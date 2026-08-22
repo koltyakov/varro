@@ -2,6 +2,7 @@ import { Show, Suspense, createSignal, lazy } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { MessageList } from '../MessageList';
 import { ChatInput } from '../ChatInput';
+import { ModelsPanel } from '../ModelsPanel';
 import { ActiveChatHeader, SessionPickerHeader } from './ChatHeader';
 import { SessionListView } from './SessionListView';
 import type { SessionListFilter } from './SessionListView';
@@ -11,9 +12,6 @@ import { ralphStore } from '../../lib/stores/ralph-store';
 import { state } from '../../lib/state';
 import { ManagedSubagentFooter } from './ManagedSubagentFooter';
 
-const LazyModelsPanel = lazy(() =>
-  import('../ModelsPanel').then((module) => ({ default: module.ModelsPanel }))
-);
 const LazyRalphDashboard = lazy(() =>
   import('../ralph/RalphDashboard').then((module) => ({ default: module.RalphDashboard }))
 );
@@ -52,7 +50,7 @@ export function ChatWorkspace(props: {
   shouldRenderWorkspace: boolean;
   isDesktopSessionPaneRight: boolean;
   showSessionPicker: boolean;
-  showSettings: boolean;
+  showModels: boolean;
   showReconnectBanner: boolean;
   slowApiRequests: readonly SlowApiRequest[];
   sessionFilter: SessionListFilter | null;
@@ -286,10 +284,8 @@ export function ChatWorkspace(props: {
         </div>
       </Show>
 
-      <Show when={props.showSettings}>
-        <Suspense fallback={<div class="settings-panel" />}>
-          <LazyModelsPanel />
-        </Suspense>
+      <Show when={props.showModels}>
+        <ModelsPanel />
       </Show>
 
       <Show

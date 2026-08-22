@@ -1128,11 +1128,14 @@ test.describe('auto-scroll', () => {
       .toBeLessThan(2);
     await page.waitForTimeout(1_250);
     const anchor = await getVisibleMessageAnchor(page.locator('.interactive-list'));
-    const exploredTop = await page.locator('.assistant-activity-summary').last().evaluate((summary) => {
-      const container = summary.closest<HTMLElement>('.interactive-list');
-      if (!container) throw new Error('Activity summary container is missing');
-      return summary.getBoundingClientRect().top - container.getBoundingClientRect().top;
-    });
+    const exploredTop = await page
+      .locator('.assistant-activity-summary')
+      .last()
+      .evaluate((summary) => {
+        const container = summary.closest<HTMLElement>('.interactive-list');
+        if (!container) throw new Error('Activity summary container is missing');
+        return summary.getBoundingClientRect().top - container.getBoundingClientRect().top;
+      });
 
     await page.evaluate(() => {
       const harnessWindow = window as typeof window & {
@@ -1323,9 +1326,7 @@ test.describe('auto-scroll', () => {
       .toBeLessThan(2);
   });
 
-  test('keeps first-turn Explored fixed across mixed multi-activity exits', async ({
-    page,
-  }) => {
+  test('keeps first-turn Explored fixed across mixed multi-activity exits', async ({ page }) => {
     await page.setViewportSize({ width: 504, height: 800 });
     await page.goto('/e2e/harness/index.html?scenario=blank');
     await page.evaluate(() => {
@@ -1405,7 +1406,10 @@ test.describe('auto-scroll', () => {
         harnessWindow.__varroE2E?.updateMessagePart?.(completed);
         for (const part of running) harnessWindow.__varroE2E?.updateMessagePart?.(part);
         for (const payload of [
-          { type: 'session.status', properties: { sessionID: sessionId, status: { type: 'busy' } } },
+          {
+            type: 'session.status',
+            properties: { sessionID: sessionId, status: { type: 'busy' } },
+          },
           { type: 'message.updated', properties: { info } },
           { type: 'message.part.updated', properties: { part: completed } },
           ...running.map((part) => ({
@@ -1478,9 +1482,7 @@ test.describe('auto-scroll', () => {
 
         const tops: Array<number | null> = [];
         for (let frame = 0; frame < 150; frame += 1) {
-          await new Promise<void>((resolve) =>
-            requestAnimationFrame(() => setTimeout(resolve, 0))
-          );
+          await new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
           const summaries = element.querySelectorAll<HTMLElement>('.assistant-activity-summary');
           const explored = summaries[summaries.length - 1];
           tops.push(
@@ -1601,9 +1603,7 @@ test.describe('auto-scroll', () => {
 
       const result: Array<{ top: number | null; reserveHeight: number }> = [];
       for (let frame = 0; frame < 30; frame += 1) {
-        await new Promise<void>((resolve) =>
-          requestAnimationFrame(() => setTimeout(resolve, 0))
-        );
+        await new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
         const summaries = element.querySelectorAll<HTMLElement>('.assistant-activity-summary');
         const explored = summaries[summaries.length - 1];
         result.push({
@@ -1884,11 +1884,14 @@ test.describe('auto-scroll', () => {
     ).toBe(true);
     await expect(activeItems).toHaveCount(7);
     const collapseAnchor = await getVisibleMessageAnchor(list);
-    const exploredTop = await page.locator('.assistant-activity-summary').last().evaluate((summary) => {
-      const container = summary.closest<HTMLElement>('.interactive-list');
-      if (!container) throw new Error('Activity summary container is missing');
-      return summary.getBoundingClientRect().top - container.getBoundingClientRect().top;
-    });
+    const exploredTop = await page
+      .locator('.assistant-activity-summary')
+      .last()
+      .evaluate((summary) => {
+        const container = summary.closest<HTMLElement>('.interactive-list');
+        if (!container) throw new Error('Activity summary container is missing');
+        return summary.getBoundingClientRect().top - container.getBoundingClientRect().top;
+      });
 
     await page.evaluate(() => {
       const sessionId = 'session-tool-cards-large-transcript';
@@ -2026,11 +2029,14 @@ test.describe('auto-scroll', () => {
       };
     });
     const anchor = await getVisibleMessageAnchor(list);
-    const exploredTop = await page.locator('.assistant-activity-summary').last().evaluate((summary) => {
-      const container = summary.closest<HTMLElement>('.interactive-list');
-      if (!container) throw new Error('Activity summary container is missing');
-      return summary.getBoundingClientRect().top - container.getBoundingClientRect().top;
-    });
+    const exploredTop = await page
+      .locator('.assistant-activity-summary')
+      .last()
+      .evaluate((summary) => {
+        const container = summary.closest<HTMLElement>('.interactive-list');
+        if (!container) throw new Error('Activity summary container is missing');
+        return summary.getBoundingClientRect().top - container.getBoundingClientRect().top;
+      });
 
     await page.evaluate(() => {
       const sessionID = 'session-tool-cards-large-transcript';
@@ -2393,12 +2399,11 @@ test.describe('auto-scroll', () => {
 
     await page.getByLabel('Back to sessions').click();
     await page.locator('.session-item').filter({ hasText: 'History switch target' }).click();
-    await expect(page.getByText('The history switch target is ready.', { exact: true })).toBeVisible();
+    await expect(
+      page.getByText('The history switch target is ready.', { exact: true })
+    ).toBeVisible();
     await page.getByLabel('Back to sessions').click();
-    await page
-      .locator('.session-item')
-      .filter({ hasText: 'Cold large paginated history' })
-      .click();
+    await page.locator('.session-item').filter({ hasText: 'Cold large paginated history' }).click();
     await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
     const wheelListenerOptions = await page.evaluate(() => {
       const instrumentedWindow = window as Window & {
@@ -2423,9 +2428,9 @@ test.describe('auto-scroll', () => {
       page.waitForTimeout(1_000).then(() => false),
     ]);
     expect(wheelCompleted).toBe(true);
-    await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBeLessThan(
-      reopenedScrollTop - 1
-    );
+    await expect
+      .poll(() => list.evaluate((element) => element.scrollTop))
+      .toBeLessThan(reopenedScrollTop - 1);
     await list.evaluate(async (element) => {
       element.dispatchEvent(new WheelEvent('wheel', { deltaY: -96, bubbles: true }));
       element.scrollTop = 0;
@@ -2442,9 +2447,7 @@ test.describe('auto-scroll', () => {
         __varroE2E?: { requests?: Array<{ path: string }> };
       };
       return (harness.__varroE2E?.requests ?? [])
-        .filter((request) =>
-          request.path.includes('/session/session-cold-large-history/message')
-        )
+        .filter((request) => request.path.includes('/session/session-cold-large-history/message'))
         .map((request) => {
           const params = new URL(request.path, 'https://example.test').searchParams;
           return { before: params.get('before'), limit: params.get('limit') };
@@ -2512,10 +2515,7 @@ test.describe('auto-scroll', () => {
       // pre-paint turn. Every callback after that handoff must preserve the captured row.
       for (const top of samples.slice(1)) {
         expect(top).not.toBeNull();
-        expect(
-          Math.abs(top! - anchor.top),
-          JSON.stringify({ anchor, samples })
-        ).toBeLessThan(1.5);
+        expect(Math.abs(top! - anchor.top), JSON.stringify({ anchor, samples })).toBeLessThan(1.5);
       }
       expect(await list.locator('[data-msg-id]').count()).toBeLessThan(80);
     };

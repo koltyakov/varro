@@ -369,6 +369,47 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
+  it('aborts only requests owned by earlier webview generations', async () => {
+    const signals = new Map<string, AbortSignal>();
+    const serverRequest = vi.fn(
+      (_method: string, path: string, _body: unknown, options?: { signal?: AbortSignal }) =>
+        new Promise<unknown>((_resolve, reject) => {
+          if (options?.signal) signals.set(path, options.signal);
+          options?.signal?.addEventListener('abort', () => reject(options.signal?.reason), {
+            once: true,
+          });
+        })
+    );
+    let generation = 1;
+    const { proxy } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      getRequestGeneration: () => generation,
+    });
+
+    const oldRequest = proxy.handleRequest({
+      id: 41,
+      cancelKey: 'old-request',
+      method: 'GET',
+      path: '/session/old',
+    });
+    generation = 2;
+    const currentRequest = proxy.handleRequest({
+      id: 42,
+      cancelKey: 'current-request',
+      method: 'GET',
+      path: '/session/current',
+    });
+    await vi.waitFor(() => expect(signals.size).toBe(2));
+
+    proxy.cancelRequestsBeforeGeneration(2);
+
+    expect(signals.get('/session/old')?.aborted).toBe(true);
+    expect(signals.get('/session/current')?.aborted).toBe(false);
+    proxy.dispose();
+    await Promise.all([oldRequest, currentRequest]);
+    expect(signals.get('/session/current')?.aborted).toBe(true);
+  });
+
   it('returns error for disallowed API request', async () => {
     const { proxy, callbacks } = createProxy();
     await proxy.handleRequest(makePayload(1, 'DELETE', '/global/health'));

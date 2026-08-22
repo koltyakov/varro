@@ -241,6 +241,7 @@ describe('state helpers', () => {
       queuedMessages: [
         {
           id: 'host',
+          messageId: 'msg_host',
           sessionId: 'session-1',
           text: 'host snapshot',
           agent: 'plan',
@@ -264,6 +265,7 @@ describe('state helpers', () => {
       const stateModule = await loadState();
 
       expect(stateModule.state.queuedMessages.map((message) => message.id)).toEqual(['host']);
+      expect(stateModule.state.queuedMessages[0]?.messageId).toBe('msg_host');
       expect(stateModule.state.queuedMessages[0]?.paused).toBe(true);
       expect(stateModule.state.queuedMessages[0]?.agent).toBe('plan');
       expect(stateModule.state.queuedMessages[0]?.clipboardImages).toEqual([

@@ -22,7 +22,7 @@ vi.mock('./lib/bridge', () => ({
   postMessage: mocks.postMessage,
 }));
 
-import { bootstrap, bootstrapWebview } from './index';
+import { bootstrap, bootstrapWebview, startWebview } from './index';
 import { fixture } from './test-fixtures';
 import type { UnknownRecord } from '../shared/type-utils';
 
@@ -32,11 +32,19 @@ let root: HTMLDivElement;
 let cleanup: (() => void) | undefined;
 let consoleError: ReturnType<typeof vi.spyOn>;
 const STARTUP_HANDLERS_KEY = '__clearVarroBootstrapFailureHandlers';
+const APP_CLEANUP_KEY = '__cleanupVarroApp';
 // SAFETY: The fixture provides the unknown fields read by this statement.
-const bootstrapWindow = fixture<UnknownRecord>(window);
+const bootstrapWindow = fixture<
+  UnknownRecord & {
+    __clearVarroBootstrapFailureHandlers?: () => void;
+    __cleanupVarroApp?: () => void;
+  }
+>(window);
 
 describe('webview bootstrap', () => {
   beforeEach(() => {
+    bootstrapWindow[APP_CLEANUP_KEY]?.();
+    delete bootstrapWindow[APP_CLEANUP_KEY];
     mocks.cleanupBridge.mockReset();
     mocks.postMessage.mockReset().mockReturnValue(true);
     mocks.clearStartupHandlers.mockReset();
@@ -54,6 +62,7 @@ describe('webview bootstrap', () => {
     cleanup = undefined;
     root.remove();
     delete bootstrapWindow[STARTUP_HANDLERS_KEY];
+    delete bootstrapWindow[APP_CLEANUP_KEY];
     consoleError.mockRestore();
   });
 
@@ -111,6 +120,19 @@ describe('webview bootstrap', () => {
     cleanup = undefined;
 
     expect(mocks.disposeSolid).toHaveBeenCalledOnce();
+    expect(mocks.cleanupBridge).toHaveBeenCalledOnce();
+  });
+
+  it('disposes the previous app before bootstrapping again in the same document', () => {
+    const firstDispose = vi.fn();
+    const secondDispose = vi.fn();
+    mocks.render.mockReturnValueOnce(firstDispose).mockReturnValueOnce(secondDispose);
+
+    startWebview(root);
+    cleanup = startWebview(root);
+
+    expect(firstDispose).toHaveBeenCalledOnce();
+    expect(secondDispose).not.toHaveBeenCalled();
     expect(mocks.cleanupBridge).toHaveBeenCalledOnce();
   });
 

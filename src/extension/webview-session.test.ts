@@ -169,6 +169,7 @@ function createSession(options?: { renderHtml?: (state: InitialWebviewState) => 
     queuedMessages: vi.fn<() => InitialWebviewState['queuedMessages']>(() => undefined),
     draftImages: vi.fn<() => InitialWebviewState['clipboardImages']>(() => []),
     flushPendingServerEvents: vi.fn(),
+    cancelApiRequestsBeforeGeneration: vi.fn(),
   };
 
   const session = new WebviewSession(
@@ -189,6 +190,15 @@ describe('WebviewSession', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vscodeMock.env.remoteName = undefined;
+  });
+
+  it('cancels requests owned by earlier webview generations on every resolve', async () => {
+    const { session, deps } = createSession();
+
+    await session.resolve(createWebviewView(true) as never);
+    await session.resolve(createWebviewView(true) as never);
+
+    expect(deps.cancelApiRequestsBeforeGeneration.mock.calls).toEqual([[1], [2]]);
   });
 
   it('queues focus, search, and attention commands until the webview is visible and ready', async () => {

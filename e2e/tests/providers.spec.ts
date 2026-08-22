@@ -62,7 +62,7 @@ test('supports escape in the provider switcher', async ({ page }) => {
   await expect(page.getByText('Go Plan', { exact: true })).toHaveCount(0);
 });
 
-test('opens manage models from the picker and filters the settings catalog', async ({ page }) => {
+test('opens manage models from the picker and filters the model catalog', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
 
   await page.getByLabel('GitHub Copilot / GPT-5 mini').click();

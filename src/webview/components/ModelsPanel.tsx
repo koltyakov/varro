@@ -13,7 +13,7 @@ import {
   setModelVisible,
   setModelsVisible,
   setProviderVisible,
-  setShowSettings,
+  setShowModels,
   setState,
   state,
 } from '../lib/state';
@@ -43,8 +43,8 @@ import { ProviderDisconnectionDialog } from './ProviderDisconnectionDialog';
 import { Tooltip } from './Tooltip';
 import { isString } from '../lib/runtime-values';
 
-type SettingsProvider = (typeof state.providers)[number];
-type SettingsModel = SettingsProvider['models'][string];
+type ModelProvider = (typeof state.providers)[number];
+type ProviderModel = ModelProvider['models'][string];
 type ModelContextMenuState = {
   x: number;
   y: number;
@@ -82,9 +82,7 @@ export function ModelsPanel() {
   const [previousRouting, setPreviousRouting] = createSignal<OpenCodeModelRouting | null>(null);
   const [contextMenu, setContextMenu] = createSignal<ModelContextMenuState | null>(null);
   const [renameDialog, setRenameDialog] = createSignal<ModelRenameState | null>(null);
-  const [modelCatalogProvider, setModelCatalogProvider] = createSignal<SettingsProvider | null>(
-    null
-  );
+  const [modelCatalogProvider, setModelCatalogProvider] = createSignal<ModelProvider | null>(null);
   const [isSaving, setIsSaving] = createSignal(false);
   const [isReloading, setIsReloading] = createSignal(false);
   const [providerConnectionData, setProviderConnectionData] = createSignal<{
@@ -173,7 +171,7 @@ export function ModelsPanel() {
   function updateScrollbarInset() {
     if (!bodyRef) return;
     const scrollbarInset = Math.max(0, bodyRef.offsetWidth - bodyRef.clientWidth);
-    bodyRef.parentElement?.style.setProperty('--settings-scrollbar-inset', `${scrollbarInset}px`);
+    bodyRef.parentElement?.style.setProperty('--models-scrollbar-inset', `${scrollbarInset}px`);
   }
 
   async function loadRouting() {
@@ -334,14 +332,14 @@ export function ModelsPanel() {
   });
 
   return (
-    <div class="settings-panel">
-      <div class="settings-header">
-        <div class="settings-header-inner">
-          <div class="settings-header-left">
+    <div class="models-panel">
+      <div class="models-header">
+        <div class="models-header-inner">
+          <div class="models-header-left">
             <Tooltip content="Back">
               <button
                 class="chat-header-btn"
-                onClick={() => setShowSettings(false)}
+                onClick={() => setShowModels(false)}
                 aria-label="Back"
               >
                 <svg viewBox="0 0 16 16" fill="currentColor">
@@ -349,9 +347,9 @@ export function ModelsPanel() {
                 </svg>
               </button>
             </Tooltip>
-            <span class="settings-header-title">Models</span>
+            <span class="models-header-title">Models</span>
           </div>
-          <div class="settings-header-actions">
+          <div class="models-header-actions">
             <Tooltip content={isReloading() ? 'Reloading providers' : 'Reload providers'}>
               <button
                 type="button"
@@ -362,7 +360,7 @@ export function ModelsPanel() {
                 disabled={isReloading()}
               >
                 <svg
-                  class="settings-reload-icon"
+                  class="models-reload-icon"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
@@ -409,7 +407,7 @@ export function ModelsPanel() {
       </div>
 
       <Show when={state.providerRefreshPending && runningAgentCount() > 0}>
-        <div class="settings-provider-refresh-notice" role="status">
+        <div class="models-provider-refresh-notice" role="status">
           <svg
             viewBox="0 0 24 24"
             fill="none"
@@ -436,8 +434,8 @@ export function ModelsPanel() {
       </Show>
 
       <Show when={state.workspaceStatuses.length > 0}>
-        <div class="settings-toolbar">
-          <div class="settings-toolbar-inner flex flex-wrap items-center gap-2">
+        <div class="models-toolbar">
+          <div class="models-toolbar-inner flex flex-wrap items-center gap-2">
             <Show when={state.workspaceStatuses.length > 0}>
               <div class="text-[11px] text-vscode-muted">Workspaces: {workspaceStatusText()}</div>
             </Show>
@@ -446,12 +444,12 @@ export function ModelsPanel() {
       </Show>
 
       <Show when={state.providers.length > 0}>
-        <div class="settings-toolbar">
-          <div class="settings-toolbar-inner">
-            <div class="settings-search">
+        <div class="models-toolbar">
+          <div class="models-toolbar-inner">
+            <div class="models-search">
               <input
                 type="text"
-                class="settings-search-input"
+                class="models-search-input"
                 value={query()}
                 onInput={(e) => setQuery(e.currentTarget.value)}
                 placeholder="Filter providers or models"
@@ -462,7 +460,7 @@ export function ModelsPanel() {
                 <Tooltip content="Clear filter">
                   <button
                     type="button"
-                    class="settings-search-clear"
+                    class="models-search-clear"
                     onClick={() => setQuery('')}
                     aria-label="Clear filter"
                   >
@@ -477,15 +475,15 @@ export function ModelsPanel() {
         </div>
       </Show>
 
-      <div class="settings-body" ref={(el) => (bodyRef = el)}>
-        <div class="settings-body-inner">
+      <div class="models-body" ref={(el) => (bodyRef = el)}>
+        <div class="models-body-inner">
           <Show
             when={state.providers.length > 0}
-            fallback={<div class="settings-empty">No providers configured</div>}
+            fallback={<div class="models-empty">No providers configured</div>}
           >
             <Show
               when={filteredProviders().length > 0}
-              fallback={<div class="settings-empty">No matching models</div>}
+              fallback={<div class="models-empty">No matching models</div>}
             >
               <For each={filteredProviders()}>
                 {({ provider, models }) => (
@@ -512,13 +510,13 @@ export function ModelsPanel() {
           <Portal>
             <div
               ref={(element) => positionContextMenu(element, menu.x, menu.y)}
-              class="settings-context-menu"
+              class="models-context-menu"
               style={{ left: `${menu.x}px`, top: `${menu.y}px` }}
               onPointerDown={(event) => event.stopPropagation()}
             >
               <button
                 type="button"
-                class="settings-context-menu-item"
+                class="models-context-menu-item"
                 onClick={() => {
                   setModelPinned(
                     menu.providerID,
@@ -532,7 +530,7 @@ export function ModelsPanel() {
               </button>
               <button
                 type="button"
-                class="settings-context-menu-item"
+                class="models-context-menu-item"
                 onClick={() => renameModel(menu.providerID, menu.modelID)}
               >
                 Rename model
@@ -540,7 +538,7 @@ export function ModelsPanel() {
               <Show when={state.modelDisplayNames[`${menu.providerID}:${menu.modelID}`]}>
                 <button
                   type="button"
-                  class="settings-context-menu-item"
+                  class="models-context-menu-item"
                   onClick={() => {
                     setModelDisplayName(menu.providerID, menu.modelID, '');
                     closeContextMenu();
@@ -549,10 +547,10 @@ export function ModelsPanel() {
                   Reset model name
                 </button>
               </Show>
-              <div class="settings-context-menu-separator" role="separator" />
+              <div class="models-context-menu-separator" role="separator" />
               <button
                 type="button"
-                class="settings-context-menu-item"
+                class="models-context-menu-item"
                 disabled={isSaving()}
                 onClick={() =>
                   void saveRouting({
@@ -572,7 +570,7 @@ export function ModelsPanel() {
               </button>
               <button
                 type="button"
-                class="settings-context-menu-item"
+                class="models-context-menu-item"
                 disabled={isSaving()}
                 onClick={() =>
                   void saveRouting({
@@ -592,7 +590,7 @@ export function ModelsPanel() {
               </button>
               <button
                 type="button"
-                class="settings-context-menu-item"
+                class="models-context-menu-item"
                 disabled={isSaving()}
                 onClick={() =>
                   void saveRouting({
@@ -617,7 +615,7 @@ export function ModelsPanel() {
                   return (
                     <button
                       type="button"
-                      class="settings-context-menu-item"
+                      class="models-context-menu-item"
                       disabled={isSaving()}
                       onClick={() =>
                         void saveRouting({
@@ -651,10 +649,10 @@ export function ModelsPanel() {
               }}
             >
               <form
-                class="provider-connect-dialog settings-model-rename-dialog"
+                class="provider-connect-dialog models-model-rename-dialog"
                 role="dialog"
                 aria-modal="true"
-                aria-labelledby="settings-model-rename-title"
+                aria-labelledby="models-model-rename-title"
                 onSubmit={(event) => {
                   event.preventDefault();
                   saveModelName();
@@ -662,7 +660,7 @@ export function ModelsPanel() {
               >
                 <div class="provider-connect-header">
                   <div>
-                    <div id="settings-model-rename-title" class="provider-connect-title">
+                    <div id="models-model-rename-title" class="provider-connect-title">
                       Rename model
                     </div>
                     <div class="provider-connect-subtitle">{rename().originalName}</div>
@@ -698,7 +696,7 @@ export function ModelsPanel() {
                         autocomplete="off"
                       />
                     </label>
-                    <div class="settings-model-rename-hint">
+                    <div class="models-model-rename-hint">
                       Leave blank to restore the original model name.
                     </div>
                     <div class="provider-connect-actions">
@@ -755,9 +753,9 @@ export function ModelsPanel() {
   );
 }
 
-function ModelCatalogDialog(props: { provider: SettingsProvider; onClose: () => void }) {
+function ModelCatalogDialog(props: { provider: ModelProvider; onClose: () => void }) {
   const [query, setQuery] = createSignal('');
-  const [catalogProvider, setCatalogProvider] = createSignal<SettingsProvider>(props.provider);
+  const [catalogProvider, setCatalogProvider] = createSignal<ModelProvider>(props.provider);
   const [isLoading, setIsLoading] = createSignal(true);
   const [loadError, setLoadError] = createSignal('');
   const allModels = createMemo(() => sortProviderModels(Object.values(catalogProvider().models)));
@@ -860,14 +858,14 @@ function ModelCatalogDialog(props: { provider: SettingsProvider; onClose: () => 
         }}
       >
         <div
-          class="provider-connect-dialog settings-model-catalog-dialog"
+          class="provider-connect-dialog models-model-catalog-dialog"
           role="dialog"
           aria-modal="true"
-          aria-labelledby="settings-model-catalog-title"
+          aria-labelledby="models-model-catalog-title"
         >
           <div class="provider-connect-header">
             <div>
-              <div id="settings-model-catalog-title" class="provider-connect-title">
+              <div id="models-model-catalog-title" class="provider-connect-title">
                 Manage {props.provider.name} models
               </div>
               <div class="provider-connect-subtitle">
@@ -887,11 +885,11 @@ function ModelCatalogDialog(props: { provider: SettingsProvider; onClose: () => 
               </svg>
             </button>
           </div>
-          <div class="settings-model-catalog-search">
+          <div class="models-model-catalog-search">
             <input
               ref={(element) => (searchInputRef = element)}
               type="text"
-              class="settings-search-input"
+              class="models-search-input"
               value={query()}
               onInput={(event) => setQuery(event.currentTarget.value)}
               placeholder="Search models by name or ID"
@@ -901,18 +899,18 @@ function ModelCatalogDialog(props: { provider: SettingsProvider; onClose: () => 
               disabled={isLoading()}
             />
           </div>
-          <div class="provider-connect-body settings-model-catalog-body">
+          <div class="provider-connect-body models-model-catalog-body">
             <Show
               when={!isLoading()}
               fallback={
-                <div class="settings-model-catalog-loading" role="status">
+                <div class="models-model-catalog-loading" role="status">
                   Refreshing model catalog...
                 </div>
               }
             >
               <Show when={loadError()}>
                 {(message) => (
-                  <div class="provider-connect-error settings-model-catalog-error" role="alert">
+                  <div class="provider-connect-error models-model-catalog-error" role="alert">
                     Could not refresh the catalog: {message()}. Showing cached models.
                   </div>
                 )}
@@ -920,25 +918,25 @@ function ModelCatalogDialog(props: { provider: SettingsProvider; onClose: () => 
               <Show
                 when={visibleModels().length > 0}
                 fallback={
-                  <div class="provider-connect-empty settings-model-catalog-empty">
+                  <div class="provider-connect-empty models-model-catalog-empty">
                     {normalizedQuery() ? 'No matching models' : 'Search the catalog to add models.'}
                   </div>
                 }
               >
-                <div class="settings-model-catalog-list">
+                <div class="models-model-catalog-list">
                   <For each={visibleModels()}>
                     {(model) => (
-                      <label class="settings-model-catalog-row">
+                      <label class="models-model-catalog-row">
                         <input
                           type="checkbox"
-                          class="settings-checkbox"
+                          class="models-checkbox"
                           checked={selectedModelIDs().has(model.id)}
                           onChange={(event) => toggleModel(model.id, event.currentTarget.checked)}
                         />
-                        <span class="settings-model-catalog-name">
+                        <span class="models-model-catalog-name">
                           <FormattedModelName name={model.name} />
                         </span>
-                        <span class="settings-model-catalog-id">{model.id}</span>
+                        <span class="models-model-catalog-id">{model.id}</span>
                       </label>
                     )}
                   </For>
@@ -946,15 +944,15 @@ function ModelCatalogDialog(props: { provider: SettingsProvider; onClose: () => 
               </Show>
             </Show>
           </div>
-          <div class="settings-model-catalog-footer">
-            <span class="settings-model-catalog-status">
+          <div class="models-model-catalog-footer">
+            <span class="models-model-catalog-status">
               {hasChanges()
                 ? `${changeCount()} unsaved ${changeCount() === 1 ? 'change' : 'changes'}`
                 : matchingModels().length > MODEL_CATALOG_RESULT_LIMIT
                   ? `Showing ${MODEL_CATALOG_RESULT_LIMIT} of ${matchingModels().length} matches`
                   : `${selectedModelIDs().size} ${selectedModelIDs().size === 1 ? 'model' : 'models'} selected`}
             </span>
-            <div class="provider-connect-actions settings-model-catalog-actions">
+            <div class="provider-connect-actions models-model-catalog-actions">
               <button type="button" class="provider-connect-secondary" onClick={props.onClose}>
                 Cancel
               </button>
@@ -975,8 +973,8 @@ function ModelCatalogDialog(props: { provider: SettingsProvider; onClose: () => 
 }
 
 function ProviderSection(props: {
-  provider: SettingsProvider;
-  models: SettingsModel[];
+  provider: ModelProvider;
+  models: ProviderModel[];
   maxCapabilityCount: number;
   reconnectRequired: boolean;
   forceExpanded: boolean;
@@ -1008,14 +1006,14 @@ function ProviderSection(props: {
   }
 
   return (
-    <div class="settings-provider">
-      <div class="settings-provider-header">
+    <div class="models-provider">
+      <div class="models-provider-header">
         <button
-          class="settings-provider-toggle"
+          class="models-provider-toggle"
           onClick={() => !props.forceExpanded && setExpanded((v) => !v)}
         >
           <svg
-            class={`settings-chevron ${isExpanded() ? 'expanded' : ''}`}
+            class={`models-chevron ${isExpanded() ? 'expanded' : ''}`}
             viewBox="0 0 16 16"
             fill="none"
             stroke="currentColor"
@@ -1025,8 +1023,8 @@ function ProviderSection(props: {
           >
             <path d="M6 4l4 4-4 4" />
           </svg>
-          <span class="settings-provider-name">{props.provider.name}</span>
-          <span class="settings-provider-count">
+          <span class="models-provider-name">{props.provider.name}</span>
+          <span class="models-provider-count">
             {props.reconnectRequired
               ? 'Reconnect'
               : isLargeModelCatalog(props.provider)
@@ -1038,7 +1036,7 @@ function ProviderSection(props: {
           <Show when={isLargeModelCatalog(props.provider)}>
             <button
               type="button"
-              class="settings-provider-models-button"
+              class="models-provider-models-button"
               onClick={props.onOpenModelCatalog}
             >
               Add models
@@ -1058,7 +1056,7 @@ function ProviderSection(props: {
         <Show
           when={!props.reconnectRequired}
           fallback={
-            <div class="settings-provider-auth-required">
+            <div class="models-provider-auth-required">
               <span>Authentication is required to load available models.</span>
               <button type="button" onClick={() => requestProviderConnection(props.provider.id)}>
                 Re-authenticate
@@ -1067,8 +1065,8 @@ function ProviderSection(props: {
           }
         >
           <div
-            class="settings-model-list"
-            style={{ '--settings-capability-count': props.maxCapabilityCount }}
+            class="models-model-list"
+            style={{ '--models-capability-count': props.maxCapabilityCount }}
           >
             <For each={props.models}>
               {(model) => {
@@ -1095,7 +1093,7 @@ function ProviderSection(props: {
 
                 return (
                   <label
-                    class="settings-model-row"
+                    class="models-model-row"
                     onContextMenu={(event) => {
                       event.preventDefault();
                       props.onOpenContextMenu({
@@ -1108,14 +1106,14 @@ function ProviderSection(props: {
                   >
                     <input
                       type="checkbox"
-                      class="settings-checkbox"
+                      class="models-checkbox"
                       checked={isModelVisible(props.provider.id, model.id)}
                       onChange={(e) =>
                         setModelVisible(props.provider.id, model.id, e.currentTarget.checked)
                       }
                     />
-                    <span class="settings-model-name-wrap">
-                      <span class="settings-model-name">
+                    <span class="models-model-name-wrap">
+                      <span class="models-model-name">
                         <FormattedModelName
                           name={getModelDisplayName(props.provider.id, model.id, model.name)}
                         />
@@ -1123,7 +1121,7 @@ function ProviderSection(props: {
                       <Show when={state.modelDisplayNames[`${props.provider.id}:${model.id}`]}>
                         <Tooltip content={`Original name: ${model.name}`}>
                           <span
-                            class="settings-model-renamed-marker"
+                            class="models-model-renamed-marker"
                             aria-label={`Renamed model. Original name: ${model.name}`}
                           >
                             renamed
@@ -1132,7 +1130,7 @@ function ProviderSection(props: {
                       </Show>
                       <Show when={isModelPinned(props.provider.id, model.id)}>
                         <Tooltip content="Pinned model">
-                          <span class="settings-model-pinned-marker" aria-label="Pinned model">
+                          <span class="models-model-pinned-marker" aria-label="Pinned model">
                             <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
                               <path
                                 d="M5.25 2.25h5.5l-.85 3.4 1.85 1.85v1H8.6v4.75L8 14l-.6-.75V8.5H4.25v-1L6.1 5.65l-.85-3.4Z"
@@ -1145,7 +1143,7 @@ function ProviderSection(props: {
                         </Tooltip>
                       </Show>
                       <Show when={routeTags().length > 0}>
-                        <span class="settings-model-routes">
+                        <span class="models-model-routes">
                           <For each={routeTags()}>{(tag) => <ModelRouteBadge tag={tag} />}</For>
                         </span>
                       </Show>
@@ -1153,8 +1151,8 @@ function ProviderSection(props: {
                         <span class="model-default-label">(default)</span>
                       </Show>
                     </span>
-                    <span class="settings-model-meta">
-                      <span class="settings-model-date-cell">
+                    <span class="models-model-meta">
+                      <span class="models-model-date-cell">
                         <Show when={releaseDate()}>
                           {(date) => (
                             <Tooltip content={`Released ${date()}`}>
@@ -1171,7 +1169,7 @@ function ProviderSection(props: {
                           )}
                         </Show>
                       </span>
-                      <span class="settings-model-badges">
+                      <span class="models-model-badges">
                         <Show when={supportsTools()}>
                           <ModelCapabilityBadge capability="tools" label="Tools" />
                         </Show>
@@ -1194,7 +1192,7 @@ function ProviderSection(props: {
                           <ModelCapabilityBadge capability="video" label="Video" />
                         </Show>
                       </span>
-                      <span class="settings-model-ctx">
+                      <span class="models-model-ctx">
                         <Show when={model.limit?.context}>
                           {formatContextLimit(model.limit!.context)}
                         </Show>
@@ -1220,10 +1218,10 @@ function ModelCapabilityBadge(props: { capability: ModelCapability; label: strin
         class={`model-capability-tag model-capability-tag-${props.capability}`}
         aria-label={props.label}
       >
-        <span class="settings-capability-icon" aria-hidden="true">
+        <span class="models-capability-icon" aria-hidden="true">
           <CapabilityIcon capability={props.capability} />
         </span>
-        <span class="settings-capability-label">
+        <span class="models-capability-label">
           {props.capability === 'variants' ? 'Variants' : props.label}
         </span>
       </span>
@@ -1372,14 +1370,14 @@ function ModelRouteBadge(props: { tag: ModelRouteTag }) {
   return (
     <Tooltip content={props.tag.label}>
       <span
-        class={`model-capability-tag settings-route-tag settings-route-tag-${props.tag.kind}${
-          props.tag.change ? ` settings-route-tag-${props.tag.change}` : ''
+        class={`model-capability-tag models-route-tag models-route-tag-${props.tag.kind}${
+          props.tag.change ? ` models-route-tag-${props.tag.change}` : ''
         }`}
         aria-label={props.tag.label}
       >
         {props.tag.text}
         <Show when={props.tag.change !== 'removed' ? props.tag.change : undefined}>
-          {(change) => <span class="settings-route-tag-change">{change()}</span>}
+          {(change) => <span class="models-route-tag-change">{change()}</span>}
         </Show>
       </span>
     </Tooltip>
@@ -1458,11 +1456,11 @@ function ProviderCheckbox(props: {
   });
 
   return (
-    <label class="settings-checkbox-label">
+    <label class="models-checkbox-label">
       <input
         ref={ref}
         type="checkbox"
-        class="settings-checkbox"
+        class="models-checkbox"
         checked={props.checked}
         onChange={props.onChange}
       />

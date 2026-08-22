@@ -134,6 +134,7 @@ import {
   mergeContextFile,
 } from '../../shared/context-files';
 import { normalizeSessionTitle } from '../../shared/session-title';
+import { createOpenCodeMessageID } from '../../shared/opencode-id';
 import { getQueuedAttachmentSnapshot } from '../hooks/session/session-send';
 import {
   createComposerHistory,
@@ -1816,8 +1817,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     ) {
       requestMessageListScrollToBottom();
       const sessionId = composerSessionId()!;
-      const queuedMessagePaused =
-        queuedEdit && state.queuedMessages.find((item) => item.id === queuedEdit.id)?.paused;
+      const existingQueuedMessage =
+        queuedEdit && state.queuedMessages.find((item) => item.id === queuedEdit.id);
+      const queuedMessagePaused = existingQueuedMessage?.paused;
       const queuedDroppedFiles = [...(queuedAttachments.droppedFiles ?? [])];
       const activeFile = composerActiveFile();
       if (activeFile && activeContextEnabled(sessionId)) {
@@ -1841,6 +1843,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       }
       const message = {
         id: createAttachmentID(),
+        messageId: existingQueuedMessage?.messageId ?? createOpenCodeMessageID(),
         sessionId,
         text: sendableText,
         agent: state.selectedAgent ? state.selectedAgent : undefined,
@@ -1929,9 +1932,17 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (failedQueuedMessageIds().has(item.id) && !retry) return;
     setQueuedMessageFailed(item.id, false);
     setDispatchingQueuedMessageId(item.id);
+    const messageId = item.messageId ?? createOpenCodeMessageID();
+    if (!item.messageId) replaceQueuedMessage(item.id, { ...item, messageId });
     let sent = false;
     try {
+      const messages = await client.session.messages(item.sessionId, { limit: 200 });
+      if (messages.some((message) => message.info.id === messageId)) {
+        removeQueuedMessage(item.id);
+        return;
+      }
       sent = await sendMessage(item.text, {
+        messageId,
         agent: item.agent ? item.agent : undefined,
         queuedAttachments: {
           droppedFiles: item.droppedFiles,

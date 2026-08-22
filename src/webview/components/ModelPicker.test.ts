@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import type { Provider } from '../types';
 import { ModelPicker } from './ModelPicker';
-import { resetDefaultAppState, setShowSettings, setState, showSettings } from '../lib/state';
+import { resetDefaultAppState, setShowModels, setState, showModels } from '../lib/state';
 import { STORAGE_KEYS } from '../lib/state-storage';
 import {
   markProviderAuthFailure,
@@ -66,7 +66,7 @@ afterEach(() => {
   container = null;
   if (originalScrollIntoView) HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
   else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
-  setShowSettings(false);
+  setShowModels(false);
   window.localStorage.removeItem(STORAGE_KEYS.pinnedModels);
   window.localStorage.removeItem(STORAGE_KEYS.modelDisplayNames);
   resetDefaultAppState();
@@ -405,7 +405,7 @@ describe('ModelPicker', () => {
     expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
   });
 
-  it('opens settings from the footer action and closes the picker', () => {
+  it('opens Models from the footer action and closes the picker', () => {
     const onClose = vi.fn();
 
     setState('providers', [
@@ -431,7 +431,7 @@ describe('ModelPicker', () => {
 
     manageButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
-    expect(showSettings()).toBe(true);
+    expect(showModels()).toBe(true);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 

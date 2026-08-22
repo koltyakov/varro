@@ -53,6 +53,14 @@ export function modelDisplayName(value) {
     .join(' ');
 }
 
+export function parseRestartCount(value) {
+  const restartCount = Number(value ?? 1);
+  if (!Number.isInteger(restartCount) || restartCount < 1 || restartCount > 10) {
+    throw new Error('--restart-count must be an integer from 1 through 10');
+  }
+  return restartCount;
+}
+
 export function missingLiveGates(snapshot, scenario) {
   const missing = [];
   if (!snapshot.virtualized) missing.push('virtualized transcript');
@@ -684,6 +692,7 @@ async function runLive(options) {
   }
   const maxPrompts = Number(options['max-prompts'] ?? DEFAULT_MAX_PROMPTS);
   const timeoutMs = Number(options['gate-timeout-ms'] ?? DEFAULT_GATE_TIMEOUT_MS);
+  const restartCount = parseRestartCount(options['restart-count']);
   if (!Number.isInteger(maxPrompts) || maxPrompts < 1 || maxPrompts > 4) {
     throw new Error('--max-prompts must be an integer from 1 through 4');
   }
@@ -708,7 +717,9 @@ async function runLive(options) {
   if (!tracked) throw new Error('The manifest has no active run session');
   const client = new OpenCodeClient(manifest.server, manifest.workspace);
   if (scenario === 'AI-17') {
-    await reloadVscodeWindow(launch.remoteDebuggingPort);
+    for (let restart = 0; restart < restartCount; restart += 1) {
+      await reloadVscodeWindow(launch.remoteDebuggingPort);
+    }
   }
   const cdp = await CdpController.connect(launch.remoteDebuggingPort);
   const attempts = [];
@@ -747,6 +758,7 @@ async function runLive(options) {
       }
       const result = {
         scenario,
+        restartCount,
         prepared: failures.length === 0,
         prompt,
         model: requestedModel,

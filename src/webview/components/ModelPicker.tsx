@@ -4,7 +4,7 @@ import {
   getModelDisplayName,
   isModelPinned,
   setModelPinned,
-  setShowSettings,
+  setShowModels,
   state,
 } from '../lib/state';
 import { formatVariantLabel as formatThinkingLabel, formatContextLimit } from '../lib/format';
@@ -532,7 +532,7 @@ export function ModelPicker(props: {
             <button
               class={`dropdown-item ${animateManageModels() ? 'manage-models-attention' : ''}`}
               onClick={() => {
-                setShowSettings(true);
+                setShowModels(true);
                 props.onClose();
               }}
             >

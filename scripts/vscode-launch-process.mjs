@@ -64,6 +64,11 @@ async function bringTargetToFront(webSocketDebuggerUrl) {
   return result;
 }
 
+export function hasRecreatedVarroTarget(originalTargetId, currentTargetId, sawUnavailable) {
+  if (!currentTargetId) return false;
+  return originalTargetId ? currentTargetId !== originalTargetId : sawUnavailable;
+}
+
 export async function waitForVscodeProcess(executable, userDataDir, timeoutMs = 15_000) {
   const expectedArgument = `--user-data-dir=${userDataDir}`;
   const deadline = Date.now() + timeoutMs;
@@ -255,9 +260,12 @@ export async function reloadVscodeWindow(remoteDebuggingPort, timeoutMs = 20_000
       const varroTarget = currentTargets.find(
         (target) => target.type === 'iframe' && target.url.includes('extensionId=koltyakov.varro')
       );
-      const hasRecreatedVarro =
-        !!varroTarget && (!originalVarroTargetId || varroTarget.id !== originalVarroTargetId);
-      if (sawUnavailable && currentWorkbench?.webSocketDebuggerUrl && hasRecreatedVarro) {
+      const hasRecreatedVarro = hasRecreatedVarroTarget(
+        originalVarroTargetId,
+        varroTarget?.id,
+        sawUnavailable
+      );
+      if (currentWorkbench?.webSocketDebuggerUrl && hasRecreatedVarro) {
         await bringTargetToFront(currentWorkbench.webSocketDebuggerUrl);
         return;
       }

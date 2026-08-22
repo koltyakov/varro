@@ -692,6 +692,8 @@ npm run ai:live -- run --manifest <manifest-path> --launch <launch.json> --scena
 The controller reloads the Extension Development Host through the native command palette, reconnects
 to the recreated Varro iframe, sends one marked prompt through native composer input, requests 21
 unique tokens, and samples the real Varro DOM on every animation frame until the stream settles.
+Use `--restart-count <1-10>` to perform consecutive workbench reloads before the single observed send
+when investigating listener or state accumulation across restarts.
 
 Pass invariants:
 

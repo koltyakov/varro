@@ -95,6 +95,7 @@ export type QueuedAttachmentSnapshot = Pick<
 >;
 
 type SessionSendOptions = SendFlowOptions & {
+  messageId?: string;
   agent?: string;
   selectedModel?: SelectedModel;
   optimisticModel?: SelectedModel;
@@ -980,7 +981,7 @@ export async function sendMessageWithDependencies(
   const sendPayload = deps.buildSendPayload(sessionId, text, options);
   if (!sendPayload) return false;
   const { body, effectiveModel, optimisticImages } = sendPayload;
-  const messageId = createOpenCodeMessageID();
+  const messageId = options?.messageId ?? createOpenCodeMessageID();
   const sendBody = { ...body, messageID: messageId };
   if (sendBody.variant === undefined) delete sendBody.variant;
 

@@ -217,8 +217,8 @@ export interface AppStateInstance {
   setShowSessionPicker: Setter<boolean>;
   showModelPicker: Accessor<boolean>;
   setShowModelPicker: Setter<boolean>;
-  showSettings: Accessor<boolean>;
-  setShowSettings: Setter<boolean>;
+  showModels: Accessor<boolean>;
+  setShowModels: Setter<boolean>;
   composerFocusKey: Accessor<number>;
   setComposerFocusKey: Setter<number>;
   openAttentionSessionsKey: Accessor<number>;
@@ -404,7 +404,7 @@ export function createAppState(): AppStateInstance {
   const [connectionInitialized, setConnectionInitialized] = createSignal(false);
   const [showSessionPicker, setShowSessionPicker] = createSignal(false);
   const [showModelPicker, setShowModelPicker] = createSignal(false);
-  const [showSettings, setShowSettings] = createSignal(false);
+  const [showModels, setShowModels] = createSignal(false);
   const [composerFocusKey, setComposerFocusKey] = createSignal(0);
   const [openAttentionSessionsKey, setOpenAttentionSessionsKey] = createSignal(0);
   const [sessionSearchFocusKey, setSessionSearchFocusKey] = createSignal(0);
@@ -476,8 +476,8 @@ export function createAppState(): AppStateInstance {
     setShowSessionPicker,
     showModelPicker,
     setShowModelPicker,
-    showSettings,
-    setShowSettings,
+    showModels,
+    setShowModels,
     composerFocusKey,
     setComposerFocusKey,
     openAttentionSessionsKey,
@@ -560,8 +560,8 @@ export const setShowSessionPicker = defaultAppState.setShowSessionPicker;
 
 export const showModelPicker = defaultAppState.showModelPicker;
 export const setShowModelPicker = defaultAppState.setShowModelPicker;
-export const showSettings = defaultAppState.showSettings;
-export const setShowSettings = defaultAppState.setShowSettings;
+export const showModels = defaultAppState.showModels;
+export const setShowModels = defaultAppState.setShowModels;
 export const composerFocusKey = defaultAppState.composerFocusKey;
 export const setComposerFocusKey = defaultAppState.setComposerFocusKey;
 export const openAttentionSessionsKey = defaultAppState.openAttentionSessionsKey;
@@ -609,7 +609,7 @@ export function resetDefaultAppState() {
   setConnectionInitialized(next.connectionInitialized());
   setShowSessionPicker(next.showSessionPicker());
   setShowModelPicker(next.showModelPicker());
-  setShowSettings(next.showSettings());
+  setShowModels(next.showModels());
   setComposerFocusKey(next.composerFocusKey());
   setOpenAttentionSessionsKey(next.openAttentionSessionsKey());
   setSessionSearchFocusKey(next.sessionSearchFocusKey());

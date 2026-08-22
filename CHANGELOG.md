@@ -7,13 +7,17 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 - Added an Auto accept edits permission mode that approves file changes while continuing to ask before other tool actions.
 - Improved commit message generation with richer working-tree and repository-history context, support for unstaged changes, stronger validation, and safer handling of existing Source Control input.
 - Added automatic retries for sessions interrupted by transient connection failures.
-- Preserved chat content, loaded history, context, and scroll position more reliably across session activity, updates, and reopened conversations.
+- Preserved chat content, loaded history, context, and scroll position more reliably across streaming, queued-message handoffs, named forks, updates, and reopened conversations.
+- Improved reload and restart recovery by preventing restored queued prompts from being sent twice and stopping stale session activity.
 - Improved slash-command completion behavior, including direct execution of `/stats` from the completion menu and stable suggestions while editing trigger text.
-- Improved composer editing around file and context chips, including atomic deletion, reliable inline image pasting, and preserved active-file context in queued messages.
+- Improved composer editing around file and context chips, including atomic deletion, reliable inline image pasting and line breaks, and preserved active-file context in queued messages.
+- Allowed expanded diff previews to remain open while writing prompts in the composer.
 - Added composer visibility for active language servers with quick access to their output channels.
+- Improved model management with searchable, selective additions for large provider catalogs.
+- Made model and thinking-level changes easier to follow with before-and-after labels and full provider details.
 - Added warnings for unignored generated dependency trees and compact handling of very large generated changes in prompts, summaries, and changed-file views.
 - Improved file and repository references in messages with compact type icons, line-aware links, clickable SSH Git remotes, and more reliable opening of uniquely matched workspace and local files.
-- Improved guidance and accessibility across chat controls with consistent tooltips, clearer labels, and keyboard-accessible terminal previews.
+- Improved guidance and accessibility across chat controls with consistent tooltips, model-cost warnings, clearer Plan-agent indicators, keyboard-accessible terminal previews, and more reliable sidebar recovery.
 
 ## 0.24.x - August 2026
 

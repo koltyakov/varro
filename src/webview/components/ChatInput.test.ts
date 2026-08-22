@@ -99,6 +99,7 @@ vi.mock('../lib/client', () => ({
         throw new Error('Session not found');
       }),
       list: vi.fn(async () => ({ items: [], hasMore: false })),
+      messages: vi.fn(async () => []),
     },
     varro: {
       session: {
@@ -232,6 +233,8 @@ afterEach(() => {
   vi.mocked(client.session.list).mockResolvedValue({ items: [], hasMore: false });
   vi.mocked(client.session.get).mockReset();
   vi.mocked(client.session.get).mockRejectedValue(new Error('Session not found'));
+  vi.mocked(client.session.messages).mockReset();
+  vi.mocked(client.session.messages).mockResolvedValue([]);
   setExpandedDiffOverlay(testDiffOverlayOwner, false);
 });
 
@@ -2320,6 +2323,7 @@ describe('ChatInput', () => {
     expect(state.terminalSelection).toBeNull();
     expect(state.queuedMessages).toHaveLength(1);
     expect(state.queuedMessages[0]).toMatchObject({
+      messageId: expect.stringMatching(/^msg_/),
       text: 'Follow up with context',
       agent: 'build',
       droppedFiles: [
@@ -2414,6 +2418,7 @@ describe('ChatInput', () => {
     await flushAsyncWork();
 
     expect(sendMessageMock).toHaveBeenCalledWith('Implement the plan', {
+      messageId: expect.stringMatching(/^msg_/),
       agent: 'build',
       queuedAttachments: {
         droppedFiles: undefined,
@@ -2482,6 +2487,7 @@ describe('ChatInput', () => {
     await flushAsyncWork();
 
     expect(sendMessageMock).toHaveBeenCalledWith('Continue in the background', {
+      messageId: expect.stringMatching(/^msg_/),
       queuedAttachments: {
         droppedFiles: undefined,
         clipboardImages: undefined,
@@ -2491,6 +2497,40 @@ describe('ChatInput', () => {
       targetSessionId: 'session-2',
     });
     expect(state.activeSessionId).toBe('session-1');
+    expect(state.queuedMessages).toEqual([]);
+  });
+
+  it('removes a restored queued prompt that OpenCode already admitted', async () => {
+    vi.useFakeTimers();
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', 'session-1', { type: 'idle' });
+    setState('queuedMessages', [
+      {
+        id: 'q1',
+        messageId: 'msg_admitted',
+        sessionId: 'session-1',
+        text: 'Already admitted',
+      },
+    ]);
+    vi.mocked(client.session.messages).mockResolvedValue([
+      {
+        info: {
+          id: 'msg_admitted',
+          sessionID: 'session-1',
+          role: 'user',
+          time: { created: 1 },
+          agent: 'build',
+          model: { providerID: 'openai', modelID: 'gpt-5.6-sol' },
+        },
+        parts: [],
+      },
+    ]);
+
+    cleanup = render(() => ChatInput(), container!);
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+
+    expect(sendMessageMock).not.toHaveBeenCalled();
     expect(state.queuedMessages).toEqual([]);
   });
 
@@ -2860,10 +2900,14 @@ describe('ChatInput', () => {
     await flushAsyncWork();
 
     expect(sendMessageMock).toHaveBeenCalledWith('first', {
+      messageId: expect.stringMatching(/^msg_/),
+      agent: undefined,
       queuedAttachments: {
         droppedFiles: undefined,
         clipboardImages: undefined,
+        nativePdfs: undefined,
         terminalSelection: undefined,
+        attachedDiagnostics: undefined,
       },
       preserveComposer: true,
       targetSessionId: 'session-1',
@@ -2905,10 +2949,14 @@ describe('ChatInput', () => {
     await flushAsyncWork();
 
     expect(sendMessageMock).toHaveBeenCalledWith('restored follow-up', {
+      messageId: expect.stringMatching(/^msg_/),
+      agent: undefined,
       queuedAttachments: {
         droppedFiles: undefined,
         clipboardImages: undefined,
+        nativePdfs: undefined,
         terminalSelection: undefined,
+        attachedDiagnostics: undefined,
       },
       preserveComposer: true,
       targetSessionId: 'session-1',
@@ -2974,12 +3022,16 @@ describe('ChatInput', () => {
 
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
     expect(sendMessageMock).toHaveBeenCalledWith('test 1', {
+      messageId: expect.stringMatching(/^msg_/),
+      agent: undefined,
       queuedAttachments: {
         droppedFiles: [{ path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' }],
         clipboardImages: [
           { id: 'img-1', url: 'blob:1', mime: 'image/png', filename: 'img-1.png', size: 10 },
         ],
+        nativePdfs: undefined,
         terminalSelection: { text: 'npm test', terminalName: 'zsh' },
+        attachedDiagnostics: undefined,
       },
       preserveComposer: true,
       targetSessionId: 'session-1',
@@ -3200,10 +3252,14 @@ describe('ChatInput', () => {
     expect(sendMessageMock.mock.calls[1]).toEqual([
       'test 2',
       {
+        messageId: expect.stringMatching(/^msg_/),
+        agent: undefined,
         queuedAttachments: {
           droppedFiles: undefined,
           clipboardImages: undefined,
+          nativePdfs: undefined,
           terminalSelection: undefined,
+          attachedDiagnostics: undefined,
         },
         preserveComposer: true,
         targetSessionId: 'session-1',
@@ -3581,11 +3637,14 @@ describe('ChatInput', () => {
     await flushAsyncWork();
 
     expect(sendMessageMock).toHaveBeenCalledWith('Wait for the answer', {
+      messageId: expect.stringMatching(/^msg_/),
+      agent: undefined,
       queuedAttachments: {
         droppedFiles: [],
         clipboardImages: [],
         nativePdfs: [],
         terminalSelection: null,
+        attachedDiagnostics: undefined,
       },
       preserveComposer: true,
       targetSessionId: 'session-1',

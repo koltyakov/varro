@@ -84,6 +84,7 @@ export class WebviewSession {
       queuedMessages(): InitialWebviewState['queuedMessages'];
       draftImages(): InitialWebviewState['clipboardImages'];
       flushPendingServerEvents(): void;
+      cancelApiRequestsBeforeGeneration(generation: number): void;
     }
   ) {
     this.bridge.onDeliveryFailure(() => {
@@ -157,6 +158,7 @@ export class WebviewSession {
     this.webviewReady = false;
     this.resetCommandState();
     const webviewLoadGeneration = ++this.webviewLoadGeneration;
+    this.deps.cancelApiRequestsBeforeGeneration(webviewLoadGeneration);
 
     webviewView.webview.options = this.bridge.webviewOptions();
     webviewView.webview.html = renderWebviewLoadingHtml();

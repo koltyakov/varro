@@ -255,7 +255,7 @@ Key components:
 - `src/webview/components/QuestionPrompt.tsx`: inline question UI
 - `src/webview/components/TodoList.tsx`: task progress surface
 - `src/webview/components/DiffView.tsx`: file change summaries
-- `src/webview/components/ModelsPanel.tsx`: model visibility, routing settings, and provider connection management
+- `src/webview/components/ModelsPanel.tsx`: model visibility, model routing, and provider connection management
 - `src/webview/components/ProviderConnectionDialog.tsx` and `ProviderDisconnectionDialog.tsx`: OpenCode-backed API-key/OAuth connection, credential removal, and terminal fallbacks
 - `src/webview/components/ralph/RalphForm.tsx`: Ralph loop setup form for plan path, iteration cap, model selection, and prompt-template overrides
 - `src/webview/components/ralph/RalphDashboard.tsx` and `RalphIterationCard.tsx`: manager-session dashboard, controls, stop reasons, and per-iteration summaries

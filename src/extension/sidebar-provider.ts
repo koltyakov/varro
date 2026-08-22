@@ -216,6 +216,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         queuedMessages: () => this.queuedMessages.list(),
         draftImages: () => this.draftImages.list(),
         flushPendingServerEvents: () => this.serverEventBridge.flushPendingEvents(),
+        cancelApiRequestsBeforeGeneration: (generation) =>
+          this.restProxy.cancelRequestsBeforeGeneration(generation),
       }
     );
 
@@ -420,6 +422,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   async dispose() {
     this.providerFileRefresh.beginDispose();
+    this.restProxy.dispose();
     await this.setMermaidPreviewOpen(false);
     if (this.sessionReconcileTimer) {
       clearInterval(this.sessionReconcileTimer);

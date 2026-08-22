@@ -111,7 +111,11 @@ test.describe('diff preview anchoring', () => {
         return getComputedStyle(row).contain;
       })
     ).toBe('layout style');
-
+    expect(
+      await page
+        .locator(`[data-msg-id="${editMessageId}"] .diff-view-lines-content`)
+        .evaluate((element) => getComputedStyle(element).willChange)
+    ).toContain('contents');
     const anchorRow = page.locator(`[data-msg-id="${anchorMessageId}"]`);
     await anchorRow.scrollIntoViewIfNeeded();
     await list.evaluate((element) => {
@@ -184,7 +188,7 @@ test.describe('diff preview anchoring', () => {
     await expect(page.locator(`[data-msg-id="${editMessageId}"] .diff-view-file`)).toBeVisible();
   });
 
-  test('centers the expanded diff and strongly obscures the transcript', async ({ page }) => {
+  test('centers the expanded diff without blocking the composer', async ({ page }) => {
     await page.goto(
       '/e2e/harness/index.html?scenario=diff-preview-large-transcript&expandedActivity=1'
     );
@@ -226,6 +230,13 @@ test.describe('diff preview anchoring', () => {
     expect(layout.listFilter).toBe('blur(40px)');
     expect(layout.listOpacity).toBe('0.1');
     await expect(overlay.locator('.diff-view-overlay-title .diff-view-icon')).toBeVisible();
+
+    const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+    await composer.click();
+    await composer.fill('Continue while reviewing this diff');
+    await expect(composer).toBeFocused();
+    await expect(composer).toHaveText('Continue while reviewing this diff');
+    await expect(overlay).toBeVisible();
 
     const overlayFilename = overlay.locator('.diff-view-overlay-filename');
     await overlayFilename.click();

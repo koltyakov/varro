@@ -27,6 +27,7 @@ function commitQueuedMessages(messages: QueuedMessage[]) {
   const hostPersisted = messages.map(
     ({
       id,
+      messageId,
       sessionId,
       text,
       agent,
@@ -38,6 +39,7 @@ function commitQueuedMessages(messages: QueuedMessage[]) {
       attachedDiagnostics,
     }) => ({
       id,
+      messageId: messageId || undefined,
       sessionId,
       text,
       agent: agent || undefined,

@@ -235,6 +235,7 @@ function normalizeStoredDiagnostics<T>(value: T): QueuedMessage['attachedDiagnos
 function normalizeStoredQueuedMessage<T>(value: T): QueuedMessage | null {
   const record = asStoredRecord(value);
   const id = normalizeStoredString(record?.id);
+  const messageId = normalizeStoredString(record?.messageId);
   const sessionId = normalizeStoredString(record?.sessionId);
   if (!id || !sessionId || !isString(record?.text)) return null;
   const agent = normalizeStoredString(record.agent);
@@ -272,6 +273,7 @@ function normalizeStoredQueuedMessage<T>(value: T): QueuedMessage | null {
 
   return {
     id,
+    messageId: messageId || undefined,
     sessionId,
     text: record.text,
     agent: agent || undefined,

@@ -129,7 +129,7 @@ import {
   type ExpansionScrollAnchor,
 } from './message-list/scrolling';
 import { VirtualizedContent } from './message-list/VirtualizedContent';
-import { AssistantDialogSummaryForMessage } from './message-list/MessageRows';
+import { AssistantDialogSummaryForMessage, type ModelChangeInfo } from './message-list/MessageRows';
 import { deduplicateFileEdits } from './message/AssistantMessageContent';
 import {
   getLinkedToolCallKeys,
@@ -5501,37 +5501,56 @@ export function MessageList() {
     const providerMap = new Map(state.providers.map((p) => [p.id, p]));
     const messagesSnapshot = messages();
     return untrack(() => {
-      const result = new Map<string, string>();
-      let prevProvider: string | undefined;
-      let prevModel: string | undefined;
-      let prevVariant: string | undefined;
+      const result = new Map<string, ModelChangeInfo>();
+      let previous: AssistantMessage | undefined;
       for (const msg of messagesSnapshot) {
         if (!isAssistantMessage(msg.info)) continue;
         // SAFETY: The surrounding shape or discriminator check establishes the AssistantMessage contract used below.
         const cur = msg.info as AssistantMessage;
         if (cur.mode === 'subagent') continue;
-        const modelChanged = cur.providerID !== prevProvider || cur.modelID !== prevModel;
-        const variantChanged = (cur.variant || '') !== (prevVariant || '');
-        if (prevProvider !== undefined && (modelChanged || variantChanged)) {
-          const provider = providerMap.get(cur.providerID);
-          const modelName = formatModelName(provider?.models[cur.modelID]?.name || cur.modelID);
-          const parts: string[] = [];
-          if (modelChanged) parts.push(modelName);
-          if (cur.variant) parts.push(formatVariantLabel(cur.variant));
-          else if (
-            variantChanged &&
-            !modelSupportsReasoning(cur.providerID, cur.modelID, state.providers)
-          ) {
-            parts.push('No thinking');
-          }
-          result.set(
-            msg.info.id,
-            formatLabelWithProvider(parts.join(' · '), provider?.name || cur.providerID)
+        if (previous) {
+          const previousProvider = providerMap.get(previous.providerID);
+          const currentProvider = providerMap.get(cur.providerID);
+          const fromProvider = previousProvider?.name || previous.providerID;
+          const toProvider = currentProvider?.name || cur.providerID;
+          const fromModel = formatModelName(
+            previousProvider?.models[previous.modelID]?.name || previous.modelID
           );
+          const toModel = formatModelName(
+            currentProvider?.models[cur.modelID]?.name || cur.modelID
+          );
+          const fromReasoning = previous.variant
+            ? formatVariantLabel(previous.variant)
+            : modelSupportsReasoning(previous.providerID, previous.modelID, state.providers)
+              ? 'Default'
+              : 'No thinking';
+          const toReasoning = cur.variant
+            ? formatVariantLabel(cur.variant)
+            : modelSupportsReasoning(cur.providerID, cur.modelID, state.providers)
+              ? 'Default'
+              : 'No thinking';
+          const providerChanged = previous.providerID !== cur.providerID;
+          const modelChanged = previous.modelID !== cur.modelID;
+          const reasoningChanged = fromReasoning !== toReasoning;
+
+          if (providerChanged || modelChanged || reasoningChanged) {
+            const normalFrom = `${fromModel} ${fromReasoning}`;
+            const normalTo = modelChanged ? `${toModel} ${toReasoning}` : toReasoning;
+            const narrowFrom = modelChanged ? fromModel : fromReasoning;
+            const narrowTo = modelChanged
+              ? `${toModel}${reasoningChanged ? ` ${toReasoning}` : ''}`
+              : toReasoning;
+            result.set(msg.info.id, {
+              normalFrom,
+              normalTo,
+              narrowFrom,
+              narrowTo,
+              from: formatLabelWithProvider(`${fromModel} ${fromReasoning}`, fromProvider),
+              to: formatLabelWithProvider(`${toModel} ${toReasoning}`, toProvider),
+            });
+          }
         }
-        prevProvider = cur.providerID;
-        prevModel = cur.modelID;
-        prevVariant = cur.variant;
+        previous = cur;
       }
       return result;
     });

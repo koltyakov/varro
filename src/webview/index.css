@@ -10,7 +10,7 @@
 @import './styles/menus.css' layer(components);
 @import './styles/chat-header.css' layer(components);
 @import './styles/session-list.css' layer(components);
-@import './styles/settings.css' layer(components);
+@import './styles/models.css' layer(components);
 @import './styles/prompts.css' layer(components);
 @import './styles/ralph.css' layer(components);
 @import './styles/motion.css' layer(overrides);

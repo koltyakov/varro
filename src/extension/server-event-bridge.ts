@@ -88,6 +88,7 @@ export class ServerEventBridge {
   }
 
   attach() {
+    if (this.serverStatusHandler || this.serverEventHandler) return;
     this.serverStatusHandler = (status: ServerStatus) => {
       this.flushPendingDelta();
       const previousStatus = this.status;

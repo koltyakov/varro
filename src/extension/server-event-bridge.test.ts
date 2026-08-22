@@ -131,6 +131,16 @@ describe('ServerEventBridge', () => {
     expect(updateStatusBarItem).toHaveBeenCalledOnce();
   });
 
+  it('does not register duplicate server handlers when attached repeatedly', () => {
+    const { bridge, server, updateStatusBarItem } = createMocks();
+
+    bridge.attach();
+    bridge.attach();
+
+    expect(server.on).toHaveBeenCalledTimes(2);
+    expect(updateStatusBarItem).toHaveBeenCalledOnce();
+  });
+
   it('status handler updates status and posts server/status', () => {
     const { bridge, handlers, post } = createMocks();
     bridge.attach();

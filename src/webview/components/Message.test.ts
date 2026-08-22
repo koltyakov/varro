@@ -10,7 +10,7 @@ import {
   resolveProviderAuthFailure,
   resetProviderConnectionState,
 } from '../lib/provider-connection-state';
-import { setShowSettings, setState as setAppState, showSettings } from '../lib/state';
+import { setShowModels, setState as setAppState, showModels } from '../lib/state';
 import {
   Message,
   getAssistantContainerVariant,
@@ -68,7 +68,7 @@ afterEach(() => {
   retryMessageMock.mockReset();
   selectSessionMock.mockReset();
   resetProviderConnectionState();
-  setShowSettings(false);
+  setShowModels(false);
   setAppState('sessions', []);
   setAppState('allAgents', []);
   resetToolCallExpansionState();
@@ -2582,7 +2582,7 @@ describe('Message assistant final answer rendering', () => {
 
     expect(providerConnectionRequest()?.providerID).toBe('github-copilot');
     expect(providerRequiresReconnection('github-copilot')).toBe(true);
-    expect(showSettings()).toBe(false);
+    expect(showModels()).toBe(false);
     expect(retryMessageMock).not.toHaveBeenCalled();
 
     resolveProviderAuthFailure('github-copilot');

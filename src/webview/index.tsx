@@ -6,7 +6,11 @@ import './index.css';
 import { isFunction } from './lib/runtime-values';
 
 const STARTUP_HANDLERS_KEY = '__clearVarroBootstrapFailureHandlers';
-type BootstrapWindow = Window & { __clearVarroBootstrapFailureHandlers?: () => void };
+const APP_CLEANUP_KEY = '__cleanupVarroApp';
+type BootstrapWindow = Window & {
+  __clearVarroBootstrapFailureHandlers?: () => void;
+  __cleanupVarroApp?: () => void;
+};
 // SAFETY: The bootstrap script may install this optional cleanup callback on window.
 const bootstrapWindow = window as BootstrapWindow;
 
@@ -105,4 +109,21 @@ export function bootstrapWebview(root: HTMLElement | null) {
   return undefined;
 }
 
-bootstrapWebview(document.getElementById('root'));
+export function startWebview(root: HTMLElement | null) {
+  bootstrapWindow[APP_CLEANUP_KEY]?.();
+  const cleanup = bootstrapWebview(root);
+  if (!cleanup) {
+    delete bootstrapWindow[APP_CLEANUP_KEY];
+    return undefined;
+  }
+  const cleanupCurrentApp = () => {
+    cleanup();
+    if (bootstrapWindow[APP_CLEANUP_KEY] === cleanupCurrentApp) {
+      delete bootstrapWindow[APP_CLEANUP_KEY];
+    }
+  };
+  bootstrapWindow[APP_CLEANUP_KEY] = cleanupCurrentApp;
+  return cleanupCurrentApp;
+}
+
+startWebview(document.getElementById('root'));

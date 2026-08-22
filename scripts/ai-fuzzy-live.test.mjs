@@ -9,6 +9,7 @@ import {
   duplicateDeliveryFailures,
   missingLiveGates,
   modelDisplayName,
+  parseRestartCount,
 } from './ai-fuzzy-live.mjs';
 
 const ready = {
@@ -62,6 +63,13 @@ test('builds the controlled duplicate-delivery stream prompt', () => {
 test('maps requested model IDs to their composer labels', () => {
   assert.equal(modelDisplayName('openai/gpt-5.6-luna'), 'GPT-5.6 Luna');
   assert.equal(modelDisplayName('openai/gpt-5.6-sol'), 'GPT-5.6 Sol');
+});
+
+test('accepts a bounded restart count for duplicate-delivery stress', () => {
+  assert.equal(parseRestartCount(undefined), 1);
+  assert.equal(parseRestartCount('4'), 4);
+  assert.throws(() => parseRestartCount('0'), /integer from 1 through 10/);
+  assert.throws(() => parseRestartCount('11'), /integer from 1 through 10/);
 });
 
 test('builds valid JavaScript for the duplicate-delivery frame observer', () => {

@@ -24,7 +24,7 @@ import {
 import type { AssistantDialogSummaryInfo } from './assistant-dialog';
 
 export type MessageRowSharedProps = {
-  modelChangeMap: Map<string, string>;
+  modelChangeMap: Map<string, ModelChangeInfo>;
   promptNumberMap: ReadonlyMap<string, number>;
   showPromptNumbers: boolean;
   showSentTimestamps: boolean;
@@ -46,6 +46,15 @@ export type MessageRowSharedProps = {
   observeMeasuredRow?: (element: HTMLDivElement, messageId: string, active: boolean) => void;
   questionRequestForTool: (part: ToolPart) => QuestionRequest | null;
   permissionMatchForTool: (part: ToolPart) => ToolCallPermissionMatch | null;
+};
+
+export type ModelChangeInfo = {
+  normalFrom: string;
+  normalTo: string;
+  narrowFrom: string;
+  narrowTo: string;
+  from: string;
+  to: string;
 };
 
 export function MessageRows(props: { messages: MessageEntry[] } & MessageRowSharedProps) {
@@ -94,7 +103,7 @@ export function MessageRow(
   const isOffCore = () => !!props.outerListVirtualized && props.nearViewport === false;
   const isVirtualPlaceholder = () => isOffCore() && !!props.virtualPlaceholder;
   const [entrancePending, setEntrancePending] = createSignal(animateEntrance);
-  const changeLabel = () => props.modelChangeMap.get(props.msg.info.id) ?? null;
+  const modelChange = () => props.modelChangeMap.get(props.msg.info.id) ?? null;
   const isEditingThisMessage = () =>
     props.msg.info.role === 'user' && editingMessage()?.messageId === props.msg.info.id;
   const isAbandonedByEdit = createMemo(() => {
@@ -169,10 +178,29 @@ export function MessageRow(
       }${props.followsVisibleAssistantResponse ? ' interactive-response-follows-response' : ''}${props.continuesVisibleActivityGroup ? ' interactive-response-continues-activity-group' : ''}${isOffCore() ? ' interactive-item-off-core' : ''}${isVirtualPlaceholder() ? ' interactive-item-virtual-placeholder' : ''}${props.renderEmpty ? ' interactive-item-render-empty' : ''}`}
     >
       <Show when={!isVirtualPlaceholder()}>
-        <Show when={changeLabel()}>
-          <div class="model-change-indicator">
-            <span class="model-change-label">Switched to {changeLabel()}</span>
-          </div>
+        <Show when={modelChange()}>
+          {(change) => (
+            <div class="model-change-indicator">
+              <Tooltip
+                delay={300}
+                content={
+                  <div class="model-change-tooltip">
+                    <div>From: {change().from}</div>
+                    <div>To: {change().to}</div>
+                  </div>
+                }
+              >
+                <span class="model-change-label" tabindex="0">
+                  <span class="model-change-normal">
+                    {change().normalFrom} → {change().normalTo}
+                  </span>
+                  <span class="model-change-narrow">
+                    {change().narrowFrom} → {change().narrowTo}
+                  </span>
+                </span>
+              </Tooltip>
+            </div>
+          )}
         </Show>
         <Show when={!isEditingThisMessage()} fallback={<InlineEditComposerSlot />}>
           <MessageComponent

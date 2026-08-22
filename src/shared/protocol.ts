@@ -535,6 +535,7 @@ export type ClipboardImageSnapshot = {
 
 export type QueuedMessageSnapshot = {
   id: string;
+  messageId?: string;
   sessionId: string;
   text: string;
   agent?: string;

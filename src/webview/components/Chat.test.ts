@@ -41,7 +41,7 @@ import {
   hasActiveUsageLimit,
   state,
   setSessionFailed,
-  setShowSettings,
+  setShowModels,
   setShowSessionPicker,
   setSessionUsageLimit,
   setMessagesIncremental,
@@ -141,7 +141,7 @@ afterEach(() => {
   setState('compactingSessionIds', []);
   setDesktopSessionPaneSide('left');
   setShowSessionPicker(false);
-  setShowSettings(false);
+  setShowModels(false);
   stopLoading();
   clearDirectSessionReturn();
   resetProviderConnectionState();
@@ -2587,18 +2587,18 @@ describe('header status badges', () => {
     ).toBe('New Chat');
   });
 
-  it('renders settings on desktop while the session picker state is active', async () => {
+  it('renders Models on desktop while the session picker state is active', async () => {
     setState('sessions', [session('session-1', 500), session('session-2', 400)]);
     setState('activeSessionId', 'session-1');
     setShowSessionPicker(true);
-    setShowSettings(true);
+    setShowModels(true);
 
     cleanup = render(() => Chat(), container!);
 
     dispatchDesktopMediaQueryChange(true);
     await Promise.resolve();
 
-    expect(container?.querySelector('.settings-panel')).toBeInstanceOf(HTMLDivElement);
+    expect(container?.querySelector('.models-panel')).toBeInstanceOf(HTMLDivElement);
   });
 
   it('opens locked provider re-authentication over chat without showing Models', async () => {
@@ -2627,7 +2627,7 @@ describe('header status badges', () => {
       )
     );
     const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
-    expect(container?.querySelector('.settings-panel')).toBeNull();
+    expect(container?.querySelector('.models-panel')).toBeNull();
     expect(dialog?.textContent).toContain('Re-authenticate provider');
     expect(dialog?.textContent).toContain('GitHub Copilot');
     expect(dialog?.textContent).toContain('Login with GitHub Copilot');
@@ -2635,17 +2635,17 @@ describe('header status badges', () => {
     expect(dialog?.querySelector('[aria-label="Search providers"]')).toBeNull();
   });
 
-  it('renders settings from the session picker on narrow screens', () => {
+  it('renders Models from the session picker on narrow screens', () => {
     setState('sessions', [session('session-1', 500), session('session-2', 400)]);
     setState('activeSessionId', 'session-1');
     setShowSessionPicker(true);
-    setShowSettings(true);
+    setShowModels(true);
 
     cleanup = render(() => Chat(), container!);
 
     expect(container?.querySelector('.chat-workspace')).toBeNull();
     expect(container?.querySelector('.session-list-view')).toBeInstanceOf(HTMLDivElement);
-    expect(container?.querySelector('.settings-panel')).toBeInstanceOf(HTMLDivElement);
+    expect(container?.querySelector('.models-panel')).toBeInstanceOf(HTMLDivElement);
   });
 
   it('renders the desktop session pane on the right when configured', async () => {

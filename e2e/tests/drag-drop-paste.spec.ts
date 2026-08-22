@@ -260,17 +260,18 @@ test('inserts one visible line break after a pasted image', async ({ page }) => 
 
   await expect
     .poll(() => composer.evaluate((editor) => editor.querySelectorAll('br').length))
-    .toBe(2);
+    .toBe(3);
   await expect
     .poll(() =>
       composer.evaluate((editor) => {
-        const selection = window.getSelection();
-        return (
-          selection?.anchorNode === editor && selection.anchorOffset === editor.childNodes.length
-        );
+        const chip = editor.querySelector<HTMLElement>('[data-chip-type="image"]');
+        const placeholder = editor.querySelector<HTMLElement>('[data-caret-placeholder]');
+        return chip && placeholder
+          ? placeholder.getBoundingClientRect().top - chip.getBoundingClientRect().top
+          : null;
       })
     )
-    .toBe(true);
+    .toBeGreaterThan(8);
 });
 
 test('paints a sent portrait carousel at its final presentation without blinking', async ({

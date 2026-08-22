@@ -162,7 +162,10 @@ export class RestProxy {
   private sessionSummaryRequests = new Map<string, SessionSummaryCacheEntry>();
   private activeSessionSummaryDescendantRequests = 0;
   private sessionSummaryDescendantWaiters: Array<() => void> = [];
-  private readonly activeRequests = new Map<string, { id: number; controller: AbortController }>();
+  private readonly activeRequests = new Map<
+    string,
+    { id: number; generation: number; controller: AbortController }
+  >();
 
   constructor(private readonly callbacks: RestProxyCallbacks) {}
 
@@ -173,10 +176,25 @@ export class RestProxy {
     request.controller.abort(new Error('API call aborted'));
   }
 
+  cancelRequestsBeforeGeneration(generation: number) {
+    for (const [cancelKey, request] of this.activeRequests) {
+      if (request.generation >= generation) continue;
+      this.activeRequests.delete(cancelKey);
+      request.controller.abort(new Error('Webview reloaded'));
+    }
+  }
+
+  dispose() {
+    for (const request of this.activeRequests.values()) {
+      request.controller.abort(new Error('REST proxy disposed'));
+    }
+    this.activeRequests.clear();
+  }
+
   async handleRequest(payload: ApiRequestPayload) {
     const requestGeneration = this.callbacks.getRequestGeneration();
     const request = payload.cancelKey
-      ? { id: payload.id, controller: new AbortController() }
+      ? { id: payload.id, generation: requestGeneration, controller: new AbortController() }
       : undefined;
     if (payload.cancelKey && request) {
       const existing = this.activeRequests.get(payload.cancelKey);

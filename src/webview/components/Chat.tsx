@@ -3,14 +3,14 @@ import {
   state,
   showSessionPicker,
   setPersistentShowSessionPicker as setShowSessionPicker,
-  showSettings,
+  showModels,
   openAttentionSessionsKey,
   sessionSearchFocusKey,
   isSessionAwaitingInput,
   isSessionUnread,
   isActiveSessionWorking,
   getSessionTreeRootId,
-  setShowSettings,
+  setShowModels,
 } from '../lib/state';
 import {
   Show,
@@ -184,7 +184,7 @@ export function Chat() {
     const selectedModel = state.selectedModel;
     const canSwitchSessions =
       shouldRenderWorkspace() &&
-      !showSettings() &&
+      !showModels() &&
       primarySessions().length >= 2 &&
       Boolean(
         activeSessionId && primarySessions().some((session) => session.id === activeSessionId)
@@ -294,7 +294,7 @@ export function Chat() {
         if (key === 0) return;
         setSessionFilter(null);
         setSubagentParentId(null);
-        setShowSettings(false);
+        setShowModels(false);
         setShowSessionPicker(true);
       },
       { defer: true }
@@ -466,7 +466,7 @@ export function Chat() {
   };
 
   const switchActiveSession = (direction: -1 | 1) => {
-    if (!shouldRenderWorkspace() || showSettings()) return;
+    if (!shouldRenderWorkspace() || showModels()) return;
 
     const activeSessionId = state.activeSessionId;
     if (!activeSessionId) return;
@@ -515,8 +515,8 @@ export function Chat() {
         ) {
           return;
         }
-        if (showSettings()) {
-          setShowSettings(false);
+        if (showModels()) {
+          setShowModels(false);
           return;
         }
         if (showSessionPicker()) return;
@@ -691,7 +691,7 @@ export function Chat() {
         shouldRenderWorkspace={shouldRenderWorkspace()}
         isDesktopSessionPaneRight={isDesktopSessionPaneRight()}
         showSessionPicker={showSessionPicker()}
-        showSettings={showSettings()}
+        showModels={showModels()}
         showReconnectBanner={showReconnectBanner()}
         slowApiRequests={slowApiRequests()}
         sessionFilter={sessionFilter()}

@@ -142,6 +142,7 @@ export interface OpenCodeRuntime {
   sendMessage(
     text: string,
     options?: {
+      messageId?: string;
       agent?: string;
       noReply?: boolean;
       delivery?: 'steer' | 'queue';
@@ -877,7 +878,7 @@ export function resetWorkspaceDerivedState() {
     uiStore.setError(null);
     uiStore.setShowSessionPicker(false);
     uiStore.setShowModelPicker(false);
-    uiStore.setShowSettings(false);
+    uiStore.setShowModels(false);
   });
 
   appStore.defaultAppState.sessionTreeIndex.invalidate();
@@ -2327,6 +2328,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   async function sendMessage(
     text: string,
     options?: {
+      messageId?: string;
       agent?: string;
       noReply?: boolean;
       delivery?: 'steer' | 'queue';

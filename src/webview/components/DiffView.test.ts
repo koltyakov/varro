@@ -322,7 +322,7 @@ describe('DiffView', () => {
     expect(toggle?.getAttribute('aria-label')).toBe('Collapse changes in example.ts');
     expect(toggle?.title).toBe('Collapse diff preview');
     expect(overlay).toBeInstanceOf(HTMLElement);
-    expect(overlay?.getAttribute('aria-modal')).toBe('true');
+    expect(overlay?.hasAttribute('aria-modal')).toBe(false);
     expect(overlay?.closest('.interactive-list-shell')).toBe(messageListShell);
     expect(hasExpandedDiffOverlay()).toBe(true);
     expect(overlayViewport?.scrollTop).toBe(57);
@@ -335,9 +335,6 @@ describe('DiffView', () => {
     );
 
     const closeButton = overlay?.querySelector<HTMLButtonElement>('.diff-view-overlay-close');
-    const overlayFilename = overlay?.querySelector<HTMLButtonElement>(
-      '.diff-view-overlay-filename'
-    );
     expect(document.activeElement).toBe(closeButton);
 
     overlayViewport?.focus();
@@ -347,8 +344,14 @@ describe('DiffView', () => {
       cancelable: true,
     });
     overlayViewport?.dispatchEvent(tabEvent);
-    expect(tabEvent.defaultPrevented).toBe(true);
-    expect(document.activeElement).toBe(overlayFilename);
+    expect(tabEvent.defaultPrevented).toBe(false);
+
+    const composer = document.createElement('textarea');
+    document.body.appendChild(composer);
+    composer.focus();
+    expect(document.activeElement).toBe(composer);
+    expect(document.querySelector('.diff-view-overlay')).toBe(overlay);
+    composer.remove();
 
     closeButton?.click();
     await Promise.resolve();

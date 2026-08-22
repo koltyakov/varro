@@ -464,7 +464,75 @@ describe('RichComposerArea', () => {
     expect(onInput).toHaveBeenCalledWith('something\n', 'something\n'.length);
   });
 
-  it('renders one trailing line break when Shift+Enter follows an image chip', async () => {
+  it('keeps the caret on the inserted line before an existing blank line', async () => {
+    const firstBlock =
+      'From: GPT-5.6 Sol Default\nTo: GPT-5.6 Sol High\nNormal: GPT-5.6 Sol Default -> High';
+    const secondBlock =
+      'From: GPT-5.6 Sol Default\nTo: GPT-5.6 Luna Default\nNormal: GPT-5.6 Sol Default -> GPT-5.6 Luna Default';
+
+    cleanup = render(() => {
+      const [value, setValue] = createSignal(`${firstBlock}\n\n${secondBlock}`);
+      const [cursorOffset, setCursorOffset] = createSignal(firstBlock.length);
+
+      return RichComposerArea({
+        editorRef: () => {},
+        placeholder: 'Compose',
+        get value() {
+          return value();
+        },
+        get cursorOffset() {
+          return cursorOffset();
+        },
+        chips: [],
+        isFocused: true,
+        showCompletionMenu: false,
+        completionItems: [],
+        completionSelectedIndex: 0,
+        onInput: (text, nextOffset) => {
+          setValue(text);
+          setCursorOffset(nextOffset);
+        },
+        onKeyDown: () => {},
+        onPaste: () => {},
+        onFocus: () => {},
+        onBlur: () => {},
+        onClick: () => {},
+        onKeyUp: () => {},
+        onSelect: () => {},
+        onSelectCompletion: () => {},
+      });
+    }, container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor) throw new Error('Expected composer editor');
+    editor.focus();
+    const target = findNodeAtOffset(editor, firstBlock.length);
+    if (!target) throw new Error('Expected cursor target');
+    setCollapsedSelection(target.node, target.offset);
+
+    editor.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Enter',
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+    await flushAsyncWork();
+
+    const selection = window.getSelection();
+    if (!selection?.rangeCount) throw new Error('Expected composer selection');
+    const prefixRange = document.createRange();
+    prefixRange.selectNodeContents(editor);
+    prefixRange.setEnd(selection.focusNode!, selection.focusOffset);
+    const prefix = document.createElement('div');
+    prefix.appendChild(prefixRange.cloneContents());
+
+    expect(extractText(editor)).toBe(`${firstBlock}\n\n\n${secondBlock}`);
+    expect(extractText(prefix)).toBe(`${firstBlock}\n`);
+  });
+
+  it('renders a visible caret line when Shift+Enter follows an image chip', async () => {
     const marker = '[Image]';
     const chip: RichComposerChip = {
       id: 'img:1',
@@ -525,8 +593,13 @@ describe('RichComposerArea', () => {
 
     expect(event.defaultPrevented).toBe(true);
     expect(extractText(editor)).toBe(`${marker}\n`);
-    expect(editor.querySelectorAll('br')).toHaveLength(1);
-    expect(editor.querySelector('[data-caret-placeholder]')).toBeNull();
+    const placeholder = editor.querySelector('[data-caret-placeholder]');
+    expect(editor.querySelectorAll('br')).toHaveLength(2);
+    expect(placeholder).toBeInstanceOf(HTMLBRElement);
+    expect(window.getSelection()?.focusNode).toBe(editor);
+    expect(window.getSelection()?.focusOffset).toBe(
+      Array.from(editor.childNodes).indexOf(placeholder!)
+    );
   });
 
   it('continues a hyphen bullet on Shift+Enter', () => {

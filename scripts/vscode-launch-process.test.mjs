@@ -5,10 +5,18 @@ import path from 'node:path';
 import test from 'node:test';
 
 import {
+  hasRecreatedVarroTarget,
   reserveLoopbackPort,
   waitForVscodeProcess,
   writeVscodeLaunchMetadata,
 } from './vscode-launch-process.mjs';
+
+test('accepts a changed Varro target without requiring an unavailable polling frame', () => {
+  assert.equal(hasRecreatedVarroTarget('old', 'new', false), true);
+  assert.equal(hasRecreatedVarroTarget('same', 'same', true), false);
+  assert.equal(hasRecreatedVarroTarget(undefined, 'new', false), false);
+  assert.equal(hasRecreatedVarroTarget(undefined, 'new', true), true);
+});
 
 test('writes atomic launch metadata for the tracked process', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'vscode-launch-test-'));

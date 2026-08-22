@@ -115,15 +115,7 @@ export function RichComposerArea(props: {
           frag.appendChild(document.createTextNode(CARET_SPACER));
         }
       } else {
-        const previousNode = frag.lastChild;
-        const followsAtomicChip =
-          previousNode?.nodeType === Node.TEXT_NODE &&
-          previousNode.textContent === CARET_SPACER &&
-          previousNode.previousSibling instanceof HTMLElement &&
-          previousNode.previousSibling.matches('.inline-chip[data-chip-id]');
-        const needsTrailingPlaceholder =
-          index === parts.length - 1 && !(followsAtomicChip && /^\n+$/.test(part));
-        appendTextWithLineBreaks(frag, part, needsTrailingPlaceholder);
+        appendTextWithLineBreaks(frag, part, index === parts.length - 1);
       }
     }
     return frag;
@@ -904,7 +896,7 @@ export function findNodeAtOffset(
         }
         if (remaining === 0) {
           const idx = Array.from(root.childNodes).indexOf(child);
-          return { node: root, offset: idx + 1 };
+          return { node: root, offset: idx };
         }
         remaining -= 1;
       } else if (el.dataset.chipMarker) {

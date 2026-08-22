@@ -41,7 +41,7 @@ describe('SidebarProvider provider refresh', () => {
     await provider.dispose();
   });
 
-  it('refreshes providers after an auth change without opening model settings', async () => {
+  it('refreshes providers after an auth change without opening the Models view', async () => {
     vi.useFakeTimers();
     const server = createServer({
       request: vi.fn(async (_method: string, path: string) =>

@@ -9,7 +9,7 @@ import {
   setInputText,
   setPersistentShowSessionPicker,
   setShowModelPicker,
-  setShowSettings,
+  setShowModels,
   setState,
   state,
   stopLoading,
@@ -55,7 +55,7 @@ export function startNewChatDraft() {
       persistActiveSessionId(null);
     }
     setError(null);
-    setShowSettings(false);
+    setShowModels(false);
     setShowModelPicker(false);
     stopLoading();
     setPersistentShowSessionPicker(false);

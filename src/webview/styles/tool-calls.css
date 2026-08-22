@@ -333,6 +333,26 @@
   white-space: nowrap;
 }
 
+.model-change-label:focus-visible {
+  border-radius: 2px;
+  outline: 1px solid var(--color-vscode-focus-border);
+  outline-offset: 2px;
+}
+
+.model-change-narrow {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .model-change-normal {
+    display: none;
+  }
+
+  .model-change-narrow {
+    display: inline;
+  }
+}
+
 .message-compaction-divider {
   display: flex;
   align-items: center;
@@ -803,6 +823,9 @@
 .diff-view-lines-content {
   width: max-content;
   min-width: 100%;
+  /* Highlighted lines update in place while the surrounding virtualized row
+     moves. Do not reuse a cached glyph paint from the line's old position. */
+  will-change: contents;
 }
 
 .diff-view-gap {
@@ -2804,6 +2827,7 @@ kbd {
   flex: 1;
   max-height: none;
   overflow: hidden;
+  overscroll-behavior: auto;
   scrollbar-gutter: auto;
   cursor: pointer;
   font-size: calc(var(--vscode-font-size, 13px) - 2px);

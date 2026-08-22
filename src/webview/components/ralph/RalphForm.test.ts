@@ -76,7 +76,7 @@ vi.mock('../../lib/state', () => ({
   isModelPinned: vi.fn(() => false),
   isSessionAwaitingInput: vi.fn(() => false),
   setModelPinned: vi.fn(),
-  setShowSettings: vi.fn(),
+  setShowModels: vi.fn(),
   state: stateMock,
 }));
 

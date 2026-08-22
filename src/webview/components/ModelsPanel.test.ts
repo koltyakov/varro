@@ -293,18 +293,18 @@ describe('ModelsPanel', () => {
     cleanup = render(() => ModelsPanel(), container!);
     await Promise.resolve();
 
-    expect(container?.querySelectorAll('.settings-model-row')).toHaveLength(0);
-    expect(container?.querySelector('.settings-provider-count')?.textContent).toBe('0 added');
+    expect(container?.querySelectorAll('.models-model-row')).toHaveLength(0);
+    expect(container?.querySelector('.models-provider-count')?.textContent).toBe('0 added');
 
     findButton(container, 'Add models')?.click();
-    const dialog = document.body.querySelector<HTMLElement>('.settings-model-catalog-dialog');
+    const dialog = document.body.querySelector<HTMLElement>('.models-model-catalog-dialog');
     expect(dialog?.textContent).toContain('Refreshing model catalog...');
     expect(
       dialog?.querySelector<HTMLInputElement>('[aria-label="Search OpenRouter models"]')?.disabled
     ).toBe(true);
     await Promise.resolve();
     await Promise.resolve();
-    expect(dialog?.querySelectorAll('.settings-model-catalog-row')).toHaveLength(0);
+    expect(dialog?.querySelectorAll('.models-model-catalog-row')).toHaveLength(0);
     expect(dialog?.textContent).toContain('Search 101 available models');
     expect(clientMocks.providers).toHaveBeenCalledOnce();
 
@@ -315,25 +315,25 @@ describe('ModelsPanel', () => {
       search.value = 'model-100';
       search.dispatchEvent(new InputEvent('input', { bubbles: true }));
     }
-    const result = dialog?.querySelector<HTMLElement>('.settings-model-catalog-row');
+    const result = dialog?.querySelector<HTMLElement>('.models-model-catalog-row');
     expect(result?.textContent).toContain('Model 100');
-    result?.querySelector<HTMLInputElement>('.settings-checkbox')?.click();
+    result?.querySelector<HTMLInputElement>('.models-checkbox')?.click();
     await Promise.resolve();
 
-    expect(container?.querySelector('.settings-provider-count')?.textContent).toBe('0 added');
+    expect(container?.querySelector('.models-provider-count')?.textContent).toBe('0 added');
     expect(window.localStorage.getItem(STORAGE_KEYS.addedModels)).toBeNull();
     expect(dialog?.textContent).toContain('1 unsaved change');
     findButton(dialog, 'Save changes')?.click();
     await Promise.resolve();
 
-    expect(container?.querySelector('.settings-provider-count')?.textContent).toBe('1 added');
+    expect(container?.querySelector('.models-provider-count')?.textContent).toBe('1 added');
     expect(JSON.parse(window.localStorage.getItem(STORAGE_KEYS.addedModels)!)).toEqual([
       'openrouter:model-100',
     ]);
 
     await Promise.resolve();
-    expect(container?.querySelectorAll('.settings-model-row')).toHaveLength(1);
-    expect(container?.querySelector('.settings-model-row')?.textContent).toContain('Model 100');
+    expect(container?.querySelectorAll('.models-model-row')).toHaveLength(1);
+    expect(container?.querySelector('.models-model-row')?.textContent).toContain('Model 100');
   });
 
   it('discards pending model catalog changes when cancelled', async () => {
@@ -357,7 +357,7 @@ describe('ModelsPanel', () => {
     cleanup = render(() => ModelsPanel(), container!);
 
     findButton(container, 'Add models')?.click();
-    const dialog = document.body.querySelector<HTMLElement>('.settings-model-catalog-dialog');
+    const dialog = document.body.querySelector<HTMLElement>('.models-model-catalog-dialog');
     await Promise.resolve();
     await Promise.resolve();
     const search = dialog?.querySelector<HTMLInputElement>(
@@ -367,11 +367,11 @@ describe('ModelsPanel', () => {
       search.value = 'model-50';
       search.dispatchEvent(new InputEvent('input', { bubbles: true }));
     }
-    dialog?.querySelector<HTMLInputElement>('.settings-checkbox')?.click();
+    dialog?.querySelector<HTMLInputElement>('.models-checkbox')?.click();
     findButton(dialog, 'Cancel')?.click();
 
-    expect(document.body.querySelector('.settings-model-catalog-dialog')).toBeNull();
-    expect(container?.querySelector('.settings-provider-count')?.textContent).toBe('0 added');
+    expect(document.body.querySelector('.models-model-catalog-dialog')).toBeNull();
+    expect(container?.querySelector('.models-provider-count')?.textContent).toBe('0 added');
     expect(window.localStorage.getItem(STORAGE_KEYS.addedModels)).toBeNull();
   });
 
@@ -389,7 +389,7 @@ describe('ModelsPanel', () => {
     cleanup = render(() => ModelsPanel(), container!);
 
     findButton(container, 'Add models')?.click();
-    const dialog = document.body.querySelector<HTMLElement>('.settings-model-catalog-dialog');
+    const dialog = document.body.querySelector<HTMLElement>('.models-model-catalog-dialog');
     expect(dialog?.textContent).toContain('Refreshing available models...');
 
     await Promise.resolve();
@@ -405,7 +405,7 @@ describe('ModelsPanel', () => {
     await Promise.resolve();
 
     const fastSymbol = container?.querySelector(
-      '.settings-model-name [aria-label="Fast mode may consume usage limits faster and cost more."]'
+      '.models-model-name [aria-label="Fast mode may consume usage limits faster and cost more."]'
     );
     expect(fastSymbol?.textContent).toBe('⚡');
   });
@@ -532,8 +532,8 @@ describe('ModelsPanel', () => {
     expect(container?.textContent).toContain(
       'Authentication is required to load available models.'
     );
-    expect(container?.querySelector('.settings-model-row')).toBeNull();
-    expect(container?.querySelector('.settings-provider-count')?.textContent).toBe('Reconnect');
+    expect(container?.querySelector('.models-model-row')).toBeNull();
+    expect(container?.querySelector('.models-provider-count')?.textContent).toBe('Reconnect');
   });
 
   it('connects an API provider from the embedded dialog', async () => {
@@ -811,7 +811,7 @@ describe('ModelsPanel', () => {
     setState('providerRefreshPending', true);
     cleanup = render(() => ModelsPanel(), container!);
 
-    expect(container?.querySelector('.settings-provider-refresh-notice')).toBeNull();
+    expect(container?.querySelector('.models-provider-refresh-notice')).toBeNull();
   });
 
   it('counts only running parent sessions in the queued provider notice', () => {
@@ -830,7 +830,7 @@ describe('ModelsPanel', () => {
     });
     cleanup = render(() => ModelsPanel(), container!);
 
-    const notice = container?.querySelector<HTMLElement>('.settings-provider-refresh-notice');
+    const notice = container?.querySelector<HTMLElement>('.models-provider-refresh-notice');
     expect(notice?.getAttribute('role')).toBe('status');
     expect(notice?.textContent).toContain('Configuration update queued.');
     expect(notice?.textContent).toContain('when 2 running agents finish.');
@@ -855,12 +855,12 @@ describe('ModelsPanel', () => {
     await Promise.resolve();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const nextRow = Array.from(container?.querySelectorAll('.settings-model-row') ?? []).find(
-      (item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5'
+    const nextRow = Array.from(container?.querySelectorAll('.models-model-row') ?? []).find(
+      (item) => item.querySelector('.models-model-name')?.textContent === 'GPT-5'
     ) as HTMLElement;
     nextRow.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     const assignButton = Array.from(
-      document.querySelectorAll<HTMLButtonElement>('.settings-context-menu-item')
+      document.querySelectorAll<HTMLButtonElement>('.models-context-menu-item')
     ).find((item) => item.textContent === 'Use as small model');
     assignButton?.click();
     await Promise.resolve();
@@ -872,7 +872,7 @@ describe('ModelsPanel', () => {
     expect(container?.querySelector('[aria-label="Small model (new)"]')?.textContent).toBe(
       'smallnew'
     );
-    expect(container?.querySelector('.settings-provider-refresh-notice')?.textContent).toContain(
+    expect(container?.querySelector('.models-provider-refresh-notice')?.textContent).toContain(
       'Old and new assignments are labeled in the model list.'
     );
 
@@ -903,12 +903,12 @@ describe('ModelsPanel', () => {
     await Promise.resolve();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const nextRow = Array.from(container?.querySelectorAll('.settings-model-row') ?? []).find(
-      (item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5'
+    const nextRow = Array.from(container?.querySelectorAll('.models-model-row') ?? []).find(
+      (item) => item.querySelector('.models-model-name')?.textContent === 'GPT-5'
     ) as HTMLElement;
     nextRow.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     const assignButton = Array.from(
-      document.querySelectorAll<HTMLButtonElement>('.settings-context-menu-item')
+      document.querySelectorAll<HTMLButtonElement>('.models-context-menu-item')
     ).find((item) => item.textContent === 'Use for review agent');
     assignButton?.click();
     await Promise.resolve();
@@ -938,12 +938,12 @@ describe('ModelsPanel', () => {
     await Promise.resolve();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const currentRow = Array.from(container?.querySelectorAll('.settings-model-row') ?? []).find(
-      (item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5 mini'
+    const currentRow = Array.from(container?.querySelectorAll('.models-model-row') ?? []).find(
+      (item) => item.querySelector('.models-model-name')?.textContent === 'GPT-5 mini'
     ) as HTMLElement;
     currentRow.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     const removeButton = Array.from(
-      document.querySelectorAll<HTMLButtonElement>('.settings-context-menu-item')
+      document.querySelectorAll<HTMLButtonElement>('.models-context-menu-item')
     ).find((item) => item.textContent === "Don't use as small model");
     removeButton?.click();
     await Promise.resolve();
@@ -951,7 +951,7 @@ describe('ModelsPanel', () => {
 
     const removedTag = container?.querySelector('[aria-label="Small model (will be removed)"]');
     expect(removedTag?.textContent).toBe('small');
-    expect(removedTag?.classList.contains('settings-route-tag-removed')).toBe(true);
+    expect(removedTag?.classList.contains('models-route-tag-removed')).toBe(true);
     expect(container?.querySelector('[aria-label="Small model (old)"]')).toBeNull();
   });
 
@@ -959,28 +959,28 @@ describe('ModelsPanel', () => {
     cleanup = render(() => ModelsPanel(), container!);
     await Promise.resolve();
 
-    const row = Array.from(container?.querySelectorAll('.settings-model-row') ?? []).find(
-      (item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5'
+    const row = Array.from(container?.querySelectorAll('.models-model-row') ?? []).find(
+      (item) => item.querySelector('.models-model-name')?.textContent === 'GPT-5'
     );
     expect(row?.querySelector('.model-release-date')?.textContent).toBe('2026/01/01');
-    expect(row?.querySelector('.settings-model-date-cell')).toBeInstanceOf(HTMLElement);
-    expect(row?.querySelector('.settings-model-ctx')?.textContent).toBe('400k');
-    expect(row?.querySelector('.settings-model-ctx')?.parentElement?.classList).toContain(
-      'settings-model-meta'
+    expect(row?.querySelector('.models-model-date-cell')).toBeInstanceOf(HTMLElement);
+    expect(row?.querySelector('.models-model-ctx')?.textContent).toBe('400k');
+    expect(row?.querySelector('.models-model-ctx')?.parentElement?.classList).toContain(
+      'models-model-meta'
     );
     expect(row?.querySelector('.model-default-label')?.textContent).toBe('(default)');
     expect(row?.querySelector('.model-expanded-meta')).toBeNull();
 
-    const rowWithoutDate = Array.from(
-      container?.querySelectorAll('.settings-model-row') ?? []
-    ).find((item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5 mini');
-    expect(rowWithoutDate?.querySelector('.settings-model-date-cell')).toBeInstanceOf(HTMLElement);
+    const rowWithoutDate = Array.from(container?.querySelectorAll('.models-model-row') ?? []).find(
+      (item) => item.querySelector('.models-model-name')?.textContent === 'GPT-5 mini'
+    );
+    expect(rowWithoutDate?.querySelector('.models-model-date-cell')).toBeInstanceOf(HTMLElement);
     expect(rowWithoutDate?.querySelector('.model-release-date')).toBeNull();
     expect(
       rowWithoutDate
-        ?.closest('.settings-provider')
-        ?.querySelector<HTMLElement>('.settings-model-list')
-        ?.style.getPropertyValue('--settings-capability-count')
+        ?.closest('.models-provider')
+        ?.querySelector<HTMLElement>('.models-model-list')
+        ?.style.getPropertyValue('--models-capability-count')
     ).toBe('2');
   });
 
@@ -999,16 +999,16 @@ describe('ModelsPanel', () => {
     cleanup = render(() => ModelsPanel(), container!);
     await Promise.resolve();
 
-    const rows = Array.from(container?.querySelectorAll('.settings-model-row') ?? []);
+    const rows = Array.from(container?.querySelectorAll('.models-model-row') ?? []);
     const fullRow = rows.find(
-      (item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5'
+      (item) => item.querySelector('.models-model-name')?.textContent === 'GPT-5'
     );
     const miniRow = rows.find(
-      (item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5 mini'
+      (item) => item.querySelector('.models-model-name')?.textContent === 'GPT-5 mini'
     );
     const capabilityLabels = Array.from(
       fullRow?.querySelectorAll(
-        '.settings-model-badges .model-capability-tag:not(.settings-route-tag)'
+        '.models-model-badges .model-capability-tag:not(.models-route-tag)'
       ) ?? []
     ).map((tag) => tag.textContent?.trim());
 
@@ -1019,8 +1019,8 @@ describe('ModelsPanel', () => {
     expect(fullRow?.querySelector('.model-capability-tag-vision')?.getAttribute('aria-label')).toBe(
       'Vision'
     );
-    expect(fullRow?.querySelectorAll('.settings-capability-icon svg')).toHaveLength(5);
-    expect(fullRow?.querySelector('.settings-capability-universal')).toBeNull();
+    expect(fullRow?.querySelectorAll('.models-capability-icon svg')).toHaveLength(5);
+    expect(fullRow?.querySelector('.models-capability-universal')).toBeNull();
     expect(fullRow?.querySelector('.model-capability-tag-audio')).toBeInstanceOf(HTMLElement);
     expect(fullRow?.querySelector('.model-capability-tag-video')).toBeInstanceOf(HTMLElement);
     expect(miniRow?.querySelector('.model-capability-tag-pdf')).toBeNull();
@@ -1032,7 +1032,7 @@ describe('ModelsPanel', () => {
     cleanup = render(() => ModelsPanel(), container!);
     await Promise.resolve();
 
-    const tags = Array.from(container?.querySelectorAll('.settings-route-tag') ?? []);
+    const tags = Array.from(container?.querySelectorAll('.models-route-tag') ?? []);
     const labels = tags.map((tag) => tag.getAttribute('aria-label'));
     expect(labels).toEqual(
       expect.arrayContaining([
@@ -1049,18 +1049,18 @@ describe('ModelsPanel', () => {
     );
     expect(tags.map((tag) => tag.className)).toEqual(
       expect.arrayContaining([
-        expect.stringContaining('settings-route-tag-small'),
-        expect.stringContaining('settings-route-tag-commit'),
-        expect.stringContaining('settings-route-tag-approve'),
-        expect.stringContaining('settings-route-tag-agent'),
+        expect.stringContaining('models-route-tag-small'),
+        expect.stringContaining('models-route-tag-commit'),
+        expect.stringContaining('models-route-tag-approve'),
+        expect.stringContaining('models-route-tag-agent'),
       ])
     );
-    expect(
-      tags.every((tag) => tag.parentElement?.classList.contains('settings-model-routes'))
-    ).toBe(true);
-    expect(
-      tags.every((tag) => tag.closest('.settings-model-name-wrap') instanceof HTMLElement)
-    ).toBe(true);
+    expect(tags.every((tag) => tag.parentElement?.classList.contains('models-model-routes'))).toBe(
+      true
+    );
+    expect(tags.every((tag) => tag.closest('.models-model-name-wrap') instanceof HTMLElement)).toBe(
+      true
+    );
   });
 
   it('accepts preview routing payloads without normalized agentModels', async () => {
@@ -1081,8 +1081,8 @@ describe('ModelsPanel', () => {
     await Promise.resolve();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const row = Array.from(container?.querySelectorAll('.settings-model-row') || []).find(
-      (item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5'
+    const row = Array.from(container?.querySelectorAll('.models-model-row') || []).find(
+      (item) => item.querySelector('.models-model-name')?.textContent === 'GPT-5'
     ) as HTMLElement;
     expect(row).toBeTruthy();
 
@@ -1095,7 +1095,7 @@ describe('ModelsPanel', () => {
       })
     );
 
-    const menuItems = Array.from(document.querySelectorAll('.settings-context-menu-item'));
+    const menuItems = Array.from(document.querySelectorAll('.models-context-menu-item'));
     expect(menuItems.map((item) => item.querySelector('strong')?.textContent)).toEqual(
       expect.arrayContaining(['small', 'commit messages', 'auto-approve', 'review'])
     );
@@ -1131,7 +1131,7 @@ describe('ModelsPanel', () => {
     cleanup = render(() => ModelsPanel(), container!);
     await Promise.resolve();
 
-    const row = container?.querySelector<HTMLElement>('.settings-model-row');
+    const row = container?.querySelector<HTMLElement>('.models-model-row');
     row?.dispatchEvent(
       new MouseEvent('contextmenu', {
         bubbles: true,
@@ -1142,7 +1142,7 @@ describe('ModelsPanel', () => {
     );
     await Promise.resolve();
 
-    const menu = document.querySelector<HTMLElement>('.settings-context-menu');
+    const menu = document.querySelector<HTMLElement>('.models-context-menu');
     expect(menu?.style.left).toBe('272px');
     expect(menu?.style.top).toBe('52px');
   });
@@ -1153,16 +1153,16 @@ describe('ModelsPanel', () => {
     await Promise.resolve();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const row = Array.from(container?.querySelectorAll('.settings-model-row') || []).find(
-      (item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5'
+    const row = Array.from(container?.querySelectorAll('.models-model-row') || []).find(
+      (item) => item.querySelector('.models-model-name')?.textContent === 'GPT-5'
     ) as HTMLElement;
     expect(row.querySelector('[aria-label="Pinned model"]')).not.toBeNull();
 
     row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const menu = document.querySelector('.settings-context-menu') as HTMLElement;
+    const menu = document.querySelector('.models-context-menu') as HTMLElement;
     const unpinButton = Array.from(
-      menu.querySelectorAll<HTMLButtonElement>('.settings-context-menu-item')
+      menu.querySelectorAll<HTMLButtonElement>('.models-context-menu-item')
     ).find((item) => item.textContent === 'Unpin model');
     expect(unpinButton).toBeTruthy();
     expect(menu.children[0]).toBe(unpinButton);
@@ -1172,12 +1172,12 @@ describe('ModelsPanel', () => {
     unpinButton?.click();
     await Promise.resolve();
     expect(row.querySelector('[aria-label="Pinned model"]')).toBeNull();
-    expect(document.querySelector('.settings-context-menu')).toBeNull();
+    expect(document.querySelector('.models-context-menu')).toBeNull();
     expect(JSON.parse(window.localStorage.getItem(STORAGE_KEYS.pinnedModels)!)).toEqual([]);
 
     row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     const pinButton = Array.from(
-      document.querySelectorAll<HTMLButtonElement>('.settings-context-menu-item')
+      document.querySelectorAll<HTMLButtonElement>('.models-context-menu-item')
     ).find((item) => item.textContent === 'Pin model');
     pinButton?.click();
     await Promise.resolve();
@@ -1193,8 +1193,8 @@ describe('ModelsPanel', () => {
     await Promise.resolve();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const row = Array.from(container?.querySelectorAll('.settings-model-row') || []).find(
-      (item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5'
+    const row = Array.from(container?.querySelectorAll('.models-model-row') || []).find(
+      (item) => item.querySelector('.models-model-name')?.textContent === 'GPT-5'
     ) as HTMLElement;
     row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     findButton(document, 'Rename model')?.click();
@@ -1212,11 +1212,11 @@ describe('ModelsPanel', () => {
 
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const renamedRow = Array.from(container?.querySelectorAll('.settings-model-row') || []).find(
-      (item) => item.querySelector('.settings-model-name')?.textContent === 'Primary coder'
+    const renamedRow = Array.from(container?.querySelectorAll('.models-model-row') || []).find(
+      (item) => item.querySelector('.models-model-name')?.textContent === 'Primary coder'
     ) as HTMLElement;
     expect(renamedRow).toBeTruthy();
-    const renamedMarker = renamedRow.querySelector('.settings-model-renamed-marker');
+    const renamedMarker = renamedRow.querySelector('.models-model-renamed-marker');
     expect(renamedMarker?.textContent).toBe('renamed');
     expect(renamedMarker?.getAttribute('aria-label')).toBe('Renamed model. Original name: GPT-5');
     expect(renamedMarker?.getAttribute('title')).toBeNull();
@@ -1229,8 +1229,8 @@ describe('ModelsPanel', () => {
     findButton(document, 'Reset model name')?.click();
     await Promise.resolve();
 
-    expect(container?.querySelector('.settings-model-name')?.textContent).toBe('GPT-5');
-    expect(container?.querySelector('.settings-model-renamed-marker')).toBeNull();
+    expect(container?.querySelector('.models-model-name')?.textContent).toBe('GPT-5');
+    expect(container?.querySelector('.models-model-renamed-marker')).toBeNull();
     expect(window.localStorage.getItem(STORAGE_KEYS.modelDisplayNames)).toBeNull();
   });
 
@@ -1245,13 +1245,13 @@ describe('ModelsPanel', () => {
     await Promise.resolve();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const row = Array.from(container?.querySelectorAll('.settings-model-row') || []).find(
-      (item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5 mini'
+    const row = Array.from(container?.querySelectorAll('.models-model-row') || []).find(
+      (item) => item.querySelector('.models-model-name')?.textContent === 'GPT-5 mini'
     ) as HTMLElement;
     row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
 
     const menuItems = Array.from(
-      document.querySelectorAll<HTMLButtonElement>('.settings-context-menu-item')
+      document.querySelectorAll<HTMLButtonElement>('.models-context-menu-item')
     );
     expect(menuItems.map((item) => item.textContent)).toEqual(
       expect.arrayContaining([
@@ -1292,10 +1292,8 @@ describe('ModelsPanel', () => {
     await Promise.resolve();
 
     expect(container?.textContent).toContain('OpenAI0/2');
-    expect(container?.querySelector('.settings-chevron')?.classList.contains('expanded')).toBe(
-      false
-    );
-    expect(container?.querySelector('.settings-model-row')).toBeNull();
+    expect(container?.querySelector('.models-chevron')?.classList.contains('expanded')).toBe(false);
+    expect(container?.querySelector('.models-model-row')).toBeNull();
   });
 
   it('keeps provider priority order unchanged when providers are toggled', async () => {
@@ -1345,23 +1343,23 @@ describe('ModelsPanel', () => {
     await Promise.resolve();
 
     const providerNames = () =>
-      Array.from(container?.querySelectorAll('.settings-provider-name') ?? []).map(
+      Array.from(container?.querySelectorAll('.models-provider-name') ?? []).map(
         (item) => item.textContent
       );
     expect(providerNames()).toEqual(['OpenAI', 'Alpha', 'Beta']);
 
     const betaSection = Array.from(
-      container?.querySelectorAll<HTMLElement>('.settings-provider') ?? []
-    ).find((section) => section.querySelector('.settings-provider-name')?.textContent === 'Beta');
-    betaSection?.querySelector<HTMLInputElement>('.settings-checkbox')?.click();
+      container?.querySelectorAll<HTMLElement>('.models-provider') ?? []
+    ).find((section) => section.querySelector('.models-provider-name')?.textContent === 'Beta');
+    betaSection?.querySelector<HTMLInputElement>('.models-checkbox')?.click();
     await Promise.resolve();
 
     expect(providerNames()).toEqual(['OpenAI', 'Alpha', 'Beta']);
 
     const alphaSection = Array.from(
-      container?.querySelectorAll<HTMLElement>('.settings-provider') ?? []
-    ).find((section) => section.querySelector('.settings-provider-name')?.textContent === 'Alpha');
-    alphaSection?.querySelector<HTMLInputElement>('.settings-checkbox')?.click();
+      container?.querySelectorAll<HTMLElement>('.models-provider') ?? []
+    ).find((section) => section.querySelector('.models-provider-name')?.textContent === 'Alpha');
+    alphaSection?.querySelector<HTMLInputElement>('.models-checkbox')?.click();
     await Promise.resolve();
 
     expect(providerNames()).toEqual(['OpenAI', 'Alpha', 'Beta']);

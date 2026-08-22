@@ -2349,7 +2349,86 @@ describe('MessageList session scoping', () => {
     expect(container?.textContent).toContain('Root response');
     expect(container?.textContent).toContain('Continuing root response');
     expect(container?.textContent).not.toContain('Hidden child response');
-    expect(container?.textContent).not.toContain('Switched to High');
+    expect(container?.textContent).not.toContain('GPT-5.4 Medium → High');
+  });
+
+  it('shows model transitions with unchanged details omitted and full details in a tooltip', async () => {
+    setState('activeSessionId', 'session-1');
+    setState('providers', [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          'gpt-5.4': {
+            id: 'gpt-5.4',
+            name: 'GPT-5.4',
+            capabilities: { reasoning: true, toolcall: true, attachment: true },
+            cost: { input: 0, output: 0 },
+            variants: { medium: {}, high: {} },
+          },
+          xhigh: {
+            id: 'xhigh',
+            name: 'Xhigh',
+            capabilities: { reasoning: true, toolcall: true, attachment: true },
+            cost: { input: 0, output: 0 },
+            variants: { high: {} },
+          },
+        },
+      },
+    ]);
+    replaceMessages([
+      {
+        info: assistantMessage('assistant-1', { modelID: 'gpt-5.4', variant: 'medium' }),
+        parts: [textPart('text-1', 'First response')],
+      },
+      {
+        info: assistantMessage('assistant-2', { modelID: 'gpt-5.4', variant: 'high' }),
+        parts: [textPart('text-2', 'Second response')],
+      },
+      {
+        info: assistantMessage('assistant-3', { modelID: 'xhigh', variant: 'high' }),
+        parts: [textPart('text-3', 'Third response')],
+      },
+      {
+        info: assistantMessage('assistant-4', { modelID: 'gpt-5.4', variant: 'medium' }),
+        parts: [textPart('text-4', 'Fourth response')],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const labels = [
+      ...(container?.querySelectorAll(
+        '.model-change-indicator:not(.assistant-dialog-summary) .model-change-label'
+      ) ?? []),
+    ];
+    expect(
+      labels.map((label) => label.querySelector('.model-change-normal')?.textContent?.trim())
+    ).toEqual([
+      'GPT-5.4 Medium → High',
+      'GPT-5.4 High → Xhigh High',
+      'Xhigh High → GPT-5.4 Medium',
+    ]);
+    expect(labels.some((label) => label.textContent?.includes('OpenAI'))).toBe(false);
+    expect(labels.every((label) => !label.textContent?.includes('·'))).toBe(true);
+    expect(
+      labels.map((label) => label.querySelector('.model-change-narrow')?.textContent?.trim())
+    ).toEqual(['Medium → High', 'GPT-5.4 → Xhigh', 'Xhigh → GPT-5.4 Medium']);
+
+    labels[1]?.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(299);
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+
+    const tooltipLines = [
+      ...document.querySelectorAll('[role="tooltip"] .model-change-tooltip > div'),
+    ];
+    expect(tooltipLines.map((line) => line.textContent)).toEqual([
+      'From: GPT-5.4 High (OpenAI)',
+      'To: Xhigh High (OpenAI)',
+    ]);
   });
 
   it('keeps child-session streaming text out of the parent thread', async () => {

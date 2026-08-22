@@ -388,6 +388,30 @@
   padding: 0 max(0px, calc(14px - var(--ralph-dashboard-scrollbar-inset))) 0 14px;
 }
 
+@media (min-width: 960px) {
+  .ralph-dashboard-list-scroll {
+    scrollbar-gutter: stable both-edges;
+  }
+
+  .ralph-dashboard-fixed-track,
+  .ralph-dashboard-list-track {
+    width: min(100%, var(--chat-content-max-width));
+    margin-inline: auto;
+  }
+
+  .ralph-dashboard-fixed-track {
+    padding-inline: var(--chat-horizontal-padding);
+  }
+
+  .ralph-dashboard-list-track {
+    padding-left: var(--chat-horizontal-padding);
+    padding-right: max(
+      0px,
+      calc(var(--chat-horizontal-padding) - var(--ralph-dashboard-scrollbar-inset))
+    );
+  }
+}
+
 .ralph-dashboard-empty {
   color: var(--color-vscode-muted);
   font-size: 12px;

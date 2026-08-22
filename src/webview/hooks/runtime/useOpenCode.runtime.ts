@@ -98,6 +98,7 @@ export async function loadMoreSessions() {
 export async function sendMessage(
   text: string,
   options?: {
+    messageId?: string;
     agent?: string;
     noReply?: boolean;
     delivery?: 'steer' | 'queue';
