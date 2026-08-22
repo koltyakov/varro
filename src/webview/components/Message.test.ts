@@ -460,7 +460,7 @@ describe('Message user prompt rendering', () => {
     expect(scrollContainer?.classList.contains('has-more-below')).toBe(false);
   });
 
-  it('renders fenced user prompt text as a scrollable code block', async () => {
+  it('renders fenced user prompt text as a clipped code block with an overflow fade', async () => {
     cleanup = render(
       () =>
         Message({
@@ -488,6 +488,15 @@ describe('Message user prompt rendering', () => {
     expect(container?.querySelector('.user-message-code-block code.hljs')).toBeInstanceOf(
       HTMLElement
     );
+    const scrollContainer = container?.querySelector<HTMLElement>('.user-message-text-scroll');
+    const codeBlock = container?.querySelector<HTMLElement>('.user-message-code-block pre');
+    Object.defineProperties(codeBlock!, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 240 },
+    });
+    scrollContainer?.dispatchEvent(new Event('scroll'));
+    expect(codeBlock?.classList.contains('is-truncated')).toBe(true);
+
     await vi.waitFor(() => {
       expect(container?.querySelector('.user-message-code-block .hljs-keyword')?.textContent).toBe(
         'const'

@@ -12,17 +12,7 @@ import {
   getSessionTreeRootId,
   setShowModels,
 } from '../lib/state';
-import {
-  Show,
-  Suspense,
-  createSignal,
-  onMount,
-  onCleanup,
-  createEffect,
-  createMemo,
-  lazy,
-  on,
-} from 'solid-js';
+import { Show, createSignal, onMount, onCleanup, createEffect, createMemo, on } from 'solid-js';
 import { selectSession, deleteSessionImmediately } from '../hooks/useOpenCode';
 import { normalizeSessionTitle } from '../../shared/session-title';
 import { ChatWorkspace } from './chat/ChatWorkspace';
@@ -65,6 +55,7 @@ import {
   getDirectSessionReturnId,
 } from '../lib/session-navigation';
 import { isFunction } from '../lib/runtime-values';
+import { ProviderConnectionDialog } from './ProviderConnectionDialog';
 
 type HeaderSessionCounts = {
   running: number;
@@ -78,12 +69,6 @@ type HeaderSessionCounts = {
   sidebarPlanReady: number;
   sidebarCompleted: number;
 };
-
-const LazyProviderConnectionDialog = lazy(() =>
-  import('./ProviderConnectionDialog').then((module) => ({
-    default: module.ProviderConnectionDialog,
-  }))
-);
 
 const DESKTOP_SESSION_LAYOUT_MEDIA_QUERY = '(min-width: 1400px)';
 const RECONNECT_BANNER_SHOW_DELAY_MS = 10_000;
@@ -749,17 +734,15 @@ export function Chat() {
       />
       <Show when={providerConnectionData()}>
         {(data) => (
-          <Suspense>
-            <LazyProviderConnectionDialog
-              catalogProviders={data().providers}
-              providerLoadError={data().error}
-              isLoadingProviders={data().loading}
-              initialProviderID={data().providerID}
-              lockProvider
-              reauthentication
-              onClose={() => setProviderConnectionData(null)}
-            />
-          </Suspense>
+          <ProviderConnectionDialog
+            catalogProviders={data().providers}
+            providerLoadError={data().error}
+            isLoadingProviders={data().loading}
+            initialProviderID={data().providerID}
+            lockProvider
+            reauthentication
+            onClose={() => setProviderConnectionData(null)}
+          />
         )}
       </Show>
     </>

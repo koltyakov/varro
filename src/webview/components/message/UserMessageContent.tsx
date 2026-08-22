@@ -101,6 +101,14 @@ function bindUserMessageOverflowFade(element: HTMLElement, trackText: () => stri
   const update = () => {
     const hasMoreBelow = element.scrollTop + element.clientHeight < element.scrollHeight - 1;
     element.classList.toggle('has-more-below', hasMoreBelow);
+    for (const codeBlock of element.querySelectorAll<HTMLElement>(
+      '.user-message-code-block:not(.user-message-terminal-code-block) pre.code-block'
+    )) {
+      codeBlock.classList.toggle(
+        'is-truncated',
+        codeBlock.scrollHeight > codeBlock.clientHeight + 1
+      );
+    }
   };
 
   element.addEventListener('scroll', update, { passive: true });

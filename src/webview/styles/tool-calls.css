@@ -2831,10 +2831,19 @@ kbd {
   margin-bottom: 8px;
 }
 
-.user-message-code-block pre.code-block {
-  max-height: min(240px, 34vh);
-  overflow: auto;
-  overscroll-behavior: contain;
+.user-message-code-block:not(.user-message-terminal-code-block) pre.code-block {
+  max-height: min(160px, 24vh);
+  overflow: hidden;
+  scrollbar-gutter: auto;
+}
+
+.user-message-code-block:not(.user-message-terminal-code-block) pre.code-block.is-truncated {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    black calc(100% - 2.6em),
+    transparent calc(100% - 8px)
+  );
+  mask-image: linear-gradient(to bottom, black calc(100% - 2.6em), transparent calc(100% - 8px));
 }
 
 .user-message-terminal-code-block pre.code-block {

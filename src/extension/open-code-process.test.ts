@@ -579,6 +579,7 @@ describe('OpenCodeProcess server ownership leases', () => {
   });
 
   it('confirms a spawned Linux descendant through procfs when inspection tools are unavailable', async () => {
+    if (originalPlatform === 'win32') return;
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
     const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
     const leasePath = join(directory, 'lease.json');
@@ -1965,7 +1966,11 @@ describe('OpenCodeProcess config ownership', () => {
       `varro-opencode-config-linked-${process.pid}-${Date.now()}`
     );
     await writeFile(victimConfig, '{"keep":true}', 'utf-8');
-    await symlink(victimDirectory, linkedDirectory, 'dir');
+    await symlink(
+      victimDirectory,
+      linkedDirectory,
+      originalPlatform === 'win32' ? 'junction' : 'dir'
+    );
     const manager = new OpenCodeProcess(4096, true, 'opencode');
     (manager as unknown as { injectedConfigPath: string | null }).injectedConfigPath = join(
       linkedDirectory,
