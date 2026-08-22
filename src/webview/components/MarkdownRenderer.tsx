@@ -1,5 +1,6 @@
 import { Show, createSignal, createEffect, onMount, onCleanup } from 'solid-js';
-import { Portal } from 'solid-js/web';
+import type { JSX } from 'solid-js';
+import { Portal, render } from 'solid-js/web';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import type { Mermaid, MermaidConfig } from 'mermaid';
@@ -29,13 +30,23 @@ interface MarkdownProps {
   content: string;
   cacheByContent?: boolean;
   lightweight?: boolean;
+  class?: string;
+  inlineSlots?: MarkdownInlineSlot[];
+  disablePathLinkify?: boolean;
+  escapeHtml?: boolean;
 }
+
+export type MarkdownInlineSlot = {
+  marker: string;
+  render: () => JSX.Element;
+};
 
 type ParseMarkdownOptions = {
   cacheByContent: boolean;
   disablePathLinkify?: boolean;
   disableCodeHighlighting?: boolean;
   allowMermaidHydration?: boolean;
+  escapeHtml?: boolean;
 };
 
 type StreamingMarkdownSegments = {
@@ -73,6 +84,7 @@ type RenderMarkdownContext = {
   disableCodeHighlighting: boolean;
   disableCache: boolean;
   allowMermaidHydration: boolean;
+  escapeHtml: boolean;
 };
 
 type MarkdownStringCache = Map<string, MarkdownCacheEntry>;
@@ -124,6 +136,7 @@ const ALLOWED_HTML_TAGS = [
   'h5',
   'h6',
   'hr',
+  'img',
   'li',
   'line',
   'ol',
@@ -145,6 +158,7 @@ const ALLOWED_HTML_TAGS = [
 const ALLOWED_HTML_ATTRIBUTES = [
   'aria-hidden',
   'aria-label',
+  'alt',
   'class',
   'data-copy',
   'data-copy-text',
@@ -157,12 +171,14 @@ const ALLOWED_HTML_ATTRIBUTES = [
   'height',
   'hidden',
   'href',
+  'loading',
   'points',
   'role',
   'stroke',
   'stroke-linecap',
   'stroke-linejoin',
   'stroke-width',
+  'src',
   'title',
   'type',
   'viewBox',
@@ -286,6 +302,7 @@ function getRenderedMarkdownCacheKey(content: string, options: ParseMarkdownOpti
     options.disablePathLinkify ? 'no-paths' : 'paths',
     options.disableCodeHighlighting ? 'plain-code' : `highlight-code:${codeHighlighterVersion()}`,
     options.allowMermaidHydration ? 'hydrate-mermaid' : 'defer-mermaid',
+    options.escapeHtml ? 'escaped-html' : 'rendered-html',
     hashContent(content),
   ].join('\u0000');
 }
@@ -505,17 +522,12 @@ renderer.codespan = function ({ text }: { text: string }) {
   return `<code>${escapeHtml(text)}</code>`;
 };
 
-renderer.link = function ({
-  href,
-  text,
-  title,
-}: {
-  href: string;
-  text: string;
-  title?: string | null;
-}) {
+renderer.link = function ({ href, text: rawText, title, tokens }) {
+  const text = this.parser.parseInline(tokens);
+  if (renderMarkdownContext?.escapeHtml && href.startsWith('mailto:')) return text;
+
   if (isLocalFileHref(href)) {
-    const link = buildFileLink(href, text);
+    const link = buildFileLink(href, rawText);
     if (link) {
       const titleAttr = ` title="${title ? escapeHtml(title) : link.title}"`;
       return `<a href="${link.href}" class="file-path-link" data-file="${link.payload}"${titleAttr}>${link.label}</a>`;
@@ -524,6 +536,21 @@ renderer.link = function ({
 
   const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
   return `<a href="${escapeHtml(href)}"${titleAttr}>${text}</a>`;
+};
+
+renderer.image = function ({
+  href,
+  text,
+  title,
+}: {
+  href: string;
+  text: string;
+  title?: string | null;
+}) {
+  if (!isSafeExternalHref(href)) return escapeHtml(text);
+
+  const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
+  return `<img src="${escapeHtml(href)}" alt="${escapeHtml(text)}" loading="lazy"${titleAttr}>`;
 };
 
 marked.setOptions({
@@ -567,6 +594,7 @@ const PRESERVED_HTML_PLACEHOLDER_RE = /@@VARRO_PRESERVE_(\d+)@@/g;
 const MARKDOWN_FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
 const MARKDOWN_FENCE_INFO_RE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 const ANCHOR_RE = /(<a[\s\S]*?<\/a>)/gi;
+const IMAGE_RE = /(<img\b[^>]*>)/gi;
 const SVG_RE = /(<svg[\s\S]*?<\/svg>)/gi;
 const BUTTON_RE = /(<button[\s\S]*?<\/button>)/gi;
 const INLINE_CODE_RE = /(<code[\s\S]*?<\/code>)/gi;
@@ -643,6 +671,12 @@ function sanitizeAnchorHref(anchor: HTMLAnchorElement) {
     anchor.setAttribute('href', href);
     anchor.setAttribute('data-external', 'true');
     anchor.classList.add('external-link');
+    const image = anchor.querySelector('img');
+    if (image) {
+      const label = image.getAttribute('alt')?.trim();
+      if (label) anchor.setAttribute('aria-label', label);
+      return;
+    }
     prependLinkIcon(anchor, createExternalLinkIconElement());
     return;
   }
@@ -705,6 +739,7 @@ function linkifySessionReferences(fragment: DocumentFragment) {
       anchor.className = 'session-reference-link';
       anchor.href = segment.reference.href;
       anchor.dataset.sessionId = segment.reference.id;
+      anchor.dataset.copyMarker = segment.reference.marker;
       anchor.title = `Open session ${segment.reference.id}`;
       const icon = createMaterialChipIconElement('session', 'session-reference-icon');
       const label = document.createElement('span');
@@ -742,6 +777,16 @@ function sanitizeHtml(html: string, disableCache: boolean, sessionContextKey: st
     RETURN_DOM_FRAGMENT: true,
   });
 
+  for (const image of Array.from(fragment.querySelectorAll<HTMLImageElement>('img'))) {
+    const src = image.getAttribute('src')?.trim() || '';
+    if (!isSafeExternalHref(src)) {
+      image.remove();
+      continue;
+    }
+    image.setAttribute('src', src);
+    image.setAttribute('loading', 'lazy');
+  }
+
   for (const anchor of Array.from(fragment.querySelectorAll<HTMLAnchorElement>('a'))) {
     sanitizeAnchorHref(anchor);
   }
@@ -762,6 +807,7 @@ function renderMarkdownHtml(
     disableCodeHighlighting?: boolean;
     disableCache?: boolean;
     allowMermaidHydration?: boolean;
+    escapeHtml?: boolean;
   }
 ): string {
   const previousRenderMarkdownContext = renderMarkdownContext;
@@ -770,6 +816,7 @@ function renderMarkdownHtml(
     disableCodeHighlighting: options?.disableCodeHighlighting === true,
     disableCache: options?.disableCache === true,
     allowMermaidHydration: options?.allowMermaidHydration === true,
+    escapeHtml: options?.escapeHtml === true,
   };
   try {
     // SAFETY: The surrounding shape or discriminator check establishes the string contract used below.
@@ -1088,6 +1135,7 @@ function parseMarkdown(content: string, options: ParseMarkdownOptions): string {
       disableCodeHighlighting: options.disableCodeHighlighting,
       disableCache: true,
       allowMermaidHydration: options.allowMermaidHydration,
+      escapeHtml: options.escapeHtml,
     });
   }
 
@@ -1099,6 +1147,7 @@ function parseMarkdown(content: string, options: ParseMarkdownOptions): string {
     disablePathLinkify: options.disablePathLinkify,
     disableCodeHighlighting: options.disableCodeHighlighting,
     allowMermaidHydration: options.allowMermaidHydration,
+    escapeHtml: options.escapeHtml,
   });
   setCachedValue(renderedMarkdownCache, cacheKey, html);
   return html;
@@ -1111,6 +1160,7 @@ export function __parseMarkdownForTests(
     disablePathLinkify?: boolean;
     disableCodeHighlighting?: boolean;
     allowMermaidHydration?: boolean;
+    escapeHtml?: boolean;
   }
 ): string {
   return parseMarkdown(content, options);
@@ -1150,6 +1200,7 @@ function linkifyPaths(html: string): string {
   protect(SVG_RE);
   protect(BUTTON_RE);
   protect(ANCHOR_RE);
+  protect(IMAGE_RE);
   protect(PRE_RE);
   protect(INLINE_CODE_RE);
 
@@ -1538,6 +1589,8 @@ export function MarkdownRenderer(props: MarkdownProps) {
   let lastAppliedScanState = initialSegments.scanState;
   let lastAppliedCacheByContent = !!props.cacheByContent;
   let lastAppliedLightweight = lw();
+  let lastAppliedDisablePathLinkify = !!props.disablePathLinkify;
+  let lastAppliedEscapeHtml = !!props.escapeHtml;
   let lastAppliedWorkspacePath = state.editorContext.workspacePath || '';
   let lastAppliedSessionContextKey = getSessionReferenceContextKey(props.content || '');
   let lastAppliedCodeHighlighterVersion = codeHighlighterVersion();
@@ -1546,9 +1599,10 @@ export function MarkdownRenderer(props: MarkdownProps) {
   let lastAppliedStableHtml = initialSegments.stableContent
     ? parseMarkdown(initialSegments.stableContent, {
         cacheByContent: false,
-        disablePathLinkify: lw(),
+        disablePathLinkify: lw() || !!props.disablePathLinkify,
         disableCodeHighlighting: lw(),
         allowMermaidHydration: lw(),
+        escapeHtml: !!props.escapeHtml,
       })
     : '';
   const initialTailRenderContent = props.cacheByContent
@@ -1556,15 +1610,89 @@ export function MarkdownRenderer(props: MarkdownProps) {
     : hideUnclosedStreamingMarkdown(initialSegments.tailContent);
   let lastAppliedTailHtml = parseMarkdown(initialTailRenderContent, {
     cacheByContent: initialSegments.stableContent.length === 0 && !!props.cacheByContent,
-    disablePathLinkify: lw(),
+    disablePathLinkify: lw() || !!props.disablePathLinkify,
     disableCodeHighlighting: initialSegments.hasUnclosedFence || lw(),
     allowMermaidHydration: lw() && !initialSegments.hasUnclosedFence,
+    escapeHtml: !!props.escapeHtml,
   });
   let lastAppliedStableHydrationFlags = getMarkdownHydrationFlags(lastAppliedStableHtml);
   let lastAppliedTailHydrationFlags = getMarkdownHydrationFlags(lastAppliedTailHtml);
   let lastAppliedStableContentWasAppendOnlySafe = isAppendOnlySafeMarkdown(
     initialSegments.stableContent
   );
+  const inlineSlotDisposers = new Map<HTMLElement, () => void>();
+
+  function disposeInlineSlots(root?: HTMLElement) {
+    for (const [element, dispose] of inlineSlotDisposers) {
+      if (root && !root.contains(element)) continue;
+      const marker = element.dataset.markdownInlineSlot;
+      dispose();
+      inlineSlotDisposers.delete(element);
+      if (marker && element.isConnected) element.replaceWith(document.createTextNode(marker));
+    }
+  }
+
+  function hydrateInlineSlots(root?: HTMLElement) {
+    if (!root) return;
+    disposeInlineSlots(root);
+
+    const slots = props.inlineSlots;
+    if (!slots?.length) return;
+    const slotByMarker = new Map(slots.map((slot) => [slot.marker, slot]));
+    const markers = [...slotByMarker.keys()]
+      .filter((marker) => marker.length > 0)
+      .toSorted((a, b) => b.length - a.length);
+    if (markers.length === 0) return;
+
+    for (const anchor of root.querySelectorAll<HTMLAnchorElement>('a:not([href])')) {
+      anchor.replaceWith(document.createTextNode(anchor.textContent || ''));
+    }
+    root.normalize();
+
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const textNodes: Text[] = [];
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (!(node instanceof Text)) continue;
+      const textNode = node;
+      const parent = textNode.parentElement;
+      if (!parent || parent.closest('a, button, code, [data-markdown-inline-slot]')) continue;
+      if (markers.some((marker) => textNode.data.includes(marker))) textNodes.push(textNode);
+    }
+
+    for (const textNode of textNodes) {
+      const fragment = document.createDocumentFragment();
+      let offset = 0;
+      while (offset < textNode.data.length) {
+        let nextMarker: string | null = null;
+        let nextIndex = -1;
+        for (const marker of markers) {
+          const index = textNode.data.indexOf(marker, offset);
+          if (index < 0 || (nextIndex >= 0 && index >= nextIndex)) continue;
+          nextMarker = marker;
+          nextIndex = index;
+        }
+        if (!nextMarker) {
+          fragment.append(textNode.data.slice(offset));
+          break;
+        }
+        if (nextIndex > offset) fragment.append(textNode.data.slice(offset, nextIndex));
+
+        const host = document.createElement('span');
+        host.className = 'markdown-inline-slot';
+        host.dataset.markdownInlineSlot = nextMarker;
+        fragment.append(host);
+        const slot = slotByMarker.get(nextMarker)!;
+        inlineSlotDisposers.set(host, render(slot.render, host));
+        offset = nextIndex + nextMarker.length;
+      }
+      textNode.replaceWith(fragment);
+    }
+  }
+
+  function hydrateMarkdownRoot(root: HTMLDivElement | undefined, flags: MarkdownHydrationFlags) {
+    hydrateRenderedMarkdown(root, flags);
+    hydrateInlineSlots(root);
+  }
 
   const [stableHtml, setStableHtml] = createSignal(lastAppliedStableHtml);
   const [tailHtml, setTailHtml] = createSignal(lastAppliedTailHtml);
@@ -1585,7 +1713,8 @@ export function MarkdownRenderer(props: MarkdownProps) {
 
       const highlightedTailHtml = parseMarkdown(hideUnclosedStreamingMarkdown(content), {
         cacheByContent: false,
-        disablePathLinkify: false,
+        disablePathLinkify: !!props.disablePathLinkify,
+        escapeHtml: !!props.escapeHtml,
       });
       if (highlightedTailHtml === lastAppliedTailHtml) return;
 
@@ -1593,7 +1722,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
       lastAppliedTailHydrationFlags = getMarkdownHydrationFlags(highlightedTailHtml);
       setTailHtml(highlightedTailHtml);
       queueMicrotask(() => {
-        hydrateRenderedMarkdown(tailRef, lastAppliedTailHydrationFlags);
+        hydrateMarkdownRoot(tailRef, lastAppliedTailHydrationFlags);
       });
     });
   }
@@ -1606,11 +1735,16 @@ export function MarkdownRenderer(props: MarkdownProps) {
       cancelIdleWork(idleHighlightId);
       idleHighlightId = null;
       const isLightweight = lw();
+      const disablePathLinkify = isLightweight || !!props.disablePathLinkify;
+      const escapeRawHtml = !!props.escapeHtml;
       // Completion can briefly regress while the final message events reconcile.
       // Keep final rendering enabled once observed so links and highlighting do not flicker.
       const cacheByContent = lastAppliedCacheByContent || !!props.cacheByContent;
       const renderModeChanged =
-        cacheByContent !== lastAppliedCacheByContent || isLightweight !== lastAppliedLightweight;
+        cacheByContent !== lastAppliedCacheByContent ||
+        isLightweight !== lastAppliedLightweight ||
+        disablePathLinkify !== lastAppliedDisablePathLinkify ||
+        escapeRawHtml !== lastAppliedEscapeHtml;
       const preserveStreamingSegments = cacheByContent && lastAppliedScanState !== null;
       const segments = preserveStreamingSegments
         ? getStreamingMarkdownSegments(content, lastAppliedScanState)
@@ -1649,15 +1783,17 @@ export function MarkdownRenderer(props: MarkdownProps) {
             ? appendOnlyStableDelta
               ? `${lastAppliedStableHtml}${parseMarkdown(appendOnlyStableDelta, {
                   cacheByContent: false,
-                  disablePathLinkify: isLightweight,
+                  disablePathLinkify,
                   disableCodeHighlighting: isLightweight,
                   allowMermaidHydration: isLightweight,
+                  escapeHtml: escapeRawHtml,
                 })}`
               : parseMarkdown(segments.stableContent, {
                   cacheByContent: false,
-                  disablePathLinkify: isLightweight,
+                  disablePathLinkify,
                   disableCodeHighlighting: isLightweight,
                   allowMermaidHydration: isLightweight,
+                  escapeHtml: escapeRawHtml,
                 })
             : lastAppliedStableHtml;
       const shouldDeferTailHighlight =
@@ -1674,10 +1810,11 @@ export function MarkdownRenderer(props: MarkdownProps) {
               : hideUnclosedStreamingMarkdown(segments.tailContent),
             {
               cacheByContent: segments.stableContent.length === 0 && cacheByContent,
-              disablePathLinkify: isLightweight,
+              disablePathLinkify,
               disableCodeHighlighting:
                 segments.hasUnclosedFence || shouldDeferTailHighlight || isLightweight,
               allowMermaidHydration: isLightweight && !segments.hasUnclosedFence,
+              escapeHtml: escapeRawHtml,
             }
           )
         : lastAppliedTailHtml;
@@ -1685,6 +1822,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
       const stableChanged = nextStableHtml !== lastAppliedStableHtml;
       const tailChanged = nextTailHtml !== lastAppliedTailHtml;
       if (stableChanged) {
+        disposeInlineSlots(stableRef);
         lastAppliedStableContent = segments.stableContent;
         lastAppliedStableHtml = nextStableHtml;
         lastAppliedStableContentWasAppendOnlySafe = appendOnlyStableDelta
@@ -1699,6 +1837,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
         );
       }
       if (tailChanged) {
+        disposeInlineSlots(tailRef);
         lastAppliedTailContent = segments.tailContent;
         lastAppliedTailHtml = nextTailHtml;
         lastAppliedTailHydrationFlags = getMarkdownHydrationFlags(nextTailHtml);
@@ -1712,6 +1851,8 @@ export function MarkdownRenderer(props: MarkdownProps) {
       lastAppliedScanState = segments.scanState;
       lastAppliedCacheByContent = cacheByContent;
       lastAppliedLightweight = isLightweight;
+      lastAppliedDisablePathLinkify = disablePathLinkify;
+      lastAppliedEscapeHtml = escapeRawHtml;
       hasProcessedStreamingUpdate = true;
 
       if (shouldDeferTailHighlight) {
@@ -1720,10 +1861,10 @@ export function MarkdownRenderer(props: MarkdownProps) {
 
       queueMicrotask(() => {
         if (stableChanged) {
-          hydrateRenderedMarkdown(stableRef, lastAppliedStableHydrationFlags);
+          hydrateMarkdownRoot(stableRef, lastAppliedStableHydrationFlags);
         }
         if (tailChanged) {
-          hydrateRenderedMarkdown(tailRef, lastAppliedTailHydrationFlags);
+          hydrateMarkdownRoot(tailRef, lastAppliedTailHydrationFlags);
         }
       });
     }
@@ -1733,6 +1874,8 @@ export function MarkdownRenderer(props: MarkdownProps) {
     const content = props.content || '';
     const cacheByContent = !!props.cacheByContent;
     const isLightweight = lw();
+    const disablePathLinkify = !!props.disablePathLinkify;
+    const escapeRawHtml = !!props.escapeHtml;
     const workspacePath = state.editorContext.workspacePath;
     const sessionContextKey = getSessionReferenceContextKey(content);
     const highlighterVersion = codeHighlighterVersion();
@@ -1747,6 +1890,17 @@ export function MarkdownRenderer(props: MarkdownProps) {
     void highlighterVersion;
     void cacheByContent;
     void isLightweight;
+    void disablePathLinkify;
+    void escapeRawHtml;
+  });
+
+  createEffect(() => {
+    const slots = props.inlineSlots;
+    slots?.forEach((slot) => slot.marker);
+    queueMicrotask(() => {
+      hydrateInlineSlots(stableRef);
+      hydrateInlineSlots(tailRef);
+    });
   });
 
   createEffect(() => {
@@ -1776,6 +1930,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
     }
     cancelIdleWork(idleHighlightId);
     idleHighlightId = null;
+    disposeInlineSlots();
     for (const id of copyTimeouts) clearTimeout(id);
     copyTimeouts.clear();
   });
@@ -1889,10 +2044,8 @@ export function MarkdownRenderer(props: MarkdownProps) {
 
   onMount(() => {
     ref?.addEventListener('click', handleClick);
-    queueMicrotask(() => {
-      hydrateRenderedMarkdown(stableRef, lastAppliedStableHydrationFlags);
-      hydrateRenderedMarkdown(tailRef, lastAppliedTailHydrationFlags);
-    });
+    hydrateMarkdownRoot(stableRef, lastAppliedStableHydrationFlags);
+    hydrateMarkdownRoot(tailRef, lastAppliedTailHydrationFlags);
   });
   onCleanup(() => {
     ref?.removeEventListener('click', handleClick);
@@ -1900,7 +2053,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
 
   return (
     <>
-      <div ref={ref} class="rendered-markdown">
+      <div ref={ref} class={`rendered-markdown${props.class ? ` ${props.class}` : ''}`}>
         <div
           ref={stableRef}
           data-markdown-segment="stable"

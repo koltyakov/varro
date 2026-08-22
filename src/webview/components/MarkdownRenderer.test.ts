@@ -274,7 +274,7 @@ describe('MarkdownRenderer', () => {
     });
   });
 
-  it('sanitizes unsafe html while keeping safe external links routable', () => {
+  it('sanitizes html while keeping safe external links and images routable', () => {
     const send = vi.fn();
     window.__sendToExtension = send;
 
@@ -288,7 +288,10 @@ describe('MarkdownRenderer', () => {
     );
 
     expect(container?.querySelector('script')).toBeNull();
-    expect(container?.querySelector('img:not(.external-link-icon)')).toBeNull();
+    const image = container?.querySelector<HTMLImageElement>('img:not(.external-link-icon)');
+    expect(image?.getAttribute('src')).toBe('https://example.test/x.png');
+    expect(image?.getAttribute('loading')).toBe('lazy');
+    expect(image?.hasAttribute('onerror')).toBe(false);
     expect(container?.textContent).not.toContain('alert(1)');
 
     const links = Array.from(container?.querySelectorAll('a') || []);
@@ -312,6 +315,46 @@ describe('MarkdownRenderer', () => {
       type: 'vscode/open-external',
       payload: { url: 'https://opencode.ai' },
     });
+  });
+
+  it('renders linked badge markdown as images', () => {
+    cleanup = render(
+      () =>
+        MarkdownRenderer({
+          content:
+            '[![Visual Studio Marketplace](https://badgen.net/vs-marketplace/v/koltyakov.varro?color=0078d4)](https://marketplace.visualstudio.com/items?itemName=koltyakov.varro) [![License: MIT](https://img.shields.io/badge/license-MIT-2ea44f.svg)](https://github.com/koltyakov/varro/blob/main/LICENSE)',
+        }),
+      container!
+    );
+
+    const images = Array.from(
+      container?.querySelectorAll<HTMLImageElement>('img:not(.external-link-icon)') || []
+    );
+    expect(images).toHaveLength(2);
+    expect(images[0]?.getAttribute('src')).toBe(
+      'https://badgen.net/vs-marketplace/v/koltyakov.varro?color=0078d4'
+    );
+    expect(images[0]?.getAttribute('alt')).toBe('Visual Studio Marketplace');
+    expect(images[0]?.getAttribute('loading')).toBe('lazy');
+
+    const link = images[0]?.closest('a');
+    expect(link?.getAttribute('aria-label')).toBe('Visual Studio Marketplace');
+    expect(link?.getAttribute('data-external')).toBe('true');
+    expect(link?.querySelector('.external-link-icon')).toBeNull();
+  });
+
+  it('removes images with non-HTTPS sources', () => {
+    cleanup = render(
+      () =>
+        MarkdownRenderer({
+          content:
+            '![Local](file:///tmp/image.png) <img src="data:image/png;base64,AA==" alt="Embedded"> <img src="javascript:alert(1)" alt="Bad">',
+        }),
+      container!
+    );
+
+    expect(container?.querySelector('img')).toBeNull();
+    expect(container?.textContent).toContain('Local');
   });
 
   it('strips dangerous attributes from allowed html', () => {

@@ -118,8 +118,12 @@ describe('UserMessageContent', () => {
     const scrollContainer = container?.querySelector('.user-message-text-scroll');
     expect(scrollContainer).toBeInstanceOf(HTMLDivElement);
     expect(scrollContainer?.querySelectorAll('.user-message-text')).toHaveLength(2);
-    expect(scrollContainer?.querySelectorAll('.user-message-text')[0]?.textContent).toBe('Line 1');
-    expect(scrollContainer?.querySelectorAll('.user-message-text')[1]?.textContent).toBe('Line 2');
+    expect(scrollContainer?.querySelectorAll('.user-message-text')[0]?.textContent?.trim()).toBe(
+      'Line 1'
+    );
+    expect(scrollContainer?.querySelectorAll('.user-message-text')[1]?.textContent?.trim()).toBe(
+      'Line 2'
+    );
     expect(container?.querySelector('.message-attachments')).toBeNull();
     expect(container?.querySelector('.user-message-empty')).toBeNull();
   });
@@ -139,9 +143,50 @@ describe('UserMessageContent', () => {
       'text'
     );
     expect(container?.querySelector('.user-message-code-block code')?.textContent).toBe(
-      'https://example.test/docs\n'
+      'https://example.test/docs'
     );
     expect(container?.querySelector('a.external-link')).toBeNull();
+  });
+
+  it('renders Markdown while preserving attachment chips outside code', () => {
+    renderUserContent([
+      textPart(
+        'text-1',
+        [
+          '# Review',
+          '',
+          '- Use **@README.md** with *care*',
+          '- Keep `@README.md` literal in code',
+          '',
+          '> Confirm the result',
+        ].join('\n')
+      ),
+      textPart('text-2', 'README.md'),
+    ]);
+
+    const markdown = container?.querySelector('.user-message-markdown');
+    expect(markdown?.querySelector('h1')?.textContent).toBe('Review');
+    expect(markdown?.querySelectorAll('li')).toHaveLength(2);
+    expect(markdown?.querySelector('strong .inline-chip')?.textContent).toBe('README.md');
+    expect(markdown?.querySelector('em')?.textContent).toBe('care');
+    expect(markdown?.querySelector('code')?.textContent).toBe('@README.md');
+    expect(markdown?.querySelectorAll('.inline-chip')).toHaveLength(1);
+    expect(markdown?.querySelector('blockquote')?.textContent?.trim()).toBe('Confirm the result');
+  });
+
+  it('renders Markdown links through the external-link bridge', () => {
+    const send = installSendToExtension();
+    renderUserContent([textPart('text-1', 'Read the [documentation](https://example.test/docs).')]);
+
+    const link = container?.querySelector<HTMLAnchorElement>('a.external-link');
+    expect(link?.textContent).toContain('documentation');
+    expect(link?.getAttribute('href')).toBe('https://example.test/docs');
+
+    link?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open-external',
+      payload: { url: 'https://example.test/docs' },
+    });
   });
 
   it('trims blank lines around prose between fenced code blocks', () => {
@@ -155,7 +200,8 @@ describe('UserMessageContent', () => {
     ]);
 
     const messageText = container?.querySelector('.user-message-text');
-    expect(messageText?.textContent).toBe('Another text');
+    expect(messageText?.querySelectorAll('.interactive-result-code-block')).toHaveLength(2);
+    expect(messageText?.querySelector('p')?.textContent).toBe('Another text');
   });
 
   it('compacts standalone SVG markup into a chip that opens in an editor', () => {
@@ -193,7 +239,7 @@ describe('UserMessageContent', () => {
 
     const messageText = container?.querySelectorAll('.user-message-text');
     expect(messageText).toHaveLength(2);
-    expect(messageText?.[0]?.textContent).toBe('In input, change the agent chip icon to');
+    expect(messageText?.[0]?.textContent?.trim()).toBe('In input, change the agent chip icon to');
     expect(messageText?.[1]?.textContent).toBe('SVG143 B');
     expect(messageText?.[1]?.classList).toContain('user-message-format-chip-row');
     expect(
@@ -367,7 +413,9 @@ describe('UserMessageContent', () => {
     expect(chip?.getAttribute('title')).toBe('Terminal: zsh');
     expect(chip?.textContent).toContain('zsh');
     expect(chip?.querySelector('.chip-detail')?.textContent).toBe('2 lines');
-    expect(container?.querySelector('.user-message-text')?.textContent).toBe('Why does this fail?');
+    expect(container?.querySelector('.user-message-text')?.textContent?.trim()).toBe(
+      'Why does this fail?'
+    );
 
     chip?.click();
     expect(send).toHaveBeenCalledWith({
@@ -440,7 +488,7 @@ describe('UserMessageContent', () => {
     ]);
 
     const messageText = container?.querySelector('.user-message-text');
-    expect(messageText?.textContent).toBe('Test README.md');
+    expect(messageText?.textContent?.trim()).toBe('Test README.md');
     expect(messageText?.querySelectorAll('.inline-chip')).toHaveLength(1);
     expect(messageText?.querySelector('.inline-chip .file-type-icon')).toBeInstanceOf(
       HTMLImageElement
@@ -463,7 +511,7 @@ describe('UserMessageContent', () => {
     ]);
 
     const messageText = container?.querySelector('.user-message-text');
-    expect(messageText?.textContent).toBe('Compare Image 1 with Image 2');
+    expect(messageText?.textContent?.trim()).toBe('Compare Image 1 with Image 2');
     const imageChips = Array.from(
       messageText?.querySelectorAll<HTMLButtonElement>('.inline-chip-clickable') ?? []
     );
@@ -594,7 +642,7 @@ describe('UserMessageContent', () => {
     renderUserContent([textPart('text-1', 'Test message https://iconoir.com')]);
 
     expect(container?.querySelector('.message-attachments')).toBeNull();
-    expect(container?.querySelector('.user-message-text')?.textContent).toBe(
+    expect(container?.querySelector('.user-message-text')?.textContent?.trim()).toBe(
       'Test message https://iconoir.com'
     );
     expect(
@@ -609,7 +657,7 @@ describe('UserMessageContent', () => {
     renderUserContent([textPart('text-1', prompt)]);
 
     expect(container?.querySelector('.message-attachments')).toBeNull();
-    expect(container?.querySelector('.user-message-text')?.textContent).toBe(prompt);
+    expect(container?.querySelector('.user-message-text')?.textContent?.trim()).toBe(prompt);
     const link = container?.querySelector<HTMLAnchorElement>('a.external-link');
     expect(link?.textContent).toBe('git@github.com:koltyakov/browser-bridge.git');
     expect(link?.querySelector('.material-chip-icon')).toBeInstanceOf(HTMLImageElement);
@@ -644,7 +692,7 @@ describe('UserMessageContent', () => {
       image,
     ]);
 
-    expect(container?.querySelector('.user-message-text')?.textContent).toBe(
+    expect(container?.querySelector('.user-message-text')?.textContent?.trim()).toBe(
       "What's on this image? Image 1 Vision"
     );
     expect(container?.querySelectorAll('.user-message-text .inline-chip')).toHaveLength(2);
@@ -665,7 +713,9 @@ describe('UserMessageContent', () => {
     expect(chip?.getAttribute('title')).toBe('Agent: Vision');
     expect(chip?.getAttribute('data-copy-marker')).toBe('@vision');
     expect(chip?.querySelector('.material-chip-icon')).toBeInstanceOf(HTMLImageElement);
-    expect(container?.querySelector('.user-message-text')?.textContent).toBe('Run the review');
+    expect(container?.querySelector('.user-message-text')?.textContent?.trim()).toBe(
+      'Run the review'
+    );
   });
 
   it('renders textual agent mentions from known agents as inline chips', () => {
@@ -745,8 +795,26 @@ describe('UserMessagePreviewContent', () => {
     );
 
     const messageText = container?.querySelector('.user-message-text');
-    expect(messageText?.textContent).toBe('Check README.md');
+    expect(messageText?.textContent?.trim()).toBe('Check README.md');
     expect(messageText?.querySelectorAll('.inline-chip')).toHaveLength(1);
+    expect(messageText).toBeInstanceOf(HTMLParagraphElement);
+    expect(container?.querySelector('.user-message-markdown')).toBeNull();
+  });
+
+  it('keeps Markdown source inline so sticky sizing stays compact', () => {
+    cleanup = render(
+      () =>
+        UserMessagePreviewContent({
+          parts: [textPart('text-1', '**Review** this prompt')],
+          fallback: 'Fallback',
+        }),
+      container!
+    );
+
+    const messageText = container?.querySelector('.user-message-text');
+    expect(messageText).toBeInstanceOf(HTMLParagraphElement);
+    expect(messageText?.textContent).toBe('**Review** this prompt');
+    expect(messageText?.querySelector('strong')).toBeNull();
   });
 
   it('falls back to the provided label when no message text exists', () => {

@@ -23,7 +23,8 @@ import {
 import { AttachmentLabel } from '../AttachmentLabel';
 import { ImagePreviewOverlay, createImagePreviewEffect } from '../ImagePreview';
 import type { PreviewImage } from '../ImagePreview';
-import { renderCodeBlockHtml } from '../MarkdownRenderer';
+import { MarkdownRenderer } from '../MarkdownRenderer';
+import type { MarkdownInlineSlot } from '../MarkdownRenderer';
 import { getPdfDataUrlSize } from '../../../shared/native-pdf';
 import { FileTypeIcon } from '../FileTypeIcon';
 import { FolderIcon } from '../FolderIcon';
@@ -49,8 +50,8 @@ export type MessageAttachment =
   | { type: 'file-reference'; path: string; isDirectory: boolean };
 
 type UserMessageSegment =
-  | { type: 'text'; content: string }
-  | { type: 'code'; content: string; language?: string }
+  | { type: 'markdown'; content: string }
+  | { type: 'plain'; content: string }
   | { type: 'markup'; content: string; format: UserMessageMarkupFormat };
 
 export type UserMessageMarkupFormat = {
@@ -93,7 +94,6 @@ type InlineTextSegment =
   | { type: 'session'; reference: SessionReference }
   | Extract<ExternalLinkTextSegment, { type: 'external-link' }>;
 
-const USER_CODE_FENCE_RE = /```([^\n`]*)\n([\s\S]*?)```/g;
 const VISION_DELEGATION_CONTEXT_RE =
   /^\[Image for @[^:\]\n]+: [^\]\n]+\]\nWhen calling the [^\n]+ subagent, include \{file:[^}\n]+\} in its task prompt\.$/;
 function bindUserMessageOverflowFade(element: HTMLElement, trackText: () => string[]) {
@@ -114,10 +114,6 @@ function bindUserMessageOverflowFade(element: HTMLElement, trackText: () => stri
   });
 }
 
-function trimFenceBoundaryNewlines(content: string, side: 'start' | 'end') {
-  return side === 'start' ? content.replace(/^\n+/, '') : content.replace(/\n+$/, '');
-}
-
 function parseUserMessageSegments(text: string): UserMessageSegment[] {
   const normalized = text.replace(/\r\n?/g, '\n');
   const markup = getUserMessageMarkupSuffix(normalized);
@@ -127,41 +123,12 @@ function parseUserMessageSegments(text: string): UserMessageSegment[] {
     return segments;
   }
 
-  const segments: UserMessageSegment[] = [];
-  let lastIndex = 0;
-
-  for (const match of normalized.matchAll(USER_CODE_FENCE_RE)) {
-    const index = match.index ?? 0;
-    if (index > lastIndex) {
-      const content = trimFenceBoundaryNewlines(
-        trimFenceBoundaryNewlines(normalized.slice(lastIndex, index), 'start'),
-        'end'
-      );
-      if (content.length > 0) {
-        segments.push({ type: 'text', content });
-      }
-    }
-
-    segments.push({
-      type: 'code',
-      content: match[2]!,
-      language: match[1]!.trim() || undefined,
-    });
-    lastIndex = index + match[0].length;
+  const trimmed = normalized.trim();
+  if (trimmed.startsWith('<') && trimmed.endsWith('>')) {
+    return [{ type: 'plain', content: normalized }];
   }
 
-  if (lastIndex < normalized.length) {
-    const content = trimFenceBoundaryNewlines(normalized.slice(lastIndex), 'start');
-    if (content.length > 0) {
-      segments.push({ type: 'text', content });
-    }
-  }
-
-  if (segments.length === 0) {
-    segments.push({ type: 'text', content: normalized });
-  }
-
-  return segments;
+  return [{ type: 'markdown', content: normalized }];
 }
 
 export function getUserMessageMarkupFormat(text: string): UserMessageMarkupFormat | null {
@@ -784,13 +751,15 @@ export function UserMessagePreviewContent(props: {
   return (
     <Show when={text()} fallback={props.fallback}>
       {(value) => (
-        <UserMessageTextContent
-          text={value()}
-          attachments={attachments()}
-          imageParts={imageParts()}
-          agentParts={agentParts()}
-          onOpenImagePreview={(index) => props.onOpenImagePreview?.(index)}
-        />
+        <p class="user-message-text">
+          <InlineAttachmentText
+            content={value()}
+            attachments={attachments()}
+            imageParts={imageParts()}
+            agentParts={agentParts()}
+            onOpenImagePreview={(index) => props.onOpenImagePreview?.(index)}
+          />
+        </p>
       )}
     </Show>
   );
@@ -829,112 +798,75 @@ function UserMessageTextContent(props: {
   onOpenImagePreview: (index: number) => void;
 }) {
   const segments = createMemo(() => parseUserMessageSegments(props.text));
+  const inlineSlots = createMemo<MarkdownInlineSlot[]>(() => {
+    const slots = new Map<string, MarkdownInlineSlot>();
+    for (const segment of buildInlineTextSegments(
+      props.text,
+      props.attachments,
+      props.imageParts,
+      props.agentParts
+    )) {
+      if (segment.type === 'session' || segment.type === 'text') continue;
+      if (segment.type === 'external-link') {
+        if (segment.kind !== 'git') continue;
+        slots.set(segment.href, {
+          marker: segment.href,
+          render: () => <ExternalLink link={segment} />,
+        });
+        continue;
+      }
+
+      const attachment = segment.attachment;
+      const marker =
+        attachment.type === 'agent'
+          ? attachment.marker
+          : attachment.type === 'image-file'
+            ? attachment.marker || attachment.label || getInlineImageLabel(attachment.part)
+            : getInlineAttachmentCopyMarker(attachment.attachment);
+      slots.set(marker, {
+        marker,
+        render: () =>
+          attachment.type === 'agent' ? (
+            <InlineAgentChip part={attachment.part} marker={attachment.marker} />
+          ) : attachment.type === 'image-file' ? (
+            <InlineImageAttachmentChip
+              part={attachment.part}
+              index={attachment.index}
+              marker={attachment.marker}
+              label={attachment.label}
+              onClick={() => props.onOpenImagePreview(attachment.index)}
+            />
+          ) : (
+            <InlineMessageAttachmentChip attachment={attachment.attachment} />
+          ),
+      });
+    }
+    return [...slots.values()];
+  });
 
   return (
     <For each={segments()}>
       {(segment) =>
-        segment.type === 'code' ? (
-          <UserMessageCodeBlock content={segment.content} language={segment.language} />
-        ) : segment.type === 'markup' ? (
+        segment.type === 'markup' ? (
           <p class="user-message-text user-message-format-chip-row">
             <UserMessageMarkupChip content={segment.content} format={segment.format} />
           </p>
+        ) : segment.type === 'plain' ? (
+          <p class="user-message-text">{segment.content}</p>
         ) : (
           <Show when={segment.content.length > 0}>
-            <p class="user-message-text">
-              <InlineAttachmentText
-                content={segment.content}
-                attachments={props.attachments}
-                imageParts={props.imageParts}
-                agentParts={props.agentParts}
-                onOpenImagePreview={props.onOpenImagePreview}
-              />
-            </p>
+            <MarkdownRenderer
+              content={segment.content}
+              cacheByContent
+              class="user-message-text user-message-markdown user-message-code-block"
+              inlineSlots={inlineSlots()}
+              disablePathLinkify
+              escapeHtml
+            />
           </Show>
         )
       }
     </For>
-  );
-}
-
-function UserMessageMarkupChip(props: { content: string; format: UserMessageMarkupFormat }) {
-  const label = () => props.format.kind.toUpperCase();
-  const size = () => formatUserMessageMarkupSize(props.format.byteSize);
-  const openInEditor = () => {
-    postMessage({
-      type: 'vscode/open-text',
-      payload: {
-        content: props.content,
-        title: `${label()} user message`,
-        language: 'xml',
-      },
-    });
-  };
-
-  return (
-    <button
-      type="button"
-      class="inline-chip inline-chip-clickable user-message-format-chip"
-      data-copy-marker={props.content}
-      title={`Open ${label()} content - ${size()}`}
-      onClick={openInEditor}
-    >
-      <span class="inline-chip-label">{label()}</span>
-      <span class="inline-chip-detail">{size()}</span>
-    </button>
-  );
-}
-
-function UserMessageCodeBlock(props: { content: string; language?: string }) {
-  const html = createMemo(() =>
-    renderCodeBlockHtml({
-      text: props.content,
-      lang: props.language,
-      className: 'user-message-code-block',
-      showCopyButton: false,
-    })
-  );
-  return <div innerHTML={html()} />;
-}
-
-function TerminalMessageCodeBlock(props: {
-  attachment: Extract<MessageAttachment, { type: 'terminal-selection' }>;
-}) {
-  const openTerminalSelection = () => openAttachment(props.attachment);
-  const handleClick = (event: MouseEvent) => {
-    const target = event.target;
-    if (target instanceof Element && target.closest('.code-block-header')) return;
-    event.stopPropagation();
-    if (window.getSelection()?.toString()) return;
-    openTerminalSelection();
-  };
-
-  return (
-    <div
-      class="user-message-terminal-preview"
-      role="button"
-      tabIndex={0}
-      onClick={handleClick}
-      onKeyDown={(event) => {
-        if (event.key !== 'Enter' && event.key !== ' ') return;
-        event.preventDefault();
-        openTerminalSelection();
-      }}
-    >
-      <div
-        class="interactive-result-code-block user-message-code-block user-message-terminal-code-block"
-        data-lang="text"
-      >
-        <div class="code-block-header">
-          <MaterialChipIcon kind="terminal" class="user-message-terminal-header-icon" />
-          <span class="code-block-lang">{props.attachment.terminalName}</span>
-          <span class="code-block-detail">{getTerminalLineCountLabel(props.attachment.text)}</span>
-        </div>
-        <pre class="code-block">
-          <code class="hljs">{props.attachment.text ?? ''}</code>
-        </pre>
-      </div>
-    </div>
   );
 }
 
@@ -980,6 +912,75 @@ function InlineAttachmentText(props: {
         return <InlineMessageAttachmentChip attachment={segment.attachment.attachment} />;
       }}
     </For>
+  );
+}
+
+function UserMessageMarkupChip(props: { content: string; format: UserMessageMarkupFormat }) {
+  const label = () => props.format.kind.toUpperCase();
+  const size = () => formatUserMessageMarkupSize(props.format.byteSize);
+  const openInEditor = () => {
+    postMessage({
+      type: 'vscode/open-text',
+      payload: {
+        content: props.content,
+        title: `${label()} user message`,
+        language: 'xml',
+      },
+    });
+  };
+
+  return (
+    <button
+      type="button"
+      class="inline-chip inline-chip-clickable user-message-format-chip"
+      data-copy-marker={props.content}
+      title={`Open ${label()} content - ${size()}`}
+      onClick={openInEditor}
+    >
+      <span class="inline-chip-label">{label()}</span>
+      <span class="inline-chip-detail">{size()}</span>
+    </button>
+  );
+}
+
+function TerminalMessageCodeBlock(props: {
+  attachment: Extract<MessageAttachment, { type: 'terminal-selection' }>;
+}) {
+  const openTerminalSelection = () => openAttachment(props.attachment);
+  const handleClick = (event: MouseEvent) => {
+    const target = event.target;
+    if (target instanceof Element && target.closest('.code-block-header')) return;
+    event.stopPropagation();
+    if (window.getSelection()?.toString()) return;
+    openTerminalSelection();
+  };
+
+  return (
+    <div
+      class="user-message-terminal-preview"
+      role="button"
+      tabIndex={0}
+      onClick={handleClick}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        openTerminalSelection();
+      }}
+    >
+      <div
+        class="interactive-result-code-block user-message-code-block user-message-terminal-code-block"
+        data-lang="text"
+      >
+        <div class="code-block-header">
+          <MaterialChipIcon kind="terminal" class="user-message-terminal-header-icon" />
+          <span class="code-block-lang">{props.attachment.terminalName}</span>
+          <span class="code-block-detail">{getTerminalLineCountLabel(props.attachment.text)}</span>
+        </div>
+        <pre class="code-block">
+          <code class="hljs">{props.attachment.text ?? ''}</code>
+        </pre>
+      </div>
+    </div>
   );
 }
 

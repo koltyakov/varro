@@ -77,14 +77,14 @@ describe('renderWebviewHtml', () => {
     expect(html).not.toContain('<script');
   });
 
-  it('restricts image sources to the webview and data URIs', () => {
+  it('allows remote HTTPS images without broadening other resource directives', () => {
     const html = renderWebviewHtml('vscode-webview-resource:', initialState, {
       scriptUri: 'webview.js',
       cssUri: 'webview.css',
     });
     const imgSrc = html.match(/img-src ([^;]+);/)?.[1];
 
-    expect(imgSrc).toBe('vscode-webview-resource: data:');
+    expect(imgSrc).toBe('vscode-webview-resource: data: https:');
   });
 
   it('allows module chunks only from the webview resource source', () => {

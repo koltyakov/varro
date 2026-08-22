@@ -42,6 +42,7 @@ import {
   getSessionListFilterLabel,
   groupSessions,
   isPrimarySession,
+  isSessionFailureUnread,
   shouldShowSessionHeaderBadge,
 } from './chat/SessionListView';
 import type { SessionListFilter } from './chat/SessionListView';
@@ -353,7 +354,7 @@ export function Chat() {
       showSessionPicker(),
       (sessionId) => indicators.runningIds.has(sessionId),
       (sessionId) => indicators.attentionIds.has(sessionId),
-      (sessionId) => indicators.failedIds.has(sessionId),
+      (sessionId) => indicators.failedIds.has(sessionId) && isSessionFailureUnread(sessionId),
       (session) =>
         indicators.planReadyIds.has(session.id) &&
         isSessionUnread(session.id, session.time.updated),

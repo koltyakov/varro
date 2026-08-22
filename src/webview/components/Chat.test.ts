@@ -1131,6 +1131,26 @@ describe('header status badges', () => {
     expect(container?.querySelector('.chat-header-completed-badge')?.textContent).toBe('');
   });
 
+  it('hides the failed badge after all failed sessions have been read', () => {
+    setState('sessions', [session('failed-1', 500), session('failed-2', 400)]);
+    setState('failedSessionIds', ['failed-1', 'failed-2']);
+    setState('failedSessionUpdatedAt', { 'failed-1': 500, 'failed-2': 400 });
+    setState('lastSeenSessions', { 'failed-1': 0, 'failed-2': 0 });
+
+    cleanup = render(() => Chat(), container!);
+
+    expect(container?.querySelector('.chat-header-failed-badge')).not.toBeNull();
+
+    setState('lastSeenSessions', 'failed-1', 500);
+
+    expect(container?.querySelector('.chat-header-failed-badge')).not.toBeNull();
+
+    setState('lastSeenSessions', 'failed-2', 400);
+
+    expect(container?.querySelector('.chat-header-failed-badge')).toBeNull();
+    expect(state.failedSessionIds).toEqual(['failed-1', 'failed-2']);
+  });
+
   it('shows an actively loading session as running when its status entry is idle', async () => {
     setState('sessions', [session('active-loading', 500), session('other-running', 400)]);
     setState('activeSessionId', 'active-loading');

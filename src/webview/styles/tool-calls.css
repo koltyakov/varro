@@ -2597,7 +2597,18 @@ kbd {
   line-height: 1.6;
 }
 
-.user-message-text > .inline-chip {
+.user-message-markdown {
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.6;
+}
+
+.markdown-inline-slot {
+  display: inline;
+}
+
+.user-message-text > .inline-chip,
+.user-message-markdown .inline-chip {
   vertical-align: -2px;
   margin: 0 1px;
   gap: 4px;
@@ -2610,7 +2621,8 @@ kbd {
   line-height: 1.35;
 }
 
-.user-message-text > .inline-chip .inline-chip-icon {
+.user-message-text > .inline-chip .inline-chip-icon,
+.user-message-markdown .inline-chip .inline-chip-icon {
   width: 12px;
   height: 12px;
 }
@@ -2621,14 +2633,16 @@ kbd {
   letter-spacing: 0.02em;
 }
 
-.user-message-text > .inline-chip-clickable {
+.user-message-text > .inline-chip-clickable,
+.user-message-markdown .inline-chip-clickable {
   cursor: pointer;
   appearance: none;
   -webkit-appearance: none;
   font-family: inherit;
 }
 
-.user-message-text > .inline-chip-clickable:hover {
+.user-message-text > .inline-chip-clickable:hover,
+.user-message-markdown .inline-chip-clickable:hover {
   background: color-mix(
     in srgb,
     var(--color-vscode-request-bubble-hover) 82%,
@@ -2637,7 +2651,8 @@ kbd {
   border-color: color-mix(in srgb, var(--color-vscode-request-border) 60%, transparent);
 }
 
-.user-message-text > .inline-chip-clickable:focus-visible {
+.user-message-text > .inline-chip-clickable:focus-visible,
+.user-message-markdown .inline-chip-clickable:focus-visible {
   outline: 1px solid var(--color-vscode-accent);
   outline-offset: 1px;
 }

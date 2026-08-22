@@ -240,6 +240,13 @@ function getSessionTreeFailedUpdated(sessionId: string): number | undefined {
   return updated;
 }
 
+export function isSessionFailureUnread(sessionId: string): boolean {
+  return isSessionUnread(
+    sessionId,
+    getSessionTreeFailedUpdated(sessionId) ?? getSessionTreeUpdated(sessionId)
+  );
+}
+
 // Module-scoped so cached diff summaries survive the session list being
 // unmounted and remounted (navigating away and back). Persisting the cache and
 // keeping the last-known stats while refreshing avoids the "0 0 0 -> numbers"
@@ -1654,12 +1661,7 @@ function SessionListItem(props: {
   const hasUnreadCompletion = () =>
     props.isNewlyCompleted ||
     (props.isCompletedPlanSession && isSessionUnread(props.session.id, props.session.time.updated));
-  const hasUnreadFailure = () =>
-    props.isFailed &&
-    isSessionUnread(
-      props.session.id,
-      getSessionTreeFailedUpdated(props.session.id) ?? props.summaryUpdated
-    );
+  const hasUnreadFailure = () => props.isFailed && isSessionFailureUnread(props.session.id);
   const hasPendingInput = () =>
     props.hasPermissionRequest || props.hasQuestionRequest || props.needsAttention;
   const hasSubagents = () => !!props.onOpenSubagents && props.subagentCount > 0;
