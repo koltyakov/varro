@@ -4,6 +4,7 @@ import {
   isAbortedAssistantError,
   isProviderAuthFailure,
 } from '../../shared/error-classification';
+import { normalizeSessionTitle } from '../../shared/session-title';
 import { retryMessage } from '../hooks/useOpenCode';
 import {
   getAssistantActivityPartKey,
@@ -12,6 +13,7 @@ import {
   type AssistantActivityGroupInfo,
 } from '../lib/assistant-activity';
 import { client } from '../lib/client';
+import { postMessage } from '../lib/bridge';
 import { editingMessageId, startEditingMessage } from '../lib/message-edit-state';
 import { collapseLeadingDuplicateFileEvents } from '../lib/message-event-collapse';
 import { getAssistantDiffRequest, isAssistantMessage } from '../lib/message-metrics';
@@ -101,6 +103,7 @@ export function Message(props: {
   info: MessageType;
   parts: Part[];
   promptNumber?: number;
+  showPromptNumber?: boolean;
   showSentTimestamp?: boolean;
   suppressTimestampAnimation?: boolean;
   onUserMessageHoverChange?: (messageId: string, hovering: boolean) => void;
@@ -442,11 +445,27 @@ export function Message(props: {
     !isActiveSessionWorking() &&
     hasUserMessageEditableContent(normalizedParts());
   const handleUserCardClick = (event: MouseEvent) => {
-    if (props.info.role !== 'user' || !canEditUserMessage() || isEditingUserMessage()) return;
+    if (props.info.role !== 'user') return;
     const target = event.target;
     if (target instanceof Element && target.closest('button, a, textarea')) return;
     const selection = window.getSelection();
     if (selection && !selection.isCollapsed) return;
+    if (event.altKey) {
+      const content = getUserMessageEditText(normalizedParts());
+      if (!content.trim()) return;
+      event.preventDefault();
+      const sessionTitle = normalizeSessionTitle(
+        state.sessions.find((session) => session.id === props.info.sessionID)?.title
+      );
+      const title = `${sessionTitle || 'User message'}${props.promptNumber ? ` [${props.promptNumber}]` : ''}`;
+      postMessage({
+        type: 'vscode/open-text',
+        payload: { content, title, language: 'markdown' },
+      });
+      return;
+    }
+
+    if (!canEditUserMessage() || isEditingUserMessage()) return;
     startEditingMessage(
       props.info.id,
       props.info.sessionID,
@@ -481,7 +500,9 @@ export function Message(props: {
             onMouseEnter={() => notifyUserMessageHoverChange(true)}
             onMouseLeave={() => notifyUserMessageHoverChange(false)}
           >
-            <Show when={isUser() && props.promptNumber}>
+            <Show
+              when={isUser() && props.showPromptNumber !== false ? props.promptNumber : undefined}
+            >
               {(promptNumber) => (
                 <span class="prompt-number-badge" aria-hidden="true">
                   {promptNumber()}

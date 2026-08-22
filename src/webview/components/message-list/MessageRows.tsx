@@ -215,9 +215,8 @@ export function MessageRow(
           <MessageComponent
             info={props.msg.info}
             parts={props.msg.parts}
-            promptNumber={
-              props.showPromptNumbers ? props.promptNumberMap.get(props.msg.info.id) : undefined
-            }
+            promptNumber={props.promptNumberMap.get(props.msg.info.id)}
+            showPromptNumber={props.showPromptNumbers}
             showSentTimestamp={
               props.showSentTimestamps || props.revealedSentTimestampMessageId === props.msg.info.id
             }

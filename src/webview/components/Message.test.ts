@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { createSignal } from 'solid-js';
-import type { FilePart, Part, ToolPart } from '../types';
+import type { FilePart, Part, Session, ToolPart } from '../types';
 import { client } from '../lib/client';
 import { editingMessage, resetMessageEditState } from '../lib/message-edit-state';
 import {
@@ -1621,6 +1621,47 @@ describe('Message user editing', () => {
     });
     expect(card?.classList.contains('user-message-card-editable')).toBe(false);
     expect(container?.textContent).toContain('original prompt');
+  });
+
+  it('opens a user message as Markdown on Alt-click without editing it', () => {
+    const send = vi.fn();
+    fixture<UnknownRecord>(window).__sendToExtension = send;
+    setAppState('sessions', [
+      fixture<Session>({
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'Replace edit header icon',
+        version: '1',
+        time: { created: 0, updated: 0 },
+      }),
+    ]);
+    setAppState('activeSessionId', 'session-1');
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-edit'),
+          parts: [textPart('text-edit', 'original prompt')],
+          promptNumber: 3,
+        }),
+      container!
+    );
+
+    window.getSelection()?.removeAllRanges();
+    const card = container?.querySelector<HTMLElement>('.user-message-card');
+    expect(card?.querySelector('.prompt-number-badge')?.textContent).toBe('3');
+
+    card?.dispatchEvent(new MouseEvent('click', { bubbles: true, altKey: true }));
+
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open-text',
+      payload: {
+        content: 'original prompt',
+        title: 'Replace edit header icon [3]',
+        language: 'markdown',
+      },
+    });
+    expect(editingMessage()).toBeNull();
   });
 
   it('starts a composer edit for image-only user messages', () => {

@@ -3496,6 +3496,7 @@ describe('ChatInput', () => {
     });
     await Promise.resolve();
 
+    expect(container?.querySelector('.toolbar-repository-link')).toBeNull();
     expect(inputText()).toBe('edited prompt');
     expect(state.droppedFiles).toEqual([
       { path: '/repo/src/app.ts', relativePath: 'src/app.ts', type: 'file' },

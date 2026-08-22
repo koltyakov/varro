@@ -143,7 +143,7 @@ describe('UserMessageContent', () => {
       'text'
     );
     expect(container?.querySelector('.user-message-code-block code')?.textContent).toBe(
-      'https://example.test/docs'
+      'https://example.test/docs\n'
     );
     expect(container?.querySelector('a.external-link')).toBeNull();
   });
@@ -199,9 +199,9 @@ describe('UserMessageContent', () => {
       ),
     ]);
 
-    const messageText = container?.querySelector('.user-message-text');
-    expect(messageText?.querySelectorAll('.interactive-result-code-block')).toHaveLength(2);
-    expect(messageText?.querySelector('p')?.textContent).toBe('Another text');
+    const scrollContainer = container?.querySelector('.user-message-text-scroll');
+    expect(scrollContainer?.querySelectorAll('.interactive-result-code-block')).toHaveLength(2);
+    expect(scrollContainer?.querySelector('.user-message-text')?.textContent).toBe('Another text');
   });
 
   it('compacts standalone SVG markup into a chip that opens in an editor', () => {

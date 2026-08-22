@@ -23,7 +23,7 @@ import {
 import { AttachmentLabel } from '../AttachmentLabel';
 import { ImagePreviewOverlay, createImagePreviewEffect } from '../ImagePreview';
 import type { PreviewImage } from '../ImagePreview';
-import { MarkdownRenderer } from '../MarkdownRenderer';
+import { MarkdownRenderer, renderCodeBlockHtml } from '../MarkdownRenderer';
 import type { MarkdownInlineSlot } from '../MarkdownRenderer';
 import { getPdfDataUrlSize } from '../../../shared/native-pdf';
 import { FileTypeIcon } from '../FileTypeIcon';
@@ -50,8 +50,8 @@ export type MessageAttachment =
   | { type: 'file-reference'; path: string; isDirectory: boolean };
 
 type UserMessageSegment =
-  | { type: 'markdown'; content: string }
-  | { type: 'plain'; content: string }
+  | { type: 'text'; content: string }
+  | { type: 'code'; content: string; language?: string }
   | { type: 'markup'; content: string; format: UserMessageMarkupFormat };
 
 export type UserMessageMarkupFormat = {
@@ -96,6 +96,7 @@ type InlineTextSegment =
 
 const VISION_DELEGATION_CONTEXT_RE =
   /^\[Image for @[^:\]\n]+: [^\]\n]+\]\nWhen calling the [^\n]+ subagent, include \{file:[^}\n]+\} in its task prompt\.$/;
+const USER_CODE_FENCE_RE = /```([^\n`]*)\n([\s\S]*?)```/g;
 function bindUserMessageOverflowFade(element: HTMLElement, trackText: () => string[]) {
   const update = () => {
     const hasMoreBelow = element.scrollTop + element.clientHeight < element.scrollHeight - 1;
@@ -125,10 +126,42 @@ function parseUserMessageSegments(text: string): UserMessageSegment[] {
 
   const trimmed = normalized.trim();
   if (trimmed.startsWith('<') && trimmed.endsWith('>')) {
-    return [{ type: 'plain', content: normalized }];
+    return [{ type: 'text', content: normalized }];
   }
 
-  return [{ type: 'markdown', content: normalized }];
+  const segments: UserMessageSegment[] = [];
+  let lastIndex = 0;
+
+  for (const match of normalized.matchAll(USER_CODE_FENCE_RE)) {
+    const index = match.index ?? 0;
+    if (index > lastIndex) {
+      const content = normalized.slice(lastIndex, index).replace(/^\n+|\n+$/g, '');
+      if (content.length > 0) segments.push({ type: 'text', content });
+    }
+
+    segments.push({
+      type: 'code',
+      content: match[2]!,
+      language: match[1]!.trim() || undefined,
+    });
+    lastIndex = index + match[0].length;
+  }
+
+  if (lastIndex < normalized.length) {
+    const content = normalized.slice(lastIndex).replace(/^\n+/, '');
+    if (content.length > 0) segments.push({ type: 'text', content });
+  }
+
+  return segments.length > 0 ? segments : [{ type: 'text', content: normalized }];
+}
+
+function hasUserMarkdownSyntax(text: string): boolean {
+  return (
+    /^(?: {0,3}#{1,6}\s| {0,3}>\s| {0,3}(?:[-+*]|\d+[.)])\s)/m.test(text) ||
+    /(?:\*\*|__|~~|`|\[[^\]\n]+\]\([^\n)]+\))/.test(text) ||
+    /(?:^|[^*])\*[^*\n]+\*(?:[^*]|$)/.test(text) ||
+    /(?:^|[^_])_[^_\n]+_(?:[^_]|$)/.test(text)
+  );
 }
 
 export function getUserMessageMarkupFormat(text: string): UserMessageMarkupFormat | null {
@@ -847,13 +880,13 @@ function UserMessageTextContent(props: {
   return (
     <For each={segments()}>
       {(segment) =>
-        segment.type === 'markup' ? (
+        segment.type === 'code' ? (
+          <UserMessageCodeBlock content={segment.content} language={segment.language} />
+        ) : segment.type === 'markup' ? (
           <p class="user-message-text user-message-format-chip-row">
             <UserMessageMarkupChip content={segment.content} format={segment.format} />
           </p>
-        ) : segment.type === 'plain' ? (
-          <p class="user-message-text">{segment.content}</p>
-        ) : (
+        ) : hasUserMarkdownSyntax(segment.content) ? (
           <Show when={segment.content.length > 0}>
             <MarkdownRenderer
               content={segment.content}
@@ -864,10 +897,34 @@ function UserMessageTextContent(props: {
               escapeHtml
             />
           </Show>
+        ) : (
+          <Show when={segment.content.length > 0}>
+            <p class="user-message-text">
+              <InlineAttachmentText
+                content={segment.content}
+                attachments={props.attachments}
+                imageParts={props.imageParts}
+                agentParts={props.agentParts}
+                onOpenImagePreview={props.onOpenImagePreview}
+              />
+            </p>
+          </Show>
         )
       }
     </For>
   );
+}
+
+function UserMessageCodeBlock(props: { content: string; language?: string }) {
+  const html = createMemo(() =>
+    renderCodeBlockHtml({
+      text: props.content,
+      lang: props.language,
+      className: 'user-message-code-block',
+      showCopyButton: false,
+    })
+  );
+  return <div innerHTML={html()} />;
 }
 
 function InlineAttachmentText(props: {

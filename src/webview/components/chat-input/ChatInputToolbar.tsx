@@ -221,6 +221,7 @@ function SelectionCostWarning(props: {
 }
 
 type ChatInputMetaToolbarProps = ToolbarSharedProps & {
+  allowRepositoryLink: boolean;
   showMcpControl: boolean;
   showMcpPicker: boolean;
   enabledMcpCount: number;
@@ -342,6 +343,7 @@ export function ChatInputMainToolbar(props: ChatInputMainToolbarProps) {
 export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
   const hasContextControl = () => props.showContextControl && !!props.contextUsage;
   const showRepositoryLink = () =>
+    props.allowRepositoryLink &&
     !props.showMcpControl &&
     props.activeLspNames.length === 0 &&
     !hasContextControl() &&

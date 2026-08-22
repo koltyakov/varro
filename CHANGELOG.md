@@ -6,32 +6,20 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 
 - Added an Auto accept edits permission mode that approves file changes while continuing to ask before other tool actions.
 - Improved commit message generation with richer working-tree and repository-history context, support for unstaged changes, stronger validation, and safer handling of existing Source Control input.
-- Added automatic retries for sessions interrupted by transient connection failures.
-- Preserved chat content, loaded history, context, and scroll position more reliably across streaming, queued-message handoffs, named forks, updates, and reopened conversations.
-- Improved reload and restart recovery by preventing restored queued prompts from being sent twice and stopping stale session activity.
-- Improved slash-command completion behavior, including direct execution of `/stats` from the completion menu and stable suggestions while editing trigger text.
-- Improved composer editing around file and context chips, including atomic deletion, reliable inline image pasting and line breaks, and preserved active-file context in queued messages.
-- Allowed expanded diff previews to remain open while writing prompts in the composer.
-- Added composer visibility for active language servers with quick access to their output channels.
-- Improved model management with searchable, selective additions for large provider catalogs.
-- Made model and thinking-level changes easier to follow with before-and-after labels and full provider details.
-- Added warnings for unignored generated dependency trees and compact handling of very large generated changes in prompts, summaries, and changed-file views.
-- Improved file and repository references in messages with compact type icons, line-aware links, clickable SSH Git remotes, and more reliable opening of uniquely matched workspace and local files.
-- Improved guidance and accessibility across chat controls with consistent tooltips, model-cost warnings, clearer Plan-agent indicators, keyboard-accessible terminal previews, and more reliable sidebar recovery.
+- Made sessions more resilient to connection failures, reloads, restarts, queued-message handoffs, and reopened conversations without losing context or duplicating work.
+- Improved the composer with more reliable file, context, and image handling while keeping diff previews open and surfacing active language servers.
+- Made large model catalogs easier to manage with search and selective additions, clearer model and thinking-level changes, and cost warnings.
+- Added safer handling and warnings for generated dependency trees and very large changes across prompts, summaries, and changed-file views.
+- Improved message readability and navigation with Markdown, secure external images, richer file and repository links, and more accessible chat controls.
 
 ## 0.24.x - August 2026
 
-- Streamlined assistant activity with compact summaries, clearer loading progress, expandable details, collapsed thinking blocks, turn navigation markers, and response forking.
-- Added Mermaid diagrams, session references, native PDF attachments, composer context breakdowns, richer attachment and user-message previews, and automatic vision delegation for image-aware prompts.
-- Redesigned model discovery with provider prioritization, pinned models, custom display names, and responsive picker details and positioning.
-- Added session cost details, clearer provider usage quotas, and helper-model assignments for commit messages and automatic permission decisions.
-- Deferred provider and authentication refreshes until active work finishes, with visible pending status and preserved provider changes across managed restarts.
-- Added in-workbench provider and MCP connection management with API-key and OAuth flows, terminal fallbacks, and targeted recovery from expired credentials.
-- Improved permissions with sequential progress, responsive actions, reliable tool matching and
-  child-session inheritance, OpenCode-managed defaults, clearer request summaries, safer Git-backed
-  local decisions, and preserved rejected commands in stopped turns.
-- Made message edits immediate and recoverable, clarified queued-message positions, and strengthened scrolling, history loading, sticky navigation, row sizing, and viewport preservation.
-- Improved session switching and deletion, first-run navigation, exact slash-command completion, model discovery, accessible Markdown links, and image attachment feedback and cleanup.
+- Streamlined long conversations with compact activity summaries, clearer progress, turn navigation, response forking, and more reliable history and scrolling.
+- Added Mermaid diagrams, native PDF attachments, session references, richer context previews, and automatic vision delegation for image prompts.
+- Improved model selection and cost control with prioritized and pinned models, custom names, session costs, provider quotas, and helper-model assignments.
+- Added in-workbench provider and MCP connection management with API-key and OAuth flows, expired-credential recovery, and refreshes that wait for active work.
+- Strengthened permissions with clearer requests, reliable tool matching and child-session inheritance, safer local decisions, and preserved rejected commands.
+- Made message edits, queued prompts, session switching, and image attachments more reliable and recoverable.
 
 ## 0.23.x - July-August 2026
 

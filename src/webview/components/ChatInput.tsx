@@ -3494,13 +3494,19 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         <div class="composer-edit-banner">
           <svg
             class="composer-edit-banner-icon"
-            viewBox="0 0 16 16"
-            fill="currentColor"
-            width="12"
-            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            width="14"
+            height="14"
             aria-hidden="true"
           >
-            <path d="M13.23 1q-.36 0-.7.15a1.8 1.8 0 0 0-.58.39L3.52 9.97a.5.5 0 0 0-.13.22l-1.37 4.18a.5.5 0 0 0 .63.63l4.18-1.37a.5.5 0 0 0 .22-.13l8.43-8.43q.25-.25.39-.58a1.81 1.81 0 0 0-.39-1.98L14.51 1.54a1.8 1.8 0 0 0-.58-.39 1.8 1.8 0 0 0-.7-.15zm-.32 1.07a.8.8 0 0 1 .64 0q.15.06.26.18l.97.97a.81.81 0 0 1 0 1.16l-.97.97-2.13-2.13.97-.97a.8.8 0 0 1 .26-.18zM10.97 4.93l2.13 2.13-6.6 6.6-2.85.94.94-2.86z" />
+            <path
+              d="M14.3632 5.65156L15.8431 4.17157C16.6242 3.39052 17.8905 3.39052 18.6716 4.17157L20.0858 5.58579C20.8668 6.36683 20.8668 7.63316 20.0858 8.41421L18.6058 9.8942M14.3632 5.65156L4.74749 15.2672C4.41542 15.5993 4.21079 16.0376 4.16947 16.5054L3.92738 19.2459C3.87261 19.8659 4.39148 20.3848 5.0115 20.33L7.75191 20.0879C8.21972 20.0466 8.65806 19.8419 8.99013 19.5099L18.6058 9.8942M14.3632 5.65156L18.6058 9.8942"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
           </svg>
           <span class="composer-edit-banner-label">Editing message</span>
           <button
@@ -3943,6 +3949,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         <ChatInputMetaToolbar
           compactTight={toolbarCompactMode() === 'tight'}
           inputFrameRef={inputFrameRef}
+          allowRepositoryLink={!composerEditingMessage()}
           showMcpControl={!composerEditingMessage() && showMcpControl()}
           showMcpPicker={showMcpPicker()}
           enabledMcpCount={enabledMcpCount()}
