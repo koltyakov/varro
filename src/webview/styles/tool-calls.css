@@ -2804,12 +2804,12 @@ kbd {
 .interactive-result-code-block.user-message-terminal-code-block {
   display: flex;
   flex-direction: column;
-  aspect-ratio: 16 / 9;
   margin: 0;
   border-color: color-mix(in srgb, var(--color-vscode-border) 62%, transparent);
 }
 
 .user-message-terminal-preview {
+  container-type: inline-size;
   cursor: default;
 }
 
@@ -2849,7 +2849,7 @@ kbd {
 .user-message-terminal-code-block pre.code-block {
   min-height: 0;
   flex: 1;
-  max-height: none;
+  max-height: calc(56.25cqi - 26px);
   overflow: hidden;
   overscroll-behavior: auto;
   scrollbar-gutter: auto;

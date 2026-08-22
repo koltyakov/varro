@@ -132,11 +132,11 @@ describe('SidebarProviderBridge', () => {
     await expect(bridge.renderHtml(nextState)).resolves.toBe('<html>second</html>');
 
     expect(mocks.renderWebviewHtml).toHaveBeenNthCalledWith(1, 'csp-source', initialState, {
-      scriptUri: 'webview:/extension/dist/webview/webview.js',
+      scriptUri: 'webview:/extension/dist/webview/webview.mjs',
       cssUri: 'webview:/extension/dist/webview/webview.css',
     });
     expect(mocks.renderWebviewHtml).toHaveBeenNthCalledWith(2, 'csp-source', nextState, {
-      scriptUri: 'webview:/extension/dist/webview/webview.js',
+      scriptUri: 'webview:/extension/dist/webview/webview.mjs',
       cssUri: 'webview:/extension/dist/webview/webview.css',
     });
     expect(view.webview.asWebviewUri).toHaveBeenCalledTimes(4);

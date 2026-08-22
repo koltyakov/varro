@@ -68,7 +68,7 @@ export class SidebarProviderBridge {
     if (!webview) throw new Error('Cannot render webview assets before the view is available');
     const distUri = vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview');
     return {
-      scriptUri: webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'webview.js')).toString(),
+      scriptUri: webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'webview.mjs')).toString(),
       cssUri: webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'webview.css')).toString(),
     };
   }

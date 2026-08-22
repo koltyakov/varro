@@ -3868,7 +3868,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         terminalOnly
           ? [
               `[Selection from terminal zsh]\n\`\`\`text\n${Array.from(
-                { length: 30 },
+                { length: index === 2 ? 1 : 30 },
                 (_, line) => `virtualization verification line ${line + 1}`
               ).join('\n')}\n\`\`\``,
             ]

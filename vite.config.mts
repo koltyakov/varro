@@ -18,7 +18,7 @@ export default defineConfig(({ mode }) => ({
     rollupOptions: {
       input: resolve(projectRoot, 'src/webview/index.tsx'),
       output: {
-        entryFileNames: 'webview.js',
+        entryFileNames: 'webview.mjs',
         chunkFileNames: 'chunks/[name]-[hash].js',
         assetFileNames: 'webview.[ext]',
       },

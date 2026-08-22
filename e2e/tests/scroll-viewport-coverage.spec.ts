@@ -159,12 +159,11 @@ test.describe('viewport content coverage', () => {
       list.evaluate((element) => {
         const rows = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')];
         return (
-          (element.querySelector<HTMLElement>('.virtual-spacer-top')?.getBoundingClientRect().height ??
-            0) +
-            rows.reduce((total, row) => total + row.getBoundingClientRect().height, 0) +
-          (element
-            .querySelector<HTMLElement>('.virtual-spacer-bottom')
-            ?.getBoundingClientRect().height ?? 0)
+          (element.querySelector<HTMLElement>('.virtual-spacer-top')?.getBoundingClientRect()
+            .height ?? 0) +
+          rows.reduce((total, row) => total + row.getBoundingClientRect().height, 0) +
+          (element.querySelector<HTMLElement>('.virtual-spacer-bottom')?.getBoundingClientRect()
+            .height ?? 0)
         );
       });
     let previousHeight = -1;
@@ -181,8 +180,10 @@ test.describe('viewport content coverage', () => {
     type HeightSample = {
       accountedHeight: number;
       terminalRows: number;
-      terminalFramesValid: boolean;
+      terminalFramesBounded: boolean;
       terminalPreviewsClipped: boolean;
+      shortTerminalRows: number;
+      shortTerminalFramesFit: boolean;
       imageRows: number;
       renderedRows: number;
     };
@@ -202,21 +203,34 @@ test.describe('viewport content coverage', () => {
         const terminalBlocks = rows
           .map((row) => row.querySelector<HTMLElement>('.user-message-terminal-code-block'))
           .filter((block): block is HTMLElement => block !== null);
+        const shortTerminalBlocks = terminalBlocks.filter(
+          (block) => block.querySelector('.code-block-detail')?.textContent === '1 line'
+        );
         return {
           accountedHeight:
             (topSpacer?.getBoundingClientRect().height ?? 0) +
             rows.reduce((total, row) => total + row.getBoundingClientRect().height, 0) +
             (bottomSpacer?.getBoundingClientRect().height ?? 0),
           terminalRows: terminalBlocks.length,
-          terminalFramesValid: terminalBlocks.every((block) => {
+          terminalFramesBounded: terminalBlocks.every((block) => {
             const bounds = block.getBoundingClientRect();
-            return Math.abs(bounds.width / bounds.height - 16 / 9) < 0.01;
+            return bounds.height <= bounds.width / (16 / 9) + 1;
           }),
           terminalPreviewsClipped: terminalBlocks.every((block) => {
             const pre = block.querySelector<HTMLElement>('pre.code-block');
             if (!pre) return false;
             const style = getComputedStyle(pre);
             return style.overflow === 'hidden' && style.maskImage.includes('linear-gradient');
+          }),
+          shortTerminalRows: shortTerminalBlocks.length,
+          shortTerminalFramesFit: shortTerminalBlocks.every((block) => {
+            const bounds = block.getBoundingClientRect();
+            const pre = block.querySelector<HTMLElement>('pre.code-block');
+            return (
+              pre !== null &&
+              bounds.height < bounds.width / (16 / 9) &&
+              pre.clientHeight >= pre.scrollHeight
+            );
           }),
           imageRows: rows.filter((row) => row.querySelector('.chat-image-preview-trigger')).length,
           renderedRows: rows.length,
@@ -230,17 +244,22 @@ test.describe('viewport content coverage', () => {
     for (const ratio of ratios) samples.push(await sampleAt(ratio));
 
     expect(hydrationSamples.some((sample) => sample.terminalRows > 0)).toBe(true);
+    expect(hydrationSamples.some((sample) => sample.shortTerminalRows > 0)).toBe(true);
     expect(hydrationSamples.some((sample) => sample.imageRows > 0)).toBe(true);
     for (const sample of hydrationSamples.filter((value) => value.terminalRows > 0)) {
-      expect(sample.terminalFramesValid).toBe(true);
+      expect(sample.terminalFramesBounded).toBe(true);
       expect(sample.terminalPreviewsClipped).toBe(true);
+    }
+    for (const sample of hydrationSamples.filter((value) => value.shortTerminalRows > 0)) {
+      expect(sample.shortTerminalFramesFit).toBe(true);
     }
 
     const expectedHeight = samples[0]!.accountedHeight;
     for (const sample of samples) {
-      expect(Math.abs(sample.accountedHeight - expectedHeight), JSON.stringify(samples)).toBeLessThan(
-        1
-      );
+      expect(
+        Math.abs(sample.accountedHeight - expectedHeight),
+        JSON.stringify(samples)
+      ).toBeLessThan(1);
       expect(sample.renderedRows).toBeLessThan(40);
     }
   });
