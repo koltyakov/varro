@@ -158,6 +158,7 @@ function SelectionCostWarning(props: {
   const detail = `Current session: ${props.providerName} / ${props.modelName} · ${props.reasoningLabel}`;
   return (
     <Tooltip
+      delay={0}
       content={
         <span class="model-selection-cost-tooltip">
           <span>{SELECTION_COST_WARNING}</span>

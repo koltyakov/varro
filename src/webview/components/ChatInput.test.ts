@@ -5990,7 +5990,7 @@ describe('ChatInput', () => {
     expect(warning).not.toBeNull();
 
     warning?.dispatchEvent(new MouseEvent('mouseenter'));
-    await vi.advanceTimersByTimeAsync(1_500);
+    await vi.advanceTimersByTimeAsync(0);
     const tooltip = document.querySelector('[role="tooltip"]');
     expect(tooltip?.querySelector('.model-selection-cost-tooltip > span')?.textContent).toBe(
       'Switching the model or reasoning level mid-session may make this request more expensive.'
