@@ -9,7 +9,11 @@ vi.mock('crypto', () => ({
   randomBytes: randomBytesMock,
 }));
 
-import { renderWebviewHtml, renderWebviewLoadingHtml } from './webview-html';
+import {
+  renderEditorWebviewPlaceholderHtml,
+  renderWebviewHtml,
+  renderWebviewLoadingHtml,
+} from './webview-html';
 
 const initialState: InitialWebviewState = {
   theme: 'dark',
@@ -40,7 +44,7 @@ describe('renderWebviewHtml', () => {
       '<link rel="stylesheet" href="webview://assets/webview.css?v=Zml4ZWQtbm9uY2U" />'
     );
     expect(html).toContain('role="status" aria-label="Loading workspace"');
-    expect(html).toContain('Loading workspace...');
+    expect(html).not.toContain('Loading workspace...');
     expect(html).toContain(
       '<script type="module" nonce="Zml4ZWQtbm9uY2U" src="webview://assets/webview.js?v=Zml4ZWQtbm9uY2U"></script>'
     );
@@ -62,19 +66,66 @@ describe('renderWebviewHtml', () => {
     expect(html.indexOf('window.__clearVarroBootstrapFailureHandlers')).toBeLessThan(
       html.indexOf('src="webview://assets/webview.js?v=Zml4ZWQtbm9uY2U"')
     );
-    expect(html.indexOf('Loading workspace...')).toBeLessThan(
+    expect(html.indexOf('role="status" aria-label="Loading workspace"')).toBeLessThan(
       html.indexOf('src="webview://assets/webview.js?v=Zml4ZWQtbm9uY2U"')
     );
+  });
+
+  it('marks editor webviews before their stylesheet loads', () => {
+    const html = renderWebviewHtml(
+      'vscode-webview-resource:',
+      {
+        ...initialState,
+        webviewContext: {
+          viewId: 'editor-1',
+          surface: 'editor',
+          initialRoute: { type: 'new-session' },
+        },
+      },
+      { scriptUri: 'webview.js', cssUri: 'webview.css' }
+    );
+
+    expect(html).toContain(
+      '<html lang="en" class="varro-editor-surface varro-editor-layout-pending">'
+    );
+  });
+
+  it('does not mark sidebar webviews as editor surfaces', () => {
+    const html = renderWebviewHtml(
+      'vscode-webview-resource:',
+      {
+        ...initialState,
+        webviewContext: {
+          viewId: 'sidebar',
+          surface: 'sidebar',
+          initialRoute: { type: 'new-session' },
+        },
+      },
+      { scriptUri: 'webview.js', cssUri: 'webview.css' }
+    );
+
+    expect(html).toContain('<html lang="en">');
+    expect(html).not.toContain('class="varro-editor-surface"');
   });
 
   it('renders a standalone loading screen before the webview assets are available', () => {
     const html = renderWebviewLoadingHtml();
 
     expect(html).toContain('role="status" aria-label="Loading workspace"');
-    expect(html).toContain('Loading workspace...');
-    expect(html).toContain('Restoring your recent view');
+    expect(html).not.toContain('Loading workspace...');
+    expect(html).not.toContain('Restoring your recent view');
     expect(html).toContain('html > body { padding: 0; }');
     expect(html).not.toContain('<script');
+  });
+
+  it('renders a script-free dots-only editor placeholder', () => {
+    const html = renderEditorWebviewPlaceholderHtml();
+
+    expect(html).toContain('--vscode-editor-background');
+    expect(html).toContain('role="status" aria-label="Loading workspace"');
+    expect(html).not.toContain('Loading workspace...');
+    expect(html).not.toContain('<script');
+    expect(html).not.toContain('acquireVsCodeApi');
   });
 
   it('allows remote HTTPS images without broadening other resource directives', () => {

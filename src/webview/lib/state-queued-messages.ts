@@ -3,6 +3,7 @@ import { prepareForQueuedMessageRemoval } from './message-list-layout';
 import { setState, state } from './app-state';
 import { postMessage } from './bridge';
 import { STORAGE_KEYS, writeStored } from './state-storage';
+import { readWebviewInstanceContext } from './state-stored-values';
 
 function commitQueuedMessages(messages: QueuedMessage[]) {
   setState('queuedMessages', messages);
@@ -27,6 +28,7 @@ function commitQueuedMessages(messages: QueuedMessage[]) {
   const hostPersisted = messages.map(
     ({
       id,
+      ownerViewId,
       messageId,
       sessionId,
       text,
@@ -40,6 +42,7 @@ function commitQueuedMessages(messages: QueuedMessage[]) {
       queuedContext,
     }) => ({
       id,
+      ownerViewId,
       messageId: messageId || undefined,
       sessionId,
       text,
@@ -76,7 +79,14 @@ export function setQueuedMessageEdit(edit: { id: string; sessionId: string } | n
 }
 
 export function enqueueMessage(message: QueuedMessage) {
-  commitQueuedMessages([...state.queuedMessages, message]);
+  const context = readWebviewInstanceContext();
+  const ownedMessage =
+    context?.surface === 'editor' ? { ...message, ownerViewId: context.viewId } : message;
+  commitQueuedMessages([...state.queuedMessages, ownedMessage]);
+}
+
+export function applyQueuedMessagesSnapshot(messages: QueuedMessage[]) {
+  setState('queuedMessages', messages);
 }
 
 export function replaceQueuedMessage(id: string, message: QueuedMessage) {

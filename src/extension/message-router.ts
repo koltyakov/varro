@@ -13,6 +13,8 @@ type LogPayload = Extract<WebviewMessage, { type: 'log' }>['payload'];
 type OpenPathPayload = Extract<WebviewMessage, { type: 'vscode/open' }>['payload'];
 type OpenTextPayload = Extract<WebviewMessage, { type: 'vscode/open-text' }>['payload'];
 type QueuedMessagesPayload = Extract<WebviewMessage, { type: 'queued-messages/update' }>['payload'];
+type PermissionModePayload = Extract<WebviewMessage, { type: 'permission-mode/update' }>['payload'];
+type SessionModelPayload = Extract<WebviewMessage, { type: 'session-model/update' }>['payload'];
 type RalphMessage = Extract<
   WebviewMessage,
   {
@@ -43,6 +45,15 @@ export interface MessageRouterCallbacks {
   clearTerminalSelection(): void;
   runInTerminal(command: string, title?: string): void | Promise<void>;
   openSessionInOpenCode(sessionId: string): void | Promise<void>;
+  openSessionInEditor(
+    sessionId: string,
+    title?: string,
+    model?: Extract<WebviewMessage, { type: 'session/open-in-editor' }>['payload']['model']
+  ): void | Promise<void>;
+  openNewEditor(): void | Promise<void>;
+  editorRouteChanged(
+    route: Extract<WebviewMessage, { type: 'editor/route-changed' }>['payload']['route']
+  ): void;
   exportSession(sessionId: string): Promise<void>;
   generateUsageReport(includeAllTime: boolean): Promise<void>;
   reloadWebview(): Promise<void>;
@@ -73,6 +84,8 @@ export interface MessageRouterCallbacks {
   cancelApiRequest(payload: ApiCancelPayload): void;
   handleRalphMessage(msg: RalphMessage): void;
   updateQueuedMessages(payload: QueuedMessagesPayload): Promise<void>;
+  updatePermissionMode(payload: PermissionModePayload): Promise<void>;
+  updateSessionModel(payload: SessionModelPayload): Promise<void>;
   updateDraftImages(
     payload: Extract<WebviewMessage, { type: 'composer/images-update' }>['payload']
   ): Promise<void>;
@@ -90,6 +103,12 @@ export class MessageRouter {
           break;
         case 'queued-messages/update':
           await this.callbacks.updateQueuedMessages(msg.payload);
+          break;
+        case 'permission-mode/update':
+          await this.callbacks.updatePermissionMode(msg.payload);
+          break;
+        case 'session-model/update':
+          await this.callbacks.updateSessionModel(msg.payload);
           break;
         case 'composer/images-update':
           await this.callbacks.updateDraftImages(msg.payload);
@@ -130,6 +149,19 @@ export class MessageRouter {
           break;
         case 'session/open-in-opencode':
           await this.callbacks.openSessionInOpenCode(msg.payload.sessionId);
+          break;
+        case 'session/open-in-editor':
+          await this.callbacks.openSessionInEditor(
+            msg.payload.sessionId,
+            msg.payload.title,
+            msg.payload.model
+          );
+          break;
+        case 'chat/new-editor':
+          await this.callbacks.openNewEditor();
+          break;
+        case 'editor/route-changed':
+          this.callbacks.editorRouteChanged(msg.payload.route);
           break;
         case 'session/export':
           await this.handleSessionExportMessage(msg);

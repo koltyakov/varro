@@ -511,6 +511,68 @@ describe('webview message validation', () => {
     ).toBeNull();
   });
 
+  it('validates session permission mode updates', () => {
+    expect(
+      parseWebviewMessage({
+        type: 'permission-mode/update',
+        payload: { sessionId: 'session-1', mode: 'full' },
+      })
+    ).toEqual({
+      type: 'permission-mode/update',
+      payload: { sessionId: 'session-1', mode: 'full' },
+    });
+    expect(
+      parseWebviewMessage({
+        type: 'permission-mode/update',
+        payload: { sessionId: 'session-1', mode: 'invalid' },
+      })
+    ).toBeNull();
+  });
+
+  it('validates session model updates with reasoning variants', () => {
+    expect(
+      parseWebviewMessage({
+        type: 'session-model/update',
+        payload: {
+          sessionId: 'session-1',
+          model: { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
+        },
+      })
+    ).toEqual({
+      type: 'session-model/update',
+      payload: {
+        sessionId: 'session-1',
+        model: { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
+      },
+    });
+    expect(
+      parseWebviewMessage({
+        type: 'session-model/update',
+        payload: { sessionId: 'session-1', model: { providerID: 'openai', modelID: 1 } },
+      })
+    ).toBeNull();
+  });
+
+  it('preserves a session model variant when opening an editor', () => {
+    expect(
+      parseWebviewMessage({
+        type: 'session/open-in-editor',
+        payload: {
+          sessionId: 'session-1',
+          title: 'Session 1',
+          model: { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
+        },
+      })
+    ).toEqual({
+      type: 'session/open-in-editor',
+      payload: {
+        sessionId: 'session-1',
+        title: 'Session 1',
+        model: { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
+      },
+    });
+  });
+
   it('rejects unsafe or structurally excessive API request bodies', () => {
     const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;
@@ -975,6 +1037,34 @@ describe('webview message validation', () => {
       parseWebviewMessage({
         type: 'commands/state',
         payload: { canAbort: false, canSwitchSessions: false, model: { providerID: 'openai' } },
+      })
+    ).toBeNull();
+  });
+
+  it('validates editor panel actions and routes', () => {
+    expect(parseWebviewMessage({ type: 'chat/new-editor' })).toEqual({ type: 'chat/new-editor' });
+    expect(
+      parseWebviewMessage({
+        type: 'session/open-in-editor',
+        payload: { sessionId: 'session-1', title: 'Editor session' },
+      })
+    ).toEqual({
+      type: 'session/open-in-editor',
+      payload: { sessionId: 'session-1', title: 'Editor session' },
+    });
+    expect(
+      parseWebviewMessage({
+        type: 'editor/route-changed',
+        payload: { route: { type: 'session', sessionId: 'session-2', title: 'Updated title' } },
+      })
+    ).toEqual({
+      type: 'editor/route-changed',
+      payload: { route: { type: 'session', sessionId: 'session-2', title: 'Updated title' } },
+    });
+    expect(
+      parseWebviewMessage({
+        type: 'editor/route-changed',
+        payload: { route: { type: 'session', sessionId: '../foreign' } },
       })
     ).toBeNull();
   });

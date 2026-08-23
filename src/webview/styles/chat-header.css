@@ -232,7 +232,8 @@
   min-width: 0;
 }
 
-.chat-header-subagents {
+.session-item-subagents-counter.chat-header-subagents {
+  gap: 3px;
   margin-left: 2px;
 }
 

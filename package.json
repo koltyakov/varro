@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: OpenCode Workbench",
-  "version": "0.26.0",
+  "version": "0.26.1",
   "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
@@ -125,6 +125,12 @@
         "title": "Varro: New Session"
       },
       {
+        "command": "varro.chat.newEditor",
+        "title": "Varro: New Chat Editor",
+        "shortTitle": "New Chat Editor",
+        "icon": "$(add)"
+      },
+      {
         "command": "varro.chat.searchSessions",
         "title": "Varro: Search Sessions"
       },
@@ -210,6 +216,13 @@
       }
     ],
     "menus": {
+      "editor/title": [
+        {
+          "command": "varro.chat.newEditor",
+          "when": "activeWebviewPanelId == varro.editor",
+          "group": "navigation@1"
+        }
+      ],
       "explorer/context": [
         {
           "command": "varro.chat.addToContext",
@@ -419,7 +432,8 @@
   "activationEvents": [
     "onCommand:varro.chat.focus",
     "onCommand:varro.chat.statusBarClick",
-    "onStartupFinished"
+    "onStartupFinished",
+    "onWebviewPanel:varro.editor"
   ],
   "extensionKind": [
     "workspace"

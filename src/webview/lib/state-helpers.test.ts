@@ -1184,6 +1184,49 @@ describe('state helpers', () => {
     expect(stateModule.getStoredVariantForModel('openai', 'gpt-5.5')).toBe('low');
   });
 
+  it('applies a host model snapshot to the active session composer', async () => {
+    const stateModule = await loadState();
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setSelectedModel(
+      { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'medium' },
+      { sessionId: 'session-1', persistGlobal: false }
+    );
+
+    stateModule.applySessionSelectedModelsSnapshot({
+      'session-1': { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
+    });
+
+    expect(stateModule.state.selectedModel).toEqual({
+      providerID: 'openai',
+      modelID: 'gpt-5.6-sol',
+      variant: 'xhigh',
+    });
+    expect(stateModule.getSelectedModelForSession('session-1')).toEqual({
+      providerID: 'openai',
+      modelID: 'gpt-5.6-sol',
+      variant: 'xhigh',
+    });
+  });
+
+  it('does not apply a session model snapshot to the new-chat composer', async () => {
+    const stateModule = await loadState();
+    const draftModel = { providerID: 'openai', modelID: 'gpt-5.6-sol' };
+    stateModule.setSelectedModel(draftModel);
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setShowSessionPicker(true);
+
+    stateModule.applySessionSelectedModelsSnapshot({
+      'session-1': { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
+    });
+
+    expect(stateModule.state.selectedModel).toEqual(draftModel);
+    expect(stateModule.getSelectedModelForSession('session-1')).toEqual({
+      providerID: 'openai',
+      modelID: 'gpt-5.6-sol',
+      variant: 'xhigh',
+    });
+  });
+
   it('remembers an explicit default reasoning selection', async () => {
     const stateModule = await loadState();
 

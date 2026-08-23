@@ -205,6 +205,9 @@ export async function activate(context: vscode.ExtensionContext) {
       webviewOptions: { retainContextWhenHidden: true },
     })
   );
+  context.subscriptions.push(
+    vscode.window.registerWebviewPanelSerializer(SidebarProvider.editorViewType, sidebarProvider)
+  );
 
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((event) => {

@@ -56,4 +56,24 @@ describe('DraftImageStore', () => {
 
     expect(storage.has('varro.inputDraftImages')).toBe(false);
   });
+
+  it('keeps image drafts isolated by webview', async () => {
+    const { persistence } = createPersistence();
+    const store = new DraftImageStore(persistence);
+    const sidebarImage = {
+      id: 'sidebar-image',
+      url: 'data:image/png;base64,AA==',
+      mime: 'image/png',
+      filename: 'sidebar.png',
+      size: 1,
+    };
+    const editorImage = { ...sidebarImage, id: 'editor-image', filename: 'editor.png' };
+
+    await store.update([sidebarImage]);
+    await store.update([editorImage], 'editor-1');
+
+    const restored = new DraftImageStore(persistence);
+    expect(restored.list()).toEqual([sidebarImage]);
+    expect(restored.list('editor-1')).toEqual([editorImage]);
+  });
 });

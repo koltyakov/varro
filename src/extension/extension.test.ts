@@ -11,6 +11,7 @@ const {
   getCommandsMock,
   getMock,
   onDidChangeConfigurationMock,
+  registerWebviewPanelSerializerMock,
   registerWebviewViewProviderMock,
   showInformationMessageMock,
   sweepStaleInjectedConfigDirectoriesMock,
@@ -39,6 +40,7 @@ const {
     }
   }),
   onDidChangeConfigurationMock: vi.fn((_listener: ConfigChangeListener) => ({ dispose: vi.fn() })),
+  registerWebviewPanelSerializerMock: vi.fn(() => ({ dispose: vi.fn() })),
   registerWebviewViewProviderMock: vi.fn(() => ({ dispose: vi.fn() })),
   showInformationMessageMock: vi.fn(() => Promise.resolve('Reload Window')),
   sweepStaleInjectedConfigDirectoriesMock: vi.fn(() => Promise.resolve()),
@@ -100,6 +102,7 @@ vi.mock('vscode', () => ({
     onDidChangeConfiguration: onDidChangeConfigurationMock,
   },
   window: {
+    registerWebviewPanelSerializer: registerWebviewPanelSerializerMock,
     registerWebviewViewProvider: registerWebviewViewProviderMock,
     showInformationMessage: showInformationMessageMock,
   },
@@ -134,6 +137,7 @@ vi.mock('./open-code-process', async (importOriginal) => ({
 vi.mock('./sidebar-provider', () => ({
   SidebarProvider: class {
     static viewType = 'varro.chat';
+    static editorViewType = 'varro.editor';
     dispose = vi.fn(() => Promise.resolve());
     post = vi.fn();
     startProviderFileObservation = vi.fn();
@@ -337,6 +341,10 @@ describe('extension activation', () => {
     expect(registerWebviewViewProviderMock).toHaveBeenCalledWith('varro.chat', expect.anything(), {
       webviewOptions: { retainContextWhenHidden: true },
     });
+    expect(registerWebviewPanelSerializerMock).toHaveBeenCalledWith(
+      'varro.editor',
+      expect.anything()
+    );
     expect(registerCommandsMock).toHaveBeenCalledWith(
       context as never,
       expect.anything(),
@@ -355,7 +363,7 @@ describe('extension activation', () => {
     expect(
       latestSidebarProviderInstance.current?.startProviderFileObservation
     ).toHaveBeenCalledOnce();
-    expect(context.subscriptions).toHaveLength(2);
+    expect(context.subscriptions).toHaveLength(3);
   });
 
   it.each([
@@ -867,6 +875,22 @@ describe('extension manifest', () => {
       { command: 'varro.about', group: '1_main@1' },
       { command: 'varro.chat.openStats', group: '1_main@2' },
       { command: 'varro.openGitHub', group: '1_main@3' },
+    ]);
+  });
+
+  it('contributes a new-chat action to Varro editor tabs', () => {
+    expect(packageJson.contributes.commands).toContainEqual({
+      command: 'varro.chat.newEditor',
+      title: 'Varro: New Chat Editor',
+      shortTitle: 'New Chat Editor',
+      icon: '$(add)',
+    });
+    expect(packageJson.contributes.menus['editor/title']).toEqual([
+      {
+        command: 'varro.chat.newEditor',
+        when: 'activeWebviewPanelId == varro.editor',
+        group: 'navigation@1',
+      },
     ]);
   });
 

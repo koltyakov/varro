@@ -40,6 +40,7 @@ import type { RecycleBinEntry, SessionDiffSummary } from '../../../shared/protoc
 import type { SelectedModel } from '../../lib/app-state-types';
 import type { Session } from '../../types';
 import { client } from '../../lib/client';
+import { postMessage } from '../../lib/bridge';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { isEmptySession, shouldHideEmptySessionFromList } from '../../lib/empty-session';
 import { formatEditCount, formatModelName, formatVariantLabel } from '../../lib/format';
@@ -188,7 +189,14 @@ function getSessionDisplayModel(
       variant: session.model.variant,
     };
   }
-  return getSelectedModelForSession(session.id);
+  const selectedModel = getSelectedModelForSession(session.id);
+  return selectedModel
+    ? {
+        providerID: selectedModel.providerID,
+        modelID: selectedModel.modelID,
+        variant: selectedModel.variant,
+      }
+    : null;
 }
 
 function openSessionWithDisplayedModel(session: Session, diffSummary: SessionDiffSummary | null) {
@@ -1745,7 +1753,19 @@ function SessionListItem(props: {
       actionsMenuRef?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
     );
   };
-  const openSession = () => {
+  const openSession = (openInEditor = false) => {
+    if (openInEditor || (!props.embedded && state.editorTabsOpen)) {
+      const model = getSessionDisplayModel(props.session, props.diffSummary);
+      postMessage({
+        type: 'session/open-in-editor',
+        payload: {
+          sessionId: props.session.id,
+          title: props.session.title,
+          model: model ?? undefined,
+        },
+      });
+      return;
+    }
     if (isActive()) {
       props.onActiveSessionReselect?.();
       return;
@@ -1764,7 +1784,7 @@ function SessionListItem(props: {
     if (!(target instanceof Element)) return;
     const interactive = target.closest('button, a, input, textarea, select');
     if (interactive && !interactive.classList.contains('session-item-main')) return;
-    openSession();
+    openSession(event.altKey);
   };
   const handleRowPointerDown = (event: PointerEvent) => {
     if (event.button !== 0 || props.actions.sessionId()) return;
@@ -1777,7 +1797,7 @@ function SessionListItem(props: {
     if (event.pointerType === 'mouse') {
       event.preventDefault();
       openedPointerId = event.pointerId;
-      openSession();
+      openSession(event.altKey);
     }
   };
   const handleRowPointerUp = (event: PointerEvent) => {
@@ -2062,6 +2082,7 @@ function SessionListItem(props: {
           session={props.session}
           state={props.actions}
           isPinned={props.isPinned}
+          showOpenAsEditor
           inputIdPrefix="session-rename"
           onMenuRef={(element) => {
             actionsMenuRef = element;

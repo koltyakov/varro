@@ -26,6 +26,7 @@ export const STORAGE_KEYS = {
   inputDraftFiles: 'varro.inputDraftFiles',
   lastActiveSessionId: 'varro.lastActiveSessionId',
   lastOpenedView: 'varro.lastOpenedView',
+  editorViewId: 'varro.editorViewId',
   showThinking: 'varro.showThinking',
   todoListCollapsed: 'varro.todoListCollapsed',
 } as const;

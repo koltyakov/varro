@@ -5,3 +5,4 @@ artifacts/
 tmp/
 .DS_Store
 opencode.json
+opencode.jsonc

@@ -3,6 +3,7 @@ import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { reconcile } from 'solid-js/store';
 import type { AssistantMessage, Session } from '../types';
+import type { WebviewMessage } from '../../shared/protocol';
 import * as openCodeModule from '../hooks/useOpenCode';
 import {
   archiveSessionGroup,
@@ -34,6 +35,7 @@ import { client } from '../lib/client';
 import { EMPTY_SESSION_PRUNE_GRACE_MS } from '../lib/empty-session';
 import {
   requestOpenAttentionSessions,
+  applySessionSelectedModelsSnapshot,
   requestSessionSearchFocus,
   startLoading,
   stopLoading,
@@ -45,6 +47,7 @@ import {
   setShowSessionPicker,
   setSessionUsageLimit,
   setMessagesIncremental,
+  setConnectionInitialized,
   setState,
   skipPlanSession,
 } from '../lib/state';
@@ -62,6 +65,18 @@ let originalMatchMedia: typeof globalThis.matchMedia | undefined;
 let originalScrollIntoView: typeof HTMLElement.prototype.scrollIntoView | undefined;
 let desktopMediaQueryMatches = false;
 let desktopMediaQueryListeners = new Set<(event: MediaQueryListEvent) => void>();
+// SAFETY: Tests own the optional host bootstrap state and clear it after each case.
+const hostWindow = window as typeof window & {
+  __initialWebviewState?: unknown;
+  __vscodeWebviewState?: {
+    getState(): TestWebviewState;
+    setState(state: TestWebviewState): void;
+  };
+};
+
+type TestWebviewState = {
+  'varro.lastOpenedView'?: { type: string; sessionId?: string; timestamp?: number };
+};
 
 function dispatchDesktopMediaQueryChange(matches: boolean) {
   desktopMediaQueryMatches = matches;
@@ -75,6 +90,8 @@ function preventKeyboardDefault(event: KeyboardEvent) {
 }
 
 beforeEach(() => {
+  delete hostWindow.__initialWebviewState;
+  delete hostWindow.__vscodeWebviewState;
   vi.useFakeTimers();
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -109,6 +126,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  delete hostWindow.__initialWebviewState;
+  delete hostWindow.__vscodeWebviewState;
   vi.runOnlyPendingTimers();
   vi.useRealTimers();
   cleanup?.();
@@ -142,6 +161,7 @@ afterEach(() => {
   setDesktopSessionPaneSide('left');
   setShowSessionPicker(false);
   setShowModels(false);
+  setConnectionInitialized(false);
   stopLoading();
   clearDirectSessionReturn();
   resetProviderConnectionState();
@@ -1263,6 +1283,99 @@ describe('header status badges', () => {
       HTMLButtonElement
     );
     expect(desktopHeader?.querySelector('.chat-header-btn[aria-label="Fork session"]')).toBeNull();
+  });
+
+  it('omits the session header in editor panels', () => {
+    hostWindow.__initialWebviewState = {
+      webviewContext: {
+        viewId: 'editor-1',
+        surface: 'editor',
+        initialRoute: { type: 'session', sessionId: 'session-1' },
+      },
+    };
+    setState('sessions', [session('session-1', 500)]);
+    setState('activeSessionId', 'session-1');
+
+    cleanup = render(() => Chat(), container!);
+
+    expect(container?.querySelector('.interactive-session > .chat-header')).toBeNull();
+    expect(container?.querySelector('.chat-header-chat-desktop')).toBeNull();
+    expect(container?.querySelector('.chat-main-shell')).toBeInstanceOf(HTMLDivElement);
+  });
+
+  it('does not echo host-applied model snapshots back to the extension', () => {
+    const sent: WebviewMessage[] = [];
+    // SAFETY: The fixture installs the protocol bridge callback owned by the webview host.
+    const bridgeWindow = window as {
+      __sendToExtension?: (message: WebviewMessage) => void;
+    };
+    const originalSend = bridgeWindow.__sendToExtension;
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
+    setState('sessions', [session('session-1', 500)]);
+    setState('activeSessionId', 'session-1');
+
+    try {
+      cleanup = render(() => Chat(), container!);
+      sent.length = 0;
+
+      applySessionSelectedModelsSnapshot({
+        'session-1': { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
+      });
+
+      expect(sent.some((message) => message.type === 'session-model/update')).toBe(false);
+    } finally {
+      if (originalSend) bridgeWindow.__sendToExtension = originalSend;
+      else delete bridgeWindow.__sendToExtension;
+    }
+  });
+
+  it('reconciles a restored editor route before reporting a new-chat route', () => {
+    hostWindow.__initialWebviewState = {
+      webviewContext: {
+        viewId: 'editor-1',
+        surface: 'editor',
+        initialRoute: { type: 'session', sessionId: 'session-1' },
+      },
+    };
+    const selectSession = vi
+      .spyOn(openCodeModule, 'selectSession')
+      .mockImplementation(async (id) => {
+        setState('activeSessionId', id);
+      });
+    setConnectionInitialized(true);
+
+    cleanup = render(() => Chat(), container!);
+
+    expect(selectSession).toHaveBeenCalledOnce();
+    expect(selectSession).toHaveBeenCalledWith('session-1');
+    expect(state.activeSessionId).toBe('session-1');
+  });
+
+  it('persists the confirmed editor session route for panel serialization', () => {
+    let webviewState: TestWebviewState = {};
+    hostWindow.__initialWebviewState = {
+      webviewContext: {
+        viewId: 'editor-1',
+        surface: 'editor',
+        initialRoute: { type: 'session', sessionId: 'session-1' },
+      },
+    };
+    hostWindow.__vscodeWebviewState = {
+      getState: () => webviewState,
+      setState: (next) => {
+        webviewState = next;
+      },
+    };
+    setState('sessions', [session('session-1', 500)]);
+    setState('activeSessionId', 'session-1');
+    setConnectionInitialized(true);
+
+    cleanup = render(() => Chat(), container!);
+
+    expect(webviewState['varro.lastOpenedView']).toMatchObject({
+      type: 'session',
+      sessionId: 'session-1',
+    });
   });
 
   it('shows the active session subagent button beside the title and opens its sub-agent list', async () => {

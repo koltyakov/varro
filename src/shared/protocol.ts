@@ -522,6 +522,16 @@ export type WebviewThemeKind = 'light' | 'dark' | 'high-contrast' | 'high-contra
 
 export type DesktopSessionPaneSide = 'left' | 'right';
 
+export type WebviewRoute =
+  | { type: 'session'; sessionId: string; title?: string }
+  | { type: 'new-session' };
+
+export type WebviewInstanceContext = {
+  viewId: string;
+  surface: 'sidebar' | 'editor';
+  initialRoute: WebviewRoute;
+};
+
 export type ClipboardImageSnapshot = {
   id: string;
   url: string;
@@ -540,6 +550,7 @@ export type QueuedContextSnapshot = {
 
 export type QueuedMessageSnapshot = {
   id: string;
+  ownerViewId?: string;
   messageId?: string;
   sessionId: string;
   text: string;
@@ -554,6 +565,7 @@ export type QueuedMessageSnapshot = {
 };
 
 export type InitialWebviewState = {
+  webviewContext?: WebviewInstanceContext;
   theme: WebviewThemeKind;
   serverStatus: ServerStatus;
   editorContext: EditorContext;
@@ -566,6 +578,9 @@ export type InitialWebviewState = {
   showChangedFiles?: boolean;
   desktopSessionPaneSide?: DesktopSessionPaneSide;
   defaultPermissionMode?: PermissionMode;
+  sessionPermissionModes?: Record<string, PermissionMode>;
+  sessionSelectedModels?: Record<string, ChatModelSelection>;
+  editorTabsOpen?: boolean;
   interruptedSessionIds?: string[];
   pendingPermissions?: UnknownRecord[];
   pendingQuestions?: UnknownRecord[];
@@ -618,7 +633,15 @@ export type ExtensionMessage =
       payload: { requestId: number; status: 'opened' | 'unavailable' };
     }
   | { type: 'api/response'; payload: { id: number; data?: unknown; error?: string } }
+  | { type: 'queued-messages/sync'; payload: { messages: QueuedMessageSnapshot[] } }
+  | { type: 'permission-modes/sync'; payload: { modes: Record<string, PermissionMode> } }
+  | {
+      type: 'session-models/sync';
+      payload: { models: Record<string, ChatModelSelection> };
+    }
+  | { type: 'editor-tabs/state'; payload: { open: boolean } }
   | { type: 'command/new-session'; payload?: { prefill: string } }
+  | { type: 'command/open-session'; payload: { sessionId: string } }
   | { type: 'command/focus-input' }
   | { type: 'command/search-sessions' }
   | { type: 'command/open-attention-sessions' }
@@ -644,7 +667,17 @@ export type WebviewMessage =
   | { type: 'providers/reauthenticated' }
   | { type: 'terminal-selection/clear' }
   | { type: 'terminal/run'; payload: { command: string; title?: string } }
+  | {
+      type: 'session/open-in-editor';
+      payload: { sessionId: string; title?: string; model?: ChatModelSelection };
+    }
   | { type: 'session/open-in-opencode'; payload: { sessionId: string } }
+  | { type: 'chat/new-editor' }
+  | { type: 'editor/route-changed'; payload: { route: WebviewRoute } }
+  | {
+      type: 'session-model/update';
+      payload: { sessionId: string; model: ChatModelSelection | null };
+    }
   | { type: 'session/export'; payload: { sessionId: string } }
   | { type: 'usage/report'; payload: { includeAllTime: boolean } }
   | { type: 'webview/reload' }
@@ -675,6 +708,7 @@ export type WebviewMessage =
   | { type: 'files/remove'; payload: { path: string } }
   | { type: 'files/clear' }
   | { type: 'queued-messages/update'; payload: { messages: QueuedMessageSnapshot[] } }
+  | { type: 'permission-mode/update'; payload: { sessionId: string; mode: PermissionMode | null } }
   | { type: 'files/pick' }
   | { type: 'files/search'; payload: { requestId: number; query: string; limit?: number } }
   | { type: 'file/read'; payload: { path: string } }

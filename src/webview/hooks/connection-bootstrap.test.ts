@@ -325,7 +325,7 @@ describe('connection-bootstrap helpers', () => {
     expect(selectSession).toHaveBeenCalledWith('session-1');
   });
 
-  it('restores a recent active session on startup', async () => {
+  it('lets an editor session route override the recent startup view', async () => {
     const setShowSessionPicker = vi.fn();
     const selectSession = vi.fn(async () => {});
 
@@ -341,9 +341,10 @@ describe('connection-bootstrap helpers', () => {
           sessionId: 'session-1',
           timestamp: 1_000_000,
         }),
+        getInitialRoute: () => ({ type: 'session', sessionId: 'session-2' }),
         getSessionCount: () => 2,
         getOnlyPrimarySessionId: () => null,
-        hasSession: (sessionId) => sessionId === 'session-1',
+        hasSession: () => true,
         selectSession,
         setShowSessionPicker,
         recoverInterruptedSessions: vi.fn(async () => {}),
@@ -358,10 +359,10 @@ describe('connection-bootstrap helpers', () => {
     );
 
     expect(setShowSessionPicker).toHaveBeenCalledWith(false);
-    expect(selectSession).toHaveBeenCalledWith('session-1');
+    expect(selectSession).toHaveBeenCalledWith('session-2');
   });
 
-  it('keeps the new chat draft open when that was the recent startup view', async () => {
+  it('loads an editor session route outside the initial session page', async () => {
     const setShowSessionPicker = vi.fn();
     const selectSession = vi.fn(async () => {});
 
@@ -372,11 +373,50 @@ describe('connection-bootstrap helpers', () => {
         hydrateSessionStatuses: vi.fn(async () => {}),
         getActiveSessionId: () => null,
         getPersistedActiveSessionId: () => null,
-        getPersistedLastOpenedView: () => ({ type: 'new-session', timestamp: 1_000_000 }),
+        getPersistedLastOpenedView: () => null,
+        getInitialRoute: () => ({ type: 'session', sessionId: 'session-outside-page' }),
+        getSessionCount: () => 100,
+        getOnlyPrimarySessionId: () => null,
+        hasSession: () => false,
+        selectSession,
+        setShowSessionPicker,
+        recoverInterruptedSessions: vi.fn(async () => {}),
+        setInitialized: vi.fn(),
+        setError: vi.fn(),
+      },
+      {
+        next: () => 1,
+        isCurrent: () => true,
+      }
+    );
+
+    expect(setShowSessionPicker).toHaveBeenCalledWith(false);
+    expect(selectSession).toHaveBeenCalledWith('session-outside-page');
+  });
+
+  it('lets an editor new-session route override a persisted session', async () => {
+    const setShowSessionPicker = vi.fn();
+    const selectSession = vi.fn(async () => {});
+    const startNewSession = vi.fn();
+
+    await initConnectionWithDependencies(
+      {
+        health: vi.fn(async () => HEALTHY_RESPONSE),
+        loadInitialData: vi.fn(async () => {}),
+        hydrateSessionStatuses: vi.fn(async () => {}),
+        getActiveSessionId: () => 'session-1',
+        getPersistedActiveSessionId: () => null,
+        getPersistedLastOpenedView: () => ({
+          type: 'session',
+          sessionId: 'session-1',
+          timestamp: 1_000_000,
+        }),
+        getInitialRoute: () => ({ type: 'new-session' }),
         getSessionCount: () => 1,
         getOnlyPrimarySessionId: () => 'session-1',
         hasSession: () => true,
         selectSession,
+        startNewSession,
         setShowSessionPicker,
         recoverInterruptedSessions: vi.fn(async () => {}),
         setInitialized: vi.fn(),
@@ -390,6 +430,7 @@ describe('connection-bootstrap helpers', () => {
     );
 
     expect(setShowSessionPicker).toHaveBeenCalledWith(false);
+    expect(startNewSession).toHaveBeenCalledOnce();
     expect(selectSession).not.toHaveBeenCalled();
   });
 

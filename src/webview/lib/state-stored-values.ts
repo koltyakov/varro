@@ -10,6 +10,7 @@ import type {
   EditorDiagnostic,
   InitialWebviewState,
   PermissionMode,
+  WebviewInstanceContext,
 } from '../../shared/protocol';
 import { isPermissionMode } from '../../shared/protocol';
 import { isEditorContext } from '../../shared/extension-message';
@@ -236,6 +237,7 @@ function normalizeStoredDiagnostics<T>(value: T): QueuedMessage['attachedDiagnos
 function normalizeStoredQueuedMessage<T>(value: T): QueuedMessage | null {
   const record = asStoredRecord(value);
   const id = normalizeStoredString(record?.id);
+  const ownerViewId = normalizeStoredString(record?.ownerViewId);
   const messageId = normalizeStoredString(record?.messageId);
   const sessionId = normalizeStoredString(record?.sessionId);
   if (!id || !sessionId || !isString(record?.text)) return null;
@@ -284,6 +286,7 @@ function normalizeStoredQueuedMessage<T>(value: T): QueuedMessage | null {
 
   return {
     id,
+    ownerViewId: ownerViewId || undefined,
     messageId: messageId || undefined,
     sessionId,
     text: record.text,
@@ -351,4 +354,8 @@ export function readInitialWebviewState(): Partial<InitialWebviewState> {
   // SAFETY: The host owns __initialWebviewState and supplies the InitialWebviewState protocol shape.
   const initialState = value as InitialWebviewState;
   return initialState;
+}
+
+export function readWebviewInstanceContext(): WebviewInstanceContext | null {
+  return readInitialWebviewState().webviewContext ?? null;
 }

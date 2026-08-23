@@ -159,14 +159,8 @@ export function ContextPopup(props: {
                 onChange={(event) => setNestedBreakdown(event.currentTarget.checked)}
               />
               <UiIcon
-                source={squareIcon}
-                class="context-breakdown-checkbox context-breakdown-checkbox-unchecked"
-                width="16"
-                height="16"
-              />
-              <UiIcon
-                source={checkSquareIcon}
-                class="context-breakdown-checkbox context-breakdown-checkbox-checked"
+                source={nestedBreakdown() ? checkSquareIcon : squareIcon}
+                class={`context-breakdown-checkbox context-breakdown-checkbox-${nestedBreakdown() ? 'checked' : 'unchecked'}`}
                 width="16"
                 height="16"
               />

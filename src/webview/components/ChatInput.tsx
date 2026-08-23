@@ -73,6 +73,7 @@ import {
   setErrorRetry,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
+import { readWebviewInstanceContext } from '../lib/state-stored-values';
 import { client, serverEvents } from '../lib/client';
 import { openProviderSetup } from '../lib/provider-setup';
 import {
@@ -583,7 +584,24 @@ async function queuedMessageWasAdmitted(sessionId: string, messageId: string) {
   return false;
 }
 
+function postSessionModelSelection(sessionId: string, model: RalphSelectedModel) {
+  postMessage({
+    type: 'session-model/update',
+    payload: {
+      sessionId,
+      model: {
+        providerID: model.providerID,
+        modelID: model.modelID,
+        variant: model.variant ? model.variant : undefined,
+      },
+    },
+  });
+}
+
 export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => void } = {}) {
+  const queueOwnerViewId = readWebviewInstanceContext()?.viewId ?? 'sidebar';
+  const ownsQueuedMessage = (item: (typeof state.queuedMessages)[number]) =>
+    (item.ownerViewId ?? 'sidebar') === queueOwnerViewId;
   let richEditorRef: HTMLDivElement | undefined;
   let containerRef: HTMLDivElement | undefined;
   let inputFrameRef: HTMLDivElement | undefined;
@@ -1791,6 +1809,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             persistGlobal: true,
             rememberVariant: selectedModel.variant ?? null,
           });
+          postSessionModelSelection(editing.sessionId, selectedModel);
         }
         if (!optimisticPublished) resetMessageEditState();
       } else if (
@@ -1959,6 +1978,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   }
 
   async function dispatchQueuedMessage(item: (typeof state.queuedMessages)[number], retry = false) {
+    if (!ownsQueuedMessage(item)) return;
     if (isSessionAwaitingInput(item.sessionId)) return;
     if (dispatchingQueuedMessageId()) return;
     if (!retry && state.queuedMessages.find((queued) => queued.id === item.id)?.paused) return;
@@ -2020,6 +2040,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const blockedSessionIds = new Set<string>();
 
     for (const item of state.queuedMessages) {
+      if (!ownsQueuedMessage(item)) continue;
       if (item.paused || steeringIds.has(item.id) || failedSteerIds.has(item.id)) continue;
       if (blockedSessionIds.has(item.sessionId)) continue;
       if (failedIds.has(item.id)) {
@@ -3336,11 +3357,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       variant: state.selectedModel?.variant,
     };
 
+    const selectedSessionId = composerSessionId();
     setSelectedModel(nextModel, {
-      sessionId: composerSessionId(),
+      sessionId: selectedSessionId,
       persistGlobal: true,
       rememberVariant,
     });
+    if (selectedSessionId) postSessionModelSelection(selectedSessionId, nextModel);
     syncActiveRalphModel(nextModel);
 
     const usageLimit = activeUsageLimit();

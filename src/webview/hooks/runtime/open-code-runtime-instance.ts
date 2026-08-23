@@ -64,6 +64,8 @@ import {
   takeCachedSessionHistoryPage,
 } from '../../lib/message-window';
 import { getNewChatDraftGeneration, startNewChatDraft } from '../../lib/new-chat-draft';
+import { readWebviewInstanceContext } from '../../lib/state-stored-values';
+import { STORAGE_KEYS, writeStored } from '../../lib/state-storage';
 import {
   createConnectionBootstrapOperations,
   ensureConnectionInitializedWithDependencies,
@@ -1081,6 +1083,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
     onMount(() => {
       applyTheme(uiStore.theme());
+      const webviewContext = readWebviewInstanceContext();
+      if (webviewContext?.surface === 'editor') {
+        writeStored(STORAGE_KEYS.editorViewId, webviewContext.viewId);
+      }
 
       const mountBridgeOperations = createMountBridgeOperations({
         ensureConnectionInitialized,
@@ -1098,6 +1104,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           if (prefill !== undefined) {
             composerStore.setInputText(prefill);
           }
+        },
+        openSession: (sessionId) => {
+          void selectSession(sessionId);
         },
         abortSession: () => {
           void abortSession().catch(() => {});
@@ -1123,6 +1132,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
       postMessage({ type: 'ready' });
       syncQueuedMessages();
+      permissionsStore.syncSessionPermissionModesToHost();
 
       postFocusState();
 
@@ -1810,13 +1820,18 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     getActiveSessionId: () => appStore.state.activeSessionId,
     getPersistedActiveSessionId: sessionStore.getPersistedActiveSessionId,
     getPersistedLastOpenedView: sessionStore.getPersistedLastOpenedView,
+    getInitialRoute: () => {
+      const context = readWebviewInstanceContext();
+      return context?.surface === 'editor' ? context.initialRoute : null;
+    },
     getSessionCount: () => appStore.state.sessions.length,
     getOnlyPrimarySessionId: () => {
       const primarySessions = appStore.state.sessions.filter((session) => !session.parentID);
       return primarySessions.length === 1 ? primarySessions[0]?.id || null : null;
     },
     hasSession: (sessionId) => appStore.state.sessions.some((session) => session.id === sessionId),
-    selectSession: (sessionId) => sessionSyncOperations.selectSession(sessionId),
+    selectSession: (sessionId) => selectSession(sessionId),
+    startNewSession: startNewChatDraft,
     setShowSessionPicker: uiStore.setShowSessionPicker,
     setInitialized: (value) => {
       initialized = value;

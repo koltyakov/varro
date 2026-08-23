@@ -367,6 +367,7 @@ describe('mount bridge helpers', () => {
 
   it('routes command and server-event messages to the expected actions', () => {
     const createSession = vi.fn();
+    const openSession = vi.fn();
     const focusComposer = vi.fn();
     const openAttentionSessions = vi.fn();
     const searchSessions = vi.fn();
@@ -401,6 +402,7 @@ describe('mount bridge helpers', () => {
       addContextFiles: addDroppedContextFiles,
       removeContextFile: removeDroppedContextFile,
       createSession,
+      openSession,
       requestComposerFocus: focusComposer,
       requestOpenAttentionSessions: openAttentionSessions,
       requestSessionSearchFocus: searchSessions,
@@ -419,6 +421,10 @@ describe('mount bridge helpers', () => {
     handleExtensionMessageWithDependencies(deps, {
       type: 'command/new-session',
       payload: { prefill: '/init' },
+    });
+    handleExtensionMessageWithDependencies(deps, {
+      type: 'command/open-session',
+      payload: { sessionId: 'session-1' },
     });
     handleExtensionMessageWithDependencies(deps, { type: 'command/focus-input' });
     handleExtensionMessageWithDependencies(deps, { type: 'command/open-attention-sessions' });
@@ -470,6 +476,7 @@ describe('mount bridge helpers', () => {
 
     expect(createSession).toHaveBeenNthCalledWith(1, undefined);
     expect(createSession).toHaveBeenNthCalledWith(2, '/init');
+    expect(openSession).toHaveBeenCalledWith('session-1');
     expect(focusComposer).toHaveBeenCalledTimes(1);
     expect(openAttentionSessions).toHaveBeenCalledTimes(1);
     expect(searchSessions).toHaveBeenCalledTimes(1);

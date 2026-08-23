@@ -1,5 +1,6 @@
 import type { HealthResponse } from '../../shared/health';
 import { normalizeModelVariant } from '../../shared/model-variant';
+import type { WebviewRoute } from '../../shared/protocol';
 import type { MessageEntry, SessionStatus } from '../types';
 
 type ResolvedModel = { providerID: string; modelID: string; variant?: string };
@@ -128,10 +129,12 @@ export async function initConnectionWithDependencies(
     getActiveSessionId(): string | null;
     getPersistedActiveSessionId(): string | null;
     getPersistedLastOpenedView?(): LastOpenedView | null;
+    getInitialRoute?(): WebviewRoute | null;
     getSessionCount?(): number;
     getOnlyPrimarySessionId(): string | null;
     hasSession(sessionId: string): boolean;
     selectSession(sessionId: string): Promise<void | boolean | object>;
+    startNewSession?(): void;
     setShowSessionPicker(value: boolean): void;
     recoverInterruptedSessions(generation: number): Promise<void | boolean | object>;
     setInitialized(value: boolean): void;
@@ -152,7 +155,7 @@ export async function initConnectionWithDependencies(
     await deps.hydrateSessionStatuses();
     if (!generationRef.isCurrent(generation)) return;
 
-    if (!deps.getActiveSessionId()) {
+    if (deps.getInitialRoute?.() || !deps.getActiveSessionId()) {
       await restoreStartupView(deps, generation, generationRef);
       if (!generationRef.isCurrent(generation)) return;
     }
@@ -174,10 +177,12 @@ async function restoreStartupView(
   deps: {
     getPersistedActiveSessionId(): string | null;
     getPersistedLastOpenedView?(): LastOpenedView | null;
+    getInitialRoute?(): WebviewRoute | null;
     getSessionCount?(): number;
     getOnlyPrimarySessionId(): string | null;
     hasSession(sessionId: string): boolean;
     selectSession(sessionId: string): Promise<void | boolean | object>;
+    startNewSession?(): void;
     setShowSessionPicker(value: boolean): void;
     now?(): number;
   },
@@ -185,7 +190,17 @@ async function restoreStartupView(
   generationRef: { isCurrent(generation: number): boolean }
 ) {
   const sessionCount = deps.getSessionCount?.() ?? 0;
+  const initialRoute = deps.getInitialRoute?.() ?? null;
   const lastOpenedView = deps.getPersistedLastOpenedView?.() ?? null;
+
+  if (initialRoute) {
+    if (initialRoute.type === 'new-session') deps.startNewSession?.();
+    deps.setShowSessionPicker(false);
+    if (initialRoute.type === 'session') {
+      await deps.selectSession(initialRoute.sessionId);
+    }
+    return;
+  }
 
   if (
     lastOpenedView?.type === 'session' &&
@@ -251,10 +266,12 @@ export function createConnectionBootstrapOperations(deps: {
   getActiveSessionId(): string | null;
   getPersistedActiveSessionId(): string | null;
   getPersistedLastOpenedView?(): LastOpenedView | null;
+  getInitialRoute?(): WebviewRoute | null;
   getSessionCount?(): number;
   getOnlyPrimarySessionId(): string | null;
   hasSession(sessionId: string): boolean;
   selectSession(sessionId: string): Promise<void | boolean | object>;
+  startNewSession?(): void;
   setShowSessionPicker(value: boolean): void;
   setInitialized(value: boolean): void;
   setError(message: string | null): void;
@@ -317,10 +334,12 @@ export function createConnectionBootstrapOperations(deps: {
         getActiveSessionId: deps.getActiveSessionId,
         getPersistedActiveSessionId: deps.getPersistedActiveSessionId,
         getPersistedLastOpenedView: deps.getPersistedLastOpenedView,
+        getInitialRoute: deps.getInitialRoute,
         getSessionCount: deps.getSessionCount,
         getOnlyPrimarySessionId: deps.getOnlyPrimarySessionId,
         hasSession: deps.hasSession,
         selectSession: deps.selectSession,
+        startNewSession: deps.startNewSession,
         setShowSessionPicker: deps.setShowSessionPicker,
         recoverInterruptedSessions,
         setInitialized: deps.setInitialized,

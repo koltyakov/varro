@@ -1509,12 +1509,26 @@ describe('ChatInput', () => {
 
     const nested = container?.querySelector<HTMLInputElement>('.context-breakdown-nested input');
     expect(nested?.checked).toBe(true);
+    expect(container?.querySelectorAll('.context-breakdown-checkbox')).toHaveLength(1);
+    expect(container?.querySelector('.context-breakdown-checkbox-checked')).not.toBeNull();
 
     expect(
       [...(container?.querySelectorAll('.context-breakdown-item') || [])].map(
         (item) => item.textContent
       )
     ).toEqual(['Tool Calls50.0%', 'Other50.0%']);
+
+    nested?.click();
+    await Promise.resolve();
+
+    expect(nested?.checked).toBe(false);
+    expect(container?.querySelectorAll('.context-breakdown-checkbox')).toHaveLength(1);
+    expect(container?.querySelector('.context-breakdown-checkbox-unchecked')).not.toBeNull();
+    expect(
+      [...(container?.querySelectorAll('.context-breakdown-item') || [])].map(
+        (item) => item.textContent
+      )
+    ).toEqual(['Other100.0%']);
   });
 
   it('keeps the provider limit chip accessible while the popup is open', async () => {

@@ -124,12 +124,15 @@ describe('AppRoot', () => {
     setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
     mountAppRoot();
 
-    expect(container?.textContent).toContain('Loading workspace...');
+    expect(container?.querySelector('[role="status"]')?.getAttribute('aria-label')).toBe(
+      'Loading workspace'
+    );
+    expect(container?.textContent?.trim()).toBe('');
     expect(container?.textContent).not.toContain('New Chat');
 
     setConnectionInitialized(true);
 
-    expect(container?.textContent).not.toContain('Loading workspace...');
+    expect(container?.querySelector('[role="status"]')).toBeNull();
     expect(container?.textContent).toContain('New Chat');
   });
 

@@ -18,6 +18,7 @@ export class BrowserPersistence implements Persistence {
   get<T>(key: string): T | undefined {
     const vscodeValue = readVsCodeWebviewStateValue<T>(key);
     if (vscodeValue !== undefined) return vscodeValue;
+    if (!shouldUseLocalStorage(key)) return undefined;
 
     try {
       const raw = this.storage?.getItem(key);
@@ -35,6 +36,7 @@ export class BrowserPersistence implements Persistence {
       logWarn(`browser-persistence:vscode-state-write:${key}`, vscodeStateFailure.error);
     }
 
+    if (!shouldUseLocalStorage(key)) return;
     try {
       const serialized = JSON.stringify(value);
       if (serialized === undefined) {
@@ -65,6 +67,7 @@ export class BrowserPersistence implements Persistence {
       logWarn(`browser-persistence:vscode-state-remove:${key}`, vscodeStateFailure.error);
     }
 
+    if (!shouldUseLocalStorage(key)) return;
     try {
       this.storage?.removeItem(key);
     } catch (err) {
@@ -74,6 +77,21 @@ export class BrowserPersistence implements Persistence {
       }
     }
   }
+}
+
+const EDITOR_INSTANCE_KEYS = new Set([
+  'varro.inputDraft',
+  'varro.inputDraftFiles',
+  'varro.editorViewId',
+  'varro.lastActiveSessionId',
+  'varro.lastOpenedView',
+]);
+
+function shouldUseLocalStorage(key: string): boolean {
+  const initialState = asRecord(window)?.__initialWebviewState;
+  const webviewContext = asRecord(initialState)?.webviewContext;
+  const contextRecord = asRecord(webviewContext);
+  return !(contextRecord?.surface === 'editor' && EDITOR_INSTANCE_KEYS.has(key));
 }
 
 function acquireLocalStorage(): Storage | undefined {

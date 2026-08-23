@@ -21,6 +21,7 @@ import {
   setPermissionModeForSession,
   setQuestions,
   syncDraftPermissionForWorkspace,
+  syncSessionPermissionModesToHost,
   upsertQuestion,
 } from '../state';
 
@@ -32,6 +33,7 @@ export const permissionsStore = {
   removePermissionModeForSession,
   resetDraftPermissionMode,
   syncDraftPermissionForWorkspace,
+  syncSessionPermissionModesToHost,
   saveProjectPermissionMode,
   setDefaultPermissionModePreference,
   getPermissionGroupMembers,

@@ -1,6 +1,7 @@
 import {
   isPermissionMode,
   parseServerEvent,
+  type ChatModelSelection,
   type ContextLineRange,
   type DesktopSessionPaneSide,
   type DroppedFile,
@@ -33,7 +34,12 @@ const KNOWN_TYPES = new Set<string>([
   'theme/update',
   'vscode/open-result',
   'api/response',
+  'queued-messages/sync',
+  'permission-modes/sync',
+  'session-models/sync',
+  'editor-tabs/state',
   'command/new-session',
+  'command/open-session',
   'command/focus-input',
   'command/search-sessions',
   'command/open-attention-sessions',
@@ -60,6 +66,12 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
       const payload = asRecord(record.payload);
       if (!payload || !isString(payload.prefill)) return null;
       return { type, payload: { prefill: payload.prefill } };
+    }
+
+    case 'command/open-session': {
+      const payload = asRecord(record.payload);
+      if (!payload || !isString(payload.sessionId)) return null;
+      return { type, payload: { sessionId: payload.sessionId } };
     }
 
     case 'command/focus-input':
@@ -216,6 +228,70 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
       if (payload.error !== undefined) response.error = String(payload.error);
       if (payload.data !== undefined) response.data = payload.data;
       return { type, payload: response };
+    }
+
+    case 'queued-messages/sync': {
+      const payload = asRecord(record.payload);
+      if (!payload || !Array.isArray(payload.messages)) return null;
+      for (const message of payload.messages) {
+        const item = asRecord(message);
+        if (
+          !item ||
+          !isString(item.id) ||
+          !isString(item.sessionId) ||
+          !isString(item.text) ||
+          (item.ownerViewId !== undefined && !isString(item.ownerViewId))
+        ) {
+          return null;
+        }
+      }
+      return {
+        type,
+        payload: {
+          // SAFETY: The extension owns this snapshot; routing-critical queue fields are validated above.
+          messages: payload.messages as Extract<
+            ExtensionMessage,
+            { type: 'queued-messages/sync' }
+          >['payload']['messages'],
+        },
+      };
+    }
+
+    case 'permission-modes/sync': {
+      const payload = asRecord(record.payload);
+      const modes = asRecord(payload?.modes);
+      if (!modes || !Object.values(modes).every(isPermissionMode)) return null;
+      return {
+        type,
+        payload: {
+          // SAFETY: Every value in the host-owned mode map was validated above.
+          modes: modes as Extract<
+            ExtensionMessage,
+            { type: 'permission-modes/sync' }
+          >['payload']['modes'],
+        },
+      };
+    }
+
+    case 'session-models/sync': {
+      const payload = asRecord(record.payload);
+      const models = asRecord(payload?.models);
+      if (!models) return null;
+      const parsed: Record<string, ChatModelSelection> = {};
+      for (const [sessionId, modelValue] of Object.entries(models)) {
+        const model = asRecord(modelValue);
+        if (!model || !isString(model.providerID) || !isString(model.modelID)) return null;
+        if (model.variant !== undefined && !isString(model.variant)) return null;
+        parsed[sessionId] = model.variant
+          ? { providerID: model.providerID, modelID: model.modelID, variant: model.variant }
+          : { providerID: model.providerID, modelID: model.modelID };
+      }
+      return { type, payload: { models: parsed } };
+    }
+
+    case 'editor-tabs/state': {
+      const payload = asRecord(record.payload);
+      return payload && isBoolean(payload.open) ? { type, payload: { open: payload.open } } : null;
     }
 
     case 'ralph/state': {

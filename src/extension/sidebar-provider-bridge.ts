@@ -5,12 +5,12 @@ import { logger } from './logger';
 import { renderWebviewHtml, type WebviewAssetUris } from './webview-html';
 
 export class SidebarProviderBridge {
-  private view?: vscode.WebviewView;
+  private view?: vscode.WebviewView | vscode.WebviewPanel;
   private deliveryFailureHandler?: () => void;
 
   constructor(private readonly extensionUri: vscode.Uri) {}
 
-  setView(view: vscode.WebviewView | undefined) {
+  setView(view: vscode.WebviewView | vscode.WebviewPanel | undefined) {
     this.view = view;
   }
 

@@ -3,7 +3,7 @@ import type { Command, Provider } from '../types';
 import type { SelectedModel } from './app-state-types';
 import type { McpStatus, ProviderLimitStatus } from '../../shared/protocol';
 import type { ProviderAuthMethodsByProvider } from '../../shared/opencode-types';
-import { setState, state } from './app-state';
+import { setState, showSessionPicker, state } from './app-state';
 import { providerRequiresReconnection } from './provider-connection-state';
 import { STORAGE_KEYS, writeStored } from './state-storage';
 
@@ -97,6 +97,16 @@ export function clearSelectedModelForSession(sessionId: string) {
     })
   );
   writeStored(STORAGE_KEYS.sessionSelectedModels, { ...state.sessionSelectedModels });
+}
+
+export function applySessionSelectedModelsSnapshot(models: Record<string, SelectedModel>) {
+  setState('sessionSelectedModels', reconcile(models));
+  writeStored(STORAGE_KEYS.sessionSelectedModels, models);
+  const sessionId = showSessionPicker() ? null : state.activeSessionId;
+  const activeModel = sessionId ? models[sessionId] : undefined;
+  if (sessionId && activeModel) {
+    setSelectedModel(activeModel, { sessionId, persistGlobal: false });
+  }
 }
 
 export function setMcpStatus(status: Record<string, McpStatus>) {

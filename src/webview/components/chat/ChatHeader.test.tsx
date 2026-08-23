@@ -3,9 +3,10 @@ import { cableTagIcon } from '../../lib/ui-icons';
 import { toCssUrl } from '../UiIcon';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../../types';
+import type { WebviewMessage } from '../../../shared/protocol';
 import { client } from '../../lib/client';
 import { setShowSessionPicker, setState, showSessionPicker } from '../../lib/state';
-import { ActiveChatHeader } from './ChatHeader';
+import { ActiveChatHeader, getNewChatEditorShortcut, SessionPickerHeader } from './ChatHeader';
 import { SessionActionFeedback } from './SessionActionFeedback';
 
 const deleteSessionMock = vi.hoisted(() => vi.fn());
@@ -32,7 +33,10 @@ function session(overrides: Partial<Session> = {}): Session {
   };
 }
 
-function renderHeader(activeSubagentRootId: string | null = null) {
+function renderHeader(
+  activeSubagentRootId: string | null = null,
+  options: { showActions?: boolean; onCreateSession?: () => void } = {}
+) {
   cleanup = render(
     () => (
       <>
@@ -40,7 +44,7 @@ function renderHeader(activeSubagentRootId: string | null = null) {
           title="Session one"
           showBackButton={false}
           backTitle="Back"
-          showActions={false}
+          showActions={options.showActions ?? false}
           activeSubagentRootId={activeSubagentRootId}
           activeSubagentCount={activeSubagentRootId ? 2 : 0}
           activeSubagentLabel="Subagents"
@@ -56,7 +60,7 @@ function renderHeader(activeSubagentRootId: string | null = null) {
           onOpenPlanReadySessions={vi.fn()}
           onOpenCompletedSessions={vi.fn()}
           onOpenRunningSessions={vi.fn()}
-          onCreateSession={vi.fn()}
+          onCreateSession={options.onCreateSession ?? vi.fn()}
         />
         <SessionActionFeedback />
       </>
@@ -119,6 +123,32 @@ describe('SessionActionFeedback icon state', () => {
 });
 
 describe('ActiveChatHeader', () => {
+  it('uses the platform-specific editor shortcut in the new-chat tooltip', () => {
+    expect(getNewChatEditorShortcut('MacIntel')).toBe('Option-click to open in editor');
+    expect(getNewChatEditorShortcut('Win32')).toBe('Alt-click to open in editor');
+    expect(getNewChatEditorShortcut('Linux x86_64')).toBe('Alt-click to open in editor');
+  });
+
+  it('renders the new-chat tooltip title and shortcut on separate rows', async () => {
+    vi.useFakeTimers();
+    try {
+      renderHeader(null, { showActions: true });
+      container
+        .querySelector<HTMLButtonElement>('[aria-label="New chat"]')!
+        .dispatchEvent(new MouseEvent('mouseenter'));
+      vi.advanceTimersByTime(1000);
+      await Promise.resolve();
+
+      const tooltip = document.body.querySelector<HTMLElement>('[role="tooltip"]');
+      expect(tooltip?.querySelector('strong.new-chat-tooltip-title')?.textContent).toBe('New chat');
+      expect(tooltip?.querySelector('.new-chat-tooltip-shortcut')?.textContent).toBe(
+        getNewChatEditorShortcut()
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('opens the session context menu from the title', () => {
     renderHeader();
 
@@ -134,12 +164,27 @@ describe('ActiveChatHeader', () => {
     const menu = document.body.querySelector<HTMLElement>('[aria-label="Session actions"]');
     expect(menu).not.toBeNull();
     expect(menu!.textContent).toContain('Rename');
-    expect(menu!.textContent).toContain('Pin');
+    expect(menu!.textContent).toContain('Pin session');
     expect(menu!.textContent).toContain('Copy session ID');
-    expect(menu!.textContent).toContain('Open in OpenCode');
+    expect(menu!.textContent).toContain('Open as Editor');
+    expect(menu!.textContent).toContain('Open in terminal');
     expect(menu!.textContent).toContain('Share session');
     expect(menu!.textContent).not.toContain('Unshare session');
     expect(menu!.textContent).toContain('Move to Recycle Bin');
+    expect(
+      Array.from(menu!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).map((button) =>
+        button.textContent?.trim()
+      )
+    ).toEqual([
+      'Open as Editor',
+      'Open in terminal',
+      'Rename',
+      'Pin session',
+      'Copy session ID',
+      'Share session',
+      'Move to Recycle Bin',
+    ]);
+    expect(menu!.querySelectorAll('[role="separator"]')).toHaveLength(3);
     expect(menu!.style.left).toBe('40px');
     expect(menu!.style.top).toBe('50px');
   });
@@ -156,8 +201,87 @@ describe('ActiveChatHeader', () => {
     expect(menu?.textContent).not.toContain('Rename');
     expect(menu?.textContent).not.toContain('Move to Recycle Bin');
     expect(menu?.textContent).toContain('Copy session ID');
-    expect(menu?.textContent).toContain('Open in OpenCode');
+    expect(menu?.textContent).toContain('Open as Editor');
+    expect(menu?.textContent).toContain('Open in terminal');
     expect(menu?.textContent).toContain('Share session');
+  });
+
+  it('opens the active session as an editor and returns the panel to the sessions list', () => {
+    const send = vi.fn<(message: WebviewMessage) => void>();
+    // SAFETY: The fixture provides the bridge callback used by postMessage.
+    (window as { __sendToExtension?: (message: WebviewMessage) => void }).__sendToExtension = send;
+    renderHeader();
+    container
+      .querySelector<HTMLElement>('.chat-header-session-title')!
+      .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+
+    Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
+      .find((button) => button.textContent?.trim() === 'Open as Editor')!
+      .click();
+
+    expect(send).toHaveBeenCalledWith({
+      type: 'session/open-in-editor',
+      payload: {
+        sessionId: 'session-1',
+        title: 'Session one',
+        model: undefined,
+      },
+    });
+    expect(showSessionPicker()).toBe(true);
+  });
+
+  it('keeps normal plus clicks local and opens Alt-clicks in editor tabs', () => {
+    const send = vi.fn<(message: WebviewMessage) => void>();
+    const createActiveSession = vi.fn();
+    const createPickerSession = vi.fn();
+    // SAFETY: The fixture provides the bridge callback used by postMessage.
+    (window as { __sendToExtension?: (message: WebviewMessage) => void }).__sendToExtension = send;
+    renderHeader(null, { showActions: true, onCreateSession: createActiveSession });
+
+    const activePlus = container.querySelector<HTMLButtonElement>('[aria-label="New chat"]')!;
+    activePlus.click();
+    activePlus.dispatchEvent(new MouseEvent('click', { bubbles: true, altKey: true }));
+
+    expect(createActiveSession).toHaveBeenCalledOnce();
+
+    cleanup?.();
+    cleanup = render(
+      () => (
+        <SessionPickerHeader
+          filterLabel={null}
+          filterPrefix="Filtered:"
+          primarySessionsCount={1}
+          showFailedBadge={false}
+          showAttentionBadge={false}
+          showPlanReadyBadge={false}
+          showCompletedBadge={false}
+          showRunningBadge={false}
+          failedCount={0}
+          attentionCount={0}
+          planReadyCount={0}
+          completedCount={0}
+          runningCount={0}
+          showNewChatButton
+          onClearFilter={vi.fn()}
+          onOpenFailedSessions={vi.fn()}
+          onOpenAttentionSessions={vi.fn()}
+          onOpenPlanReadySessions={vi.fn()}
+          onOpenCompletedSessions={vi.fn()}
+          onOpenRunningSessions={vi.fn()}
+          onCreateSession={createPickerSession}
+        />
+      ),
+      container
+    );
+    const pickerPlus = container.querySelector<HTMLButtonElement>('[aria-label="New chat"]')!;
+    pickerPlus.click();
+    pickerPlus.dispatchEvent(new MouseEvent('click', { bubbles: true, altKey: true }));
+
+    expect(createPickerSession).toHaveBeenCalledOnce();
+    expect(send.mock.calls.filter(([message]) => message.type === 'chat/new-editor')).toEqual([
+      [{ type: 'chat/new-editor' }],
+      [{ type: 'chat/new-editor' }],
+    ]);
   });
 
   it('returns to the sessions list after deleting from the header menu', async () => {
@@ -191,7 +315,7 @@ describe('ActiveChatHeader', () => {
       .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     const unpin = Array.from(
       document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
-    ).find((button) => button.textContent === 'Unpin');
+    ).find((button) => button.textContent === 'Unpin session');
     unpin!.click();
 
     await vi.waitFor(() => expect(setPinned).toHaveBeenCalledWith('session-1', false));

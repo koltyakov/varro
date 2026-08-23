@@ -146,8 +146,17 @@ function createActionFixture() {
     searchFiles: vi.fn(),
     runInTerminal: vi.fn(),
     openSessionInTerminal: vi.fn(),
+    openSessionInEditor: vi.fn(),
+    openNewEditor: vi.fn(),
+    editorRouteChanged: vi.fn(),
     handleRalphMessage: vi.fn<SidebarProviderActionDeps['handleRalphMessage']>(),
     updateQueuedMessages: vi.fn<SidebarProviderActionDeps['updateQueuedMessages']>(() =>
+      Promise.resolve()
+    ),
+    updatePermissionMode: vi.fn<SidebarProviderActionDeps['updatePermissionMode']>(() =>
+      Promise.resolve()
+    ),
+    updateSessionModel: vi.fn<SidebarProviderActionDeps['updateSessionModel']>(() =>
       Promise.resolve()
     ),
     updateDraftImages: vi.fn<SidebarProviderActionDeps['updateDraftImages']>(() =>
@@ -195,6 +204,19 @@ describe('createSidebarProviderActions', () => {
     );
 
     expect(deps.openSessionInTerminal).not.toHaveBeenCalled();
+  });
+
+  it('validates a session before opening it in an editor', async () => {
+    const { actions, deps, server } = createActionFixture();
+
+    await actions.openSessionInEditor('session-1', 'Editor session');
+    expect(deps.openSessionInEditor).toHaveBeenCalledWith('session-1', 'Editor session', undefined);
+
+    server.request.mockResolvedValueOnce({ id: 'session-foreign', directory: '/other-repo' });
+    await expect(actions.openSessionInEditor('session-foreign')).rejects.toThrow(
+      'Session does not belong to the current workspace'
+    );
+    expect(deps.openSessionInEditor).not.toHaveBeenCalledWith('session-foreign');
   });
 
   it('does not fall back to opening a path rejected by the session diff guard', async () => {

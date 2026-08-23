@@ -4,9 +4,13 @@ import { cleanupBridge, initializeBridge, postMessage } from './lib/bridge';
 // oxlint-disable-next-line no-unassigned-import
 import './index.css';
 import { isFunction } from './lib/runtime-values';
+import { readWebviewInstanceContext } from './lib/state-stored-values';
 
 const STARTUP_HANDLERS_KEY = '__clearVarroBootstrapFailureHandlers';
 const APP_CLEANUP_KEY = '__cleanupVarroApp';
+const EDITOR_SURFACE_CLASS = 'varro-editor-surface';
+const EDITOR_LAYOUT_PENDING_CLASS = 'varro-editor-layout-pending';
+const EDITOR_LAYOUT_SETTLE_MS = 50;
 type BootstrapWindow = Window & {
   __clearVarroBootstrapFailureHandlers?: () => void;
   __cleanupVarroApp?: () => void;
@@ -35,6 +39,49 @@ function cleanupBridgeSafe() {
   }
 }
 
+function trackEditorLayoutSettling() {
+  const html = document.documentElement;
+  let settleTimer: number | undefined;
+  let settleFrame: number | undefined;
+
+  const cancelSettle = () => {
+    if (settleTimer !== undefined) window.clearTimeout(settleTimer);
+    if (settleFrame !== undefined) window.cancelAnimationFrame(settleFrame);
+    settleTimer = undefined;
+    settleFrame = undefined;
+  };
+  const settle = () => {
+    cancelSettle();
+    settleTimer = window.setTimeout(() => {
+      settleTimer = undefined;
+      settleFrame = window.requestAnimationFrame(() => {
+        settleFrame = undefined;
+        html.classList.remove(EDITOR_LAYOUT_PENDING_CLASS);
+      });
+    }, EDITOR_LAYOUT_SETTLE_MS);
+  };
+  const handleVisibilityChange = () => {
+    cancelSettle();
+    html.classList.add(EDITOR_LAYOUT_PENDING_CLASS);
+    if (document.visibilityState !== 'hidden') settle();
+  };
+  const handleResize = () => {
+    if (html.classList.contains(EDITOR_LAYOUT_PENDING_CLASS)) settle();
+  };
+
+  html.classList.add(EDITOR_LAYOUT_PENDING_CLASS);
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+  window.addEventListener('resize', handleResize);
+  if (document.visibilityState !== 'hidden') settle();
+
+  return () => {
+    cancelSettle();
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
+    window.removeEventListener('resize', handleResize);
+    html.classList.remove(EDITOR_LAYOUT_PENDING_CLASS);
+  };
+}
+
 export function showBootstrapFailure(root: HTMLElement) {
   const fallback = document.createElement('div');
   fallback.setAttribute('role', 'alert');
@@ -54,6 +101,9 @@ export function showBootstrapFailure(root: HTMLElement) {
 }
 
 export function bootstrap(root: HTMLElement) {
+  const isEditorSurface = readWebviewInstanceContext()?.surface === 'editor';
+  document.documentElement.classList.toggle(EDITOR_SURFACE_CLASS, isEditorSurface);
+  const stopTrackingEditorLayout = isEditorSurface ? trackEditorLayoutSettling() : undefined;
   let dispose: (() => void) | undefined;
   let failed = false;
   const disposeWebview = () => {
@@ -93,6 +143,8 @@ export function bootstrap(root: HTMLElement) {
       logWebviewError('Varro webview startup handler cleanup failed', error);
     }
     disposeWebview();
+    stopTrackingEditorLayout?.();
+    document.documentElement.classList.remove(EDITOR_SURFACE_CLASS);
   };
 }
 

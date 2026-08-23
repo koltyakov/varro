@@ -1,4 +1,5 @@
 import {
+  connectionInitialized,
   desktopSessionPaneSide,
   state,
   showSessionPicker,
@@ -10,6 +11,7 @@ import {
   isSessionUnread,
   isActiveSessionWorking,
   getSessionTreeRootId,
+  persistLastOpenedView,
   setShowModels,
 } from '../lib/state';
 import { Show, createSignal, onMount, onCleanup, createEffect, createMemo, on } from 'solid-js';
@@ -56,6 +58,7 @@ import {
 } from '../lib/session-navigation';
 import { isFunction } from '../lib/runtime-values';
 import { ProviderConnectionDialog } from './ProviderConnectionDialog';
+import { readWebviewInstanceContext } from '../lib/state-stored-values';
 
 type HeaderSessionCounts = {
   running: number;
@@ -81,6 +84,8 @@ function isDesktopSessionPaneRight() {
 }
 
 export function Chat() {
+  const webviewContext = readWebviewInstanceContext();
+  const isEditorSurface = webviewContext?.surface === 'editor';
   const [providerConnectionData, setProviderConnectionData] = createSignal<{
     providers: Provider[];
     error: string;
@@ -159,7 +164,8 @@ export function Chat() {
   const isEventStreamDegraded = createMemo(
     () => state.serverStatus.state === 'running' && state.serverStatus.eventStream === 'degraded'
   );
-  const shouldRenderWorkspace = () => !showSessionPicker() || isDesktopSessionLayout();
+  const shouldRenderWorkspace = () =>
+    isEditorSurface || !showSessionPicker() || isDesktopSessionLayout();
   let reconnectBannerShowTimer: ReturnType<typeof setTimeout> | undefined;
   let reconnectBannerHideTimer: ReturnType<typeof setTimeout> | undefined;
   let reconnectBannerVisibleSince = 0;
@@ -168,6 +174,13 @@ export function Chat() {
   createEffect(() => {
     const activeSessionId = state.activeSessionId;
     const selectedModel = state.selectedModel;
+    const modelPayload = selectedModel
+      ? {
+          providerID: selectedModel.providerID,
+          modelID: selectedModel.modelID,
+          variant: selectedModel.variant ? selectedModel.variant : undefined,
+        }
+      : null;
     const canSwitchSessions =
       shouldRenderWorkspace() &&
       !showModels() &&
@@ -180,13 +193,30 @@ export function Chat() {
       payload: {
         canAbort: Boolean(activeSessionId) && isActiveSessionWorking(),
         canSwitchSessions,
-        model: selectedModel
-          ? {
-              providerID: selectedModel.providerID,
-              modelID: selectedModel.modelID,
-              variant: selectedModel.variant ? selectedModel.variant : undefined,
-            }
-          : null,
+        model: modelPayload,
+      },
+    });
+  });
+
+  let initialEditorRouteReconciled = false;
+  createEffect(() => {
+    if (initialEditorRouteReconciled || !isEditorSurface || !connectionInitialized()) return;
+    initialEditorRouteReconciled = true;
+    const initialRoute = webviewContext.initialRoute;
+    if (initialRoute.type === 'session' && state.activeSessionId !== initialRoute.sessionId) {
+      void selectSession(initialRoute.sessionId);
+    }
+  });
+
+  createEffect(() => {
+    if (!isEditorSurface || !connectionInitialized()) return;
+    const sessionId = state.activeSessionId;
+    const title = activeSession()?.title;
+    persistLastOpenedView(sessionId ? { type: 'session', sessionId } : { type: 'new-session' });
+    postMessage({
+      type: 'editor/route-changed',
+      payload: {
+        route: sessionId ? { type: 'session', sessionId, title } : { type: 'new-session' },
       },
     });
   });
@@ -676,7 +706,9 @@ export function Chat() {
       <ChatWorkspace
         shouldRenderWorkspace={shouldRenderWorkspace()}
         isDesktopSessionPaneRight={isDesktopSessionPaneRight()}
-        showSessionPicker={showSessionPicker()}
+        showDesktopSessionPane={!isEditorSurface}
+        showSessionHeader={!isEditorSurface}
+        showSessionPicker={isEditorSurface ? false : showSessionPicker()}
         showModels={showModels()}
         showReconnectBanner={showReconnectBanner()}
         slowApiRequests={slowApiRequests()}

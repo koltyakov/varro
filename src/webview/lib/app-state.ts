@@ -120,6 +120,7 @@ export interface AppState {
   pinnedSessionIds: string[];
   recycleBinEntries: RecycleBinEntry[];
   activeSessionId: string | null;
+  editorTabsOpen: boolean;
   currentDocumentEnabledBySession: Record<string, boolean>;
   sessionStatus: Record<string, SessionStatus>;
   messages: MessageEntry[];
@@ -317,6 +318,7 @@ export function createAppState(): AppStateInstance {
     pinnedSessionIds: initialWebviewState.pinnedSessionIds ?? [],
     recycleBinEntries: initialWebviewState.recycleBinEntries ?? [],
     activeSessionId: null,
+    editorTabsOpen: initialWebviewState.editorTabsOpen ?? false,
     currentDocumentEnabledBySession: {},
     sessionStatus: {},
     messages: [],
@@ -334,14 +336,26 @@ export function createAppState(): AppStateInstance {
     mcpStatus: {},
     lspStatus: [],
     providerDefaults: {},
-    sessionPermissionModes: readStoredPermissionModes(STORAGE_KEYS.sessionPermissionModes),
+    sessionPermissionModes:
+      initialWebviewState.webviewContext?.surface === 'editor'
+        ? (initialWebviewState.sessionPermissionModes ?? {})
+        : {
+            ...readStoredPermissionModes(STORAGE_KEYS.sessionPermissionModes),
+            ...initialWebviewState.sessionPermissionModes,
+          },
     sessionAutoPermissionCounts: {},
     sessionAutoPermissionActivity: {},
     autoPermissionCountsSince: Date.now(),
     selectedAgent: readStoredString(STORAGE_KEYS.selectedAgent),
     sessionSelectedAgents: readStoredStringRecord(STORAGE_KEYS.sessionSelectedAgents),
     selectedModel: readStoredSelectedModel(STORAGE_KEYS.selectedModel),
-    sessionSelectedModels: readStoredSelectedModels(STORAGE_KEYS.sessionSelectedModels),
+    sessionSelectedModels:
+      initialWebviewState.webviewContext?.surface === 'editor'
+        ? (initialWebviewState.sessionSelectedModels ?? {})
+        : {
+            ...readStoredSelectedModels(STORAGE_KEYS.sessionSelectedModels),
+            ...initialWebviewState.sessionSelectedModels,
+          },
     modelVariantSelections: readStoredNullableStringRecord(STORAGE_KEYS.modelVariantSelections),
     sessionSelectedMcps: readStoredStringArrayRecord(STORAGE_KEYS.sessionSelectedMcps),
     draftSelectedMcps: null,

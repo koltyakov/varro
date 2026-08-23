@@ -95,7 +95,9 @@ beforeEach(() => {
   setState('sessionSelectedModels', reconcile({}));
   setState('pinnedSessionIds', []);
   setState('activeSessionId', null);
+  setState('editorTabsOpen', false);
   setState('sessionStatus', {});
+  setState('editorTabsOpen', false);
   setState('completedSessionResponses', reconcile({}));
   setState('sessionsLoadError', null);
   setState('sessionsHasMore', false);
@@ -171,6 +173,56 @@ describe('SessionListSectionHeader icons', () => {
 });
 
 describe('SessionListView model details', () => {
+  it('opens an Alt-clicked session row in an editor tab', () => {
+    const send = vi.fn((message: TestRuntimeValue) => {
+      structuredClone(message);
+    });
+    // SAFETY: The fixture provides the bridge callback used by postMessage.
+    (window as { __sendToExtension?: (message: TestRuntimeValue) => void }).__sendToExtension =
+      send;
+    setState('sessions', [session('session-1', Date.now())]);
+    vi.mocked(selectSession).mockClear();
+
+    cleanup = render(() => <SessionListView />, container);
+    container
+      .querySelector<HTMLButtonElement>('.session-item-main')!
+      .dispatchEvent(new MouseEvent('click', { bubbles: true, altKey: true }));
+
+    expect(send).toHaveBeenCalledWith({
+      type: 'session/open-in-editor',
+      payload: { sessionId: 'session-1', title: 'session-1' },
+    });
+    expect(selectSession).not.toHaveBeenCalled();
+  });
+
+  it('opens sidebar session clicks in editor tabs while an editor tab exists', () => {
+    const send = vi.fn((message: TestRuntimeValue) => {
+      structuredClone(message);
+    });
+    // SAFETY: The fixture provides the bridge callback used by postMessage.
+    (window as { __sendToExtension?: (message: TestRuntimeValue) => void }).__sendToExtension =
+      send;
+    setState('editorTabsOpen', true);
+    setState('sessions', [session('session-1', Date.now())]);
+    setState('sessionSelectedModels', {
+      'session-1': { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
+    });
+    vi.mocked(selectSession).mockClear();
+
+    cleanup = render(() => <SessionListView />, container);
+    container.querySelector<HTMLButtonElement>('.session-item-main')!.click();
+
+    expect(send).toHaveBeenCalledWith({
+      type: 'session/open-in-editor',
+      payload: {
+        sessionId: 'session-1',
+        title: 'session-1',
+        model: { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
+      },
+    });
+    expect(selectSession).not.toHaveBeenCalled();
+  });
+
   it('renders hover-only model details and the provider icon in the row', async () => {
     vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
       files: 0,
@@ -712,7 +764,7 @@ describe('SessionListView pins', () => {
     expect(row().querySelector('[aria-label="Session actions"]')).toBeNull();
     openSessionActions(row());
     Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
-      .find((button) => button.textContent?.trim() === 'Pin')!
+      .find((button) => button.textContent?.trim() === 'Pin session')!
       .click();
 
     await vi.waitFor(() => expect(setPinned).toHaveBeenCalledWith('session-1', true));
@@ -724,7 +776,7 @@ describe('SessionListView pins', () => {
     });
     openSessionActions(row());
     Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
-      .find((button) => button.textContent?.trim() === 'Unpin')!
+      .find((button) => button.textContent?.trim() === 'Unpin session')!
       .click();
 
     await vi.waitFor(() => expect(setPinned).toHaveBeenLastCalledWith('session-1', false));
@@ -1075,11 +1127,12 @@ describe('SessionListView actions', () => {
     expect(menu?.textContent).not.toContain('Rename');
     expect(menu?.textContent).not.toContain('Move to Recycle Bin');
     expect(menu?.textContent).toContain('Copy session ID');
-    expect(menu?.textContent).toContain('Open in OpenCode');
+    expect(menu?.textContent).toContain('Open as Editor');
+    expect(menu?.textContent).toContain('Open in terminal');
     expect(menu?.textContent).toContain('Share session');
   });
 
-  it('opens a session in OpenCode from its row menu', () => {
+  it('opens a session in a terminal from its row menu', () => {
     const send = vi.fn();
     // SAFETY: The fixture provides the unknown fields read by this statement.
     (window as { __sendToExtension?: (message: TestRuntimeValue) => void }).__sendToExtension =
@@ -1097,12 +1150,49 @@ describe('SessionListView actions', () => {
 
     openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
     Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
-      .find((button) => button.textContent?.trim() === 'Open in OpenCode')!
+      .find((button) => button.textContent?.trim() === 'Open in terminal')!
       .click();
 
     expect(send).toHaveBeenCalledWith({
       type: 'session/open-in-opencode',
       payload: { sessionId: 'session-1' },
+    });
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it('opens a session in an editor tab from its row menu', () => {
+    const send = vi.fn((message: TestRuntimeValue) => {
+      structuredClone(message);
+    });
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    (window as { __sendToExtension?: (message: TestRuntimeValue) => void }).__sendToExtension =
+      send;
+    vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
+      files: 0,
+      additions: 0,
+      deletions: 0,
+      tokens: 0,
+      durationMs: 0,
+      activeStartedAt: null,
+    });
+    setSessions([session('session-1', Date.now())]);
+    setState('sessionSelectedModels', {
+      'session-1': { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
+    });
+    cleanup = render(() => <SessionListView />, container);
+
+    openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
+    Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
+      .find((button) => button.textContent?.trim() === 'Open as Editor')!
+      .click();
+
+    expect(send).toHaveBeenCalledWith({
+      type: 'session/open-in-editor',
+      payload: {
+        sessionId: 'session-1',
+        title: 'session-1',
+        model: { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
+      },
     });
     expect(document.querySelector('[role="menu"]')).toBeNull();
   });
@@ -1176,9 +1266,6 @@ describe('SessionListView actions', () => {
       openSessionActions(row);
       const sharedActions = Array.from(
         document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
-      );
-      expect(sharedActions.some((button) => button.textContent?.trim() === 'Copy share link')).toBe(
-        true
       );
       sharedActions.find((button) => button.textContent?.trim() === 'Unshare session')!.click();
 
@@ -1337,7 +1424,9 @@ describe('SessionListView actions', () => {
     );
 
     openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
-    document.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click();
+    Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
+      .find((button) => button.textContent?.trim() === 'Rename')!
+      .click();
     await Promise.resolve();
     const input = document.querySelector<HTMLInputElement>('[id^="session-rename-"]')!;
     input.value = 'Draft rename';
@@ -1384,7 +1473,9 @@ describe('SessionListView actions', () => {
     cleanup = render(() => <SessionListView />, container);
 
     openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
-    document.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click();
+    Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
+      .find((button) => button.textContent?.trim() === 'Rename')!
+      .click();
     await Promise.resolve();
 
     const input = document.querySelector<HTMLInputElement>('[id^="session-rename-"]')!;
@@ -1421,7 +1512,9 @@ describe('SessionListView actions', () => {
 
     const rows = container.querySelectorAll<HTMLElement>('.session-item');
     openSessionActions(rows[0]!);
-    document.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click();
+    Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
+      .find((button) => button.textContent?.trim() === 'Rename')!
+      .click();
     Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
       .find((button) => button.textContent === 'Cancel')!
       .click();
@@ -1445,7 +1538,9 @@ describe('SessionListView actions', () => {
     cleanup = render(() => <SessionListView />, container);
 
     openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
-    document.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click();
+    Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
+      .find((button) => button.textContent?.trim() === 'Rename')!
+      .click();
 
     const input = document.querySelector<HTMLInputElement>('[id^="session-rename-"]')!;
     input.value = '  Better title  ';

@@ -34,13 +34,6 @@ body { background: var(--vscode-sideBar-background, #181818); }
 }
 .varro-startup-dot:nth-child(2) { animation-delay: 0.3s; }
 .varro-startup-dot:nth-child(3) { animation-delay: 0.6s; }
-.varro-startup-title { margin: 0; font-size: 13px; font-weight: 500; }
-.varro-startup-detail {
-  margin: 6px 0 0;
-  font-size: 12px;
-  color: var(--vscode-descriptionForeground, #999999);
-  opacity: 0.7;
-}
 @keyframes varro-startup-pulse {
   0%, 100% { opacity: 0.35; transform: scale(0.85); }
   50% { opacity: 1; transform: scale(1); }
@@ -51,10 +44,6 @@ const LOADING_MARKUP = `<div class="varro-startup-loading" role="status" aria-la
       <span class="varro-startup-dot"></span>
       <span class="varro-startup-dot"></span>
       <span class="varro-startup-dot"></span>
-    </div>
-    <div>
-      <p class="varro-startup-title">Loading workspace...</p>
-      <p class="varro-startup-detail">Restoring your recent view</p>
     </div>
   </div>`;
 
@@ -74,6 +63,22 @@ export function renderWebviewLoadingHtml() {
 </html>`;
 }
 
+export function renderEditorWebviewPlaceholderHtml() {
+  return /*html*/ `<!DOCTYPE html>
+<html lang="en" style="height:100%;background:var(--vscode-editor-background,#1e1e1e)">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>${LOADING_STYLES}
+    body { background: var(--vscode-editor-background, #1e1e1e); }
+  </style>
+</head>
+<body>
+  <div id="root">${LOADING_MARKUP}</div>
+</body>
+</html>`;
+}
+
 export function renderWebviewHtml(
   cspSource: string,
   initialState: InitialWebviewState,
@@ -83,9 +88,13 @@ export function renderWebviewHtml(
   const serializedInitialState = serializeForInlineScript(initialState);
   const scriptUri = appendCacheKey(assets.scriptUri, nonce);
   const cssUri = appendCacheKey(assets.cssUri, nonce);
+  const htmlClass =
+    initialState.webviewContext?.surface === 'editor'
+      ? ' class="varro-editor-surface varro-editor-layout-pending"'
+      : '';
 
   return /*html*/ `<!DOCTYPE html>
-<html lang="en">
+<html lang="en"${htmlClass}>
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />

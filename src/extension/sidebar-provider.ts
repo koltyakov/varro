@@ -7,7 +7,10 @@ import type {
   ChatModelSelection,
   DroppedFile,
   ExtensionMessage,
+  QueuedMessageSnapshot,
+  WebviewInstanceContext,
   WebviewMessage,
+  WebviewRoute,
 } from '../shared/protocol';
 import { AutoApproveJudge } from './auto-approve-judge';
 import { CommitMessageService } from './commit-message-service';
@@ -38,6 +41,8 @@ import { SessionExportService } from './session-export-service';
 import { SessionDiffDocumentProvider } from './session-diff-document-provider';
 import { ToolOutputDocumentProvider } from './tool-output-document-provider';
 import { SessionStateManager } from './session-state-manager';
+import { SessionPermissionModeStore } from './session-permission-mode-store';
+import { SessionModelSelectionStore } from './session-model-selection-store';
 import { SessionTitleFallback } from './session-title-fallback';
 import { SessionTrashManager } from './session-trash-manager';
 import { createSidebarProviderActions } from './sidebar-provider-actions';
@@ -50,8 +55,31 @@ import { resolveServerLaunch } from './util/server-launch';
 
 const maximumTestedOpenCodeVersion = readMaximumTestedOpenCodeVersion();
 
+interface WebviewEndpoint {
+  bridge: SidebarProviderBridge;
+  contextFilesState: SidebarProviderContextFiles;
+  fileSearch: FileSearchService;
+  messageRouter: MessageRouter;
+  restProxy: RestProxy;
+  webviewSession: WebviewSession;
+}
+
+interface EditorEndpoint extends WebviewEndpoint {
+  key: string;
+  panel: vscode.WebviewPanel;
+  viewId: string;
+  restoringSessionId?: string;
+}
+
+interface EndpointRef {
+  restProxy?: RestProxy;
+}
+
+type PersistedEditorState = Record<string, unknown> | null | undefined;
+
 export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'varro.chat';
+  public static readonly editorViewType = 'varro.editor';
   private static readonly EXPORT_TIMEOUT_MS = 30_000;
   private static readonly RECYCLE_BIN_CLEANUP_INTERVAL_MS = 60_000;
   private static readonly SESSION_RECONCILE_INTERVAL_MS = 10_000;
@@ -64,6 +92,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly sessionTrash: SessionTrashManager;
   private readonly pinnedSessions: PinnedSessionManager;
   private readonly queuedMessages: QueuedMessageStore;
+  private readonly sessionPermissionModes: SessionPermissionModeStore;
+  private readonly sessionSelectedModels: SessionModelSelectionStore;
   private readonly draftImages: DraftImageStore;
   private readonly hiddenSessions: HiddenSessionManager;
   private readonly autoApproveJudge: AutoApproveJudge;
@@ -90,6 +120,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private mermaidPreviewMaximized = false;
   private mermaidPreviewLayoutQueue: Promise<void> = Promise.resolve();
   private readonly contextProvider: ContextProvider;
+  private readonly generatedDependencyTreeGuard: GeneratedDependencyTreeGuard;
+  private readonly endpoints = new Set<WebviewEndpoint>();
+  private readonly editorPanels = new Map<string, EditorEndpoint>();
+  private nextEditorId = 0;
+  private disposing = false;
 
   get view() {
     return this.bridge.getView();
@@ -116,7 +151,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   constructor(
-    extensionUri: vscode.Uri,
+    private readonly extensionUri: vscode.Uri,
     workspaceState: vscode.Memento,
     contextProvider: ContextProvider,
     private readonly server: OpenCodeServer,
@@ -137,6 +172,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.sessionTrash = new SessionTrashManager(persistence);
     this.pinnedSessions = new PinnedSessionManager(persistence);
     this.queuedMessages = new QueuedMessageStore(persistence);
+    this.sessionPermissionModes = new SessionPermissionModeStore(persistence);
+    this.sessionSelectedModels = new SessionModelSelectionStore(persistence);
     this.draftImages = new DraftImageStore(persistence);
     this.hiddenSessions = new HiddenSessionManager();
     this.autoApproveJudge = new AutoApproveJudge(server, this.hiddenSessions, isOpenAIPro, () =>
@@ -147,14 +184,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         .getConfiguration('varro')
         .get<boolean>('chat.autoRenameUntitledSessions', true)
     );
-    const generatedDependencyTreeGuard = new GeneratedDependencyTreeGuard();
+    this.generatedDependencyTreeGuard = new GeneratedDependencyTreeGuard();
     this.sessionState = new SessionStateManager(
       persistence,
       {
         onStatusChange: () => this.updateStatusBarItem(),
       },
       {
-        shouldShow: () => !this.bridge.getView()?.visible,
+        shouldShow: () => !this.isAnyEndpointVisible(),
       }
     );
     this.contextFilesState = new SidebarProviderContextFiles(this.droppedFilesService);
@@ -201,62 +238,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       { getPath: () => this.contextProvider.context.workspacePath }
     );
 
-    this.webviewSession = new WebviewSession(
-      this.bridge,
-      this.sessionState,
-      this.sessionTrash,
-      this.pinnedSessions,
-      this.hiddenSessions,
-      contextProvider,
-      this.contextFilesState,
-      {
-        handleMessage: (message) => this.handleMessage(message),
-        ensureServerStarted: () => this.runtime.ensureServerStarted(),
-        readConfig: () => this.readConfig(),
-        currentTheme: () => this.currentTheme(),
-        renderStatus: () => this.serverEventBridge.getStatus(),
-        handleReadySideEffects: () => this.cleanupExpiredRecycleBin(),
-        handleVisibleSideEffects: () => this.cleanupExpiredRecycleBin(),
-        updateStatusBarItem: () => this.updateStatusBarItem(),
-        postThemeUpdate: () =>
-          this.post({ type: 'theme/update', payload: { theme: this.currentTheme() } }),
-        onHidden: () => undefined,
-        resetStatusBarCache: () => {
-          this.lastStatusBarStateKey = '';
-        },
-        queuedMessages: () => this.queuedMessages.list(),
-        draftImages: () => this.draftImages.list(),
-        flushPendingServerEvents: () => this.serverEventBridge.flushPendingEvents(),
-        cancelApiRequestsBeforeGeneration: (generation) =>
-          this.restProxy.cancelRequestsBeforeGeneration(generation),
-      }
-    );
-
-    this.restProxy = new RestProxy({
-      server,
-      contextProvider,
-      providerLimitService: this.providerLimitService,
-      sessionState: this.sessionState,
-      sessionTrash: this.sessionTrash,
-      pinnedSessions: this.pinnedSessions,
-      hiddenSessions: this.hiddenSessions,
-      autoApproveJudge: this.autoApproveJudge,
-      sessionTitleFallback: this.sessionTitleFallback,
-      simulateNoProviders: this.simulateNoProviders,
-      getRequestGeneration: () => this.webviewSession.getRequestGeneration(),
-      getStatus: () => this.serverEventBridge.getStatus(),
-      ensureServerStarted: () => this.runtime.ensureServerStarted(),
-      confirmPromptAdmission: (workspacePath) =>
-        generatedDependencyTreeGuard.confirmPromptAdmission(workspacePath),
-      refreshOpenCodeConfig: (previousRouting, currentRouting) =>
-        this.refreshOpenCodeWorkspaceState(previousRouting, currentRouting),
-      cleanupExpiredRecycleBin: () => this.cleanupExpiredRecycleBin(),
-      removeSessionImages: (sessionIds) =>
-        this.droppedFilesService.removeSessionOwnedFiles(sessionIds),
-      postApiResponse: (requestGeneration, payload) =>
-        this.webviewSession.postApiResponse(payload, requestGeneration),
-    });
-
     this.ralphHost = new RalphHost({
       server,
       contextProvider,
@@ -282,52 +263,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       providerSignatureFileSystem
     );
 
-    this.messageRouter = new MessageRouter(
-      createSidebarProviderActions({
-        contextProvider,
-        extensionId: this.extensionId,
-        webviewSession: {
-          setFocus: (focused) => this.webviewSession.setFocus(focused),
-          updateCommandState: (canAbort, canSwitchSessions) =>
-            this.webviewSession.updateCommandState(canAbort, canSwitchSessions),
-          reload: () => this.webviewSession.reload(),
-        },
-        setProviderWatchActive: (active) => this.setProviderWatchActive(active),
-        setActiveChatModel: (model) => {
-          this.activeChatModel = model;
-        },
-        revealPermission: (permissionId) => this.sessionState.revealPermission(permissionId),
-        contextFilesState: this.contextFilesState,
-        sessionExportService: this.sessionExportService,
-        usageReportService: this.usageReportService,
-        restProxy: this.restProxy,
-        sessionDiffProvider: this.sessionDiffProvider,
-        toolOutputProvider: this.toolOutputProvider,
-        server,
-        post: (message) => this.post(message),
-        refreshProviders: () => this.refreshProviderState(),
-        providerReauthenticated: () => this.providerReauthenticated(),
-        postContext: () => this.postContext(),
-        postTerminalSelection: (selection) => this.postTerminalSelection(selection),
-        postConfigState: () => this.postConfigState(),
-        handleReadyMessage: () => this.handleReadyMessage(),
-        handleDroppedPaths: (paths) => this.handleDroppedPaths(paths),
-        handleDroppedContent: (files) => this.handleDroppedContent(files),
-        storePdf: (payload) => this.storePdf(payload),
-        storeImage: (payload) => this.storeImage(payload),
-        releaseImages: (payload) => this.releaseImages(payload),
-        removeContextFile: (path) => this.removeContextFile(path),
-        clearContextFiles: () => this.clearContextFiles(),
-        pickFiles: () => this.pickFiles(),
-        searchFiles: (requestId, query, limit) => this.searchFiles(requestId, query, limit),
-        runInTerminal: (command, title) => this.runInTerminal(command, title),
-        openSessionInTerminal: (sessionId) => this.openSessionInTerminal(sessionId),
-        handleRalphMessage: (msg) => this.ralphHost.handleMessage(msg),
-        updateQueuedMessages: ({ messages }) => this.queuedMessages.update(messages),
-        updateDraftImages: ({ images }) => this.draftImages.update(images),
-        setMermaidPreviewOpen: (open) => this.setMermaidPreviewOpen(open),
-      })
-    );
+    const sidebarEndpoint = this.createEndpoint(this.bridge, this.generatedDependencyTreeGuard, {
+      viewId: 'sidebar',
+      surface: 'sidebar',
+      initialRoute: { type: 'new-session' },
+    });
+    this.webviewSession = sidebarEndpoint.webviewSession;
+    this.restProxy = sidebarEndpoint.restProxy;
+    this.messageRouter = sidebarEndpoint.messageRouter;
 
     this.windowStateDisposable = vscode.window.onDidChangeWindowState(() => {
       this.updateStatusBarItem();
@@ -346,6 +289,153 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.serverEventBridge.attach();
   }
 
+  private createEndpoint(
+    bridge: SidebarProviderBridge,
+    generatedDependencyTreeGuard: GeneratedDependencyTreeGuard,
+    webviewContext: WebviewInstanceContext,
+    contextFilesState = this.contextFilesState
+  ): WebviewEndpoint {
+    const endpointRef: EndpointRef = {};
+    const post = (message: ExtensionMessage) => bridge.post(message);
+    const fileSearch =
+      webviewContext.surface === 'sidebar' ? this.fileSearch : new FileSearchService();
+
+    const webviewSession = new WebviewSession(
+      bridge,
+      this.sessionState,
+      this.sessionTrash,
+      this.pinnedSessions,
+      this.hiddenSessions,
+      this.contextProvider,
+      contextFilesState,
+      {
+        handleMessage: (message) => messageRouter.handleMessage(message),
+        ensureServerStarted: () => this.runtime.ensureServerStarted(),
+        readConfig: () => this.readConfig(),
+        currentTheme: () => this.currentTheme(),
+        renderStatus: () => this.serverEventBridge.getStatus(),
+        handleReadySideEffects: () => this.cleanupExpiredRecycleBin(),
+        handleVisibleSideEffects: () => this.cleanupExpiredRecycleBin(),
+        updateStatusBarItem: () => this.updateStatusBarItem(),
+        postThemeUpdate: () =>
+          this.post({ type: 'theme/update', payload: { theme: this.currentTheme() } }),
+        onHidden: () => undefined,
+        resetStatusBarCache: () => {
+          this.lastStatusBarStateKey = '';
+        },
+        queuedMessages: () => this.queuedMessages.list(),
+        sessionPermissionModes: () => this.sessionPermissionModes.list(),
+        sessionSelectedModels: () => this.sessionSelectedModels.list(),
+        editorTabsOpen: () => this.editorPanels.size > 0,
+        draftImages: () => this.draftImages.list(webviewContext.viewId),
+        flushPendingServerEvents: () => this.serverEventBridge.flushPendingEvents(),
+        cancelApiRequestsBeforeGeneration: (generation) =>
+          endpointRef.restProxy?.cancelRequestsBeforeGeneration(generation),
+      },
+      webviewContext,
+      webviewContext.surface === 'sidebar'
+    );
+
+    const restProxy = new RestProxy({
+      server: this.server,
+      contextProvider: this.contextProvider,
+      providerLimitService: this.providerLimitService,
+      sessionState: this.sessionState,
+      sessionTrash: this.sessionTrash,
+      pinnedSessions: this.pinnedSessions,
+      hiddenSessions: this.hiddenSessions,
+      autoApproveJudge: this.autoApproveJudge,
+      sessionTitleFallback: this.sessionTitleFallback,
+      simulateNoProviders: this.simulateNoProviders,
+      getRequestGeneration: () => webviewSession.getRequestGeneration(),
+      getStatus: () => this.serverEventBridge.getStatus(),
+      ensureServerStarted: () => this.runtime.ensureServerStarted(),
+      confirmPromptAdmission: (workspacePath) =>
+        generatedDependencyTreeGuard.confirmPromptAdmission(workspacePath),
+      refreshOpenCodeConfig: (previousRouting, currentRouting) =>
+        this.refreshOpenCodeWorkspaceState(previousRouting, currentRouting),
+      cleanupExpiredRecycleBin: () => this.cleanupExpiredRecycleBin(),
+      removeSessionImages: (sessionIds) =>
+        this.droppedFilesService.removeSessionOwnedFiles(sessionIds),
+      postApiResponse: (requestGeneration, payload) =>
+        webviewSession.postApiResponse(payload, requestGeneration),
+    });
+    endpointRef.restProxy = restProxy;
+
+    const messageRouter = new MessageRouter(
+      createSidebarProviderActions({
+        contextProvider: this.contextProvider,
+        extensionId: this.extensionId,
+        webviewSession,
+        setProviderWatchActive: (active) => this.setProviderWatchActive(active),
+        setActiveChatModel: (model) => {
+          if (webviewContext.surface === 'sidebar') this.activeChatModel = model;
+        },
+        revealPermission: (permissionId) => this.sessionState.revealPermission(permissionId),
+        contextFilesState,
+        sessionExportService: this.sessionExportService,
+        usageReportService: this.usageReportService,
+        restProxy,
+        sessionDiffProvider: this.sessionDiffProvider,
+        toolOutputProvider: this.toolOutputProvider,
+        server: this.server,
+        post,
+        refreshProviders: () => this.refreshProviderState(),
+        providerReauthenticated: () => this.providerReauthenticated(),
+        postContext: () => post({ type: 'context/update', payload: this.getEditorContext() }),
+        postTerminalSelection: (selection) =>
+          post({ type: 'terminal-selection/update', payload: selection }),
+        postConfigState: () => this.postConfigState(),
+        handleReadyMessage: async () => {
+          await webviewSession.handleReady();
+          this.providerFileRefresh.postStatus();
+        },
+        handleDroppedPaths: (paths) =>
+          contextFilesState.handleDroppedPaths(paths, (message) => post(message)),
+        handleDroppedContent: (files) =>
+          contextFilesState.handleDroppedContent(files, (message) => post(message)),
+        storePdf: (payload) => this.storePdf(payload, post),
+        storeImage: (payload) => this.storeImage(payload, post),
+        releaseImages: (payload) => this.releaseImages(payload),
+        removeContextFile: (path) =>
+          contextFilesState.removeContextFile(path, (message) => post(message)),
+        clearContextFiles: () => contextFilesState.clearContextFiles(),
+        pickFiles: () => contextFilesState.pickFiles((message) => post(message)),
+        searchFiles: (requestId, query, limit) =>
+          this.searchFiles(requestId, query, limit, post, fileSearch),
+        runInTerminal: (command, title) => this.runInTerminal(command, title),
+        openSessionInTerminal: (sessionId) => this.openSessionInTerminal(sessionId),
+        openSessionInEditor: (sessionId, title, model) =>
+          this.openSessionInEditor(sessionId, title, model),
+        openNewEditor: () => this.openNewEditor(),
+        editorRouteChanged: (route) => this.editorRouteChanged(webviewContext.viewId, route),
+        handleRalphMessage: (msg) => this.ralphHost.handleMessage(msg),
+        updateQueuedMessages: ({ messages }) =>
+          this.updateQueuedMessages(webviewContext.viewId, messages),
+        updatePermissionMode: async ({ sessionId, mode }) => {
+          const modes = await this.sessionPermissionModes.set(sessionId, mode);
+          this.post({ type: 'permission-modes/sync', payload: { modes } });
+        },
+        updateSessionModel: async ({ sessionId, model }) => {
+          const models = await this.sessionSelectedModels.set(sessionId, model);
+          this.post({ type: 'session-models/sync', payload: { models } });
+        },
+        updateDraftImages: ({ images }) => this.draftImages.update(images, webviewContext.viewId),
+        setMermaidPreviewOpen: (open) => this.setMermaidPreviewOpen(open),
+      })
+    );
+    const endpoint = {
+      bridge,
+      contextFilesState,
+      fileSearch,
+      messageRouter,
+      restProxy,
+      webviewSession,
+    };
+    this.endpoints.add(endpoint);
+    return endpoint;
+  }
+
   resolveWebviewView(
     webviewView: vscode.WebviewView,
     _context: vscode.WebviewViewResolveContext,
@@ -361,6 +451,163 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  async openSessionInEditor(sessionId: string, title?: string, model?: ChatModelSelection) {
+    if (model) {
+      void this.sessionSelectedModels.set(sessionId, model).catch((err) => {
+        logger.warn(
+          `Failed to persist editor session model: ${err instanceof Error ? err.message : String(err)}`
+        );
+      });
+    }
+    const key = `session:${sessionId}`;
+    const existing = this.editorPanels.get(key);
+    if (existing) {
+      existing.panel.reveal(existing.panel.viewColumn, false);
+      return;
+    }
+    await this.openEditorPanel({ type: 'session', sessionId, title });
+  }
+
+  async openNewEditor() {
+    await this.openEditorPanel({ type: 'new-session' });
+  }
+
+  async deserializeWebviewPanel(panel: vscode.WebviewPanel, state: PersistedEditorState) {
+    const route = this.readPersistedEditorRoute(state);
+    const viewId = this.readPersistedEditorViewId(state);
+    await this.attachEditorPanel(
+      panel,
+      route,
+      viewId ?? `editor-${Date.now()}-${++this.nextEditorId}`
+    );
+  }
+
+  private async openEditorPanel(route: WebviewRoute) {
+    const panel = vscode.window.createWebviewPanel(
+      SidebarProvider.editorViewType,
+      this.editorTitle(route),
+      { viewColumn: vscode.ViewColumn.Active, preserveFocus: false },
+      { enableScripts: true, retainContextWhenHidden: false }
+    );
+    await this.attachEditorPanel(panel, route, `editor-${Date.now()}-${++this.nextEditorId}`);
+  }
+
+  private async attachEditorPanel(panel: vscode.WebviewPanel, route: WebviewRoute, viewId: string) {
+    const key = this.editorKey(route, viewId);
+    const existing = this.editorPanels.get(key);
+    if (existing) {
+      existing.panel.reveal(existing.panel.viewColumn, false);
+      panel.dispose();
+      return;
+    }
+
+    panel.title = this.editorTitle(route);
+    panel.iconPath = new vscode.ThemeIcon('chat-sparkle');
+    const bridge = new SidebarProviderBridge(this.extensionUri);
+    const endpoint = this.createEndpoint(
+      bridge,
+      this.generatedDependencyTreeGuard,
+      {
+        viewId,
+        surface: 'editor',
+        initialRoute: route,
+      },
+      new SidebarProviderContextFiles(this.droppedFilesService)
+    );
+    const editorEndpoint: EditorEndpoint = {
+      ...endpoint,
+      key,
+      panel,
+      viewId,
+      restoringSessionId: route.type === 'session' ? route.sessionId : undefined,
+    };
+    this.editorPanels.set(key, editorEndpoint);
+    this.postEditorTabsState();
+    panel.onDidChangeViewState(({ webviewPanel }) => {
+      if (webviewPanel.visible) {
+        void endpoint.webviewSession.resolve(webviewPanel);
+      } else {
+        endpoint.webviewSession.suspend();
+      }
+    });
+    panel.onDidDispose(() => {
+      let removed = false;
+      for (const [registeredKey, registeredEndpoint] of this.editorPanels) {
+        if (registeredEndpoint !== editorEndpoint) continue;
+        this.editorPanels.delete(registeredKey);
+        removed = true;
+      }
+      if (removed) this.postEditorTabsState();
+      this.endpoints.delete(endpoint);
+      endpoint.fileSearch.dispose();
+      endpoint.restProxy.dispose();
+      void endpoint.webviewSession.dispose();
+      if (!this.disposing) {
+        void this.transferEditorDraftState(viewId);
+      }
+    });
+    await endpoint.webviewSession.resolve(panel);
+    if (!panel.visible) endpoint.webviewSession.suspend();
+  }
+
+  private editorRouteChanged(viewId: string, route: WebviewRoute) {
+    const endpoint = [...this.editorPanels.values()].find((item) => item.viewId === viewId);
+    if (!endpoint) return;
+    if (endpoint.restoringSessionId) {
+      if (route.type === 'session' && route.sessionId === endpoint.restoringSessionId) {
+        endpoint.restoringSessionId = undefined;
+      } else {
+        endpoint.bridge.post({
+          type: 'command/open-session',
+          payload: { sessionId: endpoint.restoringSessionId },
+        });
+        return;
+      }
+    }
+    const nextKey = this.editorKey(route, viewId);
+    if (nextKey !== endpoint.key) {
+      if (this.editorPanels.get(endpoint.key) === endpoint) this.editorPanels.delete(endpoint.key);
+      const existing = this.editorPanels.get(nextKey);
+      if (existing && existing !== endpoint) {
+        existing.panel.reveal(existing.panel.viewColumn, false);
+        endpoint.panel.dispose();
+        return;
+      }
+      endpoint.key = nextKey;
+      this.editorPanels.set(nextKey, endpoint);
+    }
+    endpoint.panel.title = this.editorTitle(route);
+    endpoint.webviewSession.setInitialRoute(route);
+  }
+
+  private postEditorTabsState() {
+    this.post({ type: 'editor-tabs/state', payload: { open: this.editorPanels.size > 0 } });
+  }
+
+  private editorKey(route: WebviewRoute, viewId: string) {
+    return route.type === 'session' ? `session:${route.sessionId}` : `draft:${viewId}`;
+  }
+
+  private editorTitle(route: WebviewRoute) {
+    if (route.type === 'new-session') return 'Varro: New Session';
+    return route.title?.trim() || this.sessionState.titleFor(route.sessionId) || 'Varro: Session';
+  }
+
+  private readPersistedEditorRoute(state: PersistedEditorState): WebviewRoute {
+    if (!state) return { type: 'new-session' };
+    const persisted = state['varro.lastOpenedView'];
+    if (!persisted || typeof persisted !== 'object') return { type: 'new-session' };
+    const route = persisted as Record<string, unknown>;
+    return route.type === 'session' && typeof route.sessionId === 'string'
+      ? { type: 'session', sessionId: route.sessionId }
+      : { type: 'new-session' };
+  }
+
+  private readPersistedEditorViewId(state: PersistedEditorState) {
+    const value = state?.['varro.editorViewId'];
+    return typeof value === 'string' && /^editor-[A-Za-z0-9-]+$/.test(value) ? value : null;
+  }
+
   async initializeProviderFileSignature() {
     await this.providerFileRefresh.initializeSignature();
   }
@@ -374,7 +621,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   post(msg: ExtensionMessage) {
-    this.bridge.post(msg);
+    for (const endpoint of this.endpoints) endpoint.bridge.post(msg);
+    if (msg.type === 'server/event') this.updateEditorPanelTitles();
+  }
+
+  private updateEditorPanelTitles() {
+    for (const endpoint of this.editorPanels.values()) {
+      if (!endpoint.key.startsWith('session:')) continue;
+      const sessionId = endpoint.key.slice('session:'.length);
+      endpoint.panel.title = this.editorTitle({ type: 'session', sessionId });
+    }
+  }
+
+  private isAnyEndpointVisible() {
+    return [...this.endpoints].some((endpoint) => endpoint.bridge.isVisible());
   }
 
   setOnContextFilesChanged(fn: () => void) {
@@ -386,7 +646,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   postDroppedFiles(files: Array<Pick<DroppedFile, 'path' | 'relativePath' | 'type'>>) {
-    this.contextFilesState.postDroppedFiles(files, (message) => this.post(message));
+    this.contextFilesState.postDroppedFiles(files, (message) => this.bridge.post(message));
   }
 
   postTerminalSelection(selection: { text: string; terminalName: string } | null) {
@@ -447,7 +707,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   async dispose() {
+    this.disposing = true;
     this.providerFileRefresh.beginDispose();
+    for (const endpoint of this.editorPanels.values()) {
+      endpoint.restProxy.dispose();
+      endpoint.fileSearch.dispose();
+      await endpoint.webviewSession.dispose();
+      this.endpoints.delete(endpoint);
+    }
+    this.editorPanels.clear();
     this.restProxy.dispose();
     await this.setMermaidPreviewOpen(false);
     if (this.sessionReconcileTimer) {
@@ -470,6 +738,42 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private setProviderWatchActive(active: boolean) {
     this.providerFileRefresh.setActive(active);
+  }
+
+  private queuedMessagesFor(viewId: string) {
+    return this.queuedMessages
+      .list()
+      ?.filter((message) => (message.ownerViewId ?? 'sidebar') === viewId);
+  }
+
+  private async updateQueuedMessages(viewId: string, messages: QueuedMessageSnapshot[]) {
+    const retained = (this.queuedMessages.list() ?? []).filter(
+      (message) => (message.ownerViewId ?? 'sidebar') !== viewId
+    );
+    const owned = messages
+      .filter((message) => (message.ownerViewId ?? 'sidebar') === viewId)
+      .map((message) => ({ ...message, ownerViewId: viewId }));
+    await this.queuedMessages.update([...retained, ...owned]);
+    this.post({
+      type: 'queued-messages/sync',
+      payload: { messages: this.queuedMessages.list() ?? [] },
+    });
+  }
+
+  private async transferEditorDraftState(viewId: string) {
+    const messages = this.queuedMessages.list() ?? [];
+    if (messages.some((message) => message.ownerViewId === viewId)) {
+      await this.queuedMessages.update(
+        messages.map((message) =>
+          message.ownerViewId === viewId ? { ...message, ownerViewId: undefined } : message
+        )
+      );
+      this.post({
+        type: 'queued-messages/sync',
+        payload: { messages: this.queuedMessages.list() ?? [] },
+      });
+    }
+    await this.draftImages.update([], viewId);
   }
 
   private async setMermaidPreviewOpen(open: boolean) {
@@ -532,21 +836,27 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await this.contextFilesState.handleDroppedPaths(paths, (message) => this.post(message));
   }
 
-  private async storePdf(payload: Extract<WebviewMessage, { type: 'pdfs/store' }>['payload']) {
+  private async storePdf(
+    payload: Extract<WebviewMessage, { type: 'pdfs/store' }>['payload'],
+    post: (message: ExtensionMessage) => void = (message) => this.post(message)
+  ) {
     const [contextFile] = await this.droppedFilesService.fromContent([
       { name: payload.name, content: payload.content, size: payload.size },
     ]);
     if (contextFile) {
-      this.post({ type: 'pdfs/stored', payload: { id: payload.id, contextFile } });
+      post({ type: 'pdfs/stored', payload: { id: payload.id, contextFile } });
     }
   }
 
-  private async storeImage(payload: Extract<WebviewMessage, { type: 'images/store' }>['payload']) {
+  private async storeImage(
+    payload: Extract<WebviewMessage, { type: 'images/store' }>['payload'],
+    post: (message: ExtensionMessage) => void = (message) => this.post(message)
+  ) {
     const [contextFile] = await this.droppedFilesService.fromContent([
       { name: payload.name, content: payload.content, size: payload.size },
     ]);
     if (contextFile) {
-      this.post({ type: 'images/stored', payload: { id: payload.id, contextFile } });
+      post({ type: 'images/stored', payload: { id: payload.id, contextFile } });
     }
   }
 
@@ -574,9 +884,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await this.contextFilesState.pickFiles((message) => this.post(message));
   }
 
-  private searchFiles(requestId: number, query: string, limit = 12) {
-    this.fileSearch.search(requestId, query, limit, (result) => {
-      this.post({ type: 'files/search-results', payload: result });
+  private searchFiles(
+    requestId: number,
+    query: string,
+    limit = 12,
+    post: (message: ExtensionMessage) => void = (message) => this.post(message),
+    fileSearch = this.fileSearch
+  ) {
+    fileSearch.search(requestId, query, limit, (result) => {
+      post({ type: 'files/search-results', payload: result });
     });
   }
 
@@ -716,7 +1032,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       text: `$(robot) OpenCode ${maximumTestedOpenCodeVersion}`,
       tooltip: `OpenCode ${maximumTestedOpenCodeVersion}\nMaximum version tested with this Varro release.\n\nClick to open chat.`,
     };
-    if (this.bridge.getView()?.visible) return idleState;
+    if (this.isAnyEndpointVisible()) return idleState;
 
     const pendingRequests = [...this.sessionState.pendingForUser.values()].filter(
       (request) =>

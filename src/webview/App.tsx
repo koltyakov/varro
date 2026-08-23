@@ -136,10 +136,6 @@ function WorkspaceLoading() {
           style={{ 'animation-delay': '0.6s' }}
         />
       </div>
-      <div>
-        <p class="text-[13px] font-medium text-vscode-fg">Loading workspace...</p>
-        <p class="mt-1.5 text-[12px] text-vscode-muted">Restoring your recent view</p>
-      </div>
     </div>
   );
 }

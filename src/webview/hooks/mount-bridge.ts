@@ -9,7 +9,12 @@ import { uiStore } from '../lib/stores/ui-store';
 import { postMessage } from '../lib/bridge';
 import { getWorkspaceStatusEventSummary } from '../lib/client';
 import { isString } from '../lib/runtime-values';
-import { syncSessionMarkersForWorkspace } from '../lib/state';
+import {
+  applySessionPermissionModesSnapshot,
+  applySessionSelectedModelsSnapshot,
+  syncSessionMarkersForWorkspace,
+} from '../lib/state';
+import { applyQueuedMessagesSnapshot } from '../lib/state-queued-messages';
 import { normalizeProjectPath } from './session/session-lifecycle';
 
 export function createMountBridgeOperations(deps: {
@@ -22,6 +27,7 @@ export function createMountBridgeOperations(deps: {
   reloadWorkspaceAfterChange(wasInitialized: boolean): void;
   isInitialized(): boolean;
   createSession(prefill?: string): void;
+  openSession?(sessionId: string): void;
   abortSession(): void;
   refreshMcps(): void;
   refreshLsps?(): void;
@@ -76,6 +82,7 @@ export function createMountBridgeOperations(deps: {
         addContextFiles: composerStore.addContextFiles,
         removeContextFile: composerStore.removeContextFile,
         createSession: deps.createSession,
+        openSession: deps.openSession,
         requestComposerFocus: uiStore.requestComposerFocus,
         requestOpenAttentionSessions: uiStore.requestOpenAttentionSessions,
         requestSessionSearchFocus: uiStore.requestSessionSearchFocus,
@@ -90,6 +97,7 @@ export function createMountBridgeOperations(deps: {
         setWorkspaceStatusSummary: (summary) =>
           appStore.setState('workspaceStatusSummary', summary),
         setWorkspaceStatuses: (entries) => appStore.setState('workspaceStatuses', entries),
+        setEditorTabsOpen: (open) => appStore.setState('editorTabsOpen', open),
       },
       msg
     );
@@ -128,6 +136,7 @@ export function handleExtensionMessageWithDependencies(
     addContextFiles(payload: Extract<ExtensionMessage, { type: 'files/dropped' }>['payload']): void;
     removeContextFile(path: string): void;
     createSession(prefill?: string): void;
+    openSession?(sessionId: string): void;
     requestComposerFocus(): void;
     requestOpenAttentionSessions(): void;
     requestSessionSearchFocus?(): void;
@@ -145,6 +154,7 @@ export function handleExtensionMessageWithDependencies(
         status: 'connected' | 'connecting' | 'disconnected' | 'error';
       }[]
     ): void;
+    setEditorTabsOpen?(open: boolean): void;
   },
   msg: ExtensionMessage
 ) {
@@ -209,6 +219,9 @@ export function handleExtensionMessageWithDependencies(
     case 'command/new-session':
       deps.createSession(msg.payload?.prefill);
       break;
+    case 'command/open-session':
+      deps.openSession?.(msg.payload.sessionId);
+      break;
     case 'command/focus-input':
       deps.requestComposerFocus();
       break;
@@ -264,6 +277,18 @@ export function handleExtensionMessageWithDependencies(
       break;
     case 'providers/status':
       deps.setProviderRefreshPending?.(msg.payload.pending);
+      break;
+    case 'queued-messages/sync':
+      applyQueuedMessagesSnapshot(msg.payload.messages);
+      break;
+    case 'permission-modes/sync':
+      applySessionPermissionModesSnapshot(msg.payload.modes);
+      break;
+    case 'session-models/sync':
+      applySessionSelectedModelsSnapshot(msg.payload.models);
+      break;
+    case 'editor-tabs/state':
+      deps.setEditorTabsOpen?.(msg.payload.open);
       break;
     case 'ralph/state':
       ralphStore.applyHostState(msg.payload.runs, msg.payload.activeIds);

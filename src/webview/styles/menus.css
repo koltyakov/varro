@@ -46,6 +46,20 @@
   border-left: 1px solid color-mix(in srgb, var(--color-vscode-border-strong) 82%, transparent);
 }
 
+.new-chat-tooltip {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.new-chat-tooltip-title {
+  font-weight: 600;
+}
+
+.new-chat-tooltip-shortcut {
+  color: var(--color-vscode-muted);
+}
+
 .dropdown-menu {
   display: flex;
   flex-direction: column;

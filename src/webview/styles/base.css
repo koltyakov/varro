@@ -359,6 +359,21 @@ body,
   -webkit-font-smoothing: antialiased;
 }
 
+html.varro-editor-surface {
+  --color-vscode-sidebar: var(--vscode-editor-background, #1e1e1e);
+  --color-vscode-list-bg: var(--vscode-editor-background, #1e1e1e);
+}
+
+html.varro-editor-surface,
+html.varro-editor-surface body,
+html.varro-editor-surface #root {
+  background: var(--vscode-editor-background, #1e1e1e);
+}
+
+html.varro-editor-surface.varro-editor-layout-pending #root {
+  visibility: hidden;
+}
+
 body.chat-read-mode-open,
 body.chat-image-preview-open {
   overflow: hidden;

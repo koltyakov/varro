@@ -73,6 +73,7 @@ function register(
   const sidebar = {
     post: vi.fn(),
     postCommand: vi.fn(),
+    openNewEditor: vi.fn(() => Promise.resolve()),
     requestInputFocus: vi.fn(),
     searchSessions: vi.fn(),
     switchSession: vi.fn(),
@@ -653,6 +654,14 @@ describe('sidebar navigation commands', () => {
 
     expect(sidebar.postCommand).toHaveBeenNthCalledWith(1, 'new-session');
     expect(sidebar.postCommand).toHaveBeenNthCalledWith(2, 'abort');
+  });
+
+  it('opens a new editor chat from the editor-title action', async () => {
+    const { sidebar } = register();
+
+    await runCommand('varro.chat.newEditor');
+
+    expect(sidebar.openNewEditor).toHaveBeenCalledOnce();
   });
 
   it('switches sessions in both directions', async () => {

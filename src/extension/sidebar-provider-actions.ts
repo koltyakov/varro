@@ -12,7 +12,7 @@ import type { ToolOutputDocumentProvider } from './tool-output-document-provider
 import type { OpenCodeServer } from './server';
 import { assertSessionInCurrentWorkspace } from './session-workspace';
 import type { UsageReportService } from './usage-report-service';
-import type { ChatModelSelection, ExtensionMessage } from '../shared/protocol';
+import type { ChatModelSelection, ExtensionMessage, WebviewRoute } from '../shared/protocol';
 
 type ConfigPayload = Extract<
   Parameters<MessageRouterCallbacks['updateConfig']>[0],
@@ -59,8 +59,17 @@ export interface SidebarProviderActionDeps {
   searchFiles(requestId: number, query: string, limit?: number): void;
   runInTerminal(command: string, title?: string): void | Promise<void>;
   openSessionInTerminal(sessionId: string): void | Promise<void>;
+  openSessionInEditor(
+    sessionId: string,
+    title?: string,
+    model?: ChatModelSelection
+  ): void | Promise<void>;
+  openNewEditor(): void | Promise<void>;
+  editorRouteChanged(route: WebviewRoute): void;
   handleRalphMessage: MessageRouterCallbacks['handleRalphMessage'];
   updateQueuedMessages: MessageRouterCallbacks['updateQueuedMessages'];
+  updatePermissionMode: MessageRouterCallbacks['updatePermissionMode'];
+  updateSessionModel: MessageRouterCallbacks['updateSessionModel'];
   updateDraftImages: MessageRouterCallbacks['updateDraftImages'];
   setMermaidPreviewOpen: MessageRouterCallbacks['setMermaidPreviewOpen'];
 }
@@ -119,8 +128,16 @@ export function createSidebarProviderActions(
       await assertSessionInCurrentWorkspace(deps.server, sessionId);
       await deps.openSessionInTerminal(sessionId);
     },
+    openSessionInEditor: async (sessionId, title, model) => {
+      await assertSessionInCurrentWorkspace(deps.server, sessionId);
+      await deps.openSessionInEditor(sessionId, title, model);
+    },
+    openNewEditor: () => deps.openNewEditor(),
+    editorRouteChanged: (route) => deps.editorRouteChanged(route),
     handleRalphMessage: (msg) => deps.handleRalphMessage(msg),
     updateQueuedMessages: (payload) => deps.updateQueuedMessages(payload),
+    updatePermissionMode: (payload) => deps.updatePermissionMode(payload),
+    updateSessionModel: (payload) => deps.updateSessionModel(payload),
     updateDraftImages: (payload) => deps.updateDraftImages(payload),
     exportSession: (sessionId) => deps.sessionExportService.exportSession(sessionId),
     generateUsageReport: (includeAllTime) => deps.usageReportService.openReport(includeAllTime),

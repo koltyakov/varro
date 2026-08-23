@@ -27,6 +27,9 @@ function createCallbacks(): MessageRouterCallbacks {
     clearTerminalSelection: vi.fn(),
     runInTerminal: vi.fn(),
     openSessionInOpenCode: vi.fn(),
+    openSessionInEditor: vi.fn(),
+    openNewEditor: vi.fn(),
+    editorRouteChanged: vi.fn(),
     exportSession: vi.fn(() => Promise.resolve()),
     generateUsageReport: vi.fn(() => Promise.resolve()),
     reloadWebview: vi.fn(() => Promise.resolve()),
@@ -55,12 +58,26 @@ function createCallbacks(): MessageRouterCallbacks {
     cancelApiRequest: vi.fn(),
     handleRalphMessage: vi.fn(),
     updateQueuedMessages: vi.fn(() => Promise.resolve()),
+    updatePermissionMode: vi.fn(() => Promise.resolve()),
+    updateSessionModel: vi.fn(() => Promise.resolve()),
     updateDraftImages: vi.fn(() => Promise.resolve()),
     log: vi.fn(),
   };
 }
 
 describe('MessageRouter', () => {
+  it('persists a session permission mode update', async () => {
+    const cb = createCallbacks();
+    const router = new MessageRouter(cb);
+
+    await router.handleMessage({
+      type: 'permission-mode/update',
+      payload: { sessionId: 'session-1', mode: 'full' },
+    });
+
+    expect(cb.updatePermissionMode).toHaveBeenCalledWith({ sessionId: 'session-1', mode: 'full' });
+  });
+
   it('persists composer image snapshots', async () => {
     const cb = createCallbacks();
     const router = new MessageRouter(cb);

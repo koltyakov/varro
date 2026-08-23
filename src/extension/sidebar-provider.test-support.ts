@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
         hide: vi.fn(),
         dispose: vi.fn(),
       })),
+      createWebviewPanel: vi.fn(),
       onDidChangeWindowState: vi.fn(() => ({ dispose: vi.fn() })),
       onDidChangeActiveColorTheme: vi.fn(() => ({ dispose: vi.fn() })),
       activeColorTheme: { kind: 2 },
@@ -68,8 +69,12 @@ const mocks = vi.hoisted(() => ({
       openTextDocument: vi.fn(() => Promise.resolve({})),
     },
     StatusBarAlignment: { Left: 1 },
+    ViewColumn: { Active: -1 },
     ThemeColor: class ThemeColor {
       constructor(public readonly value: string) {}
+    },
+    ThemeIcon: class ThemeIcon {
+      constructor(public readonly id: string) {}
     },
     RelativePattern: class RelativePattern {
       constructor(
@@ -292,6 +297,7 @@ beforeEach(() => {
   mocks.logger.error.mockReset();
 
   mocks.vscode.window.showTextDocument.mockReset();
+  mocks.vscode.window.createWebviewPanel.mockReset();
   mocks.vscode.window.showTextDocument.mockResolvedValue(undefined);
   mocks.vscode.window.showWarningMessage.mockReset();
   mocks.vscode.window.showWarningMessage.mockResolvedValue(undefined);

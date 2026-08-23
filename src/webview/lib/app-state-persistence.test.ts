@@ -12,6 +12,34 @@ beforeEach(() => {
 });
 
 describe('composer draft persistence', () => {
+  it('uses host session models instead of stale editor-local variants', () => {
+    window.localStorage.setItem(
+      STORAGE_KEYS.sessionSelectedModels,
+      JSON.stringify({
+        'session-1': { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'medium' },
+      })
+    );
+    // SAFETY: The fixture provides the host-owned initial webview state.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      webviewContext: {
+        viewId: 'editor-1',
+        surface: 'editor',
+        initialRoute: { type: 'session', sessionId: 'session-1' },
+      },
+      sessionSelectedModels: {
+        'session-1': { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
+      },
+    };
+
+    const appState = createAppState();
+
+    expect(appState.state.sessionSelectedModels['session-1']).toEqual({
+      providerID: 'openai',
+      modelID: 'gpt-5.6-sol',
+      variant: 'xhigh',
+    });
+  });
+
   it('restores draft text when app state is recreated', () => {
     const first = createAppState();
     first.setInputText('Keep this draft');

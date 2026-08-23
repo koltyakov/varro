@@ -40,6 +40,7 @@ const bootstrapWindow = fixture<
   UnknownRecord & {
     __clearVarroBootstrapFailureHandlers?: () => void;
     __cleanupVarroApp?: () => void;
+    __initialWebviewState?: unknown;
   }
 >(window);
 
@@ -47,6 +48,9 @@ describe('webview bootstrap', () => {
   beforeEach(() => {
     bootstrapWindow[APP_CLEANUP_KEY]?.();
     delete bootstrapWindow[APP_CLEANUP_KEY];
+    delete bootstrapWindow.__initialWebviewState;
+    document.documentElement.classList.remove('varro-editor-surface');
+    document.documentElement.classList.remove('varro-editor-layout-pending');
     mocks.cleanupBridge.mockReset();
     mocks.initializeBridge.mockReset();
     mocks.postMessage.mockReset().mockReturnValue(true);
@@ -66,6 +70,9 @@ describe('webview bootstrap', () => {
     root.remove();
     delete bootstrapWindow[STARTUP_HANDLERS_KEY];
     delete bootstrapWindow[APP_CLEANUP_KEY];
+    delete bootstrapWindow.__initialWebviewState;
+    document.documentElement.classList.remove('varro-editor-surface');
+    document.documentElement.classList.remove('varro-editor-layout-pending');
     consoleError.mockRestore();
   });
 
@@ -85,6 +92,59 @@ describe('webview bootstrap', () => {
 
     root.querySelector<HTMLButtonElement>('button')?.click();
     expect(mocks.postMessage).toHaveBeenCalledWith({ type: 'webview/reload' });
+  });
+
+  it('marks editor webviews before rendering and removes the marker on cleanup', () => {
+    bootstrapWindow.__initialWebviewState = {
+      webviewContext: {
+        viewId: 'editor-1',
+        surface: 'editor',
+        initialRoute: { type: 'new-session' },
+      },
+    };
+
+    cleanup = bootstrap(root);
+
+    expect(document.documentElement.classList.contains('varro-editor-surface')).toBe(true);
+    cleanup();
+    cleanup = undefined;
+    expect(document.documentElement.classList.contains('varro-editor-surface')).toBe(false);
+  });
+
+  it('hides editor content until a revealed tab finishes resizing', async () => {
+    let visibilityState: DocumentVisibilityState = 'visible';
+    const visibilityStateSpy = vi
+      .spyOn(document, 'visibilityState', 'get')
+      .mockImplementation(() => visibilityState);
+    bootstrapWindow.__initialWebviewState = {
+      webviewContext: {
+        viewId: 'editor-1',
+        surface: 'editor',
+        initialRoute: { type: 'new-session' },
+      },
+    };
+
+    cleanup = bootstrap(root);
+    expect(document.documentElement.classList.contains('varro-editor-layout-pending')).toBe(true);
+    await vi.waitFor(() => {
+      expect(document.documentElement.classList.contains('varro-editor-layout-pending')).toBe(
+        false
+      );
+    });
+
+    visibilityState = 'hidden';
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(document.documentElement.classList.contains('varro-editor-layout-pending')).toBe(true);
+
+    visibilityState = 'visible';
+    document.dispatchEvent(new Event('visibilitychange'));
+    window.dispatchEvent(new Event('resize'));
+    await vi.waitFor(() => {
+      expect(document.documentElement.classList.contains('varro-editor-layout-pending')).toBe(
+        false
+      );
+    });
+    visibilityStateSpy.mockRestore();
   });
 
   it('logs and cleans up safely when the root element is missing', () => {

@@ -17,6 +17,7 @@ export type SessionSelectedMcps = Record<string, string[]>;
 
 export interface QueuedMessage {
   id: string;
+  ownerViewId?: string;
   messageId?: string;
   sessionId: string;
   text: string;

@@ -22,6 +22,12 @@ describe('parseExtensionMessage', () => {
     expect(
       parseExtensionMessage({ type: 'command/new-session', payload: { prefill: 1 } })
     ).toBeNull();
+    expect(
+      parseExtensionMessage({ type: 'command/open-session', payload: { sessionId: 'session-1' } })
+    ).toEqual({ type: 'command/open-session', payload: { sessionId: 'session-1' } });
+    expect(
+      parseExtensionMessage({ type: 'command/open-session', payload: { sessionId: 1 } })
+    ).toBeNull();
     expect(parseExtensionMessage({ type: 'command/focus-input' })).toEqual({
       type: 'command/focus-input',
     });
@@ -165,6 +171,71 @@ describe('parseExtensionMessage', () => {
     });
 
     expect(parseExtensionMessage({ type: 'api/response', payload: { id: 'x' } })).toBeNull();
+  });
+
+  it('parses host queue synchronization snapshots', () => {
+    const message = {
+      type: 'queued-messages/sync',
+      payload: {
+        messages: [
+          {
+            id: 'queue-1',
+            ownerViewId: 'sidebar',
+            sessionId: 'session-1',
+            text: 'Continue',
+            droppedFiles: [],
+            clipboardImages: [],
+            terminalSelection: null,
+          },
+        ],
+      },
+    } as const;
+
+    expect(parseExtensionMessage(message)).toEqual(message);
+  });
+
+  it('parses host permission mode snapshots', () => {
+    const message = {
+      type: 'permission-modes/sync',
+      payload: { modes: { 'session-1': 'full' } },
+    } as const;
+
+    expect(parseExtensionMessage(message)).toEqual(message);
+    expect(
+      parseExtensionMessage({
+        type: 'permission-modes/sync',
+        payload: { modes: { 'session-1': 'invalid' } },
+      })
+    ).toBeNull();
+  });
+
+  it('parses host session model snapshots with reasoning variants', () => {
+    const message = {
+      type: 'session-models/sync',
+      payload: {
+        models: {
+          'session-1': { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
+        },
+      },
+    } as const;
+
+    expect(parseExtensionMessage(message)).toEqual(message);
+    expect(
+      parseExtensionMessage({
+        type: 'session-models/sync',
+        payload: { models: { 'session-1': { providerID: 'openai', modelID: 1 } } },
+      })
+    ).toBeNull();
+  });
+
+  it('parses editor-tab lifecycle state', () => {
+    expect(parseExtensionMessage({ type: 'editor-tabs/state', payload: { open: true } })).toEqual({
+      type: 'editor-tabs/state',
+      payload: { open: true },
+    });
+    expect(
+      parseExtensionMessage({ type: 'editor-tabs/state', payload: { open: 'yes' } })
+    ).toBeNull();
   });
 
   it('parses Ralph migration acknowledgements and rejects malformed markers', () => {

@@ -14,14 +14,17 @@ import type { SessionTrashManager } from './session-trash-manager';
 import type { PinnedSessionManager } from './pinned-session-manager';
 import { logger } from './logger';
 import { parseWebviewMessage } from './util/webview-message';
-import { renderWebviewLoadingHtml } from './webview-html';
+import { renderEditorWebviewPlaceholderHtml, renderWebviewLoadingHtml } from './webview-html';
 import type {
   ExtensionMessage,
   InitialWebviewState,
   PermissionMode,
   ServerStatus,
   WebviewMessage,
+  WebviewInstanceContext,
 } from '../shared/protocol';
+
+export type WebviewHost = vscode.WebviewView | vscode.WebviewPanel;
 
 export class WebviewSession {
   public interruptedSessionsForWebview: InterruptedSessionSnapshot[] = [];
@@ -82,10 +85,15 @@ export class WebviewSession {
       onHidden(): void;
       resetStatusBarCache(): void;
       queuedMessages(): InitialWebviewState['queuedMessages'];
+      sessionPermissionModes(): InitialWebviewState['sessionPermissionModes'];
+      sessionSelectedModels(): InitialWebviewState['sessionSelectedModels'];
+      editorTabsOpen(): boolean;
       draftImages(): InitialWebviewState['clipboardImages'];
       flushPendingServerEvents(): void;
       cancelApiRequestsBeforeGeneration(generation: number): void;
-    }
+    },
+    private readonly webviewContext?: WebviewInstanceContext,
+    private readonly manageCommandContext = true
   ) {
     this.bridge.onDeliveryFailure(() => {
       this.deliveryRecoveryPending = true;
@@ -96,6 +104,10 @@ export class WebviewSession {
 
   getRequestGeneration() {
     return this.webviewLoadGeneration;
+  }
+
+  setInitialRoute(route: WebviewInstanceContext['initialRoute']) {
+    if (this.webviewContext?.surface === 'editor') this.webviewContext.initialRoute = route;
   }
 
   postApiResponse(
@@ -142,8 +154,14 @@ export class WebviewSession {
 
   updateCommandState(canAbort: boolean, canSwitchSessions: boolean) {
     this.commandStateReady = true;
-    void vscode.commands.executeCommand('setContext', 'varro:canAbortSession', canAbort);
-    void vscode.commands.executeCommand('setContext', 'varro:canSwitchSessions', canSwitchSessions);
+    if (this.manageCommandContext) {
+      void vscode.commands.executeCommand('setContext', 'varro:canAbortSession', canAbort);
+      void vscode.commands.executeCommand(
+        'setContext',
+        'varro:canSwitchSessions',
+        canSwitchSessions
+      );
+    }
     this.flushPendingCommands();
   }
 
@@ -153,7 +171,19 @@ export class WebviewSession {
     await this.resolve(view);
   }
 
-  async resolve(webviewView: vscode.WebviewView) {
+  suspend() {
+    if (this.webviewContext?.surface !== 'editor') return;
+    const view = this.bridge.getView();
+    if (!view) return;
+    const nextGeneration = ++this.webviewLoadGeneration;
+    this.deps.cancelApiRequestsBeforeGeneration(nextGeneration);
+    this.disposeWebviewDisposables();
+    this.webviewReady = false;
+    this.webviewHasFocus = false;
+    this.resetCommandState();
+  }
+
+  async resolve(webviewView: WebviewHost) {
     this.bridge.setView(webviewView);
     this.webviewReady = false;
     this.resetCommandState();
@@ -161,7 +191,10 @@ export class WebviewSession {
     this.deps.cancelApiRequestsBeforeGeneration(webviewLoadGeneration);
 
     webviewView.webview.options = this.bridge.webviewOptions();
-    webviewView.webview.html = renderWebviewLoadingHtml();
+    webviewView.webview.html =
+      this.webviewContext?.surface === 'editor'
+        ? renderEditorWebviewPlaceholderHtml()
+        : renderWebviewLoadingHtml();
     this.disposeWebviewDisposables();
 
     this.webviewDisposables.push(
@@ -211,8 +244,15 @@ export class WebviewSession {
         webviewView.webview.html = '<p>Failed to load Varro webview. Please reload.</p>';
       });
 
+    const onDidChangeVisibility =
+      'onDidChangeVisibility' in webviewView
+        ? webviewView.onDidChangeVisibility.bind(webviewView)
+        : (listener: () => void) =>
+            webviewView.onDidChangeViewState(() => {
+              listener();
+            });
     this.webviewDisposables.push(
-      webviewView.onDidChangeVisibility(() => {
+      onDidChangeVisibility(() => {
         if (webviewView.visible) {
           this.handleVisible();
         } else {
@@ -269,7 +309,7 @@ export class WebviewSession {
 
   private async renderHtml(
     webviewLoadGeneration: number,
-    webviewView: vscode.WebviewView
+    webviewView: WebviewHost
   ): Promise<string | undefined> {
     const recoverySnapshotLoad =
       this.recoverySnapshotLoad ??
@@ -299,6 +339,7 @@ export class WebviewSession {
   private buildInitialState(serverStatus: ServerStatus): InitialWebviewState {
     const config = this.deps.readConfig();
     return {
+      webviewContext: this.webviewContext,
       theme: this.deps.currentTheme(),
       serverStatus,
       editorContext: this.contextProvider.context,
@@ -311,6 +352,9 @@ export class WebviewSession {
       showChangedFiles: config.showChangedFiles,
       desktopSessionPaneSide: config.desktopSessionPaneSide,
       defaultPermissionMode: config.defaultPermissionMode,
+      sessionPermissionModes: this.deps.sessionPermissionModes(),
+      sessionSelectedModels: this.deps.sessionSelectedModels(),
+      editorTabsOpen: this.deps.editorTabsOpen(),
       interruptedSessionIds: this.interruptedSessionsForWebview.map((item) => item.id),
       pendingPermissions: this.blockingRequestsForWebview
         .filter((item) => item.kind === 'permission')
@@ -406,6 +450,7 @@ export class WebviewSession {
 
   private resetCommandState() {
     this.commandStateReady = false;
+    if (!this.manageCommandContext) return;
     void vscode.commands.executeCommand('setContext', 'varro:canAbortSession', false);
     void vscode.commands.executeCommand('setContext', 'varro:canSwitchSessions', false);
   }

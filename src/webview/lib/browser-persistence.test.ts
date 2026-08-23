@@ -32,19 +32,59 @@ declare global {
   }
 }
 
+function setInitialWebviewState(value?: TestRuntimeRecord) {
+  // SAFETY: Tests own this optional host bootstrap field and restore it after each case.
+  const hostWindow = window as typeof window & { __initialWebviewState?: unknown };
+  if (value === undefined) delete hostWindow.__initialWebviewState;
+  else hostWindow.__initialWebviewState = value;
+}
+
 beforeEach(() => {
   window.localStorage.clear();
+  setInitialWebviewState();
   delete window.__vscodeWebviewState;
   delete window.__sendToExtension;
 });
 
 afterEach(() => {
+  setInitialWebviewState();
   delete window.__vscodeWebviewState;
   delete window.__sendToExtension;
   vi.restoreAllMocks();
 });
 
 describe('BrowserPersistence', () => {
+  it('keeps editor route and draft state out of shared local storage', () => {
+    setInitialWebviewState({
+      webviewContext: {
+        viewId: 'editor-1',
+        surface: 'editor',
+        initialRoute: { type: 'new-session' },
+      },
+    });
+    let vscodeState: TestRuntimeRecord = {};
+    window.__vscodeWebviewState = {
+      getState: () => vscodeState,
+      setState: (state) => {
+        vscodeState = state;
+      },
+    };
+    window.localStorage.setItem(
+      'varro.lastOpenedView',
+      JSON.stringify({ type: 'session', sessionId: 'sidebar-session' })
+    );
+    const storage = new BrowserPersistence();
+
+    expect(storage.get('varro.lastOpenedView')).toBeUndefined();
+    storage.set('varro.lastOpenedView', { type: 'new-session' });
+
+    expect(vscodeState['varro.lastOpenedView']).toEqual({ type: 'new-session' });
+    expect(JSON.parse(window.localStorage.getItem('varro.lastOpenedView') || 'null')).toEqual({
+      type: 'session',
+      sessionId: 'sidebar-session',
+    });
+  });
+
   it('mirrors values into VSCode webview state', () => {
     const storage = new BrowserPersistence();
     let vscodeState: TestRuntimeRecord = {};

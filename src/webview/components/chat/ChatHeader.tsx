@@ -1,6 +1,7 @@
 import { Show, createEffect, createSignal, onCleanup } from 'solid-js';
 import type { SessionDiffSummary } from '../../../shared/protocol';
 import { deleteSession } from '../../hooks/useOpenCode';
+import { postMessage } from '../../lib/bridge';
 import { client } from '../../lib/client';
 import { formatDuration } from '../../lib/message-metrics';
 import { cableTagIcon, pinIcon, xmarkIcon } from '../../lib/ui-icons';
@@ -39,6 +40,27 @@ function isActiveSessionRunning() {
   if (!sessionId) return false;
   const type = state.sessionStatus[sessionId]?.type;
   return type === 'busy' || type === 'retry';
+}
+
+function createSessionFromClick(event: MouseEvent, onCreateSession: () => void) {
+  if (event.altKey) {
+    postMessage({ type: 'chat/new-editor' });
+    return;
+  }
+  onCreateSession();
+}
+
+export function getNewChatEditorShortcut(platform = navigator.platform) {
+  return /^Mac/i.test(platform) ? 'Option-click to open in editor' : 'Alt-click to open in editor';
+}
+
+function NewChatTooltipContent() {
+  return (
+    <span class="new-chat-tooltip">
+      <strong class="new-chat-tooltip-title">New chat</strong>
+      <span class="new-chat-tooltip-shortcut">{getNewChatEditorShortcut()}</span>
+    </span>
+  );
 }
 
 async function toggleSessionPinned(sessionId: string) {
@@ -155,8 +177,12 @@ export function SessionPickerHeader(props: {
           <RunningSessionsBadge count={props.runningCount} onClick={props.onOpenRunningSessions} />
         </Show>
         <Show when={props.showNewChatButton}>
-          <Tooltip content="New chat">
-            <button class="chat-header-btn" onClick={props.onCreateSession} aria-label="New chat">
+          <Tooltip content={<NewChatTooltipContent />}>
+            <button
+              class="chat-header-btn"
+              onClick={(event) => createSessionFromClick(event, props.onCreateSession)}
+              aria-label="New chat"
+            >
               <PlusIcon class="chat-header-add-icon" />
             </button>
           </Tooltip>
@@ -342,8 +368,12 @@ export function ActiveChatHeader(props: {
             onClick={props.onOpenCompletedSessions}
           />
           <RunningSessionsBadge count={props.runningCount} onClick={props.onOpenRunningSessions} />
-          <Tooltip content="New chat">
-            <button class="chat-header-btn" onClick={props.onCreateSession} aria-label="New chat">
+          <Tooltip content={<NewChatTooltipContent />}>
+            <button
+              class="chat-header-btn"
+              onClick={(event) => createSessionFromClick(event, props.onCreateSession)}
+              aria-label="New chat"
+            >
               <PlusIcon class="chat-header-add-icon" />
             </button>
           </Tooltip>
@@ -355,11 +385,13 @@ export function ActiveChatHeader(props: {
             session={session()}
             state={sessionActions}
             isPinned={isActionsSessionPinned()}
+            showOpenAsEditor
             inputIdPrefix="header-session-rename"
             onMenuRef={(element) => {
               actionsMenuRef = element;
             }}
             onEscape={() => titleRef?.focus()}
+            onOpenAsEditor={() => setShowSessionPicker(true)}
             onTogglePinned={toggleSessionPinned}
             onDelete={deleteSessionFromHeader}
           />

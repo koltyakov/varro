@@ -475,6 +475,12 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   color: var(--color-vscode-error);
 }
 
+.session-item-actions-separator {
+  height: 1px;
+  margin: 4px 2px;
+  background: color-mix(in srgb, var(--color-vscode-border-strong) 70%, transparent);
+}
+
 /* Toast for one-shot feedback and app errors. Sits just clear of the 36px chat
    header so it never straddles the title row. Fully opaque: every surface
    mixes toward `--color-vscode-widget-bg`, so nothing underneath shows through. */

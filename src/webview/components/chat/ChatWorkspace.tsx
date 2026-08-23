@@ -49,6 +49,8 @@ function ComposerHost() {
 export function ChatWorkspace(props: {
   shouldRenderWorkspace: boolean;
   isDesktopSessionPaneRight: boolean;
+  showDesktopSessionPane: boolean;
+  showSessionHeader: boolean;
   showSessionPicker: boolean;
   showModels: boolean;
   showReconnectBanner: boolean;
@@ -200,9 +202,11 @@ export function ChatWorkspace(props: {
 
   const mainShell = () => (
     <div class="chat-main-shell">
-      <div class="chat-header chat-header-chat-desktop">
-        <div class="chat-header-inner">{activeChatHeader(props.showDesktopBackButton)}</div>
-      </div>
+      <Show when={props.showSessionHeader}>
+        <div class="chat-header chat-header-chat-desktop">
+          <div class="chat-header-inner">{activeChatHeader(props.showDesktopBackButton)}</div>
+        </div>
+      </Show>
       <div
         ref={(element) => {
           chatContentRef = element;
@@ -235,18 +239,20 @@ export function ChatWorkspace(props: {
 
   return (
     <div class="interactive-session">
-      <div
-        class={`chat-header ${props.shouldRenderWorkspace ? 'chat-header-centered chat-header-chat-layout' : ''}`}
-      >
-        <div class="chat-header-inner">
-          <Show
-            when={props.showSessionPicker}
-            fallback={activeChatHeader(!props.showDesktopBackButton)}
-          >
-            {sessionPickerHeader()}
-          </Show>
+      <Show when={props.showSessionHeader}>
+        <div
+          class={`chat-header ${props.shouldRenderWorkspace ? 'chat-header-centered chat-header-chat-layout' : ''}`}
+        >
+          <div class="chat-header-inner">
+            <Show
+              when={props.showSessionPicker}
+              fallback={activeChatHeader(!props.showDesktopBackButton)}
+            >
+              {sessionPickerHeader()}
+            </Show>
+          </div>
         </div>
-      </div>
+      </Show>
 
       <Show when={props.showReconnectBanner}>
         <div
@@ -306,19 +312,21 @@ export function ChatWorkspace(props: {
         <div
           class={`chat-workspace ${props.isDesktopSessionPaneRight ? 'chat-workspace-pane-right' : ''}`}
         >
-          <Show
-            when={props.isDesktopSessionPaneRight}
-            fallback={
+          <Show when={props.showDesktopSessionPane} fallback={mainShell()}>
+            <Show
+              when={props.isDesktopSessionPaneRight}
+              fallback={
+                <>
+                  {sessionSidebar()}
+                  {mainShell()}
+                </>
+              }
+            >
               <>
-                {sessionSidebar()}
                 {mainShell()}
+                {sessionSidebar()}
               </>
-            }
-          >
-            <>
-              {mainShell()}
-              {sessionSidebar()}
-            </>
+            </Show>
           </Show>
         </div>
       </Show>

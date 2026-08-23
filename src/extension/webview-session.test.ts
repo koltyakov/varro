@@ -92,7 +92,10 @@ function createWebviewView(visible: boolean) {
   };
 }
 
-function createSession(options?: { renderHtml?: (state: InitialWebviewState) => Promise<string> }) {
+function createSession(options?: {
+  renderHtml?: (state: InitialWebviewState) => Promise<string>;
+  manageCommandContext?: boolean;
+}) {
   let currentView: ReturnType<typeof createWebviewView> | undefined;
 
   const bridge = {
@@ -167,6 +170,9 @@ function createSession(options?: { renderHtml?: (state: InitialWebviewState) => 
     onHidden: vi.fn(),
     resetStatusBarCache: vi.fn(),
     queuedMessages: vi.fn<() => InitialWebviewState['queuedMessages']>(() => undefined),
+    sessionPermissionModes: vi.fn<() => InitialWebviewState['sessionPermissionModes']>(() => ({})),
+    sessionSelectedModels: vi.fn<() => InitialWebviewState['sessionSelectedModels']>(() => ({})),
+    editorTabsOpen: vi.fn(() => false),
     draftImages: vi.fn<() => InitialWebviewState['clipboardImages']>(() => []),
     flushPendingServerEvents: vi.fn(),
     cancelApiRequestsBeforeGeneration: vi.fn(),
@@ -180,7 +186,9 @@ function createSession(options?: { renderHtml?: (state: InitialWebviewState) => 
     hiddenSessions as never,
     contextProvider as never,
     contextFilesState as never,
-    deps
+    deps,
+    undefined,
+    options?.manageCommandContext
   );
 
   return { session, bridge, sessionState, sessionTrash, hiddenSessions, contextFilesState, deps };
@@ -296,6 +304,14 @@ describe('WebviewSession', () => {
     );
   });
 
+  it('does not let an editor endpoint overwrite global command contexts', () => {
+    const { session } = createSession({ manageCommandContext: false });
+
+    session.updateCommandState(true, true);
+
+    expect(vscodeMock.commands.executeCommand).not.toHaveBeenCalled();
+  });
+
   it('ignores stale renderHtml results from an earlier resolve generation', async () => {
     const firstHtml = createDeferred<string>();
     const secondHtml = createDeferred<string>();
@@ -316,7 +332,7 @@ describe('WebviewSession', () => {
 
     firstHtml.resolve('<html>stale</html>');
     await flushMicrotasks();
-    expect(view.webview.html).toContain('Loading workspace...');
+    expect(view.webview.html).toContain('aria-label="Loading workspace"');
 
     secondHtml.resolve('<html>fresh</html>');
     await flushMicrotasks();
@@ -332,7 +348,7 @@ describe('WebviewSession', () => {
     bridge.renderHtml.mockReturnValueOnce(Promise.resolve('<html>reloaded</html>'));
 
     await session.reload();
-    expect(view.webview.html).toContain('Loading workspace...');
+    expect(view.webview.html).toContain('aria-label="Loading workspace"');
     await flushMicrotasks();
 
     expect(bridge.renderHtml).toHaveBeenCalledTimes(2);
@@ -364,7 +380,7 @@ describe('WebviewSession', () => {
     expect(sessionState.consumeRecoverySnapshot).toHaveBeenCalledOnce();
     expect(deps.resetStatusBarCache).toHaveBeenCalledOnce();
     expect(bridge.renderHtml).toHaveBeenCalledOnce();
-    expect(firstView.webview.html).toContain('Loading workspace...');
+    expect(firstView.webview.html).toContain('aria-label="Loading workspace"');
     expect(secondView.webview.html).toBe('<html><body>Varro</body></html>');
     expect(session.interruptedSessionsForWebview).toEqual([
       { id: 'session-1', title: 'Interrupted' },
@@ -406,6 +422,36 @@ describe('WebviewSession', () => {
     await flushMicrotasks();
 
     expect(bridge.renderHtml).toHaveBeenCalledWith(expect.objectContaining({ queuedMessages }));
+  });
+
+  it('includes persisted session permission modes in the initial webview state', async () => {
+    const { session, bridge, deps } = createSession();
+    deps.sessionPermissionModes.mockReturnValue({ 'session-1': 'full' });
+
+    await session.resolve(createWebviewView(true) as never);
+    await flushMicrotasks();
+
+    expect(bridge.renderHtml).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionPermissionModes: { 'session-1': 'full' } })
+    );
+  });
+
+  it('includes host-owned session model variants in the initial webview state', async () => {
+    const { session, bridge, deps } = createSession();
+    deps.sessionSelectedModels.mockReturnValue({
+      'session-1': { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
+    });
+
+    await session.resolve(createWebviewView(true) as never);
+    await flushMicrotasks();
+
+    expect(bridge.renderHtml).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionSelectedModels: {
+          'session-1': { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
+        },
+      })
+    );
   });
 
   it('marks the initial state when the extension host is remote', async () => {

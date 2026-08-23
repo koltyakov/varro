@@ -94,6 +94,7 @@ const WEBVIEW_MESSAGE_TYPES = {
   'context/request': true,
   'workspace/select': true,
   'commands/state': true,
+  'session-model/update': true,
   'webview/focus': true,
   'permission/reveal': true,
   'providers/watch': true,
@@ -101,7 +102,10 @@ const WEBVIEW_MESSAGE_TYPES = {
   'providers/reauthenticated': true,
   'terminal-selection/clear': true,
   'terminal/run': true,
+  'session/open-in-editor': true,
   'session/open-in-opencode': true,
+  'chat/new-editor': true,
+  'editor/route-changed': true,
   'session/export': true,
   'usage/report': true,
   'webview/reload': true,
@@ -117,6 +121,7 @@ const WEBVIEW_MESSAGE_TYPES = {
   'files/remove': true,
   'files/clear': true,
   'queued-messages/update': true,
+  'permission-mode/update': true,
   'composer/images-update': true,
   'files/pick': true,
   'files/search': true,
@@ -155,6 +160,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
     case 'webview/reload':
     case 'vscode/open-folder':
     case 'vscode/show-output':
+    case 'chat/new-editor':
       return { type };
 
     case 'usage/report': {
@@ -188,6 +194,39 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       };
     }
 
+    case 'permission-mode/update': {
+      const payload = asRecord(message?.payload);
+      if (!payload) return null;
+      const sessionId = getString(payload?.sessionId);
+      if (!sessionId) return null;
+      const mode = payload.mode;
+      if (mode !== null && !isPermissionMode(mode)) return null;
+      return { type, payload: { sessionId, mode } };
+    }
+
+    case 'session-model/update': {
+      const payload = asRecord(message?.payload);
+      const sessionId = getBoundedString(payload?.sessionId, 512);
+      if (!sessionId) return null;
+      if (payload?.model === null) return { type, payload: { sessionId, model: null } };
+      const model = asRecord(payload?.model);
+      const providerID = getBoundedString(model?.providerID, MAX_RALPH_ID_LENGTH);
+      const modelID = getBoundedString(model?.modelID, MAX_RALPH_ID_LENGTH);
+      if (!providerID || !modelID) return null;
+      const variant =
+        model?.variant === undefined
+          ? undefined
+          : getBoundedString(model.variant, MAX_RALPH_ID_LENGTH);
+      if (model?.variant !== undefined && !variant) return null;
+      return {
+        type,
+        payload: {
+          sessionId,
+          model: variant ? { providerID, modelID, variant } : { providerID, modelID },
+        },
+      };
+    }
+
     case 'composer/images-update': {
       const payload = asRecord(message?.payload);
       const images = sanitizeClipboardImages(payload?.images);
@@ -205,11 +244,42 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
         : null;
     }
 
+    case 'session/open-in-editor': {
+      const payload = asRecord(message?.payload);
+      const sessionId = getBoundedString(payload?.sessionId, 512);
+      const title = getBoundedString(payload?.title, 512);
+      if (!sessionId || !/^[A-Za-z0-9_-]+$/.test(sessionId)) return null;
+      const model = parseChatModelSelection(payload?.model);
+      if (payload?.model !== undefined && !model) return null;
+      const parsedPayload: Extract<WebviewMessage, { type: 'session/open-in-editor' }>['payload'] =
+        { sessionId };
+      if (title) parsedPayload.title = title;
+      if (model) parsedPayload.model = model;
+      return { type, payload: parsedPayload };
+    }
+
     case 'session/open-in-opencode': {
       const payload = asRecord(message?.payload);
       const sessionId = getBoundedString(payload?.sessionId, 512);
       return sessionId && /^[A-Za-z0-9_-]+$/.test(sessionId)
         ? { type, payload: { sessionId } }
+        : null;
+    }
+
+    case 'editor/route-changed': {
+      const payload = asRecord(message?.payload);
+      const route = asRecord(payload?.route);
+      if (route?.type === 'new-session')
+        return { type, payload: { route: { type: 'new-session' } } };
+      const sessionId = getBoundedString(route?.sessionId, 512);
+      const title = getBoundedString(route?.title, 512);
+      return route?.type === 'session' && sessionId && /^[A-Za-z0-9_-]+$/.test(sessionId)
+        ? {
+            type,
+            payload: {
+              route: title ? { type: 'session', sessionId, title } : { type: 'session', sessionId },
+            },
+          }
         : null;
     }
 
@@ -557,6 +627,17 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       return exhaustive;
     }
   }
+}
+
+function parseChatModelSelection(value: unknown) {
+  const model = asRecord(value);
+  const providerID = getBoundedString(model?.providerID, MAX_RALPH_ID_LENGTH);
+  const modelID = getBoundedString(model?.modelID, MAX_RALPH_ID_LENGTH);
+  if (!providerID || !modelID) return null;
+  const variant =
+    model?.variant === undefined ? undefined : getBoundedString(model.variant, MAX_RALPH_ID_LENGTH);
+  if (model?.variant !== undefined && !variant) return null;
+  return variant ? { providerID, modelID, variant } : { providerID, modelID };
 }
 
 function parseRalphConfig(

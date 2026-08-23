@@ -1,6 +1,7 @@
 import { produce } from 'solid-js/store';
 import type { PermissionMode } from '../../shared/protocol';
 import { isPermissionMode } from '../../shared/protocol';
+import { postMessage } from './bridge';
 import {
   defaultPermissionMode,
   draftPermissionMode,
@@ -12,7 +13,11 @@ import {
   state,
 } from './app-state';
 import { STORAGE_KEYS, readStored, writeStored } from './state-storage';
-import { readStoredPermissionModes } from './state-stored-values';
+import {
+  readInitialWebviewState,
+  readStoredPermissionModes,
+  readWebviewInstanceContext,
+} from './state-stored-values';
 
 export function getPermissionModeForSession(sessionId: string | null | undefined): PermissionMode {
   if (!sessionId) return draftPermissionMode();
@@ -64,6 +69,7 @@ export function setPermissionModeForSession(
 
   setState('sessionPermissionModes', nextModes);
   writeStored(STORAGE_KEYS.sessionPermissionModes, nextModes);
+  postMessage({ type: 'permission-mode/update', payload: { sessionId, mode } });
 }
 
 export function removePermissionModeForSession(sessionId: string) {
@@ -78,6 +84,22 @@ export function removePermissionModeForSession(sessionId: string) {
     })
   );
   writeStored(STORAGE_KEYS.sessionPermissionModes, nextModes);
+  postMessage({ type: 'permission-mode/update', payload: { sessionId, mode: null } });
+}
+
+export function applySessionPermissionModesSnapshot(modes: Record<string, PermissionMode>) {
+  setState('sessionPermissionModes', modes);
+  writeStored(STORAGE_KEYS.sessionPermissionModes, modes);
+}
+
+export function syncSessionPermissionModesToHost() {
+  if (readWebviewInstanceContext()?.surface !== 'sidebar') return;
+  const hostModes = readInitialWebviewState().sessionPermissionModes ?? {};
+  for (const [sessionId, mode] of Object.entries(state.sessionPermissionModes)) {
+    if (!Object.hasOwn(hostModes, sessionId)) {
+      postMessage({ type: 'permission-mode/update', payload: { sessionId, mode } });
+    }
+  }
 }
 
 export function resetDraftPermissionMode() {

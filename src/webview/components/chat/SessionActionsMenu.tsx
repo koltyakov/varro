@@ -5,7 +5,7 @@ import { renameSession } from '../../hooks/useOpenCode';
 import { postMessage } from '../../lib/bridge';
 import { clampPopupToViewport } from '../../lib/popup-position';
 import { shareSession, unshareSession } from '../../lib/session-sharing';
-import { setError } from '../../lib/state';
+import { getSelectedModelForSession, setError } from '../../lib/state';
 import { writeClipboard } from '../../lib/write-clipboard';
 import type { Session } from '../../types';
 import { showSessionActionFeedback } from './SessionActionFeedback';
@@ -75,9 +75,11 @@ export function SessionActionsMenu(props: {
   session: Session;
   state: SessionActionsState;
   isPinned: boolean;
+  showOpenAsEditor?: boolean;
   inputIdPrefix: string;
   onMenuRef: (element: HTMLDivElement) => void;
   onEscape: () => void;
+  onOpenAsEditor?: (sessionId: string) => void;
   onTogglePinned: (sessionId: string) => void | Promise<void>;
   onDelete: (sessionId: string) => void | Promise<void>;
 }) {
@@ -163,28 +165,43 @@ export function SessionActionsMenu(props: {
           when={props.state.renaming()}
           fallback={
             <>
-              <Show when={!props.session.parentID}>
-                <button type="button" role="menuitem" onClick={beginRename}>
-                  Rename
-                </button>
-              </Show>
-              <Show when={!props.session.parentID}>
+              <Show when={props.showOpenAsEditor}>
                 <button
                   type="button"
                   role="menuitem"
                   onClick={() => {
                     const sessionId = props.session.id;
-                    const onTogglePinned = props.onTogglePinned;
+                    const title = props.session.title;
+                    const selectedModel = getSelectedModelForSession(sessionId);
+                    const sessionModel = props.session.model
+                      ? {
+                          providerID: props.session.model.providerID,
+                          modelID: props.session.model.id,
+                          variant: props.session.model.variant,
+                        }
+                      : undefined;
+                    const model = selectedModel
+                      ? {
+                          providerID: selectedModel.providerID,
+                          modelID: selectedModel.modelID,
+                          variant: selectedModel.variant,
+                        }
+                      : sessionModel;
                     props.state.close();
-                    void onTogglePinned(sessionId);
+                    const posted = postMessage({
+                      type: 'session/open-in-editor',
+                      payload: {
+                        sessionId,
+                        title,
+                        model,
+                      },
+                    });
+                    if (posted) props.onOpenAsEditor?.(sessionId);
                   }}
                 >
-                  {props.isPinned ? 'Unpin' : 'Pin'}
+                  Open as Editor
                 </button>
               </Show>
-              <button type="button" role="menuitem" onClick={() => void copySessionId()}>
-                Copy session ID
-              </button>
               <button
                 type="button"
                 role="menuitem"
@@ -197,17 +214,39 @@ export function SessionActionsMenu(props: {
                   });
                 }}
               >
-                Open in OpenCode
+                Open in terminal
               </button>
-              <button type="button" role="menuitem" onClick={() => void copyShareLink()}>
-                {props.session.share?.url ? 'Copy share link' : 'Share session'}
-              </button>
-              <Show when={props.session.share?.url}>
-                <button type="button" role="menuitem" onClick={() => void unshare()}>
-                  Unshare session
+              <Show when={!props.session.parentID}>
+                <div class="session-item-actions-separator" role="separator" />
+                <button type="button" role="menuitem" onClick={beginRename}>
+                  Rename
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    const sessionId = props.session.id;
+                    const onTogglePinned = props.onTogglePinned;
+                    props.state.close();
+                    void onTogglePinned(sessionId);
+                  }}
+                >
+                  {props.isPinned ? 'Unpin session' : 'Pin session'}
                 </button>
               </Show>
+              <div class="session-item-actions-separator" role="separator" />
+              <button type="button" role="menuitem" onClick={() => void copySessionId()}>
+                Copy session ID
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => (props.session.share?.url ? void unshare() : void copyShareLink())}
+              >
+                {props.session.share?.url ? 'Unshare session' : 'Share session'}
+              </button>
               <Show when={!props.session.parentID}>
+                <div class="session-item-actions-separator" role="separator" />
                 <button
                   type="button"
                   role="menuitem"
