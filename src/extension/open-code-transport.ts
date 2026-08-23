@@ -19,6 +19,7 @@ export type OpenCodeRequestOptions = {
   captureNextCursor?: boolean;
   maxResponseBytes?: number;
   maxProjectedResponseBytes?: number;
+  stripMessageParts?: boolean;
   stripSummaryDiffs?: boolean;
   unscoped?: boolean;
   signal?: AbortSignal;
@@ -113,7 +114,8 @@ export class OpenCodeTransport {
         res,
         options?.maxResponseBytes ?? OpenCodeTransport.RESPONSE_MAX_BYTES,
         options?.stripSummaryDiffs === true,
-        options?.maxProjectedResponseBytes
+        options?.maxProjectedResponseBytes,
+        options?.stripMessageParts === true
       );
       let data: unknown = text;
       try {
@@ -542,7 +544,8 @@ async function readResponseText(
   response: Response,
   maxBytes?: number,
   stripSummaryDiffs = false,
-  maxProjectedBytes = maxBytes
+  maxProjectedBytes = maxBytes,
+  stripMessageParts = false
 ): Promise<string> {
   if (!maxBytes) return response.text();
 
@@ -555,7 +558,10 @@ async function readResponseText(
     if (new TextEncoder().encode(text).byteLength > maxBytes) {
       throw new OpenCodeResponseTooLargeError(maxBytes);
     }
-    const projected = stripSummaryDiffs ? stripDiffArrays(text) : text;
+    const projected =
+      stripSummaryDiffs || stripMessageParts
+        ? stripLargeArrays(text, stripSummaryDiffs, stripMessageParts)
+        : text;
     if (maxProjectedBytes && new TextEncoder().encode(projected).byteLength > maxProjectedBytes) {
       throw new OpenCodeResponseTooLargeError(maxProjectedBytes);
     }
@@ -564,7 +570,10 @@ async function readResponseText(
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
-  const projector = stripSummaryDiffs ? new DiffArrayProjector() : null;
+  const projector =
+    stripSummaryDiffs || stripMessageParts
+      ? new LargeArrayProjector(stripSummaryDiffs, stripMessageParts)
+      : null;
   let bytes = 0;
   let projectedBytes = 0;
   let text = '';
@@ -600,25 +609,36 @@ async function readResponseText(
   }
 }
 
-function stripDiffArrays(text: string): string {
-  const projector = new DiffArrayProjector();
+function stripLargeArrays(
+  text: string,
+  stripSummaryDiffs: boolean,
+  stripMessageParts: boolean
+): string {
+  const projector = new LargeArrayProjector(stripSummaryDiffs, stripMessageParts);
   return projector.write(text) + projector.finish();
 }
 
 type JsonContainer = { type: 'array' } | { type: 'object'; expectingKey: boolean };
+type StrippedArrayKey = 'diffs' | 'parts';
 
-class DiffArrayProjector {
+class LargeArrayProjector {
   private readonly stack: JsonContainer[] = [];
   private inString = false;
   private escaped = false;
   private key = '';
   private collectingKey = false;
-  private pendingDiffsKey = false;
-  private stripNextArray = false;
+  private pendingArrayKey: StrippedArrayKey | null = null;
+  private stripNextArrayKey: StrippedArrayKey | null = null;
+  private strippedArrayKey: StrippedArrayKey | null = null;
   private stripping = false;
   private stripDepth = 0;
   private stripInString = false;
   private stripEscaped = false;
+
+  constructor(
+    private readonly stripSummaryDiffs = true,
+    private readonly stripMessageParts = false
+  ) {}
 
   write(chunk: string): string {
     let output = '';
@@ -627,7 +647,9 @@ class DiffArrayProjector {
       if (this.stripping) {
         const nextIndex = this.consumeStrippedChunk(chunk, index);
         if (nextIndex < 0) return output;
-        output += '[],"diffsOmitted":true,"diffsTruncated":true';
+        output +=
+          this.strippedArrayKey === 'diffs' ? '[],"diffsOmitted":true,"diffsTruncated":true' : '[]';
+        this.strippedArrayKey = null;
         index = nextIndex;
         continue;
       }
@@ -647,29 +669,38 @@ class DiffArrayProjector {
         }
         if (char === '"') {
           this.inString = false;
-          if (this.collectingKey) this.pendingDiffsKey = this.key === 'diffs';
+          if (this.collectingKey) {
+            if (this.stripSummaryDiffs && this.key === 'diffs') {
+              this.pendingArrayKey = 'diffs';
+            } else if (this.stripMessageParts && this.key === 'parts') {
+              this.pendingArrayKey = 'parts';
+            } else {
+              this.pendingArrayKey = null;
+            }
+          }
           continue;
         }
         if (this.collectingKey && this.key.length < 32) this.key += char;
         continue;
       }
 
-      if (this.pendingDiffsKey && char === ':') {
+      if (this.pendingArrayKey && char === ':') {
         output += char;
-        this.stripNextArray = true;
-        this.pendingDiffsKey = false;
+        this.stripNextArrayKey = this.pendingArrayKey;
+        this.pendingArrayKey = null;
         const object = this.currentObject();
         if (object) object.expectingKey = false;
         continue;
       }
-      if (this.pendingDiffsKey && !/\s/.test(char)) this.pendingDiffsKey = false;
-      if (this.stripNextArray && char === '[') {
-        this.stripNextArray = false;
+      if (this.pendingArrayKey && !/\s/.test(char)) this.pendingArrayKey = null;
+      if (this.stripNextArrayKey && char === '[') {
+        this.strippedArrayKey = this.stripNextArrayKey;
+        this.stripNextArrayKey = null;
         this.stripping = true;
         this.stripDepth = 1;
         continue;
       }
-      if (this.stripNextArray && !/\s/.test(char)) this.stripNextArray = false;
+      if (this.stripNextArrayKey && !/\s/.test(char)) this.stripNextArrayKey = null;
 
       output += char;
       if (char === '"') {

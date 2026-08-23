@@ -43,7 +43,7 @@ describe('ToolOutputDocumentProvider', () => {
     try {
       await expect(
         provider.open({ content: 'line one\nline two\n', title: 'rtk git status (output)' })
-      ).resolves.toBe(true);
+      ).resolves.toEqual(expect.anything());
 
       const uri = vscodeMock.Uri.from.mock.results[0]?.value as { toString(): string };
       expect(vscodeMock.provider?.provideTextDocumentContent(uri)).toBe('line one\nline two\n');
@@ -110,6 +110,36 @@ describe('ToolOutputDocumentProvider', () => {
     }
   });
 
+  it('can keep a named document out of preview mode', async () => {
+    const provider = new ToolOutputDocumentProvider();
+
+    try {
+      await provider.open({ content: 'x', title: 'OpenCode Usage Report', preview: false });
+
+      expect(vscodeMock.window.showTextDocument).toHaveBeenCalledWith(expect.anything(), {
+        preview: false,
+      });
+      expect(vscodeMock.Uri.from).toHaveBeenCalledWith(
+        expect.objectContaining({ path: expect.stringContaining('OpenCode Usage Report.md') })
+      );
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('can register a named document without showing its source editor', async () => {
+    const provider = new ToolOutputDocumentProvider();
+
+    try {
+      await provider.open({ content: 'x', title: 'OpenCode Usage Report', show: false });
+
+      expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledOnce();
+      expect(vscodeMock.window.showTextDocument).not.toHaveBeenCalled();
+    } finally {
+      provider.dispose();
+    }
+  });
+
   it('opens markup in an XML editor tab', async () => {
     const provider = new ToolOutputDocumentProvider();
 
@@ -135,7 +165,7 @@ describe('ToolOutputDocumentProvider', () => {
     const provider = new ToolOutputDocumentProvider();
 
     try {
-      await expect(provider.open({ content: 'x', title: 'tool' })).resolves.toBe(false);
+      await expect(provider.open({ content: 'x', title: 'tool' })).resolves.toBeUndefined();
 
       const uri = vscodeMock.Uri.from.mock.results[0]?.value as { toString(): string };
       expect(vscodeMock.provider?.provideTextDocumentContent(uri)).toBe('');
@@ -148,7 +178,7 @@ describe('ToolOutputDocumentProvider', () => {
     const provider = new ToolOutputDocumentProvider();
     provider.dispose();
 
-    await expect(provider.open({ content: 'x', title: 'tool' })).resolves.toBe(false);
+    await expect(provider.open({ content: 'x', title: 'tool' })).resolves.toBeUndefined();
     expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
   });
 });

@@ -1,8 +1,7 @@
-/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/no-unsafe-dictionary-type -- Command handlers decode VS Code extension API values before use. */
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns -- Command handlers decode VS Code extension API values before use. */
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Assertions bind VS Code command contexts to contracts checked by each handler. */
 import * as vscode from 'vscode';
 import { getSelectionRangesFromEditorContext } from '../shared/context-files';
-import { MINIMUM_SUPPORTED_OPENCODE_VERSION } from '../shared/opencode-compatibility';
 import { describeInstallMethod, getUpgradeCommand } from '../shared/opencode-install';
 import { readMaximumTestedOpenCodeVersion } from './extension-manifest';
 import type { SidebarProvider } from './sidebar-provider';
@@ -12,12 +11,12 @@ import { getOpenCodeConfigDirectory } from './open-code-process';
 import { getRelativePath } from './util/path';
 import { errorHub } from './error-hub';
 import { logger } from './logger';
+import { compareVersions, extractVersion } from './server-utils';
 
 type ExtensionPackageJson = {
   name?: unknown;
   displayName?: unknown;
   version?: unknown;
-  dependencies?: unknown;
 };
 
 export function registerCommands(
@@ -94,11 +93,13 @@ export function registerCommands(
     vscode.commands.registerCommand('varro.about', async () => {
       try {
         const serverInfo = await server.readServerInfo();
-        const document = await vscode.workspace.openTextDocument({
-          language: 'markdown',
-          content: renderAboutMarkdown(context, serverInfo),
-        });
-        await vscode.window.showTextDocument(document, { preview: false });
+        const uri = await sidebar.openMarkdownDocument(
+          renderAboutMarkdown(context, serverInfo),
+          'Varro About',
+          false
+        );
+        if (!uri) throw new Error('Could not open the generated about report.');
+        await vscode.commands.executeCommand('markdown.showPreview', uri);
       } catch (err) {
         const message = `Failed to open Varro about: ${err instanceof Error ? err.message : String(err)}`;
         logger.error(message);
@@ -325,8 +326,7 @@ function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenC
   const pkg = readPackageJson(context);
   const name = getString(pkg.displayName) || getString(pkg.name) || 'Varro';
   const version = getString(pkg.version) || 'unknown';
-  const sdkVersion = readDependencyVersion(pkg, '@opencode-ai/sdk');
-  const status = formatServerStatus(serverInfo);
+  const maximumTestedVersion = readMaximumTestedOpenCodeVersion();
   const autoUpdate = vscode.workspace
     .getConfiguration('varro')
     .get<boolean>('server.autoUpdate', true);
@@ -336,6 +336,31 @@ function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenC
   const activeAgents = serverInfo.activeAgentError
     ? `error: ${serverInfo.activeAgentError}`
     : String(serverInfo.activeAgentCount ?? 'unknown');
+  const installedVersion = serverInfo.cliVersion ? extractVersion(serverInfo.cliVersion) : null;
+  const updateAvailable =
+    installedVersion !== null && compareVersions(installedVersion, maximumTestedVersion) < 0;
+  const updateCommand = updateAvailable
+    ? getUpgradeCommand(serverInfo.installMethod, process.platform)
+    : null;
+  const updateNoticeLines = !updateAvailable
+    ? []
+    : updateCommand
+      ? [
+          '',
+          `**OpenCode ${maximumTestedVersion} is available.**`,
+          '',
+          'Run this command to install the update:',
+          '',
+          `\`\`\`${process.platform === 'win32' ? 'powershell' : 'sh'}`,
+          updateCommand,
+          '```',
+        ]
+      : [
+          '',
+          `**OpenCode ${maximumTestedVersion} is available.**`,
+          '',
+          `Reinstall OpenCode using ${describeInstallMethod(serverInfo.installMethod)}.`,
+        ];
   const ownership =
     serverInfo.ownership === 'other-host' ||
     serverInfo.ownership === 'current-host' ||
@@ -344,64 +369,45 @@ function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenC
       : 'unmanaged';
 
   return [
-    `# ${name} About`,
+    `# ${name}`,
     '',
     '## Varro',
-    `- Version: ${version}`,
+    `- **Version:** ${markdownCode(version)}`,
+    '- [GitHub repository](https://github.com/koltyakov/varro)',
+    '- [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=koltyakov.varro)',
+    '- [Open VSX Registry](https://open-vsx.org/extension/koltyakov/varro)',
     '',
     '## OpenCode',
-    `- SDK version: ${sdkVersion}`,
-    `- Minimum supported version: ${MINIMUM_SUPPORTED_OPENCODE_VERSION}`,
-    `- Maximum tested version: ${readMaximumTestedOpenCodeVersion()}`,
-    `- CLI version: ${cliVersion}`,
-    `- Install method: ${describeInstallMethod(serverInfo.installMethod)}`,
-    `- Resolved binary: ${serverInfo.resolvedCommand || 'not resolved'}`,
-    `- Update command for this install: ${getUpgradeCommand(serverInfo.installMethod, process.platform) || 'none (reinstall manually)'}`,
-    `- Server status: ${status}`,
-    `- Server URL: ${serverInfo.url}`,
-    `- Server port: ${serverInfo.port}`,
-    `- Server health: ${serverInfo.health.healthy ? 'healthy' : 'unhealthy'}`,
-    `- Server version: ${serverInfo.health.version || 'unknown'}`,
-    `- Server ownership: ${ownership}`,
-    `- Active agents (server-wide): ${activeAgents}`,
-    `- Auto updates: ${autoUpdate ? 'enabled' : 'disabled'}`,
-    `- CLI command: ${serverInfo.command}`,
-    `- Workspace: ${serverInfo.workspaceCwd || 'none'}`,
+    '- **CLI:**',
+    `  - **Version:** ${markdownCode(cliVersion)}`,
+    `  - **Install method:** ${describeInstallMethod(serverInfo.installMethod)}`,
+    `  - **Binary:** ${markdownCode(serverInfo.resolvedCommand || 'not resolved')}`,
+    '- **Server:**',
+    `  - **Version:** ${markdownCode(serverInfo.health.version || 'unknown')}`,
+    `  - **URL:** [${serverInfo.url}](${serverInfo.url})`,
+    `  - **Ownership:** ${ownership}`,
+    `  - **Active agents:** ${markdownCode(activeAgents)}`,
+    `- **Auto updates:** ${autoUpdate ? 'enabled' : 'disabled'}`,
+    ...updateNoticeLines,
     '',
     '## Runtime',
-    `- VS Code: ${vscode.version}`,
-    `- Node: ${process.version}`,
-    `- Platform: ${process.platform} ${process.arch}`,
+    `- **VS Code:** ${markdownCode(vscode.version)}`,
+    `- **Node:** ${markdownCode(process.version)}`,
+    `- **Platform:** ${markdownCode(`${process.platform} ${process.arch}`)}`,
     '',
   ].join('\n');
+}
+
+function markdownCode(value: string | number) {
+  const text = String(value).replace(/[\r\n]+/g, ' ');
+  const longestRun = Math.max(0, ...(text.match(/`+/g)?.map((run) => run.length) ?? []));
+  const fence = '`'.repeat(longestRun + 1);
+  return `${fence}${text}${fence}`;
 }
 
 function readPackageJson(context: vscode.ExtensionContext): ExtensionPackageJson {
   const pkg = (context as { extension?: { packageJSON?: unknown } }).extension?.packageJSON;
   return pkg && typeof pkg === 'object' ? (pkg as ExtensionPackageJson) : {};
-}
-
-function readDependencyVersion(pkg: ExtensionPackageJson, name: string) {
-  if (!pkg.dependencies || typeof pkg.dependencies !== 'object') return 'unknown';
-
-  const value = (pkg.dependencies as Record<string, unknown>)[name];
-  if (typeof value !== 'string') return 'unknown';
-
-  const normalized = value.match(/\d+(?:\.\d+)+/)?.[0];
-  if (!normalized || normalized === value) return value;
-  return `${normalized} (declared ${value})`;
-}
-
-function formatServerStatus(serverInfo: OpenCodeServerInfo) {
-  const status = serverInfo.status;
-  switch (status.state) {
-    case 'running':
-      return status.eventStream ? `running, event stream ${status.eventStream}` : 'running';
-    case 'error':
-      return `error: ${status.message}`;
-    default:
-      return status.state;
-  }
 }
 
 function getString(value: unknown): string | undefined {

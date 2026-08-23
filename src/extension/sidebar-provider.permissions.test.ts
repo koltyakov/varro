@@ -1,5 +1,6 @@
 /* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- These tests deliberately model malformed permission events and inspect controlled provider internals. */
 import { describe, expect, it } from 'vitest';
+import { readMaximumTestedOpenCodeVersion } from './extension-manifest';
 import {
   attachTestView,
   createServer,
@@ -175,7 +176,7 @@ describe('SidebarProvider permission replay', () => {
     });
 
     expect(statusBarItem.show).not.toHaveBeenCalled();
-    expect(statusBarItem.text).toBe('');
+    expect(statusBarItem.text).toBe(`$(robot) OpenCode ${readMaximumTestedOpenCodeVersion()}`);
 
     providerState.sessionState.handleServerEvent({
       type: 'session.updated',

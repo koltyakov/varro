@@ -269,7 +269,7 @@ test('shows todos and queues follow-up messages while a session is busy', async 
     })
   );
   expect(controlSizes).toEqual(Array.from({ length: 5 }, () => ({ width: 24, height: 24 })));
-  const iconSizes = await queueControls.locator('svg').evaluateAll((icons) =>
+  const iconSizes = await queueControls.locator('svg, .ui-icon').evaluateAll((icons) =>
     icons.map((icon) => {
       const rect = icon.getBoundingClientRect();
       return { width: rect.width, height: rect.height };

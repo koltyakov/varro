@@ -1,5 +1,6 @@
 /* oxlint-disable anti-slop/no-known-value-widening, anti-slop/no-module-mocking, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- These report tests deliberately model malformed external usage responses and imported adapter boundaries. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type * as vscode from 'vscode';
 
 const mocks = vi.hoisted(() => {
   const documentUri = { scheme: 'untitled', path: '/OpenCode Usage Report.md' };
@@ -67,7 +68,7 @@ function createService(
   ensureServerStarted = vi.fn(async () => undefined)
 ): { service: UsageReportService; ensureServerStarted: typeof ensureServerStarted } {
   return {
-    service: new UsageReportService({ request }, ensureServerStarted),
+    service: new UsageReportService({ request }, ensureServerStarted, null),
     ensureServerStarted,
   };
 }
@@ -92,6 +93,65 @@ afterEach(() => {
 });
 
 describe('UsageReportService', () => {
+  it('opens the report as a named Markdown preview', async () => {
+    const uri = {
+      scheme: 'varro-tool-output',
+      path: '/id/OpenCode Usage Report.md',
+    } as vscode.Uri;
+    const openDocument = vi.fn(async () => uri);
+    const service = new UsageReportService(
+      { request: vi.fn<Request>() },
+      vi.fn(async () => undefined),
+      async () => ({ sessionCount: 0, usage: [] }),
+      openDocument
+    );
+
+    await service.openReport();
+
+    expect(openDocument).toHaveBeenCalledWith(
+      expect.stringContaining('# OpenCode Usage Report'),
+      'OpenCode Usage Report'
+    );
+    expect(mocks.executeCommand).toHaveBeenCalledWith('markdown.showPreview', uri);
+  });
+
+  it('uses local usage metadata without requesting every session history', async () => {
+    const request = vi.fn<Request>();
+    const readLocalUsage = vi.fn(async () => ({
+      sessionCount: 2,
+      usage: [
+        {
+          providerID: 'provider-local',
+          modelID: 'model-local',
+          promptID: 'session-1\u0000prompt-1',
+          created: NOW.getTime(),
+          tokens: {
+            total: 100,
+            input: 70,
+            output: 20,
+            reasoning: 10,
+            cacheRead: 0,
+            cacheWrite: 0,
+          },
+        },
+      ],
+    }));
+    const service = new UsageReportService(
+      { request },
+      vi.fn(async () => undefined),
+      readLocalUsage
+    );
+
+    await service.openReport();
+
+    expect(readLocalUsage).toHaveBeenCalledWith(RECENT_START);
+    expect(request).not.toHaveBeenCalled();
+    expect(reportContent()).toContain('from 2 sessions scanned');
+    expect(reportSection(reportContent(), 'Today')).toContain(
+      '| provider-local | model-local | 1 | 100 |'
+    );
+  });
+
   it('scans global sessions with one history request each and renders token windows', async () => {
     const today = NOW.getTime() - 60_000;
     const eightDaysAgo = NOW.getTime() - 8 * 24 * 60 * 60 * 1000;
@@ -133,7 +193,14 @@ describe('UsageReportService', () => {
     );
     expect(request).toHaveBeenCalledWith(
       'GET',
-      '/session/session-1/message?directory=%2Frepo%20one'
+      '/session/session-1/message?directory=%2Frepo%20one',
+      undefined,
+      {
+        maxResponseBytes: 256 * 1024 * 1024,
+        maxProjectedResponseBytes: 16 * 1024 * 1024,
+        stripMessageParts: true,
+        stripSummaryDiffs: true,
+      }
     );
     expect(reportSection(reportContent(), 'Today')).toContain(
       '| provider-a | model-a | 1 | 190 | 100 | 50 | 25 | 10 | 5 |'

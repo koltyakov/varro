@@ -15,6 +15,7 @@ import type { ContextProvider } from './context-provider';
 import { DroppedFilesService } from './dropped-files-service';
 import { DraftImageStore } from './draft-image-store';
 import { readExtensionConfigState } from './extension-config';
+import { readMaximumTestedOpenCodeVersion } from './extension-manifest';
 import { FileSearchService } from './file-search-service';
 import { GeneratedDependencyTreeGuard } from './generated-dependency-tree-guard';
 import { HiddenSessionManager } from './hidden-session-manager';
@@ -46,6 +47,8 @@ import { SidebarProviderRuntime } from './sidebar-provider-runtime';
 import { WebviewSession } from './webview-session';
 import { UsageReportService } from './usage-report-service';
 import { resolveServerLaunch } from './util/server-launch';
+
+const maximumTestedOpenCodeVersion = readMaximumTestedOpenCodeVersion();
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'varro.chat';
@@ -156,11 +159,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     );
     this.contextFilesState = new SidebarProviderContextFiles(this.droppedFilesService);
     this.sessionExportService = new SessionExportService(server, SidebarProvider.EXPORT_TIMEOUT_MS);
-    this.usageReportService = new UsageReportService(server, () =>
-      this.runtime.ensureServerStarted()
-    );
     this.sessionDiffProvider = new SessionDiffDocumentProvider(server);
     this.toolOutputProvider = new ToolOutputDocumentProvider();
+    this.usageReportService = new UsageReportService(
+      server,
+      () => this.runtime.ensureServerStarted(),
+      undefined,
+      async (content, title) => {
+        const uri = await this.openMarkdownDocument(content, title, false);
+        if (!uri) throw new Error('Could not open the generated usage report.');
+        return uri;
+      }
+    );
     this.runtime = new SidebarProviderRuntime(
       server,
       this.sessionState,
@@ -416,6 +426,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   async generateUsageReport() {
     await this.usageReportService.openReport(false);
+  }
+
+  async openMarkdownDocument(content: string, title: string, show = true) {
+    return this.toolOutputProvider.open({
+      content,
+      title,
+      language: 'markdown',
+      preview: false,
+      show,
+    });
   }
 
   hasPendingAttention() {
@@ -691,9 +711,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private getStatusBarState():
     | { visible: false }
     | { visible: true; text: string; tooltip: string; backgroundColor?: vscode.ThemeColor } {
-    if (this.bridge.getView()?.visible) {
-      return { visible: false };
-    }
+    const idleState = {
+      visible: true as const,
+      text: `$(robot) OpenCode ${maximumTestedOpenCodeVersion}`,
+      tooltip: `OpenCode ${maximumTestedOpenCodeVersion}\nMaximum version tested with this Varro release.\n\nClick to open chat.`,
+    };
+    if (this.bridge.getView()?.visible) return idleState;
 
     const pendingRequests = [...this.sessionState.pendingForUser.values()].filter(
       (request) =>
@@ -747,6 +770,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       };
     }
 
-    return { visible: false };
+    return idleState;
   }
 }

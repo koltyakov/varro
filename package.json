@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: OpenCode Workbench",
-  "version": "0.25.17",
+  "version": "0.26.0",
   "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
@@ -137,7 +137,7 @@
       {
         "command": "varro.chat.openStats",
         "title": "Varro: Usage Stats",
-        "shortTitle": "Stats"
+        "shortTitle": "Usage Stats"
       },
       {
         "command": "varro.chat.abort",
@@ -161,12 +161,12 @@
       {
         "command": "varro.about",
         "title": "Varro: About",
-        "shortTitle": "About"
+        "shortTitle": "About Varro"
       },
       {
         "command": "varro.openGitHub",
         "title": "Varro: Open GitHub",
-        "shortTitle": "GitHub"
+        "shortTitle": "View on GitHub"
       },
       {
         "command": "varro.showOutput",

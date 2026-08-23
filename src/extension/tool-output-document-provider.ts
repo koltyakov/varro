@@ -5,10 +5,9 @@ import * as vscode from 'vscode';
 const SCHEME = 'varro-tool-output';
 
 /**
- * Backs read-only editor tabs for tool text that the chat view clamps rather
- * than scrolling in place. A virtual scheme (instead of an untitled document)
- * keeps the tab named after the tool and leaves the buffer non-dirty, so
- * closing it never prompts to save.
+ * Backs read-only editor tabs for generated text, including tool output and
+ * reports. A virtual scheme keeps each tab named and leaves the buffer
+ * non-dirty, so closing it never prompts to save.
  */
 export class ToolOutputDocumentProvider implements vscode.TextDocumentContentProvider {
   private readonly contents = new Map<string, string>();
@@ -28,8 +27,14 @@ export class ToolOutputDocumentProvider implements vscode.TextDocumentContentPro
     return this.contents.get(uri.toString()) ?? '';
   }
 
-  async open(payload: { content: string; title: string; language?: string }): Promise<boolean> {
-    if (this.disposed) return false;
+  async open(payload: {
+    content: string;
+    title: string;
+    language?: string;
+    preview?: boolean;
+    show?: boolean;
+  }): Promise<vscode.Uri | undefined> {
+    if (this.disposed) return undefined;
 
     // Tool prompts and results are written as Markdown, so that is the default
     // rather than plaintext; callers with something more specific (a bash
@@ -44,11 +49,13 @@ export class ToolOutputDocumentProvider implements vscode.TextDocumentContentPro
     try {
       const document = await vscode.workspace.openTextDocument(uri);
       await vscode.languages.setTextDocumentLanguage(document, language);
-      await vscode.window.showTextDocument(document, { preview: true });
-      return true;
+      if (payload.show ?? true) {
+        await vscode.window.showTextDocument(document, { preview: payload.preview ?? true });
+      }
+      return uri;
     } catch {
       this.contents.delete(uri.toString());
-      return false;
+      return undefined;
     }
   }
 

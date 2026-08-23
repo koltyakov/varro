@@ -863,6 +863,32 @@ describe('OpenCodeTransport requests', () => {
       },
     ]);
   });
+
+  it('strips message parts while preserving usage info', async () => {
+    const payload = [
+      {
+        info: { id: 'message-1', role: 'assistant', tokens: { total: 42 } },
+        parts: [{ type: 'text', text: 'x'.repeat(10_000) }],
+      },
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify(payload)))
+    );
+
+    await expect(
+      createTransport().request('GET', '/session/session-1/message', undefined, {
+        maxResponseBytes: 64 * 1024,
+        maxProjectedResponseBytes: 1024,
+        stripMessageParts: true,
+      })
+    ).resolves.toEqual([
+      {
+        info: { id: 'message-1', role: 'assistant', tokens: { total: 42 } },
+        parts: [],
+      },
+    ]);
+  });
 });
 
 describe('OpenCodeTransport request scoping', () => {

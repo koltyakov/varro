@@ -94,7 +94,7 @@ function createActionFixture() {
     open: vi.fn<SessionDiffProvider['open']>(() => Promise.resolve('unavailable')),
   } satisfies SessionDiffProvider;
   const toolOutputProvider = {
-    open: vi.fn<ToolOutputProvider['open']>(() => Promise.resolve(false)),
+    open: vi.fn<ToolOutputProvider['open']>(() => Promise.resolve(undefined)),
   } satisfies ToolOutputProvider;
   const server = {
     getWorkspaceCwd: vi.fn(() => '/repo'),

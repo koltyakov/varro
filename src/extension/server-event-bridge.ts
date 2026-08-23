@@ -68,7 +68,7 @@ export class ServerEventBridge {
   ) {
     this.statusBarItem = vscode.window.createStatusBarItem(
       'varro.session-status',
-      vscode.StatusBarAlignment.Left,
+      vscode.StatusBarAlignment.Right,
       1000
     );
     this.statusBarItem.name = 'Varro Session Status';

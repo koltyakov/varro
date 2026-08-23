@@ -82,6 +82,13 @@ function register(
     postTerminalSelection: vi.fn(),
     generateCommitMessage: vi.fn(() => Promise.resolve()),
     generateUsageReport: vi.fn(() => Promise.resolve()),
+    openMarkdownDocument: vi.fn(async (content: string, title: string, _show?: boolean) => {
+      await vscodeMock.workspace.openTextDocument({
+        language: 'markdown',
+        content,
+      });
+      return { value: `varro-tool-output:/${title}.md` };
+    }),
   };
   const contextProvider = {
     context: { workspacePath },
@@ -108,7 +115,7 @@ function register(
 
 describe('About command', () => {
   it('shows OpenCode server diagnostics', async () => {
-    register('/repo', {
+    const { sidebar } = register('/repo', {
       readServerInfo: vi.fn().mockResolvedValue({
         status: { state: 'running', url: 'http://127.0.0.1:4096' },
         url: 'http://127.0.0.1:4096',
@@ -129,29 +136,74 @@ describe('About command', () => {
 
     await runCommand('varro.about');
 
+    expect(sidebar.openMarkdownDocument).toHaveBeenCalledWith(
+      expect.stringContaining('  - **Active agents:** `1`'),
+      'Varro About',
+      false
+    );
+    const aboutMarkdown = sidebar.openMarkdownDocument.mock.calls[0]?.[0] ?? '';
+    expect(aboutMarkdown).toMatch(/^# Varro\n/);
+    expect(aboutMarkdown).not.toContain('# Varro About');
+    expect(aboutMarkdown).not.toMatch(
+      /SDK version|Minimum supported version|Maximum tested version|CLI command|Server port|Server health|Server status|Workspace/
+    );
+    expect(aboutMarkdown).toContain(
+      '- **CLI:**\n  - **Version:** `1.18.4`\n  - **Install method:** bun\n  - **Binary:** `/home/me/.bun/bin/opencode`'
+    );
+    expect(aboutMarkdown).toContain(
+      '- **Server:**\n  - **Version:** `1.18.4`\n  - **URL:** [http://127.0.0.1:4096](http://127.0.0.1:4096)\n  - **Ownership:** managed by Varro\n  - **Active agents:** `1`\n- **Auto updates:** enabled'
+    );
+    expect(sidebar.openMarkdownDocument).toHaveBeenCalledWith(
+      expect.stringContaining('- [GitHub repository](https://github.com/koltyakov/varro)'),
+      'Varro About',
+      false
+    );
+    expect(sidebar.openMarkdownDocument).toHaveBeenCalledWith(
+      expect.stringContaining(
+        '- [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=koltyakov.varro)'
+      ),
+      'Varro About',
+      false
+    );
+    expect(sidebar.openMarkdownDocument).toHaveBeenCalledWith(
+      expect.stringContaining(
+        '- [Open VSX Registry](https://open-vsx.org/extension/koltyakov/varro)'
+      ),
+      'Varro About',
+      false
+    );
+    expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith(
+      'markdown.showPreview',
+      expect.objectContaining({ value: 'varro-tool-output:/Varro About.md' })
+    );
     expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
       expect.objectContaining({
-        content: expect.stringContaining('- Active agents (server-wide): 1'),
+        content: expect.stringContaining('  - **Active agents:** `1`'),
       })
     );
     // The About report is the paste-ready hand-off for update bug reports.
     expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
       expect.objectContaining({
-        content: expect.stringContaining('- Install method: bun'),
+        content: expect.stringContaining('  - **Install method:** bun'),
+      })
+    );
+    expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining('  - **Binary:** `/home/me/.bun/bin/opencode`'),
       })
     );
     expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
       expect.objectContaining({
         content: expect.stringContaining(
-          '- Update command for this install: bun add -g opencode-ai@latest'
+          '**OpenCode 1.18.21 is available.**\n\nRun this command to install the update:\n\n```sh\nbun add -g opencode-ai@latest\n```'
         ),
       })
     );
     expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
-      expect.objectContaining({ content: expect.not.stringContaining('- Loaded workspaces:') })
+      expect.objectContaining({ content: expect.not.stringContaining('Loaded workspaces') })
     );
     expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
-      expect.objectContaining({ content: expect.not.stringContaining('- Searched PATH entries:') })
+      expect.objectContaining({ content: expect.not.stringContaining('Searched PATH entries') })
     );
   });
 
@@ -166,7 +218,7 @@ describe('About command', () => {
         ownership: 'other-host',
         cliVersion: '1.18.9',
         cliVersionError: null,
-        installMethod: 'script',
+        installMethod: 'curl',
         resolvedCommand: '/home/me/.opencode/bin/opencode',
         searchedPaths: [],
         activeAgentCount: 0,
@@ -180,7 +232,36 @@ describe('About command', () => {
 
     expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
       expect.objectContaining({
-        content: expect.stringContaining('- Server ownership: managed by Varro'),
+        content: expect.stringContaining('  - **Ownership:** managed by Varro'),
+      })
+    );
+  });
+
+  it('hides the update notice when OpenCode is at the tested update ceiling', async () => {
+    register('/repo', {
+      readServerInfo: vi.fn().mockResolvedValue({
+        status: { state: 'running', url: 'http://127.0.0.1:4096' },
+        url: 'http://127.0.0.1:4096',
+        port: 4096,
+        command: 'opencode',
+        managedProcess: true,
+        cliVersion: '1.18.21',
+        cliVersionError: null,
+        installMethod: 'bun',
+        resolvedCommand: '/home/me/.bun/bin/opencode',
+        searchedPaths: [],
+        activeAgentCount: 0,
+        activeAgentError: null,
+        health: { healthy: true, version: '1.18.21' },
+        workspaceCwd: '/repo',
+      }),
+    });
+
+    await runCommand('varro.about');
+
+    expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.not.stringContaining('is available'),
       })
     );
   });

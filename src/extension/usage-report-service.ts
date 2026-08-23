@@ -1,5 +1,8 @@
 /* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns -- Usage endpoint payloads are decoded before aggregation. */
 /* oxlint-disable anti-slop/no-known-value-widening -- Query and aggregate values intentionally use their named service contracts. */
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { Worker } from 'node:worker_threads';
 import * as vscode from 'vscode';
 
 import { asRecord } from '../shared/type-utils';
@@ -45,8 +48,18 @@ type CachedSessionUsage = {
   usage: Usage[];
 };
 
+type LocalUsageSnapshot = {
+  sessionCount: number;
+  usage: Usage[];
+};
+
+type LocalUsageReader = (start?: number) => Promise<LocalUsageSnapshot | null>;
+type ReportDocumentOpener = (content: string, title: string) => Promise<vscode.Uri>;
+
 const SESSION_PAGE_LIMIT = 1_000;
-const SESSION_CONCURRENCY = 12;
+const SESSION_CONCURRENCY = 32;
+const SESSION_HISTORY_MAX_BYTES = 256 * 1024 * 1024;
+const SESSION_USAGE_MAX_BYTES = 16 * 1024 * 1024;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export class UsageReportService {
@@ -54,7 +67,9 @@ export class UsageReportService {
 
   constructor(
     private readonly server: OpenCodeRequest,
-    private readonly ensureServerStarted: () => Promise<unknown>
+    private readonly ensureServerStarted: () => Promise<unknown>,
+    private readonly readLocalUsage: LocalUsageReader | null = readLocalUsageDatabase,
+    private readonly openDocument: ReportDocumentOpener = openAnonymousReportDocument
   ) {}
 
   async openReport(includeAllTime = false): Promise<void> {
@@ -70,12 +85,8 @@ export class UsageReportService {
           return this.buildReport(includeAllTime);
         }
       );
-      const document = await vscode.workspace.openTextDocument({
-        language: 'markdown',
-        content,
-      });
-      await vscode.window.showTextDocument(document, { preview: false });
-      await vscode.commands.executeCommand('markdown.showPreview', document.uri);
+      const uri = await this.openDocument(content, 'OpenCode Usage Report');
+      await vscode.commands.executeCommand('markdown.showPreview', uri);
     } catch (error) {
       const message = errorMessage(error);
       await vscode.window.showErrorMessage(`Could not build OpenCode usage report: ${message}`);
@@ -86,10 +97,13 @@ export class UsageReportService {
   private async buildReport(includeAllTime: boolean): Promise<string> {
     const warnings: string[] = [];
     const now = Date.now();
-    const sessions = await this.listSessions(
-      warnings,
-      includeAllTime ? undefined : now - 30 * DAY_MS
-    );
+    const start = includeAllTime ? undefined : now - 30 * DAY_MS;
+    const local = await this.readLocalUsage?.(start);
+    if (local) {
+      return renderReport(local.usage, local.sessionCount, warnings, now, includeAllTime);
+    }
+
+    const sessions = await this.listSessions(warnings, start);
     if (includeAllTime) {
       const sessionIDs = new Set(sessions.map((session) => session.id));
       for (const id of this.sessionUsageCache.keys()) {
@@ -175,7 +189,12 @@ export class UsageReportService {
         `/session/${encodeURIComponent(session.id)}/message`,
         session.directory
       );
-      const response = await this.server.request('GET', path);
+      const response = await this.server.request('GET', path, undefined, {
+        maxResponseBytes: SESSION_HISTORY_MAX_BYTES,
+        maxProjectedResponseBytes: SESSION_USAGE_MAX_BYTES,
+        stripMessageParts: true,
+        stripSummaryDiffs: true,
+      });
       const messages = Array.isArray(response) ? response : asRecord(response)?.data;
       if (!Array.isArray(messages)) {
         warnings.push(`Ignored malformed message history for session ${session.id}.`);
@@ -203,6 +222,116 @@ export class UsageReportService {
       return [];
     }
   }
+}
+
+async function openAnonymousReportDocument(content: string): Promise<vscode.Uri> {
+  const document = await vscode.workspace.openTextDocument({
+    language: 'markdown',
+    content,
+  });
+  await vscode.window.showTextDocument(document, { preview: false });
+  return document.uri;
+}
+
+async function readLocalUsageDatabase(start?: number): Promise<LocalUsageSnapshot | null> {
+  const dataHome =
+    process.env.XDG_DATA_HOME?.trim() ||
+    (process.platform === 'win32' && process.env.LOCALAPPDATA
+      ? process.env.LOCALAPPDATA
+      : join(homedir(), '.local', 'share'));
+  const databasePath = join(dataHome, 'opencode', 'opencode.db');
+
+  return new Promise((resolve) => {
+    const worker = new Worker(LOCAL_USAGE_WORKER, {
+      eval: true,
+      workerData: { databasePath, start: start ?? null },
+    });
+    let settled = false;
+    const finish = (result: LocalUsageSnapshot | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    worker.once('message', (value: unknown) => finish(normalizeLocalUsageSnapshot(value)));
+    worker.once('error', () => finish(null));
+    worker.once('exit', (code) => {
+      if (code !== 0) finish(null);
+    });
+  });
+}
+
+const LOCAL_USAGE_WORKER = String.raw`
+const { DatabaseSync } = require('node:sqlite');
+const { parentPort, workerData } = require('node:worker_threads');
+
+try {
+  const database = new DatabaseSync(workerData.databasePath, { readOnly: true });
+  const sessionCount = database
+    .prepare('SELECT count(*) AS count FROM session WHERE ? IS NULL OR time_updated >= ?')
+    .get(workerData.start, workerData.start).count;
+  const query = [
+    'SELECT m.id, m.session_id AS sessionID,',
+    "json_extract(m.data, '$.providerID') AS providerID,",
+    "json_extract(m.data, '$.model.providerID') AS nestedProviderID,",
+    "json_extract(m.data, '$.modelID') AS modelID,",
+    "json_extract(m.data, '$.model.modelID') AS nestedModelID,",
+    "json_extract(m.data, '$.parentID') AS parentID,",
+    "coalesce(json_extract(m.data, '$.time.completed'), json_extract(m.data, '$.time.created')) AS created,",
+    "json_extract(m.data, '$.tokens.total') AS total,",
+    "json_extract(m.data, '$.tokens.input') AS input,",
+    "json_extract(m.data, '$.tokens.output') AS output,",
+    "json_extract(m.data, '$.tokens.reasoning') AS reasoning,",
+    "json_extract(m.data, '$.tokens.cache.read') AS cacheRead,",
+    "json_extract(m.data, '$.tokens.cache.write') AS cacheWrite",
+    'FROM message m WHERE (? IS NULL OR m.time_created >= ?)',
+    "AND json_extract(m.data, '$.role') = 'assistant'",
+  ].join(' ');
+  const rows = database.prepare(query).all(workerData.start, workerData.start);
+  database.close();
+  parentPort.postMessage({ sessionCount: Number(sessionCount), rows });
+} catch {
+  parentPort.postMessage(null);
+}
+`;
+
+function normalizeLocalUsageSnapshot(value: unknown): LocalUsageSnapshot | null {
+  const snapshot = asRecord(value);
+  const sessionCount = numberValue(snapshot?.sessionCount);
+  if (sessionCount === null || !Array.isArray(snapshot?.rows)) return null;
+
+  const usage: Usage[] = [];
+  for (const rawRow of snapshot.rows) {
+    const row = asRecord(rawRow);
+    const sessionID = stringValue(row?.sessionID);
+    const providerID = stringValue(row?.providerID) || stringValue(row?.nestedProviderID);
+    const modelID = stringValue(row?.modelID) || stringValue(row?.nestedModelID);
+    const parentID = stringValue(row?.parentID);
+    const created = numberValue(row?.created);
+    if (!sessionID || !providerID || !modelID || created === null) continue;
+
+    const input = nonnegativeNumber(row?.input);
+    const output = nonnegativeNumber(row?.output);
+    const reasoning = nonnegativeNumber(row?.reasoning);
+    const cacheRead = nonnegativeNumber(row?.cacheRead);
+    const cacheWrite = nonnegativeNumber(row?.cacheWrite);
+    usage.push({
+      providerID,
+      modelID,
+      promptID: parentID ? `${sessionID}\u0000${parentID}` : null,
+      created,
+      tokens: {
+        input,
+        output,
+        reasoning,
+        cacheRead,
+        cacheWrite,
+        total:
+          optionalNonnegativeNumber(row?.total) ??
+          input + output + reasoning + cacheRead + cacheWrite,
+      },
+    });
+  }
+  return { sessionCount, usage };
 }
 
 function normalizeUsage(

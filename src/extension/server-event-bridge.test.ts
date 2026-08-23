@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('vscode', () => ({
   window: { createStatusBarItem: mocks.createStatusBarItem },
-  StatusBarAlignment: { Left: 1 },
+  StatusBarAlignment: { Left: 1, Right: 2 },
 }));
 
 vi.mock('../shared/protocol', () => ({
@@ -108,7 +108,7 @@ function useParsedEvents() {
 describe('ServerEventBridge', () => {
   it('creates a status bar item on construction', () => {
     createMocks();
-    expect(mocks.createStatusBarItem).toHaveBeenCalledWith('varro.session-status', 1, 1000);
+    expect(mocks.createStatusBarItem).toHaveBeenCalledWith('varro.session-status', 2, 1000);
   });
 
   it('returns default status { state: "stopped" }', () => {
