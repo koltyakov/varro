@@ -77,7 +77,7 @@ export interface SessionStateListener {
 
 export interface NotificationGate {
   /** Whether a user-facing toast should be shown right now. */
-  shouldShow(): boolean;
+  shouldShow(sessionID: string): boolean;
 }
 
 const INTERRUPTED_SESSIONS_KEY = 'varro.interruptedSessions';
@@ -151,6 +151,7 @@ export class SessionStateManager {
   };
   private readonly recoveryDeletedSessionIDs = new Set<string>();
   private readonly consumedInterruptedSessionIDs = new Set<string>();
+  private readonly unclaimedInterruptedSessions = new Map<string, InterruptedSessionSnapshot>();
   private readonly busyAttempts = new Map<string, Set<number>>();
   private readonly deferredPromptFailures = new Map<
     number,
@@ -184,6 +185,24 @@ export class SessionStateManager {
     return new Map(
       [...this.pendingAttention].filter(([id]) => !this.deferredPermissionAttention.has(id))
     );
+  }
+
+  rootSessionIdFor(sessionID: string): string {
+    const visited = new Set<string>();
+    let current = sessionID;
+    while (!visited.has(current)) {
+      visited.add(current);
+      const parent = this.sessionParentIDs.get(current);
+      if (!parent) return current;
+      current = parent;
+    }
+    return sessionID;
+  }
+
+  claimInterruptedSessions(): InterruptedSessionSnapshot[] {
+    const sessions = [...this.unclaimedInterruptedSessions.values()];
+    this.unclaimedInterruptedSessions.clear();
+    return sessions;
   }
 
   revealPermission(requestID: string): void {
@@ -489,6 +508,7 @@ export class SessionStateManager {
       );
       for (const session of interruptedSessions) {
         this.consumedInterruptedSessionIDs.add(session.id);
+        this.unclaimedInterruptedSessions.set(session.id, session);
       }
       const rawBlockingRequests = this.persistence.get<unknown>(BLOCKING_REQUESTS_KEY);
       const blockingRequests = validateBlockingRequestSnapshots(rawBlockingRequests);
@@ -1187,7 +1207,7 @@ export class SessionStateManager {
     sessionID: string,
     _label: string
   ): void {
-    if (!this.notificationGate.shouldShow()) return;
+    if (!this.notificationGate.shouldShow(sessionID)) return;
 
     const prefix =
       kind === 'question' ? 'Varro is waiting for your input' : 'Varro needs permission approval';
@@ -1202,7 +1222,7 @@ export class SessionStateManager {
 
   private showCompletionNotification(sessionID: string): void {
     if (!this.isPlanSession(sessionID)) return;
-    if (!this.notificationGate.shouldShow()) return;
+    if (!this.notificationGate.shouldShow(sessionID)) return;
 
     const message = `Varro has a plan ready for review${this.describeSessionSuffix(sessionID)}.`;
     void vscode.window.showInformationMessage(message, 'Open Chat').then((action) => {
@@ -1213,7 +1233,7 @@ export class SessionStateManager {
   }
 
   private showFailureNotification(sessionID: string, detail: string | undefined): void {
-    if (!this.notificationGate.shouldShow()) return;
+    if (!this.notificationGate.shouldShow(sessionID)) return;
 
     const suffix = this.describeSessionSuffix(sessionID);
     const message = detail?.trim()

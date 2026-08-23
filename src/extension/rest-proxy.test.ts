@@ -141,6 +141,8 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
     getStatus: vi.fn(() => ({ state: 'running' as const, url: 'http://127.0.0.1:4096' })),
     ensureServerStarted: vi.fn(() => Promise.resolve('http://127.0.0.1:4096')),
     confirmPromptAdmission: vi.fn(() => Promise.resolve(true)),
+    isPermissionAutomationLeaseCurrent: vi.fn(() => true),
+    updatePermissionMode: vi.fn(() => Promise.resolve(undefined)),
     cleanupExpiredRecycleBin: vi.fn(() => Promise.resolve()),
     removeSessionImages: vi.fn(() => Promise.resolve()),
     postApiResponse: vi.fn(),
@@ -962,6 +964,42 @@ describe('RestProxy handleRequest', () => {
       '/repo'
     );
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 81, data: judgeResult });
+  });
+
+  it('rejects automatic requests after their ownership lease changes', async () => {
+    const { proxy, callbacks } = createProxy({
+      isPermissionAutomationLeaseCurrent: vi.fn(() => false),
+    });
+
+    await proxy.handleRequest({
+      ...makePayload(84, 'POST', '/varro/permission/judge', {
+        permission: { id: 'perm-1', type: 'bash', sessionID: 'session-1' },
+      }),
+      permissionAutomationLease: 7,
+    });
+
+    expect(callbacks.autoApproveJudge.judge).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 84,
+      error: 'Permission automation ownership changed',
+    });
+  });
+
+  it('routes permission mode updates through the host callback', async () => {
+    const session = {
+      id: 'session-1',
+      permission: [{ permission: '*', pattern: '*', action: 'ask' }],
+    };
+    const { proxy, callbacks } = createProxy({
+      updatePermissionMode: vi.fn(() => Promise.resolve(session)),
+    });
+
+    await proxy.handleRequest(
+      makePayload(85, 'POST', '/varro/session/session-1/permission-mode', { mode: 'edits' })
+    );
+
+    expect(callbacks.updatePermissionMode).toHaveBeenCalledWith('session-1', 'edits');
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 85, data: session });
   });
 
   it('does not judge a permission whose owning session belongs to another workspace', async () => {

@@ -4,10 +4,12 @@ import type { ChatModelSelection } from '../shared/protocol';
 import { asRecord } from '../shared/type-utils';
 
 const SESSION_SELECTED_MODELS_KEY = 'varro.sessionSelectedModels';
+const SESSION_SELECTED_MODELS_MIGRATION_KEY = 'varro.sessionSelectedModels.hostMigration.v1';
 
 export class SessionModelSelectionStore {
   private models: Record<string, ChatModelSelection>;
   private mutationQueue: Promise<void> = Promise.resolve();
+  private migrationComplete: boolean;
 
   constructor(private readonly persistence: Persistence) {
     const stored = asRecord(persistence.get<unknown>(SESSION_SELECTED_MODELS_KEY));
@@ -19,6 +21,8 @@ export class SessionModelSelectionStore {
           })
         )
       : {};
+    this.migrationComplete =
+      persistence.get<boolean>(SESSION_SELECTED_MODELS_MIGRATION_KEY) === true;
   }
 
   list() {
@@ -34,9 +38,35 @@ export class SessionModelSelectionStore {
     else delete next[sessionId];
     this.models = next;
     return this.mutate(async () => {
-      await this.persistence.set(SESSION_SELECTED_MODELS_KEY, next);
-      return { ...next };
+      const current = this.list();
+      await this.persistence.set(SESSION_SELECTED_MODELS_KEY, current);
+      return this.list();
     });
+  }
+
+  needsMigration() {
+    return !this.migrationComplete;
+  }
+
+  migrateLegacy(
+    models: Record<string, ChatModelSelection>
+  ): Promise<Record<string, ChatModelSelection>> {
+    return this.mutate(async () => {
+      if (this.migrationComplete) return this.list();
+      const next = { ...this.models };
+      for (const [sessionId, model] of Object.entries(models)) {
+        if (!Object.hasOwn(next, sessionId)) next[sessionId] = model;
+      }
+      await this.persistence.set(SESSION_SELECTED_MODELS_KEY, next);
+      await this.persistence.set(SESSION_SELECTED_MODELS_MIGRATION_KEY, true);
+      this.models = next;
+      this.migrationComplete = true;
+      return this.list();
+    });
+  }
+
+  dispose(): Promise<void> {
+    return this.mutationQueue;
   }
 
   private mutate<T>(operation: () => Promise<T>): Promise<T> {

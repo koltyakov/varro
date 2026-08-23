@@ -112,6 +112,28 @@ reply event that occurred while it was loading.
 Support all currently accepted request ID fields (`id`, `permissionID`, and `requestID`) and both
 plain and v2 `properties.info` wrappers. Do not update only one event shape.
 
+### Multi-Webview Ownership
+
+Every ready webview can receive the same OpenCode permission event, but only one may run automatic
+permission work. The extension host elects that endpoint and publishes an owner flag with a
+generation lease. A ready sidebar is preferred; otherwise, the current ready owner or the next ready
+editor owns automation.
+
+- Only the elected owner may auto-accept edits, run the model judge, answer full-mode requests, or
+  automatically process a pending-permission snapshot.
+- Automatic judge and reply API requests carry the lease they started under. The host rejects a
+  request when that endpoint no longer owns the matching lease.
+- Manual permission replies do not use the automation lease.
+- A non-owner keeps the request visible and posts `permission/reveal`. The host makes attention
+  actionable and notifies the current owner so it can reconcile the pending snapshot.
+- Losing ownership must not remove the visible fallback. A late automatic decision still needs a
+  current lease before its reply can reach OpenCode.
+- Interrupted-session recovery is claimed by the elected endpoint, not by every webview that loads.
+
+The lease check belongs in the extension host, not only in webview state. Multiple runtimes can be
+alive during editor visibility changes, and a stale runtime cannot be trusted to stop before an
+in-flight callback sends its reply.
+
 ### Authoritative Resolution
 
 The following can prove a request is resolved:
@@ -344,9 +366,11 @@ sessions before reconciling host attention. Keep permission and question reconci
 
 ## Mode Changes
 
-Mode updates patch OpenCode session rules and update Varro's workspace/session preferences. Updates
-for one session are serialized, and stale successes or failures must not overwrite the latest user
-selection.
+Mode updates use the host-owned `/varro/session/{id}/permission-mode` endpoint. The host serializes
+updates for each session, patches OpenCode rules, persists the confirmed mode, and broadcasts the
+complete confirmed mode snapshot. Stale successes or failures must not overwrite the latest user
+selection. A webview may present the selected mode while its request is pending, but failure rolls
+that selection back to the last confirmed snapshot.
 
 - Switching to auto-accept edits installs its edit allowance and syncs pending requests so queued edits
   are accepted and other requests remain visible.
@@ -380,6 +404,8 @@ Before merging a permission change, verify every item that applies:
   an actionable prompt.
 - A pending list refresh cannot erase a visible timed-out auto prompt.
 - A late judge cannot override a manual response, a replied event, or a newer mode.
+- Only the elected webview starts automatic work, and every automatic host request carries its lease.
+- A stale lease is rejected before a judge or permission reply reaches OpenCode.
 - Child and grandchild requests use inherited mode but retain their own request and session IDs.
 - Reloaded requests are either re-judged, answered by full mode, or restored visibly.
 - Grouped prompts retain all member IDs and apply `once`, `always`, and `reject` with their intended
@@ -439,6 +465,7 @@ Also run `npm run lint:check` and `npm run typecheck` when implementation or typ
 | Ask/reply event handling | `src/webview/hooks/session/session-approval-events.ts` |
 | Responses and serialized mode updates | `src/webview/hooks/session/session-approvals.ts` |
 | Judge attempts and pending-list reconciliation | `src/webview/hooks/runtime/open-code-runtime-instance.ts` |
+| Multi-webview owner election and lease validation | `src/extension/sidebar-provider.ts`, `src/extension/rest-proxy.ts` |
 | Prompt grouping and snapshot mutation guards | `src/webview/lib/permission-grouping.ts`, `src/webview/lib/state-permissions.ts` |
 | Local and model judge policy | `src/extension/auto-approve-judge.ts` |
 | Judge model fallback order | `src/extension/helper-model-selection.ts` |

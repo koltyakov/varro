@@ -400,13 +400,13 @@ describe('session-approvals helpers', () => {
       'session-1'
     );
     await vi.waitFor(() => expect(updateSessionPermission).toHaveBeenCalledTimes(1));
-    expect(updateSessionPermission).toHaveBeenNthCalledWith(1, 'session-1', {
+    expect(updateSessionPermission).toHaveBeenNthCalledWith(1, 'session-1', 'full', {
       permission: [{ permission: 'bash', pattern: '*', action: 'allow' }],
     });
 
     fullUpdate.resolve(session('session-1'));
     await vi.waitFor(() => expect(updateSessionPermission).toHaveBeenCalledTimes(2));
-    expect(updateSessionPermission).toHaveBeenNthCalledWith(2, 'session-1', {
+    expect(updateSessionPermission).toHaveBeenNthCalledWith(2, 'session-1', 'auto', {
       permission: [{ permission: 'bash', pattern: '*', action: 'ask' }],
     });
     autoUpdate.resolve(session('session-1'));
@@ -596,7 +596,9 @@ describe('session-approvals helpers', () => {
       'session-1'
     );
 
-    expect(updateSessionPermission).toHaveBeenCalledWith('session-1', { permission: [] });
+    expect(updateSessionPermission).toHaveBeenCalledWith('session-1', 'default', {
+      permission: [],
+    });
     expect(getPermissionsForSession).not.toHaveBeenCalled();
     expect(autoApprovePermissionsForSession).not.toHaveBeenCalled();
   });

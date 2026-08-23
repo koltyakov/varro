@@ -62,7 +62,8 @@ export interface SidebarProviderActionDeps {
   openSessionInEditor(
     sessionId: string,
     title?: string,
-    model?: ChatModelSelection
+    model?: ChatModelSelection,
+    rootSessionId?: string
   ): void | Promise<void>;
   openNewEditor(): void | Promise<void>;
   editorRouteChanged(route: WebviewRoute): void;
@@ -70,6 +71,7 @@ export interface SidebarProviderActionDeps {
   updateQueuedMessages: MessageRouterCallbacks['updateQueuedMessages'];
   updatePermissionMode: MessageRouterCallbacks['updatePermissionMode'];
   updateSessionModel: MessageRouterCallbacks['updateSessionModel'];
+  migrateSessionModels: MessageRouterCallbacks['migrateSessionModels'];
   updateDraftImages: MessageRouterCallbacks['updateDraftImages'];
   setMermaidPreviewOpen: MessageRouterCallbacks['setMermaidPreviewOpen'];
 }
@@ -128,9 +130,9 @@ export function createSidebarProviderActions(
       await assertSessionInCurrentWorkspace(deps.server, sessionId);
       await deps.openSessionInTerminal(sessionId);
     },
-    openSessionInEditor: async (sessionId, title, model) => {
+    openSessionInEditor: async (sessionId, title, model, rootSessionId) => {
       await assertSessionInCurrentWorkspace(deps.server, sessionId);
-      await deps.openSessionInEditor(sessionId, title, model);
+      await deps.openSessionInEditor(sessionId, title, model, rootSessionId);
     },
     openNewEditor: () => deps.openNewEditor(),
     editorRouteChanged: (route) => deps.editorRouteChanged(route),
@@ -138,6 +140,7 @@ export function createSidebarProviderActions(
     updateQueuedMessages: (payload) => deps.updateQueuedMessages(payload),
     updatePermissionMode: (payload) => deps.updatePermissionMode(payload),
     updateSessionModel: (payload) => deps.updateSessionModel(payload),
+    migrateSessionModels: (payload) => deps.migrateSessionModels(payload),
     updateDraftImages: (payload) => deps.updateDraftImages(payload),
     exportSession: (sessionId) => deps.sessionExportService.exportSession(sessionId),
     generateUsageReport: (includeAllTime) => deps.usageReportService.openReport(includeAllTime),

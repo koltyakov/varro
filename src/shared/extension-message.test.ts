@@ -229,13 +229,45 @@ describe('parseExtensionMessage', () => {
   });
 
   it('parses editor-tab lifecycle state', () => {
-    expect(parseExtensionMessage({ type: 'editor-tabs/state', payload: { open: true } })).toEqual({
+    expect(
+      parseExtensionMessage({
+        type: 'editor-tabs/state',
+        payload: { open: true, sessionIds: ['session-1'] },
+      })
+    ).toEqual({
       type: 'editor-tabs/state',
-      payload: { open: true },
+      payload: { open: true, sessionIds: ['session-1'] },
     });
     expect(
       parseExtensionMessage({ type: 'editor-tabs/state', payload: { open: 'yes' } })
     ).toBeNull();
+  });
+
+  it('parses permission ownership and recovery updates', () => {
+    expect(
+      parseExtensionMessage({
+        type: 'permission-automation/update',
+        payload: { owner: true, lease: 3 },
+      })
+    ).toEqual({
+      type: 'permission-automation/update',
+      payload: { owner: true, lease: 3 },
+    });
+    expect(
+      parseExtensionMessage({
+        type: 'permission/actionable',
+        payload: { permissionId: 'perm-1' },
+      })
+    ).toEqual({ type: 'permission/actionable', payload: { permissionId: 'perm-1' } });
+    expect(
+      parseExtensionMessage({
+        type: 'recovery/interrupted-sessions',
+        payload: { sessionIds: ['session-1', 'session-1'] },
+      })
+    ).toEqual({
+      type: 'recovery/interrupted-sessions',
+      payload: { sessionIds: ['session-1'] },
+    });
   });
 
   it('parses Ralph migration acknowledgements and rejects malformed markers', () => {

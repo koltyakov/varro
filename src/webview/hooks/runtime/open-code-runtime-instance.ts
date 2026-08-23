@@ -64,7 +64,7 @@ import {
   takeCachedSessionHistoryPage,
 } from '../../lib/message-window';
 import { getNewChatDraftGeneration, startNewChatDraft } from '../../lib/new-chat-draft';
-import { readWebviewInstanceContext } from '../../lib/state-stored-values';
+import { readInitialWebviewState, readWebviewInstanceContext } from '../../lib/state-stored-values';
 import { STORAGE_KEYS, writeStored } from '../../lib/state-storage';
 import {
   createConnectionBootstrapOperations,
@@ -221,6 +221,7 @@ export type SessionStatusSnapshot = {
 
 type PermissionJudgeAttempt = {
   permission: Permission;
+  automationLease?: number;
   status: 'judging' | 'visible' | 'responded';
   countedInFlight: boolean;
   promise: Promise<void>;
@@ -898,6 +899,10 @@ export function resetWorkspaceDerivedState() {
 }
 
 export function createOpenCodeRuntime(): OpenCodeRuntime {
+  const initialWebviewState = readInitialWebviewState();
+  const initialPermissionAutomation = initialWebviewState.permissionAutomation;
+  let permissionAutomationOwner = initialPermissionAutomation?.owner ?? true;
+  let permissionAutomationLease = initialPermissionAutomation?.lease;
   let initialized = false;
   let initializationAttemptGeneration = 0;
   let activeInitializationAttempt: number | null = null;
@@ -1058,6 +1063,11 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       repairSessionTitle,
       sessionApprovalOperations: {
         respondPermission: sessionApprovalOperations.respondPermission,
+        respondAutomaticPermission: (sessionId, permissionId, response, options) =>
+          sessionApprovalOperations.respondPermission(sessionId, permissionId, response, {
+            ...options,
+            automatic: true,
+          }),
         judgePermission: judgeAndRespondPermission,
         permissionReplied: markPermissionJudgeResponded,
         permissionVisible: (permissionId) => {
@@ -1073,6 +1083,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       abortRemoteSession: (sessionId: string) => client.session.abort(sessionId),
       continueInterruptedSession,
       logError,
+      isPermissionAutomationOwner: () => permissionAutomationOwner,
     });
 
     eventHandlerCleanups = sessionEventHandlerOperations.registerSessionEventHandlers();
@@ -1122,6 +1133,17 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         },
         revalidateProviderAuth: sessionSendOperations.revalidateProviderAuth,
         applyTheme,
+        setPermissionAutomation: (owner, lease) => {
+          permissionAutomationOwner = owner;
+          permissionAutomationLease = lease;
+          if (owner) hideAutomaticallyHandledRestoredPermissions();
+        },
+        revealPermission: (permissionId) => {
+          if (!permissionAutomationOwner) return;
+          if (appStore.state.permissions.some((permission) => permission.id === permissionId))
+            return;
+          void syncPendingPermissions().catch((err) => logError('permission.actionable', err));
+        },
       });
 
       ensureSessionEventHandlersRegistered();
@@ -1131,6 +1153,26 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       });
 
       postMessage({ type: 'ready' });
+      if (
+        webviewContext?.surface !== 'editor' &&
+        initialWebviewState.sessionModelMigrationPending
+      ) {
+        postMessage({
+          type: 'session-models/migrate',
+          payload: {
+            models: Object.fromEntries(
+              Object.entries(appStore.state.sessionSelectedModels).map(([sessionId, model]) => [
+                sessionId,
+                {
+                  providerID: model.providerID,
+                  modelID: model.modelID,
+                  variant: model.variant,
+                },
+              ])
+            ),
+          },
+        });
+      }
       syncQueuedMessages();
       permissionsStore.syncSessionPermissionModesToHost();
 
@@ -1348,10 +1390,14 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       for (const permission of normalizedPendingPermissions) {
         if (!isCurrent()) return;
         const mode = permissionsStore.getPermissionModeForSession(permission.sessionID);
-        if (mode === 'full') {
+        if (permissionAutomationOwner && mode === 'full') {
           pendingPermissionHandlers.push(
             sessionApprovalOperations
-              .respondPermission(permission.sessionID, permission.id, 'always', { rethrow: true })
+              .respondPermission(permission.sessionID, permission.id, 'always', {
+                rethrow: true,
+                automatic: true,
+                permissionAutomationLease,
+              })
               .catch(() => {
                 if (
                   isCurrent() &&
@@ -1367,16 +1413,20 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           );
           continue;
         }
-        if (mode === 'auto') {
+        if (permissionAutomationOwner && mode === 'auto') {
           const attempt = permissionJudgeAttempts.get(permission.id);
           if (attempt?.status === 'visible') visiblePermissions.push(attempt.permission);
           else pendingPermissionHandlers.push(judgeAndRespondPermission(permission));
           continue;
         }
-        if (mode === 'edits' && isEditPermission(permission.type)) {
+        if (permissionAutomationOwner && mode === 'edits' && isEditPermission(permission.type)) {
           pendingPermissionHandlers.push(
             sessionApprovalOperations
-              .respondPermission(permission.sessionID, permission.id, 'once', { rethrow: true })
+              .respondPermission(permission.sessionID, permission.id, 'once', {
+                rethrow: true,
+                automatic: true,
+                permissionAutomationLease,
+              })
               .catch(() => {
                 if (isCurrent()) {
                   permissionsStore.addPermission(permission);
@@ -1419,7 +1469,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   }
 
   function hideAutomaticallyHandledRestoredPermissions() {
-    if (restoredPermissionsClassified) return;
+    if (restoredPermissionsClassified || !permissionAutomationOwner) return;
     restoredPermissionsClassified = true;
 
     const hasStoredAutomaticMode = Object.values(appStore.state.sessionPermissionModes).some(
@@ -1550,7 +1600,11 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         permission.sessionID,
         permission.id,
         outcome.response.decision === 'allow' ? 'once' : 'reject',
-        { rethrow: true }
+        {
+          rethrow: true,
+          automatic: true,
+          permissionAutomationLease: attempt.automationLease,
+        }
       );
       const counts = appStore.state.sessionAutoPermissionCounts[permission.sessionID];
       const key = outcome.response.decision === 'allow' ? 'approved' : 'rejected';
@@ -1585,12 +1639,18 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   }
 
   function judgeAndRespondPermission(permission: Permission): Promise<void> {
+    if (!permissionAutomationOwner) {
+      permissionsStore.addPermission(permission);
+      postMessage({ type: 'permission/reveal', payload: { permissionId: permission.id } });
+      return Promise.resolve();
+    }
     const existingAttempt = permissionJudgeAttempts.get(permission.id);
     if (existingAttempt) return existingAttempt.promise;
 
     permissionsStore.removePermission(permission.id, { removeGroup: true });
     const attempt: PermissionJudgeAttempt = {
       permission,
+      automationLease: permissionAutomationLease,
       status: 'judging',
       countedInFlight: true,
       promise: Promise.resolve(),
@@ -1605,14 +1665,20 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     const judgeRequest = Promise.resolve()
       .then(async (): Promise<PermissionJudgeOutcome> => {
         const model = resolvePermissionJudgeModel(permission.sessionID);
-        const response = await client.varro.judgePermission({
+        const request = {
           permission,
           approvedReferences:
             permissionDecisionReferencesByTree.get(
               getPermissionDecisionScopeId(permission.sessionID)
             ) || [],
           model: model || undefined,
-        });
+        };
+        const response =
+          attempt.automationLease === undefined
+            ? await client.varro.judgePermission(request)
+            : await client.varro.judgePermission(request, {
+                permissionAutomationLease: attempt.automationLease,
+              });
         return { type: 'decision', response };
       })
       .catch((error): PermissionJudgeOutcome => ({ type: 'error', error }));
@@ -2096,6 +2162,15 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   const sessionApprovalOperations = new SessionApprovalOperations({
     respondRemotePermission: (sessionId, permissionId, response) =>
       client.session.respondPermission(sessionId, permissionId, response),
+    respondAutomaticPermission: (sessionId, permissionId, response, lease) => {
+      const currentLease = lease ?? permissionAutomationLease;
+      return currentLease === undefined
+        ? client.session.respondPermission(sessionId, permissionId, response)
+        : client.session.respondPermission(sessionId, permissionId, response, {
+            permissionAutomationLease: currentLease,
+          });
+    },
+    canAutomatePermissions: () => permissionAutomationOwner,
     removePermission: permissionsStore.removePermission,
     setError: uiStore.setError,
     replyQuestion: (requestId, answers) => client.question.reply(requestId, answers),
@@ -2106,7 +2181,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     setPermissionModeForSession: permissionsStore.setPermissionModeForSession,
     setDraftPermissionMode: permissionsStore.setDraftPermissionMode,
     saveProjectPermissionMode: permissionsStore.saveProjectPermissionMode,
-    updateSessionPermission: (sessionId, input) => client.session.update(sessionId, input),
+    updateSessionPermission: (sessionId, mode) =>
+      client.varro.session.updatePermissionMode(sessionId, mode),
     upsertSession,
     getPermissionsForSession: (sessionId) => {
       const rootId = getSessionTreeRootId(sessionId) || sessionId;
@@ -2150,6 +2226,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     setSelectedMcpsForSession: routingStore.setSelectedMcpsForSession,
     resetDraftSelectedMcps: routingStore.resetDraftSelectedMcps,
     setPermissionModeForSession: permissionsStore.setPermissionModeForSession,
+    persistConfirmedPermissionModeForSession:
+      permissionsStore.persistConfirmedPermissionModeForSession,
     resetDraftPermissionMode: permissionsStore.resetDraftPermissionMode,
     resetTodoSync,
     clearMessages: sessionStore.clearMessages,

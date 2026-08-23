@@ -407,6 +407,39 @@ describe('webview message validation', () => {
     ).toEqual({ type: 'api/request', payload: { id: 1, method: 'GET', path: '/session' } });
   });
 
+  it('validates permission automation leases on API requests', () => {
+    expect(
+      parseWebviewMessage({
+        type: 'api/request',
+        payload: {
+          id: 1,
+          method: 'POST',
+          path: '/permission/perm-1/reply',
+          permissionAutomationLease: 4,
+        },
+      })
+    ).toEqual({
+      type: 'api/request',
+      payload: {
+        id: 1,
+        method: 'POST',
+        path: '/permission/perm-1/reply',
+        permissionAutomationLease: 4,
+      },
+    });
+    expect(
+      parseWebviewMessage({
+        type: 'api/request',
+        payload: {
+          id: 1,
+          method: 'POST',
+          path: '/permission/perm-1/reply',
+          permissionAutomationLease: -1,
+        },
+      })
+    ).toBeNull();
+  });
+
   it('validates API cancellation keys', () => {
     expect(
       parseWebviewMessage({

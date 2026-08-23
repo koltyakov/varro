@@ -212,11 +212,14 @@ export function Chat() {
     if (!isEditorSurface || !connectionInitialized()) return;
     const sessionId = state.activeSessionId;
     const title = activeSession()?.title;
+    const rootSessionId = sessionId ? getSessionTreeRootId(sessionId) || sessionId : undefined;
     persistLastOpenedView(sessionId ? { type: 'session', sessionId } : { type: 'new-session' });
     postMessage({
       type: 'editor/route-changed',
       payload: {
-        route: sessionId ? { type: 'session', sessionId, title } : { type: 'new-session' },
+        route: sessionId
+          ? { type: 'session', sessionId, rootSessionId, title }
+          : { type: 'new-session' },
       },
     });
   });

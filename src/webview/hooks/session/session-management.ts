@@ -35,6 +35,7 @@ type SessionManagementDependencies = {
   setSelectedMcpsForSession(sessionId: string, names: string[]): void;
   resetDraftSelectedMcps(): void;
   setPermissionModeForSession(sessionId: string, mode: PermissionMode): void;
+  persistConfirmedPermissionModeForSession?(sessionId: string, mode: PermissionMode): void;
   resetDraftPermissionMode(): void;
   resetTodoSync(): void;
   clearMessages(): void;
@@ -91,6 +92,8 @@ export class SessionManagementOperations {
         setSelectedMcpsForSession: this.deps.setSelectedMcpsForSession,
         resetDraftSelectedMcps: this.deps.resetDraftSelectedMcps,
         setPermissionModeForSession: this.deps.setPermissionModeForSession,
+        persistConfirmedPermissionModeForSession:
+          this.deps.persistConfirmedPermissionModeForSession,
         resetDraftPermissionMode: this.deps.resetDraftPermissionMode,
         resetTodoSync: this.deps.resetTodoSync,
         clearMessages: this.deps.clearMessages,
@@ -112,6 +115,8 @@ export class SessionManagementOperations {
         forkRemoteSession: this.deps.forkRemoteSession,
         getPermissionModeForSession: this.deps.getPermissionModeForSession,
         setPermissionModeForSession: this.deps.setPermissionModeForSession,
+        persistConfirmedPermissionModeForSession:
+          this.deps.persistConfirmedPermissionModeForSession,
         upsertSession: this.deps.upsertSession,
         selectSession: this.deps.selectSession,
         setError: this.deps.setError,
@@ -225,6 +230,7 @@ export async function createSessionWithDependencies(
     setSelectedMcpsForSession(sessionId: string, names: string[]): void;
     resetDraftSelectedMcps(): void;
     setPermissionModeForSession(sessionId: string, mode: PermissionMode): void;
+    persistConfirmedPermissionModeForSession?(sessionId: string, mode: PermissionMode): void;
     resetDraftPermissionMode(): void;
     resetTodoSync(): void;
     clearMessages(): void;
@@ -255,6 +261,7 @@ export async function createSessionWithDependencies(
     deps.setSelectedMcpsForSession(session.id, initialMcpNames);
     if (initialPermissionMode !== 'default') {
       deps.setPermissionModeForSession(session.id, initialPermissionMode);
+      deps.persistConfirmedPermissionModeForSession?.(session.id, initialPermissionMode);
     }
 
     if (
@@ -310,6 +317,7 @@ export async function forkSessionWithDependencies(
     forkRemoteSession(sessionId: string, messageID?: string): Promise<Session>;
     getPermissionModeForSession(sessionId: string): PermissionMode;
     setPermissionModeForSession(sessionId: string, mode: PermissionMode): void;
+    persistConfirmedPermissionModeForSession?(sessionId: string, mode: PermissionMode): void;
     upsertSession(session: Session): void;
     selectSession(
       sessionId: string,
@@ -333,6 +341,7 @@ export async function forkSessionWithDependencies(
     deps.upsertSession(session);
     if (permissionMode !== 'default') {
       deps.setPermissionModeForSession(session.id, permissionMode);
+      deps.persistConfirmedPermissionModeForSession?.(session.id, permissionMode);
     }
     if (
       deps.getActiveSessionId() === previousActiveSessionId &&

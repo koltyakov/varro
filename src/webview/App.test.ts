@@ -7,6 +7,7 @@ const appMocks = vi.hoisted(() => ({
   cleanupBridge: vi.fn(),
   onMessage: vi.fn(() => vi.fn()),
   postMessage: vi.fn(() => true),
+  logError: vi.fn(),
   ralphError: { current: null as Error | null },
   useOpenCode: vi.fn(),
 }));
@@ -21,6 +22,10 @@ vi.mock('./lib/bridge', () => ({
   cleanupBridge: appMocks.cleanupBridge,
   onMessage: appMocks.onMessage,
   postMessage: appMocks.postMessage,
+}));
+
+vi.mock('./lib/log', () => ({
+  logError: appMocks.logError,
 }));
 
 vi.mock('./components/Chat', () => ({
@@ -60,6 +65,7 @@ describe('AppRoot', () => {
     appMocks.ralphError.current = null;
     ralphStore.setShowRalphForm(false);
     appMocks.cleanupBridge.mockReset();
+    appMocks.logError.mockReset();
     appMocks.postMessage.mockReset().mockReturnValue(true);
     appMocks.useOpenCode.mockReset();
     container = document.createElement('div');
@@ -172,6 +178,11 @@ describe('AppRoot', () => {
     expect(container?.textContent).toContain('Something went wrong');
     expect(container?.textContent).toContain('initialization failed');
     expect(container?.textContent).not.toContain('Error: initialization failed');
+    expect(appMocks.logError).toHaveBeenCalledWith(
+      'app:error-boundary',
+      expect.stringContaining('Error: initialization failed')
+    );
+    expect(appMocks.cleanupBridge).not.toHaveBeenCalled();
     const errorIcon = container?.querySelector<HTMLElement>('.ui-icon.text-vscode-error');
     expect(errorIcon?.style.getPropertyValue('--ui-icon-width')).toBe('32px');
     expect(errorIcon?.getAttribute('aria-hidden')).toBe('true');
@@ -181,6 +192,50 @@ describe('AppRoot', () => {
     );
     reloadButton?.click();
     expect(appMocks.postMessage).toHaveBeenCalledWith({ type: 'webview/reload' });
+    cleanup?.();
+    cleanup = undefined;
+    expect(appMocks.cleanupBridge).toHaveBeenCalledOnce();
+  });
+
+  it('reports and displays non-Error initialization failures', () => {
+    appMocks.useOpenCode.mockImplementationOnce(() => {
+      throw { reason: 'invalid startup state' };
+    });
+
+    expect(() => mountAppRoot()).not.toThrow();
+    expect(container?.textContent).toContain('{"reason":"invalid startup state"}');
+    expect(container?.textContent).not.toContain('Unknown error');
+    expect(appMocks.logError).toHaveBeenCalledWith(
+      'app:error-boundary',
+      expect.stringContaining('Cause: {"reason":"invalid startup state"}')
+    );
+  });
+
+  it('reports an undefined initialization failure from its wrapped cause', () => {
+    appMocks.useOpenCode.mockImplementationOnce(() => {
+      throw undefined;
+    });
+
+    expect(() => mountAppRoot()).not.toThrow();
+    expect(container?.textContent).toContain('Something went wrongundefined');
+    expect(container?.textContent).not.toContain('Unknown error');
+    expect(appMocks.logError).toHaveBeenCalledWith(
+      'app:error-boundary',
+      expect.stringContaining('Cause: undefined')
+    );
+  });
+
+  it('identifies a Promise initialization failure', () => {
+    appMocks.useOpenCode.mockImplementationOnce(() => {
+      throw Promise.resolve();
+    });
+
+    expect(() => mountAppRoot()).not.toThrow();
+    expect(container?.textContent).toContain('[object Promise]');
+    expect(appMocks.logError).toHaveBeenCalledWith(
+      'app:error-boundary',
+      expect.stringContaining('Cause: [object Promise]')
+    );
   });
 
   it('keeps RalphForm failures inside the root boundary', async () => {

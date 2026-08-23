@@ -38,7 +38,13 @@ export class WebviewSession {
   private pendingCommands: Array<
     Extract<
       ExtensionMessage,
-      { type: 'command/new-session' | 'command/abort' | 'command/switch-session' }
+      {
+        type:
+          | 'command/new-session'
+          | 'command/abort'
+          | 'command/switch-session'
+          | 'command/open-session';
+      }
     >
   > = [];
   private commandStateReady = false;
@@ -87,10 +93,14 @@ export class WebviewSession {
       queuedMessages(): InitialWebviewState['queuedMessages'];
       sessionPermissionModes(): InitialWebviewState['sessionPermissionModes'];
       sessionSelectedModels(): InitialWebviewState['sessionSelectedModels'];
+      sessionModelMigrationPending(): boolean;
       editorTabsOpen(): boolean;
+      editorSessionIds(): string[];
+      permissionAutomation(): NonNullable<InitialWebviewState['permissionAutomation']>;
       draftImages(): InitialWebviewState['clipboardImages'];
       flushPendingServerEvents(): void;
       cancelApiRequestsBeforeGeneration(generation: number): void;
+      handleDisposedSideEffects(): void;
     },
     private readonly webviewContext?: WebviewInstanceContext,
     private readonly manageCommandContext = true
@@ -145,7 +155,13 @@ export class WebviewSession {
   queueCommand(
     message: Extract<
       ExtensionMessage,
-      { type: 'command/new-session' | 'command/abort' | 'command/switch-session' }
+      {
+        type:
+          | 'command/new-session'
+          | 'command/abort'
+          | 'command/switch-session'
+          | 'command/open-session';
+      }
     >
   ) {
     this.pendingCommands.push(message);
@@ -217,6 +233,7 @@ export class WebviewSession {
           this.webviewReady = false;
           this.webviewHasFocus = false;
           this.resetCommandState();
+          this.deps.handleDisposedSideEffects();
           this.deps.updateStatusBarItem();
         }
       })
@@ -244,6 +261,7 @@ export class WebviewSession {
         webviewView.webview.html = '<p>Failed to load Varro webview. Please reload.</p>';
       });
 
+    let wasVisible = webviewView.visible;
     const onDidChangeVisibility =
       'onDidChangeVisibility' in webviewView
         ? webviewView.onDidChangeVisibility.bind(webviewView)
@@ -253,6 +271,8 @@ export class WebviewSession {
             });
     this.webviewDisposables.push(
       onDidChangeVisibility(() => {
+        if (webviewView.visible === wasVisible) return;
+        wasVisible = webviewView.visible;
         if (webviewView.visible) {
           this.handleVisible();
         } else {
@@ -283,6 +303,14 @@ export class WebviewSession {
       );
     });
     void this.deps.ensureServerStarted().catch(() => {});
+  }
+
+  deliverInterruptedSessions(sessions: InterruptedSessionSnapshot[]) {
+    if (sessions.length === 0) return;
+    this.bridge.post({
+      type: 'recovery/interrupted-sessions',
+      payload: { sessionIds: sessions.map((session) => session.id) },
+    });
   }
 
   handleVisible() {
@@ -354,8 +382,11 @@ export class WebviewSession {
       defaultPermissionMode: config.defaultPermissionMode,
       sessionPermissionModes: this.deps.sessionPermissionModes(),
       sessionSelectedModels: this.deps.sessionSelectedModels(),
+      sessionModelMigrationPending: this.deps.sessionModelMigrationPending(),
       editorTabsOpen: this.deps.editorTabsOpen(),
-      interruptedSessionIds: this.interruptedSessionsForWebview.map((item) => item.id),
+      editorSessionIds: this.deps.editorSessionIds(),
+      permissionAutomation: this.deps.permissionAutomation(),
+      interruptedSessionIds: [],
       pendingPermissions: this.blockingRequestsForWebview
         .filter((item) => item.kind === 'permission')
         .filter((item) => !this.isHiddenSession(item.sessionID))
@@ -398,6 +429,29 @@ export class WebviewSession {
     });
     this.bridge.post({ type: 'server/status', payload: status });
     this.bridge.post({ type: 'theme/update', payload: { theme: this.deps.currentTheme() } });
+    this.bridge.post({
+      type: 'queued-messages/sync',
+      payload: { messages: this.deps.queuedMessages() ?? [] },
+    });
+    this.bridge.post({
+      type: 'permission-modes/sync',
+      payload: { modes: this.deps.sessionPermissionModes() ?? {} },
+    });
+    if (!this.deps.sessionModelMigrationPending()) {
+      this.bridge.post({
+        type: 'session-models/sync',
+        payload: { models: this.deps.sessionSelectedModels() ?? {} },
+      });
+    }
+    const editorSessionIds = this.deps.editorSessionIds();
+    this.bridge.post({
+      type: 'editor-tabs/state',
+      payload: { open: this.deps.editorTabsOpen(), sessionIds: editorSessionIds },
+    });
+    this.bridge.post({
+      type: 'permission-automation/update',
+      payload: this.deps.permissionAutomation(),
+    });
     this.sessionState.replayBlockingRequests(
       this.bridge.post.bind(this.bridge),
       new Set([...this.sessionTrash.hiddenSessionIds(), ...this.hiddenSessions.hiddenSessionIds()]),

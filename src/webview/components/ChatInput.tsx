@@ -2185,6 +2185,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const queued = state.queuedMessages.find((message) => message.id === item.id);
     if (
       !queued ||
+      !ownsQueuedMessage(queued) ||
       queued.sessionId !== composerSessionId() ||
       !canEditQueuedMessage() ||
       dispatchingQueuedMessageId() === queued.id ||

@@ -159,6 +159,9 @@ function createActionFixture() {
     updateSessionModel: vi.fn<SidebarProviderActionDeps['updateSessionModel']>(() =>
       Promise.resolve()
     ),
+    migrateSessionModels: vi.fn<SidebarProviderActionDeps['migrateSessionModels']>(() =>
+      Promise.resolve()
+    ),
     updateDraftImages: vi.fn<SidebarProviderActionDeps['updateDraftImages']>(() =>
       Promise.resolve()
     ),
@@ -210,7 +213,12 @@ describe('createSidebarProviderActions', () => {
     const { actions, deps, server } = createActionFixture();
 
     await actions.openSessionInEditor('session-1', 'Editor session');
-    expect(deps.openSessionInEditor).toHaveBeenCalledWith('session-1', 'Editor session', undefined);
+    expect(deps.openSessionInEditor).toHaveBeenCalledWith(
+      'session-1',
+      'Editor session',
+      undefined,
+      undefined
+    );
 
     server.request.mockResolvedValueOnce({ id: 'session-foreign', directory: '/other-repo' });
     await expect(actions.openSessionInEditor('session-foreign')).rejects.toThrow(

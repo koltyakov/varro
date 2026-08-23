@@ -121,6 +121,7 @@ export interface AppState {
   recycleBinEntries: RecycleBinEntry[];
   activeSessionId: string | null;
   editorTabsOpen: boolean;
+  editorSessionIds: string[];
   currentDocumentEnabledBySession: Record<string, boolean>;
   sessionStatus: Record<string, SessionStatus>;
   messages: MessageEntry[];
@@ -319,6 +320,7 @@ export function createAppState(): AppStateInstance {
     recycleBinEntries: initialWebviewState.recycleBinEntries ?? [],
     activeSessionId: null,
     editorTabsOpen: initialWebviewState.editorTabsOpen ?? false,
+    editorSessionIds: initialWebviewState.editorSessionIds ?? [],
     currentDocumentEnabledBySession: {},
     sessionStatus: {},
     messages: [],

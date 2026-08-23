@@ -1,4 +1,4 @@
-import { produce } from 'solid-js/store';
+import { produce, reconcile } from 'solid-js/store';
 import type { PermissionMode } from '../../shared/protocol';
 import { isPermissionMode } from '../../shared/protocol';
 import { postMessage } from './bridge';
@@ -69,6 +69,9 @@ export function setPermissionModeForSession(
 
   setState('sessionPermissionModes', nextModes);
   writeStored(STORAGE_KEYS.sessionPermissionModes, nextModes);
+}
+
+export function persistConfirmedPermissionModeForSession(sessionId: string, mode: PermissionMode) {
   postMessage({ type: 'permission-mode/update', payload: { sessionId, mode } });
 }
 
@@ -88,7 +91,7 @@ export function removePermissionModeForSession(sessionId: string) {
 }
 
 export function applySessionPermissionModesSnapshot(modes: Record<string, PermissionMode>) {
-  setState('sessionPermissionModes', modes);
+  setState('sessionPermissionModes', reconcile(modes));
   writeStored(STORAGE_KEYS.sessionPermissionModes, modes);
 }
 

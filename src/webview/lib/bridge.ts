@@ -15,6 +15,7 @@ type ApiCallOptions = {
   timeoutMs?: number;
   signal?: AbortSignal;
   retries?: number;
+  permissionAutomationLease?: number;
 };
 
 const handlers = new Set<MessageHandler>();
@@ -176,6 +177,7 @@ export function apiCall<T = unknown>(
     timeoutMs: options?.timeoutMs ?? defaultTimeoutForRequest(method, path),
     signal: options?.signal,
     retries: options?.retries ?? 1,
+    permissionAutomationLease: options?.permissionAutomationLease,
   });
 }
 
@@ -183,7 +185,12 @@ function sendApiCall<T>(
   method: string,
   path: string,
   body: UnknownRecord[string],
-  options: { timeoutMs: number; signal?: AbortSignal; retries: number }
+  options: {
+    timeoutMs: number;
+    signal?: AbortSignal;
+    retries: number;
+    permissionAutomationLease?: number;
+  }
 ): Promise<T> {
   if (disposed) return Promise.reject(new Error('Bridge cleaned up'));
   const id = ++reqId;
@@ -262,15 +269,19 @@ function sendApiCall<T>(
 
     let sendError: unknown;
     try {
+      const payload: Extract<WebviewMessage, { type: 'api/request' }>['payload'] = {
+        id,
+        cancelKey,
+        method,
+        path,
+        body,
+      };
+      if (options.permissionAutomationLease !== undefined) {
+        payload.permissionAutomationLease = options.permissionAutomationLease;
+      }
       sent = postMessage({
         type: 'api/request',
-        payload: {
-          id,
-          cancelKey,
-          method,
-          path,
-          body,
-        },
+        payload,
       });
     } catch (err) {
       sendError = err;

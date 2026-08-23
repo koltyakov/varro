@@ -7,6 +7,8 @@ import type {
   WebviewMessage,
   WebviewThemeKind,
 } from '../../src/shared/protocol';
+import { isPermissionMode } from '../../src/shared/protocol';
+import { getSessionPermissionRulesForMode } from '../../src/shared/permission-rules';
 import type {
   Agent,
   AssistantMessage,
@@ -4742,6 +4744,7 @@ function buildInitialState(state: ScenarioState): InitialWebviewState {
     emptyStateLogoUri: '/assets/icon.png',
     showInlineFileChanges: state.showInlineFileChanges,
     defaultPermissionMode: 'default',
+    sessionPermissionModes: state.storedState.sessionPermissionModes,
     pendingPermissions: state.initialPendingPermissions ?? state.pendingPermissions,
     pendingQuestions: [],
     recycleBinEntries: state.recycleBinEntries,
@@ -5034,6 +5037,20 @@ async function handleApiRequest(
     state.sessions = [session, ...state.sessions];
     state.messagesBySessionId[session.id] = [];
     state.sessionStatuses[session.id] = { type: 'idle' };
+    return session;
+  }
+
+  const permissionModeMatch = path.match(/^\/varro\/session\/([^/]+)\/permission-mode$/);
+  if (permissionModeMatch && method === 'POST') {
+    const sessionId = decodeURIComponent(permissionModeMatch[1]!);
+    const mode = asRecord(body).mode;
+    if (!isPermissionMode(mode)) throw new Error('Invalid permission mode request');
+    const session = getSession(state, sessionId);
+    session.permission = getSessionPermissionRulesForMode(mode, 'update');
+    session.time.updated = nextTimestamp(state);
+    const modes = { ...state.storedState.sessionPermissionModes, [sessionId]: mode };
+    state.storedState.sessionPermissionModes = modes;
+    dispatchToWebview({ type: 'permission-modes/sync', payload: { modes } });
     return session;
   }
 

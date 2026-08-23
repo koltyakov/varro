@@ -34,6 +34,10 @@ export class SessionPermissionModeStore {
     });
   }
 
+  dispose(): Promise<void> {
+    return this.mutationQueue;
+  }
+
   private mutate<T>(operation: () => Promise<T>): Promise<T> {
     const result = this.mutationQueue.then(operation);
     this.mutationQueue = result.then(

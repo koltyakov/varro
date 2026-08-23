@@ -5,6 +5,11 @@ import { postMessage } from './bridge';
 import { STORAGE_KEYS, writeStored } from './state-storage';
 import { readWebviewInstanceContext } from './state-stored-values';
 
+function ownsQueuedMessage(message: QueuedMessage) {
+  const ownerViewId = readWebviewInstanceContext()?.viewId ?? 'sidebar';
+  return (message.ownerViewId ?? 'sidebar') === ownerViewId;
+}
+
 function commitQueuedMessages(messages: QueuedMessage[]) {
   setState('queuedMessages', messages);
   const ids = new Set(messages.map((message) => message.id));
@@ -93,12 +98,16 @@ export function replaceQueuedMessage(id: string, message: QueuedMessage) {
   const next = [...state.queuedMessages];
   const index = next.findIndex((item) => item.id === id);
   if (index === -1) return false;
-  next[index] = message;
+  const existing = next[index]!;
+  if (!ownsQueuedMessage(existing)) return false;
+  next[index] = { ...message, ownerViewId: existing.ownerViewId };
   commitQueuedMessages(next);
   return true;
 }
 
 export function removeQueuedMessage(id: string) {
+  const message = state.queuedMessages.find((item) => item.id === id);
+  if (!message || !ownsQueuedMessage(message)) return;
   const next = state.queuedMessages.filter((item) => item.id !== id);
   if (next.length === state.queuedMessages.length) return;
   prepareForQueuedMessageRemoval(id);
@@ -107,10 +116,11 @@ export function removeQueuedMessage(id: string) {
 
 export function setQueuedMessagePaused(id: string, paused: boolean, allForSession = false) {
   const message = state.queuedMessages.find((item) => item.id === id);
-  if (!message) return;
+  if (!message || !ownsQueuedMessage(message)) return;
   let changed = false;
   state.queuedMessages.forEach((item, index) => {
     if (item.id !== id && (!allForSession || item.sessionId !== message.sessionId)) return;
+    if (!ownsQueuedMessage(item)) return;
     if ((item.paused === true) === paused) return;
     setState('queuedMessages', index, 'paused', paused ? true : undefined);
     changed = true;
@@ -122,7 +132,15 @@ export function reorderQueuedMessage(id: string, targetId: string) {
   if (id === targetId) return;
   const message = state.queuedMessages.find((item) => item.id === id);
   const target = state.queuedMessages.find((item) => item.id === targetId);
-  if (!message || !target || message.sessionId !== target.sessionId) return;
+  if (
+    !message ||
+    !target ||
+    !ownsQueuedMessage(message) ||
+    !ownsQueuedMessage(target) ||
+    message.sessionId !== target.sessionId
+  ) {
+    return;
+  }
 
   const sessionMessages = state.queuedMessages.filter(
     (item) => item.sessionId === message.sessionId
@@ -143,7 +161,9 @@ export function reorderQueuedMessage(id: string, targetId: string) {
 }
 
 export function clearQueuedMessagesForSession(sessionId: string) {
-  const next = state.queuedMessages.filter((item) => item.sessionId !== sessionId);
+  const next = state.queuedMessages.filter(
+    (item) => item.sessionId !== sessionId || !ownsQueuedMessage(item)
+  );
   if (next.length === state.queuedMessages.length) return;
   commitQueuedMessages(next);
 }

@@ -172,10 +172,14 @@ function createSession(options?: {
     queuedMessages: vi.fn<() => InitialWebviewState['queuedMessages']>(() => undefined),
     sessionPermissionModes: vi.fn<() => InitialWebviewState['sessionPermissionModes']>(() => ({})),
     sessionSelectedModels: vi.fn<() => InitialWebviewState['sessionSelectedModels']>(() => ({})),
+    sessionModelMigrationPending: vi.fn(() => false),
     editorTabsOpen: vi.fn(() => false),
+    editorSessionIds: vi.fn(() => []),
+    permissionAutomation: vi.fn(() => ({ owner: true, lease: 1 })),
     draftImages: vi.fn<() => InitialWebviewState['clipboardImages']>(() => []),
     flushPendingServerEvents: vi.fn(),
     cancelApiRequestsBeforeGeneration: vi.fn(),
+    handleDisposedSideEffects: vi.fn(),
   };
 
   const session = new WebviewSession(

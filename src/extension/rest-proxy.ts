@@ -15,6 +15,7 @@ import type {
   AutoApproveJudgeReference,
   AutoApproveJudgeRequest,
   OpenCodeModelRouting,
+  PermissionMode,
   ServerStatus,
   SessionDiffSummary,
   SessionTokenBreakdown,
@@ -151,6 +152,8 @@ export interface RestProxyCallbacks {
   cleanupExpiredRecycleBin(): Promise<void>;
   removeSessionImages(sessionIds: Iterable<string>): Promise<void>;
   postApiResponse(requestGeneration: number, payload: ApiResponsePayload): void;
+  isPermissionAutomationLeaseCurrent(lease: number): boolean;
+  updatePermissionMode(sessionID: string, mode: PermissionMode): Promise<unknown>;
 }
 
 export class RestProxy {
@@ -221,6 +224,12 @@ export class RestProxy {
       const method = payload.method.toUpperCase();
       if (!isAllowedApiRequest(method, payload.path)) {
         throw new Error('Unsupported API request');
+      }
+      if (
+        payload.permissionAutomationLease !== undefined &&
+        !this.callbacks.isPermissionAutomationLeaseCurrent(payload.permissionAutomationLease)
+      ) {
+        throw new Error('Permission automation ownership changed');
       }
 
       const requestedWorkspaceDirectory = getExplicitWorkspaceDirectory(payload.path);
@@ -338,6 +347,20 @@ export class RestProxy {
         const data = await this.readCachedSessionDiffSummary(
           diffSummaryRequest.sessionID,
           diffSummaryRequest.cacheKey
+        );
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
+
+      const permissionModeRequest = this.parsePermissionModeRequest(
+        method,
+        payload.path,
+        payload.body
+      );
+      if (permissionModeRequest) {
+        const data = await this.callbacks.updatePermissionMode(
+          permissionModeRequest.sessionID,
+          permissionModeRequest.mode
         );
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
@@ -737,6 +760,23 @@ export class RestProxy {
     const record = asRecord(body);
     if (typeof record?.pinned !== 'boolean') throw new Error('Invalid pin request');
     return { sessionID: decodeURIComponent(match[1]!), pinned: record.pinned };
+  }
+
+  private parsePermissionModeRequest(
+    method: string,
+    path: string,
+    body: unknown
+  ): { sessionID: string; mode: PermissionMode } | null {
+    if (method !== 'POST') return null;
+    const url = new URL(path, 'http://localhost');
+    const match = url.pathname.match(/^\/varro\/session\/([^/]+)\/permission-mode$/);
+    if (!match) return null;
+    const record = asRecord(body);
+    const mode = record?.mode;
+    if (mode !== 'default' && mode !== 'edits' && mode !== 'auto' && mode !== 'full') {
+      throw new Error('Invalid permission mode request');
+    }
+    return { sessionID: decodeURIComponent(match[1]!), mode };
   }
 
   private async readSessionDiffSummary(sessionID: string): Promise<SessionDiffSummary> {

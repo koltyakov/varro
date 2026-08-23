@@ -17,6 +17,48 @@ const bridgeOnMessage = vi.fn<BridgeOnMessage>();
 Object.assign(bridgeMocks, { onMessage: bridgeOnMessage });
 
 describe('useOpenCode initialization', () => {
+  it('sends session model migration values as structured-cloneable objects', async () => {
+    // SAFETY: The fixture provides the initial host state read by the runtime.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      sessionModelMigrationPending: true,
+      webviewContext: {
+        viewId: 'sidebar',
+        surface: 'sidebar',
+        initialRoute: { type: 'new-session' },
+      },
+    };
+    window.localStorage.setItem(
+      'varro.sessionSelectedModels',
+      JSON.stringify({
+        'session-1': { providerID: 'openai', modelID: 'gpt-5.6', variant: 'high' },
+      })
+    );
+
+    const { hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      const migration = bridgeMocks.postMessage.mock.calls
+        .map(([message]) => message)
+        .find((message) => message.type === 'session-models/migrate');
+      expect(migration).toEqual({
+        type: 'session-models/migrate',
+        payload: {
+          models: {
+            'session-1': { providerID: 'openai', modelID: 'gpt-5.6', variant: 'high' },
+          },
+        },
+      });
+      expect(() => structuredClone(migration)).not.toThrow();
+    } finally {
+      dispose();
+      window.localStorage.removeItem('varro.sessionSelectedModels');
+    }
+  });
+
   it('reconciles restored permissions during startup', async () => {
     let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
     bridgeOnMessage.mockImplementation((handler) => {

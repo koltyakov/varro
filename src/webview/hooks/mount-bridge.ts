@@ -34,6 +34,8 @@ export function createMountBridgeOperations(deps: {
   refreshProviders(): void;
   revalidateProviderAuth?(): void;
   applyTheme(theme: WebviewThemeKind): void;
+  setPermissionAutomation?(owner: boolean, lease: number): void;
+  revealPermission?(permissionId: string): void;
 }) {
   const handleExtensionMessage = (msg: ExtensionMessage) => {
     handleExtensionMessageWithDependencies(
@@ -97,7 +99,17 @@ export function createMountBridgeOperations(deps: {
         setWorkspaceStatusSummary: (summary) =>
           appStore.setState('workspaceStatusSummary', summary),
         setWorkspaceStatuses: (entries) => appStore.setState('workspaceStatuses', entries),
-        setEditorTabsOpen: (open) => appStore.setState('editorTabsOpen', open),
+        setEditorTabsState: (open, sessionIds) => {
+          appStore.setState('editorTabsOpen', open);
+          appStore.setState('editorSessionIds', sessionIds);
+        },
+        setPermissionAutomation: deps.setPermissionAutomation,
+        revealPermission: deps.revealPermission,
+        addInterruptedSessionIds: (sessionIds) => {
+          appStore.setState('interruptedSessionIds', [
+            ...new Set([...appStore.state.interruptedSessionIds, ...sessionIds]),
+          ]);
+        },
       },
       msg
     );
@@ -154,7 +166,10 @@ export function handleExtensionMessageWithDependencies(
         status: 'connected' | 'connecting' | 'disconnected' | 'error';
       }[]
     ): void;
-    setEditorTabsOpen?(open: boolean): void;
+    setEditorTabsState?(open: boolean, sessionIds: string[]): void;
+    setPermissionAutomation?(owner: boolean, lease: number): void;
+    revealPermission?(permissionId: string): void;
+    addInterruptedSessionIds?(sessionIds: string[]): void;
   },
   msg: ExtensionMessage
 ) {
@@ -288,7 +303,16 @@ export function handleExtensionMessageWithDependencies(
       applySessionSelectedModelsSnapshot(msg.payload.models);
       break;
     case 'editor-tabs/state':
-      deps.setEditorTabsOpen?.(msg.payload.open);
+      deps.setEditorTabsState?.(msg.payload.open, msg.payload.sessionIds);
+      break;
+    case 'permission-automation/update':
+      deps.setPermissionAutomation?.(msg.payload.owner, msg.payload.lease);
+      break;
+    case 'permission/actionable':
+      deps.revealPermission?.(msg.payload.permissionId);
+      break;
+    case 'recovery/interrupted-sessions':
+      deps.addInterruptedSessionIds?.(msg.payload.sessionIds);
       break;
     case 'ralph/state':
       ralphStore.applyHostState(msg.payload.runs, msg.payload.activeIds);

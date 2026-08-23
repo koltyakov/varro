@@ -1754,12 +1754,14 @@ function SessionListItem(props: {
     );
   };
   const openSession = (openInEditor = false) => {
+    const sessionRootId = getSessionTreeRootId(props.session.id) || props.session.id;
     if (openInEditor || (!props.embedded && state.editorTabsOpen)) {
       const model = getSessionDisplayModel(props.session, props.diffSummary);
       postMessage({
         type: 'session/open-in-editor',
         payload: {
           sessionId: props.session.id,
+          rootSessionId: sessionRootId,
           title: props.session.title,
           model: model ?? undefined,
         },

@@ -299,7 +299,12 @@ export const VARRO_API_ENDPOINTS = {
   permissionJudgeModel: `${VARRO_API_NAMESPACE}/permission/judge/model`,
 } as const;
 
-export type VarroSessionEndpointAction = 'delete' | 'diff-summary' | 'pin' | 'rename-if-untitled';
+export type VarroSessionEndpointAction =
+  | 'delete'
+  | 'diff-summary'
+  | 'permission-mode'
+  | 'pin'
+  | 'rename-if-untitled';
 
 export function buildVarroSessionEndpoint(
   sessionID: string,
@@ -523,7 +528,7 @@ export type WebviewThemeKind = 'light' | 'dark' | 'high-contrast' | 'high-contra
 export type DesktopSessionPaneSide = 'left' | 'right';
 
 export type WebviewRoute =
-  | { type: 'session'; sessionId: string; title?: string }
+  | { type: 'session'; sessionId: string; rootSessionId?: string; title?: string }
   | { type: 'new-session' };
 
 export type WebviewInstanceContext = {
@@ -580,7 +585,10 @@ export type InitialWebviewState = {
   defaultPermissionMode?: PermissionMode;
   sessionPermissionModes?: Record<string, PermissionMode>;
   sessionSelectedModels?: Record<string, ChatModelSelection>;
+  sessionModelMigrationPending?: boolean;
   editorTabsOpen?: boolean;
+  editorSessionIds?: string[];
+  permissionAutomation?: { owner: boolean; lease: number };
   interruptedSessionIds?: string[];
   pendingPermissions?: UnknownRecord[];
   pendingQuestions?: UnknownRecord[];
@@ -639,7 +647,10 @@ export type ExtensionMessage =
       type: 'session-models/sync';
       payload: { models: Record<string, ChatModelSelection> };
     }
-  | { type: 'editor-tabs/state'; payload: { open: boolean } }
+  | { type: 'editor-tabs/state'; payload: { open: boolean; sessionIds: string[] } }
+  | { type: 'permission-automation/update'; payload: { owner: boolean; lease: number } }
+  | { type: 'permission/actionable'; payload: { permissionId: string } }
+  | { type: 'recovery/interrupted-sessions'; payload: { sessionIds: string[] } }
   | { type: 'command/new-session'; payload?: { prefill: string } }
   | { type: 'command/open-session'; payload: { sessionId: string } }
   | { type: 'command/focus-input' }
@@ -669,7 +680,12 @@ export type WebviewMessage =
   | { type: 'terminal/run'; payload: { command: string; title?: string } }
   | {
       type: 'session/open-in-editor';
-      payload: { sessionId: string; title?: string; model?: ChatModelSelection };
+      payload: {
+        sessionId: string;
+        rootSessionId?: string;
+        title?: string;
+        model?: ChatModelSelection;
+      };
     }
   | { type: 'session/open-in-opencode'; payload: { sessionId: string } }
   | { type: 'chat/new-editor' }
@@ -677,6 +693,10 @@ export type WebviewMessage =
   | {
       type: 'session-model/update';
       payload: { sessionId: string; model: ChatModelSelection | null };
+    }
+  | {
+      type: 'session-models/migrate';
+      payload: { models: Record<string, ChatModelSelection> };
     }
   | { type: 'session/export'; payload: { sessionId: string } }
   | { type: 'usage/report'; payload: { includeAllTime: boolean } }
@@ -741,7 +761,14 @@ export type WebviewMessage =
   | { type: 'ready' }
   | {
       type: 'api/request';
-      payload: { id: number; cancelKey?: string; method: string; path: string; body?: unknown };
+      payload: {
+        id: number;
+        cancelKey?: string;
+        method: string;
+        path: string;
+        body?: unknown;
+        permissionAutomationLease?: number;
+      };
     }
   | { type: 'api/cancel'; payload: { id: number; cancelKey: string } }
   | { type: 'ralph/start'; payload: { config: RalphConfig } }

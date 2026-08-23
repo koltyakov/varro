@@ -157,10 +157,12 @@ type EventHandlerDependencies = {
     response: 'once' | 'always' | 'reject',
     options?: { rethrow?: boolean }
   ): Promise<void | boolean | object>;
+  respondAutomaticPermission?: EventHandlerDependencies['respondPermission'];
   setDiffs(diffs: FileDiff[]): void;
   abortRemoteSession(sessionId: string): Promise<void | boolean | object>;
   continueInterruptedSession?(sessionId: string): Promise<void | boolean | object>;
   logError(context: string, cause: unknown): void;
+  isPermissionAutomationOwner?(): boolean;
 };
 
 type EventHandlerOperationDependencies = {
@@ -194,7 +196,9 @@ type EventHandlerOperationDependencies = {
     | 'permissionVisible'
     | 'isPermissionSessionKnown'
     | 'syncPermissionSession'
-  >;
+  > & {
+    respondAutomaticPermission?: EventHandlerDependencies['respondAutomaticPermission'];
+  };
   syncPendingPermissions?: EventHandlerDependencies['syncPendingPermissions'];
   reconcileServerState?: EventHandlerDependencies['reconcileServerState'];
   invalidateMessageSync?: EventHandlerDependencies['invalidateMessageSync'];
@@ -202,6 +206,7 @@ type EventHandlerOperationDependencies = {
   abortRemoteSession: EventHandlerDependencies['abortRemoteSession'];
   continueInterruptedSession: NonNullable<EventHandlerDependencies['continueInterruptedSession']>;
   logError: EventHandlerDependencies['logError'];
+  isPermissionAutomationOwner?(): boolean;
 };
 
 export class SessionEventHandlerOperations {
@@ -245,11 +250,14 @@ export class SessionEventHandlerOperations {
       syncTodosFromMessages: this.deps.todoSyncOperations.syncTodosFromMessages,
       syncTodosForSession: this.deps.todoSyncOperations.syncTodosForSession,
       shouldAutoApprovePermissions: (sessionId) =>
+        this.deps.isPermissionAutomationOwner?.() !== false &&
         permissionsStore.getPermissionModeForSession(sessionId) === 'full',
       shouldAutoApproveEdit: (permission) =>
+        this.deps.isPermissionAutomationOwner?.() !== false &&
         permissionsStore.getPermissionModeForSession(permission.sessionID) === 'edits' &&
         isEditPermission(permission.type),
       shouldAutoJudgePermissions: (sessionId) =>
+        this.deps.isPermissionAutomationOwner?.() !== false &&
         permissionsStore.getPermissionModeForSession(sessionId) === 'auto',
       isPermissionSessionKnown: this.deps.sessionApprovalOperations.isPermissionSessionKnown,
       syncPermissionSession: this.deps.sessionApprovalOperations.syncPermissionSession,
@@ -260,6 +268,7 @@ export class SessionEventHandlerOperations {
       reconcileServerState: this.deps.reconcileServerState,
       invalidateMessageSync: this.deps.invalidateMessageSync,
       respondPermission: this.deps.sessionApprovalOperations.respondPermission,
+      respondAutomaticPermission: this.deps.sessionApprovalOperations.respondAutomaticPermission,
       setDiffs: sessionStore.setDiffs,
       abortRemoteSession: this.deps.abortRemoteSession,
       continueInterruptedSession: this.deps.continueInterruptedSession,

@@ -38,6 +38,9 @@ const KNOWN_TYPES = new Set<string>([
   'permission-modes/sync',
   'session-models/sync',
   'editor-tabs/state',
+  'permission-automation/update',
+  'permission/actionable',
+  'recovery/interrupted-sessions',
   'command/new-session',
   'command/open-session',
   'command/focus-input',
@@ -291,7 +294,37 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
 
     case 'editor-tabs/state': {
       const payload = asRecord(record.payload);
-      return payload && isBoolean(payload.open) ? { type, payload: { open: payload.open } } : null;
+      return payload &&
+        isBoolean(payload.open) &&
+        Array.isArray(payload.sessionIds) &&
+        payload.sessionIds.every(isString)
+        ? { type, payload: { open: payload.open, sessionIds: payload.sessionIds } }
+        : null;
+    }
+
+    case 'permission-automation/update': {
+      const payload = asRecord(record.payload);
+      return payload &&
+        isBoolean(payload.owner) &&
+        isNumber(payload.lease) &&
+        Number.isSafeInteger(payload.lease) &&
+        payload.lease >= 0
+        ? { type, payload: { owner: payload.owner, lease: payload.lease } }
+        : null;
+    }
+
+    case 'permission/actionable': {
+      const payload = asRecord(record.payload);
+      return payload && isString(payload.permissionId)
+        ? { type, payload: { permissionId: payload.permissionId } }
+        : null;
+    }
+
+    case 'recovery/interrupted-sessions': {
+      const payload = asRecord(record.payload);
+      return payload && Array.isArray(payload.sessionIds) && payload.sessionIds.every(isString)
+        ? { type, payload: { sessionIds: [...new Set(payload.sessionIds)] } }
+        : null;
     }
 
     case 'ralph/state': {

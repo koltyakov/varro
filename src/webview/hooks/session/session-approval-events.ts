@@ -20,6 +20,12 @@ type ApprovalEventDependencies = {
     response: 'once' | 'always' | 'reject',
     options?: { rethrow?: boolean }
   ): Promise<void | boolean | object>;
+  respondAutomaticPermission?(
+    sessionId: string,
+    permissionId: string,
+    response: 'once' | 'always' | 'reject',
+    options?: { rethrow?: boolean }
+  ): Promise<void | boolean | object>;
   logError(context: string, cause: unknown): void;
 };
 
@@ -31,23 +37,21 @@ export function registerApprovalEventHandlers(deps: ApprovalEventDependencies): 
 
   function handleKnownPermission(permission: Permission) {
     if (deps.shouldAutoApprovePermissions(permission.sessionID)) {
-      void deps
-        .respondPermission(permission.sessionID, permission.id, 'always', { rethrow: true })
-        .catch(() => {
-          if (!deps.shouldAutoApprovePermissions(permission.sessionID)) {
-            permissionsStore.addPermission(permission);
-            deps.permissionVisible?.(permission.id);
-          }
-        });
+      const respond = deps.respondAutomaticPermission ?? deps.respondPermission;
+      void respond(permission.sessionID, permission.id, 'always', { rethrow: true }).catch(() => {
+        if (!deps.shouldAutoApprovePermissions(permission.sessionID)) {
+          permissionsStore.addPermission(permission);
+          deps.permissionVisible?.(permission.id);
+        }
+      });
       return;
     }
     if (deps.shouldAutoApproveEdit?.(permission)) {
-      void deps
-        .respondPermission(permission.sessionID, permission.id, 'once', { rethrow: true })
-        .catch(() => {
-          permissionsStore.addPermission(permission);
-          deps.permissionVisible?.(permission.id);
-        });
+      const respond = deps.respondAutomaticPermission ?? deps.respondPermission;
+      void respond(permission.sessionID, permission.id, 'once', { rethrow: true }).catch(() => {
+        permissionsStore.addPermission(permission);
+        deps.permissionVisible?.(permission.id);
+      });
       return;
     }
     if (deps.shouldAutoJudgePermissions?.(permission.sessionID) && deps.judgePermission) {

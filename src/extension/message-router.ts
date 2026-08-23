@@ -15,6 +15,10 @@ type OpenTextPayload = Extract<WebviewMessage, { type: 'vscode/open-text' }>['pa
 type QueuedMessagesPayload = Extract<WebviewMessage, { type: 'queued-messages/update' }>['payload'];
 type PermissionModePayload = Extract<WebviewMessage, { type: 'permission-mode/update' }>['payload'];
 type SessionModelPayload = Extract<WebviewMessage, { type: 'session-model/update' }>['payload'];
+type SessionModelsMigrationPayload = Extract<
+  WebviewMessage,
+  { type: 'session-models/migrate' }
+>['payload'];
 type RalphMessage = Extract<
   WebviewMessage,
   {
@@ -48,7 +52,8 @@ export interface MessageRouterCallbacks {
   openSessionInEditor(
     sessionId: string,
     title?: string,
-    model?: Extract<WebviewMessage, { type: 'session/open-in-editor' }>['payload']['model']
+    model?: Extract<WebviewMessage, { type: 'session/open-in-editor' }>['payload']['model'],
+    rootSessionId?: string
   ): void | Promise<void>;
   openNewEditor(): void | Promise<void>;
   editorRouteChanged(
@@ -86,6 +91,7 @@ export interface MessageRouterCallbacks {
   updateQueuedMessages(payload: QueuedMessagesPayload): Promise<void>;
   updatePermissionMode(payload: PermissionModePayload): Promise<void>;
   updateSessionModel(payload: SessionModelPayload): Promise<void>;
+  migrateSessionModels(payload: SessionModelsMigrationPayload): Promise<void>;
   updateDraftImages(
     payload: Extract<WebviewMessage, { type: 'composer/images-update' }>['payload']
   ): Promise<void>;
@@ -109,6 +115,9 @@ export class MessageRouter {
           break;
         case 'session-model/update':
           await this.callbacks.updateSessionModel(msg.payload);
+          break;
+        case 'session-models/migrate':
+          await this.callbacks.migrateSessionModels(msg.payload);
           break;
         case 'composer/images-update':
           await this.callbacks.updateDraftImages(msg.payload);
@@ -154,7 +163,8 @@ export class MessageRouter {
           await this.callbacks.openSessionInEditor(
             msg.payload.sessionId,
             msg.payload.title,
-            msg.payload.model
+            msg.payload.model,
+            msg.payload.rootSessionId
           );
           break;
         case 'chat/new-editor':

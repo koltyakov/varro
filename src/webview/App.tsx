@@ -8,6 +8,8 @@ import { SessionActionFeedback } from './components/chat/SessionActionFeedback';
 import { RestartBlocked } from './components/RestartBlocked';
 import { ralphRunner } from './components/ralph/ralph-runner';
 import { cleanupBridge, postMessage } from './lib/bridge';
+import { logError } from './lib/log';
+import { asRecord, getString, isString } from './lib/runtime-values';
 import { ralphStore } from './lib/stores/ralph-store';
 import { observeSurfaceContrast } from './lib/theme';
 import { folderIcon, warningCircleSolidIcon } from './lib/ui-icons';
@@ -18,6 +20,7 @@ const LazyRalphForm = lazy(() =>
 );
 
 export function AppRoot() {
+  onCleanup(cleanupBridge);
   return (
     <ErrorBoundary fallback={renderErrorFallback}>
       <InitializedApp />
@@ -27,14 +30,7 @@ export function AppRoot() {
 
 function InitializedApp() {
   const restoreOpenCodeRuntime = installOpenCodeRuntime(createOpenCodeRuntime());
-
-  onCleanup(() => {
-    try {
-      restoreOpenCodeRuntime();
-    } finally {
-      cleanupBridge();
-    }
-  });
+  onCleanup(restoreOpenCodeRuntime);
 
   return <App />;
 }
@@ -49,7 +45,41 @@ const isRestoringWorkspace = () =>
 const hasNoOpenFolder = () => defaultAppState.state.editorContext.workspaceFolders?.length === 0;
 
 function renderErrorFallback(err: Error) {
+  logError('app:error-boundary', describeError(err));
   return <ErrorFallback err={err} />;
+}
+
+function describeError(err: Error): string {
+  const detail = err.stack || err.message || err.name;
+  return hasWrappedCause(err) && err.cause !== err
+    ? `${detail}\nCause: ${describeThrownValue(err.cause)}`
+    : detail;
+}
+
+function describeThrownValue<T>(err: T): string {
+  if (err instanceof Error) return err.stack || err.message || err.name;
+  if (isString(err)) return err;
+  const record = asRecord(err);
+  const name = getString(record?.name);
+  const message = getString(record?.message);
+  const stack = getString(record?.stack);
+  if (stack) return stack;
+  if (name || message) return name && message ? `${name}: ${message}` : name || message;
+  try {
+    const serialized = JSON.stringify(err) ?? String(err);
+    return serialized === '{}' ? Object.prototype.toString.call(err) : serialized;
+  } catch {
+    return String(err);
+  }
+}
+
+function getErrorMessage(err: Error): string {
+  if (hasWrappedCause(err) && err.cause !== err) return describeThrownValue(err.cause);
+  return err.message || err.name;
+}
+
+function hasWrappedCause(err: Error): err is Error & { cause: unknown } {
+  return err.message === 'Unknown error' && 'cause' in err;
 }
 
 export function App() {
@@ -150,9 +180,7 @@ function ErrorFallback(props: { err: Error }) {
         height={32}
       />
       <p class="text-sm text-vscode-error">Something went wrong</p>
-      <p class="max-w-full break-words text-xs text-vscode-muted">
-        {props.err?.message || 'Unknown error'}
-      </p>
+      <p class="max-w-full break-words text-xs text-vscode-muted">{getErrorMessage(props.err)}</p>
       <button
         class="rounded bg-vscode-button-bg px-3 py-1 text-xs text-vscode-button-fg hover:bg-vscode-button-hover"
         onClick={() => postMessage({ type: 'webview/reload' })}

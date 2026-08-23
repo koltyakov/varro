@@ -53,4 +53,25 @@ describe('SessionModelSelectionStore', () => {
       'session-1': { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
     });
   });
+
+  it('does not lose updates queued while legacy models migrate', async () => {
+    const persistence: Persistence = {
+      get: vi.fn(),
+      set: vi.fn(() => Promise.resolve()),
+      remove: vi.fn(() => Promise.resolve()),
+    };
+    const store = new SessionModelSelectionStore(persistence);
+
+    const migration = store.migrateLegacy({
+      legacy: { providerID: 'anthropic', modelID: 'claude-sonnet' },
+    });
+    const update = store.set('current', { providerID: 'openai', modelID: 'gpt-5.6-sol' });
+    await Promise.all([migration, update]);
+
+    expect(store.list()).toEqual({
+      legacy: { providerID: 'anthropic', modelID: 'claude-sonnet' },
+      current: { providerID: 'openai', modelID: 'gpt-5.6-sol' },
+    });
+    expect(persistence.set).toHaveBeenLastCalledWith('varro.sessionSelectedModels', store.list());
+  });
 });

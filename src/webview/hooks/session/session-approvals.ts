@@ -4,6 +4,12 @@ import type { Permission, QuestionRequest, Session } from '../../types';
 
 type PermissionResponse = 'once' | 'always' | 'reject';
 type PermissionResponseTarget = { id: string; sessionID: string };
+type PermissionResponseOptions = {
+  rethrow?: boolean;
+  groupMembers?: PermissionResponseTarget[];
+  automatic?: boolean;
+  permissionAutomationLease?: number;
+};
 type PermissionModeFreshness = {
   isSessionCurrent(): boolean;
   isDraftCurrent(): boolean;
@@ -45,7 +51,7 @@ export async function respondPermissionWithDependencies(
   sessionId: string,
   permissionId: string,
   response: PermissionResponse,
-  options?: { rethrow?: boolean; groupMembers?: PermissionResponseTarget[] }
+  options?: PermissionResponseOptions
 ) {
   try {
     const targets =
@@ -137,6 +143,7 @@ export async function updatePermissionModeForSessionWithDependencies(
     saveProjectPermissionMode(mode: PermissionMode): void;
     updateSessionPermission(
       sessionId: string,
+      mode: PermissionMode,
       input: { permission: Session['permission'] }
     ): Promise<Session>;
     upsertSession(session: Session): void;
@@ -159,7 +166,9 @@ export async function updatePermissionModeForSessionWithDependencies(
   if (!sessionId) return;
 
   try {
-    const session = await deps.updateSessionPermission(sessionId, { permission: permissionRules });
+    const session = await deps.updateSessionPermission(sessionId, mode, {
+      permission: permissionRules,
+    });
     freshness.onConfirmed?.(session);
     if (!freshness.isSessionCurrent()) return;
     deps.upsertSession(session);
@@ -205,6 +214,13 @@ type SessionApprovalDependencies = {
     permissionId: string,
     response: PermissionResponse
   ): Promise<void | boolean | object>;
+  respondAutomaticPermission?(
+    sessionId: string,
+    permissionId: string,
+    response: PermissionResponse,
+    lease?: number
+  ): Promise<void | boolean | object>;
+  canAutomatePermissions?(): boolean;
   removePermission(permissionId: string, options?: { removeGroup?: boolean }): void;
   setError(message: string): void;
   replyQuestion(requestId: string, answers: Array<Array<string>>): Promise<void | boolean | object>;
@@ -217,6 +233,7 @@ type SessionApprovalDependencies = {
   saveProjectPermissionMode(mode: PermissionMode): void;
   updateSessionPermission(
     sessionId: string,
+    mode: PermissionMode,
     input: { permission: Session['permission'] }
   ): Promise<Session>;
   upsertSession(session: Session): void;
@@ -242,11 +259,19 @@ export class SessionApprovalOperations {
     sessionId: string,
     permissionId: string,
     response: PermissionResponse,
-    options?: { rethrow?: boolean; groupMembers?: PermissionResponseTarget[] }
+    options?: PermissionResponseOptions
   ) => {
     await respondPermissionWithDependencies(
       {
-        respondPermission: this.deps.respondRemotePermission,
+        respondPermission: options?.automatic
+          ? (targetSessionId, targetPermissionId, targetResponse) =>
+              (this.deps.respondAutomaticPermission ?? this.deps.respondRemotePermission)(
+                targetSessionId,
+                targetPermissionId,
+                targetResponse,
+                options.permissionAutomationLease
+              )
+          : this.deps.respondRemotePermission,
         removePermission: this.deps.removePermission,
         setError: this.deps.setError,
       },
@@ -287,9 +312,14 @@ export class SessionApprovalOperations {
   };
 
   readonly autoApprovePermissionsForSession = async (permissions: Permission[]) => {
+    if (this.deps.canAutomatePermissions?.() === false) return;
     await autoApprovePermissionsForSessionWithDependencies(
       {
-        respondPermission: this.respondPermission,
+        respondPermission: (sessionId, permissionId, response, options) =>
+          this.respondPermission(sessionId, permissionId, response, {
+            ...options,
+            automatic: true,
+          }),
       },
       permissions
     );

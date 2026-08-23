@@ -95,6 +95,7 @@ const WEBVIEW_MESSAGE_TYPES = {
   'workspace/select': true,
   'commands/state': true,
   'session-model/update': true,
+  'session-models/migrate': true,
   'webview/focus': true,
   'permission/reveal': true,
   'providers/watch': true,
@@ -227,6 +228,23 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       };
     }
 
+    case 'session-models/migrate': {
+      const payload = asRecord(message?.payload);
+      const models = asRecord(payload?.models);
+      if (!models || Object.keys(models).length > 5_000) return null;
+      const parsed: Extract<
+        WebviewMessage,
+        { type: 'session-models/migrate' }
+      >['payload']['models'] = {};
+      for (const [sessionId, modelValue] of Object.entries(models)) {
+        if (!getBoundedString(sessionId, 512)) return null;
+        const model = parseChatModelSelection(modelValue);
+        if (!model) return null;
+        parsed[sessionId] = model;
+      }
+      return { type, payload: { models: parsed } };
+    }
+
     case 'composer/images-update': {
       const payload = asRecord(message?.payload);
       const images = sanitizeClipboardImages(payload?.images);
@@ -247,12 +265,20 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
     case 'session/open-in-editor': {
       const payload = asRecord(message?.payload);
       const sessionId = getBoundedString(payload?.sessionId, 512);
+      const rootSessionId = getBoundedString(payload?.rootSessionId, 512);
       const title = getBoundedString(payload?.title, 512);
       if (!sessionId || !/^[A-Za-z0-9_-]+$/.test(sessionId)) return null;
+      if (
+        payload?.rootSessionId !== undefined &&
+        (!rootSessionId || !/^[A-Za-z0-9_-]+$/.test(rootSessionId))
+      ) {
+        return null;
+      }
       const model = parseChatModelSelection(payload?.model);
       if (payload?.model !== undefined && !model) return null;
       const parsedPayload: Extract<WebviewMessage, { type: 'session/open-in-editor' }>['payload'] =
         { sessionId };
+      if (rootSessionId) parsedPayload.rootSessionId = rootSessionId;
       if (title) parsedPayload.title = title;
       if (model) parsedPayload.model = model;
       return { type, payload: parsedPayload };
@@ -272,15 +298,24 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       if (route?.type === 'new-session')
         return { type, payload: { route: { type: 'new-session' } } };
       const sessionId = getBoundedString(route?.sessionId, 512);
+      const rootSessionId = getBoundedString(route?.rootSessionId, 512);
       const title = getBoundedString(route?.title, 512);
-      return route?.type === 'session' && sessionId && /^[A-Za-z0-9_-]+$/.test(sessionId)
-        ? {
-            type,
-            payload: {
-              route: title ? { type: 'session', sessionId, title } : { type: 'session', sessionId },
-            },
-          }
-        : null;
+      if (route?.type !== 'session' || !sessionId || !/^[A-Za-z0-9_-]+$/.test(sessionId)) {
+        return null;
+      }
+      if (
+        route.rootSessionId !== undefined &&
+        (!rootSessionId || !/^[A-Za-z0-9_-]+$/.test(rootSessionId))
+      ) {
+        return null;
+      }
+      const parsedRoute: Extract<
+        WebviewMessage,
+        { type: 'editor/route-changed' }
+      >['payload']['route'] = { type: 'session', sessionId };
+      if (rootSessionId) parsedRoute.rootSessionId = rootSessionId;
+      if (title) parsedRoute.title = title;
+      return { type, payload: { route: parsedRoute } };
     }
 
     case 'session/export': {
@@ -537,9 +572,11 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
         payload?.cancelKey === undefined ? undefined : getBoundedString(payload.cancelKey, 128);
       const method = getBoundedString(payload?.method, 16)?.toUpperCase() || null;
       const path = getBoundedString(payload?.path, MAX_PATH_LENGTH + MAX_QUERY_LENGTH);
+      const permissionAutomationLease = getSafeInteger(payload?.permissionAutomationLease);
       if (
         id === null ||
         (payload?.cancelKey !== undefined && !cancelKey) ||
+        (payload?.permissionAutomationLease !== undefined && permissionAutomationLease === null) ||
         !method ||
         !path ||
         !isAllowedApiRequest(method, path)
@@ -552,6 +589,9 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
         path,
       };
       if (cancelKey) requestPayload.cancelKey = cancelKey;
+      if (permissionAutomationLease !== null) {
+        requestPayload.permissionAutomationLease = permissionAutomationLease;
+      }
       if (payload?.body === undefined) {
         return { type, payload: requestPayload };
       }
@@ -1398,6 +1438,7 @@ const API_ROUTES: ApiRoute[] = [
     ({ method, url }) => method === 'GET' && onlyQuery(url, 'revision')
   ),
   route(`${VARRO_API_ENDPOINTS.session}/:id/pin`, methodsNoQuery('POST')),
+  route(`${VARRO_API_ENDPOINTS.session}/:id/permission-mode`, methodsNoQuery('POST')),
   route(`${VARRO_API_ENDPOINTS.session}/:id/rename-if-untitled`, methodsNoQuery('POST')),
   route(`${VARRO_API_ENDPOINTS.session}/:id/delete`, methodsNoQuery('DELETE')),
   route(VARRO_API_ENDPOINTS.sessionTrash, methodsNoQuery('GET', 'DELETE')),

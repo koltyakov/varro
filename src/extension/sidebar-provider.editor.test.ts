@@ -64,7 +64,10 @@ describe('SidebarProvider editor panels', () => {
       expect.anything(),
       { enableScripts: true, retainContextWhenHidden: false }
     );
-    expect(posted).toContainEqual({ type: 'editor-tabs/state', payload: { open: true } });
+    expect(posted).toContainEqual({
+      type: 'editor-tabs/state',
+      payload: { open: true, sessionIds: [] },
+    });
 
     editor.panel.webview.html = '<p>visible editor document</p>';
 
@@ -75,7 +78,10 @@ describe('SidebarProvider editor panels', () => {
     expect(editor.panel.webview.onDidReceiveMessage).toHaveBeenCalledTimes(2);
 
     editor.panel.dispose();
-    expect(posted).toContainEqual({ type: 'editor-tabs/state', payload: { open: false } });
+    expect(posted).toContainEqual({
+      type: 'editor-tabs/state',
+      payload: { open: false, sessionIds: [] },
+    });
   });
 
   it('restores and deduplicates a persisted session panel', async () => {
@@ -139,6 +145,40 @@ describe('SidebarProvider editor panels', () => {
 
     expect(draft.panel.title).toBe('Fix editor sessions');
     expect(draft.panel.reveal).toHaveBeenCalledOnce();
+  });
+
+  it('reuses an editor for another session in the same conversation tree', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const editor = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+
+    await provider.openSessionInEditor('root-session', 'Root', undefined, 'root-session');
+    editor.receive({ type: 'ready' });
+    editor.receive({
+      type: 'commands/state',
+      payload: { canAbort: false, canSwitchSessions: true, model: null },
+    });
+    await vi.waitFor(() =>
+      expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'permission-automation/update',
+        payload: expect.objectContaining({ owner: true }),
+      })
+    );
+    editor.panel.webview.postMessage.mockClear();
+    await provider.openSessionInEditor('child-session', 'Child', undefined, 'root-session');
+    expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
+      type: 'command/open-session',
+      payload: { sessionId: 'child-session' },
+    });
+    editor.panel.webview.postMessage.mockClear();
+    await provider.openSessionInEditor('root-session', 'Root', undefined, 'root-session');
+
+    expect(getVscodeMock().window.createWebviewPanel).toHaveBeenCalledOnce();
+    expect(editor.panel.reveal).toHaveBeenCalledTimes(2);
+    expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
+      type: 'command/open-session',
+      payload: { sessionId: 'root-session' },
+    });
   });
 
   it('stores the sidebar model variant without broadcasting it into other composers', async () => {

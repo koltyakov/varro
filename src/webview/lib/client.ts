@@ -21,6 +21,7 @@ import type {
   ChatModelSelection,
   LspStatus,
   McpStatus,
+  PermissionMode,
   ProviderLimitStatus,
   RecycleBinEntry,
   ServerEvent,
@@ -198,11 +199,16 @@ export const client = {
     async respondPermission(
       _sessionId: string,
       permissionId: string,
-      response: 'once' | 'always' | 'reject'
+      response: 'once' | 'always' | 'reject',
+      options?: { permissionAutomationLease?: number }
     ): Promise<boolean> {
-      return apiCall('POST', `/permission/${permissionId}/reply`, {
-        reply: response,
-      });
+      const path = `/permission/${permissionId}/reply`;
+      const body = { reply: response };
+      return options?.permissionAutomationLease === undefined
+        ? apiCall('POST', path, body)
+        : apiCall('POST', path, body, {
+            permissionAutomationLease: options.permissionAutomationLease,
+          });
     },
     async revert(id: string, messageID: string): Promise<Session> {
       return apiCall('POST', `/session/${id}/revert`, { messageID });
@@ -355,6 +361,9 @@ export const client = {
       async renameIfUntitled(sessionID: string): Promise<SessionTitleFallbackResponse> {
         return apiCall('POST', buildVarroSessionEndpoint(sessionID, 'rename-if-untitled'));
       },
+      async updatePermissionMode(sessionID: string, mode: PermissionMode): Promise<Session> {
+        return apiCall('POST', buildVarroSessionEndpoint(sessionID, 'permission-mode'), { mode });
+      },
     },
     async openPlan(content: string): Promise<{ path: string }> {
       return apiCall('POST', VARRO_API_ENDPOINTS.planOpen, { content });
@@ -386,8 +395,15 @@ export const client = {
     }): Promise<OpenCodeModelRouting> {
       return apiCall('POST', VARRO_API_ENDPOINTS.openCodeConfigModelRouting, body);
     },
-    async judgePermission(body: AutoApproveJudgeRequest): Promise<AutoApproveJudgeResponse> {
-      return apiCall('POST', VARRO_API_ENDPOINTS.permissionJudge, body);
+    async judgePermission(
+      body: AutoApproveJudgeRequest,
+      options?: { permissionAutomationLease?: number }
+    ): Promise<AutoApproveJudgeResponse> {
+      return options?.permissionAutomationLease === undefined
+        ? apiCall('POST', VARRO_API_ENDPOINTS.permissionJudge, body)
+        : apiCall('POST', VARRO_API_ENDPOINTS.permissionJudge, body, {
+            permissionAutomationLease: options.permissionAutomationLease,
+          });
     },
     async resolveJudgeModel(model?: ChatModelSelection): Promise<ChatModelSelection | null> {
       const params = new URLSearchParams();
