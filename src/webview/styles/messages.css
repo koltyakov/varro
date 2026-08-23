@@ -114,12 +114,6 @@
   z-index: var(--z-chrome-cover);
 }
 
-/* File menus also cross virtualized row boundaries. Keep the active row above
-   its siblings and relax paint containment only while the menu is open. */
-.interactive-list-track.virtualized .interactive-item-container:has(.file-edit-more-menu) {
-  contain: layout style;
-}
-
 /* Final-answer rails paint into the track gutter, outside the row's paint box. */
 .interactive-list-track.virtualized
   .interactive-item-container:has(
@@ -134,11 +128,6 @@
    an activity block above them collapses and moves the preview within its row. */
 .interactive-list-track.virtualized .interactive-item-container:has(.diff-view-lines) {
   contain: layout style;
-}
-
-.interactive-item-container:has(.file-edit-more-menu) {
-  position: relative;
-  z-index: var(--z-chrome-cover);
 }
 
 /* Inline, the message row's track already provides horizontal padding. */

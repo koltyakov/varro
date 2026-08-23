@@ -8,6 +8,7 @@ import {
   onCleanup,
   onMount,
 } from 'solid-js';
+import { Portal } from 'solid-js/web';
 import {
   isAbortedToolError,
   isPermissionRejectedToolError,
@@ -819,6 +820,12 @@ function FileChangeCard(props: {
   let moreButtonRef: HTMLButtonElement | undefined;
   let moreMenuRef: HTMLDivElement | undefined;
   const [moreMenuOpen, setMoreMenuOpen] = createSignal(false);
+  const [moreMenuPosition, setMoreMenuPosition] = createSignal({
+    left: 8,
+    top: 8,
+    maxHeight: 220,
+    positioned: false,
+  });
   const s = () => props.toolState;
   const isCompleted = () => s().status === 'completed';
   const isPending = () => s().status === 'pending';
@@ -874,6 +881,28 @@ function FileChangeCard(props: {
   createEffect(() => {
     if (!moreMenuOpen()) return;
 
+    const positionMenu = () => {
+      if (!moreButtonRef || !moreMenuRef) return;
+
+      const margin = 8;
+      const gap = 6;
+      const buttonRect = moreButtonRef.getBoundingClientRect();
+      const menuRect = moreMenuRef.getBoundingClientRect();
+      const spaceBelow = Math.max(0, window.innerHeight - margin - buttonRect.bottom - gap);
+      const spaceAbove = Math.max(0, buttonRect.top - margin - gap);
+      const openBelow = menuRect.height <= spaceBelow || spaceBelow >= spaceAbove;
+      const maxHeight = Math.min(220, openBelow ? spaceBelow : spaceAbove);
+      const top = openBelow
+        ? buttonRect.bottom + gap
+        : Math.max(margin, buttonRect.top - gap - Math.min(menuRect.height, maxHeight));
+      const left = Math.max(
+        margin,
+        Math.min(window.innerWidth - menuRect.width - margin, buttonRect.right - menuRect.width)
+      );
+
+      setMoreMenuPosition({ left, top, maxHeight, positioned: true });
+    };
+
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target instanceof Node ? event.target : null;
       if (target && (moreButtonRef?.contains(target) || moreMenuRef?.contains(target))) return;
@@ -886,11 +915,16 @@ function FileChangeCard(props: {
       moreButtonRef?.focus();
     };
 
+    queueMicrotask(positionMenu);
     window.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('resize', positionMenu);
+    window.addEventListener('scroll', positionMenu, true);
     onCleanup(() => {
       window.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('resize', positionMenu);
+      window.removeEventListener('scroll', positionMenu, true);
     });
   });
 
@@ -1054,39 +1088,52 @@ function FileChangeCard(props: {
                       onClick={(event) => {
                         event.preventDefault();
                         event.stopPropagation();
+                        setMoreMenuPosition((position) => ({
+                          ...position,
+                          maxHeight: 220,
+                          positioned: false,
+                        }));
                         setMoreMenuOpen((open) => !open);
                       }}
                     >
                       +{hiddenMultiFileCount()} more
                     </button>
                     <Show when={moreMenuOpen()}>
-                      <div
-                        ref={(el) => (moreMenuRef = el)}
-                        class="file-edit-more-menu"
-                        role="menu"
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        <For each={hiddenMultiFileChanges()}>
-                          {(item) => {
-                            const path = () => item.toPath || item.path;
-                            const displayName = () => formatFileChangeDisplayName(path());
-                            return (
-                              <a
-                                href="#"
-                                class="file-edit-more-menu-item"
-                                role="menuitem"
-                                title={displayName()}
-                                onClick={(event) => {
-                                  setMoreMenuOpen(false);
-                                  openFileChangePath(path())(event);
-                                }}
-                              >
-                                <span class="file-edit-more-menu-path">{displayName()}</span>
-                              </a>
-                            );
+                      <Portal mount={document.body}>
+                        <div
+                          ref={(el) => (moreMenuRef = el)}
+                          class="file-edit-more-menu"
+                          role="menu"
+                          style={{
+                            left: `${moreMenuPosition().left}px`,
+                            top: `${moreMenuPosition().top}px`,
+                            'max-height': `${moreMenuPosition().maxHeight}px`,
+                            visibility: moreMenuPosition().positioned ? 'visible' : 'hidden',
                           }}
-                        </For>
-                      </div>
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          <For each={hiddenMultiFileChanges()}>
+                            {(item) => {
+                              const path = () => item.toPath || item.path;
+                              const displayName = () => formatFileChangeDisplayName(path());
+                              return (
+                                <a
+                                  href="#"
+                                  class="file-edit-more-menu-item"
+                                  role="menuitem"
+                                  title={displayName()}
+                                  onClick={(event) => {
+                                    setMoreMenuOpen(false);
+                                    openFileChangePath(path())(event);
+                                  }}
+                                >
+                                  <span class="file-edit-more-menu-path">{displayName()}</span>
+                                </a>
+                              );
+                            }}
+                          </For>
+                        </div>
+                      </Portal>
                     </Show>
                   </span>
                 </Show>

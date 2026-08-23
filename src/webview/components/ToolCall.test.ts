@@ -2620,7 +2620,7 @@ describe('FileChangeCard', () => {
     expect(container?.querySelector('.file-edit-summary-label')?.textContent).toBe('4 files');
     expect(links.map((link) => link.textContent)).toEqual(['src/one.ts']);
     expect(links[0]?.getAttribute('title')).toBe('src/one.ts');
-    expect(container?.querySelector('.file-edit-more-menu')).toBeNull();
+    expect(document.querySelector('.file-edit-more-menu')).toBeNull();
 
     const moreButton = container?.querySelector<HTMLButtonElement>('.file-edit-more-count');
     expect(moreButton?.textContent).toBe('+3 more');
@@ -2630,7 +2630,7 @@ describe('FileChangeCard', () => {
 
     expect(moreButton?.getAttribute('aria-expanded')).toBe('true');
     const hiddenLinks = Array.from(
-      container?.querySelectorAll<HTMLAnchorElement>('.file-edit-more-menu-item') || []
+      document.querySelectorAll<HTMLAnchorElement>('.file-edit-more-menu-item') || []
     );
 
     expect(hiddenLinks.map((link) => link.textContent)).toEqual([
@@ -2646,7 +2646,7 @@ describe('FileChangeCard', () => {
       type: 'vscode/open',
       payload: { path: 'src/three.ts', kind: 'file', view: 'diff' },
     });
-    expect(container?.querySelector('.file-edit-more-menu')).toBeNull();
+    expect(document.querySelector('.file-edit-more-menu')).toBeNull();
   });
 
   it('keeps the compact completed row when inline previews are disabled', () => {

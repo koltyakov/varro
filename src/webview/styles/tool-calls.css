@@ -1772,10 +1772,6 @@ kbd {
   overflow: visible;
 }
 
-.file-change-card:has(.file-edit-more-menu) {
-  z-index: var(--z-cover);
-}
-
 .file-change-inline-diffs {
   padding: 0 8px 8px;
 }
@@ -1954,16 +1950,13 @@ kbd {
 }
 
 .file-edit-more-menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
+  position: fixed;
   z-index: var(--z-menu);
   display: flex;
   flex-direction: column;
   width: max-content;
   min-width: 190px;
   max-width: min(320px, calc(100vw - 32px));
-  max-height: 220px;
   padding: 4px;
   overflow-y: auto;
   border: 1px solid color-mix(in srgb, var(--color-vscode-border-strong) 82%, transparent);

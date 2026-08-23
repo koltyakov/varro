@@ -63,6 +63,22 @@ test('restores a persisted active session', async ({ page }) => {
   ).toBeVisible();
 });
 
+test('shows queued message counts in the desktop session list', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/e2e/harness/index.html?scenario=todo-queue');
+
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+  await composer.fill('Queue this follow-up');
+  await page.getByLabel('Add to queue (Enter)').click();
+
+  const sessionRow = page.locator('.session-item').filter({ hasText: 'Queued follow-up coverage' });
+  await expect(sessionRow.getByLabel('1 queued message')).toBeVisible();
+
+  await page.getByLabel('Remove from queue').focus();
+  await page.keyboard.press('Enter');
+  await expect(sessionRow.locator('.session-item-queued-counter')).toHaveCount(0);
+});
+
 test('filters sessions by running, failed, attention, and plan ready status', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=status-filters');
 

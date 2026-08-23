@@ -930,6 +930,32 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   font-variant-numeric: tabular-nums;
 }
 
+.session-item-queued-counter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 5px;
+  color: var(--color-vscode-muted);
+  opacity: 0.8;
+  flex-shrink: 0;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.session-item-queued-icon {
+  flex-shrink: 0;
+}
+
+.session-item-queued-count {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
 .session-item-plan-skip {
   display: inline-flex;
   align-items: center;

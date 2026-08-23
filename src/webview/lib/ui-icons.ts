@@ -19,6 +19,7 @@ import emptyPageIcon from 'iconoir/icons/empty-page.svg';
 import expandIcon from 'iconoir/icons/expand.svg';
 import eyeIcon from 'iconoir/icons/eye.svg';
 import folderIcon from 'iconoir/icons/folder.svg';
+import forwardMessageIcon from 'iconoir/icons/forward-message.svg';
 import gitForkIcon from 'iconoir/icons/git-fork.svg';
 import helpCircleIcon from 'iconoir/icons/help-circle.svg';
 import hourglassIcon from 'iconoir/icons/hourglass.svg';
@@ -81,6 +82,7 @@ export {
   expandIcon,
   eyeIcon,
   folderIcon,
+  forwardMessageIcon,
   gitForkIcon,
   helpCircleIcon,
   hourglassIcon,

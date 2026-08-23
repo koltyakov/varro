@@ -49,6 +49,7 @@ import { getProviderIcon } from '../../lib/provider-icons';
 import { compareSessionsByActivity } from '../../lib/session-order';
 import {
   archiveIcon,
+  forwardMessageIcon,
   navArrowRightIcon,
   cableTagIcon,
   pinIcon,
@@ -1033,12 +1034,19 @@ export function SessionListView(props: {
 
   const rawSessionIndicators = createMemo(() => deriveSessionIndicators(state.sessions));
   const sessionIndicators = createStableSessionIndicators(rawSessionIndicators);
+  const queuedMessageCounts = createMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of state.queuedMessages) {
+      counts.set(item.sessionId, (counts.get(item.sessionId) ?? 0) + 1);
+    }
+    return counts;
+  });
   const recycleBinEntries = createMemo(() => state.recycleBinEntries || []);
   const recycleBinSessionIds = createMemo(() => getRecycleBinSessionIds(recycleBinEntries()));
   const isVisibleSession = (session: Session) => {
     if (recycleBinSessionIds().has(session.id)) return false;
     return !shouldHideEmptySessionFromList(session, {
-      isQueued: (sessionId) => state.queuedMessages.some((item) => item.sessionId === sessionId),
+      isQueued: (sessionId) => queuedMessageCounts().has(sessionId),
       isAwaitingInput: isSessionAwaitingInput,
       isRunning: (sessionId) => sessionIndicators().runningIds.has(sessionId),
       needsAttention: (sessionId) => sessionIndicators().attentionIds.has(sessionId),
@@ -1258,6 +1266,7 @@ export function SessionListView(props: {
               actions={sessionActions}
               ageNow={ageNow}
               activeNow={activeNow}
+              queuedMessageCount={queuedMessageCounts().get(sessionId) ?? 0}
               subagentCount={sessionIndicators().subagentCounts.get(sessionId) || 0}
               hasPermissionRequest={sessionIndicators().permissionIds.has(sessionId)}
               hasQuestionRequest={sessionIndicators().questionIds.has(sessionId)}
@@ -1658,6 +1667,7 @@ function SessionListItem(props: {
   actions: SessionActionsState;
   ageNow: () => number;
   activeNow: () => number;
+  queuedMessageCount: number;
   subagentCount: number;
   hasPermissionRequest: boolean;
   hasQuestionRequest: boolean;
@@ -1688,6 +1698,8 @@ function SessionListItem(props: {
   const hasUnreadFailure = () => props.isFailed && isSessionFailureUnread(props.session.id);
   const hasPendingInput = () =>
     props.hasPermissionRequest || props.hasQuestionRequest || props.needsAttention;
+  const queuedMessageLabel = () =>
+    `${props.queuedMessageCount} queued message${props.queuedMessageCount === 1 ? '' : 's'}`;
   const hasSubagents = () => !!props.onOpenSubagents && props.subagentCount > 0;
   const showsPlanModeTag = () =>
     getSelectedAgentForSession(props.session.id) === 'plan' &&
@@ -2053,6 +2065,21 @@ function SessionListItem(props: {
         <Show when={showsPlanModeTag()}>
           <span class="session-item-plan-tag" title="Plan mode" aria-label="Plan mode">
             Plan
+          </span>
+        </Show>
+        <Show when={props.queuedMessageCount > 0}>
+          <span
+            class="session-item-queued-counter"
+            title={queuedMessageLabel()}
+            aria-label={queuedMessageLabel()}
+          >
+            <UiIcon
+              source={forwardMessageIcon}
+              class="session-item-queued-icon"
+              width={16}
+              height={16}
+            />
+            <span class="session-item-queued-count">{props.queuedMessageCount}</span>
           </span>
         </Show>
         <Show when={hasSubagents()}>

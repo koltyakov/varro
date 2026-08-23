@@ -17,6 +17,8 @@ import {
   resetSessionShareOverridesForTests,
 } from '../../lib/session-share-overrides';
 import { fixture } from '../../test-fixtures';
+import { forwardMessageIcon } from '../../lib/ui-icons';
+import { toCssUrl } from '../UiIcon';
 
 type TestRuntimeValue =
   | string
@@ -98,6 +100,7 @@ beforeEach(() => {
   setState('editorTabsOpen', false);
   setState('editorSessionIds', []);
   setState('sessionStatus', {});
+  setState('queuedMessages', []);
   setState('editorTabsOpen', false);
   setState('completedSessionResponses', reconcile({}));
   setState('sessionsLoadError', null);
@@ -124,6 +127,7 @@ afterEach(() => {
   setState('sessionSelectedModels', reconcile({}));
   setState('pinnedSessionIds', []);
   setState('sessionStatus', {});
+  setState('queuedMessages', []);
   setState('completedSessionResponses', reconcile({}));
   setState('sessionsLoadError', null);
   setState('sessionsHasMore', false);
@@ -440,6 +444,52 @@ describe('SessionListView model details', () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
     window.dispatchEvent(new Event('blur'));
     expect(list.classList.contains('show-all-model-details')).toBe(false);
+  });
+});
+
+describe('SessionListView queued messages', () => {
+  it('shows reactive per-session queue counts with the outcome icon', async () => {
+    const now = Date.now();
+    setState('sessions', [
+      session('session-1', now, { summary: { files: 1, additions: 0, deletions: 0 } }),
+      session('session-2', now - 1, { summary: { files: 1, additions: 0, deletions: 0 } }),
+      session('session-3', now - 2, { summary: { files: 1, additions: 0, deletions: 0 } }),
+    ]);
+    setState('queuedMessages', [
+      { id: 'queue-1', sessionId: 'session-1', text: 'First follow-up' },
+      { id: 'queue-2', sessionId: 'session-1', text: 'Second follow-up' },
+      { id: 'queue-3', sessionId: 'session-2', text: 'Other session follow-up' },
+    ]);
+
+    cleanup = render(() => <SessionListView />, container);
+
+    const rows = () => Array.from(container.querySelectorAll<HTMLElement>('.session-item'));
+    const row = (title: string) =>
+      rows().find((item) => item.querySelector('.session-item-title-text')?.textContent === title)!;
+
+    const firstCount = row('session-1').querySelector<HTMLElement>(
+      '[aria-label="2 queued messages"]'
+    );
+    expect(firstCount?.textContent).toBe('2');
+    expect(
+      firstCount
+        ?.querySelector<HTMLElement>('.session-item-queued-icon')
+        ?.style.getPropertyValue('--ui-icon-mask')
+    ).toBe(toCssUrl(forwardMessageIcon));
+    expect(row('session-2').querySelector('[aria-label="1 queued message"]')?.textContent).toBe(
+      '1'
+    );
+    expect(row('session-3').querySelector('.session-item-queued-counter')).toBeNull();
+
+    setState(
+      'queuedMessages',
+      appState.queuedMessages.filter((item) => item.sessionId !== 'session-1')
+    );
+
+    await vi.waitFor(() => {
+      expect(row('session-1').querySelector('.session-item-queued-counter')).toBeNull();
+      expect(row('session-2').querySelector('[aria-label="1 queued message"]')).not.toBeNull();
+    });
   });
 });
 
