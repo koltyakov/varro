@@ -3,6 +3,7 @@ import { batch } from 'solid-js';
 import { render } from 'solid-js/web';
 import { reconcile } from 'solid-js/store';
 import {
+  composerFocusKey,
   replaceMessages,
   requestMessageListScrollToBottom,
   setSessions,
@@ -1934,6 +1935,35 @@ describe('MessageList compact activity', () => {
 });
 
 describe('MessageList empty state', () => {
+  it('focuses the composer when the blank chat area is clicked', () => {
+    const previousFocusKey = composerFocusKey();
+
+    cleanup = render(() => MessageList(), container!);
+    container?.querySelector<HTMLElement>('.interactive-list')?.click();
+
+    expect(composerFocusKey()).toBe(previousFocusKey + 1);
+  });
+
+  it('does not focus the composer for an existing chat whose messages have not loaded', () => {
+    setState('sessions', [
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/workspace',
+        title: 'Existing session',
+        version: '1',
+        time: { created: 100, updated: 200 },
+      },
+    ]);
+    setState('activeSessionId', 'session-1');
+    const previousFocusKey = composerFocusKey();
+
+    cleanup = render(() => MessageList(), container!);
+    container?.querySelector<HTMLElement>('.interactive-list')?.click();
+
+    expect(composerFocusKey()).toBe(previousFocusKey);
+  });
+
   it('shows the starter logo for a blank new chat', () => {
     setState('emptyStateLogoUri', 'https://example.test/logo.svg');
     setState('sessions', [

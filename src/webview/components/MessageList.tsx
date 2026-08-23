@@ -25,6 +25,7 @@ import {
   loadingStartedAt,
   messageListScrollRequestKey,
   messageListScrollTargetMessageId,
+  requestComposerFocus,
   requestMessageListScrollToBottom,
   getActiveUsageLimitNotice,
   isActiveSessionWorking,
@@ -7011,6 +7012,9 @@ export function MessageList() {
         tabIndex={0}
         aria-live="polite"
         aria-label="Chat messages"
+        onClick={() => {
+          if (shouldShowStarterLogo()) requestComposerFocus();
+        }}
         onScroll={onScroll}
       >
         <div
