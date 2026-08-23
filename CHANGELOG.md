@@ -2,15 +2,28 @@
 
 This changelog summarizes the main user-facing improvements in each Varro minor release line. Patch releases are consolidated into their parent minor version. Dates reflect the development history.
 
+## 0.26.x - August 2026
+
+- Added editor-tab chats for working with multiple sessions side by side, with model, reasoning, permission, queue, and session state synchronized across open Varro views.
+- Added quick controls for showing or hiding inline file changes in the Chat view.
+- Improved user messages with secure Markdown and external images, clearer timestamps, expandable long content, code-block truncation, and more reliable editing.
+- Made large model catalogs easier to manage with search and selective additions, clearer model and thinking-level changes, persistent session defaults, and cost warnings.
+- Improved the composer with active language server status, quick access to server output, persistent diff previews, reliable caret visibility, and easier focus handling.
+- Strengthened session and queued-message handling with captured editor context, safer late fork and deletion results, more reliable provider and MCP refreshes, and deduplicated optimistic prompts.
+- Made long conversations more stable during history loading, streaming, content reflow, viewport resizing, and queued-message removal.
+- Moved About diagnostics and usage reports into readable Markdown documents with richer local usage data.
+
 ## 0.25.x - August 2026
 
 - Added an Auto accept edits permission mode that approves file changes while continuing to ask before other tool actions.
 - Improved commit message generation with richer working-tree and repository-history context, support for unstaged changes, stronger validation, and safer handling of existing Source Control input.
-- Made sessions more resilient to connection failures, reloads, restarts, queued-message handoffs, and reopened conversations without losing context or duplicating work.
-- Improved the composer with more reliable file, context, and image handling while keeping diff previews open and surfacing active language servers.
-- Made large model catalogs easier to manage with search and selective additions, clearer model and thinking-level changes, and cost warnings.
+- Added automatic retries for sessions interrupted by transient connection failures.
+- Preserved chat content, loaded history, context, and scroll position more reliably across session activity, updates, and reopened conversations.
+- Improved slash-command completion behavior, including direct execution of `/stats` from the completion menu and stable suggestions while editing trigger text.
+- Improved composer editing around file and context chips, including atomic deletion, reliable inline image pasting, and preserved active-file context in queued messages.
 - Added safer handling and warnings for generated dependency trees and very large changes across prompts, summaries, and changed-file views.
-- Improved message readability and navigation with Markdown, secure external images, richer file and repository links, and more accessible chat controls.
+- Improved file and repository references in messages with compact type icons, line-aware links, clickable SSH Git remotes, and more reliable opening of uniquely matched workspace and local files.
+- Improved guidance and accessibility across chat controls with consistent tooltips, clearer labels, and keyboard-accessible terminal previews.
 
 ## 0.24.x - August 2026
 

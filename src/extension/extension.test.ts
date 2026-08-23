@@ -222,6 +222,39 @@ describe('extension activation', () => {
     });
   });
 
+  it('initializes and refreshes the inline file changes toolbar context', async () => {
+    let inlineFileChanges = true;
+    getMock.mockImplementation((key: string, fallback?: unknown) =>
+      key === 'chat.showInlineFileChanges' ? inlineFileChanges : fallback
+    );
+    const { activate } = await import('./extension');
+
+    await activate({
+      extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
+      workspaceState: {},
+      subscriptions: [],
+    } as never);
+
+    expect(executeCommandMock).toHaveBeenCalledWith(
+      'setContext',
+      'varro:showInlineFileChanges',
+      true
+    );
+
+    inlineFileChanges = false;
+    const listener = onDidChangeConfigurationMock.mock.lastCall?.[0];
+    listener?.({
+      affectsConfiguration: (key: string) => key === 'varro.chat.showInlineFileChanges',
+    });
+
+    expect(executeCommandMock).toHaveBeenCalledWith(
+      'setContext',
+      'varro:showInlineFileChanges',
+      false
+    );
+  });
+
   it('reapplies compaction settings when configuration changes', async () => {
     const { activate } = await import('./extension');
 
@@ -501,7 +534,7 @@ describe('extension activation', () => {
 
     expect(executeCommandMock).toHaveBeenCalledWith('workbench.view.extension.varro');
     expect(executeCommandMock).toHaveBeenCalledWith('varro.chat.focus');
-    expect(executeCommandMock.mock.calls.slice(0, 2)).toEqual([
+    expect(executeCommandMock.mock.calls.slice(1, 3)).toEqual([
       ['workbench.view.extension.varro'],
       ['varro.chat.focus'],
     ]);
@@ -854,12 +887,34 @@ describe('extension manifest', () => {
       shortTitle: 'Settings',
       icon: '$(gear)',
     });
+    expect(packageJson.contributes.commands).toContainEqual({
+      command: 'varro.chat.showInlineFileChanges',
+      title: 'Varro: Show Inline File Changes',
+      shortTitle: 'Show Inline File Changes',
+      icon: '$(diff-single)',
+    });
+    expect(packageJson.contributes.commands).toContainEqual({
+      command: 'varro.chat.hideInlineFileChanges',
+      title: 'Varro: Hide Inline File Changes',
+      shortTitle: 'Hide Inline File Changes',
+      icon: '$(list-flat)',
+    });
     expect(packageJson.contributes.submenus).toContainEqual({
       id: 'varro.viewActions',
       label: 'More Actions',
       icon: '$(more)',
     });
     expect(packageJson.contributes.menus['view/title']).toEqual([
+      {
+        command: 'varro.chat.showInlineFileChanges',
+        when: 'view == varro.chat && !varro:showInlineFileChanges',
+        group: 'navigation@0',
+      },
+      {
+        command: 'varro.chat.hideInlineFileChanges',
+        when: 'view == varro.chat && varro:showInlineFileChanges',
+        group: 'navigation@0',
+      },
       {
         command: 'varro.chat.openSettings',
         when: 'view == varro.chat',

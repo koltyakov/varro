@@ -19,6 +19,16 @@ type ExtensionPackageJson = {
   version?: unknown;
 };
 
+async function setShowInlineFileChanges(enabled: boolean): Promise<void> {
+  const config = vscode.workspace.getConfiguration('varro');
+  const inspected = config.inspect<boolean>('chat.showInlineFileChanges');
+  const target =
+    inspected?.workspaceValue !== undefined
+      ? vscode.ConfigurationTarget.Workspace
+      : vscode.ConfigurationTarget.Global;
+  await config.update('chat.showInlineFileChanges', enabled, target);
+}
+
 export function registerCommands(
   context: vscode.ExtensionContext,
   sidebar: SidebarProvider,
@@ -73,6 +83,14 @@ export function registerCommands(
 
     vscode.commands.registerCommand('varro.chat.openSettings', async () => {
       await vscode.commands.executeCommand('workbench.action.openSettings', 'Varro');
+    }),
+
+    vscode.commands.registerCommand('varro.chat.showInlineFileChanges', async () => {
+      await setShowInlineFileChanges(true);
+    }),
+
+    vscode.commands.registerCommand('varro.chat.hideInlineFileChanges', async () => {
+      await setShowInlineFileChanges(false);
     }),
 
     vscode.commands.registerCommand('varro.chat.openStats', async () => {

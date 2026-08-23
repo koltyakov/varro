@@ -1,8 +1,10 @@
 /* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-module-mocking, anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/require-safety-comment-for-type-assertion -- These tests exercise command import boundaries with malformed VS Code and process results. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { registeredCommands, vscodeMock } = vi.hoisted(() => {
+const { configInspectMock, configUpdateMock, registeredCommands, vscodeMock } = vi.hoisted(() => {
   const commands = new Map<string, (...args: unknown[]) => unknown>();
+  const configInspect = vi.fn(() => undefined as { workspaceValue?: boolean } | undefined);
+  const configUpdate = vi.fn(() => Promise.resolve());
   const vscode = {
     version: '1.120.0',
     commands: {
@@ -21,6 +23,8 @@ const { registeredCommands, vscodeMock } = vi.hoisted(() => {
       openTextDocument: vi.fn((uri: unknown) => Promise.resolve({ uri })),
       getConfiguration: vi.fn(() => ({
         get: vi.fn((_key: string, fallback: unknown) => fallback),
+        inspect: configInspect,
+        update: configUpdate,
       })),
       getWorkspaceFolder: vi.fn(() => undefined),
       asRelativePath: vi.fn((uri: { fsPath: string } | string) =>
@@ -45,8 +49,14 @@ const { registeredCommands, vscodeMock } = vi.hoisted(() => {
       openExternal: vi.fn(() => Promise.resolve(true)),
     },
     FileType: { Directory: 2 },
+    ConfigurationTarget: { Global: 1, Workspace: 2 },
   };
-  return { registeredCommands: commands, vscodeMock: vscode };
+  return {
+    configInspectMock: configInspect,
+    configUpdateMock: configUpdate,
+    registeredCommands: commands,
+    vscodeMock: vscode,
+  };
 });
 
 vi.mock('vscode', () => vscodeMock);
@@ -511,6 +521,7 @@ describe('varro.chat.addToContext', () => {
 describe('sidebar navigation commands', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    configInspectMock.mockReturnValue(undefined);
   });
 
   it('reveals the view and focuses the composer', async () => {
@@ -616,6 +627,23 @@ describe('sidebar navigation commands', () => {
       'workbench.action.openSettings',
       'Varro'
     );
+  });
+
+  it('shows inline file changes in the user setting by default', async () => {
+    register();
+
+    await runCommand('varro.chat.showInlineFileChanges');
+
+    expect(configUpdateMock).toHaveBeenCalledWith('chat.showInlineFileChanges', true, 1);
+  });
+
+  it('hides inline file changes in an existing workspace override', async () => {
+    configInspectMock.mockReturnValue({ workspaceValue: true });
+    register();
+
+    await runCommand('varro.chat.hideInlineFileChanges');
+
+    expect(configUpdateMock).toHaveBeenCalledWith('chat.showInlineFileChanges', false, 2);
   });
 
   it('opens the same usage report as the stats slash command', async () => {

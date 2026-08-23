@@ -141,6 +141,18 @@
         "icon": "$(gear)"
       },
       {
+        "command": "varro.chat.showInlineFileChanges",
+        "title": "Varro: Show Inline File Changes",
+        "shortTitle": "Show Inline File Changes",
+        "icon": "$(diff-single)"
+      },
+      {
+        "command": "varro.chat.hideInlineFileChanges",
+        "title": "Varro: Hide Inline File Changes",
+        "shortTitle": "Hide Inline File Changes",
+        "icon": "$(list-flat)"
+      },
+      {
         "command": "varro.chat.openStats",
         "title": "Varro: Usage Stats",
         "shortTitle": "Usage Stats"
@@ -251,6 +263,16 @@
         }
       ],
       "view/title": [
+        {
+          "command": "varro.chat.showInlineFileChanges",
+          "when": "view == varro.chat && !varro:showInlineFileChanges",
+          "group": "navigation@0"
+        },
+        {
+          "command": "varro.chat.hideInlineFileChanges",
+          "when": "view == varro.chat && varro:showInlineFileChanges",
+          "group": "navigation@0"
+        },
         {
           "command": "varro.chat.openSettings",
           "when": "view == varro.chat",
