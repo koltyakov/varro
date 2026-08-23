@@ -99,7 +99,7 @@ export function shouldRetryNestedHandoff(handoff) {
 export function buildLivePrompt({ seed, attempt, missing = [] }) {
   const marker = `[VFZ:${seed}:TOOLS-A${String(attempt)}]`;
   if (attempt === 1) {
-    return `${marker} Work only in the current OpenCode repository. Investigate one real, bounded test-coverage or code-quality issue. Start with at least eight independent read or search tool calls in one parallel assistant step. Make a small verified change to exactly two existing source or test files, run two focused checks separately, and inspect the resulting diff. After the edit, issue exactly six separate read-only bash calls concurrently, one command per tool call: "sleep 8 && git status --short", "sleep 16 && git rev-parse --short HEAD", "sleep 24 && git diff --check", "sleep 32 && git status --porcelain=v1", "sleep 40 && git diff --stat", and "sleep 48 && git log -1 --oneline". Do not write final prose until all six complete. Keep a todo list and brief reasoning between groups. Finish with VFZ-TOOLS-END. Do not commit, change branches, install dependencies, generate dependency trees, touch files outside this repository, or undo existing work.`;
+    return `${marker} Work only in the current OpenCode repository. Investigate one real, bounded test-coverage or code-quality issue. Start with at least eight independent read or search tool calls in one parallel assistant step. Make a small verified change to exactly two existing source or test files, run two focused checks separately with a 60-second tool timeout and no watch mode, and inspect the resulting diff. After the edit, issue exactly six separate read-only bash calls concurrently, one command per tool call: "sleep 8 && git status --short", "sleep 16 && git rev-parse --short HEAD", "sleep 24 && git diff --check", "sleep 32 && git status --porcelain=v1", "sleep 40 && git diff --stat", and "sleep 48 && git log -1 --oneline". Do not write final prose until all six complete. Keep a todo list and brief reasoning between groups. Finish with VFZ-TOOLS-END. Do not commit, change branches, install dependencies, generate dependency trees, touch files outside this repository, or undo existing work.`;
   }
 
   const requests = [];
@@ -401,17 +401,34 @@ class CdpController {
     this.contextId = world.executionContextId;
   }
 
-  snapshot() {
+  snapshot(marker = '') {
     return this.evaluate(`(() => {
       const transcript = document.querySelector('.interactive-list');
+      const marker = ${JSON.stringify(marker)};
       const visible = (element) => {
         if (!element) return false;
         const rect = element.getBoundingClientRect();
         return rect.bottom > 0 && rect.top < innerHeight && rect.right > 0 && rect.left < innerWidth;
       };
-      const firstVisible = (selector) => [...document.querySelectorAll(selector)].find(visible) ?? null;
+      const rows = [...document.querySelectorAll('[data-msg-id]')];
+      const markerRow = marker
+        ? rows.find((row) => row.querySelector('.user-message-card')?.innerText.includes(marker)) ?? null
+        : null;
+      const markerIndex = markerRow ? rows.indexOf(markerRow) : -1;
+      const turnRows = [];
+      for (let index = markerIndex < 0 ? 0 : markerIndex; index < rows.length; index += 1) {
+        const row = rows[index];
+        if (markerIndex >= 0 && index > markerIndex && row.querySelector('.user-message-card')) break;
+        turnRows.push(row);
+      }
+      const queryAll = (selector) => marker
+        ? turnRows.flatMap((row) => [...row.querySelectorAll(selector)])
+        : [...document.querySelectorAll(selector)];
+      const firstVisible = (selector) => queryAll(selector).find(visible) ?? null;
       const nested = firstVisible('.assistant-active-activity-items');
       const nestedStyle = nested ? getComputedStyle(nested) : null;
+      const stickyMessageId = document.querySelector('[data-sticky-msg-id]')?.getAttribute('data-sticky-msg-id') ?? null;
+      const markerMessageId = markerRow?.getAttribute('data-msg-id') ?? null;
       return {
         title: document.body.innerText.split('\\n')[0] ?? '',
         virtualized: !!document.querySelector('.interactive-list-track.virtualized'),
@@ -420,8 +437,9 @@ class CdpController {
           scrollHeight: transcript.scrollHeight,
           clientHeight: transcript.clientHeight,
         } : null,
-        stickyMessageId: document.querySelector('[data-sticky-msg-id]')?.getAttribute('data-sticky-msg-id') ?? null,
-        activeActivityCount: document.querySelectorAll('.assistant-active-activity-item').length,
+        markerMessageId,
+        stickyMessageId: marker && stickyMessageId !== markerMessageId ? null : stickyMessageId,
+        activeActivityCount: queryAll('.assistant-active-activity-item').length,
         nestedActivityScroller: nested ? {
           scrollTop: nested.scrollTop,
           scrollHeight: nested.scrollHeight,
@@ -429,9 +447,9 @@ class CdpController {
           overflowY: nestedStyle?.overflowY ?? '',
           hasRange: ['auto', 'scroll'].includes(nestedStyle?.overflowY ?? '') && nested.scrollHeight > nested.clientHeight + 1,
         } : null,
-        fileEdit: !!document.querySelector('.file-change-card, .file-change-inline-diffs, .diff-summary, .diff-view-file'),
-        disclosure: !!document.querySelector('.assistant-activity-summary'),
-        diffControl: !!document.querySelector('[aria-label^="Expand changes in"], [aria-label^="Collapse changes in"]'),
+        fileEdit: queryAll('.file-change-card, .file-change-inline-diffs, .diff-summary, .diff-view-file').length > 0,
+        disclosure: queryAll('.assistant-activity-summary').length > 0,
+        diffControl: queryAll('[aria-label^="Expand changes in"], [aria-label^="Collapse changes in"]').length > 0,
         jumpToLatest: !!document.querySelector('[aria-label="Scroll to latest message"]'),
       };
     })()`);
@@ -658,18 +676,50 @@ async function openRunSession(cdp, title) {
   throw new Error(`Could not open run session ${title}`);
 }
 
-async function waitForLiveGate({ client, cdp, sessionId, scenario, timeoutMs }) {
+export async function waitForLiveGate({
+  client,
+  cdp,
+  sessionId,
+  scenario,
+  timeoutMs,
+  marker = '',
+  pollIntervalMs = 50,
+}) {
   const deadline = Date.now() + timeoutMs;
   let sawBusy = false;
   let nudgedForSticky = false;
   let best = null;
+  let latest = null;
+  const observations = [];
+  let lastSignature = '';
   while (Date.now() < deadline) {
-    const [snapshot, busy] = await Promise.all([cdp.snapshot(), client.isBusy(sessionId)]);
+    const [snapshot, busy] = await Promise.all([cdp.snapshot(marker), client.isBusy(sessionId)]);
     snapshot.busy = busy;
     sawBusy ||= busy;
     const missing = missingLiveGates(snapshot, scenario);
+    latest = { snapshot, missing };
+    const signature = JSON.stringify([busy, missing, snapshot.activeActivityCount]);
+    if (signature !== lastSignature) {
+      observations.push({
+        atMs: timeoutMs - Math.max(0, deadline - Date.now()),
+        busy,
+        missing,
+        activeActivityCount: snapshot.activeActivityCount,
+        nestedActivityScroller: snapshot.nestedActivityScroller,
+      });
+      lastSignature = signature;
+    }
     if (!best || missing.length < best.missing.length) best = { snapshot, missing };
-    if (missing.length === 0) return { snapshot, missing };
+    if (missing.length === 0) {
+      return {
+        snapshot,
+        bestSnapshot: snapshot,
+        missing,
+        latestMissing: missing,
+        sawBusy,
+        observations,
+      };
+    }
     if (
       !nudgedForSticky &&
       busy &&
@@ -681,10 +731,20 @@ async function waitForLiveGate({ client, cdp, sessionId, scenario, timeoutMs }) 
       await new Promise((resolve) => setTimeout(resolve, 100));
       continue;
     }
-    if (sawBusy && !busy) return best;
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    if (sawBusy && !busy) break;
+    if (pollIntervalMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    }
   }
-  return best;
+  const selected = best ?? latest;
+  return {
+    snapshot: latest?.snapshot ?? selected?.snapshot ?? null,
+    bestSnapshot: selected?.snapshot ?? null,
+    missing: selected?.missing ?? ['live gate was not sampled'],
+    latestMissing: latest?.missing ?? ['live gate was not sampled'],
+    sawBusy,
+    observations,
+  };
 }
 
 async function waitForIdle(client, sessionId, timeoutMs) {
@@ -811,9 +871,13 @@ async function clickWithRetry(cdp, selector) {
   return false;
 }
 
-export async function executeActionPlan(cdp, plan, currentTitle, port) {
+export async function executeActionPlan(cdp, plan, currentTitle, port, options = {}) {
   const results = [];
   for (const action of plan) {
+    if (options.isActive && !(await options.isActive())) {
+      results.push({ ...action, executed: false, reason: 'model stream settled' });
+      break;
+    }
     let executed = false;
     if (action.action === 'switch session away and back') {
       executed = await switchAwayAndBack(cdp, currentTitle);
@@ -983,6 +1047,7 @@ async function runLive(options) {
       }
       const missing = best?.missing ?? [];
       const prompt = buildLivePrompt({ seed: manifest.seed, attempt, missing });
+      const marker = prompt.match(/^\[VFZ:[^\]]+\]/)?.[0] ?? '';
       await cdp.wheel('.interactive-list', -96, 'right');
       await new Promise((resolve) => setTimeout(resolve, 100));
       const reattached = await cdp.click('[aria-label="Scroll to latest message"]');
@@ -996,9 +1061,30 @@ async function runLive(options) {
         sessionId: tracked.id,
         scenario,
         timeoutMs,
+        marker,
       });
+      const promptSeen = (await client.messages(tracked.id, 20)).some(
+        (entry) =>
+          entry?.info?.role === 'user' &&
+          entry.parts?.some((part) => part?.type === 'text' && part.text?.includes(marker))
+      );
+      if (!promptSeen) {
+        gate.missing = ['submitted prompt was not observed'];
+      } else if (!gate.sawBusy && gate.missing.length === 0) {
+        gate.missing = ['active model stream'];
+      }
       best = gate;
-      attempts.push({ attempt, prompt, missingAfterAttempt: gate.missing, snapshot: gate.snapshot });
+      attempts.push({
+        attempt,
+        prompt,
+        promptSeen,
+        sawBusy: gate.sawBusy,
+        missingAfterAttempt: gate.missing,
+        latestMissing: gate.latestMissing,
+        snapshot: gate.snapshot,
+        bestSnapshot: gate.bestSnapshot,
+        observations: gate.observations,
+      });
       if (gate.missing.length === 0) break;
     }
 
@@ -1018,9 +1104,10 @@ async function runLive(options) {
           ...(await executeActionPlan(
             cdp,
             manifest.actionPlan.slice(1),
-            tracked.title,
-            launch.remoteDebuggingPort
-          )),
+             tracked.title,
+             launch.remoteDebuggingPort,
+             { isActive: () => client.isBusy(tracked.id) }
+           )),
         ];
       }
     }

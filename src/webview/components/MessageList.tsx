@@ -601,8 +601,10 @@ export function MessageList() {
     null
   );
   let lastDetachedVisibleAnchor: VisibleScrollAnchor | null = null;
+  let lastDetachedVisibleAnchorScrollTop = 0;
+  let lastDetachedVisibleAnchorClientWidth = 0;
   let directMovementAnchor: { anchor: VisibleScrollAnchor; scrollTop: number } | null = null;
-  let pendingWheelResizeAnchor: VisibleScrollAnchor | null = null;
+  let pendingWheelResizeAnchor: { anchor: VisibleScrollAnchor; scrollTop: number } | null = null;
   let detachedAnchorRefreshRafId = 0;
   let keydownDestinationRafId = 0;
   let pendingThinkingLayoutAnchor: VisibleScrollAnchor | null = null;
@@ -1001,21 +1003,24 @@ export function MessageList() {
 
   function beginWidthResize(options?: { fontChanged?: boolean }) {
     if (!widthResizeAnchor && !autoScroll()) {
-      const wheelAnchor = pendingWheelResizeAnchor;
+      const pendingWheelAnchor = pendingWheelResizeAnchor;
+      const wheelAnchor = pendingWheelAnchor?.anchor ?? null;
       const containerRect = containerRef?.getBoundingClientRect();
-      // The wheel anchor is a prediction captured at gesture time and may be minutes old;
-      // unlike freshly captured anchors it must re-verify visibility before use.
-      const wheelAnchorElement = wheelAnchor?.element ?? null;
+      // A reflow can move the predicted element before this callback. Verify that native scrolling
+      // reached the predicted destination rather than comparing already-invalidated geometry.
+      const wheelAnchorElement = wheelAnchor ? getMountedScrollAnchorElement(wheelAnchor) : null;
       const wheelAnchorRect = wheelAnchorElement?.getBoundingClientRect();
       const wheelAnchorIsVisible = !!(
         wheelAnchor &&
+        pendingWheelAnchor &&
         wheelAnchorElement &&
         containerRef?.contains(wheelAnchorElement) &&
         wheelAnchorElement.isConnected &&
         containerRect &&
         wheelAnchorRect &&
         wheelAnchorRect.bottom > containerRect.top &&
-        wheelAnchorRect.top < containerRect.bottom
+        wheelAnchorRect.top < containerRect.bottom &&
+        Math.abs(containerRef.scrollTop - pendingWheelAnchor.scrollTop) <= 1
       );
       const usableWheelAnchor = wheelAnchorIsVisible ? wheelAnchor : null;
       pendingWheelResizeAnchor = null;
@@ -1038,11 +1043,18 @@ export function MessageList() {
       const hostGeometryChanged =
         window.innerWidth !== lastHostViewportWidth ||
         window.devicePixelRatio !== lastHostDevicePixelRatio;
+      const localWidthChangedWithoutMovement = !!(
+        containerRef &&
+        Math.abs(containerRef.scrollTop - lastDetachedVisibleAnchorScrollTop) <= 1 &&
+        Math.abs(containerRef.clientWidth - lastDetachedVisibleAnchorClientWidth) > 0.5
+      );
       // Host resize events arrive after layout, so a painted descendant may already be offscreen.
       const rememberedAnchor =
         lastDetachedVisibleAnchor &&
         rememberedElement &&
-        (rememberedElementIsCurrent || (hostGeometryChanged && lastDetachedVisibleAnchor.element))
+        (rememberedElementIsCurrent ||
+          localWidthChangedWithoutMovement ||
+          (hostGeometryChanged && lastDetachedVisibleAnchor.element))
           ? lastDetachedVisibleAnchor
           : null;
       const virtualAnchor =
@@ -1053,7 +1065,7 @@ export function MessageList() {
         usableWheelAnchor ??
         rememberedAnchor ??
         virtualAnchor ??
-        captureMountedVisibleScrollAnchor();
+        captureWidthResizeVisibleScrollAnchor();
       setWidthResizePinnedMessageId(widthResizeAnchor?.messageId ?? null);
       restoreVisibleScrollAnchor(widthResizeAnchor);
     }
@@ -1105,6 +1117,7 @@ export function MessageList() {
   const forcedVirtualContentMessageIds = new Set<string>();
   const viewportForcedVirtualContentMessageIds = new Set<string>();
   const measuredRowInlineSizes = new WeakMap<HTMLElement, number>();
+  const widthResizeNewlyMountedRows = new WeakSet<HTMLElement>();
   const appliedRowHeightCorrections = new WeakMap<HTMLElement, number>();
   const pendingRowHeightCorrections = new Map<HTMLElement, number>();
   let rowHeightCorrectionScheduled = false;
@@ -2269,10 +2282,16 @@ export function MessageList() {
       const inlineSizeChanged =
         previousInlineSize !== undefined && Math.abs(previousInlineSize - inlineSize) > 0.5;
       measuredRowInlineSizes.set(element, inlineSize);
-      if (!inlineSizeChanged) everyInlineSizeChanged = false;
 
       const height = alignMeasuredRowBlockSize(element, measuredHeight);
       if (!shouldAcceptRowHeight(element, messageId, height)) continue;
+      const heightChanged = (measuredHeights.get(messageId) ?? -1) !== height;
+      if (
+        !inlineSizeChanged &&
+        !(widthResizeActive && !heightChanged && widthResizeNewlyMountedRows.has(element))
+      ) {
+        everyInlineSizeChanged = false;
+      }
 
       measurements.push({
         messageId,
@@ -2373,6 +2392,42 @@ export function MessageList() {
       }
     }
     return firstVisibleRow;
+  }
+
+  function captureWidthResizeVisibleScrollAnchor(
+    predictedMovement = 0,
+    preferFullyVisible = false
+  ) {
+    if (!containerRef) return null;
+
+    const containerRect = containerRef.getBoundingClientRect();
+    let firstVisibleRow: VisibleScrollAnchor | null = null;
+    for (const row of containerRef.querySelectorAll<HTMLElement>('[data-msg-id]')) {
+      const rect = row.getBoundingClientRect();
+      const predictedTop = rect.top - predictedMovement;
+      const predictedBottom = rect.bottom - predictedMovement;
+      if (predictedBottom <= containerRect.top || predictedTop >= containerRect.bottom) continue;
+      const messageId = row.dataset.msgId;
+      if (!messageId) continue;
+      const anchor = {
+        messageId,
+        top: predictedTop - containerRect.top,
+        topPad: 0,
+      };
+      firstVisibleRow ??= anchor;
+      if (!preferFullyVisible) break;
+      if (predictedTop >= containerRect.top && predictedBottom <= containerRect.bottom) {
+        return { ...anchor, element: row };
+      }
+    }
+
+    return refineTallRenderItemScrollAnchor(firstVisibleRow, 0, { includeCompact: true });
+  }
+
+  function rememberDetachedVisibleAnchor(anchor: VisibleScrollAnchor | null) {
+    lastDetachedVisibleAnchor = anchor;
+    lastDetachedVisibleAnchorScrollTop = containerRef?.scrollTop ?? 0;
+    lastDetachedVisibleAnchorClientWidth = containerRef?.clientWidth ?? 0;
   }
 
   function captureVisibleScrollAnchor(options?: { preferStableRenderItem?: boolean }) {
@@ -2922,6 +2977,7 @@ export function MessageList() {
     }
 
     mountedMessageRows.set(messageId, element);
+    if (widthResizeActive) widthResizeNewlyMountedRows.add(element);
     if (element.classList.contains('interactive-request')) {
       const currentStickyPreview = untrack(stickyUserMessagePreview);
       if (
@@ -4273,29 +4329,13 @@ export function MessageList() {
       ) {
         return;
       }
-      const containerRect = containerRef.getBoundingClientRect();
-      let anchor: VisibleScrollAnchor | null = null;
-      for (const row of containerRef.querySelectorAll<HTMLElement>('[data-msg-id]')) {
-        const rect = row.getBoundingClientRect();
-        if (rect.bottom <= containerRect.top || rect.top >= containerRect.bottom) continue;
-        const messageId = row.dataset.msgId;
-        if (!messageId) continue;
-        anchor = {
-          messageId,
-          top: rect.top - containerRect.top,
-          topPad: 0,
-        };
-        break;
-      }
-      anchor = refineTallRenderItemScrollAnchor(anchor, 0, {
-        includeCompact: true,
-      });
+      const anchor = captureWidthResizeVisibleScrollAnchor();
       if (
         anchor &&
         window.innerWidth === lastHostViewportWidth &&
         window.devicePixelRatio === lastHostDevicePixelRatio
       ) {
-        lastDetachedVisibleAnchor = anchor;
+        rememberDetachedVisibleAnchor(anchor);
       }
     });
   }
@@ -4532,13 +4572,18 @@ export function MessageList() {
     }
     if (!autoScroll() && !widthResizeActive && !stickyNavigationOwnsScroll() && !editingMessage()) {
       if (mountedDetachedAnchor) {
-        lastDetachedVisibleAnchor = mountedDetachedAnchor;
-        pendingWheelResizeAnchor = null;
+        const row = mountedMessageRows.get(mountedDetachedAnchor.messageId);
+        const anchorTop = mountedDetachedAnchor.messageTop ?? mountedDetachedAnchor.top;
+        rememberDetachedVisibleAnchor(
+          row?.classList.contains('interactive-request') && anchorTop < 0
+            ? (captureWidthResizeVisibleScrollAnchor(0, true) ?? mountedDetachedAnchor)
+            : mountedDetachedAnchor
+        );
       } else if (
         !lastDetachedVisibleAnchor ||
         !getMountedScrollAnchorElement(lastDetachedVisibleAnchor)
       ) {
-        lastDetachedVisibleAnchor = captureDetachedVisibleScrollAnchor(top);
+        rememberDetachedVisibleAnchor(captureDetachedVisibleScrollAnchor(top));
       }
       scheduleDetachedVisibleAnchorRefresh();
     }
@@ -4590,7 +4635,7 @@ export function MessageList() {
           anchor,
           scrollTop: containerRef.scrollTop,
         };
-        lastDetachedVisibleAnchor = anchor;
+        rememberDetachedVisibleAnchor(anchor);
       }
     }
     clearActivityExitReserve();
@@ -4605,15 +4650,22 @@ export function MessageList() {
         Math.max(0, containerRef.scrollTop + deltaY)
       );
       const movement = targetScrollTop - containerRef.scrollTop;
+      const predictedAnchor = {
+        ...directMovementAnchor.anchor,
+        top: directMovementAnchor.anchor.top - movement,
+        messageTop:
+          directMovementAnchor.anchor.messageTop !== undefined
+            ? directMovementAnchor.anchor.messageTop - movement
+            : undefined,
+      };
       pendingWheelResizeAnchor =
         Math.abs(movement) > 1.5
           ? {
-              ...directMovementAnchor.anchor,
-              top: directMovementAnchor.anchor.top - movement,
-              messageTop:
-                directMovementAnchor.anchor.messageTop !== undefined
-                  ? directMovementAnchor.anchor.messageTop - movement
-                  : undefined,
+              anchor:
+                ((predictedAnchor.messageTop ?? predictedAnchor.top) < 0
+                  ? captureWidthResizeVisibleScrollAnchor(movement, true)
+                  : null) ?? predictedAnchor,
+              scrollTop: targetScrollTop,
             }
           : null;
     }
@@ -4834,7 +4886,7 @@ export function MessageList() {
           anchor,
           scrollTop: containerRef.scrollTop,
         };
-        lastDetachedVisibleAnchor = anchor;
+        rememberDetachedVisibleAnchor(anchor);
       });
     }
   }
@@ -5441,7 +5493,7 @@ export function MessageList() {
     appendBottomReserveTarget = 0;
     newTurnReserveSessionId = null;
     lastVirtualContentOrigin = 0;
-    lastDetachedVisibleAnchor = null;
+    rememberDetachedVisibleAnchor(null);
     directMovementAnchor = null;
     pendingWheelResizeAnchor = null;
     measuredHeights.clear();
@@ -6494,7 +6546,7 @@ export function MessageList() {
       const target = getStickyUserMessageSourceElement(preview.id);
       const row = mountedMessageRows.get(preview.id);
       const containerRect = containerRef?.getBoundingClientRect();
-      lastDetachedVisibleAnchor =
+      rememberDetachedVisibleAnchor(
         target && row && containerRect
           ? {
               messageId: preview.id,
@@ -6503,7 +6555,8 @@ export function MessageList() {
               messageTop: row.getBoundingClientRect().top - containerRect.top,
               topPad: visibleRange().topPad,
             }
-          : captureMessageScrollAnchor(preview.id);
+          : captureMessageScrollAnchor(preview.id)
+      );
       animateTurnNavigationDestination(preview.id);
     }
     const currentPreview = untrack(stickyUserMessagePreview);

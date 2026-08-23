@@ -14,6 +14,7 @@ import {
   parseRestartCount,
   shouldRetryNestedHandoff,
   summarizeCanonicalDelivery,
+  waitForLiveGate,
 } from './ai-fuzzy-live.mjs';
 
 const ready = {
@@ -35,6 +36,39 @@ test('keeps live-only gates explicit for AI-07 and AI-08', () => {
   ]);
 });
 
+test('keeps the latest live-gate sample and the best busy sample separately', async () => {
+  const snapshots = [
+    {
+      ...ready,
+      fileEdit: false,
+    },
+    {
+      ...ready,
+      busy: false,
+      nestedActivityScroller: null,
+    },
+  ];
+  const busyStates = [true, false];
+  const gate = await waitForLiveGate({
+    client: { isBusy: async () => busyStates.shift() ?? false },
+    cdp: {
+      snapshot: async () => snapshots.shift(),
+      wheel: async () => false,
+    },
+    sessionId: 'session',
+    scenario: 'AI-07',
+    timeoutMs: 1_000,
+    pollIntervalMs: 0,
+  });
+
+  assert.equal(gate.sawBusy, true);
+  assert.equal(gate.snapshot.busy, false);
+  assert.equal(gate.bestSnapshot.busy, true);
+  assert.deepEqual(gate.missing, ['file edit or diff']);
+  assert.deepEqual(gate.latestMissing, ['active model stream', 'scrollable active tray']);
+  assert.equal(gate.observations.length, 2);
+});
+
 test('builds a targeted bounded recovery prompt from missing gates', () => {
   const prompt = buildLivePrompt({
     seed: 'abc',
@@ -54,6 +88,7 @@ test('the initial task requests the content forms needed by the live gate', () =
   assert.match(prompt, /eight independent read or search tool calls/);
   assert.match(prompt, /exactly two existing source or test files/);
   assert.match(prompt, /exactly six separate read-only bash calls concurrently/);
+  assert.match(prompt, /60-second tool timeout/);
 });
 
 test('dispatches editable-control keys to the composer during AI-08', async () => {
@@ -82,6 +117,26 @@ test('dispatches editable-control keys to the composer during AI-08', async () =
     ['[aria-label="Message composer"]', 'Shift+Space'],
   ]);
   assert.equal(results.every(({ executed }) => executed), true);
+});
+
+test('stops the AI-08 action plan when the model stream settles', async () => {
+  const results = await executeActionPlan(
+    { wheel: async () => true },
+    [{ step: 15, action: 'wheel transcript', delta: -32 }],
+    'session',
+    0,
+    { isActive: async () => false }
+  );
+
+  assert.deepEqual(results, [
+    {
+      step: 15,
+      action: 'wheel transcript',
+      delta: -32,
+      executed: false,
+      reason: 'model stream settled',
+    },
+  ]);
 });
 
 test('exposes the jump control when AI-08 starts bottom-pinned', async () => {

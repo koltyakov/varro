@@ -3251,13 +3251,19 @@ function createScenarioState(name: ScenarioName): ScenarioState {
   if (name === 'large-transcript') {
     const session = makeSession('session-large-transcript', 'Large transcript', BASE_TIME - 500);
     const messages: MessageEntry[] = [];
+    const wrappingBoundary =
+      new URLSearchParams(window.location.search).get('wrappingBoundary') === '1';
 
     for (let index = 0; index < 240; index += 1) {
       const createdAt = BASE_TIME - (500 - index) * 1000;
       const user = makeUserMessage(
         session.id,
         `message-large-user-${index}`,
-        [`Review large transcript section ${index} and keep the UI responsive.`],
+        [
+          wrappingBoundary
+            ? `Review large transcript section ${index} and keep the UI responsive while tracking the following assistant as a stable painted marker.`
+            : `Review large transcript section ${index} and keep the UI responsive.`,
+        ],
         createdAt
       );
       const assistant = makeCompletedAssistantMessageWithParts(

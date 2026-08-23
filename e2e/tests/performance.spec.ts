@@ -464,6 +464,121 @@ test('viewport narrowing preserves the first visible row through host-shaped ref
   expect(await getRenderedMessageRowCount(page)).toBeLessThan(90);
 });
 
+test('viewport narrowing preserves the first fully visible row after a clipped wrapping row', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1100, height: 808 });
+  await page.goto('/e2e/harness/index.html?scenario=large-transcript&wrappingBoundary=1');
+  await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+
+  const list = page.locator('.interactive-list');
+  const shell = page.locator('.chat-main-column-shell');
+  await shell.evaluate(async (element) => {
+    element.style.maxWidth = 'none';
+    element.style.width = '486px';
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  });
+  await list.evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+    element.scrollTop = Math.floor(element.scrollHeight / 2);
+    element.dispatchEvent(new Event('scroll'));
+  });
+  await page.waitForTimeout(300);
+  const target = await list.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const userRow = [...element.querySelectorAll<HTMLElement>('.interactive-request')].find(
+      (row) => {
+        const rect = row.getBoundingClientRect();
+        return rect.top > bounds.top + 20 && rect.bottom < bounds.bottom - 100;
+      }
+    );
+    const assistantRow = userRow?.nextElementSibling as HTMLElement | null;
+    if (!userRow?.dataset.msgId || !assistantRow?.dataset.msgId) return null;
+    return {
+      userId: userRow.dataset.msgId,
+      assistantId: assistantRow.dataset.msgId,
+      userTop: userRow.getBoundingClientRect().top - bounds.top,
+    };
+  });
+  expect(target).not.toBeNull();
+
+  const listBounds = await list.boundingBox();
+  await page.mouse.move(listBounds!.x + 20, listBounds!.y + listBounds!.height / 2);
+  await page.mouse.wheel(0, target!.userTop + 7);
+  await expect
+    .poll(() =>
+      list.evaluate((element, userId) => {
+        const row = element.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(userId)}"]`);
+        return row
+          ? row.getBoundingClientRect().top - element.getBoundingClientRect().top
+          : Number.POSITIVE_INFINITY;
+      }, target!.userId)
+    )
+    .toBeGreaterThanOrEqual(-9);
+  await expect
+    .poll(() =>
+      list.evaluate((element, userId) => {
+        const row = element.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(userId)}"]`);
+        return row
+          ? row.getBoundingClientRect().top - element.getBoundingClientRect().top
+          : Number.POSITIVE_INFINITY;
+      }, target!.userId)
+    )
+    .toBeLessThanOrEqual(-5);
+
+  const before = await list.evaluate((element, ids) => {
+    const bounds = element.getBoundingClientRect();
+    const user = element.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(ids.userId)}"]`)!;
+    const assistant = element.querySelector<HTMLElement>(
+      `[data-msg-id="${CSS.escape(ids.assistantId)}"]`
+    )!;
+    return {
+      userTop: user.getBoundingClientRect().top - bounds.top,
+      userHeight: user.getBoundingClientRect().height,
+      assistantTop: assistant.getBoundingClientRect().top - bounds.top,
+    };
+  }, target!);
+  const samplesPromise = list.evaluate(async (element, assistantId) => {
+    const values: Array<number | null> = [];
+    for (let frame = 0; frame < 16; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const row = element.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(assistantId)}"]`);
+      values.push(
+        row ? row.getBoundingClientRect().top - element.getBoundingClientRect().top : null
+      );
+    }
+    return values;
+  }, target!.assistantId);
+
+  await shell.evaluate((element) => {
+    element.style.width = '360px';
+  });
+  const samples = await samplesPromise;
+  const after = await list.evaluate((element, ids) => {
+    const bounds = element.getBoundingClientRect();
+    const user = element.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(ids.userId)}"]`)!;
+    return {
+      userTop: user.getBoundingClientRect().top - bounds.top,
+      userHeight: user.getBoundingClientRect().height,
+    };
+  }, target!);
+  const diagnostic = { before, after, samples };
+
+  expect(after.userHeight, JSON.stringify(diagnostic)).toBeGreaterThan(before.userHeight);
+  expect(
+    samples.every((top) => top !== null),
+    JSON.stringify(diagnostic)
+  ).toBe(true);
+  expect(
+    // The first test RAF can force layout before ResizeObserver runs in the same
+    // rendering update. It is not painted; subsequent callbacks are corrected frames.
+    Math.max(...samples.slice(1).map((top) => Math.abs(top! - before.assistantTop))),
+    JSON.stringify(diagnostic)
+  ).toBeLessThanOrEqual(3);
+  expect(await getRenderedMessageRowCount(page)).toBeLessThan(90);
+});
+
 test('viewport narrowing preserves an inner block in a viewport-tall markdown item', async ({
   page,
 }) => {

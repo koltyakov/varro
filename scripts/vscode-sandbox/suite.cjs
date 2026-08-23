@@ -68,9 +68,9 @@ const EXPECTATIONS = {
     '- Server health: healthy',
   ],
   'healthy-first-run': [
-    '- CLI version: 1.18.15',
-    '- Server status: running, event stream healthy',
-    '- Server health: healthy',
+    '- **Version:** `1.18.15`',
+    '- **Install method:** a path configured in varro.server.command',
+    '- **Ownership:** unmanaged',
   ],
 };
 
@@ -79,13 +79,16 @@ function delay(milliseconds) {
 }
 
 async function readAboutDocument() {
-  await vscode.commands.executeCommand('varro.about');
-  const document = vscode.window.activeTextEditor?.document;
-  if (!document || document.languageId !== 'markdown') return '';
+  const document = vscode.workspace.textDocuments.find(
+    (candidate) =>
+      candidate.uri.scheme === 'varro-tool-output' && candidate.uri.path.endsWith('/Varro About.md')
+  );
+  if (!document) return '';
   return document.getText();
 }
 
 async function waitForExpectedAboutText(expected, timeoutMs = DEFAULT_WAIT_TIMEOUT_MS) {
+  await vscode.commands.executeCommand('varro.about');
   const deadline = Date.now() + timeoutMs;
   let lastText = '';
   while (Date.now() < deadline) {
@@ -145,8 +148,8 @@ async function run() {
     const launches = await waitForLaunchCount(4);
     assert.equal(launches.length, 4, 'Varro did not exhaust all three startup retries');
   }
-  assert.match(about, /- VS Code: \d+\.\d+\.\d+/);
-  assert.match(about, /- Platform: (darwin|linux|win32) /);
+  assert.match(about, /- \*\*VS Code:\*\* `\d+\.\d+\.\d+`/);
+  assert.match(about, /- \*\*Platform:\*\* `(darwin|linux|win32) /);
   if (scenario === 'file-link-open') {
     const root = process.env.VARRO_SANDBOX_FILE_LINK_ROOT;
     const target = process.env.VARRO_SANDBOX_FILE_LINK_TARGET;
