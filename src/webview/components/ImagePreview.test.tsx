@@ -3,6 +3,8 @@ import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { ImagePreviewOverlay } from './ImagePreview';
 import type { PreviewImage } from './ImagePreview';
+import { navArrowLeftIcon, navArrowRightIcon, xmarkIcon } from '../lib/ui-icons';
+import { toCssUrl } from './UiIcon';
 
 const image: PreviewImage = {
   url: 'data:image/png;base64,AAAA',
@@ -36,6 +38,9 @@ describe('ImagePreviewOverlay focus management', () => {
 
     const close = overlay()?.querySelector('.chat-image-preview-close');
     expect(document.activeElement).toBe(close);
+    expect(
+      close?.querySelector<HTMLElement>('.ui-icon')?.style.getPropertyValue('--ui-icon-mask')
+    ).toBe(toCssUrl(xmarkIcon));
   });
 
   it('keeps Tab inside the dialog instead of escaping to the page behind it', () => {
@@ -58,6 +63,13 @@ describe('ImagePreviewOverlay focus management', () => {
 
     const focusable = Array.from(overlay()!.querySelectorAll('button'));
     expect(focusable.length).toBeGreaterThan(1);
+    expect(
+      focusable
+        .slice(1)
+        .map((button) =>
+          button.querySelector<HTMLElement>('.ui-icon')?.style.getPropertyValue('--ui-icon-mask')
+        )
+    ).toEqual([toCssUrl(navArrowLeftIcon), toCssUrl(navArrowRightIcon)]);
 
     const last = focusable[focusable.length - 1]!;
     last.focus();

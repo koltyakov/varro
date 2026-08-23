@@ -10,6 +10,8 @@ import { ralphRunner } from './components/ralph/ralph-runner';
 import { cleanupBridge, postMessage } from './lib/bridge';
 import { ralphStore } from './lib/stores/ralph-store';
 import { observeSurfaceContrast } from './lib/theme';
+import { folderIcon, warningCircleSolidIcon } from './lib/ui-icons';
+import { UiIcon } from './components/UiIcon';
 
 const LazyRalphForm = lazy(() =>
   import('./components/ralph/RalphForm').then((module) => ({ default: module.RalphForm }))
@@ -92,20 +94,13 @@ export function App() {
 function NoFolderOpen() {
   return (
     <div class="flex flex-1 flex-col items-center justify-center gap-4 px-8 py-10 text-center">
-      <svg
+      <UiIcon
+        source={folderIcon}
         class="h-10 w-10 text-vscode-muted"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.5"
+        width={40}
+        height={40}
         aria-hidden="true"
-      >
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          d="M3.75 6.75A2.25 2.25 0 0 1 6 4.5h3.19c.6 0 1.17.24 1.59.66l1.06 1.06c.42.42.99.66 1.59.66H18A2.25 2.25 0 0 1 20.25 9v8.25A2.25 2.25 0 0 1 18 19.5H6a2.25 2.25 0 0 1-2.25-2.25V6.75Z"
-        />
-      </svg>
+      />
       <div>
         <p class="text-[13px] font-medium text-vscode-fg">Open a folder to use Varro</p>
         <p class="mt-1.5 max-w-64 text-[12px] leading-relaxed text-vscode-muted">
@@ -152,9 +147,12 @@ function WorkspaceLoading() {
 function ErrorFallback(props: { err: Error }) {
   return (
     <div class="flex flex-col items-center justify-center gap-3 p-6 text-center">
-      <svg class="h-8 w-8 text-vscode-error" viewBox="0 0 16 16" fill="currentColor">
-        <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm-.5 3h1v5h-1V4zm.5 8a.75.75 0 110-1.5.75.75 0 010 1.5z" />
-      </svg>
+      <UiIcon
+        source={warningCircleSolidIcon}
+        class="h-8 w-8 text-vscode-error"
+        width={32}
+        height={32}
+      />
       <p class="text-sm text-vscode-error">Something went wrong</p>
       <p class="max-w-full break-words text-xs text-vscode-muted">
         {props.err?.message || 'Unknown error'}

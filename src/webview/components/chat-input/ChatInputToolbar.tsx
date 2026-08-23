@@ -9,7 +9,9 @@ import type {
   WorkspaceFolderContext,
 } from '../../../shared/protocol';
 import { postMessage } from '../../lib/bridge';
+import { warningTriangleIcon } from '../../lib/ui-icons';
 import { Tooltip } from '../Tooltip';
+import { UiIcon } from '../UiIcon';
 import { AttachButton } from './AttachButton';
 import { BusySendMenu } from './BusySendMenu';
 import { ContextPopup, ContextUsageButton, formatContextUsageTitle } from './ContextPopup';
@@ -199,22 +201,7 @@ function SelectionCostWarning(props: {
         aria-label={`${SELECTION_COST_WARNING} ${detail}`}
         tabIndex={0}
       >
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">
-          <path
-            d="M20.0429 21H3.95705C2.41902 21 1.45658 19.3364 2.22324 18.0031L10.2662 4.01533C11.0352 2.67792 12.9648 2.67791 13.7338 4.01532L21.7768 18.0031C22.5434 19.3364 21.581 21 20.0429 21Z"
-            stroke="currentColor"
-            stroke-width="1.6"
-            stroke-linecap="round"
-          />
-          <path d="M12 9V13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-          <path
-            d="M12 17.01L12.01 16.9989"
-            stroke="currentColor"
-            stroke-width="1.6"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
+        <UiIcon source={warningTriangleIcon} width={16} height={16} />
       </span>
     </Tooltip>
   );

@@ -28,6 +28,8 @@ import {
   userMessage,
 } from './MessageList.test-utils';
 import { fixture } from '../test-fixtures';
+import { navArrowDownIcon } from '../lib/ui-icons';
+import { toCssUrl } from './UiIcon';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -3846,6 +3848,9 @@ describe('MessageList auto-scroll', () => {
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const button = container?.querySelector('.jump-to-latest-button') as HTMLButtonElement | null;
     expect(button).toBeInstanceOf(HTMLButtonElement);
+    const icon = button?.querySelector<HTMLElement>('.ui-icon');
+    expect(icon?.style.getPropertyValue('--ui-icon-width')).toBe('14px');
+    expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(navArrowDownIcon));
 
     setExpandedDiffOverlay(testDiffOverlayOwner, true);
     expect(container?.querySelector('.jump-to-latest-button')).toBeNull();

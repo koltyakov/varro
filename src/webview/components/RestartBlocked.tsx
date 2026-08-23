@@ -1,6 +1,8 @@
 import { For, Show, createSignal, onCleanup } from 'solid-js';
 import { postMessage } from '../lib/bridge';
 import { defaultAppState } from '../lib/state';
+import { clockIcon, xmarkIcon } from '../lib/ui-icons';
+import { UiIcon } from './UiIcon';
 
 const RECHECK_INTERVAL_MS = 3000;
 const blockers = () => defaultAppState.state.restartBlocked;
@@ -40,33 +42,12 @@ export function RestartBlocked() {
         title="Close"
         onClick={() => defaultAppState.setState('restartBlocked', null)}
       >
-        <svg
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.7"
-          aria-hidden="true"
-        >
-          <path d="m4 4 8 8" stroke-linecap="round" />
-          <path d="m12 4-8 8" stroke-linecap="round" />
-        </svg>
+        <UiIcon source={xmarkIcon} width={14} height={14} />
       </button>
 
       <div class="mx-auto flex w-full max-w-90 flex-col items-center gap-4 text-center">
         <div class="flex h-10 w-10 items-center justify-center rounded-full bg-vscode-accent/10">
-          <svg
-            class="h-5 w-5 text-vscode-accent"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
-          >
-            <circle cx="12" cy="12" r="9" />
-            <path d="M12 7v5l3 2" />
-          </svg>
+          <UiIcon source={clockIcon} class="h-5 w-5 text-vscode-accent" width={20} height={20} />
         </div>
 
         <div class="px-3">

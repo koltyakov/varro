@@ -47,12 +47,21 @@ import { formatDuration, formatRelativeAge } from '../../lib/message-metrics';
 import { getProviderIcon } from '../../lib/provider-icons';
 import { compareSessionsByActivity } from '../../lib/session-order';
 import {
+  archiveIcon,
+  navArrowRightIcon,
+  cableTagIcon,
+  pinIcon,
+  trashIcon,
+  xmarkIcon,
+} from '../../lib/ui-icons';
+import {
   SessionActionsMenu,
   createSessionActionsState,
   type SessionActionsState,
 } from './SessionActionsMenu';
 import { SharedSessionIcon } from './SharedSessionIcon';
 import { isNumber, isString, type UnknownRecord, isObject } from '../../lib/runtime-values';
+import { UiIcon } from '../UiIcon';
 
 type SessionGroups = {
   pinned: (typeof state.sessions)[number][];
@@ -755,9 +764,12 @@ export function SessionListSectionHeader(props: {
                 title={`${archiveActionLabel()} ${archiveTargetLabel()}`}
                 aria-label={`${archiveActionLabel()} ${archiveTargetLabel()}`}
               >
-                <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                  <path d="M14.5 1h-13a.5.5 0 00-.5.5V4h14V1.5a.5.5 0 00.5-.5zM1 5v9.5a.5.5 0 00.5.5h13a.5.5 0 00.5-.5V5H1zm5 3h4v1H6V8z" />
-                </svg>
+                <UiIcon
+                  source={archiveIcon}
+                  class="session-list-section-archive-icon"
+                  width={14}
+                  height={14}
+                />
               </button>
             }
           >
@@ -789,14 +801,12 @@ export function SessionListSectionHeader(props: {
           onClick={props.onToggle}
           aria-label={`${props.expanded ? 'Collapse' : 'Expand'} ${props.title}`}
         >
-          <svg
-            viewBox="0 0 16 16"
-            fill="currentColor"
+          <UiIcon
+            source={navArrowRightIcon}
             class={`session-list-section-chevron ${props.expanded ? 'expanded' : ''}`}
-            aria-hidden="true"
-          >
-            <path d="M5.5 3.5L10 8l-4.5 4.5-.7-.7L8.6 8 4.8 4.2z" />
-          </svg>
+            width={12}
+            height={12}
+          />
         </button>
       </div>
     </div>
@@ -1496,9 +1506,12 @@ export function SessionListView(props: {
               aria-label="Clear search"
               title="Clear search"
             >
-              <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                <path d="M3.22 3.22a.75.75 0 011.06 0L8 6.94l3.72-3.72a.75.75 0 111.06 1.06L9.06 8l3.72 3.72a.75.75 0 11-1.06 1.06L8 9.06l-3.72 3.72a.75.75 0 01-1.06-1.06L6.94 8 3.22 4.28a.75.75 0 010-1.06z" />
-              </svg>
+              <UiIcon
+                source={xmarkIcon}
+                class="session-list-search-clear-icon"
+                width={10}
+                height={10}
+              />
             </button>
           </Show>
         </div>
@@ -1586,9 +1599,12 @@ function RecycleBinListItem(props: { entry: RecycleBinEntry; now: () => number }
                 title="Delete permanently"
                 aria-label="Delete permanently"
               >
-                <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true">
-                  <path d="M17 24h-2v-9h2v9zm4-9h-2v9h2v-9zm-8 0h-2v9h2v-9zm14-2h-1.064l-1 15H7.064l-1-15H5V7h7V4h8v3h7v6zM14 7h4V6h-4v1zm-7 4h18V9H7v2zm16.931 2H8.069l.866 13h14.129l.867-13z" />
-                </svg>
+                <UiIcon
+                  source={trashIcon}
+                  class="session-item-archive-icon"
+                  width={14}
+                  height={14}
+                />
               </button>
             </>
           }
@@ -1909,22 +1925,7 @@ function SessionListItem(props: {
                 title="Pinned session"
                 aria-label="Pinned session"
               >
-                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path
-                    d="M9.5 14.5 3 21"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
-                  <path
-                    d="m5 9.485 9.193 9.193 1.697-1.697-.393-3.787 5.51-4.673-5.85-5.85-4.674 5.51-3.786-.393L5 9.485Z"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
-                </svg>
+                <UiIcon source={pinIcon} class="session-item-pinned-icon" width={12} height={12} />
               </span>
             </Show>
             <Show when={props.session.share?.url}>
@@ -2040,9 +2041,12 @@ function SessionListItem(props: {
             title={subagentLabel()}
             aria-label={subagentLabel()}
           >
-            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-              <path d="M5.5 2.5a2 2 0 110 4 2 2 0 010-4zm5 1a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM2 9.25c0-1.8 2.1-2.75 3.5-2.75S9 7.45 9 9.25V10H2v-.75zm7.5.75v-.5c0-.66-.2-1.23-.54-1.7.5-.19 1.04-.3 1.54-.3 1.22 0 3 .73 3 2.25V10h-4z" />
-            </svg>
+            <UiIcon
+              source={cableTagIcon}
+              class="session-item-subagents-icon"
+              width={16}
+              height={16}
+            />
             <span class="session-item-subagents-count">{props.subagentCount}</span>
           </button>
         </Show>

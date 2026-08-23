@@ -3,6 +3,7 @@ import { render } from 'solid-js/web';
 import { createStore } from 'solid-js/store';
 import { resetDefaultAppState, setShowThinking, setState } from '../lib/state';
 import { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
+import { lightBulbIcon } from '../lib/ui-icons';
 import type { AssistantMessage, Part, ReasoningPart } from '../types';
 import {
   MessagePart,
@@ -10,6 +11,7 @@ import {
   formatReasoningHeader,
   splitReasoningText,
 } from './MessagePart';
+import { toCssUrl } from './UiIcon';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -157,11 +159,12 @@ describe('MessagePart', () => {
     expect(container?.querySelector('.thinking-header')?.getAttribute('aria-expanded')).toBe(
       'false'
     );
-    const icon = container?.querySelector('.thinking-topic-icon');
-    expect(icon?.getAttribute('width')).toBe('12');
-    expect(icon?.getAttribute('height')).toBe('12');
-    expect(icon?.getAttribute('viewBox')).toBe('2 2 20 20');
-    expect(icon?.getAttribute('stroke-width')).toBe('1.7');
+    const icon = container?.querySelector<HTMLElement>('.thinking-topic-icon');
+    expect(icon).toBeInstanceOf(HTMLSpanElement);
+    expect(icon?.classList).toContain('ui-icon');
+    expect(icon?.style.getPropertyValue('--ui-icon-width')).toBe('12px');
+    expect(icon?.style.getPropertyValue('--ui-icon-height')).toBe('12px');
+    expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(lightBulbIcon));
   });
 
   it('keeps a user-expanded reasoning block open when virtualization remounts it', () => {

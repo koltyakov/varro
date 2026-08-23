@@ -3,7 +3,9 @@ import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
 import { collapseExpandedDiffOverlays, hasExpandedDiffOverlay } from '../lib/diff-overlay-state';
+import { xmarkIcon } from '../lib/ui-icons';
 import { DiffView, getDiffLines, parseUnifiedPatch } from './DiffView';
+import { toCssUrl } from './UiIcon';
 
 type TestRuntimeValue =
   | string
@@ -330,9 +332,10 @@ describe('DiffView', () => {
     expect(overlay?.querySelector('.diff-view-overlay-title .diff-view-icon')).toBeInstanceOf(
       HTMLImageElement
     );
-    expect(overlay?.querySelector('.diff-view-overlay-close svg')?.getAttribute('width')).toBe(
-      '10'
-    );
+    const closeIcon = overlay?.querySelector<HTMLElement>('.diff-view-overlay-close .ui-icon');
+    expect(closeIcon).toBeInstanceOf(HTMLSpanElement);
+    expect(closeIcon?.style.getPropertyValue('--ui-icon-width')).toBe('10px');
+    expect(closeIcon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(xmarkIcon));
 
     const closeButton = overlay?.querySelector<HTMLButtonElement>('.diff-view-overlay-close');
     expect(document.activeElement).toBe(closeButton);

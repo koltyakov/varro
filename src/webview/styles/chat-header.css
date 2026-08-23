@@ -62,7 +62,7 @@
   color: var(--color-vscode-muted);
 }
 
-.chat-header-shared-marker svg {
+.chat-header-shared-marker .shared-session-icon {
   width: 12px;
   height: 12px;
 }
@@ -214,9 +214,14 @@
   color: var(--color-vscode-fg);
 }
 
-.chat-header-btn svg {
+.chat-header-btn .chat-header-button-icon {
   width: 14px;
   height: 14px;
+}
+
+.chat-header-btn .chat-header-back-icon {
+  width: 20px;
+  height: 20px;
 }
 
 /* Chat header left group */
@@ -294,7 +299,7 @@
   outline-offset: 2px;
 }
 
-.chat-header-filter-chip-remove svg {
+.chat-header-filter-chip-remove .chat-header-filter-chip-remove-icon {
   width: 10px;
   height: 10px;
 }

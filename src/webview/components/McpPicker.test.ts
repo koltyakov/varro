@@ -167,6 +167,10 @@ describe('McpPicker', () => {
     expect(
       items.find((item) => item.textContent?.includes('zeta'))?.getAttribute('aria-pressed')
     ).toBe('true');
+    const selectedIcon = items
+      .find((item) => item.textContent?.includes('zeta'))
+      ?.querySelector<HTMLElement>('.ui-icon');
+    expect(selectedIcon?.style.getPropertyValue('--ui-icon-width')).toBe('12px');
 
     menu?.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })

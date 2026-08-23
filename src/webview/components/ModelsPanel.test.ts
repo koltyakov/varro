@@ -410,26 +410,35 @@ describe('ModelsPanel', () => {
     expect(fastSymbol?.textContent).toBe('⚡');
   });
 
-  it('requests a provider reload from the extension', () => {
+  it('opens provider actions and requests a list refresh', () => {
     const send = vi.fn();
     window.__sendToExtension = send;
     cleanup = render(() => ModelsPanel(), container!);
 
-    const reloadButton = container?.querySelector<HTMLButtonElement>(
-      '[aria-label="Reload providers"]'
+    const actionsButton = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="Provider actions"]'
     );
-    reloadButton?.click();
+    expect(actionsButton?.getAttribute('aria-haspopup')).toBe('menu');
+    expect(actionsButton?.querySelector('.models-provider-actions-icon')).toBeInstanceOf(
+      HTMLSpanElement
+    );
+    actionsButton?.click();
+    const menu = container?.querySelector('[role="menu"]');
+    expect(
+      Array.from(menu?.querySelectorAll('[role="menuitem"]') ?? []).map((item) => item.textContent)
+    ).toEqual(['Add provider', 'Remove provider', 'Refresh list']);
+    findButton(menu, 'Refresh list')?.click();
 
-    expect(reloadButton).toBeInstanceOf(HTMLButtonElement);
+    expect(actionsButton).toBeInstanceOf(HTMLButtonElement);
+    expect(actionsButton?.getAttribute('aria-expanded')).toBe('false');
     expect(send).toHaveBeenCalledWith({ type: 'providers/refresh' });
   });
 
-  it('opens the embedded disconnect dialog from the minus button', async () => {
+  it('opens the embedded disconnect dialog from provider actions', async () => {
     cleanup = render(() => ModelsPanel(), container!);
 
-    const logoutButton = container?.querySelector<HTMLButtonElement>(
-      '[aria-label="Remove provider"]'
-    );
+    container?.querySelector<HTMLButtonElement>('[aria-label="Provider actions"]')?.click();
+    const logoutButton = findButton(container, 'Remove provider');
     logoutButton?.click();
     await Promise.resolve();
     await Promise.resolve();
@@ -442,11 +451,14 @@ describe('ModelsPanel', () => {
   it('uses terminal provider actions on Option-click', () => {
     cleanup = render(() => ModelsPanel(), container!);
 
-    const addButton = container?.querySelector<HTMLButtonElement>('[aria-label="Add provider"]');
-    const removeButton = container?.querySelector<HTMLButtonElement>(
-      '[aria-label="Remove provider"]'
+    const actionsButton = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="Provider actions"]'
     );
+    actionsButton?.click();
+    const addButton = findButton(container, 'Add provider');
     addButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, altKey: true }));
+    actionsButton?.click();
+    const removeButton = findButton(container, 'Remove provider');
     removeButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, altKey: true }));
 
     expect(addButton).toBeInstanceOf(HTMLButtonElement);
@@ -469,7 +481,7 @@ describe('ModelsPanel', () => {
     });
     cleanup = render(() => ModelsPanel(), container!);
 
-    container?.querySelector<HTMLButtonElement>('[aria-label="Remove provider"]')?.click();
+    openProviderAction(container, 'Remove provider')?.click();
     await Promise.resolve();
     await Promise.resolve();
     const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
@@ -500,7 +512,7 @@ describe('ModelsPanel', () => {
     );
     cleanup = render(() => ModelsPanel(), container!);
 
-    const button = container?.querySelector<HTMLButtonElement>('[aria-label="Add provider"]');
+    const button = openProviderAction(container, 'Add provider');
     button?.click();
 
     const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
@@ -541,7 +553,7 @@ describe('ModelsPanel', () => {
     window.__sendToExtension = send;
     cleanup = render(() => ModelsPanel(), container!);
 
-    container?.querySelector<HTMLButtonElement>('[aria-label="Add provider"]')?.click();
+    openProviderAction(container, 'Add provider')?.click();
     await Promise.resolve();
     await Promise.resolve();
     const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
@@ -571,7 +583,7 @@ describe('ModelsPanel', () => {
   it('returns to auth methods when credential entry is cancelled', async () => {
     cleanup = render(() => ModelsPanel(), container!);
 
-    container?.querySelector<HTMLButtonElement>('[aria-label="Add provider"]')?.click();
+    openProviderAction(container, 'Add provider')?.click();
     await Promise.resolve();
     await Promise.resolve();
     const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
@@ -602,7 +614,7 @@ describe('ModelsPanel', () => {
     });
     cleanup = render(() => ModelsPanel(), container!);
 
-    container?.querySelector<HTMLButtonElement>('[aria-label="Add provider"]')?.click();
+    openProviderAction(container, 'Add provider')?.click();
     await Promise.resolve();
     await Promise.resolve();
     const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
@@ -639,7 +651,7 @@ describe('ModelsPanel', () => {
     });
     cleanup = render(() => ModelsPanel(), container!);
 
-    container?.querySelector<HTMLButtonElement>('[aria-label="Add provider"]')?.click();
+    openProviderAction(container, 'Add provider')?.click();
     await Promise.resolve();
     await Promise.resolve();
     const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
@@ -685,7 +697,7 @@ describe('ModelsPanel', () => {
     });
     cleanup = render(() => ModelsPanel(), container!);
 
-    container?.querySelector<HTMLButtonElement>('[aria-label="Add provider"]')?.click();
+    openProviderAction(container, 'Add provider')?.click();
     await Promise.resolve();
     await Promise.resolve();
     const dialog = Array.from(document.body.querySelectorAll<HTMLElement>('[role="dialog"]')).at(
@@ -743,7 +755,7 @@ describe('ModelsPanel', () => {
     );
     cleanup = render(() => ModelsPanel(), container!);
 
-    container?.querySelector<HTMLButtonElement>('[aria-label="Add provider"]')?.click();
+    openProviderAction(container, 'Add provider')?.click();
     await Promise.resolve();
     await Promise.resolve();
     const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
@@ -770,21 +782,19 @@ describe('ModelsPanel', () => {
     window.__sendToExtension = send;
     cleanup = render(() => ModelsPanel(), container!);
 
-    const reloadButton = container?.querySelector<HTMLButtonElement>(
-      '[aria-label="Reload providers"]'
+    const actionsButton = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="Provider actions"]'
     );
-    reloadButton?.click();
+    actionsButton?.click();
+    findButton(container, 'Refresh list')?.click();
 
-    expect(reloadButton?.disabled).toBe(true);
-    expect(reloadButton?.classList.contains('is-loading')).toBe(true);
-    expect(reloadButton?.getAttribute('aria-label')).toBe('Reloading providers');
+    expect(actionsButton?.getAttribute('aria-busy')).toBe('true');
 
     await vi.advanceTimersByTimeAsync(499);
-    expect(reloadButton?.disabled).toBe(true);
+    expect(actionsButton?.getAttribute('aria-busy')).toBe('true');
 
     await vi.advanceTimersByTimeAsync(1);
-    expect(reloadButton?.disabled).toBe(false);
-    expect(reloadButton?.classList.contains('is-loading')).toBe(false);
+    expect(actionsButton?.getAttribute('aria-busy')).toBe('false');
   });
 
   it('re-enables provider reload for retry when the refresh remains incomplete', async () => {
@@ -793,17 +803,18 @@ describe('ModelsPanel', () => {
     window.__sendToExtension = send;
     cleanup = render(() => ModelsPanel(), container!);
 
-    const reloadButton = container?.querySelector<HTMLButtonElement>(
-      '[aria-label="Reload providers"]'
+    const actionsButton = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="Provider actions"]'
     );
-    reloadButton?.click();
+    actionsButton?.click();
+    findButton(container, 'Refresh list')?.click();
     setState('providersLoaded', false);
 
     await vi.advanceTimersByTimeAsync(500);
 
-    expect(reloadButton?.disabled).toBe(false);
-    expect(reloadButton?.getAttribute('aria-label')).toBe('Reload providers');
-    reloadButton?.click();
+    expect(actionsButton?.getAttribute('aria-busy')).toBe('false');
+    actionsButton?.click();
+    findButton(container, 'Refresh list')?.click();
     expect(send).toHaveBeenCalledTimes(2);
   });
 
@@ -963,6 +974,11 @@ describe('ModelsPanel', () => {
       (item) => item.querySelector('.models-model-name')?.textContent === 'GPT-5'
     );
     expect(row?.querySelector('.model-release-date')?.textContent).toBe('2026/01/01');
+    expect(
+      row
+        ?.querySelector<HTMLElement>('.model-release-date .ui-icon')
+        ?.style.getPropertyValue('--ui-icon-width')
+    ).toBe('13px');
     expect(row?.querySelector('.models-model-date-cell')).toBeInstanceOf(HTMLElement);
     expect(row?.querySelector('.models-model-ctx')?.textContent).toBe('400k');
     expect(row?.querySelector('.models-model-ctx')?.parentElement?.classList).toContain(
@@ -1019,6 +1035,7 @@ describe('ModelsPanel', () => {
     expect(fullRow?.querySelector('.model-capability-tag-vision')?.getAttribute('aria-label')).toBe(
       'Vision'
     );
+    expect(fullRow?.querySelectorAll('.models-capability-icon .ui-icon')).toHaveLength(0);
     expect(fullRow?.querySelectorAll('.models-capability-icon svg')).toHaveLength(5);
     expect(fullRow?.querySelector('.models-capability-universal')).toBeNull();
     expect(fullRow?.querySelector('.model-capability-tag-audio')).toBeInstanceOf(HTMLElement);
@@ -1293,6 +1310,7 @@ describe('ModelsPanel', () => {
 
     expect(container?.textContent).toContain('OpenAI0/2');
     expect(container?.querySelector('.models-chevron')?.classList.contains('expanded')).toBe(false);
+    expect(container?.querySelector('.ui-icon.models-chevron')).toBeInstanceOf(HTMLSpanElement);
     expect(container?.querySelector('.models-model-row')).toBeNull();
   });
 
@@ -1370,4 +1388,9 @@ function findButton(root: ParentNode | null | undefined, text: string) {
   return Array.from(root?.querySelectorAll<HTMLButtonElement>('button') ?? []).find(
     (button) => button.textContent?.trim() === text
   );
+}
+
+function openProviderAction(root: ParentNode | null | undefined, action: string) {
+  root?.querySelector<HTMLButtonElement>('[aria-label="Provider actions"]')?.click();
+  return findButton(root, action);
 }

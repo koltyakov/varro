@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
+import { attachmentIcon, mediaImageIcon } from '../../lib/ui-icons';
+import { toCssUrl } from '../UiIcon';
 import type { Permission, QuestionRequest } from '../../types';
 
 /* oxlint-disable anti-slop/no-module-mocking -- These tests exercise chrome integration with permission and question prompts. */
@@ -418,6 +420,11 @@ describe('MessageListChrome', () => {
     );
     expect(items).toHaveLength(2);
     expect(items.map((item) => item.textContent)).toEqual(['1', '2']);
+    expect(
+      items.map((item) =>
+        item.querySelector<HTMLElement>('.ui-icon')?.style.getPropertyValue('--ui-icon-mask')
+      )
+    ).toEqual([toCssUrl(mediaImageIcon), toCssUrl(attachmentIcon)]);
   });
 
   it('omits the meta row when there are no attachments or images', () => {

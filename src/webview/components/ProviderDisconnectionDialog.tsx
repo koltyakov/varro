@@ -5,6 +5,8 @@ import { postMessage } from '../lib/bridge';
 import { client } from '../lib/client';
 import { trapModalFocus } from '../lib/modal-focus';
 import { openProviderLogout } from '../lib/provider-setup';
+import { arrowLeftIcon, xmarkIcon } from '../lib/ui-icons';
+import { UiIcon } from './UiIcon';
 
 export function ProviderDisconnectionDialog(props: {
   catalogProviders: Provider[];
@@ -93,9 +95,7 @@ export function ProviderDisconnectionDialog(props: {
               onClick={props.onClose}
               aria-label="Close"
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-                <path d="M6.758 17.243L12 12m5.243-5.243L12 12m0 0L6.758 6.757M12 12l5.243 5.243" />
-              </svg>
+              <UiIcon source={xmarkIcon} width={16} height={16} aria-hidden="true" />
             </button>
           </div>
 
@@ -170,9 +170,7 @@ export function ProviderDisconnectionDialog(props: {
                       setErrorMessage('');
                     }}
                   >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-                      <path d="M21 12H3m0 0l8.5-8.5M3 12l8.5 8.5" />
-                    </svg>
+                    <UiIcon source={arrowLeftIcon} width={11} height={11} aria-hidden="true" />
                     Back to providers
                   </button>
                   <div class="provider-disconnect-confirmation">

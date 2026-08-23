@@ -68,7 +68,7 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   color: var(--color-vscode-fg);
 }
 
-.session-list-search-clear svg {
+.session-list-search-clear .session-list-search-clear-icon {
   width: 10px;
   height: 10px;
 }
@@ -316,7 +316,7 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   color: inherit;
 }
 
-.session-list-section-archive svg {
+.session-list-section-archive .session-list-section-archive-icon {
   width: 14px;
   height: 14px;
 }
@@ -550,7 +550,7 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   background: var(--color-vscode-warning);
 }
 
-.session-action-feedback-icon svg {
+.session-action-feedback-icon .session-action-feedback-glyph {
   width: 11px;
   height: 11px;
 }
@@ -607,7 +607,7 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   color: var(--color-vscode-muted) !important;
 }
 
-.session-action-feedback-dismiss svg {
+.session-action-feedback-dismiss .session-action-feedback-dismiss-icon {
   display: block;
   position: absolute;
   top: 50%;
@@ -798,7 +798,7 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   color: var(--color-vscode-muted);
 }
 
-.session-item-pinned-marker svg {
+.session-item-pinned-marker .session-item-pinned-icon {
   width: 12px;
   height: 12px;
 }
@@ -809,7 +809,7 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   color: var(--color-vscode-muted);
 }
 
-.session-item-shared-marker svg {
+.session-item-shared-marker .shared-session-icon {
   width: 12px;
   height: 12px;
 }
@@ -901,21 +901,20 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   background: var(--color-vscode-toolbar-hover);
 }
 
-.session-item-subagents svg {
-  width: 14px;
-  height: 14px;
+.session-item-subagents .session-item-subagents-icon {
+  width: 16px;
+  height: 16px;
 }
 
 .session-item-subagents-counter {
-  gap: 1px;
+  gap: 2px;
   min-width: 24px;
   width: auto;
   padding: 0 5px;
 }
 
-.session-item-subagents-counter svg {
+.session-item-subagents-counter .session-item-subagents-icon {
   flex-shrink: 0;
-  transform: translateY(1.5px);
 }
 
 .session-item-subagents-counter .session-item-subagents-count {
@@ -978,7 +977,7 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   background: var(--color-vscode-toolbar-hover);
 }
 
-.session-item-archive svg {
+.session-item-archive .session-item-archive-icon {
   width: 14px;
   height: 14px;
 }

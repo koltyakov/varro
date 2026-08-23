@@ -1,6 +1,8 @@
 import { Show, createSignal, onCleanup } from 'solid-js';
 import { writeClipboard } from '../lib/write-clipboard';
+import { checkIcon, copyIcon } from '../lib/ui-icons';
 import { Tooltip } from './Tooltip';
+import { UiIcon } from './UiIcon';
 
 /**
  * Copy affordance for tool detail rows that render their value on a single
@@ -34,36 +36,9 @@ export function CopyIconButton(props: { text: string; label: string }) {
       >
         <Show
           when={copied()}
-          fallback={
-            <svg
-              viewBox="0 0 24 24"
-              width="12"
-              height="12"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.4"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M19.4 20H9.6C9.26863 20 9 19.7314 9 19.4V9.6C9 9.26863 9.26863 9 9.6 9H19.4C19.7314 9 20 9.26863 20 9.6V19.4C20 19.7314 19.7314 20 19.4 20Z" />
-              <path d="M15 9V4.6C15 4.26863 14.7314 4 14.4 4H4.6C4.26863 4 4 4.26863 4 4.6V14.4C4 14.7314 4.26863 15 4.6 15H9" />
-            </svg>
-          }
+          fallback={<UiIcon source={copyIcon} width={12} height={12} aria-hidden="true" />}
         >
-          <svg
-            viewBox="0 0 16 16"
-            width="12"
-            height="12"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M3 8.5l3.5 3.5L13 5" />
-          </svg>
+          <UiIcon source={checkIcon} width={12} height={12} aria-hidden="true" />
         </Show>
       </button>
     </Tooltip>

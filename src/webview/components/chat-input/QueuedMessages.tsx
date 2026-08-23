@@ -1,6 +1,18 @@
 import { For, Show, createEffect, createSignal, onCleanup } from 'solid-js';
 import type { QueuedMessage } from '../../lib/app-state-types';
+import {
+  arrowUpIcon,
+  attachmentIcon,
+  editPencilIcon,
+  mediaImageIcon,
+  pauseIcon,
+  playIcon,
+  trashIcon,
+  undoIcon,
+} from '../../lib/ui-icons';
 import { observeSettledResize } from '../../lib/settled-resize-observer';
+import { UiIcon } from '../UiIcon';
+import { RefreshIcon } from '../ControlIcons';
 
 export const QUEUED_MESSAGE_DRAG_TYPE = 'application/x-varro-queued-message';
 
@@ -211,20 +223,7 @@ export function QueuedMessages(props: {
                         aria-label={`${imageCount} ${imageCount === 1 ? 'image' : 'images'}`}
                       >
                         <span class="chat-queue-image-icon" aria-hidden="true">
-                          <svg
-                            width="12"
-                            height="12"
-                            viewBox="0 0 16 16"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="1.5"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                          >
-                            <rect x="2" y="3" width="12" height="10" rx="1.5" />
-                            <circle cx="5.5" cy="6.5" r="1" />
-                            <path d="M3 11l3-3 2.5 2.5L11 7l2 2" />
-                          </svg>
+                          <UiIcon source={mediaImageIcon} width={12} height={12} />
                         </span>
                         <span>{imageCount}</span>
                       </span>
@@ -236,18 +235,7 @@ export function QueuedMessages(props: {
                         aria-label={`${attachmentCount} ${attachmentCount === 1 ? 'attachment' : 'attachments'}`}
                       >
                         <span class="chat-queue-attachment-icon" aria-hidden="true">
-                          <svg
-                            width="12"
-                            height="12"
-                            viewBox="0 0 16 16"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="1.25"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                          >
-                            <path d="M10.5 5.5l-4.24 4.24a2 2 0 102.83 2.83l4.6-4.59a3 3 0 00-4.24-4.24L4.5 8.69a4 4 0 105.66 5.66l4.1-4.1" />
-                          </svg>
+                          <UiIcon source={attachmentIcon} width={12} height={12} />
                         </span>
                         <span>{attachmentCount}</span>
                       </span>
@@ -269,34 +257,9 @@ export function QueuedMessages(props: {
                   >
                     <Show
                       when={item.paused}
-                      fallback={
-                        <svg
-                          width="16"
-                          height="16"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          stroke-width="1.6"
-                          aria-hidden="true"
-                        >
-                          <path d="M6 18.4V5.6C6 5.26863 6.26863 5 6.6 5H9.4C9.73137 5 10 5.26863 10 5.6V18.4C10 18.7314 9.73137 19 9.4 19H6.6C6.26863 19 6 18.7314 6 18.4Z" />
-                          <path d="M14 18.4V5.6C14 5.26863 14.2686 5 14.6 5H17.4C17.7314 5 18 5.26863 18 5.6V18.4C18 18.7314 17.7314 19 17.4 19H14.6C14.2686 19 14 18.7314 14 18.4Z" />
-                        </svg>
-                      }
+                      fallback={<UiIcon source={pauseIcon} width={16} height={16} />}
                     >
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.6"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        aria-hidden="true"
-                      >
-                        <path d="M6.90588 4.53682C6.50592 4.2998 6 4.58808 6 5.05299V18.947C6 19.4119 6.50592 19.7002 6.90588 19.4632L18.629 12.5162C19.0211 12.2838 19.0211 11.7162 18.629 11.4838L6.90588 4.53682Z" />
-                      </svg>
+                      <UiIcon source={playIcon} width={16} height={16} />
                     </Show>
                   </button>
                   <button
@@ -332,35 +295,9 @@ export function QueuedMessages(props: {
                   >
                     <Show
                       when={didDispatchFail() || didSteerFail()}
-                      fallback={
-                        <svg
-                          width="14"
-                          height="14"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          stroke-width="1.6"
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          aria-hidden="true"
-                        >
-                          <path d="M12 21V3M12 3l8.5 8.5M12 3l-8.5 8.5" />
-                        </svg>
-                      }
+                      fallback={<UiIcon source={arrowUpIcon} width={14} height={14} />}
                     >
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.6"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        aria-hidden="true"
-                      >
-                        <path d="M19.5 9A8 8 0 105 17.5M19.5 4.5V9H15" />
-                      </svg>
+                      <RefreshIcon />
                     </Show>
                   </button>
                   <button
@@ -379,36 +316,9 @@ export function QueuedMessages(props: {
                   >
                     <Show
                       when={isEditing()}
-                      fallback={
-                        <svg
-                          width="14"
-                          height="14"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          stroke-width="1.6"
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          aria-hidden="true"
-                        >
-                          <path d="M14.3632 5.65156l1.4799-1.47999a2 2 0 012.8285 0l1.4142 1.41422a2 2 0 010 2.82842l-1.48 1.47999M14.3632 5.65156l-9.61571 9.61564a2 2 0 00-.57802 1.2382l-.24209 2.7405a1 1 0 001.08412 1.0841l2.74041-.2421a2 2 0 001.23822-.578l9.61567-9.6157M14.3632 5.65156l4.2426 4.24264" />
-                        </svg>
-                      }
+                      fallback={<UiIcon source={editPencilIcon} width={14} height={14} />}
                     >
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.6"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        aria-hidden="true"
-                      >
-                        <path d="M4.5 8H15s5 0 5 4.7059C20 18 15 18 15 18H6.28571" />
-                        <path d="M7.5 11.5L4 8l3.5-3.5" />
-                      </svg>
+                      <UiIcon source={undoIcon} width={14} height={14} />
                     </Show>
                   </button>
                   <button
@@ -419,20 +329,7 @@ export function QueuedMessages(props: {
                     title="Remove from queue"
                     aria-label="Remove from queue"
                   >
-                    <svg
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.6"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      aria-hidden="true"
-                    >
-                      <path d="M20 9l-1.995 11.3463A2 2 0 0116.0353 22H7.96474a2 2 0 01-1.96978-1.6537L4 9" />
-                      <path d="M21 6h-5.625M3 6h5.625m0 0V4a2 2 0 012-2h2.75a2 2 0 012 2v2m-6.75 0h6.75" />
-                    </svg>
+                    <UiIcon source={trashIcon} width={14} height={14} />
                   </button>
                 </div>
               </div>

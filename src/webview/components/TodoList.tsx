@@ -1,7 +1,9 @@
 import { For, Show, createEffect, createSignal, on, onCleanup, onMount } from 'solid-js';
 import { defaultAppState } from '../lib/state';
 import { STORAGE_KEYS, readStored, writeStored } from '../lib/state-storage';
+import { navArrowDownIcon } from '../lib/ui-icons';
 import type { NormalizedTodo } from '../types';
+import { UiIcon } from './UiIcon';
 
 const todos = () => defaultAppState.state.todos;
 const TODO_LIST_CHAT_SHARE = 0.28;
@@ -206,18 +208,12 @@ export function TodoList() {
         onClick={toggleCollapsed}
         aria-expanded={!collapsed()}
       >
-        <svg
+        <UiIcon
+          source={navArrowDownIcon}
           class={`todo-block-chevron ${collapsed() ? 'collapsed' : ''}`}
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.5"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        >
-          <path d="M4 6l4 4 4-4" />
-        </svg>
+          width={11}
+          height={11}
+        />
         <span class="todo-block-title">Todos</span>
         <span class="todo-block-count">
           {completed()}

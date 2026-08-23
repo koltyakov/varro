@@ -12,6 +12,8 @@ import {
 import { getLeafPathName } from '../../lib/path-display';
 import { getProviderLimit } from '../../lib/state';
 import { ralphStore } from '../../lib/stores/ralph-store';
+import { pauseSolidIcon, playSolidIcon } from '../../lib/ui-icons';
+import { UiIcon } from '../UiIcon';
 import { ralphRunner } from './ralph-runner';
 import { RalphIterationCard } from './RalphIterationCard';
 import { getRalphIterationLiveIssue } from './ralph-live-issue';
@@ -133,10 +135,7 @@ export function RalphDashboard(props: { sessionId: string }) {
                         aria-label="Pause"
                         onClick={() => ralphRunner.pause(props.sessionId)}
                       >
-                        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                          <rect x="3.5" y="2.5" width="3" height="11" rx="1.25" />
-                          <rect x="9.5" y="2.5" width="3" height="11" rx="1.25" />
-                        </svg>
+                        <UiIcon source={pauseSolidIcon} width={11} height={11} />
                       </button>
                     </Show>
                     <Show when={isResumable()}>
@@ -151,9 +150,7 @@ export function RalphDashboard(props: { sessionId: string }) {
                           when={activeRun().status === 'incomplete'}
                           fallback={resumeButtonLabel(activeRun().status)}
                         >
-                          <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                            <path d="M3.5 2.5l9 5.5-9 5.5z" />
-                          </svg>
+                          <UiIcon source={playSolidIcon} width={11} height={11} />
                         </Show>
                       </button>
                     </Show>

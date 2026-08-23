@@ -389,7 +389,10 @@ describe('ModelPicker', () => {
     expect(menu).toBeInstanceOf(HTMLDivElement);
     expect(search).toBeInstanceOf(HTMLInputElement);
     expect(document.activeElement).toBe(search);
-    expect(container?.querySelector('.dropdown-search-icon')).toBeInstanceOf(SVGElement);
+    const searchIcon = container?.querySelector<HTMLElement>('.ui-icon.dropdown-search-icon');
+    expect(searchIcon).toBeInstanceOf(HTMLSpanElement);
+    expect(searchIcon?.style.getPropertyValue('--ui-icon-width')).toBe('12px');
+    expect(searchIcon?.style.getPropertyValue('--ui-icon-height')).toBe('12px');
 
     menu?.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })

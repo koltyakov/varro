@@ -4,7 +4,9 @@ import { render } from 'solid-js/web';
 import { getAssistantActivityPartKey } from '../../lib/assistant-activity';
 import { resetDefaultAppState, setIsLoading, setShowInlineFileChanges } from '../../lib/state';
 import { resetToolCallExpansionState } from '../../lib/tool-call-expansion-state';
+import { emptyPageIcon, searchIcon, terminalIcon } from '../../lib/ui-icons';
 import type { AssistantMessage, Part, ReasoningPart, TextPart, ToolPart } from '../../types';
+import { toCssUrl } from '../UiIcon';
 import {
   AssistantMessageContent,
   deduplicateFileEdits,
@@ -333,6 +335,11 @@ describe('AssistantMessageContent', () => {
     const measurement = document.querySelector<HTMLElement>('.assistant-activity-summary-measure');
     const nouns = measurement?.querySelectorAll<HTMLElement>('.assistant-activity-summary-noun');
     const icons = measurement?.querySelectorAll<HTMLElement>('.assistant-activity-kind-icon');
+    expect(
+      measurement
+        ?.querySelector<HTMLElement>('[data-kind="files"] .ui-icon')
+        ?.style.getPropertyValue('--ui-icon-mask')
+    ).toBe(toCssUrl(emptyPageIcon));
     Object.defineProperty(host, 'clientWidth', { configurable: true, value: 256 });
     if (measurement) {
       measurement.getBoundingClientRect = () => fixture<DOMRect>({ width: 300 });
@@ -358,6 +365,11 @@ describe('AssistantMessageContent', () => {
         icon.getAttribute('data-kind')
       )
     ).toEqual(['searches', 'commands']);
+    expect(
+      [...(summary?.querySelectorAll('.assistant-activity-kind-icon') || [])].map((icon) =>
+        icon.querySelector<HTMLElement>('.ui-icon')?.style.getPropertyValue('--ui-icon-mask')
+      )
+    ).toEqual([toCssUrl(searchIcon), toCssUrl(terminalIcon)]);
 
     Object.defineProperty(host, 'clientWidth', { configurable: true, value: 340 });
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.

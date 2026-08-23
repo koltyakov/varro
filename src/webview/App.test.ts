@@ -145,6 +145,9 @@ describe('AppRoot', () => {
 
     expect(container?.textContent).toContain('Open a folder to use Varro');
     expect(container?.textContent).not.toContain('New Chat');
+    const folderIcon = container?.querySelector<HTMLElement>('.ui-icon.text-vscode-muted');
+    expect(folderIcon?.style.getPropertyValue('--ui-icon-width')).toBe('40px');
+    expect(folderIcon?.style.getPropertyValue('--ui-icon-height')).toBe('40px');
 
     const openFolderButton = Array.from(container?.querySelectorAll('button') ?? []).find(
       (button) => button.textContent?.trim() === 'Open Folder'
@@ -166,6 +169,9 @@ describe('AppRoot', () => {
     expect(container?.textContent).toContain('Something went wrong');
     expect(container?.textContent).toContain('initialization failed');
     expect(container?.textContent).not.toContain('Error: initialization failed');
+    const errorIcon = container?.querySelector<HTMLElement>('.ui-icon.text-vscode-error');
+    expect(errorIcon?.style.getPropertyValue('--ui-icon-width')).toBe('32px');
+    expect(errorIcon?.getAttribute('aria-hidden')).toBe('true');
 
     const reloadButton = Array.from(container?.querySelectorAll('button') ?? []).find(
       (button) => button.textContent?.trim() === 'Reload sidebar'

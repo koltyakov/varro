@@ -2,7 +2,9 @@ import { Show, createEffect, onCleanup } from 'solid-js';
 import type { Accessor } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { trapModalFocus } from '../lib/modal-focus';
+import { navArrowLeftIcon, navArrowRightIcon, xmarkIcon } from '../lib/ui-icons';
 import { Tooltip } from './Tooltip';
+import { UiIcon } from './UiIcon';
 
 export type PreviewImage = {
   url: string;
@@ -149,44 +151,13 @@ export function ImagePreviewOverlay(props: {
 }
 
 function CloseIcon() {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="1.7"
-      aria-hidden="true"
-    >
-      <path d="m4 4 8 8" stroke-linecap="round" />
-      <path d="m12 4-8 8" stroke-linecap="round" />
-    </svg>
-  );
+  return <UiIcon source={xmarkIcon} aria-hidden="true" />;
 }
 
 function ChevronLeftIcon() {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="1.7"
-      aria-hidden="true"
-    >
-      <path d="M10 3 5 8l5 5" stroke-linecap="round" stroke-linejoin="round" />
-    </svg>
-  );
+  return <UiIcon source={navArrowLeftIcon} aria-hidden="true" />;
 }
 
 function ChevronRightIcon() {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="1.7"
-      aria-hidden="true"
-    >
-      <path d="m6 3 5 5-5 5" stroke-linecap="round" stroke-linejoin="round" />
-    </svg>
-  );
+  return <UiIcon source={navArrowRightIcon} aria-hidden="true" />;
 }

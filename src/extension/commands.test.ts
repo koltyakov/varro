@@ -36,9 +36,13 @@ const { registeredCommands, vscodeMock } = vi.hoisted(() => {
     },
     Uri: {
       file: vi.fn((fsPath: string) => ({ fsPath })),
+      parse: vi.fn((value: string) => ({ value })),
       joinPath: vi.fn((base: { fsPath: string }, ...parts: string[]) => ({
         fsPath: [base.fsPath.replace(/\/$/, ''), ...parts].join('/'),
       })),
+    },
+    env: {
+      openExternal: vi.fn(() => Promise.resolve(true)),
     },
     FileType: { Directory: 2 },
   };
@@ -77,6 +81,7 @@ function register(
     postDroppedFiles: vi.fn(),
     postTerminalSelection: vi.fn(),
     generateCommitMessage: vi.fn(() => Promise.resolve()),
+    generateUsageReport: vi.fn(() => Promise.resolve()),
   };
   const contextProvider = {
     context: { workspacePath },
@@ -518,6 +523,36 @@ describe('sidebar navigation commands', () => {
       'workbench.view.extension.varro'
     );
     expect(sidebar.searchSessions).toHaveBeenCalledOnce();
+  });
+
+  it('opens the same Varro settings search as the settings slash command', async () => {
+    register();
+
+    await runCommand('varro.chat.openSettings');
+
+    expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith(
+      'workbench.action.openSettings',
+      'Varro'
+    );
+  });
+
+  it('opens the same usage report as the stats slash command', async () => {
+    const { sidebar } = register();
+
+    await runCommand('varro.chat.openStats');
+
+    expect(sidebar.generateUsageReport).toHaveBeenCalledOnce();
+  });
+
+  it('opens the Varro GitHub repository', async () => {
+    register();
+
+    await runCommand('varro.openGitHub');
+
+    expect(vscodeMock.Uri.parse).toHaveBeenCalledWith('https://github.com/koltyakov/varro');
+    expect(vscodeMock.env.openExternal).toHaveBeenCalledWith({
+      value: 'https://github.com/koltyakov/varro',
+    });
   });
 
   it('does not open session search when the view cannot be revealed', async () => {

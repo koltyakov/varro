@@ -39,6 +39,8 @@ import { AgentChip } from './AgentChip';
 import { InlineMessageImage } from '../InlineMessageImage';
 import { MaterialChipIcon } from '../MaterialChipIcon';
 import { isFunction } from '../../lib/runtime-values';
+import { navArrowLeftIcon, navArrowRightIcon } from '../../lib/ui-icons';
+import { UiIcon } from '../UiIcon';
 
 export type MessageAttachment =
   | {
@@ -1096,16 +1098,7 @@ function UserImageCarousel(props: {
                       aria-label="Previous image"
                       title="Previous image"
                     >
-                      <svg
-                        viewBox="0 0 16 16"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.5"
-                        width="14"
-                        height="14"
-                      >
-                        <path d="M10 3 5 8l5 5" stroke-linecap="round" stroke-linejoin="round" />
-                      </svg>
+                      <UiIcon source={navArrowLeftIcon} width="14" height="14" />
                     </button>
                     <button
                       type="button"
@@ -1114,16 +1107,7 @@ function UserImageCarousel(props: {
                       aria-label="Next image"
                       title="Next image"
                     >
-                      <svg
-                        viewBox="0 0 16 16"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.5"
-                        width="14"
-                        height="14"
-                      >
-                        <path d="m6 3 5 5-5 5" stroke-linecap="round" stroke-linejoin="round" />
-                      </svg>
+                      <UiIcon source={navArrowRightIcon} width="14" height="14" />
                     </button>
                   </div>
                 </figcaption>

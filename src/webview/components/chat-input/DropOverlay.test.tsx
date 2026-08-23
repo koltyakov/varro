@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { render } from 'solid-js/web';
+import { shareIosIcon } from '../../lib/ui-icons';
+import { toCssUrl } from '../UiIcon';
 import { DropOverlay } from './DropOverlay';
 
 let container: HTMLDivElement | null = null;
@@ -28,6 +30,11 @@ describe('DropOverlay', () => {
     expect(overlay).toBeInstanceOf(HTMLDivElement);
     expect(overlay?.getAttribute('aria-hidden')).toBe('true');
     expect(overlay?.querySelector('.chat-drop-overlay-card')).toBeInstanceOf(HTMLDivElement);
+    expect(
+      overlay
+        ?.querySelector<HTMLElement>('.chat-drop-overlay-icon .ui-icon')
+        ?.style.getPropertyValue('--ui-icon-mask')
+    ).toBe(toCssUrl(shareIosIcon));
     expect(overlay?.textContent).toContain('Drop to add to context');
   });
 });

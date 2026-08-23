@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { resetToolCallExpansionState } from '../../lib/tool-call-expansion-state';
 import type { FileDiff } from '../../types';
+import { navArrowRightIcon } from '../../lib/ui-icons';
+import { toCssUrl } from '../UiIcon';
 import { DiffSummary } from './DiffSummary';
 
 /* oxlint-disable anti-slop/no-module-mocking -- These tests exercise DiffSummary's DiffView module integration. */
@@ -39,6 +41,10 @@ describe('DiffSummary', () => {
   it('keeps an expanded summary open when its virtualized row remounts', () => {
     cleanup = render(() => <DiffSummary diffs={diffs} stateKey="session-1:message-1" />, container);
 
+    const icon = container.querySelector<HTMLElement>('.diff-summary-btn .ui-icon');
+    expect(icon).toBeInstanceOf(HTMLSpanElement);
+    expect(icon?.style.getPropertyValue('--ui-icon-width')).toBe('10px');
+    expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(navArrowRightIcon));
     container.querySelector<HTMLButtonElement>('.diff-summary-btn')?.click();
     expect(container.querySelector('.diff-summary-content')?.textContent).toContain('Diff details');
 

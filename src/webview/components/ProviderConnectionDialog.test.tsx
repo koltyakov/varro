@@ -708,6 +708,15 @@ describe('ProviderConnectionDialog OAuth flow', () => {
 });
 
 describe('ProviderConnectionDialog closing and cancellation', () => {
+  it('renders the close control with the shared icon sizing', () => {
+    renderDialog();
+
+    const closeIcon = dialog()?.querySelector<HTMLElement>('.provider-connect-close .ui-icon');
+    expect(closeIcon?.style.getPropertyValue('--ui-icon-width')).toBe('16px');
+    expect(closeIcon?.style.getPropertyValue('--ui-icon-height')).toBe('16px');
+    expect(closeIcon?.getAttribute('aria-hidden')).toBe('true');
+  });
+
   it('closes on Escape from anywhere in the dialog', () => {
     const onClose = renderDialog();
 

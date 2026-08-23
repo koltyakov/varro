@@ -12,8 +12,10 @@ import { observePopupViewport, placeTriggerDropdownAnchor } from '../lib/popup-p
 import { modelSupportsVariants } from '../lib/model-capabilities';
 import { compareProviders, sortProviderModels } from '../lib/model-ordering';
 import { STORAGE_KEYS, readStored, writeStored } from '../lib/state-storage';
+import { checkIcon, pinIcon, searchIcon, xmarkIcon } from '../lib/ui-icons';
 import { FormattedModelName } from './chat-input/ToolbarPickers';
 import { Tooltip } from './Tooltip';
+import { UiIcon } from './UiIcon';
 
 interface ModelSelection {
   providerID?: string;
@@ -335,22 +337,13 @@ export function ModelPicker(props: {
         style={{ outline: 'none' }}
       >
         <div class="dropdown-search model-picker-search">
-          <svg class="dropdown-search-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path
-              d="M17 17L21 21"
-              stroke="currentColor"
-              stroke-width="1.6"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-            <path
-              d="M3 11C3 15.4183 6.58172 19 11 19C13.213 19 15.2161 18.1015 16.6644 16.6493C18.1077 15.2022 19 13.2053 19 11C19 6.58172 15.4183 3 11 3C6.58172 3 3 6.58172 3 11Z"
-              stroke="currentColor"
-              stroke-width="1.6"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-          </svg>
+          <UiIcon
+            source={searchIcon}
+            class="dropdown-search-icon"
+            width={12}
+            height={12}
+            aria-hidden="true"
+          />
           <input
             ref={(el) => {
               searchInputRef = el;
@@ -375,9 +368,7 @@ export function ModelPicker(props: {
                 aria-label="Clear search"
                 tabIndex={-1}
               >
-                <svg viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M3.22 3.22a.75.75 0 011.06 0L8 6.94l3.72-3.72a.75.75 0 111.06 1.06L9.06 8l3.72 3.72a.75.75 0 11-1.06 1.06L8 9.06l-3.72 3.72a.75.75 0 01-1.06-1.06L6.94 8 3.22 4.28a.75.75 0 010-1.06z" />
-                </svg>
+                <UiIcon source={xmarkIcon} width={11} height={11} />
               </button>
             </Tooltip>
           </Show>
@@ -475,13 +466,12 @@ export function ModelPicker(props: {
                                   </Show>
                                   <span class="dropdown-check">
                                     <Show when={isSelected(provider.id, model.id)}>
-                                      <svg
+                                      <UiIcon
+                                        source={checkIcon}
                                         class="h-3 w-3 text-vscode-accent"
-                                        viewBox="0 0 16 16"
-                                        fill="currentColor"
-                                      >
-                                        <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
-                                      </svg>
+                                        width={12}
+                                        height={12}
+                                      />
                                     </Show>
                                   </span>
                                 </span>
@@ -494,14 +484,12 @@ export function ModelPicker(props: {
                                   onClick={() => setModelPinned(provider.id, model.id, !pinned())}
                                   aria-label={`${pinned() ? 'Unpin' : 'Pin'} ${entry.item.name}`}
                                 >
-                                  <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                                    <path
-                                      d="M5.25 2.25h5.5l-.85 3.4 1.85 1.85v1H8.6v4.75L8 14l-.6-.75V8.5H4.25v-1L6.1 5.65l-.85-3.4Z"
-                                      stroke="currentColor"
-                                      stroke-width="1.1"
-                                      stroke-linejoin="round"
-                                    />
-                                  </svg>
+                                  <UiIcon
+                                    source={pinIcon}
+                                    width={14}
+                                    height={14}
+                                    aria-hidden="true"
+                                  />
                                 </button>
                               </Tooltip>
                             </div>

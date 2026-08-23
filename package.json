@@ -79,6 +79,7 @@
     "cross-spawn": "7.0.6",
     "css.escape": "1.5.1",
     "esbuild": "0.28.2",
+    "iconoir": "^7.12.1",
     "jsdom": "30.0.1",
     "material-icon-theme": "^5.37.0",
     "oxfmt": "0.64.0",
@@ -128,6 +129,17 @@
         "title": "Varro: Search Sessions"
       },
       {
+        "command": "varro.chat.openSettings",
+        "title": "Varro: Open Settings",
+        "shortTitle": "Settings",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "varro.chat.openStats",
+        "title": "Varro: Usage Stats",
+        "shortTitle": "Stats"
+      },
+      {
         "command": "varro.chat.abort",
         "title": "Varro: Abort Session",
         "enablement": "varro:canAbortSession"
@@ -148,7 +160,13 @@
       },
       {
         "command": "varro.about",
-        "title": "Varro: About"
+        "title": "Varro: About",
+        "shortTitle": "About"
+      },
+      {
+        "command": "varro.openGitHub",
+        "title": "Varro: Open GitHub",
+        "shortTitle": "GitHub"
       },
       {
         "command": "varro.showOutput",
@@ -184,6 +202,13 @@
         "title": "Varro: Add to Context"
       }
     ],
+    "submenus": [
+      {
+        "id": "varro.viewActions",
+        "label": "More Actions",
+        "icon": "$(more)"
+      }
+    ],
     "menus": {
       "explorer/context": [
         {
@@ -210,6 +235,32 @@
           "command": "varro.generateCommitMessage",
           "when": "scmProvider == git",
           "group": "navigation@99"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "varro.chat.openSettings",
+          "when": "view == varro.chat",
+          "group": "navigation@1"
+        },
+        {
+          "submenu": "varro.viewActions",
+          "when": "view == varro.chat",
+          "group": "navigation@2"
+        }
+      ],
+      "varro.viewActions": [
+        {
+          "command": "varro.about",
+          "group": "1_main@1"
+        },
+        {
+          "command": "varro.chat.openStats",
+          "group": "1_main@2"
+        },
+        {
+          "command": "varro.openGitHub",
+          "group": "1_main@3"
         }
       ],
       "commandPalette": [

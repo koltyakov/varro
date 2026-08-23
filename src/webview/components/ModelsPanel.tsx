@@ -42,6 +42,16 @@ import { ProviderConnectionDialog } from './ProviderConnectionDialog';
 import { ProviderDisconnectionDialog } from './ProviderDisconnectionDialog';
 import { Tooltip } from './Tooltip';
 import { isString } from '../lib/runtime-values';
+import {
+  calendarIcon,
+  menuIcon,
+  navArrowRightIcon,
+  pinIcon,
+  warningCircleIcon,
+  xmarkIcon,
+} from '../lib/ui-icons';
+import { NavArrowLeftControlIcon } from './ControlIcons';
+import { UiIcon } from './UiIcon';
 
 type ModelProvider = (typeof state.providers)[number];
 type ProviderModel = ModelProvider['models'][string];
@@ -83,6 +93,7 @@ export function ModelsPanel() {
   const [contextMenu, setContextMenu] = createSignal<ModelContextMenuState | null>(null);
   const [renameDialog, setRenameDialog] = createSignal<ModelRenameState | null>(null);
   const [modelCatalogProvider, setModelCatalogProvider] = createSignal<ModelProvider | null>(null);
+  const [showProviderActions, setShowProviderActions] = createSignal(false);
   const [isSaving, setIsSaving] = createSignal(false);
   const [isReloading, setIsReloading] = createSignal(false);
   const [providerConnectionData, setProviderConnectionData] = createSignal<{
@@ -98,6 +109,8 @@ export function ModelsPanel() {
     loading: boolean;
   } | null>(null);
   let bodyRef: HTMLDivElement | undefined;
+  let providerActionsButtonRef: HTMLButtonElement | undefined;
+  let providerActionsMenuRef: HTMLDivElement | undefined;
   let renameInputRef: HTMLInputElement | undefined;
   let reloadIndicatorTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -257,6 +270,28 @@ export function ModelsPanel() {
     postMessage({ type: 'providers/refresh' });
   }
 
+  function focusFirstProviderAction() {
+    queueMicrotask(() =>
+      providerActionsMenuRef?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
+    );
+  }
+
+  function handleProviderActionsKeyDown(event: KeyboardEvent) {
+    const items = Array.from(
+      providerActionsMenuRef?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []
+    );
+    if (!items.length) return;
+    const currentIndex = items.findIndex((item) => item === document.activeElement);
+    let nextIndex: number | undefined;
+    if (event.key === 'ArrowDown') nextIndex = (currentIndex + 1) % items.length;
+    if (event.key === 'ArrowUp') nextIndex = (currentIndex - 1 + items.length) % items.length;
+    if (event.key === 'Home') nextIndex = 0;
+    if (event.key === 'End') nextIndex = items.length - 1;
+    if (nextIndex === undefined) return;
+    event.preventDefault();
+    items[nextIndex]?.focus();
+  }
+
   async function openProviderConnection(initialProviderID: string | null = null) {
     if (providerConnectionData()) return;
     const loadingState = { providers: [], error: '', loading: true, initialProviderID };
@@ -317,11 +352,16 @@ export function ModelsPanel() {
   });
 
   onMount(() => {
-    const onPointerDown = () => closeContextMenu();
-    const onEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || !contextMenu()) return;
-      event.preventDefault();
+    const onPointerDown = () => {
       closeContextMenu();
+      setShowProviderActions(false);
+    };
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || (!contextMenu() && !showProviderActions())) return;
+      event.preventDefault();
+      if (showProviderActions()) providerActionsButtonRef?.focus();
+      closeContextMenu();
+      setShowProviderActions(false);
     };
     window.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('keydown', onEscape);
@@ -342,85 +382,91 @@ export function ModelsPanel() {
                 onClick={() => setShowModels(false)}
                 aria-label="Back"
               >
-                <svg viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M5.928 7.976l4.357-4.357-.618-.62L4.69 7.976l4.977 4.977.618-.618z" />
-                </svg>
+                <NavArrowLeftControlIcon class="models-header-back-icon" />
               </button>
             </Tooltip>
             <span class="models-header-title">Models</span>
           </div>
           <div class="models-header-actions">
-            <Tooltip content={isReloading() ? 'Reloading providers' : 'Reload providers'}>
+            <Tooltip content="Provider actions">
               <button
+                ref={(element) => (providerActionsButtonRef = element)}
                 type="button"
-                class={`chat-header-btn ${isReloading() ? 'is-loading' : ''}`}
-                onClick={reloadProviders}
-                aria-label={isReloading() ? 'Reloading providers' : 'Reload providers'}
+                class="chat-header-btn"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={() => setShowProviderActions((open) => !open)}
+                onKeyDown={(event) => {
+                  if (event.key !== 'ArrowDown') return;
+                  event.preventDefault();
+                  setShowProviderActions(true);
+                  focusFirstProviderAction();
+                }}
+                aria-label="Provider actions"
+                aria-haspopup="menu"
+                aria-expanded={showProviderActions()}
                 aria-busy={isReloading()}
-                disabled={isReloading()}
               >
-                <svg
-                  class="models-reload-icon"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  aria-hidden="true"
+                <UiIcon
+                  source={menuIcon}
+                  class="models-provider-actions-icon"
+                  width={16}
+                  height={16}
+                />
+              </button>
+            </Tooltip>
+            <Show when={showProviderActions()}>
+              <div
+                ref={(element) => (providerActionsMenuRef = element)}
+                class="models-provider-actions-menu"
+                role="menu"
+                onPointerDown={(event) => event.stopPropagation()}
+                onKeyDown={handleProviderActionsKeyDown}
+              >
+                <button
+                  type="button"
+                  class="models-context-menu-item"
+                  role="menuitem"
+                  onClick={(event) => {
+                    setShowProviderActions(false);
+                    if (event.altKey) openProviderSetup();
+                    else void openProviderConnection();
+                  }}
                 >
-                  <path d="M21.8883 13.5C21.1645 18.3113 17.013 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C16.1006 2 19.6248 4.46819 21.1679 8" />
-                  <path d="M17 8H21.4C21.7314 8 22 7.73137 22 7.4V3" />
-                </svg>
-              </button>
-            </Tooltip>
-            <Tooltip content="Disconnect provider (Option-click for terminal manager)">
-              <button
-                type="button"
-                class="chat-header-btn"
-                onClick={(event) =>
-                  event.altKey ? openProviderLogout() : void openProviderDisconnection()
-                }
-                aria-label="Remove provider"
-              >
-                <svg viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M3 7.25h10a.75.75 0 010 1.5H3a.75.75 0 010-1.5z" />
-                </svg>
-              </button>
-            </Tooltip>
-            <Tooltip content="Connect provider (Option-click for terminal setup)">
-              <button
-                type="button"
-                class="chat-header-btn"
-                onClick={(event) =>
-                  event.altKey ? openProviderSetup() : void openProviderConnection()
-                }
-                aria-label="Add provider"
-              >
-                <svg viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M8 2.25a.75.75 0 01.75.75v4.25H13a.75.75 0 010 1.5H8.75V13a.75.75 0 01-1.5 0V8.75H3a.75.75 0 010-1.5h4.25V3A.75.75 0 018 2.25z" />
-                </svg>
-              </button>
-            </Tooltip>
+                  Add provider
+                </button>
+                <button
+                  type="button"
+                  class="models-context-menu-item"
+                  role="menuitem"
+                  onClick={(event) => {
+                    setShowProviderActions(false);
+                    if (event.altKey) openProviderLogout();
+                    else void openProviderDisconnection();
+                  }}
+                >
+                  Remove provider
+                </button>
+                <button
+                  type="button"
+                  class="models-context-menu-item"
+                  role="menuitem"
+                  disabled={isReloading()}
+                  onClick={() => {
+                    setShowProviderActions(false);
+                    reloadProviders();
+                  }}
+                >
+                  {isReloading() ? 'Refreshing list' : 'Refresh list'}
+                </button>
+              </div>
+            </Show>
           </div>
         </div>
       </div>
 
       <Show when={state.providerRefreshPending && runningAgentCount() > 0}>
         <div class="models-provider-refresh-notice" role="status">
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.6"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M12 7L12 13" />
-            <path d="M12 17.01L12.01 16.9989" />
-            <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" />
-          </svg>
+          <UiIcon source={warningCircleIcon} width={14} height={14} aria-hidden="true" />
           <span>
             <strong>Configuration update queued.</strong> Changes will appear automatically when{' '}
             {runningAgentCount()} running{' '}
@@ -464,9 +510,7 @@ export function ModelsPanel() {
                     onClick={() => setQuery('')}
                     aria-label="Clear filter"
                   >
-                    <svg viewBox="0 0 16 16" fill="currentColor">
-                      <path d="M3.22 3.22a.75.75 0 011.06 0L8 6.94l3.72-3.72a.75.75 0 111.06 1.06L9.06 8l3.72 3.72a.75.75 0 11-1.06 1.06L8 9.06l-3.72 3.72a.75.75 0 01-1.06-1.06L6.94 8 3.22 4.28a.75.75 0 010-1.06z" />
-                    </svg>
+                    <UiIcon source={xmarkIcon} width={12} height={12} />
                   </button>
                 </Tooltip>
               </Show>
@@ -671,9 +715,7 @@ export function ModelsPanel() {
                     onClick={() => setRenameDialog(null)}
                     aria-label="Close"
                   >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-                      <path d="M6.758 17.243L12 12m5.243-5.243L12 12m0 0L6.758 6.757M12 12l5.243 5.243" />
-                    </svg>
+                    <UiIcon source={xmarkIcon} width={16} height={16} aria-hidden="true" />
                   </button>
                 </div>
                 <div class="provider-connect-body">
@@ -880,9 +922,7 @@ function ModelCatalogDialog(props: { provider: ModelProvider; onClose: () => voi
               onClick={props.onClose}
               aria-label="Close"
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-                <path d="M6.758 17.243L12 12m5.243-5.243L12 12m0 0L6.758 6.757M12 12l5.243 5.243" />
-              </svg>
+              <UiIcon source={xmarkIcon} width={16} height={16} aria-hidden="true" />
             </button>
           </div>
           <div class="models-model-catalog-search">
@@ -1012,17 +1052,12 @@ function ProviderSection(props: {
           class="models-provider-toggle"
           onClick={() => !props.forceExpanded && setExpanded((v) => !v)}
         >
-          <svg
+          <UiIcon
+            source={navArrowRightIcon}
             class={`models-chevron ${isExpanded() ? 'expanded' : ''}`}
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <path d="M6 4l4 4-4 4" />
-          </svg>
+            width={12}
+            height={12}
+          />
           <span class="models-provider-name">{props.provider.name}</span>
           <span class="models-provider-count">
             {props.reconnectRequired
@@ -1131,14 +1166,7 @@ function ProviderSection(props: {
                       <Show when={isModelPinned(props.provider.id, model.id)}>
                         <Tooltip content="Pinned model">
                           <span class="models-model-pinned-marker" aria-label="Pinned model">
-                            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                              <path
-                                d="M5.25 2.25h5.5l-.85 3.4 1.85 1.85v1H8.6v4.75L8 14l-.6-.75V8.5H4.25v-1L6.1 5.65l-.85-3.4Z"
-                                stroke="currentColor"
-                                stroke-width="1.1"
-                                stroke-linejoin="round"
-                              />
-                            </svg>
+                            <UiIcon source={pinIcon} width={12} height={12} aria-hidden="true" />
                           </span>
                         </Tooltip>
                       </Show>
@@ -1157,12 +1185,12 @@ function ProviderSection(props: {
                           {(date) => (
                             <Tooltip content={`Released ${date()}`}>
                               <span class="model-release-date" aria-label={`Released ${date()}`}>
-                                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                  <path d="M15 4V2M15 4V6M15 4H10.5M3 10V19C3 20.1046 3.89543 21 5 21H19C20.1046 21 21 20.1046 21 19V10H3Z" />
-                                  <path d="M3 10V6C3 4.89543 3.89543 4 5 4H7" />
-                                  <path d="M7 2V6" />
-                                  <path d="M21 10V6C21 4.89543 20.1046 4 19 4H18.5" />
-                                </svg>
+                                <UiIcon
+                                  source={calendarIcon}
+                                  width={13}
+                                  height={13}
+                                  aria-hidden="true"
+                                />
                                 {date()}
                               </span>
                             </Tooltip>
@@ -1231,33 +1259,43 @@ function ModelCapabilityBadge(props: { capability: ModelCapability; label: strin
 
 function CapabilityIcon(props: { capability: ModelCapability }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none">
-      <Show when={props.capability === 'vision'}>
-        <path d="M21 3.6V20.4C21 20.7314 20.7314 21 20.4 21H3.6C3.26863 21 3 20.7314 3 20.4V3.6C3 3.26863 3.26863 3 3.6 3H20.4C20.7314 3 21 3.26863 21 3.6Z" />
-        <path d="M3 16L10 13L21 18" />
-        <path d="M16 10C14.8954 10 14 9.10457 14 8C14 6.89543 14.8954 6 16 6C17.1046 6 18 6.89543 18 8C18 9.10457 17.1046 10 16 10Z" />
-      </Show>
-      <Show when={props.capability === 'video'}>
-        <path d="M21 3.6V20.4C21 20.7314 20.7314 21 20.4 21H3.6C3.26863 21 3 20.7314 3 20.4V3.6C3 3.26863 3.26863 3 3.6 3H20.4C20.7314 3 21 3.26863 21 3.6Z" />
-        <path d="M9.89768 8.51296C9.49769 8.28439 9 8.57321 9 9.03391V14.9661C9 15.4268 9.49769 15.7156 9.89768 15.487L15.0883 12.5209C15.4914 12.2906 15.4914 11.7094 15.0883 11.4791L9.89768 8.51296Z" />
-      </Show>
-      <Show when={props.capability === 'tools'}>
-        <path d="M10.0503 10.6066L2.97923 17.6777C2.19818 18.4587 2.19818 19.7251 2.97923 20.5061C3.76027 21.2872 5.0266 21.2872 5.80765 20.5061L12.8787 13.4351" />
-        <path d="M17.1927 13.7994L21.071 17.6777C21.8521 18.4587 21.8521 19.7251 21.071 20.5061C20.29 21.2872 19.0236 21.2872 18.2426 20.5061L12.0341 14.2977" />
-        <path d="M6.73267 5.90381L4.61135 6.61092L2.49003 3.07539L3.90424 1.66117L7.43978 3.78249L6.73267 5.90381ZM6.73267 5.90381L9.5629 8.73404" />
-        <path d="M10.0503 10.6066C9.2065 8.45359 9.37147 5.62861 11.111 3.8891C12.8505 2.14958 16.0607 1.76778 17.8285 2.82844L14.7878 5.86911L14.5052 8.98015L17.6162 8.69754L20.6569 5.65686C21.7176 7.42463 21.3358 10.6349 19.5963 12.3744C17.8567 14.1139 15.0318 14.2789 12.8788 13.435" />
-      </Show>
-      <Show when={props.capability === 'variants'}>
-        <path d="M7 14C5.34315 14 4 15.3431 4 17C4 18.6569 5.34315 20 7 20C7.35064 20 7.68722 19.9398 8 19.8293" />
-        <path d="M4.26392 15.6046C2.9243 14.9582 2 13.587 2 12C2 10.7883 2.53873 9.70251 3.38974 8.96898" />
-        <path d="M3.42053 8.8882C3.1549 8.49109 3 8.01363 3 7.5C3 6.11929 4.11929 5 5.5 5C6.06291 5 6.58237 5.18604 7.00024 5.5" />
-        <path d="M7.23769 5.56533C7.08524 5.24215 7 4.88103 7 4.5C7 3.11929 8.11929 2 9.5 2C10.8807 2 12 3.11929 12 4.5V20M8 20C8 21.1046 8.89543 22 10 22C11.1046 22 12 21.1046 12 20M12 7C12 8.65685 13.3431 10 15 10" />
-        <path d="M17 14C18.6569 14 20 15.3431 20 17C20 18.6569 18.6569 20 17 20C16.6494 20 16.3128 19.9398 16 19.8293" />
-        <path d="M19.7361 15.6046C21.0757 14.9582 22 13.587 22 12C22 10.7883 21.4612 9.70251 20.6102 8.96898" />
-        <path d="M20.5795 8.8882C20.8451 8.49109 21 8.01363 21 7.5C21 6.11929 19.8807 5 18.5 5C17.9371 5 17.4176 5.18604 16.9998 5.5" />
-        <path d="M12 4.5C12 3.11929 13.1193 2 14.5 2C15.8807 2 17 3.11929 17 4.5C17 4.88103 16.9148 5.24215 16.7623 5.56533M16 20C16 21.1046 15.1046 22 14 22C12.8954 22 12 21.1046 12 20" />
-      </Show>
-      <Show when={props.capability === 'pdf'}>
+    <Show
+      when={props.capability === 'pdf'}
+      fallback={
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <Show when={props.capability === 'vision'}>
+            <path d="M21 3.6V20.4C21 20.7314 20.7314 21 20.4 21H3.6C3.26863 21 3 20.7314 3 20.4V3.6C3 3.26863 3.26863 3 3.6 3H20.4C20.7314 3 21 3.26863 21 3.6Z" />
+            <path d="M3 16L10 13L21 18" />
+            <path d="M16 10C14.8954 10 14 9.10457 14 8C14 6.89543 14.8954 6 16 6C17.1046 6 18 6.89543 18 8C18 9.10457 17.1046 10 16 10Z" />
+          </Show>
+          <Show when={props.capability === 'video'}>
+            <path d="M21 3.6V20.4C21 20.7314 20.7314 21 20.4 21H3.6C3.26863 21 3 20.7314 3 20.4V3.6C3 3.26863 3.26863 3 3.6 3H20.4C20.7314 3 21 3.26863 21 3.6Z" />
+            <path d="M9.89768 8.51296C9.49769 8.28439 9 8.57321 9 9.03391V14.9661C9 15.4268 9.49769 15.7156 9.89768 15.487L15.0883 12.5209C15.4914 12.2906 15.4914 11.7094 15.0883 11.4791L9.89768 8.51296Z" />
+          </Show>
+          <Show when={props.capability === 'tools'}>
+            <path d="M10.0503 10.6066L2.97923 17.6777C2.19818 18.4587 2.19818 19.7251 2.97923 20.5061C3.76027 21.2872 5.0266 21.2872 5.80765 20.5061L12.8787 13.4351" />
+            <path d="M17.1927 13.7994L21.071 17.6777C21.8521 18.4587 21.8521 19.7251 21.071 20.5061C20.29 21.2872 19.0236 21.2872 18.2426 20.5061L12.0341 14.2977" />
+            <path d="M6.73267 5.90381L4.61135 6.61092L2.49003 3.07539L3.90424 1.66117L7.43978 3.78249L6.73267 5.90381ZM6.73267 5.90381L9.5629 8.73404" />
+            <path d="M10.0503 10.6066C9.2065 8.45359 9.37147 5.62861 11.111 3.8891C12.8505 2.14958 16.0607 1.76778 17.8285 2.82844L14.7878 5.86911L14.5052 8.98015L17.6162 8.69754L20.6569 5.65686C21.7176 7.42463 21.3358 10.6349 19.5963 12.3744C17.8567 14.1139 15.0318 14.2789 12.8788 13.435" />
+          </Show>
+          <Show when={props.capability === 'variants'}>
+            <path d="M7 14C5.34315 14 4 15.3431 4 17C4 18.6569 5.34315 20 7 20C7.35064 20 7.68722 19.9398 8 19.8293" />
+            <path d="M4.26392 15.6046C2.9243 14.9582 2 13.587 2 12C2 10.7883 2.53873 9.70251 3.38974 8.96898" />
+            <path d="M3.42053 8.8882C3.1549 8.49109 3 8.01363 3 7.5C3 6.11929 4.11929 5 5.5 5C6.06291 5 6.58237 5.18604 7.00024 5.5" />
+            <path d="M7.23769 5.56533C7.08524 5.24215 7 4.88103 7 4.5C7 3.11929 8.11929 2 9.5 2C10.8807 2 12 3.11929 12 4.5V20M8 20C8 21.1046 8.89543 22 10 22C11.1046 22 12 21.1046 12 20M12 7C12 8.65685 13.3431 10 15 10" />
+            <path d="M17 14C18.6569 14 20 15.3431 20 17C20 18.6569 18.6569 20 17 20C16.6494 20 16.3128 19.9398 16 19.8293" />
+            <path d="M19.7361 15.6046C21.0757 14.9582 22 13.587 22 12C22 10.7883 21.4612 9.70251 20.6102 8.96898" />
+            <path d="M20.5795 8.8882C20.8451 8.49109 21 8.01363 21 7.5C21 6.11929 19.8807 5 18.5 5C17.9371 5 17.4176 5.18604 16.9998 5.5" />
+            <path d="M12 4.5C12 3.11929 13.1193 2 14.5 2C15.8807 2 17 3.11929 17 4.5C17 4.88103 16.9148 5.24215 16.7623 5.56533M16 20C16 21.1046 15.1046 22 14 22C12.8954 22 12 21.1046 12 20" />
+          </Show>
+          <Show when={props.capability === 'audio'}>
+            <path d="M12 3C10.3431 3 9 4.34315 9 6V12C9 13.6569 10.3431 15 12 15C13.6569 15 15 13.6569 15 12V6C15 4.34315 13.6569 3 12 3Z" />
+            <path d="M5 11V12C5 15.866 8.13401 19 12 19C15.866 19 19 15.866 19 12V11M12 19V22M9 22H15" />
+          </Show>
+        </svg>
+      }
+    >
+      <svg viewBox="0 0 24 24" fill="none">
         <g transform="translate(1.5 1.5) scale(1.4)">
           <path
             d="M2.5 6.5V6H2V6.5H2.5ZM6.5 6.5V6H6V6.5H6.5ZM6.5 10.5H6V11H6.5V10.5ZM13.5 3.5H14V3.29289L13.8536 3.14645L13.5 3.5ZM10.5 0.5L10.8536 0.146447L10.7071 0H10.5V0.5ZM2.5 7H3.5V6H2.5V7ZM3 11V8.5H2V11H3ZM3 8.5V6.5H2V8.5H3ZM3.5 8H2.5V9H3.5V8ZM4 7.5C4 7.77614 3.77614 8 3.5 8V9C4.32843 9 5 8.32843 5 7.5H4ZM3.5 7C3.77614 7 4 7.22386 4 7.5H5C5 6.67157 4.32843 6 3.5 6V7ZM6 6.5V10.5H7V6.5H6ZM6.5 11H7.5V10H6.5V11ZM9 9.5V7.5H8V9.5H9ZM7.5 6H6.5V7H7.5V6ZM9 7.5C9 6.67157 8.32843 6 7.5 6V7C7.77614 7 8 7.22386 8 7.5H9ZM7.5 11C8.32843 11 9 10.3284 9 9.5H8C8 9.77614 7.77614 10 7.5 10V11ZM10 6V11H11V6H10ZM10.5 7H13V6H10.5V7ZM10.5 9H12V8H10.5V9ZM2 5V1.5H1V5H2ZM13 3.5V5H14V3.5H13ZM2.5 1H10.5V0H2.5V1ZM10.1464 0.853553L13.1464 3.85355L13.8536 3.14645L10.8536 0.146447L10.1464 0.853553ZM2 1.5C2 1.22386 2.22386 1 2.5 1V0C1.67157 0 1 0.671573 1 1.5H2ZM1 12V13.5H2V12H1ZM2.5 15H12.5V14H2.5V15ZM14 13.5V12H13V13.5H14ZM12.5 15C13.3284 15 14 14.3284 14 13.5H13C13 13.7761 12.7761 14 12.5 14V15ZM1 13.5C1 14.3284 1.67157 15 2.5 15V14C2.22386 14 2 13.7761 2 13.5H1Z"
@@ -1265,12 +1303,8 @@ function CapabilityIcon(props: { capability: ModelCapability }) {
             stroke="none"
           />
         </g>
-      </Show>
-      <Show when={props.capability === 'audio'}>
-        <path d="M12 3C10.3431 3 9 4.34315 9 6V12C9 13.6569 10.3431 15 12 15C13.6569 15 15 13.6569 15 12V6C15 4.34315 13.6569 3 12 3Z" />
-        <path d="M5 11V12C5 15.866 8.13401 19 12 19C15.866 19 19 15.866 19 12V11M12 19V22M9 22H15" />
-      </Show>
-    </svg>
+      </svg>
+    </Show>
   );
 }
 

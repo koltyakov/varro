@@ -416,7 +416,7 @@ describe('RalphDashboard', () => {
 
     expect(continueButton).toBeInstanceOf(HTMLButtonElement);
     expect(continueButton?.getAttribute('aria-label')).toBe('Add 5 runs & continue');
-    expect(continueButton?.querySelector('svg')).toBeInstanceOf(SVGElement);
+    expect(continueButton?.querySelector('.ui-icon')).toBeInstanceOf(HTMLSpanElement);
     expect(continueButton?.getAttribute('title')).toBe(
       'Increase the iteration limit by 5 and continue the Ralph loop.'
     );

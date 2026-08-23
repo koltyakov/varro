@@ -1,4 +1,6 @@
 import { render } from 'solid-js/web';
+import { cableTagIcon } from '../../lib/ui-icons';
+import { toCssUrl } from '../UiIcon';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../../types';
 import { client } from '../../lib/client';
@@ -87,6 +89,35 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe('SessionActionFeedback icon state', () => {
+  it('uses sized adapter icons for errors and preserves dismissal behavior', () => {
+    const onDismissError = vi.fn();
+    cleanup = render(
+      () => (
+        <SessionActionFeedback error={() => 'Session failed'} onDismissError={onDismissError} />
+      ),
+      container
+    );
+
+    const feedback = document.body.querySelector<HTMLElement>('.session-action-feedback');
+    expect(feedback?.classList).toContain('is-error');
+    expect(feedback?.getAttribute('role')).toBe('alert');
+
+    const glyph = feedback?.querySelector<HTMLElement>('.session-action-feedback-glyph');
+    expect(glyph?.classList).toContain('ui-icon');
+    expect(glyph?.style.getPropertyValue('--ui-icon-width')).toBe('11px');
+
+    const dismissIcon = feedback?.querySelector<HTMLElement>(
+      '.session-action-feedback-dismiss-icon'
+    );
+    expect(dismissIcon?.classList).toContain('ui-icon');
+    expect(dismissIcon?.style.getPropertyValue('--ui-icon-width')).toBe('13px');
+
+    feedback?.querySelector<HTMLButtonElement>('.session-action-feedback-dismiss')?.click();
+    expect(onDismissError).toHaveBeenCalledOnce();
+  });
+});
+
 describe('ActiveChatHeader', () => {
   it('opens the session context menu from the title', () => {
     renderHeader();
@@ -150,7 +181,11 @@ describe('ActiveChatHeader', () => {
     const setPinned = vi.spyOn(client.varro.session, 'setPinned').mockResolvedValueOnce([]);
     renderHeader();
 
-    expect(container.querySelector('[aria-label="Pinned session"]')).not.toBeNull();
+    const pinnedIcon = container.querySelector<HTMLElement>(
+      '[aria-label="Pinned session"] .session-item-pinned-icon'
+    );
+    expect(pinnedIcon?.classList).toContain('ui-icon');
+    expect(pinnedIcon?.style.getPropertyValue('--ui-icon-width')).toBe('12px');
     container
       .querySelector<HTMLElement>('.chat-header-session-title')!
       .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
@@ -187,10 +222,16 @@ describe('ActiveChatHeader', () => {
       await vi.waitFor(() => {
         const feedback = document.body.querySelector<HTMLElement>('.session-action-feedback');
         expect(feedback?.textContent?.trim()).toBe('Share link copied');
+        expect(feedback?.querySelector('.session-action-feedback-glyph')?.classList).toContain(
+          'ui-icon'
+        );
       });
       const sharedMarker = container.querySelector('[aria-label="Session is shared"]');
       expect(sharedMarker?.getAttribute('aria-label')).toBe('Session is shared');
       expect(sharedMarker?.getAttribute('title')).toBeNull();
+      const sharedIcon = sharedMarker?.querySelector<HTMLElement>('.shared-session-icon');
+      expect(sharedIcon?.classList).toContain('ui-icon');
+      expect(sharedIcon?.style.getPropertyValue('--ui-icon-width')).toBe('12px');
     } finally {
       if (clipboardDescriptor) {
         Object.defineProperty(navigator, 'clipboard', clipboardDescriptor);
@@ -217,5 +258,9 @@ describe('ActiveChatHeader', () => {
     });
     const duration = container.querySelector('.chat-header-session-duration');
     expect(duration?.previousElementSibling?.classList).toContain('chat-header-subagents');
+    const subagentIcon = container.querySelector<HTMLElement>('.session-item-subagents-icon');
+    expect(subagentIcon?.classList).toContain('ui-icon');
+    expect(subagentIcon?.style.getPropertyValue('--ui-icon-width')).toBe('16px');
+    expect(subagentIcon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(cableTagIcon));
   });
 });

@@ -10,7 +10,9 @@ import {
 import { getDiffSummaryStats } from './chat/SessionListView';
 import { formatDisplayPath, getLeafPathName } from '../lib/path-display';
 import { formatEditCount } from '../lib/format';
+import { navArrowDownIcon } from '../lib/ui-icons';
 import { FileTypeIcon } from './FileTypeIcon';
+import { UiIcon } from './UiIcon';
 import { isObject } from '../lib/runtime-values';
 
 type FileChangeKindBadges = Record<FileChangeKind, { label: string; title: string; class: string }>;
@@ -154,18 +156,12 @@ export function ChangedFilesList() {
           onClick={() => setCollapsed(!collapsed())}
           aria-expanded={!collapsed()}
         >
-          <svg
+          <UiIcon
+            source={navArrowDownIcon}
             class={`todo-block-chevron ${collapsed() ? 'collapsed' : ''}`}
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M4 6l4 4 4-4" />
-          </svg>
+            width={11}
+            height={11}
+          />
           <span class="todo-block-title">Files</span>
           <span class="todo-block-count">{totalLabel()}</span>
           <Show when={hasLineCounts()}>

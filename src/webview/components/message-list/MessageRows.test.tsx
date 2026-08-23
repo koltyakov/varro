@@ -3,7 +3,9 @@ import { render } from 'solid-js/web';
 import type * as UseOpenCodeModule from '../../hooks/useOpenCode';
 import { formatClockTime } from '../../lib/message-time';
 import { setState } from '../../lib/state';
+import { gitForkIcon } from '../../lib/ui-icons';
 import { assistantMessage } from '../MessageList.test-utils';
+import { toCssUrl } from '../UiIcon';
 import { AssistantDialogSummaryForMessage, getForkBoundaryMessageId } from './MessageRows';
 
 const forkSessionMock = vi.hoisted(() => vi.fn(async () => 'forked-session'));
@@ -104,6 +106,10 @@ describe('AssistantDialogSummaryForMessage', () => {
       'button[aria-label="Fork chat from here"]'
     );
     expect(button).not.toBeNull();
+    const icon = button?.querySelector<HTMLElement>('.ui-icon');
+    expect(icon).toBeInstanceOf(HTMLSpanElement);
+    expect(icon?.style.getPropertyValue('--ui-icon-width')).toBe('16px');
+    expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(gitForkIcon));
 
     button?.click();
 

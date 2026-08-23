@@ -542,7 +542,8 @@
   padding: 0;
 }
 
-.ralph-dashboard-btn-icon svg {
+.ralph-dashboard-btn-icon svg,
+.ralph-dashboard-btn-icon .ui-icon {
   width: 11px;
   height: 11px;
 }

@@ -240,6 +240,23 @@
   --z-topmost: 2000;
 }
 
+.ui-icon {
+  display: inline-block;
+  flex-shrink: 0;
+  width: var(--ui-icon-width, 1em);
+  height: var(--ui-icon-height, var(--ui-icon-width, 1em));
+  background-color: currentColor;
+  -webkit-mask-image: var(--ui-icon-mask);
+  mask-image: var(--ui-icon-mask);
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  vertical-align: middle;
+}
+
 @keyframes fade-in {
   from {
     opacity: 0;

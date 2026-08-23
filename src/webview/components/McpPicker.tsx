@@ -6,6 +6,8 @@ import { client } from '../lib/client';
 import { trapModalFocus } from '../lib/modal-focus';
 import { getSelectedMcpsForSession, setMcpStatus, state } from '../lib/state';
 import { observePopupViewport, placeDropdownAnchor } from '../lib/popup-position';
+import { checkIcon, xmarkIcon } from '../lib/ui-icons';
+import { UiIcon } from './UiIcon';
 
 export function McpPicker(props: {
   sessionId: string | null;
@@ -185,13 +187,12 @@ export function McpPicker(props: {
                       <span class="dropdown-name">{item.name}</span>
                       <span class="dropdown-check">
                         <Show when={selectedNames().has(item.name)}>
-                          <svg
+                          <UiIcon
+                            source={checkIcon}
                             class="h-3 w-3 text-vscode-accent"
-                            viewBox="0 0 16 16"
-                            fill="currentColor"
-                          >
-                            <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
-                          </svg>
+                            width={12}
+                            height={12}
+                          />
                         </Show>
                       </span>
                     </span>
@@ -338,9 +339,7 @@ function McpAuthDialog(props: {
               onClick={props.onClose}
               aria-label="Close"
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-                <path d="M6.758 17.243L12 12m5.243-5.243L12 12m0 0L6.758 6.757M12 12l5.243 5.243" />
-              </svg>
+              <UiIcon source={xmarkIcon} width={16} height={16} aria-hidden="true" />
             </button>
           </div>
           <div class="provider-connect-body">

@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
+import { navArrowLeftIcon, navArrowRightIcon } from '../../lib/ui-icons';
+import { toCssUrl } from '../UiIcon';
 import type { AgentPart, FilePart, Part, TextPart } from '../../types';
 import { resetDefaultAppState, setState as setAppState, state } from '../../lib/state';
 import {
@@ -574,6 +576,11 @@ describe('UserMessageContent', () => {
     );
 
     const navButtons = carousel?.querySelectorAll<HTMLButtonElement>('.message-image-carousel-nav');
+    expect(
+      [...(navButtons || [])].map((button) =>
+        button.querySelector<HTMLElement>('.ui-icon')?.style.getPropertyValue('--ui-icon-mask')
+      )
+    ).toEqual([toCssUrl(navArrowLeftIcon), toCssUrl(navArrowRightIcon)]);
     navButtons?.[1]?.click();
 
     expect(caption?.textContent).toContain('2 / 2');

@@ -414,6 +414,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await this.commitMessageService.generate(sourceControl);
   }
 
+  async generateUsageReport() {
+    await this.usageReportService.openReport(false);
+  }
+
   hasPendingAttention() {
     return this.sessionState.pendingForUser.size > 0;
   }

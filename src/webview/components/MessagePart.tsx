@@ -16,6 +16,8 @@ import { getMessageBlockExpanded, setMessageBlockExpanded } from '../lib/tool-ca
 import { AgentChip } from './message/AgentChip';
 import { InlineMessageImage } from './InlineMessageImage';
 import { FileTypeIcon } from './FileTypeIcon';
+import { lightBulbIcon, navArrowRightIcon } from '../lib/ui-icons';
+import { UiIcon } from './UiIcon';
 
 export function MessagePart(props: {
   part: Part;
@@ -219,19 +221,12 @@ function ReasoningBlock(props: {
           <span class="thinking-duration">{durationLabel()}</span>
         </Show>
         <Show when={hasBody()}>
-          <svg
+          <UiIcon
+            source={navArrowRightIcon}
             class={`thinking-chevron ${expanded() ? 'expanded' : ''}`}
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
             width="12"
             height="12"
-          >
-            <path d="M6 4l4 4-4 4" />
-          </svg>
+          />
         </Show>
       </button>
       <Show when={expanded() && hasBody()}>
@@ -311,22 +306,13 @@ export function formatReasoningDuration(time: ReasoningPart['time']) {
 
 function BrainTopicIcon(props: { class?: string }) {
   return (
-    <svg
+    <UiIcon
+      source={lightBulbIcon}
       class={props.class ? `thinking-topic-icon ${props.class}` : 'thinking-topic-icon'}
-      viewBox="2 2 20 20"
       width="12"
       height="12"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="1.7"
-      stroke-linecap="round"
-      stroke-linejoin="round"
       aria-hidden="true"
-    >
-      <path d="M9 18H15" />
-      <path d="M10 21H14" />
-      <path d="M9.00082 15C9.00098 13 8.50098 12.5 7.50082 11.5C6.50067 10.5 6.02422 9.48689 6.00082 8C5.95284 4.95029 8.00067 3 12.0008 3C16.001 3 18.0488 4.95029 18.0008 8C17.9774 9.48689 17.5007 10.5 16.5008 11.5C15.501 12.5 15.001 13 15.0008 15" />
-    </svg>
+    />
   );
 }
 

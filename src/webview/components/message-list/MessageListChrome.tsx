@@ -3,9 +3,11 @@ import { recheckSessionStatus } from '../../hooks/useOpenCode';
 import { formatMessageSentTime } from '../../lib/message-time';
 import { observeSettledResize } from '../../lib/settled-resize-observer';
 import { loadingLastActivityAt, loadingStartedAt, state, stopLoading } from '../../lib/state';
+import { attachmentIcon, mediaImageIcon } from '../../lib/ui-icons';
 import type { Part, Permission, QuestionRequest } from '../../types';
 import { PermissionPrompt } from '../PermissionPrompt';
 import { QuestionPrompt } from '../QuestionPrompt';
+import { UiIcon } from '../UiIcon';
 import {
   UserMessagePreviewContent,
   formatUserMessageMarkupSize,
@@ -194,37 +196,13 @@ export function StickyUserMessagePreviewCard(props: {
               <div class="latest-user-message-sticky-meta" aria-hidden="true">
                 <Show when={props.preview.imageCount > 0}>
                   <span class="latest-user-message-sticky-meta-item" title="Images">
-                    <svg
-                      width="12"
-                      height="12"
-                      viewBox="0 0 16 16"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.5"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    >
-                      <rect x="2" y="3" width="12" height="10" rx="1.5" />
-                      <circle cx="5.5" cy="6.5" r="1" />
-                      <path d="M3 11l3-3 2.5 2.5L11 7l2 2" />
-                    </svg>
+                    <UiIcon source={mediaImageIcon} width="12" height="12" />
                     <span>{props.preview.imageCount}</span>
                   </span>
                 </Show>
                 <Show when={props.preview.attachmentCount > 0}>
                   <span class="latest-user-message-sticky-meta-item" title="Attachments">
-                    <svg
-                      width="12"
-                      height="12"
-                      viewBox="0 0 16 16"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.5"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    >
-                      <path d="M10.5 5.5l-4.24 4.24a2 2 0 102.83 2.83l4.6-4.59a3 3 0 00-4.24-4.24L4.5 8.69a4 4 0 105.66 5.66l4.1-4.1" />
-                    </svg>
+                    <UiIcon source={attachmentIcon} width="12" height="12" />
                     <span>{props.preview.attachmentCount}</span>
                   </span>
                 </Show>

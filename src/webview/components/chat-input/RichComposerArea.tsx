@@ -1,16 +1,15 @@
 import { Show, createEffect, createSignal, onMount, onCleanup } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { splitExternalLinkText } from '../../lib/external-link';
+import { emptyPageIcon, folderIcon } from '../../lib/ui-icons';
 import { getFileTypeIcon } from '../FileTypeIcon';
 import { createMaterialChipIconElement, type MaterialChipIconKind } from '../MaterialChipIcon';
+import { createUiIconElement } from '../UiIcon';
 import { CompletionMenu, type CompletionItem } from './CompletionMenu';
 
 type ComposerClipboardEvent = ClipboardEvent & {
   __varroPasteText?: string;
 };
-
-const FOLDER_ICON_SVG =
-  '<svg class="inline-chip-icon" viewBox="0 0 16 16" fill="currentColor" width="11" height="11"><path d="M1.75 3h3.1c.31 0 .6.14.79.38l.86 1.12h7.75c.41 0 .75.34.75.75V6H1V3.75C1 3.34 1.34 3 1.75 3zM1 7h14v4.25c0 .97-.78 1.75-1.75 1.75H2.75A1.75 1.75 0 011 11.25V7z"/></svg>';
 
 const CARET_SPACER = '\u200B';
 
@@ -168,7 +167,7 @@ export function RichComposerArea(props: {
           )
         );
       } else if (icon) {
-        iconWrapper.innerHTML = icon;
+        iconWrapper.appendChild(icon);
       }
       if (chip.type !== 'external-link') span.appendChild(iconWrapper);
     }
@@ -874,9 +873,12 @@ export function extractText(el: HTMLElement): string {
   return result;
 }
 
-function getChipIcon(icon?: string): string {
-  if (icon === 'folder') return FOLDER_ICON_SVG;
-  return '<svg class="inline-chip-icon" viewBox="0 0 16 16" fill="currentColor" width="11" height="11"><path d="M3.5 2A1.5 1.5 0 002 3.5v9A1.5 1.5 0 003.5 14h9a1.5 1.5 0 001.5-1.5v-9A1.5 1.5 0 0012.5 2h-9zM4 4h8v1H4V4zm0 2.5h8v1H4v-1zm0 2.5h5v1H4V9z"/></svg>';
+function getChipIcon(icon?: string): HTMLSpanElement {
+  return createUiIconElement(icon === 'folder' ? folderIcon : emptyPageIcon, {
+    className: 'inline-chip-icon',
+    width: 11,
+    height: 11,
+  });
 }
 
 function getMaterialIconKind(icon?: string): MaterialChipIconKind | null {

@@ -21,7 +21,9 @@ import { trapModalFocus } from '../lib/modal-focus';
 import { resolveProviderAuthFailure } from '../lib/provider-connection-state';
 import { openProviderSetup } from '../lib/provider-setup';
 import { state } from '../lib/state';
+import { arrowLeftIcon, checkIcon, lockIcon, navArrowDownIcon, xmarkIcon } from '../lib/ui-icons';
 import { CopyIconButton } from './CopyIconButton';
+import { UiIcon } from './UiIcon';
 
 export function ProviderConnectionDialog(props: {
   catalogProviders: Provider[];
@@ -291,9 +293,7 @@ export function ProviderConnectionDialog(props: {
               </Show>
             </div>
             <button type="button" class="provider-connect-close" onClick={close} aria-label="Close">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-                <path d="M6.758 17.243L12 12m5.243-5.243L12 12m0 0L6.758 6.757M12 12l5.243 5.243" />
-              </svg>
+              <UiIcon source={xmarkIcon} width={16} height={16} aria-hidden="true" />
             </button>
           </div>
 
@@ -402,19 +402,7 @@ export function ProviderConnectionDialog(props: {
                         <Show when={method().type === 'oauth' && visiblePrompts().length === 0}>
                           <div class="provider-connect-oauth-handoff">
                             <div class="provider-connect-oauth-icon" aria-hidden="true">
-                              <svg
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="1.5"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                              >
-                                <path d="M8.5 12a3.5 3.5 0 117 0v2.5h-7V12z" />
-                                <path d="M7 14.5h10v6H7z" />
-                                <path d="M12 17v1" />
-                                <path d="M12 3v2M4.9 5.9l1.4 1.4M19.1 5.9l-1.4 1.4" />
-                              </svg>
+                              <UiIcon source={lockIcon} width={20} height={20} />
                             </div>
                             <div>
                               <div class="provider-connect-oauth-title">
@@ -565,11 +553,7 @@ export function ProviderConnectionDialog(props: {
 const GENERIC_API_METHOD: ProviderAuthMethod = { type: 'api', label: 'API key' };
 
 function BackArrowIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-      <path d="M21 12H3m0 0l8.5-8.5M3 12l8.5 8.5" />
-    </svg>
-  );
+  return <UiIcon source={arrowLeftIcon} width={11} height={11} aria-hidden="true" />;
 }
 
 function ProviderListSkeleton() {
@@ -787,9 +771,7 @@ function PromptSelect(props: {
         <span class={selectedOption() ? '' : 'provider-connect-select-placeholder'}>
           {selectedOption()?.label ?? 'Select an option'}
         </span>
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true">
-          <path d="M4 6l4 4 4-4" />
-        </svg>
+        <UiIcon source={navArrowDownIcon} width={14} height={14} aria-hidden="true" />
       </button>
       <Show when={open()}>
         <div id={listboxID} class="provider-connect-select-options" role="listbox">
@@ -809,9 +791,7 @@ function PromptSelect(props: {
                   <span class="provider-connect-select-hint">{option.hint}</span>
                 </Show>
                 <Show when={option.value === props.value}>
-                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true">
-                    <path d="M3.5 8.5l3 3 6-7" />
-                  </svg>
+                  <UiIcon source={checkIcon} width={13} height={13} aria-hidden="true" />
                 </Show>
               </button>
             )}

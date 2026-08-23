@@ -3,16 +3,7 @@ export function DocumentIcon(props: {
   width?: number | string;
   height?: number | string;
 }) {
-  return (
-    <svg
-      class={props.class}
-      viewBox="0 0 32 32"
-      width={props.width}
-      height={props.height}
-      fill="currentColor"
-      aria-hidden="true"
-    >
-      <path d="M13 4 6 11v17h20V4H13zm-1 3.828V10H9.828L12 7.828zM24 26H8V12h6V6h10v20z" />
-    </svg>
-  );
+  return <UiIcon source={pageIcon} {...props} aria-hidden="true" />;
 }
+import { pageIcon } from '../lib/ui-icons';
+import { UiIcon } from './UiIcon';

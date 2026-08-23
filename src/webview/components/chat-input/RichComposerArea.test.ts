@@ -1,6 +1,8 @@
 import { createSignal } from 'solid-js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
+import { emptyPageIcon, folderIcon } from '../../lib/ui-icons';
+import { toCssUrl } from '../UiIcon';
 import {
   RichComposerArea,
   extractText,
@@ -37,6 +39,16 @@ function setCollapsedSelection(target: Node, offset: number) {
   range.collapse(true);
   selection?.removeAllRanges();
   selection?.addRange(range);
+}
+
+function expectChipUiIcon(element: Element | null | undefined, source: string) {
+  expect(element).toBeInstanceOf(HTMLSpanElement);
+  expect(element?.classList).toContain('ui-icon');
+  expect(element?.classList).toContain('inline-chip-icon');
+  if (!(element instanceof HTMLSpanElement)) throw new Error('Expected chip UI icon element');
+  expect(element.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(source));
+  expect(element.style.getPropertyValue('--ui-icon-width')).toBe('11px');
+  expect(element.style.getPropertyValue('--ui-icon-height')).toBe('11px');
 }
 
 function renderComposer(props: {
@@ -1224,10 +1236,27 @@ describe('RichComposerArea', () => {
 
     await flushAsyncWork();
 
-    const iconPath = container?.querySelector('.inline-chip .inline-chip-icon path');
-    expect(iconPath?.getAttribute('d')).toBe(
-      'M1.75 3h3.1c.31 0 .6.14.79.38l.86 1.12h7.75c.41 0 .75.34.75.75V6H1V3.75C1 3.34 1.34 3 1.75 3zM1 7h14v4.25c0 .97-.78 1.75-1.75 1.75H2.75A1.75 1.75 0 011 11.25V7z'
-    );
+    const chipElement = container?.querySelector<HTMLElement>('.inline-chip');
+    expectChipUiIcon(chipElement?.querySelector('.inline-chip-icon'), folderIcon);
+    expect(chipElement?.dataset.chipMarker).toBe('@src/');
+    expect(chipElement?.querySelector('.inline-chip-icon-wrap')?.children).toHaveLength(1);
+  });
+
+  it('renders default document chips with the empty-page icon', async () => {
+    const chip: RichComposerChip = {
+      id: 'document:notes',
+      type: 'mention-file',
+      label: 'Notes',
+      textMarker: '@Notes',
+    };
+
+    renderComposer({ value: '@Notes', cursorOffset: 0, chips: [chip] });
+    await flushAsyncWork();
+
+    const chipElement = container?.querySelector<HTMLElement>('.inline-chip');
+    expectChipUiIcon(chipElement?.querySelector('.inline-chip-icon'), emptyPageIcon);
+    expect(chipElement?.dataset.chipMarker).toBe('@Notes');
+    expect(chipElement?.querySelector('.inline-chip-label')?.textContent).toBe('Notes');
   });
 
   it('sizes agent icons consistently with image icons', async () => {

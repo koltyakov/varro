@@ -368,7 +368,7 @@
   opacity: 1;
 }
 
-.dropdown-search-clear svg {
+.dropdown-search-clear .ui-icon {
   width: 11px;
   height: 11px;
 }
@@ -525,13 +525,13 @@
   opacity: 0;
 }
 
-.model-picker-pin svg {
+.model-picker-pin .ui-icon {
   width: 14px;
   height: 14px;
 }
 
-.model-picker-pin.active svg {
-  transform: rotate(45deg);
+.model-picker-pin.active .ui-icon {
+  transform: rotate(-45deg);
 }
 
 .model-picker-row:hover .model-picker-pin,

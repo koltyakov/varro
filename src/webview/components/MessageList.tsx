@@ -74,6 +74,7 @@ import {
 } from '../lib/message-window';
 import { loadOlderSessionHistoryPage, loadOlderSessionPrompts } from '../hooks/useOpenCode';
 import { modelSupportsReasoning } from '../lib/model-capabilities';
+import { navArrowDownIcon } from '../lib/ui-icons';
 import { formatLabelWithProvider, formatModelName, formatVariantLabel } from '../lib/format';
 import {
   collapseLeadingDuplicateFileEvents,
@@ -96,6 +97,7 @@ import {
   TurnNavigationRail,
 } from './message-list/MessageListChrome';
 import { Tooltip } from './Tooltip';
+import { UiIcon } from './UiIcon';
 import {
   getSubagentSessionIds,
   getStickyUserMessagePreview,
@@ -7180,15 +7182,7 @@ export function MessageList() {
             aria-label="Scroll to latest message"
             onClick={() => requestMessageListScrollToBottom()}
           >
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
-              <path
-                d="M3.5 6.5 8 11l4.5-4.5"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
+            <UiIcon source={navArrowDownIcon} width="14" height="14" aria-hidden="true" />
           </button>
         </Tooltip>
       </Show>

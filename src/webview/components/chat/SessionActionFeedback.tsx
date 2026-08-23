@@ -1,6 +1,8 @@
 import { Show, createSignal, onCleanup } from 'solid-js';
 import type { Accessor } from 'solid-js';
 import { Portal } from 'solid-js/web';
+import { checkIcon, priorityHighIcon, xmarkIcon } from '../../lib/ui-icons';
+import { UiIcon } from '../UiIcon';
 
 const SUCCESS_VISIBLE_MS = 1_600;
 const WARNING_VISIBLE_MS = 5_000;
@@ -64,14 +66,20 @@ export function SessionActionFeedback(props: SessionActionFeedbackProps = {}) {
               <Show
                 when={currentError() || kind() === 'warning'}
                 fallback={
-                  <svg viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M13.78 4.22a.75.75 0 010 1.06l-6.5 6.5a.75.75 0 01-1.06 0l-3-3a.75.75 0 111.06-1.06l2.47 2.47 5.97-5.97a.75.75 0 011.06 0z" />
-                  </svg>
+                  <UiIcon
+                    source={checkIcon}
+                    class="session-action-feedback-glyph"
+                    width={11}
+                    height={11}
+                  />
                 }
               >
-                <svg viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M7.25 3h1.5v6.25h-1.5V3zm0 8h1.5v1.5h-1.5V11z" />
-                </svg>
+                <UiIcon
+                  source={priorityHighIcon}
+                  class="session-action-feedback-glyph"
+                  width={11}
+                  height={11}
+                />
               </Show>
             </span>
             <span class="session-action-feedback-message" title={visibleMessage()}>
@@ -93,16 +101,12 @@ export function SessionActionFeedback(props: SessionActionFeedbackProps = {}) {
                   aria-label="Dismiss error"
                   title="Dismiss"
                 >
-                  <svg
-                    viewBox="0 0 16 16"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                    stroke-linecap="round"
-                    aria-hidden="true"
-                  >
-                    <path d="m4.5 4.5 7 7m0-7-7 7" />
-                  </svg>
+                  <UiIcon
+                    source={xmarkIcon}
+                    class="session-action-feedback-dismiss-icon"
+                    width={13}
+                    height={13}
+                  />
                 </button>
               </span>
             </Show>

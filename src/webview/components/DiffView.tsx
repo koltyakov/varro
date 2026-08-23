@@ -6,9 +6,11 @@ import { getLeafPathName } from '../lib/path-display';
 import { observeSettledResize } from '../lib/settled-resize-observer';
 import { getToolDiffPreviewState, setToolDiffPreviewState } from '../lib/tool-call-expansion-state';
 import { state } from '../lib/state';
+import { navArrowDownIcon, navArrowUpIcon, xmarkIcon } from '../lib/ui-icons';
 import type { FileDiff } from '../types';
 import { FileTypeIcon } from './FileTypeIcon';
 import { renderHighlightedCodeHtml } from './MarkdownRenderer';
+import { UiIcon } from './UiIcon';
 
 type UnifiedDiffLine = {
   kind: 'context' | 'addition' | 'deletion' | 'hunk';
@@ -972,19 +974,12 @@ function DiffItem(props: {
             aria-label={`${expanded() ? 'Collapse' : 'Expand'} changes in ${displayName()}`}
             title={`${expanded() ? 'Collapse' : 'Expand'} diff preview`}
           >
-            <svg
+            <UiIcon
+              source={expanded() ? navArrowUpIcon : navArrowDownIcon}
               width="10"
               height="10"
-              viewBox="0 0 16 16"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
               aria-hidden="true"
-            >
-              <path d={expanded() ? 'M4 10l4-4 4 4' : 'M4 6l4 4 4-4'} />
-            </svg>
+            />
           </button>
         </Show>
       </div>
@@ -1115,18 +1110,7 @@ function DiffItem(props: {
                       toggleExpanded();
                     }}
                   >
-                    <svg
-                      width="10"
-                      height="10"
-                      viewBox="0 0 16 16"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.5"
-                      stroke-linecap="round"
-                      aria-hidden="true"
-                    >
-                      <path d="M4 4l8 8M12 4l-8 8" />
-                    </svg>
+                    <UiIcon source={xmarkIcon} width="10" height="10" aria-hidden="true" />
                   </button>
                 </header>
                 <div class="diff-view-overlay-content">

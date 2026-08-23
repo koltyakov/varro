@@ -15,6 +15,18 @@ import { client } from '../lib/client';
 import { clearDirectSessionReturn, getDirectSessionReturnId } from '../lib/session-navigation';
 import { fixture } from '../test-fixtures';
 import type { UnknownRecord } from '../../shared/type-utils';
+import {
+  cableTagIcon,
+  checkCircleIcon,
+  copyIcon,
+  editPencilIcon,
+  eyeIcon,
+  hourglassIcon,
+  languageIcon,
+  searchIcon,
+  terminalIcon,
+} from '../lib/ui-icons';
+import { toCssUrl } from './UiIcon';
 
 const selectSessionMock = vi.hoisted(() => vi.fn(async () => {}));
 
@@ -232,13 +244,12 @@ describe('ToolCall', () => {
 
     expect(container?.querySelector('.tool-invocation-detail')).toBeNull();
     expect(container?.textContent).toContain('git status');
-    const icon = container?.querySelector('.tool-call-icon-terminal');
-    expect(icon).toBeInstanceOf(SVGElement);
-    expect(icon?.getAttribute('width')).toBe('12');
-    expect(icon?.getAttribute('height')).toBe('12');
-    expect(
-      Array.from(icon?.querySelectorAll('path') || [], (path) => path.getAttribute('d'))
-    ).toEqual(['M13 17H20', 'M5 7L10 12L5 17']);
+    const icon = container?.querySelector<HTMLElement>('.tool-call-icon-terminal');
+    expect(icon).toBeInstanceOf(HTMLSpanElement);
+    expect(icon?.classList).toContain('ui-icon');
+    expect(icon?.style.getPropertyValue('--ui-icon-width')).toBe('12px');
+    expect(icon?.style.getPropertyValue('--ui-icon-height')).toBe('12px');
+    expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(terminalIcon));
   });
 
   it('does not repeat long commands in the collapsed preview', () => {
@@ -513,15 +524,10 @@ describe('ToolCall', () => {
     );
     expect(copy).not.toBeNull();
     expect(header?.contains(copy || null)).toBe(false);
-    expect(copy?.querySelector('svg')?.getAttribute('viewBox')).toBe('0 0 24 24');
-    expect(copy?.querySelector('svg')?.getAttribute('width')).toBe('12');
-    expect(copy?.querySelector('svg')?.getAttribute('stroke-width')).toBe('1.4');
-    expect(
-      Array.from(copy?.querySelectorAll('path') || [], (path) => path.getAttribute('d'))
-    ).toEqual([
-      'M19.4 20H9.6C9.26863 20 9 19.7314 9 19.4V9.6C9 9.26863 9.26863 9 9.6 9H19.4C19.7314 9 20 9.26863 20 9.6V19.4C20 19.7314 19.7314 20 19.4 20Z',
-      'M15 9V4.6C15 4.26863 14.7314 4 14.4 4H4.6C4.26863 4 4 4.26863 4 4.6V14.4C4 14.7314 4.26863 15 4.6 15H9',
-    ]);
+    const copyIconElement = copy?.querySelector<HTMLElement>('.ui-icon');
+    expect(copyIconElement).toBeInstanceOf(HTMLSpanElement);
+    expect(copyIconElement?.style.getPropertyValue('--ui-icon-width')).toBe('12px');
+    expect(copyIconElement?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(copyIcon));
 
     copy?.click();
     await Promise.resolve();
@@ -679,7 +685,9 @@ describe('ToolCall', () => {
     cleanup = render(() => ToolCall({ part }), container!);
 
     expect(container?.querySelector('.tool-invocation-duration')).toBeNull();
-    expect(container?.querySelector('.tool-call-icon-search')).toBeInstanceOf(SVGElement);
+    const icon = container?.querySelector<HTMLElement>('.tool-call-icon-search');
+    expect(icon).toBeInstanceOf(HTMLSpanElement);
+    expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(searchIcon));
   });
 
   it('extracts the completed search result count into a header pill', () => {
@@ -742,7 +750,9 @@ describe('ToolCall', () => {
 
     cleanup = render(() => ToolCall({ part }), container!);
 
-    expect(container?.querySelector('.tool-call-icon-edit')).toBeInstanceOf(SVGElement);
+    const icon = container?.querySelector<HTMLElement>('.tool-call-icon-edit');
+    expect(icon).toBeInstanceOf(HTMLSpanElement);
+    expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(editPencilIcon));
   });
 
   it('renders failed search errors as a structured table row', () => {
@@ -853,7 +863,9 @@ describe('ToolCall', () => {
     const rows = Array.from(container?.querySelectorAll('.structured-tool-row') || []);
     const labels = rows.map((row) => row.querySelector('.structured-tool-label')?.textContent);
 
-    expect(container?.querySelector('.tool-call-icon-web')).toBeInstanceOf(SVGElement);
+    const icon = container?.querySelector<HTMLElement>('.tool-call-icon-web');
+    expect(icon).toBeInstanceOf(HTMLSpanElement);
+    expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(languageIcon));
     expect(labels).toEqual(['url', 'format', 'timeout', 'error']);
     expect(rows.at(-1)?.querySelector('.tool-invocation-error')?.textContent).toBe(
       'StatusCode: non 2xx status code (401)'
@@ -907,8 +919,31 @@ describe('ToolCall', () => {
 
     expect(container?.querySelector('.tool-invocation-preview')).toBeNull();
     expect(container?.textContent).not.toContain('hidden subagent summary');
-    expect(container?.querySelector('.tool-call-icon-task circle')).toBeInstanceOf(SVGElement);
-    expect(container?.querySelector('.tool-call-icon-task rect')).toBeNull();
+    const icon = container?.querySelector<HTMLElement>('.tool-call-icon-task');
+    expect(icon).toBeInstanceOf(HTMLSpanElement);
+    expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(checkCircleIcon));
+  });
+
+  it('uses the cable tag icon for incomplete task tools', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'task',
+      state: {
+        status: 'error',
+        input: { prompt: 'Review the implementation' },
+        error: 'Task failed',
+        time: { start: 0, end: 1 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    const icon = container?.querySelector<HTMLElement>('.tool-call-icon-task');
+    expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(cableTagIcon));
   });
 
   it('hides a duplicated description from expanded task details', () => {
@@ -1194,22 +1229,21 @@ describe('ToolCall', () => {
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
 
     expect(container?.querySelectorAll('.tool-call-icon')).toHaveLength(1);
-    expect(container?.querySelector('.tool-call-icon-task')).toBeInstanceOf(HTMLSpanElement);
-    expect(container?.querySelector('.tool-call-icon-task')?.classList).toContain(
-      'tool-call-spinner'
-    );
+    const taskIcon = container?.querySelector<HTMLElement>('.tool-call-icon-task');
+    expect(taskIcon).toBeInstanceOf(HTMLSpanElement);
+    expect(taskIcon?.classList).toContain('tool-call-spinner');
     expect(container?.querySelector('.tool-invocation-title')?.classList).not.toContain(
       'shimmer-progress'
     );
     const runningStatus = container?.querySelector('.tool-invocation-subagent-running');
-    const workingIcon = runningStatus?.querySelector('.tool-invocation-working-icon');
+    const workingIcon = runningStatus?.querySelector<HTMLElement>('.tool-invocation-working-icon');
     expect(runningStatus?.getAttribute('aria-live')).toBe('polite');
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     expect((runningStatus as HTMLButtonElement | null)?.disabled).toBe(true);
-    expect(workingIcon).toBeInstanceOf(SVGElement);
-    expect(workingIcon?.getAttribute('width')).toBe('12');
-    expect(workingIcon?.getAttribute('height')).toBe('12');
-    expect(workingIcon?.getAttribute('stroke-width')).toBe('2');
+    expect(workingIcon).toBeInstanceOf(HTMLSpanElement);
+    expect(workingIcon?.classList).toContain('ui-icon');
+    expect(workingIcon?.style.getPropertyValue('--ui-icon-width')).toBe('12px');
+    expect(workingIcon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(hourglassIcon));
     expect(runningStatus?.querySelector('.tool-invocation-activity-ring')).toBeNull();
     expect(runningStatus?.textContent).toContain('Explore subagent is working');
     expect(runningStatus?.textContent).toContain('Results will appear here when ready.');
@@ -1250,14 +1284,15 @@ describe('ToolCall', () => {
 
     cleanup = render(() => ToolCall({ part }), container!);
 
-    const icon = container?.querySelector('.tool-call-icon-task');
-    expect(icon).toBeInstanceOf(SVGElement);
+    const icon = container?.querySelector<HTMLElement>('.tool-call-icon-task');
+    expect(icon).toBeInstanceOf(HTMLSpanElement);
     expect(icon?.classList).toContain('tool-call-wait-icon');
     expect(icon?.classList).not.toContain('tool-call-spinner');
     expect(icon?.getAttribute('aria-label')).toBe('Waiting for permission');
-    expect(icon?.getAttribute('width')).toBe('16');
-    expect(icon?.getAttribute('height')).toBe('16');
-    expect(icon?.querySelectorAll('path')).toHaveLength(3);
+    expect(icon?.getAttribute('role')).toBe('status');
+    expect(icon?.style.getPropertyValue('--ui-icon-width')).toBe('16px');
+    expect(icon?.style.getPropertyValue('--ui-icon-height')).toBe('16px');
+    expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(hourglassIcon));
   });
 
   it('opens the running subagent session from its status card', () => {
@@ -2218,14 +2253,9 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.file-read-action-label')?.textContent).toBe('Read:');
     expect(target?.textContent).toBe('main.ts');
     expect(container?.querySelector('.file-read-range')?.textContent).toBe('(L5-7)');
-    const icon = container?.querySelector('.tool-call-icon-read');
-    expect(icon).toBeInstanceOf(SVGElement);
-    expect(
-      Array.from(icon?.querySelectorAll('path') || [], (path) => path.getAttribute('d'))
-    ).toEqual([
-      'M3 13C6.6 5 17.4 5 21 13',
-      'M12 17C10.3431 17 9 15.6569 9 14C9 12.3431 10.3431 11 12 11C13.6569 11 15 12.3431 15 14C15 15.6569 13.6569 17 12 17Z',
-    ]);
+    const icon = container?.querySelector<HTMLElement>('.tool-call-icon-read');
+    expect(icon).toBeInstanceOf(HTMLSpanElement);
+    expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(eyeIcon));
 
     target?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
@@ -2685,14 +2715,9 @@ describe('FileChangeCard', () => {
     expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Edit:');
     expect(container?.querySelector('.file-edit-summary-label')?.textContent).toBe('2 files');
     expect(container?.querySelector('.file-edit-icon')?.getAttribute('aria-label')).toBe('Running');
-    const icon = container?.querySelector('.tool-call-icon-edit');
-    expect(icon).toBeInstanceOf(SVGElement);
-    expect(
-      Array.from(icon?.querySelectorAll('path') || [], (path) => path.getAttribute('d'))
-    ).toEqual([
-      'M3 21L12 21H21',
-      'M12.2218 5.82839L15.0503 2.99996L20 7.94971L17.1716 10.7781M12.2218 5.82839L6.61522 11.435C6.42769 11.6225 6.32233 11.8769 6.32233 12.1421L6.32233 16.6776L10.8579 16.6776C11.1231 16.6776 11.3774 16.5723 11.565 16.3847L17.1716 10.7781M12.2218 5.82839L17.1716 10.7781',
-    ]);
+    const icon = container?.querySelector<HTMLElement>('.tool-call-icon-edit');
+    expect(icon).toBeInstanceOf(HTMLSpanElement);
+    expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(editPencilIcon));
     expect(container?.querySelector('.file-edit-running-label')?.textContent).toBe('editing…');
     expect(container?.querySelector('.file-edit-action-label')?.classList).toContain(
       'shimmer-progress'

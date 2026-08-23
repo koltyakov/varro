@@ -468,7 +468,7 @@ input:focus-visible {
   color: color-mix(in srgb, var(--color-vscode-fg) 65%, transparent);
 }
 
-.latest-user-message-sticky-meta-item svg {
+.latest-user-message-sticky-meta-item .ui-icon {
   flex: 0 0 auto;
 }
 

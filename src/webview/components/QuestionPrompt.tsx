@@ -2,6 +2,8 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'so
 import type { QuestionRequest } from '../types';
 import { rejectQuestion, respondQuestion } from '../hooks/useOpenCode';
 import { defaultAppState } from '../lib/state';
+import { checkIcon } from '../lib/ui-icons';
+import { UiIcon } from './UiIcon';
 
 type QuestionDraft = {
   selected: Array<Array<string>>;
@@ -214,9 +216,7 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
                           >
                             <div class={`question-checkbox ${checked() ? 'checked' : ''}`}>
                               <Show when={checked()}>
-                                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-                                  <path d="M6.5 12.5l-4-4 1.4-1.4 2.6 2.6 5.6-5.6 1.4 1.4z" />
-                                </svg>
+                                <UiIcon source={checkIcon} width={10} height={10} />
                               </Show>
                             </div>
                           </Show>
@@ -273,9 +273,7 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
                               class={`question-checkbox ${(customValues()[questionIndex()] || '').trim() ? 'checked' : ''}`}
                             >
                               <Show when={(customValues()[questionIndex()] || '').trim()}>
-                                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-                                  <path d="M6.5 12.5l-4-4 1.4-1.4 2.6 2.6 5.6-5.6 1.4 1.4z" />
-                                </svg>
+                                <UiIcon source={checkIcon} width={10} height={10} />
                               </Show>
                             </div>
                           </Show>

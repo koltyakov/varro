@@ -839,6 +839,37 @@ describe('extension activation', () => {
 });
 
 describe('extension manifest', () => {
+  it('contributes quick actions to the Varro view title', () => {
+    expect(packageJson.contributes.commands).toContainEqual({
+      command: 'varro.chat.openSettings',
+      title: 'Varro: Open Settings',
+      shortTitle: 'Settings',
+      icon: '$(gear)',
+    });
+    expect(packageJson.contributes.submenus).toContainEqual({
+      id: 'varro.viewActions',
+      label: 'More Actions',
+      icon: '$(more)',
+    });
+    expect(packageJson.contributes.menus['view/title']).toEqual([
+      {
+        command: 'varro.chat.openSettings',
+        when: 'view == varro.chat',
+        group: 'navigation@1',
+      },
+      {
+        submenu: 'varro.viewActions',
+        when: 'view == varro.chat',
+        group: 'navigation@2',
+      },
+    ]);
+    expect(packageJson.contributes.menus['varro.viewActions']).toEqual([
+      { command: 'varro.about', group: '1_main@1' },
+      { command: 'varro.chat.openStats', group: '1_main@2' },
+      { command: 'varro.openGitHub', group: '1_main@3' },
+    ]);
+  });
+
   it('contributes commit-message generation to the command palette and Source Control', () => {
     expect(packageJson.contributes.commands).toContainEqual({
       command: 'varro.generateCommitMessage',

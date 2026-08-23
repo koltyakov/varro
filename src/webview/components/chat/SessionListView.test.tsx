@@ -8,6 +8,7 @@ import { selectSession } from '../../hooks/useOpenCode';
 import {
   getSessionDiffSummaryStateForTests,
   resetSessionDiffSummaryStateForTests,
+  SessionListSectionHeader,
   SessionListView,
 } from './SessionListView';
 import { SessionActionFeedback } from './SessionActionFeedback';
@@ -137,6 +138,36 @@ afterEach(() => {
   }
   resetSessionDiffSummaryStateForTests();
   resetSessionShareOverridesForTests();
+});
+
+describe('SessionListSectionHeader icons', () => {
+  it('uses sized adapter icons and preserves the expanded chevron state', () => {
+    const onToggle = vi.fn();
+    cleanup = render(
+      () => (
+        <SessionListSectionHeader
+          title="Archive"
+          count={2}
+          expanded={true}
+          onToggle={onToggle}
+          onArchive={vi.fn()}
+        />
+      ),
+      container
+    );
+
+    const archiveIcon = container.querySelector<HTMLElement>('.session-list-section-archive-icon');
+    expect(archiveIcon?.classList).toContain('ui-icon');
+    expect(archiveIcon?.style.getPropertyValue('--ui-icon-width')).toBe('14px');
+
+    const chevron = container.querySelector<HTMLElement>('.session-list-section-chevron');
+    expect(chevron?.classList).toContain('ui-icon');
+    expect(chevron?.classList).toContain('expanded');
+    expect(chevron?.style.getPropertyValue('--ui-icon-width')).toBe('12px');
+
+    container.querySelector<HTMLButtonElement>('.session-list-section-chevron-button')!.click();
+    expect(onToggle).toHaveBeenCalledOnce();
+  });
 });
 
 describe('SessionListView model details', () => {
@@ -687,7 +718,9 @@ describe('SessionListView pins', () => {
     await vi.waitFor(() => expect(setPinned).toHaveBeenCalledWith('session-1', true));
     await vi.waitFor(() => {
       expect(row().classList.contains('is-pinned')).toBe(true);
-      expect(row().querySelector('[aria-label="Pinned session"]')).not.toBeNull();
+      const pinnedIcon = row().querySelector<HTMLElement>('.session-item-pinned-icon');
+      expect(pinnedIcon?.classList).toContain('ui-icon');
+      expect(pinnedIcon?.style.getPropertyValue('--ui-icon-width')).toBe('12px');
     });
     openSessionActions(row());
     Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
@@ -1128,10 +1161,16 @@ describe('SessionListView actions', () => {
       expect(row.querySelector('.session-item-shared-marker')?.getAttribute('title')).toBe(
         'Session is shared'
       );
+      const sharedIcon = row.querySelector<HTMLElement>('.shared-session-icon');
+      expect(sharedIcon?.classList).toContain('ui-icon');
+      expect(sharedIcon?.style.getPropertyValue('--ui-icon-width')).toBe('12px');
       await vi.waitFor(() => {
         const feedback = document.querySelector<HTMLElement>('.session-action-feedback');
         expect(feedback?.textContent?.trim()).toBe('Share link copied');
         expect(feedback?.getAttribute('aria-live')).toBe('polite');
+        expect(feedback?.querySelector('.session-action-feedback-glyph')?.classList).toContain(
+          'ui-icon'
+        );
       });
 
       openSessionActions(row);
@@ -1583,6 +1622,9 @@ describe('SessionListView load errors', () => {
     expect(container.querySelector('.session-list-continuation')).toBeNull();
     expect(appState.sessions).toEqual(loadedSessions);
 
+    const clearIcon = container.querySelector<HTMLElement>('.session-list-search-clear-icon');
+    expect(clearIcon?.classList).toContain('ui-icon');
+    expect(clearIcon?.style.getPropertyValue('--ui-icon-width')).toBe('10px');
     container.querySelector<HTMLButtonElement>('.session-list-search-clear')!.click();
 
     expect(container.textContent).not.toContain('Flick through old notes');

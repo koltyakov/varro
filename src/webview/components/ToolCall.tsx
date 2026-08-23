@@ -1,8 +1,6 @@
 import {
   Show,
   For,
-  Match,
-  Switch,
   createEffect,
   createMemo,
   createSignal,
@@ -50,6 +48,22 @@ import type { DiffViewFile } from './DiffView';
 import { ClampedToolText } from './ClampedToolText';
 import { CopyIconButton } from './CopyIconButton';
 import { isBoolean, isNumber, isString } from '../lib/runtime-values';
+import {
+  bookIcon,
+  cableTagIcon,
+  checkCircleIcon,
+  editPencilIcon,
+  eyeIcon,
+  helpCircleIcon,
+  hourglassIcon,
+  languageIcon,
+  navArrowRightIcon,
+  searchIcon,
+  taskListIcon,
+  terminalIcon,
+  toolsIcon,
+} from '../lib/ui-icons';
+import { UiIcon } from './UiIcon';
 
 export { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
 
@@ -114,97 +128,48 @@ function ToolCallIcon(props: {
   const isWaiting = () => !!props.waiting;
   const isRunningTask = () =>
     kind() === 'task' && props.statusClass === 'tool-status-running' && !isWaiting();
+  const source = () => {
+    if (isWaiting()) return hourglassIcon;
+    switch (kind()) {
+      case 'terminal':
+        return terminalIcon;
+      case 'search':
+        return searchIcon;
+      case 'read':
+        return eyeIcon;
+      case 'edit':
+        return editPencilIcon;
+      case 'task':
+        return props.statusClass === 'tool-status-completed' ? checkCircleIcon : cableTagIcon;
+      case 'todo':
+        return taskListIcon;
+      case 'web':
+        return languageIcon;
+      case 'question':
+        return helpCircleIcon;
+      case 'skill':
+        return bookIcon;
+      case 'tools':
+        return toolsIcon;
+    }
+  };
 
   return (
     <Show
       when={isRunningTask()}
       fallback={
-        <svg
+        <UiIcon
+          source={source()}
           class={`${classes()}${isWaiting() ? ' tool-call-wait-icon' : ''}`}
-          viewBox="0 0 24 24"
           width={isWaiting() ? '16' : '12'}
           height={isWaiting() ? '16' : '12'}
-          fill="none"
-          stroke="currentColor"
-          stroke-width={isWaiting() ? '1.6' : '2'}
-          stroke-linecap="round"
-          stroke-linejoin="round"
           role={props.statusLabel ? 'status' : undefined}
           aria-label={props.statusLabel}
           aria-live={props.statusLabel ? 'polite' : undefined}
           aria-atomic={props.statusLabel ? 'true' : undefined}
           aria-hidden={props.statusLabel ? undefined : 'true'}
-        >
-          <Show when={props.statusLabel}>{(label) => <title>{label()}</title>}</Show>
-          <Switch>
-            <Match when={isWaiting()}>
-              <path d="M12 12C15.866 12 19 8.86599 19 5H5C5 8.86599 8.13401 12 12 12ZM12 12C15.866 12 19 15.134 19 19H5C5 15.134 8.13401 12 12 12Z" />
-              <path d="M5 2H12H19" />
-              <path d="M5 22H12H19" />
-            </Match>
-            <Match when={kind() === 'terminal'}>
-              <path d="M13 17H20" />
-              <path d="M5 7L10 12L5 17" />
-            </Match>
-            <Match when={kind() === 'search'}>
-              <path d="M17 17L21 21" />
-              <path d="M3 11C3 15.4183 6.58172 19 11 19C13.213 19 15.2161 18.1015 16.6644 16.6493C18.1077 15.2022 19 13.2053 19 11C19 6.58172 15.4183 3 11 3C6.58172 3 3 6.58172 3 11Z" />
-            </Match>
-            <Match when={kind() === 'read'}>
-              <path d="M3 13C6.6 5 17.4 5 21 13" />
-              <path d="M12 17C10.3431 17 9 15.6569 9 14C9 12.3431 10.3431 11 12 11C13.6569 11 15 12.3431 15 14C15 15.6569 13.6569 17 12 17Z" />
-            </Match>
-            <Match when={kind() === 'edit'}>
-              <path d="M3 21L12 21H21" />
-              <path d="M12.2218 5.82839L15.0503 2.99996L20 7.94971L17.1716 10.7781M12.2218 5.82839L6.61522 11.435C6.42769 11.6225 6.32233 11.8769 6.32233 12.1421L6.32233 16.6776L10.8579 16.6776C11.1231 16.6776 11.3774 16.5723 11.565 16.3847L17.1716 10.7781M12.2218 5.82839L17.1716 10.7781" />
-            </Match>
-            <Match when={kind() === 'task'}>
-              <Show
-                when={props.statusClass === 'tool-status-completed'}
-                fallback={
-                  <>
-                    <rect x="2" y="21" width="7" height="5" rx="0.6" transform="rotate(-90 2 21)" />
-                    <rect
-                      x="17"
-                      y="15.5"
-                      width="7"
-                      height="5"
-                      rx="0.6"
-                      transform="rotate(-90 17 15.5)"
-                    />
-                    <rect x="2" y="10" width="7" height="5" rx="0.6" transform="rotate(-90 2 10)" />
-                    <path
-                      d="M7 17.5H10.5C11.6046 17.5 12.5 16.6046 12.5 15.5V8.5C12.5 7.39543 11.6046 6.5 10.5 6.5H7"
-                      stroke-linecap="butt"
-                      stroke-linejoin="miter"
-                    />
-                    <path d="M12.5 12H17" stroke-linecap="butt" stroke-linejoin="miter" />
-                  </>
-                }
-              >
-                <path d="M7 12.5L10 15.5L17 8.5" />
-                <circle cx="12" cy="12" r="10" />
-              </Show>
-            </Match>
-            <Match when={kind() === 'todo'}>
-              <path d="M9 6H20M3.8 5.8L4.6 6.6L6.6 4.6M3.8 11.8L4.6 12.6L6.6 10.6M3.8 17.8L4.6 18.6L6.6 16.6M9 12H20M9 18H20" />
-            </Match>
-            <Match when={kind() === 'web'}>
-              <circle cx="12" cy="12" r="10" />
-              <path d="M2 12H22M12 2C14.5 4.7 16 8.1 16 12C16 15.9 14.5 19.3 12 22M12 2C9.5 4.7 8 8.1 8 12C8 15.9 9.5 19.3 12 22" />
-            </Match>
-            <Match when={kind() === 'question'}>
-              <circle cx="12" cy="12" r="10" />
-              <path d="M9 9C9 5.5 14.5 5.5 14.5 9C14.5 11.5 12 11 12 14M12 18.01L12.01 17.9989" />
-            </Match>
-            <Match when={kind() === 'skill'}>
-              <path d="M4 19V5C4 3.89543 4.89543 3 6 3H19.4C19.7314 3 20 3.26863 20 3.6V16.7143M6 17H20M6 21H20M6 21C4.89543 21 4 20.1046 4 19C4 17.8954 4.89543 17 6 17M9 7H15" />
-            </Match>
-            <Match when={kind() === 'tools'}>
-              <path d="M10.0503 10.6066L2.97923 17.6777C2.19818 18.4587 2.19818 19.7251 2.97923 20.5061C3.76027 21.2872 5.0266 21.2872 5.80765 20.5061L12.8787 13.4351M17.1927 13.7994L21.071 17.6777C21.8521 18.4587 21.8521 19.7251 21.071 20.5061C20.29 21.2872 19.0236 21.2872 18.2426 20.5061L12.0341 14.2977M6.73267 5.90381L4.61135 6.61092L2.49003 3.07539L3.90424 1.66117L7.43978 3.78249L6.73267 5.90381ZM6.73267 5.90381L9.5629 8.73404M10.0503 10.6066C9.2065 8.45359 9.37147 5.62861 11.111 3.8891C12.8505 2.14958 16.0607 1.76778 17.8285 2.82844L14.7878 5.86911L14.5052 8.98015L17.6162 8.69754L20.6569 5.65686C21.7176 7.42463 21.3358 10.6349 19.5963 12.3744C17.8567 14.1139 15.0318 14.2789 12.8788 13.435" />
-            </Match>
-          </Switch>
-        </svg>
+          title={props.statusLabel}
+        />
       }
     >
       <span
@@ -1155,18 +1120,11 @@ function FileChangeCard(props: {
                   isErrorExpanded() ? 'Collapse file change error' : 'Expand file change error'
                 }
               >
-                <svg
+                <UiIcon
+                  source={navArrowRightIcon}
                   class={`tool-invocation-chevron ${isErrorExpanded() ? 'expanded' : ''}`}
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
                   aria-hidden="true"
-                >
-                  <path d="M6 4l4 4-4 4" />
-                </svg>
+                />
               </button>
             </Show>
             <Show when={completedDurationLabel()}>
@@ -1532,17 +1490,10 @@ function GenericToolCall(props: {
             </span>
           </Show>
           <Show when={hasExpandableContent()}>
-            <svg
+            <UiIcon
+              source={navArrowRightIcon}
               class={`tool-invocation-chevron ${isExpanded() ? 'expanded' : ''}`}
-              viewBox="0 0 16 16"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path d="M6 4l4 4-4 4" />
-            </svg>
+            />
           </Show>
         </button>
         <Show when={showHeaderCommandCopy()}>
@@ -1673,22 +1624,13 @@ function GenericToolCall(props: {
                 aria-live="polite"
                 title={taskSessionId() ? 'Open subagent session' : undefined}
               >
-                <svg
+                <UiIcon
+                  source={hourglassIcon}
                   class="tool-invocation-working-icon"
-                  viewBox="0 0 24 24"
                   width="12"
                   height="12"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
                   aria-hidden="true"
-                >
-                  <path d="M12 12C15.866 12 19 8.86599 19 5H5C5 8.86599 8.13401 12 12 12ZM12 12C15.866 12 19 15.134 19 19H5C5 15.134 8.13401 12 12 12Z" />
-                  <path d="M5 2H12H19" />
-                  <path d="M5 22H12H19" />
-                </svg>
+                />
                 <span class="tool-invocation-running-copy">
                   <strong class="tool-invocation-running-label">
                     {taskRetryStatus()

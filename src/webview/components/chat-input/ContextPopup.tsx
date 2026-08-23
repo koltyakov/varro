@@ -1,4 +1,5 @@
 import { For, createSignal, onCleanup, onMount, Show } from 'solid-js';
+import { checkSquareIcon, navArrowRightIcon, squareIcon } from '../../lib/ui-icons';
 import { formatCost, formatNumber } from '../../lib/message-metrics';
 import {
   alignPopupToBoundary,
@@ -11,6 +12,7 @@ import type {
   ContextBreakdownSegment,
 } from '../../../shared/context-breakdown';
 import { Tooltip } from '../Tooltip';
+import { UiIcon } from '../UiIcon';
 import { isFunction } from '../../lib/runtime-values';
 
 const CONTEXT_USAGE_WARNING_PERCENT = 70;
@@ -156,43 +158,18 @@ export function ContextPopup(props: {
                 checked={nestedBreakdown()}
                 onChange={(event) => setNestedBreakdown(event.currentTarget.checked)}
               />
-              <svg
+              <UiIcon
+                source={squareIcon}
                 class="context-breakdown-checkbox context-breakdown-checkbox-unchecked"
                 width="16"
                 height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                aria-hidden="true"
-              >
-                <path
-                  d="M21 3.6V20.4C21 20.7314 20.7314 21 20.4 21H3.6C3.26863 21 3 20.7314 3 20.4V3.6C3 3.26863 3.26863 3 3.6 3H20.4C20.7314 3 21 3.26863 21 3.6Z"
-                  stroke="currentColor"
-                  stroke-width="1.6"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-              <svg
+              />
+              <UiIcon
+                source={checkSquareIcon}
                 class="context-breakdown-checkbox context-breakdown-checkbox-checked"
                 width="16"
                 height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                aria-hidden="true"
-              >
-                <path
-                  d="M3 20.4V3.6C3 3.26863 3.26863 3 3.6 3H20.4C20.7314 3 21 3.26863 21 3.6V20.4C21 20.7314 20.7314 21 20.4 21H3.6C3.26863 21 3 20.7314 3 20.4Z"
-                  stroke="currentColor"
-                  stroke-width="1.6"
-                />
-                <path
-                  d="M7 12.5L10 15.5L17 8.5"
-                  stroke="currentColor"
-                  stroke-width="1.6"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
+              />
               <span>nested</span>
             </label>
           </Show>
@@ -228,20 +205,12 @@ export function ContextPopup(props: {
           onClick={() => setSubagentsExpanded((expanded) => !expanded)}
         >
           <span>Agents{props.subagentCount > 0 ? ` (${props.subagentCount})` : ''}</span>
-          <svg
+          <UiIcon
+            source={navArrowRightIcon}
             class={`context-popup-section-chevron${subagentsExpanded() ? ' expanded' : ''}`}
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
             width="10"
             height="10"
-            aria-hidden="true"
-          >
-            <path d="M6 4l4 4-4 4" />
-          </svg>
+          />
           <Show when={!subagentsExpanded()}>
             <span class="context-popup-section-summary">
               {formatNumber(props.subagentTokens.total)}

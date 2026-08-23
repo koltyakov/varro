@@ -2338,12 +2338,12 @@ kbd {
   right: max(20px, env(safe-area-inset-right));
 }
 
-.chat-image-preview-close svg {
+.chat-image-preview-close .ui-icon {
   width: 14px;
   height: 14px;
 }
 
-.chat-image-preview-nav svg {
+.chat-image-preview-nav .ui-icon {
   width: 16px;
   height: 16px;
 }
@@ -2491,7 +2491,7 @@ kbd {
   flex-shrink: 0;
 }
 
-.message-image-carousel-nav svg {
+.message-image-carousel-nav .ui-icon {
   width: 12px;
   height: 12px;
   opacity: 0.72;

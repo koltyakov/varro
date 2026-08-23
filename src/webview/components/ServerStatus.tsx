@@ -9,8 +9,18 @@ import type { ServerErrorDetail } from '../../shared/protocol';
 import { postMessage } from '../lib/bridge';
 import { openProviderSetup } from '../lib/provider-setup';
 import { defaultAppState } from '../lib/state';
+import {
+  brainWarningIcon,
+  checkIcon,
+  clockIcon,
+  copyIcon,
+  downloadIcon,
+  warningCircleSolidIcon,
+  warningTriangleIcon,
+} from '../lib/ui-icons';
 import { writeClipboard } from '../lib/write-clipboard';
 import { Tooltip } from './Tooltip';
+import { UiIcon } from './UiIcon';
 
 function openExternal(url: string) {
   postMessage({ type: 'vscode/open-external', payload: { url } });
@@ -61,34 +71,14 @@ function SetupCommandCard(props: { label: string; command: string }) {
             >
               <Show
                 when={copied()}
-                fallback={
-                  <svg
-                    class="h-3.5 w-3.5"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    aria-hidden="true"
-                  >
-                    <rect width="14" height="14" x="8" y="8" rx="2" />
-                    <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
-                  </svg>
-                }
+                fallback={<UiIcon source={copyIcon} class="h-3.5 w-3.5" width={14} height={14} />}
               >
-                <svg
+                <UiIcon
+                  source={checkIcon}
                   class="h-3.5 w-3.5 text-vscode-success"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M20 6 9 17l-5-5" />
-                </svg>
+                  width={14}
+                  height={14}
+                />
               </Show>
             </button>
           </Tooltip>
@@ -141,20 +131,12 @@ function RecoveryActions(props: {
 function WarningIcon() {
   return (
     <div class="flex h-10 w-10 items-center justify-center rounded-full bg-vscode-warning/10">
-      <svg
+      <UiIcon
+        source={warningTriangleIcon}
         class="h-5 w-5 text-vscode-warning"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
-      >
-        <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-        <line x1="12" y1="9" x2="12" y2="13" />
-        <line x1="12" y1="17" x2="12.01" y2="17" />
-      </svg>
+        width={20}
+        height={20}
+      />
     </div>
   );
 }
@@ -162,20 +144,7 @@ function WarningIcon() {
 function UpdateIcon() {
   return (
     <div class="flex h-10 w-10 items-center justify-center rounded-full bg-vscode-warning/10">
-      <svg
-        class="h-5 w-5 text-vscode-warning"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
-      >
-        <path d="M12 3v12" />
-        <path d="m7 10 5 5 5-5" />
-        <path d="M5 21h14" />
-      </svg>
+      <UiIcon source={downloadIcon} class="h-5 w-5 text-vscode-warning" width={20} height={20} />
     </div>
   );
 }
@@ -183,19 +152,7 @@ function UpdateIcon() {
 function WaitingIcon() {
   return (
     <div class="flex h-10 w-10 items-center justify-center rounded-full bg-vscode-accent/10">
-      <svg
-        class="h-5 w-5 text-vscode-accent"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
-      >
-        <circle cx="12" cy="12" r="9" />
-        <path d="M12 7v5l3 2" />
-      </svg>
+      <UiIcon source={clockIcon} class="h-5 w-5 text-vscode-accent" width={20} height={20} />
     </div>
   );
 }
@@ -297,24 +254,7 @@ export function ServerStatus() {
             class="flex shrink-0 items-center justify-center rounded-full bg-vscode-accent/10"
             style={{ width: '40px', height: '40px', 'aspect-ratio': '1 / 1' }}
           >
-            <svg
-              width="20"
-              height="20"
-              class="text-vscode-accent"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path d="M12 8V4H8" />
-              <rect width="16" height="12" x="4" y="8" rx="2" />
-              <path d="M2 14h2" />
-              <path d="M20 14h2" />
-              <path d="M15 13v2" />
-              <path d="M9 13v2" />
-            </svg>
+            <UiIcon source={brainWarningIcon} width={20} height={20} class="text-vscode-accent" />
           </div>
           <div class="flex flex-col gap-1.5 px-4">
             <p class="text-[13px] font-medium text-vscode-fg">No providers configured</p>
@@ -469,14 +409,12 @@ function GenericErrorState(props: { message: string }) {
   return (
     <div class="flex w-full max-w-75 flex-col items-center gap-4 text-center">
       <div class="flex h-10 w-10 items-center justify-center rounded-full bg-vscode-error/10">
-        <svg
+        <UiIcon
+          source={warningCircleSolidIcon}
           class="h-5 w-5 text-vscode-error"
-          viewBox="0 0 16 16"
-          fill="currentColor"
-          aria-hidden="true"
-        >
-          <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm-.5 3h1v5h-1V4zm.5 8a.75.75 0 110-1.5.75.75 0 010 1.5z" />
-        </svg>
+          width={20}
+          height={20}
+        />
       </div>
       <div class="flex flex-col gap-1.5 px-4">
         <p class="text-[13px] font-medium text-vscode-fg">OpenCode could not start</p>

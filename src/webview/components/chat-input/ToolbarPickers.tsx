@@ -6,9 +6,11 @@ import type {
   WorkspaceFolderContext,
 } from '../../../shared/protocol';
 import { getProviderIcon } from '../../lib/provider-icons';
+import { checkIcon, navArrowDownIcon } from '../../lib/ui-icons';
 import { formatModelName } from '../../lib/format';
 import { FolderIcon } from '../FolderIcon';
 import { Tooltip } from '../Tooltip';
+import { toCssUrl, UiIcon } from '../UiIcon';
 import {
   alignPopupToBoundary,
   clampPopupToViewport,
@@ -25,22 +27,10 @@ function isFastModelName(name: string) {
 }
 
 function PickerChevron() {
-  return (
-    <svg
-      class="codicon-chevron"
-      width="10"
-      height="10"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="1.5"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-    >
-      <path d="M4 6l4 4 4-4" />
-    </svg>
-  );
+  return <UiIcon source={navArrowDownIcon} class="codicon-chevron" width={10} height={10} />;
 }
+
+const selectedIconStyle = { '--toolbar-selected-icon': toCssUrl(checkIcon) };
 
 function getAutoApproveActivityTitle(activity: AutoApproveActivity) {
   const label = {
@@ -80,7 +70,12 @@ export function WorkspacePicker(props: {
         </button>
       </Tooltip>
       <Show when={props.showPicker}>
-        <div ref={props.popoverRef} class="toolbar-popover" onClick={(e) => e.stopPropagation()}>
+        <div
+          ref={props.popoverRef}
+          class="toolbar-popover"
+          style={selectedIconStyle}
+          onClick={(e) => e.stopPropagation()}
+        >
           <div class="toolbar-popover-header">Working directory</div>
           <For each={props.folders}>
             {(folder) => (
@@ -229,6 +224,7 @@ export function PermissionModePicker(props: {
         <div
           ref={setPopoverRef}
           class="toolbar-popover permission-mode-popover"
+          style={selectedIconStyle}
           onClick={(e) => e.stopPropagation()}
         >
           <div class="toolbar-popover-header">Permissions</div>
@@ -354,6 +350,7 @@ export function AgentPicker(props: {
         <div
           ref={setPopoverRef}
           class="toolbar-popover agent-popover"
+          style={selectedIconStyle}
           onClick={(e) => e.stopPropagation()}
         >
           <div class="toolbar-popover-header">Agent</div>
@@ -446,7 +443,7 @@ export function VariantPicker(props: {
           ref={setPopoverRef}
           class="toolbar-popover variant-popover"
           onClick={(e) => e.stopPropagation()}
-          style={popoverStyle()}
+          style={{ ...popoverStyle(), ...selectedIconStyle }}
         >
           <div class="toolbar-popover-header">Reasoning</div>
           <button

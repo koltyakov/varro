@@ -455,7 +455,7 @@
   color: var(--color-vscode-muted);
 }
 
-.composer-completion-icon svg {
+.composer-completion-icon .ui-icon {
   display: block;
 }
 
@@ -553,7 +553,7 @@
   align-items: center;
   gap: 1px;
   height: 26px;
-  padding: 0 6px 0 9px;
+  padding: 0 4px 0 9px;
   min-width: 0;
   max-width: 100%;
   border-radius: var(--chat-radius-control);
@@ -1192,10 +1192,8 @@
   flex-shrink: 0;
   margin-left: auto;
   background: currentColor;
-  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z'/></svg>")
-    center / contain no-repeat;
-  mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z'/></svg>")
-    center / contain no-repeat;
+  -webkit-mask: var(--toolbar-selected-icon) center / contain no-repeat;
+  mask: var(--toolbar-selected-icon) center / contain no-repeat;
 }
 
 .permission-mode-option-copy {
@@ -1265,7 +1263,7 @@
 
 .chat-input-toolbars.compact-tight .toolbar-picker {
   padding-left: 7px;
-  padding-right: 5px;
+  padding-right: 3px;
 }
 
 .chat-input-toolbars.compact-tight .toolbar-limit-chip {
@@ -1292,7 +1290,8 @@
   width: 16px;
   height: 26px;
 }
-.toolbar-picker.stop-button svg {
+.toolbar-picker.stop-button svg,
+.toolbar-picker.stop-button .ui-icon {
   color: var(--color-vscode-error);
   opacity: 0.75;
 }

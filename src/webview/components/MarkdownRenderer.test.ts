@@ -15,6 +15,8 @@ import {
 } from './MarkdownRenderer';
 import { setState, setTheme } from '../lib/state';
 import { loadCodeHighlighter } from '../lib/code-highlighter';
+import { checkIcon, copyIcon, expandIcon, xmarkIcon } from '../lib/ui-icons';
+import { toCssUrl } from './UiIcon';
 
 type TestRuntimeValue =
   | string
@@ -80,6 +82,15 @@ function assertInertWithSafeAnchor(root: ParentNode) {
 
 function dispatchAnchorClick(anchor: HTMLAnchorElement | null | undefined) {
   anchor?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+}
+
+function expectUiIcon(element: Element | null | undefined, source: string, size: number) {
+  expect(element).toBeInstanceOf(HTMLSpanElement);
+  expect(element?.classList).toContain('ui-icon');
+  if (!(element instanceof HTMLSpanElement)) throw new Error('Expected UI icon element');
+  expect(element.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(source));
+  expect(element.style.getPropertyValue('--ui-icon-width')).toBe(`${size}px`);
+  expect(element.style.getPropertyValue('--ui-icon-height')).toBe(`${size}px`);
 }
 
 beforeEach(() => {
@@ -313,13 +324,29 @@ describe('MarkdownRenderer', () => {
     expect(html).not.toContain('mermaid-diagram-pending');
   });
 
-  it('renders copy and expand controls after Mermaid hydration markup is mounted', () => {
-    const root = document.createElement('div');
-    root.innerHTML =
-      '<div class="mermaid-diagram-toolbar"><button data-mermaid-copy></button><button data-mermaid-expand></button></div>';
+  it('renders imperative Mermaid controls while preserving generated SVG output', async () => {
+    mermaidMock.render.mockResolvedValueOnce({
+      svg: '<svg viewBox="0 0 10 10"><path d="M0 0h10v10z"></path></svg>',
+    });
+    cleanup = render(
+      () => MarkdownRenderer({ content: '```mermaid\ngraph TD\n  A --> B\n```' }),
+      container!
+    );
+    await vi.waitFor(() =>
+      expect(container?.querySelector('.mermaid-diagram-toolbar')).not.toBeNull()
+    );
 
-    expect(root.querySelector('button[data-mermaid-copy]')).toBeInstanceOf(HTMLButtonElement);
-    expect(root.querySelector('button[data-mermaid-expand]')).toBeInstanceOf(HTMLButtonElement);
+    const copyButton = container?.querySelector<HTMLButtonElement>('button[data-mermaid-copy]');
+    const expandButton = container?.querySelector<HTMLButtonElement>('button[data-mermaid-expand]');
+    expectUiIcon(copyButton?.firstElementChild, copyIcon, 14);
+    expectUiIcon(expandButton?.firstElementChild, expandIcon, 14);
+    expect(container?.querySelector('.mermaid-diagram-output > svg path')).not.toBeNull();
+
+    expandButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    const closeButton = document.body.querySelector<HTMLButtonElement>(
+      'button[aria-label="Close diagram preview"]'
+    );
+    expectUiIcon(closeButton?.firstElementChild, xmarkIcon, 14);
   });
 
   it('splits streaming markdown at the last safe paragraph boundary', () => {
@@ -894,14 +921,14 @@ describe('MarkdownRenderer', () => {
 
     const button = container?.querySelector<HTMLButtonElement>('button[data-copy]');
     expect(button).toBeTruthy();
-    const initialIcon = button!.innerHTML;
+    expectUiIcon(button?.firstElementChild, copyIcon, 14);
 
     vi.useFakeTimers();
     button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    expect(button!.innerHTML).not.toBe(initialIcon);
+    expectUiIcon(button?.firstElementChild, checkIcon, 14);
 
     vi.advanceTimersByTime(1500);
-    expect(button!.innerHTML).toBe(initialIcon);
+    expectUiIcon(button?.firstElementChild, copyIcon, 14);
   });
 
   it('renders fenced code blocks with syntax highlight spans when the language is known', async () => {

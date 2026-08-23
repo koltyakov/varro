@@ -68,6 +68,14 @@ export function registerCommands(
       }
     }),
 
+    vscode.commands.registerCommand('varro.chat.openSettings', async () => {
+      await vscode.commands.executeCommand('workbench.action.openSettings', 'Varro');
+    }),
+
+    vscode.commands.registerCommand('varro.chat.openStats', async () => {
+      await sidebar.generateUsageReport();
+    }),
+
     vscode.commands.registerCommand('varro.chat.abort', async () => {
       sidebar.postCommand('abort');
       await revealSidebar();
@@ -96,6 +104,10 @@ export function registerCommands(
         logger.error(message);
         vscode.window.showErrorMessage(message);
       }
+    }),
+
+    vscode.commands.registerCommand('varro.openGitHub', async () => {
+      await vscode.env.openExternal(vscode.Uri.parse('https://github.com/koltyakov/varro'));
     }),
 
     vscode.commands.registerCommand('varro.showOutput', () => {

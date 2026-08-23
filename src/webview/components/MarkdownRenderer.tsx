@@ -21,9 +21,11 @@ import { selectSession } from '../hooks/useOpenCode';
 import { trapModalFocus } from '../lib/modal-focus';
 import { mixRgb, parseThemeColor } from '../lib/theme';
 import { isSafeExternalHref } from '../lib/external-link';
+import { checkIcon, copyIcon, expandIcon, xmarkIcon } from '../lib/ui-icons';
 import { createExternalLinkIconElement } from './ExternalLinkIcon';
 import { createFileTypeIconElement, hasRecognizedFileType } from './FileTypeIcon';
 import { createMaterialChipIconElement } from './MaterialChipIcon';
+import { createUiIconElement, UiIcon } from './UiIcon';
 import { showSessionActionFeedback } from './chat/SessionActionFeedback';
 
 interface MarkdownProps {
@@ -104,15 +106,6 @@ type IdleSchedulerGlobal = typeof globalThis & {
 type IdleWorkHandle =
   | { kind: 'idle'; id: number }
   | { kind: 'timeout'; id: ReturnType<typeof setTimeout> };
-
-const copySvg =
-  '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M4 4h1V2.5a.5.5 0 01.5-.5h8a.5.5 0 01.5.5v8a.5.5 0 01-.5.5H12v1h1.5a1.5 1.5 0 001.5-1.5v-8A1.5 1.5 0 0013.5 1h-8A1.5 1.5 0 004 2.5V4zm-2 1.5A1.5 1.5 0 013.5 4h8A1.5 1.5 0 0113 5.5v8a1.5 1.5 0 01-1.5 1.5h-8A1.5 1.5 0 012 13.5v-8zM3.5 5a.5.5 0 00-.5.5v8a.5.5 0 00.5.5h8a.5.5 0 00.5-.5v-8a.5.5 0 00-.5-.5h-8z"/></svg>';
-const checkSvg =
-  '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg>';
-const expandSvg =
-  '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M6 2H2v4M10 2h4v4M6 14H2v-4M10 14h4v-4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-const closeSvg =
-  '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" stroke-linecap="round"/></svg>';
 
 const renderer = new marked.Renderer();
 let renderMarkdownContext: RenderMarkdownContext | null = null;
@@ -363,7 +356,7 @@ export function renderCodeBlockHtml(params: CodeBlockHtmlParams): string {
     ? `<span class="code-block-detail">${escapeHtml(params.headerDetail)}</span>`
     : '';
   const copyBtn = showCopyButton
-    ? `<button type="button" class="code-block-copy-btn" data-copy data-copy-text="${encodeCopyPayload(copyText)}" aria-label="Copy code" title="Copy code">${copySvg}</button>`
+    ? `<button type="button" class="code-block-copy-btn" data-copy data-copy-text="${encodeCopyPayload(copyText)}" aria-label="Copy code" title="Copy code"></button>`
     : '';
   const header =
     langLabel || headerDetail || copyBtn
@@ -1265,9 +1258,7 @@ function applyCodeBlockCopyIcons(root: HTMLDivElement | undefined) {
   if (!root) return;
   const buttons = root.querySelectorAll<HTMLButtonElement>('button[data-copy]');
   for (const button of buttons) {
-    if (!button.querySelector('svg')) {
-      button.innerHTML = copySvg;
-    }
+    button.replaceChildren(createUiIconElement(copyIcon, { width: 14, height: 14 }));
     if (button.dataset.copyText) {
       button.dataset.copyText = encodeCopyPayload(
         sanitizeCopyText(decodeCopyPayload(button.dataset.copyText))
@@ -1465,7 +1456,19 @@ function showMermaidFailure(diagram: HTMLElement, message: string) {
 function mountMermaidSvg(diagram: HTMLElement, svg: string) {
   const toolbar = document.createElement('div');
   toolbar.className = 'mermaid-diagram-toolbar';
-  toolbar.innerHTML = `<button type="button" data-mermaid-copy aria-label="Copy Mermaid source" title="Copy Mermaid source">${copySvg}</button><button type="button" data-mermaid-expand aria-label="Expand diagram" title="Expand diagram">${expandSvg}</button>`;
+  const copyButton = document.createElement('button');
+  copyButton.type = 'button';
+  copyButton.dataset.mermaidCopy = '';
+  copyButton.setAttribute('aria-label', 'Copy Mermaid source');
+  copyButton.title = 'Copy Mermaid source';
+  copyButton.replaceChildren(createUiIconElement(copyIcon, { width: 14, height: 14 }));
+  const expandButton = document.createElement('button');
+  expandButton.type = 'button';
+  expandButton.dataset.mermaidExpand = '';
+  expandButton.setAttribute('aria-label', 'Expand diagram');
+  expandButton.title = 'Expand diagram';
+  expandButton.replaceChildren(createUiIconElement(expandIcon, { width: 14, height: 14 }));
+  toolbar.append(copyButton, expandButton);
   const output = document.createElement('div');
   output.className = 'mermaid-diagram-output';
   output.innerHTML = svg;
@@ -1486,7 +1489,9 @@ export function resetMermaidDiagramsForThemeForTests(root: HTMLElement | undefin
     diagram.querySelector('.mermaid-diagram-status')?.remove();
     const status = document.createElement('div');
     status.className = 'mermaid-diagram-status';
-    status.innerHTML = '<span>Rendering diagram...</span>';
+    const label = document.createElement('span');
+    label.textContent = 'Rendering diagram...';
+    status.append(label);
     diagram.prepend(status);
     diagram.querySelector<HTMLElement>('.mermaid-diagram-fallback')?.setAttribute('hidden', '');
     delete diagram.dataset.mermaidHydrated;
@@ -1950,10 +1955,10 @@ export function MarkdownRenderer(props: MarkdownProps) {
       const diagram = mermaidCopy.closest<HTMLElement>('.mermaid-diagram');
       const source = decodeCopyPayload(diagram?.dataset.mermaidSource || '');
       if (source) writeClipboard(source);
-      mermaidCopy.innerHTML = checkSvg;
+      mermaidCopy.replaceChildren(createUiIconElement(checkIcon, { width: 14, height: 14 }));
       const tid = setTimeout(() => {
         copyTimeouts.delete(tid);
-        mermaidCopy.innerHTML = copySvg;
+        mermaidCopy.replaceChildren(createUiIconElement(copyIcon, { width: 14, height: 14 }));
       }, 1500);
       copyTimeouts.add(tid);
       return;
@@ -1984,10 +1989,10 @@ export function MarkdownRenderer(props: MarkdownProps) {
       );
       if (!copyText) return;
       writeClipboard(copyText);
-      btn.innerHTML = checkSvg;
+      btn.replaceChildren(createUiIconElement(checkIcon, { width: 14, height: 14 }));
       const tid = setTimeout(() => {
         copyTimeouts.delete(tid);
-        btn.innerHTML = copySvg;
+        btn.replaceChildren(createUiIconElement(copyIcon, { width: 14, height: 14 }));
       }, 1500);
       copyTimeouts.add(tid);
       return;
@@ -2111,8 +2116,9 @@ function MermaidPreviewOverlay(props: { preview: { svg: string } | null; onClose
                   event.stopPropagation();
                   props.onClose();
                 }}
-                innerHTML={closeSvg}
-              />
+              >
+                <UiIcon source={xmarkIcon} width={14} height={14} />
+              </button>
             </div>
             <div
               class="mermaid-preview-canvas"

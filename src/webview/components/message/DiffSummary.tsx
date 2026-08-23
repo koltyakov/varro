@@ -4,7 +4,9 @@ import {
   setMessageBlockExpanded,
 } from '../../lib/tool-call-expansion-state';
 import type { FileDiff } from '../../types';
+import { navArrowRightIcon } from '../../lib/ui-icons';
 import { DiffView } from '../DiffView';
+import { UiIcon } from '../UiIcon';
 
 export function DiffSummary(props: { diffs: FileDiff[]; stateKey: string }) {
   let currentStateKey = props.stateKey;
@@ -32,19 +34,12 @@ export function DiffSummary(props: { diffs: FileDiff[]; stateKey: string }) {
   return (
     <div class="diff-summary">
       <button onClick={toggleExpanded} class="diff-summary-btn" aria-expanded={expanded()}>
-        <svg
+        <UiIcon
+          source={navArrowRightIcon}
           class={`transition-transform ${expanded() ? 'rotate-90' : ''}`}
           width="10"
           height="10"
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.5"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        >
-          <path d="M6 4l4 4-4 4" />
-        </svg>
+        />
         <span>
           {props.diffs.length} file{props.diffs.length !== 1 ? 's' : ''} changed ·{' '}
           <span class="diff-lines-added">+{summary().add}</span>{' '}

@@ -234,10 +234,9 @@ describe('CompletionMenu', () => {
       container!
     );
 
-    const icon = container?.querySelector('.composer-completion-icon svg');
-    expect(icon?.getAttribute('viewBox')).toBe('0 0 16 16');
-    expect(icon?.getAttribute('width')).toBe('12');
-    expect(icon?.getAttribute('height')).toBe('12');
+    const icon = container?.querySelector<HTMLElement>('.composer-completion-icon .ui-icon');
+    expect(icon?.style.getPropertyValue('--ui-icon-width')).toBe('12px');
+    expect(icon?.style.getPropertyValue('--ui-icon-height')).toBe('12px');
   });
 
   it('renders a Material file-type icon for file mention completions', () => {
