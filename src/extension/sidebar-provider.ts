@@ -66,6 +66,7 @@ interface WebviewEndpoint {
   webviewSession: WebviewSession;
   viewId: string;
   surface: WebviewInstanceContext['surface'];
+  route: WebviewRoute;
   ready: boolean;
 }
 
@@ -74,6 +75,7 @@ interface EditorEndpoint extends WebviewEndpoint {
   panel: vscode.WebviewPanel;
   route: WebviewRoute;
   restoringSessionId?: string;
+  panelDisposables: vscode.Disposable[];
 }
 
 interface EndpointRef {
@@ -131,6 +133,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly permissionModeQueues = new Map<string, Promise<unknown>>();
   private permissionAutomationOwnerViewId: string | null = null;
   private permissionAutomationLease = 0;
+  private interruptedRecoveryClaim: {
+    claimId: number;
+    sessionIds: string[];
+    viewId: string;
+  } | null = null;
+  private interruptedRecoveryOwnerViewId: string | null = null;
+  private readonly deferredInterruptedRecoveryIds = new Set<string>();
+  private nextInterruptedRecoveryClaimId = 0;
   private nextEditorId = 0;
   private disposing = false;
 
@@ -336,13 +346,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         sessionSelectedModels: () => this.sessionSelectedModels.list(),
         sessionModelMigrationPending: () => this.sessionSelectedModels.needsMigration(),
         editorTabsOpen: () => this.editorPanels.size > 0,
-        editorSessionIds: () => this.editorSessionIds(),
+        editorSessionIds: () => this.visibleEditorSessionIds(),
         permissionAutomation: () => this.permissionAutomationFor(webviewContext.viewId),
         draftImages: () => this.draftImages.list(webviewContext.viewId),
         flushPendingServerEvents: () => this.serverEventBridge.flushPendingEvents(),
         cancelApiRequestsBeforeGeneration: (generation) =>
           endpointRef.restProxy?.cancelRequestsBeforeGeneration(generation),
         handleDisposedSideEffects: () => {
+          if (endpointRef.endpoint) this.setEndpointReady(endpointRef.endpoint, false);
+        },
+        handleUnavailableSideEffects: () => {
           if (endpointRef.endpoint) this.setEndpointReady(endpointRef.endpoint, false);
         },
       },
@@ -376,6 +389,46 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       isPermissionAutomationLeaseCurrent: (lease) =>
         this.permissionAutomationOwnerViewId === webviewContext.viewId &&
         this.permissionAutomationLease === lease,
+      beginQueuedMessageDispatchClaim: async (sessionId, itemId, lease, requestId, messageId) =>
+        endpointRef.endpoint?.ready === true &&
+        (await this.queuedMessages.beginDispatchAdmission(
+          webviewContext.viewId,
+          sessionId,
+          itemId,
+          lease,
+          requestId,
+          messageId
+        )),
+      isQueuedMessageDispatchClaimCurrent: (sessionId, itemId, lease, requestId) =>
+        endpointRef.endpoint?.ready === true &&
+        this.queuedMessages.isDispatchAdmissionCurrent(
+          webviewContext.viewId,
+          sessionId,
+          itemId,
+          lease,
+          requestId
+        ),
+      completeQueuedMessageDispatchClaim: async (sessionId, itemId, lease, requestId) => {
+        const persistence = this.queuedMessages.completeDispatchAdmission(
+          webviewContext.viewId,
+          sessionId,
+          itemId,
+          lease,
+          requestId
+        );
+        if (!persistence) return false;
+        this.postQueuedMessageSnapshots();
+        await persistence;
+        return true;
+      },
+      releaseQueuedMessageDispatchClaim: (sessionId, itemId, lease, requestId) =>
+        this.queuedMessages.releaseDispatchAdmission(
+          webviewContext.viewId,
+          sessionId,
+          itemId,
+          lease,
+          requestId
+        ),
       updatePermissionMode: (sessionID, mode) =>
         this.updateConfirmedPermissionMode(sessionID, mode),
     });
@@ -406,14 +459,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           post({ type: 'terminal-selection/update', payload: selection }),
         postConfigState: () => this.postConfigState(),
         handleReadyMessage: async () => {
-          if (endpointRef.endpoint) this.setEndpointReady(endpointRef.endpoint, true);
-          await webviewSession.handleReady();
-          if (endpointRef.endpoint) {
-            if (this.permissionAutomationOwnerViewId === endpointRef.endpoint.viewId) {
-              webviewSession.deliverInterruptedSessions(
-                this.sessionState.claimInterruptedSessions()
-              );
-            }
+          try {
+            await webviewSession.handleReady();
+            if (endpointRef.endpoint) this.setEndpointReady(endpointRef.endpoint, true);
+          } catch (err) {
+            if (endpointRef.endpoint) this.setEndpointReady(endpointRef.endpoint, false);
+            throw err;
           }
           this.providerFileRefresh.postStatus();
         },
@@ -421,8 +472,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           contextFilesState.handleDroppedPaths(paths, (message) => post(message)),
         handleDroppedContent: (files) =>
           contextFilesState.handleDroppedContent(files, (message) => post(message)),
-        storePdf: (payload) => this.storePdf(payload, post),
-        storeImage: (payload) => this.storeImage(payload, post),
+        storePdf: (payload) => {
+          const generation = webviewSession.getRequestGeneration();
+          return this.storePdf(payload, post, () =>
+            this.isEndpointGenerationAvailable(endpointRef.endpoint, generation)
+          );
+        },
+        storeImage: (payload) => {
+          const generation = webviewSession.getRequestGeneration();
+          return this.storeImage(payload, post, () =>
+            this.isEndpointGenerationAvailable(endpointRef.endpoint, generation)
+          );
+        },
         releaseImages: (payload) => this.releaseImages(payload),
         removeContextFile: (path) =>
           contextFilesState.removeContextFile(path, (message) => post(message)),
@@ -439,8 +500,22 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         handleRalphMessage: (msg) => this.ralphHost.handleMessage(msg),
         updateQueuedMessages: ({ messages }) =>
           this.updateQueuedMessages(webviewContext.viewId, messages),
+        claimQueuedMessage: (payload) => this.claimQueuedMessage(webviewContext.viewId, payload),
+        releaseQueuedMessage: (payload) =>
+          this.queuedMessages.releaseDispatchClaim(
+            webviewContext.viewId,
+            payload.sessionId,
+            payload.itemId,
+            payload.lease
+          ),
+        acknowledgeInterruptedSessions: ({ claimId, consumedSessionIds }) =>
+          this.acknowledgeInterruptedSessions(webviewContext.viewId, claimId, consumedSessionIds),
         updatePermissionMode: async ({ sessionId, mode }) => {
           const modes = await this.sessionPermissionModes.set(sessionId, mode);
+          this.post({ type: 'permission-modes/sync', payload: { modes } });
+        },
+        migratePermissionModes: async ({ modes: legacyModes }) => {
+          const modes = await this.sessionPermissionModes.setIfAbsent(legacyModes);
           this.post({ type: 'permission-modes/sync', payload: { modes } });
         },
         updateSessionModel: async ({ sessionId, model }) => {
@@ -453,6 +528,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         },
         updateDraftImages: ({ images }) => this.draftImages.update(images, webviewContext.viewId),
         setMermaidPreviewOpen: (open) => this.setMermaidPreviewOpen(open),
+        setActiveRoute: (sessionId) => {
+          const endpoint = endpointRef.endpoint;
+          if (!endpoint || endpoint.surface !== 'sidebar' || sessionId === undefined) return;
+          endpoint.route = sessionId
+            ? {
+                type: 'session',
+                sessionId,
+              }
+            : { type: 'new-session' };
+        },
       })
     );
     const endpoint = {
@@ -464,6 +549,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       webviewSession,
       viewId: webviewContext.viewId,
       surface: webviewContext.surface,
+      route: webviewContext.initialRoute,
       ready: false,
     };
     endpointRef.endpoint = endpoint;
@@ -493,11 +579,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     rootSessionId?: string
   ) {
     if (model) {
-      void this.sessionSelectedModels.set(sessionId, model).catch((err) => {
+      try {
+        const models = await this.sessionSelectedModels.setIfAbsent(sessionId, model);
+        this.post({ type: 'session-models/sync', payload: { models } });
+      } catch (err) {
         logger.warn(
           `Failed to persist editor session model: ${err instanceof Error ? err.message : String(err)}`
         );
-      });
+      }
     }
     const rootId = rootSessionId || this.sessionState.rootSessionIdFor(sessionId);
     const key = `session:${rootId}`;
@@ -576,11 +665,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       panel,
       route,
       restoringSessionId: route.type === 'session' ? route.sessionId : undefined,
+      panelDisposables: [],
     };
     this.editorPanels.set(key, editorEndpoint);
     this.postEditorTabsState();
     let wasVisible = panel.visible;
-    panel.onDidChangeViewState(({ webviewPanel }) => {
+    const viewStateDisposable = panel.onDidChangeViewState(({ webviewPanel }) => {
+      if (this.disposing) return;
       if (webviewPanel.visible === wasVisible) return;
       wasVisible = webviewPanel.visible;
       if (webviewPanel.visible) {
@@ -589,8 +680,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.setEndpointReady(endpoint, false);
         endpoint.webviewSession.suspend();
       }
+      this.postEditorTabsState();
     });
-    panel.onDidDispose(() => {
+    const disposeDisposable = panel.onDidDispose(() => {
+      if (this.disposing) return;
       let removed = false;
       for (const [registeredKey, registeredEndpoint] of this.editorPanels) {
         if (registeredEndpoint !== editorEndpoint) continue;
@@ -603,10 +696,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       endpoint.fileSearch.dispose();
       endpoint.restProxy.dispose();
       void endpoint.webviewSession.dispose();
-      if (!this.disposing) {
-        void this.transferEditorDraftState(viewId);
-      }
+      for (const disposable of editorEndpoint.panelDisposables) disposable.dispose();
+      editorEndpoint.panelDisposables = [];
+      void this.transferEditorDraftState(viewId);
     });
+    editorEndpoint.panelDisposables.push(viewStateDisposable, disposeDisposable);
     await endpoint.webviewSession.resolve(panel);
     if (!panel.visible) endpoint.webviewSession.suspend();
   }
@@ -651,7 +745,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private postEditorTabsState() {
-    const sessionIds = this.editorSessionIds();
+    const sessionIds = this.visibleEditorSessionIds();
     this.post({
       type: 'editor-tabs/state',
       payload: { open: this.editorPanels.size > 0, sessionIds },
@@ -715,6 +809,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private setEndpointReady(endpoint: WebviewEndpoint, ready: boolean) {
     if (endpoint.ready === ready) return;
     endpoint.ready = ready;
+    if (!ready) this.queuedMessages.releaseDispatchClaimsForView(endpoint.viewId);
+    if (!this.disposing) this.reconcileQueuedMessageOwners();
     this.reconcilePermissionAutomationOwner();
   }
 
@@ -743,6 +839,78 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         next.bridge.post({ type: 'permission/actionable', payload: { permissionId } });
       }
     }
+    this.reconcileInterruptedRecoveryOwner(next);
+  }
+
+  private reconcileInterruptedRecoveryOwner(owner: WebviewEndpoint | undefined) {
+    const ownerViewId = owner?.viewId ?? null;
+    if (this.interruptedRecoveryOwnerViewId !== ownerViewId) {
+      this.interruptedRecoveryOwnerViewId = ownerViewId;
+      this.interruptedRecoveryClaim = null;
+      this.deferredInterruptedRecoveryIds.clear();
+    }
+    if (!owner || this.interruptedRecoveryClaim) return;
+    const sessions = this.sessionState
+      .claimInterruptedSessions()
+      .filter((session) => !this.deferredInterruptedRecoveryIds.has(session.id));
+    if (sessions.length === 0) return;
+    const claim = {
+      claimId: ++this.nextInterruptedRecoveryClaimId,
+      sessionIds: sessions.map((session) => session.id),
+      viewId: owner.viewId,
+    };
+    this.interruptedRecoveryClaim = claim;
+    void owner.webviewSession.deliverInterruptedSessions(claim.claimId, sessions);
+  }
+
+  private async acknowledgeInterruptedSessions(
+    viewId: string,
+    claimId: number,
+    consumedSessionIds: readonly string[]
+  ) {
+    const claim = this.interruptedRecoveryClaim;
+    if (!claim || claim.viewId !== viewId || claim.claimId !== claimId) return;
+    const claimSessionIds = new Set(claim.sessionIds);
+    const consumed = [...new Set(consumedSessionIds)].filter((id) => claimSessionIds.has(id));
+    const consumedSet = new Set(consumed);
+    await this.sessionState.acknowledgeInterruptedSessions(consumed);
+    this.interruptedRecoveryClaim = null;
+    for (const sessionId of claim.sessionIds) {
+      if (consumedSet.has(sessionId)) this.deferredInterruptedRecoveryIds.delete(sessionId);
+      else this.deferredInterruptedRecoveryIds.add(sessionId);
+    }
+    const owner = [...this.endpoints].find(
+      (endpoint) => endpoint.ready && endpoint.viewId === this.permissionAutomationOwnerViewId
+    );
+    this.reconcileInterruptedRecoveryOwner(owner);
+  }
+
+  private claimQueuedMessage(
+    viewId: string,
+    payload: Extract<WebviewMessage, { type: 'queued-messages/claim' }>['payload']
+  ) {
+    const endpoint = [...this.endpoints].find((item) => item.viewId === viewId);
+    const claim = endpoint?.ready
+      ? this.queuedMessages.claimDispatch(
+          viewId,
+          payload.sessionId,
+          payload.itemId,
+          (candidateViewId) => this.isQueueViewEligible(candidateViewId)
+        )
+      : null;
+    const result: Extract<ExtensionMessage, { type: 'queued-messages/claim-result' }>['payload'] = {
+      ...payload,
+      granted: claim !== null,
+    };
+    if (claim) result.lease = claim.lease;
+    endpoint?.bridge.post({
+      type: 'queued-messages/claim-result',
+      payload: result,
+    });
+  }
+
+  private isQueueViewEligible(viewId: string) {
+    return [...this.endpoints].some((endpoint) => endpoint.viewId === viewId && endpoint.ready);
   }
 
   private revealPermission(permissionId: string) {
@@ -779,28 +947,30 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private updateEditorPanelTitles() {
     for (const endpoint of this.editorPanels.values()) {
-      if (!endpoint.key.startsWith('session:')) continue;
-      const sessionId = endpoint.key.slice('session:'.length);
-      endpoint.panel.title = this.editorTitle({ type: 'session', sessionId });
+      if (endpoint.route.type !== 'session') continue;
+      const title = this.sessionState.titleFor(endpoint.route.sessionId) ?? endpoint.route.title;
+      endpoint.route = { ...endpoint.route, title };
+      endpoint.panel.title = this.editorTitle(endpoint.route);
     }
   }
 
   private isSessionAttentionVisible(sessionId: string) {
-    if (this.bridge.isVisible()) return true;
     const rootSessionId = this.sessionState.rootSessionIdFor(sessionId);
-    return [...this.editorPanels.values()].some(
+    return [...this.endpoints].some(
       (endpoint) =>
-        endpoint.panel.visible &&
+        endpoint.ready &&
+        endpoint.bridge.isVisible() &&
         endpoint.route.type === 'session' &&
-        (endpoint.route.rootSessionId || endpoint.route.sessionId) === rootSessionId
+        (endpoint.route.rootSessionId ||
+          this.sessionState.rootSessionIdFor(endpoint.route.sessionId)) === rootSessionId
     );
   }
 
-  private editorSessionIds() {
+  private visibleEditorSessionIds() {
     return [
       ...new Set(
         [...this.editorPanels.values()].flatMap((endpoint) =>
-          endpoint.route.type === 'session'
+          endpoint.panel.visible && endpoint.route.type === 'session'
             ? [endpoint.route.rootSessionId || endpoint.route.sessionId]
             : []
         )
@@ -882,6 +1052,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.providerFileRefresh.beginDispose();
     for (const endpoint of this.editorPanels.values()) {
       this.setEndpointReady(endpoint, false);
+      for (const disposable of endpoint.panelDisposables) disposable.dispose();
+      endpoint.panelDisposables = [];
       endpoint.restProxy.dispose();
       endpoint.fileSearch.dispose();
       await endpoint.webviewSession.dispose();
@@ -930,25 +1102,53 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async updateQueuedMessages(viewId: string, messages: QueuedMessageSnapshot[]) {
-    const retained = (this.queuedMessages.list() ?? []).filter(
-      (message) => (message.ownerViewId ?? 'sidebar') !== viewId
-    );
-    const owned = messages.map((message) => ({ ...message, ownerViewId: viewId }));
-    await this.queuedMessages.update([...retained, ...owned]);
+    const endpoint = [...this.endpoints].find((item) => item.viewId === viewId);
+    if (!endpoint?.ready) return;
+    const persistence = this.queuedMessages.updateOwned(viewId, messages);
     this.postQueuedMessageSnapshots();
+    await persistence;
   }
 
   private async transferEditorDraftState(viewId: string) {
-    const messages = this.queuedMessages.list() ?? [];
-    if (messages.some((message) => message.ownerViewId === viewId)) {
-      await this.queuedMessages.update(
-        messages.map((message) =>
-          message.ownerViewId === viewId ? { ...message, ownerViewId: undefined } : message
-        )
+    const imagePaths = this.draftImages
+      .list(viewId)
+      .flatMap((image) => (image.contextFile ? [image.contextFile.path] : []));
+    const persistence = this.draftImages.update([], viewId);
+    await Promise.all([persistence, this.droppedFilesService.removeOwnedFiles(imagePaths)]);
+  }
+
+  private reconcileQueuedMessageOwners() {
+    const eligibleEndpoints = [...this.endpoints].filter((endpoint) => endpoint.ready);
+    if (eligibleEndpoints.length === 0) return;
+    const target =
+      eligibleEndpoints.find((endpoint) => endpoint.surface === 'sidebar') ?? eligibleEndpoints[0]!;
+    const eligibleViewIds = new Set(eligibleEndpoints.map((endpoint) => endpoint.viewId));
+    const unavailableOwners = new Set(
+      (this.queuedMessages.list() ?? [])
+        .map((message) => message.ownerViewId ?? 'sidebar')
+        .filter((viewId) => !eligibleViewIds.has(viewId))
+    );
+    if (unavailableOwners.size === 0) return;
+    const persistence = Promise.all(
+      [...unavailableOwners].map((viewId) =>
+        this.queuedMessages.transferOwner(viewId, target.viewId)
+      )
+    );
+    this.postQueuedMessageSnapshots();
+    void persistence.catch((err) => {
+      logger.warn(
+        `Failed to persist queued message ownership transfer: ${err instanceof Error ? err.message : String(err)}`
       );
-      this.postQueuedMessageSnapshots();
-    }
-    await this.draftImages.update([], viewId);
+    });
+  }
+
+  private isEndpointGenerationAvailable(endpoint: WebviewEndpoint | undefined, generation: number) {
+    return (
+      !!endpoint &&
+      endpoint.ready &&
+      this.endpoints.has(endpoint) &&
+      endpoint.webviewSession.getRequestGeneration() === generation
+    );
   }
 
   private async setMermaidPreviewOpen(open: boolean) {
@@ -1013,24 +1213,34 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private async storePdf(
     payload: Extract<WebviewMessage, { type: 'pdfs/store' }>['payload'],
-    post: (message: ExtensionMessage) => void = (message) => this.post(message)
+    post: (message: ExtensionMessage) => void = (message) => this.post(message),
+    isAvailable: () => boolean = () => true
   ) {
     const [contextFile] = await this.droppedFilesService.fromContent([
       { name: payload.name, content: payload.content, size: payload.size },
     ]);
     if (contextFile) {
+      if (!isAvailable()) {
+        await this.droppedFilesService.removeOwnedFile(contextFile.path);
+        return;
+      }
       post({ type: 'pdfs/stored', payload: { id: payload.id, contextFile } });
     }
   }
 
   private async storeImage(
     payload: Extract<WebviewMessage, { type: 'images/store' }>['payload'],
-    post: (message: ExtensionMessage) => void = (message) => this.post(message)
+    post: (message: ExtensionMessage) => void = (message) => this.post(message),
+    isAvailable: () => boolean = () => true
   ) {
     const [contextFile] = await this.droppedFilesService.fromContent([
       { name: payload.name, content: payload.content, size: payload.size },
     ]);
     if (contextFile) {
+      if (!isAvailable()) {
+        await this.droppedFilesService.removeOwnedFile(contextFile.path);
+        return;
+      }
       post({ type: 'images/stored', payload: { id: payload.id, contextFile } });
     }
   }

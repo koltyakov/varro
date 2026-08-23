@@ -642,6 +642,7 @@ describe('ToolbarPickers', () => {
       () => (
         <ModelPickerButton
           providerID="openai"
+          modelID="gpt-4.1"
           providerName="OpenAI"
           modelName="gpt-4.1"
           canEllipsize={true}
@@ -656,6 +657,8 @@ describe('ToolbarPickers', () => {
     const modelName = container?.querySelector('.model-name-text');
 
     expect(button?.getAttribute('aria-label')).toBe('OpenAI / gpt-4.1');
+    expect(button?.dataset.providerId).toBe('openai');
+    expect(button?.dataset.modelId).toBe('gpt-4.1');
     expect(button?.className).toContain('model-ellipsis');
     expect(button?.className).not.toContain('fast-model-selected');
     expect(modelName?.textContent).toBe('gpt-4.1');

@@ -156,13 +156,16 @@ describe('About command', () => {
     expect(aboutMarkdown).toMatch(/^# Varro\n/);
     expect(aboutMarkdown).not.toContain('# Varro About');
     expect(aboutMarkdown).not.toMatch(
-      /SDK version|Minimum supported version|Maximum tested version|CLI command|Server port|Server health|Server status|Workspace/
+      /SDK version|Minimum supported version|Maximum tested version|CLI command/
     );
     expect(aboutMarkdown).toContain(
       '- **CLI:**\n  - **Version:** `1.18.4`\n  - **Install method:** bun\n  - **Binary:** `/home/me/.bun/bin/opencode`'
     );
     expect(aboutMarkdown).toContain(
       '- **Server:**\n  - **Version:** `1.18.4`\n  - **URL:** [http://127.0.0.1:4096](http://127.0.0.1:4096)\n  - **Ownership:** managed by Varro\n  - **Active agents:** `1`\n- **Auto updates:** enabled'
+    );
+    expect(aboutMarkdown).toContain(
+      '## Diagnostics\n- CLI version: 1.18.4\n- Resolved binary: /home/me/.bun/bin/opencode\n- Server status: running, event stream unknown\n- Server health: healthy\n- Server port: 4096\n- Auto start: disabled\n- Auto updates: enabled\n- Workspace: /repo'
     );
     expect(sidebar.openMarkdownDocument).toHaveBeenCalledWith(
       expect.stringContaining('- [GitHub repository](https://github.com/koltyakov/varro)'),

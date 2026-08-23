@@ -29,6 +29,8 @@ import { setSessionHistoryPrompts } from '../lib/message-window';
 import { hasExpandedDiffOverlay, setExpandedDiffOverlay } from '../lib/diff-overlay-state';
 import { fixture } from '../test-fixtures';
 import type { UnknownRecord } from '../../shared/type-utils';
+import { applyQueuedMessageClaimResult } from '../lib/state-queued-messages';
+import { sendQueuedAsSteer } from './chat-input/queued-steer';
 
 interface SessionEventProperties extends UnknownRecord {
   sessionID: string;
@@ -137,6 +139,7 @@ let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
 let originalResizeObserver: typeof globalThis.ResizeObserver | undefined;
 const testDiffOverlayOwner = Symbol();
+let defaultBridgeSend: ((message: WebviewMessage) => void) | undefined;
 
 beforeEach(() => {
   container = document.createElement('div');
@@ -147,6 +150,18 @@ beforeEach(() => {
     unobserve(_target: Element) {}
     disconnect() {}
   };
+  defaultBridgeSend = (message) => {
+    if (message.type !== 'queued-messages/claim') return;
+    queueMicrotask(() =>
+      applyQueuedMessageClaimResult({
+        ...message.payload,
+        granted: true,
+        lease: message.payload.requestId,
+      })
+    );
+  };
+  fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
+    defaultBridgeSend;
   setConnectionInitialized(true);
 });
 
@@ -158,6 +173,13 @@ afterEach(() => {
   container = null;
   if (originalResizeObserver) globalThis.ResizeObserver = originalResizeObserver;
   else Reflect.deleteProperty(globalThis, 'ResizeObserver');
+  const bridgeWindow = fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window);
+  if (bridgeWindow.__sendToExtension === defaultBridgeSend) delete bridgeWindow.__sendToExtension;
+  defaultBridgeSend = undefined;
+  Reflect.deleteProperty(
+    fixture<{ __initialWebviewState?: unknown }>(window),
+    '__initialWebviewState'
+  );
   setInputText('');
   setConnectionInitialized(false);
   setIsLoading(false);
@@ -564,6 +586,23 @@ describe('ChatInput', () => {
     expect(collapse).toHaveBeenCalledTimes(1);
     expect(hasExpandedDiffOverlay()).toBe(false);
     expect(sendMessageMock).toHaveBeenCalledWith('Continue with this change', { noReply: false });
+  });
+
+  it('keeps sending disabled until initial message hydration completes', async () => {
+    setState('activeSessionId', 'session-1');
+    setState('messagesLoading', true);
+    setInputText('Send after hydration');
+    cleanup = render(() => ChatInput(), container!);
+
+    const sendButton = container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]');
+    expect(sendButton?.disabled).toBe(true);
+    sendButton?.click();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+
+    setState('messagesLoading', false);
+    await flushAsyncWork();
+
+    expect(sendButton?.disabled).toBe(false);
   });
 
   it('sends at most 20 dropped content files in individual messages', async () => {
@@ -2328,6 +2367,43 @@ describe('ChatInput', () => {
     expect(document.activeElement).toBe(editor);
   });
 
+  it("renders and acts on only this view owner's queue items from a broad snapshot", async () => {
+    fixture<{ __initialWebviewState?: unknown }>(window).__initialWebviewState = {
+      webviewContext: {
+        viewId: 'editor-a',
+        surface: 'editor',
+        initialRoute: { type: 'session', sessionId: 'session-1' },
+      },
+    };
+    setState('activeSessionId', 'session-1');
+    setState('queuedMessages', [
+      {
+        id: 'owned',
+        ownerViewId: 'editor-a',
+        sessionId: 'session-1',
+        text: 'Owned follow-up',
+        paused: true,
+      },
+      {
+        id: 'other-view',
+        ownerViewId: 'editor-b',
+        sessionId: 'session-1',
+        text: 'Other view follow-up',
+      },
+    ]);
+
+    cleanup = render(() => ChatInput(), container!);
+
+    expect(
+      [...container!.querySelectorAll('.chat-queue-label')].map((item) => item.textContent)
+    ).toEqual(['Owned follow-up']);
+
+    await sendQueuedAsSteer(state.queuedMessages[1]!);
+
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(state.queuedMessages.map((item) => item.id)).toEqual(['owned', 'other-view']);
+  });
+
   it('queues busy composer attachments and clears them from the input', () => {
     setInputText('Follow up with context');
     setIsLoading(true);
@@ -2474,6 +2550,7 @@ describe('ChatInput', () => {
       queuedContext: expect.any(Object),
       preserveComposer: true,
       targetSessionId: 'session-1',
+      queuedMessageDispatch: { itemId: 'q1', lease: expect.any(Number) },
     });
     expect(client.session.messages).not.toHaveBeenCalled();
   });
@@ -2547,6 +2624,7 @@ describe('ChatInput', () => {
       queuedContext: expect.any(Object),
       preserveComposer: true,
       targetSessionId: 'session-2',
+      queuedMessageDispatch: { itemId: 'q1', lease: expect.any(Number) },
     });
     expect(state.activeSessionId).toBe('session-1');
     expect(state.queuedMessages).toEqual([]);
@@ -2684,6 +2762,9 @@ describe('ChatInput', () => {
 
     const meta = container?.querySelector('.chat-queue-meta');
     const metaItems = Array.from(container?.querySelectorAll('.chat-queue-meta-item') || []);
+    const queueRows = Array.from(
+      container?.querySelectorAll<HTMLElement>('.chat-queue-item') || []
+    );
     expect(container?.querySelector('.chat-queue-summary')).toBeNull();
     expect(metaItems.map((item) => item.textContent)).toEqual(['1', '2']);
     expect(metaItems.map((item) => item.getAttribute('aria-label'))).toEqual([
@@ -2695,6 +2776,12 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.chat-queue-attachment-icon')).not.toBeNull();
     expect(container?.querySelector('[aria-label="Send as Steer"]')?.textContent).toBe('');
     expect(container?.querySelectorAll('.chat-queue-control')).toHaveLength(10);
+    expect(queueRows.map((row) => row.dataset.queuedMessageId)).toEqual(['q1', 'q2']);
+    expect(queueRows.map((row) => row.dataset.queuedMessageOwner)).toEqual(['sidebar', 'sidebar']);
+    expect(queueRows.map((row) => row.dataset.queuedMessageSessionId)).toEqual([
+      'session-1',
+      'session-1',
+    ]);
   });
 
   it('sets a native title only when a queued message label is truncated', () => {
@@ -3106,6 +3193,7 @@ describe('ChatInput', () => {
       queuedContext: expect.any(Object),
       preserveComposer: true,
       targetSessionId: 'session-1',
+      queuedMessageDispatch: { itemId: 'q1', lease: expect.any(Number) },
     });
   });
 
@@ -3156,6 +3244,7 @@ describe('ChatInput', () => {
       queuedContext: expect.any(Object),
       preserveComposer: true,
       targetSessionId: 'session-1',
+      queuedMessageDispatch: { itemId: 'q1', lease: expect.any(Number) },
     });
   });
 
@@ -3191,6 +3280,55 @@ describe('ChatInput', () => {
       'paused first',
     ]);
     expect(state.queuedMessages).toEqual([]);
+  });
+
+  it('blocks active-session queued actions until message hydration completes', async () => {
+    vi.useFakeTimers();
+    setState('activeSessionId', 'session-1');
+    setState('messagesLoading', true);
+    setState('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'wait for hydration' }]);
+    sendMessageMock.mockResolvedValue(true);
+
+    cleanup = render(() => ChatInput(), container!);
+    const sendNowButton = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="Send as Steer"]'
+    );
+    expect(sendNowButton?.disabled).toBe(true);
+    sendNowButton?.click();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+
+    setState('messagesLoading', false);
+    await flushAsyncWork();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+
+    expect(sendMessageMock).toHaveBeenCalledWith(
+      'wait for hydration',
+      expect.objectContaining({ targetSessionId: 'session-1' })
+    );
+  });
+
+  it('dispatches a hydrated session queue while the active session is hydrating', async () => {
+    vi.useFakeTimers();
+    setState('activeSessionId', 'session-1');
+    setState('messagesLoading', true);
+    setState('queuedMessages', [
+      { id: 'active', sessionId: 'session-1', text: 'active waits' },
+      { id: 'other', sessionId: 'session-2', text: 'other can send' },
+    ]);
+    sendMessageMock.mockResolvedValue(true);
+
+    cleanup = render(() => ChatInput(), container!);
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock).toHaveBeenCalledWith(
+      'other can send',
+      expect.objectContaining({ targetSessionId: 'session-2' })
+    );
+    expect(state.queuedMessages.map((item) => item.id)).toEqual(['active']);
   });
 
   it('retains a failed automatic queue item and its attachments until an explicit retry', async () => {
@@ -3232,6 +3370,7 @@ describe('ChatInput', () => {
       queuedContext: expect.any(Object),
       preserveComposer: true,
       targetSessionId: 'session-1',
+      queuedMessageDispatch: { itemId: 'q1', lease: expect.any(Number) },
     });
     expect(state.queuedMessages.map((item) => item.id)).toEqual(['q1', 'q2']);
 
@@ -3246,7 +3385,16 @@ describe('ChatInput', () => {
     await flushAsyncWork();
 
     expect(sendMessageMock).toHaveBeenCalledTimes(2);
-    expect(sendMessageMock.mock.calls[1]).toEqual(sendMessageMock.mock.calls[0]);
+    const firstDispatch = sendMessageMock.mock.calls[0]?.[1]?.queuedMessageDispatch;
+    const retryDispatch = sendMessageMock.mock.calls[1]?.[1]?.queuedMessageDispatch;
+    expect(sendMessageMock.mock.calls[1]).toEqual([
+      'test 1',
+      {
+        ...sendMessageMock.mock.calls[0]?.[1],
+        queuedMessageDispatch: { itemId: 'q1', lease: expect.any(Number) },
+      },
+    ]);
+    expect(retryDispatch?.lease).not.toBe(firstDispatch?.lease);
     expect(state.queuedMessages.map((item) => item.id)).toEqual(['q2']);
   });
 
@@ -3376,17 +3524,57 @@ describe('ChatInput', () => {
     await flushAsyncWork();
 
     expect(sendMessageMock).toHaveBeenCalledWith('test 2', {
+      agent: undefined,
       delivery: 'steer',
+      messageId: expect.stringMatching(/^msg_/),
       queuedAttachments: {
         droppedFiles: [{ path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' }],
         clipboardImages: [
           { id: 'img-1', url: 'blob:1', mime: 'image/png', filename: 'img-1.png', size: 10 },
         ],
+        nativePdfs: undefined,
         terminalSelection: { text: 'npm test', terminalName: 'zsh' },
+        attachedDiagnostics: undefined,
       },
       preserveComposer: true,
+      targetSessionId: 'session-1',
+      queuedMessageDispatch: { itemId: 'q1', lease: expect.any(Number) },
     });
     expect(state.queuedMessages.map((item) => item.id)).toEqual(['q2']);
+  });
+
+  it('does not resend a restored queued steer that OpenCode already admitted', async () => {
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('queuedMessages', [
+      {
+        id: 'q1',
+        messageId: 'msg_admitted_steer',
+        sessionId: 'session-1',
+        text: 'Already steered',
+      },
+    ]);
+    vi.mocked(client.session.messages).mockResolvedValue([
+      {
+        info: {
+          id: 'msg_admitted_steer',
+          sessionID: 'session-1',
+          role: 'user',
+          time: { created: 1 },
+          agent: 'build',
+          model: { providerID: 'openai', modelID: 'gpt-5.6-sol' },
+        },
+        parts: [],
+      },
+    ]);
+
+    cleanup = render(() => ChatInput(), container!);
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Send as Steer"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await vi.waitFor(() => expect(state.queuedMessages).toEqual([]));
+
+    expect(sendMessageMock).not.toHaveBeenCalled();
   });
 
   it('keeps a queued steer visible and blocks later queue dispatch while pending', async () => {
@@ -3415,13 +3603,19 @@ describe('ChatInput', () => {
     const queueLabels = () =>
       [...container!.querySelectorAll('.chat-queue-label')].map((item) => item.textContent);
     expect(sendMessageMock).toHaveBeenCalledWith('test 1', {
+      agent: undefined,
       delivery: 'steer',
+      messageId: expect.stringMatching(/^msg_/),
       queuedAttachments: {
         droppedFiles: undefined,
         clipboardImages: undefined,
+        nativePdfs: undefined,
         terminalSelection: undefined,
+        attachedDiagnostics: undefined,
       },
       preserveComposer: true,
+      targetSessionId: 'session-1',
+      queuedMessageDispatch: { itemId: 'q1', lease: expect.any(Number) },
     });
     expect(queueLabels()).toEqual(['test 1', 'test 2']);
     expect(
@@ -3461,6 +3655,7 @@ describe('ChatInput', () => {
         queuedContext: expect.any(Object),
         preserveComposer: true,
         targetSessionId: 'session-1',
+        queuedMessageDispatch: { itemId: 'q2', lease: expect.any(Number) },
       },
     ]);
   });
@@ -3485,7 +3680,7 @@ describe('ChatInput', () => {
     container
       ?.querySelector<HTMLButtonElement>('[aria-label="Send as Steer"]')
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await flushAsyncWork();
+    await vi.waitFor(() => expect(resolveSteer).toBeDefined());
 
     expect(state.queuedMessages.map((item) => item.id)).toEqual(['q1', 'q2']);
 
@@ -3524,13 +3719,19 @@ describe('ChatInput', () => {
     await flushAsyncWork();
 
     expect(sendMessageMock).toHaveBeenCalledWith('test 2', {
+      agent: undefined,
       delivery: 'steer',
+      messageId: expect.stringMatching(/^msg_/),
       queuedAttachments: {
         droppedFiles: undefined,
         clipboardImages: undefined,
+        nativePdfs: undefined,
         terminalSelection: undefined,
+        attachedDiagnostics: undefined,
       },
       preserveComposer: true,
+      targetSessionId: 'session-1',
+      queuedMessageDispatch: { itemId: 'q1', lease: expect.any(Number) },
     });
     expect(state.queuedMessages.map((item) => item.id)).toEqual(['q1', 'q2']);
     expect(container?.querySelector('[aria-label="Retry send as Steer"]')).not.toBeNull();
@@ -3848,6 +4049,7 @@ describe('ChatInput', () => {
       queuedContext: expect.any(Object),
       preserveComposer: true,
       targetSessionId: 'session-1',
+      queuedMessageDispatch: { itemId: expect.any(String), lease: expect.any(Number) },
     });
     expect(state.queuedMessages).toEqual([]);
   });

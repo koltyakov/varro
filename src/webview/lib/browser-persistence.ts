@@ -16,17 +16,18 @@ export class BrowserPersistence implements Persistence {
   }
 
   get<T>(key: string): T | undefined {
-    const vscodeValue = readVsCodeWebviewStateValue<T>(key);
-    if (vscodeValue !== undefined) return vscodeValue;
-    if (!shouldUseLocalStorage(key)) return undefined;
+    if (!shouldUseLocalStorage(key)) return readVsCodeWebviewStateValue<T>(key);
 
     try {
       const raw = this.storage?.getItem(key);
-      // SAFETY: The surrounding shape or discriminator check establishes the T contract used below.
-      return raw ? (JSON.parse(raw) as T) : undefined;
+      if (raw) {
+        // SAFETY: Persistence callers own the key's value contract and validate domain values after reading.
+        return JSON.parse(raw) as T;
+      }
     } catch {
-      return undefined;
+      // Fall back to this webview's state when shared storage is unavailable or malformed.
     }
+    return readVsCodeWebviewStateValue<T>(key);
   }
 
   set<T>(key: string, value: T) {

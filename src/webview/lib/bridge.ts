@@ -16,6 +16,7 @@ type ApiCallOptions = {
   signal?: AbortSignal;
   retries?: number;
   permissionAutomationLease?: number;
+  queuedMessageDispatch?: { itemId: string; lease: number };
 };
 
 const handlers = new Set<MessageHandler>();
@@ -178,6 +179,7 @@ export function apiCall<T = unknown>(
     signal: options?.signal,
     retries: options?.retries ?? 1,
     permissionAutomationLease: options?.permissionAutomationLease,
+    queuedMessageDispatch: options?.queuedMessageDispatch,
   });
 }
 
@@ -190,6 +192,7 @@ function sendApiCall<T>(
     signal?: AbortSignal;
     retries: number;
     permissionAutomationLease?: number;
+    queuedMessageDispatch?: { itemId: string; lease: number };
   }
 ): Promise<T> {
   if (disposed) return Promise.reject(new Error('Bridge cleaned up'));
@@ -278,6 +281,9 @@ function sendApiCall<T>(
       };
       if (options.permissionAutomationLease !== undefined) {
         payload.permissionAutomationLease = options.permissionAutomationLease;
+      }
+      if (options.queuedMessageDispatch) {
+        payload.queuedMessageDispatch = options.queuedMessageDispatch;
       }
       sent = postMessage({
         type: 'api/request',

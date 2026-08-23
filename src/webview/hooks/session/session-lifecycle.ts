@@ -12,6 +12,7 @@ import { uiStore } from '../../lib/stores/ui-store';
 import { clearQueuedMessagesForSession } from '../../lib/state-queued-messages';
 import { clearSessionMessageWindowState } from '../../lib/message-window';
 import type { Session } from '../../types';
+import type { SelectedModel } from '../../lib/app-state-types';
 import { isNumber } from '../../lib/runtime-values';
 
 type LifecycleState = {
@@ -33,6 +34,7 @@ type LifecycleDependencies = {
   clearSelectedMcpsForSession(sessionId: string): void;
   clearSkippedPlanSession(sessionId: string): void;
   clearSelectedModelForSession(sessionId: string): void;
+  publishSessionModel(sessionId: string, model: SelectedModel | null): void;
   clearSessionSeen(sessionId: string): void;
   setSessionUsageLimit(sessionId: string, notice: null): void;
   setSessionFailed(sessionId: string, failed: boolean): void;
@@ -49,6 +51,7 @@ type SessionLifecycleDependencies = {
   clearPendingAbortTree(sessionIds: string[]): void;
   resetTodoSync(): void;
   resetToolCallExpansionState(): void;
+  publishSessionModel(sessionId: string, model: SelectedModel | null): void;
 };
 
 export class SessionLifecycleOperations {
@@ -72,6 +75,7 @@ export class SessionLifecycleOperations {
       clearSelectedMcpsForSession: routingStore.clearSelectedMcpsForSession,
       clearSkippedPlanSession: sessionStore.clearSkippedPlanSession,
       clearSelectedModelForSession: routingStore.clearSelectedModelForSession,
+      publishSessionModel: deps.publishSessionModel,
       clearSessionSeen: sessionStore.clearSessionSeen,
       setSessionUsageLimit: sessionStore.setSessionUsageLimit,
       setSessionFailed: sessionStore.setSessionFailed,
@@ -194,6 +198,7 @@ export function clearDeletedSessionState(deps: LifecycleDependencies, id: string
     deps.clearSelectedMcpsForSession(id);
     deps.clearSkippedPlanSession(id);
     deps.clearSelectedModelForSession(id);
+    deps.publishSessionModel(id, null);
     deps.clearSessionSeen(id);
     deps.clearSessionStatusEntry(id);
     deps.setSessionUsageLimit(id, null);

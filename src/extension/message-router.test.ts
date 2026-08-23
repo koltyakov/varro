@@ -59,7 +59,11 @@ function createCallbacks(): MessageRouterCallbacks {
     cancelApiRequest: vi.fn(),
     handleRalphMessage: vi.fn(),
     updateQueuedMessages: vi.fn(() => Promise.resolve()),
+    claimQueuedMessage: vi.fn(),
+    releaseQueuedMessage: vi.fn(),
+    acknowledgeInterruptedSessions: vi.fn(() => Promise.resolve()),
     updatePermissionMode: vi.fn(() => Promise.resolve()),
+    migratePermissionModes: vi.fn(() => Promise.resolve()),
     updateSessionModel: vi.fn(() => Promise.resolve()),
     updateDraftImages: vi.fn(() => Promise.resolve()),
     log: vi.fn(),
@@ -77,6 +81,19 @@ describe('MessageRouter', () => {
     });
 
     expect(cb.updatePermissionMode).toHaveBeenCalledWith({ sessionId: 'session-1', mode: 'full' });
+  });
+
+  it('dispatches legacy permission modes through the migration operation', async () => {
+    const cb = createCallbacks();
+    const router = new MessageRouter(cb);
+
+    await router.handleMessage({
+      type: 'permission-modes/migrate',
+      payload: { modes: { 'session-1': 'auto' } },
+    });
+
+    expect(cb.migratePermissionModes).toHaveBeenCalledWith({ modes: { 'session-1': 'auto' } });
+    expect(cb.updatePermissionMode).not.toHaveBeenCalled();
   });
 
   it('persists composer image snapshots', async () => {
@@ -140,7 +157,7 @@ describe('MessageRouter', () => {
       payload: { canAbort: true, canSwitchSessions: false, model },
     });
 
-    expect(cb.updateCommandState).toHaveBeenCalledWith(true, false, model);
+    expect(cb.updateCommandState).toHaveBeenCalledWith(true, false, model, undefined);
   });
 
   it('dispatches providers/watch', async () => {

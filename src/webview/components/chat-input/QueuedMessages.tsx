@@ -18,7 +18,14 @@ export const QUEUED_MESSAGE_DRAG_TYPE = 'application/x-varro-queued-message';
 
 export type QueuedMessageItem = Pick<
   QueuedMessage,
-  'id' | 'sessionId' | 'text' | 'paused' | 'droppedFiles' | 'clipboardImages' | 'terminalSelection'
+  | 'id'
+  | 'ownerViewId'
+  | 'sessionId'
+  | 'text'
+  | 'paused'
+  | 'droppedFiles'
+  | 'clipboardImages'
+  | 'terminalSelection'
 >;
 
 function bindQueueOverflowFade(element: HTMLElement, trackItemCount: () => number) {
@@ -153,6 +160,8 @@ export function QueuedMessages(props: {
             return (
               <div
                 data-queued-message-id={item.id}
+                data-queued-message-owner={item.ownerViewId ?? 'sidebar'}
+                data-queued-message-session-id={item.sessionId}
                 class={`chat-queue-item${item.paused ? ' is-paused' : ''}${draggedItemId() === item.id ? ' is-dragging' : ''}${dragOverItemId() === item.id ? ' is-drag-over' : ''}${isEditing() ? ' is-editing' : ''}`}
                 role="listitem"
                 onDragEnter={dragOverItem}

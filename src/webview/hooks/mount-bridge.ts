@@ -14,7 +14,10 @@ import {
   applySessionSelectedModelsSnapshot,
   syncSessionMarkersForWorkspace,
 } from '../lib/state';
-import { applyQueuedMessagesSnapshot } from '../lib/state-queued-messages';
+import {
+  applyQueuedMessageClaimResult,
+  applyQueuedMessagesSnapshot,
+} from '../lib/state-queued-messages';
 import { normalizeProjectPath } from './session/session-lifecycle';
 
 export function createMountBridgeOperations(deps: {
@@ -36,7 +39,9 @@ export function createMountBridgeOperations(deps: {
   applyTheme(theme: WebviewThemeKind): void;
   setPermissionAutomation?(owner: boolean, lease: number): void;
   revealPermission?(permissionId: string): void;
+  queueInterruptedSessionRecovery?(claimId: number, sessionIds: string[]): void;
 }) {
+  let visibleEditorSessionIds = appStore.state.editorSessionIds;
   const handleExtensionMessage = (msg: ExtensionMessage) => {
     handleExtensionMessageWithDependencies(
       {
@@ -100,16 +105,19 @@ export function createMountBridgeOperations(deps: {
           appStore.setState('workspaceStatusSummary', summary),
         setWorkspaceStatuses: (entries) => appStore.setState('workspaceStatuses', entries),
         setEditorTabsState: (open, sessionIds) => {
+          const seenSessionIds = new Set([...visibleEditorSessionIds, ...sessionIds]);
+          for (const rootSessionId of seenSessionIds) {
+            for (const sessionId of sessionStore.getSessionTreeIds(rootSessionId)) {
+              sessionStore.markSessionSeen(sessionId);
+            }
+          }
+          visibleEditorSessionIds = sessionIds;
           appStore.setState('editorTabsOpen', open);
           appStore.setState('editorSessionIds', sessionIds);
         },
         setPermissionAutomation: deps.setPermissionAutomation,
         revealPermission: deps.revealPermission,
-        addInterruptedSessionIds: (sessionIds) => {
-          appStore.setState('interruptedSessionIds', [
-            ...new Set([...appStore.state.interruptedSessionIds, ...sessionIds]),
-          ]);
-        },
+        queueInterruptedSessionRecovery: deps.queueInterruptedSessionRecovery,
       },
       msg
     );
@@ -169,7 +177,7 @@ export function handleExtensionMessageWithDependencies(
     setEditorTabsState?(open: boolean, sessionIds: string[]): void;
     setPermissionAutomation?(owner: boolean, lease: number): void;
     revealPermission?(permissionId: string): void;
-    addInterruptedSessionIds?(sessionIds: string[]): void;
+    queueInterruptedSessionRecovery?(claimId: number, sessionIds: string[]): void;
   },
   msg: ExtensionMessage
 ) {
@@ -296,6 +304,9 @@ export function handleExtensionMessageWithDependencies(
     case 'queued-messages/sync':
       applyQueuedMessagesSnapshot(msg.payload.messages);
       break;
+    case 'queued-messages/claim-result':
+      applyQueuedMessageClaimResult(msg.payload);
+      break;
     case 'permission-modes/sync':
       applySessionPermissionModesSnapshot(msg.payload.modes);
       break;
@@ -312,7 +323,7 @@ export function handleExtensionMessageWithDependencies(
       deps.revealPermission?.(msg.payload.permissionId);
       break;
     case 'recovery/interrupted-sessions':
-      deps.addInterruptedSessionIds?.(msg.payload.sessionIds);
+      deps.queueInterruptedSessionRecovery?.(msg.payload.claimId, msg.payload.sessionIds);
       break;
     case 'ralph/state':
       ralphStore.applyHostState(msg.payload.runs, msg.payload.activeIds);

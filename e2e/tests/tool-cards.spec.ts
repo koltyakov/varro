@@ -8,9 +8,9 @@ test('renders read, edit, and bash tool cards', async ({ page }) => {
   await expect(page.locator('.file-read-card')).toContainText('Read');
   await expect(page.locator('.file-read-card')).toContainText('index.ts');
 
-  await expect(page.locator('.file-change-card')).toContainText('Edited');
-  await expect(page.locator('.file-change-card')).toContainText('+1');
-  await expect(page.locator('.file-change-card')).toContainText('-1');
+  await expect(page.locator('.file-change-card').first()).toContainText('Edited');
+  await expect(page.locator('.file-change-card').first()).toContainText('+1');
+  await expect(page.locator('.file-change-card').first()).toContainText('-1');
 
   await page.locator('.tool-invocation-header').last().click();
   await expect(page.locator('.terminal-command-card')).toContainText('npm test');
@@ -23,12 +23,12 @@ test('keeps compact tool card headers on the same geometry contract', async ({ p
   const headers = page.locator(
     '.file-read-card-header, .file-change-card-header, .tool-invocation-header'
   );
-  await expect(headers).toHaveCount(4);
+  await expect(headers).toHaveCount(7);
   const heights = await headers.evaluateAll((elements) =>
     elements.map((element) => element.getBoundingClientRect().height)
   );
 
-  expect(heights).toHaveLength(4);
+  expect(heights).toHaveLength(7);
   expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(1);
 
   const iconSizes = await page.locator('.tool-call-icon').evaluateAll((icons) =>
@@ -37,7 +37,190 @@ test('keeps compact tool card headers on the same geometry contract', async ({ p
       return { width: bounds.width, height: bounds.height };
     })
   );
-  expect(iconSizes).toEqual(Array.from({ length: 4 }, () => ({ width: 12, height: 12 })));
+  expect(iconSizes).toEqual(Array.from({ length: 7 }, () => ({ width: 12, height: 12 })));
+});
+
+test('renders each completed file edit as a separate row', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards&expandedActivity=1');
+
+  const rows = page.locator('.file-change-card');
+  await expect(rows).toHaveCount(4);
+  await expect(rows.locator('.file-edit-path-link')).toHaveText([
+    'src/index.ts',
+    'src/format.ts',
+    'src/state.ts',
+    'src/types.ts',
+  ]);
+  await expect(page.locator('.file-edit-more-count')).toHaveCount(0);
+
+  const rowList = page.locator('.file-change-card-list');
+  const activityDetails = page.locator('.assistant-activity-details').filter({ has: rowList });
+  const [rowGap, activityGap] = await Promise.all([
+    rowList.evaluate((element) => getComputedStyle(element).gap),
+    activityDetails.evaluate((element) => getComputedStyle(element).gap),
+  ]);
+  expect(rowGap).toBe(activityGap);
+});
+
+test('connects expanded activity rows to the underlined summary', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards&expandedActivity=1');
+
+  const summary = page.locator('.assistant-activity-summary').first();
+  const summaryText = summary.locator('.assistant-activity-summary-text');
+  const details = page.locator('.assistant-activity-details').first();
+  const firstDetail = details.locator(':scope > .assistant-activity-detail').first();
+  const firstCard = firstDetail.locator('.chat-tool-invocation-part, .chat-thinking-box').first();
+  const firstIcon = firstCard.locator('.tool-call-icon, .thinking-topic-icon').first();
+
+  const connector = await firstDetail.evaluate((element) => {
+    const style = getComputedStyle(element, '::before');
+    const bounds = element.getBoundingClientRect();
+    return {
+      content: style.content,
+      width: style.width,
+      height: style.height,
+      color: style.backgroundColor,
+      center: bounds.left + Number.parseFloat(style.left) + Number.parseFloat(style.width) / 2,
+      top: bounds.top + Number.parseFloat(style.top),
+      bottom: bounds.top + Number.parseFloat(style.top) + Number.parseFloat(style.height),
+    };
+  });
+  const underline = await summaryText.evaluate((element) => {
+    const style = getComputedStyle(element, '::after');
+    const main = element.querySelector('.assistant-activity-summary-main');
+    if (!(main instanceof HTMLElement)) throw new Error('Activity summary label is missing');
+    const bounds = element.getBoundingClientRect();
+    return {
+      content: style.content,
+      height: style.height,
+      color: style.backgroundColor,
+      bottom: bounds.bottom,
+      textGap:
+        bounds.bottom - Number.parseFloat(style.height) - main.getBoundingClientRect().bottom,
+    };
+  });
+  const iconCenter = await firstIcon.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    return bounds.left + bounds.width / 2;
+  });
+  const [activityGap, detailTop, cardBorderColor] = await Promise.all([
+    details.evaluate((element) => getComputedStyle(element).gap),
+    firstDetail.evaluate((element) => element.getBoundingClientRect().top),
+    firstCard.evaluate((element) => getComputedStyle(element).borderTopColor),
+  ]);
+
+  expect(connector.content).toBe('""');
+  expect(connector.width).toBe('1px');
+  expect(connector.height).toBe(activityGap);
+  expect(Math.abs(connector.center - iconCenter)).toBeLessThanOrEqual(0.5);
+  expect(Math.abs(connector.top - underline.bottom)).toBeLessThanOrEqual(0.5);
+  expect(Math.abs(connector.bottom - detailTop)).toBeLessThanOrEqual(0.5);
+  expect(underline.content).toBe('""');
+  expect(underline.height).toBe('1px');
+  expect(underline.color).toBe(cardBorderColor);
+  expect(underline.textGap).toBeGreaterThanOrEqual(3);
+
+  const detailConnectors = await details
+    .locator(':scope > .assistant-activity-detail')
+    .evaluateAll((elements) =>
+      elements.map((element) => getComputedStyle(element, '::before').content)
+    );
+  expect(detailConnectors.every((content) => content === '""')).toBe(true);
+
+  const editRows = page.locator('.file-change-card-list > .file-change-card');
+  const internalConnector = await editRows.nth(1).evaluate((element) => {
+    const previous = element.previousElementSibling;
+    if (!(previous instanceof HTMLElement)) throw new Error('Previous file edit row is missing');
+    const style = getComputedStyle(element, '::before');
+    const bounds = element.getBoundingClientRect();
+    return {
+      content: style.content,
+      top: bounds.top + Number.parseFloat(style.top),
+      bottom: bounds.top + Number.parseFloat(style.top) + Number.parseFloat(style.height),
+      previousBottom: previous.getBoundingClientRect().bottom,
+      rowTop: bounds.top,
+    };
+  });
+
+  expect(internalConnector.content).toBe('""');
+  expect(Math.abs(internalConnector.top - internalConnector.previousBottom)).toBeLessThanOrEqual(
+    0.5
+  );
+  expect(Math.abs(internalConnector.bottom - internalConnector.rowTop)).toBeLessThanOrEqual(0.5);
+
+  const virtualizedBoundary = await page.evaluate(() => {
+    const sourceGroup = document.querySelector('.assistant-activity-group');
+    if (!(sourceGroup instanceof HTMLElement)) throw new Error('Activity group is missing');
+
+    const track = document.createElement('div');
+    track.className = 'interactive-list-track virtualized';
+    track.style.position = 'fixed';
+    track.style.visibility = 'hidden';
+
+    const createRow = (continues: boolean) => {
+      const row = document.createElement('div');
+      row.className = `interactive-item-container interactive-response${continues ? ' interactive-response-continues-activity-group' : ''}`;
+      const flow = document.createElement('div');
+      flow.className = 'assistant-message-flow';
+      const item = document.createElement('div');
+      item.className = 'assistant-message-flow-item';
+      item.append(sourceGroup.cloneNode(true));
+      flow.append(item);
+      row.append(flow);
+      return row;
+    };
+
+    const previousRow = createRow(false);
+    track.append(previousRow, createRow(true));
+    document.body.append(track);
+
+    const trailingDetail = previousRow.querySelector(
+      '.assistant-activity-details > .assistant-activity-detail:last-child'
+    );
+    const trailingCard = trailingDetail?.querySelector(
+      '.chat-tool-invocation-part, .chat-thinking-box'
+    );
+    if (!(trailingDetail instanceof HTMLElement) || !(trailingCard instanceof HTMLElement)) {
+      throw new Error('Virtualized activity boundary is incomplete');
+    }
+    const style = getComputedStyle(trailingDetail, '::after');
+    const detailBounds = trailingDetail.getBoundingClientRect();
+    const rowBounds = previousRow.getBoundingClientRect();
+    const top = detailBounds.top + Number.parseFloat(style.top);
+    const result = {
+      content: style.content,
+      width: style.width,
+      height: style.height,
+      color: style.backgroundColor,
+      top,
+      bottom: top + Number.parseFloat(style.height),
+      detailBottom: detailBounds.bottom,
+      rowBottom: rowBounds.bottom,
+    };
+    track.remove();
+    return result;
+  });
+
+  expect(virtualizedBoundary.content).toBe('""');
+  expect(virtualizedBoundary.width).toBe('1px');
+  expect(virtualizedBoundary.height).toBe('6px');
+  expect(virtualizedBoundary.color).toBe(connector.color);
+  expect(Math.abs(virtualizedBoundary.top - virtualizedBoundary.detailBottom)).toBeLessThanOrEqual(
+    1
+  );
+  expect(Math.abs(virtualizedBoundary.bottom - virtualizedBoundary.rowBottom)).toBeLessThanOrEqual(
+    0.5
+  );
+
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards');
+  const collapsedSummary = page.locator('.assistant-activity-summary').first();
+  await expect(collapsedSummary).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('.assistant-activity-details')).toHaveCount(0);
+  expect(
+    await collapsedSummary
+      .locator('.assistant-activity-summary-text')
+      .evaluate((element) => getComputedStyle(element, '::after').content)
+  ).toBe('none');
 });
 
 test('prevents selection from starting on expandable tool headers', async ({ page }) => {
@@ -123,7 +306,9 @@ test('renders aborted and failed tool card states', async ({ page }) => {
   await expect(bashTool).toContainText('failed');
 
   await bashTool.getByRole('button').click();
-  await expect(page.locator('.tool-invocation-error')).toContainText('Command failed with exit code 1');
+  await expect(page.locator('.tool-invocation-error')).toContainText(
+    'Command failed with exit code 1'
+  );
 });
 
 test('opens files and directories from tool cards', async ({ page }) => {
@@ -135,9 +320,11 @@ test('opens files and directories from tool cards', async ({ page }) => {
   await expect
     .poll(() =>
       getE2EState(page, () => {
-        const value = (window as Window & {
-          __varroE2E?: { openTargets?: Array<{ path: string; kind?: string; line?: number }> };
-        }).__varroE2E;
+        const value = (
+          window as Window & {
+            __varroE2E?: { openTargets?: Array<{ path: string; kind?: string; line?: number }> };
+          }
+        ).__varroE2E;
         return value?.openTargets || [];
       })
     )

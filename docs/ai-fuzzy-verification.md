@@ -121,6 +121,10 @@ under test.
 3. Record the baseline commit and every path created, modified, renamed, or deleted by the run. Prompts
    must forbid commits, branch changes, dependency upgrades, generated dependency trees, and edits
    outside the fixture.
+   After any live prompt that could edit the fixture, the controller must atomically record the current
+   fixture commit, short status, and exact changed-path list before every exit. This includes CDP,
+   webview, server, action, and result-oracle failures. Evidence capture never resets, restores, cleans,
+   or otherwise changes the fixture.
 4. Launch the Extension Development Host with the fixture as its workspace while loading Varro from
    the Varro source tree:
 
@@ -185,6 +189,7 @@ what was omitted.
    unrelated sessions or settings.
 3. Open the Varro view and explicitly select GPT Luna or GPT Terra. Use Luna for controlled text-height
    streams and Luna or Terra for realistic repository work; record the exact provider/model per scenario.
+   Apply and verify this selection before every live scenario, not only duplicate-delivery checks.
 4. Start with the secondary sidebar between 430 and 500 CSS pixels wide and the window at least 800
    CSS pixels high. Record window size, zoom, sidebar side, panel visibility, theme, and font scaling.
 5. Use a new Varro session titled `VFZ <seed>` unless the scenario requires reopening a prepared long
@@ -204,6 +209,10 @@ what was omitted.
    final report, terminate every Extension Development Host launched by the run and verify that its
    process and debugging endpoint have stopped. Delete run-created temporary sessions before terminating
    the final host. Never leave persistent test hosts open.
+9. When more than one Varro iframe exists, enumerate all matching CDP targets and inspect
+   `__initialWebviewState.webviewContext`. Select the requested `surface`, stable `viewId`, and session
+   route. An absent or ambiguous match is a failure. Never choose the first matching iframe. After an
+   editor hides, reveals, or reloads, bind its recreated iframe by the same `viewId`.
 
 The existing F5 host can preserve extension state. For cold-load checks, close the Extension
 Development Host, start it again, and do not warm the target session by opening or scrolling it first.
@@ -356,13 +365,19 @@ npm run ai:live -- run --manifest <manifest-path> --launch <launch.json> --scena
 npm run ai:live -- run --manifest <manifest-path> --launch <launch.json> --scenario AI-08
 ```
 
-The controller allows three prompts by default and at most four when explicitly requested. The first
-prompt requests the complete realistic workflow. Later prompts name only the gates still missing, such
-as the file edit, expandable diff, retained disclosure, or parallel activity needed to overflow the
-active tray. It polls the real Varro DOM while the model is busy, begins native interaction as soon as
+The controller allows three prompts by default and at most four when explicitly requested. Every prompt
+is a new turn and must request the complete minimum gate set: a virtualized active stream, sticky marked
+prompt, file edit and expandable diff when required, retained disclosure, and a verified nested activity
+scroller. Retry prompts emphasize gates that the previous turn missed, but never assume a gate from an
+earlier turn carries into the new turn. It polls the real Varro DOM while the model is busy, begins native interaction as soon as
 the gate is simultaneously true, verifies the nested-to-outer wheel handoff, and executes AI-08's
 recorded 50-action plan. It waits for bounded stream settlement and records the resulting fixture status
 in the manifest so cleanup has exact changed-path evidence. Stop prompting as soon as the gate is reached.
+
+Bounded AI-07 and AI-08 prompts must forbid subagents and delegation. The controller inventories the
+root session's descendants before and after each scenario, records every new descendant, and fails the
+scenario if one appears. Do not delete an unrecorded descendant or infer that it is disposable from its
+recency.
 
 After the retry budget, report the per-attempt missing gates and the first unavailable native action.
 Do not use the generic explanation that actions "were not executed." `BLOCKED` is valid only when the
@@ -621,6 +636,9 @@ Pass invariants:
 Precondition: an active Luna or Terra realistic repository stream in a virtualized session with at
 least one file edit, one expandable disclosure, and a verified nested scroller using the AI-07 geometry
 and overflow checks.
+AI-08 also requires a successful recorded AI-07 preparation. Its current fixture commit, status, and
+exact changed paths must equal AI-07's exit evidence. A generically clean fixture does not bypass this
+precondition.
 
 Generate and record all 50 seeded actions before starting the stream. Reserve early positions for the
 session switch and nested-to-outer wheel handoff so the model cannot normally finish before those
@@ -643,6 +661,11 @@ of box-model rounding as a nested scroller. Recheck the target immediately befor
 streaming can remove its available range. If the model settles before every required active-stream
 action, restart the scenario with the same seed and a fresh realistic stream rather than completing the
 sequence against settled content.
+
+Scope disclosure, diff, file-card, and activity actions to message IDs, part IDs, and render keys from
+the current marked turn. Count an action only after its pre/post samples prove the intended effect, such
+as changed expansion state, correct focus owner, transcript movement, nested-to-outer handoff, or measured
+width. A successfully dispatched mouse or key event is not an executed action by itself.
 
 Pass invariants:
 
@@ -673,6 +696,7 @@ Run these when the changed area, observed behavior, or user request calls for th
 | `AI-15` | Abort, reconnect, and reload during streaming | Transport, abort, persistence, server lifecycle, or busy state changed |
 | `AI-16` | Huge code, table, terminal, and nested scrollers | Markdown, tool cards, terminal attachments, or wheel ownership changed |
 | `AI-17` | Duplicate delivery during send and streaming | Webview bridge startup, listener lifecycle, optimistic messages, or event delivery changed |
+| `AI-18` | Multi-webview editor tabs and queue ownership | Editor chat tabs, cross-webview state, queue ownership, title routing, or inline-file settings changed |
 
 For each extended scenario, combine the named mutation with `AI-02` reflow, `AI-06` detached
 streaming, the realistic `tmp/opencode` workflow when tools or edits are relevant, and the ownership
@@ -701,6 +725,58 @@ Pass invariants:
 - The response occupies exactly one assistant row in every sampled frame.
 - Every required token appears, and no token appears more than once in any sampled frame.
 - The stream enters busy state, settles, and does not modify the repository fixture.
+- Canonical session history contains exactly one marked user and exactly one assistant whose
+  `parentID` is that user. The assistant has `finish: stop`, a completion time, and no error.
+- Canonical assistant text contains every requested token exactly once and in the requested order.
+
+### AI-18 Multi-Webview Editor Tabs And Queue Ownership
+
+This extended scenario covers unpublished multi-webview editor functionality. Run it through the live
+controller:
+
+```sh
+npm run ai:live -- run --manifest <manifest-path> --launch <launch.json> --scenario AI-18 \
+  --surface sidebar --view-id sidebar --model openai/gpt-5.6-luna
+```
+
+Precondition: AI-07 completed successfully and the fixture still has AI-07's exact recorded commit,
+status, and changed paths. The prepared root session is openable in the sidebar. The controller creates
+and inventories one child session for route testing. Cleanup must remove that run-created child and
+verify its recorded ancestry.
+
+The controller records its deterministic plan before acting, then performs these operations through the
+real webviews and native VS Code workbench commands:
+
+1. Select the sidebar by `surface=sidebar`, `viewId=sidebar`, and the prepared root route.
+2. Select and verify the requested Luna or Terra model and permission mode in the sidebar.
+3. Open the root in a chat editor, record its stable editor `viewId`, then route the child and root through
+   that same editor. Verify the editor title and transcript route each time.
+4. Start a real root stream. Queue marked turns from the sidebar and editor while that stream remains
+   active, recording source view IDs, queue item IDs, displayed counts, and enqueue order.
+5. Hide the editor with a native workbench command, verify ownership transfers to another ready view,
+   reveal it through the real session UI, and bind the recreated iframe by its stable `viewId`.
+6. Toggle Hide and Show Inline File Changes through the command palette and sample the current turn's
+   actual file-change rendering before and after each command.
+7. Reload the workbench, restore and rebind the editor by `viewId`, and sample marked rows for duplicate
+   delivery. Close the editor while queued work remains and verify the final handoff.
+8. Wait for ordered dispatch and settlement. Compare canonical messages with the recorded queue order,
+   sample both session routes for leakage, verify queue counts, and focus the surviving composer.
+
+Pass invariants:
+
+- Sidebar and editor evidence names the requested `surface`, stable `viewId`, and session route. No target
+  selection is ambiguous or based on target-list order.
+- Opening, revealing, reload restoration, root title routing, and child title routing all use real editor
+  panels and preserve the editor `viewId`.
+- Model and permission mode remain synchronized across the sidebar and editor.
+- At least two distinct view IDs enqueue during a real stream. Hidden and closed editor handoffs preserve
+  every item and dispatch claim.
+- Canonical marked users and linked assistants appear exactly once in recorded enqueue order. Displayed
+  queue counts equal the recorded queue and reach zero after dispatch.
+- Root content never appears in the child route, and child content never appears in the root route.
+- Inline file changes hide and return on the exact current-turn file card.
+- Reload sampling finds no duplicate marked user or assistant rows, and the surviving composer accepts
+  focus and input.
 
 ## Failure Oracle
 
@@ -750,6 +826,7 @@ Create `artifacts/ai-fuzzy/<timestamp>-<seed>.md` from this template:
 - Varro version:
 - OpenCode version:
 - Model/provider per scenario:
+- Target surface, stable viewId, and session route per live scenario:
 - Seed:
 - Fixture path, baseline commit, and initial status:
 - Run-created fixture paths and rollback verification:
@@ -757,6 +834,7 @@ Create `artifacts/ai-fuzzy/<timestamp>-<seed>.md` from this template:
 - Zoom, theme, sidebar side, panel state:
 - Session title/ID and prepared turn count:
 - Run-created session IDs and deletion verification:
+- Observed descendants and guarded cleanup verification:
 - Observation method and optional screenshots:
 
 ## Preflight
@@ -793,6 +871,10 @@ attachments, insufficient history, missing controls, credentials, or model acces
 For AI-07 and AI-08, also record the realistic task, actual reasoning/tool/edit/test/diff content
 observed, changed OpenCode paths, and frame-level flicker sampling points. Synthetic Markdown-only
 streaming cannot satisfy those scenarios.
+For AI-18, attach the full controller plan and evidence for target selection, root/child routing,
+model/permission synchronization, queue source views and item IDs, hidden/closed handoffs, inline-file
+toggle samples, reload duplicate samples, canonical delivery order, queue counts, leakage checks, and
+final focus owner.
 The overall result is `PASS` only when every scenario required by the request ran in the real Extension
 Development Host and passed. Any `FAIL` or `BLOCKED` required scenario makes the overall result `FAIL`.
 

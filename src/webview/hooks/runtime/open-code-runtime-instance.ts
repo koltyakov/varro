@@ -157,6 +157,7 @@ export interface OpenCodeRuntime {
       queuedContext?: QueuedContextSnapshot;
       preserveComposer?: boolean;
       targetSessionId?: string;
+      queuedMessageDispatch?: { itemId: string; lease: number };
     }
   ): Promise<boolean>;
   retryMessage(messageId: string, sessionId?: string | null): Promise<void>;
@@ -202,6 +203,22 @@ function logError<T>(context: string, err: T) {
       msg: context,
       error: err instanceof Error ? err.message : String(err),
       level: 'warn',
+    },
+  });
+}
+
+function publishSessionModel(sessionId: string, model: SelectedModel | null) {
+  postMessage({
+    type: 'session-model/update',
+    payload: {
+      sessionId,
+      model: model
+        ? {
+            providerID: model.providerID,
+            modelID: model.modelID,
+            variant: model.variant || undefined,
+          }
+        : null,
     },
   });
 }
@@ -991,6 +1008,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     clearPendingAbortTree,
     resetTodoSync,
     resetToolCallExpansionState,
+    publishSessionModel,
   });
 
   const { applySessions, clearDeletedSessionState, hideDeletedSessionTree, upsertSession } =
@@ -1134,9 +1152,13 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         revalidateProviderAuth: sessionSendOperations.revalidateProviderAuth,
         applyTheme,
         setPermissionAutomation: (owner, lease) => {
+          const becameOwner = owner && !permissionAutomationOwner;
           permissionAutomationOwner = owner;
           permissionAutomationLease = lease;
           if (owner) hideAutomaticallyHandledRestoredPermissions();
+          if (becameOwner) {
+            void syncPendingPermissions().catch((err) => logError('permission.ownership', err));
+          }
         },
         revealPermission: (permissionId) => {
           if (!permissionAutomationOwner) return;
@@ -1144,6 +1166,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
             return;
           void syncPendingPermissions().catch((err) => logError('permission.actionable', err));
         },
+        queueInterruptedSessionRecovery: (claimId, sessionIds) =>
+          connectionBootstrapOperations.queueInterruptedSessionRecovery(claimId, sessionIds),
       });
 
       ensureSessionEventHandlersRegistered();
@@ -1190,7 +1214,6 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           void refreshRoutingState();
         },
       });
-
       onCleanup(() => {
         disposeBridge();
         disposeFocusTracking();
@@ -1907,7 +1930,14 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     nextConnectionGeneration: () => ++connectionGeneration,
     isCurrentConnectionGeneration: (generation) =>
       isCurrentGeneration(generation, connectionGeneration),
+    getCurrentConnectionGeneration: () => connectionGeneration,
+    isInitialized: () => initialized,
     consumeInterruptedSessionIds: appStore.consumeInterruptedSessionIds,
+    acknowledgeInterruptedSessionRecovery: (claimId, consumedSessionIds) =>
+      postMessage({
+        type: 'recovery/interrupted-sessions-ack',
+        payload: { claimId, consumedSessionIds },
+      }),
     getSessionStatus: (sessionId) => appStore.state.sessionStatus[sessionId],
     hasPendingQuestion: (sessionId) =>
       appStore.state.questions.some((item) => item.sessionID === sessionId),
@@ -2217,6 +2247,13 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     markSessionSeen: sessionStore.markSessionSeen,
     getDefaultSelectedModel: routingStore.getPersistedSelectedModel,
     setSelectedModel: routingStore.setSelectedModel,
+    publishSessionModel,
+    getEffectiveSessionModel: (sessionId) =>
+      routingStore.getSelectedModelForSession(sessionId) ??
+      (appStore.state.activeSessionId === sessionId ? appStore.state.selectedModel : null) ??
+      deriveSelectedModelFromSession(
+        appStore.state.sessions.find((session) => session.id === sessionId)
+      ),
     resolveDefaultAgent: () =>
       getBuildAgentNameFromState() ||
       routingStore.getPersistedSelectedAgent() ||

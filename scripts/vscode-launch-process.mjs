@@ -4,6 +4,83 @@ import net from 'node:net';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
+const DEFAULT_CDP_REQUEST_TIMEOUT_MS = 15_000;
+
+export function createCdpRequestClient(socket, timeoutMs = DEFAULT_CDP_REQUEST_TIMEOUT_MS) {
+  let requestId = 0;
+  let disposed = false;
+  const pending = new Map();
+
+  const removeListeners = () => {
+    socket.removeEventListener('message', handleMessage);
+    socket.removeEventListener('close', handleClose);
+    socket.removeEventListener('error', handleError);
+  };
+  const rejectPending = (error) => {
+    for (const request of pending.values()) {
+      clearTimeout(request.timer);
+      request.reject(error);
+    }
+    pending.clear();
+  };
+  const terminate = (error) => {
+    if (disposed) return;
+    disposed = true;
+    removeListeners();
+    rejectPending(error);
+  };
+  function handleMessage(event) {
+    let message;
+    try {
+      message = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    const request = pending.get(message.id);
+    if (!request) return;
+    clearTimeout(request.timer);
+    pending.delete(message.id);
+    if (message.error) request.reject(new Error(message.error.message));
+    else request.resolve(message.result);
+  }
+  function handleClose() {
+    terminate(new Error('CDP socket closed before the request completed'));
+  }
+  function handleError() {
+    terminate(new Error('CDP socket failed before the request completed'));
+  }
+
+  socket.addEventListener('message', handleMessage);
+  socket.addEventListener('close', handleClose);
+  socket.addEventListener('error', handleError);
+
+  return {
+    call(method, params = {}) {
+      if (disposed) return Promise.reject(new Error('CDP request client is closed'));
+      return new Promise((resolve, reject) => {
+        const id = ++requestId;
+        const timer = setTimeout(() => {
+          if (!pending.delete(id)) return;
+          reject(new Error(`CDP request ${method} timed out after ${String(timeoutMs)}ms`));
+        }, timeoutMs);
+        pending.set(id, { reject, resolve, timer });
+        try {
+          socket.send(JSON.stringify({ id, method, params }));
+        } catch (error) {
+          clearTimeout(timer);
+          pending.delete(id);
+          reject(error);
+        }
+      });
+    },
+    dispose() {
+      terminate(new Error('CDP request client was disposed'));
+    },
+    pendingCount() {
+      return pending.size;
+    },
+  };
+}
 
 export async function writeVscodeLaunchMetadata(filePath, details) {
   const birthIdentity = await readProcessBirthIdentity(details.pid);
@@ -49,24 +126,105 @@ async function bringTargetToFront(webSocketDebuggerUrl) {
     socket.addEventListener('open', resolve, { once: true });
     socket.addEventListener('error', reject, { once: true });
   });
-  const result = await new Promise((resolve, reject) => {
-    const handleMessage = (event) => {
-      const message = JSON.parse(event.data);
-      if (message.id !== 1) return;
-      socket.removeEventListener('message', handleMessage);
-      if (message.error) reject(new Error(message.error.message));
-      else resolve(message.result);
-    };
-    socket.addEventListener('message', handleMessage);
-    socket.send(JSON.stringify({ id: 1, method: 'Page.bringToFront', params: {} }));
-  });
-  socket.close();
-  return result;
+  const requests = createCdpRequestClient(socket);
+  try {
+    return await requests.call('Page.bringToFront');
+  } finally {
+    requests.dispose();
+    socket.close();
+  }
 }
 
 export function hasRecreatedVarroTarget(originalTargetId, currentTargetId, sawUnavailable) {
   if (!currentTargetId) return false;
   return originalTargetId ? currentTargetId !== originalTargetId : sawUnavailable;
+}
+
+export function getVscodeSidebarGeometry(documentValue, viewportWidth) {
+  const sidebarRects = [
+    ...documentValue.querySelectorAll('.part.auxiliarybar, .part.sidebar'),
+  ].map((element) => element.getBoundingClientRect());
+  const candidates = [...documentValue.querySelectorAll('iframe.webview')].filter((iframe) => {
+    if (
+      !iframe.src.includes('extensionId=koltyakov.varro') &&
+      !iframe.title.includes('Varro')
+    ) {
+      return false;
+    }
+    const frame = iframe.getBoundingClientRect();
+    const centerX = frame.x + frame.width / 2;
+    const centerY = frame.y + frame.height / 2;
+    return (
+      frame.width > 0 &&
+      frame.height > 0 &&
+      sidebarRects.some(
+        (sidebar) =>
+          centerX >= sidebar.x &&
+          centerX <= sidebar.right &&
+          centerY >= sidebar.y &&
+          centerY <= sidebar.bottom
+      )
+    );
+  });
+  if (candidates.length !== 1) {
+    return {
+      error: `expected one visible Varro sidebar iframe, found ${String(candidates.length)}`,
+    };
+  }
+
+  const frame = candidates[0].getBoundingClientRect();
+  const sash = [...documentValue.querySelectorAll('.monaco-sash.vertical:not(.disabled)')]
+    .map((element) => element.getBoundingClientRect())
+    .filter((rect) => Math.abs(rect.x - frame.x) < 12 || Math.abs(rect.x - frame.right) < 12)
+    .toSorted(
+      (left, right) =>
+        Math.min(Math.abs(left.x - frame.x), Math.abs(left.x - frame.right)) -
+        Math.min(Math.abs(right.x - frame.x), Math.abs(right.x - frame.right))
+    )[0];
+  if (!sash) return { error: 'could not find a vertical sash beside the Varro sidebar iframe' };
+  return {
+    frame: [frame.x, frame.y, frame.width, frame.height],
+    sashX: sash.x,
+    viewportWidth,
+  };
+}
+
+export async function executeVscodeCommand(remoteDebuggingPort, commandLabel) {
+  const targets = await fetch(`http://127.0.0.1:${String(remoteDebuggingPort)}/json/list`).then(
+    (response) => response.json()
+  );
+  const workbenches = targets.filter(
+    (target) => target.type === 'page' && target.title.includes('[Extension Development Host]')
+  );
+  if (workbenches.length !== 1 || !workbenches[0]?.webSocketDebuggerUrl) {
+    throw new Error(
+      `Expected one VS Code workbench target, found ${String(workbenches.length)}`
+    );
+  }
+  const socket = new WebSocket(workbenches[0].webSocketDebuggerUrl);
+  await new Promise((resolve, reject) => {
+    socket.addEventListener('open', resolve, { once: true });
+    socket.addEventListener('error', reject, { once: true });
+  });
+  const requests = createCdpRequestClient(socket);
+  try {
+    for (const type of ['keyDown', 'keyUp']) {
+      await requests.call('Input.dispatchKeyEvent', {
+        type,
+        key: 'P',
+        code: 'KeyP',
+        modifiers: process.platform === 'darwin' ? 12 : 10,
+      });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    await requests.call('Input.insertText', { text: commandLabel });
+    for (const type of ['keyDown', 'keyUp']) {
+      await requests.call('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter' });
+    }
+  } finally {
+    requests.dispose();
+    socket.close();
+  }
 }
 
 export async function waitForVscodeProcess(executable, userDataDir, timeoutMs = 15_000) {
@@ -102,6 +260,8 @@ export async function waitForVscodeProcess(executable, userDataDir, timeoutMs = 
 
 export async function resizeVscodeSidebar(remoteDebuggingPort, targetWidth, timeoutMs = 15_000) {
   const deadline = Date.now() + timeoutMs;
+  const geometryExpression = `(${getVscodeSidebarGeometry.toString()})(document, window.innerWidth)`;
+  let lastError = null;
   let lastWidth = null;
 
   while (Date.now() < deadline) {
@@ -119,88 +279,72 @@ export async function resizeVscodeSidebar(remoteDebuggingPort, targetWidth, time
         socket.addEventListener('open', resolve, { once: true });
         socket.addEventListener('error', reject, { once: true });
       });
-      let requestId = 0;
-      const call = (method, params = {}) =>
-        new Promise((resolve, reject) => {
-          const id = ++requestId;
-          const handleMessage = (event) => {
-            const message = JSON.parse(event.data);
-            if (message.id !== id) return;
-            socket.removeEventListener('message', handleMessage);
-            if (message.error) reject(new Error(message.error.message));
-            else resolve(message.result);
-          };
-          socket.addEventListener('message', handleMessage);
-          socket.send(JSON.stringify({ id, method, params }));
+      const requests = createCdpRequestClient(socket, Math.max(1, deadline - Date.now()));
+      try {
+        const geometry = await requests.call('Runtime.evaluate', {
+          expression: geometryExpression,
+          returnByValue: true,
         });
-      const geometry = await call('Runtime.evaluate', {
-        expression: `(() => {
-          const iframe = document.querySelector('iframe.webview');
-          if (!iframe) return null;
-          const frame = iframe.getBoundingClientRect();
-          const sashes = [...document.querySelectorAll('.monaco-sash.vertical:not(.disabled)')]
-            .map((element) => element.getBoundingClientRect())
-            .filter((rect) => Math.abs(rect.x - frame.x) < 12 || Math.abs(rect.x - frame.right) < 12);
-          const sash = sashes.sort((left, right) =>
-            Math.min(Math.abs(left.x - frame.x), Math.abs(left.x - frame.right)) -
-            Math.min(Math.abs(right.x - frame.x), Math.abs(right.x - frame.right))
-          )[0];
-          return sash ? {
-            frame: [frame.x, frame.y, frame.width, frame.height],
-            sashX: sash.x,
-            viewportWidth: window.innerWidth,
-          } : null;
-        })()`,
-        returnByValue: true,
-      });
-      const value = geometry.result.value;
-      if (!value) {
-        socket.close();
-        throw new Error('Varro iframe or secondary-sidebar sash is not ready');
-      }
+        const value = geometry.result.value;
+        if (!value || value.error) {
+          throw new Error(value?.error || 'Varro iframe or secondary-sidebar sash is not ready');
+        }
 
-      lastWidth = value.frame[2];
-      if (Math.abs(lastWidth - targetWidth) <= 1) {
-        socket.close();
-        return Math.round(lastWidth);
-      }
-      const sidebarOnRight = value.frame[0] + lastWidth / 2 > value.viewportWidth / 2;
-      const targetX = value.sashX + (sidebarOnRight ? lastWidth - targetWidth : targetWidth - lastWidth);
-      const y = value.frame[1] + value.frame[3] / 2;
-      for (const [type, x, buttons] of [
-        ['mousePressed', value.sashX, 1],
-        ['mouseMoved', targetX, 1],
-        ['mouseReleased', targetX, 0],
-      ]) {
-        await call('Input.dispatchMouseEvent', {
-          type,
-          x,
-          y,
-          button: 'left',
-          buttons,
-          clickCount: 1,
+        lastWidth = value.frame[2];
+        if (Math.abs(lastWidth - targetWidth) <= 1) return Math.round(lastWidth);
+        const sidebarOnRight = value.frame[0] + lastWidth / 2 > value.viewportWidth / 2;
+        const targetX =
+          value.sashX + (sidebarOnRight ? lastWidth - targetWidth : targetWidth - lastWidth);
+        const y = value.frame[1] + value.frame[3] / 2;
+        for (const [type, x, buttons] of [
+          ['mousePressed', value.sashX, 1],
+          ['mouseMoved', targetX, 1],
+          ['mouseReleased', targetX, 0],
+        ]) {
+          await requests.call('Input.dispatchMouseEvent', {
+            type,
+            x,
+            y,
+            button: 'left',
+            buttons,
+            clickCount: 1,
+          });
+        }
+        const measured = await requests.call('Runtime.evaluate', {
+          expression: geometryExpression,
+          returnByValue: true,
         });
+        const measuredValue = measured.result.value;
+        if (!measuredValue || measuredValue.error) {
+          throw new Error(
+            measuredValue?.error || 'Varro iframe or secondary-sidebar sash is not ready'
+          );
+        }
+        lastWidth = measuredValue.frame[2];
+        if (Math.abs(lastWidth - targetWidth) <= 1) {
+          return Math.round(lastWidth);
+        }
+      } finally {
+        requests.dispose();
+        socket.close();
       }
-      const measured = await call('Runtime.evaluate', {
-        expression: `document.querySelector('iframe.webview')?.getBoundingClientRect().width ?? null`,
-        returnByValue: true,
-      });
-      socket.close();
-      lastWidth = measured.result.value;
-      // oxlint-disable-next-line anti-slop/no-runtime-typeof -- CDP results are untyped protocol payloads and require runtime validation.
-      if (typeof lastWidth === 'number' && Math.abs(lastWidth - targetWidth) <= 1) {
-        return Math.round(lastWidth);
-      }
-    } catch {}
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      lastError = JSON.stringify(message.slice(0, 500));
+    }
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
 
   throw new Error(
-    `Could not resize the Varro sidebar to ${String(targetWidth)}px${lastWidth === null ? '' : ` (last measured ${String(lastWidth)}px)`}`
+    `Could not resize the Varro sidebar to ${String(targetWidth)}px${lastWidth === null ? '' : ` (last measured ${String(lastWidth)}px)`}${lastError === null ? '' : `; last error: ${lastError}`}`
   );
 }
 
-export async function reloadVscodeWindow(remoteDebuggingPort, timeoutMs = 20_000) {
+export async function reloadVscodeWindow(
+  remoteDebuggingPort,
+  timeoutMs = 20_000,
+  expectedVarroTargetId = null
+) {
   const targets = await fetch(`http://127.0.0.1:${String(remoteDebuggingPort)}/json/list`).then(
     (response) => response.json()
   );
@@ -208,47 +352,20 @@ export async function reloadVscodeWindow(remoteDebuggingPort, timeoutMs = 20_000
     (target) => target.type === 'page' && target.title.includes('[Extension Development Host]')
   );
   if (!workbench?.webSocketDebuggerUrl) throw new Error('VS Code workbench target is not ready');
-  const originalVarroTargetId = targets.find(
-    (target) => target.type === 'iframe' && target.url.includes('extensionId=koltyakov.varro')
-  )?.id;
-
-  const socket = new WebSocket(workbench.webSocketDebuggerUrl);
-  await new Promise((resolve, reject) => {
-    socket.addEventListener('open', resolve, { once: true });
-    socket.addEventListener('error', reject, { once: true });
-  });
-  let requestId = 0;
-  const call = (method, params = {}) =>
-    new Promise((resolve, reject) => {
-      const id = ++requestId;
-      const handleMessage = (event) => {
-        const message = JSON.parse(event.data);
-        if (message.id !== id) return;
-        socket.removeEventListener('message', handleMessage);
-        if (message.error) reject(new Error(message.error.message));
-        else resolve(message.result);
-      };
-      socket.addEventListener('message', handleMessage);
-      socket.send(JSON.stringify({ id, method, params }));
-    });
-
-  for (const type of ['keyDown', 'keyUp']) {
-    await call('Input.dispatchKeyEvent', {
-      type,
-      key: 'P',
-      code: 'KeyP',
-      modifiers: process.platform === 'darwin' ? 12 : 10,
-    });
+  const originalVarroTargetIds = new Set(
+    targets
+      .filter(
+        (target) => target.type === 'iframe' && target.url.includes('extensionId=koltyakov.varro')
+      )
+      .map((target) => target.id)
+  );
+  if (expectedVarroTargetId && !originalVarroTargetIds.has(expectedVarroTargetId)) {
+    throw new Error(`Requested Varro target ${expectedVarroTargetId} is not attached to the workbench`);
   }
-  await new Promise((resolve) => setTimeout(resolve, 250));
-  await call('Input.insertText', { text: 'Developer: Reload Window' });
-  for (const type of ['keyDown', 'keyUp']) {
-    await call('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter' });
-  }
-  socket.close();
+
+  await executeVscodeCommand(remoteDebuggingPort, 'Developer: Reload Window');
 
   const deadline = Date.now() + timeoutMs;
-  let sawUnavailable = false;
   while (Date.now() < deadline) {
     try {
       const currentTargets = await fetch(
@@ -257,23 +374,17 @@ export async function reloadVscodeWindow(remoteDebuggingPort, timeoutMs = 20_000
       const currentWorkbench = currentTargets.find(
         (target) => target.type === 'page' && target.title.includes('[Extension Development Host]')
       );
-      const varroTarget = currentTargets.find(
+      const varroTargets = currentTargets.filter(
         (target) => target.type === 'iframe' && target.url.includes('extensionId=koltyakov.varro')
       );
-      const hasRecreatedVarro = hasRecreatedVarroTarget(
-        originalVarroTargetId,
-        varroTarget?.id,
-        sawUnavailable
+      const hasRecreatedVarro = varroTargets.some(
+        (target) => !originalVarroTargetIds.has(target.id)
       );
       if (currentWorkbench?.webSocketDebuggerUrl && hasRecreatedVarro) {
         await bringTargetToFront(currentWorkbench.webSocketDebuggerUrl);
         return;
       }
-      const hasVarro = !!varroTarget;
-      if (!currentWorkbench || !hasVarro) sawUnavailable = true;
-    } catch {
-      sawUnavailable = true;
-    }
+    } catch {}
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
   throw new Error('VS Code did not finish reloading the Varro webview');

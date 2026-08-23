@@ -14,6 +14,10 @@ type OpenPathPayload = Extract<WebviewMessage, { type: 'vscode/open' }>['payload
 type OpenTextPayload = Extract<WebviewMessage, { type: 'vscode/open-text' }>['payload'];
 type QueuedMessagesPayload = Extract<WebviewMessage, { type: 'queued-messages/update' }>['payload'];
 type PermissionModePayload = Extract<WebviewMessage, { type: 'permission-mode/update' }>['payload'];
+type PermissionModesMigrationPayload = Extract<
+  WebviewMessage,
+  { type: 'permission-modes/migrate' }
+>['payload'];
 type SessionModelPayload = Extract<WebviewMessage, { type: 'session-model/update' }>['payload'];
 type SessionModelsMigrationPayload = Extract<
   WebviewMessage,
@@ -37,7 +41,8 @@ export interface MessageRouterCallbacks {
   updateCommandState(
     canAbort: boolean,
     canSwitchSessions: boolean,
-    model: CommandStatePayload['model']
+    model: CommandStatePayload['model'],
+    sessionId?: string | null
   ): void;
   setWebviewFocus(focused: boolean): void;
   revealPermission(permissionId: string): void;
@@ -89,7 +94,17 @@ export interface MessageRouterCallbacks {
   cancelApiRequest(payload: ApiCancelPayload): void;
   handleRalphMessage(msg: RalphMessage): void;
   updateQueuedMessages(payload: QueuedMessagesPayload): Promise<void>;
+  claimQueuedMessage(
+    payload: Extract<WebviewMessage, { type: 'queued-messages/claim' }>['payload']
+  ): void;
+  releaseQueuedMessage(
+    payload: Extract<WebviewMessage, { type: 'queued-messages/release' }>['payload']
+  ): void;
+  acknowledgeInterruptedSessions(
+    payload: Extract<WebviewMessage, { type: 'recovery/interrupted-sessions-ack' }>['payload']
+  ): Promise<void>;
   updatePermissionMode(payload: PermissionModePayload): Promise<void>;
+  migratePermissionModes(payload: PermissionModesMigrationPayload): Promise<void>;
   updateSessionModel(payload: SessionModelPayload): Promise<void>;
   migrateSessionModels(payload: SessionModelsMigrationPayload): Promise<void>;
   updateDraftImages(
@@ -110,8 +125,20 @@ export class MessageRouter {
         case 'queued-messages/update':
           await this.callbacks.updateQueuedMessages(msg.payload);
           break;
+        case 'queued-messages/claim':
+          this.callbacks.claimQueuedMessage(msg.payload);
+          break;
+        case 'queued-messages/release':
+          this.callbacks.releaseQueuedMessage(msg.payload);
+          break;
+        case 'recovery/interrupted-sessions-ack':
+          await this.callbacks.acknowledgeInterruptedSessions(msg.payload);
+          break;
         case 'permission-mode/update':
           await this.callbacks.updatePermissionMode(msg.payload);
+          break;
+        case 'permission-modes/migrate':
+          await this.callbacks.migratePermissionModes(msg.payload);
           break;
         case 'session-model/update':
           await this.callbacks.updateSessionModel(msg.payload);
@@ -126,7 +153,8 @@ export class MessageRouter {
           this.callbacks.updateCommandState(
             msg.payload.canAbort,
             msg.payload.canSwitchSessions,
-            msg.payload.model
+            msg.payload.model,
+            msg.payload.sessionId
           );
           break;
         case 'webview/focus':

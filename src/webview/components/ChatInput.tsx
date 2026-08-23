@@ -43,6 +43,8 @@ import {
   setQueuedMessagePaused,
   replaceQueuedMessage,
   removeQueuedMessage,
+  claimQueuedMessageDispatch,
+  releaseQueuedMessageDispatch,
   setQueuedMessageDispatchingId as setDispatchingQueuedMessageId,
   setQueuedMessageFailed,
   setQueuedMessageEdit,
@@ -206,6 +208,7 @@ import {
 } from './chat-input/toolbar-compact';
 import { createToolbarFitter } from './chat-input/toolbar-fit';
 import { planMessageHistoryNavigation } from './chat-input/message-history-navigation';
+import { queuedMessageWasAdmitted } from './chat-input/queued-message-history';
 import {
   SKILLS_COMMAND_NAME,
   createMentionCompletionSource,
@@ -567,23 +570,6 @@ function attachCurrentDiagnostics() {
   });
 }
 
-async function queuedMessageWasAdmitted(sessionId: string, messageId: string) {
-  let before: string | undefined;
-  const consumedCursors = new Set<string>();
-  do {
-    const messages = await client.session.messages(sessionId, { limit: 200, before });
-    if (messages.some((message) => message.info.id === messageId)) return true;
-    const nextCursor = messages.nextCursor;
-    if (!nextCursor) return false;
-    if (consumedCursors.has(nextCursor)) {
-      throw new Error('Queued message history cursor did not advance');
-    }
-    consumedCursors.add(nextCursor);
-    before = nextCursor;
-  } while (before);
-  return false;
-}
-
 function postSessionModelSelection(sessionId: string, model: RalphSelectedModel) {
   postMessage({
     type: 'session-model/update',
@@ -596,6 +582,10 @@ function postSessionModelSelection(sessionId: string, model: RalphSelectedModel)
       },
     },
   });
+}
+
+function isQueuedSessionHydrating(sessionId: string) {
+  return state.messagesLoading && state.activeSessionId === sessionId;
 }
 
 export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => void } = {}) {
@@ -1979,6 +1969,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   async function dispatchQueuedMessage(item: (typeof state.queuedMessages)[number], retry = false) {
     if (!ownsQueuedMessage(item)) return;
+    if (isQueuedSessionHydrating(item.sessionId)) return;
     if (isSessionAwaitingInput(item.sessionId)) return;
     if (dispatchingQueuedMessageId()) return;
     if (!retry && state.queuedMessages.find((queued) => queued.id === item.id)?.paused) return;
@@ -1989,11 +1980,15 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const messageId = priorAttemptId ?? createOpenCodeMessageID();
     if (!priorAttemptId) replaceQueuedMessage(item.id, { ...item, messageId });
     let sent = false;
+    let dispatchLease: number | null = null;
     try {
       if (priorAttemptId && (await queuedMessageWasAdmitted(item.sessionId, priorAttemptId))) {
         removeQueuedMessage(item.id);
         return;
       }
+      dispatchLease = await claimQueuedMessageDispatch(item);
+      if (dispatchLease === null) return;
+      if (isQueuedSessionHydrating(item.sessionId)) return;
       sent = await sendMessage(item.text, {
         messageId,
         agent: item.agent ? item.agent : undefined,
@@ -2016,10 +2011,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         },
         preserveComposer: true,
         targetSessionId: item.sessionId,
+        queuedMessageDispatch: { itemId: item.id, lease: dispatchLease },
       });
     } catch {
       sent = false;
     } finally {
+      if (!sent && dispatchLease !== null) releaseQueuedMessageDispatch(item, dispatchLease);
       setDispatchingQueuedMessageId(null);
     }
     if (sent) {
@@ -2033,9 +2030,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const steeringIds = steeringQueuedMessageIds();
     const failedSteerIds = failedSteerQueuedMessageIds();
     const failedIds = failedQueuedMessageIds();
-    const editingSessionId = queuedMessageEdit()?.sessionId;
+    const editingItemId = queuedMessageEdit()?.id;
+    const editingSessionId = state.queuedMessages.find(
+      (item) => item.id === editingItemId && ownsQueuedMessage(item)
+    )?.sessionId;
     const steeringSessionIds = new Set(
-      state.queuedMessages.filter((item) => steeringIds.has(item.id)).map((item) => item.sessionId)
+      state.queuedMessages
+        .filter((item) => ownsQueuedMessage(item) && steeringIds.has(item.id))
+        .map((item) => item.sessionId)
     );
     const blockedSessionIds = new Set<string>();
 
@@ -2043,6 +2045,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       if (!ownsQueuedMessage(item)) continue;
       if (item.paused || steeringIds.has(item.id) || failedSteerIds.has(item.id)) continue;
       if (blockedSessionIds.has(item.sessionId)) continue;
+      if (isQueuedSessionHydrating(item.sessionId)) {
+        blockedSessionIds.add(item.sessionId);
+        continue;
+      }
       if (failedIds.has(item.id)) {
         blockedSessionIds.add(item.sessionId);
         continue;
@@ -2993,17 +2999,18 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   const hasPendingApproval = () => composerHasActiveQuestion() || composerHasActivePermission();
   const canSend = () =>
-    isAbortSlashCommand(inputText()) ||
-    (!pendingWorkspacePath() &&
-      !hasPendingPdfFallback() &&
-      !hasPendingDelegatedImages() &&
-      (!hasPendingApproval() || !composerEditingMessage()) &&
-      (getSendableInputText().trim().length > 0 ||
-        state.droppedFiles.length > 0 ||
-        hasSendableClipboardImages() ||
-        state.nativePdfs.length > 0 ||
-        !!state.terminalSelection ||
-        !!state.attachedDiagnostics));
+    !state.messagesLoading &&
+    (isAbortSlashCommand(inputText()) ||
+      (!pendingWorkspacePath() &&
+        !hasPendingPdfFallback() &&
+        !hasPendingDelegatedImages() &&
+        (!hasPendingApproval() || !composerEditingMessage()) &&
+        (getSendableInputText().trim().length > 0 ||
+          state.droppedFiles.length > 0 ||
+          hasSendableClipboardImages() ||
+          state.nativePdfs.length > 0 ||
+          !!state.terminalSelection ||
+          !!state.attachedDiagnostics)));
   const isBusyWithoutInterruption = createMemo(
     () => isComposerBusy() && !composerHasActiveQuestion() && !composerHasActivePermission()
   );
@@ -3446,7 +3453,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   const queuedForSession = createMemo(() =>
     composerSessionId()
-      ? state.queuedMessages.filter((item) => item.sessionId === composerSessionId())
+      ? state.queuedMessages.filter(
+          (item) => item.sessionId === composerSessionId() && ownsQueuedMessage(item)
+        )
       : []
   );
 
@@ -3518,10 +3527,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           failedSteerItemIds={failedSteerQueuedMessageIds()}
           editingItemId={queuedMessageEdit()?.id}
           canEdit={canEditQueuedMessage()}
-          canSendImmediately={!hasPendingApproval()}
+          canSendImmediately={!state.messagesLoading && !hasPendingApproval()}
           onRetryDispatch={(item) => void dispatchQueuedMessage(item, true)}
           onSendAsSteer={(item) => {
-            if (!hasPendingApproval()) void sendQueuedAsSteer(item);
+            if (!state.messagesLoading && !hasPendingApproval()) void sendQueuedAsSteer(item);
           }}
           onSetPaused={(item, paused, allRows) => setQueuedMessagePaused(item.id, paused, allRows)}
           onReorder={reorderQueuedMessage}

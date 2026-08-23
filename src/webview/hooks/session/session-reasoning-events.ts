@@ -90,9 +90,13 @@ export function registerReasoningEventHandlers(ctx: ReasoningEventContext): Arra
       if (!assistantMessageID && ctx.ignoreStaleProgressAfterFinishedAssistant(sessionID)) return;
       ctx.markSessionProgress(sessionID);
       if (!reasoningID || !ctx.isSessionInActiveTree(sessionID)) return;
-      ctx.recordSessionMessageSnapshotMutation(sessionID);
       uiStore.markLoadingActivity();
-      withReasoningMessage(sessionID, reasoningID, () => {}, assistantMessageID);
+      withReasoningMessage(
+        sessionID,
+        reasoningID,
+        () => ctx.recordSessionMessageSnapshotMutation(sessionID),
+        assistantMessageID
+      );
     })
   );
 
@@ -113,12 +117,12 @@ export function registerReasoningEventHandlers(ctx: ReasoningEventContext): Arra
       if (!assistantMessageID && ctx.ignoreStaleProgressAfterFinishedAssistant(sessionID)) return;
       ctx.markSessionProgress(sessionID);
       if (!reasoningID || !delta || !ctx.isSessionInActiveTree(sessionID)) return;
-      ctx.recordSessionMessageSnapshotMutation(sessionID);
       uiStore.markLoadingActivity();
       withReasoningMessage(
         sessionID,
         reasoningID,
         (messageID) => {
+          ctx.recordSessionMessageSnapshotMutation(sessionID);
           sessionStore.applyMessagePartDelta(messageID, reasoningID, delta, sessionID, 'text');
         },
         assistantMessageID
@@ -142,13 +146,13 @@ export function registerReasoningEventHandlers(ctx: ReasoningEventContext): Arra
       if (!assistantMessageID && ctx.ignoreStaleProgressAfterFinishedAssistant(sessionID)) return;
       ctx.markSessionProgress(sessionID);
       if (!reasoningID || !ctx.isSessionInActiveTree(sessionID)) return;
-      ctx.recordSessionMessageSnapshotMutation(sessionID);
       uiStore.markLoadingActivity();
       const text = getEventString(p, 'text');
       withReasoningMessage(
         sessionID,
         reasoningID,
         (messageID) => {
+          ctx.recordSessionMessageSnapshotMutation(sessionID);
           if (!text) return;
           // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
           sessionStore.upsertPart({

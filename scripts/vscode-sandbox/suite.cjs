@@ -9,14 +9,17 @@ const EXPECTATIONS = {
   'clean-install-missing-cli': [
     '- CLI version: not found',
     '- Server status: error: OpenCode CLI not found.',
+    '- Server health: unhealthy',
   ],
   'invalid-cli-path': [
     '- Resolved binary:',
     '- Server status: error: OpenCode CLI not found at the configured path:',
+    '- Server health: unhealthy',
   ],
   'auto-start-disabled': [
     '- Auto updates: enabled',
     '- Server status: error: No server at http://127.0.0.1:',
+    '- Server health: unhealthy',
   ],
   'version-command-failure': [
     '- CLI version: error:',
@@ -31,6 +34,7 @@ const EXPECTATIONS = {
   'startup-process-exit': [
     '- CLI version: 1.18.15',
     '- Server status: error: OpenCode server exited during startup (code 1)',
+    '- Server health: unhealthy',
   ],
   'runtime-crash-recovery': [
     '- CLI version: 1.18.15',
@@ -50,16 +54,19 @@ const EXPECTATIONS = {
   'required-update-disabled': [
     '- CLI version: 1.15.0',
     '- Server status: error: OpenCode update required.',
+    '- Server health: unhealthy',
     'Automatic updates are disabled.',
   ],
   'required-update-failure': [
     '- CLI version: 1.15.0',
     '- Server status: error: OpenCode update required.',
+    '- Server health: unhealthy',
     'The automatic update failed.',
   ],
   'required-update-no-change': [
     '- CLI version: 1.15.0',
     '- Server status: error: OpenCode update required.',
+    '- Server health: unhealthy',
     'The automatic update did not install a compatible CLI (found 1.15.0)',
   ],
   'file-link-open': [
@@ -70,7 +77,9 @@ const EXPECTATIONS = {
   'healthy-first-run': [
     '- **Version:** `1.18.15`',
     '- **Install method:** a path configured in varro.server.command',
-    '- **Ownership:** unmanaged',
+    '- **Ownership:** managed by Varro',
+    '- Server status: running, event stream healthy',
+    '- Server health: healthy',
   ],
 };
 
@@ -88,10 +97,10 @@ async function readAboutDocument() {
 }
 
 async function waitForExpectedAboutText(expected, timeoutMs = DEFAULT_WAIT_TIMEOUT_MS) {
-  await vscode.commands.executeCommand('varro.about');
   const deadline = Date.now() + timeoutMs;
   let lastText = '';
   while (Date.now() < deadline) {
+    await vscode.commands.executeCommand('varro.about');
     lastText = await readAboutDocument();
     if (expected.every((text) => lastText.includes(text))) return lastText;
     await delay(250);
@@ -126,6 +135,16 @@ async function run() {
     `Unknown sandbox scenario: ${scenario}`
   );
   const expected = [...EXPECTATIONS[scenario]];
+  expected.push(
+    '- CLI version:',
+    '- Resolved binary:',
+    '- Server status:',
+    '- Server health:',
+    '- Server port:',
+    '- Auto start:',
+    '- Auto updates:',
+    '- Workspace:'
+  );
   if (scenario === 'port-conflict-fallback') {
     const originalPort = Number(process.env.VARRO_SANDBOX_PORT);
     assert.ok(Number.isInteger(originalPort), 'Sandbox port was not provided');

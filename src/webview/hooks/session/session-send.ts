@@ -90,6 +90,7 @@ export type SessionSendBody = {
   noReply?: boolean;
   delivery?: 'steer' | 'queue';
   variant?: string;
+  queuedMessageDispatch?: { itemId: string; lease: number };
 };
 
 type SendFlowOptions = { noReply?: boolean; delivery?: 'steer' | 'queue' };
@@ -110,6 +111,7 @@ type SessionSendOptions = SendFlowOptions & {
   queuedContext?: QueuedContextSnapshot;
   preserveComposer?: boolean;
   targetSessionId?: string;
+  queuedMessageDispatch?: { itemId: string; lease: number };
 };
 
 type CapturedComposerAttachments = {
@@ -996,6 +998,9 @@ export async function sendMessageWithDependencies(
   const { body, effectiveModel, optimisticImages } = sendPayload;
   const messageId = options?.messageId ?? createOpenCodeMessageID();
   const sendBody = { ...body, messageID: messageId };
+  if (options?.queuedMessageDispatch) {
+    sendBody.queuedMessageDispatch = options.queuedMessageDispatch;
+  }
   if (sendBody.variant === undefined) delete sendBody.variant;
 
   const expectsAssistantReply = !sendBody.noReply && sendBody.delivery !== 'steer';

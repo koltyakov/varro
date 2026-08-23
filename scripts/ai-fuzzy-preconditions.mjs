@@ -175,6 +175,10 @@ class OpenCodeClient {
     return this.request('GET', '/session?roots=true&limit=1000');
   }
 
+  listAllSessions() {
+    return this.request('GET', '/session?limit=1000');
+  }
+
   listMessages(id) {
     return this.request('GET', `/session/${encodeURIComponent(id)}/message?limit=1000`);
   }
@@ -353,6 +357,14 @@ async function verifyRun(options) {
   }
   for (const tracked of manifest.runSessions) {
     if (tracked.deleted) throw new Error(`Run session ${tracked.id} is already marked deleted`);
+    if (tracked.parentID) {
+      const session = await client.getSession(tracked.id);
+      if (session.parentID !== tracked.parentID) {
+        throw new Error(`Run child session ${tracked.id} no longer has its recorded parent`);
+      }
+      tracked.verifiedAt = new Date().toISOString();
+      continue;
+    }
     const validated = await validateGolden(
       client,
       tracked.id,
@@ -376,8 +388,16 @@ async function cleanup(options) {
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   const prefix = `VFZ ${manifest.seed}`;
   const client = new OpenCodeClient(manifest.server, manifest.workspace);
-  const activeIds = new Set((await client.listSessions()).map((session) => session.id));
-  for (const tracked of manifest.runSessions) {
+  const allSessions = await client.listAllSessions();
+  const sessionsById = new Map(allSessions.map((session) => [session.id, session]));
+  const activeIds = new Set(sessionsById.keys());
+  const trackedRootIds = new Set(
+    manifest.runSessions.filter((session) => !session.parentID).map((session) => session.id)
+  );
+  const ordered = manifest.runSessions.toSorted(
+    (left, right) => Number(Boolean(right.parentID)) - Number(Boolean(left.parentID))
+  );
+  for (const tracked of ordered) {
     if (tracked.deleted) continue;
     if (!activeIds.has(tracked.id)) {
       tracked.deleted = true;
@@ -385,15 +405,25 @@ async function cleanup(options) {
       tracked.deletionNote = 'Already absent before cleanup';
       continue;
     }
-    const session = await client.getSession(tracked.id);
-    if (!session.title?.startsWith(prefix)) {
+    const session = sessionsById.get(tracked.id) ?? (await client.getSession(tracked.id));
+    if (tracked.parentID) {
+      let ancestor = session;
+      const visited = new Set();
+      while (ancestor?.parentID && !visited.has(ancestor.parentID)) {
+        visited.add(ancestor.parentID);
+        ancestor = sessionsById.get(ancestor.parentID) ?? (await client.getSession(ancestor.parentID));
+      }
+      if (!ancestor || !trackedRootIds.has(ancestor.id) || !ancestor.title?.startsWith(prefix)) {
+        throw new Error(`Refusing to delete ${tracked.id}: recorded run root ancestry was not verified`);
+      }
+    } else if (!session.title?.startsWith(prefix)) {
       throw new Error(`Refusing to delete ${tracked.id}: title does not start with ${prefix}`);
     }
     await client.request('DELETE', `/session/${encodeURIComponent(tracked.id)}`);
     tracked.deleted = true;
     tracked.deletedAt = new Date().toISOString();
   }
-  const finalActiveIds = new Set((await client.listSessions()).map((session) => session.id));
+  const finalActiveIds = new Set((await client.listAllSessions()).map((session) => session.id));
   const remaining = manifest.runSessions.filter((session) => finalActiveIds.has(session.id));
   if (remaining.length > 0) throw new Error(`Cleanup verification failed for ${remaining.map((item) => item.id).join(', ')}`);
   await writeJsonAtomic(manifestPath, manifest);

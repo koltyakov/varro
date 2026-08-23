@@ -31,6 +31,7 @@ export interface SidebarProviderActionDeps {
   };
   setProviderWatchActive(active: boolean): void;
   setActiveChatModel(model: ChatModelSelection | null): void;
+  setActiveRoute(sessionId: string | null | undefined): void;
   revealPermission(permissionId: string): void;
   contextFilesState: SidebarProviderContextFiles;
   sessionExportService: SessionExportService;
@@ -69,7 +70,11 @@ export interface SidebarProviderActionDeps {
   editorRouteChanged(route: WebviewRoute): void;
   handleRalphMessage: MessageRouterCallbacks['handleRalphMessage'];
   updateQueuedMessages: MessageRouterCallbacks['updateQueuedMessages'];
+  claimQueuedMessage: MessageRouterCallbacks['claimQueuedMessage'];
+  releaseQueuedMessage: MessageRouterCallbacks['releaseQueuedMessage'];
+  acknowledgeInterruptedSessions: MessageRouterCallbacks['acknowledgeInterruptedSessions'];
   updatePermissionMode: MessageRouterCallbacks['updatePermissionMode'];
+  migratePermissionModes: MessageRouterCallbacks['migratePermissionModes'];
   updateSessionModel: MessageRouterCallbacks['updateSessionModel'];
   migrateSessionModels: MessageRouterCallbacks['migrateSessionModels'];
   updateDraftImages: MessageRouterCallbacks['updateDraftImages'];
@@ -100,9 +105,10 @@ export function createSidebarProviderActions(
 
   return {
     ready: () => deps.handleReadyMessage(),
-    updateCommandState: (canAbort, canSwitchSessions, model) => {
+    updateCommandState: (canAbort, canSwitchSessions, model, sessionId) => {
       deps.webviewSession.updateCommandState(canAbort, canSwitchSessions);
       deps.setActiveChatModel(model);
+      deps.setActiveRoute(sessionId);
     },
     setWebviewFocus: (focused) => {
       deps.webviewSession.setFocus(focused);
@@ -138,7 +144,11 @@ export function createSidebarProviderActions(
     editorRouteChanged: (route) => deps.editorRouteChanged(route),
     handleRalphMessage: (msg) => deps.handleRalphMessage(msg),
     updateQueuedMessages: (payload) => deps.updateQueuedMessages(payload),
+    claimQueuedMessage: (payload) => deps.claimQueuedMessage(payload),
+    releaseQueuedMessage: (payload) => deps.releaseQueuedMessage(payload),
+    acknowledgeInterruptedSessions: (payload) => deps.acknowledgeInterruptedSessions(payload),
     updatePermissionMode: (payload) => deps.updatePermissionMode(payload),
+    migratePermissionModes: (payload) => deps.migratePermissionModes(payload),
     updateSessionModel: (payload) => deps.updateSessionModel(payload),
     migrateSessionModels: (payload) => deps.migrateSessionModels(payload),
     updateDraftImages: (payload) => deps.updateDraftImages(payload),

@@ -26,12 +26,20 @@ export class DraftImageStore {
   }
 
   update(images: ClipboardImageSnapshot[], viewId = 'sidebar'): Promise<void> {
-    // Temporary context files are owned by one extension-host process and cannot
-    // be restored after VS Code restarts. They will be recreated if needed.
-    const persistedImages = images.map(({ contextFile: _contextFile, ...image }) => image);
-    if (persistedImages.length > 0) this.imagesByView.set(viewId, persistedImages);
+    const memoryImages = images.map((image) => ({
+      ...image,
+      contextFile: image.contextFile ? { ...image.contextFile } : undefined,
+    }));
+    if (memoryImages.length > 0) this.imagesByView.set(viewId, memoryImages);
     else this.imagesByView.delete(viewId);
-    const snapshot = Object.fromEntries(this.imagesByView);
+    // Temporary context files belong to this extension-host process and cannot
+    // be restored after VS Code restarts. Keep them in memory only.
+    const snapshot = Object.fromEntries(
+      [...this.imagesByView].map(([ownerViewId, ownerImages]) => [
+        ownerViewId,
+        ownerImages.map(({ contextFile: _contextFile, ...image }) => image),
+      ])
+    );
     const operation = this.persistenceQueue.then(() =>
       this.imagesByView.size > 0
         ? this.persistence.set(DRAFT_IMAGES_KEY, snapshot)

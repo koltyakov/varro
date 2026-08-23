@@ -1,4 +1,4 @@
-/* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-object-parameters, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: These tests call private message handlers with protocol-shaped fixtures and named scenario options. */
+/* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-object-parameters, anti-slop/no-unknown-parameters, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: These tests call private message handlers with protocol-shaped fixtures and untyped persistence values. */
 import { describe, expect, it, vi, type Mock } from 'vitest';
 import {
   attachTestView,
@@ -8,6 +8,43 @@ import {
 } from './sidebar-provider.test-support';
 
 describe('SidebarProvider session message responses', () => {
+  it('migrates sidebar permission modes without overwriting newer host state', async () => {
+    const values = new Map<string, unknown>();
+    const workspaceState = {
+      get: vi.fn((key: string, fallback?: unknown) => values.get(key) ?? fallback),
+      update: vi.fn((key: string, value: unknown) => {
+        if (value === undefined) values.delete(key);
+        else values.set(key, value);
+        return Promise.resolve();
+      }),
+    };
+    const server = createServer();
+    const { provider } = await createSidebarProviderInstance({
+      server,
+      workspaceState: workspaceState as never,
+    });
+    const { posted } = attachTestView(provider);
+
+    await provider.handleMessage({
+      type: 'permission-mode/update',
+      payload: { sessionId: 'session-1', mode: 'full' },
+    });
+    await provider.handleMessage({
+      type: 'permission-modes/migrate',
+      payload: { modes: { 'session-1': 'auto', 'session-legacy': 'edits' } },
+    });
+
+    expect(values.get('varro.sessionPermissionModes')).toEqual({
+      'session-1': 'full',
+      'session-legacy': 'edits',
+    });
+    expect(posted).toContainEqual({
+      type: 'permission-modes/sync',
+      payload: { modes: { 'session-1': 'full', 'session-legacy': 'edits' } },
+    });
+    expect(server.request).not.toHaveBeenCalled();
+  });
+
   it('posts pending deltas before a canonical message API response', async () => {
     const server = createServer({
       request: vi.fn(async (_method: string, path: string) =>

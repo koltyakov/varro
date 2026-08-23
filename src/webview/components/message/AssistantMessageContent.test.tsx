@@ -23,6 +23,7 @@ type MockMessagePartProps = {
   part: Part;
   messageInfo?: AssistantMessage;
   streamedText?: string | null;
+  compactFileChanges?: boolean;
 };
 
 const markdownRendererMock = vi.hoisted(() =>
@@ -38,7 +39,12 @@ const markdownRendererMock = vi.hoisted(() =>
 
 const messagePartMock = vi.hoisted(() =>
   vi.fn((props: MockMessagePartProps) => (
-    <div class="message-part-mock" data-part-id={props.part.id} data-part-type={props.part.type}>
+    <div
+      class="message-part-mock"
+      data-part-id={props.part.id}
+      data-part-type={props.part.type}
+      data-compact-file-changes={props.compactFileChanges ? 'true' : undefined}
+    >
       {props.streamedText ??
         (props.part.type === 'text' || props.part.type === 'reasoning'
           ? props.part.text
@@ -435,7 +441,11 @@ describe('AssistantMessageContent', () => {
 
     summary?.click();
 
-    expect(container?.querySelector('[data-part-id="edit-history"]')).not.toBeNull();
+    expect(
+      container
+        ?.querySelector('[data-part-id="edit-history"]')
+        ?.getAttribute('data-compact-file-changes')
+    ).toBe('true');
   });
 
   it('keeps unparsed edit tools out of the activity summary when inline previews are enabled', () => {

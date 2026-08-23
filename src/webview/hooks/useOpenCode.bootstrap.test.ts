@@ -16,6 +16,18 @@ type BridgeOnMessage = typeof onMessage;
 const bridgeOnMessage = vi.fn<BridgeOnMessage>();
 Object.assign(bridgeMocks, { onMessage: bridgeOnMessage });
 
+function setupInterruptedRecoveryClientMocks() {
+  clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+  clientMocks.sessionList.mockResolvedValue([session('session-1')]);
+  clientMocks.sessionStatus.mockResolvedValue({ 'session-1': { type: 'idle' } });
+  clientMocks.agentList.mockResolvedValue([]);
+  clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+  clientMocks.questionList.mockResolvedValue([]);
+  clientMocks.sessionMessages.mockResolvedValue([{ info: userMessage('user-1'), parts: [] }]);
+  clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+  clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+}
+
 describe('useOpenCode initialization', () => {
   it('sends session model migration values as structured-cloneable objects', async () => {
     // SAFETY: The fixture provides the initial host state read by the runtime.
@@ -56,6 +68,41 @@ describe('useOpenCode initialization', () => {
     } finally {
       dispose();
       window.localStorage.removeItem('varro.sessionSelectedModels');
+    }
+  });
+
+  it('sends legacy permission modes through the set-if-absent migration message', async () => {
+    // SAFETY: The fixture provides the initial host state read by the runtime.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      webviewContext: {
+        viewId: 'sidebar',
+        surface: 'sidebar',
+        initialRoute: { type: 'new-session' },
+      },
+      sessionPermissionModes: { 'session-current': 'auto' },
+    };
+    window.localStorage.setItem(
+      'varro.sessionPermissionModes',
+      JSON.stringify({ 'session-current': 'full', 'session-legacy': 'edits' })
+    );
+
+    const { hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      expect(bridgeMocks.postMessage).toHaveBeenCalledWith({
+        type: 'permission-modes/migrate',
+        payload: { modes: { 'session-legacy': 'edits' } },
+      });
+      expect(bridgeMocks.postMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'permission-mode/update' })
+      );
+    } finally {
+      dispose();
+      window.localStorage.removeItem('varro.sessionPermissionModes');
     }
   });
 
@@ -335,6 +382,86 @@ describe('useOpenCode initialization', () => {
             },
           ],
         });
+      });
+    } finally {
+      dispose();
+    }
+  });
+
+  it('processes a recovery claim delivered before connection bootstrap before acknowledging it', async () => {
+    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
+    bridgeOnMessage.mockImplementation((handler) => {
+      bridgeHandler = handler;
+      return () => {
+        bridgeHandler = undefined;
+      };
+    });
+    setupInterruptedRecoveryClientMocks();
+
+    const { hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
+      bridgeHandler({
+        type: 'recovery/interrupted-sessions',
+        payload: { claimId: 7, sessionIds: ['session-1'] },
+      });
+      expect(bridgeMocks.postMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'recovery/interrupted-sessions-ack' })
+      );
+
+      bridgeHandler({
+        type: 'server/status',
+        payload: { state: 'running', url: 'http://127.0.0.1:4096' },
+      });
+
+      await vi.waitFor(() => expect(clientMocks.sessionSendAsync).toHaveBeenCalledTimes(1));
+      expect(bridgeMocks.postMessage).toHaveBeenCalledWith({
+        type: 'recovery/interrupted-sessions-ack',
+        payload: { claimId: 7, consumedSessionIds: ['session-1'] },
+      });
+    } finally {
+      dispose();
+    }
+  });
+
+  it('processes and acknowledges a recovery claim delivered after bootstrap', async () => {
+    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
+    bridgeOnMessage.mockImplementation((handler) => {
+      bridgeHandler = handler;
+      return () => {
+        bridgeHandler = undefined;
+      };
+    });
+    setupInterruptedRecoveryClientMocks();
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
+      bridgeHandler({
+        type: 'server/status',
+        payload: { state: 'running', url: 'http://127.0.0.1:4096' },
+      });
+      await vi.waitFor(() => expect(stateModule.connectionInitialized()).toBe(true));
+
+      bridgeHandler({
+        type: 'recovery/interrupted-sessions',
+        payload: { claimId: 8, sessionIds: ['session-1'] },
+      });
+
+      await vi.waitFor(() => expect(clientMocks.sessionSendAsync).toHaveBeenCalledTimes(1));
+      expect(bridgeMocks.postMessage).toHaveBeenCalledWith({
+        type: 'recovery/interrupted-sessions-ack',
+        payload: { claimId: 8, consumedSessionIds: ['session-1'] },
       });
     } finally {
       dispose();

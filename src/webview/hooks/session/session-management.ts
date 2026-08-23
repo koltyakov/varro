@@ -22,10 +22,12 @@ type SessionManagementDependencies = {
   persistActiveSessionId(sessionId: string): void;
   markSessionSeen(sessionId: string): void;
   getDefaultSelectedModel(): SelectedModel | null;
+  getEffectiveSessionModel(sessionId: string): SelectedModel | null;
   setSelectedModel(
     model: SelectedModel | null,
     options?: { sessionId?: string | null; persistGlobal?: boolean }
   ): void;
+  publishSessionModel(sessionId: string, model: SelectedModel | null): void;
   resolveDefaultAgent(): string | null;
   setSelectedAgent(
     agent: string | null,
@@ -86,6 +88,7 @@ export class SessionManagementOperations {
         markSessionSeen: this.deps.markSessionSeen,
         getDefaultSelectedModel: this.deps.getDefaultSelectedModel,
         setSelectedModel: this.deps.setSelectedModel,
+        publishSessionModel: this.deps.publishSessionModel,
         resolveDefaultAgent: this.deps.resolveDefaultAgent,
         setSelectedAgent: this.deps.setSelectedAgent,
         getInitialMcpNames: this.deps.getInitialMcpNames,
@@ -113,6 +116,9 @@ export class SessionManagementOperations {
         getSessionSelectionGeneration: this.deps.getSessionSelectionGeneration,
         getNewChatDraftGeneration: this.deps.getNewChatDraftGeneration,
         forkRemoteSession: this.deps.forkRemoteSession,
+        getEffectiveSessionModel: this.deps.getEffectiveSessionModel,
+        setSelectedModel: this.deps.setSelectedModel,
+        publishSessionModel: this.deps.publishSessionModel,
         getPermissionModeForSession: this.deps.getPermissionModeForSession,
         setPermissionModeForSession: this.deps.setPermissionModeForSession,
         persistConfirmedPermissionModeForSession:
@@ -221,6 +227,7 @@ export async function createSessionWithDependencies(
       model: SelectedModel | null,
       options?: { sessionId?: string | null; persistGlobal?: boolean }
     ): void;
+    publishSessionModel(sessionId: string, model: SelectedModel | null): void;
     resolveDefaultAgent(): string | null;
     setSelectedAgent(
       agent: string | null,
@@ -263,6 +270,7 @@ export async function createSessionWithDependencies(
       deps.setPermissionModeForSession(session.id, initialPermissionMode);
       deps.persistConfirmedPermissionModeForSession?.(session.id, initialPermissionMode);
     }
+    deps.publishSessionModel(session.id, defaultModel);
 
     if (
       deps.getActiveSessionId() !== previousActiveSessionId ||
@@ -315,6 +323,12 @@ export async function forkSessionWithDependencies(
     getSessionSelectionGeneration?(): number;
     getNewChatDraftGeneration(): number;
     forkRemoteSession(sessionId: string, messageID?: string): Promise<Session>;
+    getEffectiveSessionModel(sessionId: string): SelectedModel | null;
+    setSelectedModel(
+      model: SelectedModel | null,
+      options?: { sessionId?: string | null; persistGlobal?: boolean }
+    ): void;
+    publishSessionModel(sessionId: string, model: SelectedModel | null): void;
     getPermissionModeForSession(sessionId: string): PermissionMode;
     setPermissionModeForSession(sessionId: string, mode: PermissionMode): void;
     persistConfirmedPermissionModeForSession?(sessionId: string, mode: PermissionMode): void;
@@ -336,6 +350,7 @@ export async function forkSessionWithDependencies(
     // Forks are independent roots, so the source session's permission mode
     // must be copied over explicitly or the fork silently resets to default.
     const permissionMode = deps.getPermissionModeForSession(id);
+    const sourceModel = deps.getEffectiveSessionModel(id);
     const session = await deps.forkRemoteSession(id, messageID);
     if ((deps.getWorkspaceGeneration?.() ?? 0) !== workspaceGeneration) return null;
     deps.upsertSession(session);
@@ -343,6 +358,10 @@ export async function forkSessionWithDependencies(
       deps.setPermissionModeForSession(session.id, permissionMode);
       deps.persistConfirmedPermissionModeForSession?.(session.id, permissionMode);
     }
+    if (sourceModel) {
+      deps.setSelectedModel(sourceModel, { sessionId: session.id, persistGlobal: false });
+    }
+    deps.publishSessionModel(session.id, sourceModel);
     if (
       deps.getActiveSessionId() === previousActiveSessionId &&
       (deps.getSessionSelectionGeneration?.() ?? 0) === selectionGeneration &&

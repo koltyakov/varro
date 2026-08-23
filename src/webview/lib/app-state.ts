@@ -121,6 +121,7 @@ export interface AppState {
   recycleBinEntries: RecycleBinEntry[];
   activeSessionId: string | null;
   editorTabsOpen: boolean;
+  /** Root session ids currently visible in editor tabs. */
   editorSessionIds: string[];
   currentDocumentEnabledBySession: Record<string, boolean>;
   sessionStatus: Record<string, SessionStatus>;

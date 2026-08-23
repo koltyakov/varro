@@ -931,6 +931,18 @@ describe('extension manifest', () => {
       { command: 'varro.chat.openStats', group: '1_main@2' },
       { command: 'varro.openGitHub', group: '1_main@3' },
     ]);
+    expect(packageJson.contributes.menus.commandPalette).toEqual(
+      expect.arrayContaining([
+        {
+          command: 'varro.chat.showInlineFileChanges',
+          when: '!varro:showInlineFileChanges',
+        },
+        {
+          command: 'varro.chat.hideInlineFileChanges',
+          when: 'varro:showInlineFileChanges',
+        },
+      ])
+    );
   });
 
   it('contributes a new-chat action to Varro editor tabs', () => {

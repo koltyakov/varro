@@ -2,6 +2,10 @@
 import { describe, expect, it } from 'vitest';
 import { isAllowedApiRequest, isAllowedExternalUrl, parseWebviewMessage } from './webview-message';
 
+function parseQueuedMessageUpdate(messages: unknown[]) {
+  return parseWebviewMessage({ type: 'queued-messages/update', payload: { messages } });
+}
+
 function createRalphConfig() {
   return {
     managerSessionId: 'manager-1',
@@ -49,6 +53,27 @@ function createRalphRun() {
 }
 
 describe('webview message validation', () => {
+  it('parses consumed interrupted-session recovery acknowledgements', () => {
+    expect(
+      parseWebviewMessage({
+        type: 'recovery/interrupted-sessions-ack',
+        payload: {
+          claimId: 4,
+          consumedSessionIds: ['session-1', 'session-1', 'session-2'],
+        },
+      })
+    ).toEqual({
+      type: 'recovery/interrupted-sessions-ack',
+      payload: { claimId: 4, consumedSessionIds: ['session-1', 'session-2'] },
+    });
+    expect(
+      parseWebviewMessage({
+        type: 'recovery/interrupted-sessions-ack',
+        payload: { claimId: 4 },
+      })
+    ).toBeNull();
+  });
+
   it('parses restart, force restart, and restart checks', () => {
     expect(parseWebviewMessage({ type: 'server/restart' })).toEqual({
       type: 'server/restart',
@@ -544,6 +569,38 @@ describe('webview message validation', () => {
     ).toBeNull();
   });
 
+  it('rejects malformed queued message routing records atomically', () => {
+    const valid = {
+      id: 'queue-1',
+      messageId: 'message-1',
+      sessionId: 'session-1',
+      text: '',
+      agent: 'build',
+      paused: false,
+      droppedFiles: [],
+      clipboardImages: [],
+      terminalSelection: null,
+    };
+    expect(parseQueuedMessageUpdate([valid])).not.toBeNull();
+    expect(parseQueuedMessageUpdate([valid, {}])).toBeNull();
+    for (const field of ['id', 'sessionId', 'text'] as const) {
+      const malformed: Partial<typeof valid> = { ...valid };
+      delete malformed[field];
+      expect(parseQueuedMessageUpdate([malformed])).toBeNull();
+    }
+    for (const unsafe of ['__proto__', 'constructor', 'prototype', 'x'.repeat(513)]) {
+      expect(parseQueuedMessageUpdate([{ ...valid, id: unsafe }])).toBeNull();
+      expect(parseQueuedMessageUpdate([{ ...valid, sessionId: unsafe }])).toBeNull();
+      expect(parseQueuedMessageUpdate([{ ...valid, messageId: unsafe }])).toBeNull();
+      expect(parseQueuedMessageUpdate([{ ...valid, ownerViewId: unsafe }])).toBeNull();
+    }
+    expect(parseQueuedMessageUpdate([{ ...valid, agent: 'x'.repeat(513) }])).toBeNull();
+    expect(parseQueuedMessageUpdate([{ ...valid, paused: 'false' }])).toBeNull();
+    expect(
+      parseQueuedMessageUpdate([{ ...valid, text: 'x'.repeat(8 * 1024 * 1024 + 1) }])
+    ).toBeNull();
+  });
+
   it('validates session permission mode updates', () => {
     expect(
       parseWebviewMessage({
@@ -561,6 +618,49 @@ describe('webview message validation', () => {
       })
     ).toBeNull();
   });
+
+  it('parses legacy permission mode migrations', () => {
+    expect(
+      parseWebviewMessage({
+        type: 'permission-modes/migrate',
+        payload: { modes: { 'session-1': 'auto' } },
+      })
+    ).toEqual({
+      type: 'permission-modes/migrate',
+      payload: { modes: { 'session-1': 'auto' } },
+    });
+  });
+
+  it.each(['__proto__', 'constructor', 'prototype', 'x'.repeat(513)])(
+    'rejects unsafe persisted session ID %s',
+    (sessionId) => {
+      const model = { providerID: 'openai', modelID: 'gpt-5.6-sol' };
+      expect(
+        parseWebviewMessage({
+          type: 'permission-mode/update',
+          payload: { sessionId, mode: 'full' },
+        })
+      ).toBeNull();
+      expect(
+        parseWebviewMessage({
+          type: 'permission-modes/migrate',
+          payload: { modes: { [sessionId]: 'auto' } },
+        })
+      ).toBeNull();
+      expect(
+        parseWebviewMessage({
+          type: 'session-model/update',
+          payload: { sessionId, model },
+        })
+      ).toBeNull();
+      expect(
+        parseWebviewMessage({
+          type: 'session-models/migrate',
+          payload: { models: { [sessionId]: model } },
+        })
+      ).toBeNull();
+    }
+  );
 
   it('validates session model updates with reasoning variants', () => {
     expect(
@@ -1179,6 +1279,11 @@ describe('webview message validation', () => {
             mime: 'image/png',
             filename: 'image.png',
             size: 1,
+            contextFile: {
+              path: '/tmp/varro/image.png',
+              relativePath: 'image.png',
+              type: 'file',
+            },
           },
         ],
       },
@@ -1195,6 +1300,36 @@ describe('webview message validation', () => {
       parseWebviewMessage({
         type: 'composer/images-update',
         payload: { images: [null] },
+      })
+    ).toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'composer/images-update',
+        payload: {
+          images: [
+            {
+              ...message.payload.images[0],
+              contextFile: { path: '/tmp/image.png', relativePath: '', type: 'file' },
+            },
+          ],
+        },
+      })
+    ).toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'composer/images-update',
+        payload: {
+          images: [
+            {
+              ...message.payload.images[0],
+              contextFile: {
+                path: '/tmp/image.png\0escape',
+                relativePath: 'image.png',
+                type: 'file',
+              },
+            },
+          ],
+        },
       })
     ).toBeNull();
   });

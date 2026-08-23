@@ -995,7 +995,7 @@ describe('SessionStateManager notifications', () => {
     );
   });
 
-  it('serializes interrupted-session consume between overlapping writes', async () => {
+  it('serializes interrupted-session acknowledgement between overlapping writes', async () => {
     const storage = new Map<string, unknown>();
     const events: string[] = [];
     let releaseFirstWrite: (() => void) | undefined;
@@ -1051,14 +1051,16 @@ describe('SessionStateManager notifications', () => {
     await expect(consumed).resolves.toMatchObject({
       interruptedSessions: [{ id: 'session-1', title: undefined }],
     });
+    await manager.acknowledgeInterruptedSessions(['session-1']);
     await manager.flush();
     expect(events).toEqual([
       'set-1-start',
       'set-1-finish',
       'get',
-      'remove',
       'set-2-start',
       'set-2-finish',
+      'set-3-start',
+      'set-3-finish',
     ]);
     expect(storage.get('varro.interruptedSessions')).toEqual([]);
   });
@@ -1132,7 +1134,7 @@ describe('SessionStateManager notifications', () => {
     expect(storage.get('varro.blockingRequests')).toEqual([]);
   });
 
-  it('consumes persisted interrupted sessions and filters invalid snapshots', async () => {
+  it('claims persisted interrupted sessions and filters invalid snapshots', async () => {
     const workspaceState: WorkspaceStateMock = {
       get: vi.fn((key: string) => {
         if (key === 'varro.interruptedSessions') {
@@ -1161,7 +1163,9 @@ describe('SessionStateManager notifications', () => {
     await expect(manager.consumeRecoverySnapshot()).resolves.toMatchObject({
       interruptedSessions: [{ id: 'session-1', title: 'Session 1' }, { id: 'session-2' }],
     });
-    expect(workspaceState.remove).toHaveBeenCalledWith('varro.interruptedSessions');
+    expect(workspaceState.remove).not.toHaveBeenCalledWith('varro.interruptedSessions');
+    await manager.acknowledgeInterruptedSessions(['session-1', 'session-2']);
+    expect(workspaceState.set).toHaveBeenCalledWith('varro.interruptedSessions', []);
   });
 
   it('consumes persisted blocking requests and filters invalid snapshots', async () => {
@@ -1259,7 +1263,10 @@ describe('SessionStateManager notifications', () => {
     let blockingRemoveAttempts = 0;
     const workspaceState: WorkspaceStateMock = {
       get: vi.fn((key: string) => storage.get(key)),
-      set: vi.fn(() => Promise.resolve()),
+      set: vi.fn((key: string, value: unknown) => {
+        storage.set(key, value);
+        return Promise.resolve();
+      }),
       remove: vi.fn((key: string) => {
         if (key === 'varro.blockingRequests') {
           blockingRemoveAttempts += 1;
@@ -1285,6 +1292,7 @@ describe('SessionStateManager notifications', () => {
       type: 'permission.replied',
       properties: { id: 'permission-1', sessionID: 'session-1' },
     });
+    await manager.acknowledgeInterruptedSessions(['session-1']);
     await expect(manager.consumeRecoverySnapshot()).resolves.toMatchObject({
       interruptedSessions: [],
       blockingRequests: [],
@@ -1293,14 +1301,17 @@ describe('SessionStateManager notifications', () => {
     expect(blockingRemoveAttempts).toBe(2);
   });
 
-  it('does not replay interrupted sessions while failed cleanup is retried', async () => {
+  it('replays interrupted sessions until they are acknowledged', async () => {
     const storage = new Map<string, unknown>([
       ['varro.interruptedSessions', [{ id: 'session-1', title: 'Interrupted' }]],
     ]);
     let interruptedRemoveAttempts = 0;
     const workspaceState: WorkspaceStateMock = {
       get: vi.fn((key: string) => storage.get(key)),
-      set: vi.fn(() => Promise.resolve()),
+      set: vi.fn((key: string, value: unknown) => {
+        storage.set(key, value);
+        return Promise.resolve();
+      }),
       remove: vi.fn((key: string) => {
         if (key === 'varro.interruptedSessions') {
           interruptedRemoveAttempts += 1;
@@ -1322,14 +1333,36 @@ describe('SessionStateManager notifications', () => {
       interruptedSessions: [{ id: 'session-1', title: 'Interrupted' }],
     });
     await expect(manager.consumeRecoverySnapshot()).resolves.toMatchObject({
-      interruptedSessions: [],
+      interruptedSessions: [{ id: 'session-1', title: 'Interrupted' }],
     });
 
-    expect(interruptedRemoveAttempts).toBe(2);
-    expect(storage.has('varro.interruptedSessions')).toBe(false);
+    expect(interruptedRemoveAttempts).toBe(0);
+    await manager.acknowledgeInterruptedSessions(['session-1']);
+    expect(storage.get('varro.interruptedSessions')).toEqual([]);
     await expect(manager.consumeRecoverySnapshot()).resolves.toMatchObject({
       interruptedSessions: [],
     });
+  });
+
+  it('keeps interrupted sessions claimable when acknowledgement persistence fails', async () => {
+    const stored = [{ id: 'session-1', title: 'Interrupted' }];
+    const workspaceState: WorkspaceStateMock = {
+      get: vi.fn((key: string) => (key === 'varro.interruptedSessions' ? stored : undefined)),
+      set: vi.fn(() => Promise.reject(new Error('write failed'))),
+      remove: vi.fn(() => Promise.resolve()),
+    };
+    const manager = new SessionStateManager(
+      workspaceState as never,
+      { onStatusChange: vi.fn() },
+      { shouldShow: () => false }
+    );
+
+    await manager.consumeRecoverySnapshot();
+    await expect(manager.acknowledgeInterruptedSessions(['session-1'])).rejects.toThrow(
+      'write failed'
+    );
+
+    expect(manager.claimInterruptedSessions()).toEqual(stored);
   });
 
   it('reconciles permission and question snapshots independently', () => {
@@ -1515,7 +1548,7 @@ describe('SessionStateManager notifications', () => {
     const second = manager.consumeRecoverySnapshot();
 
     expect(second).toBe(first);
-    await vi.waitFor(() => expect(workspaceState.remove).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(workspaceState.remove).toHaveBeenCalledOnce());
     for (const release of releaseRemoves) release();
     await Promise.all([first, second]);
     expect(workspaceState.get).toHaveBeenCalledTimes(2);

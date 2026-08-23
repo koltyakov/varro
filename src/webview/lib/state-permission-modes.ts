@@ -98,10 +98,13 @@ export function applySessionPermissionModesSnapshot(modes: Record<string, Permis
 export function syncSessionPermissionModesToHost() {
   if (readWebviewInstanceContext()?.surface !== 'sidebar') return;
   const hostModes = readInitialWebviewState().sessionPermissionModes ?? {};
-  for (const [sessionId, mode] of Object.entries(state.sessionPermissionModes)) {
-    if (!Object.hasOwn(hostModes, sessionId)) {
-      postMessage({ type: 'permission-mode/update', payload: { sessionId, mode } });
-    }
+  const modes = Object.fromEntries(
+    Object.entries(state.sessionPermissionModes).filter(
+      ([sessionId]) => !Object.hasOwn(hostModes, sessionId)
+    )
+  );
+  if (Object.keys(modes).length > 0) {
+    postMessage({ type: 'permission-modes/migrate', payload: { modes } });
   }
 }
 

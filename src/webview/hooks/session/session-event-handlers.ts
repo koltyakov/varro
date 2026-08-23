@@ -1227,10 +1227,10 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       }
 
       if (isSessionInActiveTree(sessionID)) {
-        recordSessionMessageSnapshotMutation(sessionID);
         if (!assistantFinished) markSessionProgress(sessionID);
         uiStore.markLoadingActivity();
         if (message) {
+          recordSessionMessageSnapshotMutation(sessionID);
           if (
             !deps
               .getMessages()
@@ -1253,7 +1253,12 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
             deps.handoffTodosToMessages();
             refreshSettledTodos(sessionID);
           } else {
-            settlePartialAssistantUpdate(sessionID, partialMessage, assistantMessage);
+            const settledMessageId = settlePartialAssistantUpdate(
+              sessionID,
+              partialMessage,
+              assistantMessage
+            );
+            if (settledMessageId) recordSessionMessageSnapshotMutation(sessionID);
           }
         }
       }
@@ -1292,7 +1297,6 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         sessionStore.setSessionCompacting(partSessionID, false);
       }
       if (!isSessionInActiveTree(partSessionID)) return;
-      recordSessionMessageSnapshotMutation(partSessionID!);
 
       if (!isCompleteMessagePart(rawPart)) {
         uiStore.startLoading();
@@ -1302,6 +1306,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
 
       const applyPart = () => {
         if (!isSessionInActiveTree(rawPart.sessionID)) return;
+        recordSessionMessageSnapshotMutation(rawPart.sessionID);
         const part = applyToolExecutionTime(rawPart);
         const staleCompletedMessage = ignoreStaleProgressForCompletedMessage(
           part.sessionID,
@@ -1344,7 +1349,6 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const field = getEventString(p, 'field');
       if (!sessionID || !messageID || !partID || !delta || !field) return;
       if (!isSessionInActiveTree(sessionID)) return;
-      recordSessionMessageSnapshotMutation(sessionID);
       const staleCompletedMessage = ignoreStaleProgressForCompletedMessage(sessionID, messageID);
       if (!staleCompletedMessage) {
         markSessionProgress(sessionID);
@@ -1358,6 +1362,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         queueMissingPartDelta(sessionID, messageID, partID);
         return;
       }
+      recordSessionMessageSnapshotMutation(sessionID);
       sessionStore.applyMessagePartDelta(messageID, partID, delta, sessionID, field);
     })
   );
@@ -1381,8 +1386,8 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
           return;
         }
         const activeTreeEvent = isSessionInActiveTree(sessionID);
-        if (activeTreeEvent) recordSessionMessageSnapshotMutation(sessionID);
         if (eventName === 'session.next.step.ended' && settleAssistantStepEnd(sessionID, p)) {
+          if (activeTreeEvent) recordSessionMessageSnapshotMutation(sessionID);
           handleSessionIdle(sessionID, deps.hasPendingAbort(sessionID));
           return;
         }
@@ -1405,7 +1410,11 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
           ? handleProjectedSessionEvent(eventName, p)
           : false;
         if (PROJECTED_SESSION_EVENTS.has(eventName)) {
-          if (!projected && seqStatus !== 'gap') scheduleMessageSync(sessionID);
+          if (projected) {
+            recordSessionMessageSnapshotMutation(sessionID);
+          } else if (seqStatus !== 'gap') {
+            scheduleMessageSync(sessionID);
+          }
         } else {
           // Synchronized events arrive in durable order, so a contiguous seq means we have
           // not missed anything. Events that create transcript records still need a fetch

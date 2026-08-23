@@ -129,6 +129,7 @@ function createActionFixture() {
     setActiveChatModel: vi.fn(),
     revealPermission: vi.fn(),
     setMermaidPreviewOpen: vi.fn(),
+    setActiveRoute: vi.fn(),
     refreshProviders: vi.fn(() => Promise.resolve()),
     providerReauthenticated: vi.fn(() => Promise.resolve()),
     postContext: vi.fn(),
@@ -153,7 +154,15 @@ function createActionFixture() {
     updateQueuedMessages: vi.fn<SidebarProviderActionDeps['updateQueuedMessages']>(() =>
       Promise.resolve()
     ),
+    claimQueuedMessage: vi.fn<SidebarProviderActionDeps['claimQueuedMessage']>(),
+    releaseQueuedMessage: vi.fn<SidebarProviderActionDeps['releaseQueuedMessage']>(),
+    acknowledgeInterruptedSessions: vi.fn<
+      SidebarProviderActionDeps['acknowledgeInterruptedSessions']
+    >(() => Promise.resolve()),
     updatePermissionMode: vi.fn<SidebarProviderActionDeps['updatePermissionMode']>(() =>
+      Promise.resolve()
+    ),
+    migratePermissionModes: vi.fn<SidebarProviderActionDeps['migratePermissionModes']>(() =>
       Promise.resolve()
     ),
     updateSessionModel: vi.fn<SidebarProviderActionDeps['updateSessionModel']>(() =>

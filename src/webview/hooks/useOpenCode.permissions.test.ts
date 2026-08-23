@@ -183,6 +183,71 @@ describe('useOpenCode permission and config flows', () => {
     }
   });
 
+  it('reconciles visible prompts once when a non-owner acquires automation', async () => {
+    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
+    bridgeOnMessage.mockImplementation((handler) => {
+      bridgeHandler = handler;
+      return () => {
+        bridgeHandler = undefined;
+      };
+    });
+    const serverEventHandlers = captureServerEventHandlers();
+    clientMocks.permissionList.mockResolvedValue([permissionListItem('perm-failover')]);
+    clientMocks.varroJudgePermission.mockResolvedValue({
+      decision: 'ask',
+      reason: 'Needs confirmation.',
+    });
+    // SAFETY: The fixture provides the initial ownership state read by the runtime.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      permissionAutomation: { owner: false, lease: 1 },
+    };
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setPermissionModeForSession('session-1', 'auto');
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      serverEventHandlers.get('permission.asked')?.({
+        properties: permissionListItem('perm-failover'),
+      });
+      await vi.waitFor(() =>
+        expect(stateModule.state.permissions).toEqual([
+          expect.objectContaining({ id: 'perm-failover' }),
+        ])
+      );
+      expect(clientMocks.varroJudgePermission).not.toHaveBeenCalled();
+      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
+
+      bridgeHandler({
+        type: 'permission-automation/update',
+        payload: { owner: true, lease: 2 },
+      });
+
+      await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce());
+      await vi.waitFor(() =>
+        expect(stateModule.state.permissions).toEqual([
+          expect.objectContaining({
+            id: 'perm-failover',
+            autoApproveReason: 'Needs confirmation.',
+          }),
+        ])
+      );
+
+      bridgeHandler({
+        type: 'permission-automation/update',
+        payload: { owner: true, lease: 2 },
+      });
+      await Promise.resolve();
+      expect(clientMocks.permissionList).toHaveBeenCalledOnce();
+      expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce();
+    } finally {
+      dispose();
+    }
+  });
+
   it('counts acknowledged automatic rejections', async () => {
     const serverEventHandlers = captureServerEventHandlers();
     configureReconciliationMocks();

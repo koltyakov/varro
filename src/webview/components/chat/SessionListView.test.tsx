@@ -235,6 +235,30 @@ describe('SessionListView model details', () => {
     expect(selectSession).not.toHaveBeenCalled();
   });
 
+  it('does not show an unread completion dot for a session visible in an editor tab', () => {
+    setState('sessions', [session('session-1', 500)]);
+    setState('lastSeenSessions', { 'session-1': 100 });
+    setState('completedSessionResponses', { 'session-1': 500 });
+    setState('editorTabsOpen', true);
+    setState('editorSessionIds', ['session-1']);
+
+    cleanup = render(() => <SessionListView />, container);
+
+    expect(container.querySelector('.session-item-indicator.is-completed')).toBeNull();
+  });
+
+  it('shows an unread completion dot when its open editor tab is not visible', () => {
+    setState('sessions', [session('session-1', 500)]);
+    setState('lastSeenSessions', { 'session-1': 100 });
+    setState('completedSessionResponses', { 'session-1': 500 });
+    setState('editorTabsOpen', true);
+    setState('editorSessionIds', []);
+
+    cleanup = render(() => <SessionListView />, container);
+
+    expect(container.querySelector('.session-item-indicator.is-completed')).not.toBeNull();
+  });
+
   it('opens unrelated sidebar sessions in an editor while any chat editor is open', () => {
     const send = vi.fn((message: TestRuntimeValue) => {
       structuredClone(message);
@@ -470,16 +494,30 @@ describe('SessionListView queued messages', () => {
     const firstCount = row('session-1').querySelector<HTMLElement>(
       '[aria-label="2 queued messages"]'
     );
+    const firstButton = row('session-1').querySelector<HTMLButtonElement>('.session-item-main');
     expect(firstCount?.textContent).toBe('2');
+    expect(row('session-1').dataset.sessionId).toBe('session-1');
+    expect(firstCount?.dataset.sessionId).toBe('session-1');
+    expect(firstCount?.dataset.queuedMessageCount).toBe('2');
+    expect(firstCount?.id).toBeTruthy();
+    expect(firstButton?.getAttribute('aria-describedby')).toBe(firstCount?.id);
+    expect(firstCount?.closest('.session-item-trailing')).not.toBeNull();
     expect(
       firstCount
         ?.querySelector<HTMLElement>('.session-item-queued-icon')
         ?.style.getPropertyValue('--ui-icon-mask')
     ).toBe(toCssUrl(forwardMessageIcon));
-    expect(row('session-2').querySelector('[aria-label="1 queued message"]')?.textContent).toBe(
-      '1'
+    const secondCount = row('session-2').querySelector<HTMLElement>(
+      '[aria-label="1 queued message"]'
     );
+    expect(secondCount?.textContent).toBe('1');
+    expect(
+      row('session-2').querySelector('.session-item-main')?.getAttribute('aria-describedby')
+    ).toBe(secondCount?.id);
     expect(row('session-3').querySelector('.session-item-queued-counter')).toBeNull();
+    expect(
+      row('session-3').querySelector('.session-item-main')?.getAttribute('aria-describedby')
+    ).toBeNull();
 
     setState(
       'queuedMessages',

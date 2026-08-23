@@ -389,6 +389,8 @@ function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenC
     serverInfo.managedProcess
       ? 'managed by Varro'
       : 'unmanaged';
+  const serverStatus = formatServerStatus(serverInfo.status);
+  const serverHealth = serverInfo.health.healthy ? 'healthy' : 'unhealthy';
 
   return [
     `# ${name}`,
@@ -417,7 +419,25 @@ function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenC
     `- **Node:** ${markdownCode(process.version)}`,
     `- **Platform:** ${markdownCode(`${process.platform} ${process.arch}`)}`,
     '',
+    '## Diagnostics',
+    `- CLI version: ${cliVersion}`,
+    `- Resolved binary: ${serverInfo.resolvedCommand || 'not resolved'}`,
+    `- Server status: ${serverStatus}`,
+    `- Server health: ${serverHealth}`,
+    `- Server port: ${String(serverInfo.port)}`,
+    `- Auto start: ${serverInfo.autoStart ? 'enabled' : 'disabled'}`,
+    `- Auto updates: ${autoUpdate ? 'enabled' : 'disabled'}`,
+    `- Workspace: ${serverInfo.workspaceCwd || 'not available'}`,
+    '',
   ].join('\n');
+}
+
+function formatServerStatus(status: OpenCodeServerInfo['status']): string {
+  if (status.state === 'running') {
+    return `running, event stream ${status.eventStream || 'unknown'}`;
+  }
+  if (status.state === 'error') return `error: ${status.message}`;
+  return status.state;
 }
 
 function markdownCode(value: string | number) {

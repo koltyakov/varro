@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ExtensionMessage, WorkspaceStatusEventSummary } from '../../shared/protocol';
+import type {
+  ExtensionMessage,
+  WebviewMessage,
+  WorkspaceStatusEventSummary,
+} from '../../shared/protocol';
 import type { MockedObject } from 'vitest';
 import type * as StateModule from '../lib/state';
+import { sessionStore } from '../lib/stores/session-store';
 
 const {
   setState,
@@ -84,7 +89,73 @@ vi.mock('../lib/client', () => ({
   getWorkspaceStatusEventSummary: getWorkspaceStatusEventSummaryMock,
 }));
 
+type MessageDependencies = Parameters<typeof handleExtensionMessageWithDependencies>[0];
+
+function createMessageDependencies(
+  overrides: Partial<MessageDependencies> = {}
+): MessageDependencies {
+  return {
+    setServerStatus: vi.fn(),
+    clearError: vi.fn(),
+    ensureConnectionInitialized: vi.fn(),
+    getServerState: () => 'stopped',
+    invalidateConnection: vi.fn(),
+    clearProvidersState: vi.fn(),
+    setTheme: vi.fn(),
+    setConfig: vi.fn(),
+    getPreviousActiveFilePath: () => null,
+    getCurrentWorkspacePath: () => null,
+    setCurrentWorkspacePath: vi.fn(),
+    setEditorContext: vi.fn(),
+    rememberCurrentDocumentNavigation: vi.fn(),
+    syncWorkspaceState: vi.fn(),
+    resetWorkspaceForChange: vi.fn(),
+    reloadWorkspaceAfterChange: vi.fn(),
+    isInitialized: () => false,
+    setTerminalSelection: vi.fn(),
+    addContextFiles: vi.fn(),
+    removeContextFile: vi.fn(),
+    createSession: vi.fn(),
+    requestComposerFocus: vi.fn(),
+    requestOpenAttentionSessions: vi.fn(),
+    abortSession: vi.fn(),
+    refreshMcps: vi.fn(),
+    refreshProviders: vi.fn(),
+    setWorkspaceStatusSummary: vi.fn(),
+    setWorkspaceStatuses: vi.fn(),
+    ...overrides,
+  };
+}
+
 describe('mount bridge helpers', () => {
+  it('queues interrupted recovery without acknowledging volatile receipt', () => {
+    const queueInterruptedSessionRecovery = vi.fn();
+    // SAFETY: The webview bootstrap installs this optional typed host bridge on Window.
+    const bridgeWindow = window as Window & {
+      __sendToExtension?: (message: WebviewMessage) => void;
+    };
+    const originalSend = bridgeWindow.__sendToExtension;
+    const sendToExtension = vi.fn();
+    bridgeWindow.__sendToExtension = sendToExtension;
+    try {
+      handleExtensionMessageWithDependencies(
+        createMessageDependencies({
+          queueInterruptedSessionRecovery,
+        }),
+        {
+          type: 'recovery/interrupted-sessions',
+          payload: { claimId: 4, sessionIds: ['session-1'] },
+        }
+      );
+    } finally {
+      if (originalSend) bridgeWindow.__sendToExtension = originalSend;
+      else delete bridgeWindow.__sendToExtension;
+    }
+
+    expect(queueInterruptedSessionRecovery).toHaveBeenCalledWith(4, ['session-1']);
+    expect(sendToExtension).not.toHaveBeenCalled();
+  });
+
   it('starts connection initialization when server status becomes running', () => {
     const setServerStatus = vi.fn();
     const clearError = vi.fn();
@@ -539,6 +610,50 @@ describe('mount bridge helpers', () => {
     expect(setDefaultPermissionModePreference).toHaveBeenCalledWith('full');
     expect(setShowInlineFileChanges).toHaveBeenCalledWith(true);
     expect(setShowChangedFiles).toHaveBeenCalledWith(true);
+  });
+
+  it('marks visible editor session trees seen as visibility changes', () => {
+    const getSessionTreeIds = vi
+      .spyOn(sessionStore, 'getSessionTreeIds')
+      .mockImplementation((sessionId) =>
+        sessionId === 'session-1' ? ['session-1', 'child-1'] : [sessionId!]
+      );
+    const markSessionSeen = vi
+      .spyOn(sessionStore, 'markSessionSeen')
+      .mockImplementation(() => undefined);
+    const operations = createMountBridgeOperations({
+      ensureConnectionInitialized: vi.fn(),
+      getServerState: () => 'stopped',
+      invalidateConnection: vi.fn(),
+      getCurrentWorkspacePath: () => null,
+      setCurrentWorkspacePath: vi.fn(),
+      resetWorkspaceForChange: vi.fn(),
+      reloadWorkspaceAfterChange: vi.fn(),
+      isInitialized: () => false,
+      createSession: vi.fn(),
+      abortSession: vi.fn(),
+      refreshMcps: vi.fn(),
+      refreshProviders: vi.fn(),
+      applyTheme: vi.fn(),
+    });
+
+    operations.handleExtensionMessage({
+      type: 'editor-tabs/state',
+      payload: { open: true, sessionIds: ['session-1'] },
+    });
+    expect(markSessionSeen).toHaveBeenCalledWith('session-1');
+    expect(markSessionSeen).toHaveBeenCalledWith('child-1');
+
+    markSessionSeen.mockClear();
+    operations.handleExtensionMessage({
+      type: 'editor-tabs/state',
+      payload: { open: false, sessionIds: [] },
+    });
+    expect(markSessionSeen).toHaveBeenCalledWith('session-1');
+    expect(markSessionSeen).toHaveBeenCalledWith('child-1');
+
+    getSessionTreeIds.mockRestore();
+    markSessionSeen.mockRestore();
   });
 
   it('routes workspace status events into shared workspace state', () => {

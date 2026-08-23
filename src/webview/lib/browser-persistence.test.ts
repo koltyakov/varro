@@ -111,20 +111,92 @@ describe('BrowserPersistence', () => {
     expect(storage.get('varro.lastOpenedView')).toBeUndefined();
   });
 
-  it('prefers VSCode webview state after a webview reload', () => {
-    const storage = new BrowserPersistence();
-    window.localStorage.setItem('varro.lastOpenedView', JSON.stringify({ type: 'sessions-list' }));
+  it("loads another view's canonical shared write instead of stale private VSCode state", () => {
+    let firstViewState: TestRuntimeRecord = {};
     window.__vscodeWebviewState = {
-      getState: () => ({
-        'varro.lastOpenedView': { type: 'session', sessionId: 'session-1' },
-      }),
-      setState: vi.fn(),
+      getState: () => firstViewState,
+      setState: (state) => {
+        firstViewState = state;
+      },
+    };
+    new BrowserPersistence().set('varro.selectedModel', {
+      providerID: 'openai',
+      modelID: 'stale-model',
+    });
+
+    let secondViewState: TestRuntimeRecord = {};
+    window.__vscodeWebviewState = {
+      getState: () => secondViewState,
+      setState: (state) => {
+        secondViewState = state;
+      },
+    };
+    new BrowserPersistence().set('varro.selectedModel', {
+      providerID: 'anthropic',
+      modelID: 'canonical-model',
+    });
+
+    window.__vscodeWebviewState = {
+      getState: () => firstViewState,
+      setState: (state) => {
+        firstViewState = state;
+      },
     };
 
-    expect(storage.get('varro.lastOpenedView')).toEqual({
+    expect(new BrowserPersistence().get('varro.selectedModel')).toEqual({
+      providerID: 'anthropic',
+      modelID: 'canonical-model',
+    });
+    expect(firstViewState['varro.selectedModel']).toEqual({
+      providerID: 'openai',
+      modelID: 'stale-model',
+    });
+  });
+
+  it('keeps editor-instance state private across two view writes and reloads', () => {
+    setInitialWebviewState({
+      webviewContext: {
+        viewId: 'editor-1',
+        surface: 'editor',
+        initialRoute: { type: 'new-session' },
+      },
+    });
+    let firstViewState: TestRuntimeRecord = {};
+    window.__vscodeWebviewState = {
+      getState: () => firstViewState,
+      setState: (state) => {
+        firstViewState = state;
+      },
+    };
+    new BrowserPersistence().set('varro.lastOpenedView', {
       type: 'session',
       sessionId: 'session-1',
     });
+
+    let secondViewState: TestRuntimeRecord = {};
+    window.__vscodeWebviewState = {
+      getState: () => secondViewState,
+      setState: (state) => {
+        secondViewState = state;
+      },
+    };
+    new BrowserPersistence().set('varro.lastOpenedView', {
+      type: 'session',
+      sessionId: 'session-2',
+    });
+
+    window.__vscodeWebviewState = {
+      getState: () => firstViewState,
+      setState: (state) => {
+        firstViewState = state;
+      },
+    };
+
+    expect(new BrowserPersistence().get('varro.lastOpenedView')).toEqual({
+      type: 'session',
+      sessionId: 'session-1',
+    });
+    expect(window.localStorage.getItem('varro.lastOpenedView')).toBeNull();
   });
 
   it('continues with VSCode state when localStorage acquisition is denied', () => {

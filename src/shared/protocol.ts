@@ -66,6 +66,19 @@ export interface WorkspaceFilePick {
 
 export type PermissionMode = 'default' | 'edits' | 'auto' | 'full';
 
+export const MAX_PERSISTED_SESSION_ID_LENGTH = 512;
+
+export function isSafePersistedSessionId<T>(value: T): value is T & string {
+  return (
+    isString(value) &&
+    value.length > 0 &&
+    value.length <= MAX_PERSISTED_SESSION_ID_LENGTH &&
+    value !== '__proto__' &&
+    value !== 'constructor' &&
+    value !== 'prototype'
+  );
+}
+
 export type ChatModelSelection = {
   providerID: string;
   modelID: string;
@@ -587,6 +600,7 @@ export type InitialWebviewState = {
   sessionSelectedModels?: Record<string, ChatModelSelection>;
   sessionModelMigrationPending?: boolean;
   editorTabsOpen?: boolean;
+  /** Root session ids currently visible in editor tabs. */
   editorSessionIds?: string[];
   permissionAutomation?: { owner: boolean; lease: number };
   interruptedSessionIds?: string[];
@@ -642,6 +656,16 @@ export type ExtensionMessage =
     }
   | { type: 'api/response'; payload: { id: number; data?: unknown; error?: string } }
   | { type: 'queued-messages/sync'; payload: { messages: QueuedMessageSnapshot[] } }
+  | {
+      type: 'queued-messages/claim-result';
+      payload: {
+        requestId: number;
+        itemId: string;
+        sessionId: string;
+        granted: boolean;
+        lease?: number;
+      };
+    }
   | { type: 'permission-modes/sync'; payload: { modes: Record<string, PermissionMode> } }
   | {
       type: 'session-models/sync';
@@ -650,7 +674,10 @@ export type ExtensionMessage =
   | { type: 'editor-tabs/state'; payload: { open: boolean; sessionIds: string[] } }
   | { type: 'permission-automation/update'; payload: { owner: boolean; lease: number } }
   | { type: 'permission/actionable'; payload: { permissionId: string } }
-  | { type: 'recovery/interrupted-sessions'; payload: { sessionIds: string[] } }
+  | {
+      type: 'recovery/interrupted-sessions';
+      payload: { claimId: number; sessionIds: string[] };
+    }
   | { type: 'command/new-session'; payload?: { prefill: string } }
   | { type: 'command/open-session'; payload: { sessionId: string } }
   | { type: 'command/focus-input' }
@@ -669,6 +696,7 @@ export type WebviewMessage =
         canAbort: boolean;
         canSwitchSessions: boolean;
         model: ChatModelSelection | null;
+        sessionId?: string | null;
       };
     }
   | { type: 'webview/focus'; payload: { focused: boolean } }
@@ -728,7 +756,23 @@ export type WebviewMessage =
   | { type: 'files/remove'; payload: { path: string } }
   | { type: 'files/clear' }
   | { type: 'queued-messages/update'; payload: { messages: QueuedMessageSnapshot[] } }
+  | {
+      type: 'queued-messages/claim';
+      payload: { requestId: number; itemId: string; sessionId: string };
+    }
+  | {
+      type: 'queued-messages/release';
+      payload: { itemId: string; sessionId: string; lease: number };
+    }
+  | {
+      type: 'recovery/interrupted-sessions-ack';
+      payload: { claimId: number; consumedSessionIds: string[] };
+    }
   | { type: 'permission-mode/update'; payload: { sessionId: string; mode: PermissionMode | null } }
+  | {
+      type: 'permission-modes/migrate';
+      payload: { modes: Record<string, PermissionMode> };
+    }
   | { type: 'files/pick' }
   | { type: 'files/search'; payload: { requestId: number; query: string; limit?: number } }
   | { type: 'file/read'; payload: { path: string } }
@@ -768,6 +812,7 @@ export type WebviewMessage =
         path: string;
         body?: unknown;
         permissionAutomationLease?: number;
+        queuedMessageDispatch?: { itemId: string; lease: number };
       };
     }
   | { type: 'api/cancel'; payload: { id: number; cancelKey: string } }

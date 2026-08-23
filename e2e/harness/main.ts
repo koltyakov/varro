@@ -2586,7 +2586,14 @@ function createScenarioState(name: ScenarioName): ScenarioState {
           },
           output: 'Updated /workspace/varro/src/index.ts',
           title: 'Edit file',
-          metadata: { additions: 1, deletions: 1 },
+          metadata: {
+            files: [
+              { type: 'update', relativePath: 'src/index.ts', additions: 1, deletions: 1 },
+              { type: 'update', relativePath: 'src/format.ts', additions: 0, deletions: 0 },
+              { type: 'update', relativePath: 'src/state.ts', additions: 0, deletions: 0 },
+              { type: 'update', relativePath: 'src/types.ts', additions: 0, deletions: 0 },
+            ],
+          },
           time: { start: BASE_TIME - 4_800, end: BASE_TIME - 4_700 },
         },
       },
@@ -3359,10 +3366,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
             ].join('\n')
           : `*** Begin Patch\n*** Update File: src/report-${index}.ts\n@@\n-export const status = 'pending';\n+export const status = 'ready';\n*** End Patch`;
       const patchPart = makeApplyPatchToolPart(session.id, assistantId, patchId, patchText);
-      if (
-        (includeMultiFileDiff || includeActiveTurnCollapse || includeSpacingBoundary) &&
-        index === 59
-      ) {
+      if ((includeActiveTurnCollapse || includeSpacingBoundary) && index === 59) {
         patchPart.state = {
           status: 'completed',
           input: patchPart.state.input,
@@ -5596,6 +5600,20 @@ function installBridge(state: ScenarioState) {
             dispatchPostReadyMessage(msg);
           }
         });
+        return;
+      case 'queued-messages/claim':
+        queueMicrotask(() => {
+          dispatchToWebview({
+            type: 'queued-messages/claim-result',
+            payload: {
+              ...webviewMessage.payload,
+              granted: true,
+              lease: 1,
+            },
+          });
+        });
+        return;
+      case 'queued-messages/release':
         return;
       case 'vscode/open-external':
         state.externalUrls.push(webviewMessage.payload.url);

@@ -44,10 +44,12 @@ type WebviewSessionState = Pick<
 
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((res) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
     resolve = res;
+    reject = rej;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 function flushMicrotasks() {
@@ -106,6 +108,7 @@ function createSession(options?: {
     isVisible: vi.fn(() => Boolean(currentView?.visible)),
     onDeliveryFailure: vi.fn(),
     post: vi.fn(),
+    deliver: vi.fn(() => Promise.resolve(true)),
     webviewOptions: vi.fn(() => ({ enableScripts: true, localResourceRoots: [] })),
     renderHtml: vi.fn(
       options?.renderHtml ?? (() => Promise.resolve('<html><body>Varro</body></html>'))
@@ -179,6 +182,7 @@ function createSession(options?: {
     draftImages: vi.fn<() => InitialWebviewState['clipboardImages']>(() => []),
     flushPendingServerEvents: vi.fn(),
     cancelApiRequestsBeforeGeneration: vi.fn(),
+    handleUnavailableSideEffects: vi.fn(),
     handleDisposedSideEffects: vi.fn(),
   };
 
@@ -357,6 +361,57 @@ describe('WebviewSession', () => {
 
     expect(bridge.renderHtml).toHaveBeenCalledTimes(2);
     expect(view.webview.html).toBe('<html>reloaded</html>');
+  });
+
+  it('revokes readiness when rendering fails after ready', async () => {
+    const render = createDeferred<string>();
+    const { session, deps } = createSession({ renderHtml: () => render.promise });
+    const view = createWebviewView(true);
+
+    await session.resolve(view as never);
+    await session.handleReady();
+    deps.handleUnavailableSideEffects.mockClear();
+    render.reject(new Error('render failed'));
+    await flushMicrotasks();
+
+    expect(deps.handleUnavailableSideEffects).toHaveBeenCalled();
+    expect(view.webview.html).toContain('Failed to load Varro webview');
+  });
+
+  it('retries interrupted-session delivery once before revoking readiness', async () => {
+    const { session, bridge, deps } = createSession();
+    const view = createWebviewView(true);
+    bridge.deliver.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    await session.resolve(view as never);
+    await flushMicrotasks();
+    await session.handleReady();
+    deps.handleUnavailableSideEffects.mockClear();
+
+    await expect(
+      session.deliverInterruptedSessions(7, [{ id: 'session-1', title: 'Interrupted' }])
+    ).resolves.toBe(true);
+
+    expect(bridge.deliver).toHaveBeenCalledTimes(2);
+    expect(bridge.deliver).toHaveBeenLastCalledWith({
+      type: 'recovery/interrupted-sessions',
+      payload: { claimId: 7, sessionIds: ['session-1'] },
+    });
+    expect(deps.handleUnavailableSideEffects).not.toHaveBeenCalled();
+  });
+
+  it('revokes readiness after interrupted-session delivery fails twice', async () => {
+    const { session, bridge, deps } = createSession();
+    const view = createWebviewView(true);
+    bridge.deliver.mockResolvedValue(false);
+    await session.resolve(view as never);
+    await flushMicrotasks();
+    await session.handleReady();
+    deps.handleUnavailableSideEffects.mockClear();
+
+    await expect(session.deliverInterruptedSessions(8, [{ id: 'session-1' }])).resolves.toBe(false);
+
+    expect(bridge.deliver).toHaveBeenCalledTimes(2);
+    expect(deps.handleUnavailableSideEffects).toHaveBeenCalledOnce();
   });
 
   it('shares an overlapping recovery load and lets only the current generation commit it', async () => {

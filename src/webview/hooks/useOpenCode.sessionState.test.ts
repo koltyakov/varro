@@ -1241,6 +1241,90 @@ describe('useOpenCode session state flows', () => {
     }
   });
 
+  it('hydrates a selected busy session when an unprojectable stream event races the initial snapshot', async () => {
+    const handlers = installServerEventHandlers();
+    mockRuntimeBootstrap();
+    const initialSnapshot = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
+    const followUpSnapshot = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
+    const canonical = [
+      userEntry('user-1'),
+      { info: assistantMessage('assistant-1', 'user-1'), parts: [] },
+    ];
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages
+      .mockReturnValueOnce(initialSnapshot.promise)
+      .mockReturnValue(followUpSnapshot.promise);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await vi.waitFor(() => expect(handlers.has('session.next.text.delta')).toBe(true));
+      stateModule.setState('sessions', [session('session-1')]);
+      const selection = hookModule.selectSession('session-1');
+      await vi.waitFor(() => expect(clientMocks.sessionMessages).toHaveBeenCalledTimes(1));
+
+      handlers.get('session.next.text.delta')?.({
+        properties: {
+          sessionID: 'session-1',
+          assistantMessageID: 'assistant-1',
+          textID: 'text-1',
+          delta: 'streaming response',
+        },
+      });
+      handlers.get('session.next.reasoning.delta')?.({
+        properties: {
+          sessionID: 'session-1',
+          assistantMessageID: 'assistant-1',
+          reasoningID: 'reasoning-1',
+          delta: 'thinking',
+        },
+      });
+      handlers.get('message.part.delta')?.({
+        properties: {
+          sessionID: 'session-1',
+          messageID: 'assistant-1',
+          partID: 'text-1',
+          field: 'text',
+          delta: 'streaming response',
+        },
+      });
+      handlers.get('message.part.updated')?.({
+        properties: {
+          part: {
+            id: 'text-1',
+            sessionID: 'session-1',
+            messageID: 'assistant-1',
+            type: 'text',
+            text: 'streaming response',
+          },
+        },
+      });
+      handlers.get('message.updated')?.({
+        properties: {
+          info: {
+            id: 'assistant-1',
+            sessionID: 'session-1',
+            role: 'assistant',
+          },
+        },
+      });
+      initialSnapshot.resolve(canonical);
+      await selection;
+
+      expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
+        'user-1',
+        'assistant-1',
+      ]);
+      expect(stateModule.state.messagesLoading).toBe(false);
+    } finally {
+      dispose();
+    }
+  });
+
   it('preserves child-session messages during active-parent latest-message resync', async () => {
     const handlers = installServerEventHandlers();
     mockRuntimeBootstrap();

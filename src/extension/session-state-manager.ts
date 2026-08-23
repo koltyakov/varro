@@ -150,7 +150,6 @@ export class SessionStateManager {
     question: 0,
   };
   private readonly recoveryDeletedSessionIDs = new Set<string>();
-  private readonly consumedInterruptedSessionIDs = new Set<string>();
   private readonly unclaimedInterruptedSessions = new Map<string, InterruptedSessionSnapshot>();
   private readonly busyAttempts = new Map<string, Set<number>>();
   private readonly deferredPromptFailures = new Map<
@@ -160,6 +159,7 @@ export class SessionStateManager {
   private readonly reconcileIdleSince = new Map<string, number>();
   private persistenceQueue: Promise<void> = Promise.resolve();
   private recoverySnapshotPromise: Promise<RecoverySnapshot> | undefined;
+  private interruptedRecoveryLoaded = false;
   private blockingRecoveryCleanupPending = false;
   private nextBusyAttemptID = 0;
 
@@ -200,9 +200,20 @@ export class SessionStateManager {
   }
 
   claimInterruptedSessions(): InterruptedSessionSnapshot[] {
-    const sessions = [...this.unclaimedInterruptedSessions.values()];
-    this.unclaimedInterruptedSessions.clear();
-    return sessions;
+    return [...this.unclaimedInterruptedSessions.values()];
+  }
+
+  acknowledgeInterruptedSessions(sessionIDs: readonly string[]): Promise<void> {
+    const acknowledgedSessionIDs = new Set(sessionIDs);
+    const interruptedSessions = this.getInterruptedSessionSnapshots().filter(
+      (session) => !acknowledgedSessionIDs.has(session.id)
+    );
+    return this.enqueuePersistence(async () => {
+      await this.persistence.set(INTERRUPTED_SESSIONS_KEY, interruptedSessions);
+      for (const sessionID of acknowledgedSessionIDs) {
+        this.unclaimedInterruptedSessions.delete(sessionID);
+      }
+    });
   }
 
   revealPermission(requestID: string): void {
@@ -500,15 +511,16 @@ export class SessionStateManager {
     if (this.recoverySnapshotPromise) return this.recoverySnapshotPromise;
 
     const operation = this.enqueuePersistence(async () => {
-      const persistedInterruptedSessions = validateInterruptedSessionSnapshots(
-        this.persistence.get<unknown>(INTERRUPTED_SESSIONS_KEY)
-      );
-      const interruptedSessions = persistedInterruptedSessions.filter(
-        (session) => !this.consumedInterruptedSessionIDs.has(session.id)
-      );
-      for (const session of interruptedSessions) {
-        this.consumedInterruptedSessionIDs.add(session.id);
-        this.unclaimedInterruptedSessions.set(session.id, session);
+      if (!this.interruptedRecoveryLoaded) {
+        const persistedInterruptedSessions = validateInterruptedSessionSnapshots(
+          this.persistence.get<unknown>(INTERRUPTED_SESSIONS_KEY)
+        );
+        this.interruptedRecoveryLoaded = true;
+        for (const session of persistedInterruptedSessions) {
+          if (!this.unclaimedInterruptedSessions.has(session.id)) {
+            this.unclaimedInterruptedSessions.set(session.id, session);
+          }
+        }
       }
       const rawBlockingRequests = this.persistence.get<unknown>(BLOCKING_REQUESTS_KEY);
       const blockingRequests = validateBlockingRequestSnapshots(rawBlockingRequests);
@@ -521,27 +533,24 @@ export class SessionStateManager {
         if (!recoveredSessionIDs.has(sessionID)) this.recoveryDeletedSessionIDs.delete(sessionID);
       }
       this.mergeBlockingRequests(blockingRequests);
-      const cleanupResults = await Promise.allSettled([
-        Promise.resolve().then(() => this.persistence.remove(INTERRUPTED_SESSIONS_KEY)),
-        Promise.resolve().then(() => this.persistence.remove(BLOCKING_REQUESTS_KEY)),
-      ]);
-      for (const [index, result] of cleanupResults.entries()) {
-        if (result.status === 'fulfilled') continue;
-        const key = index === 0 ? INTERRUPTED_SESSIONS_KEY : BLOCKING_REQUESTS_KEY;
-        logger.warn(
-          `Failed to clean up recovered session state (${key}): ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`
+      const blockingCleanup = await Promise.resolve()
+        .then(() => this.persistence.remove(BLOCKING_REQUESTS_KEY))
+        .then(
+          () => true,
+          (reason: unknown) => {
+            logger.warn(
+              `Failed to clean up recovered session state (${BLOCKING_REQUESTS_KEY}): ${reason instanceof Error ? reason.message : String(reason)}`
+            );
+            return false;
+          }
         );
-      }
-      if (cleanupResults[0]?.status === 'fulfilled') {
-        this.consumedInterruptedSessionIDs.clear();
-      }
-      if (cleanupResults[1]?.status === 'fulfilled') {
+      if (blockingCleanup) {
         this.blockingRequestMutations.clear();
         this.recoveryDeletedSessionIDs.clear();
         this.blockingRecoveryCleanupPending = false;
       }
       return {
-        interruptedSessions,
+        interruptedSessions: this.claimInterruptedSessions(),
         blockingRequests: this.getLiveBlockingRequestSnapshots(),
       };
     });
@@ -798,16 +807,20 @@ export class SessionStateManager {
   }
 
   private getInterruptedSessionSnapshots(): InterruptedSessionSnapshot[] {
-    return [...this.busySessions]
-      .filter((id) => !this.isIgnoredBackgroundSession(id))
-      .toSorted()
-      .slice(0, MAX_PERSISTED_INTERRUPTED_SESSIONS)
-      .map((id) => ({
+    const snapshots = new Map(this.unclaimedInterruptedSessions);
+    for (const id of this.busySessions) {
+      if (this.isIgnoredBackgroundSession(id)) continue;
+      snapshots.set(id, {
         id,
         title: trimOptionalString(
           this.getSessionMetadata(this.sessionTitles, id)?.trim() || undefined
         ),
-      }));
+      });
+    }
+    return [...snapshots.values()]
+      .toSorted((a, b) => a.id.localeCompare(b.id))
+      .slice(0, MAX_PERSISTED_INTERRUPTED_SESSIONS)
+      .map((session) => ({ ...session }));
   }
 
   private getBlockingRequestSnapshots(): BlockingRequestSnapshot[] {
@@ -964,6 +977,7 @@ export class SessionStateManager {
     changed = this.sessionDirectories.delete(sessionID) || changed;
     changed = this.sessionParentIDs.delete(sessionID) || changed;
     changed = this.sessionModes.delete(sessionID) || changed;
+    changed = this.unclaimedInterruptedSessions.delete(sessionID) || changed;
     this.busyStartedAt.delete(sessionID);
     this.trailingBusyAfterCompletion.delete(sessionID);
     this.clearBusyAttempts(sessionID);

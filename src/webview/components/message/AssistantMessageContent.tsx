@@ -1088,6 +1088,7 @@ function AssistantActivityGroup(props: {
                     part.type === 'tool' ? props.permissionMatchForTool?.(part) : undefined
                   }
                   renderPermissionPrompt={false}
+                  compactFileChanges
                 />
               </div>
             )}

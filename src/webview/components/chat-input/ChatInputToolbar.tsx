@@ -263,6 +263,7 @@ export function ChatInputMainToolbar(props: ChatInputMainToolbarProps) {
         <ModelPickerButton
           buttonRef={props.modelButtonRef}
           providerID={props.currentModel.providerID}
+          modelID={props.currentModel.modelID}
           providerName={props.currentModel.providerName}
           modelName={props.currentModel.modelName}
           canEllipsize={props.modelCanEllipsize}

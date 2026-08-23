@@ -125,6 +125,7 @@ function createDeps(overrides?: {
       clearSelectedMcpsForSession: vi.fn(),
       clearSkippedPlanSession: vi.fn(),
       clearSelectedModelForSession: vi.fn(),
+      publishSessionModel: vi.fn(),
       clearSessionSeen: vi.fn(),
       setSessionUsageLimit: vi.fn(),
       setSessionFailed: vi.fn(),
@@ -150,6 +151,7 @@ function createDeps(overrides?: {
       clearSelectedMcpsForSession: vi.fn(),
       clearSkippedPlanSession: vi.fn(),
       clearSelectedModelForSession: vi.fn(),
+      publishSessionModel: vi.fn(),
       clearSessionSeen: vi.fn(),
       setSessionUsageLimit: vi.fn(),
       setSessionFailed: vi.fn(),
@@ -295,6 +297,7 @@ describe('session-lifecycle helpers', () => {
     expect(setup.deps.clearSelectedMcpsForSession).toHaveBeenCalledWith('session-1');
     expect(setup.deps.clearSessionSeen).toHaveBeenCalledWith('session-1');
     expect(setup.deps.clearQueuedMessagesForSession).toHaveBeenCalledWith('session-1');
+    expect(setup.deps.publishSessionModel).toHaveBeenCalledWith('session-1', null);
     expect(setup.deps.clearActiveSessionState).toHaveBeenCalledTimes(1);
   });
 
@@ -503,6 +506,7 @@ describe('session-lifecycle helpers', () => {
     const resetTodoSync = vi.fn();
     const resetToolCallExpansionState = vi.fn();
     const clearPendingAbort = vi.fn();
+    const publishSessionModel = vi.fn();
 
     state.activeSessionId = 'session-2';
     state.sessions = [session('session-1', '/repo-a', 1), session('session-2', '/repo-b', 2)];
@@ -513,6 +517,7 @@ describe('session-lifecycle helpers', () => {
       clearPendingAbortTree: vi.fn(),
       resetTodoSync,
       resetToolCallExpansionState,
+      publishSessionModel,
     });
 
     operations.applySessions(state.sessions);
@@ -534,5 +539,6 @@ describe('session-lifecycle helpers', () => {
     expect(clearSelectedMcpsForSession).toHaveBeenCalledWith('session-1');
     expect(setSessionUsageLimit).toHaveBeenCalledWith('session-1', null);
     expect(setSessionFailed).toHaveBeenCalledWith('session-1', false);
+    expect(publishSessionModel).toHaveBeenCalledWith('session-1', null);
   });
 });

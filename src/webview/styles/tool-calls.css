@@ -1772,6 +1772,12 @@ kbd {
   overflow: visible;
 }
 
+.file-change-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--assistant-activity-item-gap, 12px);
+}
+
 .file-change-inline-diffs {
   padding: 0 8px 8px;
 }
@@ -1841,7 +1847,7 @@ kbd {
 .file-change-card-header,
 .file-edit-line {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   flex-wrap: nowrap;
   gap: 0.25em;
   width: 100%;
@@ -1877,6 +1883,7 @@ kbd {
 .file-edit-path-link {
   display: inline-flex;
   align-items: center;
+  gap: 4px;
   font-family: inherit;
   font-size: inherit;
   min-width: 0;
@@ -1888,13 +1895,20 @@ kbd {
   text-decoration: none;
 }
 
+.file-edit-file-icon {
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+  flex: 0 0 auto;
+}
+
 .file-edit-path-link:hover {
   text-decoration: underline;
 }
 
 .file-edit-move-paths {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: 0.25em;
   line-height: 1.2;
   min-width: 0;
@@ -1910,7 +1924,7 @@ kbd {
 
 .file-edit-multi-list {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   flex: 1 1 auto;
   gap: 0.25em;
   min-width: 0;
@@ -1932,7 +1946,7 @@ kbd {
   cursor: pointer;
   flex-shrink: 0;
   font-family: inherit;
-  font-size: 11px;
+  font-size: inherit;
   line-height: 1.2;
   white-space: nowrap;
 }
@@ -1960,14 +1974,15 @@ kbd {
   padding: 4px;
   overflow-y: auto;
   border: 1px solid color-mix(in srgb, var(--color-vscode-border-strong) 82%, transparent);
-  border-radius: var(--chat-radius-popover);
+  border-radius: var(--radius-card);
   background: var(--color-vscode-surface-raised);
-  box-shadow: var(--chat-shadow-popover);
+  box-shadow: var(--shadow-popover);
 }
 
 .file-edit-more-menu-item {
   display: flex;
   align-items: center;
+  gap: 6px;
   width: 100%;
   min-width: 0;
   padding: 6px 8px;
@@ -1979,9 +1994,11 @@ kbd {
   text-decoration: none;
 }
 
-.file-edit-more-menu-item:hover {
+.file-edit-more-menu-item:hover,
+.file-edit-more-menu-item:focus {
   background: var(--color-vscode-hover);
   text-decoration: none;
+  outline: none;
 }
 
 .file-edit-more-menu-path {
@@ -2001,10 +2018,6 @@ kbd {
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
   line-height: 1.2;
-}
-
-.file-edit-duration {
-  flex-shrink: 0;
 }
 
 .file-edit-running-label {

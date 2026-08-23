@@ -192,6 +192,7 @@ export function PermissionModePicker(props: {
         <button
           ref={props.buttonRef}
           class={`toolbar-picker permission-mode-button ${props.showLabel ? '' : 'icon-only'}`}
+          data-permission-mode={props.mode}
           onClick={props.onToggle}
           aria-label={title()}
           aria-expanded={props.showPicker}
@@ -232,6 +233,7 @@ export function PermissionModePicker(props: {
             {(option) => (
               <button
                 class={`toolbar-popover-item ${props.mode === option.mode ? 'selected' : ''}`}
+                data-permission-mode-option={option.mode}
                 onClick={() => props.onSelect(option.mode)}
               >
                 <PermissionModeIcon mode={option.mode} />
@@ -471,6 +473,7 @@ export function VariantPicker(props: {
 export function ModelPickerButton(props: {
   buttonRef?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
   providerID: string | null;
+  modelID?: string | null;
   providerName: string;
   modelName: string;
   canEllipsize: boolean;
@@ -495,6 +498,8 @@ export function ModelPickerButton(props: {
       <button
         ref={props.buttonRef}
         class={`toolbar-picker model-picker-btn ${props.canEllipsize ? 'model-ellipsis' : ''} ${isFastModel() ? 'fast-model-selected' : ''}`}
+        data-provider-id={props.providerID ?? undefined}
+        data-model-id={props.modelID ?? undefined}
         onClick={props.onToggle}
         aria-label={label()}
         aria-expanded={props.expanded ?? false}

@@ -1,11 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import { parseExtensionMessage } from './extension-message';
-import { isPermissionMode, parseServerEvent, type ExtensionMessage } from './protocol';
+import {
+  isPermissionMode,
+  isSafePersistedSessionId,
+  parseServerEvent,
+  type ExtensionMessage,
+} from './protocol';
 
 describe('protocol parsers', () => {
   it('recognizes only supported permission modes', () => {
     expect(['default', 'edits', 'auto', 'full'].every(isPermissionMode)).toBe(true);
     expect(['', 'Default', 'ask', null, undefined].some(isPermissionMode)).toBe(false);
+  });
+
+  it('accepts only bounded prototype-safe persisted session IDs', () => {
+    expect(isSafePersistedSessionId('session-1')).toBe(true);
+    expect(isSafePersistedSessionId('x'.repeat(512))).toBe(true);
+    expect(
+      ['', '__proto__', 'constructor', 'prototype', 'x'.repeat(513)].some(isSafePersistedSessionId)
+    ).toBe(false);
   });
 
   it('validator round-trips a server/status running payload', () => {

@@ -6,12 +6,14 @@ import { renderWebviewHtml, type WebviewAssetUris } from './webview-html';
 
 export class SidebarProviderBridge {
   private view?: vscode.WebviewView | vscode.WebviewPanel;
+  private viewGeneration = 0;
   private deliveryFailureHandler?: () => void;
 
   constructor(private readonly extensionUri: vscode.Uri) {}
 
   setView(view: vscode.WebviewView | vscode.WebviewPanel | undefined) {
     this.view = view;
+    this.viewGeneration += 1;
   }
 
   getView() {
@@ -27,20 +29,38 @@ export class SidebarProviderBridge {
   }
 
   post(msg: ExtensionMessage) {
-    // oxlint-disable-next-line require-post-message-target-origin
-    const delivery = this.view?.webview.postMessage(msg);
-    if (delivery === undefined) return;
-    void Promise.resolve(delivery).then(
-      (delivered) => {
-        if (delivered) return;
-        logger.warn(`Webview message was not delivered: ${msg.type}`);
+    const view = this.view;
+    if (!view) return;
+    const generation = this.viewGeneration;
+    void this.deliverToView(view, msg).then((delivered) => {
+      if (!delivered && this.view === view && this.viewGeneration === generation) {
         this.deliveryFailureHandler?.();
+      }
+    });
+  }
+
+  deliver(msg: ExtensionMessage): Promise<boolean> {
+    const view = this.view;
+    if (!view) return Promise.resolve(false);
+    return this.deliverToView(view, msg);
+  }
+
+  private deliverToView(
+    view: vscode.WebviewView | vscode.WebviewPanel,
+    msg: ExtensionMessage
+  ): Promise<boolean> {
+    // oxlint-disable-next-line require-post-message-target-origin
+    const delivery = view.webview.postMessage(msg);
+    return Promise.resolve(delivery).then(
+      (delivered) => {
+        if (!delivered) logger.warn(`Webview message was not delivered: ${msg.type}`);
+        return delivered;
       },
       (error: unknown) => {
         logger.warn(
           `Webview message delivery failed (${msg.type}): ${error instanceof Error ? error.message : String(error)}`
         );
-        this.deliveryFailureHandler?.();
+        return false;
       }
     );
   }

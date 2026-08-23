@@ -106,6 +106,7 @@ export async function sendMessage(
     queuedContext?: QueuedContextSnapshot;
     preserveComposer?: boolean;
     targetSessionId?: string;
+    queuedMessageDispatch?: { itemId: string; lease: number };
   }
 ): Promise<boolean> {
   return await getCurrentOpenCodeRuntime().sendMessage(text, options);

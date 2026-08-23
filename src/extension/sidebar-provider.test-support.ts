@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   readFile: vi.fn(),
   rm: vi.fn(),
   vscode: {
+    env: { remoteName: undefined as string | undefined },
     window: {
       createStatusBarItem: vi.fn(() => ({
         name: '',
@@ -159,7 +160,7 @@ vi.mock('./error-hub', () => ({
 export function createWorkspaceState() {
   return {
     get: vi.fn((_key: string, fallback?: unknown) => fallback),
-    update: vi.fn(() => Promise.resolve()),
+    update: vi.fn((_key: string, _value: unknown) => Promise.resolve()),
   };
 }
 

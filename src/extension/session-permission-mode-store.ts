@@ -1,5 +1,9 @@
 import type { Persistence } from '../shared/persistence';
-import { isPermissionMode, type PermissionMode } from '../shared/protocol';
+import {
+  isPermissionMode,
+  isSafePersistedSessionId,
+  type PermissionMode,
+} from '../shared/protocol';
 import { asRecord } from '../shared/type-utils';
 
 const SESSION_PERMISSION_MODES_KEY = 'varro.sessionPermissionModes';
@@ -12,8 +16,9 @@ export class SessionPermissionModeStore {
     const stored = asRecord(persistence.get<unknown>(SESSION_PERMISSION_MODES_KEY));
     this.modes = stored
       ? Object.fromEntries(
-          Object.entries(stored).filter((entry): entry is [string, PermissionMode] =>
-            isPermissionMode(entry[1])
+          Object.entries(stored).filter(
+            (entry): entry is [string, PermissionMode] =>
+              isSafePersistedSessionId(entry[0]) && isPermissionMode(entry[1])
           )
         )
       : {};
@@ -24,12 +29,32 @@ export class SessionPermissionModeStore {
   }
 
   set(sessionId: string, mode: PermissionMode | null): Promise<Record<string, PermissionMode>> {
+    if (!isSafePersistedSessionId(sessionId)) {
+      return Promise.reject(new Error('Invalid persisted session ID'));
+    }
     return this.mutate(async () => {
       const next = { ...this.modes };
       if (mode === null) delete next[sessionId];
       else next[sessionId] = mode;
       await this.persistence.set(SESSION_PERMISSION_MODES_KEY, next);
       this.modes = next;
+      return this.list();
+    });
+  }
+
+  setIfAbsent(modes: Record<string, PermissionMode>): Promise<Record<string, PermissionMode>> {
+    return this.mutate(async () => {
+      const next = { ...this.modes };
+      let changed = false;
+      for (const [sessionId, mode] of Object.entries(modes)) {
+        if (!isSafePersistedSessionId(sessionId) || Object.hasOwn(next, sessionId)) continue;
+        next[sessionId] = mode;
+        changed = true;
+      }
+      if (changed) {
+        await this.persistence.set(SESSION_PERMISSION_MODES_KEY, next);
+        this.modes = next;
+      }
       return this.list();
     });
   }

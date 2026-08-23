@@ -37,6 +37,8 @@ describe('DraftImageStore', () => {
       },
     ]);
 
+    expect(store.list()[0]?.contextFile?.path).toBe('/tmp/current-host/image.png');
+
     expect(new DraftImageStore(persistence).list()).toEqual([
       {
         id: 'image-1',

@@ -38,7 +38,9 @@ import {
 import type { RestProxyCallbacks } from './rest-proxy';
 import { OpenCodeResponseTooLargeError } from './open-code-transport';
 import { HiddenSessionManager } from './hidden-session-manager';
+import { QueuedMessageStore } from './queued-message-store';
 import { SessionStateManager } from './session-state-manager';
+import type { Persistence } from '../shared/persistence';
 
 type SanitizedMessageResponse = {
   id: number;
@@ -57,6 +59,8 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
+
+const allViewsEligible = () => true;
 
 function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxyCallbacks {
   return {
@@ -142,6 +146,10 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
     ensureServerStarted: vi.fn(() => Promise.resolve('http://127.0.0.1:4096')),
     confirmPromptAdmission: vi.fn(() => Promise.resolve(true)),
     isPermissionAutomationLeaseCurrent: vi.fn(() => true),
+    beginQueuedMessageDispatchClaim: vi.fn(() => Promise.resolve(true)),
+    isQueuedMessageDispatchClaimCurrent: vi.fn(() => true),
+    completeQueuedMessageDispatchClaim: vi.fn(() => Promise.resolve(true)),
+    releaseQueuedMessageDispatchClaim: vi.fn(),
     updatePermissionMode: vi.fn(() => Promise.resolve(undefined)),
     cleanupExpiredRecycleBin: vi.fn(() => Promise.resolve()),
     removeSessionImages: vi.fn(() => Promise.resolve()),
@@ -982,6 +990,85 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 84,
       error: 'Permission automation ownership changed',
+    });
+  });
+
+  it('revalidates the automation lease after judge workspace resolution', async () => {
+    const sessionLookup = deferred<unknown>();
+    let leaseCurrent = true;
+    const serverRequest = vi.fn((method: string, path: string) => {
+      if (method === 'GET' && path === '/session/session-1?directory=%2Frepo') {
+        return sessionLookup.promise;
+      }
+      return Promise.resolve(undefined);
+    });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      isPermissionAutomationLeaseCurrent: vi.fn(() => leaseCurrent),
+    });
+
+    const request = proxy.handleRequest({
+      ...makePayload(86, 'POST', '/varro/permission/judge', {
+        permission: { id: 'perm-1', type: 'bash', sessionID: 'session-1' },
+      }),
+      permissionAutomationLease: 7,
+    });
+    await vi.waitFor(() =>
+      expect(serverRequest).toHaveBeenCalledWith('GET', '/session/session-1?directory=%2Frepo')
+    );
+    leaseCurrent = false;
+    sessionLookup.resolve({ id: 'session-1', directory: '/repo' });
+    await request;
+
+    expect(callbacks.autoApproveJudge.judge).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 86,
+      error: 'Permission automation ownership changed',
+    });
+  });
+
+  it('revalidates the automation lease after reply preparation', async () => {
+    const cleanup = deferred<void>();
+    let leaseCurrent = true;
+    const serverRequest = vi.fn(() => Promise.resolve(true));
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      cleanupExpiredRecycleBin: vi.fn(() => cleanup.promise),
+      isPermissionAutomationLeaseCurrent: vi.fn(() => leaseCurrent),
+    });
+
+    const request = proxy.handleRequest({
+      ...makePayload(87, 'POST', '/permission/perm-1/reply', { reply: 'once' }),
+      permissionAutomationLease: 7,
+    });
+    await vi.waitFor(() => expect(callbacks.cleanupExpiredRecycleBin).toHaveBeenCalledOnce());
+    leaseCurrent = false;
+    cleanup.resolve();
+    await request;
+
+    expect(serverRequest).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 87,
+      error: 'Permission automation ownership changed',
+    });
+  });
+
+  it('does not apply permission leases to unrelated API requests', async () => {
+    const serverRequest = vi.fn(() => Promise.resolve({ ok: true }));
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      isPermissionAutomationLeaseCurrent: vi.fn(() => false),
+    });
+
+    await proxy.handleRequest({
+      ...makePayload(88, 'GET', '/session/status'),
+      permissionAutomationLease: 7,
+    });
+
+    expect(serverRequest).toHaveBeenCalledWith('GET', '/session/status', undefined);
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 88,
+      data: { ok: true },
     });
   });
 
@@ -2633,6 +2720,274 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
+  it('rejects a queued prompt whose dispatch lease is stale', async () => {
+    const beginQueuedMessageDispatchClaim = vi.fn(() => Promise.resolve(false));
+    const { proxy, callbacks } = createProxy({ beginQueuedMessageDispatchClaim });
+
+    await proxy.handleRequest({
+      ...makePayload(302, 'POST', '/session/session-1/prompt_async', {
+        messageID: 'message-302',
+        parts: [],
+      }),
+      queuedMessageDispatch: { itemId: 'queue-1', lease: 9 },
+    });
+
+    expect(beginQueuedMessageDispatchClaim).toHaveBeenCalledWith(
+      'session-1',
+      'queue-1',
+      9,
+      302,
+      'message-302'
+    );
+    expect(callbacks.server.request).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 302,
+      error: 'Queued message dispatch lease is no longer current',
+    });
+  });
+
+  it('revalidates a queued dispatch immediately before the server request', async () => {
+    const serverRequest = vi.fn();
+    const isQueuedMessageDispatchClaimCurrent = vi.fn(() => false);
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      isQueuedMessageDispatchClaimCurrent,
+    });
+
+    await proxy.handleRequest({
+      ...makePayload(305, 'POST', '/session/session-1/prompt_async', {
+        messageID: 'message-305',
+        parts: [],
+      }),
+      queuedMessageDispatch: { itemId: 'queue-1', lease: 10 },
+    });
+
+    expect(isQueuedMessageDispatchClaimCurrent).toHaveBeenCalledWith(
+      'session-1',
+      'queue-1',
+      10,
+      305
+    );
+    expect(serverRequest).not.toHaveBeenCalled();
+    expect(callbacks.releaseQueuedMessageDispatchClaim).toHaveBeenCalledWith(
+      'session-1',
+      'queue-1',
+      10,
+      305
+    );
+  });
+
+  it('holds a queued dispatch claim through preparation and server admission', async () => {
+    const persistence = {
+      get: vi.fn(),
+      set: vi.fn(() => Promise.resolve()),
+      remove: vi.fn(() => Promise.resolve()),
+    };
+    const queue = new QueuedMessageStore(persistence);
+    await queue.update([
+      {
+        id: 'queue-1',
+        sessionId: 'session-1',
+        text: 'first',
+        ownerViewId: 'view-a',
+        droppedFiles: [],
+        clipboardImages: [],
+        terminalSelection: null,
+      },
+      {
+        id: 'queue-2',
+        sessionId: 'session-1',
+        text: 'second',
+        ownerViewId: 'view-b',
+        droppedFiles: [],
+        clipboardImages: [],
+        terminalSelection: null,
+      },
+    ]);
+    const firstClaim = queue.claimDispatch('view-a', 'session-1', 'queue-1', allViewsEligible)!;
+    const admission = deferred<boolean>();
+    const serverResponse = deferred<unknown>();
+    const serverRequest = vi.fn(() => serverResponse.promise);
+    const confirmPromptAdmission = vi.fn(() => admission.promise);
+    const { proxy } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      confirmPromptAdmission,
+      beginQueuedMessageDispatchClaim: (sessionId, itemId, lease, requestId, messageId) =>
+        queue.beginDispatchAdmission('view-a', sessionId, itemId, lease, requestId, messageId),
+      isQueuedMessageDispatchClaimCurrent: (sessionId, itemId, lease, requestId) =>
+        queue.isDispatchAdmissionCurrent('view-a', sessionId, itemId, lease, requestId),
+      completeQueuedMessageDispatchClaim: async (sessionId, itemId, lease, requestId) => {
+        const persisted = queue.completeDispatchAdmission(
+          'view-a',
+          sessionId,
+          itemId,
+          lease,
+          requestId
+        );
+        if (!persisted) return false;
+        await persisted;
+        return true;
+      },
+      releaseQueuedMessageDispatchClaim: (sessionId, itemId, lease, requestId) =>
+        queue.releaseDispatchAdmission('view-a', sessionId, itemId, lease, requestId),
+    });
+
+    const firstDispatch = proxy.handleRequest({
+      ...makePayload(303, 'POST', '/session/session-1/prompt_async', {
+        messageID: 'message-303',
+        parts: [],
+      }),
+      queuedMessageDispatch: { itemId: 'queue-1', lease: firstClaim.lease },
+    });
+    await vi.waitFor(() => expect(confirmPromptAdmission).toHaveBeenCalledOnce());
+
+    expect(queue.claimDispatch('view-b', 'session-1', 'queue-2', allViewsEligible)).toBeNull();
+    admission.resolve(true);
+    await vi.waitFor(() => expect(serverRequest).toHaveBeenCalledOnce());
+    expect(queue.claimDispatch('view-b', 'session-1', 'queue-2', allViewsEligible)).toBeNull();
+
+    serverResponse.resolve({ ok: true });
+    await firstDispatch;
+    expect(queue.list()?.map((message) => message.id)).toEqual(['queue-2']);
+    expect(queue.claimDispatch('view-b', 'session-1', 'queue-2', allViewsEligible)).not.toBeNull();
+  });
+
+  it('persists accepted queue completion before restart can admit it again', async () => {
+    const storage = new Map<string, unknown>();
+    let rejectCompletionWrite = true;
+    const persistence: Persistence = {
+      get: <T>(key: string) => storage.get(key) as T | undefined,
+      set: vi.fn((key: string, value: unknown) => {
+        if (rejectCompletionWrite && Array.isArray(value) && value.length === 0) {
+          rejectCompletionWrite = false;
+          return Promise.reject(new Error('transient completion failure'));
+        }
+        storage.set(key, value);
+        return Promise.resolve();
+      }),
+      remove: vi.fn(() => Promise.resolve()),
+    };
+    const queue = new QueuedMessageStore(persistence);
+    await queue.update([
+      {
+        id: 'queue-1',
+        messageId: 'message-1',
+        sessionId: 'session-1',
+        text: 'first',
+        ownerViewId: 'view-a',
+        droppedFiles: [],
+        clipboardImages: [],
+        terminalSelection: null,
+      },
+    ]);
+    const claim = queue.claimDispatch('view-a', 'session-1', 'queue-1', allViewsEligible)!;
+    const serverRequest = vi.fn(() => Promise.resolve({ ok: true }));
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      beginQueuedMessageDispatchClaim: (sessionId, itemId, lease, requestId, messageId) =>
+        queue.beginDispatchAdmission('view-a', sessionId, itemId, lease, requestId, messageId),
+      isQueuedMessageDispatchClaimCurrent: (sessionId, itemId, lease, requestId) =>
+        queue.isDispatchAdmissionCurrent('view-a', sessionId, itemId, lease, requestId),
+      completeQueuedMessageDispatchClaim: async (sessionId, itemId, lease, requestId) => {
+        const completion = queue.completeDispatchAdmission(
+          'view-a',
+          sessionId,
+          itemId,
+          lease,
+          requestId
+        );
+        if (!completion) return false;
+        await completion;
+        return true;
+      },
+      releaseQueuedMessageDispatchClaim: (sessionId, itemId, lease, requestId) =>
+        queue.releaseDispatchAdmission('view-a', sessionId, itemId, lease, requestId),
+    });
+
+    await proxy.handleRequest({
+      ...makePayload(306, 'POST', '/session/session-1/prompt_async', {
+        messageID: 'message-1',
+        parts: [],
+      }),
+      queuedMessageDispatch: { itemId: 'queue-1', lease: claim.lease },
+    });
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 306,
+      data: { ok: true },
+    });
+    const restartedQueue = new QueuedMessageStore(persistence);
+    expect(restartedQueue.list()).toEqual([]);
+    expect(
+      restartedQueue.claimDispatch('view-a', 'session-1', 'queue-1', allViewsEligible)
+    ).toBeNull();
+    expect(serverRequest).toHaveBeenCalledOnce();
+  });
+
+  it('reports exhausted completion persistence without resending accepted work', async () => {
+    const serverRequest = vi.fn(() => Promise.resolve({ ok: true }));
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      completeQueuedMessageDispatchClaim: vi.fn(() =>
+        Promise.reject(new Error('Memento unavailable'))
+      ),
+    });
+
+    await proxy.handleRequest({
+      ...makePayload(307, 'POST', '/session/session-1/prompt_async', {
+        messageID: 'message-307',
+        parts: [],
+      }),
+      queuedMessageDispatch: { itemId: 'queue-1', lease: 11 },
+    });
+
+    expect(serverRequest).toHaveBeenCalledOnce();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 307,
+      data: { ok: true },
+    });
+    expect(callbacks.releaseQueuedMessageDispatchClaim).not.toHaveBeenCalled();
+    expect(mocks.logger.warn).toHaveBeenCalledWith(
+      'Accepted queued message could not be durably removed: Memento unavailable'
+    );
+  });
+
+  it('releases a queued dispatch cancelled during preparation before calling the server', async () => {
+    const admission = deferred<boolean>();
+    const confirmPromptAdmission = vi.fn(() => admission.promise);
+    const serverRequest = vi.fn();
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      confirmPromptAdmission,
+    });
+    const operation = proxy.handleRequest({
+      id: 304,
+      cancelKey: 'queued-prompt',
+      method: 'POST',
+      path: '/session/session-1/prompt_async',
+      body: { messageID: 'message-304', parts: [] },
+      queuedMessageDispatch: { itemId: 'queue-1', lease: 6 },
+    });
+    await vi.waitFor(() => expect(confirmPromptAdmission).toHaveBeenCalledOnce());
+
+    proxy.cancelRequest({ id: 304, cancelKey: 'queued-prompt' });
+    await operation;
+
+    expect(serverRequest).not.toHaveBeenCalled();
+    expect(callbacks.isQueuedMessageDispatchClaimCurrent).not.toHaveBeenCalled();
+    expect(callbacks.completeQueuedMessageDispatchClaim).not.toHaveBeenCalled();
+    expect(callbacks.releaseQueuedMessageDispatchClaim).toHaveBeenCalledWith(
+      'session-1',
+      'queue-1',
+      6,
+      304
+    );
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 304,
+      error: 'API call aborted',
+    });
+  });
+
   it('cancels prompt admission before marking busy when generated dependencies are unignored', async () => {
     const serverRequest = vi.fn();
     const markSessionBusy = vi.fn();
@@ -2643,9 +2998,13 @@ describe('RestProxy handleRequest', () => {
       confirmPromptAdmission,
     });
 
-    await proxy.handleRequest(
-      makePayload(301, 'POST', '/session/session-1/prompt_async', { parts: [] })
-    );
+    await proxy.handleRequest({
+      ...makePayload(301, 'POST', '/session/session-1/prompt_async', {
+        messageID: 'message-301',
+        parts: [],
+      }),
+      queuedMessageDispatch: { itemId: 'queue-1', lease: 4 },
+    });
 
     expect(confirmPromptAdmission).toHaveBeenCalledWith('/repo');
     expect(markSessionBusy).not.toHaveBeenCalled();
@@ -2654,6 +3013,12 @@ describe('RestProxy handleRequest', () => {
       id: 301,
       error: 'Prompt cancelled because generated dependencies are not ignored by Git',
     });
+    expect(callbacks.releaseQueuedMessageDispatchClaim).toHaveBeenCalledWith(
+      'session-1',
+      'queue-1',
+      4,
+      301
+    );
   });
 
   it('does not run generated dependency admission for non-prompt requests', async () => {
@@ -2696,15 +3061,25 @@ describe('RestProxy handleRequest', () => {
       } as never,
     });
 
-    await proxy.handleRequest(
-      makePayload(32, 'POST', '/session/session-1/prompt_async', { parts: [] })
-    );
+    await proxy.handleRequest({
+      ...makePayload(32, 'POST', '/session/session-1/prompt_async', {
+        messageID: 'message-32',
+        parts: [],
+      }),
+      queuedMessageDispatch: { itemId: 'queue-1', lease: 7 },
+    });
 
     expect(serverRequest.mock.calls).toEqual([
-      ['POST', '/session/session-1/prompt_async', { parts: [] }],
+      ['POST', '/session/session-1/prompt_async', { messageID: 'message-32', parts: [] }],
       ['GET', '/session/status'],
     ]);
     expect(reconcilePromptFailure).toHaveBeenCalledWith(attempt, undefined);
+    expect(callbacks.releaseQueuedMessageDispatchClaim).toHaveBeenCalledWith(
+      'session-1',
+      'queue-1',
+      7,
+      32
+    );
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 32,
       error: 'prompt rejected',

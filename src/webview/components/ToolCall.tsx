@@ -48,6 +48,7 @@ import { DiffView } from './DiffView';
 import type { DiffViewFile } from './DiffView';
 import { ClampedToolText } from './ClampedToolText';
 import { CopyIconButton } from './CopyIconButton';
+import { FileTypeIcon } from './FileTypeIcon';
 import { isBoolean, isNumber, isString } from '../lib/runtime-values';
 import {
   bookIcon,
@@ -431,6 +432,7 @@ export function ToolCall(props: {
   permissionMatch?: ToolCallPermissionMatch | null;
   renderPermissionPrompt?: boolean;
   lightweight?: boolean;
+  compactFileChanges?: boolean;
 }) {
   const tool = () => props.part;
   const expansionKey = () => getToolCallExpansionKey(tool());
@@ -592,6 +594,7 @@ export function ToolCall(props: {
           previewStateKey={expansionKey()}
           expanded={expanded()}
           toggleExpand={toggleExpand}
+          compact={!!props.compactFileChanges}
         />
       );
     }
@@ -816,6 +819,7 @@ function FileChangeCard(props: {
   previewStateKey: string;
   expanded: boolean;
   toggleExpand: () => void;
+  compact: boolean;
 }) {
   let moreButtonRef: HTMLButtonElement | undefined;
   let moreMenuRef: HTMLDivElement | undefined;
@@ -826,6 +830,7 @@ function FileChangeCard(props: {
     maxHeight: 220,
     positioned: false,
   });
+  const moreMenuId = createUniqueId();
   const s = () => props.toolState;
   const isCompleted = () => s().status === 'completed';
   const isPending = () => s().status === 'pending';
@@ -855,8 +860,10 @@ function FileChangeCard(props: {
         item.after !== undefined ||
         item.previewStatus !== undefined
     );
-  const showInlinePreview = () => showInlineFileChanges() && hasInlinePreviewContent();
+  const showInlinePreview = () =>
+    !props.compact && showInlineFileChanges() && hasInlinePreviewContent();
   const showCompactCard = () => !isCompleted() || !showInlinePreview();
+  const splitCompletedChanges = () => isCompleted() && changes().length > 1;
   const inlineDiffs = createMemo<DiffViewFile[]>(() =>
     changes().map((item) => ({
       file: item.toPath || item.path,
@@ -875,7 +882,7 @@ function FileChangeCard(props: {
   );
 
   createEffect(() => {
-    if (hiddenMultiFileCount() === 0) setMoreMenuOpen(false);
+    if (!showCompactCard() || hiddenMultiFileCount() === 0) setMoreMenuOpen(false);
   });
 
   createEffect(() => {
@@ -908,21 +915,34 @@ function FileChangeCard(props: {
       if (target && (moreButtonRef?.contains(target) || moreMenuRef?.contains(target))) return;
       setMoreMenuOpen(false);
     };
+    const onFocusIn = (event: FocusEvent) => {
+      const target = event.target instanceof Node ? event.target : null;
+      if (target && (moreButtonRef?.contains(target) || moreMenuRef?.contains(target))) return;
+      setMoreMenuOpen(false);
+    };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
+      event.stopImmediatePropagation();
+      Object.assign(event, { varroHandled: true });
       setMoreMenuOpen(false);
       moreButtonRef?.focus();
     };
 
-    queueMicrotask(positionMenu);
+    queueMicrotask(() => {
+      if (!moreMenuOpen()) return;
+      positionMenu();
+      moreMenuRef?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    });
     window.addEventListener('pointerdown', onPointerDown);
-    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('focusin', onFocusIn);
+    window.addEventListener('keydown', onKeyDown, true);
     window.addEventListener('resize', positionMenu);
     window.addEventListener('scroll', positionMenu, true);
     onCleanup(() => {
       window.removeEventListener('pointerdown', onPointerDown);
-      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('focusin', onFocusIn);
+      window.removeEventListener('keydown', onKeyDown, true);
       window.removeEventListener('resize', positionMenu);
       window.removeEventListener('scroll', positionMenu, true);
     });
@@ -990,28 +1010,23 @@ function FileChangeCard(props: {
     }
     return null;
   };
-  const completedDurationLabel = () => {
-    const state = s();
-    return state.status === 'completed'
-      ? formatVisibleToolDuration(state.time.end - state.time.start)
-      : null;
-  };
   const errorMessage = () => {
     const state = s();
     if (state.status !== 'error') return null;
     const message = state.error.trim();
     return message || null;
   };
+  const canExpandError = () => !props.compact && Boolean(errorMessage());
   const errorBodyId = createUniqueId();
-  const isErrorExpanded = () => Boolean(errorMessage()) && props.expanded;
+  const isErrorExpanded = () => canExpandError() && props.expanded;
 
   return (
     <>
-      <Show when={showCompactCard()}>
+      <Show when={showCompactCard() && !splitCompletedChanges()}>
         <div class="chat-tool-invocation-part file-change-card">
           <div
-            class={`file-change-card-header${errorMessage() ? ' is-expandable' : ''}`}
-            onClick={errorMessage() ? props.toggleExpand : undefined}
+            class={`file-change-card-header${canExpandError() ? ' is-expandable' : ''}`}
+            onClick={canExpandError() ? props.toggleExpand : undefined}
           >
             <ToolCallIcon
               kind="edit"
@@ -1038,6 +1053,10 @@ function FileChangeCard(props: {
                       class="file-path-link file-edit-path-link"
                       onClick={openFileChangePath(change()!.fromPath || change()!.path)}
                     >
+                      <FileTypeIcon
+                        path={change()!.fromPath || change()!.path}
+                        class="file-edit-file-icon"
+                      />
                       {formatFileChangeDisplayName(change()!.fromPath || change()!.path)}
                     </a>
                     <span class="file-edit-move-arrow">→</span>
@@ -1046,6 +1065,10 @@ function FileChangeCard(props: {
                       class="file-path-link file-edit-path-link"
                       onClick={openFileChangePath(change()!.toPath || change()!.path)}
                     >
+                      <FileTypeIcon
+                        path={change()!.toPath || change()!.path}
+                        class="file-edit-file-icon"
+                      />
                       {formatFileChangeDisplayName(change()!.toPath || change()!.path)}
                     </a>
                   </span>
@@ -1056,6 +1079,7 @@ function FileChangeCard(props: {
                   class="file-path-link file-edit-path-link"
                   onClick={openFileChangePath(change()!.path)}
                 >
+                  <FileTypeIcon path={change()!.path} class="file-edit-file-icon" />
                   {formatFileChangeDisplayName(change()!.path)}
                 </a>
               </Show>
@@ -1072,6 +1096,7 @@ function FileChangeCard(props: {
                         title={displayName()}
                         onClick={openFileChangePath(item.toPath || item.path)}
                       >
+                        <FileTypeIcon path={item.toPath || item.path} class="file-edit-file-icon" />
                         {displayName()}
                       </a>
                     );
@@ -1085,6 +1110,7 @@ function FileChangeCard(props: {
                       class="file-edit-more-count"
                       aria-haspopup="menu"
                       aria-expanded={moreMenuOpen()}
+                      aria-controls={moreMenuId}
                       onClick={(event) => {
                         event.preventDefault();
                         event.stopPropagation();
@@ -1101,6 +1127,7 @@ function FileChangeCard(props: {
                     <Show when={moreMenuOpen()}>
                       <Portal mount={document.body}>
                         <div
+                          id={moreMenuId}
                           ref={(el) => (moreMenuRef = el)}
                           class="file-edit-more-menu"
                           role="menu"
@@ -1111,6 +1138,47 @@ function FileChangeCard(props: {
                             visibility: moreMenuPosition().positioned ? 'visible' : 'hidden',
                           }}
                           onClick={(event) => event.stopPropagation()}
+                          onKeyDown={(event) => {
+                            if (event.key === ' ') {
+                              const activeItem =
+                                document.activeElement instanceof HTMLElement &&
+                                document.activeElement.getAttribute('role') === 'menuitem'
+                                  ? document.activeElement
+                                  : null;
+                              if (activeItem && moreMenuRef?.contains(activeItem)) {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                activeItem.click();
+                              }
+                              return;
+                            }
+                            if (
+                              event.key !== 'ArrowDown' &&
+                              event.key !== 'ArrowUp' &&
+                              event.key !== 'Home' &&
+                              event.key !== 'End'
+                            ) {
+                              return;
+                            }
+                            const items = Array.from(
+                              moreMenuRef?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []
+                            );
+                            if (items.length === 0) return;
+                            event.preventDefault();
+                            event.stopPropagation();
+                            const currentIndex = items.findIndex(
+                              (item) => item === document.activeElement
+                            );
+                            const nextIndex =
+                              event.key === 'Home'
+                                ? 0
+                                : event.key === 'End'
+                                  ? items.length - 1
+                                  : event.key === 'ArrowDown'
+                                    ? (Math.max(currentIndex, -1) + 1) % items.length
+                                    : (currentIndex <= 0 ? items.length : currentIndex) - 1;
+                            items[nextIndex]?.focus();
+                          }}
                         >
                           <For each={hiddenMultiFileChanges()}>
                             {(item) => {
@@ -1127,6 +1195,7 @@ function FileChangeCard(props: {
                                     openFileChangePath(path())(event);
                                   }}
                                 >
+                                  <FileTypeIcon path={path()} class="file-edit-file-icon" />
                                   <span class="file-edit-more-menu-path">{displayName()}</span>
                                 </a>
                               );
@@ -1153,7 +1222,7 @@ function FileChangeCard(props: {
                 {isAborted() ? 'aborted' : 'failed'}
               </span>
             </Show>
-            <Show when={errorMessage()}>
+            <Show when={canExpandError()}>
               <button
                 type="button"
                 class="file-edit-error-toggle"
@@ -1174,11 +1243,6 @@ function FileChangeCard(props: {
                 />
               </button>
             </Show>
-            <Show when={completedDurationLabel()}>
-              <span class="tool-invocation-duration file-edit-duration">
-                {completedDurationLabel()}
-              </span>
-            </Show>
           </div>
           <Show when={isErrorExpanded() && errorMessage()}>
             {(message) => (
@@ -1193,6 +1257,24 @@ function FileChangeCard(props: {
               />
             )}
           </Show>
+        </div>
+      </Show>
+      <Show when={showCompactCard() && splitCompletedChanges()}>
+        <div class="file-change-card-list">
+          <For each={changes()}>
+            {(item) => (
+              <FileChangeCard
+                toolState={props.toolState}
+                changes={[item]}
+                animatePending={props.animatePending}
+                waitingForPermission={props.waitingForPermission}
+                previewStateKey={props.previewStateKey}
+                expanded={props.expanded}
+                toggleExpand={props.toggleExpand}
+                compact={props.compact}
+              />
+            )}
+          </For>
         </div>
       </Show>
       <For each={summaries()}>

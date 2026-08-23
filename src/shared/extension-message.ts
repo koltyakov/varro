@@ -1,5 +1,6 @@
 import {
   isPermissionMode,
+  isSafePersistedSessionId,
   parseServerEvent,
   type ChatModelSelection,
   type ContextLineRange,
@@ -35,6 +36,7 @@ const KNOWN_TYPES = new Set<string>([
   'vscode/open-result',
   'api/response',
   'queued-messages/sync',
+  'queued-messages/claim-result',
   'permission-modes/sync',
   'session-models/sync',
   'editor-tabs/state',
@@ -260,36 +262,68 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
       };
     }
 
+    case 'queued-messages/claim-result': {
+      const payload = asRecord(record.payload);
+      const lease = payload?.lease;
+      if (
+        !payload ||
+        !isNumber(payload.requestId) ||
+        !Number.isSafeInteger(payload.requestId) ||
+        payload.requestId < 0 ||
+        !isString(payload.itemId) ||
+        !isString(payload.sessionId) ||
+        !isBoolean(payload.granted) ||
+        (lease !== undefined && (!isNumber(lease) || !Number.isSafeInteger(lease) || lease <= 0)) ||
+        (payload.granted ? lease === undefined : lease !== undefined)
+      ) {
+        return null;
+      }
+      const result: Extract<ExtensionMessage, { type: 'queued-messages/claim-result' }>['payload'] =
+        {
+          requestId: payload.requestId,
+          itemId: payload.itemId,
+          sessionId: payload.sessionId,
+          granted: payload.granted,
+        };
+      if (lease !== undefined) result.lease = lease;
+      return { type, payload: result };
+    }
+
     case 'permission-modes/sync': {
       const payload = asRecord(record.payload);
       const modes = asRecord(payload?.modes);
-      if (!modes || !Object.values(modes).every(isPermissionMode)) return null;
-      return {
-        type,
-        payload: {
-          // SAFETY: Every value in the host-owned mode map was validated above.
-          modes: modes as Extract<
-            ExtensionMessage,
-            { type: 'permission-modes/sync' }
-          >['payload']['modes'],
-        },
-      };
+      if (!modes) return null;
+      const entries: Array<
+        [
+          string,
+          Extract<ExtensionMessage, { type: 'permission-modes/sync' }>['payload']['modes'][string],
+        ]
+      > = [];
+      for (const [sessionId, mode] of Object.entries(modes)) {
+        if (!isSafePersistedSessionId(sessionId) || !isPermissionMode(mode)) return null;
+        entries.push([sessionId, mode]);
+      }
+      return { type, payload: { modes: Object.fromEntries(entries) } };
     }
 
     case 'session-models/sync': {
       const payload = asRecord(record.payload);
       const models = asRecord(payload?.models);
       if (!models) return null;
-      const parsed: Record<string, ChatModelSelection> = {};
+      const entries: Array<[string, ChatModelSelection]> = [];
       for (const [sessionId, modelValue] of Object.entries(models)) {
+        if (!isSafePersistedSessionId(sessionId)) return null;
         const model = asRecord(modelValue);
         if (!model || !isString(model.providerID) || !isString(model.modelID)) return null;
         if (model.variant !== undefined && !isString(model.variant)) return null;
-        parsed[sessionId] = model.variant
-          ? { providerID: model.providerID, modelID: model.modelID, variant: model.variant }
-          : { providerID: model.providerID, modelID: model.modelID };
+        entries.push([
+          sessionId,
+          model.variant
+            ? { providerID: model.providerID, modelID: model.modelID, variant: model.variant }
+            : { providerID: model.providerID, modelID: model.modelID },
+        ]);
       }
-      return { type, payload: { models: parsed } };
+      return { type, payload: { models: Object.fromEntries(entries) } };
     }
 
     case 'editor-tabs/state': {
@@ -322,8 +356,16 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
 
     case 'recovery/interrupted-sessions': {
       const payload = asRecord(record.payload);
-      return payload && Array.isArray(payload.sessionIds) && payload.sessionIds.every(isString)
-        ? { type, payload: { sessionIds: [...new Set(payload.sessionIds)] } }
+      return payload &&
+        isNumber(payload.claimId) &&
+        Number.isSafeInteger(payload.claimId) &&
+        payload.claimId > 0 &&
+        Array.isArray(payload.sessionIds) &&
+        payload.sessionIds.every(isString)
+        ? {
+            type,
+            payload: { claimId: payload.claimId, sessionIds: [...new Set(payload.sessionIds)] },
+          }
         : null;
     }
 

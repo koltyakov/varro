@@ -23,6 +23,7 @@ import {
   onMount,
   createEffect,
   createMemo,
+  createUniqueId,
   on,
   untrack,
 } from 'solid-js';
@@ -1700,6 +1701,7 @@ function SessionListItem(props: {
     props.hasPermissionRequest || props.hasQuestionRequest || props.needsAttention;
   const queuedMessageLabel = () =>
     `${props.queuedMessageCount} queued message${props.queuedMessageCount === 1 ? '' : 's'}`;
+  const queuedMessageDescriptionId = createUniqueId();
   const hasSubagents = () => !!props.onOpenSubagents && props.subagentCount > 0;
   const showsPlanModeTag = () =>
     getSelectedAgentForSession(props.session.id) === 'plan' &&
@@ -1913,6 +1915,7 @@ function SessionListItem(props: {
         rowRef = element;
       }}
       class={`session-item ${isActive() ? 'active' : ''} ${props.isPinned ? 'is-pinned' : ''} ${showActions() ? 'is-context-selected' : ''} ${props.actions.sessionId() && !showActions() ? 'is-context-obscured' : ''} ${isFocused() ? 'keyboard-focus' : ''} ${modelDetails() ? 'has-model-details' : ''}`}
+      data-session-id={props.session.id}
       inert={props.actions.sessionId() ? true : undefined}
       onMouseMove={() => {
         if (!props.actions.sessionId()) props.setFocusedIndex(props.itemIndex());
@@ -1933,6 +1936,7 @@ function SessionListItem(props: {
         type="button"
         class="session-item-main"
         aria-current={isActive() ? 'page' : undefined}
+        aria-describedby={props.queuedMessageCount > 0 ? queuedMessageDescriptionId : undefined}
         onFocus={() => {
           if (!props.actions.sessionId()) props.setFocusedIndex(props.itemIndex());
         }}
@@ -2069,7 +2073,10 @@ function SessionListItem(props: {
         </Show>
         <Show when={props.queuedMessageCount > 0}>
           <span
+            id={queuedMessageDescriptionId}
             class="session-item-queued-counter"
+            data-session-id={props.session.id}
+            data-queued-message-count={props.queuedMessageCount}
             title={queuedMessageLabel()}
             aria-label={queuedMessageLabel()}
           >
@@ -2143,6 +2150,7 @@ function rootSessionId(sessionId: string) {
 export function deriveSessionIndicators(sessions: typeof state.sessions): SessionIndicatorSets {
   const subagentCounts = new Map<string, number>();
   const failedSessionIds = new Set(state.failedSessionIds);
+  const editorSessionIds = new Set(state.editorSessionIds);
   const ralphChildToManager = new Map<string, string>();
   const ralphManagerManualStopIds = new Set<string>();
   const childSessionIdsByParent = new Map<string, string[]>();
@@ -2242,6 +2250,7 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
       }
       continue;
     }
+    if (editorSessionIds.has(displaySessionId)) continue;
     if (!isSessionCompletedResponseUnread(sessionId)) {
       continue;
     }

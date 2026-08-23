@@ -100,6 +100,7 @@ export class WebviewSession {
       draftImages(): InitialWebviewState['clipboardImages'];
       flushPendingServerEvents(): void;
       cancelApiRequestsBeforeGeneration(generation: number): void;
+      handleUnavailableSideEffects(): void;
       handleDisposedSideEffects(): void;
     },
     private readonly webviewContext?: WebviewInstanceContext,
@@ -107,6 +108,8 @@ export class WebviewSession {
   ) {
     this.bridge.onDeliveryFailure(() => {
       this.deliveryRecoveryPending = true;
+      this.webviewReady = false;
+      this.deps.handleUnavailableSideEffects();
     });
   }
 
@@ -200,6 +203,7 @@ export class WebviewSession {
   }
 
   async resolve(webviewView: WebviewHost) {
+    this.deps.handleUnavailableSideEffects();
     this.bridge.setView(webviewView);
     this.webviewReady = false;
     this.resetCommandState();
@@ -258,6 +262,8 @@ export class WebviewSession {
           return;
         }
         logger.error(`getHtml failed: ${err instanceof Error ? err.message : String(err)}`);
+        this.webviewReady = false;
+        this.deps.handleUnavailableSideEffects();
         webviewView.webview.html = '<p>Failed to load Varro webview. Please reload.</p>';
       });
 
@@ -305,12 +311,30 @@ export class WebviewSession {
     void this.deps.ensureServerStarted().catch(() => {});
   }
 
-  deliverInterruptedSessions(sessions: InterruptedSessionSnapshot[]) {
-    if (sessions.length === 0) return;
-    this.bridge.post({
+  async deliverInterruptedSessions(claimId: number, sessions: InterruptedSessionSnapshot[]) {
+    if (sessions.length === 0 || !this.webviewReady) return false;
+    const generation = this.webviewLoadGeneration;
+    const view = this.bridge.getView();
+    const message = {
       type: 'recovery/interrupted-sessions',
-      payload: { sessionIds: sessions.map((session) => session.id) },
-    });
+      payload: { claimId, sessionIds: sessions.map((session) => session.id) },
+    } satisfies ExtensionMessage;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (
+        !this.webviewReady ||
+        this.webviewLoadGeneration !== generation ||
+        this.bridge.getView() !== view
+      ) {
+        return false;
+      }
+      if (await this.bridge.deliver(message)) return true;
+      if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    if (this.webviewLoadGeneration === generation && this.bridge.getView() === view) {
+      this.webviewReady = false;
+      this.deps.handleUnavailableSideEffects();
+    }
+    return false;
   }
 
   handleVisible() {

@@ -1,7 +1,16 @@
 import { createSignal } from 'solid-js';
-import { state, removeQueuedMessage } from '../../lib/state';
+import {
+  claimQueuedMessageDispatch,
+  ownsQueuedMessage,
+  releaseQueuedMessageDispatch,
+  removeQueuedMessage,
+  replaceQueuedMessage,
+  state,
+} from '../../lib/state';
 import { sendMessage } from '../../hooks/useOpenCode';
 import { isString, isObject } from '../../lib/runtime-values';
+import { createOpenCodeMessageID } from '../../../shared/opencode-id';
+import { queuedMessageWasAdmitted } from './queued-message-history';
 
 const [steeringQueuedMessageIds, setSteeringQueuedMessageIds] = createSignal<ReadonlySet<string>>(
   new Set()
@@ -46,6 +55,7 @@ export function acceptQueuedSteer(sessionId: string, promptText: string | null) 
   const steeringIds = steeringQueuedMessageIds();
   const item = state.queuedMessages.find(
     (queued) =>
+      ownsQueuedMessage(queued) &&
       queued.sessionId === sessionId &&
       steeringIds.has(queued.id) &&
       matchesQueuedPromptText(queued.text, promptText)
@@ -57,13 +67,27 @@ export function acceptQueuedSteer(sessionId: string, promptText: string | null) 
 }
 
 export async function sendQueuedAsSteer(item: (typeof state.queuedMessages)[number]) {
+  if (!ownsQueuedMessage(item)) return;
+  if (state.messagesLoading && state.activeSessionId === item.sessionId) return;
   if (steeringQueuedMessageIds().has(item.id)) return;
   updateQueuedSteerId(setSteeringQueuedMessageIds, item.id, true);
   updateQueuedSteerId(setFailedSteerQueuedMessageIds, item.id, false);
+  const priorAttemptId = item.messageId;
+  const messageId = priorAttemptId ?? createOpenCodeMessageID();
+  if (!priorAttemptId) replaceQueuedMessage(item.id, { ...item, messageId });
   let sent = false;
+  let dispatchLease: number | null = null;
   try {
+    if (priorAttemptId && (await queuedMessageWasAdmitted(item.sessionId, priorAttemptId))) {
+      removeQueuedMessage(item.id);
+      return;
+    }
+    dispatchLease = await claimQueuedMessageDispatch(item);
+    if (dispatchLease === null) return;
+    if (state.messagesLoading && state.activeSessionId === item.sessionId) return;
     sent =
       (await sendMessage(item.text, {
+        messageId,
         delivery: 'steer',
         agent: item.agent ? item.agent : undefined,
         queuedAttachments: {
@@ -74,10 +98,13 @@ export async function sendQueuedAsSteer(item: (typeof state.queuedMessages)[numb
           attachedDiagnostics: item.attachedDiagnostics ? item.attachedDiagnostics : undefined,
         },
         preserveComposer: true,
+        targetSessionId: item.sessionId,
+        queuedMessageDispatch: { itemId: item.id, lease: dispatchLease },
       })) !== false;
   } catch {
     sent = false;
   } finally {
+    if (!sent && dispatchLease !== null) releaseQueuedMessageDispatch(item, dispatchLease);
     updateQueuedSteerId(setSteeringQueuedMessageIds, item.id, false);
   }
   if (sent) {

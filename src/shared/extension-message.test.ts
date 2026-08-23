@@ -228,6 +228,26 @@ describe('parseExtensionMessage', () => {
     ).toBeNull();
   });
 
+  it.each(['__proto__', 'constructor', 'prototype', 'x'.repeat(513)])(
+    'rejects unsafe persisted session ID %s in host snapshots',
+    (sessionId) => {
+      expect(
+        parseExtensionMessage({
+          type: 'permission-modes/sync',
+          payload: { modes: { [sessionId]: 'full' } },
+        })
+      ).toBeNull();
+      expect(
+        parseExtensionMessage({
+          type: 'session-models/sync',
+          payload: {
+            models: { [sessionId]: { providerID: 'openai', modelID: 'gpt-5.6-sol' } },
+          },
+        })
+      ).toBeNull();
+    }
+  );
+
   it('parses editor-tab lifecycle state', () => {
     expect(
       parseExtensionMessage({
@@ -262,11 +282,11 @@ describe('parseExtensionMessage', () => {
     expect(
       parseExtensionMessage({
         type: 'recovery/interrupted-sessions',
-        payload: { sessionIds: ['session-1', 'session-1'] },
+        payload: { claimId: 3, sessionIds: ['session-1', 'session-1'] },
       })
     ).toEqual({
       type: 'recovery/interrupted-sessions',
-      payload: { sessionIds: ['session-1'] },
+      payload: { claimId: 3, sessionIds: ['session-1'] },
     });
   });
 

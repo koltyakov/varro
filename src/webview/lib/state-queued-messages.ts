@@ -5,9 +5,69 @@ import { postMessage } from './bridge';
 import { STORAGE_KEYS, writeStored } from './state-storage';
 import { readWebviewInstanceContext } from './state-stored-values';
 
-function ownsQueuedMessage(message: QueuedMessage) {
+let nextQueueClaimRequestId = 0;
+const pendingQueueClaims = new Map<
+  number,
+  {
+    itemId: string;
+    sessionId: string;
+    resolve(lease: number | null): void;
+    timer: ReturnType<typeof setTimeout>;
+  }
+>();
+
+export function ownsQueuedMessage(message: QueuedMessage) {
   const ownerViewId = readWebviewInstanceContext()?.viewId ?? 'sidebar';
   return (message.ownerViewId ?? 'sidebar') === ownerViewId;
+}
+
+export function claimQueuedMessageDispatch(message: QueuedMessage): Promise<number | null> {
+  if (!ownsQueuedMessage(message)) return Promise.resolve(null);
+  const requestId = ++nextQueueClaimRequestId;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      pendingQueueClaims.delete(requestId);
+      resolve(null);
+    }, 5_000);
+    pendingQueueClaims.set(requestId, {
+      itemId: message.id,
+      sessionId: message.sessionId,
+      resolve,
+      timer,
+    });
+    if (
+      !postMessage({
+        type: 'queued-messages/claim',
+        payload: { requestId, itemId: message.id, sessionId: message.sessionId },
+      })
+    ) {
+      clearTimeout(timer);
+      pendingQueueClaims.delete(requestId);
+      resolve(null);
+    }
+  });
+}
+
+export function applyQueuedMessageClaimResult(payload: {
+  requestId: number;
+  itemId: string;
+  sessionId: string;
+  granted: boolean;
+  lease?: number;
+}) {
+  const pending = pendingQueueClaims.get(payload.requestId);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pendingQueueClaims.delete(payload.requestId);
+  const matches = pending.itemId === payload.itemId && pending.sessionId === payload.sessionId;
+  pending.resolve(matches && payload.granted && payload.lease !== undefined ? payload.lease : null);
+}
+
+export function releaseQueuedMessageDispatch(message: QueuedMessage, lease: number) {
+  postMessage({
+    type: 'queued-messages/release',
+    payload: { itemId: message.id, sessionId: message.sessionId, lease },
+  });
 }
 
 function commitQueuedMessages(messages: QueuedMessage[]) {

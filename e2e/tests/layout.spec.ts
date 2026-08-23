@@ -728,7 +728,7 @@ test('hides Thinking while an apply_patch tool is shown inline', async ({ page }
   await expect(page.locator('.interactive-loading-row .loading-indicator')).toBeHidden();
 });
 
-test('keeps the inline diff-to-next-block gap consistent', async ({ page }) => {
+test('keeps the compact file-change-to-next-block gap consistent', async ({ page }) => {
   await page.setViewportSize({ width: 1000, height: 1600 });
   await page.goto(
     '/e2e/harness/index.html?scenario=diff-preview-large-transcript&multiFileDiff=1&spacingBoundary=1'
@@ -737,21 +737,19 @@ test('keeps the inline diff-to-next-block gap consistent', async ({ page }) => {
   const row = page.locator('[data-msg-id="message-diff-preview-assistant-59"]');
   await row.locator('.assistant-activity-summary').click();
   const details = row.locator('.assistant-activity-detail');
-  const lastDiff = details
-    .first()
-    .locator('.file-change-inline-diffs-unwrapped .diff-view-file')
-    .last();
+  const lastFileChange = details.first().locator('.file-change-card-list .file-change-card').last();
   const nextBlock = details.last().locator('.chat-tool-invocation-part');
-  await expect(lastDiff).toBeVisible();
+  await expect(lastFileChange).toBeVisible();
   await expect(nextBlock).toBeVisible();
   expect(
     await nextBlock.evaluate(
-      (element, diff) => {
+      (element, fileChange) => {
         return (
-          element.getBoundingClientRect().top - (diff as HTMLElement).getBoundingClientRect().bottom
+          element.getBoundingClientRect().top -
+          (fileChange as HTMLElement).getBoundingClientRect().bottom
         );
       },
-      await lastDiff.elementHandle()
+      await lastFileChange.elementHandle()
     )
   ).toBeCloseTo(12, 0);
 });

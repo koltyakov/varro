@@ -27,6 +27,7 @@ export function MessagePart(props: {
   permissionMatch?: ToolCallPermissionMatch | null;
   renderPermissionPrompt?: boolean;
   lightweight?: boolean;
+  compactFileChanges?: boolean;
 }) {
   const p = () => props.part;
 
@@ -50,6 +51,7 @@ export function MessagePart(props: {
             permissionMatch={props.permissionMatch}
             renderPermissionPrompt={props.renderPermissionPrompt}
             lightweight={props.lightweight}
+            compactFileChanges={props.compactFileChanges}
           />
         );
       case 'reasoning':

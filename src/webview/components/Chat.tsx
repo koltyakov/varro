@@ -194,6 +194,7 @@ export function Chat() {
         canAbort: Boolean(activeSessionId) && isActiveSessionWorking(),
         canSwitchSessions,
         model: modelPayload,
+        sessionId: activeSessionId,
       },
     });
   });
@@ -226,7 +227,7 @@ export function Chat() {
   onCleanup(() => {
     postMessage({
       type: 'commands/state',
-      payload: { canAbort: false, canSwitchSessions: false, model: null },
+      payload: { canAbort: false, canSwitchSessions: false, model: null, sessionId: null },
     });
   });
 

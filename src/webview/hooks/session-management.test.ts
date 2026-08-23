@@ -36,6 +36,7 @@ function deferred<T>() {
 describe('session management helpers', () => {
   it('creates a session and restores draft routing selections', async () => {
     const setSelectedModel = vi.fn();
+    const publishSessionModel = vi.fn();
     const setSelectedAgent = vi.fn();
     const setSelectedMcpsForSession = vi.fn();
     const resetDraftSelectedMcps = vi.fn();
@@ -57,6 +58,7 @@ describe('session management helpers', () => {
         markSessionSeen: vi.fn(),
         getDefaultSelectedModel: () => ({ providerID: 'openai', modelID: 'gpt-5' }),
         setSelectedModel,
+        publishSessionModel,
         resolveDefaultAgent: () => 'build',
         setSelectedAgent,
         getInitialMcpNames: () => ['browser-bridge'],
@@ -78,6 +80,10 @@ describe('session management helpers', () => {
       { providerID: 'openai', modelID: 'gpt-5' },
       { sessionId: 'session-2', persistGlobal: false }
     );
+    expect(publishSessionModel).toHaveBeenCalledWith('session-2', {
+      providerID: 'openai',
+      modelID: 'gpt-5',
+    });
     expect(setSelectedAgent).toHaveBeenCalledWith('build', {
       sessionId: 'session-2',
       persistGlobal: false,
@@ -106,6 +112,7 @@ describe('session management helpers', () => {
         markSessionSeen: vi.fn(),
         getDefaultSelectedModel: () => null,
         setSelectedModel: vi.fn(),
+        publishSessionModel: vi.fn(),
         resolveDefaultAgent: () => null,
         setSelectedAgent: vi.fn(),
         getInitialMcpNames: () => [],
@@ -146,6 +153,7 @@ describe('session management helpers', () => {
         markSessionSeen: vi.fn(),
         getDefaultSelectedModel: () => null,
         setSelectedModel: vi.fn(),
+        publishSessionModel: vi.fn(),
         resolveDefaultAgent: () => null,
         setSelectedAgent: vi.fn(),
         getInitialMcpNames: () => [],
@@ -174,6 +182,7 @@ describe('session management helpers', () => {
       activeSessionId = sessionId;
     });
     const setSelectedModel = vi.fn();
+    const publishSessionModel = vi.fn();
     const setSelectedAgent = vi.fn();
     const setSelectedMcpsForSession = vi.fn();
     const adoptDraftCurrentDocumentState = vi.fn();
@@ -197,6 +206,7 @@ describe('session management helpers', () => {
         markSessionSeen: vi.fn(),
         getDefaultSelectedModel: () => ({ providerID: 'openai', modelID: 'draft-model' }),
         setSelectedModel,
+        publishSessionModel,
         resolveDefaultAgent: () => 'plan',
         setSelectedAgent,
         getInitialMcpNames: () => initialMcpNames,
@@ -224,6 +234,10 @@ describe('session management helpers', () => {
     expect(persistActiveSessionId).not.toHaveBeenCalled();
     expect(clearMessages).not.toHaveBeenCalled();
     expect(setSelectedModel).not.toHaveBeenCalled();
+    expect(publishSessionModel).toHaveBeenCalledWith('session-created', {
+      providerID: 'openai',
+      modelID: 'draft-model',
+    });
     expect(setSelectedAgent).not.toHaveBeenCalled();
     expect(setSelectedMcpsForSession).toHaveBeenCalledWith('session-created', ['draft-mcp']);
   });
@@ -259,6 +273,7 @@ describe('session management helpers', () => {
           markSessionSeen: vi.fn(),
           getDefaultSelectedModel: () => null,
           setSelectedModel: vi.fn(),
+          publishSessionModel: vi.fn(),
           resolveDefaultAgent: () => null,
           setSelectedAgent: vi.fn(),
           getInitialMcpNames: () => [],
@@ -521,6 +536,7 @@ describe('session management helpers', () => {
         markSessionSeen: vi.fn(),
         getDefaultSelectedModel: () => null,
         setSelectedModel: vi.fn(),
+        publishSessionModel: vi.fn(),
         resolveDefaultAgent: () => null,
         setSelectedAgent: vi.fn(),
         getInitialMcpNames: () => [],
@@ -545,6 +561,9 @@ describe('session management helpers', () => {
     const upsertSession = vi.fn();
     const selectSession = vi.fn(async () => {});
     const setPermissionModeForSession = vi.fn();
+    const setSelectedModel = vi.fn();
+    const publishSessionModel = vi.fn();
+    const sourceModel = { providerID: 'openai', modelID: 'gpt-5', variant: 'high' };
     const forkRemoteSession = vi.fn(async () =>
       session('session-3', { title: 'Session (fork #1)' })
     );
@@ -555,6 +574,9 @@ describe('session management helpers', () => {
         getWorkspaceGeneration: () => 0,
         getNewChatDraftGeneration: () => 0,
         forkRemoteSession,
+        getEffectiveSessionModel: () => sourceModel,
+        setSelectedModel,
+        publishSessionModel,
         getPermissionModeForSession: () => 'full',
         setPermissionModeForSession,
         upsertSession,
@@ -571,6 +593,11 @@ describe('session management helpers', () => {
       session('session-3', { title: 'Session (fork #1)' })
     );
     expect(setPermissionModeForSession).toHaveBeenCalledWith('session-3', 'full');
+    expect(setSelectedModel).toHaveBeenCalledWith(sourceModel, {
+      sessionId: 'session-3',
+      persistGlobal: false,
+    });
+    expect(publishSessionModel).toHaveBeenCalledWith('session-3', sourceModel);
     expect(selectSession).toHaveBeenCalledWith('session-3');
   });
 
@@ -585,6 +612,9 @@ describe('session management helpers', () => {
         getWorkspaceGeneration: () => 0,
         getNewChatDraftGeneration: () => 0,
         forkRemoteSession: vi.fn(() => remoteFork.promise),
+        getEffectiveSessionModel: () => null,
+        setSelectedModel: vi.fn(),
+        publishSessionModel: vi.fn(),
         getPermissionModeForSession: () => 'default',
         setPermissionModeForSession: vi.fn(),
         upsertSession,
@@ -613,6 +643,9 @@ describe('session management helpers', () => {
         getSessionSelectionGeneration: () => selectionGeneration,
         getNewChatDraftGeneration: () => 0,
         forkRemoteSession: vi.fn(() => remoteFork.promise),
+        getEffectiveSessionModel: () => null,
+        setSelectedModel: vi.fn(),
+        publishSessionModel: vi.fn(),
         getPermissionModeForSession: () => 'default',
         setPermissionModeForSession: vi.fn(),
         upsertSession: vi.fn(),
@@ -641,6 +674,9 @@ describe('session management helpers', () => {
         getWorkspaceGeneration: () => 0,
         getNewChatDraftGeneration: () => 0,
         forkRemoteSession: vi.fn(async () => session('session-3')),
+        getEffectiveSessionModel: () => null,
+        setSelectedModel: vi.fn(),
+        publishSessionModel: vi.fn(),
         getPermissionModeForSession: () => 'default',
         setPermissionModeForSession,
         upsertSession: vi.fn(),
@@ -664,6 +700,9 @@ describe('session management helpers', () => {
         forkRemoteSession: vi.fn(async () => {
           throw new Error('fork failed');
         }),
+        getEffectiveSessionModel: () => null,
+        setSelectedModel: vi.fn(),
+        publishSessionModel: vi.fn(),
         getPermissionModeForSession: () => 'full',
         setPermissionModeForSession: vi.fn(),
         upsertSession: vi.fn(),

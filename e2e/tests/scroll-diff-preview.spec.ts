@@ -65,12 +65,11 @@ async function updateDiffPreviewWithPatch(page: Page, messageId: string, patchTe
         callID: `${part}-call`,
         tool: 'apply_patch',
         state: {
-          status: 'completed' as const,
+          status: 'running' as const,
           input: { patchText: patch },
-          output: 'Done',
           title: 'apply_patch',
           metadata: {},
-          time: { start: 1, end: 2 },
+          time: { start: 1 },
         },
       };
       const harnessWindow = window as typeof window & {

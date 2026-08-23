@@ -1931,6 +1931,11 @@ describe('MessageList compact activity', () => {
       container?.querySelector('.assistant-activity-summary')?.getAttribute('aria-expanded')
     ).toBe('true');
     expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(2);
+    expect(
+      container
+        ?.querySelector('[data-msg-id="assistant-2"]')
+        ?.classList.contains('interactive-response-continues-activity-group')
+    ).toBe(true);
   });
 });
 
@@ -1962,6 +1967,34 @@ describe('MessageList empty state', () => {
     container?.querySelector<HTMLElement>('.interactive-list')?.click();
 
     expect(composerFocusKey()).toBe(previousFocusKey);
+  });
+
+  it('waits for equal-timestamp session hydration before enabling blank-area focus', () => {
+    setState('sessions', [
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/workspace',
+        title: 'Hydrating session',
+        version: '1',
+        time: { created: 100, updated: 100 },
+      },
+    ]);
+    setState('activeSessionId', 'session-1');
+    setState('messagesLoading', true);
+    const previousFocusKey = composerFocusKey();
+
+    cleanup = render(() => MessageList(), container!);
+    const list = container?.querySelector<HTMLElement>('.interactive-list');
+    list?.click();
+
+    expect(composerFocusKey()).toBe(previousFocusKey);
+    expect(container?.querySelector('.chat-messages-loading')).not.toBeNull();
+
+    setState('messagesLoading', false);
+    list?.click();
+
+    expect(composerFocusKey()).toBe(previousFocusKey + 1);
   });
 
   it('shows the starter logo for a blank new chat', () => {

@@ -108,12 +108,34 @@ describe('SidebarProviderBridge', () => {
     bridge.setView(view as never);
 
     bridge.post({ type: 'command/focus-input' });
-    await Promise.resolve();
+    await vi.waitFor(() => expect(onFailure).toHaveBeenCalledOnce());
 
-    expect(onFailure).toHaveBeenCalledOnce();
     expect(mocks.logger.warn).toHaveBeenCalledWith(
       'Webview message was not delivered: command/focus-input'
     );
+  });
+
+  it('ignores a held delivery failure from a replaced view', async () => {
+    let finishDelivery!: (delivered: boolean) => void;
+    const delivery = new Promise<boolean>((resolve) => {
+      finishDelivery = resolve;
+    });
+    const bridge = new SidebarProviderBridge({ fsPath: '/extension' } as never);
+    const first = createView();
+    const replacement = createView();
+    first.webview.postMessage.mockReturnValue(delivery);
+    const onFailure = vi.fn();
+    bridge.onDeliveryFailure(onFailure);
+    bridge.setView(first as never);
+
+    bridge.post({ type: 'command/focus-input' });
+    bridge.setView(replacement as never);
+    finishDelivery(false);
+    await delivery;
+    await Promise.resolve();
+
+    expect(bridge.getView()).toBe(replacement);
+    expect(onFailure).not.toHaveBeenCalled();
   });
 
   it('renders with cacheable webview asset URIs', async () => {

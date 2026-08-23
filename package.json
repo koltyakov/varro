@@ -45,7 +45,8 @@
     "lint": "oxlint -c oxlint.config.mts . --fix",
     "lint:check": "oxlint -c oxlint.config.mts .",
     "fmt": "oxfmt src/",
-    "test": "vitest run",
+    "test": "node scripts/run-tests.mjs",
+    "test:scripts": "node --test scripts/*.test.mjs",
     "test:compatibility": "node scripts/opencode-compatibility/run.mjs --check-floor --report artifacts/opencode-compatibility.json --summary scripts/opencode-compatibility/verified.json",
     "compatibility:discover": "node scripts/opencode-compatibility/run.mjs --report artifacts/opencode-compatibility.json",
     "test:e2e": "playwright test",
@@ -299,6 +300,14 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "varro.chat.showInlineFileChanges",
+          "when": "!varro:showInlineFileChanges"
+        },
+        {
+          "command": "varro.chat.hideInlineFileChanges",
+          "when": "varro:showInlineFileChanges"
+        },
         {
           "command": "varro.chat.addToContext",
           "when": "editorIsOpen"

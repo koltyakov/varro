@@ -679,6 +679,7 @@ export function MessageList() {
     );
   });
   const shouldShowStarterLogo = createMemo(() => {
+    if (state.messagesLoading) return false;
     const sessionId = state.activeSessionId;
     if (getVisibleThreadMessages(state.messages, sessionId, state.sessions).length > 0)
       return false;
@@ -7013,7 +7014,7 @@ export function MessageList() {
         aria-live="polite"
         aria-label="Chat messages"
         onClick={() => {
-          if (shouldShowStarterLogo()) requestComposerFocus();
+          if (!state.messagesLoading && shouldShowStarterLogo()) requestComposerFocus();
         }}
         onScroll={onScroll}
       >

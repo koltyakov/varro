@@ -7,8 +7,17 @@ import {
   MAX_DROPPED_CONTENT_TOTAL_BYTES,
 } from '../../shared/dropped-content-policy';
 import { OPENCODE_TERMINAL_COMMANDS } from '../../shared/opencode-install';
-import { isPermissionMode, VARRO_API_ENDPOINTS } from '../../shared/protocol';
-import type { DesktopSessionPaneSide, PermissionMode, WebviewMessage } from '../../shared/protocol';
+import {
+  isPermissionMode,
+  isSafePersistedSessionId,
+  VARRO_API_ENDPOINTS,
+} from '../../shared/protocol';
+import type {
+  ChatModelSelection,
+  DesktopSessionPaneSide,
+  PermissionMode,
+  WebviewMessage,
+} from '../../shared/protocol';
 import type {
   RalphConfig,
   RalphIteration,
@@ -18,6 +27,7 @@ import type {
 } from '../../shared/ralph';
 import { MAX_RALPH_ITERATIONS, normalizeRalphWorkspaceDirectory } from '../../shared/ralph';
 import { asRecord } from '../../shared/type-utils';
+import type { UnknownRecord } from '../../shared/type-utils';
 import {
   MAX_NATIVE_PDF_TOTAL_BYTES,
   MAX_NATIVE_PDF_FILENAME_LENGTH,
@@ -122,7 +132,11 @@ const WEBVIEW_MESSAGE_TYPES = {
   'files/remove': true,
   'files/clear': true,
   'queued-messages/update': true,
+  'queued-messages/claim': true,
+  'queued-messages/release': true,
+  'recovery/interrupted-sessions-ack': true,
   'permission-mode/update': true,
+  'permission-modes/migrate': true,
   'composer/images-update': true,
   'files/pick': true,
   'files/search': true,
@@ -195,20 +209,71 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       };
     }
 
+    case 'queued-messages/claim': {
+      const payload = asRecord(message?.payload);
+      const requestId = getSafeInteger(payload?.requestId);
+      const itemId = getBoundedString(payload?.itemId, 512);
+      const sessionId = getBoundedString(payload?.sessionId, 512);
+      return requestId !== null && requestId >= 0 && itemId && sessionId
+        ? { type, payload: { requestId, itemId, sessionId } }
+        : null;
+    }
+
+    case 'queued-messages/release': {
+      const payload = asRecord(message?.payload);
+      const itemId = getBoundedString(payload?.itemId, 512);
+      const sessionId = getBoundedString(payload?.sessionId, 512);
+      const lease = getSafeInteger(payload?.lease);
+      return itemId && sessionId && lease !== null && lease > 0
+        ? { type, payload: { itemId, sessionId, lease } }
+        : null;
+    }
+
+    case 'recovery/interrupted-sessions-ack': {
+      const payload = asRecord(message?.payload);
+      const claimId = getSafeInteger(payload?.claimId);
+      const consumedSessionIds = payload?.consumedSessionIds;
+      if (
+        claimId === null ||
+        claimId <= 0 ||
+        !Array.isArray(consumedSessionIds) ||
+        consumedSessionIds.length > 1_000 ||
+        !consumedSessionIds.every(isSafePersistedSessionId)
+      ) {
+        return null;
+      }
+      return {
+        type,
+        payload: { claimId, consumedSessionIds: [...new Set(consumedSessionIds)] },
+      };
+    }
+
     case 'permission-mode/update': {
       const payload = asRecord(message?.payload);
       if (!payload) return null;
-      const sessionId = getString(payload?.sessionId);
-      if (!sessionId) return null;
+      const sessionId = payload.sessionId;
+      if (!isSafePersistedSessionId(sessionId)) return null;
       const mode = payload.mode;
       if (mode !== null && !isPermissionMode(mode)) return null;
       return { type, payload: { sessionId, mode } };
     }
 
+    case 'permission-modes/migrate': {
+      const payload = asRecord(message?.payload);
+      const modes = asRecord(payload?.modes);
+      if (!modes || Object.keys(modes).length > 5_000) return null;
+      const entries: Array<[string, PermissionMode]> = [];
+      for (const [sessionId, mode] of Object.entries(modes)) {
+        if (!isSafePersistedSessionId(sessionId) || !isPermissionMode(mode)) return null;
+        entries.push([sessionId, mode]);
+      }
+      return { type, payload: { modes: Object.fromEntries(entries) } };
+    }
+
     case 'session-model/update': {
       const payload = asRecord(message?.payload);
-      const sessionId = getBoundedString(payload?.sessionId, 512);
-      if (!sessionId) return null;
+      const sessionId = payload?.sessionId;
+      if (!isSafePersistedSessionId(sessionId)) return null;
       if (payload?.model === null) return { type, payload: { sessionId, model: null } };
       const model = asRecord(payload?.model);
       const providerID = getBoundedString(model?.providerID, MAX_RALPH_ID_LENGTH);
@@ -232,17 +297,14 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       const payload = asRecord(message?.payload);
       const models = asRecord(payload?.models);
       if (!models || Object.keys(models).length > 5_000) return null;
-      const parsed: Extract<
-        WebviewMessage,
-        { type: 'session-models/migrate' }
-      >['payload']['models'] = {};
+      const entries: Array<[string, ChatModelSelection]> = [];
       for (const [sessionId, modelValue] of Object.entries(models)) {
-        if (!getBoundedString(sessionId, 512)) return null;
+        if (!isSafePersistedSessionId(sessionId)) return null;
         const model = parseChatModelSelection(modelValue);
         if (!model) return null;
-        parsed[sessionId] = model;
+        entries.push([sessionId, model]);
       }
-      return { type, payload: { models: parsed } };
+      return { type, payload: { models: Object.fromEntries(entries) } };
     }
 
     case 'composer/images-update': {
@@ -339,14 +401,15 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
         return null;
       }
       if (payload.model === null) {
-        return {
-          type,
-          payload: {
-            canAbort: payload.canAbort,
-            canSwitchSessions: payload.canSwitchSessions,
-            model: null,
-          },
+        const sessionId = parseOptionalSessionId(payload.sessionId);
+        if (!sessionId.valid) return null;
+        const commandState: Extract<WebviewMessage, { type: 'commands/state' }>['payload'] = {
+          canAbort: payload.canAbort,
+          canSwitchSessions: payload.canSwitchSessions,
+          model: null,
         };
+        if (sessionId.value !== undefined) commandState.sessionId = sessionId.value;
+        return { type, payload: commandState };
       }
       const model = asRecord(payload.model);
       const providerID = getBoundedString(model?.providerID, MAX_RALPH_ID_LENGTH);
@@ -361,14 +424,15 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
         Extract<WebviewMessage, { type: 'commands/state' }>['payload']['model']
       > = { providerID, modelID };
       if (variant) selectedModel.variant = variant;
-      return {
-        type,
-        payload: {
-          canAbort: payload.canAbort,
-          canSwitchSessions: payload.canSwitchSessions,
-          model: selectedModel,
-        },
+      const sessionId = parseOptionalSessionId(payload.sessionId);
+      if (!sessionId.valid) return null;
+      const commandState: Extract<WebviewMessage, { type: 'commands/state' }>['payload'] = {
+        canAbort: payload.canAbort,
+        canSwitchSessions: payload.canSwitchSessions,
+        model: selectedModel,
       };
+      if (sessionId.value !== undefined) commandState.sessionId = sessionId.value;
+      return { type, payload: commandState };
     }
 
     case 'vscode/open-settings': {
@@ -573,10 +637,18 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       const method = getBoundedString(payload?.method, 16)?.toUpperCase() || null;
       const path = getBoundedString(payload?.path, MAX_PATH_LENGTH + MAX_QUERY_LENGTH);
       const permissionAutomationLease = getSafeInteger(payload?.permissionAutomationLease);
+      const queuedMessageDispatch = asRecord(payload?.queuedMessageDispatch);
+      const queuedMessageItemId = getBoundedString(queuedMessageDispatch?.itemId, 512);
+      const queuedMessageLease = getSafeInteger(queuedMessageDispatch?.lease);
       if (
         id === null ||
         (payload?.cancelKey !== undefined && !cancelKey) ||
         (payload?.permissionAutomationLease !== undefined && permissionAutomationLease === null) ||
+        (payload?.queuedMessageDispatch !== undefined &&
+          (!queuedMessageDispatch ||
+            !queuedMessageItemId ||
+            queuedMessageLease === null ||
+            queuedMessageLease <= 0)) ||
         !method ||
         !path ||
         !isAllowedApiRequest(method, path)
@@ -591,6 +663,12 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       if (cancelKey) requestPayload.cancelKey = cancelKey;
       if (permissionAutomationLease !== null) {
         requestPayload.permissionAutomationLease = permissionAutomationLease;
+      }
+      if (queuedMessageItemId && queuedMessageLease !== null) {
+        requestPayload.queuedMessageDispatch = {
+          itemId: queuedMessageItemId,
+          lease: queuedMessageLease,
+        };
       }
       if (payload?.body === undefined) {
         return { type, payload: requestPayload };
@@ -1080,13 +1158,43 @@ function sanitizeQueuedMessages(
   }
   const sanitized = sanitizeApiRequestBody(withoutPdfs);
   if (sanitized === INVALID_JSON_VALUE || !Array.isArray(sanitized)) return null;
-  return sanitized.map((item, index) => ({
-    ...(item as unknown as Extract<
-      WebviewMessage,
-      { type: 'queued-messages/update' }
-    >['payload']['messages'][number]),
-    nativePdfs: pdfsByIndex[index]!,
-  }));
+  const messages: Extract<
+    WebviewMessage,
+    { type: 'queued-messages/update' }
+  >['payload']['messages'] = [];
+  for (const [index, item] of sanitized.entries()) {
+    const record = asRecord(item);
+    if (!record || !isValidQueuedMessageRouting(record)) return null;
+    messages.push({
+      ...(record as unknown as (typeof messages)[number]),
+      nativePdfs: pdfsByIndex[index]!,
+    });
+  }
+  return messages;
+}
+
+function isValidQueuedMessageRouting(record: UnknownRecord) {
+  if (!isSafePersistedSessionId(record.id) || !isSafePersistedSessionId(record.sessionId)) {
+    return false;
+  }
+  if (getBoundedString(record.text, MAX_API_BODY_SINGLE_STRING_BYTES, true) === null) return false;
+  if (record.ownerViewId !== undefined && !isSafePersistedSessionId(record.ownerViewId))
+    return false;
+  if (record.messageId !== undefined && !isSafePersistedSessionId(record.messageId)) return false;
+  if (record.agent !== undefined && !getBoundedString(record.agent, MAX_RALPH_ID_LENGTH))
+    return false;
+  if (record.paused !== undefined && typeof record.paused !== 'boolean') return false;
+  if (!Array.isArray(record.droppedFiles) || !Array.isArray(record.clipboardImages)) return false;
+  if (record.attachedDiagnostics !== undefined && !asRecord(record.attachedDiagnostics))
+    return false;
+  if (record.queuedContext !== undefined && !asRecord(record.queuedContext)) return false;
+  if (record.terminalSelection === null) return true;
+  const terminalSelection = asRecord(record.terminalSelection);
+  return (
+    !!terminalSelection &&
+    getBoundedString(terminalSelection.text, MAX_API_BODY_SINGLE_STRING_BYTES, true) !== null &&
+    !!getBoundedString(terminalSelection.terminalName, MAX_DROPPED_CONTENT_NAME_LENGTH)
+  );
 }
 
 function sanitizeClipboardImages(
@@ -1108,8 +1216,10 @@ function sanitizeClipboardImages(
       return null;
     const contentKey = getBoundedString(record?.contentKey, 512);
     const attachmentSequence = getSafeInteger(record?.attachmentSequence);
+    const contextFile = parseClipboardImageContextFile(record?.contextFile);
     if (record?.contentKey !== undefined && !contentKey) return null;
     if (record?.attachmentSequence !== undefined && attachmentSequence === null) return null;
+    if (record?.contextFile !== undefined && !contextFile) return null;
     const image: (typeof images)[number] = {
       id,
       url,
@@ -1119,9 +1229,30 @@ function sanitizeClipboardImages(
     };
     if (contentKey) image.contentKey = contentKey;
     if (attachmentSequence !== null) image.attachmentSequence = attachmentSequence;
+    if (contextFile) image.contextFile = contextFile;
     images.push(image);
   }
   return images;
+}
+
+function parseClipboardImageContextFile(
+  value: unknown
+):
+  | Extract<
+      WebviewMessage,
+      { type: 'composer/images-update' }
+    >['payload']['images'][number]['contextFile']
+  | null {
+  const record = asRecord(value);
+  const path = getBoundedString(record?.path, MAX_PATH_LENGTH);
+  const relativePath = getBoundedString(record?.relativePath, MAX_PATH_LENGTH);
+  return record?.type === 'file' &&
+    path &&
+    relativePath &&
+    !path.includes('\0') &&
+    !relativePath.includes('\0')
+    ? { path, relativePath, type: 'file' }
+    : null;
 }
 
 function sanitizePromptBodyWithNativePdfs(
@@ -1528,6 +1659,14 @@ function getBoundedString(value: unknown, maxLength: number, allowEmpty = false)
 function getOptionalBoundedString(value: unknown, maxLength: number) {
   if (value === undefined || value === null) return undefined;
   return getBoundedString(value, maxLength) || undefined;
+}
+
+function parseOptionalSessionId(
+  value: unknown
+): { valid: true; value: string | null | undefined } | { valid: false } {
+  if (value === undefined || value === null) return { valid: true, value };
+  const sessionId = getBoundedString(value, 512);
+  return sessionId ? { valid: true, value: sessionId } : { valid: false };
 }
 
 function getSafeInteger(value: unknown) {

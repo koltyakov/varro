@@ -1,15 +1,22 @@
-/* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/require-safety-comment-for-type-assertion -- The panel fixture implements the VS Code host boundary used by these tests. */
+/* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-unknown-parameters, anti-slop/require-safety-comment-for-type-assertion -- The panel fixture implements the VS Code host boundary and inspects private lifecycle state used by these tests. */
 import { describe, expect, it, vi } from 'vitest';
 import {
   attachTestView,
   createSidebarProviderInstance,
   getVscodeMock,
 } from './sidebar-provider.test-support';
+import type { DroppedFile } from '../shared/protocol';
 
 function createPanel() {
   const messageListeners: Array<(message: unknown) => void> = [];
   const disposeListeners: Array<() => void> = [];
   const viewStateListeners: Array<(event: { webviewPanel: unknown }) => void> = [];
+  const registeredDisposables: Array<{ dispose: ReturnType<typeof vi.fn> }> = [];
+  const registration = () => {
+    const disposable = { dispose: vi.fn() };
+    registeredDisposables.push(disposable);
+    return disposable;
+  };
   const panel = {
     title: '',
     iconPath: undefined as unknown,
@@ -23,24 +30,25 @@ function createPanel() {
       cspSource: 'vscode-webview-resource:',
       options: {},
       html: '',
-      postMessage: vi.fn(() => true),
+      postMessage: vi.fn<(_message: unknown) => boolean | Promise<boolean>>(() => true),
       onDidReceiveMessage: vi.fn((listener: (message: unknown) => void) => {
         messageListeners.push(listener);
-        return { dispose: vi.fn() };
+        return registration();
       }),
       asWebviewUri: vi.fn((uri: { toString(): string }) => uri),
     },
     onDidDispose: vi.fn((listener: () => void) => {
       disposeListeners.push(listener);
-      return { dispose: vi.fn() };
+      return registration();
     }),
     onDidChangeViewState: vi.fn((listener: (event: { webviewPanel: unknown }) => void) => {
       viewStateListeners.push(listener);
-      return { dispose: vi.fn() };
+      return registration();
     }),
   };
   return {
     panel,
+    registeredDisposables,
     receive: (message: unknown) => messageListeners[0]?.(message),
     setVisible: (visible: boolean) => {
       panel.visible = visible;
@@ -81,6 +89,33 @@ describe('SidebarProvider editor panels', () => {
     expect(posted).toContainEqual({
       type: 'editor-tabs/state',
       payload: { open: false, sessionIds: [] },
+    });
+  });
+
+  it('broadcasts only visible editor sessions as read', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const { posted } = attachTestView(provider);
+    const editor = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+
+    await provider.openSessionInEditor('session-1');
+    expect(posted).toContainEqual({
+      type: 'editor-tabs/state',
+      payload: { open: true, sessionIds: ['session-1'] },
+    });
+
+    const hiddenMessagesStart = posted.length;
+    editor.setVisible(false);
+    expect(posted.slice(hiddenMessagesStart)).toContainEqual({
+      type: 'editor-tabs/state',
+      payload: { open: true, sessionIds: [] },
+    });
+
+    const visibleMessagesStart = posted.length;
+    editor.setVisible(true);
+    expect(posted.slice(visibleMessagesStart)).toContainEqual({
+      type: 'editor-tabs/state',
+      payload: { open: true, sessionIds: ['session-1'] },
     });
   });
 
@@ -153,6 +188,7 @@ describe('SidebarProvider editor panels', () => {
     getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
 
     await provider.openSessionInEditor('root-session', 'Root', undefined, 'root-session');
+    await vi.waitFor(() => expect(editor.panel.webview.html).toContain('varro-editor-surface'));
     editor.receive({ type: 'ready' });
     editor.receive({
       type: 'commands/state',
@@ -164,24 +200,33 @@ describe('SidebarProvider editor panels', () => {
         payload: expect.objectContaining({ owner: true }),
       })
     );
+    editor.receive({
+      type: 'commands/state',
+      payload: { canAbort: false, canSwitchSessions: true, model: null },
+    });
+    await Promise.resolve();
     editor.panel.webview.postMessage.mockClear();
     await provider.openSessionInEditor('child-session', 'Child', undefined, 'root-session');
-    expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
-      type: 'command/open-session',
-      payload: { sessionId: 'child-session' },
-    });
+    await vi.waitFor(() =>
+      expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'command/open-session',
+        payload: { sessionId: 'child-session' },
+      })
+    );
     editor.panel.webview.postMessage.mockClear();
     await provider.openSessionInEditor('root-session', 'Root', undefined, 'root-session');
 
     expect(getVscodeMock().window.createWebviewPanel).toHaveBeenCalledOnce();
     expect(editor.panel.reveal).toHaveBeenCalledTimes(2);
-    expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
-      type: 'command/open-session',
-      payload: { sessionId: 'root-session' },
-    });
+    await vi.waitFor(() =>
+      expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'command/open-session',
+        payload: { sessionId: 'root-session' },
+      })
+    );
   });
 
-  it('stores the sidebar model variant without broadcasting it into other composers', async () => {
+  it('stores and broadcasts the model variant before opening an editor', async () => {
     const { provider, workspaceState } = await createSidebarProviderInstance();
     const { posted } = attachTestView(provider);
     const editor = createPanel();
@@ -196,32 +241,514 @@ describe('SidebarProvider editor panels', () => {
     expect(workspaceState.update).toHaveBeenCalledWith('varro.sessionSelectedModels', {
       'session-1': { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
     });
-    expect(posted).not.toContainEqual(expect.objectContaining({ type: 'session-models/sync' }));
+    expect(posted).toContainEqual({
+      type: 'session-models/sync',
+      payload: {
+        models: {
+          'session-1': { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
+        },
+      },
+    });
   });
 
-  it('opens the editor without waiting for model persistence', async () => {
-    let finishUpdate: (() => void) | undefined;
-    const workspaceState = {
-      get: vi.fn((_key: string, fallback?: unknown) => fallback),
-      update: vi.fn(
-        () =>
-          new Promise<void>((resolve) => {
-            finishUpdate = resolve;
-          })
-      ),
-    };
-    const { provider } = await createSidebarProviderInstance({ workspaceState });
+  it('uses authoritative session metadata for an editor title', async () => {
+    const { provider } = await createSidebarProviderInstance();
     const editor = createPanel();
     getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
 
-    await provider.openSessionInEditor('session-1', 'Session 1', {
+    await provider.openSessionInEditor('session-1');
+    expect(editor.panel.title).toBe('Varro: Session');
+
+    (
+      provider as unknown as {
+        sessionState: {
+          handleServerEvent(event: {
+            type: 'session.updated';
+            properties: { info: { id: string; title: string } };
+          }): void;
+        };
+      }
+    ).sessionState.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'session-1', title: 'Authoritative title' } },
+    });
+    provider.post({
+      type: 'server/event',
+      payload: {
+        type: 'session.updated',
+        properties: { info: { id: 'session-1', title: 'Authoritative title' } },
+      },
+    });
+
+    expect(editor.panel.title).toBe('Authoritative title');
+  });
+
+  it('treats only the ready sidebar active route as visible attention', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const sidebar = createPanel();
+    const isVisible = (sessionId: string) =>
+      (
+        provider as unknown as {
+          isSessionAttentionVisible(id: string): boolean;
+        }
+      ).isSessionAttentionVisible(sessionId);
+
+    expect(isVisible('session-1')).toBe(false);
+    await provider.resolveWebviewView(sidebar.panel as never, {} as never, {} as never);
+    await vi.waitFor(() => expect(sidebar.panel.webview.html).toContain('__initialWebviewState'));
+    expect(isVisible('session-1')).toBe(false);
+
+    sidebar.receive({ type: 'ready' });
+    sidebar.receive({
+      type: 'commands/state',
+      payload: {
+        canAbort: false,
+        canSwitchSessions: false,
+        model: null,
+        sessionId: 'session-1',
+      },
+    });
+    await vi.waitFor(() => expect(isVisible('session-1')).toBe(true));
+    expect(isVisible('session-2')).toBe(false);
+
+    sidebar.receive({
+      type: 'commands/state',
+      payload: { canAbort: false, canSwitchSessions: false, model: null, sessionId: null },
+    });
+    await vi.waitFor(() => expect(isVisible('session-1')).toBe(false));
+  });
+
+  it('transfers an editor queue to the next ready view when hidden', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const first = createPanel();
+    const second = createPanel();
+
+    await provider.deserializeWebviewPanel(first.panel as never, {
+      'varro.editorViewId': 'editor-first',
+    });
+    await provider.deserializeWebviewPanel(second.panel as never, {
+      'varro.editorViewId': 'editor-second',
+    });
+    await vi.waitFor(() => expect(first.panel.webview.html).toContain('varro-editor-surface'));
+    await vi.waitFor(() => expect(second.panel.webview.html).toContain('varro-editor-surface'));
+    first.receive({ type: 'ready' });
+    second.receive({ type: 'ready' });
+    await vi.waitFor(() =>
+      expect(second.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'permission-automation/update',
+        payload: expect.any(Object),
+      })
+    );
+    first.receive({
+      type: 'queued-messages/update',
+      payload: {
+        messages: [
+          {
+            id: 'queue-1',
+            sessionId: 'session-1',
+            text: 'Continue',
+            droppedFiles: [],
+            clipboardImages: [],
+            terminalSelection: null,
+          },
+        ],
+      },
+    });
+    await vi.waitFor(() =>
+      expect(first.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'queued-messages/sync',
+        payload: { messages: [expect.objectContaining({ id: 'queue-1' })] },
+      })
+    );
+    second.panel.webview.postMessage.mockClear();
+
+    first.setVisible(false);
+
+    await vi.waitFor(() =>
+      expect(second.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'queued-messages/sync',
+        payload: {
+          messages: [expect.objectContaining({ id: 'queue-1', ownerViewId: 'editor-second' })],
+        },
+      })
+    );
+  });
+
+  it('transfers an editor queue when delivery failure makes its endpoint unavailable', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const first = createPanel();
+    const second = createPanel();
+    await provider.deserializeWebviewPanel(first.panel as never, {
+      'varro.editorViewId': 'editor-first',
+    });
+    await provider.deserializeWebviewPanel(second.panel as never, {
+      'varro.editorViewId': 'editor-second',
+    });
+    await vi.waitFor(() => expect(first.panel.webview.html).toContain('varro-editor-surface'));
+    await vi.waitFor(() => expect(second.panel.webview.html).toContain('varro-editor-surface'));
+    first.receive({ type: 'ready' });
+    second.receive({ type: 'ready' });
+    await vi.waitFor(() =>
+      expect(first.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'permission-automation/update',
+        payload: expect.objectContaining({ owner: true }),
+      })
+    );
+    first.receive({
+      type: 'queued-messages/update',
+      payload: {
+        messages: [
+          {
+            id: 'queue-1',
+            messageId: 'message-1',
+            sessionId: 'session-1',
+            text: 'Continue',
+            droppedFiles: [],
+            clipboardImages: [],
+            terminalSelection: null,
+          },
+        ],
+      },
+    });
+    await vi.waitFor(() =>
+      expect(first.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'queued-messages/sync',
+        payload: { messages: [expect.objectContaining({ id: 'queue-1' })] },
+      })
+    );
+    second.panel.webview.postMessage.mockClear();
+    first.panel.webview.postMessage.mockResolvedValueOnce(false);
+
+    provider.post({ type: 'command/focus-input' });
+
+    await vi.waitFor(() =>
+      expect(second.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'queued-messages/sync',
+        payload: {
+          messages: [expect.objectContaining({ id: 'queue-1', ownerViewId: 'editor-second' })],
+        },
+      })
+    );
+  });
+
+  it('keeps interrupted recovery claimable until the elected view acknowledges it', async () => {
+    const storage = new Map<string, unknown>([
+      ['varro.interruptedSessions', [{ id: 'session-1', title: 'Interrupted' }]],
+    ]);
+    const workspaceState = {
+      get: vi.fn((key: string, fallback?: unknown) =>
+        storage.has(key) ? storage.get(key) : fallback
+      ),
+      update: vi.fn((key: string, value: unknown) => {
+        if (value === undefined) storage.delete(key);
+        else storage.set(key, value);
+        return Promise.resolve();
+      }),
+    };
+    const { provider } = await createSidebarProviderInstance({ workspaceState });
+    const first = createPanel();
+    const second = createPanel();
+    await provider.deserializeWebviewPanel(first.panel as never, {
+      'varro.editorViewId': 'editor-first',
+    });
+    await provider.deserializeWebviewPanel(second.panel as never, {
+      'varro.editorViewId': 'editor-second',
+    });
+    await vi.waitFor(() => expect(first.panel.webview.html).toContain('varro-editor-surface'));
+    await vi.waitFor(() => expect(second.panel.webview.html).toContain('varro-editor-surface'));
+    expect(first.panel.webview.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'recovery/interrupted-sessions' })
+    );
+
+    first.receive({ type: 'ready' });
+    second.receive({ type: 'ready' });
+    await vi.waitFor(() =>
+      expect(first.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'recovery/interrupted-sessions',
+        payload: { claimId: 1, sessionIds: ['session-1'] },
+      })
+    );
+    expect(second.panel.webview.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'recovery/interrupted-sessions' })
+    );
+
+    first.setVisible(false);
+    await vi.waitFor(() =>
+      expect(second.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'recovery/interrupted-sessions',
+        payload: { claimId: 2, sessionIds: ['session-1'] },
+      })
+    );
+    first.receive({
+      type: 'recovery/interrupted-sessions-ack',
+      payload: { claimId: 1, consumedSessionIds: ['session-1'] },
+    });
+    await Promise.resolve();
+    expect(storage.get('varro.interruptedSessions')).toEqual([
+      { id: 'session-1', title: 'Interrupted' },
+    ]);
+
+    second.receive({
+      type: 'recovery/interrupted-sessions-ack',
+      payload: { claimId: 2, consumedSessionIds: ['session-1'] },
+    });
+    await vi.waitFor(() => expect(storage.get('varro.interruptedSessions')).toEqual([]));
+    await provider.dispose();
+
+    const restarted = await createSidebarProviderInstance({ workspaceState });
+    const third = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(third.panel);
+    await restarted.provider.openNewEditor();
+    await vi.waitFor(() => expect(third.panel.webview.html).toContain('varro-editor-surface'));
+    third.receive({ type: 'ready' });
+    await Promise.resolve();
+    expect(third.panel.webview.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'recovery/interrupted-sessions' })
+    );
+  });
+
+  it('redelivers an unacknowledged recovery claim after the webview reloads', async () => {
+    const storage = new Map<string, unknown>([
+      ['varro.interruptedSessions', [{ id: 'session-1', title: 'Interrupted' }]],
+    ]);
+    const workspaceState = {
+      get: vi.fn((key: string, fallback?: unknown) =>
+        storage.has(key) ? storage.get(key) : fallback
+      ),
+      update: vi.fn((key: string, value: unknown) => {
+        if (value === undefined) storage.delete(key);
+        else storage.set(key, value);
+        return Promise.resolve();
+      }),
+    };
+    const { provider } = await createSidebarProviderInstance({ workspaceState });
+    const editor = createPanel();
+    await provider.deserializeWebviewPanel(editor.panel as never, {
+      'varro.editorViewId': 'editor-recovery',
+    });
+    await vi.waitFor(() => expect(editor.panel.webview.html).toContain('varro-editor-surface'));
+    editor.receive({ type: 'ready' });
+    await vi.waitFor(() =>
+      expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'recovery/interrupted-sessions',
+        payload: { claimId: 1, sessionIds: ['session-1'] },
+      })
+    );
+
+    const endpoint = [
+      ...(
+        provider as unknown as {
+          editorPanels: Map<string, { webviewSession: { reload(): Promise<void> } }>;
+        }
+      ).editorPanels.values(),
+    ][0];
+    if (!endpoint) throw new Error('Expected an editor endpoint');
+    editor.panel.webview.postMessage.mockClear();
+    await endpoint.webviewSession.reload();
+    editor.receive({ type: 'ready' });
+
+    await vi.waitFor(() =>
+      expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'recovery/interrupted-sessions',
+        payload: { claimId: 2, sessionIds: ['session-1'] },
+      })
+    );
+    expect(storage.get('varro.interruptedSessions')).toEqual([
+      { id: 'session-1', title: 'Interrupted' },
+    ]);
+    await provider.dispose();
+  });
+
+  it('retains failed recovery work without retrying until the webview reloads', async () => {
+    const storage = new Map<string, unknown>([
+      ['varro.interruptedSessions', [{ id: 'session-1', title: 'Interrupted' }]],
+    ]);
+    const workspaceState = {
+      get: vi.fn((key: string, fallback?: unknown) =>
+        storage.has(key) ? storage.get(key) : fallback
+      ),
+      update: vi.fn((key: string, value: unknown) => {
+        if (value === undefined) storage.delete(key);
+        else storage.set(key, value);
+        return Promise.resolve();
+      }),
+    };
+    const { provider } = await createSidebarProviderInstance({ workspaceState });
+    const editor = createPanel();
+    await provider.deserializeWebviewPanel(editor.panel as never, {
+      'varro.editorViewId': 'editor-recovery',
+    });
+    await vi.waitFor(() => expect(editor.panel.webview.html).toContain('varro-editor-surface'));
+    editor.receive({ type: 'ready' });
+    await vi.waitFor(() =>
+      expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'recovery/interrupted-sessions',
+        payload: { claimId: 1, sessionIds: ['session-1'] },
+      })
+    );
+
+    editor.panel.webview.postMessage.mockClear();
+    editor.receive({
+      type: 'recovery/interrupted-sessions-ack',
+      payload: { claimId: 1, consumedSessionIds: [] },
+    });
+    await vi.waitFor(() =>
+      expect(workspaceState.update).toHaveBeenCalledWith('varro.interruptedSessions', [
+        { id: 'session-1', title: 'Interrupted' },
+      ])
+    );
+    expect(storage.get('varro.interruptedSessions')).toEqual([
+      { id: 'session-1', title: 'Interrupted' },
+    ]);
+    expect(editor.panel.webview.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'recovery/interrupted-sessions' })
+    );
+
+    const endpoint = [
+      ...(
+        provider as unknown as {
+          editorPanels: Map<string, { webviewSession: { reload(): Promise<void> } }>;
+        }
+      ).editorPanels.values(),
+    ][0];
+    if (!endpoint) throw new Error('Expected an editor endpoint');
+    await endpoint.webviewSession.reload();
+    editor.receive({ type: 'ready' });
+    await vi.waitFor(() =>
+      expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'recovery/interrupted-sessions',
+        payload: { claimId: 2, sessionIds: ['session-1'] },
+      })
+    );
+    await provider.dispose();
+  });
+
+  it('releases decoded editor draft image files when the panel closes', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const editor = createPanel();
+    await provider.deserializeWebviewPanel(editor.panel as never, {
+      'varro.editorViewId': 'editor-draft',
+    });
+    const internals = provider as unknown as {
+      draftImages: {
+        list(viewId: string): Array<{ contextFile?: DroppedFile }>;
+        update(images: unknown[], viewId: string): Promise<void>;
+      };
+      droppedFilesService: { removeOwnedFiles(paths: Iterable<string>): Promise<void> };
+    };
+    const removeOwnedFiles = vi
+      .spyOn(internals.droppedFilesService, 'removeOwnedFiles')
+      .mockResolvedValue();
+    editor.receive({
+      type: 'composer/images-update',
+      payload: {
+        images: [
+          {
+            id: 'image-1',
+            url: 'data:image/png;base64,AA==',
+            mime: 'image/png',
+            filename: 'image.png',
+            size: 1,
+            contextFile: {
+              path: '/tmp/varro/image.png',
+              relativePath: 'image.png',
+              type: 'file',
+            },
+          },
+        ],
+      },
+    });
+    await vi.waitFor(() =>
+      expect(internals.draftImages.list('editor-draft')[0]?.contextFile?.path).toBe(
+        '/tmp/varro/image.png'
+      )
+    );
+
+    editor.panel.dispose();
+
+    await vi.waitFor(() => expect(removeOwnedFiles).toHaveBeenCalledWith(['/tmp/varro/image.png']));
+    expect(internals.draftImages.list('editor-draft')).toEqual([]);
+  });
+
+  it('removes a stored image if its target disappears before storage completes', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    let finishStore!: (files: DroppedFile[]) => void;
+    const stored = new Promise<DroppedFile[]>((resolve) => {
+      finishStore = resolve;
+    });
+    const service = (
+      provider as unknown as {
+        droppedFilesService: {
+          fromContent(...args: unknown[]): Promise<DroppedFile[]>;
+          removeOwnedFile(path: string): Promise<void>;
+        };
+      }
+    ).droppedFilesService;
+    vi.spyOn(service, 'fromContent').mockReturnValue(stored);
+    const removeOwnedFile = vi.spyOn(service, 'removeOwnedFile').mockResolvedValue();
+    const post = vi.fn();
+    let available = true;
+    const operation = (
+      provider as unknown as {
+        storeImage(
+          payload: { id: string; name: string; content: string; size: number },
+          postMessage: (message: unknown) => void,
+          isAvailable: () => boolean
+        ): Promise<void>;
+      }
+    ).storeImage(
+      { id: 'image-1', name: 'image.png', content: 'AA==', size: 1 },
+      post,
+      () => available
+    );
+    available = false;
+    finishStore([{ path: '/tmp/varro/late.png', relativePath: 'late.png', type: 'file' }]);
+    await operation;
+
+    expect(removeOwnedFile).toHaveBeenCalledWith('/tmp/varro/late.png');
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('waits for model persistence so delayed hints reach initial state and existing views', async () => {
+    let finishUpdate: (() => void) | undefined;
+    const workspaceState = {
+      get: vi.fn((_key: string, fallback?: unknown) => fallback),
+      update: vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise<void>((resolve) => {
+              finishUpdate = resolve;
+            })
+        )
+        .mockResolvedValue(undefined),
+    };
+    const { provider } = await createSidebarProviderInstance({ workspaceState });
+    const { posted } = attachTestView(provider);
+    const editor = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+
+    const opening = provider.openSessionInEditor('session-1', 'Session 1', {
       providerID: 'openai',
       modelID: 'gpt-5.6-sol',
       variant: 'xhigh',
     });
+    await vi.waitFor(() => expect(workspaceState.update).toHaveBeenCalledOnce());
+
+    expect(getVscodeMock().window.createWebviewPanel).not.toHaveBeenCalled();
+    finishUpdate?.();
+    await opening;
 
     expect(getVscodeMock().window.createWebviewPanel).toHaveBeenCalledOnce();
-    finishUpdate?.();
+    await vi.waitFor(() => expect(editor.panel.webview.html).toContain('gpt-5.6-sol'));
+    expect(posted).toContainEqual({
+      type: 'session-models/sync',
+      payload: {
+        models: {
+          'session-1': { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
+        },
+      },
+    });
   });
 
   it('reopens a session editor after its previous panel is closed', async () => {
@@ -248,6 +775,10 @@ describe('SidebarProvider editor panels', () => {
     await provider.dispose();
 
     expect(panel.panel.dispose).not.toHaveBeenCalled();
+    expect(panel.registeredDisposables.length).toBeGreaterThan(0);
+    expect(panel.registeredDisposables.every((item) => item.dispose.mock.calls.length === 1)).toBe(
+      true
+    );
   });
 
   it('does not render a restored editor panel until it becomes visible', async () => {

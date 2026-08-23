@@ -93,32 +93,46 @@ export async function recoverInterruptedSessionsWithDependencies(
     continueInterruptedSession(sessionId: string): Promise<void | boolean | object>;
     logError(context: string, cause: unknown): void;
   },
-  generation: number
+  generation: number,
+  deliveredSessionIds?: readonly string[]
 ) {
-  const sessionIds = deps
-    .consumeInterruptedSessionIds()
-    .filter((id, index, items) => items.indexOf(id) === index);
-  if (sessionIds.length === 0) return;
+  const sessionIds = [...new Set(deliveredSessionIds ?? deps.consumeInterruptedSessionIds())];
+  const consumedSessionIds: string[] = [];
+  if (sessionIds.length === 0) return consumedSessionIds;
 
   for (const sessionId of sessionIds) {
-    if (!deps.isCurrentGeneration(generation)) return;
-    if (!deps.hasSession(sessionId)) continue;
+    if (!deps.isCurrentGeneration(generation)) break;
+    if (!deps.hasSession(sessionId)) {
+      consumedSessionIds.push(sessionId);
+      continue;
+    }
 
     const status = deps.getSessionStatus(sessionId);
-    if (status?.type === 'busy' || status?.type === 'retry') continue;
-    if (deps.hasPendingQuestion(sessionId)) continue;
-    if (deps.hasPendingPermission(sessionId)) continue;
+    if (status?.type === 'busy' || status?.type === 'retry') {
+      consumedSessionIds.push(sessionId);
+      continue;
+    }
+    if (deps.hasPendingQuestion(sessionId) || deps.hasPendingPermission(sessionId)) {
+      consumedSessionIds.push(sessionId);
+      continue;
+    }
 
     try {
       const messages = await deps.loadSessionMessages(sessionId);
-      if (!deps.isCurrentGeneration(generation)) return;
-      if (!shouldContinueInterruptedSession(messages)) continue;
+      if (!deps.isCurrentGeneration(generation)) break;
+      if (!shouldContinueInterruptedSession(messages)) {
+        consumedSessionIds.push(sessionId);
+        continue;
+      }
       await deps.continueInterruptedSession(sessionId);
+      consumedSessionIds.push(sessionId);
     } catch (err) {
-      if (!deps.isCurrentGeneration(generation)) return;
+      if (!deps.isCurrentGeneration(generation)) break;
       deps.logError('recoverInterruptedSession', err);
     }
   }
+
+  return consumedSessionIds;
 }
 
 export async function initConnectionWithDependencies(
@@ -277,7 +291,10 @@ export function createConnectionBootstrapOperations(deps: {
   setError(message: string | null): void;
   nextConnectionGeneration(): number;
   isCurrentConnectionGeneration(generation: number): boolean;
+  getCurrentConnectionGeneration(): number;
+  isInitialized(): boolean;
   consumeInterruptedSessionIds(): string[];
+  acknowledgeInterruptedSessionRecovery(claimId: number, consumedSessionIds: string[]): boolean;
   getSessionStatus(sessionId: string): SessionStatus | null | undefined;
   hasPendingQuestion(sessionId: string): boolean;
   hasPendingPermission(sessionId: string): boolean;
@@ -294,7 +311,12 @@ export function createConnectionBootstrapOperations(deps: {
   recheckSessionStatus(sessionId: string): Promise<void | boolean | object>;
   now?(): number;
 }) {
-  const recoverInterruptedSessions = (generation: number) => {
+  const pendingRecoveryClaims = new Map<number, string[]>();
+  const settledRecoveryClaims = new Map<number, string[]>();
+  const processingRecoveryClaims = new Set<number>();
+  let recoveryDrain: Promise<void> | null = null;
+
+  const recoverSessionIds = (generation: number, sessionIds?: readonly string[]) => {
     return recoverInterruptedSessionsWithDependencies(
       {
         consumeInterruptedSessionIds: deps.consumeInterruptedSessionIds,
@@ -307,7 +329,8 @@ export function createConnectionBootstrapOperations(deps: {
         continueInterruptedSession,
         logError: deps.logError,
       },
-      generation
+      generation,
+      sessionIds
     );
   };
 
@@ -323,6 +346,61 @@ export function createConnectionBootstrapOperations(deps: {
       },
       sessionId
     );
+  };
+
+  const acknowledgeRecoveryClaim = (claimId: number, consumedSessionIds: string[]) => {
+    deps.acknowledgeInterruptedSessionRecovery(claimId, consumedSessionIds);
+  };
+
+  const drainRecoveryClaims = async (generation: number) => {
+    if (recoveryDrain) return recoveryDrain;
+
+    const operation = (async () => {
+      while (deps.isCurrentConnectionGeneration(generation)) {
+        const nextClaim = [...pendingRecoveryClaims].find(
+          ([claimId]) => !processingRecoveryClaims.has(claimId)
+        );
+        if (!nextClaim) return;
+
+        const [claimId, sessionIds] = nextClaim;
+        processingRecoveryClaims.add(claimId);
+        try {
+          const consumedSessionIds = await recoverSessionIds(generation, sessionIds);
+          if (!deps.isCurrentConnectionGeneration(generation)) return;
+          pendingRecoveryClaims.delete(claimId);
+          settledRecoveryClaims.set(claimId, consumedSessionIds);
+          acknowledgeRecoveryClaim(claimId, consumedSessionIds);
+        } finally {
+          processingRecoveryClaims.delete(claimId);
+        }
+      }
+    })();
+    recoveryDrain = operation;
+    try {
+      await operation;
+    } finally {
+      if (recoveryDrain === operation) recoveryDrain = null;
+    }
+  };
+
+  const queueInterruptedSessionRecovery = (claimId: number, sessionIds: readonly string[]) => {
+    const settledSessionIds = settledRecoveryClaims.get(claimId);
+    if (settledSessionIds) {
+      acknowledgeRecoveryClaim(claimId, settledSessionIds);
+      return;
+    }
+
+    const current = pendingRecoveryClaims.get(claimId) ?? [];
+    pendingRecoveryClaims.set(claimId, [...new Set([...current, ...sessionIds])]);
+    if (deps.isInitialized()) {
+      void drainRecoveryClaims(deps.getCurrentConnectionGeneration());
+    }
+  };
+
+  const recoverInterruptedSessions = async (generation: number) => {
+    await recoverSessionIds(generation);
+    if (!deps.isCurrentConnectionGeneration(generation)) return;
+    await drainRecoveryClaims(generation);
   };
 
   const initConnection = () => {
@@ -368,6 +446,7 @@ export function createConnectionBootstrapOperations(deps: {
 
   return {
     recoverInterruptedSessions,
+    queueInterruptedSessionRecovery,
     continueInterruptedSession,
     initConnection,
     ensureConnectionInitialized,

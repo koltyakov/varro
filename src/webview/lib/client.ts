@@ -178,6 +178,7 @@ export const client = {
         noReply?: boolean;
         delivery?: 'steer' | 'queue';
         variant?: string;
+        queuedMessageDispatch?: { itemId: string; lease: number };
       },
       options?: { directory?: string }
     ): Promise<void> {
@@ -189,12 +190,16 @@ export const client = {
       // so routing steer there dropped the message instead of steering. Always send
       // through prompt_async; the queue/steer distinction lives entirely in the UI
       // (queue holds the message until idle, steer sends it immediately).
-      const { delivery: _delivery, ...rest } = body;
-      await apiCall(
-        'POST',
-        withDirectory(CURRENT_OPENCODE_ENDPOINTS.sessionPromptAsync(id), options?.directory),
-        rest
+      const { delivery: _delivery, queuedMessageDispatch, ...rest } = body;
+      const path = withDirectory(
+        CURRENT_OPENCODE_ENDPOINTS.sessionPromptAsync(id),
+        options?.directory
       );
+      if (queuedMessageDispatch) {
+        await apiCall('POST', path, rest, { queuedMessageDispatch });
+      } else {
+        await apiCall('POST', path, rest);
+      }
     },
     async respondPermission(
       _sessionId: string,

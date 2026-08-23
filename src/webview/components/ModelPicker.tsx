@@ -449,6 +449,8 @@ export function ModelPicker(props: {
                             >
                               <button
                                 class={`dropdown-item model-picker-item ${isSelected(provider.id, model.id) ? 'selected' : ''} ${focusIndex() === myIndex() ? 'keyboard-focus' : ''}`}
+                                data-provider-id={provider.id}
+                                data-model-id={model.id}
                                 onClick={() => {
                                   props.onSelect({ providerID: provider.id, modelID: model.id });
                                   props.onClose();

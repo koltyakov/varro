@@ -27,6 +27,7 @@ import {
   terminalIcon,
 } from '../lib/ui-icons';
 import { toCssUrl } from './UiIcon';
+import { getFileTypeIcon } from './FileTypeIcon';
 
 const selectSessionMock = vi.hoisted(() => vi.fn(async () => {}));
 
@@ -2415,6 +2416,9 @@ describe('FileChangeCard', () => {
     cleanup = render(() => ToolCall({ part }), container!);
 
     expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Edited:');
+    const icon = container?.querySelector<HTMLImageElement>('.file-edit-file-icon');
+    expect(icon).toBeInstanceOf(HTMLImageElement);
+    expect(icon?.getAttribute('src')).toBe(getFileTypeIcon('src/foo.ts'));
     expect(fileStatusSpy).not.toHaveBeenCalled();
   });
 
@@ -2515,7 +2519,7 @@ describe('FileChangeCard', () => {
     expect(links.map((link) => link.textContent)).toEqual(['src/old.ts', 'src/new.ts']);
     expect(container?.querySelector('.file-edit-diff-stats')?.textContent).toContain('+2');
     expect(container?.querySelector('.file-edit-diff-stats')?.textContent).toContain('-1');
-    expect(container?.querySelector('.file-edit-duration')?.textContent).toBe('2s');
+    expect(container?.querySelector('.file-edit-duration')).toBeNull();
 
     links[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     links[1]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -2530,7 +2534,7 @@ describe('FileChangeCard', () => {
     });
   });
 
-  it('shows grouped paths and per-file stats for multi-file apply_patch metadata', () => {
+  it('shows separate rows and per-file stats for multi-file apply_patch metadata', () => {
     const sendSpy = setExtensionSender();
     setState('editorContext', {
       workspacePath: '/repo',
@@ -2563,17 +2567,28 @@ describe('FileChangeCard', () => {
 
     cleanup = render(() => ToolCall({ part }), container!);
 
+    const rows = Array.from(container?.querySelectorAll<HTMLElement>('.file-change-card') || []);
     const links = Array.from(
-      container?.querySelectorAll<HTMLAnchorElement>(
-        '.file-edit-multi-list .file-edit-path-link'
-      ) || []
+      container?.querySelectorAll<HTMLAnchorElement>('.file-change-card .file-edit-path-link') || []
     );
 
-    expect(container?.querySelector('.file-edit-summary-label')?.textContent).toBe('2 files');
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.querySelector('.file-edit-action-label')?.textContent)).toEqual([
+      'Added:',
+      'Edited:',
+    ]);
     expect(links.map((link) => link.textContent)).toEqual(['src/new.ts', 'src/app.ts']);
+    expect(
+      links.map((link) =>
+        link.querySelector<HTMLImageElement>('.file-edit-file-icon')?.getAttribute('src')
+      )
+    ).toEqual([getFileTypeIcon('src/new.ts'), getFileTypeIcon('src/app.ts')]);
+    expect(container?.querySelector('.file-edit-summary-label')).toBeNull();
     expect(container?.querySelector('.file-edit-more-count')).toBeNull();
-    expect(container?.querySelector('.file-edit-diff-stats')?.textContent).toContain('+5');
-    expect(container?.querySelector('.file-edit-diff-stats')?.textContent).toContain('-1');
+    expect(rows[0]?.querySelector('.file-edit-diff-stats')?.textContent).toContain('+2');
+    expect(rows[0]?.querySelector('.file-edit-diff-stats')?.textContent).toContain('-0');
+    expect(rows[1]?.querySelector('.file-edit-diff-stats')?.textContent).toContain('+3');
+    expect(rows[1]?.querySelector('.file-edit-diff-stats')?.textContent).toContain('-1');
 
     links[1]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
@@ -2583,7 +2598,7 @@ describe('FileChangeCard', () => {
     });
   });
 
-  it('limits crowded multi-file rows to a fixed summary, first path, and more count', () => {
+  it('renders every completed file change as a separate row', () => {
     const sendSpy = setExtensionSender();
     const part: ToolPart = {
       id: 'tool-1',
@@ -2601,8 +2616,8 @@ describe('FileChangeCard', () => {
           files: [
             { type: 'update', relativePath: 'src/one.ts', additions: 1, deletions: 0 },
             { type: 'update', relativePath: 'src/two.ts', additions: 1, deletions: 0 },
-            { type: 'update', relativePath: 'src/three.ts', additions: 1, deletions: 0 },
-            { type: 'update', relativePath: 'src/four.ts', additions: 1, deletions: 0 },
+            { type: 'update', relativePath: 'src/three.css', additions: 1, deletions: 0 },
+            { type: 'update', relativePath: 'src/four.mjs', additions: 1, deletions: 0 },
           ],
         },
         time: { start: 0, end: 1500 },
@@ -2611,42 +2626,93 @@ describe('FileChangeCard', () => {
 
     cleanup = render(() => ToolCall({ part }), container!);
 
+    const rows = Array.from(container?.querySelectorAll<HTMLElement>('.file-change-card') || []);
     const links = Array.from(
-      container?.querySelectorAll<HTMLAnchorElement>(
-        '.file-edit-multi-list .file-edit-path-link'
-      ) || []
+      container?.querySelectorAll<HTMLAnchorElement>('.file-change-card .file-edit-path-link') || []
     );
 
-    expect(container?.querySelector('.file-edit-summary-label')?.textContent).toBe('4 files');
-    expect(links.map((link) => link.textContent)).toEqual(['src/one.ts']);
-    expect(links[0]?.getAttribute('title')).toBe('src/one.ts');
-    expect(document.querySelector('.file-edit-more-menu')).toBeNull();
-
-    const moreButton = container?.querySelector<HTMLButtonElement>('.file-edit-more-count');
-    expect(moreButton?.textContent).toBe('+3 more');
-    expect(moreButton?.getAttribute('aria-expanded')).toBe('false');
-
-    moreButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-
-    expect(moreButton?.getAttribute('aria-expanded')).toBe('true');
-    const hiddenLinks = Array.from(
-      document.querySelectorAll<HTMLAnchorElement>('.file-edit-more-menu-item') || []
-    );
-
-    expect(hiddenLinks.map((link) => link.textContent)).toEqual([
+    expect(rows).toHaveLength(4);
+    expect(links.map((link) => link.textContent)).toEqual([
+      'src/one.ts',
       'src/two.ts',
-      'src/three.ts',
-      'src/four.ts',
+      'src/three.css',
+      'src/four.mjs',
     ]);
-    expect(hiddenLinks[1]?.getAttribute('title')).toBe('src/three.ts');
+    expect(document.querySelector('.file-edit-more-menu')).toBeNull();
+    expect(container?.querySelector('.file-edit-more-count')).toBeNull();
 
-    hiddenLinks[1]?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(
+      links.map((link) =>
+        link.querySelector<HTMLImageElement>('.file-edit-file-icon')?.getAttribute('src')
+      )
+    ).toEqual([
+      getFileTypeIcon('src/one.ts'),
+      getFileTypeIcon('src/two.ts'),
+      getFileTypeIcon('src/three.css'),
+      getFileTypeIcon('src/four.mjs'),
+    ]);
+    links[2]?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
 
     expect(sendSpy).toHaveBeenCalledWith({
       type: 'vscode/open',
-      payload: { path: 'src/three.ts', kind: 'file', view: 'diff' },
+      payload: { path: 'src/three.css', kind: 'file', view: 'diff' },
     });
-    expect(document.querySelector('.file-edit-more-menu')).toBeNull();
+  });
+
+  it('replaces separate compact rows with inline changes unless compact rows are requested', () => {
+    const part: ToolPart = {
+      id: 'tool-inline-menu',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-inline-menu',
+      tool: 'apply_patch',
+      state: {
+        status: 'completed',
+        input: {
+          patchText: `*** Begin Patch
+*** Update File: src/one.ts
+@@
+-old
++one
+*** Update File: src/two.ts
+@@
+-old
++two
+*** Update File: src/three.ts
+@@
+-old
++three
+*** Update File: src/four.ts
+@@
+-old
++four
+*** End Patch`,
+        },
+        output: '',
+        title: 'apply_patch',
+        metadata: {},
+        time: { start: 0, end: 1 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+    expect(container?.querySelectorAll('.file-change-card')).toHaveLength(4);
+    expect(container?.querySelector('.file-edit-more-count')).toBeNull();
+
+    setShowInlineFileChanges(true);
+    expect(container?.querySelector('.file-change-card')).toBeNull();
+    expect(container?.querySelectorAll('.file-change-inline-diffs .diff-view-file')).toHaveLength(
+      4
+    );
+
+    cleanup?.();
+    cleanup = undefined;
+    container!.innerHTML = '';
+    cleanup = render(() => ToolCall({ part, compactFileChanges: true }), container!);
+
+    expect(container?.querySelectorAll('.file-change-card')).toHaveLength(4);
+    expect(container?.querySelector('.file-change-inline-diffs')).toBeNull();
   });
 
   it('keeps the compact completed row when inline previews are disabled', () => {
@@ -2805,6 +2871,16 @@ describe('FileChangeCard', () => {
 
     expect(errorToggle?.getAttribute('aria-expanded')).toBe('false');
     expect(container?.querySelector('.file-edit-error-detail')).toBeNull();
+
+    cleanup?.();
+    cleanup = undefined;
+    container!.innerHTML = '';
+    cleanup = render(() => ToolCall({ part, compactFileChanges: true }), container!);
+
+    expect(container?.querySelector('.file-edit-error-label')?.textContent).toBe('failed');
+    expect(container?.querySelector('.file-edit-error-toggle')).toBeNull();
+    expect(container?.querySelector('.file-edit-error-detail')).toBeNull();
+    expect(container?.querySelector('.file-change-inline-diffs')).toBeNull();
   });
 
   it('clamps long file edit errors and opens the full error in an editor tab', () => {

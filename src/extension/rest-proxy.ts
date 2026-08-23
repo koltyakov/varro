@@ -10,7 +10,7 @@ import {
 } from '../shared/context-breakdown';
 import type { Message, Part } from '../shared/opencode-types';
 import { parseSessionPromptEndpoint } from '../shared/opencode-endpoints';
-import { VARRO_API_ENDPOINTS } from '../shared/protocol';
+import { isSafePersistedSessionId, VARRO_API_ENDPOINTS } from '../shared/protocol';
 import type {
   AutoApproveJudgeReference,
   AutoApproveJudgeRequest,
@@ -153,6 +153,31 @@ export interface RestProxyCallbacks {
   removeSessionImages(sessionIds: Iterable<string>): Promise<void>;
   postApiResponse(requestGeneration: number, payload: ApiResponsePayload): void;
   isPermissionAutomationLeaseCurrent(lease: number): boolean;
+  beginQueuedMessageDispatchClaim(
+    sessionId: string,
+    itemId: string,
+    lease: number,
+    requestId: number,
+    messageId: string
+  ): Promise<boolean>;
+  isQueuedMessageDispatchClaimCurrent(
+    sessionId: string,
+    itemId: string,
+    lease: number,
+    requestId: number
+  ): boolean;
+  completeQueuedMessageDispatchClaim(
+    sessionId: string,
+    itemId: string,
+    lease: number,
+    requestId: number
+  ): Promise<boolean>;
+  releaseQueuedMessageDispatchClaim(
+    sessionId: string,
+    itemId: string,
+    lease: number,
+    requestId: number
+  ): void;
   updatePermissionMode(sessionID: string, mode: PermissionMode): Promise<unknown>;
 }
 
@@ -199,6 +224,11 @@ export class RestProxy {
 
   async handleRequest(payload: ApiRequestPayload) {
     const requestGeneration = this.callbacks.getRequestGeneration();
+    const method = payload.method.toUpperCase();
+    const promptSessionID = this.parsePromptSessionID(method, payload.path);
+    const queuedDispatch = promptSessionID ? payload.queuedMessageDispatch : undefined;
+    const queuedMessageId = queuedDispatch ? asRecord(payload.body)?.messageID : undefined;
+    let queuedDispatchActive = false;
     if (this.disposed) {
       this.callbacks.postApiResponse(requestGeneration, {
         id: payload.id,
@@ -209,28 +239,30 @@ export class RestProxy {
     const request = payload.cancelKey
       ? { id: payload.id, generation: requestGeneration, controller: new AbortController() }
       : undefined;
-    if (payload.cancelKey && request) {
-      const existing = this.activeRequests.get(payload.cancelKey);
-      if (existing) {
-        this.callbacks.postApiResponse(requestGeneration, {
-          id: payload.id,
-          error: 'Duplicate API request cancellation key',
-        });
-        return;
-      }
-      this.activeRequests.set(payload.cancelKey, request);
-    }
     try {
-      const method = payload.method.toUpperCase();
       if (!isAllowedApiRequest(method, payload.path)) {
         throw new Error('Unsupported API request');
       }
       if (
-        payload.permissionAutomationLease !== undefined &&
-        !this.callbacks.isPermissionAutomationLeaseCurrent(payload.permissionAutomationLease)
+        queuedDispatch &&
+        (!isSafePersistedSessionId(queuedMessageId) ||
+          !(await this.callbacks.beginQueuedMessageDispatchClaim(
+            promptSessionID!,
+            queuedDispatch.itemId,
+            queuedDispatch.lease,
+            payload.id,
+            queuedMessageId
+          )))
       ) {
-        throw new Error('Permission automation ownership changed');
+        throw new Error('Queued message dispatch lease is no longer current');
       }
+      queuedDispatchActive = queuedDispatch !== undefined;
+      if (payload.cancelKey && request) {
+        const existing = this.activeRequests.get(payload.cancelKey);
+        if (existing) throw new Error('Duplicate API request cancellation key');
+        this.activeRequests.set(payload.cancelKey, request);
+      }
+      this.assertPermissionAutomationLeaseCurrent(method, payload);
 
       const requestedWorkspaceDirectory = getExplicitWorkspaceDirectory(payload.path);
       const explicitWorkspaceDirectory = requestedWorkspaceDirectory
@@ -377,6 +409,7 @@ export class RestProxy {
         const workspacePath = sessionID
           ? await this.resolveJudgeWorkspacePath(sessionID)
           : undefined;
+        this.assertPermissionAutomationLeaseCurrent(method, payload);
         const data = await this.callbacks.autoApproveJudge.judge(
           judgePermissionRequest,
           workspacePath
@@ -437,7 +470,6 @@ export class RestProxy {
       // opencode emits the SSE `session.status { busy }` event only after
       // admission, and on fast turns the finish can land first; pre-marking
       // here ensures the busy marker exists before any finish event arrives.
-      const promptSessionID = this.parsePromptSessionID(method, payload.path);
       if (promptSessionID) {
         const workspacePath =
           explicitWorkspaceDirectory ??
@@ -446,9 +478,20 @@ export class RestProxy {
         if (
           workspacePath &&
           normalizeWorkspaceIdentity(workspacePath) &&
-          !(await this.callbacks.confirmPromptAdmission(workspacePath))
+          !(await this.confirmPromptAdmission(workspacePath, request?.controller.signal))
         ) {
           throw new Error('Prompt cancelled because generated dependencies are not ignored by Git');
+        }
+        if (
+          queuedDispatch &&
+          !this.callbacks.isQueuedMessageDispatchClaimCurrent(
+            promptSessionID,
+            queuedDispatch.itemId,
+            queuedDispatch.lease,
+            payload.id
+          )
+        ) {
+          throw new Error('Queued message dispatch lease is no longer current');
         }
       }
       const promptAttempt = promptSessionID
@@ -477,23 +520,38 @@ export class RestProxy {
       const defaultModelRequest = method === 'GET' && payload.path === '/model/default';
       let responsePromise: Promise<unknown>;
       try {
-        responsePromise = defaultModelRequest
-          ? this.requestDefaultModel(
-              this.getCurrentWorkspaceResolutionRoot() ?? this.getCurrentWorkspacePath(),
-              request?.controller.signal
+        if (defaultModelRequest) {
+          responsePromise = this.requestDefaultModel(
+            this.getCurrentWorkspaceResolutionRoot() ?? this.getCurrentWorkspacePath(),
+            request?.controller.signal
+          );
+        } else if (paginatedMessages) {
+          responsePromise = this.requestPaginatedMessages(
+            method,
+            forwardedPath,
+            payload.body,
+            request?.controller.signal
+          );
+        } else {
+          this.assertPermissionAutomationLeaseCurrent(method, payload);
+          request?.controller.signal.throwIfAborted();
+          if (
+            queuedDispatch &&
+            !this.callbacks.isQueuedMessageDispatchClaimCurrent(
+              promptSessionID!,
+              queuedDispatch.itemId,
+              queuedDispatch.lease,
+              payload.id
             )
-          : paginatedMessages
-            ? this.requestPaginatedMessages(
-                method,
-                forwardedPath,
-                payload.body,
-                request?.controller.signal
-              )
-            : request
-              ? this.callbacks.server.request(method, forwardedPath, payload.body, {
-                  signal: request.controller.signal,
-                })
-              : this.callbacks.server.request(method, forwardedPath, payload.body);
+          ) {
+            throw new Error('Queued message dispatch lease is no longer current');
+          }
+          responsePromise = request
+            ? this.callbacks.server.request(method, forwardedPath, payload.body, {
+                signal: request.controller.signal,
+              })
+            : this.callbacks.server.request(method, forwardedPath, payload.body);
+        }
         if (this.isSessionListRequest(method, payload.path) && sessionPageLimit === null) {
           this.trackSessionDirectoryBootstrap(responsePromise, false);
         }
@@ -517,6 +575,24 @@ export class RestProxy {
         }
         if (promptAttempt) await this.reconcileFailedPrompt(promptAttempt, err);
         throw err;
+      }
+      if (queuedDispatch) {
+        try {
+          const completed = await this.callbacks.completeQueuedMessageDispatchClaim(
+            promptSessionID!,
+            queuedDispatch.itemId,
+            queuedDispatch.lease,
+            payload.id
+          );
+          if (!completed) {
+            logger.warn('Queued message dispatch claim changed after successful admission');
+          }
+        } catch (err) {
+          logger.warn(
+            `Accepted queued message could not be durably removed: ${err instanceof Error ? err.message : String(err)}`
+          );
+        }
+        queuedDispatchActive = false;
       }
       let data: unknown;
       try {
@@ -555,10 +631,49 @@ export class RestProxy {
         error: err instanceof Error ? err.message : String(err),
       });
     } finally {
+      if (queuedDispatch && queuedDispatchActive) {
+        this.callbacks.releaseQueuedMessageDispatchClaim(
+          promptSessionID!,
+          queuedDispatch.itemId,
+          queuedDispatch.lease,
+          payload.id
+        );
+      }
       if (payload.cancelKey && this.activeRequests.get(payload.cancelKey) === request) {
         this.activeRequests.delete(payload.cancelKey);
       }
     }
+  }
+
+  private assertPermissionAutomationLeaseCurrent(method: string, payload: ApiRequestPayload) {
+    const lease = payload.permissionAutomationLease;
+    if (lease === undefined || !isPermissionAutomationRequest(method, payload.path)) return;
+    if (!this.callbacks.isPermissionAutomationLeaseCurrent(lease)) {
+      throw new Error('Permission automation ownership changed');
+    }
+  }
+
+  private confirmPromptAdmission(workspacePath: string, signal?: AbortSignal): Promise<boolean> {
+    const admission = this.callbacks.confirmPromptAdmission(workspacePath);
+    if (!signal) return admission;
+    signal.throwIfAborted();
+    return new Promise((resolve, reject) => {
+      const abort = () => {
+        signal.removeEventListener('abort', abort);
+        reject(signal.reason);
+      };
+      signal.addEventListener('abort', abort, { once: true });
+      void admission.then(
+        (confirmed) => {
+          signal.removeEventListener('abort', abort);
+          resolve(confirmed);
+        },
+        (err: unknown) => {
+          signal.removeEventListener('abort', abort);
+          reject(err);
+        }
+      );
+    });
   }
 
   private async requestDefaultModel(
@@ -2398,5 +2513,14 @@ function isKnownPreAdmissionPromptFailure(error: unknown): boolean {
   return (
     /^4\d{2}(?:\s|$)/.test(message) ||
     message.includes('OpenCode server is not accepting requests while stopping')
+  );
+}
+
+function isPermissionAutomationRequest(method: string, path: string): boolean {
+  if (method !== 'POST') return false;
+  const pathname = new URL(path, 'http://localhost').pathname;
+  return (
+    pathname === VARRO_API_ENDPOINTS.permissionJudge ||
+    /^\/permission\/[^/]+\/reply$/.test(pathname)
   );
 }

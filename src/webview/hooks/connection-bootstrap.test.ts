@@ -3,6 +3,7 @@ import type { Message, SessionStatus } from '../types';
 import {
   buildInterruptedSessionContinueBody,
   continueInterruptedSessionWithDependencies,
+  createConnectionBootstrapOperations,
   ensureConnectionInitializedWithDependencies,
   initConnectionWithDependencies,
   INTERRUPTED_SESSION_CONTINUE_PROMPT,
@@ -54,6 +55,48 @@ function assistantMessage(
     },
     ...overrides,
   };
+}
+
+function createRecoveryOperations(options?: { sendAsync?: () => Promise<void> }) {
+  let initialized = false;
+  let generation = 0;
+  const sendAsync = vi.fn(options?.sendAsync ?? (async () => {}));
+  const acknowledgeInterruptedSessionRecovery = vi.fn(() => true);
+  const logError = vi.fn();
+  const operations = createConnectionBootstrapOperations({
+    health: async () => HEALTHY_RESPONSE,
+    loadInitialData: async () => {},
+    hydrateSessionStatuses: async () => {},
+    getActiveSessionId: () => null,
+    getPersistedActiveSessionId: () => null,
+    getSessionCount: () => 1,
+    getOnlyPrimarySessionId: () => null,
+    hasSession: () => true,
+    selectSession: async () => {},
+    setShowSessionPicker: vi.fn(),
+    setInitialized: (value) => {
+      initialized = value;
+    },
+    setError: vi.fn(),
+    nextConnectionGeneration: () => ++generation,
+    isCurrentConnectionGeneration: (candidate) => candidate === generation,
+    getCurrentConnectionGeneration: () => generation,
+    isInitialized: () => initialized,
+    consumeInterruptedSessionIds: () => [],
+    acknowledgeInterruptedSessionRecovery,
+    getSessionStatus: () => ({ type: 'idle' }),
+    hasPendingQuestion: () => false,
+    hasPendingPermission: () => false,
+    loadSessionMessages: async () => [{ info: userMessage('user-1'), parts: [] }],
+    logError,
+    syncSessionMcps: async () => {},
+    resolveModel: () => null,
+    resolveAgent: () => 'build',
+    sendAsync,
+    syncSession: async () => {},
+    recheckSessionStatus: async () => {},
+  });
+  return { operations, sendAsync, acknowledgeInterruptedSessionRecovery, logError };
 }
 
 describe('connection-bootstrap helpers', () => {
@@ -164,6 +207,61 @@ describe('connection-bootstrap helpers', () => {
     expect(continueInterruptedSession).toHaveBeenCalledTimes(1);
     expect(continueInterruptedSession).toHaveBeenCalledWith('session-idle');
     expect(logError).not.toHaveBeenCalled();
+  });
+
+  it('holds recovery claims received before bootstrap until session data is ready', async () => {
+    const { operations, sendAsync, acknowledgeInterruptedSessionRecovery } =
+      createRecoveryOperations();
+
+    operations.queueInterruptedSessionRecovery(1, ['session-1']);
+    expect(sendAsync).not.toHaveBeenCalled();
+    expect(acknowledgeInterruptedSessionRecovery).not.toHaveBeenCalled();
+
+    await operations.initConnection();
+
+    expect(sendAsync).toHaveBeenCalledTimes(1);
+    expect(acknowledgeInterruptedSessionRecovery).toHaveBeenCalledWith(1, ['session-1']);
+  });
+
+  it('drains recovery claims received after bootstrap', async () => {
+    const { operations, sendAsync, acknowledgeInterruptedSessionRecovery } =
+      createRecoveryOperations();
+    await operations.initConnection();
+
+    operations.queueInterruptedSessionRecovery(2, ['session-1']);
+
+    await vi.waitFor(() => expect(sendAsync).toHaveBeenCalledTimes(1));
+    expect(acknowledgeInterruptedSessionRecovery).toHaveBeenCalledWith(2, ['session-1']);
+  });
+
+  it('does not continue a duplicate recovery claim twice', async () => {
+    const { operations, sendAsync, acknowledgeInterruptedSessionRecovery } =
+      createRecoveryOperations();
+
+    operations.queueInterruptedSessionRecovery(3, ['session-1']);
+    operations.queueInterruptedSessionRecovery(3, ['session-1']);
+    await operations.initConnection();
+    operations.queueInterruptedSessionRecovery(3, ['session-1']);
+
+    expect(sendAsync).toHaveBeenCalledTimes(1);
+    expect(acknowledgeInterruptedSessionRecovery).toHaveBeenCalledTimes(2);
+    expect(acknowledgeInterruptedSessionRecovery).toHaveBeenLastCalledWith(3, ['session-1']);
+  });
+
+  it('acknowledges a failed continuation as retained rather than consumed', async () => {
+    const { operations, sendAsync, acknowledgeInterruptedSessionRecovery, logError } =
+      createRecoveryOperations({
+        sendAsync: async () => {
+          throw new Error('continue failed');
+        },
+      });
+
+    operations.queueInterruptedSessionRecovery(4, ['session-1']);
+    await operations.initConnection();
+
+    expect(sendAsync).toHaveBeenCalledTimes(1);
+    expect(logError).toHaveBeenCalledWith('recoverInterruptedSession', expect.any(Error));
+    expect(acknowledgeInterruptedSessionRecovery).toHaveBeenCalledWith(4, []);
   });
 
   it('initializes connection data, opens the sessions list when sessions exist, and recovers interruptions', async () => {
