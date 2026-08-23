@@ -1274,7 +1274,7 @@ body.vscode-light
 }
 
 .assistant-dialog-summary-action-implement {
-  color: color-mix(in srgb, var(--color-vscode-success) 82%, var(--color-vscode-fg));
+  color: var(--color-vscode-fg);
   border-color: color-mix(in srgb, var(--color-vscode-success) 42%, var(--color-vscode-border));
   background: color-mix(in srgb, var(--color-vscode-success) 18%, transparent);
 }
@@ -1294,7 +1294,7 @@ body.vscode-light
 }
 
 .assistant-dialog-summary-action-danger {
-  color: color-mix(in srgb, var(--color-vscode-error) 82%, var(--color-vscode-fg));
+  color: var(--color-vscode-fg);
   border-color: color-mix(in srgb, var(--color-vscode-error) 42%, var(--color-vscode-border));
   background: color-mix(in srgb, var(--color-vscode-error) 18%, transparent);
 }
