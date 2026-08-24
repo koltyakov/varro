@@ -873,6 +873,84 @@ describe('ToolCall', () => {
     );
   });
 
+  it('renders generic tool inputs and text output in the shared detail panel', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'browser-bridge_browser_page',
+      state: completedState(
+        { action: 'console', level: 'error', limit: 20 },
+        'Inspect browser console',
+        'Console: 0 entries (0 total).'
+      ),
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+    const panel = container?.querySelector('.structured-tool-card');
+    const rows = Array.from(panel?.querySelectorAll('.structured-tool-row') || []);
+
+    expect(rows.map((row) => row.querySelector('.structured-tool-label')?.textContent)).toEqual([
+      'action',
+      'level',
+      'limit',
+      'result',
+    ]);
+    expect(rows.at(-1)?.querySelector('.structured-tool-value')?.textContent).toBe(
+      'Console: 0 entries (0 total).'
+    );
+    expect(container?.querySelector('.tool-invocation-input')).toBeNull();
+    expect(container?.querySelector('.tool-invocation-output')).toBeNull();
+  });
+
+  it('shows an explicit empty result for an expandable generic tool', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'custom_lookup',
+      state: completedState({ query: 'missing' }, 'Look up missing item', '   '),
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+    const resultRow = container?.querySelector('.structured-tool-row-result');
+    expect(resultRow?.textContent).toContain('result');
+    expect(resultRow?.textContent).toContain('(no output)');
+  });
+
+  it('keeps generic running status below the shared detail panel', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'custom_lookup',
+      state: {
+        status: 'running',
+        input: { query: 'current item' },
+        title: 'Looking up current item',
+        metadata: {},
+        time: { start: 0 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+    expect(container?.querySelector('.structured-tool-card')).not.toBeNull();
+    expect(container?.querySelector('.structured-tool-label')?.textContent).toBe('query');
+    expect(container?.querySelector('.tool-invocation-running')?.textContent).toBe('Running…');
+  });
+
   it('does not render a second line for collapsed generic tool input', () => {
     setState('editorContext', {
       workspacePath: '/repo',
@@ -1737,6 +1815,8 @@ describe('ToolCall', () => {
 
     const detail = container?.querySelector('.tool-invocation-error');
 
+    expect(container?.querySelector('.structured-tool-card')).not.toBeNull();
+    expect(container?.querySelector('.structured-tool-row-aborted')).not.toBeNull();
     expect(detail?.classList.contains('is-aborted')).toBe(true);
     expect(detail?.textContent).toContain('Aborted');
   });
@@ -1765,6 +1845,7 @@ describe('ToolCall', () => {
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
 
     const detail = container?.querySelector<HTMLPreElement>('.tool-invocation-error');
+    expect(container?.querySelector('.structured-tool-row-error')).not.toBeNull();
     expect(detail?.classList).toContain('is-truncated');
     expect(detail?.textContent).not.toContain('browser failure 6');
 
@@ -2254,6 +2335,9 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.file-read-action-label')?.textContent).toBe('Read:');
     expect(target?.textContent).toBe('main.ts');
     expect(container?.querySelector('.file-read-range')?.textContent).toBe('(L5-7)');
+    const fileIcon = target?.querySelector<HTMLImageElement>('.file-read-file-icon');
+    expect(fileIcon).toBeInstanceOf(HTMLImageElement);
+    expect(fileIcon?.getAttribute('src')).toBe(getFileTypeIcon('/repo/src/main.ts'));
     const icon = container?.querySelector<HTMLElement>('.tool-call-icon-read');
     expect(icon).toBeInstanceOf(HTMLSpanElement);
     expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(eyeIcon));
@@ -2343,6 +2427,7 @@ describe('ToolCall', () => {
 
     expect(directoryLink?.textContent).toBe('src');
     expect(container?.querySelector('.file-read-meta')?.textContent).toBe('directory');
+    expect(directoryLink?.querySelector('.file-read-file-icon')).toBeNull();
 
     directoryLink?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
@@ -2371,6 +2456,7 @@ describe('ToolCall', () => {
       'current directory'
     );
     expect(container?.querySelector('.file-read-target[href]')).toBeNull();
+    expect(container?.querySelector('.file-read-file-icon')).toBeNull();
   });
 
   it('renders read paths containing edit as reads rather than file changes', () => {

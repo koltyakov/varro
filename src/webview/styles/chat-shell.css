@@ -1,5 +1,4 @@
 /* Narrow scrollbars for inline widgets */
-.tool-invocation-output,
 .toolbar-popover,
 .tool-invocation-params {
   scrollbar-width: thin;
@@ -7,7 +6,6 @@
   scrollbar-gutter: stable;
 }
 
-.tool-invocation-output:hover,
 .toolbar-popover:hover,
 .tool-invocation-params:hover {
   scrollbar-color: var(

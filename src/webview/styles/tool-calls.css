@@ -1361,8 +1361,8 @@ kbd {
 }
 
 /* Terminal and structured cards are the detail surface, rather than content
-   inside one. Let them occupy the full expanded region while plain tool
-   inputs, errors, and status text retain the readable inset above. */
+   inside one. Let them occupy the full expanded region while status text
+   retains a readable inset. */
 .chat-tool-invocation-part
   .tool-invocation-detail:has(> :is(.terminal-command-card, .structured-tool-card)) {
   padding: 0;
@@ -1376,7 +1376,7 @@ kbd {
 
 .chat-tool-invocation-part
   .tool-invocation-detail:has(> :is(.terminal-command-card, .structured-tool-card))
-  > :is(.tool-invocation-error, .tool-invocation-running:not(.tool-invocation-subagent-running)) {
+  > .tool-invocation-running:not(.tool-invocation-subagent-running) {
   padding: var(--space-5) var(--space-6) var(--space-6) var(--tool-detail-indent);
 }
 
@@ -1436,7 +1436,6 @@ kbd {
    reveal it or it becomes a keyboard trap the user cannot see. */
 .chat-tool-invocation-part .terminal-command-row-input:hover .tool-copy-button,
 .chat-tool-invocation-part .structured-tool-row:hover .tool-copy-button,
-.chat-tool-invocation-part .tool-input-entry:hover .tool-copy-button,
 .chat-tool-invocation-part .tool-invocation-header-shell:hover > .tool-copy-button,
 .chat-tool-invocation-part .tool-copy-button.is-copied,
 .chat-tool-invocation-part .tool-copy-button:focus-visible {
@@ -1515,61 +1514,6 @@ kbd {
    italic as a slanted synthetic face that reads as a different font. */
 .chat-tool-invocation-part .terminal-command-output-empty {
   color: var(--color-vscode-fg-muted);
-}
-
-.chat-tool-invocation-part .tool-invocation-input {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  margin-bottom: 8px;
-}
-
-.chat-tool-invocation-part .tool-input-entry {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11.5px;
-  line-height: 1.5;
-}
-
-/* Only the plain value grows; path links keep their intrinsic width so the
-   hover underline tracks the text rather than the whole row. */
-.chat-tool-invocation-part .tool-input-entry > span.tool-input-value {
-  flex: 1;
-}
-
-.chat-tool-invocation-part .tool-input-key {
-  color: var(--color-vscode-fg-muted);
-  flex-shrink: 0;
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-}
-
-.chat-tool-invocation-part .tool-input-key::after {
-  content: ':';
-}
-
-.chat-tool-invocation-part .tool-input-value {
-  color: var(--color-vscode-fg);
-  opacity: 0.88;
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chat-tool-invocation-part .tool-invocation-output {
-  white-space: pre-wrap;
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  line-height: 1.6;
-  color: var(--color-vscode-fg-soft);
-  margin: 0;
-  padding: var(--space-4) var(--space-5);
-  border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--color-vscode-fg) 2%, var(--color-vscode-list-bg));
 }
 
 /* Same surface as .terminal-command-card, deliberately: both are tool detail
@@ -1895,7 +1839,8 @@ kbd {
   text-decoration: none;
 }
 
-.file-edit-file-icon {
+.file-edit-file-icon,
+.file-read-file-icon {
   width: 14px;
   height: 14px;
   object-fit: contain;
@@ -2070,6 +2015,8 @@ kbd {
 .file-read-target {
   display: inline-flex;
   align-items: center;
+  align-self: center;
+  gap: 4px;
   font-family: inherit;
   font-size: inherit;
   min-width: 0;

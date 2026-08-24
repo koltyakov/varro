@@ -171,21 +171,22 @@ test('connects expanded activity rows to the underlined summary', async ({ page 
     };
 
     const previousRow = createRow(false);
-    track.append(previousRow, createRow(true));
+    const continuingRow = createRow(true);
+    continuingRow.querySelector('.assistant-activity-summary')?.remove();
+    track.append(previousRow, continuingRow);
     document.body.append(track);
 
     const trailingDetail = previousRow.querySelector(
       '.assistant-activity-details > .assistant-activity-detail:last-child'
     );
-    const trailingCard = trailingDetail?.querySelector(
-      '.chat-tool-invocation-part, .chat-thinking-box'
+    const continuingDetail = continuingRow.querySelector(
+      '.assistant-activity-details > .assistant-activity-detail:first-child'
     );
-    if (!(trailingDetail instanceof HTMLElement) || !(trailingCard instanceof HTMLElement)) {
+    if (!(trailingDetail instanceof HTMLElement) || !(continuingDetail instanceof HTMLElement)) {
       throw new Error('Virtualized activity boundary is incomplete');
     }
-    const style = getComputedStyle(trailingDetail, '::after');
-    const detailBounds = trailingDetail.getBoundingClientRect();
-    const rowBounds = previousRow.getBoundingClientRect();
+    const style = getComputedStyle(continuingDetail, '::before');
+    const detailBounds = continuingDetail.getBoundingClientRect();
     const top = detailBounds.top + Number.parseFloat(style.top);
     const result = {
       content: style.content,
@@ -194,8 +195,9 @@ test('connects expanded activity rows to the underlined summary', async ({ page 
       color: style.backgroundColor,
       top,
       bottom: top + Number.parseFloat(style.height),
-      detailBottom: detailBounds.bottom,
-      rowBottom: rowBounds.bottom,
+      previousDetailBottom: trailingDetail.getBoundingClientRect().bottom,
+      continuingDetailTop: detailBounds.top,
+      containment: getComputedStyle(continuingRow).contain,
     };
     track.remove();
     return result;
@@ -203,14 +205,15 @@ test('connects expanded activity rows to the underlined summary', async ({ page 
 
   expect(virtualizedBoundary.content).toBe('""');
   expect(virtualizedBoundary.width).toBe('1px');
-  expect(virtualizedBoundary.height).toBe('6px');
+  expect(virtualizedBoundary.height).toBe('12px');
   expect(virtualizedBoundary.color).toBe(connector.color);
-  expect(Math.abs(virtualizedBoundary.top - virtualizedBoundary.detailBottom)).toBeLessThanOrEqual(
-    1
-  );
-  expect(Math.abs(virtualizedBoundary.bottom - virtualizedBoundary.rowBottom)).toBeLessThanOrEqual(
-    0.5
-  );
+  expect(
+    Math.abs(virtualizedBoundary.top - virtualizedBoundary.previousDetailBottom)
+  ).toBeLessThanOrEqual(0.5);
+  expect(
+    Math.abs(virtualizedBoundary.bottom - virtualizedBoundary.continuingDetailTop)
+  ).toBeLessThanOrEqual(0.5);
+  expect(virtualizedBoundary.containment).toBe('layout style');
 
   await page.goto('/e2e/harness/index.html?scenario=tool-cards');
   const collapsedSummary = page.locator('.assistant-activity-summary').first();

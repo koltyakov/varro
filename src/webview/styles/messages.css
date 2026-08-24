@@ -362,7 +362,6 @@
   );
   --assistant-activity-underline-color: var(--color-vscode-border-soft);
   --assistant-activity-connector-width: 1px;
-  --assistant-activity-row-half-gap: 6px;
   --assistant-activity-summary-line-offset: 4px;
   /* Card border + horizontal padding + half of the 12px header icon. */
   --assistant-activity-icon-center: calc(1px + var(--space-5) + 6px);
@@ -720,15 +719,7 @@
 }
 
 .assistant-activity-details > .assistant-activity-detail::before,
-.assistant-activity-details .file-change-card-list > .file-change-card + .file-change-card::before,
-.interactive-list-track.virtualized
-  .interactive-item-container.interactive-response:has(
-    + .interactive-item-container.interactive-response-continues-activity-group
-  )
-  .assistant-message-flow
-  > .assistant-message-flow-item:last-child
-  .assistant-activity-details
-  > .assistant-activity-detail:last-child::after {
+.assistant-activity-details .file-change-card-list > .file-change-card + .file-change-card::before {
   position: absolute;
   left: var(--assistant-activity-icon-center);
   width: var(--assistant-activity-connector-width);
@@ -743,16 +734,11 @@
   height: var(--assistant-activity-item-gap);
 }
 
+/* Let the continuing row's connector paint across the row boundary as one
+   segment. Two paint-contained half-segments can expose a raster seam. */
 .interactive-list-track.virtualized
-  .interactive-item-container.interactive-response:has(
-    + .interactive-item-container.interactive-response-continues-activity-group
-  )
-  .assistant-message-flow
-  > .assistant-message-flow-item:last-child
-  .assistant-activity-details
-  > .assistant-activity-detail:last-child::after {
-  top: 100%;
-  height: var(--assistant-activity-row-half-gap);
+  .interactive-item-container.interactive-response-continues-activity-group {
+  contain: layout style;
 }
 
 .assistant-message-flow-item-streamed.measured-entrance-active {
@@ -1628,14 +1614,12 @@ body.vscode-light
 }
 
 .rendered-markdown a.file-path-link,
-.rendered-markdown a.session-reference-link,
-.tool-input-value.file-path-link {
+.rendered-markdown a.session-reference-link {
   color: var(--color-vscode-link);
   text-decoration: none;
   cursor: pointer;
 }
-.rendered-markdown a.session-reference-link:hover,
-.tool-input-value.file-path-link:hover {
+.rendered-markdown a.session-reference-link:hover {
   text-decoration: underline;
 }
 

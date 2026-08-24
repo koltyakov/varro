@@ -33,12 +33,7 @@ import type { FileChange } from '../lib/tool-file-change';
 import { getToolCallExpanded, setToolCallExpanded } from '../lib/tool-call-expansion-state';
 import type { ToolCallPermissionMatch } from '../lib/tool-call-matching';
 import { resolveTaskSessionId } from '../lib/task-session';
-import {
-  getToolKind,
-  isApplyPatchTool,
-  isStructuredTool,
-  normalizeToolName,
-} from '../lib/tool-normalization';
+import { getToolKind, isApplyPatchTool, normalizeToolName } from '../lib/tool-normalization';
 import type { ToolKind } from '../lib/tool-normalization';
 import { rememberDirectSessionReturn } from '../lib/session-navigation';
 import { selectSession } from '../hooks/useOpenCode';
@@ -783,6 +778,9 @@ function ReadToolCard(props: {
               fallback={<span class="file-read-target file-read-target-text">{name()}</span>}
             >
               <a href="#" class="file-path-link file-read-target" onClick={openFile}>
+                <Show when={!isDirectory()}>
+                  <FileTypeIcon path={props.filePath ?? undefined} class="file-read-file-icon" />
+                </Show>
                 {name()}
               </a>
             </Show>
@@ -1324,11 +1322,7 @@ function GenericToolCall(props: {
   const isQuestionSkipped = () => isQuestionSkippedToolError(props.state);
   const isBash = () => toolName() === 'bash';
   const isTask = () => toolName() === 'task';
-  const isStructured = () => isStructuredTool(props.tool.tool);
   const isSearchTool = () => getToolKind(toolName()) === 'search';
-  // Search results are inputs-plus-output like task/apply_patch, so they share the
-  // framed labeled-row card instead of the unframed key/value + bare <pre> body.
-  const usesStructuredCard = () => isStructured() || isSearchTool();
   const taskAgentLabel = () => {
     const type = props.state.input?.subagent_type;
     if (!isString(type) || !type.trim()) return 'Subagent';
@@ -1634,49 +1628,12 @@ function GenericToolCall(props: {
           <Show
             when={isBash() && bashCommand()}
             fallback={
-              <Show
-                when={usesStructuredCard()}
-                fallback={
-                  <Show when={props.inputEntries.length > 0}>
-                    <div class="tool-invocation-input">
-                      <For each={props.inputEntries}>
-                        {([key, value]) => (
-                          <div class="tool-input-entry">
-                            <span class="tool-input-key">{key}</span>
-                            {isPathKey(key) && isString(value) ? (
-                              <a
-                                href="#"
-                                class="file-path-link tool-input-value"
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  openGenericToolFile(String(value));
-                                }}
-                              >
-                                {formatDisplayPath(
-                                  String(value),
-                                  appState.editorContext.workspacePath
-                                )}
-                              </a>
-                            ) : (
-                              <>
-                                <span class="tool-input-value">{formatValue(key, value)}</span>
-                                <CopyIconButton text={formatValue(key, value)} label={key} />
-                              </>
-                            )}
-                          </div>
-                        )}
-                      </For>
-                    </div>
-                  </Show>
-                }
-              >
-                <StructuredToolCard
-                  inputEntries={detailInputEntries()}
-                  result={structuredResult()}
-                  onOpenPath={openGenericToolFile}
-                  toolTitle={props.title}
-                />
-              </Show>
+              <StructuredToolCard
+                inputEntries={detailInputEntries()}
+                result={structuredResult()}
+                onOpenPath={openGenericToolFile}
+                toolTitle={props.title}
+              />
             }
           >
             <div class="terminal-command-card">
@@ -1720,28 +1677,6 @@ function GenericToolCall(props: {
                 </div>
               </Show>
             </div>
-          </Show>
-          <Show
-            when={
-              !isBash() &&
-              !usesStructuredCard() &&
-              props.state.status === 'completed' &&
-              !isBlank(props.fullOutput)
-            }
-          >
-            <ClampedToolText
-              content={props.fullOutput}
-              title={`${props.title} (output)`}
-              class="tool-invocation-output"
-            />
-          </Show>
-          <Show when={props.state.status === 'error' && !isBash() && !usesStructuredCard()}>
-            <ClampedToolText
-              content={props.state.status === 'error' ? props.state.error : ''}
-              title={`${props.title} (error)`}
-              language="plaintext"
-              class={`tool-invocation-error${isAborted() ? ' is-aborted' : ''}`}
-            />
           </Show>
           <Show when={props.state.status === 'running' && !isBash()}>
             <Show when={isTask()} fallback={<div class="tool-invocation-running">Running…</div>}>
@@ -1906,6 +1841,7 @@ function StructuredToolCard(props: {
             <ClampedToolText
               content={result().value}
               title={`${props.toolTitle} (${result().label})`}
+              language={result().status ? 'plaintext' : undefined}
               class={`structured-tool-value structured-tool-value-result${
                 result().status
                   ? ` tool-invocation-error${result().status === 'aborted' ? ' is-aborted' : ''}`
@@ -1936,14 +1872,4 @@ function formatExpandedValue<T>(key: string, value: T): string {
   }
   if (isNumber(value) || isBoolean(value)) return String(value);
   return JSON.stringify(value, null, 2);
-}
-
-function formatValue<T>(key: string, value: T): string {
-  if (isString(value)) {
-    const formatted =
-      key === 'command' ? formatCommandDisplay(value, appState.editorContext.workspacePath) : value;
-    return formatted.length > 200 ? formatted.slice(0, 200) + '...' : formatted;
-  }
-  if (isNumber(value) || isBoolean(value)) return String(value);
-  return JSON.stringify(value);
 }
