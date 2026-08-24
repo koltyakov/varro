@@ -260,7 +260,7 @@ describe('SidebarProvider permission replay', () => {
     const item = createStatusBarItem.mock.results[itemIndex]?.value;
     await vi.waitFor(() => expect(item.text).toBe(`$(robot) OpenCode ${maximumTestedVersion}*`));
     expect(item.tooltip).toBe(
-      `OpenCode CLI: ${installedVersion}\nOpenCode Server: ${installedVersion}\n\nNew CLI version: OpenCode ${maximumTestedVersion} is not installed yet. Auto-updates are off.\n\nVarro extension: 0.26.4`
+      `OpenCode CLI: ${installedVersion}\nOpenCode Server: ${installedVersion}\n\nNew CLI version: OpenCode ${maximumTestedVersion} is not installed yet.\nAuto-updates are off.\n\nVarro extension: 0.26.4`
     );
   });
 

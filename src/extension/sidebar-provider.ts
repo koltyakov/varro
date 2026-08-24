@@ -1528,7 +1528,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     ) {
       versionLines.push(
         '',
-        `New CLI version: OpenCode ${maximumTestedOpenCodeVersion} is not installed yet. Auto-updates are ${autoUpdatesEnabled ? 'on' : 'off'}.`
+        `New CLI version: OpenCode ${maximumTestedOpenCodeVersion} is not installed yet.`,
+        `Auto-updates are ${autoUpdatesEnabled ? 'on' : 'off'}.`
       );
     }
     if (

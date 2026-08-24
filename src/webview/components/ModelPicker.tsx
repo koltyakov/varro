@@ -463,9 +463,6 @@ export function ModelPicker(props: {
                                   <Show when={pinned()}>
                                     <span class="model-picker-provider-name">{provider.name}</span>
                                   </Show>
-                                  <Show when={state.providerDefaults[provider.id] === model.id}>
-                                    <span class="model-default-label">(default)</span>
-                                  </Show>
                                   <span class="dropdown-check">
                                     <Show when={isSelected(provider.id, model.id)}>
                                       <UiIcon

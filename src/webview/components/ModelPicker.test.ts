@@ -75,6 +75,21 @@ afterEach(() => {
 });
 
 describe('ModelPicker', () => {
+  it('does not label provider defaults in the dropdown', async () => {
+    setState('providers', [
+      createProvider('openai', 'OpenAI', {
+        'gpt-5': createModel('gpt-5', 'GPT-5'),
+      }),
+    ]);
+    setState('providerDefaults', { openai: 'gpt-5' });
+
+    cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    await flushMicrotasks();
+
+    expect(container?.querySelector('.model-default-label')).toBeNull();
+    expect(container?.querySelector('.model-picker-item')?.textContent).not.toContain('(default)');
+  });
+
   it('shows and searches a renamed model while selecting its original ID', async () => {
     const onSelect = vi.fn();
     setState('providers', [
