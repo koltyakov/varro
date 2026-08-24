@@ -1289,6 +1289,66 @@ describe('RichComposerArea', () => {
     expect(extractText(editor)).toBe('[Image]ab');
   });
 
+  it('does not rewrite the selection while typing mid-text after an inline chip', async () => {
+    const chip: RichComposerChip = {
+      id: 'file:state-attachments.ts',
+      type: 'mention-file',
+      label: 'state-attachments.ts',
+      icon: 'file',
+      textMarker: '@state-attachments.ts',
+    };
+
+    cleanup = render(() => {
+      const [value, setValue] = createSignal(`${chip.textMarker}\nTake the best parts`);
+      const [cursorOffset, setCursorOffset] = createSignal(value().length);
+
+      return RichComposerArea({
+        editorRef: () => {},
+        placeholder: 'Compose',
+        value: value(),
+        cursorOffset: cursorOffset(),
+        chips: [chip],
+        isFocused: true,
+        showCompletionMenu: false,
+        completionItems: [],
+        completionSelectedIndex: 0,
+        onInput: (text, nextOffset) => {
+          setValue(text);
+          setCursorOffset(nextOffset);
+        },
+        onKeyDown: () => {},
+        onPaste: () => {},
+        onFocus: () => {},
+        onBlur: () => {},
+        onClick: () => {},
+        onKeyUp: () => {},
+        onSelect: () => {},
+        onSelectCompletion: () => {},
+      });
+    }, container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    const textNode = editor?.lastChild;
+    if (!editor || !textNode || textNode.nodeType !== Node.TEXT_NODE) {
+      throw new Error('Expected text after the inline chip');
+    }
+
+    textNode.textContent = 'Take the Xbest parts';
+    editor.focus();
+    setCollapsedSelection(textNode, 'Take the X'.length);
+    const selection = window.getSelection();
+    if (!selection) throw new Error('Expected browser selection');
+    const removeAllRanges = vi.spyOn(selection, 'removeAllRanges');
+
+    editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+    await flushAsyncWork();
+
+    expect(extractText(editor)).toBe(`${chip.textMarker}\nTake the Xbest parts`);
+    expect(selection.anchorNode).toBe(textNode);
+    expect(selection.anchorOffset).toBe('Take the X'.length);
+    expect(removeAllRanges).not.toHaveBeenCalled();
+  });
+
   it('previews an inline pasted image above the input frame', async () => {
     const chip: RichComposerChip = {
       id: 'img:1',

@@ -56,8 +56,26 @@
 }
 
 .rich-composer .inline-chip {
+  position: relative;
+  isolation: isolate;
   vertical-align: middle;
   transform: translateY(-1px);
+}
+
+.rich-composer .inline-chip.selection-crossed::before,
+.rich-composer .inline-chip-icon-wrap.selection-crossed::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  top: calc(50% - 0.5px);
+  left: -2px;
+  right: -2px;
+  height: calc(var(--vscode-font-size, 13px) * 1.7);
+  transform: translateY(-50%);
+  background: var(
+    --vscode-editor-selectionBackground,
+    color-mix(in srgb, var(--color-vscode-accent) 30%, transparent)
+  );
 }
 
 .rich-composer .inline-chip[data-chip-type='mention-file'],
@@ -88,8 +106,11 @@
 
 .composer-session-reference .inline-chip-icon-wrap,
 .composer-external-link .inline-chip-icon-wrap {
-  display: inline;
+  display: inline-block;
+  position: relative;
+  isolation: isolate;
   margin-right: 3px;
+  user-select: none;
 }
 
 .composer-session-reference .inline-chip-icon-wrap::after {

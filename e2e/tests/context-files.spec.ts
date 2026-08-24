@@ -18,6 +18,50 @@ test('searches workspace files via @ mention and adds file to context', async ({
   await expect(page.getByTitle(/StickyHeader\.tsx/)).toBeVisible();
 });
 
+test('highlights inline file chips crossed by composer selections', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=file-search');
+
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+  await composer.fill('Test @README');
+  await expect(page.getByText('README.md', { exact: false })).toBeVisible();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+
+  const chip = composer.locator('[data-chip-type="mention-file"]');
+  const chipBackground = await chip.evaluate(
+    (element) => getComputedStyle(element).backgroundColor
+  );
+  await composer.evaluate((editor) => {
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+
+  await expect(chip).toHaveCSS('user-select', 'none');
+  await expect(chip).toHaveCSS('background-color', chipBackground);
+  await expect(chip).toHaveClass(/selection-crossed/);
+  await expect(chip).toHaveCSS('box-shadow', 'none');
+  const selectionLayer = await chip.evaluate((element) => {
+    const layerStyle = getComputedStyle(element, '::before');
+    const composerStyle = getComputedStyle(element.closest('.rich-composer')!);
+    return {
+      borderRadius: layerStyle.borderRadius,
+      height: layerStyle.height,
+      left: layerStyle.left,
+      lineHeight: composerStyle.lineHeight,
+      right: layerStyle.right,
+    };
+  });
+  expect(selectionLayer.borderRadius).toBe('0px');
+  expect(selectionLayer.left).toBe('-2px');
+  expect(selectionLayer.right).toBe('-2px');
+  expect(
+    Math.abs(parseFloat(selectionLayer.height) - parseFloat(selectionLayer.lineHeight))
+  ).toBeLessThan(0.1);
+});
+
 test('crosses a terminal file chip with one horizontal arrow press', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=file-search');
 

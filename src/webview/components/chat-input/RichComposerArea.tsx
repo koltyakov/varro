@@ -472,6 +472,33 @@ export function RichComposerArea(props: {
     return { start, end };
   }
 
+  function updateSelectedChips(selection: { start: number; end: number } | null) {
+    if (!editorEl) return;
+    for (const chip of editorEl.querySelectorAll<HTMLElement>('.inline-chip')) {
+      const marker = chip.dataset.chipMarker;
+      if (!selection || selection.start === selection.end || !marker) {
+        chip.classList.remove('selection-crossed');
+        continue;
+      }
+
+      const prefixRange = document.createRange();
+      prefixRange.selectNodeContents(editorEl);
+      prefixRange.setEndBefore(chip);
+      const chipStart = extractRangeTextLength(prefixRange);
+      chip.classList.toggle(
+        'selection-crossed',
+        selection.start < chipStart + marker.length && selection.end > chipStart
+      );
+    }
+
+    const range = selection && selection.start !== selection.end ? getSelectionRange() : null;
+    for (const icon of editorEl.querySelectorAll<HTMLElement>(
+      '.composer-session-reference .inline-chip-icon-wrap, .composer-external-link .inline-chip-icon-wrap'
+    )) {
+      icon.classList.toggle('selection-crossed', range?.intersectsNode(icon) === true);
+    }
+  }
+
   function getSessionReferenceBoundary(node: Node): { start: number; end: number } | null {
     if (!editorEl) return null;
     // SAFETY: The surrounding shape or discriminator check establishes the Element contract used below.
@@ -625,8 +652,7 @@ export function RichComposerArea(props: {
     }
     syncEmptyState();
     const offset = getCursorOffset();
-    normalizeEditableExternalLinks(editorEl);
-    setCursorOffset(offset);
+    if (normalizeEditableExternalLinks(editorEl)) setCursorOffset(offset);
     const text = extractText(editorEl);
     const previousValue = props.value;
     const previousChips = props.chips.slice();
@@ -782,8 +808,8 @@ export function RichComposerArea(props: {
 
   onMount(() => {
     const handleSelectionChange = () => {
-      if (!editorEl || document.activeElement !== editorEl) return;
-      const selection = getSelectionOffsets();
+      const selection = document.activeElement === editorEl ? getSelectionOffsets() : null;
+      updateSelectedChips(selection);
       if (selection) props.onSelect(selection.start, selection.end);
     };
     document.addEventListener('selectionchange', handleSelectionChange);
@@ -1140,7 +1166,8 @@ function externalLinksNeedResync(
   );
 }
 
-function normalizeEditableExternalLinks(editor: HTMLElement) {
+function normalizeEditableExternalLinks(editor: HTMLElement): boolean {
+  let changed = false;
   for (const element of Array.from(
     editor.querySelectorAll<HTMLElement>('.composer-external-link')
   )) {
@@ -1149,6 +1176,7 @@ function normalizeEditableExternalLinks(editor: HTMLElement) {
     const linkIndex = segments.findIndex((segment) => segment.type === 'external-link');
     if (linkIndex === -1) {
       element.replaceWith(document.createTextNode(content));
+      changed = true;
       continue;
     }
 
@@ -1165,5 +1193,7 @@ function normalizeEditableExternalLinks(editor: HTMLElement) {
     if (prefix) element.before(document.createTextNode(prefix));
     element.textContent = link.href;
     if (suffix) element.after(document.createTextNode(suffix));
+    changed = true;
   }
+  return changed;
 }

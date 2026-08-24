@@ -479,6 +479,11 @@
   flex-shrink: 0;
 }
 
+.composer-completion-item:is(.completion-agent, .completion-file, .completion-session)
+  .composer-completion-title {
+  font-weight: 400;
+}
+
 .composer-completion-detail {
   flex: 0 1 auto;
   min-width: 0;

@@ -82,6 +82,30 @@ test('keeps URL boundaries editable in the composer', async ({ page }) => {
   await expect(composer).toBeFocused();
 });
 
+test('keeps reference icons out of composer selection painting', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=session-search');
+
+  const composer = page.locator('.rich-composer').first();
+  await composer.fill('session:session-search-beta https://iconoir.com');
+  const iconWrappers = composer.locator(
+    '.composer-session-reference .inline-chip-icon-wrap, .composer-external-link .inline-chip-icon-wrap'
+  );
+  await expect(iconWrappers).toHaveCount(2);
+
+  await composer.evaluate((editor) => {
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+
+  for (const iconWrapper of await iconWrappers.all()) {
+    await expect(iconWrapper).toHaveCSS('user-select', 'none');
+    await expect(iconWrapper).toHaveClass(/selection-crossed/);
+  }
+});
+
 test('replaces a selected session reference when pasting', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=session-search');
 
