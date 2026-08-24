@@ -233,7 +233,60 @@ test('keeps a line-start pasted image from creating a trailing line', async ({ p
 
   await expect
     .poll(() => composer.evaluate((editor) => editor.querySelectorAll('br').length))
-    .toBe(2);
+    .toBe(1);
+});
+
+test('crosses an image chip with one horizontal arrow press', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+
+  const composer = page.locator('.rich-composer').first();
+  await composer.fill('before ');
+  await composer.evaluate((editor) => {
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(new File(['image'], 'image.png', { type: 'image/png' }));
+    const event = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
+    Object.defineProperty(event, 'clipboardData', { value: dataTransfer });
+    editor.dispatchEvent(event);
+  });
+
+  const chip = composer.locator('[data-chip-type="image"]');
+  await expect(chip).toHaveCount(1);
+  await chip.evaluate((element) => {
+    const trailingSpacer = element.nextSibling;
+    if (!trailingSpacer) throw new Error('Expected trailing chip spacer');
+    const range = document.createRange();
+    range.setStart(trailingSpacer, trailingSpacer.textContent?.length ?? 0);
+    range.collapse(true);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+
+  await composer.press('ArrowLeft');
+  await expect
+    .poll(() =>
+      chip.evaluate((element) => {
+        const selection = window.getSelection();
+        return selection?.focusNode === element.previousSibling;
+      })
+    )
+    .toBe(true);
+
+  await composer.press('ArrowRight');
+  await expect
+    .poll(() =>
+      chip.evaluate((element) => {
+        const selection = window.getSelection();
+        const editor = element.parentNode;
+        const trailingSpacer = element.nextSibling;
+        return (
+          selection?.focusNode === editor &&
+          selection.focusOffset ===
+            Array.from(editor?.childNodes ?? []).indexOf(trailingSpacer!) + 1
+        );
+      })
+    )
+    .toBe(true);
 });
 
 test('inserts one visible line break after a pasted image', async ({ page }) => {
@@ -260,7 +313,7 @@ test('inserts one visible line break after a pasted image', async ({ page }) => 
 
   await expect
     .poll(() => composer.evaluate((editor) => editor.querySelectorAll('br').length))
-    .toBe(3);
+    .toBe(2);
   await expect
     .poll(() =>
       composer.evaluate((editor) => {
@@ -272,6 +325,60 @@ test('inserts one visible line break after a pasted image', async ({ page }) => 
       })
     )
     .toBeGreaterThan(8);
+});
+
+test('keeps the caret visible after repeated Shift+Enter line breaks', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+
+  const composer = page.locator('.rich-composer').first();
+  await composer.fill('first line');
+  for (let index = 0; index < 12; index++) {
+    await composer.press('Shift+Enter');
+  }
+
+  const position = await composer.evaluate((editor) => {
+    const placeholder = editor.querySelector<HTMLElement>('[data-caret-placeholder]');
+    if (!placeholder) throw new Error('Expected trailing caret placeholder');
+    const selection = window.getSelection();
+    if (!selection?.rangeCount) throw new Error('Expected composer selection');
+    const editorRect = editor.getBoundingClientRect();
+    const placeholderRect = placeholder.getBoundingClientRect();
+    const caretRect = selection.getRangeAt(0).getBoundingClientRect();
+    return {
+      caretTop: caretRect.top,
+      caretHeight: caretRect.height,
+      editorTop: editorRect.top,
+      editorBottom: editorRect.bottom,
+      placeholderTop: placeholderRect.top,
+      scrollTop: editor.scrollTop,
+    };
+  });
+
+  expect(position.scrollTop).toBeGreaterThan(0);
+  expect(position.caretHeight).toBeGreaterThan(0);
+  expect(Math.abs(position.caretTop - position.placeholderTop)).toBeLessThan(2);
+  expect(position.caretTop).toBeGreaterThanOrEqual(position.editorTop);
+  expect(position.caretTop).toBeLessThanOrEqual(position.editorBottom);
+
+  for (let index = 0; index < 11; index++) {
+    await composer.press('Backspace');
+  }
+
+  const reducedPosition = await composer.evaluate((editor) => {
+    const placeholder = editor.querySelector<HTMLElement>('[data-caret-placeholder]');
+    const selection = window.getSelection();
+    if (!placeholder || !selection?.rangeCount) {
+      throw new Error('Expected trailing blank-line selection');
+    }
+    return {
+      breakCount: editor.querySelectorAll('br').length,
+      caretTop: selection.getRangeAt(0).getBoundingClientRect().top,
+      placeholderTop: placeholder.getBoundingClientRect().top,
+    };
+  });
+
+  expect(reducedPosition.breakCount).toBe(1);
+  expect(Math.abs(reducedPosition.caretTop - reducedPosition.placeholderTop)).toBeLessThan(2);
 });
 
 test('paints a sent portrait carousel at its final presentation without blinking', async ({

@@ -485,8 +485,7 @@ function applyPasteTransactionText(
   const textWithoutMarker = `${before}${sourceText}${after}`;
   const marker = imageFilenames.map((filename) => `[${filename}]`).join(' ');
   const markerOffset = before.length + sourceText.length;
-  const shouldInsertMarker =
-    marker.length > 0 && (insertion !== null || textWithoutMarker.trim().length > 0);
+  const shouldInsertMarker = marker.length > 0 && insertion !== null;
   const prefix =
     shouldInsertMarker && shouldPadInlineInsertion(textWithoutMarker[markerOffset - 1]) ? ' ' : '';
   const suffix =
@@ -595,6 +594,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   let richEditorRef: HTMLDivElement | undefined;
   let containerRef: HTMLDivElement | undefined;
   let inputFrameRef: HTMLDivElement | undefined;
+  let attachmentRowOwnsPaste = false;
   let permissionPickerRef: HTMLButtonElement | undefined;
   let permissionPopoverRef: HTMLDivElement | undefined;
   let agentPickerRef: HTMLButtonElement | undefined;
@@ -2636,10 +2636,16 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (transaction) {
       const previousMutationVersion = transaction.mutationVersion;
       const previousValue = transaction.value;
-      transaction.insertion = insertion;
-      if (insertion) {
-        transaction.start = insertion.start;
-        transaction.end = insertion.end;
+      const resolvedInsertion =
+        insertion &&
+        transaction.value.trim().length === 0 &&
+        transaction.pastedText.trim().length === 0
+          ? null
+          : insertion;
+      transaction.insertion = resolvedInsertion;
+      if (resolvedInsertion) {
+        transaction.start = resolvedInsertion.start;
+        transaction.end = resolvedInsertion.end;
         updatePasteTransactionOwners(transaction.sessionId, previousMutationVersion, previousValue);
         transaction.historyEntry = composerHistory.record(captureComposerSnapshot());
       }
@@ -2647,6 +2653,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       return;
     }
     if (!insertion) return;
+    // SAFETY: handlePaste assigns this optional marker on clipboard events containing context files.
+    if ((e as ClipboardEvent & { __varroPasteText?: string }).__varroPasteText === '') return;
     const pastedText = e.clipboardData?.getData('text/plain') ?? '';
     if (!pastedText) return;
 
@@ -2716,6 +2724,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const handleWindowClick = (e: MouseEvent) => {
       // SAFETY: The surrounding shape or discriminator check establishes the Node contract used below.
       const target = e.target as Node | null;
+      attachmentRowOwnsPaste =
+        !!target && !!inputFrameRef?.querySelector('.chat-attachments-container')?.contains(target);
       const clickedInsideInteractiveArea =
         !!target && (containerRef?.contains(target) || modelPopoverRef?.contains(target));
 
@@ -2804,8 +2814,25 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       if (document.visibilityState === 'hidden') cancelQueuedMessageEdit();
     };
 
+    const handleAttachmentPaste = (e: ClipboardEvent) => {
+      // SAFETY: Clipboard event targets are DOM nodes when dispatched by the document.
+      const target = e.target as Node | null;
+      if (target && richEditorRef?.contains(target)) return;
+      const attachmentRow = inputFrameRef?.querySelector('.chat-attachments-container');
+      if (!attachmentRowOwnsPaste && (!target || !attachmentRow?.contains(target))) return;
+      const hasImage = Array.from(e.clipboardData?.items ?? []).some(
+        (item) => item.kind === 'file' && item.type.startsWith('image/')
+      );
+      if (!hasImage) return;
+
+      e.preventDefault();
+      handlePaste(e);
+      handlePasteInsertion(e, null);
+    };
+
     window.addEventListener('keydown', handlePopupEscape, true);
     window.addEventListener('click', handleWindowClick, true);
+    document.addEventListener('paste', handleAttachmentPaste);
     document.addEventListener('visibilitychange', handleVisibilityChange);
     document.addEventListener('dragenter', beginDropTarget, true);
     document.addEventListener('dragover', handleWindowDragOver, true);
@@ -2816,6 +2843,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       disposeBridge();
       window.removeEventListener('keydown', handlePopupEscape, true);
       window.removeEventListener('click', handleWindowClick, true);
+      document.removeEventListener('paste', handleAttachmentPaste);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       document.removeEventListener('dragenter', beginDropTarget, true);
       document.removeEventListener('dragover', handleWindowDragOver, true);

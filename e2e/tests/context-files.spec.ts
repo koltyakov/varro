@@ -18,6 +18,48 @@ test('searches workspace files via @ mention and adds file to context', async ({
   await expect(page.getByTitle(/StickyHeader\.tsx/)).toBeVisible();
 });
 
+test('crosses a terminal file chip with one horizontal arrow press', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=file-search');
+
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+  await composer.fill('Test @README');
+  await expect(page.getByText('README.md', { exact: false })).toBeVisible();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+
+  const chip = composer.locator('[data-chip-type="mention-file"]');
+  await expect(chip).toHaveCount(1);
+  await chip.evaluate((element) => {
+    const range = document.createRange();
+    range.setStartBefore(element);
+    range.collapse(true);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+
+  await composer.press('ArrowRight');
+  await expect
+    .poll(() =>
+      chip.evaluate((element) => {
+        const selection = window.getSelection();
+        const trailingSpacer = element.nextSibling;
+        return (
+          selection?.focusNode === trailingSpacer &&
+          selection.focusOffset === trailingSpacer?.textContent?.length
+        );
+      })
+    )
+    .toBe(true);
+
+  await composer.press('ArrowLeft');
+  await expect
+    .poll(() =>
+      chip.evaluate((element) => window.getSelection()?.focusNode === element.previousSibling)
+    )
+    .toBe(true);
+});
+
 test('message body includes attached file reference', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=file-search');
 

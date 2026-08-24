@@ -547,6 +547,114 @@ describe('RichComposerArea', () => {
     }
   });
 
+  it('keeps revealing trailing blank lines when the collapsed range has no bounds', async () => {
+    const originalRangeRect = Range.prototype.getBoundingClientRect;
+    const originalElementRect = HTMLElement.prototype.getBoundingClientRect;
+    Object.defineProperty(Range.prototype, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => new DOMRect(),
+    });
+    Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', {
+      configurable: true,
+      writable: true,
+      value: function (this: HTMLElement) {
+        if (this.dataset.caretMeasure) {
+          const editor = this.parentElement!;
+          const top = 180 + editor.querySelectorAll('br').length * 20 - editor.scrollTop;
+          return new DOMRect(0, top, 0, 20);
+        }
+        return originalElementRect.call(this);
+      },
+    });
+
+    try {
+      cleanup = render(() => {
+        const [value, setValue] = createSignal('last visible line');
+        const [cursorOffset, setCursorOffset] = createSignal(value().length);
+
+        return RichComposerArea({
+          editorRef: () => {},
+          placeholder: 'Compose',
+          get value() {
+            return value();
+          },
+          get cursorOffset() {
+            return cursorOffset();
+          },
+          chips: [],
+          isFocused: true,
+          showCompletionMenu: false,
+          completionItems: [],
+          completionSelectedIndex: 0,
+          onInput: (text, nextOffset) => {
+            setValue(text);
+            setCursorOffset(nextOffset);
+          },
+          onKeyDown: () => {},
+          onPaste: () => {},
+          onFocus: () => {},
+          onBlur: () => {},
+          onClick: () => {},
+          onKeyUp: () => {},
+          onSelect: () => {},
+          onSelectCompletion: () => {},
+        });
+      }, container!);
+
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor?.firstChild) throw new Error('Expected populated composer editor');
+      editor.focus();
+      editor.getBoundingClientRect = () => new DOMRect(0, 20, 0, 180);
+      setCollapsedSelection(editor.firstChild, 'last visible line'.length);
+
+      for (let index = 0; index < 4; index++) {
+        editor.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: 'Enter',
+            shiftKey: true,
+            bubbles: true,
+            cancelable: true,
+          })
+        );
+        await flushAsyncWork();
+      }
+
+      expect(extractText(editor)).toBe('last visible line\n\n\n\n');
+      expect(editor.scrollTop).toBe(80);
+      expect(editor.querySelector('[data-caret-measure]')).toBeNull();
+
+      for (let index = 0; index < 3; index++) {
+        editor.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: 'Backspace',
+            bubbles: true,
+            cancelable: true,
+          })
+        );
+        await flushAsyncWork();
+      }
+
+      const placeholder = editor.querySelector<HTMLElement>('[data-caret-placeholder]');
+      expect(extractText(editor)).toBe('last visible line\n');
+      expect(window.getSelection()?.focusNode).toBe(placeholder?.firstChild);
+      expect(window.getSelection()?.focusOffset).toBe(1);
+    } finally {
+      if (originalRangeRect) {
+        Object.defineProperty(Range.prototype, 'getBoundingClientRect', {
+          configurable: true,
+          value: originalRangeRect,
+        });
+      } else {
+        Reflect.deleteProperty(Range.prototype, 'getBoundingClientRect');
+      }
+      Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', {
+        configurable: true,
+        writable: true,
+        value: originalElementRect,
+      });
+    }
+  });
+
   it('keeps the caret on the inserted line before an existing blank line', async () => {
     const firstBlock =
       'From: GPT-5.6 Sol Default\nTo: GPT-5.6 Sol High\nNormal: GPT-5.6 Sol Default -> High';
@@ -677,12 +785,10 @@ describe('RichComposerArea', () => {
     expect(event.defaultPrevented).toBe(true);
     expect(extractText(editor)).toBe(`${marker}\n`);
     const placeholder = editor.querySelector('[data-caret-placeholder]');
-    expect(editor.querySelectorAll('br')).toHaveLength(2);
-    expect(placeholder).toBeInstanceOf(HTMLBRElement);
-    expect(window.getSelection()?.focusNode).toBe(editor);
-    expect(window.getSelection()?.focusOffset).toBe(
-      Array.from(editor.childNodes).indexOf(placeholder!)
-    );
+    expect(editor.querySelectorAll('br')).toHaveLength(1);
+    expect(placeholder).toBeInstanceOf(HTMLSpanElement);
+    expect(window.getSelection()?.focusNode).toBe(placeholder?.firstChild);
+    expect(window.getSelection()?.focusOffset).toBe(1);
   });
 
   it('continues a hyphen bullet on Shift+Enter', () => {
@@ -738,10 +844,10 @@ describe('RichComposerArea', () => {
     const target = findNodeAtOffset(editor, value.length);
 
     expect(extractText(editor)).toBe(value);
-    expect(placeholder).toBeInstanceOf(HTMLBRElement);
+    expect(placeholder).toBeInstanceOf(HTMLSpanElement);
     expect(target).toEqual({
-      node: editor,
-      offset: Array.from(editor.childNodes).indexOf(placeholder!),
+      node: placeholder?.firstChild,
+      offset: 1,
     });
   });
 
@@ -852,6 +958,74 @@ describe('RichComposerArea', () => {
     expect(onRemoveChip).toHaveBeenCalledWith('img:4');
   });
 
+  it.each([
+    ['mention-file', ' '],
+    ['mention-agent', ' '],
+    ['image', ''],
+  ] as const)('crosses a terminal %s chip with one horizontal arrow press', (type, separator) => {
+    const marker = `[${type}]`;
+    const prefix = 'before ';
+    const value = `${prefix}${marker}${separator}`;
+    renderComposer({
+      value,
+      cursorOffset: prefix.length + marker.length,
+      chips: [
+        {
+          id: type,
+          type,
+          label: type,
+          textMarker: marker,
+        },
+      ],
+    });
+
+    const editor = container?.querySelector<HTMLElement>('.rich-composer');
+    if (!editor) throw new Error('Expected composer editor');
+    const target = findNodeAtOffset(editor, value.length);
+    if (!target) throw new Error('Expected cursor target');
+    setCollapsedSelection(target.node, target.offset);
+
+    const getPrefix = () => {
+      const selection = window.getSelection();
+      if (!selection?.focusNode) throw new Error('Expected composer selection');
+      const range = document.createRange();
+      range.selectNodeContents(editor);
+      range.setEnd(selection.focusNode, selection.focusOffset);
+      const fragment = document.createElement('div');
+      fragment.appendChild(range.cloneContents());
+      return extractText(fragment);
+    };
+
+    const left = new KeyboardEvent('keydown', {
+      key: 'ArrowLeft',
+      bubbles: true,
+      cancelable: true,
+    });
+    editor.dispatchEvent(left);
+    expect(left.defaultPrevented).toBe(true);
+    expect(getPrefix()).toBe(prefix);
+
+    const right = new KeyboardEvent('keydown', {
+      key: 'ArrowRight',
+      bubbles: true,
+      cancelable: true,
+    });
+    editor.dispatchEvent(right);
+    expect(right.defaultPrevented).toBe(true);
+    expect(getPrefix()).toBe(value);
+    const selection = window.getSelection();
+    const trailingSpacer = editor.querySelector('[data-chip-marker]')?.nextSibling;
+    if (separator) {
+      expect(selection?.focusNode).toBe(trailingSpacer);
+      expect(selection?.focusOffset).toBe(2);
+    } else {
+      expect(selection?.focusNode).toBe(editor);
+      expect(selection?.focusOffset).toBe(
+        Array.from(editor.childNodes).indexOf(trailingSpacer!) + 1
+      );
+    }
+  });
+
   it('replaces a selection spanning a session reference when pasting', () => {
     const onInput = vi.fn();
     const marker = 'session:ses_auth';
@@ -890,7 +1064,7 @@ describe('RichComposerArea', () => {
     expect(onInput).toHaveBeenCalledWith('before replacement after', 'before replacement'.length);
   });
 
-  it('reports no insertion when paste handling prevents the paste', () => {
+  it('reports the live selection when paste handling prevents the paste', () => {
     const onInput = vi.fn();
     const onPasteInsertion = vi.fn();
 
@@ -904,6 +1078,8 @@ describe('RichComposerArea', () => {
     });
 
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
+    setCollapsedSelection(editor.firstChild, 0);
     const event = new Event('paste', { bubbles: true, cancelable: true });
     Object.defineProperty(event, 'clipboardData', {
       value: { getData: (type: string) => (type === 'text/plain' ? '@README.md' : '') },
@@ -912,7 +1088,12 @@ describe('RichComposerArea', () => {
     editor?.dispatchEvent(event);
 
     expect(onInput).not.toHaveBeenCalled();
-    expect(onPasteInsertion).toHaveBeenCalledWith(event, null);
+    expect(onPasteInsertion).toHaveBeenCalledWith(event, {
+      start: 0,
+      end: 0,
+      text: '',
+      value: '@README.md',
+    });
   });
 
   it('accepts input immediately after syncing the controlled value', () => {

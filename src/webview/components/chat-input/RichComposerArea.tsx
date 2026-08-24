@@ -286,6 +286,83 @@ export function RichComposerArea(props: {
     return false;
   }
 
+  function removeTrailingLineBreak(): boolean {
+    const selection = getSelectionOffsets();
+    if (
+      !selection ||
+      selection.start !== selection.end ||
+      selection.start !== props.value.length ||
+      !props.value.endsWith('\n')
+    ) {
+      return false;
+    }
+
+    const nextValue = props.value.slice(0, -1);
+    revealCaretAfterControlledInput = true;
+    props.onInput(nextValue, nextValue.length);
+    return true;
+  }
+
+  function moveAcrossAtomicReference(event: KeyboardEvent): boolean {
+    if (
+      (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.shiftKey ||
+      event.isComposing
+    ) {
+      return false;
+    }
+
+    if (!editorEl) return false;
+    const selection = getSelectionOffsets();
+    if (!selection || selection.start !== selection.end) return false;
+
+    for (const chip of props.chips) {
+      if (chip.type === 'external-link' || chip.type === 'mention-session') continue;
+      let markerStart = props.value.indexOf(chip.textMarker);
+      while (markerStart !== -1) {
+        const markerEnd = markerStart + chip.textMarker.length;
+        const trailingEdge = props.value[markerEnd] === ' ' ? markerEnd + 1 : markerEnd;
+        const nextOffset =
+          event.key === 'ArrowLeft' && selection.start === trailingEdge
+            ? markerStart
+            : event.key === 'ArrowRight' && selection.start === markerStart
+              ? trailingEdge
+              : null;
+        if (nextOffset !== null) {
+          event.preventDefault();
+          const target = findNodeAtOffset(editorEl, nextOffset);
+          if (
+            event.key === 'ArrowRight' &&
+            target?.node.nodeType === Node.TEXT_NODE &&
+            target.node.textContent === CARET_SPACER &&
+            target.node.parentNode
+          ) {
+            const range = document.createRange();
+            range.setStart(
+              target.node.parentNode,
+              Array.from(target.node.parentNode.childNodes).findIndex(
+                (child) => child === target.node
+              ) + 1
+            );
+            range.collapse(true);
+            const browserSelection = window.getSelection();
+            browserSelection?.removeAllRanges();
+            browserSelection?.addRange(range);
+          } else {
+            setCursorOffset(nextOffset);
+          }
+          return true;
+        }
+        markerStart = props.value.indexOf(chip.textMarker, markerEnd);
+      }
+    }
+
+    return false;
+  }
+
   function getSessionReferenceAtSelection(): HTMLElement | null {
     const range = getSelectionRange();
     if (!range || !range.collapsed) return null;
@@ -448,7 +525,19 @@ export function RichComposerArea(props: {
 
     const range = getSelectionRange();
     if (!range?.collapsed || !('getBoundingClientRect' in range)) return;
-    const caretRect = range.getBoundingClientRect();
+    let caretRect = range.getBoundingClientRect();
+    if (caretRect.height === 0) {
+      const cursorOffset = getCursorOffset();
+      const marker = document.createElement('span');
+      marker.dataset.caretMeasure = 'true';
+      marker.style.cssText =
+        'display:inline-block;width:0;height:1em;overflow:hidden;vertical-align:text-bottom;pointer-events:none';
+      range.cloneRange().insertNode(marker);
+      caretRect = marker.getBoundingClientRect();
+      marker.remove();
+      editorEl.normalize();
+      setCursorOffset(cursorOffset);
+    }
     if (caretRect.height === 0) return;
     const editorRect = editorEl.getBoundingClientRect();
 
@@ -554,9 +643,20 @@ export function RichComposerArea(props: {
   }
 
   function handlePaste(e: ClipboardEvent) {
+    const selection = getSelectionOffsets();
     props.onPaste(e);
     if (e.defaultPrevented) {
-      props.onPasteInsertion?.(e, null);
+      props.onPasteInsertion?.(
+        e,
+        selection
+          ? {
+              start: selection.start,
+              end: selection.start,
+              text: '',
+              value: props.value,
+            }
+          : null
+      );
       return;
     }
 
@@ -570,17 +670,17 @@ export function RichComposerArea(props: {
       props.onPasteInsertion?.(e, null);
       return;
     }
-    const selection = getSelectionOffsets() || {
+    const insertionRange = selection || {
       start: props.value.length,
       end: props.value.length,
     };
     e.preventDefault();
-    const nextValue = `${props.value.slice(0, selection.start)}${text}${props.value.slice(selection.end)}`;
+    const nextValue = `${props.value.slice(0, insertionRange.start)}${text}${props.value.slice(insertionRange.end)}`;
     revealCaretAfterControlledInput = true;
-    props.onInput(nextValue, selection.start + text.length);
+    props.onInput(nextValue, insertionRange.start + text.length);
     props.onPasteInsertion?.(e, {
-      start: selection.start,
-      end: selection.start + text.length,
+      start: insertionRange.start,
+      end: insertionRange.start + text.length,
       text,
       value: nextValue,
     });
@@ -721,7 +821,11 @@ export function RichComposerArea(props: {
           }
 
           if (e.inputType.startsWith('delete')) {
-            if (replaceSelectionContainingSession() || removeSessionReferenceAtSelection()) {
+            if (
+              (e.inputType === 'deleteContentBackward' && removeTrailingLineBreak()) ||
+              replaceSelectionContainingSession() ||
+              removeSessionReferenceAtSelection()
+            ) {
               e.preventDefault();
             }
             return;
@@ -755,7 +859,18 @@ export function RichComposerArea(props: {
           }
         }}
         onKeyDown={(e) => {
-          if (!removeAtomicReference(e)) {
+          if (moveAcrossAtomicReference(e)) return;
+          const removedTrailingLineBreak =
+            e.key === 'Backspace' &&
+            !e.altKey &&
+            !e.ctrlKey &&
+            !e.metaKey &&
+            !e.shiftKey &&
+            !e.isComposing &&
+            removeTrailingLineBreak();
+          if (removedTrailingLineBreak) {
+            e.preventDefault();
+          } else if (!removeAtomicReference(e)) {
             props.onKeyDown(e);
             if (!e.defaultPrevented) handleLineBreak(e);
             const key = e.key.toLowerCase();
@@ -844,8 +959,9 @@ function appendTextWithLineBreaks(parent: Node, text: string, addTrailingPlaceho
     }
   }
   if (addTrailingPlaceholder && text.endsWith('\n')) {
-    const placeholder = document.createElement('br');
+    const placeholder = document.createElement('span');
     placeholder.dataset.caretPlaceholder = 'true';
+    placeholder.textContent = CARET_SPACER;
     parent.appendChild(placeholder);
   }
 }
@@ -860,7 +976,6 @@ export function extractText(el: HTMLElement): string {
       // SAFETY: The surrounding shape or discriminator check establishes the HTMLElement contract used below.
       const element = node as HTMLElement;
       if (element.tagName === 'BR') {
-        if (element.dataset.caretPlaceholder) continue;
         if (topLevelNodes.length === 1 && index === 0) continue;
         result += '\n';
       } else if (element.dataset.chipMarker) {

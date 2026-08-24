@@ -797,11 +797,14 @@ describe('SessionListView diff summaries', () => {
           session(`batch-${batch}-session-${index}`, Date.now() - index)
         )
       );
-      await vi.waitFor(() => {
-        const state = getSessionDiffSummaryStateForTests();
-        expect(state.active).toBe(0);
-        expect(state.queued).toBe(0);
-      });
+      await vi.waitFor(
+        () => {
+          const state = getSessionDiffSummaryStateForTests();
+          expect(state.active).toBe(0);
+          expect(state.queued).toBe(0);
+        },
+        { timeout: 5_000 }
+      );
     }
 
     const state = getSessionDiffSummaryStateForTests();

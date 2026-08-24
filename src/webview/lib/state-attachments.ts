@@ -22,7 +22,7 @@ import { STORAGE_KEYS, writeStored } from './state-storage';
 import { postMessage } from './bridge';
 import { readStoredBooleanRecord } from './state-stored-values';
 
-export const MAX_CLIPBOARD_IMAGES = 5;
+export const MAX_CLIPBOARD_IMAGES = 10;
 export const MAX_CLIPBOARD_IMAGE_SIZE = 5 * 1024 * 1024;
 
 export function getCurrentDocumentEnabled(

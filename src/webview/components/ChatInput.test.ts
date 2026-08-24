@@ -5011,10 +5011,42 @@ describe('ChatInput', () => {
 
       fileReader.resolve('unsupported.png');
       await flushAsyncWork();
+      expect(inputText()).toBe('');
       expect(state.clipboardImages).toHaveLength(1);
       expect(container?.querySelector('.chat-attachment-chip.disabled')).toBeInstanceOf(
         HTMLElement
       );
+    } finally {
+      fileReader.restore();
+    }
+  });
+
+  it('pastes images as attachments after the attachment row takes focus', async () => {
+    const fileReader = installControllableFileReader();
+    try {
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor) throw new Error('Expected composer editor');
+      editor.focus();
+      dispatchImagePaste(editor, [new File(['first'], 'first.png', { type: 'image/png' })]);
+      fileReader.resolve('first.png');
+      await flushAsyncWork();
+
+      const attachmentRow = container?.querySelector<HTMLElement>('.chat-attachments-container');
+      if (!attachmentRow) throw new Error('Expected attachment row');
+      editor.blur();
+      attachmentRow.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+      dispatchImagePaste(document.body, [
+        new File(['second'], 'second.png', { type: 'image/png' }),
+      ]);
+      fileReader.resolve('second.png');
+      await flushAsyncWork();
+
+      expect(inputText()).toBe('');
+      expect(state.clipboardImages.map((image) => image.filename)).toEqual(['Image 1', 'Image 2']);
     } finally {
       fileReader.restore();
     }
@@ -5596,22 +5628,24 @@ describe('ChatInput', () => {
 
       const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
       if (!editor) throw new Error('Expected composer editor');
-      const firstPaste = ['first-1.png', 'first-2.png', 'first-3.png'].map(
-        (name) => new File([name], name, { type: 'image/png' })
-      );
-      const secondPaste = ['second-1.png', 'second-2.png', 'second-3.png'].map(
-        (name) => new File([name], name, { type: 'image/png' })
-      );
+      const pasteSize = Math.floor(MAX_CLIPBOARD_IMAGES / 2) + 1;
+      const firstPaste = Array.from({ length: pasteSize }, (_, index) => {
+        const name = `first-${index + 1}.png`;
+        return new File([name], name, { type: 'image/png' });
+      });
+      const secondPaste = Array.from({ length: pasteSize }, (_, index) => {
+        const name = `second-${index + 1}.png`;
+        return new File([name], name, { type: 'image/png' });
+      });
 
       dispatchImagePaste(editor, firstPaste);
       dispatchImagePaste(editor, secondPaste);
 
-      fileReader.resolve('second-1.png');
+      fileReader.resolve(secondPaste[0]!.name);
       await flushAsyncWork();
       expect(state.clipboardImages).toEqual([]);
 
-      fileReader.resolve('second-2.png');
-      fileReader.resolve('second-3.png');
+      for (const file of secondPaste.slice(1)) fileReader.resolve(file.name);
       await flushAsyncWork();
       expect(state.clipboardImages).toEqual([]);
 
@@ -5619,23 +5653,17 @@ describe('ChatInput', () => {
       await flushAsyncWork();
 
       expect(state.clipboardImages).toHaveLength(MAX_CLIPBOARD_IMAGES);
-      expect(state.clipboardImages.map((image) => image.filename)).toEqual([
-        'Image 1',
-        'Image 2',
-        'Image 3',
-        'Image 4',
-        'Image 5',
-      ]);
+      expect(state.clipboardImages.map((image) => image.filename)).toEqual(
+        Array.from({ length: MAX_CLIPBOARD_IMAGES }, (_, index) => `Image ${index + 1}`)
+      );
       expect(new Set(state.clipboardImages.map((image) => image.filename)).size).toBe(
         MAX_CLIPBOARD_IMAGES
       );
-      expect(state.clipboardImages.map((image) => image.url)).toEqual([
-        'data:image/png;base64,first-1.png',
-        'data:image/png;base64,first-2.png',
-        'data:image/png;base64,first-3.png',
-        'data:image/png;base64,second-1.png',
-        'data:image/png;base64,second-2.png',
-      ]);
+      expect(state.clipboardImages.map((image) => image.url)).toEqual(
+        [...firstPaste, ...secondPaste]
+          .slice(0, MAX_CLIPBOARD_IMAGES)
+          .map((file) => `data:image/png;base64,${file.name}`)
+      );
       expect(nextPastedImageIndex()).toBe(MAX_CLIPBOARD_IMAGES + 1);
     } finally {
       fileReader.restore();
@@ -5674,6 +5702,41 @@ describe('ChatInput', () => {
         { filename: 'Image 2', url: 'data:image/png;base64,second.png' },
       ]);
       expect(nextPastedImageIndex()).toBe(3);
+    } finally {
+      fileReader.restore();
+    }
+  });
+
+  it('pastes images at the live selection on the first line', async () => {
+    const fileReader = installControllableFileReader();
+    try {
+      const draft = 'First line\nSecond line';
+      setInputText(draft);
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor?.firstChild) throw new Error('Expected populated composer editor');
+      editor.focus();
+      setCollapsedSelection(editor.firstChild, 'First line'.length);
+      editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'End', bubbles: true }));
+      setCollapsedSelection(editor.firstChild, 0);
+
+      dispatchImagePaste(editor, [
+        new File(['a'], 'first.png', { type: 'image/png' }),
+        new File(['b'], 'second.png', { type: 'image/png' }),
+      ]);
+      fileReader.resolve('first.png');
+      fileReader.resolve('second.png');
+      await flushAsyncWork();
+
+      expect(inputText()).toBe('[Image 1] [Image 2] First line\nSecond line');
+      expect(
+        state.clipboardImages.map((image) => ({ filename: image.filename, url: image.url }))
+      ).toEqual([
+        { filename: 'Image 1', url: 'data:image/png;base64,first.png' },
+        { filename: 'Image 2', url: 'data:image/png;base64,second.png' },
+      ]);
     } finally {
       fileReader.restore();
     }

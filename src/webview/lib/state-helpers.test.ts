@@ -958,13 +958,9 @@ describe('state helpers', () => {
       size: 6 * 1024 * 1024,
     });
 
-    expect(stateModule.state.clipboardImages.map((image) => image.id)).toEqual([
-      'img-2',
-      'img-3',
-      'img-4',
-      'img-5',
-      'img-6',
-    ]);
+    expect(stateModule.state.clipboardImages.map((image) => image.id)).toEqual(
+      Array.from({ length: stateModule.MAX_CLIPBOARD_IMAGES }, (_, index) => `img-${index + 2}`)
+    );
 
     stateModule.removeClipboardImage('img-2');
     expect(stateModule.inputText()).toBe('See _____ later');
