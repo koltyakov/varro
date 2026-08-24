@@ -685,9 +685,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       if (this.disposing) return;
       if (webviewPanel.visible === wasVisible) return;
       wasVisible = webviewPanel.visible;
-      if (webviewPanel.visible) {
-        void endpoint.webviewSession.resolve(webviewPanel);
-      } else {
+      if (!webviewPanel.visible) {
         this.setEndpointReady(endpoint, false);
         endpoint.webviewSession.suspend();
       }

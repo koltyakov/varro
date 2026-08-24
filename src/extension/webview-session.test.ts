@@ -97,6 +97,7 @@ function createWebviewView(visible: boolean) {
 function createSession(options?: {
   renderHtml?: (state: InitialWebviewState) => Promise<string>;
   manageCommandContext?: boolean;
+  editorSurface?: boolean;
 }) {
   let currentView: ReturnType<typeof createWebviewView> | undefined;
 
@@ -195,7 +196,9 @@ function createSession(options?: {
     contextProvider as never,
     contextFilesState as never,
     deps,
-    undefined,
+    options?.editorSurface
+      ? { viewId: 'editor-1', surface: 'editor', initialRoute: { type: 'new-session' } }
+      : undefined,
     options?.manageCommandContext
   );
 
@@ -738,6 +741,24 @@ describe('WebviewSession', () => {
 
     expect(bridge.getView()).toBeUndefined();
     expect(deps.updateStatusBarItem).toHaveBeenCalledOnce();
+  });
+
+  it('keeps host listeners attached while an editor webview is suspended', async () => {
+    const { session, deps } = createSession({ editorSurface: true });
+    const view = createWebviewView(true);
+    await session.resolve(view as never);
+    const messageDisposable = view.webview.onDidReceiveMessage.mock.results[0]?.value;
+    const disposeDisposable = view.onDidDispose.mock.results[0]?.value;
+    const visibilityDisposable = view.onDidChangeVisibility.mock.results[0]?.value;
+    const generation = session.getRequestGeneration();
+
+    session.suspend();
+
+    expect(session.getRequestGeneration()).toBe(generation + 1);
+    expect(deps.cancelApiRequestsBeforeGeneration).toHaveBeenLastCalledWith(generation + 1);
+    expect(messageDisposable.dispose).not.toHaveBeenCalled();
+    expect(disposeDisposable.dispose).not.toHaveBeenCalled();
+    expect(visibilityDisposable.dispose).not.toHaveBeenCalled();
   });
 
   it('logs ready and visible side-effect failures without duplicating server-start reporting', async () => {

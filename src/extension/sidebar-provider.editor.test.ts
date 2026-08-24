@@ -77,13 +77,23 @@ describe('SidebarProvider editor panels', () => {
       payload: { open: true, sessionIds: [] },
     });
 
-    editor.panel.webview.html = '<p>visible editor document</p>';
+    await vi.waitFor(() => expect(editor.panel.webview.html).toContain('varro-editor-surface'));
+    const visibleHtml = editor.panel.webview.html;
 
     editor.setVisible(false);
-    expect(editor.panel.webview.html).toBe('<p>visible editor document</p>');
+    expect(editor.panel.webview.html).toBe(visibleHtml);
 
     editor.setVisible(true);
-    expect(editor.panel.webview.onDidReceiveMessage).toHaveBeenCalledTimes(2);
+    expect(editor.panel.webview.html).toBe(visibleHtml);
+    expect(editor.panel.webview.onDidReceiveMessage).toHaveBeenCalledOnce();
+
+    editor.receive({ type: 'ready' });
+    await vi.waitFor(() =>
+      expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'server/status',
+        payload: expect.anything(),
+      })
+    );
 
     editor.panel.dispose();
     expect(posted).toContainEqual({

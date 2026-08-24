@@ -202,7 +202,6 @@ export class WebviewSession {
     if (!view) return;
     const nextGeneration = ++this.webviewLoadGeneration;
     this.deps.cancelApiRequestsBeforeGeneration(nextGeneration);
-    this.disposeWebviewDisposables();
     this.webviewReady = false;
     this.webviewHasFocus = false;
     this.resetCommandState();
