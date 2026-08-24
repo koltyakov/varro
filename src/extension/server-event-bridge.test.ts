@@ -116,8 +116,8 @@ describe('ServerEventBridge', () => {
     });
     expect(bridge.getOpenCodeStatusBarItem()).toMatchObject({
       name: 'OpenCode Version',
-      command: 'varro.chat.focus',
     });
+    expect(bridge.getOpenCodeStatusBarItem().command).toBe('');
   });
 
   it('returns default status { state: "stopped" }', () => {

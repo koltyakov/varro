@@ -20,6 +20,9 @@ const mocks = vi.hoisted(() => ({
   rm: vi.fn(),
   vscode: {
     env: { remoteName: undefined as string | undefined },
+    extensions: {
+      getExtension: vi.fn(() => ({ packageJSON: { version: '0.26.4' } })),
+    },
     window: {
       createStatusBarItem: vi.fn((_id: string, _alignment: number, _priority: number) => ({
         name: '',

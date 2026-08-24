@@ -40,6 +40,7 @@ import { RalphHost } from './ralph-host';
 import { RestProxy } from './rest-proxy';
 import type { OpenCodeServer } from './server';
 import { ServerEventBridge } from './server-event-bridge';
+import { compareVersions, extractVersion } from './server-utils';
 import { SessionExportService } from './session-export-service';
 import { SessionDiffDocumentProvider } from './session-diff-document-provider';
 import { ToolOutputDocumentProvider } from './tool-output-document-provider';
@@ -57,6 +58,12 @@ import { UsageReportService } from './usage-report-service';
 import { resolveServerLaunch } from './util/server-launch';
 
 const maximumTestedOpenCodeVersion = readMaximumTestedOpenCodeVersion();
+
+function differsByMajorOrMinor(left: string, right: string) {
+  const [leftMajor, leftMinor] = left.split('.').map(Number);
+  const [rightMajor, rightMinor] = right.split('.').map(Number);
+  return leftMajor !== rightMajor || leftMinor !== rightMinor;
+}
 
 interface WebviewEndpoint {
   bridge: SidebarProviderBridge;
@@ -94,6 +101,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private static readonly SESSION_RECONCILE_GRACE_MS = 10_000;
 
   private lastStatusBarStateKey = '';
+  private openCodeVersionCheck: 'idle' | 'checking' | 'checked' = 'idle';
+  private openCodeUpdateAvailable = false;
+  private openCodeCliVersion: string | null = null;
+  private openCodeServerVersion: string | null = null;
+  private readonly extensionVersion: string;
   private activeChatModel: ChatModelSelection | null = null;
   private readonly fileSearch: FileSearchService;
   private readonly sessionState: SessionStateManager;
@@ -180,6 +192,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     providerSignatureFileSystem: ProviderSignatureFileSystem = nodeProviderSignatureFileSystem
   ) {
     this.contextProvider = contextProvider;
+    const extensionPackageJson: unknown = vscode.extensions.getExtension(extensionId)?.packageJSON;
+    this.extensionVersion =
+      extensionPackageJson &&
+      typeof extensionPackageJson === 'object' &&
+      typeof (extensionPackageJson as { version?: unknown }).version === 'string'
+        ? (extensionPackageJson as { version: string }).version
+        : 'unknown';
     const persistence = new HostPersistence(workspaceState);
     this.droppedFilesService = new DroppedFilesService(contextProvider);
     this.fileSearch = new FileSearchService();
@@ -297,6 +316,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.updateStatusBarItem();
     });
     this.configDisposable = vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration('varro.server.autoUpdate')) {
+        this.updateStatusBarItem();
+      }
       if (
         event.affectsConfiguration('varro.chat.showInlineFileChanges') ||
         event.affectsConfiguration('varro.chat.showChangedFiles') ||
@@ -1427,6 +1449,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private updateStatusBarItem() {
     this.updateSessionReconcileTimer();
+    this.refreshOpenCodeVersionStatus();
+    this.renderOpenCodeStatusBarItem();
     const next = this.getStatusBarState();
     const nextKey = JSON.stringify(next);
     if (nextKey === this.lastStatusBarStateKey) return;
@@ -1441,10 +1465,83 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       statusBarItem.tooltip = next.tooltip;
       statusBarItem.show();
     }
+  }
+
+  private refreshOpenCodeVersionStatus() {
+    if (this.serverEventBridge.getStatus().state !== 'running') {
+      this.openCodeVersionCheck = 'idle';
+      this.openCodeUpdateAvailable = false;
+      this.openCodeCliVersion = null;
+      this.openCodeServerVersion = null;
+      return;
+    }
+    if (this.openCodeVersionCheck !== 'idle') return;
+
+    this.openCodeVersionCheck = 'checking';
+    void this.server
+      .readServerInfo()
+      .then((info) => {
+        if (this.disposing || this.serverEventBridge.getStatus().state !== 'running') return;
+        this.openCodeCliVersion = info.cliVersion ? extractVersion(info.cliVersion) : null;
+        this.openCodeServerVersion = info.health.version
+          ? extractVersion(info.health.version)
+          : null;
+        this.openCodeUpdateAvailable =
+          (this.openCodeCliVersion !== null &&
+            compareVersions(this.openCodeCliVersion, maximumTestedOpenCodeVersion) < 0) ||
+          (this.openCodeCliVersion !== null &&
+            this.openCodeServerVersion !== null &&
+            compareVersions(this.openCodeServerVersion, this.openCodeCliVersion) < 0);
+        this.openCodeVersionCheck = 'checked';
+        this.renderOpenCodeStatusBarItem();
+      })
+      .catch(() => {
+        this.openCodeVersionCheck = 'checked';
+      });
+  }
+
+  private renderOpenCodeStatusBarItem() {
+    const updateMarker = this.openCodeUpdateAvailable ? '*' : '';
+    const autoUpdatesEnabled = vscode.workspace
+      .getConfiguration('varro')
+      .get<boolean>('server.autoUpdate', true);
+    const versionLines = [
+      `OpenCode CLI: ${this.openCodeCliVersion ?? 'unknown'}`,
+      `OpenCode Server: ${this.openCodeServerVersion ?? 'unknown'}`,
+    ];
+    if (
+      this.openCodeCliVersion &&
+      compareVersions(this.openCodeCliVersion, maximumTestedOpenCodeVersion) < 0
+    ) {
+      versionLines.push(
+        '',
+        `New CLI version: OpenCode ${maximumTestedOpenCodeVersion} is not installed yet. Auto-updates are ${autoUpdatesEnabled ? 'on' : 'off'}.`
+      );
+    }
+    if (
+      this.openCodeCliVersion &&
+      this.openCodeServerVersion &&
+      compareVersions(this.openCodeServerVersion, this.openCodeCliVersion) < 0
+    ) {
+      versionLines.push(
+        '',
+        `CLI updated to OpenCode ${this.openCodeCliVersion}; server ${this.openCodeServerVersion} is stale.`
+      );
+    }
+    if (versionLines.length > 2) versionLines.push('');
+    versionLines.push(`Varro extension: ${this.extensionVersion}`);
+    if (
+      (this.openCodeCliVersion &&
+        differsByMajorOrMinor(this.openCodeCliVersion, maximumTestedOpenCodeVersion)) ||
+      (this.openCodeServerVersion &&
+        differsByMajorOrMinor(this.openCodeServerVersion, maximumTestedOpenCodeVersion))
+    ) {
+      versionLines.push(`Verified w/ OpenCode ${maximumTestedOpenCodeVersion}`);
+    }
 
     const openCodeStatusBarItem = this.serverEventBridge.getOpenCodeStatusBarItem();
-    openCodeStatusBarItem.text = `$(robot) OpenCode ${maximumTestedOpenCodeVersion}`;
-    openCodeStatusBarItem.tooltip = `OpenCode ${maximumTestedOpenCodeVersion}\nMaximum version tested with this Varro release.\n\nClick to open chat.`;
+    openCodeStatusBarItem.text = `$(robot) OpenCode ${maximumTestedOpenCodeVersion}${updateMarker}`;
+    openCodeStatusBarItem.tooltip = versionLines.join('\n');
     openCodeStatusBarItem.show();
   }
 

@@ -73,7 +73,6 @@ export class ServerEventBridge {
       1000
     );
     this.openCodeStatusBarItem.name = 'OpenCode Version';
-    this.openCodeStatusBarItem.command = 'varro.chat.focus';
 
     this.attentionStatusBarItem = vscode.window.createStatusBarItem(
       'varro.session-status',

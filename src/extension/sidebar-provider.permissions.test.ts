@@ -1,5 +1,5 @@
 /* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- These tests deliberately model malformed permission events and inspect controlled provider internals. */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { readMaximumTestedOpenCodeVersion } from './extension-manifest';
 import {
   attachTestView,
@@ -210,6 +210,58 @@ describe('SidebarProvider permission replay', () => {
     expect(statusBarItem.text).toBe('$(bell-dot) Varro: 1 waiting');
     expect(statusBarItem.tooltip).toContain('Current repo: Run Bash command');
     expect(provider.getStatusBarClickAction()).toBe('attention');
+  });
+
+  it('marks the OpenCode version when the running server trails the installed CLI', async () => {
+    const server = createServer({
+      readServerInfo: vi.fn(async () => ({
+        managedProcess: true,
+        cliVersion: readMaximumTestedOpenCodeVersion(),
+        health: { healthy: true, version: '1.16.0' },
+      })),
+    });
+    await createSidebarProviderInstance({ server });
+    const statusHandler = server.on.mock.calls.findLast(([event]) => event === 'status')?.[1];
+    statusHandler?.({ state: 'running', url: 'http://127.0.0.1:4096' });
+
+    const createStatusBarItem = getVscodeMock().window.createStatusBarItem;
+    const itemIndex = createStatusBarItem.mock.calls.findIndex(
+      ([id]) => id === 'varro.opencode-version'
+    );
+    const item = createStatusBarItem.mock.results[itemIndex]?.value;
+    await vi.waitFor(() =>
+      expect(item.text).toBe(`$(robot) OpenCode ${readMaximumTestedOpenCodeVersion()}*`)
+    );
+    expect(item.tooltip).toBe(
+      `OpenCode CLI: ${readMaximumTestedOpenCodeVersion()}\nOpenCode Server: 1.16.0\n\nCLI updated to OpenCode ${readMaximumTestedOpenCodeVersion()}; server 1.16.0 is stale.\n\nVarro extension: 0.26.4\nVerified w/ OpenCode ${readMaximumTestedOpenCodeVersion()}`
+    );
+  });
+
+  it('describes an uninstalled patch update without repeating the verified version', async () => {
+    await getVscodeMock().workspace.getConfiguration().update('server.autoUpdate', false);
+    const maximumTestedVersion = readMaximumTestedOpenCodeVersion();
+    const [major, minor, patch] = maximumTestedVersion.split('.').map(Number);
+    const installedVersion = `${major}.${minor}.${Math.max(0, (patch ?? 1) - 1)}`;
+    const server = createServer({
+      readServerInfo: vi.fn(async () => ({
+        managedProcess: true,
+        cliVersion: installedVersion,
+        health: { healthy: true, version: installedVersion },
+      })),
+    });
+    await createSidebarProviderInstance({ server });
+    const statusHandler = server.on.mock.calls.findLast(([event]) => event === 'status')?.[1];
+    statusHandler?.({ state: 'running', url: 'http://127.0.0.1:4096' });
+
+    const createStatusBarItem = getVscodeMock().window.createStatusBarItem;
+    const itemIndex = createStatusBarItem.mock.calls.findIndex(
+      ([id]) => id === 'varro.opencode-version'
+    );
+    const item = createStatusBarItem.mock.results[itemIndex]?.value;
+    await vi.waitFor(() => expect(item.text).toBe(`$(robot) OpenCode ${maximumTestedVersion}*`));
+    expect(item.tooltip).toBe(
+      `OpenCode CLI: ${installedVersion}\nOpenCode Server: ${installedVersion}\n\nNew CLI version: OpenCode ${maximumTestedVersion} is not installed yet. Auto-updates are off.\n\nVarro extension: 0.26.4`
+    );
   });
 
   it('uses completed-session navigation for a completed status item', async () => {
