@@ -1812,6 +1812,7 @@ kbd {
   display: inline-flex;
   align-items: center;
   font-size: inherit;
+  font-weight: 300;
   color: var(--color-vscode-fg);
   flex-shrink: 0;
   line-height: 1.2;
@@ -1823,6 +1824,7 @@ kbd {
   color: var(--color-vscode-fg);
   flex: 0 0 auto;
   font-size: inherit;
+  font-weight: 300;
   line-height: 1.2;
   white-space: nowrap;
 }
@@ -1833,6 +1835,7 @@ kbd {
   gap: 4px;
   font-family: inherit;
   font-size: inherit;
+  font-weight: 300;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2010,6 +2013,7 @@ kbd {
   display: inline-flex;
   align-items: center;
   font-size: inherit;
+  font-weight: 300;
   color: var(--color-vscode-fg);
   flex-shrink: 0;
   line-height: 1.2;
@@ -2022,6 +2026,7 @@ kbd {
   gap: 4px;
   font-family: inherit;
   font-size: inherit;
+  font-weight: 300;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

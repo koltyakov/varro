@@ -31,6 +31,14 @@ test('keeps compact tool card headers on the same geometry contract', async ({ p
   expect(heights).toHaveLength(7);
   expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(1);
 
+  const primaryText = page.locator(
+    '.file-read-action-label, .file-read-target, .file-edit-action-label, .file-edit-path-link, .tool-invocation-title'
+  );
+  const fontWeights = await primaryText.evaluateAll((elements) =>
+    elements.map((element) => getComputedStyle(element).fontWeight)
+  );
+  expect(new Set(fontWeights)).toEqual(new Set(['300']));
+
   const iconSizes = await page.locator('.tool-call-icon').evaluateAll((icons) =>
     icons.map((icon) => {
       const bounds = icon.getBoundingClientRect();
