@@ -329,6 +329,14 @@ describe('AssistantMessageContent', () => {
     expect(summary?.getAttribute('aria-expanded')).toBe('false');
   });
 
+  it('marks a visible Explored summary as an unbordered flow boundary', () => {
+    renderAssistantMessageContent({ parts: [toolPart('read-1', 'read')] });
+
+    const item = container?.querySelector('.assistant-message-flow-item');
+    expect(item?.classList).toContain('assistant-flow-block-starts-summary');
+    expect(item?.classList).not.toContain('assistant-flow-block-starts-bordered');
+  });
+
   it('replaces activity words with icons from right to left as space narrows', () => {
     let resize: ResizeObserverCallback | undefined;
     vi.stubGlobal(

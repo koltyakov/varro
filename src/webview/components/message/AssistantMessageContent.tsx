@@ -734,7 +734,7 @@ export function AssistantMessageContent(props: {
         );
       return (
         <div
-          class={`assistant-active-activity-tray${borderedFlowClasses(!activeSummary(), true)}${hasExitingPart() ? ' is-exiting' : ''}${activeSummary() ? ' has-active-summary' : ''}`}
+          class={`assistant-active-activity-tray${borderedFlowClasses(!activeSummary(), true)}${hasExitingPart() ? ' is-exiting' : ''}${activeSummary() ? ' has-active-summary assistant-flow-block-starts-summary' : ''}`}
           data-assistant-render-key={entry.key}
           aria-label="Active tools"
         >
@@ -831,7 +831,7 @@ export function AssistantMessageContent(props: {
         item().parts.some((part) => part.id === getCompactActivitySummaryPartId(activityGroup()));
       return (
         <div
-          class={`assistant-message-flow-item${borderedFlowClasses(!showSummary() && isActivityGroupExpanded(activityGroup().key), isActivityGroupExpanded(activityGroup().key))}${revealClass ? ' assistant-activity-group-settling' : ''}${!showSummary() && !isActivityGroupExpanded(activityGroup().key) ? ' assistant-message-flow-item-hidden' : ''}`}
+          class={`assistant-message-flow-item${borderedFlowClasses(!showSummary() && isActivityGroupExpanded(activityGroup().key), isActivityGroupExpanded(activityGroup().key))}${showSummary() ? ' assistant-flow-block-starts-summary' : ''}${revealClass ? ' assistant-activity-group-settling' : ''}${!showSummary() && !isActivityGroupExpanded(activityGroup().key) ? ' assistant-message-flow-item-hidden' : ''}`}
           data-assistant-activity-group-key={
             showSummary() ? encodeURIComponent(activityGroup().key) : undefined
           }

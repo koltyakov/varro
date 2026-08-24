@@ -1084,6 +1084,13 @@ body.vscode-light
   margin-top: calc(var(--assistant-flow-item-gap) * -0.25);
 }
 
+.assistant-turn-content.assistant-turn-content-plain
+  .assistant-message-flow
+  > .assistant-flow-block-ends-bordered
+  + .assistant-flow-block-starts-summary {
+  margin-top: 4px;
+}
+
 .interactive-item-container.interactive-response.interactive-response-follows-response:not(
     .interactive-item-render-empty
   ) {
@@ -1639,7 +1646,7 @@ body.vscode-light
   color: var(--color-vscode-muted);
 }
 .rendered-markdown li {
-  margin: 4px 0;
+  margin: 1px 0;
 }
 .rendered-markdown li > p {
   margin: 0;

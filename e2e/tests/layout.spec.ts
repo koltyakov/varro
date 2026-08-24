@@ -794,6 +794,87 @@ test('keeps the compact file-change-to-next-block gap consistent', async ({ page
   ).toBeCloseTo(9, 0);
 });
 
+test('keeps inline edits separated from a following Explored summary', async ({ page }) => {
+  await page.setViewportSize({ width: 1000, height: 1000 });
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayCount=1');
+  const row = page.locator('[data-msg-id="message-tool-cards-assistant"]');
+  await expect(row.locator('.assistant-active-activity-tray')).toBeVisible();
+  await page.evaluate(() => {
+    const messageID = 'message-tool-cards-assistant';
+    // oxlint-disable-next-line unicorn/consistent-function-scoping -- The helper runs in the browser context.
+    const postEvent = (type: string, properties: Record<string, unknown>) => {
+      window.postMessage({ type: 'server/event', payload: { type, properties } }, '*');
+    };
+    for (const [index, relativePath] of ['src/first.ts', 'src/second.ts'].entries()) {
+      postEvent('message.part.updated', {
+        part: {
+          id: `tool-edit-explored-${index}`,
+          sessionID: 'session-tool-cards',
+          messageID,
+          type: 'tool',
+          callID: `tool-edit-explored-${index}-call`,
+          tool: 'edit',
+          state: {
+            status: 'completed',
+            input: {
+              file_path: `/workspace/${relativePath}`,
+              old_string: 'before',
+              new_string: 'after',
+            },
+            output: `Updated /workspace/${relativePath}`,
+            title: 'Edit file',
+            metadata: {
+              files: [{ type: 'update', relativePath, additions: 1, deletions: 1 }],
+            },
+            time: { start: Date.now() + index, end: Date.now() + index + 1 },
+          },
+        },
+      });
+    }
+    postEvent('message.part.updated', {
+      part: {
+        id: 'tool-read-after-edits',
+        sessionID: 'session-tool-cards',
+        messageID,
+        type: 'tool',
+        callID: 'tool-read-after-edits-call',
+        tool: 'read',
+        state: {
+          status: 'completed',
+          input: { file_path: '/workspace/src/after-edits.ts' },
+          output: 'export const afterEdits = true;',
+          title: 'Read after edits',
+          metadata: {},
+          time: { start: Date.now() + 3, end: Date.now() + 4 },
+        },
+      },
+    });
+  });
+
+  const editStack = row.locator('.assistant-file-edit-stack').last();
+  const edits = editStack.locator('.file-change-card');
+  const summary = row.locator('.assistant-activity-summary').last();
+  await expect(edits).toHaveCount(2);
+  await expect(edits.locator('.file-edit-path-link')).toHaveText(['src/first.ts', 'src/second.ts']);
+  await expect(summary).toContainText('Explored');
+  await summary.evaluate(async (element) => {
+    const item = element.closest('.assistant-message-flow-item');
+    if (!item) throw new Error('Explored flow item is missing');
+    await Promise.allSettled(
+      item.getAnimations({ subtree: true }).map((animation) => animation.finished)
+    );
+  });
+
+  expect(
+    await summary.evaluate(
+      (element, lastEdit) =>
+        element.getBoundingClientRect().top -
+        (lastEdit as HTMLElement).getBoundingClientRect().bottom,
+      await edits.last().elementHandle()
+    )
+  ).toBe(16);
+});
+
 test('tightens only bordered activity boundaries', async ({ page }) => {
   await page.setViewportSize({ width: 1000, height: 1600 });
   await page.goto('/e2e/harness/index.html?scenario=tool-cards');
@@ -1157,7 +1238,7 @@ test('tightens only bordered activity boundaries', async ({ page }) => {
     return card.getBoundingClientRect().top - element.getBoundingClientRect().bottom;
   });
 
-  expect(incomingGap).toBe(12);
+  expect(incomingGap).toBe(16);
   expect(collapsedGap).toBe(12);
   expect(borderedGap).toBe(9);
   expect(expandedGap).toBe(12);

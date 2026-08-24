@@ -334,6 +334,15 @@ describe('ModelsPanel', () => {
     await Promise.resolve();
     expect(container?.querySelectorAll('.models-model-row')).toHaveLength(1);
     expect(container?.querySelector('.models-model-row')?.textContent).toContain('Model 100');
+
+    container
+      ?.querySelector<HTMLElement>('.models-model-row')
+      ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    findButton(document, 'Hide model')?.click();
+    await Promise.resolve();
+
+    expect(container?.querySelectorAll('.models-model-row')).toHaveLength(0);
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEYS.addedModels)!)).toEqual([]);
   });
 
   it('discards pending model catalog changes when cancelled', async () => {
@@ -1184,7 +1193,8 @@ describe('ModelsPanel', () => {
     expect(unpinButton).toBeTruthy();
     expect(menu.children[0]).toBe(unpinButton);
     expect(menu.children[1]?.textContent).toBe('Rename model');
-    expect(menu.children[2]?.getAttribute('role')).toBe('separator');
+    expect(menu.children[2]?.textContent).toBe('Hide model');
+    expect(menu.children[3]?.getAttribute('role')).toBe('separator');
 
     unpinButton?.click();
     await Promise.resolve();
@@ -1203,6 +1213,72 @@ describe('ModelsPanel', () => {
     expect(JSON.parse(window.localStorage.getItem(STORAGE_KEYS.pinnedModels)!)).toEqual([
       'openai:gpt-5',
     ]);
+  });
+
+  it('hides a model behind the model catalog and restores it', async () => {
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    const modelRows = () =>
+      Array.from(container?.querySelectorAll<HTMLElement>('.models-model-row') ?? []);
+    const gpt5Row = modelRows().find(
+      (row) => row.querySelector('.models-model-name')?.textContent === 'GPT-5'
+    );
+    gpt5Row?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    findButton(document, 'Hide model')?.click();
+    await Promise.resolve();
+
+    expect(modelRows()).toHaveLength(1);
+    expect(modelRows()[0]?.textContent).toContain('GPT-5 mini');
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEYS.addedModels)!)).toEqual([
+      'openai:*',
+      'openai:gpt-5-mini',
+    ]);
+
+    findButton(container, 'Add models')?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    const dialog = document.body.querySelector<HTMLElement>('.models-model-catalog-dialog');
+    expect(dialog?.querySelectorAll('.models-model-catalog-row')).toHaveLength(2);
+    expect(dialog?.querySelector('.models-model-catalog-id')?.textContent).toBe('(gpt-5-mini)');
+    const hiddenModelRow = Array.from(
+      dialog?.querySelectorAll<HTMLElement>('.models-model-catalog-row') ?? []
+    ).find((row) => row.querySelector('.models-model-catalog-id')?.textContent === '(gpt-5)');
+    const hiddenModelCheckbox = hiddenModelRow?.querySelector<HTMLInputElement>('.models-checkbox');
+    expect(hiddenModelCheckbox?.checked).toBe(false);
+    hiddenModelCheckbox?.click();
+    findButton(dialog, 'Save changes')?.click();
+    await Promise.resolve();
+
+    expect(modelRows()).toHaveLength(2);
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEYS.addedModels)!)).toEqual([
+      'openai:*',
+      'openai:gpt-5-mini',
+      'openai:gpt-5',
+    ]);
+  });
+
+  it('preserves untoggled models when hiding another model', async () => {
+    setState('hiddenModels', ['openai:gpt-5-mini']);
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    const modelRows = () =>
+      Array.from(container?.querySelectorAll<HTMLElement>('.models-model-row') ?? []);
+    const gpt5Row = modelRows().find(
+      (row) => row.querySelector('.models-model-name')?.textContent === 'GPT-5'
+    );
+    gpt5Row?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    findButton(document, 'Hide model')?.click();
+    await Promise.resolve();
+
+    container?.querySelector<HTMLButtonElement>('.models-provider-toggle')?.click();
+    await Promise.resolve();
+    const remainingCheckbox = modelRows()[0]?.querySelector<HTMLInputElement>('.models-checkbox');
+    expect(modelRows()).toHaveLength(1);
+    expect(modelRows()[0]?.textContent).toContain('GPT-5 mini');
+    expect(remainingCheckbox?.checked).toBe(false);
+    expect(state.hiddenModels).toEqual(['openai:gpt-5-mini']);
   });
 
   it('renames and resets a model display name without changing its ID', async () => {

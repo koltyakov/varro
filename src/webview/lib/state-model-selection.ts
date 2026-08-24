@@ -9,6 +9,7 @@ import { providerRequiresReconnection } from './provider-connection-state';
 import { STORAGE_KEYS, writeStored } from './state-storage';
 
 export const LARGE_MODEL_CATALOG_THRESHOLD = 50;
+const MANAGED_MODEL_CATALOG_MARKER = '*';
 
 export function getSelectedModelForSession(
   sessionId: string | null | undefined
@@ -225,9 +226,17 @@ export function isModelAdded(providerID: string, modelID: string) {
   return state.addedModels.includes(modelVisibilityKey(providerID, modelID));
 }
 
+export function hasManagedModelCatalog(providerID: string) {
+  return isModelAdded(providerID, MANAGED_MODEL_CATALOG_MARKER);
+}
+
 export function isModelListed(providerID: string, modelID: string) {
   const provider = state.providers.find((item) => item.id === providerID);
-  return !provider || !isLargeModelCatalog(provider) || isModelAdded(providerID, modelID);
+  return (
+    !provider ||
+    (!isLargeModelCatalog(provider) && !hasManagedModelCatalog(providerID)) ||
+    isModelAdded(providerID, modelID)
+  );
 }
 
 export function isModelVisible(providerID: string, modelID: string) {
@@ -268,14 +277,23 @@ export function setModelAdded(providerID: string, modelID: string, added: boolea
 
 export function setModelsAdded(providerID: string, modelIDs: readonly string[]) {
   const prefix = `${providerID}:`;
+  const provider = state.providers.find((item) => item.id === providerID);
+  const usesManagedMarker = provider ? !isLargeModelCatalog(provider) : false;
+  const wasManaged = provider
+    ? isLargeModelCatalog(provider) || hasManagedModelCatalog(providerID)
+    : false;
   const previousModelIDs = new Set(
     state.addedModels
       .filter((item) => item.startsWith(prefix))
       .map((item) => item.slice(prefix.length))
+      .filter((modelID) => modelID !== MANAGED_MODEL_CATALOG_MARKER)
   );
-  const nextModelIDs = [...new Set(modelIDs)];
+  const nextModelIDs = [...new Set(modelIDs)].filter(
+    (modelID) => modelID !== MANAGED_MODEL_CATALOG_MARKER
+  );
   const next = [
     ...state.addedModels.filter((item) => !item.startsWith(prefix)),
+    ...(usesManagedMarker ? [modelVisibilityKey(providerID, MANAGED_MODEL_CATALOG_MARKER)] : []),
     ...nextModelIDs.map((modelID) => modelVisibilityKey(providerID, modelID)),
   ];
 
@@ -283,7 +301,9 @@ export function setModelsAdded(providerID: string, modelIDs: readonly string[]) 
   writeStored(STORAGE_KEYS.addedModels, next);
   publishModelPreferences();
 
-  const newlyAddedModelIDs = nextModelIDs.filter((modelID) => !previousModelIDs.has(modelID));
+  const newlyAddedModelIDs = wasManaged
+    ? nextModelIDs.filter((modelID) => !previousModelIDs.has(modelID))
+    : [];
   setModelsVisible(providerID, newlyAddedModelIDs, true);
 
   if (
@@ -295,7 +315,9 @@ export function setModelsAdded(providerID: string, modelIDs: readonly string[]) 
 }
 
 export function getListedProviderModels(provider: Provider) {
-  if (!isLargeModelCatalog(provider)) return Object.values(provider.models);
+  if (!isLargeModelCatalog(provider) && !hasManagedModelCatalog(provider.id)) {
+    return Object.values(provider.models);
+  }
   return Object.values(provider.models).filter((model) => isModelAdded(provider.id, model.id));
 }
 

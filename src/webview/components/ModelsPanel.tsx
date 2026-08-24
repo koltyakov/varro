@@ -6,6 +6,7 @@ import {
   isModelVisible,
   getListedProviderModels,
   getModelDisplayName,
+  hasManagedModelCatalog,
   isLargeModelCatalog,
   setModelsAdded,
   setModelDisplayName,
@@ -159,7 +160,12 @@ export function ModelsPanel() {
               ),
         };
       })
-      .filter((entry) => entry.models.length > 0 || isLargeModelCatalog(entry.provider))
+      .filter(
+        (entry) =>
+          entry.models.length > 0 ||
+          isLargeModelCatalog(entry.provider) ||
+          hasManagedModelCatalog(entry.provider.id)
+      )
       .toSorted((a, b) => compareProviders(a.provider, b.provider));
   });
   const maxCapabilityCount = createMemo(() =>
@@ -221,6 +227,19 @@ export function ModelsPanel() {
 
   function closeContextMenu() {
     setContextMenu(null);
+  }
+
+  function hideModel(providerID: string, modelID: string) {
+    const provider = state.providers.find((item) => item.id === providerID);
+    if (provider) {
+      setModelsAdded(
+        providerID,
+        getListedProviderModels(provider)
+          .map((model) => model.id)
+          .filter((id) => id !== modelID)
+      );
+    }
+    closeContextMenu();
   }
 
   function positionContextMenu(element: HTMLDivElement, x: number, y: number) {
@@ -591,6 +610,13 @@ export function ModelsPanel() {
                   Reset model name
                 </button>
               </Show>
+              <button
+                type="button"
+                class="models-context-menu-item"
+                onClick={() => hideModel(menu.providerID, menu.modelID)}
+              >
+                Hide model
+              </button>
               <div class="models-context-menu-separator" role="separator" />
               <button
                 type="button"
@@ -801,12 +827,7 @@ function ModelCatalogDialog(props: { provider: ModelProvider; onClose: () => voi
   const [isLoading, setIsLoading] = createSignal(true);
   const [loadError, setLoadError] = createSignal('');
   const allModels = createMemo(() => sortProviderModels(Object.values(catalogProvider().models)));
-  const modelKeyPrefix = `${props.provider.id}:`;
-  const initialModelIDs = new Set(
-    state.addedModels
-      .filter((key) => key.startsWith(modelKeyPrefix))
-      .map((key) => key.slice(modelKeyPrefix.length))
-  );
+  const initialModelIDs = new Set(getListedProviderModels(props.provider).map((model) => model.id));
   const [selectedModelIDs, setSelectedModelIDs] = createSignal(new Set(initialModelIDs));
   const normalizedQuery = createMemo(() => query().trim().toLocaleLowerCase());
   const hasChanges = createMemo(() => {
@@ -829,14 +850,21 @@ function ModelCatalogDialog(props: { provider: ModelProvider; onClose: () => voi
   });
   const matchingModels = createMemo(() => {
     const search = normalizedQuery();
+    let models: ProviderModel[];
     if (!search) {
-      return allModels().filter(
-        (model) => initialModelIDs.has(model.id) || selectedModelIDs().has(model.id)
+      models = !isLargeModelCatalog(catalogProvider())
+        ? allModels()
+        : allModels().filter(
+            (model) => initialModelIDs.has(model.id) || selectedModelIDs().has(model.id)
+          );
+    } else {
+      models = allModels().filter((model) =>
+        [model.name, model.id].some((value) => value.toLocaleLowerCase().includes(search))
       );
     }
-    return allModels().filter((model) =>
-      [model.name, model.id].some((value) => value.toLocaleLowerCase().includes(search))
-    );
+
+    const selected = selectedModelIDs();
+    return models.toSorted((a, b) => Number(selected.has(b.id)) - Number(selected.has(a.id)));
   });
   const visibleModels = createMemo(() => matchingModels().slice(0, MODEL_CATALOG_RESULT_LIMIT));
   let searchInputRef: HTMLInputElement | undefined;
@@ -975,8 +1003,8 @@ function ModelCatalogDialog(props: { provider: ModelProvider; onClose: () => voi
                         />
                         <span class="models-model-catalog-name">
                           <FormattedModelName name={model.name} />
+                          <span class="models-model-catalog-id">({model.id})</span>
                         </span>
-                        <span class="models-model-catalog-id">{model.id}</span>
                       </label>
                     )}
                   </For>
@@ -1068,7 +1096,9 @@ function ProviderSection(props: {
           </span>
         </button>
         <Show when={!props.reconnectRequired}>
-          <Show when={isLargeModelCatalog(props.provider)}>
+          <Show
+            when={isLargeModelCatalog(props.provider) || hasManagedModelCatalog(props.provider.id)}
+          >
             <button
               type="button"
               class="models-provider-models-button"
