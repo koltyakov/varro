@@ -13,6 +13,161 @@ import {
 import { getToolInlineFileChangesLayoutSignature } from '../../lib/tool-file-change';
 import type { MessageEntry, Part } from '../../types';
 
+export type MessageBlockBoundary = {
+  startsBordered: boolean;
+  endsBordered: boolean;
+  signature: string;
+};
+
+type MessageBlockBoundaryOptions = {
+  expandedActivityGroup: (key: string) => boolean;
+  renderEmptyMessageIds: ReadonlySet<string>;
+  showThinking: boolean;
+  streaming?: { partId: string | null; text: string };
+  visibleActiveActivityPartKeys?: ReadonlySet<string>;
+  retainedActivityPartKeys?: ReadonlySet<string>;
+  exitingActivityPartKeys?: ReadonlySet<string>;
+  modelChangeMessageIds?: ReadonlySet<string>;
+  dialogSummaryMessageIds?: ReadonlySet<string>;
+};
+
+export function getMessageBlockBoundaryMap(
+  messages: readonly MessageEntry[],
+  groups: ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>,
+  options: MessageBlockBoundaryOptions
+) {
+  const boundaries = new Map<string, MessageBlockBoundary>();
+
+  for (const message of messages) {
+    const messageId = message.info.id;
+    if (options.renderEmptyMessageIds.has(messageId)) {
+      boundaries.set(messageId, {
+        startsBordered: false,
+        endsBordered: false,
+        signature: 'empty',
+      });
+      continue;
+    }
+
+    if (message.info.role === 'user') {
+      const interruptedStart = options.modelChangeMessageIds?.has(messageId) ?? false;
+      const interruptedEnd = options.dialogSummaryMessageIds?.has(messageId) ?? false;
+      boundaries.set(messageId, {
+        startsBordered: !interruptedStart,
+        endsBordered: !interruptedEnd,
+        signature: `user:${interruptedStart ? 'u' : 'b'}:${interruptedEnd ? 'u' : 'b'}`,
+      });
+      continue;
+    }
+
+    const messageGroups = groups.get(messageId) ?? [];
+    const groupByPartKey = new Map(
+      messageGroups.flatMap((group) =>
+        group.parts.map((part) => [getAssistantActivityPartKey(part), group] as const)
+      )
+    );
+    const blocks: boolean[] = [];
+    const renderedGroupKeys = new Set<string>();
+    const renderedActiveSummaryKeys = new Set<string>();
+
+    for (const part of message.parts) {
+      if (part.type === 'text') {
+        if (hasVisibleProjectedText(part, options.streaming)) blocks.push(false);
+        continue;
+      }
+      if (part.type === 'reasoning' && !options.showThinking) continue;
+      if (!shouldShowAssistantPartInline(part, false)) continue;
+
+      if (!isAssistantActivityPart(part)) {
+        blocks.push(isBorderedAssistantPart(part));
+        continue;
+      }
+
+      const partKey = getAssistantActivityPartKey(part);
+      if (
+        options.visibleActiveActivityPartKeys?.has(partKey) ||
+        options.retainedActivityPartKeys?.has(partKey) ||
+        options.exitingActivityPartKeys?.has(partKey)
+      ) {
+        const activeGroup = groupByPartKey.get(partKey);
+        if (
+          activeGroup?.ownerMessageId === messageId &&
+          !renderedActiveSummaryKeys.has(activeGroup.key)
+        ) {
+          renderedActiveSummaryKeys.add(activeGroup.key);
+          blocks.push(false);
+        }
+        blocks.push(true);
+        continue;
+      }
+
+      const group = groupByPartKey.get(partKey);
+      if (!group) {
+        blocks.push(true);
+        continue;
+      }
+      if (renderedGroupKeys.has(group.key)) continue;
+      renderedGroupKeys.add(group.key);
+      if (group.ownerMessageId === messageId) blocks.push(false);
+      if (options.expandedActivityGroup(group.key)) blocks.push(true);
+    }
+
+    if (message.info.error) blocks.push(true);
+    if (options.modelChangeMessageIds?.has(messageId)) blocks.unshift(false);
+    if (options.dialogSummaryMessageIds?.has(messageId)) blocks.push(false);
+    let borderedPairCount = 0;
+    for (let index = 1; index < blocks.length; index += 1) {
+      if (blocks[index - 1] && blocks[index]) borderedPairCount += 1;
+    }
+
+    boundaries.set(messageId, {
+      startsBordered: blocks[0] === true,
+      endsBordered: blocks.at(-1) === true,
+      signature: `${blocks[0] ? 'b' : 'u'}:${blocks.at(-1) ? 'b' : 'u'}:${borderedPairCount}`,
+    });
+  }
+
+  return boundaries;
+}
+
+export function getBorderedAdjacencyLayoutSignatures(
+  messages: readonly { info: { id: string } }[],
+  boundaries: ReadonlyMap<string, MessageBlockBoundary>,
+  renderEmptyMessageIds: ReadonlySet<string>
+) {
+  const signatures = new Map<string, string>();
+  let previousVisibleMessageId: string | null = null;
+
+  for (const message of messages) {
+    const messageId = message.info.id;
+    const boundary = boundaries.get(messageId);
+    if (!boundary) continue;
+    const previousBoundary = previousVisibleMessageId
+      ? boundaries.get(previousVisibleMessageId)
+      : undefined;
+    const followsBordered =
+      !!previousBoundary?.endsBordered &&
+      boundary.startsBordered &&
+      !renderEmptyMessageIds.has(messageId);
+    signatures.set(
+      messageId,
+      `${boundary.signature}\u0000${previousVisibleMessageId ?? ''}\u0000${followsBordered ? 'tight' : 'normal'}`
+    );
+    if (!renderEmptyMessageIds.has(messageId)) previousVisibleMessageId = messageId;
+  }
+
+  return signatures;
+}
+
+function isBorderedAssistantPart(part: Part) {
+  return (
+    part.type === 'tool' ||
+    part.type === 'reasoning' ||
+    part.type === 'file' ||
+    part.type === 'agent'
+  );
+}
+
 export function getInlinePreviewLayoutSignatures(
   messages: readonly { info: { id: string }; parts: readonly Part[] }[],
   enabled: boolean

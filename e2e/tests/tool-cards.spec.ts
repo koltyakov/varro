@@ -70,6 +70,61 @@ test('renders each completed file edit as a separate row', async ({ page }) => {
   expect(rowGap).toBe(activityGap);
 });
 
+test('scales only bordered pairs in compact file-edit stacks', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards');
+  await expect(page.locator('.assistant-message-flow')).toBeVisible();
+
+  const gaps = await page.evaluate(() => {
+    const host = document.querySelector('.assistant-message-flow');
+    if (!(host instanceof HTMLElement)) throw new Error('Assistant flow is missing');
+    const stack = document.createElement('div');
+    stack.className = 'assistant-file-edit-stack';
+    stack.style.position = 'absolute';
+    stack.style.visibility = 'hidden';
+    const blocks: HTMLDivElement[] = [];
+    for (const className of [
+      'file-change-card',
+      'file-change-card',
+      'file-change-truncated-summary',
+      'file-change-card',
+      'file-edit-error-detail',
+      'file-change-card',
+    ]) {
+      const block = document.createElement('div');
+      block.className = className;
+      block.style.height = '20px';
+      blocks.push(block);
+    }
+    const [first, second, note, third, detail, fourth] = blocks as [
+      HTMLDivElement,
+      HTMLDivElement,
+      HTMLDivElement,
+      HTMLDivElement,
+      HTMLDivElement,
+      HTMLDivElement,
+    ];
+    stack.append(first, second, note, third, detail, fourth);
+    host.append(stack);
+    const result = {
+      bordered: second.getBoundingClientRect().top - first.getBoundingClientRect().bottom,
+      borderedToNote: note.getBoundingClientRect().top - second.getBoundingClientRect().bottom,
+      noteToBordered: third.getBoundingClientRect().top - note.getBoundingClientRect().bottom,
+      borderedToDetail: detail.getBoundingClientRect().top - third.getBoundingClientRect().bottom,
+      detailToBordered: fourth.getBoundingClientRect().top - detail.getBoundingClientRect().bottom,
+    };
+    stack.remove();
+    return result;
+  });
+
+  expect(gaps).toEqual({
+    bordered: 1.5,
+    borderedToNote: 4.5,
+    noteToBordered: 1.5,
+    borderedToDetail: 2,
+    detailToBordered: 2,
+  });
+});
+
 test('connects expanded activity rows to the underlined summary', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=tool-cards&expandedActivity=1');
 
@@ -119,7 +174,8 @@ test('connects expanded activity rows to the underlined summary', async ({ page 
 
   expect(connector.content).toBe('""');
   expect(connector.width).toBe('1px');
-  expect(connector.height).toBe(activityGap);
+  expect(activityGap).toBe('9px');
+  expect(connector.height).toBe('12px');
   expect(Math.abs(connector.center - iconCenter)).toBeLessThanOrEqual(0.5);
   expect(Math.abs(connector.top - underline.bottom)).toBeLessThanOrEqual(0.5);
   expect(Math.abs(connector.bottom - detailTop)).toBeLessThanOrEqual(0.5);
@@ -167,7 +223,7 @@ test('connects expanded activity rows to the underlined summary', async ({ page 
 
     const createRow = (continues: boolean) => {
       const row = document.createElement('div');
-      row.className = `interactive-item-container interactive-response${continues ? ' interactive-response-continues-activity-group' : ''}`;
+      row.className = `interactive-item-container interactive-response${continues ? ' interactive-response-continues-activity-group interactive-item-follows-bordered-block' : ''}`;
       const flow = document.createElement('div');
       flow.className = 'assistant-message-flow';
       const item = document.createElement('div');
@@ -213,7 +269,7 @@ test('connects expanded activity rows to the underlined summary', async ({ page 
 
   expect(virtualizedBoundary.content).toBe('""');
   expect(virtualizedBoundary.width).toBe('1px');
-  expect(virtualizedBoundary.height).toBe('12px');
+  expect(virtualizedBoundary.height).toBe('9px');
   expect(virtualizedBoundary.color).toBe(connector.color);
   expect(
     Math.abs(virtualizedBoundary.top - virtualizedBoundary.previousDetailBottom)

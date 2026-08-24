@@ -867,7 +867,7 @@ describe('SessionListView diff summaries', () => {
 });
 
 describe('SessionListView pins', () => {
-  it('pins and unpins a session from its row menu and highlights it', async () => {
+  it('pins and unpins a session from its row menu and marks it', async () => {
     const setPinned = vi
       .spyOn(client.varro.session, 'setPinned')
       .mockResolvedValueOnce(['session-1'])
@@ -910,6 +910,28 @@ describe('SessionListView pins', () => {
       expect(row().classList.contains('is-pinned')).toBe(false);
       expect(row().querySelector('[aria-label="Pinned session"]')).toBeNull();
     });
+  });
+
+  it('separates the pinned group from the first unpinned session', () => {
+    const now = Date.now();
+    setState('sessions', [
+      session('unpinned', now),
+      session('pinned-newer', now - 1_000),
+      session('pinned-older', now - 2_000),
+    ]);
+    setState('pinnedSessionIds', ['pinned-newer', 'pinned-older']);
+
+    cleanup = render(() => <SessionListView />, container);
+
+    const rows = Array.from(container.querySelectorAll<HTMLElement>('.session-item'));
+    expect(rows.map((row) => row.querySelector('.session-item-title-text')?.textContent)).toEqual([
+      'pinned-newer',
+      'pinned-older',
+      'unpinned',
+    ]);
+    expect(rows.filter((row) => row.classList.contains('starts-unpinned-group'))).toEqual([
+      rows[2],
+    ]);
   });
 });
 

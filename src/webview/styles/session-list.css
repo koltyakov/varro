@@ -389,13 +389,8 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   background: var(--color-vscode-hover);
 }
 
-.session-item.is-pinned {
-  background: color-mix(in srgb, var(--color-vscode-warning) 8%, transparent);
-}
-
-.session-item.is-pinned:hover,
-.session-item.is-pinned.keyboard-focus {
-  background: color-mix(in srgb, var(--color-vscode-warning) 12%, var(--color-vscode-hover));
+.session-item.starts-unpinned-group {
+  border-top: 1px solid var(--color-vscode-border-soft);
 }
 
 @media (min-width: 1400px) {

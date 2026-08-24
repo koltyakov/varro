@@ -98,6 +98,7 @@ export function MessageRow(
     virtualPlaceholder?: boolean;
     renderEmpty?: boolean;
     followsVisibleAssistantResponse?: boolean;
+    followsBorderedBlock?: boolean;
     continuesVisibleActivityGroup?: boolean;
   } & MessageRowSharedProps
 ) {
@@ -184,7 +185,7 @@ export function MessageRow(
         props.msg.info.role === 'user' ? 'interactive-request' : 'interactive-response'
       } ${entrancePending() ? 'interactive-item-entering' : ''}${isAbandonedByEdit() ? ' interactive-item-edit-abandoned' : ''}${
         isEditingThisMessage() ? ' interactive-request-editing' : ''
-      }${props.followsVisibleAssistantResponse ? ' interactive-response-follows-response' : ''}${props.continuesVisibleActivityGroup ? ' interactive-response-continues-activity-group' : ''}${isOffCore() ? ' interactive-item-off-core' : ''}${isVirtualPlaceholder() ? ' interactive-item-virtual-placeholder' : ''}${props.renderEmpty ? ' interactive-item-render-empty' : ''}`}
+      }${props.followsVisibleAssistantResponse ? ' interactive-response-follows-response' : ''}${props.followsBorderedBlock ? ' interactive-item-follows-bordered-block' : ''}${props.continuesVisibleActivityGroup ? ' interactive-response-continues-activity-group' : ''}${isOffCore() ? ' interactive-item-off-core' : ''}${isVirtualPlaceholder() ? ' interactive-item-virtual-placeholder' : ''}${props.renderEmpty ? ' interactive-item-render-empty' : ''}`}
     >
       <Show when={!isVirtualPlaceholder()}>
         <Show when={modelChange()}>

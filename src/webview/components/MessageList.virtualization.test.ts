@@ -13,9 +13,11 @@ import type { AssistantActivityGroupInfo } from '../lib/assistant-activity';
 import { MessageList } from './MessageList';
 import {
   getChangedInlinePreviewMessageIds,
+  getBorderedAdjacencyLayoutSignatures,
   getCompactActivityDisclosureLayoutSignatures,
   getCompactActivityLayoutSignatures,
   getInlinePreviewLayoutSignatures,
+  getMessageBlockBoundaryMap,
 } from './message-list/row-layout';
 import { startEditingMessage } from '../lib/message-edit-state';
 import {
@@ -260,6 +262,95 @@ describe('compact activity virtualization signatures', () => {
       ).get('assistant-1');
 
     expect(new Set(['active', 'retained', 'exiting', 'grouped'].map(signature))).toHaveLength(4);
+  });
+
+  it('projects bordered boundaries for collapsed and expanded cross-row activity', () => {
+    const continuedPart: Part = {
+      ...activityPart,
+      id: 'read-2',
+      messageID: 'assistant-2',
+      callID: 'call-2',
+    };
+    const group: AssistantActivityGroupInfo = {
+      key: 'activity-turn\u0000session-1\u0000user-1',
+      ownerMessageId: 'assistant-1',
+      ownerPartId: activityPart.id,
+      parts: [activityPart, continuedPart],
+    };
+    const messages: MessageEntry[] = [
+      { info: assistantMessage('assistant-1'), parts: [activityPart] },
+      { info: assistantMessage('assistant-2'), parts: [continuedPart] },
+    ];
+    const groups = new Map([
+      ['assistant-1', [group]],
+      ['assistant-2', [group]],
+    ]);
+    const project = (expanded: boolean, emptyIds: ReadonlySet<string> = new Set()) =>
+      getMessageBlockBoundaryMap(messages, groups, {
+        expandedActivityGroup: () => expanded,
+        renderEmptyMessageIds: emptyIds,
+        showThinking: true,
+      });
+
+    expect(project(false, new Set(['assistant-2']))).toEqual(
+      new Map([
+        ['assistant-1', { startsBordered: false, endsBordered: false, signature: 'u:u:0' }],
+        ['assistant-2', { startsBordered: false, endsBordered: false, signature: 'empty' }],
+      ])
+    );
+    expect(project(true)).toEqual(
+      new Map([
+        ['assistant-1', { startsBordered: false, endsBordered: true, signature: 'u:b:0' }],
+        ['assistant-2', { startsBordered: true, endsBordered: true, signature: 'b:b:0' }],
+      ])
+    );
+  });
+});
+
+describe('bordered message projection', () => {
+  it('distinguishes bordered cards from prose and row chrome', () => {
+    const messages: MessageEntry[] = [
+      { info: userMessage('user-1'), parts: [textPart('user-text', 'Prompt')] },
+      {
+        info: assistantMessage('assistant-1'),
+        parts: [textPart('assistant-text', 'Prose'), toolPart('tool-1', 'assistant-1')],
+      },
+    ];
+    const boundaries = getMessageBlockBoundaryMap(messages, new Map(), {
+      expandedActivityGroup: () => false,
+      renderEmptyMessageIds: new Set(),
+      showThinking: true,
+      modelChangeMessageIds: new Set(['user-1']),
+    });
+
+    expect(boundaries.get('user-1')).toEqual({
+      startsBordered: false,
+      endsBordered: true,
+      signature: 'user:u:b',
+    });
+    expect(boundaries.get('assistant-1')).toEqual({
+      startsBordered: false,
+      endsBordered: true,
+      signature: 'u:b:0',
+    });
+  });
+
+  it('invalidates visual adjacency through zero-height rows', () => {
+    const messages = [{ info: { id: 'a' } }, { info: { id: 'empty' } }, { info: { id: 'b' } }];
+    const boundaries = new Map([
+      ['a', { startsBordered: true, endsBordered: true, signature: 'b' }],
+      ['empty', { startsBordered: false, endsBordered: false, signature: 'empty' }],
+      ['b', { startsBordered: true, endsBordered: true, signature: 'b' }],
+    ]);
+    const signatures = getBorderedAdjacencyLayoutSignatures(
+      messages,
+      boundaries,
+      new Set(['empty'])
+    );
+
+    expect(signatures.get('b')).toBe('b\u0000a\u0000tight');
+    const visibleMiddle = getBorderedAdjacencyLayoutSignatures(messages, boundaries, new Set());
+    expect(visibleMiddle.get('b')).toBe('b\u0000empty\u0000normal');
   });
 });
 

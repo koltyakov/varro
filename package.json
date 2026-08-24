@@ -375,7 +375,7 @@
         },
         "varro.chat.showInlineFileChanges": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "description": "Show line-by-line edits directly in file-change tool cards."
         },
         "varro.chat.showChangedFiles": {

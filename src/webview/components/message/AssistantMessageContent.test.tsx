@@ -315,6 +315,20 @@ describe('AssistantMessageContent', () => {
     expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(5);
   });
 
+  it('activates Explored on mousedown without toggling again on click', () => {
+    renderAssistantMessageContent({ parts: [toolPart('read-1', 'read')] });
+    const summary = container?.querySelector<HTMLButtonElement>('.assistant-activity-summary');
+
+    summary?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    expect(summary?.getAttribute('aria-expanded')).toBe('true');
+
+    summary?.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+    expect(summary?.getAttribute('aria-expanded')).toBe('true');
+
+    summary?.click();
+    expect(summary?.getAttribute('aria-expanded')).toBe('false');
+  });
+
   it('replaces activity words with icons from right to left as space narrows', () => {
     let resize: ResizeObserverCallback | undefined;
     vi.stubGlobal(
@@ -1015,6 +1029,9 @@ describe('AssistantMessageContent', () => {
     expect(stack).toBeInstanceOf(HTMLDivElement);
     expect(stack?.querySelectorAll('.message-part-mock')).toHaveLength(2);
     expect(stack?.querySelector('.assistant-file-edit-pager')).toBeNull();
+    const renderItem = container?.querySelector('[data-assistant-render-key]');
+    expect(renderItem?.classList).toContain('assistant-flow-block-starts-bordered');
+    expect(renderItem?.classList).toContain('assistant-flow-block-ends-bordered');
     expect(container?.querySelectorAll('[data-assistant-render-key]')).toHaveLength(1);
   });
 

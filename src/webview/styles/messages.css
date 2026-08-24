@@ -347,7 +347,7 @@
 }
 
 .assistant-turn-content.assistant-turn-content-plain .assistant-message-flow {
-  gap: 12px;
+  --assistant-flow-item-gap: 12px;
 }
 
 .assistant-message-flow-item {
@@ -449,7 +449,7 @@
   > .assistant-active-activity-item:not(.is-exiting)
   ~ .assistant-active-activity-item:not(.is-exiting)
   .assistant-active-activity-item-content {
-  padding-top: var(--assistant-activity-item-gap);
+  padding-top: var(--assistant-bordered-block-gap);
 }
 
 .assistant-active-activity-item.is-entering {
@@ -722,7 +722,7 @@
 .assistant-activity-details {
   display: flex;
   flex-direction: column;
-  gap: var(--assistant-activity-item-gap);
+  gap: var(--assistant-bordered-block-gap);
 }
 
 .assistant-activity-summary + .assistant-activity-details {
@@ -747,10 +747,21 @@
   pointer-events: none;
 }
 
-.assistant-activity-details > .assistant-activity-detail::before,
-.assistant-activity-details .file-change-card-list > .file-change-card + .file-change-card::before {
+.assistant-activity-details > .assistant-activity-detail::before {
+  top: calc(-1 * var(--assistant-bordered-block-gap));
+  height: var(--assistant-bordered-block-gap);
+}
+
+.assistant-activity-summary
+  + .assistant-activity-details
+  > .assistant-activity-detail:first-child::before {
   top: calc(-1 * var(--assistant-activity-item-gap));
   height: var(--assistant-activity-item-gap);
+}
+
+.assistant-activity-details .file-change-card-list > .file-change-card + .file-change-card::before {
+  top: calc(-1 * var(--assistant-bordered-block-gap));
+  height: var(--assistant-bordered-block-gap);
 }
 
 /* Let the continuing row's connector paint across the row boundary as one
@@ -1058,10 +1069,19 @@ body.vscode-light
 
 .assistant-message-flow {
   --assistant-activity-item-gap: 12px;
+  --assistant-bordered-block-gap: 9px;
+  --assistant-flow-item-gap: 8px;
 
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--assistant-flow-item-gap);
+}
+
+.assistant-message-flow
+  > .assistant-flow-block-ends-bordered
+  + :is(.assistant-flow-block-starts-bordered, .permission-prompt),
+.assistant-message-flow > .permission-prompt + .assistant-flow-block-starts-bordered {
+  margin-top: calc(var(--assistant-flow-item-gap) * -0.25);
 }
 
 .interactive-item-container.interactive-response.interactive-response-follows-response:not(
@@ -1074,6 +1094,18 @@ body.vscode-light
     .interactive-item-render-empty
   ) {
   padding-top: 6px;
+}
+
+.interactive-item-container.interactive-item-follows-bordered-block:not(
+    .interactive-item-render-empty
+  ) {
+  padding-top: 3px;
+}
+
+.interactive-item-container.interactive-response.interactive-response-follows-response.interactive-item-follows-bordered-block:not(
+    .interactive-item-render-empty
+  ) {
+  padding-top: 3px;
 }
 
 .model-change-indicator.assistant-dialog-summary {
@@ -1316,8 +1348,32 @@ body.vscode-light
   gap: 2px;
 }
 
+.assistant-file-edit-stack:not(:has(.file-change-inline-diffs-unwrapped))
+  > :is(.file-change-card, .file-change-truncated-summary)
+  + .file-change-card {
+  margin-top: -0.5px;
+}
+
+.assistant-file-edit-stack:not(:has(.file-change-inline-diffs-unwrapped))
+  > :is(.file-change-card, .file-change-truncated-summary)
+  + .file-change-truncated-summary {
+  margin-top: 2.5px;
+}
+
 .assistant-file-edit-stack:has(.file-change-inline-diffs-unwrapped) {
   gap: 12px;
+}
+
+.assistant-file-edit-stack:has(.file-change-inline-diffs-unwrapped)
+  > :is(.file-change-card, .file-change-truncated-summary)
+  + .file-change-card {
+  margin-top: -3px;
+}
+
+.assistant-file-edit-stack:has(.file-change-inline-diffs-unwrapped)
+  > :is(.file-change-card, .file-change-truncated-summary)
+  + .file-change-truncated-summary {
+  margin-top: 0;
 }
 
 .chat-turn-content > :last-child,

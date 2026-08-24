@@ -153,9 +153,11 @@ import {
 } from './message-list/assistant-dialog';
 import {
   getChangedInlinePreviewMessageIds,
+  getBorderedAdjacencyLayoutSignatures,
   getCompactActivityDisclosureLayoutSignatures,
   getCompactActivityLayoutSignatures,
   getInlinePreviewLayoutSignatures,
+  getMessageBlockBoundaryMap,
   getRenderEmptyAssistantMessageIds,
   getThinkingLayoutSignatures,
   hasVisibleProjectedText,
@@ -5020,6 +5022,8 @@ export function MessageList() {
     if (target.closest('.diff-view-filename')) return;
     const control = target.closest<HTMLElement>('[aria-expanded], .diff-view-item-expandable');
     if (!control || !containerRef.contains(control)) return;
+    // Explored mouse presses already dispatched their activation click on mousedown.
+    if (control.matches('.assistant-activity-summary') && event.detail !== 0) return;
     const isDiffToggle = control.matches('.diff-view-toggle, .diff-view-item-expandable');
     const anchor = isDiffToggle
       ? (control.closest<HTMLElement>('.diff-view-item') ?? control)
@@ -6443,6 +6447,38 @@ export function MessageList() {
     }
     setKnownZeroHeightMessageIds(next);
   });
+  const messageBlockBoundaryMap = createMemo(() => {
+    trackMessageBlockExpansionState();
+    return getMessageBlockBoundaryMap(messages(), assistantActivityGroupMap(), {
+      expandedActivityGroup: (key) => getMessageBlockExpanded(key) ?? false,
+      renderEmptyMessageIds: knownZeroHeightMessageIds(),
+      showThinking: showThinking(),
+      streaming: { partId: state.streamingPartId, text: state.streamingText },
+      visibleActiveActivityPartKeys: renderedVisibleActiveActivityPartKeys(),
+      retainedActivityPartKeys: renderedRetainedActivityPartKeys(),
+      exitingActivityPartKeys: renderedExitingActivityPartKeys(),
+      modelChangeMessageIds: new Set(modelChangeMap().keys()),
+      dialogSummaryMessageIds: new Set(rowAssistantDialogSummaryMap().keys()),
+    });
+  });
+  const borderedAdjacencyLayoutSignatures = createMemo(() => {
+    return getBorderedAdjacencyLayoutSignatures(
+      messages(),
+      messageBlockBoundaryMap(),
+      knownZeroHeightMessageIds()
+    );
+  });
+  let previousBorderedAdjacencyLayoutSignatures: Map<string, string> | null = null;
+
+  createEffect(() => {
+    const current = borderedAdjacencyLayoutSignatures();
+    if (previousBorderedAdjacencyLayoutSignatures === null) {
+      previousBorderedAdjacencyLayoutSignatures = new Map(current);
+      return;
+    }
+    scheduleChangedLayoutRowMeasurements(previousBorderedAdjacencyLayoutSignatures, current);
+    previousBorderedAdjacencyLayoutSignatures = new Map(current);
+  });
   const hasBuildAgent = createMemo(() => state.agents.some((agent) => agent.name === 'build'));
   const showJumpToLatest = createMemo(() => {
     if (autoScroll() || messages().length === 0) return false;
@@ -7169,6 +7205,7 @@ export function MessageList() {
                   trailingFinalResponseMessageId() === messageId)
               }
               assistantActivityGroupMap={assistantActivityGroupMap()}
+              messageBlockBoundaryMap={messageBlockBoundaryMap()}
               retainedActivityPartKeys={renderedRetainedActivityPartKeys()}
               exitingActivityPartKeys={renderedExitingActivityPartKeys()}
               visibleActiveActivityPartKeys={renderedVisibleActiveActivityPartKeys()}

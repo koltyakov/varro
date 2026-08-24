@@ -61,6 +61,19 @@ type AssistantRenderEntry = {
   update: (item: AssistantRenderItem) => void;
 };
 
+function borderedFlowClasses(startsBordered: boolean, endsBordered = startsBordered) {
+  return `${startsBordered ? ' assistant-flow-block-starts-bordered' : ''}${endsBordered ? ' assistant-flow-block-ends-bordered' : ''}`;
+}
+
+function isBorderedFlowPart(part: Part) {
+  return (
+    part.type === 'tool' ||
+    part.type === 'reasoning' ||
+    part.type === 'file' ||
+    part.type === 'agent'
+  );
+}
+
 function getActivityGroupRevealTrackingKey(parts: readonly AssistantActivityPart[]) {
   return `activity-group:${parts[0]!.id}`;
 }
@@ -721,7 +734,7 @@ export function AssistantMessageContent(props: {
         );
       return (
         <div
-          class={`assistant-active-activity-tray${hasExitingPart() ? ' is-exiting' : ''}${activeSummary() ? ' has-active-summary' : ''}`}
+          class={`assistant-active-activity-tray${borderedFlowClasses(!activeSummary(), true)}${hasExitingPart() ? ' is-exiting' : ''}${activeSummary() ? ' has-active-summary' : ''}`}
           data-assistant-render-key={entry.key}
           aria-label="Active tools"
         >
@@ -818,7 +831,7 @@ export function AssistantMessageContent(props: {
         item().parts.some((part) => part.id === getCompactActivitySummaryPartId(activityGroup()));
       return (
         <div
-          class={`assistant-message-flow-item${revealClass ? ' assistant-activity-group-settling' : ''}${!showSummary() && !isActivityGroupExpanded(activityGroup().key) ? ' assistant-message-flow-item-hidden' : ''}`}
+          class={`assistant-message-flow-item${borderedFlowClasses(!showSummary() && isActivityGroupExpanded(activityGroup().key), isActivityGroupExpanded(activityGroup().key))}${revealClass ? ' assistant-activity-group-settling' : ''}${!showSummary() && !isActivityGroupExpanded(activityGroup().key) ? ' assistant-message-flow-item-hidden' : ''}`}
           data-assistant-activity-group-key={
             showSummary() ? encodeURIComponent(activityGroup().key) : undefined
           }
@@ -864,7 +877,7 @@ export function AssistantMessageContent(props: {
               );
             }
           }}
-          class={`assistant-message-flow-item${revealClass}`}
+          class={`assistant-message-flow-item${borderedFlowClasses(true)}${revealClass}`}
           data-assistant-render-key={entry.key}
         >
           <div class="assistant-file-edit-stack">
@@ -906,7 +919,7 @@ export function AssistantMessageContent(props: {
           item().part,
           finalTextPartId(),
           !!props.highlightPlanningAnswer
-        )}${revealClass}`}
+        )}${borderedFlowClasses(isBorderedFlowPart(item().part))}${revealClass}`}
       >
         <Show
           when={
@@ -964,7 +977,7 @@ export function AssistantMessageContent(props: {
         )}
       </Show>
       <Show when={props.errorMessage}>
-        <div class="assistant-message-flow-item assistant-message-flow-item-error rendered-markdown">
+        <div class="assistant-message-flow-item assistant-message-flow-item-error assistant-flow-block-starts-bordered assistant-flow-block-ends-bordered rendered-markdown">
           <p>{props.errorMessage!}</p>
           <Show when={props.errorAction || props.onRetry}>
             <div class="assistant-message-flow-item-error-actions">
@@ -1022,6 +1035,14 @@ export function AssistantMessageContent(props: {
   );
 }
 
+function activateButtonOnPrimaryMouseDown(
+  event: MouseEvent & { currentTarget: HTMLButtonElement }
+) {
+  if (event.button !== 0) return;
+  // Streaming can replace the summary before mouseup, which prevents the browser's click.
+  event.currentTarget.click();
+}
+
 function AssistantActivityGroup(props: {
   info: AssistantMessage;
   parts: AssistantActivityPart[];
@@ -1048,6 +1069,12 @@ function AssistantActivityGroup(props: {
     setMessageBlockExpanded(props.expansionKey, nextExpanded);
   };
 
+  const handleClick = (event: MouseEvent) => {
+    // Mouse presses activate through handleMouseDown; detail 0 preserves keyboard activation.
+    if (event.detail !== 0) return;
+    toggleExpanded();
+  };
+
   return (
     <div class="assistant-activity-group">
       <Show when={props.showSummary}>
@@ -1056,7 +1083,8 @@ function AssistantActivityGroup(props: {
           class="assistant-activity-summary"
           data-activity-summary-group-key={encodeURIComponent(props.expansionKey)}
           aria-expanded={expanded()}
-          onClick={toggleExpanded}
+          onMouseDown={activateButtonOnPrimaryMouseDown}
+          onClick={handleClick}
         >
           <AssistantActivitySummaryText
             items={activityItems()}

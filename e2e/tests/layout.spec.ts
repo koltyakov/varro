@@ -92,8 +92,8 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
   });
   expect(activeSpacing.summaryToFirst).toBeGreaterThanOrEqual(10);
   expect(activeSpacing.summaryToFirst).toBeLessThanOrEqual(14);
-  expect(activeSpacing.firstToThird).toBeGreaterThanOrEqual(10);
-  expect(activeSpacing.firstToThird).toBeLessThanOrEqual(14);
+  expect(activeSpacing.firstToThird).toBeGreaterThanOrEqual(8);
+  expect(activeSpacing.firstToThird).toBeLessThanOrEqual(10);
 
   await page.goto(
     '/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayCount=1&activeTrayPrefix=1'
@@ -693,10 +693,31 @@ test('toggles Explored from the full disclosure hit area', async ({ page }) => {
 
   const collapsedBox = await summary.boundingBox();
   if (!collapsedBox) throw new Error('Explored summary is not visible');
-  await page.mouse.click(
+  await page.mouse.move(
     collapsedBox.x + collapsedBox.width - 2,
     collapsedBox.y + collapsedBox.height + 4
   );
+  await page.mouse.down();
+  await expect(summary).toHaveAttribute('aria-expanded', 'true');
+  await page.evaluate(() => {
+    const harnessWindow = window as typeof window & {
+      __varroE2E?: {
+        getSessionMessages?: (id: string) => Array<{ parts: Array<Record<string, unknown>> }>;
+        updateMessagePart?: (part: Record<string, unknown>) => void;
+      };
+    };
+    const part = harnessWindow.__varroE2E
+      ?.getSessionMessages?.('session-tool-cards')
+      .flatMap((message) => message.parts)
+      .find((candidate) => candidate.id === 'tool-read-1');
+    if (!part) throw new Error('Streaming activity fixture is missing');
+    const state = part.state as Record<string, unknown>;
+    harnessWindow.__varroE2E?.updateMessagePart?.({
+      ...part,
+      state: { ...state, output: `${String(state.output)}\nstreamed update` },
+    });
+  });
+  await page.mouse.up();
   await expect(summary).toHaveAttribute('aria-expanded', 'true');
 
   const expandedBox = await summary.boundingBox();
@@ -770,15 +791,42 @@ test('keeps the compact file-change-to-next-block gap consistent', async ({ page
       },
       await lastFileChange.elementHandle()
     )
-  ).toBeCloseTo(12, 0);
+  ).toBeCloseTo(9, 0);
 });
 
-test('matches collapsed activity-to-event spacing to expanded detail spacing', async ({ page }) => {
+test('tightens only bordered activity boundaries', async ({ page }) => {
   await page.setViewportSize({ width: 1000, height: 1600 });
   await page.goto('/e2e/harness/index.html?scenario=tool-cards');
   const summary = page.locator('.assistant-activity-summary').first();
   await expect(summary).toContainText('Explored');
   await page.evaluate(() => {
+    window.postMessage(
+      {
+        type: 'server/event',
+        payload: {
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              id: 'tool-task-spacing-second',
+              sessionID: 'session-tool-cards',
+              messageID: 'message-tool-cards-assistant',
+              type: 'tool',
+              callID: 'tool-task-spacing-second-call',
+              tool: 'task',
+              state: {
+                status: 'completed',
+                input: { description: 'Verify bordered spacing' },
+                output: 'Verified',
+                title: 'Verify bordered spacing',
+                metadata: {},
+                time: { start: Date.now(), end: Date.now() + 1 },
+              },
+            },
+          },
+        },
+      },
+      '*'
+    );
     window.postMessage(
       {
         type: 'server/event',
@@ -880,7 +928,11 @@ test('matches collapsed activity-to-event spacing to expanded detail spacing', a
     );
   });
   const taskCard = page.locator('.tool-invocation-task').first();
+  const secondTaskCard = page
+    .locator('.tool-invocation-task')
+    .filter({ hasText: 'Verify activity spacing' });
   await expect(taskCard).toBeVisible();
+  await expect(secondTaskCard).toBeVisible();
   const trailingSummary = page.locator('.assistant-activity-summary').nth(1);
   await expect(trailingSummary).toContainText('Explored');
   await trailingSummary.evaluate(async (element) => {
@@ -894,7 +946,9 @@ test('matches collapsed activity-to-event spacing to expanded detail spacing', a
     return card.getBoundingClientRect().top - element.getBoundingClientRect().bottom;
   });
   const incomingGap = await trailingSummary.evaluate((element) => {
-    const card = document.querySelector<HTMLElement>('.tool-invocation-task');
+    const card = [...document.querySelectorAll<HTMLElement>('.tool-invocation-task')].find((item) =>
+      item.textContent?.includes('Verify activity spacing')
+    );
     if (!card) throw new Error('Task card is missing');
     return element.getBoundingClientRect().top - card.getBoundingClientRect().bottom;
   });
@@ -904,6 +958,13 @@ test('matches collapsed activity-to-event spacing to expanded detail spacing', a
     .filter({ hasText: 'Verify prose spacing' });
   await expect(prose).toBeVisible();
   await expect(followingTask).toBeVisible();
+  const borderedGap = await secondTaskCard.evaluate((element) => {
+    const flowItem = element.closest('.assistant-message-flow-item');
+    const previous =
+      flowItem?.previousElementSibling?.querySelector<HTMLElement>('.tool-invocation-task');
+    if (!previous) throw new Error('Preceding bordered card is missing');
+    return element.getBoundingClientRect().top - previous.getBoundingClientRect().bottom;
+  });
   const proseGaps = await prose.evaluate((element) => {
     const summaries = document.querySelectorAll<HTMLElement>('.assistant-activity-summary');
     const card = [...document.querySelectorAll<HTMLElement>('.tool-invocation-task')].find((item) =>
@@ -1034,10 +1095,21 @@ test('matches collapsed activity-to-event spacing to expanded detail spacing', a
     if (!precedingCard || !followingSummary) {
       throw new Error('Cross-message spacing fixtures are missing');
     }
+    const precedingRow = precedingCard.closest<HTMLElement>('.interactive-item-container');
+    const proseRow = element.closest<HTMLElement>('.interactive-item-container');
+    if (!precedingRow || !proseRow) throw new Error('Spacing row is missing');
     const proseBox = element.getBoundingClientRect();
     return {
       eventToProse: proseBox.top - precedingCard.getBoundingClientRect().bottom,
+      eventToProseRowCorrection:
+        Number.parseFloat(
+          getComputedStyle(precedingRow).getPropertyValue('--interactive-item-block-correction')
+        ) || 0,
       proseToSummary: followingSummary.getBoundingClientRect().top - proseBox.bottom,
+      proseToSummaryRowCorrection:
+        Number.parseFloat(
+          getComputedStyle(proseRow).getPropertyValue('--interactive-item-block-correction')
+        ) || 0,
     };
   });
   await page.addStyleTag({
@@ -1062,12 +1134,16 @@ test('matches collapsed activity-to-event spacing to expanded detail spacing', a
   );
   await expect(firstCrossMessageDetail).toBeVisible();
   await expect(continuedCrossMessageDetail).toBeVisible();
-  const continuedActivityGap = await continuedCrossMessageDetail.evaluate((element) => {
+  const continuedActivityGeometry = await continuedCrossMessageDetail.evaluate((element) => {
     const previous = document.querySelector<HTMLElement>(
       '[data-msg-id="message-spacing-activity-followup"] .assistant-activity-detail .chat-tool-invocation-part'
     );
     if (!previous) throw new Error('Previous cross-message activity detail is missing');
-    return element.getBoundingClientRect().top - previous.getBoundingClientRect().bottom;
+    return {
+      gap: element.getBoundingClientRect().top - previous.getBoundingClientRect().bottom,
+      previousRowClass: previous.closest('.interactive-item-container')?.className,
+      currentRowClass: element.closest('.interactive-item-container')?.className,
+    };
   });
 
   await summary.click();
@@ -1083,11 +1159,20 @@ test('matches collapsed activity-to-event spacing to expanded detail spacing', a
 
   expect(incomingGap).toBe(12);
   expect(collapsedGap).toBe(12);
+  expect(borderedGap).toBe(9);
   expect(expandedGap).toBe(12);
   expect(proseGaps).toEqual({ summaryToProse: 12, proseToEvent: 12 });
-  expect(crossMessageGaps.eventToProse).toBeCloseTo(12, 0);
-  expect(crossMessageGaps.proseToSummary).toBe(12);
-  expect(continuedActivityGap).toBeCloseTo(12, 0);
+  expect(crossMessageGaps.eventToProse - crossMessageGaps.eventToProseRowCorrection).toBeCloseTo(
+    12,
+    0
+  );
+  expect(
+    crossMessageGaps.proseToSummary - crossMessageGaps.proseToSummaryRowCorrection
+  ).toBeCloseTo(12, 0);
+  expect(continuedActivityGeometry.currentRowClass).toContain(
+    'interactive-item-follows-bordered-block'
+  );
+  expect(continuedActivityGeometry.gap).toBeCloseTo(9, 0);
 });
 
 test('keeps Explored spacing consistent beside user blocks', async ({ page }) => {

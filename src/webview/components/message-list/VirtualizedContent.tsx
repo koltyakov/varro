@@ -1,6 +1,7 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import type { MessageEntry } from '../../types';
 import type { VirtualMetrics, VisibleRange } from './virtualization';
+import type { MessageBlockBoundary } from './row-layout';
 import { MessageRow, type MessageRowSharedProps } from './MessageRows';
 
 export function VirtualizedContent(
@@ -9,6 +10,7 @@ export function VirtualizedContent(
     visibleRange?: Partial<VisibleRange>;
     virtualMetrics?: VirtualMetrics;
     renderEmptyMessageIds?: ReadonlySet<string>;
+    messageBlockBoundaryMap?: ReadonlyMap<string, MessageBlockBoundary>;
     forceVirtualContent?: (messageId: string) => boolean;
     canReleaseVirtualPlaceholders?: () => boolean;
     outerListVirtualized?: boolean;
@@ -171,6 +173,15 @@ export function VirtualizedContent(
         props.messages[previousIndex]!.info.role === 'assistant'
       );
     });
+    const followsBorderedBlock = createMemo(() => {
+      const previousIndex = previousVisibleIndex();
+      if (previousIndex < 0) return false;
+      const previousMessageId = props.messages[previousIndex]!.info.id;
+      return (
+        props.messageBlockBoundaryMap?.get(previousMessageId)?.endsBordered === true &&
+        props.messageBlockBoundaryMap?.get(msg.info.id)?.startsBordered === true
+      );
+    });
     const continuesVisibleActivityGroup = createMemo(() => {
       const previousIndex = previousVisibleIndex();
       if (msg.info.role !== 'assistant' || previousIndex < 0) return false;
@@ -199,6 +210,7 @@ export function VirtualizedContent(
         virtualPlaceholder={virtualPlaceholder()}
         renderEmpty={props.renderEmptyMessageIds?.has(msg.info.id)}
         followsVisibleAssistantResponse={followsVisibleAssistantResponse()}
+        followsBorderedBlock={followsBorderedBlock()}
         continuesVisibleActivityGroup={continuesVisibleActivityGroup()}
         modelChangeMap={props.modelChangeMap}
         promptNumberMap={props.promptNumberMap}

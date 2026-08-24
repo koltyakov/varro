@@ -1216,7 +1216,11 @@ export function SessionListView(props: {
     setActiveGroupedSection((current) => (current === section ? null : section));
   };
 
-  const renderSessionItems = (sessions: () => typeof state.sessions, indexOffset = 0) => {
+  const renderSessionItems = (
+    sessions: () => typeof state.sessions,
+    indexOffset = 0,
+    separatePinnedSessions = false
+  ) => {
     const orderedSessions = createMemo(() => {
       const items = sessions();
       const frozenOrder = frozenSessionOrder();
@@ -1236,6 +1240,15 @@ export function SessionListView(props: {
       <For each={orderedSessions().map((session) => session.id)}>
         {(sessionId, index) => {
           const session = () => sessionsById().get(sessionId)!;
+          const startsUnpinnedGroup = () => {
+            if (!separatePinnedSessions || index() === 0) return false;
+            const previousSession = orderedSessions()[index() - 1];
+            return (
+              !state.pinnedSessionIds.includes(sessionId) &&
+              !!previousSession &&
+              state.pinnedSessionIds.includes(previousSession.id)
+            );
+          };
           return (
             <SessionListItem
               session={session()}
@@ -1277,6 +1290,7 @@ export function SessionListView(props: {
               isNewlyCompleted={sessionIndicators().newlyCompletedIds.has(sessionId)}
               isCompletedPlanSession={sessionIndicators().planReadyIds.has(sessionId)}
               isPinned={state.pinnedSessionIds.includes(sessionId)}
+              startsUnpinnedGroup={startsUnpinnedGroup()}
               onTogglePinned={async () => {
                 try {
                   const pinnedSessionIds = await client.varro.session.setPinned(
@@ -1324,7 +1338,7 @@ export function SessionListView(props: {
             </Show>
             <Show when={expanded()}>
               <div class="session-list-scroll session-list-section-scroll">
-                {renderSessionItems(surfacedSessions)}
+                {renderSessionItems(surfacedSessions, 0, true)}
               </div>
             </Show>
           </div>
@@ -1678,6 +1692,7 @@ function SessionListItem(props: {
   isNewlyCompleted: boolean;
   isCompletedPlanSession: boolean;
   isPinned: boolean;
+  startsUnpinnedGroup: boolean;
   onTogglePinned: () => Promise<void>;
   onOpenSubagents?: (parentSessionId: string) => void;
   onActiveSessionReselect?: () => void;
@@ -1914,7 +1929,7 @@ function SessionListItem(props: {
       ref={(element) => {
         rowRef = element;
       }}
-      class={`session-item ${isActive() ? 'active' : ''} ${props.isPinned ? 'is-pinned' : ''} ${showActions() ? 'is-context-selected' : ''} ${props.actions.sessionId() && !showActions() ? 'is-context-obscured' : ''} ${isFocused() ? 'keyboard-focus' : ''} ${modelDetails() ? 'has-model-details' : ''}`}
+      class={`session-item ${isActive() ? 'active' : ''} ${props.isPinned ? 'is-pinned' : ''} ${props.startsUnpinnedGroup ? 'starts-unpinned-group' : ''} ${showActions() ? 'is-context-selected' : ''} ${props.actions.sessionId() && !showActions() ? 'is-context-obscured' : ''} ${isFocused() ? 'keyboard-focus' : ''} ${modelDetails() ? 'has-model-details' : ''}`}
       data-session-id={props.session.id}
       inert={props.actions.sessionId() ? true : undefined}
       onMouseMove={() => {
