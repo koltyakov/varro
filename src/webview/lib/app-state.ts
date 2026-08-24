@@ -308,6 +308,10 @@ export function createAppState(): AppStateInstance {
     STORAGE_KEYS.skippedPlanSessions,
     sessionMarkerWorkspaceScope
   );
+  for (const [sessionId, skippedAt] of Object.entries(initialWebviewState.sessionPlanState ?? {})) {
+    if (skippedAt === null) delete initialSkippedPlanSessions[sessionId];
+    else initialSkippedPlanSessions[sessionId] = skippedAt;
+  }
   const initialCompletedSessionResponses = readInitialSessionMarkerScope(
     sessionMarkerStorage,
     STORAGE_KEYS.completedSessionResponses,

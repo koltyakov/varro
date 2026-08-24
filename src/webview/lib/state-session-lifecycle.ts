@@ -101,9 +101,17 @@ export function skipPlanSession(sessionId: string, updatedAt?: number) {
     getSessionMarkerWorkspaceScopeValue(),
     next
   );
+  postMessage({
+    type: 'session-plan-state/update',
+    payload: { sessionId, skippedAt: next[sessionId]! },
+  });
 }
 
 export function clearSkippedPlanSession(sessionId: string) {
+  postMessage({
+    type: 'session-plan-state/update',
+    payload: { sessionId, skippedAt: null },
+  });
   const nextSessions = removeSessionMarker(state.skippedPlanSessions, sessionId);
   if (!nextSessions) return;
   setState(
@@ -112,6 +120,19 @@ export function clearSkippedPlanSession(sessionId: string) {
       delete draft[sessionId];
     })
   );
+  writeScopedSessionMarkerState(
+    { readStored, writeStored },
+    STORAGE_KEYS.skippedPlanSessions,
+    getSessionMarkerWorkspaceScopeValue(),
+    nextSessions
+  );
+}
+
+export function applySessionPlanStateUpdate(sessionId: string, skippedAt: number | null) {
+  const nextSessions = { ...state.skippedPlanSessions };
+  if (skippedAt === null) delete nextSessions[sessionId];
+  else nextSessions[sessionId] = skippedAt;
+  setState('skippedPlanSessions', reconcile(nextSessions));
   writeScopedSessionMarkerState(
     { readStored, writeStored },
     STORAGE_KEYS.skippedPlanSessions,

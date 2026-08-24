@@ -376,6 +376,14 @@ export function createDataLoaderOperations(deps: {
               if (!retainedIds.has(current.id)) deps.clearQueuedMessagesForSession(current.id);
             }
           }
+          for (const session of nextSessions) {
+            if (session.agent) {
+              deps.setSelectedAgent(session.agent, {
+                sessionId: session.id,
+                persistGlobal: false,
+              });
+            }
+          }
           deps.applySessions(nextSessions);
           deps.setSessionsHasMore?.(hasMore);
         },

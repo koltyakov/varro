@@ -108,6 +108,7 @@ const WEBVIEW_MESSAGE_TYPES = {
   'session/seen': true,
   'session-model/update': true,
   'session-models/migrate': true,
+  'session-plan-state/update': true,
   'model-preferences/update': true,
   'model-preferences/migrate': true,
   'webview/focus': true,
@@ -336,6 +337,25 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
         entries.push([sessionId, model]);
       }
       return { type, payload: { models: Object.fromEntries(entries) } };
+    }
+
+    case 'session-plan-state/update': {
+      const payload = asRecord(message?.payload);
+      const sessionId = payload?.sessionId;
+      if (!isSafePersistedSessionId(sessionId)) return null;
+      const skippedAt = payload?.skippedAt;
+      if (skippedAt !== undefined && skippedAt !== null && !Number.isFinite(skippedAt)) return null;
+      const rawAgent = payload?.agent;
+      const agent = rawAgent === undefined ? undefined : getString(rawAgent);
+      if (rawAgent !== undefined && !agent?.trim()) return null;
+      if (skippedAt === undefined && agent === undefined) return null;
+      const result: Extract<WebviewMessage, { type: 'session-plan-state/update' }> = {
+        type,
+        payload: { sessionId },
+      };
+      if (skippedAt !== undefined) result.payload.skippedAt = skippedAt as number | null;
+      if (agent) result.payload.agent = agent;
+      return result;
     }
 
     case 'composer/images-update': {

@@ -609,6 +609,7 @@ export type InitialWebviewState = {
   chatFontFamily: string;
   sessionPermissionModes?: Record<string, PermissionMode>;
   sessionSelectedModels?: Record<string, ChatModelSelection>;
+  sessionPlanState?: Record<string, number | null>;
   sessionModelMigrationPending?: boolean;
   modelPreferences?: ModelPreferences;
   modelPreferencesMigrationPending?: boolean;
@@ -684,6 +685,14 @@ export type ExtensionMessage =
       type: 'session-models/sync';
       payload: { models: Record<string, ChatModelSelection> };
     }
+  | {
+      type: 'session-plan-state/sync';
+      payload: { state: Record<string, number | null> };
+    }
+  | {
+      type: 'session-plan-state/update';
+      payload: { sessionId: string; skippedAt?: number | null; agent?: string };
+    }
   | { type: 'model-preferences/sync'; payload: ModelPreferences }
   | { type: 'editor-tabs/state'; payload: { open: boolean; sessionIds: string[] } }
   | { type: 'permission-automation/update'; payload: { owner: boolean; lease: number } }
@@ -741,6 +750,10 @@ export type WebviewMessage =
   | {
       type: 'session-models/migrate';
       payload: { models: Record<string, ChatModelSelection> };
+    }
+  | {
+      type: 'session-plan-state/update';
+      payload: { sessionId: string; skippedAt?: number | null; agent?: string };
     }
   | { type: 'model-preferences/update'; payload: ModelPreferences }
   | { type: 'model-preferences/migrate'; payload: ModelPreferences }

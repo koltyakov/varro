@@ -12,6 +12,7 @@ import { getWorkspaceStatusEventSummary } from '../lib/client';
 import { isString } from '../lib/runtime-values';
 import {
   applyModelPreferencesSnapshot,
+  applySessionPlanStateUpdate,
   applySessionPermissionModesSnapshot,
   applySessionSelectedModelsSnapshot,
   syncSessionMarkersForWorkspace,
@@ -324,6 +325,19 @@ export function handleExtensionMessageWithDependencies(
       break;
     case 'session-models/sync':
       applySessionSelectedModelsSnapshot(msg.payload.models);
+      break;
+    case 'session-plan-state/sync':
+      for (const [sessionId, skippedAt] of Object.entries(msg.payload.state)) {
+        applySessionPlanStateUpdate(sessionId, skippedAt);
+      }
+      break;
+    case 'session-plan-state/update':
+      if (msg.payload.skippedAt !== undefined) {
+        applySessionPlanStateUpdate(msg.payload.sessionId, msg.payload.skippedAt);
+      }
+      if (msg.payload.agent !== undefined) {
+        appStore.setState('sessionSelectedAgents', msg.payload.sessionId, msg.payload.agent);
+      }
       break;
     case 'model-preferences/sync':
       applyModelPreferencesSnapshot(msg.payload);

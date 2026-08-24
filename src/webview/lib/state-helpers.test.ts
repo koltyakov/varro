@@ -509,6 +509,9 @@ describe('state helpers', () => {
 
   it('persists skipped plan sessions by session update time', async () => {
     const stateModule = await loadState();
+    const sent: unknown[] = [];
+    const bridgeWindow = getTestBridgeWindow();
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
 
     stateModule.setSessions([
       {
@@ -529,11 +532,20 @@ describe('state helpers', () => {
     expect(window.localStorage.getItem('varro.skippedPlanSessions')).toBe(
       JSON.stringify({ '__varro.no-workspace__': { 'session-1': 200 } })
     );
+    expect(sent).toContainEqual({
+      type: 'session-plan-state/update',
+      payload: { sessionId: 'session-1', skippedAt: 200 },
+    });
 
     stateModule.clearSkippedPlanSession('session-1');
 
     expect(stateModule.state.skippedPlanSessions).toEqual({});
     expect(window.localStorage.getItem('varro.skippedPlanSessions')).toBe(JSON.stringify({}));
+    expect(sent).toContainEqual({
+      type: 'session-plan-state/update',
+      payload: { sessionId: 'session-1', skippedAt: null },
+    });
+    delete bridgeWindow.__sendToExtension;
 
     stateModule.setState('lastSeenSessions', { 'session-1': 100, 'session-2': 200 });
     stateModule.clearSessionSeen('session-1');

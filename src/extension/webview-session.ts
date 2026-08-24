@@ -91,6 +91,7 @@ export class WebviewSession {
       queuedMessages(): InitialWebviewState['queuedMessages'];
       sessionPermissionModes(): InitialWebviewState['sessionPermissionModes'];
       sessionSelectedModels(): InitialWebviewState['sessionSelectedModels'];
+      sessionPlanState(): InitialWebviewState['sessionPlanState'];
       sessionModelMigrationPending(): boolean;
       modelPreferences(): InitialWebviewState['modelPreferences'];
       modelPreferencesMigrationPending(): boolean;
@@ -416,6 +417,7 @@ export class WebviewSession {
       chatFontFamily: config.chatFontFamily,
       sessionPermissionModes: this.deps.sessionPermissionModes(),
       sessionSelectedModels: this.deps.sessionSelectedModels(),
+      sessionPlanState: this.deps.sessionPlanState(),
       sessionModelMigrationPending: this.deps.sessionModelMigrationPending(),
       modelPreferences: this.deps.modelPreferences(),
       modelPreferencesMigrationPending: this.deps.modelPreferencesMigrationPending(),
@@ -479,6 +481,10 @@ export class WebviewSession {
         payload: { models: this.deps.sessionSelectedModels() ?? {} },
       });
     }
+    this.bridge.post({
+      type: 'session-plan-state/sync',
+      payload: { state: this.deps.sessionPlanState() ?? {} },
+    });
     if (!this.deps.modelPreferencesMigrationPending()) {
       const modelPreferences = this.deps.modelPreferences();
       if (modelPreferences) {

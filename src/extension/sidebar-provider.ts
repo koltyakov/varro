@@ -47,6 +47,7 @@ import { ToolOutputDocumentProvider } from './tool-output-document-provider';
 import { SessionStateManager } from './session-state-manager';
 import { SessionPermissionModeStore } from './session-permission-mode-store';
 import { SessionModelSelectionStore } from './session-model-selection-store';
+import { SessionPlanStateStore } from './session-plan-state-store';
 import { SessionTitleFallback } from './session-title-fallback';
 import { SessionTrashManager } from './session-trash-manager';
 import { createSidebarProviderActions } from './sidebar-provider-actions';
@@ -114,6 +115,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly queuedMessages: QueuedMessageStore;
   private readonly sessionPermissionModes: SessionPermissionModeStore;
   private readonly sessionSelectedModels: SessionModelSelectionStore;
+  private readonly sessionPlanState: SessionPlanStateStore;
   private readonly modelPreferences: ModelPreferencesStore;
   private readonly draftImages: DraftImageStore;
   private readonly hiddenSessions: HiddenSessionManager;
@@ -213,6 +215,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.queuedMessages = new QueuedMessageStore(persistence);
     this.sessionPermissionModes = new SessionPermissionModeStore(persistence);
     this.sessionSelectedModels = new SessionModelSelectionStore(persistence);
+    this.sessionPlanState = new SessionPlanStateStore(persistence);
     this.modelPreferences = new ModelPreferencesStore(persistence);
     this.draftImages = new DraftImageStore(persistence);
     this.hiddenSessions = new HiddenSessionManager();
@@ -371,6 +374,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         queuedMessages: () => this.queuedMessagesFor(webviewContext.viewId),
         sessionPermissionModes: () => this.sessionPermissionModes.list(),
         sessionSelectedModels: () => this.sessionSelectedModels.list(),
+        sessionPlanState: () => this.sessionPlanState.list(),
         sessionModelMigrationPending: () => this.sessionSelectedModels.needsMigration(),
         modelPreferences: () =>
           this.modelPreferences.needsMigration() ? undefined : this.modelPreferences.get(),
@@ -561,6 +565,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         migrateSessionModels: async ({ models }) => {
           const migrated = await this.sessionSelectedModels.migrateLegacy(models);
           this.post({ type: 'session-models/sync', payload: { models: migrated } });
+        },
+        updateSessionPlanState: async (payload) => {
+          if (payload.skippedAt !== undefined) {
+            await this.sessionPlanState.set(payload.sessionId, payload.skippedAt);
+          }
+          this.post({ type: 'session-plan-state/update', payload });
         },
         updateModelPreferences: async (preferences) => {
           const updated = await this.modelPreferences.set(preferences);
@@ -1160,6 +1170,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await this.draftImages.dispose();
     await this.sessionPermissionModes.dispose();
     await this.sessionSelectedModels.dispose();
+    await this.sessionPlanState.dispose();
     await this.modelPreferences.dispose();
     this.configDisposable.dispose();
     this.windowStateDisposable.dispose();

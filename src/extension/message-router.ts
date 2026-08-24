@@ -23,6 +23,10 @@ type SessionModelsMigrationPayload = Extract<
   WebviewMessage,
   { type: 'session-models/migrate' }
 >['payload'];
+type SessionPlanStatePayload = Extract<
+  WebviewMessage,
+  { type: 'session-plan-state/update' }
+>['payload'];
 type ModelPreferencesPayload = Extract<
   WebviewMessage,
   { type: 'model-preferences/update' }
@@ -112,6 +116,7 @@ export interface MessageRouterCallbacks {
   migratePermissionModes(payload: PermissionModesMigrationPayload): Promise<void>;
   updateSessionModel(payload: SessionModelPayload): Promise<void>;
   migrateSessionModels(payload: SessionModelsMigrationPayload): Promise<void>;
+  updateSessionPlanState(payload: SessionPlanStatePayload): Promise<void>;
   updateModelPreferences(payload: ModelPreferencesPayload): Promise<void>;
   migrateModelPreferences(payload: ModelPreferencesPayload): Promise<void>;
   updateDraftImages(
@@ -152,6 +157,9 @@ export class MessageRouter {
           break;
         case 'session-models/migrate':
           await this.callbacks.migrateSessionModels(msg.payload);
+          break;
+        case 'session-plan-state/update':
+          await this.callbacks.updateSessionPlanState(msg.payload);
           break;
         case 'model-preferences/update':
           await this.callbacks.updateModelPreferences(msg.payload);

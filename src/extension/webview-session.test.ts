@@ -179,6 +179,7 @@ function createSession(options?: {
     queuedMessages: vi.fn<() => InitialWebviewState['queuedMessages']>(() => undefined),
     sessionPermissionModes: vi.fn<() => InitialWebviewState['sessionPermissionModes']>(() => ({})),
     sessionSelectedModels: vi.fn<() => InitialWebviewState['sessionSelectedModels']>(() => ({})),
+    sessionPlanState: vi.fn<() => InitialWebviewState['sessionPlanState']>(() => ({})),
     sessionModelMigrationPending: vi.fn(() => false),
     modelPreferences: vi.fn<() => InitialWebviewState['modelPreferences']>(() => ({
       modelVariantSelections: {},

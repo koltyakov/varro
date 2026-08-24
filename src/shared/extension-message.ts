@@ -40,6 +40,8 @@ const KNOWN_TYPES = new Set<string>([
   'queued-messages/claim-result',
   'permission-modes/sync',
   'session-models/sync',
+  'session-plan-state/sync',
+  'session-plan-state/update',
   'model-preferences/sync',
   'editor-tabs/state',
   'permission-automation/update',
@@ -332,6 +334,47 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
         ]);
       }
       return { type, payload: { models: Object.fromEntries(entries) } };
+    }
+
+    case 'session-plan-state/sync': {
+      const payload = asRecord(record.payload);
+      const state = asRecord(payload?.state);
+      if (!state) return null;
+      const entries: Array<[string, number | null]> = [];
+      for (const [sessionId, skippedAt] of Object.entries(state)) {
+        if (
+          !isSafePersistedSessionId(sessionId) ||
+          (skippedAt !== null && (!isNumber(skippedAt) || !Number.isFinite(skippedAt)))
+        ) {
+          return null;
+        }
+        entries.push([sessionId, skippedAt]);
+      }
+      return { type, payload: { state: Object.fromEntries(entries) } };
+    }
+
+    case 'session-plan-state/update': {
+      const payload = asRecord(record.payload);
+      const sessionId = payload?.sessionId;
+      if (!isSafePersistedSessionId(sessionId)) return null;
+      const skippedAt = payload?.skippedAt;
+      if (
+        skippedAt !== undefined &&
+        skippedAt !== null &&
+        (!isNumber(skippedAt) || !Number.isFinite(skippedAt))
+      ) {
+        return null;
+      }
+      const agent = payload?.agent;
+      if (agent !== undefined && (!isString(agent) || !agent.trim())) return null;
+      if (skippedAt === undefined && agent === undefined) return null;
+      const result: Extract<ExtensionMessage, { type: 'session-plan-state/update' }> = {
+        type,
+        payload: { sessionId },
+      };
+      if (skippedAt !== undefined) result.payload.skippedAt = skippedAt;
+      if (agent !== undefined) result.payload.agent = agent;
+      return result;
     }
 
     case 'model-preferences/sync': {

@@ -884,6 +884,24 @@ describe('data loaders', () => {
     expect(clearQueuedMessagesForSession).toHaveBeenCalledWith('removed');
   });
 
+  it('reconciles stale selected agents from loaded session metadata', async () => {
+    const loaded = { ...session('session-1'), agent: 'build' };
+    const setSelectedAgent = vi.fn();
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listSessions: async () => [loaded],
+        setSelectedAgent,
+      })
+    );
+
+    await operations.loadSessions();
+
+    expect(setSelectedAgent).toHaveBeenCalledWith('build', {
+      sessionId: 'session-1',
+      persistGlobal: false,
+    });
+  });
+
   it('preserves queues omitted from a partial refresh until a complete snapshot confirms removal', async () => {
     const stale = session('stale');
     const newest = session('newest');

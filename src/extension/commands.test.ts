@@ -72,7 +72,10 @@ vi.mock('./logger', () => ({ logger: loggerMock }));
 vi.mock('./error-hub', () => ({ errorHub: errorHubMock }));
 
 import { registerCommands } from './commands';
+import { readMaximumTestedOpenCodeVersion } from './extension-manifest';
 import { RestartBlockedError } from './server';
+
+const MAXIMUM_TESTED_OPENCODE_VERSION = readMaximumTestedOpenCodeVersion();
 
 function register(
   workspacePath: string | null = '/repo',
@@ -209,7 +212,7 @@ describe('About command', () => {
     expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
       expect.objectContaining({
         content: expect.stringContaining(
-          `**OpenCode 1.18.21 is available.**\n\nRun this command to install the update:\n\n\`\`\`${process.platform === 'win32' ? 'powershell' : 'sh'}\nbun add -g opencode-ai@latest\n\`\`\``
+          `**OpenCode ${MAXIMUM_TESTED_OPENCODE_VERSION} is available.**\n\nRun this command to install the update:\n\n\`\`\`${process.platform === 'win32' ? 'powershell' : 'sh'}\nbun add -g opencode-ai@latest\n\`\`\``
         ),
       })
     );
@@ -259,14 +262,14 @@ describe('About command', () => {
         port: 4096,
         command: 'opencode',
         managedProcess: true,
-        cliVersion: '1.18.21',
+        cliVersion: MAXIMUM_TESTED_OPENCODE_VERSION,
         cliVersionError: null,
         installMethod: 'bun',
         resolvedCommand: '/home/me/.bun/bin/opencode',
         searchedPaths: [],
         activeAgentCount: 0,
         activeAgentError: null,
-        health: { healthy: true, version: '1.18.21' },
+        health: { healthy: true, version: MAXIMUM_TESTED_OPENCODE_VERSION },
         workspaceCwd: '/repo',
       }),
     });

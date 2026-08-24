@@ -28,6 +28,7 @@ const {
   setWorkspaceStatusSummary,
   setWorkspaceStatuses,
   applyModelPreferencesSnapshot,
+  applySessionPlanStateUpdate,
 } = vi.hoisted(() => ({
   setState: vi.fn(),
   setError: vi.fn(),
@@ -48,6 +49,7 @@ const {
   setWorkspaceStatusSummary: vi.fn(),
   setWorkspaceStatuses: vi.fn(),
   applyModelPreferencesSnapshot: vi.fn(),
+  applySessionPlanStateUpdate: vi.fn(),
 }));
 
 /* oxlint-disable anti-slop/no-module-mocking -- These tests exercise mount-bridge integration with state and client modules. */
@@ -77,6 +79,7 @@ vi.mock('../lib/state', async () => {
     setDesktopSessionPaneSide,
     setDefaultPermissionModePreference,
     applyModelPreferencesSnapshot,
+    applySessionPlanStateUpdate,
   };
 });
 
@@ -162,6 +165,16 @@ describe('mount bridge helpers', () => {
     });
 
     expect(permissionModesSynced).toHaveBeenCalledOnce();
+  });
+
+  it('applies plan state resolved in another webview', () => {
+    handleExtensionMessageWithDependencies(createMessageDependencies(), {
+      type: 'session-plan-state/update',
+      payload: { sessionId: 'session-1', skippedAt: 200, agent: 'build' },
+    });
+
+    expect(applySessionPlanStateUpdate).toHaveBeenCalledWith('session-1', 200);
+    expect(setState).toHaveBeenCalledWith('sessionSelectedAgents', 'session-1', 'build');
   });
 
   it('queues interrupted recovery without acknowledging volatile receipt', () => {
