@@ -2,9 +2,11 @@
 import type * as vscode from 'vscode';
 import type * as nodeFsPromises from 'node:fs/promises';
 import { Readable } from 'node:stream';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { PermissionRule } from '../shared/opencode-types';
+
+const originalPlatform = process.platform;
 
 const mocks = vi.hoisted(() => {
   type CancellationListener = () => void;
@@ -294,6 +296,7 @@ function resolveToolAction(rules: PermissionRule[], tool: string) {
 }
 
 beforeEach(() => {
+  Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
   vi.clearAllMocks();
   mocks.extensionSlot.value = undefined;
   mocks.window.activeTextEditor = undefined;
@@ -317,6 +320,10 @@ beforeEach(() => {
   mocks.nodeRealpath.mockReset().mockImplementation(async (path: string) => path);
   mocks.nodeStat.mockReset().mockResolvedValue({ dev: 1, ino: 1 });
   mocks.workspaceStat.mockReset().mockResolvedValue({ type: 1, ctime: 0, mtime: 1, size: 0 });
+});
+
+afterEach(() => {
+  Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
 });
 
 describe('CommitMessageService', () => {
@@ -742,6 +749,32 @@ describe('CommitMessageService', () => {
     expect(mocks.window.showWarningMessage).not.toHaveBeenCalledWith(
       expect.stringContaining('no changes')
     );
+  });
+
+  it('omits untracked file contents when atomic reads are unavailable on Windows', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    const repository = createRepository('/repo', '');
+    repository.state.indexChanges = [];
+    repository.state.workingTreeChanges.push({
+      uri: uri('/repo/src/new-file.ts'),
+      status: 7,
+    });
+    mocks.workspaceStat.mockResolvedValue({ type: 1, ctime: 0, mtime: 1, size: 29 });
+    mocks.workspaceReadFile.mockResolvedValue(
+      new TextEncoder().encode('export const secret = true;\n')
+    );
+    setGitRepositories([repository]);
+    const request = createRequest();
+    const { service } = createService(request);
+
+    await service.generate();
+
+    const messageBody = requestBody(request, '/message?');
+    const prompt = ((messageBody?.parts || []) as Array<{ text: string }>)[0]?.text || '';
+    expect(prompt).toContain('src/new-file.ts');
+    expect(prompt).toContain('content unavailable');
+    expect(prompt).not.toContain('export const secret');
+    expect(mocks.nodeOpen).not.toHaveBeenCalled();
   });
 
   it('does not read through an untracked symbolic link', async () => {

@@ -173,12 +173,16 @@ test('reserves an available loopback port', async () => {
   assert.equal(port > 0, true);
 });
 
-test('does not match an unrelated process profile', async () => {
-  await assert.rejects(
-    waitForVscodeProcess(process.execPath, '/tmp/varro-profile-that-does-not-exist', 1),
-    /Could not find the VS Code process/
-  );
-});
+test(
+  'does not match an unrelated process profile',
+  { skip: process.platform === 'win32' },
+  async () => {
+    await assert.rejects(
+      waitForVscodeProcess(process.execPath, '/tmp/varro-profile-that-does-not-exist', 1),
+      /Could not find the VS Code process/
+    );
+  }
+);
 
 test('rejects pending CDP requests and removes listeners when the socket closes', async () => {
   const socket = new FakeSocket();

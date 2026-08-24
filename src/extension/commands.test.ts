@@ -207,7 +207,7 @@ describe('About command', () => {
     expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
       expect.objectContaining({
         content: expect.stringContaining(
-          '**OpenCode 1.18.21 is available.**\n\nRun this command to install the update:\n\n```sh\nbun add -g opencode-ai@latest\n```'
+          `**OpenCode 1.18.21 is available.**\n\nRun this command to install the update:\n\n\`\`\`${process.platform === 'win32' ? 'powershell' : 'sh'}\nbun add -g opencode-ai@latest\n\`\`\``
         ),
       })
     );
