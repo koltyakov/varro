@@ -341,6 +341,11 @@
   outline-offset: 2px;
 }
 
+.message-compaction-divider {
+  width: 100%;
+  min-width: 0;
+}
+
 .model-change-narrow {
   display: none;
 }
@@ -353,27 +358,6 @@
   .model-change-narrow {
     display: inline;
   }
-}
-
-.message-compaction-divider {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px var(--chat-horizontal-padding);
-}
-
-.message-compaction-divider::before,
-.message-compaction-divider::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: color-mix(in srgb, var(--color-vscode-border) 30%, transparent);
-}
-
-.message-compaction-label {
-  font-size: 11px;
-  color: var(--color-vscode-muted);
-  white-space: nowrap;
 }
 
 .loading-indicator {

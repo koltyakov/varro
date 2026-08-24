@@ -56,6 +56,54 @@ test('thinking visibility preserves a detached virtualized anchor', async ({ pag
   }
 });
 
+test('hiding thinking preserves visible markdown inside the same clipped assistant row', async ({
+  page,
+}) => {
+  await page.goto(
+    '/e2e/harness/index.html?scenario=heterogeneous-large-transcript&expandedActivity=1'
+  );
+  const list = page.locator('.interactive-list');
+  await list.evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
+    element.scrollTop = element.scrollHeight * 0.5;
+    element.dispatchEvent(new Event('scroll'));
+  });
+  const row = page.locator('[data-msg-id="message-heterogeneous-assistant-60-a"]');
+  await expect(row).toBeAttached();
+  await row.evaluate((element) => {
+    const transcript = element.closest<HTMLElement>('.interactive-list')!;
+    transcript.scrollTop +=
+      element.getBoundingClientRect().top - transcript.getBoundingClientRect().top + 100;
+    transcript.dispatchEvent(new Event('scroll'));
+  });
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      )
+  );
+
+  const anchor = row.locator('[data-assistant-render-key] .rendered-markdown p').last();
+  await expect(anchor).toBeVisible();
+  const before = await anchor.evaluate((element) => element.getBoundingClientRect().top);
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+  await composer.fill('/thinking');
+  await page.keyboard.press('Enter');
+  await expect(row.locator('.chat-thinking-box')).toHaveCount(0);
+
+  const samples = await anchor.evaluate(async (element) => {
+    const values: number[] = [];
+    for (let frame = 0; frame < 12; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      values.push(element.getBoundingClientRect().top);
+    }
+    return values;
+  });
+  for (const top of samples) {
+    expect(Math.abs(top - before), JSON.stringify({ before, samples })).toBeLessThan(1.5);
+  }
+});
+
 test('hiding an expanded offscreen activity group preserves the bottom viewport', async ({
   page,
 }) => {

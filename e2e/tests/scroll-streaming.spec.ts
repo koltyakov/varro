@@ -45,6 +45,87 @@ test.describe('scroll stability regressions', () => {
       .toBeLessThan(15);
   });
 
+  test('first streamed item stays painted within its clipped bottom-follow viewport', async ({
+    page,
+  }) => {
+    await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
+    const list = page.locator('.interactive-list');
+    await expect(list).toBeVisible();
+    await list.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await page.evaluate(() => {
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: {
+            type: 'message.part.updated',
+            properties: {
+              part: {
+                id: 'message-rapid-assistant-streaming-text-2',
+                sessionID: 'session-rapid-streaming-jitter',
+                messageID: 'message-rapid-assistant-streaming',
+                type: 'text',
+                text:
+                  '## 1. Orientation\n\n' +
+                  Array.from(
+                    { length: 6 },
+                    (_, index) =>
+                      `Streamed paragraph ${index + 1} enters while the measured wrapper clips its natural layout.`
+                  ).join('\n\n'),
+              },
+            },
+          },
+        },
+        '*'
+      );
+    });
+
+    const entering = page
+      .locator(
+        '[data-msg-id="message-rapid-assistant-streaming"] .assistant-message-flow-item-streamed.measured-entrance-active'
+      )
+      .last();
+    await expect(entering).toBeAttached();
+    const geometry = await entering.evaluate(async (element) => {
+      const animation = element.getAnimations()[0];
+      animation?.pause();
+      if (animation) animation.currentTime = 90;
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      );
+
+      const transcript = element.closest<HTMLElement>('.interactive-list')!;
+      const paragraphs = element.querySelectorAll<HTMLElement>('.rendered-markdown p');
+      const paragraph = paragraphs[paragraphs.length - 1]!;
+      const viewport = transcript.getBoundingClientRect();
+      const raw = paragraph.getBoundingClientRect();
+      let paintedBottom = Math.min(raw.bottom, viewport.bottom);
+      let ancestor = paragraph.parentElement;
+      while (ancestor && ancestor !== transcript) {
+        const styles = getComputedStyle(ancestor);
+        if (/(auto|clip|hidden|scroll)/.test(`${styles.overflow} ${styles.overflowY}`)) {
+          paintedBottom = Math.min(paintedBottom, ancestor.getBoundingClientRect().bottom);
+        }
+        ancestor = ancestor.parentElement;
+      }
+      return {
+        bottomDistance: transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop,
+        clipBottom: element.getBoundingClientRect().bottom,
+        rawBottom: raw.bottom,
+        viewportBottom: viewport.bottom,
+        paintedBottom,
+      };
+    });
+
+    expect(geometry.bottomDistance).toBeLessThanOrEqual(1);
+    expect(geometry.rawBottom).toBeGreaterThan(geometry.clipBottom + 1);
+    expect(geometry.paintedBottom).toBeLessThanOrEqual(
+      Math.min(geometry.clipBottom, geometry.viewportBottom)
+    );
+  });
+
   test('user scroll beyond the reattach threshold disengages bottom follow', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=large-transcript');
     const list = page.locator('.interactive-list');

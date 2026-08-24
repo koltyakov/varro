@@ -484,6 +484,17 @@
   opacity: 0.82;
 }
 
+.assistant-active-activity-item .shimmer-progress {
+  background-image: linear-gradient(
+    90deg,
+    var(--color-vscode-fg-muted) 0%,
+    var(--color-vscode-fg-muted) 30%,
+    var(--color-vscode-fg) 50%,
+    var(--color-vscode-fg-muted) 70%,
+    var(--color-vscode-fg-muted) 100%
+  );
+}
+
 .assistant-active-activity-item.is-exiting {
   animation: assistant-active-activity-out 0.42s cubic-bezier(0.3, 0, 0.2, 1) both;
 }

@@ -8,8 +8,10 @@ export function CompactionDivider(props: { part: CompactionPart }) {
       : `Context compacted (${kind})`;
   };
   return (
-    <div class="message-compaction-divider">
-      <span class="message-compaction-label">{label()}</span>
+    <div class="model-change-indicator assistant-dialog-summary message-compaction-divider">
+      <div class="assistant-dialog-summary-content">
+        <span class="model-change-label">{label()}</span>
+      </div>
     </div>
   );
 }

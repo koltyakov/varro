@@ -34,6 +34,12 @@ describe('CompactionDivider', () => {
     cleanup = render(() => CompactionDivider({ part: compactionPart() }), container!);
 
     expect(container?.textContent).toContain('Context compacted (manual)');
+    expect(
+      container
+        ?.querySelector('.message-compaction-divider')
+        ?.classList.contains('assistant-dialog-summary')
+    ).toBe(true);
+    expect(container?.querySelector('.assistant-dialog-summary-content')).not.toBeNull();
   });
 
   it('renders the auto compaction label', () => {

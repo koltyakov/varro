@@ -3962,6 +3962,10 @@ function createScenarioState(name: ScenarioName): ScenarioState {
             : []),
         ]
       );
+      if (index === 60) {
+        // Match live turns where completed reasoning precedes the final Markdown response.
+        firstAssistant.parts = [...firstAssistant.parts.slice(1), firstAssistant.parts[0]!];
+      }
       messages.push(firstAssistant);
 
       if (index % 3 === 0) {

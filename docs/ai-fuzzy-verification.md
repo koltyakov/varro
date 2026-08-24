@@ -197,10 +197,11 @@ what was omitted.
 6. Observe the complete run directly in the tracked Extension Development Host. Record the scenario,
    step, marker, and preceding actions immediately when a suspected failure occurs and again after
    settling. Screenshots are optional supporting evidence, not pass preconditions.
-   A marker is an exact painted DOM element whose own bounding rectangle intersects the viewport, not
-   merely text found inside an intersecting message row. Capture and reuse that element's stable message
-   ID plus render key or a uniquely identifying descendant. If Varro preserves a different visible
-   render item during reflow, record both identities and do not infer a jump from movement of the
+   A marker is an exact painted DOM element whose bounding rectangle, after intersection with every
+   clipping ancestor and the transcript scrollport, intersects the viewport. A raw descendant rectangle
+   outside an `overflow: clip` entrance wrapper is not painted evidence. Capture and reuse that element's
+   stable message ID plus render key or a uniquely identifying descendant. If Varro preserves a
+   different visible render item during reflow, record both identities and do not infer a jump from movement of the
    containing row or an adjacent card.
 7. Keep DevTools closed for the first pass because docking changes webview dimensions. Use it only for
    diagnosis or metric capture, and record that the run became instrumented.

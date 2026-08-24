@@ -2340,7 +2340,8 @@ export function MessageList() {
 
   function captureMountedVisibleScrollAnchorWithTopPad(
     topPad: number,
-    preferStableRenderItem = false
+    preferStableRenderItem = false,
+    skipThinkingRenderItems = false
   ) {
     if (!containerRef) return null;
 
@@ -2363,6 +2364,7 @@ export function MessageList() {
       // Compact activity summaries can move to an older owner after a prepend. Follow their
       // preserved group identity across rows; otherwise prefer stable transcript content.
       for (const element of row.querySelectorAll<HTMLElement>('[data-assistant-render-key]')) {
+        if (skipThinkingRenderItems && element.querySelector('.chat-thinking-box')) continue;
         const renderKey = element.dataset.assistantRenderKey;
         if (!renderKey || element.getClientRects().length === 0) continue;
         const elementRect = element.getBoundingClientRect();
@@ -5113,7 +5115,7 @@ export function MessageList() {
         !stickyNavigationOwnsScroll() &&
         !editingMessage() &&
         !pendingExpansionScrollAnchor
-          ? captureMountedVisibleScrollAnchor()
+          ? captureMountedVisibleScrollAnchorWithTopPad(0, true, true)
           : null;
     });
     onCleanup(stopCapturingThinkingAnchor);
