@@ -683,6 +683,7 @@ export type ExtensionMessage =
   | { type: 'command/focus-input' }
   | { type: 'command/search-sessions' }
   | { type: 'command/open-attention-sessions' }
+  | { type: 'command/open-completed-sessions' }
   | { type: 'command/switch-session'; payload: { direction: 'previous' | 'next' } }
   | { type: 'command/abort' }
   | { type: 'ralph/state'; payload: RalphStatePayload };
@@ -699,6 +700,7 @@ export type WebviewMessage =
         sessionId?: string | null;
       };
     }
+  | { type: 'session/seen'; payload: { sessionId: string } }
   | { type: 'webview/focus'; payload: { focused: boolean } }
   | { type: 'permission/reveal'; payload: { permissionId: string } }
   | { type: 'providers/watch'; payload: { active: boolean } }

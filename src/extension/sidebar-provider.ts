@@ -209,7 +209,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         onStatusChange: () => this.updateStatusBarItem(),
       },
       {
-        shouldShow: (sessionId) => !this.isSessionAttentionVisible(sessionId),
+        shouldShow: () => !this.isAnyChatVisible(),
       }
     );
     this.contextFilesState = new SidebarProviderContextFiles(this.droppedFilesService);
@@ -443,6 +443,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         setActiveChatModel: (model) => {
           if (webviewContext.surface === 'sidebar') this.activeChatModel = model;
         },
+        acknowledgeSessionSeen: (sessionId) =>
+          this.sessionState.acknowledgeCompletedSession(sessionId),
         revealPermission: (permissionId) => this.revealPermission(permissionId),
         contextFilesState,
         sessionExportService: this.sessionExportService,
@@ -975,6 +977,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     );
   }
 
+  private isAnyChatVisible() {
+    return [...this.endpoints].some((endpoint) => endpoint.bridge.isVisible());
+  }
+
   private visibleEditorSessionIds() {
     return [
       ...new Set(
@@ -1048,12 +1054,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  hasPendingAttention() {
-    return this.sessionState.pendingForUser.size > 0;
+  getStatusBarClickAction() {
+    return this.getStatusBarState().action;
   }
 
   openAttentionSessions() {
     this.webviewSession.openAttentionSessions();
+  }
+
+  openCompletedSessions() {
+    this.webviewSession.openCompletedSessions();
   }
 
   async dispose() {
@@ -1372,13 +1382,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const statusBarItem = this.serverEventBridge.getStatusBarItem();
     if (!next.visible) {
       statusBarItem.hide();
-      return;
+    } else {
+      statusBarItem.text = next.text;
+      statusBarItem.backgroundColor = next.backgroundColor;
+      statusBarItem.tooltip = next.tooltip;
+      statusBarItem.show();
     }
 
-    statusBarItem.text = next.text;
-    statusBarItem.backgroundColor = next.backgroundColor;
-    statusBarItem.tooltip = next.tooltip;
-    statusBarItem.show();
+    const openCodeStatusBarItem = this.serverEventBridge.getOpenCodeStatusBarItem();
+    openCodeStatusBarItem.text = `$(robot) OpenCode ${maximumTestedOpenCodeVersion}`;
+    openCodeStatusBarItem.tooltip = `OpenCode ${maximumTestedOpenCodeVersion}\nMaximum version tested with this Varro release.\n\nClick to open chat.`;
+    openCodeStatusBarItem.show();
   }
 
   /**
@@ -1430,12 +1444,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private getStatusBarState():
-    | { visible: false }
-    | { visible: true; text: string; tooltip: string; backgroundColor?: vscode.ThemeColor } {
+    | { visible: false; action: 'focus' }
+    | {
+        visible: true;
+        action: 'focus' | 'attention' | 'completed';
+        text: string;
+        tooltip: string;
+        backgroundColor?: vscode.ThemeColor;
+      } {
     const idleState = {
-      visible: true as const,
-      text: `$(robot) OpenCode ${maximumTestedOpenCodeVersion}`,
-      tooltip: `OpenCode ${maximumTestedOpenCodeVersion}\nMaximum version tested with this Varro release.\n\nClick to open chat.`,
+      visible: false as const,
+      action: 'focus' as const,
     };
     const pendingRequests = [...this.sessionState.pendingForUser.values()].filter(
       (request) =>
@@ -1450,6 +1469,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (pendingRequests.length > 0) {
       return {
         visible: true,
+        action: 'attention',
         text: `$(bell-dot) Varro: ${pendingRequests.length} waiting`,
         backgroundColor: new vscode.ThemeColor('statusBarItem.warningBackground'),
         tooltip: [
@@ -1478,6 +1498,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (completedSessions.length > 0) {
       return {
         visible: true,
+        action: 'completed',
         text: `$(check-all) Varro: ${completedSessions.length} completed`,
         tooltip: [
           'Varro finished background work.',

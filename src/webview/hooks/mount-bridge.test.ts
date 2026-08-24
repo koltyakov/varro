@@ -16,6 +16,7 @@ const {
   removeContextFile,
   requestComposerFocus,
   requestOpenAttentionSessions,
+  requestOpenCompletedSessions,
   setRecycleBinEntries,
   rememberCurrentDocumentNavigation,
   syncDraftPermissionForWorkspace,
@@ -34,6 +35,7 @@ const {
   removeContextFile: vi.fn(),
   requestComposerFocus: vi.fn(),
   requestOpenAttentionSessions: vi.fn(),
+  requestOpenCompletedSessions: vi.fn(),
   setRecycleBinEntries: vi.fn(),
   rememberCurrentDocumentNavigation: vi.fn(),
   syncDraftPermissionForWorkspace: vi.fn(),
@@ -63,6 +65,7 @@ vi.mock('../lib/state', async () => {
     removeContextFile,
     requestComposerFocus,
     requestOpenAttentionSessions,
+    requestOpenCompletedSessions,
     setRecycleBinEntries,
     rememberCurrentDocumentNavigation,
     syncDraftPermissionForWorkspace,
@@ -118,6 +121,7 @@ function createMessageDependencies(
     createSession: vi.fn(),
     requestComposerFocus: vi.fn(),
     requestOpenAttentionSessions: vi.fn(),
+    requestOpenCompletedSessions: vi.fn(),
     abortSession: vi.fn(),
     refreshMcps: vi.fn(),
     refreshProviders: vi.fn(),
@@ -197,6 +201,7 @@ describe('mount bridge helpers', () => {
         createSession: vi.fn(),
         requestComposerFocus: vi.fn(),
         requestOpenAttentionSessions: vi.fn(),
+        requestOpenCompletedSessions: vi.fn(),
         abortSession: vi.fn(),
         refreshMcps: vi.fn(),
         refreshProviders: vi.fn(),
@@ -253,6 +258,7 @@ describe('mount bridge helpers', () => {
       createSession: vi.fn(),
       requestComposerFocus: vi.fn(),
       requestOpenAttentionSessions: vi.fn(),
+      requestOpenCompletedSessions: vi.fn(),
       abortSession: vi.fn(),
       refreshMcps: vi.fn(),
       refreshProviders: vi.fn(),
@@ -316,6 +322,7 @@ describe('mount bridge helpers', () => {
         createSession: vi.fn(),
         requestComposerFocus: vi.fn(),
         requestOpenAttentionSessions: vi.fn(),
+        requestOpenCompletedSessions: vi.fn(),
         abortSession: vi.fn(),
         refreshMcps: vi.fn(),
         refreshProviders: vi.fn(),
@@ -375,6 +382,7 @@ describe('mount bridge helpers', () => {
         createSession: vi.fn(),
         requestComposerFocus: vi.fn(),
         requestOpenAttentionSessions: vi.fn(),
+        requestOpenCompletedSessions: vi.fn(),
         abortSession: vi.fn(),
         refreshMcps: vi.fn(),
         refreshProviders: vi.fn(),
@@ -426,6 +434,7 @@ describe('mount bridge helpers', () => {
         createSession: vi.fn(),
         requestComposerFocus: vi.fn(),
         requestOpenAttentionSessions: vi.fn(),
+        requestOpenCompletedSessions: vi.fn(),
         abortSession: vi.fn(),
         refreshMcps: vi.fn(),
         refreshProviders: vi.fn(),
@@ -452,6 +461,7 @@ describe('mount bridge helpers', () => {
     const openSession = vi.fn();
     const focusComposer = vi.fn();
     const openAttentionSessions = vi.fn();
+    const openCompletedSessions = vi.fn();
     const searchSessions = vi.fn();
     const abortSession = vi.fn();
     const refreshMcps = vi.fn();
@@ -487,6 +497,7 @@ describe('mount bridge helpers', () => {
       openSession,
       requestComposerFocus: focusComposer,
       requestOpenAttentionSessions: openAttentionSessions,
+      requestOpenCompletedSessions: openCompletedSessions,
       requestSessionSearchFocus: searchSessions,
       abortSession,
       refreshMcps,
@@ -510,6 +521,7 @@ describe('mount bridge helpers', () => {
     });
     handleExtensionMessageWithDependencies(deps, { type: 'command/focus-input' });
     handleExtensionMessageWithDependencies(deps, { type: 'command/open-attention-sessions' });
+    handleExtensionMessageWithDependencies(deps, { type: 'command/open-completed-sessions' });
     handleExtensionMessageWithDependencies(deps, { type: 'command/search-sessions' });
     handleExtensionMessageWithDependencies(deps, { type: 'command/abort' });
     handleExtensionMessageWithDependencies(deps, {
@@ -561,6 +573,7 @@ describe('mount bridge helpers', () => {
     expect(openSession).toHaveBeenCalledWith('session-1');
     expect(focusComposer).toHaveBeenCalledTimes(1);
     expect(openAttentionSessions).toHaveBeenCalledTimes(1);
+    expect(openCompletedSessions).toHaveBeenCalledTimes(1);
     expect(searchSessions).toHaveBeenCalledTimes(1);
     expect(abortSession).toHaveBeenCalledTimes(1);
     expect(addDroppedContextFiles).toHaveBeenCalledTimes(1);
@@ -697,6 +710,7 @@ describe('mount bridge helpers', () => {
       createSession: vi.fn(),
       requestComposerFocus: vi.fn(),
       requestOpenAttentionSessions: vi.fn(),
+      requestOpenCompletedSessions: vi.fn(),
       abortSession: vi.fn(),
       refreshMcps: vi.fn(),
       refreshProviders: vi.fn(),

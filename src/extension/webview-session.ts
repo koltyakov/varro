@@ -35,6 +35,7 @@ export class WebviewSession {
   private pendingInputFocus = false;
   private pendingSearchSessions = false;
   private pendingOpenAttentionSessions = false;
+  private pendingOpenCompletedSessions = false;
   private pendingCommands: Array<
     Extract<
       ExtensionMessage,
@@ -153,6 +154,11 @@ export class WebviewSession {
   openAttentionSessions() {
     this.pendingOpenAttentionSessions = true;
     this.flushPendingOpenAttentionSessions();
+  }
+
+  openCompletedSessions() {
+    this.pendingOpenCompletedSessions = true;
+    this.flushPendingOpenCompletedSessions();
   }
 
   queueCommand(
@@ -488,6 +494,7 @@ export class WebviewSession {
     this.flushPendingInputFocus();
     this.flushPendingSearchSessions();
     this.flushPendingOpenAttentionSessions();
+    this.flushPendingOpenCompletedSessions();
   }
 
   private commitRecoverySnapshot(snapshot: RecoverySnapshot) {
@@ -512,6 +519,13 @@ export class WebviewSession {
       return;
     this.pendingOpenAttentionSessions = false;
     this.bridge.post({ type: 'command/open-attention-sessions' });
+  }
+
+  private flushPendingOpenCompletedSessions() {
+    if (!this.pendingOpenCompletedSessions || !this.bridge.isVisible() || !this.webviewReady)
+      return;
+    this.pendingOpenCompletedSessions = false;
+    this.bridge.post({ type: 'command/open-completed-sessions' });
   }
 
   private flushPendingSearchSessions() {

@@ -42,7 +42,8 @@ type RecentEventState = {
 };
 
 export class ServerEventBridge {
-  private readonly statusBarItem: vscode.StatusBarItem;
+  private readonly attentionStatusBarItem: vscode.StatusBarItem;
+  private readonly openCodeStatusBarItem: vscode.StatusBarItem;
   private status: ServerStatus = { state: 'stopped' };
   private serverStatusHandler: ((status: ServerStatus) => void) | undefined;
   private serverEventHandler: ((event: unknown) => void) | undefined;
@@ -66,13 +67,21 @@ export class ServerEventBridge {
     private readonly updateStatusBarItem: () => void,
     private readonly workspace?: { getPath(): string | null | undefined }
   ) {
-    this.statusBarItem = vscode.window.createStatusBarItem(
-      'varro.session-status',
+    this.openCodeStatusBarItem = vscode.window.createStatusBarItem(
+      'varro.opencode-version',
       vscode.StatusBarAlignment.Right,
       1000
     );
-    this.statusBarItem.name = 'Varro Session Status';
-    this.statusBarItem.command = 'varro.chat.statusBarClick';
+    this.openCodeStatusBarItem.name = 'OpenCode Version';
+    this.openCodeStatusBarItem.command = 'varro.chat.focus';
+
+    this.attentionStatusBarItem = vscode.window.createStatusBarItem(
+      'varro.session-status',
+      vscode.StatusBarAlignment.Left,
+      1000
+    );
+    this.attentionStatusBarItem.name = 'Varro Attention';
+    this.attentionStatusBarItem.command = 'varro.chat.statusBarClick';
   }
 
   getStatus() {
@@ -80,7 +89,11 @@ export class ServerEventBridge {
   }
 
   getStatusBarItem() {
-    return this.statusBarItem;
+    return this.attentionStatusBarItem;
+  }
+
+  getOpenCodeStatusBarItem() {
+    return this.openCodeStatusBarItem;
   }
 
   flushPendingEvents() {
@@ -125,7 +138,8 @@ export class ServerEventBridge {
     await this.sessionState.flush();
     this.unknownEventLoggedAt.clear();
     this.recentEvents.clear();
-    this.statusBarItem.dispose();
+    this.attentionStatusBarItem.dispose();
+    this.openCodeStatusBarItem.dispose();
   }
 
   private acceptParsedEvent(event: ServerEvent) {

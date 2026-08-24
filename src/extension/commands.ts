@@ -48,9 +48,14 @@ export function registerCommands(
 
     vscode.commands.registerCommand('varro.chat.statusBarClick', async () => {
       try {
+        const action = sidebar.getStatusBarClickAction();
         await revealSidebar();
-        if (sidebar.hasPendingAttention()) {
+        if (action === 'attention') {
           sidebar.openAttentionSessions();
+          return;
+        }
+        if (action === 'completed') {
+          sidebar.openCompletedSessions();
           return;
         }
         sidebar.requestInputFocus();

@@ -127,6 +127,7 @@ function createActionFixture() {
     post: vi.fn(),
     setProviderWatchActive: vi.fn(),
     setActiveChatModel: vi.fn(),
+    acknowledgeSessionSeen: vi.fn(),
     revealPermission: vi.fn(),
     setMermaidPreviewOpen: vi.fn(),
     setActiveRoute: vi.fn(),
@@ -262,6 +263,14 @@ describe('createSidebarProviderActions', () => {
 
     expect(webviewSession.updateCommandState).toHaveBeenCalledWith(true, false);
     expect(deps.setActiveChatModel).toHaveBeenCalledWith(model);
+  });
+
+  it('forwards session read acknowledgements', () => {
+    const { actions, deps } = createActionFixture();
+
+    actions.acknowledgeSessionSeen('session-1');
+
+    expect(deps.acknowledgeSessionSeen).toHaveBeenCalledWith('session-1');
   });
 
   it('posts blocker updates while polling and restarts once the server is idle', async () => {

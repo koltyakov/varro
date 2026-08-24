@@ -266,6 +266,17 @@ export class SessionStateManager {
     this.listener.onStatusChange();
   }
 
+  acknowledgeCompletedSession(sessionID: string): void {
+    const rootSessionID = this.rootSessionIdFor(sessionID);
+    let changed = false;
+    for (const completedSessionID of this.completedSessions) {
+      if (this.rootSessionIdFor(completedSessionID) !== rootSessionID) continue;
+      this.completedSessions.delete(completedSessionID);
+      changed = true;
+    }
+    if (changed) this.listener.onStatusChange();
+  }
+
   /**
    * Optimistically marks a session busy the moment a prompt is forwarded to
    * the server. opencode admits a prompt and only later emits the SSE

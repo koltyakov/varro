@@ -612,6 +612,29 @@ describe('SessionStateManager notifications', () => {
     expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
   });
 
+  it('clears a completed conversation when one of its sessions is seen', () => {
+    const manager = createManager();
+    manager.handleServerEvent({
+      type: 'session.created',
+      properties: { info: { id: 'child-1', parentID: 'session-1' } },
+    });
+    markBusy(manager, 'session-1');
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    });
+    markBusy(manager, 'session-2');
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-2', status: { type: 'idle' } },
+    });
+
+    manager.acknowledgeCompletedSession('child-1');
+
+    expect(manager.completed.has('session-1')).toBe(false);
+    expect(manager.completed.has('session-2')).toBe(true);
+  });
+
   it('remembers sync session metadata when id is only on the event properties', () => {
     const manager = createManager(() => false);
 

@@ -227,6 +227,8 @@ export interface AppStateInstance {
   setComposerFocusKey: Setter<number>;
   openAttentionSessionsKey: Accessor<number>;
   setOpenAttentionSessionsKey: Setter<number>;
+  openCompletedSessionsKey: Accessor<number>;
+  setOpenCompletedSessionsKey: Setter<number>;
   sessionSearchFocusKey: Accessor<number>;
   setSessionSearchFocusKey: Setter<number>;
   messageListScrollRequestKey: Accessor<number>;
@@ -444,6 +446,7 @@ export function createAppState(): AppStateInstance {
   const [showModels, setShowModels] = createSignal(false);
   const [composerFocusKey, setComposerFocusKey] = createSignal(0);
   const [openAttentionSessionsKey, setOpenAttentionSessionsKey] = createSignal(0);
+  const [openCompletedSessionsKey, setOpenCompletedSessionsKey] = createSignal(0);
   const [sessionSearchFocusKey, setSessionSearchFocusKey] = createSignal(0);
   const [messageListScrollRequestKey, setMessageListScrollRequestKey] = createSignal(0);
   const [messageListScrollTargetMessageId, setMessageListScrollTargetMessageId] = createSignal<
@@ -519,6 +522,8 @@ export function createAppState(): AppStateInstance {
     setComposerFocusKey,
     openAttentionSessionsKey,
     setOpenAttentionSessionsKey,
+    openCompletedSessionsKey,
+    setOpenCompletedSessionsKey,
     sessionSearchFocusKey,
     setSessionSearchFocusKey,
     messageListScrollRequestKey,
@@ -603,6 +608,8 @@ export const composerFocusKey = defaultAppState.composerFocusKey;
 export const setComposerFocusKey = defaultAppState.setComposerFocusKey;
 export const openAttentionSessionsKey = defaultAppState.openAttentionSessionsKey;
 export const setOpenAttentionSessionsKey = defaultAppState.setOpenAttentionSessionsKey;
+export const openCompletedSessionsKey = defaultAppState.openCompletedSessionsKey;
+export const setOpenCompletedSessionsKey = defaultAppState.setOpenCompletedSessionsKey;
 export const sessionSearchFocusKey = defaultAppState.sessionSearchFocusKey;
 export const setSessionSearchFocusKey = defaultAppState.setSessionSearchFocusKey;
 export const messageListScrollRequestKey = defaultAppState.messageListScrollRequestKey;
@@ -649,6 +656,7 @@ export function resetDefaultAppState() {
   setShowModels(next.showModels());
   setComposerFocusKey(next.composerFocusKey());
   setOpenAttentionSessionsKey(next.openAttentionSessionsKey());
+  setOpenCompletedSessionsKey(next.openCompletedSessionsKey());
   setSessionSearchFocusKey(next.sessionSearchFocusKey());
   setMessageListScrollRequestKey(next.messageListScrollRequestKey());
   setMessageListScrollTargetMessageId(next.messageListScrollTargetMessageId());

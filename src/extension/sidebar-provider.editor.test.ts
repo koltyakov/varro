@@ -318,6 +318,44 @@ describe('SidebarProvider editor panels', () => {
     await vi.waitFor(() => expect(isVisible('session-1')).toBe(false));
   });
 
+  it('shows plan notifications only when no Varro chat is visible', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const { view } = attachTestView(provider);
+    const sessionState = (
+      provider as unknown as {
+        sessionState: { handleServerEvent(event: unknown): void };
+      }
+    ).sessionState;
+    const completePlan = (sessionId: string, title: string) => {
+      sessionState.handleServerEvent({
+        type: 'session.updated',
+        properties: { info: { id: sessionId, title } },
+      });
+      sessionState.handleServerEvent({
+        type: 'message.updated',
+        properties: { info: { sessionID: sessionId, role: 'assistant', agent: 'plan' } },
+      });
+      sessionState.handleServerEvent({
+        type: 'session.status',
+        properties: { sessionID: sessionId, status: { type: 'busy' } },
+      });
+      sessionState.handleServerEvent({
+        type: 'session.status',
+        properties: { sessionID: sessionId, status: { type: 'idle' } },
+      });
+    };
+
+    completePlan('session-visible', 'Visible plan');
+    expect(getVscodeMock().window.showInformationMessage).not.toHaveBeenCalled();
+
+    view.visible = false;
+    completePlan('session-hidden', 'Hidden plan');
+    expect(getVscodeMock().window.showInformationMessage).toHaveBeenCalledWith(
+      'Varro has a plan ready for review for "Hidden plan".',
+      'Open Chat'
+    );
+  });
+
   it('transfers an editor queue to the next ready view when hidden', async () => {
     const { provider } = await createSidebarProviderInstance();
     const first = createPanel();

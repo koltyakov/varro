@@ -6,6 +6,7 @@ import {
   setPersistentShowSessionPicker as setShowSessionPicker,
   showModels,
   openAttentionSessionsKey,
+  openCompletedSessionsKey,
   sessionSearchFocusKey,
   isSessionAwaitingInput,
   isSessionUnread,
@@ -439,6 +440,16 @@ export function Chat() {
       openAttentionSessionsKey,
       () => {
         openAttentionSessionsFromCommand();
+      },
+      { defer: true }
+    )
+  );
+
+  createEffect(
+    on(
+      openCompletedSessionsKey,
+      () => {
+        openCompletedSessions();
       },
       { defer: true }
     )

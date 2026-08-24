@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ServerEvent, ServerStatus } from '../shared/protocol';
 
 const mocks = vi.hoisted(() => ({
-  createStatusBarItem: vi.fn(() => ({
+  createStatusBarItem: vi.fn((_id: string, _alignment: number, _priority: number) => ({
     name: '',
     command: '',
     dispose: vi.fn(),
@@ -106,9 +106,18 @@ function useParsedEvents() {
 }
 
 describe('ServerEventBridge', () => {
-  it('creates a status bar item on construction', () => {
-    createMocks();
-    expect(mocks.createStatusBarItem).toHaveBeenCalledWith('varro.session-status', 2, 1000);
+  it('creates separate left attention and right OpenCode status items', () => {
+    const { bridge } = createMocks();
+    expect(mocks.createStatusBarItem).toHaveBeenCalledWith('varro.session-status', 1, 1000);
+    expect(mocks.createStatusBarItem).toHaveBeenCalledWith('varro.opencode-version', 2, 1000);
+    expect(bridge.getStatusBarItem()).toMatchObject({
+      name: 'Varro Attention',
+      command: 'varro.chat.statusBarClick',
+    });
+    expect(bridge.getOpenCodeStatusBarItem()).toMatchObject({
+      name: 'OpenCode Version',
+      command: 'varro.chat.focus',
+    });
   });
 
   it('returns default status { state: "stopped" }', () => {
@@ -121,6 +130,15 @@ describe('ServerEventBridge', () => {
     const item = bridge.getStatusBarItem();
     const lastResult = mocks.createStatusBarItem.mock.results.at(-1)!.value;
     expect(item).toBe(lastResult);
+  });
+
+  it('returns the right-aligned OpenCode item separately', () => {
+    const { bridge } = createMocks();
+    const item = bridge.getOpenCodeStatusBarItem();
+    const openCodeCallIndex = mocks.createStatusBarItem.mock.calls.findLastIndex(
+      ([id]) => id === 'varro.opencode-version'
+    );
+    expect(item).toBe(mocks.createStatusBarItem.mock.results[openCodeCallIndex]!.value);
   });
 
   it('attach registers server handlers and calls updateStatusBarItem', () => {
@@ -823,10 +841,12 @@ describe('ServerEventBridge', () => {
 
   it('dispose disposes the status bar item', async () => {
     const { bridge } = createMocks();
-    const item = bridge.getStatusBarItem();
+    const attentionItem = bridge.getStatusBarItem();
+    const openCodeItem = bridge.getOpenCodeStatusBarItem();
     bridge.attach();
     await bridge.dispose();
-    expect(item.dispose).toHaveBeenCalled();
+    expect(attentionItem.dispose).toHaveBeenCalled();
+    expect(openCodeItem.dispose).toHaveBeenCalled();
   });
 
   it('dispose clears handler references', async () => {

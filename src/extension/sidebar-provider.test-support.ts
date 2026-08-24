@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => ({
   vscode: {
     env: { remoteName: undefined as string | undefined },
     window: {
-      createStatusBarItem: vi.fn(() => ({
+      createStatusBarItem: vi.fn((_id: string, _alignment: number, _priority: number) => ({
         name: '',
         command: '',
         text: '',
@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => ({
       activeColorTheme: { kind: 2 },
       showOpenDialog: vi.fn(() => Promise.resolve(undefined)),
       showTextDocument: vi.fn(() => Promise.resolve()),
+      showInformationMessage: vi.fn(() => Promise.resolve(undefined)),
       showWarningMessage: vi.fn(() => Promise.resolve(undefined)),
       showErrorMessage: vi.fn(() => Promise.resolve(undefined)),
       createTerminal: vi.fn(() => ({ show: vi.fn(), sendText: vi.fn() })),
@@ -69,7 +70,7 @@ const mocks = vi.hoisted(() => ({
       },
       openTextDocument: vi.fn(() => Promise.resolve({})),
     },
-    StatusBarAlignment: { Left: 1 },
+    StatusBarAlignment: { Left: 1, Right: 2 },
     ViewColumn: { Active: -1 },
     ThemeColor: class ThemeColor {
       constructor(public readonly value: string) {}
@@ -298,6 +299,8 @@ beforeEach(() => {
   mocks.logger.error.mockReset();
 
   mocks.vscode.window.showTextDocument.mockReset();
+  mocks.vscode.window.showInformationMessage.mockReset();
+  mocks.vscode.window.showInformationMessage.mockResolvedValue(undefined);
   mocks.vscode.window.createWebviewPanel.mockReset();
   mocks.vscode.window.showTextDocument.mockResolvedValue(undefined);
   mocks.vscode.window.showWarningMessage.mockReset();

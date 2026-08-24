@@ -87,8 +87,9 @@ function register(
     requestInputFocus: vi.fn(),
     searchSessions: vi.fn(),
     switchSession: vi.fn(),
-    hasPendingAttention: vi.fn(() => false),
+    getStatusBarClickAction: vi.fn<() => 'focus' | 'attention' | 'completed'>(() => 'focus'),
     openAttentionSessions: vi.fn(),
+    openCompletedSessions: vi.fn(),
     postDroppedFiles: vi.fn(),
     postTerminalSelection: vi.fn(),
     generateCommitMessage: vi.fn(() => Promise.resolve()),
@@ -590,7 +591,7 @@ describe('sidebar navigation commands', () => {
 
   it('opens attention sessions from the status bar when something needs attention', async () => {
     const { sidebar } = register();
-    sidebar.hasPendingAttention.mockReturnValue(true);
+    sidebar.getStatusBarClickAction.mockReturnValue('attention');
 
     await runCommand('varro.chat.statusBarClick');
 
@@ -598,9 +599,23 @@ describe('sidebar navigation commands', () => {
     expect(sidebar.requestInputFocus).not.toHaveBeenCalled();
   });
 
+  it('opens completed sessions from the completed status item', async () => {
+    let action: 'completed' | 'focus' = 'completed';
+    const { sidebar } = register('/repo', {}, () => {
+      action = 'focus';
+      return Promise.resolve();
+    });
+    sidebar.getStatusBarClickAction.mockImplementation(() => action);
+
+    await runCommand('varro.chat.statusBarClick');
+
+    expect(sidebar.openCompletedSessions).toHaveBeenCalledOnce();
+    expect(sidebar.openAttentionSessions).not.toHaveBeenCalled();
+    expect(sidebar.requestInputFocus).not.toHaveBeenCalled();
+  });
+
   it('focuses the composer from the status bar when nothing needs attention', async () => {
     const { sidebar } = register();
-    sidebar.hasPendingAttention.mockReturnValue(false);
 
     await runCommand('varro.chat.statusBarClick');
 

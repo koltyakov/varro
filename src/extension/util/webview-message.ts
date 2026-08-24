@@ -104,6 +104,7 @@ const WEBVIEW_MESSAGE_TYPES = {
   'context/request': true,
   'workspace/select': true,
   'commands/state': true,
+  'session/seen': true,
   'session-model/update': true,
   'session-models/migrate': true,
   'webview/focus': true,
@@ -183,6 +184,12 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       return typeof payload?.includeAllTime === 'boolean'
         ? { type, payload: { includeAllTime: payload.includeAllTime } }
         : null;
+    }
+
+    case 'session/seen': {
+      const payload = asRecord(message?.payload);
+      const sessionId = payload?.sessionId;
+      return isSafePersistedSessionId(sessionId) ? { type, payload: { sessionId } } : null;
     }
 
     case 'vscode/mermaid-preview': {

@@ -9,6 +9,7 @@ import {
   setMessageListScrollRequestKey,
   setMessageListScrollTargetMessageId,
   setOpenAttentionSessionsKey,
+  setOpenCompletedSessionsKey,
   setSessionSearchFocusKey,
   setShowThinking,
   showThinking,
@@ -65,6 +66,10 @@ export function requestComposerFocus() {
 
 export function requestOpenAttentionSessions() {
   setOpenAttentionSessionsKey((value) => value + 1);
+}
+
+export function requestOpenCompletedSessions() {
+  setOpenCompletedSessionsKey((value) => value + 1);
 }
 
 export function requestSessionSearchFocus() {

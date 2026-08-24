@@ -148,8 +148,16 @@ describe('SidebarProvider permission replay', () => {
 
   it('only shows waiting status for permission requests in the current workspace', async () => {
     const { provider } = await createSidebarProviderInstance();
-    const statusBarItem = getVscodeMock().window.createStatusBarItem.mock.results.at(-1)?.value;
+    const createStatusBarItem = getVscodeMock().window.createStatusBarItem;
+    const statusBarItem = createStatusBarItem.mock.results.at(-1)?.value;
+    const openCodeItemIndex = createStatusBarItem.mock.calls.findIndex(
+      ([id]) => id === 'varro.opencode-version'
+    );
+    const openCodeStatusBarItem = createStatusBarItem.mock.results[openCodeItemIndex]?.value;
     if (!statusBarItem) throw new Error('Expected status bar item to exist');
+    if (!openCodeStatusBarItem) throw new Error('Expected OpenCode status bar item to exist');
+    expect(statusBarItem.hide).toHaveBeenCalled();
+    expect(openCodeStatusBarItem.show).toHaveBeenCalled();
 
     statusBarItem.show.mockClear();
     statusBarItem.hide.mockClear();
@@ -176,7 +184,10 @@ describe('SidebarProvider permission replay', () => {
     });
 
     expect(statusBarItem.show).not.toHaveBeenCalled();
-    expect(statusBarItem.text).toBe(`$(robot) OpenCode ${readMaximumTestedOpenCodeVersion()}`);
+    expect(openCodeStatusBarItem.text).toBe(
+      `$(robot) OpenCode ${readMaximumTestedOpenCodeVersion()}`
+    );
+    expect(provider.getStatusBarClickAction()).toBe('focus');
 
     providerState.sessionState.handleServerEvent({
       type: 'session.updated',
@@ -198,5 +209,27 @@ describe('SidebarProvider permission replay', () => {
     expect(statusBarItem.show).toHaveBeenCalled();
     expect(statusBarItem.text).toBe('$(bell-dot) Varro: 1 waiting');
     expect(statusBarItem.tooltip).toContain('Current repo: Run Bash command');
+    expect(provider.getStatusBarClickAction()).toBe('attention');
+  });
+
+  it('uses completed-session navigation for a completed status item', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const providerState = provider as unknown as {
+      sessionState: { handleServerEvent(event: unknown): void };
+    };
+    providerState.sessionState.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'session-1', title: 'Completed work', directory: '/repo' } },
+    });
+    providerState.sessionState.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+    });
+    providerState.sessionState.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    });
+
+    expect(provider.getStatusBarClickAction()).toBe('completed');
   });
 });

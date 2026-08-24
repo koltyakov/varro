@@ -1,5 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { WebviewMessage } from '../../shared/protocol';
 import type { AssistantMessage, Part, Provider, UserMessage } from '../types';
+
+type TestBridgeWindow = Window & {
+  __sendToExtension?: (message: WebviewMessage) => void;
+};
+
+function getTestBridgeWindow() {
+  // SAFETY: The test installs only the optional bridge callback declared by TestBridgeWindow.
+  return window as TestBridgeWindow;
+}
 
 function assistantMessage(
   id: string,
@@ -451,6 +461,9 @@ describe('state helpers', () => {
 
   it('persists active session state and unread markers', async () => {
     const stateModule = await loadState();
+    const sent: unknown[] = [];
+    const bridgeWindow = getTestBridgeWindow();
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
     vi.spyOn(Date, 'now').mockReturnValue(1_000);
 
     stateModule.persistActiveSessionId('session-1');
@@ -468,6 +481,10 @@ describe('state helpers', () => {
     stateModule.setState('activeSessionId', 'session-1');
 
     expect(stateModule.state.lastSeenSessions).toEqual({ 'session-1': 1_000, 'session-2': 1_000 });
+    expect(sent).toEqual([
+      { type: 'session/seen', payload: { sessionId: 'session-1' } },
+      { type: 'session/seen', payload: { sessionId: 'session-2' } },
+    ]);
     expect(stateModule.isSessionUnread('session-1', 1_000)).toBe(false);
     expect(stateModule.isSessionUnread('session-1', 1_001)).toBe(true);
     expect(stateModule.isSessionUnread('session-2', 999)).toBe(false);
@@ -481,6 +498,7 @@ describe('state helpers', () => {
         '__varro.no-workspace__': { 'session-1': 1_500, 'session-2': 1_000 },
       })
     );
+    delete bridgeWindow.__sendToExtension;
 
     stateModule.setSessionCompacting('session-4', true);
     expect(stateModule.state.compactingSessionIds).toEqual(['session-4']);
@@ -1836,18 +1854,21 @@ describe('state helpers', () => {
 
     expect(stateModule.composerFocusKey()).toBe(0);
     expect(stateModule.openAttentionSessionsKey()).toBe(0);
+    expect(stateModule.openCompletedSessionsKey()).toBe(0);
     expect(stateModule.messageListScrollRequestKey()).toBe(0);
     expect(stateModule.showThinking()).toBe(true);
     expect(stateModule.showChangedFiles()).toBe(false);
 
     stateModule.requestComposerFocus();
     stateModule.requestOpenAttentionSessions();
+    stateModule.requestOpenCompletedSessions();
     stateModule.requestMessageListScrollToBottom('message-new-turn');
     stateModule.toggleThinking();
     stateModule.resetPastedImageIndex();
 
     expect(stateModule.composerFocusKey()).toBe(1);
     expect(stateModule.openAttentionSessionsKey()).toBe(1);
+    expect(stateModule.openCompletedSessionsKey()).toBe(1);
     expect(stateModule.messageListScrollRequestKey()).toBe(1);
     expect(stateModule.messageListScrollTargetMessageId()).toBe('message-new-turn');
     stateModule.requestMessageListScrollToBottom();

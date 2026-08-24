@@ -246,13 +246,14 @@ describe('WebviewSession', () => {
     expect(deps.cancelApiRequestsBeforeGeneration.mock.calls).toEqual([[1], [2], [3]]);
   });
 
-  it('queues focus, search, and attention commands until the webview is visible and ready', async () => {
+  it('queues focus, search, and status commands until the webview is visible and ready', async () => {
     const { session, bridge, sessionState, deps } = createSession();
     const view = createWebviewView(false);
 
     session.requestInputFocus();
     session.searchSessions();
     session.openAttentionSessions();
+    session.openCompletedSessions();
 
     await session.resolve(view as never);
     await session.handleReady();
@@ -263,6 +264,7 @@ describe('WebviewSession', () => {
     expect(typesAfterReady).not.toContain('command/focus-input');
     expect(typesAfterReady).not.toContain('command/search-sessions');
     expect(typesAfterReady).not.toContain('command/open-attention-sessions');
+    expect(typesAfterReady).not.toContain('command/open-completed-sessions');
 
     view.visible = true;
     session.handleVisible();
@@ -273,6 +275,9 @@ describe('WebviewSession', () => {
     expect(postedTypes.filter((type) => type === 'command/focus-input')).toHaveLength(1);
     expect(postedTypes.filter((type) => type === 'command/search-sessions')).toHaveLength(1);
     expect(postedTypes.filter((type) => type === 'command/open-attention-sessions')).toHaveLength(
+      1
+    );
+    expect(postedTypes.filter((type) => type === 'command/open-completed-sessions')).toHaveLength(
       1
     );
     expect(sessionState.clearCompleted).toHaveBeenCalledOnce();

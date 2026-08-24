@@ -35,6 +35,7 @@ import { client } from '../lib/client';
 import { EMPTY_SESSION_PRUNE_GRACE_MS } from '../lib/empty-session';
 import {
   requestOpenAttentionSessions,
+  requestOpenCompletedSessions,
   applySessionSelectedModelsSnapshot,
   requestSessionSearchFocus,
   startLoading,
@@ -2146,6 +2147,30 @@ describe('header status badges', () => {
 
     expect(selectSessionSpy).toHaveBeenCalledWith('attention-target');
     expect(container?.querySelector('.chat-header-filter-chip')).toBeNull();
+  });
+
+  it('opens completed sessions from state and keeps multiple matches filtered', async () => {
+    setState('sessions', [
+      session('active', 500),
+      session('completed-1', 400),
+      session('completed-2', 300),
+    ]);
+    setState('activeSessionId', 'active');
+    setState('lastSeenSessions', { active: 500 });
+    setState('completedSessionResponses', { 'completed-1': 400, 'completed-2': 300 });
+
+    cleanup = render(() => Chat(), container!);
+
+    requestOpenCompletedSessions();
+    await Promise.resolve();
+
+    expect(container?.querySelector('.chat-header-filter-chip-label')?.textContent).toBe(
+      'Completed'
+    );
+    const titles = Array.from(container?.querySelectorAll('.session-item-title') ?? []).map(
+      (item) => item.textContent?.trim()
+    );
+    expect(titles).toEqual(['completed-1', 'completed-2']);
   });
 
   it('hides skipped plans from the plan-ready badge', () => {

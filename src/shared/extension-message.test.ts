@@ -37,6 +37,9 @@ describe('parseExtensionMessage', () => {
     expect(parseExtensionMessage({ type: 'command/open-attention-sessions' })).toEqual({
       type: 'command/open-attention-sessions',
     });
+    expect(parseExtensionMessage({ type: 'command/open-completed-sessions' })).toEqual({
+      type: 'command/open-completed-sessions',
+    });
     expect(
       parseExtensionMessage({
         type: 'command/switch-session',

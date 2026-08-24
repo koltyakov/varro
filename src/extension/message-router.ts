@@ -44,6 +44,7 @@ export interface MessageRouterCallbacks {
     model: CommandStatePayload['model'],
     sessionId?: string | null
   ): void;
+  acknowledgeSessionSeen(sessionId: string): void;
   setWebviewFocus(focused: boolean): void;
   revealPermission(permissionId: string): void;
   setProviderWatchActive(active: boolean): void;
@@ -156,6 +157,9 @@ export class MessageRouter {
             msg.payload.model,
             msg.payload.sessionId
           );
+          break;
+        case 'session/seen':
+          this.callbacks.acknowledgeSessionSeen(msg.payload.sessionId);
           break;
         case 'webview/focus':
           this.handleWebviewFocusMessage(msg);

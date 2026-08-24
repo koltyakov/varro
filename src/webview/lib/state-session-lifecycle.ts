@@ -14,6 +14,7 @@ import {
   setState,
   state,
 } from './app-state';
+import { postMessage } from './bridge';
 import { collectSessionTreeIds } from './session-tree-index';
 import {
   getSessionMarkerWorkspaceScope,
@@ -40,6 +41,7 @@ export function consumeInterruptedSessionIds() {
 }
 
 export function markSessionSeen(id: string, updatedAt?: number) {
+  postMessage({ type: 'session/seen', payload: { sessionId: id } });
   const nextSessions = nextSeenSessions(state.lastSeenSessions, id, updatedAt);
   if (!nextSessions) return;
   setState('lastSeenSessions', id, nextSessions[id]!);

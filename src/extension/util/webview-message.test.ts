@@ -53,6 +53,13 @@ function createRalphRun() {
 }
 
 describe('webview message validation', () => {
+  it('parses session read acknowledgements', () => {
+    expect(
+      parseWebviewMessage({ type: 'session/seen', payload: { sessionId: 'session-1' } })
+    ).toEqual({ type: 'session/seen', payload: { sessionId: 'session-1' } });
+    expect(parseWebviewMessage({ type: 'session/seen', payload: { sessionId: '' } })).toBeNull();
+  });
+
   it('parses consumed interrupted-session recovery acknowledgements', () => {
     expect(
       parseWebviewMessage({

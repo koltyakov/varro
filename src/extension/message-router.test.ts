@@ -17,6 +17,7 @@ function createCallbacks(): MessageRouterCallbacks {
   return {
     ready: vi.fn(() => Promise.resolve()),
     updateCommandState: vi.fn(),
+    acknowledgeSessionSeen: vi.fn(),
     setWebviewFocus: vi.fn(),
     revealPermission: vi.fn(),
     migrateSessionModels: vi.fn(() => Promise.resolve()),
@@ -158,6 +159,15 @@ describe('MessageRouter', () => {
     });
 
     expect(cb.updateCommandState).toHaveBeenCalledWith(true, false, model, undefined);
+  });
+
+  it('dispatches session read acknowledgements', async () => {
+    const cb = createCallbacks();
+    const router = new MessageRouter(cb);
+
+    await router.handleMessage({ type: 'session/seen', payload: { sessionId: 'session-1' } });
+
+    expect(cb.acknowledgeSessionSeen).toHaveBeenCalledWith('session-1');
   });
 
   it('dispatches providers/watch', async () => {
