@@ -13,6 +13,7 @@ import {
 } from '../../lib/message-metrics';
 import { isRunningSessionStatus } from '../../lib/session-event-reducer';
 import { logWarn } from '../../lib/log';
+import { readWebviewInstanceContext } from '../../lib/state-stored-values';
 import {
   invalidateSessionMessageWindowRequests,
   recordSessionMessageSnapshotMutation,
@@ -622,7 +623,9 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         activeMessages.length === 0 ||
         hadActiveAssistantReply ||
         hasActiveAssistantReply(activeMessages);
-      if (!uiStore.showSessionPicker()) sessionStore.markSessionSeen(sessionId);
+      if (readWebviewInstanceContext()?.surface === 'editor' || !uiStore.showSessionPicker()) {
+        sessionStore.markSessionSeen(sessionId);
+      }
       const handedOffTodos = deps.handoffTodosToMessages();
       refreshSettledTodos(sessionId);
       if (

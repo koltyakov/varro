@@ -1,6 +1,7 @@
 import type { FileDiff, SessionStatus } from '../../types';
 import { isRunningSessionStatus } from '../session-event-reducer';
 import { produce } from 'solid-js/store';
+import { readWebviewInstanceContext } from '../state-stored-values';
 import {
   applyMessagePartDelta,
   clearMessages,
@@ -217,6 +218,9 @@ function recordStatusCompletionTransition(
   if (hasActiveUsageLimit(sessionId)) return;
   if (isSessionAwaitingInput(sessionId)) return;
 
-  if (state.activeSessionId === sessionId && !showSessionPicker()) markSessionSeen(sessionId);
+  const isActiveSessionVisible =
+    state.activeSessionId === sessionId &&
+    (readWebviewInstanceContext()?.surface === 'editor' || !showSessionPicker());
+  if (isActiveSessionVisible) markSessionSeen(sessionId);
   else markSessionResponseCompleted(sessionId);
 }

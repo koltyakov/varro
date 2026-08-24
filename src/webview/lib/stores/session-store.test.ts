@@ -81,6 +81,8 @@ function toolPart(status: 'running' | 'completed'): Part {
 
 describe('sessionStore', () => {
   beforeEach(() => {
+    // SAFETY: The test removes the optional host-provided initial state from the window fixture.
+    delete (window as { __initialWebviewState?: unknown }).__initialWebviewState;
     window.localStorage.clear();
     resetDefaultAppState();
     resetSessionStatusSnapshotTracking();
@@ -411,6 +413,25 @@ describe('sessionStore', () => {
 
     expect(state.completedSessionResponses['session-1']).toBeGreaterThan(0);
     expect(state.lastSeenSessions['session-1']).toBeUndefined();
+  });
+
+  it('marks active editor sessions seen when status turns idle while the session list is open', () => {
+    // SAFETY: The fixture provides the initial host state read by the session store.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      webviewContext: {
+        viewId: 'editor-1',
+        surface: 'editor',
+        initialRoute: { type: 'session', sessionId: 'session-1' },
+      },
+    };
+    sessionStore.setActiveSessionId('session-1');
+    setShowSessionPicker(true);
+    sessionStore.setSessionStatusEntry('session-1', { type: 'busy' });
+
+    sessionStore.setSessionStatusEntry('session-1', { type: 'idle' });
+
+    expect(state.lastSeenSessions['session-1']).toBeGreaterThan(0);
+    expect(state.completedSessionResponses['session-1']).toBeUndefined();
   });
 
   it('exposes session tree helpers for loaded sessions', () => {

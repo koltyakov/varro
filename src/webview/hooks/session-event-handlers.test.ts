@@ -3857,6 +3857,36 @@ describe('registerSessionEventHandlers', () => {
     expect(handoffTodosToMessages).toHaveBeenCalledTimes(1);
   });
 
+  it('marks the active editor session seen on idle while the session list is open', () => {
+    const handlers = installHandlers();
+    const setSessionStatusEntry = vi.fn();
+
+    // SAFETY: The fixture provides the initial host state read by the event handler.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      webviewContext: {
+        viewId: 'editor-1',
+        surface: 'editor',
+        initialRoute: { type: 'session', sessionId: 'session-1' },
+      },
+    };
+    markSessionSeen.mockClear();
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        setSessionStatusEntry,
+      })
+    );
+
+    setShowSessionPicker(true);
+    handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+    setShowSessionPicker(false);
+    // SAFETY: The test removes the optional host-provided initial state from the window fixture.
+    delete (window as { __initialWebviewState?: unknown }).__initialWebviewState;
+
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'idle' });
+    expect(markSessionSeen).toHaveBeenCalledWith('session-1');
+  });
+
   it('does not resync messages on idle when the active session already looks settled', () => {
     const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
     serverEventsOn.mockImplementation((event, handler) => {

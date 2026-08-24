@@ -153,6 +153,8 @@ afterEach(() => {
   setState('providers', []);
   setState('providerDefaults', reconcile({}));
   setState('providerLimits', reconcile({}));
+  setState('editorTabsOpen', false);
+  setState('editorSessionIds', []);
   setState('activeSessionId', null);
   setState('messages', []);
   setState('queuedMessages', []);
@@ -2199,6 +2201,24 @@ describe('header status badges', () => {
     cleanup = render(() => Chat(), container!);
 
     expect(container?.querySelector('.chat-header-plan-badge')).toBeNull();
+  });
+
+  it('does not show plan-ready indicators for a session visible in an editor tab', () => {
+    setState('sessions', [session('plan-1', 200), session('session-1', 100)]);
+    setState('activeSessionId', 'plan-1');
+    setState('lastSeenSessions', { 'plan-1': 0, 'session-1': 100 });
+    setState('sessionSelectedAgents', { 'plan-1': 'plan' });
+    setState('editorTabsOpen', true);
+    setState('editorSessionIds', ['plan-1']);
+    setShowSessionPicker(true);
+
+    const indicators = deriveSessionIndicators(state.sessions);
+    expect(indicators.planReadyIds.has('plan-1')).toBe(false);
+
+    cleanup = render(() => Chat(), container!);
+
+    expect(container?.querySelector('.chat-header-plan-badge')).toBeNull();
+    expect(container?.querySelector('.session-item-indicator.is-plan-completed')).toBeNull();
   });
 
   it('does not mark an empty session with the plan agent as plan ready', () => {

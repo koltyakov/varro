@@ -371,7 +371,7 @@ export function Chat() {
     return getHeaderSessionCounts(
       recentSessions(),
       state.activeSessionId,
-      showSessionPicker(),
+      isEditorSurface ? false : showSessionPicker(),
       (sessionId) => indicators.runningIds.has(sessionId),
       (sessionId) => indicators.attentionIds.has(sessionId),
       (sessionId) => indicators.failedIds.has(sessionId) && isSessionFailureUnread(sessionId),

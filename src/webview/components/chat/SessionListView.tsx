@@ -2241,6 +2241,7 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
       if (managerSessionId && !failedIds.has(managerSessionId)) runningIds.add(managerSessionId);
       continue;
     }
+    if (editorSessionIds.has(displaySessionId)) continue;
     const selectedAgent = getSelectedAgentForSession(sessionId);
     if (selectedAgent === 'plan') {
       // An empty session cannot contain a plan; the plan agent may have been
@@ -2250,7 +2251,6 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
       }
       continue;
     }
-    if (editorSessionIds.has(displaySessionId)) continue;
     if (!isSessionCompletedResponseUnread(sessionId)) {
       continue;
     }
