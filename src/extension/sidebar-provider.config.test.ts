@@ -11,6 +11,30 @@ import {
 const vscodeMock = getVscodeMock();
 
 describe('SidebarProvider local config routing', () => {
+  it.each(['chat.fontSize', 'chat.fontFamily'])(
+    'broadcasts font configuration when %s changes',
+    async (changedKey) => {
+      const { provider } = await createSidebarProviderInstance();
+      const { posted } = attachTestView(provider);
+      const listener = vscodeMock.workspace.onDidChangeConfiguration.mock.calls.at(-1)?.[0];
+      expect(listener).toBeTypeOf('function');
+
+      await vscodeMock.workspace.getConfiguration('chat').update('fontSize', 15);
+      await vscodeMock.workspace
+        .getConfiguration('chat')
+        .update('fontFamily', 'Iosevka, monospace');
+      listener?.({ affectsConfiguration: (key: string) => key === changedKey });
+
+      expect(posted).toContainEqual({
+        type: 'config/update',
+        payload: expect.objectContaining({
+          chatFontSize: 15,
+          chatFontFamily: 'Iosevka, monospace',
+        }),
+      });
+    }
+  );
+
   it('reads model routing from project opencode.json', async () => {
     vscodeMock.workspace.fs.readFile.mockImplementation((uri: { fsPath: string }) =>
       uri.fsPath === '/repo/opencode.json'

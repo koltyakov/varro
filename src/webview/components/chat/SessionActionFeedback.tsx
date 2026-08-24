@@ -74,12 +74,17 @@ export function SessionActionFeedback(props: SessionActionFeedbackProps = {}) {
                   />
                 }
               >
-                <UiIcon
-                  source={priorityHighIcon}
-                  class="session-action-feedback-glyph"
-                  width={11}
-                  height={11}
-                />
+                <Show
+                  when={currentError()}
+                  fallback={<span class="session-action-feedback-warning-glyph">!</span>}
+                >
+                  <UiIcon
+                    source={priorityHighIcon}
+                    class="session-action-feedback-glyph"
+                    width={11}
+                    height={11}
+                  />
+                </Show>
               </Show>
             </span>
             <span class="session-action-feedback-message" title={visibleMessage()}>

@@ -4752,6 +4752,8 @@ function buildInitialState(state: ScenarioState): InitialWebviewState {
     emptyStateLogoUri: '/assets/icon.png',
     showInlineFileChanges: state.showInlineFileChanges,
     defaultPermissionMode: 'default',
+    chatFontSize: 13,
+    chatFontFamily: 'default',
     sessionPermissionModes: state.storedState.sessionPermissionModes,
     pendingPermissions: state.initialPendingPermissions ?? state.pendingPermissions,
     pendingQuestions: [],

@@ -18,11 +18,11 @@ import { renderEditorWebviewPlaceholderHtml, renderWebviewLoadingHtml } from './
 import type {
   ExtensionMessage,
   InitialWebviewState,
-  PermissionMode,
   ServerStatus,
   WebviewMessage,
   WebviewInstanceContext,
 } from '../shared/protocol';
+import type { ExtensionConfigState } from '../shared/provider-limit-config';
 
 export type WebviewHost = vscode.WebviewView | vscode.WebviewPanel;
 
@@ -79,12 +79,7 @@ export class WebviewSession {
     private readonly deps: {
       handleMessage(message: WebviewMessage): Promise<void>;
       ensureServerStarted(): Promise<unknown>;
-      readConfig(): {
-        showInlineFileChanges?: boolean;
-        showChangedFiles?: boolean;
-        desktopSessionPaneSide: 'left' | 'right';
-        defaultPermissionMode: PermissionMode;
-      };
+      readConfig(): ExtensionConfigState;
       currentTheme(): InitialWebviewState['theme'];
       renderStatus(): ServerStatus;
       handleReadySideEffects(): Promise<void>;
@@ -417,6 +412,8 @@ export class WebviewSession {
       showChangedFiles: config.showChangedFiles,
       desktopSessionPaneSide: config.desktopSessionPaneSide,
       defaultPermissionMode: config.defaultPermissionMode,
+      chatFontSize: config.chatFontSize,
+      chatFontFamily: config.chatFontFamily,
       sessionPermissionModes: this.deps.sessionPermissionModes(),
       sessionSelectedModels: this.deps.sessionSelectedModels(),
       sessionModelMigrationPending: this.deps.sessionModelMigrationPending(),

@@ -61,7 +61,11 @@ const mocks = vi.hoisted(() => ({
         onDidChange: vi.fn(() => ({ dispose: vi.fn() })),
         dispose: vi.fn(),
       })),
-      onDidChangeConfiguration: vi.fn(() => ({ dispose: vi.fn() })),
+      onDidChangeConfiguration: vi.fn(
+        (_listener?: (event: { affectsConfiguration(key: string): boolean }) => void) => ({
+          dispose: vi.fn(),
+        })
+      ),
       registerTextDocumentContentProvider: vi.fn(() => ({ dispose: vi.fn() })),
       onDidCloseTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
       getWorkspaceFolder: vi.fn(() => undefined),

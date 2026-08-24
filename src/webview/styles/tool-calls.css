@@ -7,7 +7,7 @@
   background: transparent;
   padding: 4px 11px 4px 4px;
   margin-bottom: 8px;
-  font-size: var(--vscode-font-size, 13px);
+  font-size: var(--varro-chat-font-size, var(--vscode-font-size, 13px));
   line-height: 1.7;
   color: var(--color-vscode-input-fg);
   outline: none;
@@ -21,7 +21,7 @@
 
 .rich-composer[data-empty='true']::before {
   content: attr(data-placeholder);
-  color: var(--color-vscode-muted);
+  color: var(--color-vscode-input-placeholder);
   pointer-events: none;
   position: absolute;
   left: 4px;
@@ -1266,7 +1266,7 @@ kbd {
 .chat-tool-invocation-part .tool-invocation-activity-age {
   display: inline;
   align-self: auto;
-  color: color-mix(in srgb, var(--color-vscode-fg-muted) 58%, transparent);
+  color: var(--color-vscode-muted);
 }
 
 .chat-tool-invocation-part .tool-invocation-activity-time {
@@ -1276,7 +1276,7 @@ kbd {
 .chat-tool-invocation-part .tool-invocation-token-stats {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
-  color: color-mix(in srgb, var(--color-vscode-fg-muted) 58%, transparent);
+  color: var(--color-vscode-muted);
   flex-shrink: 0;
   line-height: 1.2;
   white-space: nowrap;
@@ -1823,6 +1823,22 @@ kbd {
 
 .file-change-card-header.is-standalone .file-edit-action-label.is-removed {
   color: color-mix(in srgb, var(--color-vscode-error) 78%, var(--color-vscode-fg-muted));
+}
+
+.file-change-card-header.is-standalone .file-edit-action-label.has-edit-gradient {
+  color: transparent;
+  background-image: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--color-vscode-success) 78%, var(--color-vscode-fg-muted)) 0%,
+    color-mix(in srgb, var(--color-vscode-success) 78%, var(--color-vscode-fg-muted))
+      var(--file-edit-gradient-start),
+    color-mix(in srgb, var(--color-vscode-error) 78%, var(--color-vscode-fg-muted))
+      var(--file-edit-gradient-end),
+    color-mix(in srgb, var(--color-vscode-error) 78%, var(--color-vscode-fg-muted)) 100%
+  );
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .file-edit-action-label {

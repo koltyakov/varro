@@ -161,6 +161,7 @@ import {
   hasVisibleProjectedText,
 } from './message-list/row-layout';
 import { isNumber, isFunction } from '../lib/runtime-values';
+import { onBeforeChatFontConfigChange } from '../lib/chat-font-config';
 
 function showTruncatedHistoryBanner() {
   return !editingMessage() && isSessionHistoryTruncated(state.activeSessionId);
@@ -197,6 +198,11 @@ const EMPTY_VISIBLE_RANGE: VisibleRange = {
   coreStart: 0,
   coreEnd: 0,
 };
+
+function getFontLayoutSignature(element: HTMLElement): string {
+  const styles = getComputedStyle(element);
+  return JSON.stringify([styles.fontSize, styles.fontFamily]);
+}
 
 function setSetMembership(setter: Setter<ReadonlySet<string>>, key: string, included: boolean) {
   setter((current) => {
@@ -521,7 +527,7 @@ export function MessageList() {
   let lastHostViewportHeight = -1;
   let lastHostDevicePixelRatio = -1;
   let hostViewportResizeActiveUntil = Number.NEGATIVE_INFINITY;
-  let lastContainerFontSize = -1;
+  let lastContainerFontSignature = '';
   let lastTrackInlineSize = -1;
   let lastAutoScrolledTrackHeight = 0;
   let lastAutoScrolledBottomScrollTop = 0;
@@ -1003,7 +1009,15 @@ export function MessageList() {
     });
   }
 
-  function beginWidthResize(options?: { fontChanged?: boolean }) {
+  function beginWidthResize(options?: {
+    fontChanged?: boolean;
+    anchor?: VisibleScrollAnchor | null;
+  }) {
+    if (!widthResizeAnchor && options?.anchor && !autoScroll()) {
+      widthResizeAnchor = options.anchor;
+      setWidthResizePinnedMessageId(widthResizeAnchor.messageId);
+      restoreVisibleScrollAnchor(widthResizeAnchor);
+    }
     if (!widthResizeAnchor && !autoScroll()) {
       const pendingWheelAnchor = pendingWheelResizeAnchor;
       const wheelAnchor = pendingWheelAnchor?.anchor ?? null;
@@ -2303,10 +2317,10 @@ export function MessageList() {
 
     let fontChanged = false;
     if (!everyInlineSizeChanged && containerRef) {
-      const currentFontSize = parseFloat(getComputedStyle(containerRef).fontSize) || 0;
-      fontChanged = currentFontSize !== lastContainerFontSize;
+      const currentFontSignature = getFontLayoutSignature(containerRef);
+      fontChanged = currentFontSignature !== lastContainerFontSignature;
       if (fontChanged) {
-        lastContainerFontSize = currentFontSize;
+        lastContainerFontSignature = currentFontSignature;
         beginWidthResize({ fontChanged: true });
       }
     }
@@ -5105,6 +5119,22 @@ export function MessageList() {
 
   onMount(() => {
     if (!containerRef) return;
+    const stopCapturingFontChange = onBeforeChatFontConfigChange(() => {
+      if (
+        !containerRef ||
+        autoScroll() ||
+        stickyNavigationOwnsScroll() ||
+        editingMessage() ||
+        pendingExpansionScrollAnchor
+      ) {
+        return;
+      }
+      beginWidthResize({
+        fontChanged: true,
+        anchor: captureWidthResizeVisibleScrollAnchor(),
+      });
+    });
+    onCleanup(stopCapturingFontChange);
     const unregisterQueuedMessageRemoval = registerQueuedMessageRemovalHandler(
       reserveQueuedMessageRemoval
     );
@@ -5152,7 +5182,7 @@ export function MessageList() {
       hostViewportResizeActiveUntil = performance.now() + WIDTH_RESIZE_SETTLE_MS;
     };
     window.addEventListener('resize', handleHostViewportResize);
-    lastContainerFontSize = parseFloat(getComputedStyle(containerRef).fontSize) || 0;
+    lastContainerFontSignature = getFontLayoutSignature(containerRef);
     updateScrollbarInset();
     setViewportHeight(containerRef.clientHeight);
     setScrollTop(containerRef.scrollTop);
@@ -5240,10 +5270,11 @@ export function MessageList() {
       if (trackChanged && shouldMeasureRows() && !autoScroll()) {
         setTrackLayoutVersion((version) => version + 1);
       }
-      const currentContainerFontSize = containerChanged
-        ? parseFloat(getComputedStyle(containerRef).fontSize) || 0
-        : lastContainerFontSize;
-      const fontChanged = containerChanged && currentContainerFontSize !== lastContainerFontSize;
+      const currentContainerFontSignature = containerChanged
+        ? getFontLayoutSignature(containerRef)
+        : lastContainerFontSignature;
+      const fontChanged =
+        containerChanged && currentContainerFontSignature !== lastContainerFontSignature;
       const trackEntry = entries.find((entry) => entry.target === trackRef);
       const currentTrackInlineSize =
         trackEntry?.borderBoxSize?.[0]?.inlineSize ?? trackRef?.getBoundingClientRect().width ?? 0;
@@ -5254,7 +5285,7 @@ export function MessageList() {
         ((containerChanged || trackChanged) && widthResizeActive && widthResizeIncludesFontChange);
       if (widthChanged) {
         lastTrackInlineSize = currentTrackInlineSize;
-        lastContainerFontSize = currentContainerFontSize;
+        lastContainerFontSignature = currentContainerFontSignature;
         beginWidthResize({ fontChanged });
       }
       // Below the virtualization threshold rows have no individual ResizeObserver. Keep an active

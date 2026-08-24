@@ -1,10 +1,20 @@
 @theme {
   --color-vscode-bg: var(--vscode-editor-background, #1e1e1e);
-  --color-vscode-fg: var(--vscode-editor-foreground, #cccccc);
+  --color-vscode-fg: var(
+    --vscode-interactive-session-foreground,
+    var(
+      --vscode-sideBar-foreground,
+      var(--vscode-foreground, var(--vscode-editor-foreground, #cccccc))
+    )
+  );
   --color-vscode-sidebar: var(--vscode-sideBar-background, #252526);
   --color-vscode-input-bg: var(--vscode-input-background, #3c3c3c);
   --color-vscode-input-border: var(--vscode-input-border, #3c3c3c);
   --color-vscode-input-fg: var(--vscode-input-foreground, #cccccc);
+  --color-vscode-input-placeholder: var(
+    --vscode-input-placeholderForeground,
+    color-mix(in srgb, var(--color-vscode-input-fg) 70%, var(--color-vscode-input-bg))
+  );
   --color-vscode-button-bg: var(--vscode-button-background, #0e639c);
   --color-vscode-button-fg: var(--vscode-button-foreground, #ffffff);
   --color-vscode-button-hover: var(--vscode-button-hoverBackground, #1177bb);
@@ -35,9 +45,12 @@
     --vscode-interactive-result-editor-background-color,
     var(--color-vscode-widget-bg)
   );
-  --color-vscode-preformat-fg: var(--vscode-textPreformat-foreground, #d67a00);
-  --color-vscode-preformat-bg: var(--vscode-textPreformat-background, rgba(255, 255, 255, 0.1));
-  --color-vscode-preformat-border: var(--vscode-textPreformat-border, rgba(255, 255, 255, 0.12));
+  --color-vscode-preformat-fg: var(--vscode-textPreformat-foreground, #d7ba7d);
+  --color-vscode-preformat-bg: var(--vscode-textPreformat-background, #ffffff1a);
+  --color-vscode-preformat-border: var(
+    --vscode-textPreformat-border,
+    color-mix(in srgb, var(--color-vscode-fg) 12%, transparent)
+  );
   --color-vscode-blockquote-bg: var(--vscode-textBlockQuote-background, rgba(127, 127, 127, 0.1));
   --color-vscode-blockquote-border: var(--vscode-textBlockQuote-border, rgba(0, 122, 204, 0.5));
   --color-vscode-toolbar-hover: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
@@ -198,6 +211,7 @@
     'Segoe UI',
     sans-serif
   );
+  --font-chat: var(--varro-chat-font-family, var(--font-sans));
   --animate-fade-in: fade-in 0.12s ease-out;
   --animate-pulse-soft: pulse-soft 1.5s ease-in-out infinite;
   --animate-status-pulse: status-pulse 2s infinite;
@@ -383,6 +397,8 @@ body.vscode-light,
 body.vscode-high-contrast-light {
   --color-vscode-session-fg: var(--color-vscode-fg);
   --color-vscode-prose-fg: color-mix(in srgb, var(--color-vscode-fg) 92%, black);
+  --color-vscode-preformat-fg: var(--vscode-textPreformat-foreground, #a31515);
+  --color-vscode-preformat-bg: var(--vscode-textPreformat-background, #0000001a);
   --color-vscode-request-bubble: var(
     --vscode-chat-requestBubbleBackground,
     color-mix(in srgb, var(--color-vscode-accent) 10%, var(--color-vscode-widget-bg))

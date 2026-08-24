@@ -650,6 +650,8 @@ describe('parseExtensionMessage', () => {
           showChangedFiles: true,
           desktopSessionPaneSide: 'left',
           defaultPermissionMode: 'full',
+          chatFontSize: 13,
+          chatFontFamily: 'default',
         },
       })
     ).toEqual({
@@ -659,6 +661,8 @@ describe('parseExtensionMessage', () => {
         showChangedFiles: true,
         desktopSessionPaneSide: 'left',
         defaultPermissionMode: 'full',
+        chatFontSize: 13,
+        chatFontFamily: 'default',
       },
     });
 
@@ -671,15 +675,38 @@ describe('parseExtensionMessage', () => {
     expect(
       parseExtensionMessage({
         type: 'config/update',
-        payload: { desktopSessionPaneSide: 'bottom', defaultPermissionMode: 'full' },
+        payload: {
+          desktopSessionPaneSide: 'bottom',
+          defaultPermissionMode: 'full',
+          chatFontSize: 13,
+          chatFontFamily: 'default',
+        },
       })
     ).toBeNull();
     expect(
       parseExtensionMessage({
         type: 'config/update',
-        payload: { desktopSessionPaneSide: 'left', defaultPermissionMode: 'invalid' },
+        payload: {
+          desktopSessionPaneSide: 'left',
+          defaultPermissionMode: 'invalid',
+          chatFontSize: 13,
+          chatFontFamily: 'default',
+        },
       })
     ).toBeNull();
+    for (const chatFontSize of [5, 101, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(
+        parseExtensionMessage({
+          type: 'config/update',
+          payload: {
+            desktopSessionPaneSide: 'left',
+            defaultPermissionMode: 'full',
+            chatFontSize,
+            chatFontFamily: 'default',
+          },
+        })
+      ).toBeNull();
+    }
   });
 
   it('parses auto permission mode in config/update', () => {
@@ -689,6 +716,8 @@ describe('parseExtensionMessage', () => {
         payload: {
           desktopSessionPaneSide: 'left',
           defaultPermissionMode: 'auto',
+          chatFontSize: 13,
+          chatFontFamily: 'default',
         },
       })
     ).toEqual({
@@ -696,6 +725,8 @@ describe('parseExtensionMessage', () => {
       payload: {
         desktopSessionPaneSide: 'left',
         defaultPermissionMode: 'auto',
+        chatFontSize: 13,
+        chatFontFamily: 'default',
       },
     });
   });

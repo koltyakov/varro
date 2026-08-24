@@ -7,6 +7,7 @@ import { ralphStore } from '../lib/stores/ralph-store';
 import { sessionStore } from '../lib/stores/session-store';
 import { uiStore } from '../lib/stores/ui-store';
 import { postMessage } from '../lib/bridge';
+import { applyChatFontConfig } from '../lib/chat-font-config';
 import { getWorkspaceStatusEventSummary } from '../lib/client';
 import { isString } from '../lib/runtime-values';
 import {
@@ -65,6 +66,7 @@ export function createMountBridgeOperations(deps: {
           deps.applyTheme(payload.theme);
         },
         setConfig: (payload) => {
+          applyChatFontConfig(payload);
           if (payload.showInlineFileChanges !== undefined) {
             uiStore.setShowInlineFileChanges(payload.showInlineFileChanges);
           }

@@ -2,7 +2,7 @@ import type { OpenCodeInstallMethod } from './opencode-install';
 import type { ContextBreakdownSegment } from './context-breakdown';
 import type { NativePdfAttachment } from './native-pdf';
 import type { ServerEventPropertiesByName, WorkspaceStatusEntry } from './opencode-types';
-import type { WebviewConfigUpdatePayload } from './provider-limit-config';
+import type { ExtensionConfigSnapshot, WebviewConfigUpdatePayload } from './provider-limit-config';
 import type { RalphConfig, RalphRun, RalphSelectedModel } from './ralph';
 import { asRecord, isNumber, isString } from './type-utils';
 import type { UnknownRecord } from './type-utils';
@@ -605,6 +605,8 @@ export type InitialWebviewState = {
   showChangedFiles?: boolean;
   desktopSessionPaneSide?: DesktopSessionPaneSide;
   defaultPermissionMode?: PermissionMode;
+  chatFontSize: number;
+  chatFontFamily: string;
   sessionPermissionModes?: Record<string, PermissionMode>;
   sessionSelectedModels?: Record<string, ChatModelSelection>;
   sessionModelMigrationPending?: boolean;
@@ -658,7 +660,7 @@ export type ExtensionMessage =
     }
   | {
       type: 'config/update';
-      payload: WebviewConfigUpdatePayload;
+      payload: ExtensionConfigSnapshot;
     }
   | { type: 'theme/update'; payload: { theme: WebviewThemeKind } }
   | {

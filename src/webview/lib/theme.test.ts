@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
   applyWebviewTheme,
   BODY_THEME_CLASSES,
@@ -107,7 +107,14 @@ describe('readable text colors', () => {
     '--color-vscode-fg-soft',
     '--color-vscode-fg-muted',
     '--color-vscode-muted',
+    '--color-vscode-input-fg',
+    '--color-vscode-input-placeholder',
   ];
+
+  beforeEach(() => {
+    document.body.removeAttribute('style');
+    document.body.className = '';
+  });
 
   function clearTextProps() {
     for (const prop of TEXT_PROPS) document.body.style.removeProperty(prop);
@@ -160,9 +167,6 @@ describe('readable text colors', () => {
     expect(parseThemeColor(fg)).not.toEqual([0x66, 0x88, 0xcc]);
     const parsed = parseThemeColor(fg);
     expect(parsed && contrastRatio(parsed, [0x06, 0x06, 0x21])).toBeGreaterThanOrEqual(6);
-    for (const prop of TEXT_PROPS) {
-      expect(document.body.style.getPropertyValue(prop)).toBeTruthy();
-    }
   });
 
   it('leaves readable themes untouched', () => {
@@ -204,5 +208,71 @@ describe('readable text colors', () => {
     for (const prop of TEXT_PROPS) {
       expect(document.body.style.getPropertyValue(prop)).toBe('');
     }
+  });
+
+  it('prefers the interactive session foreground over the editor foreground', () => {
+    document.body.className = 'vscode-dark';
+    document.body.style.setProperty('--vscode-interactive-session-foreground', '#cccccc');
+    document.body.style.setProperty('--vscode-editor-foreground', '#555555');
+    document.body.style.setProperty('--vscode-sideBar-background', '#252526');
+
+    syncReadableTextColors();
+
+    expect(document.body.style.getPropertyValue('--color-vscode-fg')).toBe('');
+  });
+
+  it('repairs muted text independently when primary text is readable', () => {
+    document.body.className = 'vscode-dark';
+    document.body.style.setProperty('--vscode-sideBar-foreground', '#d4d4d4');
+    document.body.style.setProperty('--vscode-descriptionForeground', '#666666');
+    document.body.style.setProperty('--vscode-sideBar-background', '#252526');
+
+    syncReadableTextColors();
+
+    const muted = parseThemeColor(document.body.style.getPropertyValue('--color-vscode-muted'));
+    expect(muted && contrastRatio(muted, [0x25, 0x25, 0x26])).toBeGreaterThanOrEqual(4.5);
+    expect(document.body.style.getPropertyValue('--color-vscode-fg-muted')).toBe(
+      document.body.style.getPropertyValue('--color-vscode-muted')
+    );
+  });
+
+  it('repairs input foreground and placeholder against the input surface', () => {
+    document.body.className = 'vscode-dark';
+    document.body.style.setProperty('--vscode-sideBar-foreground', '#d4d4d4');
+    document.body.style.setProperty('--vscode-sideBar-background', '#252526');
+    document.body.style.setProperty('--vscode-input-background', '#3c3c3c');
+    document.body.style.setProperty('--vscode-input-foreground', '#777777');
+    document.body.style.setProperty('--vscode-input-placeholderForeground', '#747474');
+
+    syncReadableTextColors();
+
+    const input = parseThemeColor(document.body.style.getPropertyValue('--color-vscode-input-fg'));
+    const placeholder = parseThemeColor(
+      document.body.style.getPropertyValue('--color-vscode-input-placeholder')
+    );
+    expect(input && contrastRatio(input, [0x3c, 0x3c, 0x3c])).toBeGreaterThanOrEqual(6);
+    expect(placeholder && contrastRatio(placeholder, [0x3c, 0x3c, 0x3c])).toBeGreaterThanOrEqual(
+      4.5
+    );
+  });
+
+  it('repairs a light input surface independently of a dark theme', () => {
+    document.body.className = 'vscode-dark';
+    document.body.style.setProperty('--vscode-sideBar-foreground', '#d4d4d4');
+    document.body.style.setProperty('--vscode-sideBar-background', '#252526');
+    document.body.style.setProperty('--vscode-input-background', '#eeeeee');
+    document.body.style.setProperty('--vscode-input-foreground', '#777777');
+    document.body.style.setProperty('--vscode-input-placeholderForeground', '#777777');
+
+    syncReadableTextColors();
+
+    const input = parseThemeColor(document.body.style.getPropertyValue('--color-vscode-input-fg'));
+    const placeholder = parseThemeColor(
+      document.body.style.getPropertyValue('--color-vscode-input-placeholder')
+    );
+    expect(input && contrastRatio(input, [0xee, 0xee, 0xee])).toBeGreaterThanOrEqual(6);
+    expect(placeholder && contrastRatio(placeholder, [0xee, 0xee, 0xee])).toBeGreaterThanOrEqual(
+      4.5
+    );
   });
 });

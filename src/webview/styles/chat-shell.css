@@ -66,6 +66,8 @@ input:focus-visible {
   flex-direction: column;
   height: 100%;
   position: relative;
+  font-family: var(--font-chat);
+  font-size: var(--varro-chat-font-size, var(--vscode-font-size, 13px));
 }
 
 .chat-main-column {
@@ -392,7 +394,7 @@ input:focus-visible {
   scrollbar-color: color-mix(in srgb, var(--color-vscode-fg) 20%, transparent) transparent;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-size: var(--vscode-font-size, 13px);
+  font-size: inherit;
   line-height: 1.6;
 }
 

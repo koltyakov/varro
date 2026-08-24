@@ -362,7 +362,7 @@
 }
 
 .interactive-session .chat-editor-container textarea::placeholder {
-  color: var(--color-vscode-muted);
+  color: var(--color-vscode-input-placeholder);
 }
 
 .composer-completion-menu {

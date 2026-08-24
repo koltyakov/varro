@@ -1,5 +1,34 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { getE2EState, getVisibleMessageAnchor, sampleMessageTopAcrossFrames } from './helpers';
+
+async function dispatchChatFontConfig(page: Page, chatFontSize: number, chatFontFamily: string) {
+  await page.evaluate(
+    ({ family, size }) => {
+      // SAFETY: The E2E harness owns this protocol-shaped bootstrap snapshot.
+      const initial = (
+        window as Window & {
+          __initialWebviewState?: {
+            desktopSessionPaneSide?: 'left' | 'right';
+            defaultPermissionMode?: 'default' | 'edits' | 'auto' | 'full';
+          };
+        }
+      ).__initialWebviewState;
+      window.postMessage(
+        {
+          type: 'config/update',
+          payload: {
+            desktopSessionPaneSide: initial?.desktopSessionPaneSide ?? 'left',
+            defaultPermissionMode: initial?.defaultPermissionMode ?? 'default',
+            chatFontSize: size,
+            chatFontFamily: family,
+          },
+        },
+        '*'
+      );
+    },
+    { family: chatFontFamily, size: chatFontSize }
+  );
+}
 
 test('toggling /thinking hides and shows reasoning blocks', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=plan-ready&expandedActivity=1');
@@ -53,6 +82,120 @@ test('thinking visibility preserves a detached virtualized anchor', async ({ pag
       expect(top).not.toBeNull();
       expect(Math.abs(top! - anchor.top)).toBeLessThan(1.5);
     }
+  }
+});
+
+test('chat font changes preserve main typography proportions and a detached anchor', async ({
+  page,
+}) => {
+  await page.goto('/e2e/harness/index.html?scenario=heterogeneous-large-transcript');
+  const list = page.locator('.interactive-list');
+  await list.evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
+    element.scrollTop = element.scrollHeight * 0.5;
+    element.dispatchEvent(new Event('scroll'));
+  });
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      )
+  );
+  const anchor = await list.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const row = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].find((candidate) => {
+      const rect = candidate.getBoundingClientRect();
+      return rect.bottom > bounds.top && rect.top < bounds.bottom;
+    });
+    if (!row?.dataset.msgId) throw new Error('Visible message anchor is not mounted');
+
+    const blocks = [
+      ...row.querySelectorAll<HTMLElement>(
+        '.rendered-markdown :is(p, li, pre, table, blockquote, h1, h2, h3, h4, h5, h6)'
+      ),
+    ];
+    let block = blocks.find((candidate) => candidate.getBoundingClientRect().bottom > bounds.top);
+    while (block && block.getBoundingClientRect().top < bounds.top) {
+      const next = blocks[blocks.indexOf(block) + 1];
+      if (!next || next.getBoundingClientRect().top >= bounds.bottom) break;
+      block = next;
+    }
+    if (!block) throw new Error('Visible Markdown anchor is not mounted');
+
+    return {
+      messageId: row.dataset.msgId,
+      text: block.innerText,
+      top: block.getBoundingClientRect().top - bounds.top,
+    };
+  });
+  const session = page.locator('.interactive-session');
+  await session.evaluate((element) => {
+    const probe = document.createElement('div');
+    probe.dataset.typographyProbe = 'true';
+    probe.style.position = 'fixed';
+    probe.style.visibility = 'hidden';
+    probe.innerHTML =
+      '<div class="chat-tool-invocation-part"><button class="tool-invocation-header">Tool</button></div>';
+    element.append(probe);
+  });
+  const markdown = page.locator('.rendered-markdown').first();
+  const toolHeader = page.locator('[data-typography-probe] .tool-invocation-header');
+  await expect(markdown).toBeAttached();
+  await expect(toolHeader).toBeAttached();
+
+  const before = await page.evaluate(() => {
+    const sessionStyle = getComputedStyle(document.querySelector('.interactive-session')!);
+    const markdownStyle = getComputedStyle(document.querySelector('.rendered-markdown')!);
+    const toolStyle = getComputedStyle(
+      document.querySelector('[data-typography-probe] .tool-invocation-header')!
+    );
+    return {
+      sessionFontSize: sessionStyle.fontSize,
+      markdownFontSize: markdownStyle.fontSize,
+      markdownLineHeight: markdownStyle.lineHeight,
+      toolFontSize: toolStyle.fontSize,
+      toolLineHeight: toolStyle.lineHeight,
+    };
+  });
+  expect(before).toEqual({
+    sessionFontSize: '13px',
+    markdownFontSize: '13.5px',
+    markdownLineHeight: '22.275px',
+    toolFontSize: '12.5px',
+    toolLineHeight: '15px',
+  });
+
+  await dispatchChatFontConfig(page, 17, 'monospace');
+
+  await expect(session).toHaveCSS('font-size', '17px');
+  await expect(session).toHaveCSS('font-family', 'monospace');
+  await expect(markdown).toHaveCSS('font-size', '17.5px');
+  await expect(markdown).toHaveCSS('line-height', '28.875px');
+  await expect(toolHeader).toHaveCSS('font-size', '12.5px');
+  await expect(toolHeader).toHaveCSS('line-height', '15px');
+  const samples = await list.evaluate(async (element, target) => {
+    const result: Array<number | null> = [];
+    for (let frame = 0; frame < 16; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const row = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].find(
+        (candidate) => candidate.dataset.msgId === target.messageId
+      );
+      const block = [
+        ...(row?.querySelectorAll<HTMLElement>(
+          '.rendered-markdown :is(p, li, pre, table, blockquote, h1, h2, h3, h4, h5, h6)'
+        ) ?? []),
+      ].find((candidate) => candidate.innerText === target.text);
+      result.push(
+        block?.isConnected
+          ? block.getBoundingClientRect().top - element.getBoundingClientRect().top
+          : null
+      );
+    }
+    return result;
+  }, anchor);
+  for (const top of samples) {
+    expect(top).not.toBeNull();
+    expect(Math.abs(top! - anchor.top), JSON.stringify({ anchor, samples })).toBeLessThan(1.5);
   }
 });
 

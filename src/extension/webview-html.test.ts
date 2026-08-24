@@ -27,6 +27,8 @@ const initialState: InitialWebviewState = {
   terminalSelection: null,
   droppedFiles: [],
   emptyStateLogoUri: '</script>&\u2028\u2029',
+  chatFontSize: 13,
+  chatFontFamily: 'default',
 };
 
 describe('renderWebviewHtml', () => {

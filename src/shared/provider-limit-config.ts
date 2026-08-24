@@ -7,9 +7,14 @@ export type ExtensionConfigState = {
   showChangedFiles?: boolean;
   desktopSessionPaneSide: DesktopSessionPaneSide;
   defaultPermissionMode: PermissionMode;
+  chatFontSize: number;
+  chatFontFamily: string;
 };
 
 export type WebviewConfigUpdatePayload = Pick<
   ExtensionConfigState,
   'showInlineFileChanges' | 'showChangedFiles' | 'desktopSessionPaneSide' | 'defaultPermissionMode'
 >;
+
+export type ExtensionConfigSnapshot = WebviewConfigUpdatePayload &
+  Pick<ExtensionConfigState, 'chatFontSize' | 'chatFontFamily'>;

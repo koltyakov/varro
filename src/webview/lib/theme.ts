@@ -116,13 +116,15 @@ function parseThemeColorAlpha(value: string): { color: RgbColor; alpha: number }
 }
 
 const READABLE_TEXT_MIN_CONTRAST = 6;
-const READABLE_MUTED_MIN_CONTRAST = 4;
+const READABLE_MUTED_MIN_CONTRAST = 4.5;
 
 const READABLE_TEXT_PROPS = [
   '--color-vscode-fg',
   '--color-vscode-fg-soft',
   '--color-vscode-fg-muted',
   '--color-vscode-muted',
+  '--color-vscode-input-fg',
+  '--color-vscode-input-placeholder',
 ] as const;
 
 export function readableTextColor(
@@ -152,39 +154,123 @@ function clearStyleProp(body: HTMLElement, name: string) {
   if (body.style.getPropertyValue(name)) body.style.removeProperty(name);
 }
 
+function firstThemeColor(
+  styles: CSSStyleDeclaration,
+  properties: readonly string[]
+): RgbColor | null {
+  for (const property of properties) {
+    const color = parseThemeColor(styles.getPropertyValue(property));
+    if (color) return color;
+  }
+  return null;
+}
+
+function resolvedThemeColor(
+  styles: CSSStyleDeclaration,
+  property: string,
+  background: RgbColor
+): RgbColor | null {
+  const parsed = parseThemeColorAlpha(styles.getPropertyValue(property));
+  return parsed ? compositeOver(parsed.color, parsed.alpha, background) : null;
+}
+
+function readableTextDirection(background: RgbColor): 'lighter' | 'darker' {
+  return contrastRatio([255, 255, 255], background) >= contrastRatio([0, 0, 0], background)
+    ? 'lighter'
+    : 'darker';
+}
+
+function syncReadableColor(
+  body: HTMLElement,
+  property: string,
+  color: RgbColor,
+  background: RgbColor,
+  minContrast: number,
+  direction: 'lighter' | 'darker'
+): RgbColor {
+  const readable = readableTextColor(color, background, minContrast, direction);
+  if (readable === color) clearStyleProp(body, property);
+  else setStyleProp(body, property, rgbString(readable));
+  return readable;
+}
+
 export function syncReadableTextColors(body: HTMLElement = document.body) {
   const styles = getComputedStyle(body);
-  const fg = parseThemeColor(styles.getPropertyValue('--vscode-editor-foreground'));
-  const bg = parseThemeColor(styles.getPropertyValue('--vscode-sideBar-background'));
-  const clear = () => {
-    for (const prop of READABLE_TEXT_PROPS) clearStyleProp(body, prop);
-  };
+  const fg = firstThemeColor(styles, [
+    '--vscode-interactive-session-foreground',
+    '--vscode-sideBar-foreground',
+    '--vscode-foreground',
+    '--vscode-editor-foreground',
+  ]);
+  const bg = firstThemeColor(styles, [
+    '--color-vscode-sidebar',
+    '--vscode-sideBar-background',
+    '--vscode-editor-background',
+  ]);
   if (!fg || !bg) {
-    clear();
+    for (const prop of READABLE_TEXT_PROPS) clearStyleProp(body, prop);
     return;
   }
-  const direction =
-    body.classList.contains('vscode-light') || body.classList.contains('vscode-high-contrast-light')
-      ? 'darker'
-      : 'lighter';
-  const readable = readableTextColor(fg, bg, READABLE_TEXT_MIN_CONTRAST, direction);
-  if (readable === fg) {
-    clear();
-    return;
-  }
-  setStyleProp(body, '--color-vscode-fg', rgbString(readable));
-  setStyleProp(body, '--color-vscode-fg-soft', rgbString(mixRgb(readable, bg, 0.88)));
-  setStyleProp(body, '--color-vscode-fg-muted', rgbString(mixRgb(readable, bg, 0.76)));
-  const mutedParsed = parseThemeColorAlpha(
-    styles.getPropertyValue('--vscode-descriptionForeground')
-  );
-  const mutedBase = mutedParsed
-    ? compositeOver(mutedParsed.color, mutedParsed.alpha, bg)
-    : mixRgb(readable, bg, 0.72);
-  setStyleProp(
+  const direction = readableTextDirection(bg);
+  const readable = syncReadableColor(
     body,
-    '--color-vscode-muted',
-    rgbString(readableTextColor(mutedBase, bg, READABLE_MUTED_MIN_CONTRAST, direction))
+    '--color-vscode-fg',
+    fg,
+    bg,
+    READABLE_TEXT_MIN_CONTRAST,
+    direction
+  );
+  syncReadableColor(
+    body,
+    '--color-vscode-fg-soft',
+    mixRgb(readable, bg, 0.88),
+    bg,
+    READABLE_MUTED_MIN_CONTRAST,
+    direction
+  );
+
+  const mutedBase =
+    resolvedThemeColor(styles, '--vscode-descriptionForeground', bg) ?? mixRgb(readable, bg, 0.72);
+  const muted = readableTextColor(mutedBase, bg, READABLE_MUTED_MIN_CONTRAST, direction);
+  if (muted === mutedBase) {
+    clearStyleProp(body, '--color-vscode-muted');
+    clearStyleProp(body, '--color-vscode-fg-muted');
+  } else {
+    const value = rgbString(muted);
+    setStyleProp(body, '--color-vscode-muted', value);
+    setStyleProp(body, '--color-vscode-fg-muted', value);
+  }
+
+  const inputBackground = firstThemeColor(styles, [
+    '--vscode-input-background',
+    '--color-vscode-input-bg',
+  ]);
+  if (!inputBackground) {
+    clearStyleProp(body, '--color-vscode-input-fg');
+    clearStyleProp(body, '--color-vscode-input-placeholder');
+    return;
+  }
+  const inputDirection = readableTextDirection(inputBackground);
+  const inputForeground =
+    resolvedThemeColor(styles, '--vscode-input-foreground', inputBackground) ?? fg;
+  syncReadableColor(
+    body,
+    '--color-vscode-input-fg',
+    inputForeground,
+    inputBackground,
+    READABLE_TEXT_MIN_CONTRAST,
+    inputDirection
+  );
+  const inputPlaceholder =
+    resolvedThemeColor(styles, '--vscode-input-placeholderForeground', inputBackground) ??
+    mixRgb(inputForeground, inputBackground, 0.7);
+  syncReadableColor(
+    body,
+    '--color-vscode-input-placeholder',
+    inputPlaceholder,
+    inputBackground,
+    READABLE_MUTED_MIN_CONTRAST,
+    inputDirection
   );
 }
 

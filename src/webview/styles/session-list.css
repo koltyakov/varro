@@ -561,6 +561,12 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   height: 11px;
 }
 
+.session-action-feedback-warning-glyph {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .session-action-feedback-message {
   min-width: 0;
   overflow: hidden;

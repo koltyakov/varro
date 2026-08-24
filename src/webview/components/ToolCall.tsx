@@ -1018,6 +1018,20 @@ function FileChangeCard(props: {
   const canExpandError = () => !props.compact && Boolean(errorMessage());
   const errorBodyId = createUniqueId();
   const isErrorExpanded = () => canExpandError() && props.expanded;
+  const isFailed = () => isError() && !isAborted();
+  const editedGradientStyle = () => {
+    if (props.compact || effectiveKind() !== 'edited' || !isCompleted()) return undefined;
+    const stats = diffStats();
+    if (!stats) return undefined;
+
+    const total = stats.additions + stats.deletions;
+    const additionShare = total > 0 ? (stats.additions / total) * 100 : 50;
+    const blendHalfWidth = 8;
+    return {
+      '--file-edit-gradient-start': `${Math.max(0, additionShare - blendHalfWidth)}%`,
+      '--file-edit-gradient-end': `${Math.min(100, additionShare + blendHalfWidth)}%`,
+    };
+  };
   const statusContent = (showIcon: boolean) => (
     <>
       <Show when={showIcon}>
@@ -1030,7 +1044,8 @@ function FileChangeCard(props: {
         />
       </Show>
       <span
-        class={`file-edit-action-label is-${effectiveKind()}${!props.waitingForPermission && (isRunning() || (isPending() && props.animatePending)) ? ' shimmer-progress' : ''}`}
+        class={`file-edit-action-label is-${effectiveKind()}${editedGradientStyle() ? ' has-edit-gradient' : ''}${!props.waitingForPermission && (isRunning() || (isPending() && props.animatePending)) ? ' shimmer-progress' : ''}`}
+        style={editedGradientStyle()}
       >
         {props.compact ? `${action()}:` : `(${action().toLowerCase()})`}
       </span>
@@ -1231,7 +1246,7 @@ function FileChangeCard(props: {
                 </Show>
               </span>
             </Show>
-            <Show when={!props.compact}>{statusContent(!isCompleted())}</Show>
+            <Show when={!props.compact && !isFailed()}>{statusContent(!isCompleted())}</Show>
             <Show when={isCompleted() && diffStats()}>
               <span class="file-edit-diff-stats">
                 <span class="diff-lines-added">+{diffStats()!.additions}</span>
@@ -1243,7 +1258,11 @@ function FileChangeCard(props: {
             </Show>
             <Show when={isError()}>
               <span class={`file-edit-error-label${isAborted() ? ' is-aborted' : ''}`}>
-                {isAborted() ? 'aborted' : 'failed'}
+                {isAborted()
+                  ? 'aborted'
+                  : props.compact
+                    ? 'failed'
+                    : `${action().toLowerCase()} failed`}
               </span>
             </Show>
             <Show when={canExpandError()}>

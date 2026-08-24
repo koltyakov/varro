@@ -2525,7 +2525,10 @@ describe('FileChangeCard', () => {
       type: 'tool',
       callID: 'call-1',
       tool: 'edit',
-      state: completedState({ file_path: 'src/foo.ts' }, 'Edit src/foo.ts'),
+      state: {
+        ...completedState({ file_path: 'src/foo.ts' }, 'Edit src/foo.ts'),
+        metadata: { additions: 3, deletions: 1 },
+      },
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
@@ -2535,7 +2538,11 @@ describe('FileChangeCard', () => {
     expect(header?.children[0]?.classList).toContain('file-edit-path-link');
     expect(header?.children[1]?.classList).toContain('file-edit-action-label');
     expect(container?.querySelector('.file-edit-icon')).toBeNull();
-    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('(edited)');
+    const action = container?.querySelector<HTMLElement>('.file-edit-action-label');
+    expect(action?.textContent).toBe('(edited)');
+    expect(action?.classList).toContain('has-edit-gradient');
+    expect(action?.style.getPropertyValue('--file-edit-gradient-start')).toBe('67%');
+    expect(action?.style.getPropertyValue('--file-edit-gradient-end')).toBe('83%');
     const icon = container?.querySelector<HTMLImageElement>('.file-edit-file-icon');
     expect(icon).toBeInstanceOf(HTMLImageElement);
     expect(icon?.getAttribute('src')).toBe(getFileTypeIcon('src/foo.ts'));
@@ -2976,11 +2983,9 @@ describe('FileChangeCard', () => {
 
     cleanup = render(() => ToolCall({ part }), container!);
 
-    expect(container?.querySelector('.file-edit-icon')?.classList).toContain('tool-status-error');
-    expect(container?.querySelector('.file-edit-icon')?.getAttribute('aria-label')).toBe('Failed');
-    expect(container?.querySelector('.file-edit-icon')?.getAttribute('role')).toBe('status');
-    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('(edit)');
-    expect(container?.querySelector('.file-edit-error-label')?.textContent).toBe('failed');
+    expect(container?.querySelector('.file-edit-icon')).toBeNull();
+    expect(container?.querySelector('.file-edit-action-label')).toBeNull();
+    expect(container?.querySelector('.file-edit-error-label')?.textContent).toBe('edit failed');
     const errorToggle = container?.querySelector<HTMLButtonElement>('.file-edit-error-toggle');
     expect(errorToggle?.getAttribute('aria-expanded')).toBe('false');
     expect(container?.querySelector('.file-edit-error-detail')).toBeNull();

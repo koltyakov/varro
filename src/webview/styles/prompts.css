@@ -510,6 +510,10 @@ body.vscode-light .question-custom-input {
 body.vscode-high-contrast,
 body.vscode-high-contrast-light {
   --color-vscode-widget-shadow: transparent;
+  --color-vscode-preformat-border: var(
+    --vscode-textPreformat-border,
+    var(--color-vscode-contrast-border)
+  );
   /* High-contrast themes tune their ANSI palette for maximum legibility;
      softening toward the foreground would undo that, so use them as-is. */
   --color-code-comment: var(--vscode-terminal-ansiGreen, var(--color-vscode-muted));

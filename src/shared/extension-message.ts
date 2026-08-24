@@ -195,13 +195,17 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
       if (
         !payload ||
         !isDesktopSessionPaneSide(payload.desktopSessionPaneSide) ||
-        !isPermissionMode(payload.defaultPermissionMode)
+        !isPermissionMode(payload.defaultPermissionMode) ||
+        !isChatFontSize(payload.chatFontSize) ||
+        !isString(payload.chatFontFamily)
       ) {
         return null;
       }
       const config: Extract<ExtensionMessage, { type: 'config/update' }>['payload'] = {
         desktopSessionPaneSide: payload.desktopSessionPaneSide,
         defaultPermissionMode: payload.defaultPermissionMode,
+        chatFontSize: payload.chatFontSize,
+        chatFontFamily: payload.chatFontFamily,
       };
       if (isBoolean(payload.showInlineFileChanges)) {
         config.showInlineFileChanges = payload.showInlineFileChanges;
@@ -399,6 +403,10 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
     default:
       return null;
   }
+}
+
+function isChatFontSize<T>(value: T): value is T & number {
+  return isNumber(value) && Number.isFinite(value) && value >= 6 && value <= 100;
 }
 
 function parseRestartBlockedState<T>(value: T): RestartBlockedState | null {

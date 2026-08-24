@@ -3,8 +3,9 @@ import { AppRoot } from './App';
 import { cleanupBridge, initializeBridge, postMessage } from './lib/bridge';
 // oxlint-disable-next-line no-unassigned-import
 import './index.css';
+import { applyChatFontConfig } from './lib/chat-font-config';
 import { isFunction } from './lib/runtime-values';
-import { readWebviewInstanceContext } from './lib/state-stored-values';
+import { readInitialWebviewState } from './lib/state-stored-values';
 
 const STARTUP_HANDLERS_KEY = '__clearVarroBootstrapFailureHandlers';
 const APP_CLEANUP_KEY = '__cleanupVarroApp';
@@ -101,7 +102,14 @@ export function showBootstrapFailure(root: HTMLElement) {
 }
 
 export function bootstrap(root: HTMLElement) {
-  const isEditorSurface = readWebviewInstanceContext()?.surface === 'editor';
+  const initialState = readInitialWebviewState();
+  const isEditorSurface = initialState.webviewContext?.surface === 'editor';
+  if (initialState.chatFontSize !== undefined && initialState.chatFontFamily !== undefined) {
+    applyChatFontConfig({
+      chatFontSize: initialState.chatFontSize,
+      chatFontFamily: initialState.chatFontFamily,
+    });
+  }
   document.documentElement.classList.toggle(EDITOR_SURFACE_CLASS, isEditorSurface);
   const stopTrackingEditorLayout = isEditorSurface ? trackEditorLayoutSettling() : undefined;
   let dispose: (() => void) | undefined;

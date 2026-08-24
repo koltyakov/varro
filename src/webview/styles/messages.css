@@ -646,7 +646,7 @@
 }
 
 .assistant-activity-summary-counts {
-  opacity: 0.68;
+  color: var(--color-vscode-muted);
 }
 
 .assistant-activity-summary-noun {
@@ -1441,9 +1441,9 @@ body.vscode-light
   line-height: 1.65;
   /* Track the user's editor font-size setting (accessibility); the +0.5px
      keeps the prose slightly larger than UI chrome, as before. */
-  font-size: calc(var(--vscode-font-size, 13px) + 0.5px);
-  font-family: var(--font-sans);
-  font-weight: 300;
+  font-size: calc(var(--varro-chat-font-size, var(--vscode-font-size, 13px)) + 0.5px);
+  font-family: var(--font-chat);
+  font-weight: 400;
   color: var(--color-vscode-prose-fg);
 }
 
@@ -1499,7 +1499,7 @@ body.vscode-light
   border: none;
   border-radius: 0 var(--radius-control) var(--radius-control) 0;
   background: none;
-  color: color-mix(in srgb, var(--color-vscode-fg) 88%, transparent);
+  color: var(--color-vscode-fg-soft);
 }
 
 .rendered-markdown blockquote::before {
@@ -1555,7 +1555,6 @@ body.vscode-light
   position: absolute;
   left: -16px;
   color: var(--color-vscode-muted);
-  opacity: 0.5;
 }
 .rendered-markdown ol {
   list-style: none;
@@ -1574,7 +1573,6 @@ body.vscode-light
   position: absolute;
   left: -16px;
   color: var(--color-vscode-muted);
-  opacity: 0.5;
 }
 .rendered-markdown li {
   margin: 4px 0;
@@ -1694,13 +1692,17 @@ body.vscode-light
 .rendered-markdown code {
   font-family: var(--font-mono);
   font-size: 0.89em;
-  color: var(--color-vscode-fg);
-  background-color: color-mix(in srgb, var(--color-vscode-fg) 10%, transparent);
-  padding: 2px 6px;
-  border-radius: var(--radius-inset);
-  border: none;
+  color: var(--color-vscode-preformat-fg);
+  background-color: var(--color-vscode-preformat-bg);
+  padding: 1px 3px;
+  border-radius: var(--radius-chip);
+  border: 1px solid var(--color-vscode-preformat-border);
   white-space: pre-wrap;
   font-weight: 500;
+}
+
+.rendered-markdown a code {
+  color: inherit;
 }
 
 .mermaid-diagram {
@@ -2253,6 +2255,8 @@ body.vscode-dark .interactive-session .chat-input-container.focused {
 }
 
 .interactive-session .chat-input-toolbars.toolbar-meta {
+  --color-vscode-fg: var(--vscode-editor-foreground, #cccccc);
+  --color-vscode-fg-soft: color-mix(in srgb, var(--color-vscode-fg) 88%, transparent);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2261,6 +2265,10 @@ body.vscode-dark .interactive-session .chat-input-container.focused {
   min-width: 0;
   padding: 0 8px 0 2px;
   flex-wrap: nowrap;
+}
+
+body.vscode-light .interactive-session .chat-input-toolbars.toolbar-meta {
+  --color-vscode-fg-soft: color-mix(in srgb, var(--color-vscode-fg) 93%, transparent);
 }
 
 .interactive-session .chat-input-toolbars.toolbar-meta .toolbar-meta-left,
@@ -2320,7 +2328,7 @@ body.vscode-dark .interactive-session .chat-input-container.focused {
   box-shadow: none;
   color: var(--color-vscode-fg-soft);
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 400;
 }
 
 .interactive-session
