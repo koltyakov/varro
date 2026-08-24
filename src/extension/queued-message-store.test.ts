@@ -247,6 +247,20 @@ describe('QueuedMessageStore', () => {
     ).not.toBeNull();
   });
 
+  it('allows an owned paused or non-head item to be claimed for manual steering', async () => {
+    const { persistence } = createPersistence();
+    const store = new QueuedMessageStore(persistence);
+    await store.update([
+      queuedMessage('queue-1', 'first', 'editor-a'),
+      { ...queuedMessage('queue-2', 'second', 'editor-a'), paused: true },
+    ]);
+
+    expect(store.claimDispatch('editor-a', 'session-1', 'queue-2', isTestViewEligible)).toBeNull();
+    expect(
+      store.claimDispatch('editor-a', 'session-1', 'queue-2', isTestViewEligible, 'steer')
+    ).not.toBeNull();
+  });
+
   it('preserves the admitted message ID across a stale owner snapshot', async () => {
     const { persistence } = createPersistence();
     const store = new QueuedMessageStore(persistence);

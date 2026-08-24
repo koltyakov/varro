@@ -9,6 +9,7 @@ import {
   getVscodeSidebarGeometry,
   hasRecreatedVarroTarget,
   reserveLoopbackPort,
+  vscodeLaunchCommandMatches,
   waitForVscodeProcess,
   writeVscodeLaunchMetadata,
 } from './vscode-launch-process.mjs';
@@ -145,6 +146,25 @@ test('writes atomic launch metadata for the tracked process', async () => {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test('matches all identity-bearing launch arguments', () => {
+  const launch = {
+    executable: '/Applications/Visual Studio Code.app/Contents/MacOS/Electron',
+    profileRoot: '/tmp/vfz-safe',
+    userDataDir: '/tmp/vfz-safe/u',
+    extensionsDir: '/tmp/vfz-safe/e',
+    workspace: '/repo/tmp/opencode',
+    remoteDebuggingPort: 9222,
+  };
+  const command = `${launch.executable} --remote-debugging-port=9222 --user-data-dir=/tmp/vfz-safe/u --extensions-dir=/tmp/vfz-safe/e /repo/tmp/opencode`;
+
+  assert.equal(vscodeLaunchCommandMatches(command, launch), true);
+  assert.equal(
+    vscodeLaunchCommandMatches(command, { ...launch, remoteDebuggingPort: 9333 }),
+    false
+  );
+  assert.equal(vscodeLaunchCommandMatches(command, { ...launch, workspace: '/repo' }), false);
 });
 
 test('reserves an available loopback port', async () => {

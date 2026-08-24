@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +10,19 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const DEFAULT_SERVER = 'http://127.0.0.1:4096';
 const DEFAULT_MODEL = 'openai/gpt-5.6-luna';
 const DEFAULT_TURNS = 110;
+
+export async function requireFixtureWorkspace(workspace) {
+  const expected = path.join(projectRoot, 'tmp/opencode');
+  const resolved = path.resolve(workspace);
+  if (resolved !== expected) {
+    throw new Error(`AI fuzzy workspace must be exactly ${expected}, not ${resolved}`);
+  }
+  const [actualRealPath, expectedRealPath] = await Promise.all([realpath(resolved), realpath(expected)]);
+  if (actualRealPath !== expectedRealPath) {
+    throw new Error(`AI fuzzy workspace must resolve to ${expectedRealPath}, not ${actualRealPath}`);
+  }
+  return expected;
+}
 
 function parseArgs(argv) {
   const [command, ...rest] = argv;
@@ -285,7 +298,9 @@ async function writeJsonAtomic(filePath, value) {
 
 async function prepareRun(options) {
   const seed = requiredOption(options, 'seed');
-  const workspace = path.resolve(options.workspace ?? path.join(projectRoot, 'tmp/opencode'));
+  const workspace = await requireFixtureWorkspace(
+    options.workspace ?? path.join(projectRoot, 'tmp/opencode')
+  );
   const turns = Number(options.turns ?? DEFAULT_TURNS);
   if (!Number.isInteger(turns) || turns < 110) throw new Error('--turns must be an integer of at least 110');
   const client = new OpenCodeClient(options.server ?? DEFAULT_SERVER, workspace);
@@ -338,7 +353,9 @@ async function prepareRun(options) {
 
 async function inspect(options) {
   const sessionId = requiredOption(options, 'session');
-  const workspace = path.resolve(options.workspace ?? path.join(projectRoot, 'tmp/opencode'));
+  const workspace = await requireFixtureWorkspace(
+    options.workspace ?? path.join(projectRoot, 'tmp/opencode')
+  );
   const client = new OpenCodeClient(options.server ?? DEFAULT_SERVER, workspace);
   const result = await validateGolden(client, sessionId, Number(options.turns ?? DEFAULT_TURNS));
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
@@ -347,6 +364,7 @@ async function inspect(options) {
 async function verifyRun(options) {
   const manifestPath = path.resolve(requiredOption(options, 'manifest'));
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  manifest.workspace = await requireFixtureWorkspace(manifest.workspace);
   const client = new OpenCodeClient(manifest.server, manifest.workspace);
   const fixture = await fixtureStatus(manifest.workspace);
   if (fixture.status) throw new Error(`Fixture must be clean before the timed run:\n${fixture.status}`);
@@ -386,6 +404,7 @@ async function verifyRun(options) {
 async function cleanup(options) {
   const manifestPath = path.resolve(requiredOption(options, 'manifest'));
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  manifest.workspace = await requireFixtureWorkspace(manifest.workspace);
   const prefix = `VFZ ${manifest.seed}`;
   const client = new OpenCodeClient(manifest.server, manifest.workspace);
   const allSessions = await client.listAllSessions();

@@ -38,6 +38,7 @@ export function createMountBridgeOperations(deps: {
   revalidateProviderAuth?(): void;
   applyTheme(theme: WebviewThemeKind): void;
   setPermissionAutomation?(owner: boolean, lease: number): void;
+  permissionModesSynced?(): void;
   revealPermission?(permissionId: string): void;
   queueInterruptedSessionRecovery?(claimId: number, sessionIds: string[]): void;
 }) {
@@ -116,6 +117,7 @@ export function createMountBridgeOperations(deps: {
           appStore.setState('editorSessionIds', sessionIds);
         },
         setPermissionAutomation: deps.setPermissionAutomation,
+        permissionModesSynced: deps.permissionModesSynced,
         revealPermission: deps.revealPermission,
         queueInterruptedSessionRecovery: deps.queueInterruptedSessionRecovery,
       },
@@ -176,6 +178,7 @@ export function handleExtensionMessageWithDependencies(
     ): void;
     setEditorTabsState?(open: boolean, sessionIds: string[]): void;
     setPermissionAutomation?(owner: boolean, lease: number): void;
+    permissionModesSynced?(): void;
     revealPermission?(permissionId: string): void;
     queueInterruptedSessionRecovery?(claimId: number, sessionIds: string[]): void;
   },
@@ -309,6 +312,7 @@ export function handleExtensionMessageWithDependencies(
       break;
     case 'permission-modes/sync':
       applySessionPermissionModesSnapshot(msg.payload.modes);
+      deps.permissionModesSynced?.();
       break;
     case 'session-models/sync':
       applySessionSelectedModelsSnapshot(msg.payload.models);

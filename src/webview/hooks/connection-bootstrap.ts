@@ -144,6 +144,7 @@ export async function initConnectionWithDependencies(
     getPersistedActiveSessionId(): string | null;
     getPersistedLastOpenedView?(): LastOpenedView | null;
     getInitialRoute?(): WebviewRoute | null;
+    markInitialRouteConsumed?(): void;
     getSessionCount?(): number;
     getOnlyPrimarySessionId(): string | null;
     hasSession(sessionId: string): boolean;
@@ -169,8 +170,9 @@ export async function initConnectionWithDependencies(
     await deps.hydrateSessionStatuses();
     if (!generationRef.isCurrent(generation)) return;
 
-    if (deps.getInitialRoute?.() || !deps.getActiveSessionId()) {
-      await restoreStartupView(deps, generation, generationRef);
+    const initialRoute = deps.getInitialRoute?.() ?? null;
+    if (initialRoute || !deps.getActiveSessionId()) {
+      await restoreStartupView(deps, generation, generationRef, initialRoute);
       if (!generationRef.isCurrent(generation)) return;
     }
 
@@ -191,7 +193,7 @@ async function restoreStartupView(
   deps: {
     getPersistedActiveSessionId(): string | null;
     getPersistedLastOpenedView?(): LastOpenedView | null;
-    getInitialRoute?(): WebviewRoute | null;
+    markInitialRouteConsumed?(): void;
     getSessionCount?(): number;
     getOnlyPrimarySessionId(): string | null;
     hasSession(sessionId: string): boolean;
@@ -201,10 +203,10 @@ async function restoreStartupView(
     now?(): number;
   },
   generation: number,
-  generationRef: { isCurrent(generation: number): boolean }
+  generationRef: { isCurrent(generation: number): boolean },
+  initialRoute: WebviewRoute | null
 ) {
   const sessionCount = deps.getSessionCount?.() ?? 0;
-  const initialRoute = deps.getInitialRoute?.() ?? null;
   const lastOpenedView = deps.getPersistedLastOpenedView?.() ?? null;
 
   if (initialRoute) {
@@ -213,6 +215,7 @@ async function restoreStartupView(
     if (initialRoute.type === 'session') {
       await deps.selectSession(initialRoute.sessionId);
     }
+    deps.markInitialRouteConsumed?.();
     return;
   }
 
@@ -281,6 +284,7 @@ export function createConnectionBootstrapOperations(deps: {
   getPersistedActiveSessionId(): string | null;
   getPersistedLastOpenedView?(): LastOpenedView | null;
   getInitialRoute?(): WebviewRoute | null;
+  markInitialRouteConsumed?(): void;
   getSessionCount?(): number;
   getOnlyPrimarySessionId(): string | null;
   hasSession(sessionId: string): boolean;
@@ -413,6 +417,7 @@ export function createConnectionBootstrapOperations(deps: {
         getPersistedActiveSessionId: deps.getPersistedActiveSessionId,
         getPersistedLastOpenedView: deps.getPersistedLastOpenedView,
         getInitialRoute: deps.getInitialRoute,
+        markInitialRouteConsumed: deps.markInitialRouteConsumed,
         getSessionCount: deps.getSessionCount,
         getOnlyPrimarySessionId: deps.getOnlyPrimarySessionId,
         hasSession: deps.hasSession,

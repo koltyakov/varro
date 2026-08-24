@@ -52,6 +52,43 @@ describe('composer draft persistence', () => {
     );
   });
 
+  it('restores the queued edit identity with its draft', () => {
+    window.localStorage.setItem(STORAGE_KEYS.inputDraft, JSON.stringify('Edit this follow-up'));
+    window.localStorage.setItem(
+      STORAGE_KEYS.queuedMessages,
+      JSON.stringify([{ id: 'queue-1', sessionId: 'session-1', text: 'Edit this follow-up' }])
+    );
+    window.localStorage.setItem(
+      STORAGE_KEYS.queuedMessageEdit,
+      JSON.stringify({ id: 'queue-1', sessionId: 'session-1' })
+    );
+
+    const restored = createAppState();
+
+    expect(restored.inputText()).toBe('Edit this follow-up');
+    expect(restored.state.queuedMessageEdit).toEqual({ id: 'queue-1', sessionId: 'session-1' });
+  });
+
+  it('discards a queued edit draft missing from the authoritative host queue', () => {
+    window.localStorage.setItem(STORAGE_KEYS.inputDraft, JSON.stringify('Stale queued draft'));
+    window.localStorage.setItem(
+      STORAGE_KEYS.queuedMessageEdit,
+      JSON.stringify({ id: 'queue-1', sessionId: 'session-1' })
+    );
+    // SAFETY: The fixture provides the host-owned initial webview state.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      queuedMessages: [],
+    };
+
+    const restored = createAppState();
+
+    expect(restored.inputText()).toBe('');
+    expect(restored.state.queuedMessages).toEqual([]);
+    expect(restored.state.queuedMessageEdit).toBeNull();
+    expect(window.localStorage.getItem(STORAGE_KEYS.inputDraft)).toBeNull();
+    expect(window.localStorage.getItem(STORAGE_KEYS.queuedMessageEdit)).toBeNull();
+  });
+
   it('restores draft text from VS Code webview state', () => {
     let vscodeState: UnknownRecord = {};
     // SAFETY: The fixture provides the unknown fields read by this statement.

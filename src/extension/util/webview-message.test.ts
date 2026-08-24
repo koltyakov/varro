@@ -601,6 +601,23 @@ describe('webview message validation', () => {
     ).toBeNull();
   });
 
+  it('validates manual queued-message dispatch claims', () => {
+    const claim = {
+      type: 'queued-messages/claim',
+      payload: {
+        requestId: 1,
+        itemId: 'queue-1',
+        sessionId: 'session-1',
+        mode: 'steer',
+      },
+    } as const;
+
+    expect(parseWebviewMessage(claim)).toEqual(claim);
+    expect(
+      parseWebviewMessage({ ...claim, payload: { ...claim.payload, mode: 'invalid' } })
+    ).toBeNull();
+  });
+
   it('validates session permission mode updates', () => {
     expect(
       parseWebviewMessage({

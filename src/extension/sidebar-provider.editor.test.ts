@@ -5,7 +5,7 @@ import {
   createSidebarProviderInstance,
   getVscodeMock,
 } from './sidebar-provider.test-support';
-import type { DroppedFile } from '../shared/protocol';
+import type { DroppedFile, QueuedMessageSnapshot } from '../shared/protocol';
 
 function createPanel() {
   const messageListeners: Array<(message: unknown) => void> = [];
@@ -668,6 +668,54 @@ describe('SidebarProvider editor panels', () => {
 
     await vi.waitFor(() => expect(removeOwnedFiles).toHaveBeenCalledWith(['/tmp/varro/image.png']));
     expect(internals.draftImages.list('editor-draft')).toEqual([]);
+  });
+
+  it('keeps editor draft image files still referenced by a transferred queued message', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const editor = createPanel();
+    await provider.deserializeWebviewPanel(editor.panel as never, {
+      'varro.editorViewId': 'editor-draft',
+    });
+    const contextFile: DroppedFile = {
+      path: '/tmp/varro/image.png',
+      relativePath: 'image.png',
+      type: 'file',
+    };
+    const image = {
+      id: 'image-1',
+      url: 'data:image/png;base64,AA==',
+      mime: 'image/png',
+      filename: 'image.png',
+      size: 1,
+      contextFile,
+    };
+    const internals = provider as unknown as {
+      draftImages: { update(images: unknown[], viewId: string): Promise<void> };
+      queuedMessages: { update(messages: QueuedMessageSnapshot[]): Promise<void> };
+      droppedFilesService: { removeOwnedFiles(paths: Iterable<string>): Promise<void> };
+    };
+    const removeOwnedFiles = vi
+      .spyOn(internals.droppedFilesService, 'removeOwnedFiles')
+      .mockResolvedValue();
+    await internals.draftImages.update([image], 'editor-draft');
+    await internals.queuedMessages.update([
+      {
+        id: 'queue-1',
+        ownerViewId: 'editor-draft',
+        sessionId: 'session-1',
+        text: 'Inspect the image',
+        droppedFiles: [],
+        clipboardImages: [image],
+        terminalSelection: null,
+      },
+    ]);
+
+    editor.panel.dispose();
+    await vi.waitFor(() => expect(removeOwnedFiles).toHaveBeenCalled());
+
+    expect(removeOwnedFiles.mock.calls.flatMap(([paths]) => [...paths])).not.toContain(
+      contextFile.path
+    );
   });
 
   it('removes a stored image if its target disappears before storage completes', async () => {

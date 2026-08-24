@@ -38,6 +38,7 @@ import {
   getSessionTreeRootId,
   isSessionAwaitingInput,
   isSessionTreeStatusWorking,
+  setQueuedMessageEdit,
   syncQueuedMessages,
 } from '../../lib/state';
 import {
@@ -864,7 +865,7 @@ export function resetWorkspaceDerivedState() {
     appStore.setState('compactingSessionIds', []);
     appStore.setState('queuedMessageDispatchingId', null);
     appStore.setState('failedQueuedMessageIds', []);
-    appStore.setState('queuedMessageEdit', null);
+    setQueuedMessageEdit(null);
     appStore.setState('failedSessionIds', []);
     appStore.setState('failedSessionUpdatedAt', {});
     appStore.setState('sessionMessageCounts', reconcile({}));
@@ -1159,6 +1160,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           if (becameOwner) {
             void syncPendingPermissions().catch((err) => logError('permission.ownership', err));
           }
+        },
+        permissionModesSynced: () => {
+          if (!permissionAutomationOwner) return;
+          void syncPendingPermissions().catch((err) => logError('permission.mode-sync', err));
         },
         revealPermission: (permissionId) => {
           if (!permissionAutomationOwner) return;

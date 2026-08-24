@@ -118,6 +118,13 @@ export function readStoredPermissionModes(key: string): Record<string, Permissio
   );
 }
 
+export function readStoredQueuedMessageEdit(): { id: string; sessionId: string } | null {
+  const record = asStoredRecord(readStored<unknown>(STORAGE_KEYS.queuedMessageEdit));
+  const id = normalizeStoredString(record?.id);
+  const sessionId = normalizeStoredString(record?.sessionId);
+  return id && sessionId ? { id, sessionId } : null;
+}
+
 function normalizeStoredAttachmentSequence<T>(value: T): number | undefined {
   return isNumber(value) && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }

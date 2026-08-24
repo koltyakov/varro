@@ -758,7 +758,12 @@ export type WebviewMessage =
   | { type: 'queued-messages/update'; payload: { messages: QueuedMessageSnapshot[] } }
   | {
       type: 'queued-messages/claim';
-      payload: { requestId: number; itemId: string; sessionId: string };
+      payload: {
+        requestId: number;
+        itemId: string;
+        sessionId: string;
+        mode?: 'next' | 'steer';
+      };
     }
   | {
       type: 'queued-messages/release';

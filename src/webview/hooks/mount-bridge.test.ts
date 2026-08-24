@@ -128,6 +128,17 @@ function createMessageDependencies(
 }
 
 describe('mount bridge helpers', () => {
+  it('reprocesses pending permissions after a host permission-mode snapshot', () => {
+    const permissionModesSynced = vi.fn();
+
+    handleExtensionMessageWithDependencies(createMessageDependencies({ permissionModesSynced }), {
+      type: 'permission-modes/sync',
+      payload: { modes: { 'session-1': 'full' } },
+    });
+
+    expect(permissionModesSynced).toHaveBeenCalledOnce();
+  });
+
   it('queues interrupted recovery without acknowledging volatile receipt', () => {
     const queueInterruptedSessionRecovery = vi.fn();
     // SAFETY: The webview bootstrap installs this optional typed host bridge on Window.

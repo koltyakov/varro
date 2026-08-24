@@ -10,7 +10,9 @@ import {
   executeVscodeCommand,
   reloadVscodeWindow,
   resizeVscodeSidebar,
+  verifyVscodeLaunchIdentity,
 } from './vscode-launch-process.mjs';
+import { requireFixtureWorkspace } from './ai-fuzzy-preconditions.mjs';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_MODEL = 'openai/gpt-5.6-luna';
@@ -76,7 +78,7 @@ export function parseRestartCount(value) {
 
 export function fixtureIsSafeForScenario(fixture, manifest, scenario) {
   if (fixture.commit !== manifest.fixture.commit) return false;
-  if (scenario !== 'AI-08' && scenario !== 'AI-18') return !fixture.status;
+  if (!['AI-08', 'AI-18', 'AI-19'].includes(scenario)) return !fixture.status;
   const preparedFixture = manifest.livePreparation?.['AI-07']?.fixtureAfterPreparation;
   if (manifest.livePreparation?.['AI-07']?.prepared !== true) return false;
   return (
@@ -645,7 +647,7 @@ class CdpController {
     } catch (error) {
       if (
         !(error instanceof Error) ||
-        !/Cannot find context|Execution context was destroyed|Session closed|Target closed|CDP socket (?:closed|failed)/i.test(
+        !/Cannot find context|Execution context was destroyed|Session closed|Target closed|CDP (?:request client is closed|socket (?:closed|failed))/i.test(
           error.message
         )
       ) {
@@ -925,6 +927,57 @@ class CdpController {
     return true;
   }
 
+  async clickSession(sessionId) {
+    const point = await this.evaluate(`(() => {
+      const sessionId = ${JSON.stringify(sessionId)};
+      const row = [...document.querySelectorAll('.session-item')].find(
+        (candidate) => candidate.getAttribute('data-session-id') === sessionId
+      );
+      const control = row?.querySelector('.session-item-main');
+      if (!control) return null;
+      const rect = control.getBoundingClientRect();
+      return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+    })()`);
+    if (!point) return false;
+    for (const [type, buttons] of [
+      ['mousePressed', 1],
+      ['mouseReleased', 0],
+    ]) {
+      await this.call('Input.dispatchMouseEvent', {
+        type,
+        ...point,
+        button: 'left',
+        buttons,
+        clickCount: 1,
+      });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const opened = await this.evaluate(`(() => {
+      let persisted = null;
+      try {
+        persisted = globalThis.__vscodeWebviewState?.getState?.()?.['varro.lastOpenedView'] ?? null;
+      } catch {}
+      return persisted?.type === 'session' && persisted.sessionId === ${JSON.stringify(sessionId)};
+    })()`);
+    if (opened) return true;
+
+    await executeVscodeCommand(this.port, 'View: Focus Secondary Side Bar');
+    await this.refreshContext();
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const focused = await this.evaluate(`(() => {
+        const active = document.activeElement;
+        return active?.classList.contains('session-item-main') === true &&
+          active.closest('.session-item')?.getAttribute('data-session-id') === ${JSON.stringify(sessionId)};
+      })()`);
+      if (focused) {
+        await this.key('', 'Enter');
+        return true;
+      }
+      await this.key('', 'Tab');
+    }
+    return false;
+  }
+
   async altClickSession(title) {
     const point = await this.evaluate(`(() => {
       const title = ${JSON.stringify(title)};
@@ -953,13 +1006,13 @@ class CdpController {
     return true;
   }
 
-  async clickSessionControl(title, selector) {
+  async clickSessionControl(sessionId, selector) {
     const point = await this.evaluate(`(() => {
-      const title = ${JSON.stringify(title)};
-      const text = [...document.querySelectorAll('.session-item-title-text')].find(
-        (element) => element.textContent?.trim() === title
+      const sessionId = ${JSON.stringify(sessionId)};
+      const row = [...document.querySelectorAll('.session-item')].find(
+        (candidate) => candidate.getAttribute('data-session-id') === sessionId
       );
-      const control = text?.closest('.session-item')?.querySelector(${JSON.stringify(selector)});
+      const control = row?.querySelector(${JSON.stringify(selector)});
       if (!control) return null;
       const rect = control.getBoundingClientRect();
       return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
@@ -978,6 +1031,97 @@ class CdpController {
       });
     }
     return true;
+  }
+
+  async clickQueueControl(itemId, label) {
+    const point = await this.evaluate(`(() => {
+      const itemId = ${JSON.stringify(itemId)};
+      const label = ${JSON.stringify(label)};
+      const row = [...document.querySelectorAll('[data-queued-message-id]')].find(
+        (candidate) => candidate.getAttribute('data-queued-message-id') === itemId
+      );
+      const control = [...(row?.querySelectorAll('button') ?? [])].find(
+        (button) => button.getAttribute('aria-label') === label
+      );
+      if (!control || control.disabled || control.hidden) return null;
+      const rect = control.getBoundingClientRect();
+      return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+    })()`);
+    if (!point) return false;
+    for (const [type, buttons] of [
+      ['mousePressed', 1],
+      ['mouseReleased', 0],
+    ]) {
+      await this.call('Input.dispatchMouseEvent', {
+        type,
+        ...point,
+        button: 'left',
+        buttons,
+        clickCount: 1,
+      });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const remainsActionable = () =>
+      this.evaluate(`(() => {
+        const row = [...document.querySelectorAll('[data-queued-message-id]')].find(
+          (candidate) => candidate.getAttribute('data-queued-message-id') === ${JSON.stringify(itemId)}
+        );
+        const control = [...(row?.querySelectorAll('button') ?? [])].find(
+          (button) => button.getAttribute('aria-label') === ${JSON.stringify(label)}
+        );
+        return !!control && !control.disabled && !control.hidden;
+      })()`);
+    if (!(await remainsActionable())) return true;
+
+    if (
+      !(await this.evaluate('document.hasFocus()')) &&
+      this.targetContext?.surface === 'sidebar'
+    ) {
+      await executeVscodeCommand(this.port, 'View: Focus Secondary Side Bar');
+      await this.refreshContext();
+    }
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      const focused = await this.evaluate(`(() => {
+        const active = document.activeElement;
+        return active?.getAttribute('aria-label') === ${JSON.stringify(label)} &&
+          active.closest('[data-queued-message-id]')?.getAttribute('data-queued-message-id') === ${JSON.stringify(itemId)};
+      })()`);
+      if (focused) {
+        await this.key('', 'Space');
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        return !(await remainsActionable());
+      }
+      await this.key('', 'Tab');
+    }
+    return false;
+  }
+
+  readQueueRow(itemId) {
+    return this.evaluate(`(() => {
+      const itemId = ${JSON.stringify(itemId)};
+      const row = [...document.querySelectorAll('[data-queued-message-id]')].find(
+        (candidate) => candidate.getAttribute('data-queued-message-id') === itemId
+      );
+      if (!row) return null;
+      return {
+        id: itemId,
+        ownerViewId: row.getAttribute('data-queued-message-owner'),
+        sessionId: row.getAttribute('data-queued-message-session-id'),
+        paused: !!row.querySelector('[aria-label="Play queued message"]'),
+        editing: row.classList.contains('is-editing'),
+        text: row.textContent ?? '',
+      };
+    })()`);
+  }
+
+  readComposerText() {
+    return this.evaluate(
+      `document.querySelector('[aria-label="Message composer"]')?.textContent ?? ''`
+    );
+  }
+
+  isDocumentVisible() {
+    return this.evaluate(`document.visibilityState === 'visible'`);
   }
 
   async wheel(selector, delta, edge = 'center', scope = null) {
@@ -1006,13 +1150,20 @@ class CdpController {
     const shifted = key === 'Shift+Space';
     const normalized = shifted ? ' ' : key === 'Space' ? ' ' : key;
     const code = shifted || key === 'Space' ? 'Space' : key;
+    const virtualKeyCode =
+      normalized === 'Enter' ? 13 : normalized === 'Tab' ? 9 : normalized === ' ' ? 32 : undefined;
     for (const type of ['keyDown', 'keyUp']) {
-      await this.call('Input.dispatchKeyEvent', {
+      const event = {
         type,
         key: normalized,
         code,
         modifiers: shifted ? 8 : 0,
-      });
+      };
+      if (virtualKeyCode !== undefined) {
+        event.windowsVirtualKeyCode = virtualKeyCode;
+        event.nativeVirtualKeyCode = virtualKeyCode;
+      }
+      await this.call('Input.dispatchKeyEvent', event);
     }
     return true;
   }
@@ -1146,7 +1297,8 @@ class CdpController {
       const active = document.activeElement;
       const focusOwner = active?.closest?.('[aria-label="Message composer"]')
         ? 'composer'
-        : active?.closest?.('.diff-view-overlay-content, .diff-view-lines, .file-change-inline-diffs, .diff-view-file')
+        : active?.matches?.('[aria-label^="Collapse changes in"]') ||
+            active?.closest?.('.diff-view-overlay-content, .diff-view-lines, .file-change-inline-diffs, .diff-view-file')
           ? 'diff'
           : active?.closest?.('.interactive-list')
             ? 'transcript'
@@ -1325,15 +1477,19 @@ export async function persistFixtureExitEvidence({
   return fixture;
 }
 
-async function openRunSession(cdp, title) {
+export function sessionSnapshotMatches(snapshot, sessionId, title) {
+  return snapshot?.routeSessionId === sessionId && snapshot.title === title;
+}
+
+async function openRunSession(cdp, sessionId, title) {
   let snapshot = await cdp.snapshot();
-  if (snapshot.title === title) return;
+  if (sessionSnapshotMatches(snapshot, sessionId, title)) return;
   const deadline = Date.now() + 5_000;
   let opened = false;
   while (Date.now() < deadline && !opened) {
     await cdp.click('[aria-label="Back to sessions"]');
     await new Promise((resolve) => setTimeout(resolve, 250));
-    opened = await cdp.clickText(title);
+    opened = await cdp.clickSession(sessionId);
   }
   if (!opened) {
     throw new Error(`Run session ${title} is not visible in the dedicated host session list`);
@@ -1342,18 +1498,19 @@ async function openRunSession(cdp, title) {
   while (Date.now() < openDeadline) {
     await new Promise((resolve) => setTimeout(resolve, 250));
     snapshot = await cdp.snapshot();
-    if (snapshot?.title === title) return;
+    if (sessionSnapshotMatches(snapshot, sessionId, title)) return;
   }
   throw new Error(`Could not open run session ${title}`);
 }
 
-async function restoreSidebarSessionFromPicker(cdp, title) {
+async function restoreSidebarSessionFromPicker(cdp, sessionId, title) {
+  if (sessionSnapshotMatches(await cdp.snapshot(), sessionId, title)) return true;
   await new Promise((resolve) => setTimeout(resolve, 250));
   if (!(await cdp.key('.session-list-view', 'Escape'))) return false;
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 250));
-    if ((await cdp.snapshot()).title === title) return true;
+    if (sessionSnapshotMatches(await cdp.snapshot(), sessionId, title)) return true;
   }
   return false;
 }
@@ -1538,17 +1695,16 @@ async function nestedHandoff(cdp, marker = '', scope = null) {
   };
 }
 
-async function switchAwayAndBack(cdp, currentTitle) {
+async function switchAwayAndBack(cdp, currentSessionId, currentTitle) {
   if (!(await cdp.click('[aria-label="Back to sessions"]'))) {
     return { dispatched: false, switchedAway: false, returned: false };
   }
   await new Promise((resolve) => setTimeout(resolve, 250));
   const alternate = await cdp.evaluate(`(() => {
-    const current = ${JSON.stringify(currentTitle)};
-    const title = [...document.querySelectorAll('.session-item-title-text')].find((element) =>
-      element.textContent?.trim() && element.textContent.trim() !== current
+    const currentSessionId = ${JSON.stringify(currentSessionId)};
+    const row = [...document.querySelectorAll('.session-item')].find((candidate) =>
+      candidate.getAttribute('data-session-id') !== currentSessionId
     );
-    const row = title?.closest('.session-item');
     if (!row) return null;
     const rect = row.getBoundingClientRect();
     return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
@@ -1570,7 +1726,7 @@ async function switchAwayAndBack(cdp, currentTitle) {
   const switchedAway = (await cdp.snapshot()).title !== currentTitle;
   await cdp.click('[aria-label="Back to sessions"]');
   await new Promise((resolve) => setTimeout(resolve, 250));
-  const reopened = await cdp.clickText(currentTitle);
+  const reopened = await cdp.clickSession(currentSessionId);
   if (reopened) await new Promise((resolve) => setTimeout(resolve, 500));
   return {
     dispatched: true,
@@ -1744,7 +1900,7 @@ export async function executeActionPlan(cdp, plan, currentTitle, port, options =
     let dispatched = false;
     const details = {};
     if (action.action === 'switch session away and back') {
-      const switched = await switchAwayAndBack(cdp, currentTitle);
+      const switched = await switchAwayAndBack(cdp, options.sessionId, currentTitle);
       dispatched = switched.dispatched;
       details.switchedAway = switched.switchedAway;
       details.returned = switched.returned;
@@ -1800,26 +1956,34 @@ export async function executeActionPlan(cdp, plan, currentTitle, port, options =
         }
       }
     } else if (action.action === 'focus and close diff') {
-      const focused = await clickWithRetry(
-        cdp,
-        '.diff-view-overlay-content, .diff-view-lines, .file-change-inline-diffs, .diff-view-file, .file-change-card',
-        options.scope
-      );
+      let focused = false;
+      for (const target of [
+        { selector: '.diff-view-overlay-content', scope: null },
+        { selector: '.diff-view-lines', scope: options.scope },
+        { selector: '.file-change-inline-diffs', scope: options.scope },
+        { selector: '.diff-view-file', scope: options.scope },
+        { selector: '.file-change-card', scope: options.scope },
+      ]) {
+        focused = await clickWithRetry(cdp, target.selector, target.scope);
+        if (focused) break;
+      }
       dispatched = focused;
       if (focused) {
         details.focusOwner = (await cdp.captureActionState(options.scope)).focusOwner;
-        for (let attempt = 0; attempt < 3; attempt += 1) {
-          dispatched =
-            (await cdp.click(
-              '[aria-label="Close expanded diff"], [aria-label^="Collapse changes in"]',
-              options.scope
-            )) || dispatched;
-          await new Promise((resolve) => setTimeout(resolve, 100));
-          const state = await cdp.captureActionState(options.scope);
-          if ((state.expandedDiffCount ?? 0) < (before.expandedDiffCount ?? 0)) {
-            details.after = state;
-            break;
+        for (const target of [
+          { selector: '[aria-label="Close expanded diff"]', scope: null },
+          { selector: '[aria-label^="Collapse changes in"]', scope: options.scope },
+        ]) {
+          for (let attempt = 0; attempt < 3; attempt += 1) {
+            dispatched = (await cdp.click(target.selector, target.scope)) || dispatched;
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            const state = await cdp.captureActionState(options.scope);
+            if ((state.expandedDiffCount ?? 0) < (before.expandedDiffCount ?? 0)) {
+              details.after = state;
+              break;
+            }
           }
+          if (details.after) break;
         }
       }
     } else if (action.action === 'click sticky or jump to latest') {
@@ -2201,8 +2365,8 @@ async function waitForNoVarroEditorTargets(port, timeoutMs) {
   return false;
 }
 
-async function openAi18SidebarSession(cdp, title, port, sessionTitles) {
-  if ((await cdp.snapshot()).title === title) return;
+async function openAi18SidebarSession(cdp, sessionId, title, port, sessionTitles) {
+  if (sessionSnapshotMatches(await cdp.snapshot(), sessionId, title)) return;
   let lastTitle = null;
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const returnedToParent =
@@ -2214,7 +2378,7 @@ async function openAi18SidebarSession(cdp, title, port, sessionTitles) {
         await new Promise((resolve) => setTimeout(resolve, 250));
         const snapshot = await cdp.snapshot();
         lastTitle = snapshot.title;
-        if (snapshot.title === title) return;
+        if (sessionSnapshotMatches(snapshot, sessionId, title)) return;
       }
     }
     await closeVscodeSessionEditorTabs(port, sessionTitles);
@@ -2225,18 +2389,63 @@ async function openAi18SidebarSession(cdp, title, port, sessionTitles) {
     await cdp.rebind();
     await cdp.click('[aria-label="Back to sessions"]');
     await new Promise((resolve) => setTimeout(resolve, 250));
-    if (!(await cdp.clickText(title))) continue;
+    if (!(await cdp.clickSession(sessionId))) continue;
     const deadline = Date.now() + 3_000;
     while (Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 250));
       const snapshot = await cdp.snapshot();
       lastTitle = snapshot.title;
-      if (snapshot.title === title) return;
+      if (sessionSnapshotMatches(snapshot, sessionId, title)) return;
       if ((await varroEditorTargetIds(port)).length > 0) break;
     }
   }
   throw new Error(
     `Could not open AI-18 root in the sidebar; last sidebar title was ${String(lastTitle)}`
+  );
+}
+
+async function openSessionEditorWithRetry(
+  sidebar,
+  port,
+  sessionId,
+  title,
+  sessionTitles,
+  timeoutMs = 20_000
+) {
+  try {
+    const existing = await waitForTarget(port, { surface: 'editor', sessionId }, 1_000);
+    if (await existing.isDocumentVisible()) return existing;
+    existing.close();
+  } catch {}
+
+  let lastError = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (attempt > 0) {
+      await openAi18SidebarSession(sidebar, sessionId, title, port, sessionTitles);
+    }
+    try {
+      if (!(await sidebar.contextClick('.chat-header-session-title'))) {
+        throw new Error(`Could not open the ${title} session actions`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      if (!(await sidebar.clickText('Open as Editor'))) {
+        throw new Error(`Could not open ${title} in an editor`);
+      }
+      return await waitForTarget(port, { surface: 'editor', sessionId }, timeoutMs);
+    } catch (error) {
+      lastError = error;
+      await closeVscodeSessionEditorTabs(port, [title, ...sessionTitles]);
+      if (!(await waitForNoVarroEditorTargets(port, 10_000))) {
+        throw new Error(`The stale ${title} editor target did not close before retrying`, {
+          cause: error,
+        });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await sidebar.rebind();
+    }
+  }
+  throw new Error(
+    `Could not open ${title} in a usable editor after retrying: ${lastError instanceof Error ? lastError.message : String(lastError)}`
   );
 }
 
@@ -2339,6 +2548,7 @@ async function runMultiWebviewScenario({
     .map((session) => session.title);
   await openAi18SidebarSession(
     sidebar,
+    tracked.id,
     tracked.title,
     launch.remoteDebuggingPort,
     runSessionTitles
@@ -2472,6 +2682,7 @@ async function runMultiWebviewScenario({
   try {
     await openAi18SidebarSession(
       sidebar,
+      tracked.id,
       tracked.title,
       launch.remoteDebuggingPort,
       runSessionTitles
@@ -2488,16 +2699,12 @@ async function runMultiWebviewScenario({
     }
     await enqueueTurn(sidebar, 'sidebar', queueTurns[0], 'sidebar-enqueue');
 
-    if (!(await sidebar.contextClick('.chat-header-session-title'))) {
-      throw new Error(`AI-18 could not open the ${tracked.title} session actions`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    if (!(await sidebar.clickText('Open as Editor'))) {
-      throw new Error(`AI-18 could not open ${tracked.title} in an editor`);
-    }
-    editor = await waitForTarget(
+    editor = await openSessionEditorWithRetry(
+      sidebar,
       launch.remoteDebuggingPort,
-      { surface: 'editor', sessionId: tracked.id },
+      tracked.id,
+      tracked.title,
+      runSessionTitles,
       20_000
     );
     const editorViewId = editor.targetContext?.viewId;
@@ -2513,7 +2720,7 @@ async function runMultiWebviewScenario({
     evidence.editor.samples.push({ phase: 'opened-root', snapshot: openedRoot });
     evidence.editor.rootTitleRouted =
       openedRoot.title === tracked.title && openedRoot.routeSessionId === tracked.id;
-    if (!(await restoreSidebarSessionFromPicker(sidebar, tracked.title))) {
+    if (!(await restoreSidebarSessionFromPicker(sidebar, tracked.id, tracked.title))) {
       throw new Error('AI-18 could not restore the root session in the sidebar after opening the editor');
     }
     await sampleConfiguration(editor, 'editor-root');
@@ -2526,6 +2733,7 @@ async function runMultiWebviewScenario({
     evidence.counts.samples.push({ phase: 'hidden', count: hiddenCount.count });
     await openAi18SidebarSession(
       sidebar,
+      tracked.id,
       tracked.title,
       launch.remoteDebuggingPort,
       runSessionTitles
@@ -2539,11 +2747,11 @@ async function runMultiWebviewScenario({
 
     await sidebar.click('[aria-label="Back to sessions"]');
     await new Promise((resolve) => setTimeout(resolve, 250));
-    if (!(await sidebar.clickSessionControl(tracked.title, '.session-item-subagents'))) {
+    if (!(await sidebar.clickSessionControl(tracked.id, '.session-item-subagents'))) {
       throw new Error('AI-18 could not open the root sub-agent list');
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
-    if (!(await sidebar.clickText(childTitle))) {
+    if (!(await sidebar.clickSession(child.id))) {
       throw new Error('AI-18 could not reveal the child session in the editor');
     }
     editor.close();
@@ -2567,7 +2775,7 @@ async function runMultiWebviewScenario({
     ));
     await client.send(
       child.id,
-      `${childEditTurn.promptMarker} Work only in the current OpenCode repository. Read packages/opencode/src/util/timeout.ts. Use the edit tool to append the exact temporary comment " // VFZ AI18 transient" to the line "let timeout: ReturnType<typeof setTimeout>", then use the edit tool again to remove exactly that comment so the file returns byte-for-byte to its starting content. Verify the final repository status still has exactly the six pre-existing changed paths and run git diff --check. Do not touch any other content, spawn subagents, or delegate work. Finish with ${childEditTurn.responseMarker}.`,
+      `${childEditTurn.promptMarker} Work only in the current OpenCode repository. Read packages/opencode/src/util/timeout.ts. Use the edit tool to append the exact temporary comment " // VFZ AI18 transient" to the line "let timeout: NodeJS.Timeout", then use the edit tool again to remove exactly that comment so the file returns byte-for-byte to its starting content. Verify the final repository status still has exactly the pre-existing changed paths and run git diff --check. Do not touch any other content, spawn subagents, or delegate work. Finish with ${childEditTurn.responseMarker}.`,
       parseModel(requestedModel)
     );
     if (!(await waitForBusy(client, child.id, Math.min(timeoutMs, 15_000)))) {
@@ -2683,7 +2891,7 @@ async function runMultiWebviewScenario({
           entry?.info?.role === 'user' &&
           entry.parts?.some((part) => part?.type === 'text' && part.text?.includes(streamMarker))
       );
-    if (!(await restoreSidebarSessionFromPicker(sidebar, tracked.title))) {
+    if (!(await restoreSidebarSessionFromPicker(sidebar, tracked.id, tracked.title))) {
       throw new Error('AI-18 could not restore the root sidebar after child routing');
     }
 
@@ -2746,6 +2954,7 @@ async function runMultiWebviewScenario({
     evidence.counts.samples.push({ phase: 'closed', count: closedCount.count });
     await openAi18SidebarSession(
       sidebar,
+      tracked.id,
       tracked.title,
       launch.remoteDebuggingPort,
       runSessionTitles
@@ -2796,6 +3005,7 @@ async function runMultiWebviewScenario({
         JSON.stringify([2, 1, 0]);
     await openAi18SidebarSession(
       sidebar,
+      tracked.id,
       tracked.title,
       launch.remoteDebuggingPort,
       runSessionTitles
@@ -2868,12 +3078,312 @@ async function runMultiWebviewScenario({
   }
 }
 
+async function waitForObservation(read, accept, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  let value = null;
+  while (Date.now() < deadline) {
+    value = await read();
+    if (accept(value)) return value;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return value;
+}
+
+export function lifecycleScenarioFailures(evidence) {
+  const failures = [];
+  if (!evidence.editor.opened || !evidence.editor.revealed || !evidence.editor.sameViewId) {
+    failures.push('editor did not hide and reveal through the same stable viewId');
+  }
+  if (!evidence.permissions.sidebarFullReachedEditor) {
+    failures.push('sidebar full permission mode did not reach the editor');
+  }
+  if (!evidence.permissions.editorAutoReachedSidebar) {
+    failures.push('editor auto permission mode did not reach the sidebar');
+  }
+  if (!evidence.queue.initialOwner || !evidence.queue.paused) {
+    failures.push('editor queue row did not preserve its exact owner and paused state');
+  }
+  if (!evidence.queue.edited || !evidence.queue.transferredToSidebar) {
+    failures.push('edited queue row did not transfer from the hidden editor to the sidebar');
+  }
+  if (!evidence.queue.steerDispatched || !evidence.queue.removedAfterSteer) {
+    failures.push('paused queue row was not dispatched manually as a steer');
+  }
+  if (!evidence.editor.orphanedDraftCleared) {
+    failures.push('revealed editor retained the transferred queued edit as an ordinary draft');
+  }
+  const delivery = evidence.delivery;
+  if (
+    !delivery ||
+    delivery.userCounts?.[0] !== 1 ||
+    delivery.assistantCounts?.[0] !== 1 ||
+    delivery.assistantValid?.[0] !== true
+  ) {
+    failures.push('manual steer did not produce one valid canonical user/assistant delivery');
+  }
+  if (evidence.unexpectedDescendants.length > 0) {
+    failures.push('lifecycle scenario created an unexpected descendant session');
+  }
+  return failures;
+}
+
+async function runLifecycleScenario({
+  cdp: sidebar,
+  client,
+  launch,
+  manifest,
+  manifestPath,
+  requestedModel,
+  selectedModel,
+  tracked,
+  fixture,
+  descendantsBefore,
+  promptRun,
+  markModelMayEdit,
+  timeoutMs,
+}) {
+  const runSessionTitles = manifest.runSessions
+    .filter((session) => !session.deleted)
+    .map((session) => session.title);
+  await openAi18SidebarSession(
+    sidebar,
+    tracked.id,
+    tracked.title,
+    launch.remoteDebuggingPort,
+    runSessionTitles
+  );
+  if (!(await waitForSessionQuiescence(client, sidebar, tracked.id, timeoutMs * 3))) {
+    throw new Error('AI-19 root session and queue did not become quiescent before replay');
+  }
+
+  const streamMarker = `[VFZ:${manifest.seed}:AI19:R${String(promptRun)}:STREAM]`;
+  const queueTurn = {
+    promptMarker: `[VFZ:${manifest.seed}:AI19:R${String(promptRun)}:STEER]`,
+    responseMarker: `VFZ-AI19-R${String(promptRun)}-STEER-END`,
+  };
+  const evidence = {
+    editor: {
+      opened: false,
+      revealed: false,
+      sameViewId: false,
+      orphanedDraftCleared: false,
+      viewId: null,
+    },
+    permissions: {
+      sidebarFullReachedEditor: false,
+      editorAutoReachedSidebar: false,
+      samples: [],
+    },
+    queue: {
+      id: null,
+      initialOwner: false,
+      paused: false,
+      edited: false,
+      transferredToSidebar: false,
+      steerDispatched: false,
+      removedAfterSteer: false,
+      samples: [],
+    },
+    delivery: null,
+    unexpectedDescendants: [],
+  };
+
+  let editor = null;
+  try {
+    editor = await openSessionEditorWithRetry(
+      sidebar,
+      launch.remoteDebuggingPort,
+      tracked.id,
+      tracked.title,
+      runSessionTitles,
+      20_000
+    );
+    const editorViewId = editor.targetContext?.viewId;
+    if (!editorViewId) throw new Error('AI-19 editor target has no stable viewId');
+    evidence.editor.opened = true;
+    evidence.editor.viewId = editorViewId;
+    if (!(await restoreSidebarSessionFromPicker(sidebar, tracked.id, tracked.title))) {
+      throw new Error('AI-19 could not restore the root in the sidebar');
+    }
+
+    await sidebar.selectPermissionMode('full');
+    const editorFull = await waitForObservation(
+      () => editor.readComposerConfiguration(),
+      (configuration) => configuration?.permissionMode === 'full'
+    );
+    evidence.permissions.samples.push({ phase: 'sidebar-full', editor: editorFull });
+    evidence.permissions.sidebarFullReachedEditor = editorFull?.permissionMode === 'full';
+
+    await editor.selectPermissionMode('auto');
+    const sidebarAuto = await waitForObservation(
+      () => sidebar.readComposerConfiguration(),
+      (configuration) => configuration?.permissionMode === 'auto'
+    );
+    evidence.permissions.samples.push({ phase: 'editor-auto', sidebar: sidebarAuto });
+    evidence.permissions.editorAutoReachedSidebar = sidebarAuto?.permissionMode === 'auto';
+
+    markModelMayEdit();
+    const streamPrompt = `${streamMarker} Produce 120 numbered paragraphs of 35-45 words each and end with VFZ-AI19-R${String(promptRun)}-STREAM-END. Do not use tools, spawn subagents, delegate work, or change files.`;
+    if (!(await sendComposerPromptWithRetry(sidebar, streamPrompt))) {
+      throw new Error('AI-19 could not start the root stream');
+    }
+    if (!(await waitForBusy(client, tracked.id, Math.min(timeoutMs, 15_000)))) {
+      throw new Error('AI-19 did not observe the root stream become busy');
+    }
+    if (
+      !(await sendComposerPromptWithRetry(
+        editor,
+        `${queueTurn.promptMarker} Reply with only ${queueTurn.responseMarker}. Do not use tools or subagents.`
+      ))
+    ) {
+      throw new Error('AI-19 could not enqueue the editor follow-up');
+    }
+    const queued = await waitForQueueMarker(editor, queueTurn.promptMarker);
+    if (!queued.item?.id) throw new Error('AI-19 could not identify the editor queue row');
+    evidence.queue.id = queued.item.id;
+    evidence.queue.initialOwner = queued.item.ownerViewId === editorViewId;
+    evidence.queue.samples.push({ phase: 'enqueued', row: queued.item });
+
+    if (!(await editor.clickQueueControl(queued.item.id, 'Pause queued message'))) {
+      throw new Error('AI-19 could not pause the editor queue row');
+    }
+    const paused = await waitForObservation(
+      () => editor.readQueueRow(queued.item.id),
+      (row) => row?.paused === true
+    );
+    evidence.queue.paused = paused?.paused === true;
+    evidence.queue.samples.push({ phase: 'paused', row: paused });
+
+    if (!(await editor.clickQueueControl(queued.item.id, 'Edit queued message'))) {
+      throw new Error('AI-19 could not edit the queued row');
+    }
+    const edited = await waitForObservation(
+      async () => ({
+        row: await editor.readQueueRow(queued.item.id),
+        composerText: await editor.readComposerText(),
+      }),
+      (sample) =>
+        sample?.row?.editing === true && sample.composerText.includes(queueTurn.promptMarker)
+    );
+    evidence.queue.edited =
+      edited?.row?.editing === true && edited.composerText.includes(queueTurn.promptMarker);
+    evidence.queue.samples.push({ phase: 'editing', ...edited });
+
+    await executeVscodeCommand(launch.remoteDebuggingPort, 'File: New Untitled Text File');
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await sidebar.rebind();
+    const transferred = await waitForObservation(
+      () => sidebar.readQueueRow(queued.item.id),
+      (row) => row?.ownerViewId === 'sidebar' && row.paused === true
+    );
+    evidence.queue.transferredToSidebar =
+      transferred?.ownerViewId === 'sidebar' && transferred.paused === true;
+    evidence.queue.samples.push({ phase: 'hidden-transfer', row: transferred });
+
+    evidence.queue.steerDispatched = await sidebar.clickQueueControl(
+      queued.item.id,
+      'Send as Steer'
+    );
+    const removed = await waitForObservation(
+      () => sidebar.readQueueRow(queued.item.id),
+      (row) => row === null
+    );
+    evidence.queue.removedAfterSteer = removed === null;
+
+    if (!(await sidebar.contextClick('.chat-header-session-title'))) {
+      throw new Error('AI-19 could not reopen the root session actions');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    if (!(await sidebar.clickText('Open as Editor'))) {
+      throw new Error('AI-19 could not reveal the root editor');
+    }
+    const visible = await waitForObservation(
+      () => editor.isDocumentVisible(),
+      (isVisible) => isVisible === true,
+      20_000
+    );
+    await editor.rebind();
+    const restored = await waitForSessionSnapshot(
+      editor,
+      tracked.title,
+      tracked.id,
+      launch.remoteDebuggingPort
+    );
+    const cleared = await waitForObservation(
+      async () => ({
+        composerText: await editor.readComposerText(),
+        row: await editor.readQueueRow(queued.item.id),
+      }),
+      (sample) =>
+        sample?.row === null && !sample.composerText.includes(queueTurn.promptMarker)
+    );
+    evidence.editor.revealed = visible === true && restored.routeSessionId === tracked.id;
+    evidence.editor.sameViewId = editor.targetContext?.viewId === editorViewId;
+    evidence.editor.orphanedDraftCleared =
+      cleared?.row === null && !cleared.composerText.includes(queueTurn.promptMarker);
+
+    const queuedDelivery = await waitForQueuedDelivery(
+      client,
+      tracked.id,
+      [queueTurn],
+      timeoutMs * 3
+    );
+    evidence.delivery = queuedDelivery.delivery;
+    if (!(await waitForIdle(client, tracked.id, timeoutMs * 3))) {
+      throw new Error('AI-19 streams did not settle');
+    }
+    evidence.unexpectedDescendants = inventoryVerifiedDescendants(
+      manifest,
+      await client.listSessions(),
+      tracked.id,
+      descendantsBefore,
+      'AI-19'
+    ).observed;
+
+    const messages = await client.messages(tracked.id, 1000);
+    const modelEvidence = promptModelFailures(
+      messages,
+      [streamMarker, queueTurn.promptMarker],
+      requestedModel
+    );
+    const fixtureAfterPreparation = await fixtureStatus(manifest.workspace);
+    const failures = lifecycleScenarioFailures(evidence);
+    failures.push(...modelEvidence.failures);
+    if (
+      fixtureAfterPreparation.commit !== fixture.commit ||
+      fixtureAfterPreparation.status !== fixture.status ||
+      fixtureAfterPreparation.contentHash !== fixture.contentHash ||
+      JSON.stringify(fixtureAfterPreparation.changedPaths) !== JSON.stringify(fixture.changedPaths)
+    ) {
+      failures.push('AI-19 changed the recorded repository fixture state');
+    }
+    const result = {
+      scenario: 'AI-19',
+      promptRun,
+      prepared: failures.length === 0,
+      model: requestedModel,
+      selectedModel,
+      evidence,
+      modelEvidence,
+      failures,
+      fixtureAfterPreparation,
+    };
+    manifest.livePreparation ??= {};
+    manifest.livePreparation['AI-19'] = { ...result, recordedAt: new Date().toISOString() };
+    await writeJsonAtomic(manifestPath, manifest);
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    if (failures.length > 0) throw new Error(`AI-19 failed: ${failures.join('; ')}`);
+  } finally {
+    editor?.close();
+  }
+}
+
 async function runLive(options) {
   const manifestPath = path.resolve(required(options, 'manifest'));
   const launchPath = path.resolve(required(options, 'launch'));
   const scenario = options.scenario ?? 'AI-07';
-  if (!['AI-07', 'AI-08', 'AI-17', 'AI-18'].includes(scenario)) {
-    throw new Error('--scenario must be AI-07, AI-08, AI-17, or AI-18');
+  if (!['AI-07', 'AI-08', 'AI-17', 'AI-18', 'AI-19'].includes(scenario)) {
+    throw new Error('--scenario must be AI-07, AI-08, AI-17, AI-18, or AI-19');
   }
   const maxPrompts = Number(options['max-prompts'] ?? DEFAULT_MAX_PROMPTS);
   const timeoutMs = Number(options['gate-timeout-ms'] ?? DEFAULT_GATE_TIMEOUT_MS);
@@ -2888,9 +3398,12 @@ async function runLive(options) {
     readFile(manifestPath, 'utf8').then(JSON.parse),
     readFile(launchPath, 'utf8').then(JSON.parse),
   ]);
-  if (path.resolve(launch.workspace) !== path.resolve(manifest.workspace)) {
+  manifest.workspace = await requireFixtureWorkspace(manifest.workspace);
+  const launchWorkspace = await requireFixtureWorkspace(launch.workspace);
+  if (launchWorkspace !== manifest.workspace) {
     throw new Error(`Launch workspace ${launch.workspace} does not match ${manifest.workspace}`);
   }
+  await verifyVscodeLaunchIdentity(launch);
   if (!manifest.hostPersistenceVerifiedAt) {
     throw new Error('Run verify-run for this manifest after launching the dedicated host');
   }
@@ -2910,8 +3423,11 @@ async function runLive(options) {
   if (targetSurface === 'editor' && !targetViewId) {
     throw new Error('--view-id is required when --surface is editor');
   }
-  if (scenario === 'AI-18' && (targetSurface !== 'sidebar' || targetViewId !== 'sidebar')) {
-    throw new Error('AI-18 must start from --surface sidebar --view-id sidebar');
+  if (
+    ['AI-18', 'AI-19'].includes(scenario) &&
+    (targetSurface !== 'sidebar' || targetViewId !== 'sidebar')
+  ) {
+    throw new Error(`${scenario} must start from --surface sidebar --view-id sidebar`);
   }
   const requestedTarget = {
     surface: targetSurface,
@@ -2942,12 +3458,13 @@ async function runLive(options) {
     if (scenario === 'AI-18') {
       await openAi18SidebarSession(
         cdp,
+        tracked.id,
         tracked.title,
         launch.remoteDebuggingPort,
         manifest.runSessions.filter((session) => !session.deleted).map((session) => session.title)
       );
     } else {
-      await openRunSession(cdp, tracked.title);
+      await openRunSession(cdp, tracked.id, tracked.title);
     }
     await cdp.click('[aria-label="Scroll to latest message"]');
     await cdp.key('.interactive-list', 'End');
@@ -3084,6 +3601,25 @@ async function runLive(options) {
         },
       });
     }
+    if (scenario === 'AI-19') {
+      return await runLifecycleScenario({
+        cdp,
+        client,
+        launch,
+        manifest,
+        manifestPath,
+        requestedModel,
+        selectedModel,
+        tracked,
+        fixture,
+        descendantsBefore,
+        promptRun,
+        timeoutMs,
+        markModelMayEdit: () => {
+          modelMayEdit = true;
+        },
+      });
+    }
     let handoff = null;
     let actions = [];
     let scope = null;
@@ -3195,6 +3731,7 @@ async function runLive(options) {
             {
               isActive: () => client.isBusy(tracked.id),
               marker: gate.marker,
+              sessionId: tracked.id,
               scope,
             }
           ))
@@ -3326,7 +3863,7 @@ async function main() {
   const { command, options } = parseArgs(process.argv.slice(2));
   if (command === 'run') return runLive(options);
   throw new Error(
-    'Usage: ai-fuzzy-live.mjs run --manifest <path> --launch <path> --scenario AI-07|AI-08|AI-17|AI-18'
+    'Usage: ai-fuzzy-live.mjs run --manifest <path> --launch <path> --scenario AI-07|AI-08|AI-17|AI-18|AI-19'
   );
 }
 

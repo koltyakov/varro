@@ -84,6 +84,7 @@ import {
   normalizeStoredClipboardImage,
   readStoredDroppedFiles,
   readStoredPermissionModes,
+  readStoredQueuedMessageEdit,
   readStoredQueuedMessages,
   readStoredNullableStringRecord,
   readStoredSelectedModel,
@@ -253,14 +254,31 @@ export interface AppStateInstance {
 
 export function createAppState(): AppStateInstance {
   const initialWebviewState = readInitialWebviewState();
-  const initialDroppedFiles = mergeInitialDroppedFiles(
-    readStoredDroppedFiles(STORAGE_KEYS.inputDraftFiles),
-    initialWebviewState.droppedFiles ?? []
-  );
-  const initialClipboardImages = (initialWebviewState.clipboardImages ?? [])
-    .slice(0, 5)
-    .map(normalizeStoredClipboardImage)
-    .filter((image): image is ClipboardImage => image !== null);
+  const initialQueuedMessages = readStoredQueuedMessages(initialWebviewState.queuedMessages);
+  const storedQueuedMessageEdit = readStoredQueuedMessageEdit();
+  const initialQueuedMessageEdit =
+    storedQueuedMessageEdit &&
+    initialQueuedMessages.some((message) => message.id === storedQueuedMessageEdit.id)
+      ? storedQueuedMessageEdit
+      : null;
+  const discardQueuedEditDraft = storedQueuedMessageEdit !== null && !initialQueuedMessageEdit;
+  if (discardQueuedEditDraft) {
+    writeStored(STORAGE_KEYS.queuedMessageEdit, null);
+    writeStored(STORAGE_KEYS.inputDraft, null);
+    writeStored(STORAGE_KEYS.inputDraftFiles, null);
+  }
+  const initialDroppedFiles = discardQueuedEditDraft
+    ? []
+    : mergeInitialDroppedFiles(
+        readStoredDroppedFiles(STORAGE_KEYS.inputDraftFiles),
+        initialWebviewState.droppedFiles ?? []
+      );
+  const initialClipboardImages = discardQueuedEditDraft
+    ? []
+    : (initialWebviewState.clipboardImages ?? [])
+        .slice(0, 5)
+        .map(normalizeStoredClipboardImage)
+        .filter((image): image is ClipboardImage => image !== null);
   const currentDocumentWorkspace =
     initialWebviewState.editorContext?.workspacePath?.replace(/\\/g, '/').replace(/\/+$/, '') ||
     null;
@@ -300,7 +318,9 @@ export function createAppState(): AppStateInstance {
     providersLoaded: false,
     providerRefreshPending: false,
     editorContext: initialWebviewState.editorContext ?? defaultEditorContext,
-    terminalSelection: initialWebviewState.terminalSelection ?? null,
+    terminalSelection: discardQueuedEditDraft
+      ? null
+      : (initialWebviewState.terminalSelection ?? null),
     attachedDiagnostics: null,
     emptyStateLogoUri: initialWebviewState.emptyStateLogoUri ?? '',
     currentDocumentEnabled: currentDocumentWorkspace
@@ -371,10 +391,10 @@ export function createAppState(): AppStateInstance {
     completedSessionResponses: initialCompletedSessionResponses,
     skippedPlanSessions: initialSkippedPlanSessions,
     compactingSessionIds: [],
-    queuedMessages: readStoredQueuedMessages(initialWebviewState.queuedMessages),
+    queuedMessages: initialQueuedMessages,
     queuedMessageDispatchingId: null,
     failedQueuedMessageIds: [],
-    queuedMessageEdit: null,
+    queuedMessageEdit: initialQueuedMessageEdit,
     failedSessionIds: [],
     failedSessionUpdatedAt: {},
     sessionMessageCounts: {},

@@ -13,6 +13,7 @@ import {
   executeActionPlan,
   findSessionDescendants,
   inventoryVerifiedDescendants,
+  lifecycleScenarioFailures,
   fixtureIsSafeForScenario,
   missingLiveGates,
   modelDisplayName,
@@ -24,6 +25,7 @@ import {
   queueHandoffMatches,
   selectVarroTargetDescriptor,
   sendComposerPromptWithRetry,
+  sessionSnapshotMatches,
   shouldRetryAi08WithFreshStream,
   shouldRetryNestedHandoff,
   summarizeCanonicalDelivery,
@@ -448,6 +450,7 @@ test('allows AI-08 to continue from the exact recorded AI-07 fixture state', () 
   assert.equal(fixtureIsSafeForScenario({ commit: 'abc', status: '' }, manifest, 'AI-07'), true);
   assert.equal(fixtureIsSafeForScenario(fixture, manifest, 'AI-08'), true);
   assert.equal(fixtureIsSafeForScenario(fixture, manifest, 'AI-18'), true);
+  assert.equal(fixtureIsSafeForScenario(fixture, manifest, 'AI-19'), true);
   assert.equal(fixtureIsSafeForScenario(fixture, manifest, 'AI-07'), false);
   assert.equal(
     fixtureIsSafeForScenario({ ...fixture, status: ' M other.ts' }, manifest, 'AI-08'),
@@ -652,6 +655,13 @@ test('selects Varro targets by surface, stable viewId, and session route', () =>
       }),
     /No Varro iframe matched.*session=other/i
   );
+});
+
+test('matches open sessions by recorded route ID rather than title alone', () => {
+  const snapshot = { routeSessionId: 'session-1', title: 'Duplicate title' };
+
+  assert.equal(sessionSnapshotMatches(snapshot, 'session-1', 'Duplicate title'), true);
+  assert.equal(sessionSnapshotMatches(snapshot, 'session-2', 'Duplicate title'), false);
 });
 
 test('parses exact changed paths including both sides of a rename', () => {
@@ -938,6 +948,44 @@ test('requires clean linked assistants and exact response markers for queued del
   assert.equal(delivery.ordered, true);
   messages[3].parts[0].text = 'wrong response';
   assert.deepEqual(summarizeQueuedDelivery(messages, turns).assistantValid, [true, false]);
+});
+
+test('judges the AI-19 permission, queue handoff, steer, and draft lifecycle', () => {
+  const passing = {
+    editor: {
+      opened: true,
+      revealed: true,
+      sameViewId: true,
+      orphanedDraftCleared: true,
+    },
+    permissions: {
+      sidebarFullReachedEditor: true,
+      editorAutoReachedSidebar: true,
+    },
+    queue: {
+      initialOwner: true,
+      paused: true,
+      edited: true,
+      transferredToSidebar: true,
+      steerDispatched: true,
+      removedAfterSteer: true,
+    },
+    delivery: {
+      userCounts: [1],
+      assistantCounts: [1],
+      assistantValid: [true],
+    },
+    unexpectedDescendants: [],
+  };
+
+  assert.deepEqual(lifecycleScenarioFailures(passing), []);
+  assert.match(
+    lifecycleScenarioFailures({
+      ...passing,
+      editor: { ...passing.editor, orphanedDraftCleared: false },
+    })[0],
+    /ordinary draft/
+  );
 });
 
 test('waits until the exact closed editor target disappears', async () => {

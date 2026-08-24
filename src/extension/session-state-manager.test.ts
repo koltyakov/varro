@@ -1168,6 +1168,29 @@ describe('SessionStateManager notifications', () => {
     expect(workspaceState.set).toHaveBeenCalledWith('varro.interruptedSessions', []);
   });
 
+  it('keeps an acknowledged recovery durable while the session is still busy', async () => {
+    const stored = [{ id: 'session-1', title: 'Session 1' }];
+    const workspaceState: WorkspaceStateMock = {
+      get: vi.fn((key: string) => (key === 'varro.interruptedSessions' ? stored : undefined)),
+      set: vi.fn(() => Promise.resolve()),
+      remove: vi.fn(() => Promise.resolve()),
+    };
+    const manager = new SessionStateManager(
+      workspaceState as never,
+      { onStatusChange: vi.fn() },
+      { shouldShow: () => false }
+    );
+    await manager.consumeRecoverySnapshot();
+    markBusy(manager, 'session-1');
+
+    await manager.acknowledgeInterruptedSessions(['session-1']);
+
+    expect(workspaceState.set).toHaveBeenLastCalledWith('varro.interruptedSessions', [
+      { id: 'session-1', title: undefined },
+    ]);
+    expect(manager.claimInterruptedSessions()).toEqual([]);
+  });
+
   it('consumes persisted blocking requests and filters invalid snapshots', async () => {
     const workspaceState: WorkspaceStateMock = {
       get: vi.fn((key: string) => {

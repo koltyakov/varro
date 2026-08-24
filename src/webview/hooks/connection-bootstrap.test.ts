@@ -532,6 +532,48 @@ describe('connection-bootstrap helpers', () => {
     expect(selectSession).not.toHaveBeenCalled();
   });
 
+  it('does not reapply an editor bootstrap route after reconnecting', async () => {
+    let activeSessionId: string | null = null;
+    let initialRouteConsumed = false;
+    let generation = 0;
+    const selectSession = vi.fn(async (sessionId: string) => {
+      activeSessionId = sessionId;
+    });
+    const deps = {
+      health: vi.fn(async () => HEALTHY_RESPONSE),
+      loadInitialData: vi.fn(async () => {}),
+      hydrateSessionStatuses: vi.fn(async () => {}),
+      getActiveSessionId: () => activeSessionId,
+      getPersistedActiveSessionId: () => null,
+      getPersistedLastOpenedView: () => null,
+      getInitialRoute: () =>
+        initialRouteConsumed ? null : ({ type: 'session', sessionId: 'session-1' } as const),
+      markInitialRouteConsumed: () => {
+        initialRouteConsumed = true;
+      },
+      getSessionCount: () => 2,
+      getOnlyPrimarySessionId: () => null,
+      hasSession: () => true,
+      selectSession,
+      setShowSessionPicker: vi.fn(),
+      recoverInterruptedSessions: vi.fn(async () => {}),
+      setInitialized: vi.fn(),
+      setError: vi.fn(),
+    };
+    const generationRef = {
+      next: () => ++generation,
+      isCurrent: (candidate: number) => candidate === generation,
+    };
+
+    await initConnectionWithDependencies(deps, generationRef);
+    activeSessionId = 'session-2';
+    await initConnectionWithDependencies(deps, generationRef);
+
+    expect(selectSession).toHaveBeenCalledOnce();
+    expect(selectSession).toHaveBeenCalledWith('session-1');
+    expect(activeSessionId).toBe('session-2');
+  });
+
   it('opens the sessions list when that was the recent startup fallback', async () => {
     const setShowSessionPicker = vi.fn();
     const selectSession = vi.fn(async () => {});

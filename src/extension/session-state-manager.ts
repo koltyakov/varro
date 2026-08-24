@@ -206,7 +206,7 @@ export class SessionStateManager {
   acknowledgeInterruptedSessions(sessionIDs: readonly string[]): Promise<void> {
     const acknowledgedSessionIDs = new Set(sessionIDs);
     const interruptedSessions = this.getInterruptedSessionSnapshots().filter(
-      (session) => !acknowledgedSessionIDs.has(session.id)
+      (session) => !acknowledgedSessionIDs.has(session.id) || this.busySessions.has(session.id)
     );
     return this.enqueuePersistence(async () => {
       await this.persistence.set(INTERRUPTED_SESSIONS_KEY, interruptedSessions);

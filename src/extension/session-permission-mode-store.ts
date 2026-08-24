@@ -36,8 +36,8 @@ export class SessionPermissionModeStore {
       const next = { ...this.modes };
       if (mode === null) delete next[sessionId];
       else next[sessionId] = mode;
-      await this.persistence.set(SESSION_PERMISSION_MODES_KEY, next);
       this.modes = next;
+      await this.persistence.set(SESSION_PERMISSION_MODES_KEY, next);
       return this.list();
     });
   }
@@ -52,8 +52,8 @@ export class SessionPermissionModeStore {
         changed = true;
       }
       if (changed) {
-        await this.persistence.set(SESSION_PERMISSION_MODES_KEY, next);
         this.modes = next;
+        await this.persistence.set(SESSION_PERMISSION_MODES_KEY, next);
       }
       return this.list();
     });

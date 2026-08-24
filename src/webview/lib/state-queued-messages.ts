@@ -21,7 +21,10 @@ export function ownsQueuedMessage(message: QueuedMessage) {
   return (message.ownerViewId ?? 'sidebar') === ownerViewId;
 }
 
-export function claimQueuedMessageDispatch(message: QueuedMessage): Promise<number | null> {
+export function claimQueuedMessageDispatch(
+  message: QueuedMessage,
+  mode: 'next' | 'steer' = 'next'
+): Promise<number | null> {
   if (!ownsQueuedMessage(message)) return Promise.resolve(null);
   const requestId = ++nextQueueClaimRequestId;
   return new Promise((resolve) => {
@@ -38,7 +41,10 @@ export function claimQueuedMessageDispatch(message: QueuedMessage): Promise<numb
     if (
       !postMessage({
         type: 'queued-messages/claim',
-        payload: { requestId, itemId: message.id, sessionId: message.sessionId },
+        payload:
+          mode === 'next'
+            ? { requestId, itemId: message.id, sessionId: message.sessionId }
+            : { requestId, itemId: message.id, sessionId: message.sessionId, mode },
       })
     ) {
       clearTimeout(timer);
@@ -72,25 +78,16 @@ export function releaseQueuedMessageDispatch(message: QueuedMessage, lease: numb
 
 function commitQueuedMessages(messages: QueuedMessage[]) {
   setState('queuedMessages', messages);
-  const ids = new Set(messages.map((message) => message.id));
-  if (state.queuedMessageDispatchingId && !ids.has(state.queuedMessageDispatchingId)) {
-    setState('queuedMessageDispatchingId', null);
-  }
-  if (state.queuedMessageEdit && !ids.has(state.queuedMessageEdit.id)) {
-    setState('queuedMessageEdit', null);
-  }
-  const failedIds = state.failedQueuedMessageIds.filter((id) => ids.has(id));
-  if (failedIds.length !== state.failedQueuedMessageIds.length) {
-    setState('failedQueuedMessageIds', failedIds);
-  }
+  reconcileQueuedMessageState(messages);
+  const ownedMessages = messages.filter(ownsQueuedMessage);
   // Data URLs can make queued media messages tens of megabytes. Persist them through the
   // asynchronous extension bridge, but not synchronously in webview state and localStorage.
-  const browserPersisted = messages.filter(
+  const browserPersisted = ownedMessages.filter(
     (message) =>
       (message.clipboardImages?.length ?? 0) === 0 && (message.nativePdfs?.length ?? 0) === 0
   );
   writeStored(STORAGE_KEYS.queuedMessages, browserPersisted);
-  const hostPersisted = messages.map(
+  const hostPersisted = ownedMessages.map(
     ({
       id,
       ownerViewId,
@@ -124,6 +121,20 @@ function commitQueuedMessages(messages: QueuedMessage[]) {
   postMessage({ type: 'queued-messages/update', payload: { messages: hostPersisted } });
 }
 
+function reconcileQueuedMessageState(messages: QueuedMessage[], preserveMissingEdit = false) {
+  const ids = new Set(messages.map((message) => message.id));
+  if (state.queuedMessageDispatchingId && !ids.has(state.queuedMessageDispatchingId)) {
+    setState('queuedMessageDispatchingId', null);
+  }
+  if (!preserveMissingEdit && state.queuedMessageEdit && !ids.has(state.queuedMessageEdit.id)) {
+    setState('queuedMessageEdit', null);
+  }
+  const failedIds = state.failedQueuedMessageIds.filter((id) => ids.has(id));
+  if (failedIds.length !== state.failedQueuedMessageIds.length) {
+    setState('failedQueuedMessageIds', failedIds);
+  }
+}
+
 export function syncQueuedMessages() {
   commitQueuedMessages([...state.queuedMessages]);
 }
@@ -141,6 +152,7 @@ export function setQueuedMessageFailed(id: string, failed: boolean) {
 
 export function setQueuedMessageEdit(edit: { id: string; sessionId: string } | null) {
   setState('queuedMessageEdit', edit);
+  writeStored(STORAGE_KEYS.queuedMessageEdit, edit);
 }
 
 export function enqueueMessage(message: QueuedMessage) {
@@ -152,6 +164,14 @@ export function enqueueMessage(message: QueuedMessage) {
 
 export function applyQueuedMessagesSnapshot(messages: QueuedMessage[]) {
   setState('queuedMessages', messages);
+  reconcileQueuedMessageState(messages, true);
+  const browserPersisted = messages
+    .filter(ownsQueuedMessage)
+    .filter(
+      (message) =>
+        (message.clipboardImages?.length ?? 0) === 0 && (message.nativePdfs?.length ?? 0) === 0
+    );
+  writeStored(STORAGE_KEYS.queuedMessages, browserPersisted);
 }
 
 export function replaceQueuedMessage(id: string, message: QueuedMessage) {

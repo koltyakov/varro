@@ -125,7 +125,7 @@ function register(
 }
 
 describe('About command', () => {
-  it('shows OpenCode server diagnostics', async () => {
+  it('shows OpenCode server details without redundant diagnostics', async () => {
     const { sidebar } = register('/repo', {
       readServerInfo: vi.fn().mockResolvedValue({
         status: { state: 'running', url: 'http://127.0.0.1:4096' },
@@ -162,11 +162,9 @@ describe('About command', () => {
       '- **CLI:**\n  - **Version:** `1.18.4`\n  - **Install method:** bun\n  - **Binary:** `/home/me/.bun/bin/opencode`'
     );
     expect(aboutMarkdown).toContain(
-      '- **Server:**\n  - **Version:** `1.18.4`\n  - **URL:** [http://127.0.0.1:4096](http://127.0.0.1:4096)\n  - **Ownership:** managed by Varro\n  - **Active agents:** `1`\n- **Auto updates:** enabled'
+      '- **Server:**\n  - **Version:** `1.18.4`\n  - **URL:** [http://127.0.0.1:4096](http://127.0.0.1:4096)\n  - **Ownership:** managed by Varro\n  - **Status:** `running, event stream unknown`\n  - **Health:** healthy\n  - **Active agents:** `1`\n- **Auto updates:** enabled'
     );
-    expect(aboutMarkdown).toContain(
-      '## Diagnostics\n- CLI version: 1.18.4\n- Resolved binary: /home/me/.bun/bin/opencode\n- Server status: running, event stream unknown\n- Server health: healthy\n- Server port: 4096\n- Auto start: disabled\n- Auto updates: enabled\n- Workspace: /repo'
-    );
+    expect(aboutMarkdown).not.toContain('## Diagnostics');
     expect(sidebar.openMarkdownDocument).toHaveBeenCalledWith(
       expect.stringContaining('- [GitHub repository](https://github.com/koltyakov/varro)'),
       'Varro About',

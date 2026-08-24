@@ -5,6 +5,7 @@ import {
   buildActionPlan,
   buildPreconditionReport,
   inspectGoldenMessages,
+  requireFixtureWorkspace,
 } from './ai-fuzzy-preconditions.mjs';
 
 function turn(number, tall = false) {
@@ -66,4 +67,8 @@ test('creates a stable 50-step mixed-ownership action plan', () => {
     ['PageDown in composer', 'Space in composer', 'Shift+Space in composer']
   );
   assert.equal(first.some(({ action }) => action.includes('inline editor')), false);
+});
+
+test('rejects AI workspaces outside the canonical fixture', async () => {
+  await assert.rejects(requireFixtureWorkspace(process.cwd()), /must be exactly/);
 });

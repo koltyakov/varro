@@ -22,6 +22,8 @@ import {
   nextPastedImageIndex,
   removeContextFile,
   resetPastedImageIndex,
+  resetDefaultAppState,
+  setQueuedMessageEdit,
 } from '../lib/state';
 import { client } from '../lib/client';
 import { resetMessageEditState, startEditingMessage } from '../lib/message-edit-state';
@@ -29,7 +31,11 @@ import { setSessionHistoryPrompts } from '../lib/message-window';
 import { hasExpandedDiffOverlay, setExpandedDiffOverlay } from '../lib/diff-overlay-state';
 import { fixture } from '../test-fixtures';
 import type { UnknownRecord } from '../../shared/type-utils';
-import { applyQueuedMessageClaimResult } from '../lib/state-queued-messages';
+import {
+  applyQueuedMessageClaimResult,
+  applyQueuedMessagesSnapshot,
+  syncQueuedMessages,
+} from '../lib/state-queued-messages';
 import { sendQueuedAsSteer } from './chat-input/queued-steer';
 
 interface SessionEventProperties extends UnknownRecord {
@@ -221,7 +227,7 @@ afterEach(() => {
   setState('queuedMessages', []);
   setState('queuedMessageDispatchingId', null);
   setState('failedQueuedMessageIds', []);
-  setState('queuedMessageEdit', null);
+  setQueuedMessageEdit(null);
   setState('todos', []);
   setState('hiddenProviders', []);
   setState('hiddenModels', []);
@@ -2392,6 +2398,9 @@ describe('ChatInput', () => {
       },
     ]);
 
+    const sendToExtension = vi.fn(defaultBridgeSend);
+    fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
+      sendToExtension;
     cleanup = render(() => ChatInput(), container!);
 
     expect(
@@ -2402,6 +2411,14 @@ describe('ChatInput', () => {
 
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(state.queuedMessages.map((item) => item.id)).toEqual(['owned', 'other-view']);
+
+    syncQueuedMessages();
+    expect(sendToExtension).toHaveBeenLastCalledWith({
+      type: 'queued-messages/update',
+      payload: {
+        messages: [expect.objectContaining({ id: 'owned', ownerViewId: 'editor-a' })],
+      },
+    });
   });
 
   it('queues busy composer attachments and clears them from the input', () => {
@@ -3497,6 +3514,38 @@ describe('ChatInput', () => {
     expect(state.queuedMessageEdit).toEqual({ id: 'q1', sessionId: 'session-1' });
     expect(container?.querySelector('.chat-queue-item.is-editing')).not.toBeNull();
     expect(inputText()).toBe('edit this follow-up');
+  });
+
+  it('clears an edited draft when ownership transfer removes its queued row', async () => {
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'edit this follow-up' }]);
+    cleanup = render(() => ChatInput(), container!);
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    syncQueuedMessages();
+    cleanup();
+    resetDefaultAppState();
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    cleanup = render(() => ChatInput(), container!);
+    expect(state.queuedMessageEdit).toEqual({ id: 'q1', sessionId: 'session-1' });
+    expect(inputText()).toBe('edit this follow-up');
+
+    applyQueuedMessagesSnapshot([]);
+    await flushAsyncWork();
+
+    expect(state.queuedMessageEdit).toBeNull();
+    expect(inputText()).toBe('');
+
+    cleanup();
+    cleanup = undefined;
+    resetDefaultAppState();
+    expect(state.queuedMessages).toEqual([]);
+    expect(state.queuedMessageEdit).toBeNull();
+    expect(inputText()).toBe('');
   });
 
   it('sends queued rows as steers and removes them on success', async () => {

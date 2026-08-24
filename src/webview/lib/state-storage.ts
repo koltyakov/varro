@@ -22,6 +22,7 @@ export const STORAGE_KEYS = {
   completedSessionResponses: 'varro.completedSessionResponses',
   unsharedSessions: 'varro.unsharedSessions',
   queuedMessages: 'varro.queuedMessages',
+  queuedMessageEdit: 'varro.queuedMessageEdit',
   inputDraft: 'varro.inputDraft',
   inputDraftFiles: 'varro.inputDraftFiles',
   lastActiveSessionId: 'varro.lastActiveSessionId',

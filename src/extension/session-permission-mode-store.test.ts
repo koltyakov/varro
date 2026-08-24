@@ -65,4 +65,17 @@ describe('SessionPermissionModeStore', () => {
       await expect(store.set(sessionId, 'full')).rejects.toThrow('Invalid persisted session ID');
     }
   });
+
+  it('retains a server-confirmed mode in memory when persistence fails', async () => {
+    const persistence: Persistence = {
+      get: vi.fn(),
+      set: vi.fn(() => Promise.reject(new Error('disk full'))),
+      remove: vi.fn(() => Promise.resolve()),
+    };
+    const store = new SessionPermissionModeStore(persistence);
+
+    await expect(store.set('session-1', 'full')).rejects.toThrow('disk full');
+
+    expect(store.list()).toEqual({ 'session-1': 'full' });
+  });
 });

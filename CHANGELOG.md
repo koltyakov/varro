@@ -10,6 +10,7 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 - Made large model catalogs easier to manage with search and selective additions, clearer model and thinking-level changes, persistent session defaults, and cost warnings.
 - Improved the composer with active language server status, quick access to server output, persistent diff previews, reliable caret visibility, and easier focus handling.
 - Strengthened session and queued-message handling with captured editor context, safer late fork and deletion results, more reliable provider and MCP refreshes, and deduplicated optimistic prompts.
+- Made multi-view handoffs more reliable for permission changes, queued edits and attachments, manual steering, editor restoration after reconnects, and interrupted-session recovery.
 - Made long conversations more stable during history loading, streaming, content reflow, viewport resizing, and queued-message removal.
 - Moved About diagnostics and usage reports into readable Markdown documents with richer local usage data.
 

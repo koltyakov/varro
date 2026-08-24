@@ -674,6 +674,21 @@ describe('state helpers', () => {
     expect(stateModule.draftPermissionMode()).toBe('default');
   });
 
+  it('preserves a pending permission mode over an older host snapshot', async () => {
+    const stateModule = await loadState();
+
+    stateModule.setPermissionModeForSession('session-1', 'full');
+    stateModule.setPendingSessionPermissionMode('session-1', 'full');
+    stateModule.applySessionPermissionModesSnapshot({ 'session-1': 'auto' });
+
+    expect(stateModule.getPermissionModeForSession('session-1')).toBe('full');
+
+    stateModule.setPendingSessionPermissionMode('session-1', null);
+    stateModule.applySessionPermissionModesSnapshot({ 'session-1': 'auto' });
+
+    expect(stateModule.getPermissionModeForSession('session-1')).toBe('auto');
+  });
+
   it('inherits a parent session permission mode for child sessions', async () => {
     const stateModule = await loadState();
 

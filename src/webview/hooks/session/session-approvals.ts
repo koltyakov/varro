@@ -239,6 +239,7 @@ type SessionApprovalDependencies = {
   upsertSession(session: Session): void;
   getPermissionsForSession(sessionId: string): Permission[];
   syncPendingPermissions?(): Promise<void | boolean | object>;
+  setPendingSessionPermissionMode?(sessionId: string, mode: PermissionMode | null): void;
 };
 
 type PermissionModeQueue = {
@@ -345,6 +346,7 @@ export class SessionApprovalOperations {
 
     applyPermissionModeSelection(this.deps, sessionId, mode);
     if (!sessionId || !queue) return;
+    this.deps.setPendingSessionPermissionMode?.(sessionId, mode);
 
     queue.pending += 1;
     const request = queue.tail.then(() =>
@@ -382,6 +384,9 @@ export class SessionApprovalOperations {
       await request;
     } finally {
       queue.pending -= 1;
+      if (this.permissionModeGenerationBySession.get(sessionKey) === generation) {
+        this.deps.setPendingSessionPermissionMode?.(sessionId, null);
+      }
       if (queue.pending === 0 && this.permissionModeQueues.get(sessionId) === queue) {
         this.permissionModeQueues.delete(sessionId);
       }

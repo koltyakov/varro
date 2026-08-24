@@ -7,79 +7,79 @@ const DEFAULT_WAIT_TIMEOUT_MS = process.platform === 'win32' ? 60_000 : 25_000;
 
 const EXPECTATIONS = {
   'clean-install-missing-cli': [
-    '- CLI version: not found',
-    '- Server status: error: OpenCode CLI not found.',
-    '- Server health: unhealthy',
+    '  - **Version:** `not found`',
+    '  - **Status:** `error: OpenCode CLI not found.',
+    '  - **Health:** unhealthy',
   ],
   'invalid-cli-path': [
-    '- Resolved binary:',
-    '- Server status: error: OpenCode CLI not found at the configured path:',
-    '- Server health: unhealthy',
+    '  - **Binary:**',
+    '  - **Status:** `error: OpenCode CLI not found at the configured path:',
+    '  - **Health:** unhealthy',
   ],
   'auto-start-disabled': [
-    '- Auto updates: enabled',
-    '- Server status: error: No server at http://127.0.0.1:',
-    '- Server health: unhealthy',
+    '- **Auto updates:** enabled',
+    '  - **Status:** `error: No server at http://127.0.0.1:',
+    '  - **Health:** unhealthy',
   ],
   'version-command-failure': [
-    '- CLI version: error:',
-    '- Server status: running, event stream healthy',
-    '- Server health: healthy',
+    '  - **Version:** `error:',
+    '  - **Status:** `running, event stream healthy`',
+    '  - **Health:** healthy',
   ],
   'malformed-cli-version': [
-    '- CLI version: not found',
-    '- Server status: running, event stream healthy',
-    '- Server health: healthy',
+    '  - **Version:** `not found`',
+    '  - **Status:** `running, event stream healthy`',
+    '  - **Health:** healthy',
   ],
   'startup-process-exit': [
-    '- CLI version: 1.18.15',
-    '- Server status: error: OpenCode server exited during startup (code 1)',
-    '- Server health: unhealthy',
+    '  - **Version:** `1.18.15`',
+    '  - **Status:** `error: OpenCode server exited during startup (code 1)',
+    '  - **Health:** unhealthy',
   ],
   'runtime-crash-recovery': [
-    '- CLI version: 1.18.15',
-    '- Server status: running, event stream healthy',
-    '- Server health: healthy',
+    '  - **Version:** `1.18.15`',
+    '  - **Status:** `running, event stream healthy`',
+    '  - **Health:** healthy',
   ],
   'event-stream-failure': [
-    '- CLI version: 1.18.15',
-    '- Server status: running, event stream degraded',
-    '- Server health: healthy',
+    '  - **Version:** `1.18.15`',
+    '  - **Status:** `running, event stream degraded`',
+    '  - **Health:** healthy',
   ],
   'port-conflict-fallback': [
-    '- CLI version: 1.18.15',
-    '- Server status: running, event stream healthy',
-    '- Server health: healthy',
+    '  - **Version:** `1.18.15`',
+    '  - **Status:** `running, event stream healthy`',
+    '  - **Health:** healthy',
   ],
   'required-update-disabled': [
-    '- CLI version: 1.15.0',
-    '- Server status: error: OpenCode update required.',
-    '- Server health: unhealthy',
+    '  - **Version:** `1.15.0`',
+    '  - **Status:** `error: OpenCode update required.',
+    '  - **Health:** unhealthy',
     'Automatic updates are disabled.',
   ],
   'required-update-failure': [
-    '- CLI version: 1.15.0',
-    '- Server status: error: OpenCode update required.',
-    '- Server health: unhealthy',
+    '  - **Version:** `1.15.0`',
+    '  - **Status:** `error: OpenCode update required.',
+    '  - **Health:** unhealthy',
     'The automatic update failed.',
   ],
   'required-update-no-change': [
-    '- CLI version: 1.15.0',
-    '- Server status: error: OpenCode update required.',
-    '- Server health: unhealthy',
+    '  - **Version:** `1.15.0`',
+    '  - **Status:** `error: OpenCode update required.',
+    '  - **Health:** unhealthy',
     'The automatic update did not install a compatible CLI (found 1.15.0)',
   ],
   'file-link-open': [
-    '- CLI version: 1.18.15',
-    '- Server status: running, event stream healthy',
-    '- Server health: healthy',
+    '  - **Version:** `1.18.15`',
+    '  - **Status:** `running, event stream healthy`',
+    '  - **Health:** healthy',
   ],
   'healthy-first-run': [
     '- **Version:** `1.18.15`',
     '- **Install method:** a path configured in varro.server.command',
     '- **Ownership:** managed by Varro',
-    '- Server status: running, event stream healthy',
-    '- Server health: healthy',
+    '  - **Status:** `running, event stream healthy`',
+    '  - **Health:** healthy',
   ],
 };
 
@@ -88,10 +88,13 @@ function delay(milliseconds) {
 }
 
 async function readAboutDocument() {
-  const document = vscode.workspace.textDocuments.find(
-    (candidate) =>
-      candidate.uri.scheme === 'varro-tool-output' && candidate.uri.path.endsWith('/Varro About.md')
-  );
+  const document = vscode.workspace.textDocuments
+    .filter(
+      (candidate) =>
+        candidate.uri.scheme === 'varro-tool-output' &&
+        candidate.uri.path.endsWith('/Varro About.md')
+    )
+    .at(-1);
   if (!document) return '';
   return document.getText();
 }
@@ -136,19 +139,19 @@ async function run() {
   );
   const expected = [...EXPECTATIONS[scenario]];
   expected.push(
-    '- CLI version:',
-    '- Resolved binary:',
-    '- Server status:',
-    '- Server health:',
-    '- Server port:',
-    '- Auto start:',
-    '- Auto updates:',
-    '- Workspace:'
+    '- **CLI:**',
+    '  - **Version:**',
+    '  - **Binary:**',
+    '- **Server:**',
+    '  - **URL:**',
+    '  - **Status:**',
+    '  - **Health:**',
+    '- **Auto updates:**'
   );
   if (scenario === 'port-conflict-fallback') {
     const originalPort = Number(process.env.VARRO_SANDBOX_PORT);
     assert.ok(Number.isInteger(originalPort), 'Sandbox port was not provided');
-    expected.push(`- Server port: ${String(originalPort + 1)}`);
+    expected.push(`  - **URL:** [http://127.0.0.1:${String(originalPort + 1)}]`);
   }
 
   const extension = vscode.extensions.getExtension('koltyakov.varro');

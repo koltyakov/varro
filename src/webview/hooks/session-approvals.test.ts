@@ -360,6 +360,7 @@ describe('session-approvals helpers', () => {
     const upsertSession = vi.fn();
     const autoApprovePermissionsForSession = vi.fn(async () => {});
     const syncPendingPermissions = vi.fn(async () => {});
+    const setPendingSessionPermissionMode = vi.fn();
     const updateSessionPermission = vi
       .fn()
       .mockReturnValueOnce(fullUpdate.promise)
@@ -384,6 +385,7 @@ describe('session-approvals helpers', () => {
       upsertSession,
       getPermissionsForSession: () => [permission('perm-1')],
       syncPendingPermissions,
+      setPendingSessionPermissionMode,
     });
     vi.spyOn(operations, 'autoApprovePermissionsForSession').mockImplementation(
       autoApprovePermissionsForSession
@@ -418,6 +420,11 @@ describe('session-approvals helpers', () => {
     expect(upsertSession).toHaveBeenCalledWith(session('session-1'));
     expect(autoApprovePermissionsForSession).not.toHaveBeenCalled();
     expect(syncPendingPermissions).toHaveBeenCalledTimes(1);
+    expect(setPendingSessionPermissionMode.mock.calls).toEqual([
+      ['session-1', 'full'],
+      ['session-1', 'auto'],
+      ['session-1', null],
+    ]);
   });
 
   it('rolls full then auto failures back to the last confirmed mode', async () => {

@@ -935,6 +935,29 @@ describe('OpenCodeServer maintenance', () => {
     });
   });
 
+  it('reports the current status when health collection outlives a startup transition', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const health = deferred<{ healthy: boolean; version?: string }>();
+    const api = server as unknown as {
+      _status: ServerStatus;
+      readInstalledCliVersion: () => Promise<string | null>;
+      readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
+    };
+    api._status = { state: 'starting' };
+    api.readInstalledCliVersion = vi.fn().mockResolvedValue('1.18.15');
+    api.readHealthInfo = vi.fn(() => health.promise);
+
+    const infoPromise = server.readServerInfo();
+    await flushMicrotasks();
+    api._status = { state: 'error', message: 'startup failed' };
+    health.resolve({ healthy: false });
+
+    await expect(infoPromise).resolves.toMatchObject({
+      status: { state: 'error', message: 'startup failed' },
+      health: { healthy: false },
+    });
+  });
+
   it('restarts a managed idle server when the installed CLI is newer', async () => {
     const server = new OpenCodeServer(4096, false);
     const restartServerForCliUpdate = vi.fn().mockResolvedValue(undefined);

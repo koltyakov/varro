@@ -82,7 +82,7 @@ export async function sendQueuedAsSteer(item: (typeof state.queuedMessages)[numb
       removeQueuedMessage(item.id);
       return;
     }
-    dispatchLease = await claimQueuedMessageDispatch(item);
+    dispatchLease = await claimQueuedMessageDispatch(item, 'steer');
     if (dispatchLease === null) return;
     if (state.messagesLoading && state.activeSessionId === item.sessionId) return;
     sent =

@@ -19,6 +19,8 @@ import {
   readWebviewInstanceContext,
 } from './state-stored-values';
 
+const pendingSessionPermissionModes = new Map<string, PermissionMode>();
+
 export function getPermissionModeForSession(sessionId: string | null | undefined): PermissionMode {
   if (!sessionId) return draftPermissionMode();
 
@@ -91,8 +93,17 @@ export function removePermissionModeForSession(sessionId: string) {
 }
 
 export function applySessionPermissionModesSnapshot(modes: Record<string, PermissionMode>) {
-  setState('sessionPermissionModes', reconcile(modes));
-  writeStored(STORAGE_KEYS.sessionPermissionModes, modes);
+  const effectiveModes = { ...modes };
+  for (const [sessionId, mode] of pendingSessionPermissionModes) {
+    effectiveModes[sessionId] = mode;
+  }
+  setState('sessionPermissionModes', reconcile(effectiveModes));
+  writeStored(STORAGE_KEYS.sessionPermissionModes, effectiveModes);
+}
+
+export function setPendingSessionPermissionMode(sessionId: string, mode: PermissionMode | null) {
+  if (mode === null) pendingSessionPermissionModes.delete(sessionId);
+  else pendingSessionPermissionModes.set(sessionId, mode);
 }
 
 export function syncSessionPermissionModesToHost() {

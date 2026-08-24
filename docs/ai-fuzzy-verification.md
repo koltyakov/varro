@@ -697,6 +697,7 @@ Run these when the changed area, observed behavior, or user request calls for th
 | `AI-16` | Huge code, table, terminal, and nested scrollers | Markdown, tool cards, terminal attachments, or wheel ownership changed |
 | `AI-17` | Duplicate delivery during send and streaming | Webview bridge startup, listener lifecycle, optimistic messages, or event delivery changed |
 | `AI-18` | Multi-webview editor tabs and queue ownership | Editor chat tabs, cross-webview state, queue ownership, title routing, or inline-file settings changed |
+| `AI-19` | Permission and queued-edit lifecycle | Permission modes, manual steering, editor hide/reveal, queued editing, or ownership transfer changed |
 
 For each extended scenario, combine the named mutation with `AI-02` reflow, `AI-06` detached
 streaming, the realistic `tmp/opencode` workflow when tools or edits are relevant, and the ownership
@@ -777,6 +778,32 @@ Pass invariants:
 - Inline file changes hide and return on the exact current-turn file card.
 - Reload sampling finds no duplicate marked user or assistant rows, and the surviving composer accepts
   focus and input.
+
+### AI-19 Permission And Queued-Edit Lifecycle
+
+Run the focused lifecycle controller with Luna or Terra:
+
+```sh
+npm run ai:live -- run --manifest <manifest-path> --launch <launch.json> --scenario AI-19 \
+  --surface sidebar --view-id sidebar --model openai/gpt-5.6-luna
+```
+
+Precondition: AI-07 completed successfully and the fixture still matches AI-07's exact recorded state.
+
+The controller opens the same root in the sidebar and an editor, changes permission mode from each
+surface, starts a real stream, pauses and edits an editor-owned queue row, hides the editor, and sends
+the transferred paused row manually as a steer from the sidebar. It then reveals the same editor by its
+stable `viewId` and checks the composer and canonical session history.
+
+Pass invariants:
+
+- A sidebar permission change reaches the editor, and a later editor permission change reaches the
+  sidebar.
+- The queue row retains its exact ID, owner, paused state, and edit content through the hide handoff.
+- Manual steer dispatch removes the paused transferred row and creates exactly one canonical user and
+  one valid linked assistant.
+- Revealing the same editor does not restore the removed queued edit as an ordinary composer draft.
+- The model remains exact, no descendant session appears, and the repository fixture remains unchanged.
 
 ## Failure Oracle
 
@@ -875,6 +902,8 @@ For AI-18, attach the full controller plan and evidence for target selection, ro
 model/permission synchronization, queue source views and item IDs, hidden/closed handoffs, inline-file
 toggle samples, reload duplicate samples, canonical delivery order, queue counts, leakage checks, and
 final focus owner.
+For AI-19, attach permission synchronization samples, the exact queue item and owner IDs, paused/edit
+state samples, hide/reveal `viewId` evidence, manual-steer delivery, and the final composer draft check.
 The overall result is `PASS` only when every scenario required by the request ran in the real Extension
 Development Host and passed. Any `FAIL` or `BLOCKED` required scenario makes the overall result `FAIL`.
 

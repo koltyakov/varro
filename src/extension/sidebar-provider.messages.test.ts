@@ -8,6 +8,32 @@ import {
 } from './sidebar-provider.test-support';
 
 describe('SidebarProvider session message responses', () => {
+  it('keeps a server-confirmed permission mode when persistence fails', async () => {
+    const workspaceState = {
+      get: vi.fn(() => undefined),
+      update: vi.fn(() => Promise.reject(new Error('disk full'))),
+    };
+    const server = createServer({
+      request: vi.fn(async () => ({ id: 'session-1', directory: '/repo' })),
+    });
+    const { provider } = await createSidebarProviderInstance({
+      server,
+      workspaceState: workspaceState as never,
+    });
+    const { posted } = attachTestView(provider);
+
+    await (
+      provider as unknown as {
+        updateConfirmedPermissionMode(sessionId: string, mode: 'full'): Promise<void>;
+      }
+    ).updateConfirmedPermissionMode('session-1', 'full');
+
+    expect(posted).toContainEqual({
+      type: 'permission-modes/sync',
+      payload: { modes: { 'session-1': 'full' } },
+    });
+  });
+
   it('migrates sidebar permission modes without overwriting newer host state', async () => {
     const values = new Map<string, unknown>();
     const workspaceState = {

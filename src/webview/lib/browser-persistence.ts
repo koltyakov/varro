@@ -83,6 +83,8 @@ export class BrowserPersistence implements Persistence {
 const EDITOR_INSTANCE_KEYS = new Set([
   'varro.inputDraft',
   'varro.inputDraftFiles',
+  'varro.queuedMessageEdit',
+  'varro.queuedMessages',
   'varro.editorViewId',
   'varro.lastActiveSessionId',
   'varro.lastOpenedView',

@@ -1133,6 +1133,7 @@ export class OpenCodeServer extends EventEmitter {
     }
 
     const install = this.processManager.getInstallInfo();
+    const health = await this.readHealthInfo();
 
     return {
       status: this._status,
@@ -1150,7 +1151,7 @@ export class OpenCodeServer extends EventEmitter {
       cliVersionError,
       activeAgentCount,
       activeAgentError,
-      health: await this.readHealthInfo(),
+      health,
       workspaceCwd: this.getWorkspaceCwd(),
     };
   }

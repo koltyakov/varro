@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { rename, writeFile } from 'node:fs/promises';
 import net from 'node:net';
+import path from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -101,6 +102,57 @@ export async function writeVscodeLaunchMetadata(filePath, details) {
   await writeFile(temporaryPath, `${JSON.stringify(metadata, null, 2)}\n`);
   await rename(temporaryPath, filePath);
   return metadata;
+}
+
+export function vscodeLaunchCommandMatches(command, launch) {
+  const requiredArguments = [
+    `--remote-debugging-port=${String(launch.remoteDebuggingPort)}`,
+    `--user-data-dir=${launch.userDataDir}`,
+    `--extensions-dir=${launch.extensionsDir}`,
+  ];
+  const hasArgument = (argument) =>
+    command.includes(`${argument} `) || command.endsWith(argument);
+  return (
+    path.dirname(launch.userDataDir) === launch.profileRoot &&
+    path.dirname(launch.extensionsDir) === launch.profileRoot &&
+    command.startsWith(`${launch.executable} `) &&
+    requiredArguments.every(hasArgument) &&
+    command.endsWith(` ${launch.workspace}`)
+  );
+}
+
+export async function verifyVscodeLaunchIdentity(launch) {
+  if (!Number.isInteger(launch.pid) || launch.pid <= 0 || !launch.birthIdentity) {
+    throw new Error('Launch metadata does not contain a valid process identity');
+  }
+  if (!Number.isInteger(launch.remoteDebuggingPort) || launch.remoteDebuggingPort <= 0) {
+    throw new Error('Launch metadata does not contain a valid remote debugging port');
+  }
+  const [birthIdentity, commandResult] = await Promise.all([
+    readProcessBirthIdentity(launch.pid),
+    execFileAsync('ps', ['-p', String(launch.pid), '-o', 'command=']),
+  ]);
+  if (birthIdentity !== launch.birthIdentity) {
+    throw new Error(`VS Code process ${String(launch.pid)} no longer matches its launch identity`);
+  }
+  const command = commandResult.stdout.trim();
+  if (!vscodeLaunchCommandMatches(command, launch)) {
+    throw new Error(`VS Code process ${String(launch.pid)} no longer matches its launch metadata`);
+  }
+  const targets = await fetch(
+    `http://127.0.0.1:${String(launch.remoteDebuggingPort)}/json/list`
+  ).then((response) => {
+    if (!response.ok) throw new Error(`CDP endpoint returned HTTP ${String(response.status)}`);
+    return response.json();
+  });
+  const workbenches = targets.filter(
+    (target) => target.type === 'page' && target.title.includes('[Extension Development Host]')
+  );
+  if (workbenches.length !== 1) {
+    throw new Error(
+      `Launch CDP endpoint has ${String(workbenches.length)} Extension Development Host targets`
+    );
+  }
 }
 
 export function reserveLoopbackPort() {

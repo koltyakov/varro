@@ -692,7 +692,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   createEffect(() => {
     const queuedEdit = queuedMessageEdit();
     if (!queuedEdit) return;
-    if (composerSessionId() !== queuedEdit.sessionId) cancelQueuedMessageEdit();
+    const queuedEditExists = state.queuedMessages.some((message) => message.id === queuedEdit.id);
+    if (!queuedEditExists || composerSessionId() !== queuedEdit.sessionId)
+      cancelQueuedMessageEdit();
     else if (composerEditingMessage()) setQueuedMessageEdit(null);
   });
 
@@ -2798,8 +2800,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       setIsDraggingOver(false);
     };
 
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') cancelQueuedMessageEdit();
+    };
+
     window.addEventListener('keydown', handlePopupEscape, true);
     window.addEventListener('click', handleWindowClick, true);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     document.addEventListener('dragenter', beginDropTarget, true);
     document.addEventListener('dragover', handleWindowDragOver, true);
     document.addEventListener('drop', handleWindowDrop, true);
@@ -2809,6 +2816,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       disposeBridge();
       window.removeEventListener('keydown', handlePopupEscape, true);
       window.removeEventListener('click', handleWindowClick, true);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       document.removeEventListener('dragenter', beginDropTarget, true);
       document.removeEventListener('dragover', handleWindowDragOver, true);
       document.removeEventListener('drop', handleWindowDrop, true);

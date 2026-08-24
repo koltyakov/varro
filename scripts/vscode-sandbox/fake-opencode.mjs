@@ -84,6 +84,10 @@ const server = http.createServer((request, response) => {
     sendJson(response, []);
     return;
   }
+  if (request.method === 'GET' && path === '/experimental/session') {
+    sendJson(response, []);
+    return;
+  }
   if (request.method === 'GET' && path === '/session/status') {
     sendJson(response, {});
     return;

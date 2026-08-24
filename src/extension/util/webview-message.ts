@@ -214,9 +214,23 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       const requestId = getSafeInteger(payload?.requestId);
       const itemId = getBoundedString(payload?.itemId, 512);
       const sessionId = getBoundedString(payload?.sessionId, 512);
-      return requestId !== null && requestId >= 0 && itemId && sessionId
-        ? { type, payload: { requestId, itemId, sessionId } }
-        : null;
+      const mode = payload?.mode;
+      if (
+        requestId === null ||
+        requestId < 0 ||
+        !itemId ||
+        !sessionId ||
+        (mode !== undefined && mode !== 'next' && mode !== 'steer')
+      ) {
+        return null;
+      }
+      return {
+        type,
+        payload:
+          mode === undefined
+            ? { requestId, itemId, sessionId }
+            : { requestId, itemId, sessionId, mode },
+      };
     }
 
     case 'queued-messages/release': {

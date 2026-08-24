@@ -895,7 +895,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           viewId,
           payload.sessionId,
           payload.itemId,
-          (candidateViewId) => this.isQueueViewEligible(candidateViewId)
+          (candidateViewId) => this.isQueueViewEligible(candidateViewId),
+          payload.mode
         )
       : null;
     const result: Extract<ExtensionMessage, { type: 'queued-messages/claim-result' }>['payload'] = {
@@ -931,7 +932,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           `/session/${encodeURIComponent(sessionID)}`,
           { permission: getSessionPermissionRulesForMode(mode, 'update') }
         );
-        const modes = await this.sessionPermissionModes.set(sessionID, mode);
+        let modes: Record<string, PermissionMode>;
+        try {
+          modes = await this.sessionPermissionModes.set(sessionID, mode);
+        } catch (err) {
+          modes = this.sessionPermissionModes.list();
+          logger.warn(
+            `Failed to persist confirmed permission mode: ${err instanceof Error ? err.message : String(err)}`
+          );
+        }
         this.post({ type: 'permission-modes/sync', payload: { modes } });
         return session;
       });
@@ -1110,9 +1119,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async transferEditorDraftState(viewId: string) {
+    const queuedImagePaths = new Set(
+      (this.queuedMessages.list() ?? []).flatMap((message) =>
+        [...(message.clipboardImages ?? []), ...(message.nativePdfs ?? [])].flatMap((attachment) =>
+          attachment.contextFile ? [attachment.contextFile.path] : []
+        )
+      )
+    );
     const imagePaths = this.draftImages
       .list(viewId)
-      .flatMap((image) => (image.contextFile ? [image.contextFile.path] : []));
+      .flatMap((image) =>
+        image.contextFile && !queuedImagePaths.has(image.contextFile.path)
+          ? [image.contextFile.path]
+          : []
+      );
     const persistence = this.draftImages.update([], viewId);
     await Promise.all([persistence, this.droppedFilesService.removeOwnedFiles(imagePaths)]);
   }

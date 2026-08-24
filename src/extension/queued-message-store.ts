@@ -75,7 +75,8 @@ export class QueuedMessageStore {
     viewId: string,
     sessionId: string,
     itemId: string,
-    isViewEligible: (candidateViewId: string) => boolean
+    isViewEligible: (candidateViewId: string) => boolean,
+    mode: 'next' | 'steer' = 'next'
   ): { lease: number } | null {
     this.reconcileDispatchClaims(isViewEligible);
     const existing = this.dispatchClaims.get(sessionId);
@@ -85,9 +86,14 @@ export class QueuedMessageStore {
         : null;
     }
 
-    const canonical = (this.messages ?? []).find(
-      (message) => message.sessionId === sessionId && !message.paused
-    );
+    const canonical =
+      mode === 'steer'
+        ? (this.messages ?? []).find(
+            (message) => message.sessionId === sessionId && message.id === itemId
+          )
+        : (this.messages ?? []).find(
+            (message) => message.sessionId === sessionId && !message.paused
+          );
     if (
       !canonical ||
       canonical.id !== itemId ||
