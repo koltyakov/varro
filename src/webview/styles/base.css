@@ -127,6 +127,7 @@
   --color-vscode-border-soft: color-mix(in srgb, var(--color-vscode-border) 28%, transparent);
   --color-vscode-border-default: color-mix(in srgb, var(--color-vscode-border) 50%, transparent);
   --color-vscode-border-strong: color-mix(in srgb, var(--color-vscode-border) 70%, transparent);
+  --color-vscode-prose-fg: color-mix(in srgb, var(--color-vscode-fg) 92%, white);
   --color-vscode-fg-soft: color-mix(in srgb, var(--color-vscode-fg) 88%, transparent);
   --color-vscode-fg-muted: color-mix(in srgb, var(--color-vscode-fg) 76%, transparent);
   /* Syntax tokens derive from the theme's terminal ANSI palette so code
@@ -356,7 +357,6 @@ body,
   line-height: 1.4;
   color: var(--color-vscode-fg);
   background: var(--color-vscode-sidebar);
-  -webkit-font-smoothing: antialiased;
 }
 
 html.varro-editor-surface {
@@ -382,6 +382,7 @@ body.chat-image-preview-open {
 body.vscode-light,
 body.vscode-high-contrast-light {
   --color-vscode-session-fg: var(--color-vscode-fg);
+  --color-vscode-prose-fg: color-mix(in srgb, var(--color-vscode-fg) 92%, black);
   --color-vscode-request-bubble: var(
     --vscode-chat-requestBubbleBackground,
     color-mix(in srgb, var(--color-vscode-accent) 10%, var(--color-vscode-widget-bg))

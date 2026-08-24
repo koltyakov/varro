@@ -125,6 +125,7 @@ function ToolCallIcon(props: {
   const isWaiting = () => !!props.waiting;
   const isRunningTask = () =>
     kind() === 'task' && props.statusClass === 'tool-status-running' && !isWaiting();
+  const iconSize = () => (isWaiting() || kind() === 'task' ? '16' : '12');
   const source = () => {
     if (isWaiting()) return hourglassIcon;
     switch (kind()) {
@@ -158,8 +159,8 @@ function ToolCallIcon(props: {
         <UiIcon
           source={source()}
           class={`${classes()}${isWaiting() ? ' tool-call-wait-icon' : ''}`}
-          width={isWaiting() ? '16' : '12'}
-          height={isWaiting() ? '16' : '12'}
+          width={iconSize()}
+          height={iconSize()}
           role={props.statusLabel ? 'status' : undefined}
           aria-label={props.statusLabel}
           aria-live={props.statusLabel ? 'polite' : undefined}

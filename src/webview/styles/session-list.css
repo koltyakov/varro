@@ -763,7 +763,7 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   gap: 5px;
   min-width: 0;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 350;
   color: var(--color-vscode-fg);
   overflow: hidden;
   text-overflow: ellipsis;

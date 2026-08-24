@@ -697,7 +697,7 @@
 }
 
 .assistant-activity-chevron.expanded {
-  transform: rotate(90deg);
+  transform: translateY(calc(var(--assistant-activity-summary-line-offset) / -2)) rotate(90deg);
 }
 
 .assistant-activity-details {
@@ -1435,7 +1435,8 @@ body.vscode-light
      keeps the prose slightly larger than UI chrome, as before. */
   font-size: calc(var(--vscode-font-size, 13px) + 0.5px);
   font-family: var(--font-sans);
-  color: var(--color-vscode-fg);
+  font-weight: 300;
+  color: var(--color-vscode-prose-fg);
 }
 
 .rendered-markdown p {

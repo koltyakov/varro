@@ -942,10 +942,7 @@ describe('sendMessage', () => {
     await hookModule.selectSession('session-2');
 
     expect(stateModule.state.selectedModel).toEqual({ providerID: 'openai', modelID: 'gpt-5' });
-    expect(stateModule.getSelectedModelForSession('session-2')).toEqual({
-      providerID: 'openai',
-      modelID: 'gpt-5',
-    });
+    expect(stateModule.getSelectedModelForSession('session-2')).toBeNull();
   });
 
   it('restores the active turn agent when switching back to a busy session', async () => {

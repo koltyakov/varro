@@ -224,6 +224,66 @@ describe('session-selection helpers', () => {
     expect(stopLoading).not.toHaveBeenCalled();
   });
 
+  it('does not let a fallback model override a session model during overlapping selection', async () => {
+    // SAFETY: The fixture provides the string | null fields read by this statement.
+    const activeSession = { value: null as string | null };
+    const generation = { value: 0 };
+    const firstResponse = deferred<ReturnType<typeof loadedSession>>();
+    const secondResponse = deferred<ReturnType<typeof loadedSession>>();
+    const sessionModels: Record<string, { providerID: string; modelID: string; variant?: string }> =
+      {};
+    const fallbackModel = {
+      providerID: 'openai',
+      modelID: 'gpt-5.6-sol',
+      variant: 'low',
+    };
+    const restoredModel = {
+      providerID: 'openai',
+      modelID: 'gpt-5.6-luna',
+      variant: 'xhigh',
+    };
+    const applySelectedModel = vi.fn((model: typeof fallbackModel, sessionId: string | null) => {
+      if (sessionId) sessionModels[sessionId] = model;
+    });
+    const loadSession = vi
+      .fn<SelectionDependencies['loadSession']>()
+      .mockReturnValueOnce(firstResponse.promise)
+      .mockReturnValueOnce(secondResponse.promise);
+    const deps = createSelectionDependencies({
+      getActiveSessionId: () => activeSession.value,
+      setActiveSessionId: (id) => {
+        activeSession.value = id;
+      },
+      resolvePersistedModel: (id) => sessionModels[id] ?? null,
+      resolveFallbackModel: () => fallbackModel,
+      applySelectedModel,
+      loadSession,
+      isCurrentSelectionGeneration: (value) => value === generation.value,
+      deriveSelectedModelFromMessages: () => restoredModel,
+    });
+
+    const firstSelection = selectSessionWithDependencies(
+      deps,
+      { next: () => ++generation.value },
+      'session-1'
+    );
+    const secondSelection = selectSessionWithDependencies(
+      deps,
+      { next: () => ++generation.value },
+      'session-1'
+    );
+
+    secondResponse.resolve(loadedSession('session-1'));
+    await secondSelection;
+    firstResponse.resolve(loadedSession('session-1'));
+    await firstSelection;
+
+    expect(applySelectedModel).toHaveBeenNthCalledWith(1, fallbackModel, null);
+    expect(applySelectedModel).toHaveBeenNthCalledWith(2, fallbackModel, null);
+    expect(applySelectedModel).toHaveBeenNthCalledWith(3, restoredModel, 'session-1');
+    expect(sessionModels['session-1']).toEqual(restoredModel);
+  });
+
   it('flags messages as loading until the session messages and todos are applied', async () => {
     let resolveLoad!: (value: {
       session: {

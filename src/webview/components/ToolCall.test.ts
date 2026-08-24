@@ -1001,6 +1001,8 @@ describe('ToolCall', () => {
     const icon = container?.querySelector<HTMLElement>('.tool-call-icon-task');
     expect(icon).toBeInstanceOf(HTMLSpanElement);
     expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(checkCircleIcon));
+    expect(icon?.style.getPropertyValue('--ui-icon-width')).toBe('16px');
+    expect(icon?.style.getPropertyValue('--ui-icon-height')).toBe('16px');
   });
 
   it('uses the cable tag icon for incomplete task tools', () => {
@@ -1023,6 +1025,33 @@ describe('ToolCall', () => {
 
     const icon = container?.querySelector<HTMLElement>('.tool-call-icon-task');
     expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(cableTagIcon));
+  });
+
+  it('renders the pending task cable tag icon at its established size', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'task',
+      state: {
+        status: 'pending',
+        input: {
+          description: 'Research the codebase',
+          subagent_type: 'explore',
+          prompt: 'Find the relevant implementation',
+        },
+        raw: '',
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    const icon = container?.querySelector<HTMLElement>('.tool-call-icon-task');
+    expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(cableTagIcon));
+    expect(icon?.style.getPropertyValue('--ui-icon-width')).toBe('16px');
+    expect(icon?.style.getPropertyValue('--ui-icon-height')).toBe('16px');
   });
 
   it('hides a duplicated description from expanded task details', () => {

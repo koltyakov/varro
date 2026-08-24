@@ -27,7 +27,7 @@ type SessionSelectionDeps = {
   resolveSessionModel(session: Session): SelectedModel | null;
   resolvePersistedModel(id: string): SelectedModel | null;
   resolveFallbackModel(): SelectedModel | null;
-  applySelectedModel(model: SelectedModel, id: string): void;
+  applySelectedModel(model: SelectedModel, id: string | null): void;
   getConnectedMcpNames(): string[];
   hasSelectedMcps(sessionId: string): boolean;
   setSelectedMcpsForSession(sessionId: string, names: string[]): void;
@@ -100,7 +100,7 @@ export async function selectSessionWithDependencies(
     } else {
       const fallbackModel = deps.resolveFallbackModel();
       if (fallbackModel) {
-        deps.applySelectedModel(fallbackModel, id);
+        deps.applySelectedModel(fallbackModel, null);
       }
     }
 

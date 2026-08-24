@@ -12,6 +12,7 @@
   color: var(--color-vscode-input-fg);
   outline: none;
   font-family: inherit;
+  font-weight: 300;
   border: none;
   white-space: pre-wrap;
   word-wrap: break-word;
@@ -244,6 +245,7 @@
 .chat-thinking-box .thinking-label-text {
   display: block;
   min-width: 0;
+  font-weight: 300;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1120,7 +1122,7 @@ kbd {
 }
 
 .chat-tool-invocation-part.tool-invocation-task .tool-invocation-title {
-  font-weight: 600;
+  font-weight: 300;
 }
 
 .chat-tool-invocation-part:not(:last-child) {
@@ -1182,8 +1184,8 @@ kbd {
 
 .chat-tool-invocation-part .tool-call-icon {
   display: block;
-  width: 12px;
-  height: 12px;
+  width: var(--ui-icon-width, 12px);
+  height: var(--ui-icon-height, 12px);
   flex-shrink: 0;
 }
 
@@ -1224,6 +1226,7 @@ kbd {
 .chat-tool-invocation-part .tool-invocation-title {
   flex: 1;
   min-width: 0;
+  font-weight: 300;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

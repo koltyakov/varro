@@ -1086,6 +1086,7 @@
 .models-model-name {
   min-width: 0;
   font-size: 12px;
+  font-weight: 350;
   color: var(--color-vscode-fg);
   overflow: hidden;
   text-overflow: ellipsis;

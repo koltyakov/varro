@@ -56,6 +56,10 @@
   min-width: 0;
 }
 
+.chat-header-session-title .chat-header-title-text {
+  font-weight: 300;
+}
+
 .chat-header-shared-marker {
   display: inline-flex;
   flex-shrink: 0;
