@@ -212,7 +212,29 @@ function openSessionInTerminal(provider: object, sessionId: string) {
   ).openSessionInTerminal(sessionId);
 }
 
+function openNewTerminalEditor(provider: object) {
+  return (
+    provider as unknown as {
+      openNewTerminalEditor: () => void;
+    }
+  ).openNewTerminalEditor();
+}
+
 describe('SidebarProvider terminal commands', () => {
+  it('opens the default shell in an editor tab at the workspace root', async () => {
+    const { provider } = await createSidebarProviderInstance();
+
+    openNewTerminalEditor(provider);
+
+    expect(getVscodeMock().window.createTerminal).toHaveBeenCalledWith({
+      cwd: '/repo',
+      location: getVscodeMock().TerminalLocation.Editor,
+    });
+    expect(getVscodeMock().window.createTerminal.mock.results[0]?.value.show).toHaveBeenCalledWith(
+      false
+    );
+  });
+
   it('launches session handoff with the configured OpenCode executable', async () => {
     const server = createServer({
       resolveCommand: vi.fn(() => '/Applications/OpenCode Tools/opencode'),

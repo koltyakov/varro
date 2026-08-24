@@ -75,6 +75,10 @@ export function registerCommands(
       await sidebar.openNewEditor();
     }),
 
+    vscode.commands.registerCommand('varro.chat.newTerminalEditor', () => {
+      sidebar.openNewTerminalEditor();
+    }),
+
     vscode.commands.registerCommand('varro.chat.searchSessions', async () => {
       try {
         await revealSidebar();

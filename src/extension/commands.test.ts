@@ -84,6 +84,7 @@ function register(
     post: vi.fn(),
     postCommand: vi.fn(),
     openNewEditor: vi.fn(() => Promise.resolve()),
+    openNewTerminalEditor: vi.fn(),
     requestInputFocus: vi.fn(),
     searchSessions: vi.fn(),
     switchSession: vi.fn(),
@@ -706,6 +707,14 @@ describe('sidebar navigation commands', () => {
     await runCommand('varro.chat.newEditor');
 
     expect(sidebar.openNewEditor).toHaveBeenCalledOnce();
+  });
+
+  it('opens a new terminal from the editor-title action', async () => {
+    const { sidebar } = register();
+
+    await runCommand('varro.chat.newTerminalEditor');
+
+    expect(sidebar.openNewTerminalEditor).toHaveBeenCalledOnce();
   });
 
   it('switches sessions in both directions', async () => {

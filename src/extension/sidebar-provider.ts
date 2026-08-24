@@ -620,6 +620,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await this.openEditorPanel({ type: 'new-session' });
   }
 
+  openNewTerminalEditor() {
+    const terminal = vscode.window.createTerminal({
+      cwd: this.contextProvider.context.workspacePath || undefined,
+      location: vscode.TerminalLocation.Editor,
+    });
+    terminal.show(false);
+  }
+
   async deserializeWebviewPanel(panel: vscode.WebviewPanel, state: PersistedEditorState) {
     const route = this.readPersistedEditorRoute(state);
     const viewId = this.readPersistedEditorViewId(state);

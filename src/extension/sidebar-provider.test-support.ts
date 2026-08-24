@@ -72,6 +72,7 @@ const mocks = vi.hoisted(() => ({
     },
     StatusBarAlignment: { Left: 1, Right: 2 },
     ViewColumn: { Active: -1 },
+    TerminalLocation: { Panel: 1, Editor: 2 },
     ThemeColor: class ThemeColor {
       constructor(public readonly value: string) {}
     },

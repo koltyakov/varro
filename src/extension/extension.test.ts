@@ -945,18 +945,29 @@ describe('extension manifest', () => {
     );
   });
 
-  it('contributes a new-chat action to Varro editor tabs', () => {
+  it('contributes new chat and terminal actions to Varro editor tabs', () => {
     expect(packageJson.contributes.commands).toContainEqual({
       command: 'varro.chat.newEditor',
       title: 'Varro: New Chat Editor',
       shortTitle: 'New Chat Editor',
       icon: '$(add)',
     });
+    expect(packageJson.contributes.commands).toContainEqual({
+      command: 'varro.chat.newTerminalEditor',
+      title: 'Varro: New Terminal Editor',
+      shortTitle: 'New Terminal Editor',
+      icon: '$(terminal)',
+    });
     expect(packageJson.contributes.menus['editor/title']).toEqual([
       {
         command: 'varro.chat.newEditor',
         when: 'activeWebviewPanelId == varro.editor',
         group: 'navigation@1',
+      },
+      {
+        command: 'varro.chat.newTerminalEditor',
+        when: 'activeWebviewPanelId == varro.editor',
+        group: 'navigation@2',
       },
     ]);
   });

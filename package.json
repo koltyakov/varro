@@ -132,6 +132,12 @@
         "icon": "$(add)"
       },
       {
+        "command": "varro.chat.newTerminalEditor",
+        "title": "Varro: New Terminal Editor",
+        "shortTitle": "New Terminal Editor",
+        "icon": "$(terminal)"
+      },
+      {
         "command": "varro.chat.searchSessions",
         "title": "Varro: Search Sessions"
       },
@@ -234,6 +240,11 @@
           "command": "varro.chat.newEditor",
           "when": "activeWebviewPanelId == varro.editor",
           "group": "navigation@1"
+        },
+        {
+          "command": "varro.chat.newTerminalEditor",
+          "when": "activeWebviewPanelId == varro.editor",
+          "group": "navigation@2"
         }
       ],
       "explorer/context": [
