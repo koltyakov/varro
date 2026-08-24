@@ -27,6 +27,7 @@ import type {
 } from '../../shared/ralph';
 import { MAX_RALPH_ITERATIONS, normalizeRalphWorkspaceDirectory } from '../../shared/ralph';
 import { asRecord } from '../../shared/type-utils';
+import { parseModelPreferences } from '../../shared/model-preferences';
 import type { UnknownRecord } from '../../shared/type-utils';
 import {
   MAX_NATIVE_PDF_TOTAL_BYTES,
@@ -107,6 +108,8 @@ const WEBVIEW_MESSAGE_TYPES = {
   'session/seen': true,
   'session-model/update': true,
   'session-models/migrate': true,
+  'model-preferences/update': true,
+  'model-preferences/migrate': true,
   'webview/focus': true,
   'permission/reveal': true,
   'providers/watch': true,
@@ -184,6 +187,13 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       return typeof payload?.includeAllTime === 'boolean'
         ? { type, payload: { includeAllTime: payload.includeAllTime } }
         : null;
+    }
+
+    case 'model-preferences/update':
+    case 'model-preferences/migrate': {
+      const payload = asRecord(message?.payload);
+      if (!payload) return null;
+      return { type, payload: parseModelPreferences(payload) };
     }
 
     case 'session/seen': {

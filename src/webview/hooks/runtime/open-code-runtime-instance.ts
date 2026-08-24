@@ -34,6 +34,7 @@ import { applyWebviewTheme } from '../../lib/theme';
 import type { MessageEntry, Permission, Session, SessionStatus } from '../../types';
 import {
   clearQueuedMessagesForSession,
+  getModelPreferencesSnapshot,
   getSessionTreeIds,
   getSessionTreeRootId,
   isSessionAwaitingInput,
@@ -1200,6 +1201,15 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
               ])
             ),
           },
+        });
+      }
+      if (
+        webviewContext?.surface !== 'editor' &&
+        initialWebviewState.modelPreferencesMigrationPending
+      ) {
+        postMessage({
+          type: 'model-preferences/migrate',
+          payload: getModelPreferencesSnapshot(),
         });
       }
       if (

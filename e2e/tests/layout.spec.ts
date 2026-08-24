@@ -1263,9 +1263,9 @@ test('reveals user and sticky message timestamps on hover', async ({ page }) => 
   expect(timeChipStyle.borderBottom).toBeCloseTo(3, 0);
   expect(timeChipStyle.backgroundColor).toBe(timeChipStyle.chatBackgroundColor);
   expect(timeChipStyle.borderColor).toBe(timeChipStyle.lineColor);
-  expect(timeChipStyle.borderTop).toBeCloseTo(12, 0);
-  expect(timeChipStyle.textCenter).toBeCloseTo(timeChipStyle.borderTop, 0);
-  expect(timeChipStyle.borderTopWidth).toBe('0px');
+  expect(timeChipStyle.borderTop).toBeCloseTo(timeChipStyle.borderBottom, 0);
+  expect(timeChipStyle.textCenter).toBeCloseTo(12, 0);
+  expect(timeChipStyle.borderTopWidth).toBe('1px');
   expect(timeChipStyle.borderRadius).toBe(timeChipStyle.forkRadius);
   expect(timeChipStyle.paddingLeft).toBe('5px');
   expect(timeChipStyle.paddingRight).toBe(timeChipStyle.paddingLeft);

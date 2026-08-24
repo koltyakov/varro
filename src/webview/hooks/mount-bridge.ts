@@ -10,6 +10,7 @@ import { postMessage } from '../lib/bridge';
 import { getWorkspaceStatusEventSummary } from '../lib/client';
 import { isString } from '../lib/runtime-values';
 import {
+  applyModelPreferencesSnapshot,
   applySessionPermissionModesSnapshot,
   applySessionSelectedModelsSnapshot,
   syncSessionMarkersForWorkspace,
@@ -321,6 +322,9 @@ export function handleExtensionMessageWithDependencies(
       break;
     case 'session-models/sync':
       applySessionSelectedModelsSnapshot(msg.payload.models);
+      break;
+    case 'model-preferences/sync':
+      applyModelPreferencesSnapshot(msg.payload);
       break;
     case 'editor-tabs/state':
       deps.setEditorTabsState?.(msg.payload.open, msg.payload.sessionIds);

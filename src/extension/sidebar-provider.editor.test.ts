@@ -49,7 +49,7 @@ function createPanel() {
   return {
     panel,
     registeredDisposables,
-    receive: (message: unknown) => messageListeners[0]?.(message),
+    receive: (message: unknown) => messageListeners.at(-1)?.(message),
     setVisible: (visible: boolean) => {
       panel.visible = visible;
       for (const listener of viewStateListeners) listener({ webviewPanel: panel });
@@ -85,7 +85,7 @@ describe('SidebarProvider editor panels', () => {
 
     editor.setVisible(true);
     expect(editor.panel.webview.html).toBe(visibleHtml);
-    expect(editor.panel.webview.onDidReceiveMessage).toHaveBeenCalledOnce();
+    expect(editor.panel.webview.onDidReceiveMessage).toHaveBeenCalledTimes(2);
 
     editor.receive({ type: 'ready' });
     await vi.waitFor(() =>
@@ -142,6 +142,24 @@ describe('SidebarProvider editor panels', () => {
 
     expect(first.panel.title).toBe('Varro: Session');
     expect(first.panel.iconPath).toEqual({ id: 'chat-sparkle' });
+    expect(first.panel.reveal).toHaveBeenCalledOnce();
+    expect(duplicate.panel.dispose).toHaveBeenCalledOnce();
+  });
+
+  it('deduplicates restored panels that share a persisted view identity', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const first = createPanel();
+    const duplicate = createPanel();
+
+    await provider.deserializeWebviewPanel(first.panel as never, {
+      'varro.editorViewId': 'editor-shared',
+      'varro.lastOpenedView': { type: 'session', sessionId: 'session-1', timestamp: 1 },
+    });
+    await provider.deserializeWebviewPanel(duplicate.panel as never, {
+      'varro.editorViewId': 'editor-shared',
+      'varro.lastOpenedView': { type: 'session', sessionId: 'session-2', timestamp: 2 },
+    });
+
     expect(first.panel.reveal).toHaveBeenCalledOnce();
     expect(duplicate.panel.dispose).toHaveBeenCalledOnce();
   });
@@ -924,7 +942,20 @@ describe('SidebarProvider editor panels', () => {
     );
   });
 
-  it('does not render a restored editor panel until it becomes visible', async () => {
+  it('does not create or attach editor endpoints after deactivation starts', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const restored = createPanel();
+    await provider.dispose();
+
+    await provider.openNewEditor();
+    await provider.deserializeWebviewPanel(restored.panel as never, undefined);
+
+    expect(getVscodeMock().window.createWebviewPanel).not.toHaveBeenCalled();
+    expect(restored.panel.onDidDispose).not.toHaveBeenCalled();
+    expect(restored.panel.webview.onDidReceiveMessage).not.toHaveBeenCalled();
+  });
+
+  it('prepares a hidden restored editor panel for its first reveal', async () => {
     const { provider } = await createSidebarProviderInstance();
     const panel = createPanel();
     panel.panel.visible = false;
@@ -935,5 +966,9 @@ describe('SidebarProvider editor panels', () => {
 
     expect(panel.panel.webview.html).toContain('--vscode-editor-background');
     expect(panel.panel.webview.html).not.toContain('webview.mjs');
+
+    panel.setVisible(true);
+    await vi.waitFor(() => expect(panel.panel.webview.html).toContain('type="module"'));
+    expect(panel.panel.webview.onDidReceiveMessage).toHaveBeenCalledTimes(2);
   });
 });

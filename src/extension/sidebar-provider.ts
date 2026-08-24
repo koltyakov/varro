@@ -27,6 +27,7 @@ import { HiddenSessionManager } from './hidden-session-manager';
 import { HostPersistence } from './host-persistence';
 import { logger } from './logger';
 import { MessageRouter } from './message-router';
+import { ModelPreferencesStore } from './model-preferences-store';
 import {
   nodeProviderSignatureFileSystem,
   ProviderFileRefreshController,
@@ -101,6 +102,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly queuedMessages: QueuedMessageStore;
   private readonly sessionPermissionModes: SessionPermissionModeStore;
   private readonly sessionSelectedModels: SessionModelSelectionStore;
+  private readonly modelPreferences: ModelPreferencesStore;
   private readonly draftImages: DraftImageStore;
   private readonly hiddenSessions: HiddenSessionManager;
   private readonly autoApproveJudge: AutoApproveJudge;
@@ -192,6 +194,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.queuedMessages = new QueuedMessageStore(persistence);
     this.sessionPermissionModes = new SessionPermissionModeStore(persistence);
     this.sessionSelectedModels = new SessionModelSelectionStore(persistence);
+    this.modelPreferences = new ModelPreferencesStore(persistence);
     this.draftImages = new DraftImageStore(persistence);
     this.hiddenSessions = new HiddenSessionManager();
     this.autoApproveJudge = new AutoApproveJudge(server, this.hiddenSessions, isOpenAIPro, () =>
@@ -345,6 +348,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         sessionPermissionModes: () => this.sessionPermissionModes.list(),
         sessionSelectedModels: () => this.sessionSelectedModels.list(),
         sessionModelMigrationPending: () => this.sessionSelectedModels.needsMigration(),
+        modelPreferences: () =>
+          this.modelPreferences.needsMigration() ? undefined : this.modelPreferences.get(),
+        modelPreferencesMigrationPending: () => this.modelPreferences.needsMigration(),
         editorTabsOpen: () => this.editorPanels.size > 0,
         editorSessionIds: () => this.visibleEditorSessionIds(),
         permissionAutomation: () => this.permissionAutomationFor(webviewContext.viewId),
@@ -491,8 +497,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           contextFilesState.removeContextFile(path, (message) => post(message)),
         clearContextFiles: () => contextFilesState.clearContextFiles(),
         pickFiles: () => contextFilesState.pickFiles((message) => post(message)),
-        searchFiles: (requestId, query, limit) =>
-          this.searchFiles(requestId, query, limit, post, fileSearch),
+        searchFiles: (requestId, query, limit) => {
+          const generation = webviewSession.getRequestGeneration();
+          this.searchFiles(requestId, query, limit, post, fileSearch, () =>
+            this.isEndpointGenerationAvailable(endpointRef.endpoint, generation)
+          );
+        },
         runInTerminal: (command, title) => this.runInTerminal(command, title),
         openSessionInTerminal: (sessionId) => this.openSessionInTerminal(sessionId),
         openSessionInEditor: (sessionId, title, model, rootSessionId) =>
@@ -527,6 +537,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         migrateSessionModels: async ({ models }) => {
           const migrated = await this.sessionSelectedModels.migrateLegacy(models);
           this.post({ type: 'session-models/sync', payload: { models: migrated } });
+        },
+        updateModelPreferences: async (preferences) => {
+          const updated = await this.modelPreferences.set(preferences);
+          this.post({ type: 'model-preferences/sync', payload: updated });
+        },
+        migrateModelPreferences: async (preferences) => {
+          const migrated = await this.modelPreferences.migrateLegacy(preferences);
+          this.post({ type: 'model-preferences/sync', payload: migrated });
         },
         updateDraftImages: ({ images }) => this.draftImages.update(images, webviewContext.viewId),
         setMermaidPreviewOpen: (open) => this.setMermaidPreviewOpen(open),
@@ -564,6 +582,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     _context: vscode.WebviewViewResolveContext,
     _token: vscode.CancellationToken
   ) {
+    if (this.disposing) return Promise.resolve();
     return this.webviewSession.resolve(webviewView).catch((err) => {
       logger.error(
         `resolveWebviewView failed: ${err instanceof Error ? err.message : String(err)}`
@@ -580,6 +599,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     model?: ChatModelSelection,
     rootSessionId?: string
   ) {
+    if (this.disposing) return;
     if (model) {
       try {
         const models = await this.sessionSelectedModels.setIfAbsent(sessionId, model);
@@ -590,6 +610,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         );
       }
     }
+    if (this.disposing) return;
     const rootId = rootSessionId || this.sessionState.rootSessionIdFor(sessionId);
     const key = `session:${rootId}`;
     const existing = this.editorPanels.get(key);
@@ -617,6 +638,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   async openNewEditor() {
+    if (this.disposing) return;
     await this.openEditorPanel({ type: 'new-session' });
   }
 
@@ -629,6 +651,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   async deserializeWebviewPanel(panel: vscode.WebviewPanel, state: PersistedEditorState) {
+    if (this.disposing) return;
     const route = this.readPersistedEditorRoute(state);
     const viewId = this.readPersistedEditorViewId(state);
     await this.attachEditorPanel(
@@ -639,6 +662,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async openEditorPanel(route: WebviewRoute) {
+    if (this.disposing) return;
     const panel = vscode.window.createWebviewPanel(
       SidebarProvider.editorViewType,
       this.editorTitle(route),
@@ -649,10 +673,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async attachEditorPanel(panel: vscode.WebviewPanel, route: WebviewRoute, viewId: string) {
+    if (this.disposing) return;
     const key = this.editorKey(route, viewId);
     const existing = this.editorPanels.get(key);
     if (existing) {
       existing.panel.reveal(existing.panel.viewColumn, false);
+      panel.dispose();
+      return;
+    }
+    const existingView = [...this.editorPanels.values()].find(
+      (endpoint) => endpoint.viewId === viewId
+    );
+    if (existingView) {
+      existingView.panel.reveal(existingView.panel.viewColumn, false);
       panel.dispose();
       return;
     }
@@ -685,7 +718,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       if (this.disposing) return;
       if (webviewPanel.visible === wasVisible) return;
       wasVisible = webviewPanel.visible;
-      if (!webviewPanel.visible) {
+      if (webviewPanel.visible) {
+        endpoint.webviewSession.resume();
+      } else {
         this.setEndpointReady(endpoint, false);
         endpoint.webviewSession.suspend();
       }
@@ -1077,6 +1112,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   async dispose() {
     this.disposing = true;
     this.providerFileRefresh.beginDispose();
+    for (const endpoint of this.endpoints) this.setEndpointReady(endpoint, false);
     for (const endpoint of this.editorPanels.values()) {
       this.setEndpointReady(endpoint, false);
       for (const disposable of endpoint.panelDisposables) disposable.dispose();
@@ -1100,6 +1136,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await this.draftImages.dispose();
     await this.sessionPermissionModes.dispose();
     await this.sessionSelectedModels.dispose();
+    await this.modelPreferences.dispose();
     this.configDisposable.dispose();
     this.windowStateDisposable.dispose();
     this.providerFileRefresh.dispose();
@@ -1318,9 +1355,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     query: string,
     limit = 12,
     post: (message: ExtensionMessage) => void = (message) => this.post(message),
-    fileSearch = this.fileSearch
+    fileSearch = this.fileSearch,
+    isAvailable: () => boolean = () => true
   ) {
     fileSearch.search(requestId, query, limit, (result) => {
+      if (!isAvailable()) return;
       post({ type: 'files/search-results', payload: result });
     });
   }

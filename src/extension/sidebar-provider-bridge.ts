@@ -28,6 +28,10 @@ export class SidebarProviderBridge {
     this.deliveryFailureHandler = handler;
   }
 
+  invalidatePendingDeliveries() {
+    this.viewGeneration += 1;
+  }
+
   post(msg: ExtensionMessage) {
     const view = this.view;
     if (!view) return;

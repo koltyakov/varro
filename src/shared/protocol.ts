@@ -550,6 +550,15 @@ export type WebviewInstanceContext = {
   initialRoute: WebviewRoute;
 };
 
+export type ModelPreferences = {
+  modelVariantSelections: Record<string, string | null>;
+  hiddenProviders: string[];
+  hiddenModels: string[];
+  addedModels: string[];
+  pinnedModels: string[];
+  modelDisplayNames: Record<string, string>;
+};
+
 export type ClipboardImageSnapshot = {
   id: string;
   url: string;
@@ -599,6 +608,8 @@ export type InitialWebviewState = {
   sessionPermissionModes?: Record<string, PermissionMode>;
   sessionSelectedModels?: Record<string, ChatModelSelection>;
   sessionModelMigrationPending?: boolean;
+  modelPreferences?: ModelPreferences;
+  modelPreferencesMigrationPending?: boolean;
   editorTabsOpen?: boolean;
   /** Root session ids currently visible in editor tabs. */
   editorSessionIds?: string[];
@@ -671,6 +682,7 @@ export type ExtensionMessage =
       type: 'session-models/sync';
       payload: { models: Record<string, ChatModelSelection> };
     }
+  | { type: 'model-preferences/sync'; payload: ModelPreferences }
   | { type: 'editor-tabs/state'; payload: { open: boolean; sessionIds: string[] } }
   | { type: 'permission-automation/update'; payload: { owner: boolean; lease: number } }
   | { type: 'permission/actionable'; payload: { permissionId: string } }
@@ -728,6 +740,8 @@ export type WebviewMessage =
       type: 'session-models/migrate';
       payload: { models: Record<string, ChatModelSelection> };
     }
+  | { type: 'model-preferences/update'; payload: ModelPreferences }
+  | { type: 'model-preferences/migrate'; payload: ModelPreferences }
   | { type: 'session/export'; payload: { sessionId: string } }
   | { type: 'usage/report'; payload: { includeAllTime: boolean } }
   | { type: 'webview/reload' }

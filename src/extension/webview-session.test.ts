@@ -108,6 +108,7 @@ function createSession(options?: {
     getView: vi.fn(() => currentView),
     isVisible: vi.fn(() => Boolean(currentView?.visible)),
     onDeliveryFailure: vi.fn(),
+    invalidatePendingDeliveries: vi.fn(),
     post: vi.fn(),
     deliver: vi.fn(() => Promise.resolve(true)),
     webviewOptions: vi.fn(() => ({ enableScripts: true, localResourceRoots: [] })),
@@ -177,6 +178,15 @@ function createSession(options?: {
     sessionPermissionModes: vi.fn<() => InitialWebviewState['sessionPermissionModes']>(() => ({})),
     sessionSelectedModels: vi.fn<() => InitialWebviewState['sessionSelectedModels']>(() => ({})),
     sessionModelMigrationPending: vi.fn(() => false),
+    modelPreferences: vi.fn<() => InitialWebviewState['modelPreferences']>(() => ({
+      modelVariantSelections: {},
+      hiddenProviders: [],
+      hiddenModels: [],
+      addedModels: [],
+      pinnedModels: [],
+      modelDisplayNames: {},
+    })),
+    modelPreferencesMigrationPending: vi.fn(() => false),
     editorTabsOpen: vi.fn(() => false),
     editorSessionIds: vi.fn(() => []),
     permissionAutomation: vi.fn(() => ({ owner: true, lease: 1 })),
@@ -743,8 +753,8 @@ describe('WebviewSession', () => {
     expect(deps.updateStatusBarItem).toHaveBeenCalledOnce();
   });
 
-  it('keeps host listeners attached while an editor webview is suspended', async () => {
-    const { session, deps } = createSession({ editorSurface: true });
+  it('rotates only the message listener while an editor webview is suspended', async () => {
+    const { session, bridge, deps } = createSession({ editorSurface: true });
     const view = createWebviewView(true);
     await session.resolve(view as never);
     const messageDisposable = view.webview.onDidReceiveMessage.mock.results[0]?.value;
@@ -756,9 +766,45 @@ describe('WebviewSession', () => {
 
     expect(session.getRequestGeneration()).toBe(generation + 1);
     expect(deps.cancelApiRequestsBeforeGeneration).toHaveBeenLastCalledWith(generation + 1);
-    expect(messageDisposable.dispose).not.toHaveBeenCalled();
+    expect(bridge.invalidatePendingDeliveries).toHaveBeenCalledOnce();
+    expect(messageDisposable.dispose).toHaveBeenCalledOnce();
     expect(disposeDisposable.dispose).not.toHaveBeenCalled();
     expect(visibilityDisposable.dispose).not.toHaveBeenCalled();
+
+    session.resume();
+    expect(view.webview.onDidReceiveMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores a message queued by an editor document before suspension', async () => {
+    const { session, deps } = createSession({ editorSurface: true });
+    const view = createWebviewView(true);
+    await session.resolve(view as never);
+    const staleListener = view.listeners.message;
+
+    session.suspend();
+    staleListener?.({ type: 'ready' });
+    expect(deps.handleMessage).not.toHaveBeenCalled();
+
+    session.resume();
+    view.listeners.message?.({ type: 'ready' });
+    expect(deps.handleMessage).toHaveBeenCalledWith({ type: 'ready' });
+  });
+
+  it('finishes preparing editor HTML when the panel is suspended during rendering', async () => {
+    const html = createDeferred<string>();
+    const { session } = createSession({
+      editorSurface: true,
+      renderHtml: () => html.promise,
+    });
+    const view = createWebviewView(true);
+    await session.resolve(view as never);
+    await flushMicrotasks();
+
+    session.suspend();
+    html.resolve('<html>prepared while hidden</html>');
+    await flushMicrotasks();
+
+    expect(view.webview.html).toBe('<html>prepared while hidden</html>');
   });
 
   it('logs ready and visible side-effect failures without duplicating server-start reporting', async () => {

@@ -365,6 +365,33 @@ describe('bridge', () => {
     bridge.cleanupBridge();
   });
 
+  it('converts direct sender failures into unavailable delivery', async () => {
+    const bridge = await loadBridge();
+    window.__sendToExtension = vi.fn(() => {
+      throw new Error('Webview is disposed');
+    });
+
+    // oxlint-disable-next-line require-post-message-target-origin -- This is Varro's typed extension bridge, not Window.postMessage.
+    expect(bridge.postMessage({ type: 'ready' })).toBe(false);
+  });
+
+  it('finishes cleanup when cancellation hits a disposed sender', async () => {
+    const bridge = await loadBridge();
+    window.__sendToExtension = vi
+      .fn()
+      .mockImplementationOnce(() => undefined)
+      .mockImplementationOnce(() => {
+        throw new Error('Webview is disposed');
+      });
+    const request = bridge.apiCall('GET', '/session');
+    const rejection = expect(request).rejects.toThrow('Bridge cleaned up');
+
+    expect(() => bridge.cleanupBridge()).not.toThrow();
+
+    await rejection;
+    expect(bridgeWindow[BRIDGE_CLEANUP_KEY]).toBeUndefined();
+  });
+
   it('does not create API requests after cleanup', async () => {
     const bridge = await loadBridge();
     window.__sendToExtension = vi.fn();

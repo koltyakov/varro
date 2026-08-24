@@ -78,6 +78,8 @@ export interface SidebarProviderActionDeps {
   migratePermissionModes: MessageRouterCallbacks['migratePermissionModes'];
   updateSessionModel: MessageRouterCallbacks['updateSessionModel'];
   migrateSessionModels: MessageRouterCallbacks['migrateSessionModels'];
+  updateModelPreferences: MessageRouterCallbacks['updateModelPreferences'];
+  migrateModelPreferences: MessageRouterCallbacks['migrateModelPreferences'];
   updateDraftImages: MessageRouterCallbacks['updateDraftImages'];
   setMermaidPreviewOpen: MessageRouterCallbacks['setMermaidPreviewOpen'];
 }
@@ -153,6 +155,8 @@ export function createSidebarProviderActions(
     migratePermissionModes: (payload) => deps.migratePermissionModes(payload),
     updateSessionModel: (payload) => deps.updateSessionModel(payload),
     migrateSessionModels: (payload) => deps.migrateSessionModels(payload),
+    updateModelPreferences: (payload) => deps.updateModelPreferences(payload),
+    migrateModelPreferences: (payload) => deps.migrateModelPreferences(payload),
     updateDraftImages: (payload) => deps.updateDraftImages(payload),
     exportSession: (sessionId) => deps.sessionExportService.exportSession(sessionId),
     generateUsageReport: (includeAllTime) => deps.usageReportService.openReport(includeAllTime),

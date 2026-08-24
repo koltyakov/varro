@@ -3,6 +3,7 @@ import { parseExtensionMessage } from '../../shared/extension-message';
 import { isString, type UnknownRecord, isObject } from './runtime-values';
 
 type MessageHandler = (msg: ExtensionMessage) => void;
+type SendResult = { sent: boolean; error?: unknown };
 export type SlowApiRequest = {
   id: number;
   method: string;
@@ -81,11 +82,19 @@ export function onSlowApiRequestsChange(handler: SlowApiRequestHandler): () => v
 }
 
 export function postMessage(msg: WebviewMessage): boolean {
-  if (disposed) return false;
+  return sendToExtension(msg).sent;
+}
+
+function sendToExtension(msg: WebviewMessage): SendResult {
+  if (disposed) return { sent: false };
   const send = bridgeWindow.__sendToExtension;
-  if (!send) return false;
-  send(msg);
-  return true;
+  if (!send) return { sent: false };
+  try {
+    send(msg);
+    return { sent: true };
+  } catch (error) {
+    return { sent: false, error };
+  }
 }
 
 let reqId = 0;
@@ -270,28 +279,25 @@ function sendApiCall<T>(
       pending.get(id)!.cleanupAbort = cleanupAbort;
     }
 
-    let sendError: unknown;
-    try {
-      const payload: Extract<WebviewMessage, { type: 'api/request' }>['payload'] = {
-        id,
-        cancelKey,
-        method,
-        path,
-        body,
-      };
-      if (options.permissionAutomationLease !== undefined) {
-        payload.permissionAutomationLease = options.permissionAutomationLease;
-      }
-      if (options.queuedMessageDispatch) {
-        payload.queuedMessageDispatch = options.queuedMessageDispatch;
-      }
-      sent = postMessage({
-        type: 'api/request',
-        payload,
-      });
-    } catch (err) {
-      sendError = err;
+    const payload: Extract<WebviewMessage, { type: 'api/request' }>['payload'] = {
+      id,
+      cancelKey,
+      method,
+      path,
+      body,
+    };
+    if (options.permissionAutomationLease !== undefined) {
+      payload.permissionAutomationLease = options.permissionAutomationLease;
     }
+    if (options.queuedMessageDispatch) {
+      payload.queuedMessageDispatch = options.queuedMessageDispatch;
+    }
+    const sendResult = sendToExtension({
+      type: 'api/request',
+      payload,
+    });
+    sent = sendResult.sent;
+    const sendError = sendResult.error;
 
     if (sent) return;
 

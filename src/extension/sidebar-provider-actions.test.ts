@@ -172,6 +172,12 @@ function createActionFixture() {
     migrateSessionModels: vi.fn<SidebarProviderActionDeps['migrateSessionModels']>(() =>
       Promise.resolve()
     ),
+    updateModelPreferences: vi.fn<SidebarProviderActionDeps['updateModelPreferences']>(() =>
+      Promise.resolve()
+    ),
+    migrateModelPreferences: vi.fn<SidebarProviderActionDeps['migrateModelPreferences']>(() =>
+      Promise.resolve()
+    ),
     updateDraftImages: vi.fn<SidebarProviderActionDeps['updateDraftImages']>(() =>
       Promise.resolve()
     ),

@@ -14,6 +14,7 @@ import {
   type WebviewThemeKind,
 } from './protocol';
 import { MAX_NATIVE_PDF_TOTAL_BYTES, isNativePdfAttachment } from './native-pdf';
+import { parseModelPreferences } from './model-preferences';
 import { asRecord, isBoolean, isNumber, isString } from './type-utils';
 import type { UnknownRecord } from './type-utils';
 
@@ -39,6 +40,7 @@ const KNOWN_TYPES = new Set<string>([
   'queued-messages/claim-result',
   'permission-modes/sync',
   'session-models/sync',
+  'model-preferences/sync',
   'editor-tabs/state',
   'permission-automation/update',
   'permission/actionable',
@@ -326,6 +328,11 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
         ]);
       }
       return { type, payload: { models: Object.fromEntries(entries) } };
+    }
+
+    case 'model-preferences/sync': {
+      if (!asRecord(record.payload)) return null;
+      return { type, payload: parseModelPreferences(record.payload) };
     }
 
     case 'editor-tabs/state': {

@@ -313,6 +313,7 @@ export function createAppState(): AppStateInstance {
     STORAGE_KEYS.completedSessionResponses,
     sessionMarkerWorkspaceScope
   );
+  const modelPreferences = initialWebviewState.modelPreferences;
 
   const [state, setState] = createStore<AppState>({
     serverStatus: initialWebviewState.serverStatus ?? { state: 'stopped' },
@@ -381,14 +382,20 @@ export function createAppState(): AppStateInstance {
             ...readStoredSelectedModels(STORAGE_KEYS.sessionSelectedModels),
             ...initialWebviewState.sessionSelectedModels,
           },
-    modelVariantSelections: readStoredNullableStringRecord(STORAGE_KEYS.modelVariantSelections),
+    modelVariantSelections:
+      modelPreferences?.modelVariantSelections ??
+      readStoredNullableStringRecord(STORAGE_KEYS.modelVariantSelections),
     sessionSelectedMcps: readStoredStringArrayRecord(STORAGE_KEYS.sessionSelectedMcps),
     draftSelectedMcps: null,
-    hiddenProviders: readStoredStringArray(STORAGE_KEYS.hiddenProviders),
-    hiddenModels: readStoredStringArray(STORAGE_KEYS.hiddenModels),
-    addedModels: readStoredStringArray(STORAGE_KEYS.addedModels),
-    pinnedModels: readStoredStringArray(STORAGE_KEYS.pinnedModels),
-    modelDisplayNames: readStoredStringRecord(STORAGE_KEYS.modelDisplayNames),
+    hiddenProviders:
+      modelPreferences?.hiddenProviders ?? readStoredStringArray(STORAGE_KEYS.hiddenProviders),
+    hiddenModels:
+      modelPreferences?.hiddenModels ?? readStoredStringArray(STORAGE_KEYS.hiddenModels),
+    addedModels: modelPreferences?.addedModels ?? readStoredStringArray(STORAGE_KEYS.addedModels),
+    pinnedModels:
+      modelPreferences?.pinnedModels ?? readStoredStringArray(STORAGE_KEYS.pinnedModels),
+    modelDisplayNames:
+      modelPreferences?.modelDisplayNames ?? readStoredStringRecord(STORAGE_KEYS.modelDisplayNames),
     lastSeenSessions: initialLastSeenSessions,
     completedSessionResponses: initialCompletedSessionResponses,
     skippedPlanSessions: initialSkippedPlanSessions,

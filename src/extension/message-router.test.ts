@@ -21,6 +21,8 @@ function createCallbacks(): MessageRouterCallbacks {
     setWebviewFocus: vi.fn(),
     revealPermission: vi.fn(),
     migrateSessionModels: vi.fn(() => Promise.resolve()),
+    updateModelPreferences: vi.fn(() => Promise.resolve()),
+    migrateModelPreferences: vi.fn(() => Promise.resolve()),
     setProviderWatchActive: vi.fn(),
     requestContext: vi.fn(),
     selectWorkspace: vi.fn(() => Promise.resolve()),

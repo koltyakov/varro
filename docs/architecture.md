@@ -214,7 +214,7 @@ It stores:
 - queued follow-up messages
 - the unsent composer text draft
 
-Browser preferences, composer text, and explicit file or folder draft attachments are persisted through `BrowserPersistence`, which reads VS Code webview state first and mirrors values to `localStorage`. Pinned models and display names are local UI preferences and do not modify OpenCode model IDs. The authoritative queued-message snapshot, including image, PDF, terminal, diagnostic, and file attachment data, is stored separately in extension-host workspace state.
+Browser preferences, composer text, and explicit file or folder draft attachments are persisted through `BrowserPersistence`, which reads VS Code webview state first and mirrors values to `localStorage`. Model visibility, additions, pins, display names, and remembered variants are UI preferences that do not modify OpenCode model IDs; the extension host persists and broadcasts their shared snapshot so sidebar and editor webviews stay consistent. The authoritative queued-message snapshot, including image, PDF, terminal, diagnostic, and file attachment data, is also stored in extension-host workspace state.
 
 Ralph loop state is owned by the extension host (`src/extension/ralph-host.ts`, persisted in the workspace Memento). `src/webview/lib/stores/ralph-store.ts` is a render mirror fed by `ralph/state` broadcasts, with optimistic local updates for immediate dashboard feedback.
 

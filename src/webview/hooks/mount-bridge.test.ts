@@ -27,6 +27,7 @@ const {
   setDefaultPermissionModePreference,
   setWorkspaceStatusSummary,
   setWorkspaceStatuses,
+  applyModelPreferencesSnapshot,
 } = vi.hoisted(() => ({
   setState: vi.fn(),
   setError: vi.fn(),
@@ -46,6 +47,7 @@ const {
   setDefaultPermissionModePreference: vi.fn(),
   setWorkspaceStatusSummary: vi.fn(),
   setWorkspaceStatuses: vi.fn(),
+  applyModelPreferencesSnapshot: vi.fn(),
 }));
 
 /* oxlint-disable anti-slop/no-module-mocking -- These tests exercise mount-bridge integration with state and client modules. */
@@ -74,6 +76,7 @@ vi.mock('../lib/state', async () => {
     setShowChangedFiles,
     setDesktopSessionPaneSide,
     setDefaultPermissionModePreference,
+    applyModelPreferencesSnapshot,
   };
 });
 
@@ -132,6 +135,24 @@ function createMessageDependencies(
 }
 
 describe('mount bridge helpers', () => {
+  it('applies host model preferences to the current webview', () => {
+    const preferences = {
+      modelVariantSelections: {},
+      hiddenProviders: [],
+      hiddenModels: [],
+      addedModels: [],
+      pinnedModels: ['openai:gpt-5.6-sol'],
+      modelDisplayNames: {},
+    };
+
+    handleExtensionMessageWithDependencies(createMessageDependencies(), {
+      type: 'model-preferences/sync',
+      payload: preferences,
+    });
+
+    expect(applyModelPreferencesSnapshot).toHaveBeenCalledWith(preferences);
+  });
+
   it('reprocesses pending permissions after a host permission-mode snapshot', () => {
     const permissionModesSynced = vi.fn();
 

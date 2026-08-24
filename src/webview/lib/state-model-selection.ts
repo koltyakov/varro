@@ -4,6 +4,7 @@ import type { SelectedModel } from './app-state-types';
 import type { McpStatus, ProviderLimitStatus } from '../../shared/protocol';
 import type { ProviderAuthMethodsByProvider } from '../../shared/opencode-types';
 import { setState, showSessionPicker, state } from './app-state';
+import { postMessage } from './bridge';
 import { providerRequiresReconnection } from './provider-connection-state';
 import { STORAGE_KEYS, writeStored } from './state-storage';
 
@@ -70,6 +71,7 @@ export function setSelectedModel(
       const nextSelections = { ...state.modelVariantSelections, [key]: rememberedVariant };
       setState('modelVariantSelections', nextSelections);
       writeStored(STORAGE_KEYS.modelVariantSelections, nextSelections);
+      publishModelPreferences();
     }
   }
 
@@ -208,6 +210,7 @@ export function setModelDisplayName(providerID: string, modelID: string, name: s
 
   setState('modelDisplayNames', reconcile(next));
   writeStored(STORAGE_KEYS.modelDisplayNames, Object.keys(next).length > 0 ? next : null);
+  publishModelPreferences();
 }
 
 export function isProviderVisible(providerID: string) {
@@ -247,6 +250,7 @@ export function setModelPinned(providerID: string, modelID: string, pinned: bool
 
   setState('pinnedModels', next);
   writeStored(STORAGE_KEYS.pinnedModels, next);
+  publishModelPreferences();
 }
 
 export function setModelAdded(providerID: string, modelID: string, added: boolean) {
@@ -277,6 +281,7 @@ export function setModelsAdded(providerID: string, modelIDs: readonly string[]) 
 
   setState('addedModels', next);
   writeStored(STORAGE_KEYS.addedModels, next);
+  publishModelPreferences();
 
   const newlyAddedModelIDs = nextModelIDs.filter((modelID) => !previousModelIDs.has(modelID));
   setModelsVisible(providerID, newlyAddedModelIDs, true);
@@ -355,6 +360,7 @@ export function setProviderVisible(providerID: string, visible: boolean) {
 
   setState('hiddenProviders', next);
   writeStored(STORAGE_KEYS.hiddenProviders, next);
+  publishModelPreferences();
 
   if (!visible && state.selectedModel?.providerID === providerID) {
     setSelectedModel(null);
@@ -397,6 +403,8 @@ export function setModelsVisible(
     }
   }
 
+  publishModelPreferences();
+
   if (
     !visible &&
     state.selectedModel?.providerID === providerID &&
@@ -411,6 +419,39 @@ export function resetModelVisibility() {
   setState('hiddenModels', []);
   writeStored(STORAGE_KEYS.hiddenProviders, []);
   writeStored(STORAGE_KEYS.hiddenModels, []);
+  publishModelPreferences();
+}
+
+export function getModelPreferencesSnapshot() {
+  return {
+    modelVariantSelections: { ...state.modelVariantSelections },
+    hiddenProviders: [...state.hiddenProviders],
+    hiddenModels: [...state.hiddenModels],
+    addedModels: [...state.addedModels],
+    pinnedModels: [...state.pinnedModels],
+    modelDisplayNames: { ...state.modelDisplayNames },
+  };
+}
+
+export function applyModelPreferencesSnapshot(
+  preferences: ReturnType<typeof getModelPreferencesSnapshot>
+) {
+  setState('modelVariantSelections', reconcile(preferences.modelVariantSelections));
+  setState('hiddenProviders', reconcile(preferences.hiddenProviders));
+  setState('hiddenModels', reconcile(preferences.hiddenModels));
+  setState('addedModels', reconcile(preferences.addedModels));
+  setState('pinnedModels', reconcile(preferences.pinnedModels));
+  setState('modelDisplayNames', reconcile(preferences.modelDisplayNames));
+  writeStored(STORAGE_KEYS.modelVariantSelections, preferences.modelVariantSelections);
+  writeStored(STORAGE_KEYS.hiddenProviders, preferences.hiddenProviders);
+  writeStored(STORAGE_KEYS.hiddenModels, preferences.hiddenModels);
+  writeStored(STORAGE_KEYS.addedModels, preferences.addedModels);
+  writeStored(STORAGE_KEYS.pinnedModels, preferences.pinnedModels);
+  writeStored(STORAGE_KEYS.modelDisplayNames, preferences.modelDisplayNames);
+}
+
+function publishModelPreferences() {
+  postMessage({ type: 'model-preferences/update', payload: getModelPreferencesSnapshot() });
 }
 
 export function resolveSelectedModel(

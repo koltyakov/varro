@@ -1098,7 +1098,6 @@ body.vscode-light
 
 .assistant-dialog-summary-completed-time {
   --assistant-summary-time-chip-radius: var(--radius-control);
-  --assistant-summary-time-chip-line: 12px;
 
   position: absolute;
   left: 5px;
@@ -1124,15 +1123,13 @@ body.vscode-light
 .assistant-dialog-summary-completed-time::before {
   content: '';
   position: absolute;
-  top: var(--assistant-summary-time-chip-line);
+  top: 3px;
   bottom: 3px;
   left: 0;
   right: 0;
   box-sizing: border-box;
   border: 1px solid var(--assistant-summary-line-color);
-  border-top: 0;
-  border-radius: 0 0 var(--assistant-summary-time-chip-radius)
-    var(--assistant-summary-time-chip-radius);
+  border-radius: var(--assistant-summary-time-chip-radius);
   pointer-events: none;
 }
 

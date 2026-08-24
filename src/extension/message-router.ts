@@ -23,6 +23,10 @@ type SessionModelsMigrationPayload = Extract<
   WebviewMessage,
   { type: 'session-models/migrate' }
 >['payload'];
+type ModelPreferencesPayload = Extract<
+  WebviewMessage,
+  { type: 'model-preferences/update' }
+>['payload'];
 type RalphMessage = Extract<
   WebviewMessage,
   {
@@ -108,6 +112,8 @@ export interface MessageRouterCallbacks {
   migratePermissionModes(payload: PermissionModesMigrationPayload): Promise<void>;
   updateSessionModel(payload: SessionModelPayload): Promise<void>;
   migrateSessionModels(payload: SessionModelsMigrationPayload): Promise<void>;
+  updateModelPreferences(payload: ModelPreferencesPayload): Promise<void>;
+  migrateModelPreferences(payload: ModelPreferencesPayload): Promise<void>;
   updateDraftImages(
     payload: Extract<WebviewMessage, { type: 'composer/images-update' }>['payload']
   ): Promise<void>;
@@ -146,6 +152,12 @@ export class MessageRouter {
           break;
         case 'session-models/migrate':
           await this.callbacks.migrateSessionModels(msg.payload);
+          break;
+        case 'model-preferences/update':
+          await this.callbacks.updateModelPreferences(msg.payload);
+          break;
+        case 'model-preferences/migrate':
+          await this.callbacks.migrateModelPreferences(msg.payload);
           break;
         case 'composer/images-update':
           await this.callbacks.updateDraftImages(msg.payload);

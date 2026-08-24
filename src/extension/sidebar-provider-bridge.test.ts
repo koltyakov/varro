@@ -138,6 +138,27 @@ describe('SidebarProviderBridge', () => {
     expect(onFailure).not.toHaveBeenCalled();
   });
 
+  it('ignores a held delivery failure after the current view is suspended', async () => {
+    let finishDelivery!: (delivered: boolean) => void;
+    const delivery = new Promise<boolean>((resolve) => {
+      finishDelivery = resolve;
+    });
+    const bridge = new SidebarProviderBridge({ fsPath: '/extension' } as never);
+    const view = createView();
+    view.webview.postMessage.mockReturnValue(delivery);
+    const onFailure = vi.fn();
+    bridge.onDeliveryFailure(onFailure);
+    bridge.setView(view as never);
+
+    bridge.post({ type: 'command/focus-input' });
+    bridge.invalidatePendingDeliveries();
+    finishDelivery(false);
+    await delivery;
+    await Promise.resolve();
+
+    expect(onFailure).not.toHaveBeenCalled();
+  });
+
   it('renders with cacheable webview asset URIs', async () => {
     const extensionUri = { fsPath: '/extension' };
     const bridge = new SidebarProviderBridge(extensionUri as never);

@@ -50,8 +50,10 @@ export class WebviewSession {
   > = [];
   private commandStateReady = false;
   private webviewLoadGeneration = 0;
+  private webviewRenderGeneration = 0;
   private recoverySnapshotLoad?: Promise<RecoverySnapshot>;
   private themeDisposable?: vscode.Disposable;
+  private messageDisposable?: vscode.Disposable;
   private webviewDisposables: vscode.Disposable[] = [];
 
   constructor(
@@ -95,6 +97,8 @@ export class WebviewSession {
       sessionPermissionModes(): InitialWebviewState['sessionPermissionModes'];
       sessionSelectedModels(): InitialWebviewState['sessionSelectedModels'];
       sessionModelMigrationPending(): boolean;
+      modelPreferences(): InitialWebviewState['modelPreferences'];
+      modelPreferencesMigrationPending(): boolean;
       editorTabsOpen(): boolean;
       editorSessionIds(): string[];
       permissionAutomation(): NonNullable<InitialWebviewState['permissionAutomation']>;
@@ -202,6 +206,8 @@ export class WebviewSession {
     if (!view) return;
     const nextGeneration = ++this.webviewLoadGeneration;
     this.deps.cancelApiRequestsBeforeGeneration(nextGeneration);
+    this.bridge.invalidatePendingDeliveries();
+    this.disposeMessageListener();
     this.webviewReady = false;
     this.webviewHasFocus = false;
     this.resetCommandState();
@@ -213,6 +219,7 @@ export class WebviewSession {
     this.webviewReady = false;
     this.resetCommandState();
     const webviewLoadGeneration = ++this.webviewLoadGeneration;
+    const webviewRenderGeneration = ++this.webviewRenderGeneration;
     this.deps.cancelApiRequestsBeforeGeneration(webviewLoadGeneration);
 
     webviewView.webview.options = this.bridge.webviewOptions();
@@ -222,22 +229,14 @@ export class WebviewSession {
         : renderWebviewLoadingHtml();
     this.disposeWebviewDisposables();
 
-    this.webviewDisposables.push(
-      webviewView.webview.onDidReceiveMessage((raw: unknown) => {
-        const message = parseWebviewMessage(raw);
-        if (!message) {
-          logger.warn('Ignoring invalid webview message');
-          return;
-        }
-        void this.deps.handleMessage(message);
-      })
-    );
+    this.registerMessageListener(webviewView, webviewLoadGeneration);
 
     this.webviewDisposables.push(
       webviewView.onDidDispose(() => {
         if (this.bridge.getView() === webviewView) {
           const nextGeneration = ++this.webviewLoadGeneration;
           this.deps.cancelApiRequestsBeforeGeneration(nextGeneration);
+          this.disposeMessageListener();
           this.bridge.setView(undefined);
           this.webviewReady = false;
           this.webviewHasFocus = false;
@@ -248,12 +247,12 @@ export class WebviewSession {
       })
     );
 
-    void this.renderHtml(webviewLoadGeneration, webviewView)
+    void this.renderHtml(webviewRenderGeneration, webviewView)
       .then((html) => {
         if (
           html === undefined ||
           this.bridge.getView() !== webviewView ||
-          webviewLoadGeneration !== this.webviewLoadGeneration
+          webviewRenderGeneration !== this.webviewRenderGeneration
         ) {
           return;
         }
@@ -262,7 +261,7 @@ export class WebviewSession {
       .catch((err) => {
         if (
           this.bridge.getView() !== webviewView ||
-          webviewLoadGeneration !== this.webviewLoadGeneration
+          webviewRenderGeneration !== this.webviewRenderGeneration
         ) {
           return;
         }
@@ -316,6 +315,13 @@ export class WebviewSession {
     void this.deps.ensureServerStarted().catch(() => {});
   }
 
+  resume() {
+    if (this.webviewContext?.surface !== 'editor') return;
+    const view = this.bridge.getView();
+    if (!view) return;
+    this.registerMessageListener(view, this.webviewLoadGeneration);
+  }
+
   async deliverInterruptedSessions(claimId: number, sessions: InterruptedSessionSnapshot[]) {
     if (sessions.length === 0 || !this.webviewReady) return false;
     const generation = this.webviewLoadGeneration;
@@ -356,8 +362,14 @@ export class WebviewSession {
   }
 
   async dispose() {
+    if (this.bridge.getView()) {
+      const nextGeneration = ++this.webviewLoadGeneration;
+      this.deps.cancelApiRequestsBeforeGeneration(nextGeneration);
+      this.webviewRenderGeneration += 1;
+    }
     this.webviewReady = false;
     this.resetCommandState();
+    this.disposeMessageListener();
     this.disposeWebviewDisposables();
     this.themeDisposable?.dispose();
     this.themeDisposable = undefined;
@@ -365,7 +377,7 @@ export class WebviewSession {
   }
 
   private async renderHtml(
-    webviewLoadGeneration: number,
+    webviewRenderGeneration: number,
     webviewView: WebviewHost
   ): Promise<string | undefined> {
     const recoverySnapshotLoad =
@@ -375,7 +387,7 @@ export class WebviewSession {
       const snapshot = await recoverySnapshotLoad;
       if (
         this.bridge.getView() !== webviewView ||
-        webviewLoadGeneration !== this.webviewLoadGeneration
+        webviewRenderGeneration !== this.webviewRenderGeneration
       ) {
         return undefined;
       }
@@ -383,11 +395,7 @@ export class WebviewSession {
       this.deps.updateStatusBarItem();
       return await this.bridge.renderHtml(this.buildInitialState(this.deps.renderStatus()));
     } finally {
-      if (
-        this.bridge.getView() === webviewView &&
-        webviewLoadGeneration === this.webviewLoadGeneration &&
-        this.recoverySnapshotLoad === recoverySnapshotLoad
-      ) {
+      if (this.recoverySnapshotLoad === recoverySnapshotLoad) {
         this.recoverySnapshotLoad = undefined;
       }
     }
@@ -412,6 +420,8 @@ export class WebviewSession {
       sessionPermissionModes: this.deps.sessionPermissionModes(),
       sessionSelectedModels: this.deps.sessionSelectedModels(),
       sessionModelMigrationPending: this.deps.sessionModelMigrationPending(),
+      modelPreferences: this.deps.modelPreferences(),
+      modelPreferencesMigrationPending: this.deps.modelPreferencesMigrationPending(),
       editorTabsOpen: this.deps.editorTabsOpen(),
       editorSessionIds: this.deps.editorSessionIds(),
       permissionAutomation: this.deps.permissionAutomation(),
@@ -471,6 +481,12 @@ export class WebviewSession {
         type: 'session-models/sync',
         payload: { models: this.deps.sessionSelectedModels() ?? {} },
       });
+    }
+    if (!this.deps.modelPreferencesMigrationPending()) {
+      const modelPreferences = this.deps.modelPreferences();
+      if (modelPreferences) {
+        this.bridge.post({ type: 'model-preferences/sync', payload: modelPreferences });
+      }
     }
     const editorSessionIds = this.deps.editorSessionIds();
     this.bridge.post({
@@ -544,6 +560,25 @@ export class WebviewSession {
     if (!this.manageCommandContext) return;
     void vscode.commands.executeCommand('setContext', 'varro:canAbortSession', false);
     void vscode.commands.executeCommand('setContext', 'varro:canSwitchSessions', false);
+  }
+
+  private registerMessageListener(webviewView: WebviewHost, generation: number) {
+    this.disposeMessageListener();
+    this.messageDisposable = webviewView.webview.onDidReceiveMessage((raw: unknown) => {
+      if (this.bridge.getView() !== webviewView || generation !== this.webviewLoadGeneration)
+        return;
+      const message = parseWebviewMessage(raw);
+      if (!message) {
+        logger.warn('Ignoring invalid webview message');
+        return;
+      }
+      void this.deps.handleMessage(message);
+    });
+  }
+
+  private disposeMessageListener() {
+    this.messageDisposable?.dispose();
+    this.messageDisposable = undefined;
   }
 
   private disposeWebviewDisposables() {
