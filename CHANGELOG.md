@@ -4,14 +4,15 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 
 ## 0.26.x - August 2026
 
-- Added editor-tab chats for working with multiple sessions side by side, with model, reasoning, permission, queue, and session state synchronized across open Varro views.
+- Added editor-tab chats for working with multiple sessions side by side, with terminal access and model, reasoning, permission, queue, and session state synchronized across open Varro views.
 - Added quick controls for showing or hiding inline file changes in the Chat view.
 - Improved user messages with secure Markdown and external images, clearer timestamps, expandable long content, code-block truncation, and more reliable editing.
 - Made large model catalogs easier to manage with search and selective additions, clearer model and thinking-level changes, persistent session defaults, and cost warnings.
 - Improved the composer with active language server status, quick access to server output, persistent diff previews, reliable caret visibility, and easier focus handling.
-- Strengthened session and queued-message handling with captured editor context, safer late fork and deletion results, more reliable provider and MCP refreshes, and deduplicated optimistic prompts.
-- Made multi-view handoffs more reliable for permission changes, queued edits and attachments, manual steering, editor restoration after reconnects, and interrupted-session recovery.
+- Strengthened session and queued-message handling with captured editor context, preserved model choices, safer late fork and deletion results, more reliable provider and MCP refreshes, and deduplicated optimistic prompts.
+- Made multi-view handoffs more reliable for permission changes, queued edits and attachments, manual steering, editor restoration after reconnects, interrupted-session recovery, and opening completed sessions from the status bar.
 - Made long conversations more stable during history loading, streaming, content reflow, viewport resizing, and queued-message removal.
+- Refined tool details and chat presentation with more consistent cards, spacing, and contrast.
 - Moved About diagnostics and usage reports into readable Markdown documents with richer local usage data.
 
 ## 0.25.x - August 2026
