@@ -1813,6 +1813,18 @@ kbd {
   margin-right: calc(8px - 0.25em);
 }
 
+.file-change-card-header.is-standalone .file-edit-action-label {
+  color: var(--color-vscode-fg-muted);
+}
+
+.file-change-card-header.is-standalone .file-edit-action-label.is-added {
+  color: color-mix(in srgb, var(--color-vscode-success) 78%, var(--color-vscode-fg-muted));
+}
+
+.file-change-card-header.is-standalone .file-edit-action-label.is-removed {
+  color: color-mix(in srgb, var(--color-vscode-error) 78%, var(--color-vscode-fg-muted));
+}
+
 .file-edit-action-label {
   display: inline-flex;
   align-items: center;
@@ -1834,7 +1846,8 @@ kbd {
   white-space: nowrap;
 }
 
-.file-edit-path-link {
+.file-edit-path-link,
+.file-edit-path-label {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -1848,6 +1861,10 @@ kbd {
   color: var(--color-vscode-fg) !important;
   line-height: 1.2;
   text-decoration: none;
+}
+
+.file-edit-removed-path {
+  text-decoration: line-through;
 }
 
 .file-edit-file-icon,

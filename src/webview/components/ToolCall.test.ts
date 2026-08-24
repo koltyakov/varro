@@ -749,7 +749,7 @@ describe('ToolCall', () => {
       state: completedState({ filePath: 'src/app.ts' }, 'Wrote src/app.ts'),
     };
 
-    cleanup = render(() => ToolCall({ part }), container!);
+    cleanup = render(() => ToolCall({ part, compactFileChanges: true }), container!);
 
     const icon = container?.querySelector<HTMLElement>('.tool-call-icon-edit');
     expect(icon).toBeInstanceOf(HTMLSpanElement);
@@ -2530,11 +2530,28 @@ describe('FileChangeCard', () => {
 
     cleanup = render(() => ToolCall({ part }), container!);
 
-    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Edited:');
+    const header = container?.querySelector('.file-change-card-header');
+    expect(header?.classList).toContain('is-standalone');
+    expect(header?.children[0]?.classList).toContain('file-edit-path-link');
+    expect(header?.children[1]?.classList).toContain('file-edit-action-label');
+    expect(container?.querySelector('.file-edit-icon')).toBeNull();
+    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('(edited)');
     const icon = container?.querySelector<HTMLImageElement>('.file-edit-file-icon');
     expect(icon).toBeInstanceOf(HTMLImageElement);
     expect(icon?.getAttribute('src')).toBe(getFileTypeIcon('src/foo.ts'));
     expect(fileStatusSpy).not.toHaveBeenCalled();
+
+    cleanup?.();
+    cleanup = undefined;
+    container!.innerHTML = '';
+    cleanup = render(() => ToolCall({ part, compactFileChanges: true }), container!);
+
+    const compactHeader = container?.querySelector('.file-change-card-header');
+    expect(compactHeader?.classList).not.toContain('is-standalone');
+    expect(compactHeader?.children[0]?.classList).toContain('tool-call-icon');
+    expect(compactHeader?.children[1]?.classList).toContain('file-edit-action-label');
+    expect(compactHeader?.children[2]?.classList).toContain('file-edit-path-link');
+    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Edited:');
   });
 
   it('labels a create tool as Added without consulting workspace git status', () => {
@@ -2554,7 +2571,10 @@ describe('FileChangeCard', () => {
 
     cleanup = render(() => ToolCall({ part }), container!);
 
-    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Added:');
+    const action = container?.querySelector('.file-edit-action-label');
+    expect(action?.textContent).toBe('(added)');
+    expect(action?.classList).toContain('is-added');
+    expect(container?.querySelector('a.file-edit-path-link')).not.toBeNull();
     expect(fileStatusSpy).not.toHaveBeenCalled();
   });
 
@@ -2573,7 +2593,11 @@ describe('FileChangeCard', () => {
 
     cleanup = render(() => ToolCall({ part }), container!);
 
-    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Removed:');
+    const action = container?.querySelector('.file-edit-action-label');
+    expect(action?.textContent).toBe('(removed)');
+    expect(action?.classList).toContain('is-removed');
+    expect(container?.querySelector('a.file-edit-path-link')).toBeNull();
+    expect(container?.querySelector('.file-edit-removed-path')?.textContent).toBe('src/gone.ts');
     expect(fileStatusSpy).not.toHaveBeenCalled();
   });
 
@@ -2595,7 +2619,7 @@ describe('FileChangeCard', () => {
 
     cleanup = render(() => ToolCall({ part }), container!);
 
-    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Moved:');
+    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('(moved)');
     expect(fileStatusSpy).not.toHaveBeenCalled();
   });
 
@@ -2689,8 +2713,8 @@ describe('FileChangeCard', () => {
 
     expect(rows).toHaveLength(2);
     expect(rows.map((row) => row.querySelector('.file-edit-action-label')?.textContent)).toEqual([
-      'Added:',
-      'Edited:',
+      '(added)',
+      '(edited)',
     ]);
     expect(links.map((link) => link.textContent)).toEqual(['src/new.ts', 'src/app.ts']);
     expect(
@@ -2858,7 +2882,7 @@ describe('FileChangeCard', () => {
     cleanup = render(() => ToolCall({ part }), container!);
 
     expect(container?.querySelector('.file-change-card')).not.toBeNull();
-    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Edited:');
+    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('(edited)');
     expect(container?.querySelector('.file-edit-path-link')?.textContent).toBe('src/app.ts');
     expect(container?.querySelector('.file-change-inline-diffs')).toBeNull();
   });
@@ -2893,7 +2917,7 @@ describe('FileChangeCard', () => {
     cleanup = render(() => ToolCall({ part }), container!);
 
     expect(container?.querySelector('.file-change-card')).not.toBeNull();
-    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Edit:');
+    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('(edit)');
     expect(container?.querySelector('.file-edit-summary-label')?.textContent).toBe('2 files');
     expect(container?.querySelector('.file-edit-icon')?.getAttribute('aria-label')).toBe('Running');
     const icon = container?.querySelector<HTMLElement>('.tool-call-icon-edit');
@@ -2955,7 +2979,7 @@ describe('FileChangeCard', () => {
     expect(container?.querySelector('.file-edit-icon')?.classList).toContain('tool-status-error');
     expect(container?.querySelector('.file-edit-icon')?.getAttribute('aria-label')).toBe('Failed');
     expect(container?.querySelector('.file-edit-icon')?.getAttribute('role')).toBe('status');
-    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Edit:');
+    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('(edit)');
     expect(container?.querySelector('.file-edit-error-label')?.textContent).toBe('failed');
     const errorToggle = container?.querySelector<HTMLButtonElement>('.file-edit-error-toggle');
     expect(errorToggle?.getAttribute('aria-expanded')).toBe('false');
@@ -3072,7 +3096,7 @@ describe('FileChangeCard', () => {
 
     expect(container?.querySelector('.file-edit-icon')?.classList).toContain('tool-status-aborted');
     expect(container?.querySelector('.file-edit-icon')?.getAttribute('aria-label')).toBe('Aborted');
-    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Add:');
+    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('(add)');
     expect(container?.querySelector('.file-edit-error-label')?.textContent).toBe('aborted');
     expect(container?.querySelector('.diff-view-line-addition')?.textContent).toContain('proposed');
     expect(container?.textContent).not.toContain('Added');

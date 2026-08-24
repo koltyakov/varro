@@ -1018,71 +1018,95 @@ function FileChangeCard(props: {
   const canExpandError = () => !props.compact && Boolean(errorMessage());
   const errorBodyId = createUniqueId();
   const isErrorExpanded = () => canExpandError() && props.expanded;
+  const statusContent = (showIcon: boolean) => (
+    <>
+      <Show when={showIcon}>
+        <ToolCallIcon
+          kind="edit"
+          statusClass={statusClass()}
+          statusLabel={statusLabel()}
+          waiting={props.waitingForPermission}
+          class="file-edit-icon"
+        />
+      </Show>
+      <span
+        class={`file-edit-action-label is-${effectiveKind()}${!props.waitingForPermission && (isRunning() || (isPending() && props.animatePending)) ? ' shimmer-progress' : ''}`}
+      >
+        {props.compact ? `${action()}:` : `(${action().toLowerCase()})`}
+      </span>
+    </>
+  );
+  const fileContent = () => (
+    <>
+      <Show
+        when={!isMultiFile() && change()}
+        fallback={<span class="file-edit-summary-label">{fileCountLabel()}</span>}
+      >
+        <Show
+          when={effectiveKind() !== 'moved'}
+          fallback={
+            <span class="file-edit-move-paths">
+              <a
+                href="#"
+                class="file-path-link file-edit-path-link"
+                onClick={openFileChangePath(change()!.fromPath || change()!.path)}
+              >
+                <FileTypeIcon
+                  path={change()!.fromPath || change()!.path}
+                  class="file-edit-file-icon"
+                />
+                {formatFileChangeDisplayName(change()!.fromPath || change()!.path)}
+              </a>
+              <span class="file-edit-move-arrow">→</span>
+              <a
+                href="#"
+                class="file-path-link file-edit-path-link"
+                onClick={openFileChangePath(change()!.toPath || change()!.path)}
+              >
+                <FileTypeIcon
+                  path={change()!.toPath || change()!.path}
+                  class="file-edit-file-icon"
+                />
+                {formatFileChangeDisplayName(change()!.toPath || change()!.path)}
+              </a>
+            </span>
+          }
+        >
+          <Show
+            when={effectiveKind() === 'removed'}
+            fallback={
+              <a
+                href="#"
+                class="file-path-link file-edit-path-link"
+                onClick={openFileChangePath(change()!.path)}
+              >
+                <FileTypeIcon path={change()!.path} class="file-edit-file-icon" />
+                {formatFileChangeDisplayName(change()!.path)}
+              </a>
+            }
+          >
+            <span class="file-edit-path-label is-removed">
+              <FileTypeIcon path={change()!.path} class="file-edit-file-icon" />
+              <span class="file-edit-removed-path">
+                {formatFileChangeDisplayName(change()!.path)}
+              </span>
+            </span>
+          </Show>
+        </Show>
+      </Show>
+    </>
+  );
 
   return (
     <>
       <Show when={showCompactCard() && !splitCompletedChanges()}>
         <div class="chat-tool-invocation-part file-change-card">
           <div
-            class={`file-change-card-header${canExpandError() ? ' is-expandable' : ''}`}
+            class={`file-change-card-header${props.compact ? '' : ' is-standalone'}${canExpandError() ? ' is-expandable' : ''}`}
             onClick={canExpandError() ? props.toggleExpand : undefined}
           >
-            <ToolCallIcon
-              kind="edit"
-              statusClass={statusClass()}
-              statusLabel={statusLabel()}
-              waiting={props.waitingForPermission}
-              class="file-edit-icon"
-            />
-            <span
-              class={`file-edit-action-label${!props.waitingForPermission && (isRunning() || (isPending() && props.animatePending)) ? ' shimmer-progress' : ''}`}
-            >
-              {action()}:
-            </span>
-            <Show
-              when={!isMultiFile() && change()}
-              fallback={<span class="file-edit-summary-label">{fileCountLabel()}</span>}
-            >
-              <Show
-                when={effectiveKind() !== 'moved'}
-                fallback={
-                  <span class="file-edit-move-paths">
-                    <a
-                      href="#"
-                      class="file-path-link file-edit-path-link"
-                      onClick={openFileChangePath(change()!.fromPath || change()!.path)}
-                    >
-                      <FileTypeIcon
-                        path={change()!.fromPath || change()!.path}
-                        class="file-edit-file-icon"
-                      />
-                      {formatFileChangeDisplayName(change()!.fromPath || change()!.path)}
-                    </a>
-                    <span class="file-edit-move-arrow">→</span>
-                    <a
-                      href="#"
-                      class="file-path-link file-edit-path-link"
-                      onClick={openFileChangePath(change()!.toPath || change()!.path)}
-                    >
-                      <FileTypeIcon
-                        path={change()!.toPath || change()!.path}
-                        class="file-edit-file-icon"
-                      />
-                      {formatFileChangeDisplayName(change()!.toPath || change()!.path)}
-                    </a>
-                  </span>
-                }
-              >
-                <a
-                  href="#"
-                  class="file-path-link file-edit-path-link"
-                  onClick={openFileChangePath(change()!.path)}
-                >
-                  <FileTypeIcon path={change()!.path} class="file-edit-file-icon" />
-                  {formatFileChangeDisplayName(change()!.path)}
-                </a>
-              </Show>
-            </Show>
+            <Show when={props.compact}>{statusContent(true)}</Show>
+            {fileContent()}
             <Show when={isMultiFile() && changes().length > 0}>
               <span class="file-edit-multi-list">
                 <For each={visibleMultiFileChanges()}>
@@ -1207,6 +1231,7 @@ function FileChangeCard(props: {
                 </Show>
               </span>
             </Show>
+            <Show when={!props.compact}>{statusContent(!isCompleted())}</Show>
             <Show when={isCompleted() && diffStats()}>
               <span class="file-edit-diff-stats">
                 <span class="diff-lines-added">+{diffStats()!.additions}</span>
