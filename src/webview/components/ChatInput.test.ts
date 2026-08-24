@@ -12,6 +12,7 @@ import {
   setConnectionInitialized,
   setIsLoading,
   setShowChangedFiles,
+  showModelPicker,
   setShowModelPicker,
   setState,
   setInputText,
@@ -1966,6 +1967,22 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.chat-queue-container')).toBe(queue);
     expect(container?.querySelector('.todo-block:not(.changed-files-block)')).toBe(todo);
     expect(container?.querySelector('.changed-files-block')).toBe(files);
+  });
+
+  it('closes toolbar popups when the composer changes', async () => {
+    setupModelState();
+    setShowModelPicker(true);
+    cleanup = render(() => ChatInput(), container!);
+
+    expect(container?.querySelector('.model-picker-menu')).not.toBeNull();
+
+    const editor = container?.querySelector<HTMLElement>('.rich-composer');
+    editor!.textContent = 'Test';
+    editor?.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+    await flushAsyncWork();
+
+    expect(showModelPicker()).toBe(false);
+    expect(container?.querySelector('.model-picker-menu')).toBeNull();
   });
 
   it('keeps queue, todo, and file panels mounted while the @ menu is open', async () => {

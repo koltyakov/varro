@@ -7,6 +7,7 @@ import { FolderIcon } from '../FolderIcon';
 import { MaterialChipIcon } from '../MaterialChipIcon';
 import { WarningIcon } from '../WarningIcon';
 import { UiIcon } from '../UiIcon';
+import { onComposerOverlayDismiss } from './composer-overlay-dismiss';
 
 export function AttachmentChip(props: {
   label: string;
@@ -38,6 +39,9 @@ export function AttachmentChip(props: {
   };
 
   const hidePreview = () => setPreviewStyle(null);
+
+  onComposerOverlayDismiss(hidePreview);
+
   const showPreview = (element: HTMLElement) => {
     updateTitleVisibility();
     if (!props.previewImage) return;

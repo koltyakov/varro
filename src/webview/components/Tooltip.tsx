@@ -9,6 +9,7 @@ import {
 } from 'solid-js';
 import type { JSX } from 'solid-js';
 import { Portal } from 'solid-js/web';
+import { onComposerOverlayDismiss } from './chat-input/composer-overlay-dismiss';
 
 export const DEFAULT_TOOLTIP_DELAY = 1000;
 
@@ -89,6 +90,8 @@ export function Tooltip(props: {
       queueMicrotask(updatePosition);
     }, props.delay ?? DEFAULT_TOOLTIP_DELAY);
   };
+
+  onComposerOverlayDismiss(hide);
 
   createEffect(() => {
     if (props.disabled) {

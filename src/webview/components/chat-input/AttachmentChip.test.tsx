@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { render } from 'solid-js/web';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { getFileTypeIcon } from '../FileTypeIcon';
 import { AttachmentChip } from './AttachmentChip';
+import { dismissComposerOverlays } from './composer-overlay-dismiss';
 
 let container: HTMLDivElement;
 let cleanup: () => void;
@@ -45,6 +46,26 @@ describe('AttachmentChip', () => {
     expect(preview?.style.getPropertyValue('--attachment-preview-tail-offset')).not.toBe('0px');
 
     chip.dispatchEvent(new MouseEvent('mouseleave'));
+    expect(document.querySelector('.chat-attachment-image-preview')).toBeNull();
+  });
+
+  it('dismisses an image preview when the composer changes', () => {
+    cleanup = render(
+      () => (
+        <AttachmentChip
+          label="diagram.png"
+          icon="image"
+          previewImage={{ url: 'blob:diagram', alt: 'diagram.png' }}
+        />
+      ),
+      container
+    );
+    const chip = container.querySelector<HTMLElement>('.chat-attachment-chip')!;
+    chip.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(document.querySelector('.chat-attachment-image-preview')).not.toBeNull();
+
+    dismissComposerOverlays();
+
     expect(document.querySelector('.chat-attachment-image-preview')).toBeNull();
   });
 

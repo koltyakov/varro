@@ -6,6 +6,7 @@ import { getFileTypeIcon } from '../FileTypeIcon';
 import { createMaterialChipIconElement, type MaterialChipIconKind } from '../MaterialChipIcon';
 import { createUiIconElement } from '../UiIcon';
 import { CompletionMenu, type CompletionItem } from './CompletionMenu';
+import { onComposerOverlayDismiss } from './composer-overlay-dismiss';
 
 type ComposerClipboardEvent = ClipboardEvent & {
   __varroPasteText?: string;
@@ -67,6 +68,7 @@ export function RichComposerArea(props: {
     image: { url: string; alt: string };
     style: Record<string, string>;
   } | null>(null);
+  onComposerOverlayDismiss(() => setPreview(null));
 
   createEffect(() => {
     const current = preview();

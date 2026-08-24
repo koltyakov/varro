@@ -1,6 +1,7 @@
 import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { dismissComposerOverlays } from './chat-input/composer-overlay-dismiss';
 import { DEFAULT_TOOLTIP_DELAY, Tooltip } from './Tooltip';
 
 let container: HTMLDivElement;
@@ -103,5 +104,30 @@ describe('Tooltip', () => {
     button?.dispatchEvent(new MouseEvent('mouseenter'));
     await vi.runAllTimersAsync();
     expect(document.querySelector('[role="tooltip"]')).toBeNull();
+  });
+
+  it('cancels pending and visible tooltips when the composer dismisses overlays', async () => {
+    cleanup = render(
+      () => (
+        <Tooltip content="Composer action" delay={250}>
+          <button>Run</button>
+        </Tooltip>
+      ),
+      container
+    );
+
+    const button = container.querySelector('button');
+    button?.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(249);
+    dismissComposerOverlays();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+
+    button?.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(250);
+    expect(document.querySelector('[role="tooltip"]')).not.toBeNull();
+
+    dismissComposerOverlays();
+    await vi.waitFor(() => expect(document.querySelector('[role="tooltip"]')).toBeNull());
   });
 });

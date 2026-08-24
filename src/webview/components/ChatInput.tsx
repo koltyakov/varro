@@ -156,6 +156,7 @@ import { UiIcon } from './UiIcon';
 import { showSessionActionFeedback } from './chat/SessionActionFeedback';
 import { AttachmentStrip } from './chat-input/AttachmentStrip';
 import { ChatInputMainToolbar, ChatInputMetaToolbar } from './chat-input/ChatInputToolbar';
+import { dismissComposerOverlays } from './chat-input/composer-overlay-dismiss';
 import {
   RichComposerArea,
   type RichComposerChip,
@@ -3770,6 +3771,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             completionHeader={completionHeader()}
             onInput={(text, cursorOffset) => {
               batch(() => {
+                closePopups();
+                dismissComposerOverlays();
                 setHistoryIndex(null);
                 setHistoryDraft('');
                 setInputText(text);

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { emptyPageIcon, folderIcon } from '../../lib/ui-icons';
 import { toCssUrl } from '../UiIcon';
+import { dismissComposerOverlays } from './composer-overlay-dismiss';
 import {
   RichComposerArea,
   extractText,
@@ -1429,6 +1430,32 @@ describe('RichComposerArea', () => {
     expect(document.querySelector('.chat-attachment-image-preview')).not.toBeNull();
 
     setValue('');
+    await flushAsyncWork();
+
+    expect(document.querySelector('.chat-attachment-image-preview')).toBeNull();
+  });
+
+  it('dismisses an inline image preview when the composer changes', async () => {
+    const chip: RichComposerChip = {
+      id: 'img:1',
+      type: 'image',
+      label: 'Image 1',
+      icon: 'image',
+      previewImage: { url: 'blob:image-1', alt: 'Image 1' },
+      textMarker: '[Image 1]',
+    };
+    renderComposer({
+      value: chip.textMarker,
+      cursorOffset: 0,
+      chips: [chip],
+    });
+    await flushAsyncWork();
+
+    const inlineChip = container?.querySelector<HTMLElement>('.inline-chip');
+    inlineChip?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    expect(document.querySelector('.chat-attachment-image-preview')).not.toBeNull();
+
+    dismissComposerOverlays();
     await flushAsyncWork();
 
     expect(document.querySelector('.chat-attachment-image-preview')).toBeNull();
