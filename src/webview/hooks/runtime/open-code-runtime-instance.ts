@@ -1202,7 +1202,12 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           },
         });
       }
-      syncQueuedMessages();
+      if (
+        webviewContext?.surface !== 'editor' &&
+        initialWebviewState.queuedMessages === undefined
+      ) {
+        syncQueuedMessages();
+      }
       permissionsStore.syncSessionPermissionModesToHost();
 
       postFocusState();

@@ -29,6 +29,37 @@ function setupInterruptedRecoveryClientMocks() {
 }
 
 describe('useOpenCode initialization', () => {
+  it('does not overwrite an authoritative editor queue during startup', async () => {
+    // SAFETY: The fixture provides the initial host state read by the runtime.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      queuedMessages: [],
+      webviewContext: {
+        viewId: 'editor-1',
+        surface: 'editor',
+        initialRoute: { type: 'session', sessionId: 'session-1' },
+      },
+    };
+    window.localStorage.setItem(
+      'varro.queuedMessages',
+      JSON.stringify([{ id: 'stale', sessionId: 'session-1', text: 'Stale queue' }])
+    );
+
+    const { hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      expect(bridgeMocks.postMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'queued-messages/update' })
+      );
+    } finally {
+      dispose();
+      window.localStorage.removeItem('varro.queuedMessages');
+    }
+  });
+
   it('sends session model migration values as structured-cloneable objects', async () => {
     // SAFETY: The fixture provides the initial host state read by the runtime.
     (window as { __initialWebviewState?: unknown }).__initialWebviewState = {

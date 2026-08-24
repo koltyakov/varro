@@ -356,6 +356,53 @@ describe('SidebarProvider editor panels', () => {
     );
   });
 
+  it('moves a sidebar queue to an editor opened for the same session', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const editor = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+    const internals = provider as unknown as {
+      endpoints: Set<{ ready: boolean; surface: string; viewId: string }>;
+      queuedMessages: { update(messages: QueuedMessageSnapshot[]): Promise<void> };
+      setEndpointReady(endpoint: unknown, ready: boolean): void;
+    };
+    const sidebar = [...internals.endpoints].find((endpoint) => endpoint.surface === 'sidebar');
+    if (!sidebar) throw new Error('Expected sidebar endpoint');
+    internals.setEndpointReady(sidebar, true);
+    await internals.queuedMessages.update([
+      {
+        id: 'queue-1',
+        sessionId: 'session-1',
+        text: 'Continue in the editor',
+        agent: 'build',
+        droppedFiles: [{ path: '/repo/file.ts', relativePath: 'file.ts', type: 'file' }],
+        clipboardImages: [],
+        terminalSelection: null,
+      },
+    ]);
+
+    await provider.openSessionInEditor('session-1');
+    await vi.waitFor(() => expect(editor.panel.webview.html).toContain('varro-editor-surface'));
+    editor.receive({ type: 'ready' });
+
+    await vi.waitFor(() =>
+      expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'queued-messages/sync',
+        payload: {
+          messages: [
+            expect.objectContaining({
+              id: 'queue-1',
+              sessionId: 'session-1',
+              text: 'Continue in the editor',
+              agent: 'build',
+              ownerViewId: expect.stringMatching(/^editor-/),
+              droppedFiles: [{ path: '/repo/file.ts', relativePath: 'file.ts', type: 'file' }],
+            }),
+          ],
+        },
+      })
+    );
+  });
+
   it('transfers an editor queue to the next ready view when hidden', async () => {
     const { provider } = await createSidebarProviderInstance();
     const first = createPanel();

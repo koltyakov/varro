@@ -609,6 +609,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           type: 'command/open-session',
           payload: { sessionId },
         });
+        this.reconcileQueuedMessageOwners();
       }
       return;
     }
@@ -742,6 +743,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     endpoint.panel.title = this.editorTitle(route);
     endpoint.route = route;
     endpoint.webviewSession.setInitialRoute(route);
+    this.reconcileQueuedMessageOwners();
     this.postEditorTabsState();
     this.updateStatusBarItem();
   }
@@ -1150,20 +1152,26 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private reconcileQueuedMessageOwners() {
     const eligibleEndpoints = [...this.endpoints].filter((endpoint) => endpoint.ready);
     if (eligibleEndpoints.length === 0) return;
-    const target =
-      eligibleEndpoints.find((endpoint) => endpoint.surface === 'sidebar') ?? eligibleEndpoints[0]!;
-    const eligibleViewIds = new Set(eligibleEndpoints.map((endpoint) => endpoint.viewId));
-    const unavailableOwners = new Set(
-      (this.queuedMessages.list() ?? [])
-        .map((message) => message.ownerViewId ?? 'sidebar')
-        .filter((viewId) => !eligibleViewIds.has(viewId))
+    const eligibleByViewId = new Map(
+      eligibleEndpoints.map((endpoint) => [endpoint.viewId, endpoint] as const)
     );
-    if (unavailableOwners.size === 0) return;
-    const persistence = Promise.all(
-      [...unavailableOwners].map((viewId) =>
-        this.queuedMessages.transferOwner(viewId, target.viewId)
-      )
+    const sidebar = eligibleEndpoints.find((endpoint) => endpoint.surface === 'sidebar');
+    const sessionEditors = new Map<string, WebviewEndpoint>();
+    for (const editor of this.editorPanels.values()) {
+      const endpoint = eligibleByViewId.get(editor.viewId);
+      if (endpoint && editor.route.type === 'session') {
+        sessionEditors.set(editor.route.sessionId, endpoint);
+      }
+    }
+    const persistence = this.queuedMessages.reassignOwners(
+      (message) =>
+        sessionEditors.get(message.sessionId)?.viewId ??
+        sidebar?.viewId ??
+        (eligibleByViewId.has(message.ownerViewId ?? 'sidebar')
+          ? (message.ownerViewId ?? 'sidebar')
+          : eligibleEndpoints[0]!.viewId)
     );
+    if (!persistence) return;
     this.postQueuedMessageSnapshots();
     void persistence.catch((err) => {
       logger.warn(

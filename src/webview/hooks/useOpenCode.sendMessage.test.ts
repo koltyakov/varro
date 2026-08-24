@@ -948,7 +948,7 @@ describe('sendMessage', () => {
     });
   });
 
-  it('restores the previously used agent when switching back to an existing session', async () => {
+  it('restores the active turn agent when switching back to a busy session', async () => {
     const { stateModule, hookModule } = await loadModules();
 
     stateModule.setState('agents', [
@@ -984,6 +984,49 @@ describe('sendMessage', () => {
         parts: [],
       },
     ]);
+    clientMocks.sessionStatus.mockResolvedValue({ 'session-1': { type: 'busy' } });
+
+    await hookModule.selectSession('session-1');
+
+    expect(stateModule.state.selectedAgent).toBe('build');
+    expect(stateModule.getSelectedAgentForSession('session-1')).toBe('build');
+    expect(stateModule.getPersistedSelectedAgent()).toBe('build');
+  });
+
+  it('preserves the next-turn agent after the previous turn has settled', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('agents', [
+      {
+        name: 'build',
+        mode: 'primary',
+        builtIn: true,
+        permission: { edit: 'ask', bash: {} },
+        tools: {},
+      },
+      {
+        name: 'plan',
+        mode: 'primary',
+        builtIn: true,
+        permission: { edit: 'ask', bash: {} },
+        tools: {},
+      },
+    ]);
+    stateModule.setSelectedAgent('build');
+    stateModule.setSelectedAgent('plan', { sessionId: 'session-1', persistGlobal: false });
+
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages.mockResolvedValue([
+      { info: userMessage('user-1'), parts: [] },
+      {
+        info: {
+          ...assistantMessage('assistant-1', 'user-1'),
+          time: { created: 0, completed: 1 },
+        },
+        parts: [],
+      },
+    ]);
+    clientMocks.sessionStatus.mockResolvedValue({ 'session-1': { type: 'idle' } });
 
     await hookModule.selectSession('session-1');
 

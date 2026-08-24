@@ -151,11 +151,9 @@ export async function selectSessionWithDependencies(
   });
   deps.syncFailedSessionsFromMessages(messages);
 
-  if (!persistedAgent) {
-    const inferredAgent = deps.deriveSelectedAgentFromMessages(messages);
-    if (inferredAgent) {
-      deps.applySelectedAgent(inferredAgent, id);
-    }
+  const inferredAgent = deps.deriveSelectedAgentFromMessages(messages);
+  if (!persistedAgent && inferredAgent) {
+    deps.applySelectedAgent(inferredAgent, id);
   }
 
   const loadedModel =
@@ -178,6 +176,14 @@ export async function selectSessionWithDependencies(
     deps.mergeSessionStatuses(statuses, { snapshotStartedAt: statusSnapshotStartedAt });
     deps.updateUsageLimitState(id, statuses[id], messages);
     const statusType = statuses[id]?.type;
+    if (
+      persistedAgent &&
+      inferredAgent &&
+      statusType !== 'idle' &&
+      !latestAssistantFinished(messages)
+    ) {
+      deps.applySelectedAgent(inferredAgent, id);
+    }
     if (statusType === 'retry') {
       deps.startLoading();
     } else if (latestAssistantFinished(messages)) {

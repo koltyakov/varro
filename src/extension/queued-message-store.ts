@@ -71,6 +71,23 @@ export class QueuedMessageStore {
     return this.persist(next);
   }
 
+  reassignOwners(resolveOwner: (message: QueuedMessageSnapshot) => string): Promise<void> | null {
+    const current = this.messages ?? [];
+    const previousOwners = new Set<string>();
+    const next = current.map((message) => {
+      const currentOwner = ownerViewId(message);
+      const nextOwner = resolveOwner(message);
+      if (nextOwner === currentOwner) return message;
+      previousOwners.add(currentOwner);
+      return { ...message, ownerViewId: nextOwner === 'sidebar' ? undefined : nextOwner };
+    });
+    if (previousOwners.size === 0) return null;
+    this.messages = next;
+    for (const viewId of previousOwners) this.releaseDispatchClaimsForView(viewId);
+    this.reconcileDispatchClaims();
+    return this.persist(next);
+  }
+
   claimDispatch(
     viewId: string,
     sessionId: string,
