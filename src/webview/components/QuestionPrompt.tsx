@@ -2,7 +2,7 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'so
 import type { QuestionRequest } from '../types';
 import { rejectQuestion, respondQuestion } from '../hooks/useOpenCode';
 import { defaultAppState } from '../lib/state';
-import { checkIcon } from '../lib/ui-icons';
+import { chatBubbleQuestionIcon, checkIcon } from '../lib/ui-icons';
 import { UiIcon } from './UiIcon';
 
 type QuestionDraft = {
@@ -147,13 +147,12 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
       <div class="question-prompt">
         <div class="question-prompt-header">
           <div class="question-prompt-header-main">
-            <svg class="question-prompt-icon" viewBox="0 0 16 16" fill="currentColor">
-              <path
-                fill-rule="evenodd"
-                clip-rule="evenodd"
-                d="M8 15A7 7 0 108 1a7 7 0 000 14zm0-1A6 6 0 108 2a6 6 0 000 12zM7.25 4.5a.75.75 0 011.5 0v4a.75.75 0 01-1.5 0v-4zM8 11a.75.75 0 100 1.5.75.75 0 000-1.5z"
-              />
-            </svg>
+            <UiIcon
+              source={chatBubbleQuestionIcon}
+              class="question-prompt-icon"
+              width={16}
+              height={16}
+            />
             <div class="question-prompt-heading">
               <Show when={currentQuestion()?.header}>
                 <span class="question-prompt-title">{currentQuestion()!.header}</span>

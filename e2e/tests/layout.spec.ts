@@ -686,6 +686,25 @@ test('keeps active tools outside an expanded Explored group', async ({ page }) =
   ).toHaveCount(0);
 });
 
+test('toggles Explored from the full disclosure hit area', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards');
+  const summary = page.locator('.assistant-activity-summary').last();
+  await expect(summary).toHaveAttribute('aria-expanded', 'false');
+
+  const collapsedBox = await summary.boundingBox();
+  if (!collapsedBox) throw new Error('Explored summary is not visible');
+  await page.mouse.click(
+    collapsedBox.x + collapsedBox.width - 2,
+    collapsedBox.y + collapsedBox.height + 4
+  );
+  await expect(summary).toHaveAttribute('aria-expanded', 'true');
+
+  const expandedBox = await summary.boundingBox();
+  if (!expandedBox) throw new Error('Expanded Explored summary is not visible');
+  await page.mouse.click(expandedBox.x + expandedBox.width - 2, expandedBox.y - 4);
+  await expect(summary).toHaveAttribute('aria-expanded', 'false');
+});
+
 test('hides Thinking while an apply_patch tool is shown inline', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=diff-preview-large-transcript');
   await page.evaluate(() => {

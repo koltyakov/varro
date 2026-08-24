@@ -8,6 +8,7 @@ import brainWarningIcon from 'iconoir/icons/brain-warning.svg';
 import cableTagIcon from 'iconoir/icons/cable-tag.svg';
 import calendarIcon from 'iconoir/icons/calendar.svg';
 import cardShieldIcon from 'iconoir/icons/card-shield.svg';
+import chatBubbleQuestionIcon from 'iconoir/icons/chat-bubble-question.svg';
 import checkIcon from 'iconoir/icons/check.svg';
 import checkCircleIcon from 'iconoir/icons/check-circle.svg';
 import checkSquareIcon from 'iconoir/icons/check-square.svg';
@@ -71,6 +72,7 @@ export {
   cableTagIcon,
   calendarIcon,
   cardShieldIcon,
+  chatBubbleQuestionIcon,
   checkCircleIcon,
   checkIcon,
   checkSquareIcon,

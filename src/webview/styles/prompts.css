@@ -34,10 +34,8 @@
 }
 
 .question-summary-icon {
-  width: 14px;
-  height: 14px;
   flex-shrink: 0;
-  color: var(--color-vscode-accent);
+  color: var(--color-vscode-fg);
 }
 
 .question-summary-title {

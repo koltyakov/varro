@@ -576,9 +576,11 @@
 }
 
 .assistant-activity-summary {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
+  width: 100%;
   height: 14px;
   max-width: 100%;
   min-height: 0;
@@ -594,6 +596,12 @@
   text-align: left;
   user-select: none;
   -webkit-user-select: none;
+}
+
+.assistant-activity-summary:not(.assistant-activity-summary-placeholder)::before {
+  position: absolute;
+  inset: -5px 0;
+  content: '';
 }
 
 .assistant-activity-status-failed {

@@ -116,6 +116,7 @@ function ToolCallIcon(props: {
   statusLabel?: string;
   waiting?: boolean;
   class?: string;
+  size?: number;
 }) {
   const kind = () => props.kind || getToolKind(props.toolName || '');
   const classes = () =>
@@ -125,7 +126,7 @@ function ToolCallIcon(props: {
   const isWaiting = () => !!props.waiting;
   const isRunningTask = () =>
     kind() === 'task' && props.statusClass === 'tool-status-running' && !isWaiting();
-  const iconSize = () => (isWaiting() || kind() === 'task' ? '16' : '12');
+  const iconSize = () => props.size ?? (isWaiting() || kind() === 'task' ? 16 : 12);
   const source = () => {
     if (isWaiting()) return hourglassIcon;
     switch (kind()) {
@@ -654,6 +655,7 @@ function QuestionToolSummary(props: {
           kind="question"
           statusClass={props.skipped ? 'tool-status-aborted' : 'tool-status-completed'}
           class="question-summary-icon"
+          size={16}
         />
         <span class="question-summary-title">{props.title}</span>
       </div>

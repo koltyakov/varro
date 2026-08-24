@@ -17,6 +17,7 @@ import { fixture } from '../test-fixtures';
 import type { UnknownRecord } from '../../shared/type-utils';
 import {
   cableTagIcon,
+  chatBubbleQuestionIcon,
   checkCircleIcon,
   copyIcon,
   editPencilIcon,
@@ -2154,6 +2155,11 @@ describe('ToolCall', () => {
       'Asked 3 questions'
     );
     expect(
+      summary
+        ?.querySelector<HTMLElement>('.question-summary-icon')
+        ?.style.getPropertyValue('--ui-icon-width')
+    ).toBe('16px');
+    expect(
       Array.from(summary?.querySelectorAll('.question-summary-question') || []).map(
         (item) => item.textContent
       )
@@ -2237,6 +2243,11 @@ describe('ToolCall', () => {
 
     cleanup = render(() => ToolCall({ part }), container!);
 
+    expect(
+      container
+        ?.querySelector<HTMLElement>('.question-prompt-icon')
+        ?.style.getPropertyValue('--ui-icon-mask')
+    ).toBe(toCssUrl(chatBubbleQuestionIcon));
     const option = container?.querySelector<HTMLLabelElement>('.question-option');
     option?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
