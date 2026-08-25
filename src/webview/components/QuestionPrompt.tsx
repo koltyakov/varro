@@ -231,7 +231,7 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
                   </For>
                   <Show when={question().custom !== false}>
                     {(() => {
-                      let customInputRef: HTMLInputElement | undefined;
+                      let customInputRef: HTMLTextAreaElement | undefined;
                       return (
                         <div
                           class={`question-option question-option-custom ${(customValues()[questionIndex()] || '').trim() ? 'selected' : ''}`}
@@ -239,7 +239,7 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
                           aria-checked={!!(customValues()[questionIndex()] || '').trim()}
                           tabIndex={0}
                           onClick={(event) => {
-                            if (event.target instanceof HTMLInputElement) return;
+                            if (event.target === customInputRef) return;
                             if (!question().multiple) {
                               setSelected((prev) =>
                                 ensureAnswerSlots(prev, []).map((entry, index) =>
@@ -250,7 +250,7 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
                             customInputRef?.focus();
                           }}
                           onKeyDown={(event) => {
-                            if (event.target instanceof HTMLInputElement) return;
+                            if (event.target === customInputRef) return;
                             if (event.key !== 'Enter' && event.key !== ' ') return;
                             event.preventDefault();
                             customInputRef?.focus();
@@ -278,8 +278,8 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
                           </Show>
                           <div class="question-option-text question-custom-content">
                             <span class="question-option-label">Custom answer</span>
-                            <input
-                              type="text"
+                            <textarea
+                              rows={1}
                               value={customValues()[questionIndex()] || ''}
                               placeholder="Type your own answer"
                               class="question-custom-input"
@@ -293,7 +293,11 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
                                 updateCustom(questionIndex(), event.currentTarget.value)
                               }
                               onKeyDown={(event) => {
-                                if (event.key === 'Enter' && !event.isComposing) {
+                                if (
+                                  event.key === 'Enter' &&
+                                  (event.metaKey || event.ctrlKey) &&
+                                  !event.isComposing
+                                ) {
                                   event.preventDefault();
                                   void handlePrimaryAction();
                                 }

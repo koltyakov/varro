@@ -38,7 +38,16 @@ describe('session-actions helpers', () => {
     );
 
     expect(applySelectedAgent).toHaveBeenCalledWith('build', 'session-1');
-    expect(sendMessage).toHaveBeenCalledWith('Implement it');
+    expect(sendMessage).toHaveBeenCalledWith('Implement it', {
+      queuedAttachments: {
+        droppedFiles: [],
+        clipboardImages: [],
+        nativePdfs: [],
+        terminalSelection: null,
+        attachedDiagnostics: null,
+      },
+      preserveComposer: true,
+    });
   });
 
   it('rejects empty plan content before opening the plan', async () => {

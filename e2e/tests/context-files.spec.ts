@@ -22,6 +22,11 @@ test('highlights inline file chips crossed by composer selections', async ({ pag
   await page.goto('/e2e/harness/index.html?scenario=file-search');
 
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+  await expect(composer).toBeVisible();
+  await page.evaluate(() => {
+    document.documentElement.style.setProperty('--varro-chat-font-size', '17px');
+  });
+  await expect(composer).toHaveCSS('font-size', '17px');
   await composer.fill('Test @README');
   await expect(page.getByText('README.md', { exact: false })).toBeVisible();
   await page.keyboard.press('ArrowDown');

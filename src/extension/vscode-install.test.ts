@@ -65,7 +65,7 @@ describe('VS Code install helper', () => {
     });
     expect(plan.installCommand).toMatchObject({
       command: 'code.cmd',
-      args: ['--install-extension', 'C:\\src\\varro\\varro-0.23.5.vsix'],
+      args: ['--install-extension', 'C:\\src\\varro\\varro-0.23.5.vsix', '--force'],
       shell: false,
       env: expect.objectContaining({ NODE_NO_WARNINGS: '1' }),
     });
@@ -93,7 +93,7 @@ describe('VS Code install helper', () => {
 
     expect(plan.installCommand).toMatchObject({
       command: vscodeCli,
-      args: ['--install-extension', `${projectRoot}\\varro-0.23.5.vsix`],
+      args: ['--install-extension', `${projectRoot}\\varro-0.23.5.vsix`, '--force'],
       shell: false,
     });
   });
@@ -111,7 +111,7 @@ describe('VS Code install helper', () => {
 
     expect(plan.installCommand).toMatchObject({
       command: 'code',
-      args: ['--install-extension', '/src/varro/varro-0.23.5.vsix'],
+      args: ['--install-extension', '/src/varro/varro-0.23.5.vsix', '--force'],
       shell: false,
     });
   });

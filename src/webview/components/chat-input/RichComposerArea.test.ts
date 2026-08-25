@@ -277,6 +277,115 @@ describe('RichComposerArea', () => {
     );
   });
 
+  it('removes stale external-link formatting when the controlled value no longer has a URL', async () => {
+    const url = 'https://iconoir.com';
+    const chip: RichComposerChip = {
+      id: `external-link:${url}`,
+      type: 'external-link',
+      label: url,
+      icon: 'external-link',
+      textMarker: url,
+    };
+    const [value, setValue] = createSignal(url);
+
+    cleanup = render(
+      () =>
+        RichComposerArea({
+          editorRef: () => {},
+          placeholder: 'Compose',
+          get value() {
+            return value();
+          },
+          get cursorOffset() {
+            return value().length;
+          },
+          get chips() {
+            return value() === url ? [chip] : [];
+          },
+          isFocused: true,
+          showCompletionMenu: false,
+          completionItems: [],
+          completionSelectedIndex: 0,
+          onInput: () => {},
+          onKeyDown: () => {},
+          onPaste: () => {},
+          onFocus: () => {},
+          onBlur: () => {},
+          onClick: () => {},
+          onKeyUp: () => {},
+          onSelect: () => {},
+          onSelectCompletion: () => {},
+        }),
+      container!
+    );
+    const editor = container?.querySelector<HTMLElement>('.rich-composer');
+    editor?.focus();
+    expect(editor?.querySelector('.composer-external-link')).not.toBeNull();
+
+    setValue('plain replacement text that can wrap');
+    await flushAsyncWork();
+
+    expect(editor?.querySelector('.composer-external-link')).toBeNull();
+    expect(editor?.textContent).toBe('plain replacement text that can wrap');
+  });
+
+  it.each([
+    {
+      type: 'mention-session' as const,
+      marker: 'session:ses_auth',
+      label: 'Authentication work',
+      icon: 'session' as const,
+      referenceSelector: '.composer-session-reference',
+      startSelector: '.inline-chip-label',
+    },
+    {
+      type: 'external-link' as const,
+      marker: 'https://iconoir.com',
+      label: 'https://iconoir.com',
+      icon: 'external-link' as const,
+      referenceSelector: '.composer-external-link',
+      startSelector: '.link-leading-label',
+    },
+  ])('paints the $type icon when selection starts at its first visible character', (item) => {
+    renderComposer({
+      value: item.marker,
+      cursorOffset: item.marker.length,
+      chips: [
+        {
+          id: `${item.type}:${item.marker}`,
+          type: item.type,
+          label: item.label,
+          icon: item.icon,
+          textMarker: item.marker,
+        },
+      ],
+    });
+
+    const editor = container?.querySelector<HTMLElement>('.rich-composer');
+    const reference = container?.querySelector<HTMLElement>(item.referenceSelector);
+    const startNode = reference?.querySelector(item.startSelector)?.firstChild;
+    const lastChild = reference?.lastChild;
+    const endNode =
+      lastChild?.nodeType === Node.TEXT_NODE ? lastChild : (lastChild?.lastChild ?? null);
+    if (!editor || !reference || !startNode || !endNode) {
+      throw new Error('Expected editable reference content');
+    }
+
+    editor.focus();
+    const range = document.createRange();
+    range.setStart(startNode, 0);
+    range.setEnd(endNode, endNode.textContent?.length ?? 0);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    document.dispatchEvent(new Event('selectionchange'));
+
+    expect(reference.querySelector('.inline-chip-icon-wrap')?.classList).toContain(
+      'selection-crossed'
+    );
+    expect(reference.classList).toContain('selection-end-crossed');
+  });
+
   it('moves text typed after a URL into plain composer text', () => {
     const onInput = vi.fn();
     renderComposer({

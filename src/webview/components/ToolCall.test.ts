@@ -2286,7 +2286,7 @@ describe('ToolCall', () => {
 
     cleanup = render(() => ToolCall({ part }), container!);
 
-    const input = container?.querySelector<HTMLInputElement>('.question-custom-input');
+    const input = container?.querySelector<HTMLTextAreaElement>('.question-custom-input');
     if (!input) throw new Error('Expected custom answer input');
     input.value = 'npm run dev';
     input.dispatchEvent(new Event('input', { bubbles: true }));

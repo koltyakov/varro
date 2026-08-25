@@ -34,7 +34,7 @@ export function createVscodeInstallPlan(options) {
     },
     installCommand: {
       command: vscodeCli,
-      args: ['--install-extension', vsixPath],
+      args: ['--install-extension', vsixPath, '--force'],
       env: { ...options.env, NODE_NO_WARNINGS: '1' },
       shell: false,
     },

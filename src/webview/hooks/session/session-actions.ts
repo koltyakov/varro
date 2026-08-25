@@ -1,4 +1,10 @@
 import type { Message, MessageEntry, Part } from '../../types';
+import type { QueuedAttachmentSnapshot } from './session-send';
+
+type PlanImplementationSendOptions = {
+  queuedAttachments: QueuedAttachmentSnapshot;
+  preserveComposer: true;
+};
 
 export const INIT_PROMPT = `Please analyze this codebase and create an AGENTS.md file containing:
 1. Build, lint, and test commands - especially the command to run a single test.
@@ -14,7 +20,10 @@ export async function implementPlanWithDependencies(
     setError(message: string): void;
     clearSkippedPlanSession(sessionId: string): void;
     applySelectedAgent(agent: string, sessionId: string): void;
-    sendMessage(prompt: string): Promise<void | boolean | object>;
+    sendMessage(
+      prompt: string,
+      options?: PlanImplementationSendOptions
+    ): Promise<void | boolean | object>;
   },
   prompt: string,
   sessionId: string | null
@@ -29,7 +38,16 @@ export async function implementPlanWithDependencies(
 
   deps.clearSkippedPlanSession(sessionId);
   deps.applySelectedAgent(buildAgent, sessionId);
-  await deps.sendMessage(prompt);
+  await deps.sendMessage(prompt, {
+    queuedAttachments: {
+      droppedFiles: [],
+      clipboardImages: [],
+      nativePdfs: [],
+      terminalSelection: null,
+      attachedDiagnostics: null,
+    },
+    preserveComposer: true,
+  });
 }
 
 export async function openPlanWithDependencies(
@@ -149,7 +167,10 @@ type SessionActionDependencies = {
   setError(message: string | null): void;
   clearSkippedPlanSession(sessionId: string): void;
   applySelectedAgent(agent: string, sessionId: string): void;
-  sendMessage(prompt: string): Promise<void | boolean | object>;
+  sendMessage(
+    prompt: string,
+    options?: PlanImplementationSendOptions
+  ): Promise<void | boolean | object>;
   openPlan(markdown: string): Promise<void | boolean | object>;
   createSession(): Promise<string | null>;
   getMessageCount(): number;

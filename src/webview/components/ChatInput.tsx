@@ -3275,8 +3275,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   });
 
   const selectionCostWarning = createMemo(() => {
-    if (!composerSessionId() || state.messagesLoading || composerEditingMessage()) return null;
-    const previous = deriveSelectedModelFromMessages(state.messages);
+    const sessionId = composerSessionId();
+    if (!sessionId || state.messagesLoading || composerEditingMessage()) return null;
+    const previous = deriveSelectedModelFromMessages(
+      getMessageEntriesForSession(state.messages, sessionId)
+    );
     const current = currentModel();
     if (!previous || !current.providerID || !current.modelID) return null;
     const changed =

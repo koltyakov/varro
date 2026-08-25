@@ -66,7 +66,7 @@ describe('QuestionPrompt draft retention', () => {
 
     renderQuestionPrompt(activeRequest);
 
-    const input = container?.querySelector<HTMLInputElement>('.question-custom-input');
+    const input = container?.querySelector<HTMLTextAreaElement>('.question-custom-input');
     expect(input).not.toBeNull();
 
     input!.value = 'Keep this draft';
@@ -78,7 +78,7 @@ describe('QuestionPrompt draft retention', () => {
 
     renderQuestionPrompt(activeRequest);
 
-    expect(container?.querySelector<HTMLInputElement>('.question-custom-input')?.value).toBe(
+    expect(container?.querySelector<HTMLTextAreaElement>('.question-custom-input')?.value).toBe(
       'Keep this draft'
     );
   });
@@ -89,7 +89,7 @@ describe('QuestionPrompt draft retention', () => {
 
     renderQuestionPrompt(activeRequest);
 
-    const input = container?.querySelector<HTMLInputElement>('.question-custom-input');
+    const input = container?.querySelector<HTMLTextAreaElement>('.question-custom-input');
     expect(input).not.toBeNull();
 
     input!.value = 'Discard this draft';
@@ -102,7 +102,7 @@ describe('QuestionPrompt draft retention', () => {
 
     renderQuestionPrompt(activeRequest);
 
-    expect(container?.querySelector<HTMLInputElement>('.question-custom-input')?.value).toBe('');
+    expect(container?.querySelector<HTMLTextAreaElement>('.question-custom-input')?.value).toBe('');
   });
 
   it('keeps the answer draft and restores controls when answering fails', async () => {
@@ -111,7 +111,7 @@ describe('QuestionPrompt draft retention', () => {
     respondQuestionMock.mockRejectedValueOnce(new Error('answer failed'));
     renderQuestionPrompt(activeRequest);
 
-    const input = container?.querySelector<HTMLInputElement>('.question-custom-input');
+    const input = container?.querySelector<HTMLTextAreaElement>('.question-custom-input');
     input!.value = 'Retry this answer';
     input!.dispatchEvent(new Event('input', { bubbles: true }));
     container
@@ -135,7 +135,7 @@ describe('QuestionPrompt draft retention', () => {
     cleanup = undefined;
     await Promise.resolve();
     renderQuestionPrompt(activeRequest);
-    expect(container?.querySelector<HTMLInputElement>('.question-custom-input')?.value).toBe(
+    expect(container?.querySelector<HTMLTextAreaElement>('.question-custom-input')?.value).toBe(
       'Retry this answer'
     );
   });
@@ -146,7 +146,7 @@ describe('QuestionPrompt draft retention', () => {
     rejectQuestionMock.mockRejectedValueOnce(new Error('skip failed'));
     renderQuestionPrompt(activeRequest);
 
-    const input = container?.querySelector<HTMLInputElement>('.question-custom-input');
+    const input = container?.querySelector<HTMLTextAreaElement>('.question-custom-input');
     input!.value = 'Do not discard this';
     input!.dispatchEvent(new Event('input', { bubbles: true }));
     container
@@ -212,7 +212,7 @@ function customOption() {
 }
 
 function customInput() {
-  return container!.querySelector<HTMLInputElement>('.question-custom-input')!;
+  return container!.querySelector<HTMLTextAreaElement>('.question-custom-input')!;
 }
 
 function primaryButton() {
@@ -231,7 +231,7 @@ function click(element: HTMLElement) {
   element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 }
 
-function type(input: HTMLInputElement, value: string) {
+function type(input: HTMLTextAreaElement, value: string) {
   input.value = value;
   input.dispatchEvent(new Event('input', { bubbles: true }));
 }
@@ -306,13 +306,15 @@ describe('QuestionPrompt custom answers', () => {
   it('submits a typed answer in place of the listed options', async () => {
     renderQuestionPrompt(request());
 
-    type(customInput(), 'Something else');
+    type(customInput(), 'Something else\nWith more detail');
     click(primaryButton());
     await Promise.resolve();
 
-    expect(respondQuestionMock).toHaveBeenCalledWith('question-1', [['Something else']], {
-      rethrow: true,
-    });
+    expect(respondQuestionMock).toHaveBeenCalledWith(
+      'question-1',
+      [['Something else\nWith more detail']],
+      { rethrow: true }
+    );
   });
 
   it('clears a typed answer when a listed option is picked instead', () => {
@@ -351,11 +353,27 @@ describe('QuestionPrompt custom answers', () => {
     expect(customOption().getAttribute('aria-checked')).toBe('true');
   });
 
-  it('submits from the custom input with Enter', async () => {
+  it('allows Enter to add a new line in the custom input', () => {
     renderQuestionPrompt(request());
 
     type(customInput(), 'Something else');
     const event = pressKey(customInput(), 'Enter');
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(respondQuestionMock).not.toHaveBeenCalled();
+  });
+
+  it('submits from the custom input with Ctrl+Enter', async () => {
+    renderQuestionPrompt(request());
+
+    type(customInput(), 'Something else');
+    const event = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    customInput().dispatchEvent(event);
     await Promise.resolve();
 
     expect(event.defaultPrevented).toBe(true);

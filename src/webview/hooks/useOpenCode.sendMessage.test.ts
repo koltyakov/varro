@@ -1125,6 +1125,18 @@ describe('sendMessage', () => {
     ]);
     stateModule.setSelectedAgent('plan');
     stateModule.setSelectedAgent('plan', { sessionId: 'session-1', persistGlobal: false });
+    stateModule.replaceContextFiles([
+      { path: '/repo/draft.ts', relativePath: 'draft.ts', type: 'file' },
+    ]);
+    stateModule.replaceClipboardImages([
+      {
+        id: 'draft-image',
+        url: 'data:image/png;base64,aW1hZ2U=',
+        mime: 'image/png',
+        filename: 'draft.png',
+        size: 5,
+      },
+    ]);
 
     clientMocks.sessionSendAsync.mockResolvedValue(undefined);
     clientMocks.sessionGet.mockResolvedValue(session());
@@ -1140,6 +1152,18 @@ describe('sendMessage', () => {
       parts: [{ type: 'text', text: 'Implement the approved plan.' }],
       agent: 'build',
     });
+    expect(stateModule.state.droppedFiles).toEqual([
+      { path: '/repo/draft.ts', relativePath: 'draft.ts', type: 'file' },
+    ]);
+    expect(stateModule.state.clipboardImages).toEqual([
+      {
+        id: 'draft-image',
+        url: 'data:image/png;base64,aW1hZ2U=',
+        mime: 'image/png',
+        filename: 'draft.png',
+        size: 5,
+      },
+    ]);
   });
 
   it('opens the saved plan document for the active session', async () => {

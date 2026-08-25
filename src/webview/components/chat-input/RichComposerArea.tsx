@@ -493,11 +493,32 @@ export function RichComposerArea(props: {
       );
     }
 
-    const range = selection && selection.start !== selection.end ? getSelectionRange() : null;
     for (const icon of editorEl.querySelectorAll<HTMLElement>(
       '.composer-session-reference .inline-chip-icon-wrap, .composer-external-link .inline-chip-icon-wrap'
     )) {
-      icon.classList.toggle('selection-crossed', range?.intersectsNode(icon) === true);
+      const reference = icon.parentElement?.closest<HTMLElement>(
+        '.composer-session-reference, .composer-external-link'
+      );
+      if (!selection || selection.start === selection.end || !reference) {
+        icon.classList.remove('selection-crossed');
+        reference?.classList.remove('selection-end-crossed');
+        continue;
+      }
+
+      const prefixRange = document.createRange();
+      prefixRange.selectNodeContents(editorEl);
+      prefixRange.setEndBefore(reference);
+      const referenceStart = extractRangeTextLength(prefixRange);
+      icon.classList.toggle(
+        'selection-crossed',
+        selection.start <= referenceStart && selection.end > referenceStart
+      );
+      const referenceLength = reference.dataset.chipMarker?.length ?? extractText(reference).length;
+      reference.classList.toggle(
+        'selection-end-crossed',
+        selection.start < referenceStart + referenceLength &&
+          selection.end >= referenceStart + referenceLength
+      );
     }
   }
 
@@ -608,8 +629,11 @@ export function RichComposerArea(props: {
     const isFocused = props.isFocused || document.activeElement === editorEl;
     const textNeedsResync = needsResync(editorEl, text);
     const externalLinksOutOfSync = externalLinksNeedResync(editorEl, text, props.chips);
+    const hasExpectedExternalLinks = props.chips.some((chip) => chip.type === 'external-link');
     const preserveEditedExternalLinks =
-      isFocused && editorEl.querySelector('.composer-external-link') !== null;
+      isFocused &&
+      hasExpectedExternalLinks &&
+      editorEl.querySelector('.composer-external-link') !== null;
     const domNeedsResync =
       textNeedsResync || (externalLinksOutOfSync && !preserveEditedExternalLinks);
 

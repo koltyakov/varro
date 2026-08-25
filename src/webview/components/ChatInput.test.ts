@@ -6489,13 +6489,17 @@ describe('ChatInput', () => {
     ]);
     setState('providerDefaults', { openai: 'gpt-5.4' });
     setState('activeSessionId', 'session-1');
-    setState('sessions', [session('session-1', 2_000)]);
+    setState('sessions', [
+      session('session-1', 2_000),
+      session('child-1', 2_001, { parentID: 'session-1' }),
+    ]);
     setState('selectedModel', {
       providerID: 'openai',
       modelID: 'gpt-5.4',
       variant: 'medium',
     });
     const previousResponse = assistantMessageEntry({ input: 400, output: 100 });
+    const childResponse = assistantMessageEntry({ input: 100, output: 20 });
     setState('messages', [
       {
         ...previousResponse,
@@ -6503,6 +6507,16 @@ describe('ChatInput', () => {
           ...previousResponse.info,
           modelID: 'gpt-5.4',
           variant: 'medium',
+        },
+      },
+      {
+        ...childResponse,
+        info: {
+          ...childResponse.info,
+          id: 'assistant-child-1',
+          sessionID: 'child-1',
+          modelID: 'gpt-5.5',
+          variant: 'low',
         },
       },
     ]);

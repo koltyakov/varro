@@ -1,5 +1,8 @@
 /* Rich Composer (contenteditable with inline chips) */
 .rich-composer {
+  --rich-composer-line-height: calc(
+    var(--varro-chat-font-size, var(--vscode-font-size, 13px)) * 1.7
+  );
   min-height: 30px;
   max-height: 200px;
   width: calc(100% + 7px);
@@ -8,7 +11,7 @@
   padding: 4px 11px 4px 4px;
   margin-bottom: 8px;
   font-size: var(--varro-chat-font-size, var(--vscode-font-size, 13px));
-  line-height: 1.7;
+  line-height: var(--rich-composer-line-height);
   color: var(--color-vscode-input-fg);
   outline: none;
   font-family: inherit;
@@ -70,12 +73,21 @@
   top: calc(50% - 0.5px);
   left: -2px;
   right: -2px;
-  height: calc(var(--vscode-font-size, 13px) * 1.7);
+  height: var(--rich-composer-line-height);
   transform: translateY(-50%);
   background: var(
     --vscode-editor-selectionBackground,
     color-mix(in srgb, var(--color-vscode-accent) 30%, transparent)
   );
+}
+
+.rich-composer .composer-session-reference .inline-chip-icon-wrap.selection-crossed::before,
+.rich-composer .composer-external-link .inline-chip-icon-wrap.selection-crossed::before {
+  top: 0;
+  right: -4px;
+  bottom: 0;
+  height: auto;
+  transform: none;
 }
 
 .rich-composer .inline-chip[data-chip-type='mention-file'],
@@ -90,6 +102,20 @@
   font-size: inherit;
   font-weight: 500;
   cursor: text;
+}
+
+.rich-composer .composer-session-reference.selection-end-crossed::after,
+.rich-composer .composer-external-link.selection-end-crossed::after {
+  content: '';
+  display: inline-block;
+  width: 3px;
+  height: var(--rich-composer-line-height);
+  margin-right: -3px;
+  vertical-align: top;
+  background: var(
+    --vscode-editor-selectionBackground,
+    color-mix(in srgb, var(--color-vscode-accent) 30%, transparent)
+  );
 }
 
 .composer-session-reference,

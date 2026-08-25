@@ -363,6 +363,10 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   transition: background-color 0.08s;
 }
 
+.session-item.is-pinned {
+  background: var(--color-vscode-surface-subtle);
+}
+
 .session-list-section-header + .session-item {
   padding-top: 4px;
 }

@@ -82,27 +82,80 @@ test('keeps URL boundaries editable in the composer', async ({ page }) => {
   await expect(composer).toBeFocused();
 });
 
-test('keeps reference icons out of composer selection painting', async ({ page }) => {
+test('paints reference icons when selection starts at the first visible character', async ({
+  page,
+}) => {
   await page.goto('/e2e/harness/index.html?scenario=session-search');
 
   const composer = page.locator('.rich-composer').first();
   await composer.fill('session:session-search-beta https://iconoir.com');
-  const iconWrappers = composer.locator(
-    '.composer-session-reference .inline-chip-icon-wrap, .composer-external-link .inline-chip-icon-wrap'
-  );
-  await expect(iconWrappers).toHaveCount(2);
+  const references = [
+    {
+      locator: composer.locator('.composer-session-reference'),
+      startSelector: '.inline-chip-label',
+    },
+    {
+      locator: composer.locator('.composer-external-link'),
+      startSelector: '.link-leading-label',
+    },
+  ];
 
-  await composer.evaluate((editor) => {
-    const range = document.createRange();
-    range.selectNodeContents(editor);
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-  });
+  for (const reference of references) {
+    await reference.locator.evaluate((element, startSelector) => {
+      const startNode = element.querySelector(startSelector)?.firstChild;
+      if (!startNode) throw new Error('Expected visible reference label');
+      const range = document.createRange();
+      range.setStart(startNode, 0);
+      range.setEnd(element, element.childNodes.length);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    }, reference.startSelector);
 
-  for (const iconWrapper of await iconWrappers.all()) {
+    const iconWrapper = reference.locator.locator('.inline-chip-icon-wrap');
     await expect(iconWrapper).toHaveCSS('user-select', 'none');
     await expect(iconWrapper).toHaveClass(/selection-crossed/);
+    await expect(reference.locator).toHaveClass(/selection-end-crossed/);
+    const selectionLayer = await iconWrapper.evaluate((element) => {
+      const layer = getComputedStyle(element, '::before');
+      return {
+        bottom: layer.bottom,
+        height: layer.height,
+        left: layer.left,
+        lineHeight: getComputedStyle(element.closest('.rich-composer')!).lineHeight,
+        right: layer.right,
+        top: layer.top,
+        transform: layer.transform,
+      };
+    });
+    expect(selectionLayer.top).toBe('0px');
+    expect(selectionLayer.bottom).toBe('0px');
+    expect(selectionLayer.left).toBe('-2px');
+    expect(selectionLayer.right).toBe('-4px');
+    expect(selectionLayer.transform).toBe('none');
+    expect(
+      Math.abs(parseFloat(selectionLayer.height) - parseFloat(selectionLayer.lineHeight))
+    ).toBeLessThan(0.1);
+
+    const trailingLayer = await reference.locator.evaluate((element) => {
+      const layer = getComputedStyle(element, '::after');
+      return {
+        display: layer.display,
+        height: layer.height,
+        marginRight: layer.marginRight,
+        verticalAlign: layer.verticalAlign,
+        width: layer.width,
+      };
+    });
+    expect(trailingLayer).toMatchObject({
+      display: 'inline-block',
+      marginRight: '-3px',
+      verticalAlign: 'top',
+      width: '3px',
+    });
+    expect(
+      Math.abs(parseFloat(trailingLayer.height) - parseFloat(selectionLayer.lineHeight))
+    ).toBeLessThan(0.1);
   }
 });
 
