@@ -92,6 +92,7 @@ export class WebviewSession {
       sessionPermissionModes(): InitialWebviewState['sessionPermissionModes'];
       sessionSelectedModels(): InitialWebviewState['sessionSelectedModels'];
       sessionPlanState(): InitialWebviewState['sessionPlanState'];
+      sessionPlanAgents(): Record<string, string>;
       sessionModelMigrationPending(): boolean;
       modelPreferences(): InitialWebviewState['modelPreferences'];
       modelPreferencesMigrationPending(): boolean;
@@ -483,7 +484,10 @@ export class WebviewSession {
     }
     this.bridge.post({
       type: 'session-plan-state/sync',
-      payload: { state: this.deps.sessionPlanState() ?? {} },
+      payload: {
+        state: this.deps.sessionPlanState() ?? {},
+        agents: this.deps.sessionPlanAgents(),
+      },
     });
     if (!this.deps.modelPreferencesMigrationPending()) {
       const modelPreferences = this.deps.modelPreferences();

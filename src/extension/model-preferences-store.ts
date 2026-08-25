@@ -23,9 +23,9 @@ export class ModelPreferencesStore {
     return !this.migrationComplete;
   }
 
-  set(preferences: ModelPreferences): Promise<ModelPreferences> {
+  update(base: ModelPreferences, preferences: ModelPreferences): Promise<ModelPreferences> {
     return this.mutate(async () => {
-      this.preferences = cloneModelPreferences(preferences);
+      this.preferences = mergeModelPreferences(this.preferences, base, preferences);
       await this.persist();
       return this.get();
     });
@@ -58,6 +58,62 @@ export class ModelPreferencesStore {
     );
     return result;
   }
+}
+
+function mergeModelPreferences(
+  current: ModelPreferences,
+  base: ModelPreferences,
+  next: ModelPreferences
+): ModelPreferences {
+  return {
+    modelVariantSelections: mergeRecord(
+      current.modelVariantSelections,
+      base.modelVariantSelections,
+      next.modelVariantSelections
+    ),
+    hiddenProviders: mergeArray(
+      current.hiddenProviders,
+      base.hiddenProviders,
+      next.hiddenProviders
+    ),
+    hiddenModels: mergeArray(current.hiddenModels, base.hiddenModels, next.hiddenModels),
+    addedModels: mergeArray(current.addedModels, base.addedModels, next.addedModels),
+    pinnedModels: mergeArray(current.pinnedModels, base.pinnedModels, next.pinnedModels),
+    modelDisplayNames: mergeRecord(
+      current.modelDisplayNames,
+      base.modelDisplayNames,
+      next.modelDisplayNames
+    ),
+  };
+}
+
+function mergeArray(current: string[], base: string[], next: string[]) {
+  const nextSet = new Set(next);
+  const baseSet = new Set(base);
+  const removed = new Set(base.filter((item) => !nextSet.has(item)));
+  const merged = current.filter((item) => !removed.has(item));
+  const mergedSet = new Set(merged);
+  for (const item of next) {
+    if (!baseSet.has(item) && !mergedSet.has(item)) {
+      merged.push(item);
+      mergedSet.add(item);
+    }
+  }
+  return merged;
+}
+
+function mergeRecord<T extends string | null>(
+  current: Record<string, T>,
+  base: Record<string, T>,
+  next: Record<string, T>
+) {
+  const merged = { ...current };
+  for (const key of new Set([...Object.keys(base), ...Object.keys(next)])) {
+    if (base[key] === next[key] && Object.hasOwn(base, key) === Object.hasOwn(next, key)) continue;
+    if (Object.hasOwn(next, key)) merged[key] = next[key]!;
+    else delete merged[key];
+  }
+  return merged;
 }
 
 function cloneModelPreferences(preferences: ModelPreferences): ModelPreferences {

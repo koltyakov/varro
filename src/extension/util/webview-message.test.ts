@@ -53,6 +53,33 @@ function createRalphRun() {
 }
 
 describe('webview message validation', () => {
+  it('requires complete model preference update snapshots', () => {
+    const preferences = {
+      modelVariantSelections: {},
+      hiddenProviders: [],
+      hiddenModels: [],
+      addedModels: [],
+      pinnedModels: [],
+      modelDisplayNames: {},
+    };
+
+    expect(
+      parseWebviewMessage({
+        type: 'model-preferences/update',
+        payload: { base: preferences, preferences: { ...preferences, pinnedModels: ['a:m'] } },
+      })
+    ).toEqual({
+      type: 'model-preferences/update',
+      payload: { base: preferences, preferences: { ...preferences, pinnedModels: ['a:m'] } },
+    });
+    expect(
+      parseWebviewMessage({
+        type: 'model-preferences/update',
+        payload: { base: preferences, preferences: { pinnedModels: ['a:m'] } },
+      })
+    ).toBeNull();
+  });
+
   it('parses session read acknowledgements', () => {
     expect(
       parseWebviewMessage({ type: 'session/seen', payload: { sessionId: 'session-1' } })

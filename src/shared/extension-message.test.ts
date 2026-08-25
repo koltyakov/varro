@@ -2,6 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { parseExtensionMessage } from './extension-message';
 
 describe('parseExtensionMessage', () => {
+  it('parses persisted session plan and agent state', () => {
+    expect(
+      parseExtensionMessage({
+        type: 'session-plan-state/sync',
+        payload: { state: { 'session-1': 200 }, agents: { 'session-1': 'build' } },
+      })
+    ).toEqual({
+      type: 'session-plan-state/sync',
+      payload: { state: { 'session-1': 200 }, agents: { 'session-1': 'build' } },
+    });
+  });
+
   it('rejects non-objects and unknown types', () => {
     expect(parseExtensionMessage(null)).toBeNull();
     expect(parseExtensionMessage(undefined)).toBeNull();

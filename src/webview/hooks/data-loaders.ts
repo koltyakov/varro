@@ -125,6 +125,7 @@ export function createDataLoaderOperations(deps: {
       sessionId?: string | null;
       persistGlobal: boolean;
       updateSelection?: boolean;
+      publishHost?: boolean;
     }
   ): void;
   listCommands(): Promise<Command[] | null | undefined>;
@@ -386,6 +387,7 @@ export function createDataLoaderOperations(deps: {
                 sessionId: session.id,
                 persistGlobal: false,
                 updateSelection: false,
+                publishHost: false,
               });
             }
           }

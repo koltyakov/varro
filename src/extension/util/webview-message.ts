@@ -27,7 +27,10 @@ import type {
 } from '../../shared/ralph';
 import { MAX_RALPH_ITERATIONS, normalizeRalphWorkspaceDirectory } from '../../shared/ralph';
 import { asRecord } from '../../shared/type-utils';
-import { parseModelPreferences } from '../../shared/model-preferences';
+import {
+  parseModelPreferences,
+  parseRequiredModelPreferences,
+} from '../../shared/model-preferences';
 import type { UnknownRecord } from '../../shared/type-utils';
 import {
   MAX_NATIVE_PDF_TOTAL_BYTES,
@@ -190,7 +193,24 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
         : null;
     }
 
-    case 'model-preferences/update':
+    case 'model-preferences/update': {
+      const payload = asRecord(message?.payload);
+      if (!payload) return null;
+      const base = asRecord(payload.base);
+      const preferences = asRecord(payload.preferences);
+      if (!base || !preferences) return null;
+      const parsedBase = parseRequiredModelPreferences(base);
+      const parsedPreferences = parseRequiredModelPreferences(preferences);
+      if (!parsedBase || !parsedPreferences) return null;
+      return {
+        type,
+        payload: {
+          base: parsedBase,
+          preferences: parsedPreferences,
+        },
+      };
+    }
+
     case 'model-preferences/migrate': {
       const payload = asRecord(message?.payload);
       if (!payload) return null;

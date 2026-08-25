@@ -28,6 +28,7 @@ const {
   setWorkspaceStatusSummary,
   setWorkspaceStatuses,
   applyModelPreferencesSnapshot,
+  applySessionSelectedAgentUpdate,
   applySessionPlanStateUpdate,
 } = vi.hoisted(() => ({
   setState: vi.fn(),
@@ -49,6 +50,7 @@ const {
   setWorkspaceStatusSummary: vi.fn(),
   setWorkspaceStatuses: vi.fn(),
   applyModelPreferencesSnapshot: vi.fn(),
+  applySessionSelectedAgentUpdate: vi.fn(),
   applySessionPlanStateUpdate: vi.fn(),
 }));
 
@@ -79,6 +81,7 @@ vi.mock('../lib/state', async () => {
     setDesktopSessionPaneSide,
     setDefaultPermissionModePreference,
     applyModelPreferencesSnapshot,
+    applySessionSelectedAgentUpdate,
     applySessionPlanStateUpdate,
   };
 });
@@ -174,7 +177,16 @@ describe('mount bridge helpers', () => {
     });
 
     expect(applySessionPlanStateUpdate).toHaveBeenCalledWith('session-1', 200);
-    expect(setState).toHaveBeenCalledWith('sessionSelectedAgents', 'session-1', 'build');
+    expect(applySessionSelectedAgentUpdate).toHaveBeenCalledWith('session-1', 'build');
+  });
+
+  it('replays persisted agent selections when a webview becomes ready', () => {
+    handleExtensionMessageWithDependencies(createMessageDependencies(), {
+      type: 'session-plan-state/sync',
+      payload: { state: {}, agents: { 'session-1': 'build' } },
+    });
+
+    expect(applySessionSelectedAgentUpdate).toHaveBeenCalledWith('session-1', 'build');
   });
 
   it('queues interrupted recovery without acknowledging volatile receipt', () => {

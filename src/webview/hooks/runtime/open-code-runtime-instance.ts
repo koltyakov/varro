@@ -2191,10 +2191,6 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     clearSkippedPlanSession: sessionStore.clearSkippedPlanSession,
     applySelectedAgent: (agent, sessionId) => {
       routingStore.setSelectedAgent(agent, { sessionId, persistGlobal: false });
-      postMessage({
-        type: 'session-plan-state/update',
-        payload: { sessionId, agent },
-      });
     },
     sendMessage,
     openPlan: (content) => client.varro.openPlan(content),

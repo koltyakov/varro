@@ -20,6 +20,37 @@ describe('SessionPlanStateStore', () => {
     expect(set).toHaveBeenLastCalledWith('varro.sessionPlanState', { 'session-1': null });
   });
 
+  it('persists selected agents for later webviews', async () => {
+    const set = vi.fn(() => Promise.resolve());
+    const persistence: Persistence = {
+      get: vi.fn(),
+      set,
+      remove: vi.fn(),
+    };
+    const store = new SessionPlanStateStore(persistence);
+
+    await store.setAgent('session-1', 'build');
+
+    expect(store.listAgents()).toEqual({ 'session-1': 'build' });
+    expect(set).toHaveBeenLastCalledWith('varro.sessionPlanAgentState', {
+      'session-1': 'build',
+    });
+  });
+
+  it('applies combined plan updates in one queued mutation', async () => {
+    const persistence: Persistence = {
+      get: vi.fn(),
+      set: vi.fn(() => Promise.resolve()),
+      remove: vi.fn(),
+    };
+    const store = new SessionPlanStateStore(persistence);
+
+    await store.update('session-1', { skippedAt: null, agent: 'build' });
+
+    expect(store.list()).toEqual({ 'session-1': null });
+    expect(store.listAgents()).toEqual({ 'session-1': 'build' });
+  });
+
   it('drops invalid persisted entries', () => {
     const persistence: Persistence = {
       get<T>() {

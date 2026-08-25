@@ -687,7 +687,7 @@ export type ExtensionMessage =
     }
   | {
       type: 'session-plan-state/sync';
-      payload: { state: Record<string, number | null> };
+      payload: { state: Record<string, number | null>; agents: Record<string, string> };
     }
   | {
       type: 'session-plan-state/update';
@@ -755,7 +755,10 @@ export type WebviewMessage =
       type: 'session-plan-state/update';
       payload: { sessionId: string; skippedAt?: number | null; agent?: string };
     }
-  | { type: 'model-preferences/update'; payload: ModelPreferences }
+  | {
+      type: 'model-preferences/update';
+      payload: { base: ModelPreferences; preferences: ModelPreferences };
+    }
   | { type: 'model-preferences/migrate'; payload: ModelPreferences }
   | { type: 'session/export'; payload: { sessionId: string } }
   | { type: 'usage/report'; payload: { includeAllTime: boolean } }

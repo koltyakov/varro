@@ -69,10 +69,11 @@ export function setSelectedModel(
   if (persistGlobal && model && rememberedVariant !== undefined) {
     const key = getModelVariantSelectionKey(model.providerID, model.modelID);
     if (state.modelVariantSelections[key] !== rememberedVariant) {
+      const base = getModelPreferencesSnapshot();
       const nextSelections = { ...state.modelVariantSelections, [key]: rememberedVariant };
       setState('modelVariantSelections', nextSelections);
       writeStored(STORAGE_KEYS.modelVariantSelections, nextSelections);
-      publishModelPreferences();
+      publishModelPreferences(base);
     }
   }
 
@@ -162,10 +163,12 @@ export function setSelectedAgent(
     sessionId?: string | null;
     persistGlobal?: boolean;
     updateSelection?: boolean;
+    publishHost?: boolean;
   }
 ) {
   const persistGlobal = options?.persistGlobal ?? true;
   const sessionId = options?.sessionId;
+  const previousSessionAgent = sessionId ? state.sessionSelectedAgents[sessionId] : undefined;
 
   if (options?.updateSelection !== false && state.selectedAgent !== agent) {
     setState('selectedAgent', agent);
@@ -184,7 +187,22 @@ export function setSelectedAgent(
       );
     }
     writeStored(STORAGE_KEYS.sessionSelectedAgents, { ...state.sessionSelectedAgents });
+    if (agent && previousSessionAgent !== agent && options?.publishHost !== false) {
+      postMessage({
+        type: 'session-plan-state/update',
+        payload: { sessionId, agent },
+      });
+    }
   }
+}
+
+export function applySessionSelectedAgentUpdate(sessionId: string, agent: string) {
+  setSelectedAgent(agent, {
+    sessionId,
+    persistGlobal: false,
+    updateSelection: !showSessionPicker() && state.activeSessionId === sessionId,
+    publishHost: false,
+  });
 }
 
 export function clearSelectedAgentForSession(sessionId: string) {
@@ -207,6 +225,7 @@ export function getModelDisplayName(providerID: string, modelID: string, fallbac
 }
 
 export function setModelDisplayName(providerID: string, modelID: string, name: string) {
+  const base = getModelPreferencesSnapshot();
   const key = modelVisibilityKey(providerID, modelID);
   const displayName = name.trim();
   const next = { ...state.modelDisplayNames };
@@ -215,7 +234,7 @@ export function setModelDisplayName(providerID: string, modelID: string, name: s
 
   setState('modelDisplayNames', reconcile(next));
   writeStored(STORAGE_KEYS.modelDisplayNames, Object.keys(next).length > 0 ? next : null);
-  publishModelPreferences();
+  publishModelPreferences(base);
 }
 
 export function isProviderVisible(providerID: string) {
@@ -256,6 +275,7 @@ export function isModelPinned(providerID: string, modelID: string) {
 }
 
 export function setModelPinned(providerID: string, modelID: string, pinned: boolean) {
+  const base = getModelPreferencesSnapshot();
   const key = modelVisibilityKey(providerID, modelID);
   const next = pinned
     ? [...state.pinnedModels.filter((item) => item !== key), key]
@@ -263,7 +283,7 @@ export function setModelPinned(providerID: string, modelID: string, pinned: bool
 
   setState('pinnedModels', next);
   writeStored(STORAGE_KEYS.pinnedModels, next);
-  publishModelPreferences();
+  publishModelPreferences(base);
 }
 
 export function setModelAdded(providerID: string, modelID: string, added: boolean) {
@@ -280,6 +300,7 @@ export function setModelAdded(providerID: string, modelID: string, added: boolea
 }
 
 export function setModelsAdded(providerID: string, modelIDs: readonly string[]) {
+  const base = getModelPreferencesSnapshot();
   const prefix = `${providerID}:`;
   const provider = state.providers.find((item) => item.id === providerID);
   const usesManagedMarker = provider ? !isLargeModelCatalog(provider) : false;
@@ -303,7 +324,7 @@ export function setModelsAdded(providerID: string, modelIDs: readonly string[]) 
 
   setState('addedModels', next);
   writeStored(STORAGE_KEYS.addedModels, next);
-  publishModelPreferences();
+  publishModelPreferences(base);
 
   const newlyAddedModelIDs = wasManaged
     ? nextModelIDs.filter((modelID) => !previousModelIDs.has(modelID))
@@ -380,13 +401,14 @@ export function setProviderLimit(
 }
 
 export function setProviderVisible(providerID: string, visible: boolean) {
+  const base = getModelPreferencesSnapshot();
   const next = visible
     ? state.hiddenProviders.filter((item) => item !== providerID)
     : [...state.hiddenProviders.filter((item) => item !== providerID), providerID];
 
   setState('hiddenProviders', next);
   writeStored(STORAGE_KEYS.hiddenProviders, next);
-  publishModelPreferences();
+  publishModelPreferences(base);
 
   if (!visible && state.selectedModel?.providerID === providerID) {
     setSelectedModel(null);
@@ -402,6 +424,7 @@ export function setModelsVisible(
   modelIDs: readonly string[],
   visible: boolean
 ) {
+  const base = getModelPreferencesSnapshot();
   const keys = new Set(modelIDs.map((modelID) => modelVisibilityKey(providerID, modelID)));
   if (keys.size === 0) return;
 
@@ -429,7 +452,7 @@ export function setModelsVisible(
     }
   }
 
-  publishModelPreferences();
+  publishModelPreferences(base);
 
   if (
     !visible &&
@@ -441,11 +464,12 @@ export function setModelsVisible(
 }
 
 export function resetModelVisibility() {
+  const base = getModelPreferencesSnapshot();
   setState('hiddenProviders', []);
   setState('hiddenModels', []);
   writeStored(STORAGE_KEYS.hiddenProviders, []);
   writeStored(STORAGE_KEYS.hiddenModels, []);
-  publishModelPreferences();
+  publishModelPreferences(base);
 }
 
 export function getModelPreferencesSnapshot() {
@@ -476,8 +500,11 @@ export function applyModelPreferencesSnapshot(
   writeStored(STORAGE_KEYS.modelDisplayNames, preferences.modelDisplayNames);
 }
 
-function publishModelPreferences() {
-  postMessage({ type: 'model-preferences/update', payload: getModelPreferencesSnapshot() });
+function publishModelPreferences(base: ReturnType<typeof getModelPreferencesSnapshot>) {
+  postMessage({
+    type: 'model-preferences/update',
+    payload: { base, preferences: getModelPreferencesSnapshot() },
+  });
 }
 
 export function resolveSelectedModel(

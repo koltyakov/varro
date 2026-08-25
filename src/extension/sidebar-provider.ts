@@ -375,6 +375,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         sessionPermissionModes: () => this.sessionPermissionModes.list(),
         sessionSelectedModels: () => this.sessionSelectedModels.list(),
         sessionPlanState: () => this.sessionPlanState.list(),
+        sessionPlanAgents: () => this.sessionPlanState.listAgents(),
         sessionModelMigrationPending: () => this.sessionSelectedModels.needsMigration(),
         modelPreferences: () =>
           this.modelPreferences.needsMigration() ? undefined : this.modelPreferences.get(),
@@ -567,13 +568,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.post({ type: 'session-models/sync', payload: { models: migrated } });
         },
         updateSessionPlanState: async (payload) => {
-          if (payload.skippedAt !== undefined) {
-            await this.sessionPlanState.set(payload.sessionId, payload.skippedAt);
-          }
+          await this.sessionPlanState.update(payload.sessionId, payload);
           this.post({ type: 'session-plan-state/update', payload });
         },
-        updateModelPreferences: async (preferences) => {
-          const updated = await this.modelPreferences.set(preferences);
+        updateModelPreferences: async ({ base, preferences }) => {
+          const updated = await this.modelPreferences.update(base, preferences);
           this.post({ type: 'model-preferences/sync', payload: updated });
         },
         migrateModelPreferences: async (preferences) => {

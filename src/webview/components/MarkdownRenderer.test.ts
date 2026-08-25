@@ -1099,6 +1099,42 @@ describe('MarkdownRenderer', () => {
     expect(container?.querySelector('thead')?.textContent).toContain('Action');
   });
 
+  it('renders a complete streaming table without trailing pipes', async () => {
+    cleanup = render(
+      () => MarkdownRenderer({ content: 'Status follows.\n\n| Name | State\n| --- | ---' }),
+      container!
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(container?.querySelector('table')).not.toBeNull();
+    expect(container?.querySelector('thead')?.textContent).toContain('State');
+  });
+
+  it('counts escaped pipes as table cell content while streaming', async () => {
+    cleanup = render(
+      () =>
+        MarkdownRenderer({ content: 'Status follows.\n\n| Name \\| Alias | State\n| --- | ---' }),
+      container!
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(container?.querySelector('table')).not.toBeNull();
+    expect(container?.querySelector('thead')?.textContent).toContain('Name | Alias');
+  });
+
+  it('counts pipes after an even backslash run as table separators', async () => {
+    cleanup = render(
+      () =>
+        MarkdownRenderer({
+          content: 'Status follows.\n\n| Path \\\\| State | Owner\n| --- | --- | ---',
+        }),
+      container!
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(container?.querySelector('table')).not.toBeNull();
+  });
+
   it('holds incomplete streaming block delimiters', async () => {
     const [content, setContent] = createSignal('Stable text.\n\n## ');
     cleanup = render(

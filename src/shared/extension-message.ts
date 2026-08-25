@@ -339,7 +339,8 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
     case 'session-plan-state/sync': {
       const payload = asRecord(record.payload);
       const state = asRecord(payload?.state);
-      if (!state) return null;
+      const agents = asRecord(payload?.agents);
+      if (!state || !agents) return null;
       const entries: Array<[string, number | null]> = [];
       for (const [sessionId, skippedAt] of Object.entries(state)) {
         if (
@@ -350,7 +351,18 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
         }
         entries.push([sessionId, skippedAt]);
       }
-      return { type, payload: { state: Object.fromEntries(entries) } };
+      const agentEntries: Array<[string, string]> = [];
+      for (const [sessionId, agent] of Object.entries(agents)) {
+        if (!isSafePersistedSessionId(sessionId) || !isString(agent) || !agent.trim()) return null;
+        agentEntries.push([sessionId, agent]);
+      }
+      return {
+        type,
+        payload: {
+          state: Object.fromEntries(entries),
+          agents: Object.fromEntries(agentEntries),
+        },
+      };
     }
 
     case 'session-plan-state/update': {

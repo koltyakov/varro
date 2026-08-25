@@ -1119,11 +1119,10 @@ function hideIncompleteStreamingBlock(content: string) {
   const lines = block.split(/\r?\n/);
   const header = lines[0]?.trim() ?? '';
   if (!header.startsWith('|')) return content;
-  const headerCells = header.endsWith('|') ? header.slice(1, -1).split('|') : [];
+  const headerCells = splitStreamingTableRow(header);
 
   const delimiter = lines[1]?.trim();
-  const delimiterCells =
-    delimiter?.startsWith('|') && delimiter.endsWith('|') ? delimiter.slice(1, -1).split('|') : [];
+  const delimiterCells = delimiter?.startsWith('|') ? splitStreamingTableRow(delimiter) : [];
   const completeDelimiter =
     headerCells.length >= 2 &&
     delimiterCells.length === headerCells.length &&
@@ -1131,6 +1130,28 @@ function hideIncompleteStreamingBlock(content: string) {
   if (completeDelimiter) return content;
 
   return content.slice(0, (blockStartMatch.index ?? 0) + blockStartMatch[0].length - block.length);
+}
+
+function splitStreamingTableRow(row: string) {
+  const cells: string[] = [];
+  let cell = '';
+  for (let index = 1; index < row.length; index += 1) {
+    const character = row[index]!;
+    if (character === '|' && !isEscapedTablePipe(row, index)) {
+      cells.push(cell);
+      cell = '';
+    } else {
+      cell += character;
+    }
+  }
+  if (cell || !row.endsWith('|')) cells.push(cell);
+  return cells;
+}
+
+function isEscapedTablePipe(row: string, pipeIndex: number) {
+  let backslashes = 0;
+  for (let index = pipeIndex - 1; index >= 0 && row[index] === '\\'; index -= 1) backslashes += 1;
+  return backslashes % 2 === 1;
 }
 
 function isAppendOnlySafeMarkdown(content: string) {

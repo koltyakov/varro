@@ -180,6 +180,7 @@ function createSession(options?: {
     sessionPermissionModes: vi.fn<() => InitialWebviewState['sessionPermissionModes']>(() => ({})),
     sessionSelectedModels: vi.fn<() => InitialWebviewState['sessionSelectedModels']>(() => ({})),
     sessionPlanState: vi.fn<() => InitialWebviewState['sessionPlanState']>(() => ({})),
+    sessionPlanAgents: vi.fn(() => ({})),
     sessionModelMigrationPending: vi.fn(() => false),
     modelPreferences: vi.fn<() => InitialWebviewState['modelPreferences']>(() => ({
       modelVariantSelections: {},

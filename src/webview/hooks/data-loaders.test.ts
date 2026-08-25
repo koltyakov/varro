@@ -900,6 +900,7 @@ describe('data loaders', () => {
       sessionId: 'session-1',
       persistGlobal: false,
       updateSelection: false,
+      publishHost: false,
     });
   });
 

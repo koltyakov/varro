@@ -26,12 +26,33 @@ describe('ModelPreferencesStore', () => {
     expect(store.get()).toEqual(preferences);
 
     const updated = { ...preferences, pinnedModels: ['openai:gpt-5.5'] };
-    await store.set(updated);
+    await store.update(preferences, updated);
     expect(persistence.set).toHaveBeenLastCalledWith(
       'varro.modelPreferences.hostMigration.v1',
       true
     );
     expect(store.get()).toEqual(updated);
+  });
+
+  it('merges concurrent changes made from stale webview snapshots', async () => {
+    const persistence: Persistence = {
+      // SAFETY: The fixture handles the two persistence keys read by ModelPreferencesStore.
+      get: vi.fn((key: string) =>
+        key === 'varro.modelPreferences.hostMigration.v1' ? true : null
+      ) as Persistence['get'],
+      set: vi.fn(() => Promise.resolve()),
+      remove: vi.fn(() => Promise.resolve()),
+    };
+    const store = new ModelPreferencesStore(persistence);
+    const base = store.get();
+
+    await store.update(base, { ...base, pinnedModels: ['openai:gpt-5.6-sol'] });
+    await store.update(base, { ...base, hiddenModels: ['anthropic:claude-opus'] });
+
+    expect(store.get()).toMatchObject({
+      pinnedModels: ['openai:gpt-5.6-sol'],
+      hiddenModels: ['anthropic:claude-opus'],
+    });
   });
 
   it('restores a sanitized host snapshot', () => {

@@ -1296,6 +1296,9 @@ describe('state helpers', () => {
 
   it('tracks global and per-session selected agents independently', async () => {
     const stateModule = await loadState();
+    const sent: unknown[] = [];
+    const bridgeWindow = getTestBridgeWindow();
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
 
     stateModule.setSelectedAgent('build');
     stateModule.setSelectedAgent('plan', { sessionId: 'session-1', persistGlobal: false });
@@ -1303,9 +1306,14 @@ describe('state helpers', () => {
     expect(stateModule.state.selectedAgent).toBe('plan');
     expect(stateModule.getSelectedAgentForSession('session-1')).toBe('plan');
     expect(stateModule.getPersistedSelectedAgent()).toBe('build');
+    expect(sent).toContainEqual({
+      type: 'session-plan-state/update',
+      payload: { sessionId: 'session-1', agent: 'plan' },
+    });
 
     stateModule.clearSelectedAgentForSession('session-1');
     expect(stateModule.getSelectedAgentForSession('session-1')).toBeNull();
+    delete bridgeWindow.__sendToExtension;
   });
 
   it('updates session agent metadata without changing the visible selection', async () => {
@@ -1321,6 +1329,31 @@ describe('state helpers', () => {
     expect(stateModule.state.selectedAgent).toBe('build');
     expect(stateModule.getSelectedAgentForSession('child-session')).toBe('explore');
     expect(stateModule.getPersistedSelectedAgent()).toBe('build');
+  });
+
+  it('applies host agent updates to the active session selection', async () => {
+    const stateModule = await loadState();
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setSelectedAgent('plan');
+
+    stateModule.applySessionSelectedAgentUpdate('session-1', 'build');
+
+    expect(stateModule.state.selectedAgent).toBe('build');
+    expect(stateModule.getSelectedAgentForSession('session-1')).toBe('build');
+    expect(JSON.parse(window.localStorage.getItem('varro.sessionSelectedAgents')!)).toEqual({
+      'session-1': 'build',
+    });
+  });
+
+  it('keeps the visible agent when a host update targets another session', async () => {
+    const stateModule = await loadState();
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setSelectedAgent('plan');
+
+    stateModule.applySessionSelectedAgentUpdate('session-2', 'build');
+
+    expect(stateModule.state.selectedAgent).toBe('plan');
+    expect(stateModule.getSelectedAgentForSession('session-2')).toBe('build');
   });
 
   it('tracks per-session selected mcps independently', async () => {
