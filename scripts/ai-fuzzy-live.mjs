@@ -952,14 +952,7 @@ class CdpController {
       });
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
-    const opened = await this.evaluate(`(() => {
-      let persisted = null;
-      try {
-        persisted = globalThis.__vscodeWebviewState?.getState?.()?.['varro.lastOpenedView'] ?? null;
-      } catch {}
-      return persisted?.type === 'session' && persisted.sessionId === ${JSON.stringify(sessionId)};
-    })()`);
-    if (opened) return true;
+    if ((await this.snapshot()).routeSessionId === sessionId) return true;
 
     await executeVscodeCommand(this.port, 'View: Focus Secondary Side Bar');
     await this.refreshContext();
@@ -1526,7 +1519,7 @@ export async function waitForLiveGate({
 }) {
   const deadline = Date.now() + timeoutMs;
   let sawBusy = false;
-  let nudgedForSticky = false;
+  let stickyNudgeAttempts = 0;
   let best = null;
   let latest = null;
   const observations = [];
@@ -1560,14 +1553,16 @@ export async function waitForLiveGate({
       };
     }
     if (
-      !nudgedForSticky &&
+      stickyNudgeAttempts < 4 &&
       busy &&
       snapshot.nestedActivityScroller?.hasRange &&
       missing.length === 1 &&
       missing[0] === 'sticky latest prompt'
     ) {
-      nudgedForSticky = await cdp.wheel('.interactive-list', -96, 'right');
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      stickyNudgeAttempts += 1;
+      if (await cdp.wheel('.interactive-list', -96, 'right')) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
       continue;
     }
     if (sawBusy && !busy) break;
@@ -3414,6 +3409,25 @@ async function runLive(options) {
   const tracked = manifest.runSessions.find((session) => !session.deleted && !session.parentID);
   if (!tracked) throw new Error('The manifest has no active run session');
   const client = new OpenCodeClient(manifest.server, manifest.workspace);
+  if (
+    scenario === 'AI-08' &&
+    !manifest.runSessions.some(
+      (session) => !session.deleted && session.createdBy === 'AI-08 session switch'
+    )
+  ) {
+    const fork = await client.request('POST', `/session/${encodeURIComponent(tracked.id)}/fork`);
+    const title = `VFZ ${manifest.seed} AI-08 alternate`;
+    const alternate = await client.request('PATCH', `/session/${encodeURIComponent(fork.id)}`, {
+      title,
+    });
+    manifest.runSessions.push({
+      id: alternate.id,
+      title,
+      deleted: false,
+      createdBy: 'AI-08 session switch',
+    });
+    await writeJsonAtomic(manifestPath, manifest);
+  }
   const requestedModel = validateLiveModel(options.model ?? DEFAULT_MODEL);
   const targetSurface = options.surface ?? 'sidebar';
   if (!['sidebar', 'editor'].includes(targetSurface)) {
@@ -3465,6 +3479,15 @@ async function runLive(options) {
       );
     } else {
       await openRunSession(cdp, tracked.id, tracked.title);
+    }
+    if (scenario === 'AI-08' && manifest.hostState?.inlineFileChangesEnabled !== true) {
+      await executeVscodeCommand(launch.remoteDebuggingPort, 'Varro: Show Inline File Changes');
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      manifest.hostState = {
+        ...manifest.hostState,
+        inlineFileChangesEnabled: true,
+      };
+      await writeJsonAtomic(manifestPath, manifest);
     }
     await cdp.click('[aria-label="Scroll to latest message"]');
     await cdp.key('.interactive-list', 'End');

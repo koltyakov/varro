@@ -95,6 +95,30 @@ test('keeps the latest live-gate sample and the best busy sample separately', as
   assert.equal(gate.observations.length, 2);
 });
 
+test('repeats the bounded sticky nudge until bottom follow releases', async () => {
+  let wheelCount = 0;
+  const gate = await waitForLiveGate({
+    client: { isBusy: async () => true },
+    cdp: {
+      snapshot: async () => ({
+        ...ready,
+        stickyMessageId: wheelCount >= 2 ? 'message-1' : null,
+      }),
+      wheel: async () => {
+        wheelCount += 1;
+        return true;
+      },
+    },
+    sessionId: 'session',
+    scenario: 'AI-07',
+    timeoutMs: 1_000,
+    pollIntervalMs: 0,
+  });
+
+  assert.equal(wheelCount, 2);
+  assert.deepEqual(gate.missing, []);
+});
+
 test('builds a targeted bounded recovery prompt from missing gates', () => {
   const prompt = buildLivePrompt({
     seed: 'abc',

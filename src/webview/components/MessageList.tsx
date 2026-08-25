@@ -4343,7 +4343,7 @@ export function MessageList() {
   async function keepEditingMessageTopVisible(messageId: string, revealEpoch: number) {
     let stableFrames = 0;
     for (let attempt = 0; attempt < 12; attempt += 1) {
-      await waitForAnimationFrame();
+      if (attempt > 0) await waitForAnimationFrame();
       if (editRevealEpoch !== revealEpoch || editingMessage()?.messageId !== messageId) return;
 
       const container = containerRef;

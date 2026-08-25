@@ -1883,6 +1883,50 @@ describe('MessageList sticky prompt preview', () => {
     animationFrames.restore();
   });
 
+  it('clamps an aligned sticky destination before the first editing frame', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    let scrollTopValue = 500;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+        if (this.dataset.msgId === 'user-2') {
+          return new DOMRect(0, 502 - scrollTopValue, 500, 180);
+        }
+        return new DOMRect(0, 0, 500, 40);
+      }
+    );
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
+      { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
+      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    startEditingMessage('user-2', 'session-1', 'Prompt 2');
+    await Promise.resolve();
+
+    expect(scrollTopValue).toBe(494);
+    animationFrames.flush();
+    await Promise.resolve();
+    expect(scrollTopValue).toBe(494);
+
+    animationFrames.restore();
+  });
+
   it('suspends bottom follow on edit entry until an explicit follow request', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     let list: HTMLDivElement | null = null;
