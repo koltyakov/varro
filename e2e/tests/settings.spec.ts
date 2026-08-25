@@ -1,34 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { getE2EState, getVisibleMessageAnchor, sampleMessageTopAcrossFrames } from './helpers';
-
-async function dispatchChatFontConfig(page: Page, chatFontSize: number, chatFontFamily: string) {
-  await page.evaluate(
-    ({ family, size }) => {
-      // SAFETY: The E2E harness owns this protocol-shaped bootstrap snapshot.
-      const initial = (
-        window as Window & {
-          __initialWebviewState?: {
-            desktopSessionPaneSide?: 'left' | 'right';
-            defaultPermissionMode?: 'default' | 'edits' | 'auto' | 'full';
-          };
-        }
-      ).__initialWebviewState;
-      window.postMessage(
-        {
-          type: 'config/update',
-          payload: {
-            desktopSessionPaneSide: initial?.desktopSessionPaneSide ?? 'left',
-            defaultPermissionMode: initial?.defaultPermissionMode ?? 'default',
-            chatFontSize: size,
-            chatFontFamily: family,
-          },
-        },
-        '*'
-      );
-    },
-    { family: chatFontFamily, size: chatFontSize }
-  );
-}
 
 test('toggling /thinking hides and shows reasoning blocks', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=plan-ready&expandedActivity=1');
@@ -165,18 +136,17 @@ test('chat font changes preserve main typography proportions and a detached anch
     toolLineHeight: '15px',
   });
 
-  await dispatchChatFontConfig(page, 17, 'monospace');
-
-  await expect(session).toHaveCSS('font-size', '17px');
-  await expect(session).toHaveCSS('font-family', 'monospace');
-  await expect(markdown).toHaveCSS('font-size', '17.5px');
-  await expect(markdown).toHaveCSS('line-height', '28.875px');
-  await expect(toolHeader).toHaveCSS('font-size', '12.5px');
-  await expect(toolHeader).toHaveCSS('line-height', '15px');
   const samples = await list.evaluate(async (element, target) => {
-    const result: Array<number | null> = [];
-    for (let frame = 0; frame < 16; frame += 1) {
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    // SAFETY: The E2E harness owns this protocol-shaped bootstrap snapshot.
+    const initial = (
+      window as Window & {
+        __initialWebviewState?: {
+          desktopSessionPaneSide?: 'left' | 'right';
+          defaultPermissionMode?: 'default' | 'edits' | 'auto' | 'full';
+        };
+      }
+    ).__initialWebviewState;
+    const readTop = () => {
       const row = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].find(
         (candidate) => candidate.dataset.msgId === target.messageId
       );
@@ -185,14 +155,36 @@ test('chat font changes preserve main typography proportions and a detached anch
           '.rendered-markdown :is(p, li, pre, table, blockquote, h1, h2, h3, h4, h5, h6)'
         ) ?? []),
       ].find((candidate) => candidate.innerText === target.text);
-      result.push(
-        block?.isConnected
-          ? block.getBoundingClientRect().top - element.getBoundingClientRect().top
-          : null
-      );
+      return block?.isConnected
+        ? block.getBoundingClientRect().top - element.getBoundingClientRect().top
+        : null;
+    };
+    const result: Array<number | null> = [];
+    result.push(readTop());
+    window.postMessage(
+      {
+        type: 'config/update',
+        payload: {
+          desktopSessionPaneSide: initial?.desktopSessionPaneSide ?? 'left',
+          defaultPermissionMode: initial?.defaultPermissionMode ?? 'default',
+          chatFontSize: 17,
+          chatFontFamily: 'monospace',
+        },
+      },
+      '*'
+    );
+    for (let frame = 0; frame < 16; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      result.push(readTop());
     }
     return result;
   }, anchor);
+  await expect(session).toHaveCSS('font-size', '17px');
+  await expect(session).toHaveCSS('font-family', 'monospace');
+  await expect(markdown).toHaveCSS('font-size', '17.5px');
+  await expect(markdown).toHaveCSS('line-height', '28.875px');
+  await expect(toolHeader).toHaveCSS('font-size', '12.5px');
+  await expect(toolHeader).toHaveCSS('line-height', '15px');
   for (const top of samples) {
     expect(top).not.toBeNull();
     expect(Math.abs(top! - anchor.top), JSON.stringify({ anchor, samples })).toBeLessThan(1.5);

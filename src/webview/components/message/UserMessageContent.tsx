@@ -250,6 +250,15 @@ export function parseUserMessageContent(parts: Part[]): ParsedUserMessageContent
   return { messageTexts, attachments, fileParts, agentParts };
 }
 
+export function hasUserMessageContent(parsed: ParsedUserMessageContent): boolean {
+  return (
+    parsed.messageTexts.some((text) => text.trim().length > 0) ||
+    parsed.attachments.length > 0 ||
+    parsed.fileParts.length > 0 ||
+    parsed.agentParts.length > 0
+  );
+}
+
 export function isWrapperlessUserMessageContent(parsed: ParsedUserMessageContent): boolean {
   const attachmentCount =
     parsed.attachments.length + parsed.fileParts.length + parsed.agentParts.length;

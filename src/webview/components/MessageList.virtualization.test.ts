@@ -10,9 +10,10 @@ import {
 } from '../lib/state';
 import type { MessageEntry, Part } from '../types';
 import type { AssistantActivityGroupInfo } from '../lib/assistant-activity';
-import { MessageList } from './MessageList';
+import { MessageList, canWidthResizeOwnAnchor } from './MessageList';
 import {
   getChangedInlinePreviewMessageIds,
+  getAssistantFlowSpacingSize,
   getBorderedAdjacencyLayoutSignatures,
   getCompactActivityDisclosureLayoutSignatures,
   getCompactActivityLayoutSignatures,
@@ -326,7 +327,7 @@ describe('bordered message projection', () => {
     expect(boundaries.get('user-1')).toEqual({
       startsBordered: false,
       endsBordered: true,
-      signature: 'user:u:b',
+      signature: 'user:content:u:b',
     });
     expect(boundaries.get('assistant-1')).toEqual({
       startsBordered: false,
@@ -351,6 +352,102 @@ describe('bordered message projection', () => {
     expect(signatures.get('b')).toBe('b\u0000a\u0000tight');
     const visibleMiddle = getBorderedAdjacencyLayoutSignatures(messages, boundaries, new Set());
     expect(visibleMiddle.get('b')).toBe('b\u0000empty\u0000normal');
+  });
+
+  it('includes bordered-pair overlap in flow spacing', () => {
+    const bordered = { startsBordered: true, endsBordered: true };
+
+    expect(getAssistantFlowSpacingSize([bordered, bordered], 8)).toBe(6);
+    expect(getAssistantFlowSpacingSize([bordered, bordered, bordered], 8)).toBe(12);
+    expect(
+      getAssistantFlowSpacingSize([bordered, bordered, bordered], 8) -
+        getAssistantFlowSpacingSize([bordered, bordered], 8)
+    ).toBe(6);
+    expect(
+      getAssistantFlowSpacingSize(
+        [bordered, { startsBordered: false, endsBordered: false, permissionPrompt: true }],
+        8
+      )
+    ).toBe(6);
+  });
+
+  it('excludes delayed activity from a visible row boundary', () => {
+    const runningPart: Part = {
+      ...toolPart('running-1', 'assistant-1'),
+      state: {
+        status: 'running',
+        input: { command: 'npm test' },
+        title: 'npm test',
+        time: { start: 1 },
+      },
+    };
+    const messages: MessageEntry[] = [
+      {
+        info: assistantMessage('assistant-1'),
+        parts: [runningPart, { ...textPart('text-1', 'Visible prose'), messageID: 'assistant-1' }],
+      },
+    ];
+    const partKey = `${runningPart.messageID}\u0000${runningPart.id}`;
+    const boundary = getMessageBlockBoundaryMap(messages, new Map(), {
+      delayedActivityPartKeys: new Set([partKey]),
+      expandedActivityGroup: () => false,
+      renderEmptyMessageIds: new Set(),
+      showThinking: true,
+    }).get('assistant-1');
+
+    expect(boundary).toEqual({ startsBordered: false, endsBordered: false, signature: 'u:u:0' });
+  });
+
+  it('projects permission activity in its rendered order with its prompt', () => {
+    const ownerPart = toolPart('read-1', 'assistant-1');
+    const waitingPart = toolPart('bash-1', 'assistant-1');
+    const group: AssistantActivityGroupInfo = {
+      key: 'activity-1',
+      ownerMessageId: 'assistant-1',
+      ownerPartId: ownerPart.id,
+      parts: [ownerPart],
+    };
+    const boundary = getMessageBlockBoundaryMap(
+      [{ info: assistantMessage('assistant-1'), parts: [waitingPart, ownerPart] }],
+      new Map([['assistant-1', [group]]]),
+      {
+        expandedActivityGroup: () => false,
+        renderEmptyMessageIds: new Set(),
+        showThinking: true,
+        trailingPermissionMessageIds: new Set(['assistant-1']),
+        waitingActivityPartKeys: new Set([`${waitingPart.messageID}\u0000${waitingPart.id}`]),
+      }
+    ).get('assistant-1');
+
+    expect(boundary).toEqual({ startsBordered: false, endsBordered: true, signature: 'u:b:1' });
+  });
+});
+
+describe('width resize ownership', () => {
+  const noOwners = {
+    bottomFollow: false,
+    diffFocus: false,
+    editing: false,
+    expansion: false,
+    history: false,
+    stickyNavigation: false,
+    structuralReconciliation: false,
+  };
+  const strongerOwners = [
+    'bottomFollow',
+    'diffFocus',
+    'editing',
+    'expansion',
+    'history',
+    'stickyNavigation',
+    'structuralReconciliation',
+  ] satisfies Array<keyof typeof noOwners>;
+
+  it('yields its anchor to every stronger scroll owner', () => {
+    expect(canWidthResizeOwnAnchor(noOwners)).toBe(true);
+    for (const owner of strongerOwners) {
+      expect(canWidthResizeOwnAnchor({ ...noOwners, [owner]: true }), owner).toBe(false);
+    }
   });
 });
 

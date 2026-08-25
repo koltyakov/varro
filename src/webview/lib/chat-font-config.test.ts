@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { applyChatFontConfig, onBeforeChatFontConfigChange } from './chat-font-config';
+import {
+  applyChatFontConfig,
+  onAfterChatFontConfigChange,
+  onBeforeChatFontConfigChange,
+} from './chat-font-config';
 
 describe('chat font config', () => {
   afterEach(() => {
@@ -7,28 +11,38 @@ describe('chat font config', () => {
     document.documentElement.style.removeProperty('--varro-chat-font-family');
   });
 
-  it('notifies layout owners before a changed font is applied', () => {
+  it('notifies layout owners around a changed font application', () => {
     applyChatFontConfig({ chatFontSize: 13, chatFontFamily: 'default' });
     const listener = vi.fn(() => {
       expect(document.documentElement.style.getPropertyValue('--varro-chat-font-size')).toBe(
         '13px'
       );
     });
+    const afterListener = vi.fn(() => {
+      expect(document.documentElement.style.getPropertyValue('--varro-chat-font-size')).toBe(
+        '17px'
+      );
+    });
     const unsubscribe = onBeforeChatFontConfigChange(listener);
+    const unsubscribeAfter = onAfterChatFontConfigChange(afterListener);
 
     applyChatFontConfig({ chatFontSize: 13, chatFontFamily: 'default' });
     expect(listener).not.toHaveBeenCalled();
+    expect(afterListener).not.toHaveBeenCalled();
 
     applyChatFontConfig({ chatFontSize: 17, chatFontFamily: 'monospace' });
     expect(listener).toHaveBeenCalledOnce();
+    expect(afterListener).toHaveBeenCalledOnce();
     expect(document.documentElement.style.getPropertyValue('--varro-chat-font-size')).toBe('17px');
     expect(document.documentElement.style.getPropertyValue('--varro-chat-font-family')).toBe(
       'monospace'
     );
 
     unsubscribe();
+    unsubscribeAfter();
     applyChatFontConfig({ chatFontSize: 15, chatFontFamily: 'default' });
     expect(listener).toHaveBeenCalledOnce();
+    expect(afterListener).toHaveBeenCalledOnce();
     expect(document.documentElement.style.getPropertyValue('--varro-chat-font-family')).toBe('');
   });
 });

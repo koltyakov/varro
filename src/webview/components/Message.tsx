@@ -52,6 +52,7 @@ import {
   UserMessageContent,
   getUserMessageEditContext,
   getUserMessageEditText,
+  hasUserMessageContent,
   hasUserMessageEditableContent,
   isWrapperlessUserMessageContent,
   parseUserMessageContent,
@@ -422,13 +423,7 @@ export function Message(props: {
   );
   const hasUserContent = createMemo(() => {
     const parsed = parsedUserContent();
-    if (!parsed) return false;
-    return (
-      parsed.messageTexts.some((text) => text.trim().length > 0) ||
-      parsed.attachments.length > 0 ||
-      parsed.fileParts.length > 0 ||
-      parsed.agentParts.length > 0
-    );
+    return parsed ? hasUserMessageContent(parsed) : false;
   });
   const hasOmittedDiffs = () =>
     props.info.role === 'user' && props.info.summary?.diffsOmitted === true;

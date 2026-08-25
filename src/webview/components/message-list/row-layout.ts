@@ -4,6 +4,7 @@ import {
   type AssistantActivityGroupInfo,
   type AssistantActivityPart,
 } from '../../lib/assistant-activity';
+import { isAbortedAssistantError } from '../../../shared/error-classification';
 import { isAssistantMessage } from '../../lib/message-metrics';
 import {
   hasVisibleReasoningContent,
@@ -12,6 +13,7 @@ import {
 } from '../../lib/part-utils';
 import { getToolInlineFileChangesLayoutSignature } from '../../lib/tool-file-change';
 import type { MessageEntry, Part } from '../../types';
+import { hasUserMessageContent, parseUserMessageContent } from '../message/UserMessageContent';
 
 export type MessageBlockBoundary = {
   startsBordered: boolean;
@@ -20,16 +22,48 @@ export type MessageBlockBoundary = {
 };
 
 type MessageBlockBoundaryOptions = {
+  delayedActivityPartKeys?: ReadonlySet<string>;
+  dialogSummaryMessageIds?: ReadonlySet<string>;
   expandedActivityGroup: (key: string) => boolean;
-  renderEmptyMessageIds: ReadonlySet<string>;
-  showThinking: boolean;
-  streaming?: { partId: string | null; text: string };
-  visibleActiveActivityPartKeys?: ReadonlySet<string>;
-  retainedActivityPartKeys?: ReadonlySet<string>;
   exitingActivityPartKeys?: ReadonlySet<string>;
   modelChangeMessageIds?: ReadonlySet<string>;
-  dialogSummaryMessageIds?: ReadonlySet<string>;
+  renderEmptyMessageIds: ReadonlySet<string>;
+  retainedActivityPartKeys?: ReadonlySet<string>;
+  showThinking: boolean;
+  streaming?: { partId: string | null; text: string };
+  trailingPermissionMessageIds?: ReadonlySet<string>;
+  visibleActiveActivityPartKeys?: ReadonlySet<string>;
+  waitingActivityPartKeys?: ReadonlySet<string>;
 };
+
+function orderBoundaryParts(
+  parts: readonly Part[],
+  waitingActivityPartKeys?: ReadonlySet<string>
+): readonly Part[] {
+  if (!waitingActivityPartKeys?.size) return parts;
+  const ordered: Part[] = [];
+  for (let index = 0; index < parts.length;) {
+    if (!isAssistantActivityPart(parts[index]!)) {
+      ordered.push(parts[index]!);
+      index += 1;
+      continue;
+    }
+
+    let end = index + 1;
+    while (end < parts.length && isAssistantActivityPart(parts[end]!)) end += 1;
+    const activityParts = parts.slice(index, end).filter(isAssistantActivityPart);
+    ordered.push(
+      ...activityParts.filter(
+        (part) => !waitingActivityPartKeys.has(getAssistantActivityPartKey(part))
+      ),
+      ...activityParts.filter((part) =>
+        waitingActivityPartKeys.has(getAssistantActivityPartKey(part))
+      )
+    );
+    index = end;
+  }
+  return ordered;
+}
 
 export function getMessageBlockBoundaryMap(
   messages: readonly MessageEntry[],
@@ -50,12 +84,15 @@ export function getMessageBlockBoundaryMap(
     }
 
     if (message.info.role === 'user') {
+      const hasContent =
+        hasUserMessageContent(parseUserMessageContent(message.parts)) ||
+        message.info.summary?.diffsOmitted === true;
       const interruptedStart = options.modelChangeMessageIds?.has(messageId) ?? false;
       const interruptedEnd = options.dialogSummaryMessageIds?.has(messageId) ?? false;
       boundaries.set(messageId, {
-        startsBordered: !interruptedStart,
-        endsBordered: !interruptedEnd,
-        signature: `user:${interruptedStart ? 'u' : 'b'}:${interruptedEnd ? 'u' : 'b'}`,
+        startsBordered: hasContent && !interruptedStart,
+        endsBordered: hasContent && !interruptedEnd,
+        signature: `user:${hasContent ? 'content' : 'empty'}:${hasContent && !interruptedStart ? 'b' : 'u'}:${hasContent && !interruptedEnd ? 'b' : 'u'}`,
       });
       continue;
     }
@@ -70,7 +107,7 @@ export function getMessageBlockBoundaryMap(
     const renderedGroupKeys = new Set<string>();
     const renderedActiveSummaryKeys = new Set<string>();
 
-    for (const part of message.parts) {
+    for (const part of orderBoundaryParts(message.parts, options.waitingActivityPartKeys)) {
       if (part.type === 'text') {
         if (hasVisibleProjectedText(part, options.streaming)) blocks.push(false);
         continue;
@@ -84,6 +121,7 @@ export function getMessageBlockBoundaryMap(
       }
 
       const partKey = getAssistantActivityPartKey(part);
+      if (options.delayedActivityPartKeys?.has(partKey)) continue;
       if (
         options.visibleActiveActivityPartKeys?.has(partKey) ||
         options.retainedActivityPartKeys?.has(partKey) ||
@@ -112,7 +150,8 @@ export function getMessageBlockBoundaryMap(
       if (options.expandedActivityGroup(group.key)) blocks.push(true);
     }
 
-    if (message.info.error) blocks.push(true);
+    if (message.info.error && !isAbortedAssistantError(message.info.error)) blocks.push(true);
+    if (options.trailingPermissionMessageIds?.has(messageId)) blocks.push(true);
     if (options.modelChangeMessageIds?.has(messageId)) blocks.unshift(false);
     if (options.dialogSummaryMessageIds?.has(messageId)) blocks.push(false);
     let borderedPairCount = 0;
@@ -157,6 +196,28 @@ export function getBorderedAdjacencyLayoutSignatures(
   }
 
   return signatures;
+}
+
+export function getAssistantFlowSpacingSize(
+  blocks: readonly {
+    startsBordered: boolean;
+    endsBordered: boolean;
+    permissionPrompt?: boolean;
+  }[],
+  gap: number
+): number {
+  let spacing = Math.max(0, blocks.length - 1) * gap;
+  for (let index = 1; index < blocks.length; index += 1) {
+    const previous = blocks[index - 1]!;
+    const current = blocks[index]!;
+    if (
+      (previous.endsBordered && (current.startsBordered || current.permissionPrompt)) ||
+      (previous.permissionPrompt && current.startsBordered)
+    ) {
+      spacing -= gap * 0.25;
+    }
+  }
+  return spacing;
 }
 
 function isBorderedAssistantPart(part: Part) {
@@ -256,7 +317,7 @@ export function getCompactActivityDisclosureLayoutSignatures(
   );
 }
 
-export function getRenderEmptyAssistantMessageIds(
+export function getRenderEmptyMessageIds(
   messages: readonly MessageEntry[],
   groups: ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>,
   isExpanded: (key: string) => boolean,
@@ -271,7 +332,21 @@ export function getRenderEmptyAssistantMessageIds(
   const result = new Set<string>();
 
   for (const message of messages) {
-    if (!isAssistantMessage(message.info) || message.info.error) continue;
+    if (message.info.role === 'user') {
+      if (
+        !hasUserMessageContent(parseUserMessageContent(message.parts)) &&
+        message.info.summary?.diffsOmitted !== true
+      ) {
+        result.add(message.info.id);
+      }
+      continue;
+    }
+    if (
+      !isAssistantMessage(message.info) ||
+      (message.info.error && !isAbortedAssistantError(message.info.error))
+    ) {
+      continue;
+    }
     const messageGroups = groups.get(message.info.id) ?? [];
     const groupByPartKey = new Map(
       messageGroups.flatMap((group) =>

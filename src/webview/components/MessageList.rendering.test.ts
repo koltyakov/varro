@@ -17,7 +17,7 @@ import {
 import type { MessageEntry, Part, Permission, QuestionRequest, TextPart, ToolPart } from '../types';
 import type { AssistantActivityGroupInfo } from '../lib/assistant-activity';
 import { MessageList, getNewlyAppendedMessageIds } from './MessageList';
-import { getRenderEmptyAssistantMessageIds } from './message-list/row-layout';
+import { getRenderEmptyMessageIds } from './message-list/row-layout';
 import { getVisibleThreadMessages } from './message-list/thread-visibility';
 import { markSessionHistoryLoadFailed, setSessionHistoryCursor } from '../lib/message-window';
 import {
@@ -645,15 +645,89 @@ describe('MessageList compact activity', () => {
       messages.slice(0, 4).map((message) => [message.info.id, [group]] as const)
     );
 
-    expect([...getRenderEmptyAssistantMessageIds(messages, groups, () => false)]).toEqual([
+    expect([...getRenderEmptyMessageIds(messages, groups, () => false)]).toEqual([
       'assistant-follower-1',
       'assistant-follower-2',
       'assistant-follower-3',
       'assistant-hidden-todo',
     ]);
-    expect([...getRenderEmptyAssistantMessageIds(messages, groups, () => true)]).toEqual([
+    expect([...getRenderEmptyMessageIds(messages, groups, () => true)]).toEqual([
       'assistant-hidden-todo',
     ]);
+  });
+
+  it('classifies empty user and aborted assistant rows as semantic zeroes', () => {
+    const messages: MessageEntry[] = [
+      { info: userMessage('empty-user'), parts: [] },
+      {
+        info: assistantMessage('aborted-assistant', {
+          error: { name: 'aborted', data: { message: 'Aborted' } },
+        }),
+        parts: [],
+      },
+      {
+        info: userMessage('omitted-diff-user'),
+        parts: [],
+      },
+    ];
+    if (messages[2]?.info.role === 'user') {
+      messages[2].info.summary = { diffs: [], diffsOmitted: true };
+    }
+
+    expect([...getRenderEmptyMessageIds(messages, new Map(), () => false)]).toEqual([
+      'empty-user',
+      'aborted-assistant',
+    ]);
+  });
+
+  it('derives bordered adjacency from collapsed file-edit rows', async () => {
+    const firstEdit = toolPart('edit-1', 'assistant-1', 'call-edit-1');
+    firstEdit.tool = 'edit';
+    firstEdit.state = {
+      status: 'completed',
+      input: { file_path: 'src/app.ts' },
+      output: 'Edited src/app.ts',
+      title: 'Edit src/app.ts',
+      metadata: { additions: 1, deletions: 1 },
+      time: { start: 1, end: 2 },
+    };
+    const duplicateEdit: ToolPart = {
+      ...firstEdit,
+      id: 'edit-2',
+      messageID: 'assistant-2',
+      callID: 'call-edit-2',
+    };
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Edit the file')] },
+      {
+        info: assistantMessage('assistant-1', {
+          parentID: 'user-1',
+          time: { created: 1 },
+        }),
+        parts: [firstEdit],
+      },
+      {
+        info: assistantMessage('assistant-2', {
+          parentID: 'user-1',
+          time: { created: 2 },
+        }),
+        parts: [
+          duplicateEdit,
+          { ...textPart('result-1', 'The edit is complete.'), messageID: 'assistant-2' },
+        ],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const firstRow = container?.querySelector('[data-msg-id="assistant-1"]');
+    const secondRow = container?.querySelector('[data-msg-id="assistant-2"]');
+    expect(firstRow?.querySelector('.file-change-card')).not.toBeNull();
+    expect(secondRow?.querySelector('.file-change-card')).toBeNull();
+    expect(secondRow?.classList).not.toContain('interactive-item-follows-bordered-block');
   });
 
   it('does not classify projected streaming text after Explored as render-empty', async () => {

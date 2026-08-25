@@ -153,17 +153,18 @@ import {
 } from './message-list/assistant-dialog';
 import {
   getChangedInlinePreviewMessageIds,
+  getAssistantFlowSpacingSize,
   getBorderedAdjacencyLayoutSignatures,
   getCompactActivityDisclosureLayoutSignatures,
   getCompactActivityLayoutSignatures,
   getInlinePreviewLayoutSignatures,
   getMessageBlockBoundaryMap,
-  getRenderEmptyAssistantMessageIds,
+  getRenderEmptyMessageIds,
   getThinkingLayoutSignatures,
   hasVisibleProjectedText,
 } from './message-list/row-layout';
 import { isNumber, isFunction } from '../lib/runtime-values';
-import { onBeforeChatFontConfigChange } from '../lib/chat-font-config';
+import { onAfterChatFontConfigChange, onBeforeChatFontConfigChange } from '../lib/chat-font-config';
 
 function showTruncatedHistoryBanner() {
   return !editingMessage() && isSessionHistoryTruncated(state.activeSessionId);
@@ -204,6 +205,29 @@ const EMPTY_VISIBLE_RANGE: VisibleRange = {
 function getFontLayoutSignature(element: HTMLElement): string {
   const styles = getComputedStyle(element);
   return JSON.stringify([styles.fontSize, styles.fontFamily]);
+}
+
+function getAssistantFlowSpacingForElements(elements: readonly Element[], gap: number): number {
+  return getAssistantFlowSpacingSize(
+    elements.map((element) => ({
+      startsBordered: element.classList.contains('assistant-flow-block-starts-bordered'),
+      endsBordered: element.classList.contains('assistant-flow-block-ends-bordered'),
+      permissionPrompt: element.classList.contains('permission-prompt'),
+    })),
+    gap
+  );
+}
+
+export function canWidthResizeOwnAnchor(owners: {
+  bottomFollow: boolean;
+  diffFocus: boolean;
+  editing: boolean;
+  expansion: boolean;
+  history: boolean;
+  stickyNavigation: boolean;
+  structuralReconciliation: boolean;
+}): boolean {
+  return !Object.values(owners).some(Boolean);
 }
 
 function setSetMembership(setter: Setter<ReadonlySet<string>>, key: string, included: boolean) {
@@ -958,14 +982,7 @@ export function MessageList() {
 
     publishMeasurementVersion({ preserveVisibleAnchor: false });
     queueMicrotask(() => {
-      if (
-        disposed ||
-        autoScroll() ||
-        diffFocusPauseActive ||
-        pendingStructuralScrollAnchor ||
-        stickyNavigationOwnsScroll() ||
-        editingMessage()
-      ) {
+      if (disposed || !widthResizeCanOwnScroll()) {
         return;
       }
       restoreVisibleScrollAnchor(anchor, { useMessageOffsetFallback: true });
@@ -1015,12 +1032,17 @@ export function MessageList() {
     fontChanged?: boolean;
     anchor?: VisibleScrollAnchor | null;
   }) {
-    if (!widthResizeAnchor && options?.anchor && !autoScroll()) {
+    const canOwnScroll = widthResizeCanOwnScroll();
+    if (!canOwnScroll && widthResizeAnchor) {
+      widthResizeAnchor = null;
+      setWidthResizePinnedMessageId(null);
+    }
+    if (!widthResizeAnchor && options?.anchor && canOwnScroll) {
       widthResizeAnchor = options.anchor;
       setWidthResizePinnedMessageId(widthResizeAnchor.messageId);
       restoreVisibleScrollAnchor(widthResizeAnchor);
     }
-    if (!widthResizeAnchor && !autoScroll()) {
+    if (!widthResizeAnchor && canOwnScroll) {
       const pendingWheelAnchor = pendingWheelResizeAnchor;
       const wheelAnchor = pendingWheelAnchor?.anchor ?? null;
       const containerRect = containerRef?.getBoundingClientRect();
@@ -1119,6 +1141,19 @@ export function MessageList() {
     pendingWidthFollowCorrection = false;
     widthResizeAnchor = null;
     setWidthResizePinnedMessageId(null);
+  }
+
+  function widthResizeCanOwnScroll() {
+    const sessionId = state.activeSessionId;
+    return canWidthResizeOwnAnchor({
+      bottomFollow: autoScroll(),
+      diffFocus: diffFocusPauseActive,
+      editing: !!editingMessage(),
+      expansion: !!pendingExpansionScrollAnchor,
+      history: !!(sessionId && getCurrentPendingHistoryAnchor(sessionId)),
+      stickyNavigation: stickyNavigationOwnsScroll(),
+      structuralReconciliation: !!pendingStructuralScrollAnchor,
+    });
   }
 
   function finishWidthResizeNow() {
@@ -2269,7 +2304,7 @@ export function MessageList() {
     if (containerRef && Math.abs(scrollAdjustment) > 0.5) {
       setPreservedScrollTop(containerRef.scrollTop + scrollAdjustment);
     }
-    if (widthResizeActive && widthResizeAnchor) {
+    if (widthResizeActive && widthResizeAnchor && widthResizeCanOwnScroll()) {
       restoreVisibleScrollAnchor(widthResizeAnchor);
     }
 
@@ -3649,11 +3684,12 @@ export function MessageList() {
         (total, element) => total + element.getBoundingClientRect().height,
         0
       );
-      const survivingChildCount = visibleChildren.length - disappearing.length;
+      const survivingChildren = visibleChildren.filter((element) => !groups.has(element));
       const gap = Number.parseFloat(getComputedStyle(flow).rowGap) || 0;
       reserve +=
-        Math.max(0, visibleChildren.length - 1) * gap - Math.max(0, survivingChildCount - 1) * gap;
-      if (survivingChildCount === 0 && disappearing.length === visibleChildren.length) {
+        getAssistantFlowSpacingForElements(visibleChildren, gap) -
+        getAssistantFlowSpacingForElements(survivingChildren, gap);
+      if (survivingChildren.length === 0 && disappearing.length === visibleChildren.length) {
         const row = flow.closest<HTMLElement>('.interactive-item-container');
         if (row) {
           reserve += Math.max(
@@ -3750,16 +3786,17 @@ export function MessageList() {
         (element) => element.getClientRects().length > 0
       );
       const collapsingTrayElements = new Set(flowTrays.map(({ tray }) => tray));
-      const survivingChildCount = visibleChildren.filter((element) => {
+      const survivingChildren = visibleChildren.filter((element) => {
         // SAFETY: The surrounding shape or discriminator check establishes the HTMLElement contract used below.
         if (!collapsingTrayElements.has(element as HTMLElement)) return true;
         return flowTrays.some(({ tray, summary }) => tray === element && summary !== null);
-      }).length;
+      });
       const gap = Number.parseFloat(getComputedStyle(flow).rowGap) || 0;
       reserve +=
-        Math.max(0, visibleChildren.length - 1) * gap - Math.max(0, survivingChildCount - 1) * gap;
+        getAssistantFlowSpacingForElements(visibleChildren, gap) -
+        getAssistantFlowSpacingForElements(survivingChildren, gap);
 
-      if (survivingChildCount === 0 && visibleChildren.length === flowTrays.length) {
+      if (survivingChildren.length === 0 && visibleChildren.length === flowTrays.length) {
         const row = flow.closest<HTMLElement>('.interactive-item-container');
         if (row) {
           reserve += Math.max(
@@ -5124,21 +5161,19 @@ export function MessageList() {
   onMount(() => {
     if (!containerRef) return;
     const stopCapturingFontChange = onBeforeChatFontConfigChange(() => {
-      if (
-        !containerRef ||
-        autoScroll() ||
-        stickyNavigationOwnsScroll() ||
-        editingMessage() ||
-        pendingExpansionScrollAnchor
-      ) {
-        return;
-      }
+      if (!containerRef) return;
       beginWidthResize({
         fontChanged: true,
-        anchor: captureWidthResizeVisibleScrollAnchor(),
+        anchor: widthResizeCanOwnScroll() ? captureWidthResizeVisibleScrollAnchor() : null,
       });
     });
+    const stopRestoringFontChange = onAfterChatFontConfigChange(() => {
+      if (widthResizeActive && widthResizeAnchor && widthResizeCanOwnScroll()) {
+        restoreVisibleScrollAnchor(widthResizeAnchor);
+      }
+    });
     onCleanup(stopCapturingFontChange);
+    onCleanup(stopRestoringFontChange);
     const unregisterQueuedMessageRemoval = registerQueuedMessageRemovalHandler(
       reserveQueuedMessageRemoval
     );
@@ -6412,7 +6447,7 @@ export function MessageList() {
     const previous = knownZeroHeightMessageIds();
     const activityMessages = compactActivityMessages();
     const delayedActivityPartKeys = new Set(activityShowTimers.keys());
-    const candidates = getRenderEmptyAssistantMessageIds(
+    const candidates = getRenderEmptyMessageIds(
       activityMessages,
       assistantActivityGroupMap(),
       (key) => getMessageBlockExpanded(key) ?? false,
@@ -6449,14 +6484,31 @@ export function MessageList() {
   });
   const messageBlockBoundaryMap = createMemo(() => {
     trackMessageBlockExpansionState();
-    return getMessageBlockBoundaryMap(messages(), assistantActivityGroupMap(), {
+    const waitingActivityPartKeys = new Set<string>();
+    const trailingPermissionMessageIds = new Set<string>();
+    for (const message of compactActivityMessages()) {
+      if (!isAssistantMessage(message.info)) continue;
+      for (const part of message.parts) {
+        if (part.type !== 'tool') continue;
+        const match = getPermissionMatchForTool(part);
+        if (!match) continue;
+        waitingActivityPartKeys.add(getAssistantActivityPartKey(part));
+        if (!getQuestionRequestForTool(part) && match.isActive && match.isPrimaryOwner) {
+          trailingPermissionMessageIds.add(message.info.id);
+        }
+      }
+    }
+    return getMessageBlockBoundaryMap(compactActivityMessages(), assistantActivityGroupMap(), {
+      delayedActivityPartKeys: new Set(activityShowTimers.keys()),
       expandedActivityGroup: (key) => getMessageBlockExpanded(key) ?? false,
       renderEmptyMessageIds: knownZeroHeightMessageIds(),
       showThinking: showThinking(),
       streaming: { partId: state.streamingPartId, text: state.streamingText },
       visibleActiveActivityPartKeys: renderedVisibleActiveActivityPartKeys(),
       retainedActivityPartKeys: renderedRetainedActivityPartKeys(),
+      trailingPermissionMessageIds,
       exitingActivityPartKeys: renderedExitingActivityPartKeys(),
+      waitingActivityPartKeys,
       modelChangeMessageIds: new Set(modelChangeMap().keys()),
       dialogSummaryMessageIds: new Set(rowAssistantDialogSummaryMap().keys()),
     });
