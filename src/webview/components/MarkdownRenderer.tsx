@@ -2,7 +2,7 @@ import { Show, createSignal, createEffect, onMount, onCleanup } from 'solid-js';
 import type { JSX } from 'solid-js';
 import { Portal, render } from 'solid-js/web';
 import DOMPurify from 'dompurify';
-import { marked } from 'marked';
+import { marked, Tokenizer } from 'marked';
 import type { Mermaid, MermaidConfig } from 'mermaid';
 import { writeClipboard } from '../lib/write-clipboard';
 import { openPathWithResult, postMessage } from '../lib/bridge';
@@ -109,6 +109,12 @@ type IdleWorkHandle =
   | { kind: 'timeout'; id: ReturnType<typeof setTimeout> };
 
 const renderer = new marked.Renderer();
+class MarkdownTokenizer extends Tokenizer {
+  override code() {
+    return undefined;
+  }
+}
+const tokenizer = new MarkdownTokenizer();
 let renderMarkdownContext: RenderMarkdownContext | null = null;
 const SHELL_LANGS = new Set(['', 'bash', 'console', 'shell', 'sh', 'zsh']);
 const COMPACT_FIRST_COLUMN_HEADERS = new Set(['#', 'no', 'no.', 'num', 'id']);
@@ -544,6 +550,7 @@ renderer.image = function ({
 
 marked.setOptions({
   renderer,
+  tokenizer,
   gfm: true,
   breaks: false,
 });

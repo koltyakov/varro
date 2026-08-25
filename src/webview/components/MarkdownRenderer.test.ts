@@ -128,6 +128,20 @@ afterEach(() => {
 });
 
 describe('MarkdownRenderer', () => {
+  it('renders indented text as prose while preserving fenced code blocks', () => {
+    const indentedHtml = __parseMarkdownForTests(
+      'Failure details\n\n    Error: expected 37\n    Received: 36.71875',
+      { cacheByContent: false }
+    );
+    const fencedHtml = __parseMarkdownForTests('```text\nError: expected 37\n```', {
+      cacheByContent: false,
+    });
+
+    expect(indentedHtml).not.toContain('interactive-result-code-block');
+    expect(indentedHtml).toContain('Error: expected 37');
+    expect(fencedHtml).toContain('interactive-result-code-block');
+  });
+
   it('renders raw HTML as text when HTML escaping is requested', () => {
     const html = __parseMarkdownForTests('**Review** <button type="button">Run</button>', {
       cacheByContent: true,
