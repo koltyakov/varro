@@ -17,6 +17,7 @@ import { state, theme } from '../lib/state';
 import { getLeafPathName, normalizePath } from '../lib/path-display';
 import { formatCommandDisplay } from '../lib/command-display';
 import { getSessionReferenceContextKey, splitSessionReferenceText } from '../lib/session-reference';
+import { rememberDirectSessionReturn } from '../lib/session-navigation';
 import { selectSession } from '../hooks/useOpenCode';
 import { trapModalFocus } from '../lib/modal-focus';
 import { mixRgb, parseThemeColor } from '../lib/theme';
@@ -2070,6 +2071,9 @@ export function MarkdownRenderer(props: MarkdownProps) {
     );
     if (sessionLink?.dataset.sessionId) {
       e.preventDefault();
+      if (state.activeSessionId) {
+        rememberDirectSessionReturn(sessionLink.dataset.sessionId, state.activeSessionId);
+      }
       void selectSession(sessionLink.dataset.sessionId);
       return;
     }

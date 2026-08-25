@@ -14,6 +14,7 @@ import {
 } from './UserMessageContent';
 import { fixture } from '../../test-fixtures';
 import type { UnknownRecord } from '../../../shared/type-utils';
+import { clearDirectSessionReturn, getDirectSessionReturnId } from '../../lib/session-navigation';
 
 const selectSessionMock = vi.hoisted(() => vi.fn());
 const retryMessageMock = vi.hoisted(() => vi.fn());
@@ -94,6 +95,7 @@ beforeEach(() => {
     disconnect() {}
   };
   resetDefaultAppState();
+  clearDirectSessionReturn();
 });
 
 afterEach(() => {
@@ -596,6 +598,7 @@ describe('UserMessageContent', () => {
   });
 
   it('links known session references and selects the session on click', () => {
+    setAppState('activeSessionId', 'ses_origin123');
     setAppState('sessions', [
       {
         id: 'ses_found123',
@@ -620,6 +623,7 @@ describe('UserMessageContent', () => {
 
     link?.click();
     expect(selectSessionMock).toHaveBeenCalledWith('ses_found123');
+    expect(getDirectSessionReturnId('ses_found123')).toBe('ses_origin123');
   });
 
   it('renders HTTPS URLs as external links and opens them through the bridge', () => {

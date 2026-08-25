@@ -1614,6 +1614,33 @@ describe('header status badges', () => {
     ).toBeNull();
   });
 
+  it('returns directly to the originating top-level session after following a session link', async () => {
+    // SAFETY: The fixture provides the never fields read by this statement.
+    const selectSessionSpy = vi
+      .spyOn(openCodeModule, 'selectSession')
+      .mockResolvedValue(undefined as never);
+
+    setState('sessions', [session('origin', 500), session('linked', 400)]);
+    setState('activeSessionId', 'linked');
+    rememberDirectSessionReturn('linked', 'origin');
+
+    cleanup = render(() => Chat(), container!);
+
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
+    const backButton = container?.querySelector(
+      '.chat-header .chat-header-btn[aria-label="Back to parent session"]'
+    ) as HTMLButtonElement | null;
+    expect(backButton).toBeInstanceOf(HTMLButtonElement);
+
+    backButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    expect(selectSessionSpy).toHaveBeenCalledWith('origin');
+    expect(
+      container?.querySelector('.session-list-view:not(.session-list-view-sidebar)')
+    ).toBeNull();
+  });
+
   it('shows desktop sub-agent navigation in both the chat header and session sidebar', async () => {
     // SAFETY: The fixture provides the never fields read by this statement.
     const selectSessionSpy = vi

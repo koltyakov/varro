@@ -1263,6 +1263,11 @@ kbd {
   transform: translateY(1px);
 }
 
+.chat-tool-invocation-part.tool-invocation-task
+  :is(.tool-invocation-duration, .tool-invocation-activity-time) {
+  word-spacing: -0.2em;
+}
+
 .chat-tool-invocation-part .tool-invocation-activity-age {
   display: inline;
   align-self: auto;

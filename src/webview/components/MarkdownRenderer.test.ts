@@ -15,6 +15,7 @@ import {
 } from './MarkdownRenderer';
 import { setState, setTheme } from '../lib/state';
 import { loadCodeHighlighter } from '../lib/code-highlighter';
+import { clearDirectSessionReturn, getDirectSessionReturnId } from '../lib/session-navigation';
 import { checkIcon, copyIcon, expandIcon, xmarkIcon } from '../lib/ui-icons';
 import { toCssUrl } from './UiIcon';
 
@@ -105,7 +106,9 @@ beforeEach(() => {
   document.body.appendChild(container);
   delete window.__sendToExtension;
   selectSessionMock.mockReset();
+  clearDirectSessionReturn();
   setState('sessions', []);
+  setState('activeSessionId', null);
   setState('editorContext', {
     workspacePath: null,
     activeFile: null,
@@ -678,6 +681,7 @@ describe('MarkdownRenderer', () => {
   });
 
   it('links workspace session IDs using their session titles', () => {
+    setState('activeSessionId', 'ses_origin123');
     setState('sessions', [
       {
         id: 'ses_found123',
@@ -711,6 +715,7 @@ describe('MarkdownRenderer', () => {
 
     dispatchAnchorClick(link);
     expect(selectSessionMock).toHaveBeenCalledWith('ses_found123');
+    expect(getDirectSessionReturnId('ses_found123')).toBe('ses_origin123');
   });
 
   it('updates session references when a matching workspace session is discovered', async () => {

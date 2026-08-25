@@ -9,6 +9,7 @@ import {
 import { postMessage } from '../../lib/bridge';
 import type { MessageEditContext } from '../../lib/message-edit-state';
 import { splitSessionReferenceText, type SessionReference } from '../../lib/session-reference';
+import { rememberDirectSessionReturn } from '../../lib/session-navigation';
 import { state } from '../../lib/state';
 import { observeSettledResize } from '../../lib/settled-resize-observer';
 import { selectSession } from '../../hooks/useOpenCode';
@@ -1320,6 +1321,9 @@ function SessionReferenceLink(props: { reference: SessionReference }) {
   const firstWord = props.reference.title.match(/^\S+/)?.[0] ?? '';
   const openSession = (event: MouseEvent) => {
     event.preventDefault();
+    if (state.activeSessionId) {
+      rememberDirectSessionReturn(props.reference.id, state.activeSessionId);
+    }
     void selectSession(props.reference.id);
   };
 
