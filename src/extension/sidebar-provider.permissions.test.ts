@@ -229,12 +229,44 @@ describe('SidebarProvider permission replay', () => {
       ([id]) => id === 'varro.opencode-version'
     );
     const item = createStatusBarItem.mock.results[itemIndex]?.value;
-    await vi.waitFor(() =>
-      expect(item.text).toBe(`$(robot) OpenCode ${readMaximumTestedOpenCodeVersion()}*`)
-    );
+    await vi.waitFor(() => expect(item.text).toBe('$(robot) OpenCode 1.16.0*'));
     expect(item.tooltip).toBe(
       `OpenCode CLI: ${readMaximumTestedOpenCodeVersion()}\nOpenCode Server: 1.16.0\n\nCLI updated to OpenCode ${readMaximumTestedOpenCodeVersion()}; server 1.16.0 is stale.\n\nVarro extension: 0.26.4\nVerified w/ OpenCode ${readMaximumTestedOpenCodeVersion()}`
     );
+  });
+
+  it('refreshes the displayed OpenCode version after a background update restart', async () => {
+    const updatedVersion = readMaximumTestedOpenCodeVersion();
+    const [major, minor, patch] = updatedVersion.split('.').map(Number);
+    const previousVersion = `${major}.${minor}.${Math.max(0, (patch ?? 1) - 1)}`;
+    const readServerInfo = vi
+      .fn()
+      .mockResolvedValueOnce({
+        managedProcess: true,
+        cliVersion: previousVersion,
+        health: { healthy: true, version: previousVersion },
+      })
+      .mockResolvedValueOnce({
+        managedProcess: true,
+        cliVersion: updatedVersion,
+        health: { healthy: true, version: updatedVersion },
+      });
+    const server = createServer({ readServerInfo });
+    await createSidebarProviderInstance({ server });
+    const statusHandler = server.on.mock.calls.findLast(([event]) => event === 'status')?.[1];
+    const createStatusBarItem = getVscodeMock().window.createStatusBarItem;
+    const itemIndex = createStatusBarItem.mock.calls.findIndex(
+      ([id]) => id === 'varro.opencode-version'
+    );
+    const item = createStatusBarItem.mock.results[itemIndex]?.value;
+
+    statusHandler?.({ state: 'running', url: 'http://127.0.0.1:4096' });
+    await vi.waitFor(() => expect(item.text).toBe(`$(robot) OpenCode ${previousVersion}*`));
+
+    statusHandler?.({ state: 'starting' });
+    statusHandler?.({ state: 'running', url: 'http://127.0.0.1:4096' });
+    await vi.waitFor(() => expect(item.text).toBe(`$(robot) OpenCode ${updatedVersion}`));
+    expect(readServerInfo).toHaveBeenCalledTimes(2);
   });
 
   it('describes an uninstalled patch update without repeating the verified version', async () => {
@@ -258,7 +290,7 @@ describe('SidebarProvider permission replay', () => {
       ([id]) => id === 'varro.opencode-version'
     );
     const item = createStatusBarItem.mock.results[itemIndex]?.value;
-    await vi.waitFor(() => expect(item.text).toBe(`$(robot) OpenCode ${maximumTestedVersion}*`));
+    await vi.waitFor(() => expect(item.text).toBe(`$(robot) OpenCode ${installedVersion}*`));
     expect(item.tooltip).toBe(
       `OpenCode CLI: ${installedVersion}\nOpenCode Server: ${installedVersion}\n\nNew CLI version: OpenCode ${maximumTestedVersion} is not installed yet.\nAuto-updates are off.\n\nVarro extension: 0.26.4`
     );

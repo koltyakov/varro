@@ -1514,6 +1514,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private renderOpenCodeStatusBarItem() {
     const updateMarker = this.openCodeUpdateAvailable ? '*' : '';
+    const displayedVersion =
+      this.openCodeServerVersion ?? this.openCodeCliVersion ?? maximumTestedOpenCodeVersion;
     const autoUpdatesEnabled = vscode.workspace
       .getConfiguration('varro')
       .get<boolean>('server.autoUpdate', true);
@@ -1553,7 +1555,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     const openCodeStatusBarItem = this.serverEventBridge.getOpenCodeStatusBarItem();
-    openCodeStatusBarItem.text = `$(robot) OpenCode ${maximumTestedOpenCodeVersion}${updateMarker}`;
+    openCodeStatusBarItem.text = `$(robot) OpenCode ${displayedVersion}${updateMarker}`;
     openCodeStatusBarItem.tooltip = versionLines.join('\n');
     openCodeStatusBarItem.show();
   }
