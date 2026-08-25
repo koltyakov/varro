@@ -270,7 +270,7 @@ describe('UserMessageContent', () => {
     expect(container?.querySelector('.user-message-text-scroll')).toBeNull();
   });
 
-  it('orders visible attachments above text, other file parts, and images', () => {
+  it('orders attachments above image tiles and keeps tile clicks out of the message card', () => {
     renderUserContent([
       textPart('text-1', '[Active file: src/shared/extension-message.ts]'),
       pdfFilePart('file-1', 'spec.pdf'),
@@ -281,18 +281,32 @@ describe('UserMessageContent', () => {
     const rendered = container?.querySelector('.rendered-markdown');
     expect(rendered?.classList.contains('user-message-content-has-image')).toBe(true);
     const children = Array.from(rendered?.children ?? []);
-    expect(children[0]?.classList.contains('message-attachments')).toBe(true);
-    expect(children[0]?.classList.contains('message-attachments-leading')).toBe(true);
-    expect(children[0]?.textContent).toContain('extension-message.ts');
-    expect(children[0]?.textContent).toContain('spec.pdf');
-    expect(children[0]?.querySelectorAll('.message-attachment-chip')).toHaveLength(2);
-    expect(children[0]?.querySelectorAll('.message-attachment-chip .file-type-icon')).toHaveLength(
-      2
+    expect(children[0]?.classList.contains('user-message-leading-content')).toBe(true);
+    const leadingChildren = Array.from(children[0]?.children ?? []);
+    expect(leadingChildren[0]?.classList.contains('message-attachments')).toBe(true);
+    expect(leadingChildren[0]?.classList.contains('message-attachments-leading')).toBe(true);
+    expect(leadingChildren[0]?.textContent).toContain('extension-message.ts');
+    expect(leadingChildren[0]?.textContent).toContain('spec.pdf');
+    expect(leadingChildren[0]?.querySelectorAll('.message-attachment-chip')).toHaveLength(2);
+    expect(
+      leadingChildren[0]?.querySelectorAll('.message-attachment-chip .file-type-icon')
+    ).toHaveLength(2);
+    expect(leadingChildren[1]?.classList.contains('user-message-image-tiles-shell')).toBe(true);
+    expect(leadingChildren[1]?.querySelector('.user-message-image-tiles')).not.toBeNull();
+    expect(leadingChildren[1]?.querySelector('img')?.getAttribute('alt')).toBe('diagram.png');
+    expect(children[1]?.classList.contains('user-message-image-text-bubble')).toBe(true);
+    expect(children[1]?.querySelector('.user-message-text-scroll')?.textContent).toContain(
+      'Please review this.'
     );
-    expect(children[1]?.classList.contains('user-message-text-scroll')).toBe(true);
-    expect(children[1]?.textContent).toContain('Please review this.');
-    expect(children[2]?.classList.contains('chat-image-figure')).toBe(true);
-    expect(children[2]?.querySelector('img')?.getAttribute('alt')).toBe('diagram.png');
+    expect(rendered?.querySelector('.chat-image-figure')).toBeNull();
+
+    const bubbledClick = vi.fn();
+    container?.addEventListener('click', bubbledClick);
+    leadingChildren[1]?.querySelector<HTMLButtonElement>('.user-message-image-tile')?.click();
+    expect(bubbledClick).not.toHaveBeenCalled();
+    expect(
+      document.body.querySelector<HTMLImageElement>('.chat-image-preview-img')?.getAttribute('src')
+    ).toBe('https://example.test/image-1.png');
   });
 
   it('collapses excess attachments into a popup', () => {
@@ -529,9 +543,7 @@ describe('UserMessageContent', () => {
     expect(document.body.querySelector('.chat-image-preview-caption')?.textContent).toContain(
       'Image 2'
     );
-    expect(container?.querySelector('.message-image-carousel-caption-row')?.textContent).toContain(
-      '2 / 2'
-    );
+    expect(container?.querySelectorAll('.user-message-image-tile')).toHaveLength(2);
   });
 
   it('maps the legacy [Image] marker to the first image pill', () => {
@@ -711,7 +723,9 @@ describe('UserMessageContent', () => {
       HTMLImageElement
     );
     expect(container?.textContent).not.toContain('When calling the vision subagent');
-    expect(container?.querySelector('.chat-image-img')).toBeInstanceOf(HTMLImageElement);
+    expect(container?.querySelector('.user-message-image-tile img')).toBeInstanceOf(
+      HTMLImageElement
+    );
   });
 
   it('renders agent parts as leading chips when not mentioned in the text', () => {

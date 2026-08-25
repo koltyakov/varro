@@ -76,7 +76,10 @@ export function ImagePreviewOverlay(props: {
             role="dialog"
             aria-modal="true"
             aria-label={`Image preview: ${image().title}`}
-            onClick={props.onClose}
+            onClick={(event) => {
+              event.stopPropagation();
+              props.onClose();
+            }}
           >
             <Tooltip content="Close image preview">
               <button

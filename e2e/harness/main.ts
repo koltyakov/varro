@@ -53,6 +53,7 @@ const SCENARIO_NAMES = [
   'dispose-during-start',
   'startup-race',
   'plan-ready',
+  'mixed-image-tiles',
   'sticky-preview',
   'sticky-preview-first-image',
   'sticky-preview-large-transcript',
@@ -1296,6 +1297,44 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     state.messagesBySessionId[session.id] = [user, assistant];
     state.persistedActiveSessionId = session.id;
     state.nextSequence = 55;
+    return state;
+  }
+
+  if (name === 'mixed-image-tiles') {
+    const session = makeSession('session-mixed-image-tiles', 'Mixed image tiles', BASE_TIME - 500);
+    const user = makeUserMessage(
+      session.id,
+      'message-mixed-image-tiles-user',
+      ['Ten image tiles'],
+      BASE_TIME - 2_000
+    );
+    for (let index = 1; index <= 10; index += 1) {
+      user.parts.push({
+        id: `message-mixed-image-tiles-file-${index}`,
+        sessionID: session.id,
+        messageID: user.info.id,
+        type: 'file',
+        mime: 'image/svg+xml',
+        filename: `image-${index}.svg`,
+        url:
+          'data:image/svg+xml,' +
+          encodeURIComponent(
+            `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><text x="8" y="36">${index}</text></svg>`
+          ),
+      });
+    }
+    const assistant = makeAssistantMessage(
+      session.id,
+      'message-mixed-image-tiles-assistant',
+      user.info.id,
+      'Received ten images.',
+      BASE_TIME - 1_000
+    );
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = [user, assistant];
+    state.persistedActiveSessionId = session.id;
+    state.nextSequence = 20;
     return state;
   }
 

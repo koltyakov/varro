@@ -597,7 +597,7 @@ describe('Message user prompt rendering', () => {
     );
   });
 
-  it('renders sent attachments above the user text while leaving images below', () => {
+  it('renders sent attachments and image tiles above the user text', () => {
     cleanup = render(
       () =>
         Message({
@@ -615,15 +615,17 @@ describe('Message user prompt rendering', () => {
     const rendered = container?.querySelector('.rendered-markdown');
     const children = Array.from(rendered?.children ?? []);
 
-    expect(children[0]?.classList.contains('message-attachments')).toBe(true);
-    expect(children[0]?.textContent).toContain('extension-message.ts');
-    expect(children[0]?.textContent).toContain('spec.pdf');
-    expect(children[0]?.querySelectorAll('.message-attachment-chip')).toHaveLength(2);
-    expect(children[1]?.classList.contains('user-message-text-scroll')).toBe(true);
+    expect(children[0]?.classList.contains('user-message-leading-content')).toBe(true);
+    const leadingChildren = Array.from(children[0]?.children ?? []);
+    expect(leadingChildren[0]?.classList.contains('message-attachments')).toBe(true);
+    expect(leadingChildren[0]?.textContent).toContain('extension-message.ts');
+    expect(leadingChildren[0]?.textContent).toContain('spec.pdf');
+    expect(leadingChildren[0]?.querySelectorAll('.message-attachment-chip')).toHaveLength(2);
+    expect(leadingChildren[1]?.classList.contains('user-message-image-tiles-shell')).toBe(true);
+    expect(leadingChildren[1]?.querySelector('.user-message-image-tiles')).not.toBeNull();
+    expect(leadingChildren[1]?.querySelector('img')?.getAttribute('alt')).toBe('diagram.png');
+    expect(children[1]?.classList.contains('user-message-image-text-bubble')).toBe(true);
     expect(children[1]?.textContent).toContain('Please review this.');
-    expect(children[2]?.classList.contains('chat-image-figure')).toBe(true);
-    expect(children[2]?.querySelector('img')?.getAttribute('alt')).toBe('diagram.png');
-    expect(children[2]?.querySelector('.chat-image-caption')).toBeNull();
   });
 
   it('keeps the user bubble when prose ends in a Git remote before an attachment', () => {
@@ -852,8 +854,8 @@ describe('Message user prompt rendering', () => {
     expect(Array.from(inlineChips ?? []).map((chip) => chip.textContent?.trim())).toContain(
       'Image 2'
     );
-    expect(container?.querySelector('.message-image-carousel')).toBeInstanceOf(HTMLDivElement);
-    expect(container?.querySelector('.message-image-carousel-caption-row')?.textContent).toContain(
+    expect(container?.querySelectorAll('.user-message-image-tile')).toHaveLength(2);
+    expect(container?.querySelector('.user-message-image-tile img')?.getAttribute('alt')).toBe(
       'Image 1'
     );
   });
@@ -900,7 +902,9 @@ describe('Message user prompt rendering', () => {
     );
     expect(container?.querySelectorAll('.user-message-text .inline-chip')).toHaveLength(2);
     expect(container?.textContent).not.toContain('When calling the vision subagent');
-    expect(container?.querySelector('.chat-image-img')).toBeInstanceOf(HTMLImageElement);
+    expect(container?.querySelector('.user-message-image-tile img')).toBeInstanceOf(
+      HTMLImageElement
+    );
   });
 
   it('renders known textual agent mentions as chips when no agent part is returned', () => {
@@ -997,12 +1001,9 @@ describe('Message user prompt rendering', () => {
 
     const overlayImage = document.body.querySelector<HTMLImageElement>('.chat-image-preview-img');
     const overlayCaption = document.body.querySelector('.chat-image-preview-caption');
-    const carouselCaption = container?.querySelector('.message-image-carousel-caption-row');
-
     expect(overlayImage?.getAttribute('src')).toBe('https://example.test/image-2.png');
     expect(overlayCaption?.textContent).toContain('Image 2');
-    expect(carouselCaption?.textContent).toContain('2 / 2');
-    expect(carouselCaption?.textContent).toContain('Image 2');
+    expect(container?.querySelectorAll('.user-message-image-tile')).toHaveLength(2);
   });
 
   it('keeps unrelated context attachments in the leading attachment strip', () => {
@@ -1490,16 +1491,20 @@ describe('Message user rendering', () => {
 });
 
 describe('getUserMessageEditText', () => {
-  it('keeps prompt text and standalone file references while skipping context parts', () => {
+  it('keeps prompt text while skipping context and standalone attachment parts', () => {
     const editText = getUserMessageEditText([
       textPart('text-1', 'fix the failing test'),
       textPart('text-2', '[Working directory: /repo]'),
       textPart('text-3', '[Active file: src/index.ts]'),
-      textPart('text-4', '[Selection from src/index.ts:1-3]'),
+      textPart('text-4', '[Selection from src/index.ts lines 1-3]'),
       textPart('text-5', 'src/utils/helper.ts'),
+      textPart('text-6', 'package-lock.json'),
+      textPart('text-7', '.gitignore'),
+      textPart('text-8', '.gitattributes'),
+      textPart('text-9', 'LICENSE'),
     ]);
 
-    expect(editText).toBe('fix the failing test\nsrc/utils/helper.ts');
+    expect(editText).toBe('fix the failing test');
   });
 
   it('skips terminal selection blocks and non-text parts', () => {
@@ -1630,6 +1635,38 @@ describe('Message user editing', () => {
     });
     expect(card?.classList.contains('user-message-card-editable')).toBe(false);
     expect(container?.textContent).toContain('original prompt');
+  });
+
+  it('opens mixed-message image previews without starting a message edit', () => {
+    setAppState('activeSessionId', 'session-1');
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-mixed-image'),
+          parts: [
+            textPart('text-mixed-image', 'Prompt with image'),
+            imageFilePart('file-mixed-image', 'preview.png'),
+          ],
+        }),
+      container!
+    );
+
+    const card = container?.querySelector('.user-message-card');
+    const imageTile = container?.querySelector<HTMLButtonElement>('.user-message-image-tile');
+    expect(card?.classList.contains('user-message-card-editable')).toBe(true);
+
+    imageTile?.click();
+
+    const overlay = document.body.querySelector<HTMLElement>('.chat-image-preview-overlay');
+    expect(overlay).not.toBeNull();
+    expect(editingMessage()).toBeNull();
+    expect(card?.classList.contains('user-message-card-editable')).toBe(true);
+
+    overlay?.click();
+
+    expect(document.body.querySelector('.chat-image-preview-overlay')).toBeNull();
+    expect(editingMessage()).toBeNull();
+    expect(card?.classList.contains('user-message-card-editable')).toBe(true);
   });
 
   it('opens a user message as Markdown on Alt-click without editing it', () => {

@@ -212,7 +212,7 @@ describe('MessageList entrance animation', () => {
     await Promise.resolve();
 
     const imageRow = container?.querySelector('[data-msg-id="user-2"]');
-    expect(imageRow?.querySelector('.chat-image-preview-trigger')).not.toBeNull();
+    expect(imageRow?.querySelector('.user-message-image-tile')).not.toBeNull();
     expect(imageRow?.classList).not.toContain('interactive-item-entering');
   });
 

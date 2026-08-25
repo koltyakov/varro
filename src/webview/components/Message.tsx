@@ -442,6 +442,7 @@ export function Message(props: {
   const handleUserCardClick = (event: MouseEvent) => {
     if (props.info.role !== 'user') return;
     const target = event.target;
+    if (target instanceof Element && target.closest('.user-message-leading-content')) return;
     if (target instanceof Element && target.closest('button, a, textarea')) return;
     const selection = window.getSelection();
     if (selection && !selection.isCollapsed) return;
@@ -510,6 +511,7 @@ export function Message(props: {
                 leadingAgent={
                   props.info.role === 'user' && props.info.agent === 'plan' ? 'plan' : undefined
                 }
+                onMessageHoverChange={notifyUserMessageHoverChange}
               />
             </Show>
             <Show when={!isUser() && assistant()}>

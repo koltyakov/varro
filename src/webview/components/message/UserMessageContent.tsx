@@ -423,30 +423,7 @@ function hasEmbeddedMentionReference(line: string): boolean {
 }
 
 export function getUserMessageEditText(parts: Part[]): string {
-  const texts: string[] = [];
-
-  for (const part of parts) {
-    if (part.type !== 'text') continue;
-    // SAFETY: The surrounding shape or discriminator check establishes the TextPart contract used below.
-    const text = (part as TextPart).text;
-    if (!text) continue;
-
-    // Skip context parts the composer re-adds automatically on send.
-    const trimmed = text.trim();
-    if (
-      isVisionDelegationContextText(text) ||
-      trimmed.startsWith('[Working directory:') ||
-      trimmed.startsWith('[Active file:') ||
-      trimmed.startsWith('[Attached file:') ||
-      trimmed.startsWith('[Selection from ')
-    ) {
-      continue;
-    }
-
-    texts.push(text);
-  }
-
-  return texts.join('\n');
+  return parseUserMessageContent(parts).messageTexts.join('\n');
 }
 
 export function getUserMessageEditContext(parts: Part[]): MessageEditContext {
@@ -543,7 +520,11 @@ export function getUserMessagePreviewText(parts: Part[]): string {
   return '(no content)';
 }
 
-export function UserMessageContent(props: { parts: Part[]; leadingAgent?: string }) {
+export function UserMessageContent(props: {
+  parts: Part[];
+  leadingAgent?: string;
+  onMessageHoverChange?: (hovering: boolean) => void;
+}) {
   const parsed = createMemo(() => parseUserMessageContent(props.parts));
   const agentParts = createMemo(() => getDisplayAgentParts(parsed()));
   const leadingAgentPart = createMemo<AgentPart | null>(() => {
@@ -616,6 +597,8 @@ export function UserMessageContent(props: { parts: Part[]; leadingAgent?: string
     ...otherFileParts().map((part) => ({ type: 'file-part' as const, part })),
   ]);
   const attachmentCount = createMemo(() => displayAttachments().length);
+  const hasMessageText = createMemo(() => parsed().messageTexts.length > 0);
+  const hasImageTiles = createMemo(() => hasMessageText() && imageParts().length > 0);
   const [activeImageIndex, setActiveImageIndex] = createSignal(0);
   const [previewIndex, setPreviewIndex] = createSignal<number | null>(null);
 
@@ -718,14 +701,34 @@ export function UserMessageContent(props: { parts: Part[]; leadingAgent?: string
       class={`rendered-markdown${imageParts().length > 0 ? ' user-message-content-has-image' : ''}`}
       onCopy={handleCopy}
     >
-      <Show when={displayAttachments().length > 0}>
+      <Show when={hasImageTiles()}>
+        <div
+          class="user-message-leading-content"
+          on:mouseenter={() => props.onMessageHoverChange?.(false)}
+        >
+          <Show when={displayAttachments().length > 0}>
+            <MessageAttachmentRail
+              attachments={displayAttachments()}
+              leading
+              label={`${attachmentCount()} ${attachmentCount() === 1 ? 'attachment' : 'attachments'}`}
+            />
+          </Show>
+          <Show when={visibleAgentParts().length > 0}>
+            <div class="message-attachments message-attachments-leading">
+              <For each={visibleAgentParts()}>{(part) => <AgentChip part={part} />}</For>
+            </div>
+          </Show>
+          <UserMessageImageTiles imageParts={imageParts()} onOpenPreview={openImagePreview} />
+        </div>
+      </Show>
+      <Show when={!hasImageTiles() && displayAttachments().length > 0}>
         <MessageAttachmentRail
           attachments={displayAttachments()}
           leading={hasTrailingAttachmentContent()}
           label={`${attachmentCount()} ${attachmentCount() === 1 ? 'attachment' : 'attachments'}`}
         />
       </Show>
-      <Show when={visibleAgentParts().length > 0}>
+      <Show when={!hasImageTiles() && visibleAgentParts().length > 0}>
         <div class="message-attachments message-attachments-leading">
           <For each={visibleAgentParts()}>{(part) => <AgentChip part={part} />}</For>
         </div>
@@ -734,27 +737,36 @@ export function UserMessageContent(props: { parts: Part[]; leadingAgent?: string
         {(attachment) => <TerminalMessageCodeBlock attachment={attachment()} />}
       </Show>
       <Show when={parsed().messageTexts.length > 0}>
-        <div
-          class="user-message-text-scroll"
-          ref={(element) => bindUserMessageOverflowFade(element, () => parsed().messageTexts)}
+        <Show
+          when={hasImageTiles()}
+          fallback={
+            <UserMessageTextList
+              messageTexts={parsed().messageTexts}
+              attachments={indexedAttachments()}
+              imageParts={imageParts()}
+              agentParts={inlineAgentParts()}
+              onOpenImagePreview={openImagePreview}
+            />
+          }
         >
-          <For each={parsed().messageTexts}>
-            {(text) => (
-              <UserMessageTextContent
-                text={text}
-                attachments={indexedAttachments()}
-                imageParts={imageParts()}
-                agentParts={inlineAgentParts()}
-                onOpenImagePreview={openImagePreview}
-              />
-            )}
-          </For>
-        </div>
+          <div
+            class="user-message-image-text-bubble"
+            on:mouseenter={() => props.onMessageHoverChange?.(true)}
+          >
+            <UserMessageTextList
+              messageTexts={parsed().messageTexts}
+              attachments={indexedAttachments()}
+              imageParts={imageParts()}
+              agentParts={inlineAgentParts()}
+              onOpenImagePreview={openImagePreview}
+            />
+          </div>
+        </Show>
       </Show>
       <Show when={!hasContent()}>
         <p class="user-message-empty">(no content)</p>
       </Show>
-      <Show when={imageParts().length > 0}>
+      <Show when={imageParts().length > 0 && !hasImageTiles()}>
         <Show
           when={imageParts().length > 1}
           fallback={
@@ -778,6 +790,33 @@ export function UserMessageContent(props: { parts: Part[]; leadingAgent?: string
         position={previewPosition()}
         total={imageParts().length}
       />
+    </div>
+  );
+}
+
+function UserMessageTextList(props: {
+  messageTexts: string[];
+  attachments: IndexedMessageAttachment[];
+  imageParts: FilePart[];
+  agentParts: AgentPart[];
+  onOpenImagePreview: (index: number) => void;
+}) {
+  return (
+    <div
+      class="user-message-text-scroll"
+      ref={(element) => bindUserMessageOverflowFade(element, () => props.messageTexts)}
+    >
+      <For each={props.messageTexts}>
+        {(text) => (
+          <UserMessageTextContent
+            text={text}
+            attachments={props.attachments}
+            imageParts={props.imageParts}
+            agentParts={props.agentParts}
+            onOpenImagePreview={props.onOpenImagePreview}
+          />
+        )}
+      </For>
     </div>
   );
 }
@@ -1163,6 +1202,8 @@ function isStandaloneFileReference(text: string): boolean {
   }
   if (normalized.includes('/')) return true;
   if (trimmed.includes(' ')) return false;
+  if (/^\.[A-Za-z0-9][\w.-]*$/.test(trimmed)) return true;
+  if (/^LICENSE(?:[._-][A-Za-z0-9.-]+)?$/i.test(trimmed)) return true;
   return /^\w[\w.-]*\.\w{1,12}$/.test(trimmed);
 }
 
@@ -1388,6 +1429,89 @@ function UserMessageImage(props: { part: FilePart; onOpenPreview: () => void }) 
         <InlineMessageImage src={props.part.url} alt={displayName()} />
       </button>
     </figure>
+  );
+}
+
+function UserMessageImageTiles(props: {
+  imageParts: FilePart[];
+  onOpenPreview: (index: number) => void;
+}) {
+  let scroller: HTMLDivElement | undefined;
+  const [canScrollBack, setCanScrollBack] = createSignal(false);
+  const [canScrollForward, setCanScrollForward] = createSignal(false);
+  const updateScrollState = () => {
+    if (!scroller) return;
+    setCanScrollBack(scroller.scrollLeft > 1);
+    setCanScrollForward(scroller.scrollLeft + scroller.clientWidth < scroller.scrollWidth - 1);
+  };
+  const scrollTiles = (direction: -1 | 1) => {
+    if (!scroller) return;
+    scroller.scrollBy({
+      left: direction * Math.max(72, scroller.clientWidth * 0.8),
+      behavior: 'smooth',
+    });
+  };
+
+  createEffect(() => {
+    void props.imageParts.length;
+    queueMicrotask(updateScrollState);
+  });
+
+  return (
+    <div class="user-message-image-tiles-shell">
+      <Show when={canScrollBack() || canScrollForward()}>
+        <div class="user-message-image-scroll-controls" aria-label="Attached image navigation">
+          <button
+            type="button"
+            class="user-message-image-scroll-button"
+            aria-label="Previous attached images"
+            disabled={!canScrollBack()}
+            onClick={() => scrollTiles(-1)}
+          >
+            <UiIcon source={navArrowLeftIcon} width="13" height="13" />
+          </button>
+          <button
+            type="button"
+            class="user-message-image-scroll-button"
+            aria-label="Next attached images"
+            disabled={!canScrollForward()}
+            onClick={() => scrollTiles(1)}
+          >
+            <UiIcon source={navArrowRightIcon} width="13" height="13" />
+          </button>
+        </div>
+      </Show>
+      <div
+        ref={(element) => {
+          scroller = element;
+          const stopObservingResize = observeSettledResize(element, updateScrollState);
+          onCleanup(stopObservingResize);
+          queueMicrotask(updateScrollState);
+        }}
+        class="user-message-image-tiles"
+        aria-label="Attached images"
+        onScroll={updateScrollState}
+      >
+        <For each={props.imageParts}>
+          {(part, index) => {
+            const displayName = () => getImageDisplayName(part);
+            return (
+              <button
+                type="button"
+                class="user-message-image-tile"
+                aria-label={`Open image preview: ${displayName()}`}
+                on:click={(event) => {
+                  event.stopPropagation();
+                  props.onOpenPreview(index());
+                }}
+              >
+                <img src={part.url} alt={displayName()} />
+              </button>
+            );
+          }}
+        </For>
+      </div>
+    </div>
   );
 }
 

@@ -381,7 +381,7 @@ test('keeps the caret visible after repeated Shift+Enter line breaks', async ({ 
   expect(Math.abs(reducedPosition.caretTop - reducedPosition.placeholderTop)).toBeLessThan(2);
 });
 
-test('paints a sent portrait carousel at its final presentation without blinking', async ({
+test('paints sent portrait tiles at their final presentation without blinking', async ({
   page,
 }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
@@ -421,7 +421,7 @@ test('paints a sent portrait carousel at its final presentation without blinking
       const card = [...document.querySelectorAll<HTMLElement>('.user-message-card')].findLast(
         (candidate) => candidate.textContent?.includes(promptText)
       );
-      const image = card?.querySelector<HTMLElement>('.chat-image-img');
+      const image = card?.querySelector<HTMLElement>('.user-message-image-tile');
       if (image) samples.push(image.className);
     }).observe(document.body, { childList: true, subtree: true, attributes: true });
   }, prompt);
@@ -443,8 +443,8 @@ test('paints a sent portrait carousel at its final presentation without blinking
       (window as Window & { sentImagePresentationSamples?: string[] })
         .sentImagePresentationSamples ?? []
   );
-  expect(samples[0]).toContain('chat-image-img-ambient');
-  expect(samples.every((sample) => sample.includes('chat-image-img-ambient'))).toBe(true);
+  expect(samples[0]).toContain('user-message-image-tile');
+  expect(samples.every((sample) => sample.includes('user-message-image-tile'))).toBe(true);
 });
 
 test('reloads and inline-edits an image prompt without losing its attachment', async ({ page }) => {
@@ -502,7 +502,7 @@ test('reloads and inline-edits an image prompt without losing its attachment', a
 
   const initialRow = page.locator('.chat-turn-user').filter({ hasText: initialText });
   await expect(initialRow).toHaveCount(1);
-  await expect(initialRow.locator('.chat-image-preview-trigger')).toBeVisible();
+  await expect(initialRow.getByRole('button', { name: /^Open image preview:/ })).toBeVisible();
 
   const initialMessages = await readHarnessMessages();
   expect(initialMessages).toHaveLength(2);
@@ -528,7 +528,7 @@ test('reloads and inline-edits an image prompt without losing its attachment', a
   await page.reload();
   const reloadedRow = page.locator('.chat-turn-user').filter({ hasText: initialText });
   await expect(reloadedRow).toHaveCount(1);
-  await expect(reloadedRow.locator('.chat-image-preview-trigger')).toBeVisible();
+  await expect(reloadedRow.getByRole('button', { name: /^Open image preview:/ })).toBeVisible();
 
   await reloadedRow.getByText(initialText, { exact: true }).click();
   const inlineComposer = page.locator(
@@ -543,7 +543,7 @@ test('reloads and inline-edits an image prompt without losing its attachment', a
 
   const editedRow = page.locator('.chat-turn-user').filter({ hasText: editedText });
   await expect(editedRow).toHaveCount(1);
-  await expect(editedRow.locator('.chat-image-preview-trigger')).toBeVisible();
+  await expect(editedRow.getByRole('button', { name: /^Open image preview:/ })).toBeVisible();
   await expect(page.locator('.chat-turn-user').filter({ hasText: initialText })).toHaveCount(0);
 
   const editRequests = await page.evaluate(() => {
@@ -582,7 +582,9 @@ test('reloads and inline-edits an image prompt without losing its attachment', a
   await page.reload();
   const editedReloadedRow = page.locator('.chat-turn-user').filter({ hasText: editedText });
   await expect(editedReloadedRow).toHaveCount(1);
-  await expect(editedReloadedRow.locator('.chat-image-preview-trigger')).toBeVisible();
+  await expect(
+    editedReloadedRow.getByRole('button', { name: /^Open image preview:/ })
+  ).toBeVisible();
 });
 
 test('removes individual dropped files via the chip remove button', async ({ page }) => {

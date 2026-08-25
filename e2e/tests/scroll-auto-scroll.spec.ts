@@ -2873,7 +2873,7 @@ test.describe('auto-scroll', () => {
     const list = page.locator('.interactive-list');
     const historyBanner = page.locator('.message-history-banner');
     const imageRow = page.locator('[data-msg-id="message-incident-delayed-image-user"]');
-    const imageFrame = imageRow.locator('.chat-image-preview-trigger');
+    const imageFrame = imageRow.locator('.user-message-image-tile');
     const pendingHistoryRequestCount = () =>
       page.evaluate(() => {
         const harness = window as Window & {
@@ -2899,7 +2899,7 @@ test.describe('auto-scroll', () => {
       const box = element.getBoundingClientRect();
       return { width: box.width, height: box.height };
     });
-    expect(frameBeforeRelease.width / frameBeforeRelease.height).toBeCloseTo(16 / 9, 2);
+    expect(frameBeforeRelease).toEqual({ width: 72, height: 72 });
     expect(
       await imageFrame.locator('img').evaluate((image: HTMLImageElement) => image.naturalWidth)
     ).toBe(0);

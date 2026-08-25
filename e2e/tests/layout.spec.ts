@@ -1802,6 +1802,93 @@ test('multi-image messages use one normalized responsive width', async ({ page }
   expect(frameWidths[0]).toBeCloseTo(frameWidths[1]!, 1);
 });
 
+test('many mixed-message image tiles shrink into one visible row', async ({ page }) => {
+  await page.setViewportSize({ width: 486, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+  await expect(page.locator('.interactive-session')).toBeVisible();
+
+  await page.locator('.interactive-session').evaluate((root) => {
+    const turn = document.createElement('div');
+    turn.className = 'chat-turn chat-turn-user';
+    const card = document.createElement('div');
+    card.className = 'value chat-turn-content chat-turn-card user-message-card';
+    card.style.width = '350px';
+    const content = document.createElement('div');
+    content.className = 'rendered-markdown user-message-content-has-image';
+    const leading = document.createElement('div');
+    leading.className = 'user-message-leading-content';
+    const tiles = document.createElement('div');
+    tiles.className = 'user-message-image-tiles';
+    for (let index = 0; index < 7; index += 1) {
+      const tile = document.createElement('button');
+      tile.className = 'user-message-image-tile';
+      tiles.append(tile);
+    }
+    const bubble = document.createElement('div');
+    bubble.className = 'user-message-image-text-bubble';
+    bubble.textContent = 'Seven images';
+    leading.append(tiles);
+    content.append(leading, bubble);
+    card.append(content);
+    turn.append(card);
+    root.append(turn);
+  });
+
+  const tileRow = page.locator('.user-message-image-tiles');
+  const boxes = await tileRow.locator('.user-message-image-tile').evaluateAll((tiles) =>
+    tiles.map((tile) => {
+      const box = tile.getBoundingClientRect();
+      return {
+        left: box.left,
+        top: box.top,
+        right: box.right,
+        width: box.width,
+        height: box.height,
+      };
+    })
+  );
+  const rowBox = await tileRow.boundingBox();
+  if (!rowBox) throw new Error('Image tile row is missing');
+
+  expect(boxes).toHaveLength(7);
+  expect(new Set(boxes.map((box) => box.top)).size).toBe(1);
+  expect(boxes.every((box) => box.width < 72 && box.width >= 36)).toBe(true);
+  expect(boxes.every((box) => Math.abs(box.width - box.height) < 0.5)).toBe(true);
+  expect(boxes[0]!.left).toBeGreaterThanOrEqual(rowBox.x);
+  expect(boxes[6]!.right).toBeLessThanOrEqual(rowBox.x + rowBox.width);
+});
+
+test('overflowing mixed-message image tiles navigate from controls on the left', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 486, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=mixed-image-tiles');
+
+  const row = page.locator('.interactive-request').filter({ hasText: 'Ten image tiles' }).last();
+  const scroller = row.locator('.user-message-image-tiles');
+  const previous = row.getByLabel('Previous attached images');
+  const next = row.getByLabel('Next attached images');
+  const tiles = scroller.locator('.user-message-image-tile');
+  await expect(tiles).toHaveCount(10);
+  await expect(previous).toBeVisible();
+  await expect(previous).toBeDisabled();
+  await expect(next).toBeEnabled();
+  expect(await scroller.evaluate((element) => element.scrollLeft)).toBe(0);
+
+  await next.click();
+  await expect.poll(() => scroller.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+  await expect(previous).toBeEnabled();
+  await expect
+    .poll(() =>
+      tiles.last().evaluate((tile) => {
+        const tileBox = tile.getBoundingClientRect();
+        const scrollerBox = tile.parentElement!.getBoundingClientRect();
+        return tileBox.right <= scrollerBox.right + 1 && tileBox.left >= scrollerBox.left - 1;
+      })
+    )
+    .toBe(true);
+});
+
 test('the first image message does not overlap the sticky prompt', async ({ page }) => {
   await page.setViewportSize({ width: 486, height: 800 });
   await page.goto('/e2e/harness/index.html?scenario=sticky-preview');
@@ -1856,11 +1943,55 @@ test('the first image message does not overlap the sticky prompt', async ({ page
     .locator('.interactive-request')
     .filter({ hasText: 'Image message appears immediately' })
     .last();
-  const previewRatio = await row.locator('.chat-image-preview-trigger').evaluate((element) => {
+  const imageTile = row.locator('.user-message-image-tile');
+  const previewSize = await imageTile.evaluate((element) => {
     const box = element.getBoundingClientRect();
-    return box.width / box.height;
+    return { width: box.width, height: box.height };
   });
-  expect(previewRatio).toBeCloseTo(16 / 9, 2);
+  expect(previewSize).toEqual({ width: 72, height: 72 });
+  const textBubble = row.locator('.user-message-image-text-bubble');
+  const timestamp = row.locator('.message-sent-time');
+  const restingBubbleBorder = await textBubble.evaluate(
+    (element) => getComputedStyle(element).borderColor
+  );
+  await imageTile.hover();
+  await expect
+    .poll(() =>
+      row.locator('.user-message-card').evaluate((element) => getComputedStyle(element).borderWidth)
+    )
+    .toBe('0px');
+  await expect
+    .poll(() => textBubble.evaluate((element) => getComputedStyle(element).borderColor))
+    .toBe(restingBubbleBorder);
+  await page.waitForTimeout(350);
+  await expect(timestamp).not.toHaveClass(/is-visible/);
+
+  await textBubble.hover();
+  await expect
+    .poll(() => textBubble.evaluate((element) => getComputedStyle(element).borderColor))
+    .not.toBe(restingBubbleBorder);
+  await expect(timestamp).toHaveClass(/is-visible/);
+
+  await imageTile.click();
+  const overlay = page.locator('.chat-image-preview-overlay');
+  const closeButton = page.locator('.chat-image-preview-close');
+  await expect(overlay).toBeVisible();
+  const closeAlignment = await closeButton.evaluate((button) => {
+    const buttonBox = button.getBoundingClientRect();
+    const iconBox = button.querySelector('.ui-icon')!.getBoundingClientRect();
+    return {
+      horizontal: Math.abs(
+        buttonBox.left + buttonBox.width / 2 - (iconBox.left + iconBox.width / 2)
+      ),
+      vertical: Math.abs(buttonBox.top + buttonBox.height / 2 - (iconBox.top + iconBox.height / 2)),
+    };
+  });
+  expect(closeAlignment.horizontal).toBeLessThan(0.5);
+  expect(closeAlignment.vertical).toBeLessThan(0.5);
+  await expect(page.locator('.interactive-list')).not.toHaveClass(/editing-message/);
+  await overlay.click({ position: { x: 8, y: 80 } });
+  await expect(overlay).toHaveCount(0);
+  await expect(page.locator('.interactive-list')).not.toHaveClass(/editing-message/);
   await expect(row).not.toHaveClass(/interactive-item-entering/);
   await expect
     .poll(() =>
