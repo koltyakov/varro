@@ -227,7 +227,7 @@ export function ModelPicker(props: {
       const buttonBox = button.getBoundingClientRect();
       const gap = props.popupGap ?? 6;
       const viewportMargin = 8;
-      const defaultMenuWidth = 285;
+      const defaultMenuWidth = 256.5;
       const minimumMenuWidth = 220;
       const boundaryLeft = Math.max(viewportMargin, hostBox.left);
       const boundaryRight = Math.min(window.innerWidth - viewportMargin, hostBox.right);
@@ -259,7 +259,7 @@ export function ModelPicker(props: {
         editBanner
       );
       const detailsHeight = detailsPlacement() === 'top' ? (detailsRef?.offsetHeight ?? 0) + 7 : 0;
-      const menuHeight = Math.min(360, Math.max(0, availableHeight - detailsHeight));
+      const menuHeight = Math.min(396, Math.max(0, availableHeight - detailsHeight));
       const searchHeight =
         menuRef.querySelector<HTMLElement>('.model-picker-search')?.offsetHeight ?? 0;
       const footerHeight =

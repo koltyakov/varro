@@ -574,8 +574,8 @@ describe('ModelPicker', () => {
     });
     await flushMicrotasks();
 
-    expect(anchor?.style.width).toBe('285px');
-    expect(anchor?.style.left).toBe('15px');
+    expect(anchor?.style.width).toBe('256.5px');
+    expect(anchor?.style.left).toBe('44px');
   });
 
   it('reduces its width before opening toward the left', async () => {
@@ -600,14 +600,14 @@ describe('ModelPicker', () => {
     });
     vi.spyOn(button, 'getBoundingClientRect').mockReturnValue({
       ...button.getBoundingClientRect(),
-      left: 50,
-      right: 90,
+      left: 80,
+      right: 120,
       top: 450,
     });
     await flushMicrotasks();
 
-    expect(anchor?.style.width).toBe('262px');
-    expect(anchor?.style.left).toBe('50px');
+    expect(anchor?.style.width).toBe('232px');
+    expect(anchor?.style.left).toBe('80px');
   });
 
   it('shrinks to the viewport when the default width cannot fit', async () => {

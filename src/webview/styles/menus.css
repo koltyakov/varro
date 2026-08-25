@@ -390,11 +390,11 @@
 /* Model picker keeps rows scannable and moves dense metadata into a side preview. */
 .model-picker-menu {
   width: 100%;
-  max-height: 360px;
+  max-height: 396px;
 }
 
 .model-picker-anchor {
-  width: 285px;
+  width: 256.5px;
 }
 
 .model-picker-anchor.details-on-top {
