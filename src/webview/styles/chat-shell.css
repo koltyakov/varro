@@ -594,6 +594,36 @@ input:focus-visible {
   outline-offset: 1px;
 }
 
+.jump-to-latest-activity {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 13px;
+  height: 8px;
+  transform: translate(-50%, -50%);
+}
+
+.jump-to-latest-activity > span {
+  flex: 0 0 auto;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: jump-to-latest-activity-wave 900ms ease-in-out infinite;
+}
+
+.jump-to-latest-activity > span:nth-child(2) {
+  animation-delay: 120ms;
+}
+
+.jump-to-latest-activity > span:nth-child(3) {
+  animation-delay: 240ms;
+}
+
 @keyframes jump-to-latest-in {
   from {
     opacity: 0;
@@ -602,6 +632,19 @@ input:focus-visible {
   to {
     opacity: 1;
     transform: translateX(-50%) translateY(0);
+  }
+}
+
+@keyframes jump-to-latest-activity-wave {
+  0%,
+  60%,
+  100% {
+    transform: translateY(1px);
+    opacity: 0.55;
+  }
+  30% {
+    transform: translateY(-2px);
+    opacity: 1;
   }
 }
 

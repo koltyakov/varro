@@ -3860,6 +3860,14 @@ describe('MessageList auto-scroll', () => {
     expect(icon?.style.getPropertyValue('--ui-icon-width')).toBe('14px');
     expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(navArrowDownIcon));
 
+    setState('sessionStatus', 'session-1', { type: 'busy' });
+    expect(button?.querySelector('.ui-icon')).toBeNull();
+    expect(button?.querySelectorAll('.jump-to-latest-activity > span')).toHaveLength(3);
+
+    setState('sessionStatus', 'session-1', { type: 'idle' });
+    expect(button?.querySelector('.jump-to-latest-activity')).toBeNull();
+    expect(button?.querySelector('.ui-icon')).toBeInstanceOf(HTMLElement);
+
     setExpandedDiffOverlay(testDiffOverlayOwner, true);
     expect(container?.querySelector('.jump-to-latest-button')).toBeNull();
 

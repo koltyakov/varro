@@ -7368,7 +7368,18 @@ export function MessageList() {
             aria-label="Scroll to latest message"
             onClick={() => requestMessageListScrollToBottom()}
           >
-            <UiIcon source={navArrowDownIcon} width="14" height="14" aria-hidden="true" />
+            <Show
+              when={activeSessionWorking()}
+              fallback={
+                <UiIcon source={navArrowDownIcon} width="14" height="14" aria-hidden="true" />
+              }
+            >
+              <span class="jump-to-latest-activity" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+              </span>
+            </Show>
           </button>
         </Tooltip>
       </Show>
