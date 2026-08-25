@@ -1,6 +1,7 @@
 /* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type -- Layout scenarios bridge synthetic browser messages and variant-specific message-part records through page.evaluate. */
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Assertions access DOM nodes and protocol-shaped fixtures established by each controlled layout scenario. */
 import { expect, test } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import {
   getE2EState,
   getStickyMessageAlignment,
@@ -1858,17 +1859,25 @@ test('many mixed-message image tiles shrink into one visible row', async ({ page
   expect(boxes[6]!.right).toBeLessThanOrEqual(rowBox.x + rowBox.width);
 });
 
+async function revealMixedImageTileRow(page: Page): Promise<Locator> {
+  const row = page.locator('.interactive-request').filter({ hasText: 'Ten image tiles' }).last();
+  await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+  await expect(row).toBeVisible();
+  return row;
+}
+
 test('overflowing mixed-message image tiles navigate from controls on the left', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 486, height: 800 });
   await page.goto('/e2e/harness/index.html?scenario=mixed-image-tiles');
 
-  const row = page.locator('.interactive-request').filter({ hasText: 'Ten image tiles' }).last();
+  const row = await revealMixedImageTileRow(page);
   const scroller = row.locator('.user-message-image-tiles');
   const previous = row.getByLabel('Previous attached images');
   const next = row.getByLabel('Next attached images');
   const tiles = scroller.locator('.user-message-image-tile');
+  await expect(row).toBeVisible();
   await expect(tiles).toHaveCount(10);
   await expect(previous).toBeVisible();
   await expect(previous).toBeDisabled();
@@ -1887,6 +1896,37 @@ test('overflowing mixed-message image tiles navigate from controls on the left',
       })
     )
     .toBe(true);
+});
+
+test('horizontal wheel input stays within overflowing mixed-message image tiles', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 486, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=mixed-image-tiles');
+
+  const list = page.locator('.interactive-list');
+  const row = await revealMixedImageTileRow(page);
+  const scroller = row.getByRole('group', { name: 'Attached images' });
+  await expect(row).toBeVisible();
+  const listScrollTop = await list.evaluate((element) => element.scrollTop);
+  const box = await scroller.boundingBox();
+  if (!box) throw new Error('Image tile scroller is missing');
+
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(160, 0);
+
+  await expect.poll(() => scroller.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+  expect(await list.evaluate((element) => element.scrollTop)).toBe(listScrollTop);
+
+  const markerTop = await row.evaluate((element) => element.getBoundingClientRect().top);
+  await page.setViewportSize({ width: 430, height: 800 });
+  const resizedBox = await scroller.boundingBox();
+  if (!resizedBox) throw new Error('Resized image tile scroller is missing');
+  await page.mouse.move(resizedBox.x + resizedBox.width / 2, resizedBox.y + resizedBox.height / 2);
+  await page.mouse.wheel(-160, 0);
+  await expect
+    .poll(() => row.evaluate((element) => element.getBoundingClientRect().top))
+    .toBeCloseTo(markerTop, 0);
 });
 
 test('the first image message does not overlap the sticky prompt', async ({ page }) => {

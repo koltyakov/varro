@@ -1460,7 +1460,11 @@ function UserMessageImageTiles(props: {
   return (
     <div class="user-message-image-tiles-shell">
       <Show when={canScrollBack() || canScrollForward()}>
-        <div class="user-message-image-scroll-controls" aria-label="Attached image navigation">
+        <div
+          class="user-message-image-scroll-controls"
+          role="group"
+          aria-label="Attached image navigation"
+        >
           <button
             type="button"
             class="user-message-image-scroll-button"
@@ -1489,6 +1493,7 @@ function UserMessageImageTiles(props: {
           queueMicrotask(updateScrollState);
         }}
         class="user-message-image-tiles"
+        role="group"
         aria-label="Attached images"
         onScroll={updateScrollState}
       >

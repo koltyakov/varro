@@ -1302,6 +1302,25 @@ function createScenarioState(name: ScenarioName): ScenarioState {
 
   if (name === 'mixed-image-tiles') {
     const session = makeSession('session-mixed-image-tiles', 'Mixed image tiles', BASE_TIME - 500);
+    const earlierMessages: ReturnType<typeof makeUserMessage>[] = [];
+    for (let index = 1; index <= 26; index += 1) {
+      const earlierUser = makeUserMessage(
+        session.id,
+        `message-mixed-image-earlier-user-${index}`,
+        [`Earlier prompt ${index}`],
+        BASE_TIME - 100_000 + index * 2_000
+      );
+      earlierMessages.push(
+        earlierUser,
+        makeAssistantMessage(
+          session.id,
+          `message-mixed-image-earlier-assistant-${index}`,
+          earlierUser.info.id,
+          `Earlier response ${index} with enough text to reflow when the sidebar width changes.`,
+          BASE_TIME - 99_000 + index * 2_000
+        )
+      );
+    }
     const user = makeUserMessage(
       session.id,
       'message-mixed-image-tiles-user',
@@ -1332,7 +1351,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     );
     state.sessions = [session];
     state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [user, assistant];
+    state.messagesBySessionId[session.id] = [...earlierMessages, user, assistant];
     state.persistedActiveSessionId = session.id;
     state.nextSequence = 20;
     return state;

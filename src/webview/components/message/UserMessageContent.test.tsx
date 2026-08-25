@@ -292,7 +292,9 @@ describe('UserMessageContent', () => {
       leadingChildren[0]?.querySelectorAll('.message-attachment-chip .file-type-icon')
     ).toHaveLength(2);
     expect(leadingChildren[1]?.classList.contains('user-message-image-tiles-shell')).toBe(true);
-    expect(leadingChildren[1]?.querySelector('.user-message-image-tiles')).not.toBeNull();
+    expect(
+      leadingChildren[1]?.querySelector('[role="group"][aria-label="Attached images"]')
+    ).not.toBeNull();
     expect(leadingChildren[1]?.querySelector('img')?.getAttribute('alt')).toBe('diagram.png');
     expect(children[1]?.classList.contains('user-message-image-text-bubble')).toBe(true);
     expect(children[1]?.querySelector('.user-message-text-scroll')?.textContent).toContain(

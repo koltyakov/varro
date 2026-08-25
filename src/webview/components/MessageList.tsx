@@ -4661,13 +4661,13 @@ export function MessageList() {
   }
 
   function onWheel(event: WheelEvent) {
+    if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
+    if (nestedScrollerWillConsumeWheel(event)) return;
     if (widthResizeActive) {
       publishPendingWidthMeasurements({ preserveVisibleAnchor: false });
       widthResizeAnchor = null;
       finishWidthResizeNow();
     }
-    if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
-    if (nestedScrollerWillConsumeWheel(event)) return;
     pendingExpansionScrollAnchor = null;
     directMovementAnchor = null;
     pendingWheelResizeAnchor = null;
@@ -4828,9 +4828,23 @@ export function MessageList() {
     return deltaY;
   }
 
+  function getHorizontalWheelDeltaPixels(event: WheelEvent) {
+    let deltaX = event.deltaX;
+    if (event.deltaMode === 1) {
+      const styles = containerRef ? getComputedStyle(containerRef) : null;
+      deltaX *=
+        Number.parseFloat(styles?.lineHeight || '') ||
+        (Number.parseFloat(styles?.fontSize || '') || 13) * 1.35;
+    } else if (event.deltaMode === 2) {
+      deltaX *= containerRef?.clientWidth || 0;
+    }
+    return deltaX;
+  }
+
   function nestedScrollerWillConsumeWheel(event: WheelEvent) {
     if (!containerRef || !(event.target instanceof Element)) return false;
     const deltaY = getWheelDeltaPixels(event);
+    const deltaX = getHorizontalWheelDeltaPixels(event);
     for (let element: Element | null = event.target; element && element !== containerRef;) {
       // Most ancestors cannot scroll at all. Checking overflowing geometry first keeps
       // getComputedStyle - which forces a style recalculation - off the wheel hot path.
@@ -4847,6 +4861,20 @@ export function MessageList() {
         ) {
           return true;
         }
+      }
+      if (
+        element instanceof HTMLElement &&
+        Math.abs(deltaX) >= Math.abs(deltaY) &&
+        Math.abs(deltaX) > 0.5 &&
+        element.scrollWidth > element.clientWidth + 1
+      ) {
+        const styles = getComputedStyle(element);
+        const overflowX = styles.overflowX;
+        const scrollable = overflowX === 'auto' || overflowX === 'scroll';
+        const canMoveHorizontally =
+          (deltaX < 0 && element.scrollLeft > 0) ||
+          (deltaX > 0 && element.scrollLeft + element.clientWidth < element.scrollWidth - 1);
+        if (scrollable && (Math.abs(deltaY) <= 0.5 || canMoveHorizontally)) return true;
       }
       element = element.parentElement;
     }
