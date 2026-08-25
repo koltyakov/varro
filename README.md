@@ -101,6 +101,7 @@ Varro connects to `http://127.0.0.1:4096` by default. `varro.server.port` accept
 ## Documentation
 
 - [Usage guide](https://github.com/koltyakov/varro/blob/main/docs/usage.md)
+- [Configure primary agents](https://github.com/koltyakov/varro/blob/main/docs/usage.md#configure-primary-agents)
 - [VS Code forks compatibility](https://github.com/koltyakov/varro/blob/main/docs/vscode-forks.md)
 - [Development guide](https://github.com/koltyakov/varro/blob/main/docs/development.md)
 - [Architecture overview](https://github.com/koltyakov/varro/blob/main/docs/architecture.md)

@@ -216,6 +216,52 @@ Varro loads agents, models, and MCP tools from your local OpenCode configuration
 
 The Models view also shows whether a model exposes tools, variants, vision support, and a known context-window size. A lightning marker identifies GPT model names containing `Fast`; its tooltip notes that fast models can be more expensive.
 
+### Configure Primary Agents
+
+Define primary agents in OpenCode configuration. Varro lists them in the agent picker and uses the selected agent for the main conversation.
+
+Choose the config scope based on where you want the agent to appear:
+
+- Global: `~/.config/opencode/opencode.json`. The agent is available in every workspace that uses this OpenCode installation.
+- Project: `<project>/opencode.json`. The agent is available only when OpenCode runs in that project. Commit this file if the team should share the agent.
+
+OpenCode merges global and project configuration. A project agent with the same name overrides the matching global agent fields. Keep provider credentials and other secrets in the global config, not in a committed project file.
+
+This example adds `ask`, a primary agent that can inspect local code and search documentation but cannot edit files, run commands, delegate to subagents, or call unlisted custom and MCP tools:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "ask": {
+      "description": "Answers questions and investigates the codebase without modifying anything",
+      "mode": "primary",
+      "prompt": "Answer questions about the codebase using read-only investigation. Explain findings directly and cite relevant files and lines. If the user asks for implementation, describe the necessary changes without applying them.",
+      "permission": {
+        "*": "deny",
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "list": "allow",
+        "lsp": "allow",
+        "skill": "allow",
+        "webfetch": "allow",
+        "websearch": "allow",
+        "question": "allow"
+      }
+    }
+  }
+}
+```
+
+The `"*": "deny"` rule is the read-only boundary. The prompt describes expected behavior, but it does not prevent tool calls by itself. Put the catch-all rule before the specific read-oriented allowances because OpenCode uses the last matching permission rule.
+
+Omit `model` to use the configured global model, or add a provider-qualified model such as `"model": "openai/gpt-5.6-sol"` inside the agent. Add `"default_agent": "ask"` at the top level if new sessions should select it by default.
+
+OpenCode reads agent definitions when the server starts. Saving the config does not update the agent picker in a running server.
+
+Open the Command Palette and run `Varro: Restart Server`. Varro checks for active work before stopping OpenCode. If a restart would interrupt a running session, the sidebar lists the blocking sessions instead. Finish or abort that work, then run the command again. The new primary agent appears in the picker after Varro reconnects.
+
 ### Provider Connections
 
 The Models view reads OpenCode's provider catalog and authentication methods. Depending on the provider plugin, the connection dialog can accept an API key, collect provider-specific fields, or open an OAuth authorization page in your browser. Some OAuth flows finish automatically; others ask you to paste an authorization code back into Varro. OpenCode stores the resulting credential.
