@@ -1082,30 +1082,49 @@ function hideUnclosedStreamingMarkdown(content: string) {
   const hiddenStarts = [inlineStart, linkDestinationStart, ...linkLabelStarts].filter(
     (start): start is number => start !== null
   );
+  if (openFence) {
+    const trailingLineStart = Math.max(content.lastIndexOf('\n') + 1, 0);
+    const trailingLine = content.slice(trailingLineStart).trim();
+    if (
+      trailingLine.length > 0 &&
+      trailingLine.length < openFence.length &&
+      [...trailingLine].every((character) => character === openFence.char)
+    ) {
+      hiddenStarts.push(trailingLineStart);
+    }
+  }
   const visibleContent =
     hiddenStarts.length === 0 ? content : content.slice(0, Math.min(...hiddenStarts));
-  const tableSafeContent = hideIncompleteStreamingTable(visibleContent);
-  const trailingPath = tableSafeContent.match(TRAILING_BARE_PATH_CANDIDATE_RE);
-  if (!trailingPath || isLikelyFilePathReference(trailingPath[1]!)) return tableSafeContent;
+  const blockSafeContent = hideIncompleteStreamingBlock(visibleContent);
+  const trailingPath = blockSafeContent.match(TRAILING_BARE_PATH_CANDIDATE_RE);
+  if (!trailingPath || isLikelyFilePathReference(trailingPath[1]!)) return blockSafeContent;
 
   const candidateStart = trailingPath.index! + trailingPath[0].length - trailingPath[1]!.length;
-  return tableSafeContent.slice(0, candidateStart);
+  return blockSafeContent.slice(0, candidateStart);
 }
 
-function hideIncompleteStreamingTable(content: string) {
+function hideIncompleteStreamingBlock(content: string) {
+  const trailingHeading = content.match(/(?:^|\r?\n)([ \t]{0,3}#{1,6}[ \t]*)$/);
+  if (trailingHeading) {
+    return content.slice(
+      0,
+      (trailingHeading.index ?? 0) + trailingHeading[0].length - (trailingHeading[1]?.length ?? 0)
+    );
+  }
+
   const blockStartMatch = content.match(/(?:^|\r?\n\s*\r?\n)([^\r\n]*(?:\r?\n[^\r\n]*)?)$/);
   if (!blockStartMatch) return content;
   const block = blockStartMatch[1] ?? '';
   const lines = block.split(/\r?\n/);
   const header = lines[0]?.trim() ?? '';
-  const headerCells =
-    header.startsWith('|') && header.endsWith('|') ? header.slice(1, -1).split('|') : [];
-  if (headerCells.length < 2) return content;
+  if (!header.startsWith('|')) return content;
+  const headerCells = header.endsWith('|') ? header.slice(1, -1).split('|') : [];
 
   const delimiter = lines[1]?.trim();
   const delimiterCells =
     delimiter?.startsWith('|') && delimiter.endsWith('|') ? delimiter.slice(1, -1).split('|') : [];
   const completeDelimiter =
+    headerCells.length >= 2 &&
     delimiterCells.length === headerCells.length &&
     delimiterCells.every((cell) => /^\s*:?-{3,}:?\s*$/.test(cell));
   if (completeDelimiter) return content;

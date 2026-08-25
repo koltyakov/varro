@@ -1067,9 +1067,7 @@ describe('MarkdownRenderer', () => {
   });
 
   it('holds a streaming table until its delimiter row is complete', async () => {
-    const [content, setContent] = createSignal(
-      'Status follows.\n\n| No. | Area | State | Lead | Action |\n|---|---|---|---'
-    );
+    const [content, setContent] = createSignal('Status follows.\n\n| No.');
     cleanup = render(
       () =>
         createComponent(MarkdownRenderer, {
@@ -1085,11 +1083,40 @@ describe('MarkdownRenderer', () => {
     expect(container?.textContent).not.toContain('No.');
     expect(container?.querySelector('table')).toBeNull();
 
+    setContent('Status follows.\n\n| No. | Area | State | Lead | Action |\n|---|---|---|---');
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    expect(container?.textContent).not.toContain('No.');
+
     setContent('Status follows.\n\n| No. | Area | State | Lead | Action |\n|---|---|---|---|---|');
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
     expect(container?.querySelector('table')).not.toBeNull();
     expect(container?.querySelector('thead')?.textContent).toContain('Action');
+  });
+
+  it('holds incomplete streaming block delimiters', async () => {
+    const [content, setContent] = createSignal('Stable text.\n\n## ');
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+        }),
+      container!
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    expect(container?.textContent?.trim()).toBe('Stable text.');
+
+    setContent('Stable text.\n\n## 40. Delivery\n\n```ts\nconst ready = true;\n``');
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    expect(container?.querySelector('h2')?.textContent).toBe('40. Delivery');
+    expect(container?.querySelector('code')?.textContent?.trim()).toBe('const ready = true;');
+    expect(container?.textContent).not.toContain('``');
+
+    setContent('Stable text.\n\n## 40. Delivery\n\n```ts\nconst ready = true;\n```');
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    expect(container?.querySelector('code')?.textContent?.trim()).toBe('const ready = true;');
   });
 
   it('does not reparse the stable streaming segment when only the tail grows', async () => {
