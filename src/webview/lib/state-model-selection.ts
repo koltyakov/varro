@@ -158,12 +158,16 @@ export function setCommands(commands: Command[]) {
 
 export function setSelectedAgent(
   agent: string | null,
-  options?: { sessionId?: string | null; persistGlobal?: boolean }
+  options?: {
+    sessionId?: string | null;
+    persistGlobal?: boolean;
+    updateSelection?: boolean;
+  }
 ) {
   const persistGlobal = options?.persistGlobal ?? true;
   const sessionId = options?.sessionId;
 
-  if (state.selectedAgent !== agent) {
+  if (options?.updateSelection !== false && state.selectedAgent !== agent) {
     setState('selectedAgent', agent);
   }
   if (persistGlobal) writeStored(STORAGE_KEYS.selectedAgent, agent);

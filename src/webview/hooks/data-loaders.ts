@@ -121,7 +121,11 @@ export function createDataLoaderOperations(deps: {
   setPrimaryAgents(agents: Agent[]): void;
   setSelectedAgent(
     agent: string | null,
-    options: { sessionId?: string | null; persistGlobal: boolean }
+    options: {
+      sessionId?: string | null;
+      persistGlobal: boolean;
+      updateSelection?: boolean;
+    }
   ): void;
   listCommands(): Promise<Command[] | null | undefined>;
   setCommands(commands: Command[]): void;
@@ -381,6 +385,7 @@ export function createDataLoaderOperations(deps: {
               deps.setSelectedAgent(session.agent, {
                 sessionId: session.id,
                 persistGlobal: false,
+                updateSelection: false,
               });
             }
           }

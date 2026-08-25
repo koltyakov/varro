@@ -182,7 +182,7 @@ const NEW_TURN_ALIGNMENT_FRAME_LIMIT = 64;
 const NEW_TURN_ALIGNMENT_MAX_STEP_PX = 24;
 const BOTTOM_FOLLOW_SETTLE_FRAME_COUNT = 2;
 const WIDTH_RESIZE_SETTLE_MS = 100;
-const WIDTH_RESIZE_ANCHOR_INSET_PX = 60;
+const WIDTH_RESIZE_ANCHOR_INSET_PX = 20;
 const APPEND_SCROLL_TRANSITION_MS = 180;
 const EXPANSION_SCROLL_ANCHOR_WINDOW_MS = 250;
 const LOADING_ROW_REAPPEAR_DELAY_MS = 600;
@@ -2702,7 +2702,7 @@ export function MessageList() {
     let element = candidates[low];
     if (!element) return anchor;
     let rect = element.getBoundingClientRect();
-    while (rect.top < preferredTop && candidates[low + 1]) {
+    while (rect.top <= preferredTop && candidates[low + 1]) {
       const next = candidates[low + 1]!;
       const nextRect = next.getBoundingClientRect();
       if (nextRect.top >= containerRect.bottom) break;

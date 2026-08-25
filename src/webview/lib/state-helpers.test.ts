@@ -1308,6 +1308,21 @@ describe('state helpers', () => {
     expect(stateModule.getSelectedAgentForSession('session-1')).toBeNull();
   });
 
+  it('updates session agent metadata without changing the visible selection', async () => {
+    const stateModule = await loadState();
+
+    stateModule.setSelectedAgent('build');
+    stateModule.setSelectedAgent('explore', {
+      sessionId: 'child-session',
+      persistGlobal: false,
+      updateSelection: false,
+    });
+
+    expect(stateModule.state.selectedAgent).toBe('build');
+    expect(stateModule.getSelectedAgentForSession('child-session')).toBe('explore');
+    expect(stateModule.getPersistedSelectedAgent()).toBe('build');
+  });
+
   it('tracks per-session selected mcps independently', async () => {
     const stateModule = await loadState();
 

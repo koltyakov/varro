@@ -899,6 +899,7 @@ describe('data loaders', () => {
     expect(setSelectedAgent).toHaveBeenCalledWith('build', {
       sessionId: 'session-1',
       persistGlobal: false,
+      updateSelection: false,
     });
   });
 
