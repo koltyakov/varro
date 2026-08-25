@@ -369,6 +369,11 @@ input:focus-visible {
   backface-visibility: hidden;
 }
 
+.latest-user-message-sticky * {
+  pointer-events: none;
+  cursor: inherit;
+}
+
 .latest-user-message-sticky-text-clip {
   position: relative;
   width: 100%;

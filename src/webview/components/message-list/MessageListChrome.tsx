@@ -140,8 +140,7 @@ export function StickyUserMessagePreviewCard(props: {
             onMouseEnter={() => notifyUserMessageHoverChange(true)}
             onMouseLeave={() => notifyUserMessageHoverChange(false)}
             onClick={(event) => {
-              const target = event.target;
-              if (target instanceof Element && target.closest('a, button')) return;
+              event.preventDefault();
               if (!props.loading) props.onClick?.(props.preview);
             }}
           >

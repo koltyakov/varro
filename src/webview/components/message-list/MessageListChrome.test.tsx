@@ -350,6 +350,44 @@ describe('MessageListChrome', () => {
     expect(onClick).toHaveBeenCalledWith(preview);
   });
 
+  it('routes clicks on inner interactive content through the sticky card', () => {
+    const onClick = vi.fn();
+    const preview = {
+      id: 'msg-rich',
+      index: 3,
+      text: 'Review https://example.com',
+      attachmentCount: 0,
+      imageCount: 0,
+    };
+    cleanup = render(
+      () => (
+        <StickyUserMessagePreviewCard
+          preview={preview}
+          parts={[
+            {
+              id: 'part-rich',
+              sessionID: 'session-1',
+              messageID: 'msg-rich',
+              type: 'text',
+              text: preview.text,
+            },
+          ]}
+          onClick={onClick}
+        />
+      ),
+      container!
+    );
+
+    const link = container?.querySelector<HTMLAnchorElement>(
+      '.latest-user-message-sticky a.external-link'
+    );
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+    link?.dispatchEvent(click);
+
+    expect(click.defaultPrevented).toBe(true);
+    expect(onClick).toHaveBeenCalledWith(preview);
+  });
+
   it('is not clickable without an onClick handler', () => {
     cleanup = render(
       () => (
