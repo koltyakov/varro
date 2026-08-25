@@ -1,4 +1,5 @@
-import { createEffect, For, onCleanup, Show } from 'solid-js';
+import { createEffect, createSignal, For, onCleanup, Show } from 'solid-js';
+import { Portal } from 'solid-js/web';
 import type { Agent } from '../../types';
 import type {
   AutoApproveActivity,
@@ -270,6 +271,10 @@ export function AgentPicker(props: {
   onFocusIndex: (index: number) => void;
 }) {
   let popupEl: HTMLDivElement | undefined;
+  const [optionDetails, setOptionDetails] = createSignal<{
+    detail: string;
+    style: Record<string, string>;
+  } | null>(null);
   const selectedAgent = () => props.agents.find((agent) => agent.name === props.selectedAgent);
   const tooltipContent = () => {
     const agent = selectedAgent();
@@ -334,6 +339,47 @@ export function AgentPicker(props: {
     if (isFunction(forwarded)) forwarded(el);
   };
 
+  const showOptionDetails = (detail: string, option: HTMLElement) => {
+    if (!popupEl) return;
+    const gap = 7;
+    const viewportMargin = 8;
+    const panelWidth = 220;
+    const popupBox = popupEl.getBoundingClientRect();
+    const optionBox = option.getBoundingClientRect();
+    let left: number;
+    let top: number;
+    let width = panelWidth;
+
+    if (popupBox.right + gap + panelWidth <= window.innerWidth - viewportMargin) {
+      left = popupBox.right + gap;
+      top = Math.min(optionBox.top, window.innerHeight - viewportMargin - 100);
+    } else if (popupBox.left - gap - panelWidth >= viewportMargin) {
+      left = popupBox.left - gap - panelWidth;
+      top = Math.min(optionBox.top, window.innerHeight - viewportMargin - 100);
+    } else {
+      left = Math.max(viewportMargin, popupBox.left);
+      width = Math.max(0, Math.min(popupBox.width, window.innerWidth - left - viewportMargin));
+      setOptionDetails({
+        detail,
+        style: {
+          bottom: `${Math.round(window.innerHeight - popupBox.top + gap)}px`,
+          left: `${Math.round(left)}px`,
+          width: `${Math.round(width)}px`,
+        },
+      });
+      return;
+    }
+
+    setOptionDetails({
+      detail,
+      style: {
+        left: `${Math.round(left)}px`,
+        top: `${Math.round(Math.max(viewportMargin, top))}px`,
+        width: `${Math.round(width)}px`,
+      },
+    });
+  };
+
   return (
     <div style={{ position: 'relative' }}>
       <Tooltip content={tooltipContent()}>
@@ -358,23 +404,78 @@ export function AgentPicker(props: {
           <div class="toolbar-popover-header">Agent</div>
           <For each={props.agents}>
             {(agent, index) => (
-              <button
-                class={`toolbar-popover-item ${props.selectedAgent === agent.name ? 'selected' : ''} ${props.focusIndex === index() ? 'keyboard-focus' : ''}`}
-                onClick={() => props.onSelect(agent)}
-                onMouseEnter={() => props.onFocusIndex(index())}
-              >
-                <span class="min-w-0">
-                  <span class="block truncate">{props.getLabel(agent)}</span>
-                  <span class="block truncate text-[10px] text-vscode-muted">
-                    {props.getDetail(agent)}
-                  </span>
-                </span>
-              </button>
+              <AgentPickerOption
+                label={props.getLabel(agent)}
+                detail={props.getDetail(agent)}
+                selected={props.selectedAgent === agent.name}
+                focused={props.focusIndex === index()}
+                onSelect={() => props.onSelect(agent)}
+                onFocus={() => props.onFocusIndex(index())}
+                onShowDetails={showOptionDetails}
+                onHideDetails={() => setOptionDetails(null)}
+              />
             )}
           </For>
         </div>
       </Show>
+      <Show when={props.showPicker && optionDetails()}>
+        {(details) => (
+          <Portal>
+            <div
+              class="model-picker-details agent-picker-details"
+              style={details().style}
+              aria-live="polite"
+            >
+              <div class="agent-picker-details-description">{details().detail}</div>
+            </div>
+          </Portal>
+        )}
+      </Show>
     </div>
+  );
+}
+
+function AgentPickerOption(props: {
+  label: string;
+  detail: string;
+  selected: boolean;
+  focused: boolean;
+  onSelect: () => void;
+  onFocus: () => void;
+  onShowDetails: (detail: string, option: HTMLElement) => void;
+  onHideDetails: () => void;
+}) {
+  let detailElement: HTMLSpanElement | undefined;
+  const updateDetails = (option: HTMLElement) => {
+    if (detailElement && detailElement.scrollWidth > detailElement.clientWidth) {
+      props.onShowDetails(props.detail, option);
+    } else {
+      props.onHideDetails();
+    }
+  };
+
+  return (
+    <button
+      class={`toolbar-popover-item ${props.selected ? 'selected' : ''} ${props.focused ? 'keyboard-focus' : ''}`}
+      onClick={props.onSelect}
+      onMouseEnter={(event) => {
+        updateDetails(event.currentTarget);
+        props.onFocus();
+      }}
+      onMouseLeave={props.onHideDetails}
+      onFocus={(event) => updateDetails(event.currentTarget)}
+      onBlur={props.onHideDetails}
+    >
+      <span class="min-w-0">
+        <span class="block truncate">{props.label}</span>
+        <span
+          ref={(element) => (detailElement = element)}
+          class="block truncate text-[10px] text-vscode-muted"
+        >
+          {props.detail}
+        </span>
+      </span>
+    </button>
   );
 }
 

@@ -429,6 +429,79 @@ describe('ToolbarPickers', () => {
     );
   });
 
+  it('shows model-style agent details when hovering a truncated description', () => {
+    const description =
+      'Investigates the codebase and provides a detailed review without changing files';
+    cleanup = render(
+      () => (
+        <AgentPicker
+          agents={[createAgent({ name: 'reviewer', description })]}
+          selectedAgent="reviewer"
+          selectedLabel="Reviewer"
+          focusIndex={0}
+          showPicker={true}
+          getLabel={(agent) => agent.name}
+          getDetail={(agent) => agent.description ?? 'No description'}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+          onFocusIndex={vi.fn()}
+        />
+      ),
+      container!
+    );
+
+    const option = container?.querySelector<HTMLButtonElement>(
+      '.agent-popover .toolbar-popover-item'
+    );
+    const detail = option?.querySelector<HTMLElement>('.text-vscode-muted');
+    Object.defineProperties(detail!, {
+      clientWidth: { configurable: true, value: 120 },
+      scrollWidth: { configurable: true, value: 300 },
+    });
+    option?.dispatchEvent(new MouseEvent('mouseenter'));
+
+    const details = document.querySelector('.agent-picker-details');
+    expect(details?.querySelector('.agent-picker-details-description')?.textContent).toBe(
+      description
+    );
+    expect(details?.querySelector('dl')).toBeNull();
+
+    option?.dispatchEvent(new MouseEvent('mouseleave'));
+    expect(document.querySelector('.agent-picker-details')).toBeNull();
+  });
+
+  it('does not show agent details when its description fits', () => {
+    cleanup = render(
+      () => (
+        <AgentPicker
+          agents={[createAgent({ name: 'reviewer', description: 'Reviews work' })]}
+          selectedAgent="reviewer"
+          selectedLabel="Reviewer"
+          focusIndex={0}
+          showPicker={true}
+          getLabel={(agent) => agent.name}
+          getDetail={(agent) => agent.description ?? 'No description'}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+          onFocusIndex={vi.fn()}
+        />
+      ),
+      container!
+    );
+
+    const option = container?.querySelector<HTMLButtonElement>(
+      '.agent-popover .toolbar-popover-item'
+    );
+    const detail = option?.querySelector<HTMLElement>('.text-vscode-muted');
+    Object.defineProperties(detail!, {
+      clientWidth: { configurable: true, value: 120 },
+      scrollWidth: { configurable: true, value: 120 },
+    });
+    option?.dispatchEvent(new MouseEvent('mouseenter'));
+
+    expect(document.querySelector('.agent-picker-details')).toBeNull();
+  });
+
   it('limits the agent popover to the input host', async () => {
     vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(600);
     cleanup = render(

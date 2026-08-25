@@ -1123,7 +1123,19 @@
 
 .toolbar-popover.agent-popover {
   width: max-content;
-  max-width: 288px;
+  max-width: 192px;
+}
+
+.agent-picker-details {
+  position: fixed;
+  z-index: var(--z-topmost);
+}
+
+.agent-picker-details-description {
+  overflow-wrap: anywhere;
+  text-align: left;
+  font-size: 10px;
+  line-height: 1.35;
 }
 
 .agent-picker-tooltip {
