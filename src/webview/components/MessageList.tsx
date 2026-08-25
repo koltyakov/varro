@@ -182,6 +182,7 @@ const NEW_TURN_ALIGNMENT_FRAME_LIMIT = 64;
 const NEW_TURN_ALIGNMENT_MAX_STEP_PX = 24;
 const BOTTOM_FOLLOW_SETTLE_FRAME_COUNT = 2;
 const WIDTH_RESIZE_SETTLE_MS = 100;
+const WIDTH_RESIZE_ANCHOR_INSET_PX = 60;
 const APPEND_SCROLL_TRANSITION_MS = 180;
 const EXPANSION_SCROLL_ANCHOR_WINDOW_MS = 250;
 const LOADING_ROW_REAPPEAR_DELAY_MS = 600;
@@ -2476,7 +2477,9 @@ export function MessageList() {
       }
     }
 
-    return refineTallRenderItemScrollAnchor(firstVisibleRow, 0, { includeCompact: true });
+    return refineTallRenderItemScrollAnchor(firstVisibleRow, WIDTH_RESIZE_ANCHOR_INSET_PX, {
+      includeCompact: true,
+    });
   }
 
   function rememberDetachedVisibleAnchor(anchor: VisibleScrollAnchor | null) {
@@ -4417,7 +4420,10 @@ export function MessageList() {
               ? directMovementAnchor.anchor.messageTop + movement
               : undefined,
         };
-        const anchor = refineTallRenderItemScrollAnchor(movedAnchor) ?? movedAnchor;
+        const anchor =
+          refineTallRenderItemScrollAnchor(movedAnchor, WIDTH_RESIZE_ANCHOR_INSET_PX, {
+            includeCompact: true,
+          }) ?? movedAnchor;
         const anchorElement = getMountedScrollAnchorElement(anchor);
         const anchorRect = anchorElement?.getBoundingClientRect();
         const containerRect = containerRef!.getBoundingClientRect();
@@ -4437,7 +4443,7 @@ export function MessageList() {
             index === null
               ? captureVisibleScrollAnchor({ preferStableRenderItem: true })
               : capturePaintedVisibleScrollAnchorFromIndex(index),
-            0,
+            WIDTH_RESIZE_ANCHOR_INSET_PX,
             { includeCompact: true }
           );
           directMovementAnchor = replacement ? { anchor: replacement, scrollTop: top } : null;
@@ -4684,7 +4690,7 @@ export function MessageList() {
         captureVisibleUserMessageScrollAnchor() ??
         refineTallRenderItemScrollAnchor(
           index === null ? null : capturePaintedVisibleScrollAnchorFromIndex(index),
-          0,
+          WIDTH_RESIZE_ANCHOR_INSET_PX,
           { includeCompact: true }
         );
       if (anchor) {

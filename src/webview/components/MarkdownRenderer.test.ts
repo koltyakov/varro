@@ -1066,6 +1066,32 @@ describe('MarkdownRenderer', () => {
     expect(tailSegment?.innerHTML).toContain('<p>Second paragraph</p>');
   });
 
+  it('holds a streaming table until its delimiter row is complete', async () => {
+    const [content, setContent] = createSignal(
+      'Status follows.\n\n| No. | Area | State | Lead | Action |\n|---|---|---|---'
+    );
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+        }),
+      container!
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(container?.textContent).toContain('Status follows.');
+    expect(container?.textContent).not.toContain('No.');
+    expect(container?.querySelector('table')).toBeNull();
+
+    setContent('Status follows.\n\n| No. | Area | State | Lead | Action |\n|---|---|---|---|---|');
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(container?.querySelector('table')).not.toBeNull();
+    expect(container?.querySelector('thead')?.textContent).toContain('Action');
+  });
+
   it('does not reparse the stable streaming segment when only the tail grows', async () => {
     const [content, setContent] = createSignal('First paragraph\n\nSecond');
     const sanitizeSpy = vi.spyOn(DOMPurify, 'sanitize');

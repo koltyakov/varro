@@ -787,7 +787,7 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
-  it('preserves a painted descendant when width reflow changes its row-relative position', async () => {
+  it('preserves the first fully painted descendant when an earlier block is clipped', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     let hostWidth = 500;
     vi.spyOn(window, 'innerWidth', 'get').mockImplementation(() => hostWidth);
@@ -812,7 +812,8 @@ describe('MessageList auto-scroll', () => {
           const index = Number(messageId.replace('assistant-', ''));
           const rowTop = index * rowHeight - scrollTopValue;
           if (this.matches('.rendered-markdown p')) {
-            return new DOMRect(0, rowTop + markerOffset, hostWidth, 20);
+            const offset = this.textContent?.startsWith('Earlier block') ? 20 : markerOffset;
+            return new DOMRect(0, rowTop + offset, hostWidth, 20);
           }
           return new DOMRect(0, rowTop, hostWidth, rowHeight);
         }
@@ -826,7 +827,12 @@ describe('MessageList auto-scroll', () => {
         const messageId = `assistant-${index}`;
         return {
           info: assistantMessage(messageId),
-          parts: [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
+          parts: [
+            {
+              ...textPart(`text-${index}`, `Earlier block ${index}\n\nResponse ${index}`),
+              messageID: messageId,
+            },
+          ],
         };
       })
     );
@@ -864,9 +870,11 @@ describe('MessageList auto-scroll', () => {
     scrollTopValue = 22 * rowHeight;
     list.dispatchEvent(new Event('scroll'));
     await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
 
     const marker = container?.querySelector<HTMLElement>(
-      '[data-msg-id="assistant-22"] .rendered-markdown p'
+      '[data-msg-id="assistant-22"] .rendered-markdown p:last-child'
     );
     expect(marker?.getBoundingClientRect().top).toBe(140);
 

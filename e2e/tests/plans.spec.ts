@@ -23,7 +23,7 @@ test('planning mode ends up with a plan using realistic provider models', async 
   await page.locator('.model-picker-btn').click();
   const modelPicker = page.locator('.dropdown-menu').first();
   await expect(modelPicker.getByText('GitHub Copilot', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'GPT-5 mini (default)', exact: true })).toBeVisible();
+  await expect(modelPicker.getByRole('button', { name: 'GPT-5 mini', exact: true })).toBeVisible();
   await expect(modelPicker.getByText('Z.ai', { exact: true })).toBeVisible();
   await expect(page.locator('.dropdown-item').filter({ hasText: 'GLM 5.1' })).toBeVisible();
   await page.keyboard.press('Escape');

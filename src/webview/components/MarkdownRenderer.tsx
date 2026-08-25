@@ -1084,11 +1084,33 @@ function hideUnclosedStreamingMarkdown(content: string) {
   );
   const visibleContent =
     hiddenStarts.length === 0 ? content : content.slice(0, Math.min(...hiddenStarts));
-  const trailingPath = visibleContent.match(TRAILING_BARE_PATH_CANDIDATE_RE);
-  if (!trailingPath || isLikelyFilePathReference(trailingPath[1]!)) return visibleContent;
+  const tableSafeContent = hideIncompleteStreamingTable(visibleContent);
+  const trailingPath = tableSafeContent.match(TRAILING_BARE_PATH_CANDIDATE_RE);
+  if (!trailingPath || isLikelyFilePathReference(trailingPath[1]!)) return tableSafeContent;
 
   const candidateStart = trailingPath.index! + trailingPath[0].length - trailingPath[1]!.length;
-  return visibleContent.slice(0, candidateStart);
+  return tableSafeContent.slice(0, candidateStart);
+}
+
+function hideIncompleteStreamingTable(content: string) {
+  const blockStartMatch = content.match(/(?:^|\r?\n\s*\r?\n)([^\r\n]*(?:\r?\n[^\r\n]*)?)$/);
+  if (!blockStartMatch) return content;
+  const block = blockStartMatch[1] ?? '';
+  const lines = block.split(/\r?\n/);
+  const header = lines[0]?.trim() ?? '';
+  const headerCells =
+    header.startsWith('|') && header.endsWith('|') ? header.slice(1, -1).split('|') : [];
+  if (headerCells.length < 2) return content;
+
+  const delimiter = lines[1]?.trim();
+  const delimiterCells =
+    delimiter?.startsWith('|') && delimiter.endsWith('|') ? delimiter.slice(1, -1).split('|') : [];
+  const completeDelimiter =
+    delimiterCells.length === headerCells.length &&
+    delimiterCells.every((cell) => /^\s*:?-{3,}:?\s*$/.test(cell));
+  if (completeDelimiter) return content;
+
+  return content.slice(0, (blockStartMatch.index ?? 0) + blockStartMatch[0].length - block.length);
 }
 
 function isAppendOnlySafeMarkdown(content: string) {
