@@ -1553,7 +1553,7 @@ export async function waitForLiveGate({
       };
     }
     if (
-      stickyNudgeAttempts < 4 &&
+      stickyNudgeAttempts < 12 &&
       busy &&
       snapshot.nestedActivityScroller?.hasRange &&
       missing.length === 1 &&

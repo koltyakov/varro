@@ -119,6 +119,30 @@ test('repeats the bounded sticky nudge until bottom follow releases', async () =
   assert.deepEqual(gate.missing, []);
 });
 
+test('keeps nudging while a live tray has range and the marked prompt is not sticky', async () => {
+  let wheelCount = 0;
+  const gate = await waitForLiveGate({
+    client: { isBusy: async () => true },
+    cdp: {
+      snapshot: async () => ({
+        ...ready,
+        stickyMessageId: wheelCount >= 5 ? 'message-1' : null,
+      }),
+      wheel: async () => {
+        wheelCount += 1;
+        return true;
+      },
+    },
+    sessionId: 'session',
+    scenario: 'AI-08',
+    timeoutMs: 1_000,
+    pollIntervalMs: 0,
+  });
+
+  assert.equal(wheelCount, 5);
+  assert.deepEqual(gate.missing, []);
+});
+
 test('builds a targeted bounded recovery prompt from missing gates', () => {
   const prompt = buildLivePrompt({
     seed: 'abc',

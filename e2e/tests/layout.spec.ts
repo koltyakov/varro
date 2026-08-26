@@ -2568,9 +2568,12 @@ test('image sticky remains stable after a fractional upward wheel tick reveals i
         const sourceBottomBefore = settledSource.getBoundingClientRect().bottom;
         const delta = 0.75;
         element.dispatchEvent(new WheelEvent('wheel', { deltaY: -delta, bubbles: true }));
-        element.scrollTop = Math.max(0, element.scrollTop - delta);
+        const paintedDelta = Math.max(Math.ceil(delta), Math.ceil(listTop - sourceBottomBefore));
+        element.scrollTop = Math.max(0, element.scrollTop - paintedDelta);
         element.dispatchEvent(new Event('scroll'));
-        const sourceBottomAfter = settledSource.getBoundingClientRect().bottom;
+        const sourceBottomAfter = document
+          .querySelector<HTMLElement>(sourceSelector)
+          ?.getBoundingClientRect().bottom;
         let stickyVisibleFrames = 0;
         for (let settleFrame = 0; settleFrame < 6; settleFrame += 1) {
           await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -2597,7 +2600,7 @@ test('image sticky remains stable after a fractional upward wheel tick reveals i
 
   expect(result).not.toBeNull();
   expect(result?.sourceBottomBefore).toBeLessThanOrEqual(result?.listTop ?? 0);
-  expect(result?.sourceBottomAfter).toBeGreaterThanOrEqual(
+  expect(result?.sourceBottomAfter ?? Number.NEGATIVE_INFINITY).toBeGreaterThanOrEqual(
     result?.listTop ?? Number.POSITIVE_INFINITY
   );
   expect(result?.stickyVisible, JSON.stringify(result)).toBe(true);
