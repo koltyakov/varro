@@ -34,7 +34,11 @@ afterEach(() => {
 
 function renderPart(
   part: Part,
-  options: { messageInfo?: AssistantMessage; streamedText?: string | null } = {}
+  options: {
+    messageInfo?: AssistantMessage;
+    streamedText?: string | null;
+    expandReasoning?: boolean;
+  } = {}
 ) {
   cleanup = render(
     () =>
@@ -42,6 +46,7 @@ function renderPart(
         part,
         messageInfo: options.messageInfo,
         streamedText: options.streamedText,
+        expandReasoning: options.expandReasoning,
       }),
     container!
   );
@@ -167,6 +172,15 @@ describe('MessagePart', () => {
     expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(lightBulbIcon));
   });
 
+  it('starts configured reasoning blocks expanded', () => {
+    renderPart(reasoningPart('**Planning**\n\nStep one'), { expandReasoning: true });
+
+    expect(container?.querySelector('.thinking-content')?.textContent).toContain('Step one');
+    expect(container?.querySelector('.thinking-header')?.getAttribute('aria-expanded')).toBe(
+      'true'
+    );
+  });
+
   it('keeps a user-expanded reasoning block open when virtualization remounts it', () => {
     const part = reasoningPart('**Planning**\n\nStep one');
     renderPart(part);
@@ -208,13 +222,17 @@ describe('MessagePart', () => {
 
       container?.querySelector<HTMLButtonElement>('.thinking-header')?.click();
       const content = container?.querySelector<HTMLDivElement>('.thinking-content');
-      expect(content?.scrollTop).toBe(500);
+      expect(content?.scrollTop).toBe(0);
 
-      // The streaming follow scroll is deferred one frame so it measures the height
-      // after the newest delta is inserted.
+      await nextFrame();
+      const initialAutoScrollTop = content!.scrollTop;
+      expect(initialAutoScrollTop).toBeGreaterThan(0);
+      expect(initialAutoScrollTop).toBeLessThan(300);
+
       setPart('text', 'Step one\nStep two');
       await nextFrame();
-      expect(content?.scrollTop).toBe(600);
+      expect(content!.scrollTop).toBeGreaterThan(initialAutoScrollTop);
+      expect(content!.scrollTop).toBeLessThan(400);
 
       content!.scrollTop = 100;
       content?.dispatchEvent(new Event('scroll'));
@@ -233,7 +251,7 @@ describe('MessagePart', () => {
     }
   });
 
-  it('returns auto-followed reasoning to the top when streaming completes', () => {
+  it('returns auto-followed reasoning to the top when streaming completes', async () => {
     const scrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight');
     Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
       configurable: true,
@@ -246,7 +264,8 @@ describe('MessagePart', () => {
 
       container?.querySelector<HTMLButtonElement>('.thinking-header')?.click();
       const content = container?.querySelector<HTMLDivElement>('.thinking-content');
-      expect(content?.scrollTop).toBe(500);
+      await nextFrame();
+      expect(content!.scrollTop).toBeGreaterThan(0);
 
       setPart('time', 'end', 1000);
       expect(content?.scrollTop).toBe(0);
@@ -259,6 +278,30 @@ describe('MessagePart', () => {
       if (scrollHeight) Object.defineProperty(HTMLElement.prototype, 'scrollHeight', scrollHeight);
       else Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight');
     }
+  });
+
+  it('marks additional reasoning content above and below the viewport', () => {
+    renderPart(reasoningPart('Step one'));
+    container?.querySelector<HTMLButtonElement>('.thinking-header')?.click();
+    const content = container?.querySelector<HTMLDivElement>('.thinking-content');
+    Object.defineProperties(content!, {
+      scrollHeight: { configurable: true, value: 400 },
+      clientHeight: { configurable: true, value: 180 },
+    });
+
+    content!.dispatchEvent(new Event('scroll'));
+    expect(content?.classList.contains('has-more-above')).toBe(false);
+    expect(content?.classList.contains('has-more-below')).toBe(true);
+
+    content!.scrollTop = 100;
+    content!.dispatchEvent(new Event('scroll'));
+    expect(content?.classList.contains('has-more-above')).toBe(true);
+    expect(content?.classList.contains('has-more-below')).toBe(true);
+
+    content!.scrollTop = 220;
+    content!.dispatchEvent(new Event('scroll'));
+    expect(content?.classList.contains('has-more-above')).toBe(true);
+    expect(content?.classList.contains('has-more-below')).toBe(false);
   });
 
   it('keeps a reasoning summary but hides an empty HTML-comment body', () => {

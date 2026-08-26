@@ -125,6 +125,7 @@ export function Message(props: {
   exitingActivityPartKeys?: ReadonlySet<string>;
   visibleActiveActivityPartKeys?: ReadonlySet<string>;
   groupedActiveActivityPartKeys?: ReadonlySet<string>;
+  expandReasoning?: boolean;
 }) {
   let turnRef: HTMLDivElement | undefined;
   const [pulseFinalMark, setPulseFinalMark] = createSignal(false);
@@ -475,7 +476,14 @@ export function Message(props: {
     <Show when={shouldRender()}>
       <Show
         when={!compactionDivider()}
-        fallback={<CompactionDivider part={compactionDivider()!} />}
+        fallback={
+          <CompactionDivider
+            part={compactionDivider()!}
+            timestamp={assistant()?.time.completed ?? props.info.time.created}
+            showTimestamp={props.showSentTimestamp}
+            suppressTimestampAnimation={props.suppressTimestampAnimation}
+          />
+        }
       >
         <div
           ref={(element) => {
@@ -537,6 +545,7 @@ export function Message(props: {
                 exitingActivityPartKeys={props.exitingActivityPartKeys}
                 visibleActiveActivityPartKeys={props.visibleActiveActivityPartKeys}
                 groupedActiveActivityPartKeys={props.groupedActiveActivityPartKeys}
+                expandReasoning={props.expandReasoning}
               />
             </Show>
           </div>

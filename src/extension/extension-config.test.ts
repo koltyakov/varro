@@ -38,9 +38,16 @@ describe('readExtensionConfigState', () => {
 
   it('keeps the current chat typography defaults when settings are absent', () => {
     expect(readExtensionConfigState()).toMatchObject({
+      expandThinking: false,
       chatFontSize: 13,
       chatFontFamily: 'default',
     });
+  });
+
+  it('reads the expand-thinking setting', () => {
+    mocks.values.set('varro.chat.expandThinking', true);
+
+    expect(readExtensionConfigState().expandThinking).toBe(true);
   });
 
   it.each([5, 101, Number.NaN, Number.POSITIVE_INFINITY, '14'])(

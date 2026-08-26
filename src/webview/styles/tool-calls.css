@@ -240,10 +240,6 @@
   transition: background-color 0.1s;
 }
 
-.chat-thinking-box:has(.thinking-chevron.expanded) {
-  background: var(--color-vscode-surface-soft);
-}
-
 .chat-thinking-box .thinking-header {
   display: flex;
   align-items: center;
@@ -331,8 +327,46 @@
 .chat-thinking-box .thinking-content {
   border-top: 1px solid var(--color-vscode-border-soft);
   padding: 0;
-  max-height: 220px;
+  max-height: 180px;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: color-mix(in srgb, var(--color-vscode-fg) 8%, transparent) transparent;
+}
+
+.chat-thinking-box .thinking-content::-webkit-scrollbar {
+  width: 5px;
+}
+
+.chat-thinking-box .thinking-content::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-vscode-fg) 8%, transparent);
+}
+
+.chat-thinking-box .thinking-content.has-more-below {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 18px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 18px), transparent);
+}
+
+.chat-thinking-box .thinking-content.has-more-above {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 18px);
+  mask-image: linear-gradient(to bottom, transparent, #000 18px);
+}
+
+.chat-thinking-box .thinking-content.has-more-above.has-more-below {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 18px,
+    #000 calc(100% - 18px),
+    transparent
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 18px,
+    #000 calc(100% - 18px),
+    transparent
+  );
 }
 
 .chat-thinking-box .thinking-content .thinking-item {

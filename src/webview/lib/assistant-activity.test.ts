@@ -169,21 +169,53 @@ describe('assistant activity summaries', () => {
     expect(
       shouldCompactAssistantActivityPart(edit, {
         keepEditInline: true,
+        keepReasoningInline: false,
       })
     ).toBe(false);
     expect(
       shouldCompactAssistantActivityPart(edit, {
         keepEditInline: false,
+        keepReasoningInline: false,
       })
     ).toBe(true);
     expect(
       shouldCompactAssistantActivityPart(edit, {
         keepEditInline: true,
+        keepReasoningInline: false,
       })
     ).toBe(false);
     expect(
       shouldCompactAssistantActivityPart(read, {
         keepEditInline: true,
+        keepReasoningInline: false,
+      })
+    ).toBe(true);
+  });
+
+  it('keeps active-turn reasoning outside compact activity when configured', () => {
+    const thought = reasoning('reasoning-1', 2);
+
+    expect(
+      shouldCompactAssistantActivityPart(thought, {
+        keepEditInline: false,
+        keepReasoningInline: true,
+      })
+    ).toBe(false);
+    expect(
+      shouldCompactAssistantActivityPart(thought, {
+        keepEditInline: false,
+        keepReasoningInline: false,
+      })
+    ).toBe(true);
+  });
+
+  it('keeps subject-only active reasoning in compact activity', () => {
+    const thought = { ...reasoning('reasoning-1', 2), text: '**Planning**' };
+
+    expect(
+      shouldCompactAssistantActivityPart(thought, {
+        keepEditInline: false,
+        keepReasoningInline: true,
       })
     ).toBe(true);
   });
@@ -197,6 +229,7 @@ describe('assistant activity summaries', () => {
     expect(
       shouldCompactAssistantActivityPart(patch, {
         keepEditInline: false,
+        keepReasoningInline: false,
       })
     ).toBe(false);
 
@@ -211,6 +244,7 @@ describe('assistant activity summaries', () => {
     expect(
       shouldCompactAssistantActivityPart(patch, {
         keepEditInline: false,
+        keepReasoningInline: false,
       })
     ).toBe(true);
   });

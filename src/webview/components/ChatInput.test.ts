@@ -1110,7 +1110,7 @@ describe('ChatInput', () => {
     expect(popup?.textContent).toContain('1,000/1,000 left');
   });
 
-  it('filters provider-limit badges for the selected model', () => {
+  it('filters provider-limit badges and popup rows for the selected model', async () => {
     setState('providers', [
       {
         id: 'openai',
@@ -1171,6 +1171,14 @@ describe('ChatInput', () => {
     expect(chip?.textContent).toContain('39%');
     expect(chip?.textContent).toContain('80%');
     expect(chip?.textContent).not.toContain('10%');
+
+    chip?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    const popup = container?.querySelector('.provider-limit-popup');
+    expect(popup?.textContent).toContain('5-Hour Limit');
+    expect(popup?.textContent).toContain('Monthly Limit');
+    expect(popup?.textContent).not.toContain('5-Hour Spark Limit');
   });
 
   it('shows provider-limit UI for a monthly-only Copilot-style limit', () => {
@@ -4036,6 +4044,42 @@ describe('ChatInput', () => {
     expect(chips).toHaveLength(1);
     expect(chips?.[0]?.textContent).toContain('app.ts');
     expect(chips?.[0]?.querySelector('.chip-remove')).toBeNull();
+  });
+
+  it('does not duplicate the active document when editing its ranged attachment', async () => {
+    setState('activeSessionId', 'session-1');
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: {
+        path: '/repo/package.json',
+        relativePath: 'package.json',
+        language: 'json',
+      },
+      selection: { startLine: 391, endLine: 391 },
+      diagnostics: [],
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    startEditingMessage('message-1', 'session-1', 'edited prompt', {
+      files: [
+        {
+          path: '/repo/package.json',
+          relativePath: 'package.json',
+          type: 'file',
+          lineRanges: [{ startLine: 391, endLine: 391 }],
+        },
+      ],
+      images: [],
+      terminalSelection: null,
+    });
+    await Promise.resolve();
+
+    expect(state.droppedFiles).toHaveLength(1);
+    const chips = container?.querySelectorAll('.chat-attachments-container .chat-attachment-chip');
+    expect(chips).toHaveLength(1);
+    expect(chips?.[0]?.textContent).toContain('package.json');
+    expect(chips?.[0]?.textContent).toContain('L391');
   });
 
   it('does not keep edited message text in the composer after remounting into another session', async () => {

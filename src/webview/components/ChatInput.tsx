@@ -1118,7 +1118,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const file = composerActiveFile();
     const selectedLines = getSelectionRangesFromEditorContext(composerSelection());
     if (!file) return null;
-    if (explicitContextForActiveFile() && selectedLines.length === 0) return null;
+    if (explicitContextForActiveFile() && (composerEditingMessage() || selectedLines.length === 0))
+      return null;
     const displayPath = getLeafPathName(file.relativePath || file.path);
     const lineRange = formatContextLineRanges(selectedLines);
     return {
@@ -1195,7 +1196,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       onOpenFiles: () => postMessage({ type: 'files/pick' }),
       onAttachDiagnostics: attachCurrentDiagnostics,
       onOpenSettings: () =>
-        postMessage({ type: 'vscode/open-settings', payload: { query: 'Varro' } }),
+        postMessage({ type: 'vscode/open-settings', payload: { query: 'Varro >' } }),
       onExportSession: () => {
         const sessionId = composerSessionId();
         if (!sessionId) return;
@@ -3944,7 +3945,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             }}
             providerLimitBadges={currentProviderLimitBadges()}
             providerLimitTitle={currentProviderLimitTitle()}
-            providerLimit={showCurrentProviderLimit() ? currentProviderLimit() : null}
+            providerLimit={showCurrentProviderLimit() ? currentCompactProviderLimit() : null}
             showProviderLimitPopup={showCurrentProviderLimit() && showProviderLimitPopup()}
             providerLimitButtonRef={(el) => {
               providerLimitButtonRef = el;
@@ -4126,7 +4127,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           }}
           providerLimitBadges={composerEditingMessage() ? [] : currentProviderLimitBadges()}
           providerLimitTitle={currentProviderLimitTitle()}
-          providerLimit={showCurrentProviderLimit() ? currentProviderLimit() : null}
+          providerLimit={showCurrentProviderLimit() ? currentCompactProviderLimit() : null}
           showProviderLimitPopup={showCurrentProviderLimit() && showProviderLimitPopup()}
           providerLimitButtonRef={(el) => {
             providerLimitButtonRef = el;

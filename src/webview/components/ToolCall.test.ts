@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import type * as UseOpenCodeModule from '../hooks/useOpenCode';
-import { setShowInlineFileChanges, setState } from '../lib/state';
+import { setShowFileDiffs, setState } from '../lib/state';
 import type { AssistantMessage, Permission, QuestionRequest, Session, ToolPart } from '../types';
 import {
   ToolCall,
@@ -54,7 +54,7 @@ function setExtensionSender() {
 beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
-  setShowInlineFileChanges(false);
+  setShowFileDiffs(false);
   selectSessionMock.mockClear();
   // SAFETY: The fixture provides the unknown fields read by this statement.
   delete fixture<UnknownRecord>(window).__sendToExtension;
@@ -65,7 +65,7 @@ afterEach(() => {
   cleanup = undefined;
   container?.remove();
   container = null;
-  setShowInlineFileChanges(false);
+  setShowFileDiffs(false);
   setState('permissions', []);
   setState('questions', []);
   setState('sessionStatus', {});
@@ -2857,7 +2857,7 @@ describe('FileChangeCard', () => {
     expect(container?.querySelectorAll('.file-change-card')).toHaveLength(4);
     expect(container?.querySelector('.file-edit-more-count')).toBeNull();
 
-    setShowInlineFileChanges(true);
+    setShowFileDiffs(true);
     expect(container?.querySelector('.file-change-card')).toBeNull();
     expect(container?.querySelectorAll('.file-change-inline-diffs .diff-view-file')).toHaveLength(
       4
@@ -2906,7 +2906,7 @@ describe('FileChangeCard', () => {
   });
 
   it('shows live apply_patch changes inline when enabled', () => {
-    setShowInlineFileChanges(true);
+    setShowFileDiffs(true);
     const part: ToolPart = {
       id: 'tool-inline-patch',
       sessionID: 'session-1',
@@ -2955,7 +2955,7 @@ describe('FileChangeCard', () => {
   });
 
   it('keeps failed apply_patch status visible beside proposed inline changes', () => {
-    setShowInlineFileChanges(true);
+    setShowFileDiffs(true);
     const sendSpy = setExtensionSender();
     const part: ToolPart = {
       id: 'tool-failed-patch',
@@ -3086,7 +3086,7 @@ describe('FileChangeCard', () => {
   });
 
   it('keeps aborted apply_patch status visible beside proposed inline changes', () => {
-    setShowInlineFileChanges(true);
+    setShowFileDiffs(true);
     const part: ToolPart = {
       id: 'tool-aborted-patch',
       sessionID: 'session-1',
@@ -3119,7 +3119,7 @@ describe('FileChangeCard', () => {
   });
 
   it('replaces the compact completed row with inline file previews', () => {
-    setShowInlineFileChanges(true);
+    setShowFileDiffs(true);
     const part: ToolPart = {
       id: 'tool-mixed-patch',
       sessionID: 'session-1',
@@ -3184,7 +3184,7 @@ describe('FileChangeCard', () => {
   });
 
   it('bounds model patch file cards and shows an overflow summary', () => {
-    setShowInlineFileChanges(true);
+    setShowFileDiffs(true);
     const patchText = [
       '*** Begin Patch',
       ...Array.from(

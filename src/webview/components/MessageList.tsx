@@ -35,9 +35,10 @@ import {
   messageStructureVersion,
   messageInfoVersion,
   onBeforeShowThinkingPreferenceChange,
+  expandThinking,
   showModelPicker,
   showThinking,
-  showInlineFileChanges,
+  showFileDiffs,
 } from '../lib/state';
 import {
   getAssistantActivityPartKey,
@@ -812,6 +813,7 @@ export function MessageList() {
             isAssistantEditActivityPart(part) &&
             !shouldCompactAssistantActivityPart(part, {
               keepEditInline: true,
+              keepReasoningInline: false,
             })
         )
       )
@@ -1381,7 +1383,7 @@ export function MessageList() {
   }
 
   const inlinePreviewLayoutSignatures = createMemo(() =>
-    getInlinePreviewLayoutSignatures(messages(), showInlineFileChanges())
+    getInlinePreviewLayoutSignatures(messages(), showFileDiffs())
   );
   let previousInlinePreviewLayoutSignatures = new Map<string, string>();
   const compactActivityLayoutSignatures = createMemo(() =>
@@ -6006,6 +6008,44 @@ export function MessageList() {
   const keepTrailingTurnEditMessageIds = createMemo(
     () => trailingTurnInlineEditRetention().messageIds
   );
+  const trailingTurnExpandedThinking = createMemo<{
+    sessionId: string | null;
+    userMessageId: string | null;
+    messageIds: ReadonlySet<string>;
+  }>(
+    (previous) => {
+      const sessionId = state.activeSessionId;
+      const turn = trailingAssistantTurn();
+      const empty = { sessionId, userMessageId: null, messageIds: new Set<string>() };
+      if (!expandThinking() || !sessionId || !turn || turn.assistantMessageIds.size === 0) {
+        return empty;
+      }
+
+      const awaitingInput = isSessionAwaitingInput(sessionId);
+      const treeWorking = isSessionTreeStatusWorking(sessionId);
+      if (treeWorking || awaitingInput) {
+        return {
+          sessionId,
+          userMessageId: turn.userMessageId,
+          messageIds: turn.assistantMessageIds,
+        };
+      }
+
+      const completedWhileOpen =
+        previous.sessionId === sessionId &&
+        previous.userMessageId === turn.userMessageId &&
+        !!turn.latestAssistant?.time.completed;
+      return completedWhileOpen
+        ? {
+            sessionId,
+            userMessageId: turn.userMessageId,
+            messageIds: turn.assistantMessageIds,
+          }
+        : empty;
+    },
+    { sessionId: null, userMessageId: null, messageIds: new Set<string>() }
+  );
+  const expandedThinkingMessageIds = createMemo(() => trailingTurnExpandedThinking().messageIds);
   const compactActivityMessages = createMemo(() => {
     const previousSignatures = previousTrailingFileEventSignatureMap();
     return messages().map((message) =>
@@ -6195,6 +6235,7 @@ export function MessageList() {
     shouldShowAssistantPartInline(part) &&
     shouldCompactAssistantActivityPart(part, {
       keepEditInline: keepTrailingTurnEditMessageIds().has(part.messageID),
+      keepReasoningInline: expandedThinkingMessageIds().has(part.messageID),
     }) &&
     (part.type !== 'tool' ||
       (!getQuestionRequestForTool(part) && !getPermissionMatchForTool(part)));
@@ -7296,6 +7337,7 @@ export function MessageList() {
               exitingActivityPartKeys={renderedExitingActivityPartKeys()}
               visibleActiveActivityPartKeys={renderedVisibleActiveActivityPartKeys()}
               groupedActiveActivityPartKeys={visibleActiveActivityPartKeys()}
+              expandedThinkingMessageIds={expandedThinkingMessageIds()}
               hasBuildAgent={hasBuildAgent()}
               latestPlanImplementationMessageId={latestPlanImplementationMessageId()}
               visibleRange={visibleRange()}

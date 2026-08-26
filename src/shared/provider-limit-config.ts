@@ -3,7 +3,8 @@ import type { DesktopSessionPaneSide, PermissionMode } from './protocol';
 export const DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS = 120;
 
 export type ExtensionConfigState = {
-  showInlineFileChanges?: boolean;
+  showFileDiffs?: boolean;
+  expandThinking?: boolean;
   showChangedFiles?: boolean;
   desktopSessionPaneSide: DesktopSessionPaneSide;
   defaultPermissionMode: PermissionMode;
@@ -13,7 +14,11 @@ export type ExtensionConfigState = {
 
 export type WebviewConfigUpdatePayload = Pick<
   ExtensionConfigState,
-  'showInlineFileChanges' | 'showChangedFiles' | 'desktopSessionPaneSide' | 'defaultPermissionMode'
+  | 'showFileDiffs'
+  | 'expandThinking'
+  | 'showChangedFiles'
+  | 'desktopSessionPaneSide'
+  | 'defaultPermissionMode'
 >;
 
 export type ExtensionConfigSnapshot = WebviewConfigUpdatePayload &

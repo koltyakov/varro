@@ -601,7 +601,8 @@ export type InitialWebviewState = {
   clipboardImages?: ClipboardImageSnapshot[];
   emptyStateLogoUri: string;
   remoteExtensionHost?: boolean;
-  showInlineFileChanges?: boolean;
+  showFileDiffs?: boolean;
+  expandThinking?: boolean;
   showChangedFiles?: boolean;
   desktopSessionPaneSide?: DesktopSessionPaneSide;
   defaultPermissionMode?: PermissionMode;

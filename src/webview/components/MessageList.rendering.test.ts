@@ -6,8 +6,9 @@ import {
   composerFocusKey,
   replaceMessages,
   requestMessageListScrollToBottom,
+  setExpandThinking,
   setSessions,
-  setShowInlineFileChanges,
+  setShowFileDiffs,
   setShowThinkingPreference,
   setState,
   startLoading,
@@ -728,6 +729,29 @@ describe('MessageList compact activity', () => {
     expect(firstRow?.querySelector('.file-change-card')).not.toBeNull();
     expect(secondRow?.querySelector('.file-change-card')).toBeNull();
     expect(secondRow?.classList).not.toContain('interactive-item-follows-bordered-block');
+  });
+
+  it('marks an assistant response that follows a visible user request', async () => {
+    setState('activeSessionId', 'session-1');
+    setShowThinkingPreference(true);
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Research this')] },
+      {
+        info: assistantMessage('assistant-1', { parentID: 'user-1' }),
+        parts: [
+          {
+            ...reasoningPart('reasoning-1', 'Thinking through the request'),
+            messageID: 'assistant-1',
+          },
+        ],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const assistantRow = container?.querySelector('[data-msg-id="assistant-1"]');
+    expect(assistantRow?.classList).toContain('interactive-response-follows-request');
   });
 
   it('does not classify projected streaming text after Explored as render-empty', async () => {
@@ -1707,7 +1731,7 @@ describe('MessageList compact activity', () => {
       metadata: {},
       time: { start: 0, end: 1 },
     };
-    setShowInlineFileChanges(true);
+    setShowFileDiffs(true);
     setState('activeSessionId', 'session-1');
     setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
     replaceMessages([
@@ -1747,7 +1771,7 @@ describe('MessageList compact activity', () => {
       )
     ).toEqual(['app.ts', 'second.ts']);
 
-    setShowInlineFileChanges(false);
+    setShowFileDiffs(false);
     await Promise.resolve();
 
     expect(container?.querySelectorAll('.diff-view-file')).toHaveLength(0);
@@ -1759,7 +1783,7 @@ describe('MessageList compact activity', () => {
       expect.stringContaining('Explored: 1 file'),
     ]);
 
-    setShowInlineFileChanges(true);
+    setShowFileDiffs(true);
     await Promise.resolve();
 
     expect(container?.querySelectorAll('.diff-view-file')).toHaveLength(2);
@@ -1800,6 +1824,53 @@ describe('MessageList compact activity', () => {
     expect(summaries()[1]?.textContent).not.toContain('edit');
   });
 
+  it('expands active-turn thinking while keeping previous thinking in Explored', async () => {
+    const historicalThought: Extract<Part, { type: 'reasoning' }> = {
+      id: 'reasoning-history',
+      sessionID: 'session-1',
+      messageID: 'assistant-history',
+      type: 'reasoning',
+      text: '**Earlier thought**\n\nHistorical details',
+      time: { start: 1, end: 2 },
+    };
+    const activeThought: Extract<Part, { type: 'reasoning' }> = {
+      id: 'reasoning-active',
+      sessionID: 'session-1',
+      messageID: 'assistant-active',
+      type: 'reasoning',
+      text: '**Current thought**\n\nActive details',
+      time: { start: 3, end: 4 },
+    };
+    setExpandThinking(true);
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    replaceMessages([
+      { info: userMessage('user-history'), parts: [textPart('prompt-history', 'Earlier')] },
+      {
+        info: assistantMessage('assistant-history', { parentID: 'user-history' }),
+        parts: [historicalThought],
+      },
+      { info: userMessage('user-active'), parts: [textPart('prompt-active', 'Current')] },
+      {
+        info: assistantMessage('assistant-active', { parentID: 'user-active' }),
+        parts: [activeThought],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const summaries = [...(container?.querySelectorAll('.assistant-activity-summary') || [])];
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]?.textContent).toContain('Explored: 1 thought');
+    expect(container?.querySelectorAll('.chat-thinking-box')).toHaveLength(1);
+    expect(container?.querySelector('.thinking-header')?.getAttribute('aria-expanded')).toBe(
+      'true'
+    );
+    expect(container?.querySelector('.thinking-content')?.textContent).toContain('Active details');
+    expect(container?.textContent).not.toContain('Historical details');
+  });
+
   it('compacts a just-completed diff when the chat is reopened', async () => {
     const edit = toolPart('edit-inline-1', 'assistant-1', 'call-edit-inline-1');
     edit.tool = 'edit';
@@ -1822,7 +1893,7 @@ describe('MessageList compact activity', () => {
         parts: [edit],
       },
     ];
-    setShowInlineFileChanges(true);
+    setShowFileDiffs(true);
     setState('activeSessionId', 'session-1');
     setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
     replaceMessages(transcript);
@@ -1867,7 +1938,7 @@ describe('MessageList compact activity', () => {
       metadata: {},
       time: { start: 1, end: 2 },
     };
-    setShowInlineFileChanges(true);
+    setShowFileDiffs(true);
     setState('activeSessionId', 'session-1');
     setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
     replaceMessages([
@@ -3065,7 +3136,7 @@ describe('MessageList loading row', () => {
       title: 'Apply patch',
       time: { start: 1 },
     };
-    setShowInlineFileChanges(true);
+    setShowFileDiffs(true);
     setState('activeSessionId', 'session-1');
     setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
     replaceMessages([

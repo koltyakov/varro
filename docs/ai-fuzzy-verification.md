@@ -757,7 +757,7 @@ real webviews and native VS Code workbench commands:
    active, recording source view IDs, queue item IDs, displayed counts, and enqueue order.
 5. Hide the editor with a native workbench command, verify ownership transfers to another ready view,
    reveal it through the real session UI, and bind the recreated iframe by its stable `viewId`.
-6. Toggle Hide and Show Inline File Changes through the command palette and sample the current turn's
+6. Toggle Hide and Show File Diffs through the command palette and sample the current turn's
    actual file-change rendering before and after each command.
 7. Reload the workbench, restore and rebind the editor by `viewId`, and sample marked rows for duplicate
    delivery. Close the editor while queued work remains and verify the final handoff.

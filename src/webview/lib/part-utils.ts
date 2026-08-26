@@ -11,6 +11,18 @@ export function hasVisibleReasoningContent(text: string) {
   return text.replace(/<!--[\s\S]*?-->/g, '').trim().length > 0;
 }
 
+export function hasExpandableReasoningContent(text: string) {
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
+  let firstContentLine = 0;
+  while (firstContentLine < lines.length && !lines[firstContentLine]!.trim()) {
+    firstContentLine += 1;
+  }
+
+  const hasSubject = /^\*\*(.+?)\*\*$/.test(lines[firstContentLine]?.trim() ?? '');
+  const body = hasSubject ? lines.slice(firstContentLine + 1).join('\n') : text;
+  return hasVisibleReasoningContent(body);
+}
+
 export function shouldShowAssistantPartInHighlightedCard(part: Part) {
   if (part.type === 'reasoning') return hasVisibleReasoningContent(part.text);
   if (part.type === 'text') {

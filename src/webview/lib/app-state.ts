@@ -194,8 +194,10 @@ export interface AppStateInstance {
   setState: SetStoreFunction<AppState>;
   showThinking: Accessor<boolean>;
   setShowThinking: Setter<boolean>;
-  showInlineFileChanges: Accessor<boolean>;
-  setShowInlineFileChanges: Setter<boolean>;
+  showFileDiffs: Accessor<boolean>;
+  setShowFileDiffs: Setter<boolean>;
+  expandThinking: Accessor<boolean>;
+  setExpandThinking: Setter<boolean>;
   showChangedFiles: Accessor<boolean>;
   setShowChangedFiles: Setter<boolean>;
   desktopSessionPaneSide: Accessor<DesktopSessionPaneSide>;
@@ -419,8 +421,11 @@ export function createAppState(): AppStateInstance {
   });
 
   const [showThinking, setShowThinking] = createSignal(readShowThinking());
-  const [showInlineFileChanges, setShowInlineFileChanges] = createSignal(
-    initialWebviewState.showInlineFileChanges ?? false
+  const [showFileDiffs, setShowFileDiffs] = createSignal(
+    initialWebviewState.showFileDiffs ?? false
+  );
+  const [expandThinking, setExpandThinking] = createSignal(
+    initialWebviewState.expandThinking ?? false
   );
   const [showChangedFiles, setShowChangedFiles] = createSignal(
     initialWebviewState.showChangedFiles ?? false
@@ -500,8 +505,10 @@ export function createAppState(): AppStateInstance {
     setState,
     showThinking,
     setShowThinking,
-    showInlineFileChanges,
-    setShowInlineFileChanges,
+    showFileDiffs,
+    setShowFileDiffs,
+    expandThinking,
+    setExpandThinking,
     showChangedFiles,
     setShowChangedFiles,
     desktopSessionPaneSide,
@@ -585,8 +592,10 @@ export const state = defaultAppState.state;
 export const setState = defaultAppState.setState;
 export const showThinking = defaultAppState.showThinking;
 export const setShowThinking = defaultAppState.setShowThinking;
-export const showInlineFileChanges = defaultAppState.showInlineFileChanges;
-export const setShowInlineFileChanges = defaultAppState.setShowInlineFileChanges;
+export const showFileDiffs = defaultAppState.showFileDiffs;
+export const setShowFileDiffs = defaultAppState.setShowFileDiffs;
+export const expandThinking = defaultAppState.expandThinking;
+export const setExpandThinking = defaultAppState.setExpandThinking;
 export const showChangedFiles = defaultAppState.showChangedFiles;
 export const setShowChangedFiles = defaultAppState.setShowChangedFiles;
 export const desktopSessionPaneSide = defaultAppState.desktopSessionPaneSide;
@@ -652,7 +661,8 @@ export function resetDefaultAppState() {
   const next = createAppState();
   setState(reconcile(next.state));
   setShowThinking(next.showThinking());
-  setShowInlineFileChanges(next.showInlineFileChanges());
+  setShowFileDiffs(next.showFileDiffs());
+  setExpandThinking(next.expandThinking());
   setShowChangedFiles(next.showChangedFiles());
   setDesktopSessionPaneSide(next.desktopSessionPaneSide());
   setInputText(next.inputText());

@@ -173,6 +173,14 @@ export function VirtualizedContent(
         props.messages[previousIndex]!.info.role === 'assistant'
       );
     });
+    const followsVisibleUserRequest = createMemo(() => {
+      const previousIndex = previousVisibleIndex();
+      return (
+        msg.info.role === 'assistant' &&
+        previousIndex >= 0 &&
+        props.messages[previousIndex]!.info.role === 'user'
+      );
+    });
     const followsBorderedBlock = createMemo(() => {
       const previousIndex = previousVisibleIndex();
       if (previousIndex < 0) return false;
@@ -209,6 +217,7 @@ export function VirtualizedContent(
         virtualHeight={virtualHeight()}
         virtualPlaceholder={virtualPlaceholder()}
         renderEmpty={props.renderEmptyMessageIds?.has(msg.info.id)}
+        followsVisibleUserRequest={followsVisibleUserRequest()}
         followsVisibleAssistantResponse={followsVisibleAssistantResponse()}
         followsBorderedBlock={followsBorderedBlock()}
         continuesVisibleActivityGroup={continuesVisibleActivityGroup()}
@@ -229,6 +238,7 @@ export function VirtualizedContent(
         exitingActivityPartKeys={props.exitingActivityPartKeys}
         visibleActiveActivityPartKeys={props.visibleActiveActivityPartKeys}
         groupedActiveActivityPartKeys={props.groupedActiveActivityPartKeys}
+        expandedThinkingMessageIds={props.expandedThinkingMessageIds}
         hasBuildAgent={props.hasBuildAgent}
         latestPlanImplementationMessageId={props.latestPlanImplementationMessageId}
         outerListVirtualized={props.outerListVirtualized}

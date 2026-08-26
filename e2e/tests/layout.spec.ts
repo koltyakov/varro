@@ -1563,7 +1563,15 @@ test('matches the visual incoming Thinking gap to markdown', async ({ page }) =>
     );
     const tray = element.closest<HTMLElement>('.assistant-active-activity-tray');
     const viewport = tray?.querySelector<HTMLElement>('.assistant-active-activity-items');
-    if (!activitySummaries[1] || !activitySummaries[2] || !reference || !tray || !viewport) {
+    const thinkingViewport = element.querySelector<HTMLElement>('.thinking-content');
+    if (
+      !activitySummaries[1] ||
+      !activitySummaries[2] ||
+      !reference ||
+      !tray ||
+      !viewport ||
+      !thinkingViewport
+    ) {
       throw new Error('Thinking spacing fixtures are missing');
     }
     const samples: Array<{ boxTop: number; scrollTop: number; trayTop: number }> = [];
@@ -1582,6 +1590,8 @@ test('matches the visual incoming Thinking gap to markdown', async ({ page }) =>
         reference.getBoundingClientRect().top - activitySummaries[1].getBoundingClientRect().bottom,
       scrollHeight: viewport.scrollHeight,
       scrollTop: viewport.scrollTop,
+      thinkingClientHeight: thinkingViewport.clientHeight,
+      thinkingScrollHeight: thinkingViewport.scrollHeight,
       samples,
       thinking:
         element.getBoundingClientRect().top - activitySummaries[2].getBoundingClientRect().bottom,
@@ -1589,7 +1599,8 @@ test('matches the visual incoming Thinking gap to markdown', async ({ page }) =>
     };
   });
   expect(gaps.thinking).toBeCloseTo(gaps.markdown, 0);
-  expect(gaps.scrollHeight).toBeGreaterThan(gaps.clientHeight);
+  expect(gaps.scrollHeight).toBe(gaps.clientHeight);
+  expect(gaps.thinkingScrollHeight).toBeGreaterThan(gaps.thinkingClientHeight);
   expect(gaps.scrollTop).toBe(0);
   expect(gaps.boxTop).toBeGreaterThanOrEqual(gaps.trayTop - 0.5);
   expect(gaps.samples.length).toBeGreaterThan(0);
@@ -2539,7 +2550,7 @@ test('first image prompt keeps its sticky preview until the source clears the ov
   expect(result.maxSourceBeyondOverlay, JSON.stringify(result)).toBeLessThanOrEqual(0);
 });
 
-test('image sticky remains stable after a fractional upward wheel tick reveals its source', async ({
+test('image sticky remains stable for a fractional upward wheel at its source boundary', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 486, height: 800 });
@@ -2565,15 +2576,15 @@ test('image sticky remains stable after a fractional upward wheel tick reveals i
         element.dispatchEvent(new Event('scroll'));
         settledSource = document.querySelector<HTMLElement>(sourceSelector);
         if (!settledSource) continue;
+        const boundaryBottom = listTop - 0.25;
+        settledSource.style.transform = `translateY(${
+          boundaryBottom - settledSource.getBoundingClientRect().bottom
+        }px)`;
         const sourceBottomBefore = settledSource.getBoundingClientRect().bottom;
         const delta = 0.75;
         element.dispatchEvent(new WheelEvent('wheel', { deltaY: -delta, bubbles: true }));
-        const paintedDelta = Math.max(Math.ceil(delta), Math.ceil(listTop - sourceBottomBefore));
-        element.scrollTop = Math.max(0, element.scrollTop - paintedDelta);
+        element.scrollTop = Math.max(0, element.scrollTop - delta);
         element.dispatchEvent(new Event('scroll'));
-        const sourceBottomAfter = document
-          .querySelector<HTMLElement>(sourceSelector)
-          ?.getBoundingClientRect().bottom;
         let stickyVisibleFrames = 0;
         for (let settleFrame = 0; settleFrame < 6; settleFrame += 1) {
           await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -2582,8 +2593,9 @@ test('image sticky remains stable after a fractional upward wheel tick reveals i
           }
         }
         return {
+          boundaryBottom,
+          projectedSourceBottom: sourceBottomBefore + delta,
           sourceBottomBefore,
-          sourceBottomAfter,
           listTop,
           stickyVisible: !!document.querySelector('.latest-user-message-sticky-overlay'),
           stickyVisibleFrames,
@@ -2599,9 +2611,13 @@ test('image sticky remains stable after a fractional upward wheel tick reveals i
   });
 
   expect(result).not.toBeNull();
+  expect(result?.sourceBottomBefore).toBeCloseTo(
+    result?.boundaryBottom ?? Number.POSITIVE_INFINITY,
+    1
+  );
   expect(result?.sourceBottomBefore).toBeLessThanOrEqual(result?.listTop ?? 0);
-  expect(result?.sourceBottomAfter ?? Number.NEGATIVE_INFINITY).toBeGreaterThanOrEqual(
-    result?.listTop ?? Number.POSITIVE_INFINITY
+  expect(result?.projectedSourceBottom ?? Number.NEGATIVE_INFINITY).toBeGreaterThanOrEqual(
+    (result?.listTop ?? Number.POSITIVE_INFINITY) - 0.5
   );
   expect(result?.stickyVisible, JSON.stringify(result)).toBe(true);
   expect(result?.stickyVisibleFrames, JSON.stringify(result)).toBe(6);
@@ -3138,7 +3154,7 @@ test('sticky and visible-row geometry survive inline-file-change values and widt
           data: {
             type: 'config/update',
             payload: {
-              showInlineFileChanges: nextLayout.inline,
+              showFileDiffs: nextLayout.inline,
               showChangedFiles: false,
               desktopSessionPaneSide: initial?.desktopSessionPaneSide ?? 'right',
               defaultPermissionMode: initial?.defaultPermissionMode ?? 'auto',

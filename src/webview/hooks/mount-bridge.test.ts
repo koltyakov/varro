@@ -21,7 +21,8 @@ const {
   rememberCurrentDocumentNavigation,
   syncDraftPermissionForWorkspace,
   syncSessionMarkersForWorkspace,
-  setShowInlineFileChanges,
+  setShowFileDiffs,
+  setExpandThinking,
   setShowChangedFiles,
   setDesktopSessionPaneSide,
   setDefaultPermissionModePreference,
@@ -43,7 +44,8 @@ const {
   rememberCurrentDocumentNavigation: vi.fn(),
   syncDraftPermissionForWorkspace: vi.fn(),
   syncSessionMarkersForWorkspace: vi.fn(),
-  setShowInlineFileChanges: vi.fn(),
+  setShowFileDiffs: vi.fn(),
+  setExpandThinking: vi.fn(),
   setShowChangedFiles: vi.fn(),
   setDesktopSessionPaneSide: vi.fn(),
   setDefaultPermissionModePreference: vi.fn(),
@@ -76,7 +78,8 @@ vi.mock('../lib/state', async () => {
     rememberCurrentDocumentNavigation,
     syncDraftPermissionForWorkspace,
     syncSessionMarkersForWorkspace,
-    setShowInlineFileChanges,
+    setShowFileDiffs,
+    setExpandThinking,
     setShowChangedFiles,
     setDesktopSessionPaneSide,
     setDefaultPermissionModePreference,
@@ -662,7 +665,8 @@ describe('mount bridge helpers', () => {
     operations.handleExtensionMessage({
       type: 'config/update',
       payload: {
-        showInlineFileChanges: true,
+        showFileDiffs: true,
+        expandThinking: true,
         showChangedFiles: true,
         desktopSessionPaneSide: 'right',
         defaultPermissionMode: 'full',
@@ -680,7 +684,8 @@ describe('mount bridge helpers', () => {
     expect(setError).toHaveBeenCalledWith(null);
     expect(ensureConnectionInitialized).toHaveBeenCalledTimes(1);
     expect(setDefaultPermissionModePreference).toHaveBeenCalledWith('full');
-    expect(setShowInlineFileChanges).toHaveBeenCalledWith(true);
+    expect(setShowFileDiffs).toHaveBeenCalledWith(true);
+    expect(setExpandThinking).toHaveBeenCalledWith(true);
     expect(setShowChangedFiles).toHaveBeenCalledWith(true);
     expect(document.documentElement.style.getPropertyValue('--varro-chat-font-size')).toBe('16px');
     expect(document.documentElement.style.getPropertyValue('--varro-chat-font-family')).toBe(

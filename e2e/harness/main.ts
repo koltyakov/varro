@@ -174,7 +174,7 @@ type ScenarioState = {
   readyStatus?: ServerStatus;
   nextSequence: number;
   healthFailuresRemaining: number;
-  showInlineFileChanges?: boolean;
+  showFileDiffs?: boolean;
 };
 
 type HarnessWindow = Window & {
@@ -3512,7 +3512,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       : { type: 'idle' };
     state.messagesBySessionId[session.id] = messages;
     state.persistedActiveSessionId = session.id;
-    state.showInlineFileChanges = true;
+    state.showFileDiffs = true;
     state.nextSequence = 392;
     return state;
   }
@@ -4808,7 +4808,7 @@ function buildInitialState(state: ScenarioState): InitialWebviewState {
     terminalSelection: null,
     droppedFiles: [],
     emptyStateLogoUri: '/assets/icon.png',
-    showInlineFileChanges: state.showInlineFileChanges,
+    showFileDiffs: state.showFileDiffs,
     defaultPermissionMode: 'default',
     chatFontSize: 13,
     chatFontFamily: 'default',

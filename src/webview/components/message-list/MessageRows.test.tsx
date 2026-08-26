@@ -89,6 +89,41 @@ describe('AssistantDialogSummaryForMessage', () => {
     expect(onWorkedSummaryHoverChange).toHaveBeenLastCalledWith('user-1', false);
   });
 
+  it('shows the completion clock time for interrupted summaries', () => {
+    vi.useFakeTimers();
+    const completedAt = new Date(2026, 0, 2, 13, 45).getTime();
+    const onWorkedSummaryHoverChange = vi.fn();
+    cleanup = render(
+      () => (
+        <AssistantDialogSummaryForMessage
+          summary={{
+            durationMs: 1_000,
+            completedAt,
+            promptMessageId: 'user-1',
+            inputTokens: 0,
+            outputTokens: 0,
+            agentCount: 0,
+            interrupted: true,
+          }}
+          msg={{ info: assistantMessage('assistant-1', { sessionID: 'session-1' }), parts: [] }}
+          hasBuildAgent={false}
+          latestPlanImplementationMessageId={null}
+          onWorkedSummaryHoverChange={onWorkedSummaryHoverChange}
+        />
+      ),
+      container
+    );
+
+    const summary = container.querySelector<HTMLElement>('.assistant-dialog-summary');
+    expect(summary?.textContent).toContain('Interrupted');
+    expect(summary?.querySelector('time')?.textContent).toBe(formatClockTime(completedAt));
+
+    summary?.dispatchEvent(new MouseEvent('mouseenter'));
+    vi.advanceTimersByTime(300);
+    expect(summary?.classList.contains('is-completion-time-visible')).toBe(true);
+    expect(onWorkedSummaryHoverChange).toHaveBeenLastCalledWith('user-1', true);
+  });
+
   it('forks the session from the summarized assistant message', () => {
     cleanup = render(
       () => (

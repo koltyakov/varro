@@ -658,7 +658,8 @@ describe('parseExtensionMessage', () => {
       parseExtensionMessage({
         type: 'config/update',
         payload: {
-          showInlineFileChanges: true,
+          showFileDiffs: true,
+          expandThinking: true,
           showChangedFiles: true,
           desktopSessionPaneSide: 'left',
           defaultPermissionMode: 'full',
@@ -669,7 +670,8 @@ describe('parseExtensionMessage', () => {
     ).toEqual({
       type: 'config/update',
       payload: {
-        showInlineFileChanges: true,
+        showFileDiffs: true,
+        expandThinking: true,
         showChangedFiles: true,
         desktopSessionPaneSide: 'left',
         defaultPermissionMode: 'full',

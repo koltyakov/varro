@@ -323,7 +323,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.updateStatusBarItem();
       }
       if (
-        event.affectsConfiguration('varro.chat.showInlineFileChanges') ||
+        event.affectsConfiguration('varro.chat.showFileDiffs') ||
+        event.affectsConfiguration('varro.chat.expandThinking') ||
         event.affectsConfiguration('varro.chat.showChangedFiles') ||
         event.affectsConfiguration('varro.chat.desktopSessionPaneSide') ||
         event.affectsConfiguration('varro.chat.defaultPermissionMode') ||

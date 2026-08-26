@@ -28,6 +28,7 @@ export function MessagePart(props: {
   renderPermissionPrompt?: boolean;
   lightweight?: boolean;
   compactFileChanges?: boolean;
+  expandReasoning?: boolean;
 }) {
   const p = () => props.part;
 
@@ -61,6 +62,7 @@ export function MessagePart(props: {
               part={part}
               messageInfo={props.messageInfo}
               streamedText={props.streamedText}
+              expandedByDefault={props.expandReasoning}
             />
           </Show>
         );
@@ -119,8 +121,10 @@ function ReasoningBlock(props: {
   part: ReasoningPart;
   messageInfo?: AssistantMessage;
   streamedText?: string | null;
+  expandedByDefault?: boolean;
 }) {
   const scrollBottomThreshold = 8;
+  const streamingScrollSpeed = 42;
   const expansionKey = () =>
     `reasoning\u0000${props.part.sessionID}\u0000${props.part.messageID}\u0000${props.part.id}`;
   let currentExpansionKey = expansionKey();
@@ -128,9 +132,12 @@ function ReasoningBlock(props: {
   let autoFollow = true;
   let wasExpanded = false;
   let wasStreaming = props.part.time.end === undefined;
+  let wasExpandedByDefault = !!props.expandedByDefault;
   let followFrameRequest = 0;
+  let previousFollowTime: number | null = null;
+  let lastAutoScrollTop: number | null = null;
   const [expanded, setExpanded] = createSignal(
-    getMessageBlockExpanded(currentExpansionKey) ?? false
+    props.expandedByDefault || (getMessageBlockExpanded(currentExpansionKey) ?? false)
   );
   const reasoningText = createMemo(() => props.streamedText ?? props.part.text);
   const subjectLabel = createMemo(() => getReasoningSubject(reasoningText()));
@@ -148,21 +155,64 @@ function ReasoningBlock(props: {
     currentExpansionKey = nextExpansionKey;
     wasExpanded = false;
     autoFollow = true;
-    setExpanded(getMessageBlockExpanded(nextExpansionKey) ?? false);
+    wasExpandedByDefault = !!props.expandedByDefault;
+    setExpanded(props.expandedByDefault || (getMessageBlockExpanded(nextExpansionKey) ?? false));
   });
 
-  const followStreamingBottom = () => {
-    if (followFrameRequest) cancelAnimationFrame(followFrameRequest);
+  createEffect(() => {
+    const expandedByDefault = !!props.expandedByDefault;
+    if (expandedByDefault && !wasExpandedByDefault) setExpanded(true);
+    wasExpandedByDefault = expandedByDefault;
+  });
+
+  const updateOverflowFades = () => {
     const element = contentElement;
     if (!element) return;
-    followFrameRequest = requestAnimationFrame(() => {
+    const maxScrollTop = element.scrollHeight - element.clientHeight;
+    element.classList.toggle('has-more-above', element.scrollTop > 1);
+    element.classList.toggle('has-more-below', element.scrollTop < maxScrollTop - 1);
+  };
+
+  const stopStreamingFollow = () => {
+    if (followFrameRequest) cancelAnimationFrame(followFrameRequest);
+    followFrameRequest = 0;
+    previousFollowTime = null;
+  };
+
+  const followStreamingBottom = () => {
+    if (followFrameRequest) return;
+    const advance = (time: number) => {
       followFrameRequest = 0;
-      if (autoFollow && element.isConnected) element.scrollTop = element.scrollHeight;
-    });
+      const element = contentElement;
+      if (!autoFollow || !isStreaming() || !element?.isConnected) {
+        previousFollowTime = null;
+        updateOverflowFades();
+        return;
+      }
+
+      const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+      if (element.scrollTop >= maxScrollTop - 1) {
+        previousFollowTime = null;
+        updateOverflowFades();
+        return;
+      }
+
+      const elapsed = previousFollowTime === null ? 16 : Math.min(50, time - previousFollowTime);
+      const nextScrollTop = Math.min(
+        maxScrollTop,
+        element.scrollTop + (streamingScrollSpeed * elapsed) / 1000
+      );
+      previousFollowTime = time;
+      lastAutoScrollTop = nextScrollTop;
+      element.scrollTop = nextScrollTop;
+      updateOverflowFades();
+      followFrameRequest = requestAnimationFrame(advance);
+    };
+    followFrameRequest = requestAnimationFrame(advance);
   };
 
   onCleanup(() => {
-    if (followFrameRequest) cancelAnimationFrame(followFrameRequest);
+    stopStreamingFollow();
   });
 
   createEffect(() => {
@@ -171,6 +221,7 @@ function ReasoningBlock(props: {
     reasoningBody();
 
     if (!nextExpanded || !contentElement) {
+      stopStreamingFollow();
       wasExpanded = nextExpanded;
       wasStreaming = nextStreaming;
       return;
@@ -178,14 +229,19 @@ function ReasoningBlock(props: {
 
     if (!wasExpanded) {
       autoFollow = nextStreaming;
-      contentElement.scrollTop = nextStreaming ? contentElement.scrollHeight : 0;
+      contentElement.scrollTop = 0;
+      updateOverflowFades();
+      if (nextStreaming) followStreamingBottom();
     } else if (wasStreaming && !nextStreaming) {
+      stopStreamingFollow();
       if (autoFollow) contentElement.scrollTop = 0;
       autoFollow = false;
+      updateOverflowFades();
     } else if (nextStreaming && autoFollow) {
-      // The newest delta's DOM insert lands after this effect run; measure on the next
-      // frame so the follow scroll reflects the post-insert height.
       followStreamingBottom();
+      requestAnimationFrame(updateOverflowFades);
+    } else {
+      requestAnimationFrame(updateOverflowFades);
     }
 
     wasExpanded = nextExpanded;
@@ -193,10 +249,19 @@ function ReasoningBlock(props: {
   });
 
   const handleContentScroll = () => {
-    if (!contentElement || !isStreaming()) return;
+    if (!contentElement) return;
+    updateOverflowFades();
+    if (!isStreaming()) return;
+    if (lastAutoScrollTop !== null && Math.abs(contentElement.scrollTop - lastAutoScrollTop) <= 1) {
+      lastAutoScrollTop = null;
+      return;
+    }
+    lastAutoScrollTop = null;
     const distanceFromBottom =
       contentElement.scrollHeight - contentElement.clientHeight - contentElement.scrollTop;
     autoFollow = distanceFromBottom <= scrollBottomThreshold;
+    if (autoFollow) followStreamingBottom();
+    else stopStreamingFollow();
   };
 
   const toggleExpanded = () => {

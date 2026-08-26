@@ -645,25 +645,25 @@ describe('sidebar navigation commands', () => {
 
     expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith(
       'workbench.action.openSettings',
-      'Varro'
+      'Varro >'
     );
   });
 
   it('shows inline file changes in the user setting by default', async () => {
     register();
 
-    await runCommand('varro.chat.showInlineFileChanges');
+    await runCommand('varro.chat.showFileDiffs');
 
-    expect(configUpdateMock).toHaveBeenCalledWith('chat.showInlineFileChanges', true, 1);
+    expect(configUpdateMock).toHaveBeenCalledWith('chat.showFileDiffs', true, 1);
   });
 
   it('hides inline file changes in an existing workspace override', async () => {
     configInspectMock.mockReturnValue({ workspaceValue: true });
     register();
 
-    await runCommand('varro.chat.hideInlineFileChanges');
+    await runCommand('varro.chat.hideFileDiffs');
 
-    expect(configUpdateMock).toHaveBeenCalledWith('chat.showInlineFileChanges', false, 2);
+    expect(configUpdateMock).toHaveBeenCalledWith('chat.showFileDiffs', false, 2);
   });
 
   it('opens the same usage report as the stats slash command', async () => {

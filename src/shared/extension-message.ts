@@ -209,9 +209,10 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
         chatFontSize: payload.chatFontSize,
         chatFontFamily: payload.chatFontFamily,
       };
-      if (isBoolean(payload.showInlineFileChanges)) {
-        config.showInlineFileChanges = payload.showInlineFileChanges;
+      if (isBoolean(payload.showFileDiffs)) {
+        config.showFileDiffs = payload.showFileDiffs;
       }
+      if (isBoolean(payload.expandThinking)) config.expandThinking = payload.expandThinking;
       if (isBoolean(payload.showChangedFiles)) config.showChangedFiles = payload.showChangedFiles;
       return { type, payload: config };
     }

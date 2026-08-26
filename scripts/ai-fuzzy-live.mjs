@@ -2117,7 +2117,7 @@ export function multiWebviewScenarioFailures(evidence) {
   ) {
     failures.push('multi-view queue ownership and hidden/closed handoff were not verified');
   }
-  if (!evidence?.inlineFileChanges?.hidden || !evidence.inlineFileChanges.shown) {
+  if (!evidence?.fileDiffs?.hidden || !evidence.fileDiffs.shown) {
     failures.push('inline file changes did not respond to both command-palette toggles');
   }
   if (
@@ -2605,7 +2605,7 @@ async function runMultiWebviewScenario({
       closedHandoff: null,
       samples: [],
     },
-    inlineFileChanges: { hidden: false, shown: false, samples: [] },
+    fileDiffs: { hidden: false, shown: false, samples: [] },
     delivery: null,
     leakage: {
       rootAbsentFromChild: false,
@@ -2810,7 +2810,7 @@ async function runMultiWebviewScenario({
     ) {
       throw new Error('AI-18 child edit turn did not preserve the exact recorded fixture state');
     }
-    await executeVscodeCommand(launch.remoteDebuggingPort, 'Varro: Show Inline File Changes');
+    await executeVscodeCommand(launch.remoteDebuggingPort, 'Varro: Show File Diffs');
     const inlineBefore = await waitForScopedCount(
       editor,
       '.file-change-inline-diffs',
@@ -2821,23 +2821,23 @@ async function runMultiWebviewScenario({
     if (!(await editor.point('.file-change-inline-diffs', 'center', childEditScope))) {
       throw new Error('AI-18 could not reveal the current child inline file changes');
     }
-    await executeVscodeCommand(launch.remoteDebuggingPort, 'Varro: Hide Inline File Changes');
+    await executeVscodeCommand(launch.remoteDebuggingPort, 'Varro: Hide File Diffs');
     const inlineHidden = await waitForScopedCount(
       editor,
       '.file-change-inline-diffs',
       childEditScope,
       (count) => count === 0
     );
-    await executeVscodeCommand(launch.remoteDebuggingPort, 'Varro: Show Inline File Changes');
+    await executeVscodeCommand(launch.remoteDebuggingPort, 'Varro: Show File Diffs');
     const inlineShown = await waitForScopedCount(
       editor,
       '.file-change-inline-diffs',
       childEditScope,
       (count) => count > 0
     );
-    evidence.inlineFileChanges.samples = [inlineBefore, inlineHidden, inlineShown];
-    evidence.inlineFileChanges.hidden = inlineHidden === 0;
-    evidence.inlineFileChanges.shown = inlineBefore > 0 && inlineShown > 0;
+    evidence.fileDiffs.samples = [inlineBefore, inlineHidden, inlineShown];
+    evidence.fileDiffs.hidden = inlineHidden === 0;
+    evidence.fileDiffs.shown = inlineBefore > 0 && inlineShown > 0;
 
     await client.send(
       child.id,
@@ -3480,12 +3480,12 @@ async function runLive(options) {
     } else {
       await openRunSession(cdp, tracked.id, tracked.title);
     }
-    if (scenario === 'AI-08' && manifest.hostState?.inlineFileChangesEnabled !== true) {
-      await executeVscodeCommand(launch.remoteDebuggingPort, 'Varro: Show Inline File Changes');
+    if (scenario === 'AI-08' && manifest.hostState?.fileDiffsEnabled !== true) {
+      await executeVscodeCommand(launch.remoteDebuggingPort, 'Varro: Show File Diffs');
       await new Promise((resolve) => setTimeout(resolve, 300));
       manifest.hostState = {
         ...manifest.hostState,
-        inlineFileChangesEnabled: true,
+        fileDiffsEnabled: true,
       };
       await writeJsonAtomic(manifestPath, manifest);
     }

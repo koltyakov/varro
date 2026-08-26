@@ -46,6 +46,7 @@ export type MessageRowSharedProps = {
   exitingActivityPartKeys?: ReadonlySet<string>;
   visibleActiveActivityPartKeys?: ReadonlySet<string>;
   groupedActiveActivityPartKeys?: ReadonlySet<string>;
+  expandedThinkingMessageIds?: ReadonlySet<string>;
   hasBuildAgent: boolean;
   latestPlanImplementationMessageId: string | null;
   claimMessageEntrance?: (messageId: string) => boolean;
@@ -97,6 +98,7 @@ export function MessageRow(
     virtualHeight?: number;
     virtualPlaceholder?: boolean;
     renderEmpty?: boolean;
+    followsVisibleUserRequest?: boolean;
     followsVisibleAssistantResponse?: boolean;
     followsBorderedBlock?: boolean;
     continuesVisibleActivityGroup?: boolean;
@@ -185,7 +187,7 @@ export function MessageRow(
         props.msg.info.role === 'user' ? 'interactive-request' : 'interactive-response'
       } ${entrancePending() ? 'interactive-item-entering' : ''}${isAbandonedByEdit() ? ' interactive-item-edit-abandoned' : ''}${
         isEditingThisMessage() ? ' interactive-request-editing' : ''
-      }${props.followsVisibleAssistantResponse ? ' interactive-response-follows-response' : ''}${props.followsBorderedBlock ? ' interactive-item-follows-bordered-block' : ''}${props.continuesVisibleActivityGroup ? ' interactive-response-continues-activity-group' : ''}${isOffCore() ? ' interactive-item-off-core' : ''}${isVirtualPlaceholder() ? ' interactive-item-virtual-placeholder' : ''}${props.renderEmpty ? ' interactive-item-render-empty' : ''}`}
+      }${props.followsVisibleUserRequest ? ' interactive-response-follows-request' : ''}${props.followsVisibleAssistantResponse ? ' interactive-response-follows-response' : ''}${props.followsBorderedBlock ? ' interactive-item-follows-bordered-block' : ''}${props.continuesVisibleActivityGroup ? ' interactive-response-continues-activity-group' : ''}${isOffCore() ? ' interactive-item-off-core' : ''}${isVirtualPlaceholder() ? ' interactive-item-virtual-placeholder' : ''}${props.renderEmpty ? ' interactive-item-render-empty' : ''}`}
     >
       <Show when={!isVirtualPlaceholder()}>
         <Show when={modelChange()}>
@@ -242,6 +244,7 @@ export function MessageRow(
             exitingActivityPartKeys={props.exitingActivityPartKeys}
             visibleActiveActivityPartKeys={props.visibleActiveActivityPartKeys}
             groupedActiveActivityPartKeys={props.groupedActiveActivityPartKeys}
+            expandReasoning={props.expandedThinkingMessageIds?.has(props.msg.info.id)}
           />
         </Show>
         <Show when={summary()}>
@@ -343,9 +346,9 @@ function AssistantDialogSummary(props: {
       : props.summary.questionSkipped
         ? ' - Question skipped'
         : '';
-  const isWorkedSummary = () => !props.summary.interrupted && !props.summary.collectingStats;
+  const hasCompletedSummary = () => !props.summary.collectingStats;
   const completedTime = () =>
-    isWorkedSummary() && props.summary.completedAt !== undefined
+    hasCompletedSummary() && props.summary.completedAt !== undefined
       ? formatClockTime(props.summary.completedAt)
       : null;
   const onWorkedSummaryHoverChange = props.onWorkedSummaryHoverChange;
@@ -365,7 +368,7 @@ function AssistantDialogSummary(props: {
       }
       return;
     }
-    if (!isWorkedSummary() || !props.summary.promptMessageId) return;
+    if (!hasCompletedSummary() || !props.summary.promptMessageId) return;
     const promptMessageId = props.summary.promptMessageId;
     hoverIntentTimer = setTimeout(() => {
       hoverIntentTimer = undefined;

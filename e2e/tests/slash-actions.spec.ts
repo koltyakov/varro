@@ -2,7 +2,9 @@
 import { expect, test } from '@playwright/test';
 import { getE2EState } from './helpers';
 
-test('slash commands trigger provider setup, settings, and file picker actions', async ({ page }) => {
+test('slash commands trigger provider setup, settings, and file picker actions', async ({
+  page,
+}) => {
   await page.goto('/e2e/harness/index.html?scenario=slash-commands');
 
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
@@ -23,13 +25,15 @@ test('slash commands trigger provider setup, settings, and file picker actions',
   await page.keyboard.press('Enter');
 
   const state = await getE2EState(page, () => {
-    const value = (window as Window & {
-      __varroE2E?: {
-        terminalCommands?: Array<{ command: string; title?: string }>;
-        settingsQueries?: string[];
-        filePickCount?: number;
-      };
-    }).__varroE2E;
+    const value = (
+      window as Window & {
+        __varroE2E?: {
+          terminalCommands?: Array<{ command: string; title?: string }>;
+          settingsQueries?: string[];
+          filePickCount?: number;
+        };
+      }
+    ).__varroE2E;
     return {
       terminal: value?.terminalCommands?.[0] || null,
       settings: value?.settingsQueries?.[0] || null,
@@ -39,12 +43,14 @@ test('slash commands trigger provider setup, settings, and file picker actions',
 
   expect(state).toEqual({
     terminal: { command: 'opencode auth login', title: 'OpenCode Provider Setup' },
-    settings: 'Varro',
+    settings: 'Varro >',
     filePickCount: 1,
   });
 });
 
-test('supports keyboard navigation and tab completion for slash command suggestions', async ({ page }) => {
+test('supports keyboard navigation and tab completion for slash command suggestions', async ({
+  page,
+}) => {
   await page.goto('/e2e/harness/index.html?scenario=slash-commands');
 
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
@@ -54,7 +60,9 @@ test('supports keyboard navigation and tab completion for slash command suggesti
 
   await composer.press('ArrowDown');
   await expect(page.locator('.composer-completion-item.selected')).toHaveCount(1);
-  const selectedTitle = page.locator('.composer-completion-item.selected .composer-completion-title');
+  const selectedTitle = page.locator(
+    '.composer-completion-item.selected .composer-completion-title'
+  );
   const selectedText = await selectedTitle.textContent();
   await composer.press('Tab');
 

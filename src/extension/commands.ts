@@ -19,14 +19,14 @@ type ExtensionPackageJson = {
   version?: unknown;
 };
 
-async function setShowInlineFileChanges(enabled: boolean): Promise<void> {
+async function setShowFileDiffs(enabled: boolean): Promise<void> {
   const config = vscode.workspace.getConfiguration('varro');
-  const inspected = config.inspect<boolean>('chat.showInlineFileChanges');
+  const inspected = config.inspect<boolean>('chat.showFileDiffs');
   const target =
     inspected?.workspaceValue !== undefined
       ? vscode.ConfigurationTarget.Workspace
       : vscode.ConfigurationTarget.Global;
-  await config.update('chat.showInlineFileChanges', enabled, target);
+  await config.update('chat.showFileDiffs', enabled, target);
 }
 
 export function registerCommands(
@@ -91,15 +91,15 @@ export function registerCommands(
     }),
 
     vscode.commands.registerCommand('varro.chat.openSettings', async () => {
-      await vscode.commands.executeCommand('workbench.action.openSettings', 'Varro');
+      await vscode.commands.executeCommand('workbench.action.openSettings', 'Varro >');
     }),
 
-    vscode.commands.registerCommand('varro.chat.showInlineFileChanges', async () => {
-      await setShowInlineFileChanges(true);
+    vscode.commands.registerCommand('varro.chat.showFileDiffs', async () => {
+      await setShowFileDiffs(true);
     }),
 
-    vscode.commands.registerCommand('varro.chat.hideInlineFileChanges', async () => {
-      await setShowInlineFileChanges(false);
+    vscode.commands.registerCommand('varro.chat.hideFileDiffs', async () => {
+      await setShowFileDiffs(false);
     }),
 
     vscode.commands.registerCommand('varro.chat.openStats', async () => {

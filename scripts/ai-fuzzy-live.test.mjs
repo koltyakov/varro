@@ -926,7 +926,7 @@ test('defines and judges the AI-18 multi-webview controller plan', () => {
         queueItems: [{ id: 'q3', ownerViewId: 'sidebar', sessionId: 'root' }],
       },
     },
-    inlineFileChanges: { hidden: true, shown: true },
+    fileDiffs: { hidden: true, shown: true },
     delivery: {
       userCounts: [1, 1, 1],
       assistantCounts: [1, 1, 1],

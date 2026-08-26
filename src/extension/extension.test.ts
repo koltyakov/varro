@@ -223,9 +223,9 @@ describe('extension activation', () => {
   });
 
   it('initializes and refreshes the inline file changes toolbar context', async () => {
-    let inlineFileChanges = true;
+    let fileDiffs = true;
     getMock.mockImplementation((key: string, fallback?: unknown) =>
-      key === 'chat.showInlineFileChanges' ? inlineFileChanges : fallback
+      key === 'chat.showFileDiffs' ? fileDiffs : fallback
     );
     const { activate } = await import('./extension');
 
@@ -236,23 +236,15 @@ describe('extension activation', () => {
       subscriptions: [],
     } as never);
 
-    expect(executeCommandMock).toHaveBeenCalledWith(
-      'setContext',
-      'varro:showInlineFileChanges',
-      true
-    );
+    expect(executeCommandMock).toHaveBeenCalledWith('setContext', 'varro:showFileDiffs', true);
 
-    inlineFileChanges = false;
+    fileDiffs = false;
     const listener = onDidChangeConfigurationMock.mock.lastCall?.[0];
     listener?.({
-      affectsConfiguration: (key: string) => key === 'varro.chat.showInlineFileChanges',
+      affectsConfiguration: (key: string) => key === 'varro.chat.showFileDiffs',
     });
 
-    expect(executeCommandMock).toHaveBeenCalledWith(
-      'setContext',
-      'varro:showInlineFileChanges',
-      false
-    );
+    expect(executeCommandMock).toHaveBeenCalledWith('setContext', 'varro:showFileDiffs', false);
   });
 
   it('reapplies compaction settings when configuration changes', async () => {
@@ -888,15 +880,15 @@ describe('extension manifest', () => {
       icon: '$(gear)',
     });
     expect(packageJson.contributes.commands).toContainEqual({
-      command: 'varro.chat.showInlineFileChanges',
-      title: 'Varro: Show Inline File Changes',
-      shortTitle: 'Show Inline File Changes',
+      command: 'varro.chat.showFileDiffs',
+      title: 'Varro: Show File Diffs',
+      shortTitle: 'Show File Diffs',
       icon: '$(diff-single)',
     });
     expect(packageJson.contributes.commands).toContainEqual({
-      command: 'varro.chat.hideInlineFileChanges',
-      title: 'Varro: Hide Inline File Changes',
-      shortTitle: 'Hide Inline File Changes',
+      command: 'varro.chat.hideFileDiffs',
+      title: 'Varro: Hide File Diffs',
+      shortTitle: 'Hide File Diffs',
       icon: '$(list-flat)',
     });
     expect(packageJson.contributes.submenus).toContainEqual({
@@ -906,13 +898,13 @@ describe('extension manifest', () => {
     });
     expect(packageJson.contributes.menus['view/title']).toEqual([
       {
-        command: 'varro.chat.showInlineFileChanges',
-        when: 'view == varro.chat && !varro:showInlineFileChanges',
+        command: 'varro.chat.showFileDiffs',
+        when: 'view == varro.chat && !varro:showFileDiffs',
         group: 'navigation@0',
       },
       {
-        command: 'varro.chat.hideInlineFileChanges',
-        when: 'view == varro.chat && varro:showInlineFileChanges',
+        command: 'varro.chat.hideFileDiffs',
+        when: 'view == varro.chat && varro:showFileDiffs',
         group: 'navigation@0',
       },
       {
@@ -934,12 +926,12 @@ describe('extension manifest', () => {
     expect(packageJson.contributes.menus.commandPalette).toEqual(
       expect.arrayContaining([
         {
-          command: 'varro.chat.showInlineFileChanges',
-          when: '!varro:showInlineFileChanges',
+          command: 'varro.chat.showFileDiffs',
+          when: '!varro:showFileDiffs',
         },
         {
-          command: 'varro.chat.hideInlineFileChanges',
-          when: 'varro:showInlineFileChanges',
+          command: 'varro.chat.hideFileDiffs',
+          when: 'varro:showFileDiffs',
         },
       ])
     );

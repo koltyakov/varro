@@ -5,7 +5,7 @@ import {
   replaceMessages,
   requestMessageListScrollToBottom,
   setMessagesIncremental,
-  setShowInlineFileChanges,
+  setShowFileDiffs,
   setShowThinkingPreference,
   setState,
   startLoading,
@@ -1263,7 +1263,7 @@ describe('MessageList auto-scroll', () => {
       metadata: {},
       time: { start: 1, end: 2 },
     };
-    setShowInlineFileChanges(true);
+    setShowFileDiffs(true);
     setState('activeSessionId', 'session-1');
     setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
     replaceMessages(
@@ -1309,7 +1309,7 @@ describe('MessageList auto-scroll', () => {
       );
     const topPadBefore = topSpacer();
 
-    setShowInlineFileChanges(false);
+    setShowFileDiffs(false);
     await Promise.resolve();
     await Promise.resolve();
 

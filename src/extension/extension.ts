@@ -15,13 +15,13 @@ const PRIMARY_SIDEBAR_MIGRATION_KEY = 'layout.cursorPrimarySidebar.v1';
 const PRIMARY_SIDEBAR_CONTAINER = 'workbench.view.extension.varro-primary';
 const SECONDARY_SIDEBAR_CONTAINER = 'workbench.view.extension.varro';
 const PRIMARY_SIDEBAR_HOSTS = ['cursor', 'windsurf', 'devin'];
-const SHOW_INLINE_FILE_CHANGES_CONTEXT = 'varro:showInlineFileChanges';
+const SHOW_FILE_DIFFS_CONTEXT = 'varro:showFileDiffs';
 
-function syncShowInlineFileChangesContext(config: vscode.WorkspaceConfiguration): void {
+function syncShowFileDiffsContext(config: vscode.WorkspaceConfiguration): void {
   void vscode.commands.executeCommand(
     'setContext',
-    SHOW_INLINE_FILE_CHANGES_CONTEXT,
-    config.get<boolean>('chat.showInlineFileChanges', false)
+    SHOW_FILE_DIFFS_CONTEXT,
+    config.get<boolean>('chat.showFileDiffs', false)
   );
 }
 
@@ -151,7 +151,7 @@ export async function activate(context: vscode.ExtensionContext) {
   const simulateMissingCli = config.get<boolean>('debug.simulateMissingCli', false);
   const simulateNoProviders = config.get<boolean>('debug.simulateNoProviders', false);
   const compactionSettings = readCompactionSettings(config);
-  syncShowInlineFileChangesContext(config);
+  syncShowFileDiffsContext(config);
 
   server = new OpenCodeServer(port, autoStart, command, simulateMissingCli, compactionSettings);
   let scopedWorkspacePath: string | null | undefined;
@@ -228,11 +228,8 @@ export async function activate(context: vscode.ExtensionContext) {
       const launchSettingsChanged =
         event.affectsConfiguration('varro.server.autoStart') ||
         event.affectsConfiguration('varro.server.command');
-      const inlineFileChangesChanged = event.affectsConfiguration(
-        'varro.chat.showInlineFileChanges'
-      );
-      if (!portChanged && !compactionChanged && !launchSettingsChanged && !inlineFileChangesChanged)
-        return;
+      const fileDiffsChanged = event.affectsConfiguration('varro.chat.showFileDiffs');
+      if (!portChanged && !compactionChanged && !launchSettingsChanged && !fileDiffsChanged) return;
 
       if (portChanged) {
         void vscode.window
@@ -248,8 +245,8 @@ export async function activate(context: vscode.ExtensionContext) {
       }
 
       const nextConfig = vscode.workspace.getConfiguration('varro');
-      if (inlineFileChangesChanged) {
-        syncShowInlineFileChangesContext(nextConfig);
+      if (fileDiffsChanged) {
+        syncShowFileDiffsContext(nextConfig);
       }
       if (compactionChanged) {
         void server?.updateCompactionSettings(readCompactionSettings(nextConfig));

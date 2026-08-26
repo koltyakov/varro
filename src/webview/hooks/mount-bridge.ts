@@ -69,8 +69,11 @@ export function createMountBridgeOperations(deps: {
         },
         setConfig: (payload) => {
           applyChatFontConfig(payload);
-          if (payload.showInlineFileChanges !== undefined) {
-            uiStore.setShowInlineFileChanges(payload.showInlineFileChanges);
+          if (payload.showFileDiffs !== undefined) {
+            uiStore.setShowFileDiffs(payload.showFileDiffs);
+          }
+          if (payload.expandThinking !== undefined) {
+            uiStore.setExpandThinking(payload.expandThinking);
           }
           if (payload.showChangedFiles !== undefined) {
             uiStore.setShowChangedFiles(payload.showChangedFiles);

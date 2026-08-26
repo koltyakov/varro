@@ -161,7 +161,7 @@ function createSession(options?: {
     handleMessage: vi.fn(() => Promise.resolve()),
     ensureServerStarted: vi.fn(() => Promise.resolve(undefined)),
     readConfig: vi.fn(() => ({
-      showInlineFileChanges: true,
+      showFileDiffs: true,
       showChangedFiles: true,
       desktopSessionPaneSide: 'left' as const,
       defaultPermissionMode: 'default' as const,

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { getAssistantActivityPartKey } from '../../lib/assistant-activity';
-import { resetDefaultAppState, setIsLoading, setShowInlineFileChanges } from '../../lib/state';
+import { resetDefaultAppState, setIsLoading, setShowFileDiffs } from '../../lib/state';
 import { resetToolCallExpansionState } from '../../lib/tool-call-expansion-state';
 import { emptyPageIcon, searchIcon, terminalIcon } from '../../lib/ui-icons';
 import type { AssistantMessage, Part, ReasoningPart, TextPart, ToolPart } from '../../types';
@@ -408,7 +408,7 @@ describe('AssistantMessageContent', () => {
   });
 
   it('keeps inline file edits outside the compact activity disclosure while streaming', () => {
-    setShowInlineFileChanges(true);
+    setShowFileDiffs(true);
     const edit = fileEditPart('edit-inline', 'src/app.ts');
     edit.state = completedToolState(
       {
@@ -430,7 +430,7 @@ describe('AssistantMessageContent', () => {
   });
 
   it('keeps file edit cards outside the compact activity disclosure while streaming', () => {
-    setShowInlineFileChanges(false);
+    setShowFileDiffs(false);
     const edit = fileEditPart('edit-inline', 'src/app.ts');
     edit.state = completedToolState(
       {
@@ -452,7 +452,7 @@ describe('AssistantMessageContent', () => {
   });
 
   it('moves completed inline file edits into compact history', () => {
-    setShowInlineFileChanges(true);
+    setShowFileDiffs(true);
     const edit = previewFileEditPart('edit-history', 'src/history.ts');
 
     renderAssistantMessageContent({ parts: [edit] });
@@ -471,7 +471,7 @@ describe('AssistantMessageContent', () => {
   });
 
   it('keeps unparsed edit tools out of the activity summary when inline previews are enabled', () => {
-    setShowInlineFileChanges(true);
+    setShowFileDiffs(true);
 
     renderAssistantMessageContent({
       info: createAssistantMessage({ time: { created: 0 } }),
@@ -488,7 +488,7 @@ describe('AssistantMessageContent', () => {
   });
 
   it('groups file edits when inline previews are disabled', () => {
-    setShowInlineFileChanges(false);
+    setShowFileDiffs(false);
     const edit = fileEditPart('edit-compact', 'src/app.ts');
 
     renderAssistantMessageContent({ parts: [edit] });
@@ -925,7 +925,7 @@ describe('AssistantMessageContent', () => {
   });
 
   it('does not re-animate a file-edit stack when another edit is appended', () => {
-    setShowInlineFileChanges(true);
+    setShowFileDiffs(true);
     const info = createAssistantMessage({ time: { created: 0 } });
     const [parts, setParts] = createSignal<Part[]>([fileEditPart('edit-1', 'src/a.ts')]);
     const stackSelector = '[data-assistant-render-key^="file-edit-stack:"]';
@@ -1026,7 +1026,7 @@ describe('AssistantMessageContent', () => {
   });
 
   it('groups consecutive file edits into a single stack container', () => {
-    setShowInlineFileChanges(true);
+    setShowFileDiffs(true);
     renderAssistantMessageContent({
       info: createAssistantMessage({ time: { created: 0 } }),
       parts: [fileEditPart('edit-1', 'src/one.ts'), fileEditPart('edit-2', 'src/two.ts')],
@@ -1077,7 +1077,7 @@ describe('AssistantMessageContent', () => {
       renderedPartCount: 3,
     },
   ])('renders inline=$inlineChanges details=$detailsShown', (expected) => {
-    setShowInlineFileChanges(expected.inlineChanges);
+    setShowFileDiffs(expected.inlineChanges);
     renderAssistantMessageContent({
       info: createAssistantMessage({ time: { created: 0 } }),
       parts: [
@@ -1106,7 +1106,7 @@ describe('AssistantMessageContent', () => {
   });
 
   it('keeps every inline edit rendered in compact output', () => {
-    setShowInlineFileChanges(true);
+    setShowFileDiffs(true);
     renderAssistantMessageContent({
       info: createAssistantMessage({ time: { created: 0 } }),
       parts: [
@@ -1122,7 +1122,7 @@ describe('AssistantMessageContent', () => {
   it.each(['subagent', 'question'] as const)(
     'renders every inline edit for %s output',
     (variant) => {
-      setShowInlineFileChanges(true);
+      setShowFileDiffs(true);
       const parts = [
         previewFileEditPart('edit-1', 'src/one.ts'),
         previewFileEditPart('edit-2', 'src/two.ts'),
@@ -1148,7 +1148,7 @@ describe('AssistantMessageContent', () => {
   );
 
   it('renders all compact inline edit tool calls without a pager', () => {
-    setShowInlineFileChanges(true);
+    setShowFileDiffs(true);
     const multiFilePart: ToolPart = {
       ...fileEditPart('edit-multi', 'src/one.ts'),
       tool: 'apply_patch',

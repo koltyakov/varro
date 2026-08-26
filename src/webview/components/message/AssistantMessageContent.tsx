@@ -11,7 +11,7 @@ import {
   type AssistantActivityKind,
   type AssistantActivityPart,
 } from '../../lib/assistant-activity';
-import { isLoading, showInlineFileChanges } from '../../lib/state';
+import { isLoading, showFileDiffs } from '../../lib/state';
 import {
   editPencilIcon,
   emptyPageIcon,
@@ -393,6 +393,7 @@ export function AssistantMessageContent(props: {
   exitingActivityPartKeys?: ReadonlySet<string>;
   visibleActiveActivityPartKeys?: ReadonlySet<string>;
   groupedActiveActivityPartKeys?: ReadonlySet<string>;
+  expandReasoning?: boolean;
 }) {
   const dedupedParts = createMemo(() => deduplicateFileEdits(props.parts));
   const [readModeOpen, setReadModeOpen] = createSignal(false);
@@ -452,6 +453,7 @@ export function AssistantMessageContent(props: {
     isAssistantActivityPart(part) &&
     shouldCompactAssistantActivityPart(part, {
       keepEditInline: props.info.time.completed === undefined && !props.info.error,
+      keepReasoningInline: !!props.expandReasoning,
     }) &&
     (part.type !== 'tool' ||
       (!props.questionRequestForTool?.(part) && !props.permissionMatchForTool?.(part)));
@@ -632,7 +634,7 @@ export function AssistantMessageContent(props: {
           // SAFETY: The surrounding shape or discriminator check establishes the ToolPart contract used below.
           fileEditParts.push(parts[++index]! as ToolPart);
         }
-        const key = getFileEditStackRenderKey(fileEditParts, showInlineFileChanges());
+        const key = getFileEditStackRenderKey(fileEditParts, showFileDiffs());
         const previous = previousByKey.get(key);
         if (previous?.kind === 'file-edit-stack' && samePartList(previous.parts, fileEditParts)) {
           items.push(previous);
@@ -798,6 +800,7 @@ export function AssistantMessageContent(props: {
                         part={part}
                         messageInfo={props.info}
                         streamedText={props.textForPart(part)}
+                        expandReasoning={props.expandReasoning}
                         lightweight={isLightweight()}
                         questionRequest={
                           part.type === 'tool' ? props.questionRequestForTool?.(part) : undefined
@@ -945,6 +948,7 @@ export function AssistantMessageContent(props: {
           part={item().part}
           messageInfo={props.info}
           streamedText={props.textForPart(item().part)}
+          expandReasoning={props.expandReasoning}
           lightweight={isLightweight()}
           questionRequest={
             // SAFETY: The surrounding shape or discriminator check establishes the ToolPart contract used below.

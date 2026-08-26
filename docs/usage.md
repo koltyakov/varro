@@ -448,7 +448,7 @@ Varro renders OpenCode output as structured UI instead of plain text only.
   turn, its summary says `Permission rejected`
 - Todo tracking from `todowrite` or related todo events
 - Diff summaries for changed files
-- Complete inline file-edit previews when `varro.chat.showInlineFileChanges` is enabled; filenames in the previews open the corresponding file
+- Complete inline file-edit previews when `varro.chat.showFileDiffs` is enabled; filenames in the previews open the corresponding file
 - Session summaries with changed-file counts and line additions/deletions
 - Context compaction markers when OpenCode summarizes a session
 - Mermaid diagrams from completed `mermaid` code fences, with source fallback, copy, and expanded-preview controls
@@ -493,7 +493,8 @@ Chat view:
 
 - `varro.chat.defaultPermissionMode` - initial permission mode when no saved project or global selection exists; defaults to `auto`
 - `varro.chat.autoApproveModel` - provider/model used by the auto-approve judge; stored in VS Code user settings and selected from Varro's Models view
-- `varro.chat.showInlineFileChanges` - show line-by-line edits in file-change tool cards; defaults to `true`
+- `varro.chat.showFileDiffs` - show line-by-line edits in file-change tool cards; defaults to `false`
+- `varro.chat.expandThinking` - keep thinking blocks expanded and outside `Explored` during the active turn; defaults to `false`
 - `varro.chat.showChangedFiles` - show the changed-files panel above the composer; defaults to `false`
 - `varro.chat.desktopSessionPaneSide` - on large screens, show the sessions pane on the `left` or `right`; defaults to `right`
 - `varro.chat.autoRenameUntitledSessions` - generate a fallback title when OpenCode leaves a session untitled; defaults to `false`

@@ -266,7 +266,7 @@ export function ManagedSubagentFooter(props: {
                     <ProviderLimitPopup
                       boundaryRef={inputFrameRef}
                       alignTo="right"
-                      limit={currentProviderLimit()}
+                      limit={compactProviderLimit()}
                       providerName={currentModel().providerName}
                       onClose={() => setShowProviderLimitPopup(false)}
                     />

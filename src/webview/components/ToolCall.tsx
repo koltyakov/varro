@@ -23,7 +23,7 @@ import {
   getPermissionGroupMembers,
   getSessionTreeIds,
   getSessionTreeRootId,
-  showInlineFileChanges,
+  showFileDiffs,
 } from '../lib/state';
 import { formatDisplayPath, getLeafPathName, normalizePath } from '../lib/path-display';
 import { formatCommandDisplay } from '../lib/command-display';
@@ -861,8 +861,7 @@ function FileChangeCard(props: {
         item.after !== undefined ||
         item.previewStatus !== undefined
     );
-  const showInlinePreview = () =>
-    !props.compact && showInlineFileChanges() && hasInlinePreviewContent();
+  const showInlinePreview = () => !props.compact && showFileDiffs() && hasInlinePreviewContent();
   const showCompactCard = () => !isCompleted() || !showInlinePreview();
   const splitCompletedChanges = () => isCompleted() && changes().length > 1;
   const inlineDiffs = createMemo<DiffViewFile[]>(() =>

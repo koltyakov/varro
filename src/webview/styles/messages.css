@@ -398,6 +398,11 @@
   display: none;
 }
 
+.assistant-active-activity-items:has(> .assistant-active-activity-item .thinking-chevron.expanded) {
+  max-height: none;
+  overflow-y: visible;
+}
+
 .assistant-active-activity-items:has(
     > .assistant-active-activity-item
       :is(.tool-invocation-chevron.expanded, .thinking-chevron.expanded)
@@ -1089,6 +1094,12 @@ body.vscode-light
   > .assistant-flow-block-ends-bordered
   + .assistant-flow-block-starts-summary {
   margin-top: 4px;
+}
+
+.interactive-item-container.interactive-response-follows-request:has(
+    .assistant-message-flow > .assistant-flow-block-starts-bordered:first-child
+  ):not(.interactive-item-render-empty) {
+  padding-top: 10px;
 }
 
 .interactive-item-container.interactive-response.interactive-response-follows-response:not(
