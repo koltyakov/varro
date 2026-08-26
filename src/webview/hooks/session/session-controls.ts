@@ -11,12 +11,10 @@ type SessionUsageLimitSnapshot =
 
 export async function reviewSessionWithDependencies(
   deps: {
-    getActiveSessionId(): string | null;
     sendMessage(prompt: string): Promise<void | boolean | object>;
   },
   prompt = 'review the current changes in my code and provide feedback'
 ) {
-  if (!deps.getActiveSessionId()) return;
   await deps.sendMessage(prompt);
 }
 
@@ -350,7 +348,6 @@ export class SessionControlOperations {
 
   readonly reviewSession = async () => {
     await reviewSessionWithDependencies({
-      getActiveSessionId: this.deps.getActiveSessionId,
       sendMessage: this.deps.sendMessage,
     });
   };

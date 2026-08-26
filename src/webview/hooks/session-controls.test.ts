@@ -62,11 +62,10 @@ function session(id = 'session-1', overrides?: Partial<Session>): Session {
 }
 
 describe('session-controls helpers', () => {
-  it('sends the review prompt for the active session', async () => {
+  it('sends the review prompt so the send path can create a session', async () => {
     const sendMessage = vi.fn(async () => {});
 
     await reviewSessionWithDependencies({
-      getActiveSessionId: () => 'session-1',
       sendMessage,
     });
 
@@ -580,17 +579,6 @@ describe('session-controls helpers', () => {
       providerID: 'openai',
       modelID: 'gpt-4o',
     });
-  });
-
-  it('reviewSession does not call sendMessage when no active session', async () => {
-    const sendMessage = vi.fn(async () => {});
-
-    await reviewSessionWithDependencies({
-      getActiveSessionId: () => null,
-      sendMessage,
-    });
-
-    expect(sendMessage).not.toHaveBeenCalled();
   });
 
   it('abortSession returns early when no active session', async () => {
