@@ -156,6 +156,7 @@ describe('AssistantDialogSummaryForMessage', () => {
     const finalResponse = container.querySelector<HTMLElement>(
       '.assistant-message-flow-item-final'
     );
+    const responseRow = container.querySelector<HTMLElement>('[data-msg-id="assistant-1"]');
     const summary = container.querySelector<HTMLElement>('.assistant-dialog-summary');
     finalResponse?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
     vi.advanceTimersByTime(300);
@@ -164,10 +165,19 @@ describe('AssistantDialogSummaryForMessage', () => {
     expect(onWorkedSummaryHoverChange).toHaveBeenLastCalledWith('user-1', true);
 
     finalResponse?.dispatchEvent(
+      new MouseEvent('mouseout', { bubbles: true, relatedTarget: responseRow })
+    );
+    responseRow?.dispatchEvent(
+      new MouseEvent('mouseover', { bubbles: true, relatedTarget: finalResponse })
+    );
+
+    expect(summary?.classList.contains('is-hover-intent-active')).toBe(true);
+
+    responseRow?.dispatchEvent(
       new MouseEvent('mouseout', { bubbles: true, relatedTarget: summary })
     );
     summary?.dispatchEvent(
-      new MouseEvent('mouseover', { bubbles: true, relatedTarget: finalResponse })
+      new MouseEvent('mouseover', { bubbles: true, relatedTarget: responseRow })
     );
 
     expect(summary?.classList.contains('is-hover-intent-active')).toBe(true);

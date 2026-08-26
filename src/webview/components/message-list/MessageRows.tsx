@@ -401,11 +401,17 @@ function AssistantDialogSummary(props: {
   onMount(() => {
     if (!summaryRef) return;
     const messageRow = summaryRef.closest<HTMLElement>('[data-msg-id]');
+    const summaryRow = summaryRef.closest<HTMLElement>('.trailing-assistant-summary-row');
     const hoverRoot =
       messageRow ?? summaryRef.closest<HTMLElement>('.interactive-list-track') ?? summaryRef;
     const isInHoverRegion = (target: EventTarget | null) => {
       if (!(target instanceof Element) || !hoverRoot.contains(target)) return false;
       if (target.closest('.assistant-dialog-summary') === summaryRef) return true;
+      if (summaryRow && target === summaryRow) return true;
+      const targetMessageRow = target.closest<HTMLElement>('[data-msg-id]');
+      if (target === targetMessageRow && targetMessageRow.dataset.msgId === props.messageId) {
+        return true;
+      }
       const finalResponse = target.closest('.assistant-message-flow-item-final');
       return (
         finalResponse?.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId === props.messageId
