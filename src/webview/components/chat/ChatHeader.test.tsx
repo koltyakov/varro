@@ -6,7 +6,7 @@ import type { Session } from '../../types';
 import type { WebviewMessage } from '../../../shared/protocol';
 import { client } from '../../lib/client';
 import { setShowSessionPicker, setState, showSessionPicker } from '../../lib/state';
-import { ActiveChatHeader, getNewChatEditorShortcut, SessionPickerHeader } from './ChatHeader';
+import { ActiveChatHeader, SessionPickerHeader } from './ChatHeader';
 import { SessionActionFeedback } from './SessionActionFeedback';
 
 const deleteSessionMock = vi.hoisted(() => vi.fn());
@@ -123,13 +123,7 @@ describe('SessionActionFeedback icon state', () => {
 });
 
 describe('ActiveChatHeader', () => {
-  it('uses the platform-specific editor shortcut in the new-chat tooltip', () => {
-    expect(getNewChatEditorShortcut('MacIntel')).toBe('Option-click to open in editor');
-    expect(getNewChatEditorShortcut('Win32')).toBe('Alt-click to open in editor');
-    expect(getNewChatEditorShortcut('Linux x86_64')).toBe('Alt-click to open in editor');
-  });
-
-  it('renders the new-chat tooltip title and shortcut on separate rows', async () => {
+  it('renders a plain new-chat tooltip without a modifier shortcut', async () => {
     vi.useFakeTimers();
     try {
       renderHeader(null, { showActions: true });
@@ -140,10 +134,8 @@ describe('ActiveChatHeader', () => {
       await Promise.resolve();
 
       const tooltip = document.body.querySelector<HTMLElement>('[role="tooltip"]');
-      expect(tooltip?.querySelector('strong.new-chat-tooltip-title')?.textContent).toBe('New chat');
-      expect(tooltip?.querySelector('.new-chat-tooltip-shortcut')?.textContent).toBe(
-        getNewChatEditorShortcut()
-      );
+      expect(tooltip?.textContent).toBe('New chat');
+      expect(tooltip?.textContent).not.toContain('click to open in editor');
     } finally {
       vi.useRealTimers();
     }
@@ -230,7 +222,7 @@ describe('ActiveChatHeader', () => {
     expect(showSessionPicker()).toBe(true);
   });
 
-  it('keeps normal plus clicks local and opens Alt-clicks in editor tabs', () => {
+  it('keeps all plus clicks local and offers new-chat actions from the context menu', () => {
     const send = vi.fn<(message: WebviewMessage) => void>();
     const createActiveSession = vi.fn();
     const createPickerSession = vi.fn();
@@ -242,7 +234,34 @@ describe('ActiveChatHeader', () => {
     activePlus.click();
     activePlus.dispatchEvent(new MouseEvent('click', { bubbles: true, altKey: true }));
 
-    expect(createActiveSession).toHaveBeenCalledOnce();
+    expect(createActiveSession).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls.some(([message]) => message.type === 'chat/new-editor')).toBe(false);
+
+    activePlus.dispatchEvent(
+      new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: 30,
+        clientY: 40,
+      })
+    );
+    let menu = document.body.querySelector<HTMLElement>('[aria-label="New chat actions"]')!;
+    expect(
+      Array.from(menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).map((button) =>
+        button.textContent?.trim()
+      )
+    ).toEqual(['New Chat', 'New Chat in Editor']);
+    expect(menu.style.left).toBe('30px');
+    expect(menu.style.top).toBe('40px');
+    menu.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click();
+    expect(createActiveSession).toHaveBeenCalledTimes(3);
+
+    activePlus.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    menu = document.body.querySelector<HTMLElement>('[aria-label="New chat actions"]')!;
+    Array.from(menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
+      .find((button) => button.textContent?.trim() === 'New Chat in Editor')!
+      .click();
+    expect(send).toHaveBeenCalledWith({ type: 'chat/new-editor' });
 
     cleanup?.();
     cleanup = render(
@@ -277,9 +296,10 @@ describe('ActiveChatHeader', () => {
     pickerPlus.click();
     pickerPlus.dispatchEvent(new MouseEvent('click', { bubbles: true, altKey: true }));
 
-    expect(createPickerSession).toHaveBeenCalledOnce();
+    expect(createPickerSession).toHaveBeenCalledTimes(2);
+    pickerPlus.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    expect(document.body.querySelector('[aria-label="New chat actions"]')).not.toBeNull();
     expect(send.mock.calls.filter(([message]) => message.type === 'chat/new-editor')).toEqual([
-      [{ type: 'chat/new-editor' }],
       [{ type: 'chat/new-editor' }],
     ]);
   });

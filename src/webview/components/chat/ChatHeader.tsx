@@ -1,9 +1,11 @@
 import { Show, createEffect, createSignal, onCleanup } from 'solid-js';
+import { Portal } from 'solid-js/web';
 import type { SessionDiffSummary } from '../../../shared/protocol';
 import { deleteSession } from '../../hooks/useOpenCode';
 import { postMessage } from '../../lib/bridge';
 import { client } from '../../lib/client';
 import { formatDuration } from '../../lib/message-metrics';
+import { clampPopupToViewport } from '../../lib/popup-position';
 import { cableTagIcon, pinIcon, xmarkIcon } from '../../lib/ui-icons';
 import { NavArrowLeftControlIcon } from '../ControlIcons';
 import {
@@ -42,24 +44,102 @@ function isActiveSessionRunning() {
   return type === 'busy' || type === 'retry';
 }
 
-function createSessionFromClick(event: MouseEvent, onCreateSession: () => void) {
-  if (event.altKey) {
-    postMessage({ type: 'chat/new-editor' });
-    return;
-  }
-  onCreateSession();
-}
+function NewChatButton(props: { onCreateSession: () => void }) {
+  const [menuPosition, setMenuPosition] = createSignal<{ x: number; y: number } | null>(null);
+  let buttonRef: HTMLButtonElement | undefined;
+  let menuRef: HTMLDivElement | undefined;
 
-export function getNewChatEditorShortcut(platform = navigator.platform) {
-  return /^Mac/i.test(platform) ? 'Option-click to open in editor' : 'Alt-click to open in editor';
-}
+  const closeMenu = () => setMenuPosition(null);
 
-function NewChatTooltipContent() {
+  createEffect(() => {
+    if (!menuPosition()) return;
+    const closeIfOutside = (event: Event) => {
+      const target = event.target;
+      if (target instanceof Node && menuRef?.contains(target)) return;
+      closeMenu();
+    };
+    window.addEventListener('contextmenu', closeIfOutside, true);
+    window.addEventListener('pointerdown', closeIfOutside, true);
+    window.addEventListener('focusin', closeIfOutside);
+    onCleanup(() => {
+      window.removeEventListener('contextmenu', closeIfOutside, true);
+      window.removeEventListener('pointerdown', closeIfOutside, true);
+      window.removeEventListener('focusin', closeIfOutside);
+    });
+  });
+
+  createEffect(() => {
+    if (!menuPosition()) return;
+    queueMicrotask(() => {
+      if (!menuRef) return;
+      clampPopupToViewport(menuRef);
+      menuRef.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
+    });
+  });
+
   return (
-    <span class="new-chat-tooltip">
-      <strong class="new-chat-tooltip-title">New chat</strong>
-      <span class="new-chat-tooltip-shortcut">{getNewChatEditorShortcut()}</span>
-    </span>
+    <>
+      <Tooltip content="New chat">
+        <button
+          ref={(element) => {
+            buttonRef = element;
+          }}
+          class="chat-header-btn"
+          onClick={() => props.onCreateSession()}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            setMenuPosition({ x: event.clientX, y: event.clientY });
+          }}
+          aria-label="New chat"
+          aria-haspopup="menu"
+          aria-expanded={menuPosition() ? 'true' : undefined}
+        >
+          <PlusIcon class="chat-header-add-icon" />
+        </button>
+      </Tooltip>
+      <Show when={menuPosition()}>
+        {(position) => (
+          <Portal>
+            <div
+              ref={(element) => {
+                menuRef = element;
+              }}
+              class="session-item-actions-menu"
+              role="menu"
+              aria-label="New chat actions"
+              style={{ left: `${position().x}px`, top: `${position().y}px` }}
+              onKeyDown={(event) => {
+                if (event.key !== 'Escape') return;
+                event.preventDefault();
+                closeMenu();
+                buttonRef?.focus();
+              }}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  closeMenu();
+                  props.onCreateSession();
+                }}
+              >
+                New Chat
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  closeMenu();
+                  postMessage({ type: 'chat/new-editor' });
+                }}
+              >
+                New Chat in Editor
+              </button>
+            </div>
+          </Portal>
+        )}
+      </Show>
+    </>
   );
 }
 
@@ -177,15 +257,7 @@ export function SessionPickerHeader(props: {
           <RunningSessionsBadge count={props.runningCount} onClick={props.onOpenRunningSessions} />
         </Show>
         <Show when={props.showNewChatButton}>
-          <Tooltip content={<NewChatTooltipContent />}>
-            <button
-              class="chat-header-btn"
-              onClick={(event) => createSessionFromClick(event, props.onCreateSession)}
-              aria-label="New chat"
-            >
-              <PlusIcon class="chat-header-add-icon" />
-            </button>
-          </Tooltip>
+          <NewChatButton onCreateSession={props.onCreateSession} />
         </Show>
       </div>
     </>
@@ -368,15 +440,7 @@ export function ActiveChatHeader(props: {
             onClick={props.onOpenCompletedSessions}
           />
           <RunningSessionsBadge count={props.runningCount} onClick={props.onOpenRunningSessions} />
-          <Tooltip content={<NewChatTooltipContent />}>
-            <button
-              class="chat-header-btn"
-              onClick={(event) => createSessionFromClick(event, props.onCreateSession)}
-              aria-label="New chat"
-            >
-              <PlusIcon class="chat-header-add-icon" />
-            </button>
-          </Tooltip>
+          <NewChatButton onCreateSession={props.onCreateSession} />
         </div>
       </Show>
       <Show when={actionsSession()}>
