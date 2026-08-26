@@ -746,9 +746,9 @@ export function SessionListSectionHeader(props: {
   const archiveTargetLabel = () =>
     archiveActionLabel().toLowerCase() === props.title.toLowerCase() ? 'sessions' : props.title;
 
-  const confirmArchive = async () => {
+  const confirmArchive = () => {
     setIsConfirmingArchive(false);
-    await props.onArchive?.();
+    props.onArchive?.();
   };
 
   return (
@@ -787,7 +787,7 @@ export function SessionListSectionHeader(props: {
               <button
                 type="button"
                 class="session-list-section-confirm"
-                onClick={() => void confirmArchive()}
+                onClick={confirmArchive}
                 title={`Confirm ${archiveActionLabel().toLowerCase()} ${archiveTargetLabel()}`}
                 aria-label={`Confirm ${archiveActionLabel().toLowerCase()} ${archiveTargetLabel()}`}
               >

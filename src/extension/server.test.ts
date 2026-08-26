@@ -655,59 +655,34 @@ describe('OpenCodeServer event stream', () => {
     const stderrHandler = vi.fn();
     const exitHandler = vi.fn();
     const errorHandler = vi.fn();
-    (
+    const processManager = (
       server as unknown as {
-        process: {
-          stdout: { off: typeof stdoutOff };
-          stderr: { off: typeof stderrOff };
-          off: typeof procOff;
-          exitCode: null;
-          signalCode: null;
+        processManager: {
+          process: {
+            stdout: { off: typeof stdoutOff };
+            stderr: { off: typeof stderrOff };
+            off: typeof procOff;
+            exitCode: null;
+            signalCode: null;
+          };
+          processStdoutHandler: (data: Buffer) => void;
+          processStderrHandler: (data: Buffer) => void;
+          processExitHandler: (code: number | null, signal: NodeJS.Signals | null) => void;
+          processErrorHandler: (err: Error) => void;
         };
-        processStdoutHandler: (data: Buffer) => void;
-        processStderrHandler: (data: Buffer) => void;
-        processExitHandler: (code: number | null, signal: NodeJS.Signals | null) => void;
-        processErrorHandler: (err: Error) => void;
       }
-    ).process = {
+    ).processManager;
+    processManager.process = {
       stdout: { off: stdoutOff },
       stderr: { off: stderrOff },
       off: procOff,
       exitCode: null,
       signalCode: null,
     };
-    (
-      server as unknown as {
-        processStdoutHandler: (data: Buffer) => void;
-        processStderrHandler: (data: Buffer) => void;
-        processExitHandler: (code: number | null, signal: NodeJS.Signals | null) => void;
-        processErrorHandler: (err: Error) => void;
-      }
-    ).processStdoutHandler = stdoutHandler;
-    (
-      server as unknown as {
-        processStdoutHandler: (data: Buffer) => void;
-        processStderrHandler: (data: Buffer) => void;
-        processExitHandler: (code: number | null, signal: NodeJS.Signals | null) => void;
-        processErrorHandler: (err: Error) => void;
-      }
-    ).processStderrHandler = stderrHandler;
-    (
-      server as unknown as {
-        processStdoutHandler: (data: Buffer) => void;
-        processStderrHandler: (data: Buffer) => void;
-        processExitHandler: (code: number | null, signal: NodeJS.Signals | null) => void;
-        processErrorHandler: (err: Error) => void;
-      }
-    ).processExitHandler = exitHandler;
-    (
-      server as unknown as {
-        processStdoutHandler: (data: Buffer) => void;
-        processStderrHandler: (data: Buffer) => void;
-        processExitHandler: (code: number | null, signal: NodeJS.Signals | null) => void;
-        processErrorHandler: (err: Error) => void;
-      }
-    ).processErrorHandler = errorHandler;
+    processManager.processStdoutHandler = stdoutHandler;
+    processManager.processStderrHandler = stderrHandler;
+    processManager.processExitHandler = exitHandler;
+    processManager.processErrorHandler = errorHandler;
 
     await server.disconnect();
 
@@ -769,9 +744,9 @@ describe('OpenCodeServer compaction config injection', () => {
 
     const configText = await (
       server as unknown as {
-        serializeInjectedConfig: () => Promise<string>;
+        processManager: { serializeInjectedConfig: () => Promise<string> };
       }
-    ).serializeInjectedConfig();
+    ).processManager.serializeInjectedConfig();
     expect(String(configText)).toContain('"auto": false');
     expect(String(configText)).toContain('"reserved": 1234');
     expect(String(configText)).not.toContain('"example"');
@@ -838,9 +813,9 @@ describe('OpenCodeServer compaction config injection', () => {
     expect(request).toHaveBeenCalledWith('POST', '/global/dispose');
     const configText = await (
       server as unknown as {
-        serializeInjectedConfig: () => Promise<string>;
+        processManager: { serializeInjectedConfig: () => Promise<string> };
       }
-    ).serializeInjectedConfig();
+    ).processManager.serializeInjectedConfig();
     expect(String(configText)).toContain('"auto": false');
     expect(String(configText)).toContain('"reserved": 4321');
   });

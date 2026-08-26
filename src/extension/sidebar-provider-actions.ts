@@ -25,7 +25,6 @@ export interface SidebarProviderActionDeps {
   contextProvider: ContextProvider;
   extensionId: string;
   webviewSession: {
-    setFocus(focused: boolean): void;
     updateCommandState(canAbort: boolean, canSwitchSessions: boolean): void;
     reload(): Promise<void>;
   };
@@ -116,9 +115,7 @@ export function createSidebarProviderActions(
       deps.setActiveRoute(sessionId);
     },
     acknowledgeSessionSeen: (sessionId) => deps.acknowledgeSessionSeen(sessionId),
-    setWebviewFocus: (focused) => {
-      deps.webviewSession.setFocus(focused);
-    },
+    setWebviewFocus: () => {},
     revealPermission: (permissionId) => deps.revealPermission(permissionId),
     setMermaidPreviewOpen: (open) => deps.setMermaidPreviewOpen(open),
     setProviderWatchActive: (active) => {

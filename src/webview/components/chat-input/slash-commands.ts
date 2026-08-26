@@ -236,14 +236,16 @@ export function getSlashCommands(props: {
     },
   });
 
-  commands.push({
-    name: 'ralph',
-    aliases: [],
-    description: 'Start a Ralph loop on a plan document',
-    action: () => {
-      ralphStore.setShowRalphForm(true);
-    },
-  });
+  if (!props.hasCurrentSession) {
+    commands.push({
+      name: 'ralph',
+      aliases: [],
+      description: 'Start a Ralph loop on a plan document',
+      action: () => {
+        ralphStore.setShowRalphForm(true);
+      },
+    });
+  }
 
   for (const command of props.customCommands) {
     if (command.source === 'skill') continue;

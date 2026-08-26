@@ -603,7 +603,7 @@ export class RestProxy {
               response as OpenCodeResponseMetadata
             )
           : sessionPageLimit !== null
-            ? await this.formatPaginatedSessionsResponse(
+            ? this.formatPaginatedSessionsResponse(
                 response,
                 sessionPageLimit,
                 constrainedSessionList

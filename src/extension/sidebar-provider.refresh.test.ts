@@ -16,7 +16,7 @@ const providerFileSystem = getProviderSignatureFileSystemMock();
 
 type ProviderRefreshAccess = {
   initializeProviderFileSignature(): Promise<void>;
-  readProviderFilesSignature(): Promise<string>;
+  providerFileRefresh: { readFilesSignature(): Promise<string> };
   refreshOpenCodeWorkspaceState(
     previousRouting?: OpenCodeModelRouting,
     currentRouting?: OpenCodeModelRouting
@@ -302,14 +302,14 @@ describe('SidebarProvider provider refresh', () => {
     const { posted } = attachTestView(provider);
     const access = provider as unknown as ProviderRefreshAccess;
 
-    const first = await access.readProviderFilesSignature();
+    const first = await access.providerFileRefresh.readFilesSignature();
     await access.initializeProviderFileSignature();
     access.setProviderWatchActive(true);
     await vi.advanceTimersByTimeAsync(0);
     posted.length = 0;
 
     mtimeMs = 20;
-    const second = await access.readProviderFilesSignature();
+    const second = await access.providerFileRefresh.readFilesSignature();
     const watcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[0]?.value as
       | { onDidChange: ReturnType<typeof vi.fn> }
       | undefined;

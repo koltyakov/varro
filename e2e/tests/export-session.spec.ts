@@ -14,28 +14,31 @@ test('slash /export sends session/export message for active session', async ({ p
   await expect
     .poll(() =>
       getE2EState(page, () => {
-        const value = (window as Window & {
-          __varroE2E?: { exportSessionIds?: string[] };
-        }).__varroE2E;
+        const value = (
+          window as Window & {
+            __varroE2E?: { exportSessionIds?: string[] };
+          }
+        ).__varroE2E;
         return value?.exportSessionIds?.[0] || null;
       })
     )
     .toBe('session-restored');
 });
 
-test('/export does nothing when no session is active', async ({ page }) => {
+test('/export is unavailable when no session is active', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
 
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
   await composer.fill('/export');
-  await expect(page.getByText('Export the current session')).toBeVisible();
-  await page.keyboard.press('Enter');
+  await expect(page.getByText('Export the current session')).toBeHidden();
 
   const exportCount = await getE2EState(page, () => {
-    const value = (window as Window & {
-      __varroE2E?: { exportSessionIds?: string[] };
-    }).__varroE2E;
+    const value = (
+      window as Window & {
+        __varroE2E?: { exportSessionIds?: string[] };
+      }
+    ).__varroE2E;
     return value?.exportSessionIds?.length || 0;
   });
 
@@ -56,9 +59,11 @@ test('/export sends correct session after switching sessions', async ({ page }) 
   await expect
     .poll(() =>
       getE2EState(page, () => {
-        const value = (window as Window & {
-          __varroE2E?: { exportSessionIds?: string[] };
-        }).__varroE2E;
+        const value = (
+          window as Window & {
+            __varroE2E?: { exportSessionIds?: string[] };
+          }
+        ).__varroE2E;
         return value?.exportSessionIds?.[0] || null;
       })
     )

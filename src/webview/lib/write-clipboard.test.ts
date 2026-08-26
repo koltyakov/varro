@@ -1,14 +1,23 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { writeClipboard } from './write-clipboard';
 
+type LegacyClipboardDocument = {
+  execCommand(commandId: string): boolean;
+};
+
 describe('writeClipboard', () => {
   let originalClipboard: Clipboard;
-  let originalExecCommand: typeof document.execCommand;
+  let legacyDocument: LegacyClipboardDocument;
+  let originalExecCommand: LegacyClipboardDocument['execCommand'];
+  let execCommandMock = vi.fn((_commandId: string): boolean => false);
 
   beforeEach(() => {
     originalClipboard = navigator.clipboard;
-    originalExecCommand = document.execCommand;
-    document.execCommand = vi.fn(() => false);
+    // SAFETY: Tests replace the legacy clipboard method on jsdom's document fixture.
+    legacyDocument = document as LegacyClipboardDocument;
+    originalExecCommand = legacyDocument.execCommand;
+    execCommandMock = vi.fn((_commandId: string): boolean => false);
+    legacyDocument.execCommand = execCommandMock;
   });
 
   afterEach(() => {
@@ -16,7 +25,7 @@ describe('writeClipboard', () => {
       value: originalClipboard,
       configurable: true,
     });
-    document.execCommand = originalExecCommand;
+    legacyDocument.execCommand = originalExecCommand;
     vi.restoreAllMocks();
   });
 
@@ -37,11 +46,10 @@ describe('writeClipboard', () => {
       value: { writeText: () => Promise.reject(new Error('denied')) },
       configurable: true,
     });
-    // SAFETY: The fixture provides the ReturnType<typeof vi.fn> fields read by this statement.
-    (document.execCommand as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    execCommandMock.mockReturnValue(true);
 
     const result = await writeClipboard('fallback text');
-    expect(document.execCommand).toHaveBeenCalledWith('copy');
+    expect(execCommandMock).toHaveBeenCalledWith('copy');
     expect(result).toBe(true);
   });
 
@@ -50,11 +58,10 @@ describe('writeClipboard', () => {
       value: undefined,
       configurable: true,
     });
-    // SAFETY: The fixture provides the ReturnType<typeof vi.fn> fields read by this statement.
-    (document.execCommand as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    execCommandMock.mockReturnValue(true);
 
     const result = await writeClipboard('no clipboard');
-    expect(document.execCommand).toHaveBeenCalledWith('copy');
+    expect(execCommandMock).toHaveBeenCalledWith('copy');
     expect(result).toBe(true);
   });
 
@@ -69,8 +76,7 @@ describe('writeClipboard', () => {
     modal.appendChild(button);
     document.body.appendChild(modal);
     button.focus();
-    // SAFETY: The fixture provides the ReturnType<typeof vi.fn> fields read by this statement.
-    (document.execCommand as ReturnType<typeof vi.fn>).mockImplementation(() => {
+    execCommandMock.mockImplementation(() => {
       expect(modal.querySelector('textarea')?.parentElement).toBe(modal);
       return true;
     });

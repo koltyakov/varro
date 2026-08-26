@@ -19,6 +19,19 @@ function getPopupTopBound(el: HTMLElement, margin: number): number {
   return bound;
 }
 
+function getPopupBottomBound(el: HTMLElement, margin: number): number {
+  let bound = window.innerHeight - margin;
+  let node = el.parentElement;
+  while (node && node !== document.body) {
+    const { overflowY } = getComputedStyle(node);
+    if (overflowY === 'auto' || overflowY === 'scroll') {
+      bound = Math.min(bound, node.getBoundingClientRect().bottom - margin);
+    }
+    node = node.parentElement;
+  }
+  return bound;
+}
+
 /**
  * Position a dropdown around a trigger inside a larger positioned host.
  * Upward placement can clear an element stacked above the host, such as the
@@ -40,7 +53,7 @@ export function placeTriggerDropdownAnchor(
   const triggerRect = triggerEl.getBoundingClientRect();
   const aboveEdge = liftAboveEl?.getBoundingClientRect().top ?? triggerRect.top;
   const topBound = getPopupTopBound(menuEl, margin);
-  const bottomBound = window.innerHeight - margin;
+  const bottomBound = getPopupBottomBound(menuEl, margin);
   const spaceAbove = Math.max(0, aboveEdge - gap - topBound);
   const spaceBelow = Math.max(0, bottomBound - triggerRect.bottom - gap);
 

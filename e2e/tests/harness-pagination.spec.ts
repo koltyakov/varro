@@ -27,10 +27,12 @@ async function requestHarnessApi<T>(page: Page, id: number, path: string) {
       if (!send || !dispatchedMessages) throw new Error('Harness bridge is unavailable');
 
       const firstNewMessage = dispatchedMessages.length;
-      await send({
-        type: 'api/request',
-        payload: { id: requestId, method: 'GET', path: requestPath },
-      });
+      await Promise.resolve(
+        send({
+          type: 'api/request',
+          payload: { id: requestId, method: 'GET', path: requestPath },
+        })
+      );
       const response = dispatchedMessages.slice(firstNewMessage).find((message) => {
         if (message.type !== 'api/response' || !message.payload) return false;
         return (message.payload as { id?: number }).id === requestId;

@@ -353,13 +353,17 @@ describe('ToolCall', () => {
 
     cleanup = render(() => ToolCall({ part }), container!);
 
-    expect(container?.querySelector('.file-edit-summary-label')?.textContent).toBe('2 files');
+    expect(container?.querySelector('.file-change-card-header')?.textContent).not.toContain(
+      '2 files'
+    );
     expect(
       Array.from(container?.querySelectorAll('.file-edit-path-link') || []).map(
         (link) => link.textContent
       )
     ).toEqual(['src/app.ts', 'src/theme.css']);
-    expect(container?.querySelector('.file-edit-running-label')?.textContent).toBe('editing…');
+    expect(container?.querySelector('.file-change-card-header')?.textContent).not.toContain(
+      'editing…'
+    );
     expect(container?.querySelector('.tool-invocation-header')).toBeNull();
   });
 
@@ -2740,7 +2744,9 @@ describe('FileChangeCard', () => {
         link.querySelector<HTMLImageElement>('.file-edit-file-icon')?.getAttribute('src')
       )
     ).toEqual([getFileTypeIcon('src/new.ts'), getFileTypeIcon('src/app.ts')]);
-    expect(container?.querySelector('.file-edit-summary-label')).toBeNull();
+    expect(container?.querySelector('.file-change-card-header')?.textContent).not.toContain(
+      '2 files'
+    );
     expect(container?.querySelector('.file-edit-more-count')).toBeNull();
     expect(rows[0]?.querySelector('.file-edit-diff-stats')?.textContent).toContain('+2');
     expect(rows[0]?.querySelector('.file-edit-diff-stats')?.textContent).toContain('-0');
@@ -2936,12 +2942,14 @@ describe('FileChangeCard', () => {
 
     expect(container?.querySelector('.file-change-card')).not.toBeNull();
     expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('(edit)');
-    expect(container?.querySelector('.file-edit-summary-label')?.textContent).toBe('2 files');
+    expect(container?.querySelector('.file-edit-summary-label')).toBeNull();
     expect(container?.querySelector('.file-edit-icon')?.getAttribute('aria-label')).toBe('Running');
     const icon = container?.querySelector<HTMLElement>('.tool-call-icon-edit');
     expect(icon).toBeInstanceOf(HTMLSpanElement);
     expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(editPencilIcon));
-    expect(container?.querySelector('.file-edit-running-label')?.textContent).toBe('editing…');
+    expect(container?.querySelector('.file-change-card-header')?.textContent).not.toContain(
+      'editing…'
+    );
     expect(container?.querySelector('.file-edit-action-label')?.classList).toContain(
       'shimmer-progress'
     );
@@ -3211,7 +3219,10 @@ describe('FileChangeCard', () => {
 
     cleanup = render(() => ToolCall({ part }), container!);
 
-    expect(container?.querySelector('.file-edit-summary-label')?.textContent).toBe('64+ files');
+    expect(container?.querySelector('.file-change-card-header')?.textContent).not.toContain(
+      '64+ files'
+    );
+    expect(container?.querySelector('.file-edit-more-count')?.textContent).toBe('+63 more');
     expect(container?.querySelectorAll('.file-change-inline-diffs .diff-view-file')).toHaveLength(
       64
     );

@@ -166,6 +166,34 @@ describe('popup-position', () => {
     expect(availableHeight).toBe(346);
   });
 
+  it('keeps a trigger dropdown inside its scrollable ancestor', () => {
+    window.innerHeight = 600;
+
+    const scroller = document.createElement('div');
+    scroller.style.overflowY = 'auto';
+    mockRect(scroller, { top: 50, bottom: 300 });
+
+    const host = document.createElement('div');
+    mockRect(host, { top: 50, bottom: 300 });
+
+    const trigger = document.createElement('button');
+    mockRect(trigger, { top: 220, bottom: 250 });
+
+    const anchor = document.createElement('div');
+    const menu = document.createElement('div');
+    mockOffsetParent(anchor, host);
+    mockRect(menu, { top: -80, bottom: 214 });
+    scroller.append(host);
+    host.append(trigger, anchor);
+    anchor.append(menu);
+
+    const availableHeight = placeTriggerDropdownAnchor(anchor, menu, trigger, 6);
+
+    expect(anchor.style.top).toBe('auto');
+    expect(anchor.style.bottom).toBe('86px');
+    expect(availableHeight).toBe(156);
+  });
+
   it('keeps upward popups in place when they are not clipped', () => {
     const trigger = document.createElement('div');
     mockRect(trigger, { top: 400, bottom: 424 });

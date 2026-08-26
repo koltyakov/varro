@@ -1,3 +1,7 @@
+type LegacyClipboardDocument = {
+  execCommand(commandId: 'copy'): boolean;
+};
+
 export async function writeClipboard(text: string): Promise<boolean> {
   const clipboard = globalThis.navigator?.clipboard;
   if (clipboard?.writeText) {
@@ -25,7 +29,9 @@ export async function writeClipboard(text: string): Promise<boolean> {
     textarea.style.pointerEvents = 'none';
     (modal ?? body).appendChild(textarea);
     textarea.select();
-    const copied = document.execCommand('copy');
+    // SAFETY: Chromium still implements execCommand for the clipboard fallback.
+    const legacyDocument = document as LegacyClipboardDocument;
+    const copied = legacyDocument.execCommand('copy');
     textarea.remove();
     if (copied) return true;
   }

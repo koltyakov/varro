@@ -1919,17 +1919,6 @@ kbd {
   line-height: 1.2;
 }
 
-.file-edit-summary-label {
-  display: inline-flex;
-  align-items: center;
-  color: var(--color-vscode-fg);
-  flex: 0 0 auto;
-  font-size: inherit;
-  font-weight: 300;
-  line-height: 1.2;
-  white-space: nowrap;
-}
-
 .file-edit-path-link,
 .file-edit-path-label {
   display: inline-flex;
@@ -2073,15 +2062,6 @@ kbd {
   font-family: var(--font-mono);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
-  flex-shrink: 0;
-  line-height: 1.2;
-}
-
-.file-edit-running-label {
-  display: inline-flex;
-  align-items: center;
-  font-size: 11px;
-  color: var(--color-vscode-accent);
   flex-shrink: 0;
   line-height: 1.2;
 }

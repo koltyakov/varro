@@ -459,6 +459,18 @@ describe('RalphForm', () => {
     expect(document.body.textContent).not.toContain('Manage models');
   });
 
+  it('renders the model popup outside the scrolling form body', async () => {
+    cleanup = render(() => RalphForm(), container!);
+
+    document.body.querySelector<HTMLButtonElement>('.ralph-form-card .model-picker-btn')?.click();
+    await flushMicrotasks();
+
+    const anchor = document.body.querySelector('.ralph-form-card .model-picker-anchor');
+    expect(anchor).not.toBeNull();
+    expect(anchor?.closest('.ralph-form-body')).toBeNull();
+    expect(anchor?.closest('.ralph-form-picker-portal')).not.toBeNull();
+  });
+
   it('identifies a previously active blank session for cleanup', () => {
     expect(
       shouldDeletePreviousBlankSession(

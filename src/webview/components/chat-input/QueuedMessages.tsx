@@ -187,7 +187,6 @@ export function QueuedMessages(props: {
                     onKeyDown={reorderWithKeyboard}
                     title="Drag to reorder queued message"
                     aria-label={`Reorder queued message: ${label}`}
-                    aria-grabbed={draggedItemId() === item.id}
                   >
                     <Show
                       when={draggedItemId() || isAltPressed()}

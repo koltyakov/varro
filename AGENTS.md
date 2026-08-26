@@ -5,6 +5,7 @@
 - Dev/watch: `npm run dev`; preview only: `npm run preview:webview`.
 - Lint fix: `npm run lint`; lint check: `npm run lint:check`; format: `npm run fmt`.
 - Standard typecheck: `npm run typecheck` (all TypeScript source, test, E2E, and tooling files).
+- TypeScript suggestion check: `npm run typecheck:suggestions` (fails on editor suggestion diagnostics that `tsc` does not report).
 - Unit tests: `npm run test`; coverage: `npm run test:coverage`.
 - Run one Vitest file: `npm run test -- src/webview/components/ChatInput.test.ts`.
 - Run one Vitest case: `npm run test -- src/webview/components/ChatInput.test.ts -t "detects slash commands only at the start of the input"`.
@@ -26,6 +27,6 @@
 - When the user asks to "Run AI tests" or "Run fuzzy tests" (case-insensitive), follow `docs/ai-fuzzy-verification.md`. Unless the user narrows the scope, run its automated preflight and standard real-editor scenarios, use GPT Luna or Terra as specified, run realistic edit/tool streams only in the clean `tmp/opencode` fixture, save the run ledger under `artifacts/ai-fuzzy/`, and report blocked visual checks rather than treating browser or host-only tests as substitutes.
 - Before changing permission modes or rules, auto-approval, permission events or snapshots, prompt grouping, attention state, or child-session approvals, read `docs/permission-lifecycle.md` and preserve its pending-request visibility and server-acknowledgement invariants.
 - UI design: never use a decorative accent rail on only one edge of a component, such as a thick left border or inset edge shadow. Use full-perimeter borders, backgrounds, or shadows instead; structural dividers between internal sections are allowed.
-- Post-change actions: after code changes, run `npm run lint` and `npm run fmt`, then run the narrowest relevant tests and `npm run typecheck` when types changed. Do not stop after implementation without reporting each command and its result.
+- Post-change actions: after code changes, run `npm run lint` and `npm run fmt`, then run the narrowest relevant tests, `npm run typecheck` when types changed, and `npm run typecheck:suggestions`. Do not stop after implementation without reporting each command and its result.
 - Repo-local Cursor/Copilot rules: none found in `.cursor/rules/`, `.cursorrules`, or `.github/copilot-instructions.md`.
 - OpenCode version bumps: follow `docs/opencode-version-bumps.md`.

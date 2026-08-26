@@ -1,4 +1,4 @@
-import { Show, Suspense, createEffect, createMemo, createSignal, lazy, onCleanup } from 'solid-js';
+import { Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import type { JSX } from 'solid-js';
 import { Dynamic, Portal } from 'solid-js/web';
 import { client } from '../../lib/client';
@@ -23,10 +23,7 @@ import { getLeafPathName } from '../../lib/path-display';
 import { trapModalFocus } from '../../lib/modal-focus';
 import { xmarkIcon } from '../../lib/ui-icons';
 import { UiIcon } from '../UiIcon';
-
-const LazyModelPicker = lazy(() =>
-  import('../ModelPicker').then((module) => ({ default: module.ModelPicker }))
-);
+import { ModelPicker } from '../ModelPicker';
 
 const DEFAULT_ITERATIONS = 10;
 
@@ -101,6 +98,7 @@ export function RalphForm() {
   const [showVariantPicker, setShowVariantPicker] = createSignal(false);
   const [errorMessage, setErrorMessage] = createSignal<string | null>(null);
   const [modelPickerBoundaryRef, setModelPickerBoundaryRef] = createSignal<HTMLDivElement>();
+  const [modelPickerPortalRef, setModelPickerPortalRef] = createSignal<HTMLDivElement>();
 
   function close() {
     setShowModelPicker(false);
@@ -433,46 +431,6 @@ export function RalphForm() {
                       }}
                     />
                   </Show>
-                  <Show when={showModelPicker()}>
-                    <Suspense>
-                      <LazyModelPicker
-                        currentSelection={model()}
-                        showManageModels={false}
-                        popupGap={6}
-                        onSelect={(sel) => {
-                          if (sel.providerID && sel.modelID) {
-                            const variants = getVariantsForModel(
-                              sel.providerID,
-                              sel.modelID,
-                              visibleProviders()
-                            );
-                            const preference = variantPreference();
-                            const rememberedVariant = getStoredVariantForModel(
-                              sel.providerID,
-                              sel.modelID
-                            );
-                            const keepVariant =
-                              preference === null
-                                ? null
-                                : preference && variants.includes(preference)
-                                  ? preference
-                                  : rememberedVariant === null
-                                    ? null
-                                    : rememberedVariant && variants.includes(rememberedVariant)
-                                      ? rememberedVariant
-                                      : undefined;
-                            setModel({
-                              providerID: sel.providerID,
-                              modelID: sel.modelID,
-                              variant: keepVariant ? keepVariant : undefined,
-                            });
-                            setVariantPreference(keepVariant);
-                          }
-                        }}
-                        onClose={() => setShowModelPicker(false)}
-                      />
-                    </Suspense>
-                  </Show>
                 </div>
               </Field>
 
@@ -516,6 +474,50 @@ export function RalphForm() {
                 {isSubmitting() ? 'Starting…' : 'Start loop'}
               </button>
             </div>
+            <div ref={setModelPickerPortalRef} class="ralph-form-picker-portal" />
+            <Show when={showModelPicker() ? modelPickerPortalRef() : undefined}>
+              {(mount) => (
+                <Portal mount={mount()}>
+                  <ModelPicker
+                    currentSelection={model()}
+                    showManageModels={false}
+                    popupGap={6}
+                    matchTriggerWidth={true}
+                    onSelect={(sel) => {
+                      if (sel.providerID && sel.modelID) {
+                        const variants = getVariantsForModel(
+                          sel.providerID,
+                          sel.modelID,
+                          visibleProviders()
+                        );
+                        const preference = variantPreference();
+                        const rememberedVariant = getStoredVariantForModel(
+                          sel.providerID,
+                          sel.modelID
+                        );
+                        const keepVariant =
+                          preference === null
+                            ? null
+                            : preference && variants.includes(preference)
+                              ? preference
+                              : rememberedVariant === null
+                                ? null
+                                : rememberedVariant && variants.includes(rememberedVariant)
+                                  ? rememberedVariant
+                                  : undefined;
+                        setModel({
+                          providerID: sel.providerID,
+                          modelID: sel.modelID,
+                          variant: keepVariant ? keepVariant : undefined,
+                        });
+                        setVariantPreference(keepVariant);
+                      }
+                    }}
+                    onClose={() => setShowModelPicker(false)}
+                  />
+                </Portal>
+              )}
+            </Show>
           </div>
         </div>
       </Portal>

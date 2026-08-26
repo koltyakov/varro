@@ -673,4 +673,40 @@ describe('ModelPicker', () => {
     expect(anchor?.style.width).toBe('250px');
     expect(anchor?.style.left).toBe('0px');
   });
+
+  it('can match the model trigger width', async () => {
+    setState('providers', [
+      createProvider('openai', 'OpenAI', {
+        'gpt-5': createModel('gpt-5', 'GPT-5'),
+      }),
+    ]);
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(600);
+
+    cleanup = render(
+      () => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn(), matchTriggerWidth: true }),
+      container!
+    );
+    const anchor = container?.querySelector<HTMLElement>('.model-picker-anchor');
+    const button = document.createElement('button');
+    button.className = 'model-picker-btn';
+    container?.appendChild(button);
+    vi.spyOn(anchor!, 'offsetParent', 'get').mockReturnValue(container);
+    vi.spyOn(container!, 'getBoundingClientRect').mockReturnValue({
+      ...container!.getBoundingClientRect(),
+      left: 100,
+      right: 500,
+      bottom: 500,
+    });
+    vi.spyOn(button, 'getBoundingClientRect').mockReturnValue({
+      ...button.getBoundingClientRect(),
+      left: 120,
+      right: 480,
+      width: 360,
+      top: 450,
+    });
+    await flushMicrotasks();
+
+    expect(anchor?.style.width).toBe('360px');
+    expect(anchor?.style.left).toBe('20px');
+  });
 });

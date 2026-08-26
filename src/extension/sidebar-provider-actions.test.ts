@@ -73,7 +73,6 @@ function createActionFixture() {
   });
 
   const webviewSession = {
-    setFocus: vi.fn(),
     updateCommandState: vi.fn(),
     reload: vi.fn(() => Promise.resolve()),
   };
@@ -352,7 +351,6 @@ describe('createSidebarProviderActions', () => {
     await actions.handleApiRequest({ id: 4, method: 'GET', path: '/api', body: { ok: true } });
 
     expect(deps.handleReadyMessage).toHaveBeenCalledOnce();
-    expect(webviewSession.setFocus).toHaveBeenCalledWith(true);
     expect(deps.setProviderWatchActive).toHaveBeenCalledWith(true);
     expect(deps.postContext).toHaveBeenCalledTimes(2);
     expect(deps.refreshProviders).toHaveBeenCalledOnce();

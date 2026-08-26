@@ -2362,7 +2362,7 @@ test('virtualized sticky preview remains visible through active tool layout chan
 
   const samples = await page
     .locator('.interactive-list')
-    .evaluate(async (element, expectedText) => {
+    .evaluate(async (_element, expectedText) => {
       const sessionID = 'session-sticky-preview-large';
       const messageID = 'sticky-live-assistant';
       const reasoning = {

@@ -844,11 +844,6 @@ function FileChangeCard(props: {
   const hasTruncatedSummary = () => summaries().length > 0;
   const isMultiFile = () => changes().length > 1 || hasTruncatedSummary();
   const effectiveKind = () => (isMultiFile() ? 'edited' : (change()?.kind ?? 'edited'));
-  const fileCountLabel = () => {
-    const count = changes().length;
-    if (count === 0) return 'Files';
-    return `${count}${hasTruncatedSummary() ? '+' : ''} file${count === 1 ? '' : 's'}`;
-  };
   const visibleMultiFileCount = () => (changes().length > 2 ? 1 : changes().length);
   const visibleMultiFileChanges = () => changes().slice(0, visibleMultiFileCount());
   const hiddenMultiFileChanges = () => changes().slice(visibleMultiFileCount());
@@ -1054,10 +1049,7 @@ function FileChangeCard(props: {
   );
   const fileContent = () => (
     <>
-      <Show
-        when={!isMultiFile() && change()}
-        fallback={<span class="file-edit-summary-label">{fileCountLabel()}</span>}
-      >
+      <Show when={!isMultiFile() && change()}>
         <Show
           when={effectiveKind() !== 'moved'}
           fallback={
@@ -1253,9 +1245,6 @@ function FileChangeCard(props: {
                 <span class="diff-lines-added">+{diffStats()!.additions}</span>
                 <span class="diff-lines-removed">-{diffStats()!.deletions}</span>
               </span>
-            </Show>
-            <Show when={isRunning()}>
-              <span class="file-edit-running-label">editing…</span>
             </Show>
             <Show when={isError()}>
               <span class={`file-edit-error-label${isAborted() ? ' is-aborted' : ''}`}>

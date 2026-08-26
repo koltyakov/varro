@@ -33,6 +33,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Check TypeScript suggestions
+        run: npm run typecheck:suggestions
+
       - name: Lint
         run: npm run lint:check
 
@@ -67,6 +70,9 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck
+
+      - name: Check TypeScript suggestions
+        run: npm run typecheck:suggestions
 
       - name: Test
         run: npm test

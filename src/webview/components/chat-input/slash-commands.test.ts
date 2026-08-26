@@ -68,7 +68,7 @@ describe('getSlashCommands', () => {
     expect(onGenerateStats).toHaveBeenNthCalledWith(2, true);
   });
 
-  it('shows session actions and hides init outside blank sessions', () => {
+  it('shows session actions and hides new-session commands in existing sessions', () => {
     const commands = getSlashCommands({
       hasCurrentSession: true,
       canInit: false,
@@ -80,6 +80,7 @@ describe('getSlashCommands', () => {
     });
 
     expect(commands.some((command) => command.name === 'init')).toBe(false);
+    expect(commands.some((command) => command.name === 'ralph')).toBe(false);
     expect(commands.some((command) => command.name === 'export')).toBe(true);
     expect(commands.some((command) => command.name === 'fork')).toBe(false);
     expect(commands.some((command) => command.name === 'abort')).toBe(false);

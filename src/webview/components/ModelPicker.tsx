@@ -34,6 +34,7 @@ export function ModelPicker(props: {
   currentSelection?: { providerID?: string | null; modelID?: string | null } | null;
   showManageModels?: boolean;
   popupGap?: number;
+  matchTriggerWidth?: boolean;
 }) {
   const currentSelection = () =>
     props.currentSelection !== undefined ? props.currentSelection : state.selectedModel;
@@ -227,7 +228,7 @@ export function ModelPicker(props: {
       const buttonBox = button.getBoundingClientRect();
       const gap = props.popupGap ?? 6;
       const viewportMargin = 8;
-      const defaultMenuWidth = 256.5;
+      const defaultMenuWidth = props.matchTriggerWidth ? buttonBox.width : 256.5;
       const minimumMenuWidth = 220;
       const boundaryLeft = Math.max(viewportMargin, hostBox.left);
       const boundaryRight = Math.min(window.innerWidth - viewportMargin, hostBox.right);

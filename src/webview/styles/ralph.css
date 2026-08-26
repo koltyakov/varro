@@ -31,6 +31,7 @@
   --chat-shadow-popover: var(--shadow-popover);
   width: min(560px, 100%);
   max-height: 90vh;
+  position: relative;
   display: flex;
   flex-direction: column;
   background: var(--color-vscode-sidebar);
@@ -38,6 +39,10 @@
   border-radius: var(--chat-radius-card);
   box-shadow: var(--chat-shadow-popover);
   color: var(--color-vscode-fg);
+}
+
+.ralph-form-picker-portal {
+  display: contents;
 }
 
 .ralph-form-header {

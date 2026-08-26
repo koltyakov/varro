@@ -298,42 +298,6 @@ export class OpenCodeServer extends EventEmitter {
     this.processManager.managedProcess = value;
   }
 
-  private get processStdoutHandler(): ((data: Buffer) => void) | null {
-    return this.processManager.processStdoutHandler;
-  }
-
-  private set processStdoutHandler(value: ((data: Buffer) => void) | null) {
-    this.processManager.processStdoutHandler = value;
-  }
-
-  private get processStderrHandler(): ((data: Buffer) => void) | null {
-    return this.processManager.processStderrHandler;
-  }
-
-  private set processStderrHandler(value: ((data: Buffer) => void) | null) {
-    this.processManager.processStderrHandler = value;
-  }
-
-  private get processExitHandler():
-    | ((code: number | null, signal: NodeJS.Signals | null) => void)
-    | null {
-    return this.processManager.processExitHandler;
-  }
-
-  private set processExitHandler(
-    value: ((code: number | null, signal: NodeJS.Signals | null) => void) | null
-  ) {
-    this.processManager.processExitHandler = value;
-  }
-
-  private get processErrorHandler(): ((err: Error) => void) | null {
-    return this.processManager.processErrorHandler;
-  }
-
-  private set processErrorHandler(value: ((err: Error) => void) | null) {
-    this.processManager.processErrorHandler = value;
-  }
-
   private setStatus(s: ServerStatus) {
     const previousStatus = this._status;
     const nextStatus = normalizeRunningStatus(s, this._status);
@@ -1218,10 +1182,6 @@ export class OpenCodeServer extends EventEmitter {
     }, OpenCodeServer.CRASH_STABILITY_WINDOW_MS);
   }
 
-  private detachProcessListeners(proc: ChildProcess | null) {
-    this.processManager.detachProcessListeners(proc);
-  }
-
   private startMaintenanceLoop() {
     this.processManager.startMaintenanceLoop(() => {
       void this.runMaintenanceTick();
@@ -1875,10 +1835,6 @@ export class OpenCodeServer extends EventEmitter {
 
   private async syncInjectedConfigFile() {
     await this.processManager.syncInjectedConfigFile();
-  }
-
-  private serializeInjectedConfig() {
-    return this.processManager.serializeInjectedConfig();
   }
 
   private async restartManagedServerForCompactionSettings() {

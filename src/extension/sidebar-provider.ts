@@ -1305,15 +1305,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await this.providerFileRefresh.refreshWorkspaceState(previousRouting, currentRouting);
   }
 
-  private async readProviderFilesSignature() {
-    return this.providerFileRefresh.readFilesSignature();
-  }
-
-  private async handleReadyMessage() {
-    await this.webviewSession.handleReady();
-    this.providerFileRefresh.postStatus();
-  }
-
   private async cleanupExpiredRecycleBin() {
     await this.runtime.cleanupExpiredRecycleBin(this.serverEventBridge.getStatus());
   }
@@ -1322,22 +1313,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.post({ type: 'config/update', payload: this.readConfig() });
   }
 
-  private postContext() {
-    this.post({ type: 'context/update', payload: this.getEditorContext() });
-  }
-
   private getEditorContext() {
     return this.contextProvider.context;
-  }
-
-  private async handleDroppedContent(
-    files: Array<{ name: string; content: string; size: number }>
-  ) {
-    await this.contextFilesState.handleDroppedContent(files, (message) => this.post(message));
-  }
-
-  private async handleDroppedPaths(paths: string[]) {
-    await this.contextFilesState.handleDroppedPaths(paths, (message) => this.post(message));
   }
 
   private async storePdf(
@@ -1384,18 +1361,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       return;
     }
     await this.droppedFilesService.removeOwnedFiles(payload.paths);
-  }
-
-  private removeContextFile(path: string) {
-    this.contextFilesState.removeContextFile(path, (message) => this.post(message));
-  }
-
-  private clearContextFiles() {
-    this.contextFilesState.clearContextFiles();
-  }
-
-  private async pickFiles() {
-    await this.contextFilesState.pickFiles((message) => this.post(message));
   }
 
   private searchFiles(

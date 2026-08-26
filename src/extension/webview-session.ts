@@ -30,7 +30,6 @@ export class WebviewSession {
   public interruptedSessionsForWebview: InterruptedSessionSnapshot[] = [];
   public blockingRequestsForWebview: BlockingRequestSnapshot[] = [];
 
-  private webviewHasFocus = false;
   private webviewReady = false;
   private pendingInputFocus = false;
   private pendingSearchSessions = false;
@@ -138,10 +137,6 @@ export class WebviewSession {
     this.bridge.post({ type: 'api/response', payload });
   }
 
-  setFocus(focused: boolean) {
-    this.webviewHasFocus = focused;
-  }
-
   requestInputFocus() {
     this.pendingInputFocus = true;
     this.flushPendingInputFocus();
@@ -206,7 +201,6 @@ export class WebviewSession {
     this.bridge.invalidatePendingDeliveries();
     this.disposeMessageListener();
     this.webviewReady = false;
-    this.webviewHasFocus = false;
     this.resetCommandState();
   }
 
@@ -236,7 +230,6 @@ export class WebviewSession {
           this.disposeMessageListener();
           this.bridge.setView(undefined);
           this.webviewReady = false;
-          this.webviewHasFocus = false;
           this.resetCommandState();
           this.deps.handleDisposedSideEffects();
           this.deps.updateStatusBarItem();
@@ -283,7 +276,6 @@ export class WebviewSession {
         if (webviewView.visible) {
           this.handleVisible();
         } else {
-          this.webviewHasFocus = false;
           this.deps.onHidden();
         }
         this.deps.updateStatusBarItem();
@@ -299,7 +291,6 @@ export class WebviewSession {
   async handleReady() {
     const status = this.deps.renderStatus();
     this.webviewReady = true;
-    this.webviewHasFocus = false;
     this.deliveryRecoveryPending = false;
     this.postBootMessages(status, { clearResolvedEmbedded: true });
     this.flushPendingCommands();
