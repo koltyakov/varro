@@ -178,6 +178,19 @@ describe('UserMessageContent', () => {
     expect(markdown?.querySelector('blockquote')?.textContent?.trim()).toBe('Confirm the result');
   });
 
+  it('renders task-list checkboxes in user prompts', () => {
+    renderUserContent([textPart('text-1', '- [x] Do this\n- [ ] Do that')]);
+
+    const markdown = container?.querySelector('.user-message-markdown');
+    expect(markdown?.querySelectorAll('.markdown-task-checkbox')).toHaveLength(2);
+    expect(markdown?.querySelector('.markdown-task-checkbox-checked')).toBeInstanceOf(
+      HTMLSpanElement
+    );
+    expect(markdown?.querySelector('.markdown-task-checkbox-unchecked')).toBeInstanceOf(
+      HTMLSpanElement
+    );
+  });
+
   it('renders Markdown links through the external-link bridge', () => {
     const send = installSendToExtension();
     renderUserContent([textPart('text-1', 'Read the [documentation](https://example.test/docs).')]);

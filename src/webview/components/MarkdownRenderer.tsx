@@ -3,6 +3,7 @@ import type { JSX } from 'solid-js';
 import { Portal, render } from 'solid-js/web';
 import DOMPurify from 'dompurify';
 import { marked, Tokenizer } from 'marked';
+import type { Tokens } from 'marked';
 import type { Mermaid, MermaidConfig } from 'mermaid';
 import { writeClipboard } from '../lib/write-clipboard';
 import { openPathWithResult, postMessage } from '../lib/bridge';
@@ -469,6 +470,19 @@ function buildFileLink(raw: string, label?: string) {
 
 renderer.html = function ({ text }: { text: string }) {
   return renderMarkdownContext?.escapeHtml ? escapeHtml(text) : text;
+};
+
+renderer.listitem = function (item: Tokens.ListItem) {
+  const className = item.task ? ' class="task-list-item"' : '';
+  return `<li${className}>${this.parser.parse(item.tokens)}</li>\n`;
+};
+
+renderer.checkbox = function ({ checked }: { checked: boolean }) {
+  const label = checked ? 'Completed task' : 'Incomplete task';
+  const check = checked
+    ? '<path d="M7 12.5L10 15.5L17 8.5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"></path>'
+    : '';
+  return `<span class="markdown-task-checkbox markdown-task-checkbox-${checked ? 'checked' : 'unchecked'}" role="img" aria-label="${label}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 20.4V3.6C3 3.26863 3.26863 3 3.6 3H20.4C20.7314 3 21 3.26863 21 3.6V20.4C21 20.7314 20.7314 21 20.4 21H3.6C3.26863 21 3 20.7314 3 20.4Z" stroke="currentColor" stroke-width="1.5"></path>${check}</svg></span>`;
 };
 
 renderer.code = function ({ text, lang }: { text: string; lang?: string }) {

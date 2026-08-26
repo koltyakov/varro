@@ -1638,6 +1638,27 @@ body.vscode-light
   left: -16px;
   color: var(--color-vscode-muted);
 }
+.rendered-markdown ul > li.task-list-item::before {
+  content: none;
+}
+.rendered-markdown .markdown-task-checkbox {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-right: 4px;
+  color: var(--color-vscode-muted);
+  vertical-align: -2px;
+}
+.rendered-markdown .markdown-task-checkbox-checked {
+  color: var(--color-vscode-fg-soft);
+}
+.rendered-markdown .markdown-task-checkbox svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
 .rendered-markdown ol {
   list-style: none;
   padding-inline-start: 18px;

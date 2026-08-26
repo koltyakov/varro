@@ -154,6 +154,23 @@ describe('MarkdownRenderer', () => {
     expect(root.textContent).toContain('Review <button type="button">Run</button>');
   });
 
+  it('renders GFM task lists with non-interactive checkbox icons', () => {
+    const html = __parseMarkdownForTests('- [x] Do this\n- [ ] Do that', {
+      cacheByContent: false,
+    });
+    const root = document.createElement('div');
+    root.innerHTML = html;
+
+    expect(root.querySelectorAll('li.task-list-item')).toHaveLength(2);
+    expect(root.querySelectorAll('input')).toHaveLength(0);
+    expect(root.querySelector('.markdown-task-checkbox-checked')?.getAttribute('aria-label')).toBe(
+      'Completed task'
+    );
+    expect(
+      root.querySelector('.markdown-task-checkbox-unchecked')?.getAttribute('aria-label')
+    ).toBe('Incomplete task');
+  });
+
   it('does not reuse rendered Markdown for colliding content hashes', () => {
     const first = 'OcbLqTZb]B8V*RyFHEyj';
     const second = 'GifJgLaGm0`PdPJEHDaw';
