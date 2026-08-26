@@ -98,7 +98,6 @@ export function missingLiveGates(snapshot, scenario) {
   if (!snapshot.stickyMessageId) missing.push('sticky latest prompt');
   if (!snapshot.fileEdit) missing.push('file edit or diff');
   if (!snapshot.disclosure) missing.push('expandable activity disclosure');
-  if (!snapshot.nestedActivityScroller?.hasRange) missing.push('scrollable active tray');
   if (scenario === 'AI-08' && !snapshot.diffControl) missing.push('expandable diff control');
   return missing;
 }
@@ -126,7 +125,7 @@ export function buildLivePrompt({ seed, scenario = 'AI-07', promptRun = 1, attem
     missing.length === 0
       ? ''
       : ` The previous turn missed these gates, so make them especially clear in this turn: ${missing.join(', ')}.`;
-  return `${marker} Work only in the current OpenCode repository. This new turn must independently produce the complete live gate; do not assume activity or UI from an earlier turn carries over.${missingEmphasis} Investigate one real, bounded test-coverage or code-quality issue. Start with at least eight independent read or search tool calls in one parallel assistant step and retain completed reads or searches for an expandable Explored disclosure. Make a small verified change to exactly two existing source or test files, inspect the resulting expandable diff, and run two focused checks separately with a 60-second tool timeout and no watch mode. Produce enough reasoning and tool activity for this prompt to move above the viewport. After the edit, issue exactly six separate read-only bash calls concurrently, one command per tool call: "sleep 8 && git status --short", "sleep 16 && git rev-parse --short HEAD", "sleep 24 && git diff --check", "sleep 32 && git status --porcelain=v1", "sleep 40 && git diff --stat", and "sleep 48 && git log -1 --oneline". Do not write final prose until all six complete. Keep a todo list and brief reasoning between groups. Do not spawn, delegate to, or otherwise use subagents. Finish with VFZ-TOOLS-END. Do not commit, change branches, install dependencies, generate dependency trees, touch files outside this repository, or undo existing work.`;
+  return `${marker} Work only in the current OpenCode repository. This new turn must independently produce the complete live gate; do not assume activity or UI from an earlier turn carries over.${missingEmphasis} Investigate one real, bounded test-coverage or code-quality issue. Inspect the relevant implementation with three to five separate read or search operations, using parallel calls when they are genuinely independent, and retain completed work for an expandable Explored disclosure. Make the smallest justified change in one to three existing source or test files, inspect the resulting expandable diff, and run a focused test plus any broader check warranted by the change. Use bounded timeouts and no watch mode. Produce enough reasoning and tool activity for this prompt to move above the viewport. Do not use sleep, no-op commands, duplicate status commands, or deliberately slow work to keep tools visible. Keep a todo list and brief reasoning between groups. Do not write final prose until verification completes. Do not spawn, delegate to, or otherwise use subagents. Finish with VFZ-TOOLS-END. Do not commit, change branches, install dependencies, generate dependency trees, touch files outside this repository, or undo existing work.`;
 }
 
 export function buildDuplicateDeliveryPrompt(seed, tokens, promptRun = 1) {
@@ -3720,46 +3719,31 @@ async function runLive(options) {
             renderKeys: gate.bestSnapshot.turnRenderKeys,
           }
         : null;
-      handoff = await nestedHandoff(cdp, gate.marker, scope);
-      if (shouldRetryNestedHandoff(handoff)) {
-        const firstAttempt = handoff;
-        await new Promise((resolve) => setTimeout(resolve, 250));
-        const retry = await nestedHandoff(cdp, gate.marker, scope);
-        handoff = { ...retry, recoveryAttempts: [firstAttempt, retry] };
+      if (gate.bestSnapshot?.nestedActivityScroller?.hasRange) {
+        handoff = await nestedHandoff(cdp, gate.marker, scope);
+        if (shouldRetryNestedHandoff(handoff)) {
+          const firstAttempt = handoff;
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          const retry = await nestedHandoff(cdp, gate.marker, scope);
+          handoff = { ...retry, recoveryAttempts: [firstAttempt, retry] };
+        }
       }
       attemptRecord.handoff = handoff;
       attemptRecord.actionScope = scope;
       if (scenario === 'AI-07') break;
 
-      const stillActive = await client.isBusy(tracked.id);
-      const firstAction = {
-        ...manifest.actionPlan[0],
-        dispatched: !!handoff.before,
-        executed: handoff.passed,
-        handoff,
-      };
-      if (!handoff.passed) {
-        firstAction.reason = stillActive
-          ? (handoff.reason ?? 'nested handoff was not verified')
-          : 'model stream settled';
-      }
-      actions = [firstAction];
-      if (handoff.passed) {
-        actions.push(
-          ...(await executeActionPlan(
-            cdp,
-            manifest.actionPlan.slice(1),
-            tracked.title,
-            launch.remoteDebuggingPort,
-            {
-              isActive: () => client.isBusy(tracked.id),
-              marker: gate.marker,
-              sessionId: tracked.id,
-              scope,
-            }
-          ))
-        );
-      }
+      actions = await executeActionPlan(
+        cdp,
+        manifest.actionPlan,
+        tracked.title,
+        launch.remoteDebuggingPort,
+        {
+          isActive: () => client.isBusy(tracked.id),
+          marker: gate.marker,
+          sessionId: tracked.id,
+          scope,
+        }
+      );
       attemptRecord.actions = actions;
       const attemptActionFailure = actions.find((action) => !action.executed);
       if (!shouldRetryAi08WithFreshStream(attemptActionFailure, attempt, maxPrompts)) break;
@@ -3790,7 +3774,7 @@ async function runLive(options) {
       promptRun,
       prepared:
         best?.missing.length === 0 &&
-        handoff?.passed === true &&
+        (handoff === null || handoff.passed === true) &&
         !actionFailure &&
         failures.length === 0,
       model: requestedModel,

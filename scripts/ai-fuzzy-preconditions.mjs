@@ -106,7 +106,7 @@ export function buildPreconditionReport(summary, requiredTurns = DEFAULT_TURNS) 
     staticReady: Object.values(checks).every((value) => value !== false),
     checks,
     notes: {
-      'AI-07': 'Run ai:live to prepare the active stream, sticky prompt, edit, disclosure, and nested scroller.',
+      'AI-07': 'Run ai:live to prepare the active stream, sticky prompt, edit, and disclosure.',
       'AI-08': 'Run ai:live to prepare the live gate and execute the recorded 50-action plan.',
     },
   };
@@ -123,7 +123,6 @@ export function buildActionPlan(seed) {
   const width = [360, 430, 486, 720];
   const keys = ['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Space', 'Shift+Space', 'Home', 'End'];
   const required = [
-    'wheel verified nested scroller, then outer transcript',
     'switch session away and back',
     'PageDown on transcript',
     'Space on transcript',

@@ -91,7 +91,7 @@ test('keeps the latest live-gate sample and the best busy sample separately', as
   assert.equal(gate.snapshot.busy, false);
   assert.equal(gate.bestSnapshot.busy, true);
   assert.deepEqual(gate.missing, ['file edit or diff']);
-  assert.deepEqual(gate.latestMissing, ['active model stream', 'scrollable active tray']);
+  assert.deepEqual(gate.latestMissing, ['active model stream']);
   assert.equal(gate.observations.length, 2);
 });
 
@@ -147,40 +147,40 @@ test('builds a targeted bounded recovery prompt from missing gates', () => {
   const prompt = buildLivePrompt({
     seed: 'abc',
     attempt: 2,
-    missing: ['file edit or diff', 'scrollable active tray'],
+    missing: ['file edit or diff'],
   });
 
   assert.match(prompt, /^\[VFZ:abc:AI-07:R1:TOOLS-A2\]/);
-  assert.match(prompt, /exactly two existing source or test files/);
-  assert.match(prompt, /six separate read-only bash calls concurrently/);
+  assert.match(prompt, /one to three existing source or test files/);
   assert.match(prompt, /new turn must independently produce the complete live gate/);
-  assert.match(prompt, /especially clear.*file edit or diff, scrollable active tray/);
+  assert.match(prompt, /especially clear.*file edit or diff/);
   assert.match(prompt, /expandable Explored disclosure/);
+  assert.match(prompt, /Do not use sleep, no-op commands, duplicate status commands/);
   assert.match(prompt, /Do not spawn, delegate to, or otherwise use subagents/);
 });
 
 test('requests the complete gate in every retry when successive turns split the gates', () => {
   const retries = [
     buildLivePrompt({ seed: 'abc', attempt: 2, missing: ['file edit or diff'] }),
-    buildLivePrompt({ seed: 'abc', attempt: 3, missing: ['scrollable active tray'] }),
+    buildLivePrompt({ seed: 'abc', attempt: 3, missing: ['expandable activity disclosure'] }),
   ];
 
   for (const prompt of retries) {
-    assert.match(prompt, /eight independent read or search tool calls/);
-    assert.match(prompt, /exactly two existing source or test files/);
+    assert.match(prompt, /three to five separate read or search operations/);
+    assert.match(prompt, /one to three existing source or test files/);
     assert.match(prompt, /expandable diff/);
     assert.match(prompt, /expandable Explored disclosure/);
-    assert.match(prompt, /exactly six separate read-only bash calls concurrently/);
+    assert.doesNotMatch(prompt, /sleep \d/);
   }
 });
 
 test('the initial task requests the content forms needed by the live gate', () => {
   const prompt = buildLivePrompt({ seed: 'abc', attempt: 1 });
 
-  assert.match(prompt, /eight independent read or search tool calls/);
-  assert.match(prompt, /exactly two existing source or test files/);
-  assert.match(prompt, /exactly six separate read-only bash calls concurrently/);
-  assert.match(prompt, /60-second tool timeout/);
+  assert.match(prompt, /three to five separate read or search operations/);
+  assert.match(prompt, /one to three existing source or test files/);
+  assert.match(prompt, /run a focused test plus any broader check warranted by the change/);
+  assert.doesNotMatch(prompt, /sleep \d/);
 });
 
 test('uses distinct live prompt markers for AI-07 and AI-08', () => {

@@ -339,10 +339,11 @@ blocks after section 40. Emit every section in order and end with VFZ-STREAM-END
 ```text
 [VFZ:<seed>:TOOLS] Work only in the current OpenCode repository. Investigate one real, bounded code
 quality or test-coverage issue, explain the approach in reasoning, inspect the relevant implementation
-with several separate read/search operations, edit two to four existing source or test files, and run
-at least two focused checks separately. When parallel tool calls are supported, begin with at least six
-independent read or search operations in one assistant step so four or more activity items remain
-visible together. Keep a todo list and continue producing brief progress text between tool groups.
+with three to five separate read/search operations, make the smallest justified edit to one to three
+existing source or test files, and run a focused test plus any broader check warranted by the change.
+Use parallel tool calls only for genuinely independent work. Do not pad activity with sleeps, no-op
+commands, duplicate status calls, or deliberately slow work. Keep a todo list and continue producing
+brief progress text between tool groups.
 Open and review the resulting diff, fix any issue found by the checks, and finish with a concise report
 containing VFZ-TOOLS-END. Do not commit, change branches, install or upgrade dependencies, generate
 dependency trees, touch files outside this repository, or undo changes you did not make.
@@ -354,7 +355,7 @@ decorative Markdown. The timed observation must include all of these if the mode
 - visible Thinking/reasoning updates before and between tool groups
 - parallel and sequential reads/searches with overlapping active items
 - at least one real file edit followed by an inline file card or diff
-- a command with enough output to create a nested scroller
+- command output or concurrent activity when it occurs naturally
 - a failed or corrective intermediate check when it occurs naturally; do not manufacture failures
 - completion transitions from active tools into Explored/Worked plus final response text
 
@@ -368,10 +369,11 @@ npm run ai:live -- run --manifest <manifest-path> --launch <launch.json> --scena
 
 The controller allows three prompts by default and at most four when explicitly requested. Every prompt
 is a new turn and must request the complete minimum gate set: a virtualized active stream, sticky marked
-prompt, file edit and expandable diff when required, retained disclosure, and a verified nested activity
-scroller. Retry prompts emphasize gates that the previous turn missed, but never assume a gate from an
+prompt, file edit and expandable diff when required, and retained disclosure. Retry prompts emphasize
+gates that the previous turn missed, but never assume a gate from an
 earlier turn carries into the new turn. It polls the real Varro DOM while the model is busy, begins native interaction as soon as
-the gate is simultaneously true, verifies the nested-to-outer wheel handoff, and executes AI-08's
+the gate is simultaneously true, verifies the nested-to-outer wheel handoff if a scrollable activity tray
+occurs naturally, and executes AI-08's
 recorded 50-action plan. It waits for bounded stream settlement and records the resulting fixture status
 in the manifest so cleanup has exact changed-path evidence. Stop prompting as soon as the gate is reached.
 
@@ -413,8 +415,8 @@ static gate for every scenario. If no valid golden exists, it creates one once w
 history. The source golden is never a run-created session and must not be deleted during run cleanup.
 
 Static history can establish AI-01 through AI-06 cheaply. It cannot satisfy AI-07 or AI-08 by itself.
-The manifest keeps those gates pending until the live stream proves the required edit, disclosure,
-virtualized state, and nested-scroller geometry. Treat a failed static gate as setup work to repair or
+The manifest keeps those gates pending until the live stream proves the required edit, disclosure, and
+virtualized state. Treat a failed static gate as setup work to repair or
 regenerate before launching the timed scenario, not as a late scenario surprise.
 
 After launching or restarting the dedicated host, verify that the fork survived into the exact server
@@ -599,20 +601,16 @@ Pass invariants:
 ### AI-07 Activity, Tools, And Sticky Streaming
 
 Precondition: the Extension Development Host workspace is the clean `tmp/opencode` fixture, the session
-is virtualized, the latest user prompt can become sticky, and the active tray contains a nested scroller
-that can consume wheel input in the intended direction. Before the timed actions, verify that the target
-has `scrollHeight > clientHeight`, computed `overflow-y` of
-`auto` or `scroll`, and available scroll range in that direction. If the first tool recipe does not
-produce enough simultaneously visible or retained activity, prompt Luna or Terra for at least six
-independent read/search operations in one assistant step when parallel tool calls are supported, then
-restart the scenario from its precondition. An expanded Explored disclosure is ordinary outer flow content and
-does not satisfy this precondition unless it independently passes the same nested-scroller checks.
+is virtualized, and the latest user prompt can become sticky. The live turn must produce real reasoning,
+tool activity, a file edit, and a retained disclosure. A scrollable active tray is optional because Luna
+and Terra may serialize otherwise independent tool calls. AI-16 owns required live nested-scroller
+stress. The deterministic layout suite always verifies native-style nested-to-outer wheel ownership.
 
 1. Send the realistic tool and activity recipe using Luna or Terra. Record the clean fixture baseline
    and every changed path before timed interaction continues.
 2. Keep the source prompt just above the viewport while reasoning text and tool cards appear.
-3. Expand the active tray item when available, wheel the verified nested scroller while it has range,
-   and then move the pointer outside that scroller and wheel the outer transcript.
+3. Expand an activity disclosure when available and wheel the outer transcript. If the active tray has
+   real scroll range, also verify nested-to-outer wheel ownership before continuing.
 4. Let at least two tool operations complete while detached from the bottom.
 5. Return to the bottom before the final tool completes and observe the transition into Explored or
    Worked.
@@ -622,8 +620,8 @@ Pass invariants:
 - The sticky prompt remains the same marked prompt throughout unrelated activity height changes.
 - Active items do not duplicate, disappear before completion, or replay entrance animation after a
   virtual remount.
-- Nested wheel movement stays local while possible; outer movement immediately takes ownership when
-  requested.
+- When a scrollable active tray occurs, nested wheel movement stays local while possible and outer
+  movement immediately takes ownership when requested.
 - A detached visible marker remains fixed through completion and grouping.
 - At the bottom, disappearing activity space is replaced without a one-frame jump and releases after
   streamed content consumes it.
@@ -635,15 +633,13 @@ Pass invariants:
 ### AI-08 Seeded Mixed-Ownership Fuzz
 
 Precondition: an active Luna or Terra realistic repository stream in a virtualized session with at
-least one file edit, one expandable disclosure, and a verified nested scroller using the AI-07 geometry
-and overflow checks.
+least one file edit and one expandable disclosure.
 AI-08 also requires a successful recorded AI-07 preparation. Its current fixture commit, status, and
 exact changed paths must equal AI-07's exit evidence. A generically clean fixture does not bypass this
 precondition.
 
-Generate and record all 50 seeded actions before starting the stream. Reserve early positions for the
-session switch and nested-to-outer wheel handoff so the model cannot normally finish before those
-actions.
+Generate and record all 50 seeded actions before starting the stream. Reserve an early position for the
+session switch so the model cannot normally finish before that action.
 Perform exactly those 50 actions and ensure the sequence contains at least one of every category:
 
 - upward and downward wheel input
@@ -654,18 +650,15 @@ Perform exactly those 50 actions and ensure the sequence contains at least one o
 - file-card and diff expansion, focus, and collapse
 - sticky click or jump-to-latest
 - session switch away and back
-- outer transcript movement after nested scrolling
+- outer transcript movement after disclosure interaction
 
-An unavailable or mis-targeted action does not count toward the 50. Do not treat sticky chrome, a
-message row, an expanded non-scrollable disclosure, or an element that merely differs by a few pixels
-of box-model rounding as a nested scroller. Recheck the target immediately before dispatch because
-streaming can remove its available range. If the model settles before every required active-stream
+An unavailable or mis-targeted action does not count toward the 50. If the model settles before every required active-stream
 action, restart the scenario with the same seed and a fresh realistic stream rather than completing the
 sequence against settled content.
 
 Scope disclosure, diff, file-card, and activity actions to message IDs, part IDs, and render keys from
 the current marked turn. Count an action only after its pre/post samples prove the intended effect, such
-as changed expansion state, correct focus owner, transcript movement, nested-to-outer handoff, or measured
+as changed expansion state, correct focus owner, transcript movement, or measured
 width. A successfully dispatched mouse or key event is not an executed action by itself.
 
 Pass invariants:
