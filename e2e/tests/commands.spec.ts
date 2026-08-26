@@ -1,27 +1,22 @@
 import { expect, test } from '@playwright/test';
 
-test('supports slash commands for sessions, models, and MCP servers', async ({ page }) => {
+test('hides disabled slash commands', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=slash-commands');
 
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
-  await composer.fill('/sessions');
-  await expect(page.getByText('Open the session list')).toBeVisible();
-  await page.keyboard.press('Enter');
-  await expect(page.getByText('Sessions', { exact: false })).toBeVisible();
-
-  await page.getByRole('button', { name: 'Slash command flows' }).click();
-  await composer.click();
-  await composer.fill('/models');
-  await page.keyboard.press('Enter');
-  await expect(page.getByText('OpenAI', { exact: true })).toBeVisible();
-  await expect(page.getByText('OpenCode Go', { exact: true })).toBeVisible();
-
-  await composer.click();
-  await composer.fill('/mcp');
-  await page.keyboard.press('Enter');
-  await expect(page.getByRole('button', { name: /chrome connected/i })).toBeVisible();
-  await expect(page.getByRole('button', { name: /playwright disabled/i })).toBeVisible();
+  for (const [command, description] of [
+    ['/new', 'Start a new chat session'],
+    ['/sessions', 'Open the session list'],
+    ['/fork', 'Fork the current session'],
+    ['/attach', 'Pick files or folders to attach'],
+    ['/abort', 'Stop the current run'],
+    ['/models', 'Open the model picker'],
+    ['/mcp', 'Open the MCP picker for this session'],
+  ] as const) {
+    await composer.fill(command);
+    await expect(page.getByText(description, { exact: true })).not.toBeVisible();
+  }
 });
 
 test('reacts to host command events for focus and attention sessions', async ({ page }) => {

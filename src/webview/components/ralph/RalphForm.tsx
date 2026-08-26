@@ -21,6 +21,8 @@ import { getVariantsForModel } from '../../lib/model-variants';
 import { formatVariantLabel } from '../../lib/format';
 import { getLeafPathName } from '../../lib/path-display';
 import { trapModalFocus } from '../../lib/modal-focus';
+import { xmarkIcon } from '../../lib/ui-icons';
+import { UiIcon } from '../UiIcon';
 
 const LazyModelPicker = lazy(() =>
   import('../ModelPicker').then((module) => ({ default: module.ModelPicker }))
@@ -330,7 +332,7 @@ export function RalphForm() {
                 Start Ralph loop
               </span>
               <button type="button" class="ralph-form-close" onClick={close} aria-label="Close">
-                ×
+                <UiIcon source={xmarkIcon} width={16} height={16} aria-hidden="true" />
               </button>
             </div>
 

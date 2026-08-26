@@ -12,19 +12,12 @@ vi.mock('../../hooks/useOpenCode', () => ({
 }));
 
 describe('getSlashCommands', () => {
-  it('includes init for blank sessions alongside built-ins and custom commands', () => {
+  it('includes init but hides session actions in new chats', () => {
     const onGenerateStats = vi.fn();
     const commands = getSlashCommands({
-      isBusy: false,
-      canUndo: true,
-      canRedo: true,
+      hasCurrentSession: false,
       canInit: true,
       onConnectProvider: () => {},
-      onOpenSessions: () => {},
-      onOpenModels: () => {},
-      onOpenMcps: () => {},
-      onOpenFiles: () => {},
-      onAttachDiagnostics: () => {},
       onOpenSettings: () => {},
       onExportSession: () => {},
       onGenerateStats,
@@ -43,19 +36,11 @@ describe('getSlashCommands', () => {
     });
 
     expect(commands.map((command) => command.name)).toEqual([
-      'attach',
       'compact',
       'connect',
-      'diagnostics',
-      'export',
-      'fork',
       'init',
-      'mcp',
-      'models',
-      'new',
       'ralph',
       'review',
-      'sessions',
       'settings',
       'skills',
       'stats',
@@ -63,9 +48,15 @@ describe('getSlashCommands', () => {
       'thinking',
     ]);
     expect(commands.some((command) => command.name === 'init')).toBe(true);
-    expect(commands.some((command) => command.name === 'export')).toBe(true);
+    expect(commands.some((command) => command.name === 'export')).toBe(false);
+    expect(commands.some((command) => command.name === 'fork')).toBe(false);
     expect(commands.some((command) => command.name === 'redo')).toBe(false);
-    expect(commands.find((command) => command.name === 'diagnostics')?.aliases).toEqual([]);
+    expect(commands.some((command) => command.name === 'diagnostics')).toBe(false);
+    expect(commands.some((command) => command.name === 'attach')).toBe(false);
+    expect(commands.some((command) => command.name === 'mcp')).toBe(false);
+    expect(commands.some((command) => command.name === 'models')).toBe(false);
+    expect(commands.some((command) => command.name === 'new')).toBe(false);
+    expect(commands.some((command) => command.name === 'sessions')).toBe(false);
     expect(commands.some((command) => command.name === 'skills')).toBe(true);
     expect(commands.some((command) => command.name === 'test')).toBe(true);
     expect(commands.some((command) => command.name === 'undo')).toBe(false);
@@ -77,18 +68,11 @@ describe('getSlashCommands', () => {
     expect(onGenerateStats).toHaveBeenNthCalledWith(2, true);
   });
 
-  it('hides init outside blank sessions', () => {
+  it('shows session actions and hides init outside blank sessions', () => {
     const commands = getSlashCommands({
-      isBusy: false,
-      canUndo: false,
-      canRedo: false,
+      hasCurrentSession: true,
       canInit: false,
       onConnectProvider: () => {},
-      onOpenSessions: () => {},
-      onOpenModels: () => {},
-      onOpenMcps: () => {},
-      onOpenFiles: () => {},
-      onAttachDiagnostics: () => {},
       onOpenSettings: () => {},
       onExportSession: () => {},
       onGenerateStats: () => {},
@@ -96,20 +80,16 @@ describe('getSlashCommands', () => {
     });
 
     expect(commands.some((command) => command.name === 'init')).toBe(false);
+    expect(commands.some((command) => command.name === 'export')).toBe(true);
+    expect(commands.some((command) => command.name === 'fork')).toBe(false);
+    expect(commands.some((command) => command.name === 'abort')).toBe(false);
   });
 
   it('keeps reserved built-ins hidden when a custom command reuses the name', () => {
     const commands = getSlashCommands({
-      isBusy: false,
-      canUndo: false,
-      canRedo: false,
+      hasCurrentSession: true,
       canInit: false,
       onConnectProvider: () => {},
-      onOpenSessions: () => {},
-      onOpenModels: () => {},
-      onOpenMcps: () => {},
-      onOpenFiles: () => {},
-      onAttachDiagnostics: () => {},
       onOpenSettings: () => {},
       onExportSession: () => {},
       onGenerateStats: () => {},

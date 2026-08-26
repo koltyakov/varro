@@ -1,4 +1,4 @@
-import { ErrorBoundary, Show, Suspense, lazy, onCleanup, onMount } from 'solid-js';
+import { ErrorBoundary, Show, onCleanup, onMount } from 'solid-js';
 import { useOpenCode } from './hooks/useOpenCode';
 import { createOpenCodeRuntime, installOpenCodeRuntime } from './hooks/runtime/useOpenCode.runtime';
 import { connectionInitialized, defaultAppState } from './lib/state';
@@ -14,10 +14,7 @@ import { ralphStore } from './lib/stores/ralph-store';
 import { observeSurfaceContrast } from './lib/theme';
 import { folderIcon, warningCircleSolidIcon } from './lib/ui-icons';
 import { UiIcon } from './components/UiIcon';
-
-const LazyRalphForm = lazy(() =>
-  import('./components/ralph/RalphForm').then((module) => ({ default: module.RalphForm }))
-);
+import { RalphForm } from './components/ralph/RalphForm';
 
 export function AppRoot() {
   onCleanup(cleanupBridge);
@@ -108,9 +105,7 @@ export function App() {
         </Show>
       </Show>
       <Show when={ralphStore.showRalphForm()}>
-        <Suspense>
-          <LazyRalphForm />
-        </Suspense>
+        <RalphForm />
       </Show>
       <SessionActionFeedback
         error={defaultAppState.error}

@@ -44,7 +44,7 @@ export const ralphStore = {
 
   /**
    * Returns the manager session id for the Ralph run that owns the given
-   * iteration child session, or null if no Ralph run currently tracks it.
+   * child or repair session, or null if no Ralph run currently tracks it.
    * Used so navigating "back" from a Ralph iteration session returns to the
    * Ralph dashboard instead of the global sessions list.
    */
@@ -52,7 +52,10 @@ export const ralphStore = {
     if (!childSessionId) return null;
     for (const run of Object.values(runs)) {
       for (const iteration of run.iterations) {
-        if (iteration.childSessionId === childSessionId) {
+        if (
+          iteration.childSessionId === childSessionId ||
+          iteration.repairSessionIds?.includes(childSessionId)
+        ) {
           return run.config.managerSessionId;
         }
       }

@@ -91,7 +91,7 @@ export function Chat() {
     providers: Provider[];
     error: string;
     loading: boolean;
-    providerID: string;
+    providerID: string | null;
   } | null>(null);
 
   createEffect(() => {
@@ -466,6 +466,14 @@ export function Chat() {
       await selectSession(directReturnSessionId);
       return;
     }
+    // Ralph owns its iteration and repair sessions, so return to the dashboard
+    // before applying generic sub-agent navigation.
+    const ralphParentId = ralphStore.findManagerSessionIdForChild(sessionId);
+    if (ralphParentId && ralphParentId !== sessionId) {
+      setShowSessionPicker(false);
+      await selectSession(ralphParentId);
+      return;
+    }
     const parentSessionId = sessionId ? sessionsById().get(sessionId)?.parentID : null;
     if (parentSessionId) {
       const rootSessionId = getSessionTreeRootId(sessionId) || parentSessionId;
@@ -476,15 +484,6 @@ export function Chat() {
       }
       setSubagentParentId(rootSessionId);
       setShowSessionPicker(true);
-      return;
-    }
-    // If the user is currently viewing a Ralph iteration child session, "back"
-    // should return to the owning Ralph dashboard instead of the global
-    // sessions list.
-    const ralphParentId = ralphStore.findManagerSessionIdForChild(sessionId);
-    if (ralphParentId && ralphParentId !== sessionId) {
-      setShowSessionPicker(false);
-      await selectSession(ralphParentId);
       return;
     }
     const discardableActiveBlankSessionId = getDiscardableActiveBlankSessionId();
@@ -640,6 +639,7 @@ export function Chat() {
   const activeBackTitle = createMemo(() => {
     if (
       getDirectSessionReturnId(state.activeSessionId) ||
+      ralphStore.findManagerSessionIdForChild(state.activeSessionId) ||
       (isDesktopSessionLayout() && activeSession()?.parentID)
     ) {
       return 'Back to parent session';
@@ -786,8 +786,8 @@ export function Chat() {
             providerLoadError={data().error}
             isLoadingProviders={data().loading}
             initialProviderID={data().providerID}
-            lockProvider
-            reauthentication
+            lockProvider={Boolean(data().providerID)}
+            reauthentication={Boolean(data().providerID)}
             onClose={() => setProviderConnectionData(null)}
           />
         )}

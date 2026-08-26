@@ -240,6 +240,18 @@ describe('ralph store findManagerSessionIdForChild', () => {
     expect(ralphStore.findManagerSessionIdForChild('child-2')).toBe('manager-child-1');
   });
 
+  it('returns the manager session id for a known repair session', async () => {
+    const { ralphStore } = await loadRalphStore();
+    const config = createConfig({ managerSessionId: 'manager-repair-1' });
+    ralphStore.startRun(config);
+    ralphStore.upsertIteration(
+      config.managerSessionId,
+      createIteration(1, { repairSessionIds: ['repair-1'] })
+    );
+
+    expect(ralphStore.findManagerSessionIdForChild('repair-1')).toBe('manager-repair-1');
+  });
+
   it('returns null when the child id is unknown or falsy', async () => {
     const { ralphStore } = await loadRalphStore();
     const config = createConfig({ managerSessionId: 'manager-child-2' });

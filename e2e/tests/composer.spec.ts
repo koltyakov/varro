@@ -450,7 +450,7 @@ test('keeps an optimistic steer visible through canonical parts and stale histor
 test('keeps pre-input panels visible for model picker and reserved for MCP picker', async ({
   page,
 }) => {
-  await page.goto('/e2e/harness/index.html?scenario=todo-queue');
+  await page.goto('/e2e/harness/index.html?scenario=todo-queue&mcp=1');
 
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.fill('Keep this queued while choosing a model');
@@ -495,9 +495,7 @@ test('keeps pre-input panels visible for model picker and reserved for MCP picke
   await expect(inputShell).toBeVisible();
 
   await page.keyboard.press('Escape');
-  await composer.fill('/mcp');
-  await expect(page.getByText('Open the MCP picker for this session')).toBeVisible();
-  await page.keyboard.press('Enter');
+  await page.getByRole('button', { name: /MCPs? enabled/i }).click();
   await expect(page.locator('.dropdown-menu')).toBeVisible();
   await expect(queue).toBeHidden();
   await expect(todo).toBeHidden();

@@ -41,10 +41,7 @@ test('supports keyboard navigation and escape in the model picker', async ({ pag
 test('filters MCPs in the MCP picker and shows a no-match state', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=mcp-search');
 
-  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
-  await composer.click();
-  await composer.fill('/mcp');
-  await page.keyboard.press('Enter');
+  await page.getByRole('button', { name: /MCPs? enabled/i }).click();
 
   const search = page.getByLabel('Search MCPs');
   await expect(search).toBeVisible();
@@ -59,10 +56,7 @@ test('filters MCPs in the MCP picker and shows a no-match state', async ({ page 
 test('supports keyboard navigation and escape in the MCP picker', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=mcp-search');
 
-  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
-  await composer.click();
-  await composer.fill('/mcp');
-  await page.keyboard.press('Enter');
+  await page.getByRole('button', { name: /MCPs? enabled/i }).click();
 
   const search = page.getByLabel('Search MCPs');
   await expect(search).toBeVisible();
@@ -75,9 +69,6 @@ test('supports keyboard navigation and escape in the MCP picker', async ({ page 
     .filter({ has: page.getByText('sentry', { exact: true }) });
   await expect(sentryRow).toBeVisible();
 
-  await composer.fill('/mcp');
-  await page.keyboard.press('Enter');
-  await expect(search).toBeVisible();
   await expect(sentryRow).toBeVisible();
   await search.press('Escape');
   await expect(search).toHaveCount(0);

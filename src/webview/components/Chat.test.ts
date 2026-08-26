@@ -1614,6 +1614,54 @@ describe('header status badges', () => {
     ).toBeNull();
   });
 
+  it('returns directly from a Ralph subsession to its manager session', async () => {
+    // SAFETY: The fixture provides the never fields read by this statement.
+    const selectSessionSpy = vi
+      .spyOn(openCodeModule, 'selectSession')
+      .mockResolvedValue(undefined as never);
+
+    setState('sessions', [
+      session('manager', 500),
+      session('ralph-child', 400, { parentID: 'manager' }),
+    ]);
+    setState('activeSessionId', 'ralph-child');
+    ralphStore.startRun({
+      managerSessionId: 'manager',
+      workspaceDirectory: '/workspace',
+      planDocPath: 'PLAN.md',
+      iterations: 1,
+      promptTemplate: 'Prompt',
+      permissionMode: 'full',
+      model: null,
+      agent: null,
+      createdAt: 1,
+    });
+    ralphStore.upsertIteration('manager', {
+      index: 1,
+      childSessionId: 'ralph-child',
+      status: 'running',
+      startedAt: 1,
+      endedAt: null,
+      filesChanged: [],
+      verification: {},
+    });
+
+    cleanup = render(() => Chat(), container!);
+
+    const backButton = container?.querySelector<HTMLButtonElement>(
+      '.chat-header .chat-header-btn[aria-label="Back to parent session"]'
+    );
+    expect(backButton).toBeInstanceOf(HTMLButtonElement);
+
+    backButton?.click();
+    await Promise.resolve();
+
+    expect(selectSessionSpy).toHaveBeenCalledWith('manager');
+    expect(
+      container?.querySelector('.session-list-view:not(.session-list-view-sidebar)')
+    ).toBeNull();
+  });
+
   it('returns directly to the originating top-level session after following a session link', async () => {
     // SAFETY: The fixture provides the never fields read by this statement.
     const selectSessionSpy = vi
@@ -2838,6 +2886,37 @@ describe('header status badges', () => {
     expect(dialog?.textContent).toContain('Login with GitHub Copilot');
     expect(dialog?.textContent).not.toContain('Back to providers');
     expect(dialog?.querySelector('[aria-label="Search providers"]')).toBeNull();
+  });
+
+  it('opens the provider picker for a generic connection request', async () => {
+    vi.spyOn(client.config, 'providerCatalog').mockResolvedValue({
+      all: [
+        { id: 'anthropic', name: 'Anthropic', source: 'api', models: {} },
+        { id: 'openai', name: 'OpenAI', source: 'api', models: {} },
+      ],
+      default: {},
+      connected: [],
+    });
+    setState('sessions', [session('session-1', 500)]);
+    setState('activeSessionId', 'session-1');
+    cleanup = render(() => Chat(), container!);
+
+    requestProviderConnection();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    await vi.waitFor(() =>
+      expect(document.body.querySelector<HTMLElement>('[role="dialog"]')).toBeInstanceOf(
+        HTMLElement
+      )
+    );
+    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
+    expect(dialog?.textContent).toContain('Connect provider');
+    expect(dialog?.textContent).toContain('Anthropic');
+    expect(dialog?.textContent).toContain('OpenAI');
+    expect(dialog?.querySelector('[aria-label="Search providers"]')).toBeInstanceOf(
+      HTMLInputElement
+    );
   });
 
   it('renders Models from the session picker on narrow screens', () => {

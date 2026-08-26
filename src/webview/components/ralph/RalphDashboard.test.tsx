@@ -352,6 +352,86 @@ describe('RalphDashboard', () => {
     expect(limits?.getAttribute('title')).toContain('Monthly: 40 / 100 left');
   });
 
+  it.each([
+    {
+      modelID: 'gpt-5.6-codex',
+      visibleLabels: ['5-Hour Limit', 'Weekly All-Model'],
+      hiddenLabels: ['5-Hour Limit (Spark)', 'Weekly Limit (Spark)'],
+      badges: ['95%', '100%'],
+    },
+    {
+      modelID: 'gpt-5.3-codex-spark',
+      visibleLabels: ['5-Hour Limit (Spark)', 'Weekly Limit (Spark)'],
+      hiddenLabels: ['5-Hour Limit:', 'Weekly All-Model'],
+      badges: ['100%', '100%'],
+    },
+  ])(
+    'shows the matching OpenAI limits for $modelID',
+    ({ modelID, visibleLabels, hiddenLabels, badges }) => {
+      currentRun = run({
+        status: 'running',
+        config: {
+          model: { providerID: 'openai', modelID },
+        },
+      });
+      getProviderLimitMock.mockReturnValue(
+        providerLimit({
+          modelID,
+          windows: [
+            {
+              id: 'five_hour',
+              label: '5-Hour Limit',
+              unit: 'requests',
+              remaining: 95,
+              limit: 100,
+              resetAt: Date.now() + 60_000,
+              percent: 5,
+            },
+            {
+              id: 'seven_day',
+              label: 'Weekly All-Model',
+              unit: 'requests',
+              remaining: 100,
+              limit: 100,
+              resetAt: Date.now() + 60_000,
+              percent: 0,
+            },
+            {
+              id: 'spark_five_hour',
+              label: '5-Hour Limit (Spark)',
+              unit: 'requests',
+              remaining: 100,
+              limit: 100,
+              resetAt: Date.now() + 60_000,
+              percent: 0,
+            },
+            {
+              id: 'spark_seven_day',
+              label: 'Weekly Limit (Spark)',
+              unit: 'requests',
+              remaining: 100,
+              limit: 100,
+              resetAt: Date.now() + 60_000,
+              percent: 0,
+            },
+          ],
+        })
+      );
+
+      renderDashboard();
+
+      const limits = container?.querySelector('.ralph-dashboard-provider-limits');
+      const title = limits?.getAttribute('title') ?? '';
+      const renderedBadges = Array.from(
+        container?.querySelectorAll('.ralph-dashboard-provider-limit') ?? []
+      ).map((node) => node.textContent?.trim());
+
+      expect(renderedBadges).toEqual(badges);
+      for (const label of visibleLabels) expect(title).toContain(label);
+      for (const label of hiddenLabels) expect(title).not.toContain(label);
+    }
+  );
+
   it('reacts to live provider-limit updates without remounting', async () => {
     currentRun = run({
       status: 'running',

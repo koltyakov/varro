@@ -1843,6 +1843,9 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     state.sessionStatuses[session.id] = { type: 'busy' };
     state.messagesBySessionId[session.id] = [user, assistant];
     state.persistedActiveSessionId = session.id;
+    if (new URLSearchParams(window.location.search).get('mcp') === '1') {
+      state.mcpStatus = createDenseMcpStatus();
+    }
     state.nextSequence = 60;
     return state;
   }

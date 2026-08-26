@@ -14,6 +14,7 @@ import { getProviderLimit } from '../../lib/state';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { pauseSolidIcon, playSolidIcon } from '../../lib/ui-icons';
 import { UiIcon } from '../UiIcon';
+import { filterCompactProviderLimitForModel } from '../chat-input/toolbar-compact';
 import { ralphRunner } from './ralph-runner';
 import { RalphIterationCard } from './RalphIterationCard';
 import { getRalphIterationLiveIssue } from './ralph-live-issue';
@@ -45,7 +46,11 @@ export function RalphDashboard(props: { sessionId: string }) {
   const providerLimit = () => {
     const model = run()?.config.model;
     if (!model) return null;
-    return getProviderLimit(model.providerID, model.modelID);
+    return filterCompactProviderLimitForModel(
+      getProviderLimit(model.providerID, model.modelID),
+      model.modelID,
+      null
+    );
   };
   const providerLimitBadges = () => {
     const limit = providerLimit();

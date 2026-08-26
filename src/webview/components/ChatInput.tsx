@@ -31,7 +31,6 @@ import {
   MAX_CLIPBOARD_IMAGE_SIZE,
   showModelPicker,
   setShowModelPicker,
-  setPersistentShowSessionPicker as setShowSessionPicker,
   composerFocusKey,
   removeClipboardImage,
   removeNativePdf,
@@ -77,7 +76,7 @@ import {
 import { onMessage, postMessage } from '../lib/bridge';
 import { readWebviewInstanceContext } from '../lib/state-stored-values';
 import { client, serverEvents } from '../lib/client';
-import { openProviderSetup } from '../lib/provider-setup';
+import { requestProviderConnection } from '../lib/provider-connection-state';
 import {
   applySessionMcps,
   sendMessage,
@@ -88,6 +87,7 @@ import {
   initSession,
   loadOlderSessionPrompts,
   redoSession,
+  runSlashCommandByName,
   undoSession,
   reviewSession,
   updatePermissionModeForSession,
@@ -212,6 +212,7 @@ import { planMessageHistoryNavigation } from './chat-input/message-history-navig
 import { queuedMessageWasAdmitted } from './chat-input/queued-message-history';
 import {
   SKILLS_COMMAND_NAME,
+  applySlashCompletion,
   createMentionCompletionSource,
   getActiveCompletion,
   getAgentBadgeLine,
@@ -1183,18 +1184,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   const slashCommands = createMemo(() =>
     getSlashCommands({
-      isBusy: isComposerBusy(),
-      canUndo: !!composerSessionId() && state.messages.some((m) => m.info.role === 'assistant'),
-      canRedo:
-        !!composerSessionId() &&
-        !!state.sessions.find((session) => session.id === composerSessionId())?.revert,
+      hasCurrentSession: !!composerSessionId(),
       canInit: !composerSessionId() || state.messages.length === 0,
-      onConnectProvider: openProviderSetup,
-      onOpenSessions: () => setShowSessionPicker(true),
-      onOpenModels: () => setShowModelPicker(true),
-      onOpenMcps: () => setShowMcpPicker(true),
-      onOpenFiles: () => postMessage({ type: 'files/pick' }),
-      onAttachDiagnostics: attachCurrentDiagnostics,
+      onConnectProvider: () => requestProviderConnection(),
       onOpenSettings: () =>
         postMessage({ type: 'vscode/open-settings', payload: { query: 'Varro >' } }),
       onExportSession: () => {
@@ -1373,6 +1365,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
     return slashCommands()
       .filter((command) => command.source !== 'skill')
+      .filter((command) => completion.start === 0 || command.name === SKILLS_COMMAND_NAME)
       .filter((command) => {
         if (!query) return true;
         return (
@@ -1515,7 +1508,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         e.preventDefault();
         setCompletionIndex(0);
         if (activeCompletion()?.type === 'slash') {
-          setInputText('');
+          if (activeCompletion()?.start === 0) setInputText('');
+          else setSuppressCompletion(true);
         } else {
           setSuppressCompletion(true);
         }
@@ -1529,7 +1523,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         const items = composerCompletions();
         const item = items[Math.min(completionIndex(), items.length - 1)];
         void applyActiveCompletion(item?.type === 'slash' && !item.acceptsArguments);
-        setSuppressCompletion(true);
+        setSuppressCompletion(item?.type !== 'slash' || item.name !== SKILLS_COMMAND_NAME);
         return;
       }
     }
@@ -1616,7 +1610,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
 
     if (completionSelection.type === 'set-slash') {
-      setComposerValue(completionSelection.value);
+      if (completion?.type !== 'slash') return;
+      applySlashCompletionValue(completion, completionSelection.value);
       return;
     }
 
@@ -1624,6 +1619,19 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (completionSelection.session) rememberSessionReference(completionSelection.session);
     if (completion?.type !== 'mention' && completion?.type !== 'session') return;
     applyCompletionValue(completion, completionSelection.value);
+  }
+
+  function applySlashCompletionValue(
+    completion: Extract<ReturnType<typeof getActiveCompletion>, { type: 'slash' }>,
+    value: string
+  ) {
+    const result = applySlashCompletion(inputText(), completion, value);
+    batch(() => {
+      setInputText(result.value);
+      setCaretPosition(result.cursor);
+      setCompletionIndex(0);
+    });
+    queueMicrotask(() => richEditorRef?.focus());
   }
 
   function applyCompletionValue(
@@ -1682,6 +1690,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       if (name === 'init' && !args) {
         return initSession();
       }
+      if (name === 'diagnostics' && !args) {
+        attachCurrentDiagnostics();
+        return Promise.resolve();
+      }
       return null;
     };
 
@@ -1690,6 +1702,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       builtInCommand === null
         ? slashCommands().find((item) => item.name === name || item.aliases.includes(name))
         : null;
+    const skillCommand =
+      builtInCommand === null && !fallbackCommand
+        ? state.commands.find((command) => command.source === 'skill' && command.name === name)
+        : undefined;
+    if (builtInCommand === null && !fallbackCommand && !skillCommand) return false;
     setHistoryIndex(null);
     setHistoryDraft('');
     setInputText('');
@@ -1699,6 +1716,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       await builtInCommand;
       return true;
     }
+    if (skillCommand) return runSlashCommandByName(skillCommand.name, args);
     if (!fallbackCommand) return false;
     await fallbackCommand.action(args);
     return true;
@@ -3842,7 +3860,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               }
 
               if (completionSelection.type === 'set-slash') {
-                setComposerValue(completionSelection.value);
+                if (completion?.type !== 'slash') return;
+                applySlashCompletionValue(completion, completionSelection.value);
                 return;
               }
 

@@ -2,7 +2,7 @@ import { createSignal } from 'solid-js';
 
 type ProviderConnectionRequest = {
   id: number;
-  providerID: string;
+  providerID: string | null;
 };
 
 const [providerConnectionRequest, setProviderConnectionRequest] =
@@ -65,9 +65,8 @@ export function resolveProviderAuthFailure(providerID: string) {
   });
 }
 
-export function requestProviderConnection(providerID: string) {
-  const normalizedProviderID = providerID.trim();
-  if (!normalizedProviderID) return;
+export function requestProviderConnection(providerID?: string) {
+  const normalizedProviderID = providerID?.trim() || null;
   setProviderConnectionRequest({ id: ++nextRequestID, providerID: normalizedProviderID });
 }
 

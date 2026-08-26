@@ -5,11 +5,7 @@ import { getE2EState } from './helpers';
 test('opens the MCP picker and syncs connection requests', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=mcp-pickers');
 
-  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
-  await composer.click();
-  await composer.fill('/mcp');
-  await expect(page.getByText('Open the MCP picker for this session')).toBeVisible();
-  await page.keyboard.press('Enter');
+  await page.getByRole('button', { name: /MCPs? enabled/i }).click();
 
   await expect(page.getByText('chrome', { exact: true })).toBeVisible();
   await expect(page.getByText('needs auth', { exact: true })).toBeVisible();
@@ -47,18 +43,14 @@ test('opens the MCP picker and syncs connection requests', async ({ page }) => {
 test('restores preselected MCPs after reload', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=mcp-pickers');
 
-  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
-  await composer.click();
-  await composer.fill('/mcp');
-  await page.keyboard.press('Enter');
+  const mcpButton = page.getByRole('button', { name: /MCPs? enabled/i });
+  await mcpButton.click();
 
   await expect(page.getByRole('button', { name: /chrome connected/i })).toBeVisible();
   await page.keyboard.press('Escape');
 
   await page.reload();
-  await composer.click();
-  await composer.fill('/mcp');
-  await page.keyboard.press('Enter');
+  await mcpButton.click();
 
   await expect(page.getByRole('button', { name: /chrome connected/i })).toBeVisible();
   await expect

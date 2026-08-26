@@ -30,6 +30,10 @@ import { client } from '../lib/client';
 import { resetMessageEditState, startEditingMessage } from '../lib/message-edit-state';
 import { setSessionHistoryPrompts } from '../lib/message-window';
 import { hasExpandedDiffOverlay, setExpandedDiffOverlay } from '../lib/diff-overlay-state';
+import {
+  providerConnectionRequest,
+  resetProviderConnectionState,
+} from '../lib/provider-connection-state';
 import { fixture } from '../test-fixtures';
 import type { UnknownRecord } from '../../shared/type-utils';
 import {
@@ -192,6 +196,7 @@ afterEach(() => {
   setIsLoading(false);
   setShowChangedFiles(false);
   setShowModelPicker(false);
+  resetProviderConnectionState();
   setState('activeSessionId', null);
   setState('messagesLoading', false);
   setState('messages', []);
@@ -2303,6 +2308,82 @@ describe('ChatInput', () => {
     expect(inputText()).toBe('/zzvarrotest');
     expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
     expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('opens the skills completion list on Enter', async () => {
+    setState('commands', [
+      {
+        name: 'browser-bridge',
+        description: 'Control a browser',
+        template: 'Control a browser',
+        source: 'skill',
+      },
+    ]);
+    setInputText('/skills');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
+    editor.focus();
+    setCollapsedSelection(editor.firstChild, '/skills'.length);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: 's', bubbles: true }));
+    await flushAsyncWork();
+
+    editor.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    );
+    await flushAsyncWork();
+
+    expect(inputText()).toBe('/skills ');
+    expect(container?.querySelector('.composer-completion-header')?.textContent).toBe('Skills');
+    expect(container?.querySelector('.composer-completion-title')?.textContent).toBe(
+      '/browser-bridge'
+    );
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('selects and runs a skill from the middle of a prompt', async () => {
+    setState('commands', [
+      {
+        name: 'browser-bridge',
+        description: 'Control a browser',
+        template: 'Control a browser',
+        source: 'skill',
+      },
+    ]);
+    const draft = 'Please use /skills bro for this';
+    const completionEnd = 'Please use /skills bro'.length;
+    setInputText(draft);
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
+    editor.focus();
+    setCollapsedSelection(editor.firstChild, completionEnd);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'o', bubbles: true }));
+    await flushAsyncWork();
+
+    expect(container?.querySelector('.composer-completion-title')?.textContent).toBe(
+      '/browser-bridge'
+    );
+    editor.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    );
+    await flushAsyncWork();
+
+    expect(inputText()).toBe('/browser-bridge Please use for this');
+    expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
+
+    editor.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    );
+    await flushAsyncWork();
+
+    expect(runSlashCommandByNameMock).toHaveBeenCalledWith('browser-bridge', 'Please use for this');
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(inputText()).toBe('');
   });
 
   it('resolves pasted session markers to titled links', async () => {
@@ -4522,6 +4603,20 @@ describe('ChatInput', () => {
     await flushAsyncWork();
 
     expect(runSlashCommandByNameMock).toHaveBeenCalledWith('test', '--watch');
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(inputText()).toBe('');
+  });
+
+  it('opens the Varro provider connection UI with the connect slash command', async () => {
+    setInputText('/connect');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    editor?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flushAsyncWork();
+
+    expect(providerConnectionRequest()?.providerID).toBeNull();
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(inputText()).toBe('');
   });

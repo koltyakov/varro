@@ -35,7 +35,7 @@ vi.mock('./components/Chat', () => ({
 vi.mock('./components/ralph/RalphForm', () => ({
   RalphForm: () => {
     if (appMocks.ralphError.current) throw appMocks.ralphError.current;
-    return null;
+    return 'Ralph Form';
   },
 }));
 
@@ -247,6 +247,14 @@ describe('AppRoot', () => {
       expect(container?.textContent).toContain('Something went wrong');
       expect(container?.textContent).toContain('ralph failed');
     });
+  });
+
+  it('renders RalphForm synchronously the first time it is opened', () => {
+    ralphStore.setShowRalphForm(true);
+
+    mountAppRoot();
+
+    expect(container?.textContent).toContain('Ralph Form');
   });
 
   it('shows app errors in a toast and runs its retry action', () => {

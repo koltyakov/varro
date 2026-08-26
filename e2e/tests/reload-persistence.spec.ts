@@ -21,10 +21,8 @@ test('keeps selected model, agent, MCP, and permission mode after reload', async
   await page.getByRole('button', { name: 'Full access' }).click();
   await expect(page.getByRole('button', { name: 'Full access permissions' })).toBeVisible();
 
-  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
-  await composer.click();
-  await composer.fill('/mcp');
-  await page.keyboard.press('Enter');
+  const mcpButton = page.getByRole('button', { name: /MCPs? enabled/i });
+  await mcpButton.click();
   await page.getByRole('button', { name: /github/i }).click();
   await expect(page.locator('.dropdown-item.selected').filter({ hasText: 'github' })).toBeVisible();
   await page.keyboard.press('Escape');
@@ -54,9 +52,7 @@ test('keeps selected model, agent, MCP, and permission mode after reload', async
   await expect(page.getByLabel('Thinking level')).toContainText('Default');
   await expect(page.getByRole('button', { name: 'Full access permissions' })).toBeVisible();
 
-  await composer.click();
-  await composer.fill('/mcp');
-  await page.keyboard.press('Enter');
+  await mcpButton.click();
   await expect(page.locator('.dropdown-item.selected').filter({ hasText: 'chrome' })).toBeVisible();
   await expect(page.locator('.dropdown-item.selected').filter({ hasText: 'github' })).toBeVisible();
 });

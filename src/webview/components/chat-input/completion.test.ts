@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Agent, Session } from '../../types';
 import {
+  applySlashCompletion,
   getActiveCompletion,
   getCompletionSelection,
   getInlineInsertionSuffix,
@@ -142,7 +143,7 @@ describe('shouldRequestMentionFileSearch', () => {
 });
 
 describe('getActiveCompletion', () => {
-  it('detects slash commands only at the start of the input', () => {
+  it('detects slash commands at token boundaries', () => {
     expect(getActiveCompletion('/rev', 4)).toEqual({
       type: 'slash',
       query: 'rev',
@@ -161,7 +162,13 @@ describe('getActiveCompletion', () => {
       start: 0,
       end: 15,
     });
-    expect(getActiveCompletion('prefix /rev', 11)).toBeNull();
+    expect(getActiveCompletion('prefix /rev', 11)).toEqual({
+      type: 'slash',
+      query: 'rev',
+      start: 7,
+      end: 11,
+    });
+    expect(getActiveCompletion('prefix/path', 11)).toBeNull();
   });
 
   it('detects mention completions for the active token', () => {
@@ -195,6 +202,30 @@ describe('getActiveCompletion', () => {
   it('rejects cursor positions outside the input bounds', () => {
     expect(getActiveCompletion('abc', -1)).toBeNull();
     expect(getActiveCompletion('abc', 4)).toBeNull();
+  });
+});
+
+describe('applySlashCompletion', () => {
+  it('opens the skills selector without replacing surrounding prompt text', () => {
+    expect(
+      applySlashCompletion('Use /sk for this', { query: 'sk', start: 4, end: 7 }, '/skills ')
+    ).toEqual({
+      value: 'Use /skills for this',
+      cursor: 12,
+    });
+  });
+
+  it('moves a selected inline skill to the command position', () => {
+    expect(
+      applySlashCompletion(
+        'Please use /skills browser for this',
+        { query: 'skills browser', start: 11, end: 26 },
+        '/browser-bridge'
+      )
+    ).toEqual({
+      value: '/browser-bridge Please use for this',
+      cursor: 35,
+    });
   });
 });
 

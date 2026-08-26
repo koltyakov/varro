@@ -39,28 +39,30 @@ export function getActiveCompletion(text: string, cursor: number) {
   if (cursor < 0 || cursor > text.length) return null;
 
   const prefix = text.slice(0, cursor);
-  const slashMatch = prefix.match(/^\/([^\s]*)$/);
-  if (slashMatch) {
-    return {
-      type: 'slash' as const,
-      query: slashMatch[1] || '',
-      start: 0,
-      end: cursor,
-    };
-  }
-
-  const skillMatch = prefix.match(new RegExp(`^/${SKILLS_COMMAND_NAME}(?:\\s+([^\\s]*))?$`, 'i'));
-  if (skillMatch) {
-    return {
-      type: 'slash' as const,
-      query: prefix.slice(1),
-      start: 0,
-      end: cursor,
-    };
-  }
-
   const tokenStart = Math.max(prefix.lastIndexOf(' '), prefix.lastIndexOf('\n')) + 1;
   const token = prefix.slice(tokenStart);
+  if (token.startsWith('/')) {
+    return {
+      type: 'slash' as const,
+      query: token.slice(1),
+      start: tokenStart,
+      end: cursor,
+    };
+  }
+
+  const skillMatch = prefix.match(
+    new RegExp(`(?:^|\\s)(/${SKILLS_COMMAND_NAME}(?:\\s+[^\\s]*)?)$`, 'i')
+  );
+  if (skillMatch) {
+    const value = skillMatch[1]!;
+    return {
+      type: 'slash' as const,
+      query: value.slice(1),
+      start: cursor - value.length,
+      end: cursor,
+    };
+  }
+
   if (token.startsWith('&')) {
     return {
       type: 'session' as const,
@@ -77,6 +79,31 @@ export function getActiveCompletion(text: string, cursor: number) {
     start: tokenStart,
     end: cursor,
   };
+}
+
+export function applySlashCompletion(
+  text: string,
+  completion: { query: string; start: number; end: number },
+  value: string
+) {
+  if (value === `/${SKILLS_COMMAND_NAME} `) {
+    const suffix = text.slice(completion.end).replace(/^[ \t]+/, '');
+    const nextValue = `${text.slice(0, completion.start)}${value}${suffix}`;
+    return {
+      value: nextValue,
+      cursor: completion.start + value.length,
+    };
+  }
+
+  if (completion.query.toLowerCase().startsWith(`${SKILLS_COMMAND_NAME} `)) {
+    const before = text.slice(0, completion.start).trimEnd();
+    const after = text.slice(completion.end).trimStart();
+    const args = before && after ? `${before} ${after}` : before || after;
+    const nextValue = args ? `${value} ${args}` : value;
+    return { value: nextValue, cursor: nextValue.length };
+  }
+
+  return { value, cursor: value.length };
 }
 
 export function getSessionCompletionItems(sessions: Session[]): MentionCompletionItem[] {
