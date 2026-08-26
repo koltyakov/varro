@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: OpenCode Workbench",
-  "version": "0.26.9",
+  "version": "0.26.10",
   "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
@@ -382,6 +382,16 @@
           "type": "boolean",
           "default": false,
           "description": "Keep thinking blocks expanded and outside Explored during the active turn."
+        },
+        "varro.chat.fontSize": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 6,
+          "maximum": 100,
+          "default": null,
+          "markdownDescription": "Font size for text in Varro chat. Set to `null` to use the VS Code `chat.fontSize` setting, or use `13.5` for text slightly larger than the default."
         },
         "varro.chat.showChangedFiles": {
           "type": "boolean",

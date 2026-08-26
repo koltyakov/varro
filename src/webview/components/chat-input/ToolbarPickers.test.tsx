@@ -364,6 +364,7 @@ describe('ToolbarPickers', () => {
     expect(options[1]?.className).toContain('selected');
     expect(options[0]?.textContent).toContain('PLANNER');
     expect(options[1]?.textContent).toContain('Reviews work');
+    expect(options[1]?.querySelector('.text-vscode-muted')?.className).toContain('font-normal');
 
     toggleButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     options[0]?.dispatchEvent(new MouseEvent('mouseenter'));

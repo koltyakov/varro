@@ -16,7 +16,7 @@ export function readExtensionConfigState(
     showChangedFiles: config.get<boolean>('chat.showChangedFiles', false),
     desktopSessionPaneSide: config.get<'left' | 'right'>('chat.desktopSessionPaneSide', 'left'),
     defaultPermissionMode: readDefaultPermissionMode(config),
-    chatFontSize: readChatFontSize(chatConfig),
+    chatFontSize: readChatFontSize(config, chatConfig),
     chatFontFamily: readChatFontFamily(chatConfig),
   };
 }
@@ -26,8 +26,16 @@ function readDefaultPermissionMode(config: vscode.WorkspaceConfiguration) {
   return isPermissionMode(value) ? value : 'default';
 }
 
-function readChatFontSize(config: vscode.WorkspaceConfiguration): number {
-  const value = config.get<unknown>('fontSize', DEFAULT_CHAT_FONT_SIZE);
+function readChatFontSize(
+  config: vscode.WorkspaceConfiguration,
+  chatConfig: vscode.WorkspaceConfiguration
+): number {
+  const override = config.get<unknown>('chat.fontSize');
+  if (isNumber(override) && Number.isFinite(override) && override >= 6 && override <= 100) {
+    return override;
+  }
+
+  const value = chatConfig.get<unknown>('fontSize', DEFAULT_CHAT_FONT_SIZE);
   return isNumber(value) && Number.isFinite(value) && value >= 6 && value <= 100
     ? value
     : DEFAULT_CHAT_FONT_SIZE;

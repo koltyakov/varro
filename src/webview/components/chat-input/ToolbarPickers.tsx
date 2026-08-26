@@ -470,7 +470,7 @@ function AgentPickerOption(props: {
         <span class="block truncate">{props.label}</span>
         <span
           ref={(element) => (detailElement = element)}
-          class="block truncate text-[10px] text-vscode-muted"
+          class="block truncate text-[10px] font-normal text-vscode-muted"
         >
           {props.detail}
         </span>

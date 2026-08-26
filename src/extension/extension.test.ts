@@ -1007,4 +1007,18 @@ describe('extension manifest', () => {
       });
     }
   });
+
+  it('contributes a nullable Varro chat font-size override', () => {
+    const properties = packageJson.contributes.configuration.properties as Record<
+      string,
+      Record<string, unknown>
+    >;
+
+    expect(properties['varro.chat.fontSize']).toMatchObject({
+      type: ['number', 'null'],
+      minimum: 6,
+      maximum: 100,
+      default: null,
+    });
+  });
 });
