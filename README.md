@@ -1,169 +1,153 @@
-# Varro: The OpenCode Workbench
+# Varro: OpenCode Workbench
 
 [![Visual Studio Marketplace](https://badgen.net/vs-marketplace/v/koltyakov.varro?color=0078d4)](https://marketplace.visualstudio.com/items?itemName=koltyakov.varro)
 [![Open VSX Version](https://img.shields.io/open-vsx/v/koltyakov/varro?color=a66f00)](https://open-vsx.org/extension/koltyakov/varro)
 [![License: MIT](https://img.shields.io/badge/license-MIT-2ea44f.svg)](https://github.com/koltyakov/varro/blob/main/LICENSE)
 
-**The complete OpenCode experience inside VS Code.**
+Varro runs [OpenCode](https://opencode.ai) inside VS Code. It adds project-aware chat, parallel sessions, plan and change review, model and permission controls, commit-message generation, and usage reports.
 
-Varro brings [OpenCode](https://opencode.ai) into a compact, project-aware workbench for daily agentic development. Run agents, manage parallel sidebar and editor sessions, review plans and inline file changes, generate commit messages, control models and permissions, and monitor context, tokens, and provider limits without leaving the editor.
-
-Varro builds on OpenCode instead of replacing it. Your local OpenCode configuration remains the source of truth for agents, providers, models, commands, skills, and MCP servers.
+OpenCode remains responsible for agents, providers, models, commands, skills, MCP servers, and their configuration. Varro reads that configuration and provides a VS Code interface for it.
 
 ![The Varro OpenCode workbench in VS Code](https://raw.githubusercontent.com/koltyakov/varro/main/assets/demo.png)
 
-## Why Varro
-
-- **Built for the whole agent loop.** Prompts, streaming output, reasoning, tool activity, permissions, questions, todos, plans, inline edits, and changed files stay in one readable flow.
-- **Structured chat output.** Active work, failures, approvals, edits, and final responses are shown directly. Routine activity and thinking collapse into compact summaries that can be expanded.
-- **A coding-first chat composer.** Work with live editor context, inline file, agent, and session chips, drag-and-drop attachments, pasted images and PDFs, terminal selections, slash-command completion, prompt history, undo and redo, and restored drafts.
-- **Image analysis for text-only models.** Configure an `@vision` sub-agent to inspect attached images when the selected model supports tools but not image input.
-- **Read-only codebase Q&A.** Configure an `ask` primary agent to investigate code and documentation without editing files, running commands, or delegating work.
-- **Parallel work that stays clear.** Session state, notifications, and status-bar updates keep background work visible and actionable.
-- **Control work in progress.** Queue follow-ups, steer an active run, or stop and replace the current prompt without waiting for the session to finish.
-- **Permission control for each session.** Keep approval requests in the chat and choose between manual control, edit approval, automatic review, or unrestricted access.
-- **OpenCode controls at the point of work.** Agents, models, reasoning variants, provider connections, and per-session MCP connections are available inside the workbench.
-- **Commit messages where you commit.** Generate a repository-aware message from staged changes in VS Code, without leaving Source Control or handing commit control to the model.
-- **Token usage and limits.** Context fill and session token usage remain visible during work, with detailed accounting, provider limits, and cross-project reports.
-- **Simple to use, adjustable where it matters.** The polished UI keeps everyday actions easy to find and needs little setup, while optional settings tune chat typography, thinking visibility, inline diffs, the changed-files panel, compaction, and default permissions.
-- **Native VS Code theming.** Varro follows light, dark, high-contrast light, and high-contrast dark themes, including theme changes while the workbench is open.
-- **Fits your layout.** Keep Varro in the side panel, maximize the sidebar through VS Code when a conversation needs more room, or open chats in editor tabs for side-by-side work. Larger layouts can also keep the session pane visible beside the active chat.
-
-## OpenCode Feature Coverage
-
-`In workbench` means the workflow has dedicated Varro UI. `Integrated` means OpenCode remains responsible for the underlying configuration or operation while Varro exposes it in the workbench. `Handoff` opens the appropriate OpenCode or VS Code surface.
-
-| OpenCode capability | Coverage | Varro support |
-| --- | --- | --- |
-| Sessions and history | In workbench | Create, search, resume, rename, pin, fork, share, export, recycle, and navigate root and sub-agent sessions. |
-| Streaming chat and tool calls | In workbench | Keep active and important output inline while grouping routine completed activity into expandable summaries. |
-| Queue and steering | In workbench | Queue follow-ups with attachments, manage their order and state, steer the active run, or stop and send a replacement. |
-| Agents and sub-agents | Integrated | Select primary agents, mention agents, follow child sessions, and display delegated work. Agent definitions stay in OpenCode configuration. |
-| Providers, models, and reasoning | In workbench | Connect supported provider credentials, choose models and variants, pin or hide models, and assign helper models. |
-| Files and multimodal context | In workbench | Attach files, folders, selections, terminal output, diagnostics, images, PDFs, and session references, subject to model capabilities. |
-| Permissions and questions | In workbench | Answer inline requests and questions, choose a permission mode per session, and preserve child-session approvals in the parent flow. |
-| Commands and skills | Integrated | Run built-in and custom slash commands, browse OpenCode skills, and use session actions such as compact, undo, redo, and export. |
-| MCP servers | In workbench | View OpenCode MCP servers and connect or disconnect them per session. |
-| Plans and todos | In workbench | Track todos, surface completed plans, open plan documents, continue into implementation, or run Ralph loops. |
-| Compaction and recovery | Integrated | Configure automatic compaction, compact manually, reconnect resumable sessions, and recover from transient transport failures. |
-| LSP, formatters, and custom tools | Integrated | Show active language-server status and render resulting tool activity; definitions and execution remain with OpenCode. |
-| OpenCode configuration and TUI | Handoff | Keep local OpenCode config as the source of truth, open instruction files for editing, or continue any session in the OpenCode TUI. |
-
-## Sessions
-
-Sessions are filtered to the current workspace and grouped into `Recent`, `Archive`, and `Recycle Bin`. Header badges filter or jump to `Running`, `Needs attention`, `Failed`, `Plan ready`, and `Completed` sessions. Pinned and active-state sessions stay surfaced, while ordinary sessions are ordered approximately by activity. Session rows can show queued-message counts, changed files, line additions and removals, token usage, duration, and current state.
-
-OpenCode's native search finds root sessions across loaded and older history. Top-level sessions can be pinned, renamed, or moved to the recycle bin. Any session can be opened in the sidebar, an editor tab, or the OpenCode TUI; shared or unshared; or have its ID copied. New chats can also start directly in editor tabs, with a terminal editor available from the chat-tab toolbar. Sharing asks OpenCode to create a share link and copies it to the clipboard. Sub-agent sessions remain linked to their parent session. On larger layouts, the session list can stay open beside the active chat.
-
-When the sidebar is hidden, Varro can notify you when a plan is ready, a top-level session fails, requests permission, or asks a question. The status bar tracks waiting and completed top-level sessions; selecting it opens work that needs attention first, then completed background work.
-
-![Workspace sessions with status, token, and change summaries](https://raw.githubusercontent.com/koltyakov/varro/main/assets/sessions.png)
-
-## Context And Composer
-
-- The active file and current selection are included automatically while live document context is enabled, which is the default for new sessions.
-- A document chip shows the current live editor context and lets you disable or re-enable it for the session.
-- Files, folders, line ranges, and terminal output can be added with `Varro: Add to Context` or `Cmd+Shift+K` / `Ctrl+Shift+K`.
-- Files and folders can be dragged into the composer, and images can be pasted directly.
-- Typing `@` searches workspace files and available agents.
-- Typing `&` searches recent root sessions and inserts a navigable session reference.
-- While a session is running, you can queue a follow-up, steer the current run, or stop and replace the prompt. Queued messages can be reordered, paused or resumed, edited, retried, removed, or sent immediately as steering.
-- The composer shows active language servers and links to their output when VS Code exposes it.
-- Composer undo and redo include file, image, and PDF attachment changes.
-- Unsent composer text and explicit file or folder attachments are restored after webview or window reloads.
-
-## Chat Output
-
-Varro structures agent output around what needs attention. Running commands stream their output, failures remain visible, permission requests and questions stay actionable, file edits get dedicated summaries or optional inline diffs, and the final response remains separate from tool activity.
-
-Completed routine work and thinking are compacted under summaries such as `Explored` and `Worked` instead of filling the transcript. Expand those summaries or individual tool cards when you need the underlying detail, open long tool input or output in an editor tab, toggle thinking visibility, or enable complete inline file previews.
-
-## Permissions And Questions
-
-Approval requests and follow-up questions stay inside the conversation. Permission prompts provide `Reject`, `Once`, and `Always` actions, while the composer lets each session use one of four modes:
-
-- `Default` follows permission rules from OpenCode configuration and the selected agent, showing requests that require manual approval.
-- `Auto-accept edits` approves file edits, known read-only actions, and sub-agent launches while continuing to ask before other actions.
-- `Auto` judges eligible requests with local rules and, when needed, a configured model. Anything it cannot decide safely falls back to an actionable prompt.
-- `Full access` grants unrestricted access for sessions that can operate without confirmation.
-
-Child sessions inherit the nearest selected permission mode in their session tree. When a child needs manual approval, Varro surfaces its request in the parent conversation without losing child-session ownership.
-
-## Usage And Limits
-
-Token usage is part of the working layout, not only a report. The composer shows context-window fill beside the model controls, session rows show token usage at a glance, and the context popup breaks the active session down into input, output, reasoning, cache reads, cache writes, and sub-agent tokens. It also shows reported session cost when OpenCode supplies it.
-
-Run `/stats` or `Varro: Usage Stats` to open a Markdown report built from retained OpenCode history across all projects. It compares today, the last 7 days, and the last 30 days, with prompt counts and input, output, reasoning, cache, and total tokens grouped by provider and model. `/stats all` adds retained all-time usage.
-
-![Context window and session token breakdown](https://raw.githubusercontent.com/koltyakov/varro/main/assets/context.png)
-
-Provider-limit status is shown when OpenCode metadata or a supported provider endpoint supplies quota data. Available windows include remaining capacity and reset timing. If a provider returns a usage-limit error, Varro provides actions to stop retrying or switch providers.
-
-![Provider quota limits and reset windows](https://raw.githubusercontent.com/koltyakov/varro/main/assets/limits.png)
-
-## Models And MCPs
-
-The model picker loads providers and models from OpenCode. It shows known capabilities such as tool support, reasoning variants, vision and PDF support, and context-window size. Providers and individual models can be hidden from the picker, frequently used models can be pinned, and models can have local display names without changing their OpenCode IDs or configuration.
-
-A tool-capable text-only model can delegate pasted-image analysis to a configured OpenCode sub-agent named `vision`. Give that agent an image-capable model, then include an exact `@vision` mention in the prompt. Varro passes the images to the sub-agent without sending unsupported image input to the parent model. See [Add Vision To A Text-Only Model](https://github.com/koltyakov/varro/blob/main/docs/usage.md#add-vision-to-a-text-only-model) for configuration.
-
-For questions and investigation, configure a primary agent named `ask` with a catch-all deny rule followed by explicit read and search allowances. Varro adds it to the agent picker, where it can use the global model or its own model and can be selected as the default for new sessions. See [Configure Primary Agents](https://github.com/koltyakov/varro/blob/main/docs/usage.md#configure-primary-agents) for a read-only example.
-
-The Models view can connect and disconnect provider credentials through OpenCode using available API-key or OAuth methods. If a provider rejects an expired or revoked credential, Varro offers targeted reauthentication from the failed response and the Models view. Terminal-based OpenCode setup remains available as a fallback.
-
-MCP servers are also loaded from OpenCode and can be connected or disconnected per session.
-
-![Provider and model selection in Varro](https://raw.githubusercontent.com/koltyakov/varro/main/assets/providers.png)
-
-## Auto-Generated Commit Messages
-
-Use the quick wand icon in the Source Control toolbar or run `Varro: Generate Commit Message` from the Command Palette. Varro uses staged changes when present; if nothing is staged, it falls back to the unstaged working tree. It follows recent repository commit style when possible and fills the selected Git repository's commit input for review.
-
-Generation never mixes staged and unstaged scopes, stages files, or commits automatically. Varro preserves an existing draft unless you approve replacement, detects change-scope or input changes while generation is running, and keeps its temporary helper session out of chat history.
-
-## Additional Workflows
-
-- Answer OpenCode questions and permission requests in the chat
-- Open changed files or hand the session off to VS Code Source Control
-- Generate a commit message from staged changes, or unstaged changes when the index is empty, with the quick Source Control toolbar action or the Command Palette
-- Open a completed plan as a Markdown document or continue it in an implementation session
-- Run plan-driven Ralph loops with iteration, verification, repair, pause, and resume controls; Ralph runs use `Full access`
-- Use built-in and custom slash commands such as `/review`, `/compact`, `/export`, `/stats`, `/skills`, `/diagnostics`, `/fork`, and `/ralph`
-- Navigate conversation turns from the transcript rail and open rendered Mermaid diagrams in an expanded preview
-- Reconnect to resumable sessions after a VS Code reload
-
-## Quick Start
+## Quick start
 
 1. [Install Varro](https://marketplace.visualstudio.com/items?itemName=koltyakov.varro) from the VS Code Marketplace.
 2. Install the OpenCode CLI with `npm install -g opencode-ai`.
-3. Run `opencode auth login`, or use `/connect` in Varro, if no provider is configured yet.
+3. Run `opencode auth login`, or use `/connect` in Varro, if no provider is configured.
 4. Open a folder in VS Code and select `Varro` from the Activity Bar.
-5. Start a session. Varro starts or connects to OpenCode when the chat first needs it.
+5. Start a session. Varro starts or connects to OpenCode when needed.
 
-VS Code and VSCodium are the target containers for Varro. VS Code forks have limited support; see [VS Code fork compatibility](https://github.com/koltyakov/varro/blob/main/docs/vscode-forks.md) for details.
+Varro supports VS Code and VSCodium. Support for other VS Code forks is limited; see [VS Code fork compatibility](https://github.com/koltyakov/varro/blob/main/docs/vscode-forks.md).
 
-Varro connects to `http://127.0.0.1:4096` by default. `varro.server.port` accepts integers from 1 through 65535. For advanced manual server management, disable the deprecated, debug-only `varro.server.autoStart` setting and run `opencode serve --port 4096`.
+## Why Varro
 
-The status bar reports the active OpenCode version and compatible updates. On macOS and Linux, `varro.server.autoUpdate` installs updates only through the OpenCode version tested with the current Varro release; Windows uses an upgrade prompt instead.
+- Choose among the providers and models supported by OpenCode instead of tying the editor to one model vendor.
+- Reuse OpenCode agents, commands, skills, MCP servers, and project instructions. The same configuration remains available in Varro, the OpenCode TUI, and other OpenCode clients.
+- Run multiple OpenCode sessions in the sidebar or editor tabs. Search, resume, fork, pin, share, export, archive, and recycle sessions.
+- Follow streaming responses, reasoning, tool calls, questions, permissions, todos, plans, and file changes in one transcript. Routine completed work is grouped into expandable summaries.
+- Include the active file and selection automatically. Attach files, folders, diagnostics, terminal output, images, PDFs, and references to other sessions.
+- Queue follow-up prompts, steer an active run, or stop it and send a replacement.
+- Set permissions per session to manual approval, automatic edit approval, rule or model-based approval, or full access.
+- Select agents, providers, models, reasoning variants, and per-session MCP connections. Pin or hide models and inspect their known capabilities.
+- Review changed files and optional inline diffs. Open completed plans or continue them in implementation sessions.
+- Track context use, token counts, reported cost, and supported provider quotas. Generate cross-project usage reports with `/stats`.
+- Generate a commit message from staged changes, or from unstaged changes when the index is empty. Varro fills the Source Control input but does not stage or commit files.
+- Use VS Code light, dark, and high-contrast themes. Chats work in the sidebar, a maximized sidebar, or side-by-side editor tabs.
 
-Varro watches OpenCode's global configuration and refreshes it when OpenCode is idle. External project-configuration edits may require `Varro: Restart Server`. The command checks for active work and only restarts a server managed by Varro. Restart a manually launched server from its terminal.
+## OpenCode feature coverage
+
+`Workbench` means Varro provides dedicated UI. `Integrated` means OpenCode performs the operation and Varro exposes it. `Handoff` opens the relevant OpenCode or VS Code interface.
+
+| Capability | Coverage | Support |
+| --- | --- | --- |
+| Sessions and history | Workbench | Create, search, resume, rename, pin, fork, share, export, recycle, and navigate root and child sessions. |
+| Chat and tool calls | Workbench | Stream active output; keep failures, approvals, edits, and final responses visible; group routine work into expandable summaries. |
+| Queue and steering | Workbench | Queue and reorder follow-ups, steer the active run, or stop it and send a replacement. |
+| Files and multimodal input | Workbench | Attach files, folders, selections, terminal output, diagnostics, images, PDFs, and session references, subject to model support. |
+| Permissions and questions | Workbench | Answer requests inline, choose a permission mode per session, and surface child-session approvals in the parent chat. |
+| Providers and models | Workbench | Connect supported credentials, select models and reasoning variants, pin or hide models, and assign helper models. |
+| MCP servers | Workbench | View OpenCode MCP servers and connect or disconnect them per session. |
+| Plans and todos | Workbench | Track todos, open completed plans, continue into implementation, and run Ralph loops. |
+| Agents and sub-agents | Integrated | Select or mention agents and follow delegated sessions. Agent definitions stay in OpenCode configuration. |
+| Commands and skills | Integrated | Run built-in and custom slash commands, browse skills, and use compact, undo, redo, fork, and export actions. |
+| Compaction and recovery | Integrated | Configure or run compaction, reconnect sessions, and recover from temporary transport failures. |
+| LSP, formatters, and tools | Integrated | Show language-server status and tool activity. OpenCode owns definitions and execution. |
+| Configuration and TUI | Handoff | Edit instruction files or continue a session in the OpenCode TUI. |
+
+## Sessions
+
+Varro filters sessions to the current workspace and groups them into `Recent`, `Archive`, and `Recycle Bin`. Filters identify `Running`, `Needs attention`, `Failed`, `Plan ready`, and `Completed` sessions. Rows can show queued prompts, changed files, added and removed lines, token use, duration, and current state.
+
+OpenCode search covers loaded and older root sessions. Open any session in the sidebar, an editor tab, or the OpenCode TUI. Root sessions can be pinned, renamed, shared, or recycled. Child sessions remain linked to their parent. On wide layouts, the session list can remain beside the active chat.
+
+When Varro is hidden, VS Code notifications report plans, failures, permission requests, and questions from root sessions. The status bar links to sessions that need attention, then to completed background work.
+
+![Workspace sessions with status, token, and change summaries](https://raw.githubusercontent.com/koltyakov/varro/main/assets/sessions.png)
+
+## Chat and context
+
+Live document context includes the active file and selection by default. A chip in the composer shows this context and can disable it for the session. Use `Varro: Add to Context` or `Cmd+Shift+K` / `Ctrl+Shift+K` to add files, folders, line ranges, or terminal output. You can also drag files and folders into the composer or paste images.
+
+Type `@` to find workspace files and agents. Type `&` to reference a recent root session. The composer also shows active language servers, supports prompt history and undo or redo for attachments, and restores unsent text plus explicit file or folder attachments after a reload.
+
+During a run, queue a follow-up, steer the current work, or stop it and send a replacement. Queued prompts can be reordered, paused, resumed, edited, retried, removed, or sent immediately as steering.
+
+Commands stream their output. Failures, questions, approvals, file edits, and the final response remain visible. Completed routine work and thinking are grouped under summaries such as `Explored` and `Worked`. You can expand summaries, open long tool input or output in an editor, show thinking, or enable inline file previews.
+
+![Chat output, attached context, file changes, and inline questions](https://raw.githubusercontent.com/koltyakov/varro/main/assets/chat.png)
+
+Other chat workflows include rendered Mermaid previews, transcript turn navigation, changed-file links, Source Control handoff, reconnecting sessions after reload, and commands such as `/review`, `/compact`, `/export`, `/stats`, `/skills`, `/diagnostics`, `/fork`, and `/ralph`. Ralph runs support iteration, verification, repair, pause, and resume, and use `Full access`.
+
+## Permissions
+
+Permission requests provide `Reject`, `Once`, and `Always` actions. Each session has one of four modes:
+
+- `Default` follows OpenCode and agent permission rules.
+- `Auto-accept edits` approves file edits, known read-only actions, and sub-agent launches, but asks about other actions.
+- `Auto` applies local rules and, when needed, a configured model. Requests it cannot decide remain available for manual approval.
+- `Full access` allows the session to act without confirmation.
+
+Child sessions inherit the nearest selected mode in their session tree. Manual child requests appear in the parent conversation while remaining owned by the child session.
+
+![Per-session permission modes in Varro](https://raw.githubusercontent.com/koltyakov/varro/main/assets/permissions.png)
+
+## Models, providers, and MCP
+
+The model picker reads providers and models from OpenCode. It displays known tool, reasoning, image, PDF, and context-window capabilities. You can pin or hide models and set local display names without changing OpenCode IDs.
+
+The Models view connects supported API-key and OAuth credentials through OpenCode. It also provides reauthentication when a provider reports an expired or revoked credential. Terminal-based OpenCode setup remains available.
+
+A tool-capable text-only model can delegate image analysis to an OpenCode sub-agent named `vision`. Assign that agent an image-capable model and include an exact `@vision` mention in the prompt. See [Add vision to a text-only model](https://github.com/koltyakov/varro/blob/main/docs/usage.md#add-vision-to-a-text-only-model).
+
+For read-only investigation, define a primary agent named `ask` with explicit read and search permissions. See [Configure primary agents](https://github.com/koltyakov/varro/blob/main/docs/usage.md#configure-primary-agents).
+
+MCP servers come from OpenCode configuration and can be connected or disconnected per session.
+
+![Provider and model selection in Varro](https://raw.githubusercontent.com/koltyakov/varro/main/assets/providers.png)
+
+## Usage and limits
+
+The composer shows context-window fill, and session rows show token use. The context popup separates input, output, reasoning, cache reads, cache writes, and sub-agent tokens. It also shows session cost when OpenCode reports it.
+
+Run `/stats` or `Varro: Usage Stats` for a Markdown report from retained OpenCode history across all projects. It covers today, 7 days, and 30 days, grouped by provider and model. `/stats all` adds all retained history.
+
+![Context window and session token breakdown](https://raw.githubusercontent.com/koltyakov/varro/main/assets/context.png)
+
+Varro shows quota windows and reset times when OpenCode metadata or a supported provider endpoint supplies them. After a usage-limit error, you can stop retries or switch providers.
+
+![Provider quota limits and reset windows](https://raw.githubusercontent.com/koltyakov/varro/main/assets/limits.png)
+
+## Commit messages
+
+Select the wand in the Source Control toolbar or run `Varro: Generate Commit Message`. Varro uses staged changes if present; otherwise, it uses the unstaged working tree. It follows recent commit style when possible and writes the result to the selected repository's commit input for review.
+
+Varro never mixes staged and unstaged changes, stages files, or commits automatically. It asks before replacing an existing draft, detects source changes during generation, and omits its temporary helper session from chat history.
+
+## Server and updates
+
+Varro connects to `http://127.0.0.1:4096` by default. Set `varro.server.port` to another port from 1 through 65535. For manual server management, disable the deprecated debug setting `varro.server.autoStart` and run `opencode serve --port 4096`.
+
+The status bar shows the active OpenCode version and compatible updates. On macOS and Linux, `varro.server.autoUpdate` installs updates only through the OpenCode version tested with the current Varro release. Windows shows an upgrade prompt instead.
+
+Varro reloads global OpenCode configuration when OpenCode is idle. Changes to project configuration may require `Varro: Restart Server`. This command waits for active work and only restarts a server managed by Varro. Restart a manually launched server in its terminal.
 
 ## Requirements
 
 - [VS Code](https://code.visualstudio.com/) or [VSCodium](https://vscodium.com/) 1.120 or newer
 - [Node.js](https://nodejs.org/) 22.22.2+ on Node 22, or Node 24.15.0+
-- The [OpenCode CLI](https://opencode.ai/docs) 1.16.0 or newer on your `PATH`, or its executable path set in `varro.server.command`.
-- A trusted, non-virtual workspace; remote workspaces run Varro and OpenCode on the remote extension host
+- [OpenCode CLI](https://opencode.ai/docs) 1.16.0 or newer on `PATH`, or configured through `varro.server.command`
+- A trusted, non-virtual workspace. Remote workspaces run Varro and OpenCode on the remote extension host
 
 ## Documentation
 
 - [Usage guide](https://github.com/koltyakov/varro/blob/main/docs/usage.md)
 - [Configure primary agents](https://github.com/koltyakov/varro/blob/main/docs/usage.md#configure-primary-agents)
-- [VS Code forks compatibility](https://github.com/koltyakov/varro/blob/main/docs/vscode-forks.md)
+- [VS Code fork compatibility](https://github.com/koltyakov/varro/blob/main/docs/vscode-forks.md)
 - [Development guide](https://github.com/koltyakov/varro/blob/main/docs/development.md)
 - [Architecture overview](https://github.com/koltyakov/varro/blob/main/docs/architecture.md)
 - [Issues and feature requests](https://github.com/koltyakov/varro/issues)
 
 ## License
 
-Varro is available under the [MIT License](https://github.com/koltyakov/varro/blob/main/LICENSE).
+[MIT](https://github.com/koltyakov/varro/blob/main/LICENSE)
