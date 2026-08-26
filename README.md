@@ -26,7 +26,7 @@ Varro builds on OpenCode instead of replacing it. Your local OpenCode configurat
 
 Sessions are filtered to the current workspace and grouped into `Recent`, `Archive`, and `Recycle Bin`. Pinned and active-state sessions stay surfaced, while ordinary sessions are ordered approximately by activity. Each session can show changed files, line additions and removals, token usage, duration, and current state.
 
-OpenCode's native search finds root sessions across loaded and older history. Top-level sessions can be pinned, renamed, or moved to the recycle bin. Any session can be resumed, opened in the OpenCode TUI, shared or unshared, or have its ID copied. Sharing asks OpenCode to create a share link and copies it to the clipboard. Sub-agent sessions remain linked to their parent session. On larger layouts, the session list can stay open beside the active chat.
+OpenCode's native search finds root sessions across loaded and older history. Top-level sessions can be pinned, renamed, or moved to the recycle bin. Any session can be opened in the sidebar, an editor tab, or the OpenCode TUI; shared or unshared; or have its ID copied. Sharing asks OpenCode to create a share link and copies it to the clipboard. Sub-agent sessions remain linked to their parent session. On larger layouts, the session list can stay open beside the active chat.
 
 When the sidebar is hidden, Varro can notify you when a plan is ready, a top-level session fails, requests permission, or asks a question. The status bar also tracks top-level sessions that finish in the background.
 
@@ -89,7 +89,9 @@ Generation never includes unstaged changes, stages files, or commits automatical
 
 VS Code and VSCodium are the target containers for Varro. VS Code forks have limited support; see [VS Code fork compatibility](https://github.com/koltyakov/varro/blob/main/docs/vscode-forks.md) for details.
 
-Varro connects to `http://127.0.0.1:4096` by default. `varro.server.port` accepts integers from 1 through 65535. To manage the server manually, disable `varro.server.autoStart` and run `opencode serve --port 4096`.
+Varro connects to `http://127.0.0.1:4096` by default. `varro.server.port` accepts integers from 1 through 65535. For advanced manual server management, disable the deprecated, debug-only `varro.server.autoStart` setting and run `opencode serve --port 4096`.
+
+Varro watches OpenCode's global configuration and refreshes it when OpenCode is idle. External project-configuration edits may require `Varro: Restart Server`. The command checks for active work and only restarts a server managed by Varro. Restart a manually launched server from its terminal.
 
 ## Requirements
 

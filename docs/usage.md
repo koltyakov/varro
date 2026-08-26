@@ -24,7 +24,7 @@ If OpenCode does not have any providers configured yet, either connect one from 
 opencode auth login
 ```
 
-From inside Varro, `/connect` opens a VS Code terminal and runs `opencode auth login` for you. The no-provider recovery screen uses the same terminal flow.
+From inside Varro, `/connect` opens the provider connection dialog. The no-provider recovery screen offers the same embedded setup. Use `opencode auth login` when a provider does not expose a supported embedded method.
 
 Varro connects to `http://127.0.0.1:4096` by default. It does not start OpenCode at extension activation time. Instead, it starts or attaches to the server the first time the chat view needs it.
 
@@ -74,7 +74,7 @@ Use any of these flows to add more context.
 - With an editor selection, use the editor context menu entry that also appears as `Varro: Add to Context`, or press `Cmd+Shift+K` / `Ctrl+Shift+K`.
 - Select terminal text and choose `Varro: Add to Context` from the terminal context menu, or press `Cmd+Shift+K` / `Ctrl+Shift+K`.
 - Drag files or folders into the composer.
-- Use the composer attachment flow from `/attach`.
+- Use the attachment button beside the composer.
 - Paste an image or PDF into the composer.
 - Type `@path/to/file` to search workspace files.
 - Type `@agent-name` to mention an available agent.
@@ -105,7 +105,7 @@ Varro can delegate pasted images from a tool-capable text-only model, such as GL
 }
 ```
 
-Restart OpenCode after changing its configuration. The `vision` agent must have an explicit model that OpenCode reports as supporting image input. With a non-vision parent model, pasted images retain the normal disabled appearance and are not sent unless the prompt contains an exact `@vision` mention. Once `@vision` is present, Varro materializes the images as private temporary files and instructs OpenCode to include those files in the vision subagent task. The parent model must support tool calls and be allowed to invoke the `vision` subagent.
+The `vision` agent must have an explicit model that OpenCode reports as supporting image input. If the saved agent does not appear, follow the server restart guidance under [Models, Agents, Reasoning, And MCPs](#models-agents-reasoning-and-mcps). With a non-vision parent model, pasted images retain the normal disabled appearance and are not sent unless the prompt contains an exact `@vision` mention. Once `@vision` is present, Varro materializes the images as private temporary files and instructs OpenCode to include those files in the vision subagent task. The parent model must support tool calls and be allowed to invoke the `vision` subagent.
 
 ## Composer Behavior
 
@@ -132,16 +132,10 @@ Queued messages belong to the session where they were created and dispatch from 
 - Text, selected agent, files, diagnostics, terminal selections, pasted images, and native PDFs are persisted in VS Code workspace state across window and webview reloads. Binary attachment data stays in extension-host persistence instead of synchronous webview storage.
 - Successfully dispatched and explicitly removed messages leave the queue. Failed messages remain available for retry.
 
-Current built-in slash commands include:
+Commands offered in slash-command completion include:
 
-- `/new` or `/clear` starts a new chat session
 - `/skills` browses skill commands loaded from OpenCode
-- `/sessions` or `/resume` opens the session list
-- `/models` opens the model picker
-- `/mcp` or `/mcps` opens the MCP picker for the current session
-- `/connect` opens provider login in a VS Code terminal
-- `/attach` or `/files` picks files or folders to attach
-- `/diagnostics` attaches active-file Problems to the next message
+- `/connect` opens the provider connection dialog
 - `/settings` opens VS Code Settings filtered to Varro
 - `/export` opens a JSON export of the current session in the editor
 - `/stats` opens a Markdown usage report for the last 30 days across all OpenCode projects; `/stats all` also includes retained all-time usage
@@ -151,15 +145,14 @@ Current built-in slash commands include:
 - `/init` analyzes the workspace and creates or improves `AGENTS.md`
 - `/review` asks the agent to review current workspace changes
 - `/ralph` starts a Ralph loop from a plan or spec document
-- `/abort` or `/stop` stops the current run
 
 Custom OpenCode commands loaded from your local config also appear in the same completion list. Skill-sourced commands are browsed through `/skills` instead of being mixed into the main slash-command list.
 
 `/stats` scans the last 30 days of retained OpenCode history across projects and opens an untitled Markdown report. Use `/stats all` when you need the slower all-time scan. Deleted OpenCode history cannot be included.
 
-Some commands only appear when they apply. For example, `/init` only appears in blank sessions and `/abort` only appears while a session is active.
+Some commands only appear when they apply. `/ralph` appears before a session exists, `/export` appears after one exists, and `/init` appears when the workspace can be initialized.
 
-`/undo` or `/revert` undoes the last assistant response, and `/redo` reapplies it. These session-level commands can be submitted directly when applicable but are intentionally hidden from slash-command completion. They are separate from composer undo and redo.
+`/diagnostics`, `/fork`, `/abort`, `/stop`, `/undo`, `/revert`, and `/redo` can be submitted directly when applicable but are intentionally hidden from slash-command completion. `/undo` or `/revert` undoes the last assistant response, and `/redo` reapplies it. These session-level actions are separate from composer undo and redo.
 
 Use `Varro: Open Global AGENTS.md` to edit OpenCode's global instructions. `Varro: Initialize Project AGENTS.md` creates the project file when needed, opens it, and starts a new chat with `/init` ready to send using the current model.
 
@@ -167,12 +160,12 @@ Use `Varro: Open Global AGENTS.md` to edit OpenCode's global instructions. `Varr
 
 Sessions are filtered to the current workspace directory. The default list is split into `Recent`, `Archive`, and `Recycle Bin`. `Archive` is a UI grouping for older ordinary sessions; opening it does not alter those sessions in OpenCode. Pinned and active-state sessions remain surfaced, while other sessions are ordered approximately by activity age.
 
-- Start a fresh session with `Varro: New Session` or the new chat button. Crafted composer text is kept for the new session, while file, image, terminal, and message-edit context is cleared.
+- Start a fresh session with `Varro: New Session` or the new chat button. Right-click the button to choose `New Chat` or `New Chat in Editor`. Crafted composer text is kept for the new session, while file, image, terminal, and message-edit context is cleared.
 - Open the session list from the back button in the header.
 - Search uses OpenCode's native root-session search across loaded and older history and returns up to 30 results. Matching fields depend on the installed OpenCode version. Run `Varro: Search Sessions` to open and focus search directly.
 - Filter or jump to `Running`, `Needs attention`, `Failed`, `Plan ready`, and `Completed` sessions from the header badges.
 - Open sub-agent sessions from the parent session row when they exist.
-- Top-level sessions can be renamed, pinned, or moved to the recycle bin. Any session can copy its ID, open in the OpenCode TUI, and be shared or unshared. Sharing asks OpenCode to create a share link and copies it to the clipboard.
+- Top-level sessions can be renamed, pinned, or moved to the recycle bin. Any session can open in the sidebar, an editor tab, or the OpenCode TUI; copy its ID; and be shared or unshared. Opening an editor session in the sidebar closes its matching editor tab. Sharing asks OpenCode to create a share link and copies it to the clipboard.
 - Deleted session roots move into a recycle bin section where you can restore them or delete them permanently for 24 hours before they expire.
 - Stop the active run with `Varro: Abort Session`.
 - Use `/export` to open the current session as JSON in the editor.
@@ -189,11 +182,12 @@ If VS Code reloads while a session was running, Varro reconnects to those sessio
 
 ## Plans, Reviews, And Ralph
 
-- `/review` sends a review prompt for the current workspace changes.
+- `/review` sends a review prompt for the current workspace changes. From a blank chat, it creates the review session before sending.
 - `/ralph` opens a form where you pick a plan or spec document, set an iteration cap (default `10`), optionally choose a model and reasoning variant, and can override the loop prompt template.
 - Ralph manager, iteration, and repair sessions run in `Full access`, independently of the permission mode selected in the composer. Review the plan and prompt before starting the loop.
 - A Ralph run creates a manager session with a dedicated dashboard plus one child session per iteration.
 - After each iteration settles, the Ralph manager sends a separate verification turn and expects lines like `<name>: PASS`, `<name>: FAIL - <cause>`, or `<name>: SKIPPED - <reason>`.
+- Each iteration takes the first actionable incomplete plan item and must update plan progress or report a blocker. Verification runs checks relevant to that iteration and avoids repeating a reported check unless matching files changed.
 - If verification fails, Ralph can spawn up to two repair sub-agents for that iteration before the loop moves on.
 - Ralph can pause, resume, or stop from the dashboard. It stops early when the plan starts with `DONE` and the latest completed iteration has no failed verification; otherwise it runs to the iteration cap. If the cap is reached with unchecked plan items or failed verification, the run is marked `incomplete` and can be continued with a higher limit. Manual stops and iteration errors terminate the run separately.
 - Sessions that finished with the `plan` agent surface as `Plan ready` in the session list.
@@ -203,6 +197,10 @@ If VS Code reloads while a session was running, Varro reconnects to those sessio
 ## Models, Agents, Reasoning, And MCPs
 
 Varro loads agents, models, and MCP tools from your local OpenCode configuration.
+
+Varro watches OpenCode's global configuration and authentication files and refreshes provider and model state when OpenCode is idle. A refresh waits while agents are running or questions or permission requests are pending. Changes made through Varro's Models view follow the same safe refresh flow.
+
+External edits to project-level OpenCode configuration may not be detected. If agents, models, commands, skills, MCP servers, or other settings do not reflect the saved config, open the Command Palette and run `Varro: Restart Server`. Varro checks for active work before restarting a server it manages. If active work blocks the restart, finish or abort that work and run the command again. If you started `opencode serve` yourself, restart that process from its terminal.
 
 - Pick the agent from the composer toolbar.
 - Pick the provider/model from the model picker.
@@ -257,10 +255,6 @@ This example adds `ask`, a primary agent that can inspect local code and search 
 The `"*": "deny"` rule is the read-only boundary. The prompt describes expected behavior, but it does not prevent tool calls by itself. Put the catch-all rule before the specific read-oriented allowances because OpenCode uses the last matching permission rule.
 
 Omit `model` to use the configured global model, or add a provider-qualified model such as `"model": "openai/gpt-5.6-sol"` inside the agent. Add `"default_agent": "ask"` at the top level if new sessions should select it by default.
-
-OpenCode reads agent definitions when the server starts. Saving the config does not update the agent picker in a running server.
-
-Open the Command Palette and run `Varro: Restart Server`. Varro checks for active work before stopping OpenCode. If a restart would interrupt a running session, the sidebar lists the blocking sessions instead. Finish or abort that work, then run the command again. The new primary agent appears in the picker after Varro reconnects.
 
 ### Provider Connections
 
@@ -457,6 +451,7 @@ Varro renders OpenCode output as structured UI instead of plain text only.
 - A transport banner when the OpenCode event stream is reconnecting and live updates may lag temporarily
 - A slow-request banner when an OpenCode request has been waiting for more than 15 seconds
 - A jump-to-latest button when you scroll away from the bottom of the chat; clicking it returns to the newest message and re-enables auto-follow
+- Completed turn summaries expose `Copy final response` and `Fork chat from here` actions. Copying uses the final assistant text from that turn.
 
 Hold `Alt` or `Option` while viewing a sufficiently long final answer to reveal its read-mode action. Read mode opens the rendered answer in a focused dialog; close it with `Escape`, the close button, or a click outside the content.
 
@@ -465,12 +460,18 @@ Editable user messages expose an edit action. Sending the replacement removes th
 ## VS Code Commands And Keybindings
 
 - `Varro: New Session`
+- `Varro: New Chat Editor`
+- `Varro: New Terminal Editor`
 - `Varro: Search Sessions`
+- `Varro: Open Settings`
+- `Varro: Show File Diffs` or `Varro: Hide File Diffs`
+- `Varro: Usage Stats`
 - `Varro: Abort Session`
 - `Varro: Previous Session`
 - `Varro: Next Session`
 - `Varro: Restart Server`
 - `Varro: About`
+- `Varro: Open GitHub`
 - `Varro: Show Output`
 - `Varro: Open Source Control`
 - `Varro: Generate Commit Message` generates from staged changes using the configured VS Code commit-message model, OpenCode `small_model`, OpenAI GPT Luna, GitHub Copilot GPT Luna, or the active chat model at low reasoning, in that order. It fills the selected Git repository's commit input without committing
@@ -495,6 +496,7 @@ Chat view:
 - `varro.chat.autoApproveModel` - provider/model used by the auto-approve judge; stored in VS Code user settings and selected from Varro's Models view
 - `varro.chat.showFileDiffs` - show line-by-line edits in file-change tool cards; defaults to `false`
 - `varro.chat.expandThinking` - keep thinking blocks expanded and outside `Explored` during the active turn; defaults to `false`
+- `varro.chat.fontSize` - chat text size from `6` through `100`; defaults to `null`, which uses VS Code's `chat.fontSize`. Tool and diff editor content follows `chat.editor.fontSize`
 - `varro.chat.showChangedFiles` - show the changed-files panel above the composer; defaults to `false`
 - `varro.chat.desktopSessionPaneSide` - on large screens, show the sessions pane on the `left` or `right`; defaults to `right`
 - `varro.chat.autoRenameUntitledSessions` - generate a fallback title when OpenCode leaves a session untitled; defaults to `false`
@@ -522,6 +524,7 @@ There are also deprecated debug-only settings used for development and recovery 
 - Provider authentication failed: use `Re-authenticate` on the failed response or provider row, complete the API-key or OAuth flow, then send a new prompt. Use terminal setup if the embedded method is unavailable.
 - Provider badge missing: quota metadata is only shown when OpenCode or the provider exposes usable limit information.
 - Images do not send: select a model with vision support.
+- OpenCode configuration changes are not taking effect: wait for any queued refresh to finish. For externally edited project configuration, run `Varro: Restart Server` if Varro manages the server. If you started `opencode serve` yourself, restart it from its terminal.
 - Live updates are reconnecting: REST requests still work, but session status can lag until the event stream recovers.
 - Session export fails: ensure the OpenCode CLI is installed and `varro.server.command` points to it if the executable is outside `PATH`.
-- Server needs a clean reconnect: run `Varro: Restart Server`.
+- Server needs a clean reconnect: run `Varro: Restart Server` for a Varro-managed server, or restart a manually managed server from its terminal.
