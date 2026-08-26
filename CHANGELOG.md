@@ -4,17 +4,15 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 
 ## 0.26.x - August 2026
 
-- Added editor-tab chats for working with multiple sessions side by side, with terminal access and model, reasoning, permission, queue, and session state synchronized across open Varro views.
-- Added quick controls for showing or hiding inline file changes in the Chat view.
-- Improved user messages with secure Markdown and external images, scrollable image tiles for mixed-content prompts, clearer timestamps, expandable long content, code-block truncation, and more reliable editing.
-- Made large model catalogs easier to manage with search and selective additions, clearer model and thinking-level changes, persistent session defaults, and cost warnings.
-- Improved the composer with active language server status, quick access to server output, persistent diff previews, reliable caret visibility, and easier focus handling.
-- Strengthened session and queued-message handling with captured editor context, preserved model choices, safer late fork and deletion results, more reliable provider and MCP refreshes, and deduplicated optimistic prompts.
-- Made multi-view handoffs more reliable for permission changes, queued edits and attachments, manual steering, editor restoration after reconnects, interrupted-session recovery, and opening completed sessions from the status bar.
-- Made long conversations more stable during history loading, streaming, content reflow, viewport resizing, and queued-message removal, with session activity shown in jump-to-latest navigation.
-- Refined tool details and chat presentation with more consistent cards, spacing, contrast, and support for VS Code chat typography settings.
+- Added editor-tab chats for working with sessions side by side, with terminal access and synchronized model, reasoning, permission, queue, and session state across Varro views.
+- Added quick controls for inline file changes and status-bar indicators for the active OpenCode version and available updates.
+- Improved messages with secure Markdown, external and mixed-content images, expandable long content, code-block truncation, clearer timestamps, and more reliable editing and rendering.
+- Made model catalogs easier to manage with search, selective additions and hiding, persistent session defaults, clearer model and thinking changes, cost warnings, and expanded thinking during active turns.
+- Improved the composer with language server status and output, persistent diff previews, steadier caret and focus behavior, and more reliable chip and prompt interactions.
+- Strengthened session, queue, and multi-view handling across editor context, model choices, permissions, attachments, manual steering, reconnects, forks, deletions, and provider or MCP refreshes.
+- Stabilized long conversations during history loading, streaming, content reflow, resizing, and queued-message removal, with activity shown in jump-to-latest navigation.
+- Refined tool cards and chat presentation with consistent spacing, contrast, VS Code chat typography, and full descriptions for agents and other truncated details.
 - Moved About diagnostics and usage reports into readable Markdown documents with richer local usage data.
-- Added status-bar indicators for the active OpenCode version and available updates.
 
 ## 0.25.x - August 2026
 
