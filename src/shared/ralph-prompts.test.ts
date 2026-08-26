@@ -91,7 +91,13 @@ describe('ralph prompt helpers', () => {
     // Default prompt no longer hardcodes verification commands.
     expect(prompt).not.toContain('npm run lint');
     expect(prompt).not.toContain('npm run typecheck');
-    expect(prompt).toContain('Ralph manager will request verification commands separately');
+    expect(prompt).toContain('Ralph manager will review verification separately');
+    expect(prompt).toContain('manager does not ask for the same check again');
+    expect(prompt).toContain('Select the first incomplete plan item you can act on');
+    expect(prompt).toContain('Never repeat a completed item');
+    expect(prompt).toContain('Do not spend an iteration only inspecting or verifying');
+    expect(prompt).toContain('report the blocker instead of claiming success');
+    expect(prompt).toContain('If the final plan item is complete, add the marker DONE');
   });
 
   it('warns that absolute plan document paths may be outside the workspace', async () => {
@@ -161,6 +167,9 @@ describe('parent-driven verification prompts', () => {
     expect(prompt).not.toContain('npm run test');
     expect(prompt).toMatch(/lint/i);
     expect(prompt).toMatch(/test/i);
+    expect(prompt).toContain('matches the nature of the change and the files touched');
+    expect(prompt).toContain('do not run linting when no corresponding code files changed');
+    expect(prompt).toContain('do not run it again unless matching files changed afterward');
     // No fixed name list - the model picks short names that fit the project.
     expect(prompt).not.toMatch(/Use the names:/);
     expect(prompt).toMatch(/short, lowercase names/i);

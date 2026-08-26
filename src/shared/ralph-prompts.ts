@@ -9,7 +9,7 @@ import type { RalphConfig, RalphIteration } from './ralph';
 const VERIFICATION_EXAMPLES = 'lint, test, build, typecheck, fmt';
 
 const GENERIC_VERIFICATION_INSTRUCTION =
-  'Inspect the workspace and run whatever verification commands the project supports - for example linting, tests, builds, typechecking, formatting, or language-specific checks (npm/pnpm scripts, cargo, pytest, go test/vet, mypy, etc.). Skip any verification the project does not configure. Do not invent checks the project does not support.';
+  'Inspect the workspace and choose verification that matches the nature of the change and the files touched. Run only checks that can validate that work; for example, do not run linting when no corresponding code files changed. Skip unrelated checks and checks the project does not configure. Do not invent checks the project does not support. If a relevant check already ran and its result was reported, do not run it again unless matching files changed afterward.';
 
 export const DEFAULT_RALPH_PROMPT_TEMPLATE = `You are iteration {{iteration}} of {{totalIterations}} in a Ralph loop driven from a plan document.
 
@@ -23,16 +23,18 @@ Current plan document content:
 
 Your task this iteration:
 1. Read the plan document at {{planPath}}.
-2. Pick the smallest reasonable next chunk from it. Do not attempt the whole plan.
-3. Implement the chunk with concrete code edits.
-4. Update the plan document - mark the chunk as done (e.g., flip [ ] to [x]) and add a one-line note if useful.
-5. End with a short summary of what you changed.
+2. Select the first incomplete plan item you can act on. Never repeat a completed item, and do not attempt the whole plan.
+3. Finish that item or make a concrete, documented advance toward it. If it is already satisfied and needs no code changes, verify that fact and mark it complete in this iteration.
+4. Update the plan document - mark completed work as done (e.g., flip [ ] to [x]) or record the concrete progress made. Do not spend an iteration only inspecting or verifying without updating the plan.
+5. Before ending, reread the plan and confirm that this iteration changed either the selected item's status or its documented progress. If no actionable progress is possible, report the blocker instead of claiming success.
+6. If the final plan item is complete, add the marker DONE on its own line at the top of the plan document immediately.
+7. End with a short summary of what you changed.
 
-The Ralph manager will request verification commands separately after this turn - do not run verification yourself unless you need it to confirm the work is correct.
+The Ralph manager will review verification separately after this turn. Do not run verification yourself unless you need it to confirm the work is correct. If you do run a check, include its command and result in your summary so the manager does not ask for the same check again.
 
 Constraints:
 - Do not exceed roughly 30 minutes of work.
-- If the plan is fully complete, write the marker DONE on its own line at the top of the plan document and stop.
+- If the plan is already fully complete, write the marker DONE on its own line at the top of the plan document and stop.
 - Do not ask questions; you have full permission to read, edit, and run shell commands.`;
 
 export function getDefaultPromptTemplate(): string {
