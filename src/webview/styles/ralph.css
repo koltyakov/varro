@@ -95,6 +95,10 @@
   overscroll-behavior-y: contain;
 }
 
+.ralph-form-body-picker-open {
+  overflow-y: visible;
+}
+
 .ralph-form-field {
   display: flex;
   flex-direction: column;

@@ -334,7 +334,9 @@ export function RalphForm() {
               </button>
             </div>
 
-            <div class="ralph-form-body">
+            <div
+              class={`ralph-form-body ${showVariantPicker() ? 'ralph-form-body-picker-open' : ''}`}
+            >
               <Field label="Plan / spec document">
                 <div class="ralph-form-input-row">
                   <input

@@ -6,6 +6,10 @@ import { getE2EState } from './helpers';
 
 async function openRalphForm(page: Page) {
   await expect(page.locator('.chat-workspace')).toBeVisible();
+  await page
+    .locator('.chat-header-chat-layout:visible, .chat-header-chat-desktop:visible')
+    .getByRole('button', { name: 'New chat', exact: true })
+    .click();
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
   await composer.fill('/ralph');
@@ -159,7 +163,7 @@ test('start form blocks the uncovered sessions pane and restores it on close', a
   await page.mouse.click(targetCenter.x, targetCenter.y);
 
   await expect(dialog).toBeVisible();
-  await expect(page.locator('.chat-header-title-text').first()).toHaveText('Host command events');
+  await expect(page.locator('.chat-header-title-text').first()).toHaveText('New Chat');
   await expect(page.locator('.interactive-session')).toHaveAttribute('inert', '');
 
   await dialog.getByRole('button', { name: 'Cancel' }).click();

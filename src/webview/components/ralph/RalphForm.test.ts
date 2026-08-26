@@ -381,6 +381,33 @@ describe('RalphForm', () => {
     });
   });
 
+  it('allows the reasoning picker to extend beyond the scrolling form body', async () => {
+    stateMock.selectedModel = { providerID: 'openai', modelID: 'gpt-5.5' };
+    stateMock.providers = [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          'gpt-5.5': {
+            id: 'gpt-5.5',
+            name: 'GPT 5.5',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+            variants: { low: {}, medium: {}, high: {} },
+          },
+        },
+      },
+    ];
+    cleanup = render(() => RalphForm(), container!);
+
+    document.body.querySelector<HTMLButtonElement>('[aria-label="Thinking level"]')?.click();
+    await flushMicrotasks();
+
+    expect(document.body.querySelector('.ralph-form-body-picker-open')).not.toBeNull();
+    expect(document.body.querySelector('.variant-popover')).not.toBeNull();
+  });
+
   it('does not start without an originating workspace directory', async () => {
     stateMock.editorContext.activeFile = {
       path: '/tmp/RALPH.md',
