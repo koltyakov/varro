@@ -7,6 +7,7 @@ import { defineConfig } from 'vite';
 const projectRoot = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig(({ mode }) => ({
+  base: './',
   plugins: [solid(), tailwindcss()],
   optimizeDeps: {
     entries: ['preview.html', 'e2e/harness/index.html'],

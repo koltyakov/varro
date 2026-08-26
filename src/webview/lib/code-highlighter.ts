@@ -4,6 +4,7 @@ type CodeHighlighter = {
   hasLanguage: (language: string) => boolean;
   highlightCode: (text: string, language: string) => string;
 };
+type CodeHighlighterLoader = () => Promise<CodeHighlighter>;
 
 const CODE_LANGUAGE_ALIASES = new Map<string, string>([
   ['console', 'bash'],
@@ -26,7 +27,6 @@ const CODE_LANGUAGE_ALIASES = new Map<string, string>([
 const [codeHighlighterVersion, setCodeHighlighterVersion] = createSignal(0);
 let codeHighlighter: CodeHighlighter | null = null;
 let codeHighlighterLoad: Promise<void> | null = null;
-let codeHighlighterLoadFailed = false;
 
 export { codeHighlighterVersion };
 
@@ -42,17 +42,19 @@ export function highlightCode(text: string, language: string): string | null {
   return codeHighlighter?.highlightCode(text, language) ?? null;
 }
 
-export function loadCodeHighlighter(): Promise<void> {
-  if (codeHighlighter || codeHighlighterLoadFailed) return Promise.resolve();
+export function loadCodeHighlighter(
+  loader: CodeHighlighterLoader = () => import('./syntax-highlighter')
+): Promise<void> {
+  if (codeHighlighter) return Promise.resolve();
   if (codeHighlighterLoad) return codeHighlighterLoad;
 
-  codeHighlighterLoad = import('./syntax-highlighter')
+  codeHighlighterLoad = loader()
     .then((module) => {
       codeHighlighter = module;
       setCodeHighlighterVersion((version) => version + 1);
     })
     .catch((error) => {
-      codeHighlighterLoadFailed = true;
+      codeHighlighterLoad = null;
       throw error;
     });
   return codeHighlighterLoad;
