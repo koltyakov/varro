@@ -3,8 +3,8 @@ import { render } from 'solid-js/web';
 import type * as UseOpenCodeModule from '../../hooks/useOpenCode';
 import { formatClockTime } from '../../lib/message-time';
 import { setState } from '../../lib/state';
-import { gitForkIcon } from '../../lib/ui-icons';
-import { assistantMessage } from '../MessageList.test-utils';
+import { copyIcon, gitForkIcon } from '../../lib/ui-icons';
+import { assistantMessage, textPart } from '../MessageList.test-utils';
 import { toCssUrl } from '../UiIcon';
 import { AssistantDialogSummaryForMessage, getForkBoundaryMessageId } from './MessageRows';
 
@@ -70,14 +70,14 @@ describe('AssistantDialogSummaryForMessage', () => {
       ' - Tokens ↑ 10 ↓ 5'
     );
 
-    summary?.dispatchEvent(new MouseEvent('mouseenter'));
+    summary?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
     vi.advanceTimersByTime(150);
-    summary?.dispatchEvent(new MouseEvent('mouseleave'));
+    summary?.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
     vi.advanceTimersByTime(150);
     expect(onWorkedSummaryHoverChange).not.toHaveBeenCalled();
     expect(summary?.classList.contains('is-hover-intent-active')).toBe(false);
 
-    summary?.dispatchEvent(new MouseEvent('mouseenter'));
+    summary?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
     expect(onWorkedSummaryHoverChange).not.toHaveBeenCalled();
     vi.advanceTimersByTime(299);
     expect(onWorkedSummaryHoverChange).not.toHaveBeenCalled();
@@ -85,7 +85,7 @@ describe('AssistantDialogSummaryForMessage', () => {
     vi.advanceTimersByTime(1);
     expect(onWorkedSummaryHoverChange).toHaveBeenLastCalledWith('user-1', true);
     expect(summary?.classList.contains('is-hover-intent-active')).toBe(true);
-    summary?.dispatchEvent(new MouseEvent('mouseleave'));
+    summary?.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
     expect(onWorkedSummaryHoverChange).toHaveBeenLastCalledWith('user-1', false);
   });
 
@@ -118,10 +118,60 @@ describe('AssistantDialogSummaryForMessage', () => {
     expect(summary?.textContent).toContain('Interrupted');
     expect(summary?.querySelector('time')?.textContent).toBe(formatClockTime(completedAt));
 
-    summary?.dispatchEvent(new MouseEvent('mouseenter'));
+    summary?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
     vi.advanceTimersByTime(300);
     expect(summary?.classList.contains('is-completion-time-visible')).toBe(true);
     expect(onWorkedSummaryHoverChange).toHaveBeenLastCalledWith('user-1', true);
+  });
+
+  it('includes the final response in the summary hover region', () => {
+    vi.useFakeTimers();
+    const onWorkedSummaryHoverChange = vi.fn();
+    cleanup = render(
+      () => (
+        <div class="interactive-list-track">
+          <div data-msg-id="assistant-1">
+            <div class="assistant-message-flow-item-final">Final response</div>
+          </div>
+          <div class="trailing-assistant-summary-row">
+            <AssistantDialogSummaryForMessage
+              summary={{
+                durationMs: 1_000,
+                promptMessageId: 'user-1',
+                inputTokens: 0,
+                outputTokens: 0,
+                agentCount: 0,
+              }}
+              msg={{ info: assistantMessage('assistant-1', { sessionID: 'session-1' }), parts: [] }}
+              hasBuildAgent={false}
+              latestPlanImplementationMessageId={null}
+              onWorkedSummaryHoverChange={onWorkedSummaryHoverChange}
+            />
+          </div>
+        </div>
+      ),
+      container
+    );
+
+    const finalResponse = container.querySelector<HTMLElement>(
+      '.assistant-message-flow-item-final'
+    );
+    const summary = container.querySelector<HTMLElement>('.assistant-dialog-summary');
+    finalResponse?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    vi.advanceTimersByTime(300);
+
+    expect(summary?.classList.contains('is-hover-intent-active')).toBe(true);
+    expect(onWorkedSummaryHoverChange).toHaveBeenLastCalledWith('user-1', true);
+
+    finalResponse?.dispatchEvent(
+      new MouseEvent('mouseout', { bubbles: true, relatedTarget: summary })
+    );
+    summary?.dispatchEvent(
+      new MouseEvent('mouseover', { bubbles: true, relatedTarget: finalResponse })
+    );
+
+    expect(summary?.classList.contains('is-hover-intent-active')).toBe(true);
+    expect(onWorkedSummaryHoverChange).toHaveBeenCalledTimes(1);
   });
 
   it('forks the session from the summarized assistant message', () => {
@@ -149,6 +199,49 @@ describe('AssistantDialogSummaryForMessage', () => {
     button?.click();
 
     expect(forkSessionMock).toHaveBeenCalledWith('session-1');
+  });
+
+  it('copies the final assistant response', async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    cleanup = render(
+      () => (
+        <AssistantDialogSummaryForMessage
+          summary={{ durationMs: 1_000, inputTokens: 0, outputTokens: 0, agentCount: 0 }}
+          msg={{
+            info: assistantMessage('assistant-1', { sessionID: 'session-1' }),
+            parts: [
+              textPart('text-1', 'First paragraph'),
+              textPart('synthetic', 'Internal text', { synthetic: true }),
+              textPart('text-2', 'Second paragraph'),
+            ],
+          }}
+          hasBuildAgent={false}
+          latestPlanImplementationMessageId={null}
+        />
+      ),
+      container
+    );
+
+    const button = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Copy final response"]'
+    );
+    expect(
+      button?.querySelector<HTMLElement>('.ui-icon')?.style.getPropertyValue('--ui-icon-mask')
+    ).toBe(toCssUrl(copyIcon));
+    expect(
+      Array.from(
+        container.querySelectorAll<HTMLButtonElement>('.assistant-dialog-summary-turn-action')
+      ).map((action) => action.getAttribute('aria-label'))
+    ).toEqual(['Copy final response', 'Fork chat from here']);
+
+    button?.click();
+    await vi.waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith('First paragraph\n\nSecond paragraph')
+    );
   });
 
   it('shows the custom fork tooltip after 500ms', async () => {

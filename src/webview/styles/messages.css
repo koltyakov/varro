@@ -1224,10 +1224,15 @@ body.vscode-light
   }
 }
 
-.assistant-dialog-summary-fork {
+.assistant-dialog-summary-turn-actions {
   position: absolute;
   right: 5px;
   top: 1px;
+  display: flex;
+  gap: 5px;
+}
+
+.assistant-dialog-summary-turn-action {
   width: 22px;
   height: 22px;
   padding: 0;
@@ -1250,35 +1255,35 @@ body.vscode-light
     background-color 120ms ease;
 }
 
-.assistant-dialog-summary.is-hover-intent-active .assistant-dialog-summary-fork {
+.assistant-dialog-summary.is-hover-intent-active .assistant-dialog-summary-turn-action {
   opacity: 1;
   filter: blur(0);
   pointer-events: auto;
 }
 
-.assistant-dialog-summary-fork:focus-visible {
+.assistant-dialog-summary-turn-action:focus-visible {
   opacity: 1;
   filter: blur(0);
   pointer-events: auto;
 }
 
-.assistant-dialog-summary-fork:hover:not(:disabled) {
+.assistant-dialog-summary-turn-action:hover:not(:disabled) {
   color: var(--color-vscode-fg);
   background: var(--color-vscode-surface-hover);
 }
 
-.assistant-dialog-summary-fork:focus-visible {
+.assistant-dialog-summary-turn-action:focus-visible {
   outline: 2px solid var(--color-vscode-accent);
   outline-offset: 1px;
 }
 
-.assistant-dialog-summary-fork:disabled {
+.assistant-dialog-summary-turn-action:disabled {
   cursor: default;
   opacity: 0;
 }
 
 @media (hover: none) {
-  .assistant-dialog-summary-fork:not(:disabled) {
+  .assistant-dialog-summary-turn-action:not(:disabled) {
     opacity: 1;
     filter: blur(0);
     pointer-events: auto;

@@ -11,11 +11,14 @@ import { prepareMeasuredEntrance } from '../../lib/measured-entrance';
 import type { AssistantActivityGroupInfo } from '../../lib/assistant-activity';
 import { formatNumber, formatTurnDuration, isAssistantMessage } from '../../lib/message-metrics';
 import { formatClockTime } from '../../lib/message-time';
+import { checkIcon, copyIcon } from '../../lib/ui-icons';
+import { writeClipboard } from '../../lib/write-clipboard';
 import type { ToolCallPermissionMatch } from '../../lib/tool-call-matching';
 import type { MessageEntry, QuestionRequest, ToolPart } from '../../types';
 import { ForkIcon } from '../ForkIcon';
 import { Message as MessageComponent } from '../Message';
 import { Tooltip } from '../Tooltip';
+import { UiIcon } from '../UiIcon';
 import {
   buildPlanDocumentContent,
   buildPlanImplementationPrompt,
@@ -282,6 +285,7 @@ export function AssistantDialogSummaryForMessage(
   return (
     <AssistantDialogSummary
       summary={props.summary}
+      messageId={props.msg.info.id}
       showImplementPlanAction={shouldShowPlanImplementationAction({
         hasBuildAgent: props.hasBuildAgent,
         info: props.msg.info,
@@ -294,6 +298,12 @@ export function AssistantDialogSummaryForMessage(
         void openPlan(buildPlanDocumentContent(props.msg.parts), props.msg.info.sessionID)
       }
       onSkipPlan={() => skipPlanSession(props.msg.info.sessionID)}
+      copyText={props.msg.parts
+        .flatMap((part) =>
+          part.type === 'text' && !part.synthetic && !part.ignored ? [part.text.trim()] : []
+        )
+        .filter(Boolean)
+        .join('\n\n')}
       onFork={() => {
         const boundaryMessageId = getForkBoundaryMessageId(
           state.messages,
@@ -325,15 +335,18 @@ export function getForkBoundaryMessageId(
 
 function AssistantDialogSummary(props: {
   summary: AssistantDialogSummaryInfo;
+  messageId: string;
   showImplementPlanAction?: boolean;
   onOpenPlan?: () => void;
   onImplementPlan?: () => void;
   onSkipPlan?: () => void;
+  copyText: string;
   onFork: () => void;
   onWorkedSummaryHoverChange?: (promptMessageId: string, hovering: boolean) => void;
   showCompletedTime?: boolean;
   suppressTimestampAnimation?: boolean;
 }) {
+  let summaryRef: HTMLDivElement | undefined;
   const tokenSuffix = () =>
     props.summary.inputTokens > 0 || props.summary.outputTokens > 0
       ? ` - Tokens ↑ ${formatNumber(props.summary.inputTokens)} ↓ ${formatNumber(props.summary.outputTokens)}`
@@ -354,7 +367,15 @@ function AssistantDialogSummary(props: {
   const onWorkedSummaryHoverChange = props.onWorkedSummaryHoverChange;
   let hoveredPromptMessageId: string | null = null;
   let hoverIntentTimer: ReturnType<typeof setTimeout> | undefined;
+  let copiedTimer: ReturnType<typeof setTimeout> | undefined;
   const [isHoverIntentActive, setIsHoverIntentActive] = createSignal(false);
+  const [copied, setCopied] = createSignal(false);
+  const copyFinalResponse = async () => {
+    if (!props.copyText || !(await writeClipboard(props.copyText))) return;
+    setCopied(true);
+    clearTimeout(copiedTimer);
+    copiedTimer = setTimeout(() => setCopied(false), 1500);
+  };
   const notifyHoverChange = (hovering: boolean) => {
     if (hoverIntentTimer) {
       clearTimeout(hoverIntentTimer);
@@ -377,8 +398,39 @@ function AssistantDialogSummary(props: {
       onWorkedSummaryHoverChange?.(promptMessageId, true);
     }, HOVER_INTENT_DELAY_MS);
   };
+  onMount(() => {
+    if (!summaryRef) return;
+    const messageRow = summaryRef.closest<HTMLElement>('[data-msg-id]');
+    const hoverRoot =
+      messageRow ?? summaryRef.closest<HTMLElement>('.interactive-list-track') ?? summaryRef;
+    const isInHoverRegion = (target: EventTarget | null) => {
+      if (!(target instanceof Element) || !hoverRoot.contains(target)) return false;
+      if (target.closest('.assistant-dialog-summary') === summaryRef) return true;
+      const finalResponse = target.closest('.assistant-message-flow-item-final');
+      return (
+        finalResponse?.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId === props.messageId
+      );
+    };
+    const onMouseOver = (event: MouseEvent) => {
+      if (isInHoverRegion(event.target) && !isInHoverRegion(event.relatedTarget)) {
+        notifyHoverChange(true);
+      }
+    };
+    const onMouseOut = (event: MouseEvent) => {
+      if (isInHoverRegion(event.target) && !isInHoverRegion(event.relatedTarget)) {
+        notifyHoverChange(false);
+      }
+    };
+    hoverRoot.addEventListener('mouseover', onMouseOver);
+    hoverRoot.addEventListener('mouseout', onMouseOut);
+    onCleanup(() => {
+      hoverRoot.removeEventListener('mouseover', onMouseOver);
+      hoverRoot.removeEventListener('mouseout', onMouseOut);
+    });
+  });
   onCleanup(() => {
     if (hoverIntentTimer) clearTimeout(hoverIntentTimer);
+    if (copiedTimer) clearTimeout(copiedTimer);
     if (hoveredPromptMessageId) {
       onWorkedSummaryHoverChange?.(hoveredPromptMessageId, false);
     }
@@ -386,10 +438,11 @@ function AssistantDialogSummary(props: {
 
   return (
     <div
+      ref={(element) => {
+        summaryRef = element;
+      }}
       class={`model-change-indicator assistant-dialog-summary${props.showCompletedTime || isHoverIntentActive() ? ' is-completion-time-visible' : ''}${isHoverIntentActive() ? ' is-hover-intent-active' : ''}`}
       data-prompt-msg-id={props.summary.promptMessageId}
-      onMouseEnter={() => notifyHoverChange(true)}
-      onMouseLeave={() => notifyHoverChange(false)}
     >
       <div class="assistant-dialog-summary-content">
         <Show when={completedTime()}>
@@ -415,17 +468,36 @@ function AssistantDialogSummary(props: {
             {agentSuffix()}
           </Show>
         </span>
-        <Tooltip content="Fork chat from here" delay={500}>
-          <button
-            type="button"
-            class="assistant-dialog-summary-fork"
-            aria-label="Fork chat from here"
-            disabled={isLoading()}
-            onClick={() => props.onFork()}
-          >
-            <ForkIcon />
-          </button>
-        </Tooltip>
+        <div class="assistant-dialog-summary-turn-actions">
+          <Tooltip content={copied() ? 'Copied' : 'Copy final response'} delay={500}>
+            <button
+              type="button"
+              class="assistant-dialog-summary-turn-action assistant-dialog-summary-copy"
+              classList={{ 'is-copied': copied() }}
+              aria-label={copied() ? 'Copied final response' : 'Copy final response'}
+              disabled={isLoading() || !props.copyText}
+              onClick={() => void copyFinalResponse()}
+            >
+              <UiIcon
+                source={copied() ? checkIcon : copyIcon}
+                width="16"
+                height="16"
+                aria-hidden="true"
+              />
+            </button>
+          </Tooltip>
+          <Tooltip content="Fork chat from here" delay={500}>
+            <button
+              type="button"
+              class="assistant-dialog-summary-turn-action assistant-dialog-summary-fork"
+              aria-label="Fork chat from here"
+              disabled={isLoading()}
+              onClick={() => props.onFork()}
+            >
+              <ForkIcon />
+            </button>
+          </Tooltip>
+        </div>
       </div>
       <Show when={props.showImplementPlanAction}>
         <div class="assistant-dialog-summary-actions">
