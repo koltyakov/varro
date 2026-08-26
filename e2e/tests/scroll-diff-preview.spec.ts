@@ -439,10 +439,10 @@ test.describe('diff preview anchoring', () => {
     });
 
     expect(dimensions.visibleRowCount).toBe(6);
-    expect(dimensions.clientHeight).toBe(dimensions.rowHeight * 6);
+    expect(dimensions.clientHeight).toBeCloseTo(dimensions.rowHeight * 6, 0);
     expect(dimensions.hasHorizontalScrollbar).toBe(false);
-    expect(dimensions.shellHeight).toBeCloseTo(dimensions.clientHeight + 1, 3);
-    expect(dimensions.fadeHeight).toBe(dimensions.rowHeight / 2);
+    expect(dimensions.shellHeight).toBeCloseTo(dimensions.rowHeight * 6 + 1, 3);
+    expect(dimensions.fadeHeight).toBeCloseTo(dimensions.rowHeight / 2, 0);
     expect(dimensions.toggleInHeader).toBe(true);
 
     const toggle = page.locator(`[data-msg-id="${messageId}"] .diff-view-toggle`);

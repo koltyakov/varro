@@ -143,6 +143,7 @@ test('chat font changes preserve main typography proportions and a detached anch
         __initialWebviewState?: {
           desktopSessionPaneSide?: 'left' | 'right';
           defaultPermissionMode?: 'default' | 'edits' | 'auto' | 'full';
+          chatEditorFontSize?: number;
         };
       }
     ).__initialWebviewState;
@@ -168,6 +169,7 @@ test('chat font changes preserve main typography proportions and a detached anch
           desktopSessionPaneSide: initial?.desktopSessionPaneSide ?? 'left',
           defaultPermissionMode: initial?.defaultPermissionMode ?? 'default',
           chatFontSize: 17,
+          chatEditorFontSize: initial?.chatEditorFontSize ?? 12,
           chatFontFamily: 'monospace',
         },
       },
