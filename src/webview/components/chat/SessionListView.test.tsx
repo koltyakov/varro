@@ -1275,7 +1275,7 @@ describe('SessionListView actions', () => {
     expect(menu?.textContent).not.toContain('Rename');
     expect(menu?.textContent).not.toContain('Move to Recycle Bin');
     expect(menu?.textContent).toContain('Copy session ID');
-    expect(menu?.textContent).toContain('Open as Editor');
+    expect(menu?.textContent).toContain('Open in Editor');
     expect(menu?.textContent).toContain('Open in terminal');
     expect(menu?.textContent).toContain('Share session');
   });
@@ -1308,6 +1308,26 @@ describe('SessionListView actions', () => {
     expect(document.querySelector('[role="menu"]')).toBeNull();
   });
 
+  it('opens a session in the sidebar from its row menu', () => {
+    const send = vi.fn();
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    (window as { __sendToExtension?: (message: TestRuntimeValue) => void }).__sendToExtension =
+      send;
+    setSessions([session('session-1', Date.now())]);
+    cleanup = render(() => <SessionListView />, container);
+
+    openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
+    Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
+      .find((button) => button.textContent?.trim() === 'Open')!
+      .click();
+
+    expect(send).toHaveBeenCalledWith({
+      type: 'session/open-in-sidebar',
+      payload: { sessionId: 'session-1' },
+    });
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+
   it('opens a session in an editor tab from its row menu', () => {
     const send = vi.fn((message: TestRuntimeValue) => {
       structuredClone(message);
@@ -1331,7 +1351,7 @@ describe('SessionListView actions', () => {
 
     openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
     Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
-      .find((button) => button.textContent?.trim() === 'Open as Editor')!
+      .find((button) => button.textContent?.trim() === 'Open in Editor')!
       .click();
 
     expect(send).toHaveBeenCalledWith({

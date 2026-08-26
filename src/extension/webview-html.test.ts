@@ -28,6 +28,7 @@ const initialState: InitialWebviewState = {
   droppedFiles: [],
   emptyStateLogoUri: '</script>&\u2028\u2029',
   chatFontSize: 13,
+  chatEditorFontSize: 12,
   chatFontFamily: 'default',
 };
 

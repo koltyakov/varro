@@ -73,6 +73,7 @@ export interface MessageRouterCallbacks {
     model?: Extract<WebviewMessage, { type: 'session/open-in-editor' }>['payload']['model'],
     rootSessionId?: string
   ): void | Promise<void>;
+  openSessionInSidebar(sessionId: string): void | Promise<void>;
   openNewEditor(): void | Promise<void>;
   editorRouteChanged(
     route: Extract<WebviewMessage, { type: 'editor/route-changed' }>['payload']['route']
@@ -222,6 +223,9 @@ export class MessageRouter {
             msg.payload.model,
             msg.payload.rootSessionId
           );
+          break;
+        case 'session/open-in-sidebar':
+          await this.callbacks.openSessionInSidebar(msg.payload.sessionId);
           break;
         case 'chat/new-editor':
           await this.callbacks.openNewEditor();

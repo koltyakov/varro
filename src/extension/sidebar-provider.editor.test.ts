@@ -129,6 +129,28 @@ describe('SidebarProvider editor panels', () => {
     });
   });
 
+  it('closes a session editor before opening that session in the sidebar', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const { posted } = attachTestView(provider);
+    const editor = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+
+    await provider.openSessionInEditor('session-1');
+    await provider.openSessionInSidebar('session-1');
+
+    expect(getVscodeMock().commands.executeCommand).toHaveBeenCalledWith('varro.chat.focus');
+    expect(editor.panel.dispose).toHaveBeenCalledOnce();
+    await provider.handleMessage({ type: 'ready' });
+    await provider.handleMessage({
+      type: 'commands/state',
+      payload: { canAbort: false, canSwitchSessions: false, model: null },
+    });
+    expect(posted).toContainEqual({
+      type: 'command/open-session',
+      payload: { sessionId: 'session-1' },
+    });
+  });
+
   it('restores and deduplicates a persisted session panel', async () => {
     const { provider } = await createSidebarProviderInstance();
     const first = createPanel();

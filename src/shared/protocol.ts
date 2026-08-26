@@ -607,6 +607,7 @@ export type InitialWebviewState = {
   desktopSessionPaneSide?: DesktopSessionPaneSide;
   defaultPermissionMode?: PermissionMode;
   chatFontSize: number;
+  chatEditorFontSize: number;
   chatFontFamily: string;
   sessionPermissionModes?: Record<string, PermissionMode>;
   sessionSelectedModels?: Record<string, ChatModelSelection>;
@@ -741,6 +742,7 @@ export type WebviewMessage =
         model?: ChatModelSelection;
       };
     }
+  | { type: 'session/open-in-sidebar'; payload: { sessionId: string } }
   | { type: 'session/open-in-opencode'; payload: { sessionId: string } }
   | { type: 'chat/new-editor' }
   | { type: 'editor/route-changed'; payload: { route: WebviewRoute } }

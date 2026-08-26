@@ -149,6 +149,7 @@ function createActionFixture() {
     runInTerminal: vi.fn(),
     openSessionInTerminal: vi.fn(),
     openSessionInEditor: vi.fn(),
+    openSessionInSidebar: vi.fn(),
     openNewEditor: vi.fn(),
     editorRouteChanged: vi.fn(),
     handleRalphMessage: vi.fn<SidebarProviderActionDeps['handleRalphMessage']>(),
@@ -244,6 +245,19 @@ describe('createSidebarProviderActions', () => {
       'Session does not belong to the current workspace'
     );
     expect(deps.openSessionInEditor).not.toHaveBeenCalledWith('session-foreign');
+  });
+
+  it('validates a session before opening it in the sidebar', async () => {
+    const { actions, deps, server } = createActionFixture();
+
+    await actions.openSessionInSidebar('session-1');
+    expect(deps.openSessionInSidebar).toHaveBeenCalledWith('session-1');
+
+    server.request.mockResolvedValueOnce({ id: 'session-foreign', directory: '/other-repo' });
+    await expect(actions.openSessionInSidebar('session-foreign')).rejects.toThrow(
+      'Session does not belong to the current workspace'
+    );
+    expect(deps.openSessionInSidebar).not.toHaveBeenCalledWith('session-foreign');
   });
 
   it('does not fall back to opening a path rejected by the session diff guard', async () => {

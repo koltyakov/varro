@@ -63,6 +63,40 @@ function mockRuntimeBootstrap() {
 }
 
 describe('useOpenCode session state flows', () => {
+  it('closes the session picker when the host opens a session', async () => {
+    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
+    bridgeOnMessage.mockImplementation((handler) => {
+      bridgeHandler = handler;
+      return () => {
+        bridgeHandler = undefined;
+      };
+    });
+    mockRuntimeBootstrap();
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages.mockResolvedValue([]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
+      stateModule.setShowSessionPicker(true);
+
+      bridgeHandler({
+        type: 'command/open-session',
+        payload: { sessionId: 'session-1' },
+      });
+
+      expect(stateModule.showSessionPicker()).toBe(false);
+      expect(stateModule.state.activeSessionId).toBe('session-1');
+    } finally {
+      dispose();
+    }
+  });
+
   it('keeps the chat connected when the event stream is degraded', async () => {
     let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
     bridgeOnMessage.mockImplementation((handler) => {

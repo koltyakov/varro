@@ -75,6 +75,7 @@ export function SessionActionsMenu(props: {
   session: Session;
   state: SessionActionsState;
   isPinned: boolean;
+  showOpenInSidebar?: boolean;
   showOpenAsEditor?: boolean;
   inputIdPrefix: string;
   onMenuRef: (element: HTMLDivElement) => void;
@@ -165,6 +166,22 @@ export function SessionActionsMenu(props: {
           when={props.state.renaming()}
           fallback={
             <>
+              <Show when={props.showOpenInSidebar}>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    const sessionId = props.session.id;
+                    props.state.close();
+                    postMessage({
+                      type: 'session/open-in-sidebar',
+                      payload: { sessionId },
+                    });
+                  }}
+                >
+                  Open
+                </button>
+              </Show>
               <Show when={props.showOpenAsEditor}>
                 <button
                   type="button"
@@ -199,7 +216,7 @@ export function SessionActionsMenu(props: {
                     if (posted) props.onOpenAsEditor?.(sessionId);
                   }}
                 >
-                  Open as Editor
+                  Open in Editor
                 </button>
               </Show>
               <button

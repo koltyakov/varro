@@ -416,6 +416,7 @@ export class WebviewSession {
       desktopSessionPaneSide: config.desktopSessionPaneSide,
       defaultPermissionMode: config.defaultPermissionMode,
       chatFontSize: config.chatFontSize,
+      chatEditorFontSize: config.chatEditorFontSize,
       chatFontFamily: config.chatFontFamily,
       sessionPermissionModes: this.deps.sessionPermissionModes(),
       sessionSelectedModels: this.deps.sessionSelectedModels(),

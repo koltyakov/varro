@@ -330,6 +330,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         event.affectsConfiguration('varro.chat.desktopSessionPaneSide') ||
         event.affectsConfiguration('varro.chat.defaultPermissionMode') ||
         event.affectsConfiguration('chat.fontSize') ||
+        event.affectsConfiguration('chat.editor.fontSize') ||
         event.affectsConfiguration('chat.fontFamily')
       ) {
         this.postConfigState();
@@ -538,6 +539,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         openSessionInTerminal: (sessionId) => this.openSessionInTerminal(sessionId),
         openSessionInEditor: (sessionId, title, model, rootSessionId) =>
           this.openSessionInEditor(sessionId, title, model, rootSessionId),
+        openSessionInSidebar: (sessionId) => this.openSessionInSidebar(sessionId),
         openNewEditor: () => this.openNewEditor(),
         editorRouteChanged: (route) => this.editorRouteChanged(webviewContext.viewId, route),
         handleRalphMessage: (msg) => this.ralphHost.handleMessage(msg),
@@ -670,6 +672,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       return;
     }
     await this.openEditorPanel({ type: 'session', sessionId, rootSessionId: rootId, title });
+  }
+
+  async openSessionInSidebar(sessionId: string) {
+    await vscode.commands.executeCommand(`${SidebarProvider.viewType}.focus`);
+    const rootId = this.sessionState.rootSessionIdFor(sessionId);
+    this.editorPanels.get(`session:${rootId}`)?.panel.dispose();
+    this.webviewSession.queueCommand({
+      type: 'command/open-session',
+      payload: { sessionId },
+    });
   }
 
   async openNewEditor() {

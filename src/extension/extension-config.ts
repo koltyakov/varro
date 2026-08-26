@@ -4,6 +4,7 @@ import { isPermissionMode } from '../shared/protocol';
 import { isNumber, isString } from '../shared/type-utils';
 
 const DEFAULT_CHAT_FONT_SIZE = 13;
+const DEFAULT_CHAT_EDITOR_FONT_SIZE = 12;
 const DEFAULT_CHAT_FONT_FAMILY = 'default';
 
 export function readExtensionConfigState(
@@ -17,6 +18,10 @@ export function readExtensionConfigState(
     desktopSessionPaneSide: config.get<'left' | 'right'>('chat.desktopSessionPaneSide', 'left'),
     defaultPermissionMode: readDefaultPermissionMode(config),
     chatFontSize: readChatFontSize(config, chatConfig),
+    chatEditorFontSize: readFontSize(
+      vscode.workspace.getConfiguration('chat.editor').get<unknown>('fontSize'),
+      DEFAULT_CHAT_EDITOR_FONT_SIZE
+    ),
     chatFontFamily: readChatFontFamily(chatConfig),
   };
 }
@@ -36,9 +41,11 @@ function readChatFontSize(
   }
 
   const value = chatConfig.get<unknown>('fontSize', DEFAULT_CHAT_FONT_SIZE);
-  return isNumber(value) && Number.isFinite(value) && value >= 6 && value <= 100
-    ? value
-    : DEFAULT_CHAT_FONT_SIZE;
+  return readFontSize(value, DEFAULT_CHAT_FONT_SIZE);
+}
+
+function readFontSize<T>(value: T, fallback: number): number {
+  return isNumber(value) && Number.isFinite(value) && value >= 6 && value <= 100 ? value : fallback;
 }
 
 function readChatFontFamily(config: vscode.WorkspaceConfiguration): string {

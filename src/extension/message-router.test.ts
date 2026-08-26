@@ -33,6 +33,7 @@ function createCallbacks(): MessageRouterCallbacks {
     runInTerminal: vi.fn(),
     openSessionInOpenCode: vi.fn(),
     openSessionInEditor: vi.fn(),
+    openSessionInSidebar: vi.fn(),
     openNewEditor: vi.fn(),
     editorRouteChanged: vi.fn(),
     exportSession: vi.fn(() => Promise.resolve()),
@@ -287,6 +288,16 @@ describe('MessageRouter', () => {
       payload: { sessionId: 'session-1' },
     });
     expect(cb.openSessionInOpenCode).toHaveBeenCalledWith('session-1');
+  });
+
+  it('dispatches session/open-in-sidebar', async () => {
+    const cb = createCallbacks();
+    const router = new MessageRouter(cb);
+    await router.handleMessage({
+      type: 'session/open-in-sidebar',
+      payload: { sessionId: 'session-1' },
+    });
+    expect(cb.openSessionInSidebar).toHaveBeenCalledWith('session-1');
   });
 
   it('dispatches vscode/open-settings with query', async () => {

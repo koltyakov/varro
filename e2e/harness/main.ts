@@ -4810,6 +4810,7 @@ function buildInitialState(state: ScenarioState): InitialWebviewState {
     emptyStateLogoUri: '/assets/icon.png',
     showFileDiffs: state.showFileDiffs,
     defaultPermissionMode: 'default',
+    chatEditorFontSize: 12,
     chatFontSize: 13,
     chatFontFamily: 'default',
     sessionPermissionModes: state.storedState.sessionPermissionModes,

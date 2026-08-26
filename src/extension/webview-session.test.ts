@@ -166,6 +166,7 @@ function createSession(options?: {
       desktopSessionPaneSide: 'left' as const,
       defaultPermissionMode: 'default' as const,
       chatFontSize: 13,
+      chatEditorFontSize: 12,
       chatFontFamily: 'default',
     })),
     currentTheme: vi.fn(() => 'dark' as const),

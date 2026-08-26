@@ -9,6 +9,7 @@ export type ExtensionConfigState = {
   desktopSessionPaneSide: DesktopSessionPaneSide;
   defaultPermissionMode: PermissionMode;
   chatFontSize: number;
+  chatEditorFontSize: number;
   chatFontFamily: string;
 };
 
@@ -22,4 +23,4 @@ export type WebviewConfigUpdatePayload = Pick<
 >;
 
 export type ExtensionConfigSnapshot = WebviewConfigUpdatePayload &
-  Pick<ExtensionConfigState, 'chatFontSize' | 'chatFontFamily'>;
+  Pick<ExtensionConfigState, 'chatFontSize' | 'chatEditorFontSize' | 'chatFontFamily'>;

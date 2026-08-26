@@ -671,6 +671,7 @@ describe('mount bridge helpers', () => {
         desktopSessionPaneSide: 'right',
         defaultPermissionMode: 'full',
         chatFontSize: 16,
+        chatEditorFontSize: 15,
         chatFontFamily: 'Iosevka, monospace',
       },
     });
@@ -688,6 +689,9 @@ describe('mount bridge helpers', () => {
     expect(setExpandThinking).toHaveBeenCalledWith(true);
     expect(setShowChangedFiles).toHaveBeenCalledWith(true);
     expect(document.documentElement.style.getPropertyValue('--varro-chat-font-size')).toBe('16px');
+    expect(document.documentElement.style.getPropertyValue('--varro-chat-editor-font-size')).toBe(
+      '15px'
+    );
     expect(document.documentElement.style.getPropertyValue('--varro-chat-font-family')).toBe(
       'Iosevka, monospace'
     );
@@ -698,11 +702,13 @@ describe('mount bridge helpers', () => {
         desktopSessionPaneSide: 'right',
         defaultPermissionMode: 'full',
         chatFontSize: 13,
+        chatEditorFontSize: 12,
         chatFontFamily: 'default',
       },
     });
     expect(document.documentElement.style.getPropertyValue('--varro-chat-font-family')).toBe('');
     document.documentElement.style.removeProperty('--varro-chat-font-size');
+    document.documentElement.style.removeProperty('--varro-chat-editor-font-size');
   });
 
   it('marks visible editor session trees seen as visibility changes', () => {

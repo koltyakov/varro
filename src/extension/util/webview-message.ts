@@ -122,6 +122,7 @@ const WEBVIEW_MESSAGE_TYPES = {
   'terminal-selection/clear': true,
   'terminal/run': true,
   'session/open-in-editor': true,
+  'session/open-in-sidebar': true,
   'session/open-in-opencode': true,
   'chat/new-editor': true,
   'editor/route-changed': true,
@@ -417,6 +418,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       return { type, payload: parsedPayload };
     }
 
+    case 'session/open-in-sidebar':
     case 'session/open-in-opencode': {
       const payload = asRecord(message?.payload);
       const sessionId = getBoundedString(payload?.sessionId, 512);

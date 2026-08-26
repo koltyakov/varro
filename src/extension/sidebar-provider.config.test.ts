@@ -11,7 +11,7 @@ import {
 const vscodeMock = getVscodeMock();
 
 describe('SidebarProvider local config routing', () => {
-  it.each(['varro.chat.fontSize', 'chat.fontSize', 'chat.fontFamily'])(
+  it.each(['varro.chat.fontSize', 'chat.fontSize', 'chat.editor.fontSize', 'chat.fontFamily'])(
     'broadcasts font configuration when %s changes',
     async (changedKey) => {
       const { provider } = await createSidebarProviderInstance();
@@ -21,6 +21,7 @@ describe('SidebarProvider local config routing', () => {
 
       await vscodeMock.workspace.getConfiguration('varro').update('chat.fontSize', 15);
       await vscodeMock.workspace.getConfiguration('chat').update('fontSize', 14);
+      await vscodeMock.workspace.getConfiguration('chat.editor').update('fontSize', 16);
       await vscodeMock.workspace
         .getConfiguration('chat')
         .update('fontFamily', 'Iosevka, monospace');
@@ -30,6 +31,7 @@ describe('SidebarProvider local config routing', () => {
         type: 'config/update',
         payload: expect.objectContaining({
           chatFontSize: 15,
+          chatEditorFontSize: 16,
           chatFontFamily: 'Iosevka, monospace',
         }),
       });

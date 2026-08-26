@@ -52,6 +52,7 @@ describe('webview bootstrap', () => {
     document.documentElement.classList.remove('varro-editor-surface');
     document.documentElement.classList.remove('varro-editor-layout-pending');
     document.documentElement.style.removeProperty('--varro-chat-font-size');
+    document.documentElement.style.removeProperty('--varro-chat-editor-font-size');
     document.documentElement.style.removeProperty('--varro-chat-font-family');
     mocks.cleanupBridge.mockReset();
     mocks.initializeBridge.mockReset();
@@ -76,6 +77,7 @@ describe('webview bootstrap', () => {
     document.documentElement.classList.remove('varro-editor-surface');
     document.documentElement.classList.remove('varro-editor-layout-pending');
     document.documentElement.style.removeProperty('--varro-chat-font-size');
+    document.documentElement.style.removeProperty('--varro-chat-editor-font-size');
     document.documentElement.style.removeProperty('--varro-chat-font-family');
     consoleError.mockRestore();
   });
@@ -118,6 +120,7 @@ describe('webview bootstrap', () => {
   it('applies initial chat font properties before rendering', () => {
     bootstrapWindow.__initialWebviewState = {
       chatFontSize: 15.5,
+      chatEditorFontSize: 14,
       chatFontFamily: 'Iosevka, monospace',
     };
 
@@ -125,6 +128,9 @@ describe('webview bootstrap', () => {
 
     expect(document.documentElement.style.getPropertyValue('--varro-chat-font-size')).toBe(
       '15.5px'
+    );
+    expect(document.documentElement.style.getPropertyValue('--varro-chat-editor-font-size')).toBe(
+      '14px'
     );
     expect(document.documentElement.style.getPropertyValue('--varro-chat-font-family')).toBe(
       'Iosevka, monospace'

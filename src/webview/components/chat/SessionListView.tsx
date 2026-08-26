@@ -2133,6 +2133,7 @@ function SessionListItem(props: {
           session={props.session}
           state={props.actions}
           isPinned={props.isPinned}
+          showOpenInSidebar
           showOpenAsEditor
           inputIdPrefix="session-rename"
           onMenuRef={(element) => {

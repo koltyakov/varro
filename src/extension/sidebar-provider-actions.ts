@@ -67,6 +67,7 @@ export interface SidebarProviderActionDeps {
     model?: ChatModelSelection,
     rootSessionId?: string
   ): void | Promise<void>;
+  openSessionInSidebar(sessionId: string): void | Promise<void>;
   openNewEditor(): void | Promise<void>;
   editorRouteChanged(route: WebviewRoute): void;
   handleRalphMessage: MessageRouterCallbacks['handleRalphMessage'];
@@ -144,6 +145,10 @@ export function createSidebarProviderActions(
     openSessionInEditor: async (sessionId, title, model, rootSessionId) => {
       await assertSessionInCurrentWorkspace(deps.server, sessionId);
       await deps.openSessionInEditor(sessionId, title, model, rootSessionId);
+    },
+    openSessionInSidebar: async (sessionId) => {
+      await assertSessionInCurrentWorkspace(deps.server, sessionId);
+      await deps.openSessionInSidebar(sessionId);
     },
     openNewEditor: () => deps.openNewEditor(),
     editorRouteChanged: (route) => deps.editorRouteChanged(route),

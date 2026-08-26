@@ -158,7 +158,7 @@ describe('ActiveChatHeader', () => {
     expect(menu!.textContent).toContain('Rename');
     expect(menu!.textContent).toContain('Pin session');
     expect(menu!.textContent).toContain('Copy session ID');
-    expect(menu!.textContent).toContain('Open as Editor');
+    expect(menu!.textContent).toContain('Open in Editor');
     expect(menu!.textContent).toContain('Open in terminal');
     expect(menu!.textContent).toContain('Share session');
     expect(menu!.textContent).not.toContain('Unshare session');
@@ -168,7 +168,7 @@ describe('ActiveChatHeader', () => {
         button.textContent?.trim()
       )
     ).toEqual([
-      'Open as Editor',
+      'Open in Editor',
       'Open in terminal',
       'Rename',
       'Pin session',
@@ -193,7 +193,7 @@ describe('ActiveChatHeader', () => {
     expect(menu?.textContent).not.toContain('Rename');
     expect(menu?.textContent).not.toContain('Move to Recycle Bin');
     expect(menu?.textContent).toContain('Copy session ID');
-    expect(menu?.textContent).toContain('Open as Editor');
+    expect(menu?.textContent).toContain('Open in Editor');
     expect(menu?.textContent).toContain('Open in terminal');
     expect(menu?.textContent).toContain('Share session');
   });
@@ -208,7 +208,7 @@ describe('ActiveChatHeader', () => {
       .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
 
     Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
-      .find((button) => button.textContent?.trim() === 'Open as Editor')!
+      .find((button) => button.textContent?.trim() === 'Open in Editor')!
       .click();
 
     expect(send).toHaveBeenCalledWith({

@@ -1137,6 +1137,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           }
         },
         openSession: (sessionId) => {
+          uiStore.setShowSessionPicker(false);
           void selectSession(sessionId);
         },
         abortSession: () => {

@@ -199,6 +199,7 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
         !isDesktopSessionPaneSide(payload.desktopSessionPaneSide) ||
         !isPermissionMode(payload.defaultPermissionMode) ||
         !isChatFontSize(payload.chatFontSize) ||
+        !isChatFontSize(payload.chatEditorFontSize) ||
         !isString(payload.chatFontFamily)
       ) {
         return null;
@@ -207,6 +208,7 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
         desktopSessionPaneSide: payload.desktopSessionPaneSide,
         defaultPermissionMode: payload.defaultPermissionMode,
         chatFontSize: payload.chatFontSize,
+        chatEditorFontSize: payload.chatEditorFontSize,
         chatFontFamily: payload.chatFontFamily,
       };
       if (isBoolean(payload.showFileDiffs)) {

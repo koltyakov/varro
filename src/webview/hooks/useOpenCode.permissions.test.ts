@@ -1407,6 +1407,7 @@ describe('useOpenCode permission and config flows', () => {
           desktopSessionPaneSide: 'right',
           defaultPermissionMode: 'default',
           chatFontSize: 13,
+          chatEditorFontSize: 12,
           chatFontFamily: 'default',
         },
       });

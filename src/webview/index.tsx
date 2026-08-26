@@ -104,9 +104,14 @@ export function showBootstrapFailure(root: HTMLElement) {
 export function bootstrap(root: HTMLElement) {
   const initialState = readInitialWebviewState();
   const isEditorSurface = initialState.webviewContext?.surface === 'editor';
-  if (initialState.chatFontSize !== undefined && initialState.chatFontFamily !== undefined) {
+  if (
+    initialState.chatFontSize !== undefined &&
+    initialState.chatEditorFontSize !== undefined &&
+    initialState.chatFontFamily !== undefined
+  ) {
     applyChatFontConfig({
       chatFontSize: initialState.chatFontSize,
+      chatEditorFontSize: initialState.chatEditorFontSize,
       chatFontFamily: initialState.chatFontFamily,
     });
   }

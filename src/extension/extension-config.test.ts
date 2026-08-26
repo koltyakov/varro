@@ -28,10 +28,12 @@ describe('readExtensionConfigState', () => {
 
   it('reads the VS Code chat font size and font family', () => {
     mocks.values.set('chat.fontSize', 15.5);
+    mocks.values.set('chat.editor.fontSize', 16);
     mocks.values.set('chat.fontFamily', 'Iosevka, monospace');
 
     expect(readExtensionConfigState()).toMatchObject({
       chatFontSize: 15.5,
+      chatEditorFontSize: 16,
       chatFontFamily: 'Iosevka, monospace',
     });
   });
@@ -40,6 +42,7 @@ describe('readExtensionConfigState', () => {
     expect(readExtensionConfigState()).toMatchObject({
       expandThinking: false,
       chatFontSize: 13,
+      chatEditorFontSize: 12,
       chatFontFamily: 'default',
     });
   });
@@ -69,6 +72,19 @@ describe('readExtensionConfigState', () => {
     mocks.values.set('chat.fontSize', value);
     expect(readExtensionConfigState().chatFontSize).toBe(value);
   });
+
+  it.each([6, 100])('accepts the chat.editor.fontSize boundary %s', (value) => {
+    mocks.values.set('chat.editor.fontSize', value);
+    expect(readExtensionConfigState().chatEditorFontSize).toBe(value);
+  });
+
+  it.each([5, 101, Number.NaN, Number.POSITIVE_INFINITY, '14'])(
+    'uses the default for invalid chat.editor.fontSize %s',
+    (value) => {
+      mocks.values.set('chat.editor.fontSize', value);
+      expect(readExtensionConfigState().chatEditorFontSize).toBe(12);
+    }
+  );
 
   it.each([null, 5, 101, Number.NaN, Number.POSITIVE_INFINITY, '14'])(
     'inherits chat.fontSize for Varro override %s',

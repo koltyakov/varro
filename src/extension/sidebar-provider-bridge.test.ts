@@ -38,6 +38,7 @@ function createInitialState(): InitialWebviewState {
     droppedFiles: [],
     emptyStateLogoUri: 'logo://icon',
     chatFontSize: 13,
+    chatEditorFontSize: 12,
     chatFontFamily: 'default',
   };
 }
