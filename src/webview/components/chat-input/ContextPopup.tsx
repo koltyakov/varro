@@ -37,10 +37,22 @@ type ContextTokens = {
   cacheWrite: number;
 };
 
+function getSessionInputTokens(tokens: ContextTokens) {
+  return tokens.input + tokens.cacheWrite;
+}
+
+function getSessionOutputTokens(tokens: ContextTokens) {
+  return tokens.output + tokens.reasoning;
+}
+
+function getSessionTotalTokens(tokens: ContextTokens) {
+  return getSessionInputTokens(tokens) + getSessionOutputTokens(tokens);
+}
+
 function getTokenRows(tokens: ContextTokens) {
   const items: Array<{ label: string; value: number }> = [
-    { label: 'Input', value: tokens.input },
-    { label: 'Output', value: tokens.output },
+    { label: 'Input', value: getSessionInputTokens(tokens) },
+    { label: 'Output', value: getSessionOutputTokens(tokens) },
   ];
   if (tokens.reasoning > 0) items.push({ label: 'Reasoning', value: tokens.reasoning });
   if (tokens.cacheRead > 0) items.push({ label: 'Cache read', value: tokens.cacheRead });
@@ -70,8 +82,10 @@ export function ContextPopup(props: {
   const visibleBreakdown = () =>
     nestedBreakdown() && props.nestedBreakdown.length > 0 ? props.nestedBreakdown : props.breakdown;
   const contextUsageAvailable = () => props.usage.used > 0;
-  const sessionTokensAvailable = () => props.tokens.total > 0;
-  const overallTotal = () => props.tokens.total + props.subagentTokens.total;
+  const sessionTotal = () => getSessionTotalTokens(props.tokens);
+  const subagentTotal = () => getSessionTotalTokens(props.subagentTokens);
+  const sessionTokensAvailable = () => sessionTotal() > 0;
+  const overallTotal = () => sessionTotal() + subagentTotal();
   let popupEl: HTMLDivElement | undefined;
 
   const setRef = (el: HTMLDivElement) => {
@@ -135,7 +149,7 @@ export function ContextPopup(props: {
         <div class="context-popup-row context-popup-row-total">
           <span class="context-popup-row-label">Total</span>
           <span class={`context-popup-row-value${sessionTokensAvailable() ? '' : ' unavailable'}`}>
-            {sessionTokensAvailable() ? formatNumber(props.tokens.total) : '--'}
+            {sessionTokensAvailable() ? formatNumber(sessionTotal()) : '--'}
           </span>
         </div>
         <Show when={formatCost(props.cost ?? undefined)}>
@@ -191,7 +205,7 @@ export function ContextPopup(props: {
         </div>
       </Show>
 
-      <Show when={props.subagentTokens.total > 0}>
+      <Show when={subagentTotal() > 0}>
         <button
           type="button"
           class="context-popup-section context-popup-section-toggle"
@@ -206,9 +220,7 @@ export function ContextPopup(props: {
             height="10"
           />
           <Show when={!subagentsExpanded()}>
-            <span class="context-popup-section-summary">
-              {formatNumber(props.subagentTokens.total)}
-            </span>
+            <span class="context-popup-section-summary">{formatNumber(subagentTotal())}</span>
           </Show>
         </button>
         <Show when={subagentsExpanded()}>
@@ -223,9 +235,7 @@ export function ContextPopup(props: {
             </For>
             <div class="context-popup-row context-popup-row-total">
               <span class="context-popup-row-label">Total</span>
-              <span class="context-popup-row-value">
-                {formatNumber(props.subagentTokens.total)}
-              </span>
+              <span class="context-popup-row-value">{formatNumber(subagentTotal())}</span>
             </div>
           </div>
         </Show>

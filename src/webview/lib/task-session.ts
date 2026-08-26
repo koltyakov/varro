@@ -7,7 +7,12 @@ export type TaskSessionInfo = {
   parentID?: string;
   title: string;
   time: { created: number };
-  tokens?: { input: number; output: number };
+  tokens?: {
+    input: number;
+    output: number;
+    reasoning?: number;
+    cache?: { read: number; write: number };
+  };
 };
 
 function getTaskSessionIdFromMetadata(metadata: UnknownRecord | undefined) {

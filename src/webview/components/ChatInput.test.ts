@@ -1396,7 +1396,7 @@ describe('ChatInput', () => {
     const sections = [...(container?.querySelectorAll('.context-popup-section') || [])];
     expect(sections.map((section) => section.textContent)).toEqual([
       'Session Tokens',
-      'Agents (1)650',
+      'Agents (1)600',
     ]);
     expect(readContextRows(sections[0])).toMatchObject({
       Input: '400',
@@ -1420,10 +1420,10 @@ describe('ChatInput', () => {
       Input: '500',
       Output: '100',
       'Cache read': '50',
-      Total: '650',
+      Total: '600',
     });
     expect(container?.querySelector('.context-popup-overall-total')?.textContent).toContain(
-      'Overall1,150'
+      'Overall1,100'
     );
   });
 
@@ -1453,7 +1453,7 @@ describe('ChatInput', () => {
     const sections = [...(container?.querySelectorAll('.context-popup-section') || [])];
     expect(sections.map((section) => section.textContent)).toEqual([
       'Session Tokens',
-      'Agents (1)650',
+      'Agents (1)600',
     ]);
     const sessionSection = sections[0];
     if (!sessionSection) throw new Error('Expected session token section');
@@ -1488,12 +1488,12 @@ describe('ChatInput', () => {
 
     const sessionSection = container?.querySelector('.context-popup-section');
     expect(readContextRows(sessionSection ?? undefined)).toEqual({
-      Input: '1,000',
-      Output: '200',
+      Input: '1,025',
+      Output: '250',
       Reasoning: '50',
       'Cache read': '100',
       'Cache write': '25',
-      Total: '1,375',
+      Total: '1,275',
     });
   });
 
@@ -1561,7 +1561,7 @@ describe('ChatInput', () => {
 
     await vi.waitFor(() => {
       expect(container?.querySelector('.context-popup-section-toggle')?.textContent).toContain(
-        'Agents (1)900'
+        'Agents (1)850'
       );
     });
     expect(client.varro.session.diffSummary).toHaveBeenCalledWith('session-1');

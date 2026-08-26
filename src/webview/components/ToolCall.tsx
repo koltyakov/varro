@@ -1433,8 +1433,8 @@ function GenericToolCall(props: {
     const sessionTokens = appState.sessions.find((session) => session.id === sessionId)?.tokens;
     if (sessionTokens) {
       return {
-        input: sessionTokens.input || 0,
-        output: sessionTokens.output || 0,
+        input: (sessionTokens.input || 0) + (sessionTokens.cache.write || 0),
+        output: (sessionTokens.output || 0) + (sessionTokens.reasoning || 0),
       };
     }
 
@@ -1443,8 +1443,8 @@ function GenericToolCall(props: {
     for (const entry of appState.messages) {
       const info = entry.info;
       if (info.role !== 'assistant' || info.sessionID !== sessionId) continue;
-      input += info.tokens.input || 0;
-      output += info.tokens.output || 0;
+      input += (info.tokens.input || 0) + (info.tokens.cache?.write || 0);
+      output += (info.tokens.output || 0) + (info.tokens.reasoning || 0);
     }
 
     return { input, output };

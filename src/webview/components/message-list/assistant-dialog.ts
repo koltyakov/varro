@@ -263,8 +263,15 @@ function sumAssistantDialogTokens(
     if (!snapshotSessionIds.has(session.id) || !session.tokens) continue;
     tokens.input += session.tokens.input || 0;
     tokens.output += session.tokens.output || 0;
+    tokens.reasoning += session.tokens.reasoning || 0;
+    tokens.cacheRead += session.tokens.cache?.read || 0;
+    tokens.cacheWrite += session.tokens.cache?.write || 0;
   }
-  return tokens;
+  return {
+    ...tokens,
+    input: tokens.input + tokens.cacheWrite,
+    output: tokens.output + tokens.reasoning,
+  };
 }
 
 function collectAssistantDialogMessages(

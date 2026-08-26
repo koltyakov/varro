@@ -1518,7 +1518,12 @@ describe('ToolCall', () => {
       {
         info: assistantMessage('subagent-assistant-1', {
           sessionID: 'subagent-session-1',
-          tokens: { input: 1_234, output: 56, reasoning: 0, cache: { read: 0, write: 0 } },
+          tokens: {
+            input: 3,
+            output: 50,
+            reasoning: 6,
+            cache: { read: 1_000, write: 1_231 },
+          },
         }),
         parts: [],
       },
@@ -1695,7 +1700,12 @@ describe('ToolCall', () => {
   it('uses subagent session token snapshots when message tokens are unavailable', () => {
     setState('sessions', [
       session('subagent-session-1', {
-        tokens: { input: 2_468, output: 135, reasoning: 0, cache: { read: 0, write: 0 } },
+        tokens: {
+          input: 3,
+          output: 130,
+          reasoning: 5,
+          cache: { read: 2_000, write: 2_465 },
+        },
       }),
     ]);
 

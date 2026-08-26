@@ -93,6 +93,24 @@ describe('getAssistantDialogSummaryMap', () => {
     });
   });
 
+  it('includes cache writes and reasoning but excludes cache reads from compact totals', () => {
+    const assistant = assistantMessage('assistant-final', 'session-parent', 'user-1', 2_000, 3_000);
+    assistant.info.tokens = {
+      input: 3,
+      output: 238,
+      reasoning: 54,
+      cache: { read: 7_347, write: 10_325 },
+    };
+
+    expect(
+      getAssistantDialogSummaryMap(
+        [userMessage('user-1', 'session-parent', 1_000), assistant],
+        undefined,
+        { primarySessionId: 'session-parent' }
+      ).get('assistant-final')
+    ).toMatchObject({ inputTokens: 10_328, outputTokens: 292 });
+  });
+
   it('does not let a child completion become the primary worked summary', () => {
     const messages: MessageEntry[] = [
       userMessage('user-1', 'session-parent', 1_000),
