@@ -2103,7 +2103,7 @@
 }
 
 .chat-queue-icon-action.is-active {
-  color: #fff;
+  color: var(--color-vscode-accent);
   background: color-mix(in srgb, var(--color-vscode-accent) 12%, transparent);
 }
 

@@ -107,7 +107,7 @@
   border: none;
   border-radius: var(--radius-pill);
   background: none;
-  color: #fff;
+  color: var(--color-vscode-muted);
   cursor: pointer;
 }
 
