@@ -393,6 +393,7 @@ export function AssistantMessageContent(props: {
   exitingActivityPartKeys?: ReadonlySet<string>;
   visibleActiveActivityPartKeys?: ReadonlySet<string>;
   groupedActiveActivityPartKeys?: ReadonlySet<string>;
+  keepReasoningInline?: boolean;
   expandReasoning?: boolean;
 }) {
   const dedupedParts = createMemo(() => deduplicateFileEdits(props.parts));
@@ -453,7 +454,7 @@ export function AssistantMessageContent(props: {
     isAssistantActivityPart(part) &&
     shouldCompactAssistantActivityPart(part, {
       keepEditInline: props.info.time.completed === undefined && !props.info.error,
-      keepReasoningInline: !!props.expandReasoning,
+      keepReasoningInline: !!props.keepReasoningInline,
     }) &&
     (part.type !== 'tool' ||
       (!props.questionRequestForTool?.(part) && !props.permissionMatchForTool?.(part)));

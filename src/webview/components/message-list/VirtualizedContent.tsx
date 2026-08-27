@@ -238,6 +238,7 @@ export function VirtualizedContent(
         exitingActivityPartKeys={props.exitingActivityPartKeys}
         visibleActiveActivityPartKeys={props.visibleActiveActivityPartKeys}
         groupedActiveActivityPartKeys={props.groupedActiveActivityPartKeys}
+        inlineThinkingMessageIds={props.inlineThinkingMessageIds}
         expandedThinkingMessageIds={props.expandedThinkingMessageIds}
         hasBuildAgent={props.hasBuildAgent}
         latestPlanImplementationMessageId={props.latestPlanImplementationMessageId}

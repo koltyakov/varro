@@ -299,6 +299,7 @@
   font-size: 11px;
   line-height: 1.2;
   font-variant-numeric: tabular-nums;
+  word-spacing: -0.2em;
   color: var(--color-vscode-fg-muted);
   flex-shrink: 0;
   white-space: nowrap;
@@ -2238,9 +2239,23 @@ kbd {
   background: var(--color-vscode-surface-softer);
 }
 
-.chat-thinking-box .thinking-text {
-  white-space: pre-wrap;
+.chat-thinking-box .thinking-text.rendered-markdown {
+  color: inherit;
+  font-size: inherit;
   line-height: 1.5;
+}
+
+.chat-thinking-box .thinking-text.rendered-markdown > [data-markdown-segment='tail'] > :last-child,
+.chat-thinking-box
+  .thinking-text.rendered-markdown
+  > [data-markdown-segment='stable']:not(:has(+ [data-markdown-segment='tail'] > :first-child))
+  > :last-child {
+  margin-bottom: 0;
+}
+
+.chat-thinking-box .thinking-text.rendered-markdown :is(h1, h2, h3, h4, h5, h6) {
+  font-size: 1em;
+  line-height: inherit;
 }
 
 .chat-image-figure {
@@ -2604,6 +2619,7 @@ kbd {
   padding: 12px 15px;
   border: 1px solid color-mix(in srgb, var(--color-vscode-request-border) 45%, transparent);
   border-radius: var(--chat-radius-card);
+  border-top-right-radius: var(--radius-chip);
   background: var(--color-vscode-request-bubble);
 }
 
@@ -3070,6 +3086,7 @@ kbd {
 
 .user-message-card:has(.message-file-attachments.message-attachments-leading) {
   margin-top: 33px;
+  border-top-right-radius: var(--radius-chip);
 }
 
 .message-file-attachments {

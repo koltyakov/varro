@@ -495,7 +495,7 @@ Chat view:
 - `varro.chat.defaultPermissionMode` - initial permission mode when no saved project or global selection exists; defaults to `auto`
 - `varro.chat.autoApproveModel` - provider/model used by the auto-approve judge; stored in VS Code user settings and selected from Varro's Models view
 - `varro.chat.showFileDiffs` - show line-by-line edits in file-change tool cards; defaults to `false`
-- `varro.chat.expandThinking` - keep thinking blocks expanded and outside `Explored` during the active turn; defaults to `false`
+- `varro.chat.expandThinking` - expand thinking details after two seconds while reasoning is active, collapse finished thinking into rows, and return it to `Explored` when the turn finishes; defaults to `false`
 - `varro.chat.fontSize` - chat text size from `6` through `100`; defaults to `null`, which uses VS Code's `chat.fontSize`. Tool and diff editor content follows `chat.editor.fontSize`
 - `varro.chat.showChangedFiles` - show the changed-files panel above the composer; defaults to `false`
 - `varro.chat.desktopSessionPaneSide` - on large screens, show the sessions pane on the `left` or `right`; defaults to `right`

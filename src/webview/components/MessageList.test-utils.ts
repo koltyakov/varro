@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, vi } from 'vitest';
 import { reconcile } from 'solid-js/store';
 import {
+  setExpandThinking,
   setState,
   setShowFileDiffs,
   setShowThinkingPreference,
@@ -88,6 +89,7 @@ export function installMessageListTestEnvironment(
     setState('sessionAutoPermissionCounts', reconcile({}));
     setState('skippedPlanSessions', reconcile({}));
     setShowFileDiffs(false);
+    setExpandThinking(false);
     setShowThinkingPreference(true);
     stopLoading();
     resetMessageEditState();

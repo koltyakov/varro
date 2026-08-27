@@ -125,6 +125,7 @@ export function Message(props: {
   exitingActivityPartKeys?: ReadonlySet<string>;
   visibleActiveActivityPartKeys?: ReadonlySet<string>;
   groupedActiveActivityPartKeys?: ReadonlySet<string>;
+  keepReasoningInline?: boolean;
   expandReasoning?: boolean;
 }) {
   let turnRef: HTMLDivElement | undefined;
@@ -545,6 +546,7 @@ export function Message(props: {
                 exitingActivityPartKeys={props.exitingActivityPartKeys}
                 visibleActiveActivityPartKeys={props.visibleActiveActivityPartKeys}
                 groupedActiveActivityPartKeys={props.groupedActiveActivityPartKeys}
+                keepReasoningInline={props.keepReasoningInline}
                 expandReasoning={props.expandReasoning}
               />
             </Show>

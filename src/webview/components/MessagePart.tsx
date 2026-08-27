@@ -127,26 +127,32 @@ function ReasoningBlock(props: {
   const streamingScrollSpeed = 42;
   const expansionKey = () =>
     `reasoning\u0000${props.part.sessionID}\u0000${props.part.messageID}\u0000${props.part.id}`;
+  const isStreaming = () => props.part.time.end === undefined;
+  const isAutoExpansionRequested = () => !!props.expandedByDefault && isStreaming();
   let currentExpansionKey = expansionKey();
   let contentElement: HTMLDivElement | undefined;
   let autoFollow = true;
   let wasExpanded = false;
-  let wasStreaming = props.part.time.end === undefined;
-  let wasExpandedByDefault = !!props.expandedByDefault;
+  let wasStreaming = isStreaming();
+  let wasAutoExpansionRequested = isAutoExpansionRequested();
   let followFrameRequest = 0;
   let previousFollowTime: number | null = null;
   let lastAutoScrollTop: number | null = null;
   const [expanded, setExpanded] = createSignal(
-    props.expandedByDefault || (getMessageBlockExpanded(currentExpansionKey) ?? false)
+    isAutoExpansionRequested() || (getMessageBlockExpanded(currentExpansionKey) ?? false)
   );
   const reasoningText = createMemo(() => props.streamedText ?? props.part.text);
   const subjectLabel = createMemo(() => getReasoningSubject(reasoningText()));
   const reasoningBody = createMemo(() => splitReasoningText(reasoningText()).body);
+  const reasoningDescription = createMemo(() => reasoningBody().replace(/\s+/g, ' ').trim());
   const bodyText = createMemo(() => (expanded() ? reasoningBody() : ''));
-  const isStreaming = () => props.part.time.end === undefined;
   const hasBody = () => hasVisibleReasoningContent(reasoningBody());
   const detailLabel = () => getReasoningDetailLabel(props.messageInfo);
-  const headerLabel = () => formatReasoningHeader(subjectLabel(), detailLabel());
+  const headerLabel = () =>
+    formatReasoningHeader(
+      subjectLabel() || (expanded() ? 'Reasoning' : reasoningDescription() || null),
+      detailLabel()
+    );
   const durationLabel = () => formatReasoningDuration(props.part.time);
 
   createEffect(() => {
@@ -155,14 +161,18 @@ function ReasoningBlock(props: {
     currentExpansionKey = nextExpansionKey;
     wasExpanded = false;
     autoFollow = true;
-    wasExpandedByDefault = !!props.expandedByDefault;
-    setExpanded(props.expandedByDefault || (getMessageBlockExpanded(nextExpansionKey) ?? false));
+    wasAutoExpansionRequested = isAutoExpansionRequested();
+    setExpanded(isAutoExpansionRequested() || (getMessageBlockExpanded(nextExpansionKey) ?? false));
   });
 
   createEffect(() => {
-    const expandedByDefault = !!props.expandedByDefault;
-    if (expandedByDefault && !wasExpandedByDefault) setExpanded(true);
-    wasExpandedByDefault = expandedByDefault;
+    const autoExpansionRequested = isAutoExpansionRequested();
+    if (autoExpansionRequested && !wasAutoExpansionRequested) {
+      setExpanded(true);
+    } else if (!autoExpansionRequested && wasAutoExpansionRequested) {
+      setExpanded(getMessageBlockExpanded(currentExpansionKey) ?? false);
+    }
+    wasAutoExpansionRequested = autoExpansionRequested;
   });
 
   const updateOverflowFades = () => {
@@ -303,7 +313,11 @@ function ReasoningBlock(props: {
           onScroll={handleContentScroll}
         >
           <div class="thinking-item">
-            <div class="thinking-text">{bodyText()}</div>
+            <MarkdownRenderer
+              content={bodyText()}
+              cacheByContent={!isStreaming()}
+              class="thinking-text"
+            />
           </div>
         </div>
       </Show>

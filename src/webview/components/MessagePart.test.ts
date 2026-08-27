@@ -172,13 +172,82 @@ describe('MessagePart', () => {
     expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(lightBulbIcon));
   });
 
-  it('starts configured reasoning blocks expanded', () => {
-    renderPart(reasoningPart('**Planning**\n\nStep one'), { expandReasoning: true });
+  it('uses an unnamed reasoning description as the collapsed ellipsized label', () => {
+    renderPart(reasoningPart('Let me inspect the source tree.\n\nThen I will check the tests.'));
+
+    const header = container?.querySelector<HTMLButtonElement>('.thinking-header');
+    const label = header?.querySelector<HTMLElement>('.thinking-label-text');
+    expect(label?.textContent).toBe('Let me inspect the source tree. Then I will check the tests.');
+    expect(label?.classList).toContain('thinking-label-text');
+
+    header?.click();
+    expect(label?.textContent).toBe('Reasoning');
+
+    header?.click();
+    expect(label?.textContent).toBe('Let me inspect the source tree. Then I will check the tests.');
+  });
+
+  it('starts configured active reasoning blocks expanded', () => {
+    renderPart(reasoningPart('**Planning**\n\nStep one', { time: { start: 0 } }), {
+      expandReasoning: true,
+    });
 
     expect(container?.querySelector('.thinking-content')?.textContent).toContain('Step one');
     expect(container?.querySelector('.thinking-header')?.getAttribute('aria-expanded')).toBe(
       'true'
     );
+  });
+
+  it('collapses auto-expanded reasoning when that reasoning finishes', () => {
+    const [part, setPart] = createStore(
+      reasoningPart('**Planning**\n\nStep one', { time: { start: 0 } })
+    );
+    cleanup = render(() => MessagePart({ part, expandReasoning: true }), container!);
+
+    expect(container?.querySelector('.thinking-content')?.textContent).toContain('Step one');
+
+    setPart('time', 'end', 1_000);
+
+    expect(container?.querySelector('.thinking-content')).toBeNull();
+    expect(container?.querySelector('.thinking-header')?.getAttribute('aria-expanded')).toBe(
+      'false'
+    );
+  });
+
+  it('keeps configured completed reasoning collapsed', () => {
+    renderPart(reasoningPart('**Planning**\n\nStep one'), { expandReasoning: true });
+
+    expect(container?.querySelector('.thinking-content')).toBeNull();
+    expect(container?.querySelector('.thinking-header')?.getAttribute('aria-expanded')).toBe(
+      'false'
+    );
+  });
+
+  it('renders reasoning details as markdown at the thinking text size', () => {
+    renderPart(
+      reasoningPart('**Planning**\n\nUse **care** with `inline value`.', { time: { start: 0 } }),
+      { expandReasoning: true }
+    );
+
+    const details = container?.querySelector('.thinking-text');
+    expect(details?.classList).toContain('rendered-markdown');
+    expect(details?.querySelector('strong')?.textContent).toBe('care');
+    expect(details?.querySelector('code')?.textContent).toBe('inline value');
+  });
+
+  it('lets the user collapse and reopen auto-expanded reasoning', () => {
+    renderPart(reasoningPart('**Planning**\n\nStep one', { time: { start: 0 } }), {
+      expandReasoning: true,
+    });
+
+    const header = container?.querySelector<HTMLButtonElement>('.thinking-header');
+    header?.click();
+    expect(header?.getAttribute('aria-expanded')).toBe('false');
+    expect(container?.querySelector('.thinking-content')).toBeNull();
+
+    header?.click();
+    expect(header?.getAttribute('aria-expanded')).toBe('true');
+    expect(container?.querySelector('.thinking-content')?.textContent).toContain('Step one');
   });
 
   it('keeps a user-expanded reasoning block open when virtualization remounts it', () => {

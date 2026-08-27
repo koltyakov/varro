@@ -192,6 +192,7 @@ const ACTIVITY_SHOW_DELAY_MS = 500;
 const ACTIVITY_MIN_VISIBLE_MS = 2_000;
 const ACTIVITY_EXIT_MS = 420;
 const ACTIVITY_EXIT_CLEANUP_GRACE_MS = 250;
+const THINKING_AUTO_EXPAND_DELAY_MS = 2_000;
 // Only offer "jump to latest" when at least this much content is hidden
 // below the viewport; a barely-scrolled list doesn't need the button.
 const JUMP_TO_LATEST_MIN_HIDDEN_CONTENT_PX = 240;
@@ -6008,7 +6009,7 @@ export function MessageList() {
   const keepTrailingTurnEditMessageIds = createMemo(
     () => trailingTurnInlineEditRetention().messageIds
   );
-  const trailingTurnExpandedThinking = createMemo<{
+  const inlineThinkingTurn = createMemo<{
     sessionId: string | null;
     userMessageId: string | null;
     messageIds: ReadonlySet<string>;
@@ -6016,14 +6017,16 @@ export function MessageList() {
     (previous) => {
       const sessionId = state.activeSessionId;
       const turn = trailingAssistantTurn();
-      const empty = { sessionId, userMessageId: null, messageIds: new Set<string>() };
-      if (!expandThinking() || !sessionId || !turn || turn.assistantMessageIds.size === 0) {
-        return empty;
-      }
+      const empty = {
+        sessionId,
+        userMessageId: null,
+        messageIds: new Set<string>(),
+      };
+      if (!expandThinking() || !sessionId || messages().length === 0 || !turn) return empty;
+      if (turn.assistantMessageIds.size === 0) return empty;
 
-      const awaitingInput = isSessionAwaitingInput(sessionId);
-      const treeWorking = isSessionTreeStatusWorking(sessionId);
-      if (treeWorking || awaitingInput) {
+      const working = isSessionTreeStatusWorking(sessionId) || isSessionAwaitingInput(sessionId);
+      if (working) {
         return {
           sessionId,
           userMessageId: turn.userMessageId,
@@ -6034,6 +6037,7 @@ export function MessageList() {
       const completedWhileOpen =
         previous.sessionId === sessionId &&
         previous.userMessageId === turn.userMessageId &&
+        previous.messageIds.size > 0 &&
         !!turn.latestAssistant?.time.completed;
       return completedWhileOpen
         ? {
@@ -6045,7 +6049,52 @@ export function MessageList() {
     },
     { sessionId: null, userMessageId: null, messageIds: new Set<string>() }
   );
-  const expandedThinkingMessageIds = createMemo(() => trailingTurnExpandedThinking().messageIds);
+  const inlineThinkingTurnKey = createMemo(() => {
+    const turn = inlineThinkingTurn();
+    return turn.sessionId && turn.userMessageId
+      ? `${turn.sessionId}\u0000${turn.userMessageId}`
+      : null;
+  });
+  const streamingThinkingTurnKey = createMemo(() => {
+    const sessionId = state.activeSessionId;
+    const turn = trailingAssistantTurn();
+    if (!expandThinking() || !sessionId || !turn || turn.assistantMessageIds.size === 0)
+      return null;
+    if (!isSessionTreeStatusWorking(sessionId) && !isSessionAwaitingInput(sessionId)) return null;
+
+    const hasStreamingReasoning = messages().some(
+      (message) =>
+        turn.assistantMessageIds.has(message.info.id) &&
+        message.parts.some((part) => part.type === 'reasoning' && part.time.end === undefined)
+    );
+    return hasStreamingReasoning ? `${sessionId}\u0000${turn.userMessageId}` : null;
+  });
+  const [autoExpandedThinkingTurnKey, setAutoExpandedThinkingTurnKey] = createSignal<string | null>(
+    null
+  );
+  createEffect(() => {
+    const turnKey = streamingThinkingTurnKey();
+    if (!turnKey) {
+      setAutoExpandedThinkingTurnKey(null);
+      return;
+    }
+    setAutoExpandedThinkingTurnKey(null);
+
+    const timer = window.setTimeout(() => {
+      setAutoExpandedThinkingTurnKey(turnKey);
+    }, THINKING_AUTO_EXPAND_DELAY_MS);
+    onCleanup(() => window.clearTimeout(timer));
+  });
+  const expandedThinkingMessageIds = createMemo<ReadonlySet<string>>(() => {
+    const turn = inlineThinkingTurn();
+    if (!inlineThinkingTurnKey() || autoExpandedThinkingTurnKey() !== inlineThinkingTurnKey()) {
+      return new Set<string>();
+    }
+    return turn.messageIds;
+  });
+  const inlineThinkingMessageIds = createMemo<ReadonlySet<string>>(
+    () => inlineThinkingTurn().messageIds
+  );
   const compactActivityMessages = createMemo(() => {
     const previousSignatures = previousTrailingFileEventSignatureMap();
     return messages().map((message) =>
@@ -6235,7 +6284,7 @@ export function MessageList() {
     shouldShowAssistantPartInline(part) &&
     shouldCompactAssistantActivityPart(part, {
       keepEditInline: keepTrailingTurnEditMessageIds().has(part.messageID),
-      keepReasoningInline: expandedThinkingMessageIds().has(part.messageID),
+      keepReasoningInline: inlineThinkingMessageIds().has(part.messageID),
     }) &&
     (part.type !== 'tool' ||
       (!getQuestionRequestForTool(part) && !getPermissionMatchForTool(part)));
@@ -7337,6 +7386,7 @@ export function MessageList() {
               exitingActivityPartKeys={renderedExitingActivityPartKeys()}
               visibleActiveActivityPartKeys={renderedVisibleActiveActivityPartKeys()}
               groupedActiveActivityPartKeys={visibleActiveActivityPartKeys()}
+              inlineThinkingMessageIds={inlineThinkingMessageIds()}
               expandedThinkingMessageIds={expandedThinkingMessageIds()}
               hasBuildAgent={hasBuildAgent()}
               latestPlanImplementationMessageId={latestPlanImplementationMessageId()}

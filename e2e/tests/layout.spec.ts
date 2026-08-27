@@ -1553,9 +1553,12 @@ test('matches the visual incoming Thinking gap to markdown', async ({ page }) =>
   const thinkingBox = page.locator('.assistant-active-activity-item .chat-thinking-box');
   await expect(summaries).toHaveCount(3);
   await expect(markdown).toBeVisible();
-  await expect(thinkingBox.locator('.thinking-label-text')).toHaveText('Thinking');
+  await expect(thinkingBox.locator('.thinking-label-text')).toContainText(
+    'Examining Detailed reasoning line 1 keeps the active card overheight.'
+  );
   await thinkingBox.locator('.thinking-header').click();
   await expect(thinkingBox.locator('.thinking-header')).toHaveAttribute('aria-expanded', 'true');
+  await expect(thinkingBox.locator('.thinking-label-text')).toHaveText('Reasoning');
   const gaps = await thinkingBox.evaluate(async (element) => {
     const activitySummaries = document.querySelectorAll<HTMLElement>('.assistant-activity-summary');
     const reference = document.querySelector<HTMLElement>(
@@ -1564,13 +1567,17 @@ test('matches the visual incoming Thinking gap to markdown', async ({ page }) =>
     const tray = element.closest<HTMLElement>('.assistant-active-activity-tray');
     const viewport = tray?.querySelector<HTMLElement>('.assistant-active-activity-items');
     const thinkingViewport = element.querySelector<HTMLElement>('.thinking-content');
+    const lastThinkingParagraph = [
+      ...(thinkingViewport?.querySelectorAll<HTMLElement>('.thinking-text p') ?? []),
+    ].at(-1);
     if (
       !activitySummaries[1] ||
       !activitySummaries[2] ||
       !reference ||
       !tray ||
       !viewport ||
-      !thinkingViewport
+      !thinkingViewport ||
+      !lastThinkingParagraph
     ) {
       throw new Error('Thinking spacing fixtures are missing');
     }
@@ -1591,6 +1598,9 @@ test('matches the visual incoming Thinking gap to markdown', async ({ page }) =>
       scrollHeight: viewport.scrollHeight,
       scrollTop: viewport.scrollTop,
       thinkingClientHeight: thinkingViewport.clientHeight,
+      thinkingLastMarginBottom: Number.parseFloat(
+        getComputedStyle(lastThinkingParagraph).marginBottom
+      ),
       thinkingScrollHeight: thinkingViewport.scrollHeight,
       samples,
       thinking:
@@ -1601,6 +1611,7 @@ test('matches the visual incoming Thinking gap to markdown', async ({ page }) =>
   expect(gaps.thinking).toBeCloseTo(gaps.markdown, 0);
   expect(gaps.scrollHeight).toBe(gaps.clientHeight);
   expect(gaps.thinkingScrollHeight).toBeGreaterThan(gaps.thinkingClientHeight);
+  expect(gaps.thinkingLastMarginBottom).toBe(0);
   expect(gaps.scrollTop).toBe(0);
   expect(gaps.boxTop).toBeGreaterThanOrEqual(gaps.trayTop - 0.5);
   expect(gaps.samples.length).toBeGreaterThan(0);

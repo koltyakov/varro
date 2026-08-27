@@ -1824,7 +1824,7 @@ describe('MessageList compact activity', () => {
     expect(summaries()[1]?.textContent).not.toContain('edit');
   });
 
-  it('expands active-turn thinking while keeping previous thinking in Explored', async () => {
+  it('retains sustained active-turn thinking until a new turn starts or the chat reopens', async () => {
     const historicalThought: Extract<Part, { type: 'reasoning' }> = {
       id: 'reasoning-history',
       sessionID: 'session-1',
@@ -1839,7 +1839,15 @@ describe('MessageList compact activity', () => {
       messageID: 'assistant-active',
       type: 'reasoning',
       text: '**Current thought**\n\nActive details',
-      time: { start: 3, end: 4 },
+      time: { start: 3 },
+    };
+    const completedActiveThought: Extract<Part, { type: 'reasoning' }> = {
+      id: 'reasoning-active-completed',
+      sessionID: 'session-1',
+      messageID: 'assistant-active',
+      type: 'reasoning',
+      text: '**Previous active thought**\n\nCompleted active details',
+      time: { start: 2, end: 3 },
     };
     setExpandThinking(true);
     setState('activeSessionId', 'session-1');
@@ -1853,22 +1861,110 @@ describe('MessageList compact activity', () => {
       { info: userMessage('user-active'), parts: [textPart('prompt-active', 'Current')] },
       {
         info: assistantMessage('assistant-active', { parentID: 'user-active' }),
-        parts: [activeThought],
+        parts: [completedActiveThought, activeThought],
       },
     ]);
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
+    expect(container?.querySelector('.thinking-content')).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(container?.querySelector('.thinking-content')).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(1);
     const summaries = [...(container?.querySelectorAll('.assistant-activity-summary') || [])];
-    expect(summaries).toHaveLength(1);
-    expect(summaries[0]?.textContent).toContain('Explored: 1 thought');
-    expect(container?.querySelectorAll('.chat-thinking-box')).toHaveLength(1);
-    expect(container?.querySelector('.thinking-header')?.getAttribute('aria-expanded')).toBe(
-      'true'
+    expect(summaries.some((summary) => summary.textContent?.includes('Explored: 1 thought'))).toBe(
+      true
     );
-    expect(container?.querySelector('.thinking-content')?.textContent).toContain('Active details');
+    expect(container?.querySelectorAll('.chat-thinking-box')).toHaveLength(2);
+    const thinkingHeaders = [...(container?.querySelectorAll('.thinking-header') || [])];
+    expect(
+      thinkingHeaders
+        .find((header) => header.textContent?.includes('Previous active thought'))
+        ?.getAttribute('aria-expanded')
+    ).toBe('false');
+    expect(
+      thinkingHeaders
+        .find((header) => header.textContent?.includes('Current thought'))
+        ?.getAttribute('aria-expanded')
+    ).toBe('true');
+    expect(container?.textContent).toContain('Active details');
+    expect(container?.textContent).not.toContain('Completed active details');
     expect(container?.textContent).not.toContain('Historical details');
+
+    upsertPart({ ...activeThought, time: { start: 3, end: 2_003 } });
+    await Promise.resolve();
+
+    expect(container?.querySelector('.thinking-content')).toBeNull();
+    expect(container?.textContent).not.toContain('Active details');
+    expect(container?.querySelectorAll('.chat-thinking-box')).toHaveLength(2);
+    expect(
+      [...(container?.querySelectorAll('.thinking-header') || [])].every(
+        (header) => header.getAttribute('aria-expanded') === 'false'
+      )
+    ).toBe(true);
+
+    const nextThought: Extract<Part, { type: 'reasoning' }> = {
+      id: 'reasoning-next',
+      sessionID: 'session-1',
+      messageID: 'assistant-active',
+      type: 'reasoning',
+      text: '**Next thought**\n\nNext active details',
+      time: { start: 2_004 },
+    };
+    upsertPart(nextThought);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.thinking-content')).toBeNull();
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(container?.querySelector('.thinking-content')).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(container?.querySelectorAll('.thinking-content')).toHaveLength(1);
+    expect(container?.textContent).toContain('Next active details');
+
+    upsertPart({ ...nextThought, time: { start: 2_004, end: 4_004 } });
+    await Promise.resolve();
+
+    expect(container?.querySelector('.thinking-content')).toBeNull();
+
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'idle' } }));
+    await Promise.resolve();
+
+    expect(container?.querySelectorAll('.chat-thinking-box')).toHaveLength(3);
+    expect(container?.querySelector('.thinking-content')).toBeNull();
+
+    replaceMessages([
+      { info: userMessage('user-history'), parts: [textPart('prompt-history', 'Earlier')] },
+      {
+        info: assistantMessage('assistant-history', { parentID: 'user-history' }),
+        parts: [historicalThought],
+      },
+      { info: userMessage('user-active'), parts: [textPart('prompt-active', 'Current')] },
+      {
+        info: assistantMessage('assistant-active', { parentID: 'user-active' }),
+        parts: [completedActiveThought, { ...activeThought, time: { start: 3, end: 2_003 } }],
+      },
+      { info: userMessage('user-next'), parts: [textPart('prompt-next', 'Next turn')] },
+    ]);
+    await Promise.resolve();
+
+    expect(container?.querySelectorAll('.chat-thinking-box')).toHaveLength(0);
+    expect(container?.textContent).toContain('Explored: 1 thought');
+
+    replaceMessages([]);
+    await Promise.resolve();
+    replaceMessages([
+      { info: userMessage('user-active'), parts: [textPart('prompt-active', 'Current')] },
+      {
+        info: assistantMessage('assistant-active', { parentID: 'user-active' }),
+        parts: [completedActiveThought, { ...activeThought, time: { start: 3, end: 2_003 } }],
+      },
+    ]);
+    await Promise.resolve();
+
+    expect(container?.querySelectorAll('.chat-thinking-box')).toHaveLength(0);
   });
 
   it('compacts a just-completed diff when the chat is reopened', async () => {

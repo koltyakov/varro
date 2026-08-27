@@ -201,6 +201,22 @@ describe('format helpers', () => {
     );
   });
 
+  it('formats sub-dollar provider limits in cents', () => {
+    const window = {
+      id: 'spend',
+      label: 'Spend',
+      unit: 'usd' as const,
+      remaining: 0.9,
+      limit: 1,
+      resetAt: null,
+    };
+    const limit = availableLimit([window]);
+
+    expect(formatProviderLimitWindowValue(window, window.remaining)).toBe('90¢');
+    expect(formatProviderLimitWindowValue(window, window.limit)).toBe('$1');
+    expect(formatProviderLimitTitle(limit)).toBe('Spend: 90¢ / $1 left');
+  });
+
   it('keeps a compact badge for a single unprefixed window', () => {
     const limit = availableLimit([
       {

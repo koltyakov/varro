@@ -2363,7 +2363,7 @@ describe('Message assistant final answer rendering', () => {
     const finalItem = container?.querySelector('.assistant-message-flow-item-final-planning');
 
     expect(plainContainer).toBeInstanceOf(HTMLDivElement);
-    expect(container?.textContent).toContain('Thinking');
+    expect(container?.querySelector('.thinking-label-text')?.textContent).toBe('Inspecting');
     expect(container?.textContent).not.toContain('[Working directory: /workspace]');
     expect(container?.textContent).toContain('Dummy Plan');
     expect(finalItem).toBeInstanceOf(HTMLDivElement);
@@ -2393,7 +2393,7 @@ describe('Message assistant final answer rendering', () => {
     const finalItem = container?.querySelector('.assistant-message-flow-item-final');
 
     expect(plainContainer).toBeInstanceOf(HTMLDivElement);
-    expect(container?.textContent).toContain('Thinking');
+    expect(container?.querySelector('.thinking-label-text')?.textContent).toBe('Inspecting');
     expect(container?.textContent).not.toContain('[Working directory: /workspace]');
     expect(container?.textContent).toContain('Implemented the fix.');
     expect(finalItem).toBeInstanceOf(HTMLDivElement);
