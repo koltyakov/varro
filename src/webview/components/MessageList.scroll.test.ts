@@ -887,6 +887,152 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
+  it('does not replace a fully visible resize anchor with a clipped wrapping request', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const observers: Array<{
+      callback: ResizeObserverCallback;
+      targets: Set<Element>;
+    }> = [];
+    class TestResizeObserver {
+      readonly targets = new Set<Element>();
+
+      constructor(readonly callback: ResizeObserverCallback) {
+        observers.push(this);
+      }
+      observe(target: Element) {
+        this.targets.add(target);
+      }
+      unobserve(target: Element) {
+        this.targets.delete(target);
+      }
+      disconnect() {
+        this.targets.clear();
+      }
+    }
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+
+    const rowHeights: number[] = Array.from({ length: 50 }, (_, index) =>
+      index % 2 === 0 ? 82 : 65
+    );
+    const rowTop = (index: number) =>
+      rowHeights.slice(0, index).reduce((total, height) => total + height, 0);
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+    let listWidth = 486;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 0, listWidth, 631);
+        }
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(
+            0,
+            0,
+            listWidth,
+            rowHeights.reduce((total, height) => total + height, 0)
+          );
+        }
+        const row = this.dataset.msgId
+          ? this
+          : (this.closest<HTMLElement>('[data-msg-id]') ?? null);
+        const messageId = row?.dataset.msgId;
+        if (messageId?.startsWith('user-') || messageId?.startsWith('assistant-')) {
+          const index = Number(messageId.slice(messageId.lastIndexOf('-') + 1));
+          const top = rowTop(index) - scrollTopValue;
+          if (this.dataset.assistantRenderKey) return new DOMRect(0, top + 6, listWidth, 22);
+          if (this.classList.contains('user-message-card')) {
+            return new DOMRect(0, top + 6, listWidth, Math.max(1, rowHeights[index]! - 12));
+          }
+          return new DOMRect(0, top, listWidth, rowHeights[index]);
+        }
+        return new DOMRect(0, 0, listWidth, 40);
+      }
+    );
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 50 }, (_, index) => {
+        const messageId = index % 2 === 0 ? `user-${index}` : `assistant-${index}`;
+        return {
+          info:
+            index % 2 === 0
+              ? userMessage(messageId)
+              : assistantMessage(messageId, { parentID: `user-${index - 1}` }),
+          parts: [{ ...textPart(`text-${index}`, `Message ${index}`), messageID: messageId }],
+        };
+      })
+    );
+    cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 631 });
+    Object.defineProperty(list, 'clientWidth', { configurable: true, get: () => listWidth });
+    Object.defineProperty(list, 'offsetWidth', { configurable: true, get: () => listWidth });
+    Object.defineProperty(list, 'scrollHeight', {
+      configurable: true,
+      get: () => rowHeights.reduce((total, height) => total + height, 0),
+    });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+
+    const userIndex = 20;
+    const assistantIndex = 21;
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    scrollTopValue = rowTop(userIndex) + 14;
+    list.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    // Flush the queued detached-anchor refresh before the width observer reports wrapping.
+    animationFrames.flush();
+    await Promise.resolve();
+
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
+    const userRow = container?.querySelector(`[data-msg-id="user-${userIndex}"]`) as HTMLDivElement;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
+    const assistantRow = container?.querySelector(
+      `[data-msg-id="assistant-${assistantIndex}"]`
+    ) as HTMLDivElement;
+    const rowObserver = observers.find(
+      (observer) => observer.targets.has(userRow) && observer.targets.has(assistantRow)
+    );
+    expect(userRow.getBoundingClientRect().top).toBe(-14);
+    expect(assistantRow.getBoundingClientRect().top).toBe(68);
+    expect(rowObserver).toBeDefined();
+
+    rowHeights[userIndex] = 103;
+    listWidth = 360;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    rowObserver!.callback(
+      [
+        fixture<ResizeObserverEntry>({
+          target: userRow,
+          borderBoxSize: [{ blockSize: 103, inlineSize: 360 }],
+        }),
+        fixture<ResizeObserverEntry>({
+          target: assistantRow,
+          borderBoxSize: [{ blockSize: 65, inlineSize: 360 }],
+        }),
+      ],
+      fixture<ResizeObserver>(rowObserver)
+    );
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+      expect(assistantRow.getBoundingClientRect().top).toBe(68);
+    }
+    animationFrames.restore();
+  });
+
   it('preserves the wheel destination when width reflow precedes the native scroll event', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     const observers: Array<{

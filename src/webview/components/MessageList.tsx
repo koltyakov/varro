@@ -2485,6 +2485,15 @@ export function MessageList() {
     });
   }
 
+  function replaceClippedRequestWidthResizeAnchor(anchor: VisibleScrollAnchor | null) {
+    if (!anchor) return null;
+    const row = mountedMessageRows.get(anchor.messageId);
+    const anchorTop = anchor.messageTop ?? anchor.top;
+    return row?.classList.contains('interactive-request') && anchorTop < 0
+      ? (captureWidthResizeVisibleScrollAnchor(0, true) ?? anchor)
+      : anchor;
+  }
+
   function rememberDetachedVisibleAnchor(anchor: VisibleScrollAnchor | null) {
     lastDetachedVisibleAnchor = anchor;
     lastDetachedVisibleAnchorScrollTop = containerRef?.scrollTop ?? 0;
@@ -4392,7 +4401,9 @@ export function MessageList() {
       ) {
         return;
       }
-      const anchor = captureWidthResizeVisibleScrollAnchor();
+      const anchor = replaceClippedRequestWidthResizeAnchor(
+        captureWidthResizeVisibleScrollAnchor()
+      );
       if (
         anchor &&
         window.innerWidth === lastHostViewportWidth &&
@@ -4638,12 +4649,8 @@ export function MessageList() {
     }
     if (!autoScroll() && !widthResizeActive && !stickyNavigationOwnsScroll() && !editingMessage()) {
       if (mountedDetachedAnchor) {
-        const row = mountedMessageRows.get(mountedDetachedAnchor.messageId);
-        const anchorTop = mountedDetachedAnchor.messageTop ?? mountedDetachedAnchor.top;
         rememberDetachedVisibleAnchor(
-          row?.classList.contains('interactive-request') && anchorTop < 0
-            ? (captureWidthResizeVisibleScrollAnchor(0, true) ?? mountedDetachedAnchor)
-            : mountedDetachedAnchor
+          replaceClippedRequestWidthResizeAnchor(mountedDetachedAnchor)
         );
       } else if (
         !lastDetachedVisibleAnchor ||

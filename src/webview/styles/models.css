@@ -433,6 +433,10 @@
   display: none;
 }
 
+.provider-connect-options > .provider-connect-empty {
+  padding: 8px 10px;
+}
+
 .provider-connect-scrollbar {
   position: absolute;
   z-index: 2;
