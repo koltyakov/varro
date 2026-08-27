@@ -3,6 +3,7 @@ import { createServer } from 'http';
 import type { RequestListener, Server } from 'http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as ChildProcessModule from 'child_process';
+import type { ExecFileOptionsWithStringEncoding } from 'child_process';
 import type { ProviderMetadata } from '../../util/provider-limit';
 
 const { execFile } = vi.hoisted(() => ({ execFile: vi.fn() }));
@@ -42,6 +43,7 @@ function mockCommands({ ps, lsof }: CommandOutput) {
     (
       command: string,
       _args: string[],
+      _options: ExecFileOptionsWithStringEncoding,
       callback: (error: Error | null, stdout: string, stderr: string) => void
     ) => {
       if (command === 'ps') {
@@ -252,6 +254,27 @@ describe('antigravity language-server discovery', () => {
     await expect(fetchLimits()).resolves.toMatchObject({ status: 'unsupported' });
   });
 
+  it('guards process discovery commands with bounded subprocess options', async () => {
+    vi.stubEnv('LSOFDEVCACHE', '/network/device-cache');
+    mockCommands({
+      ps: psLine(900, '/opt/antigravity/language_server --csrf_token=csrf-abc'),
+      lsof: new Error('lsof unavailable'),
+    });
+
+    await expect(fetchLimits()).resolves.toMatchObject({ status: 'unsupported' });
+    expect(execFile).toHaveBeenCalledTimes(2);
+    for (const call of execFile.mock.calls) {
+      expect(call[2]).toMatchObject({
+        encoding: 'utf8',
+        maxBuffer: 4 * 1_024 * 1_024,
+        timeout: 10_000,
+        windowsHide: true,
+      });
+      expect(call[2].env).not.toHaveProperty('LSOFDEVCACHE');
+      expect(call[3]).toEqual(expect.any(Function));
+    }
+  });
+
   it('reports unsupported when lsof fails and no port is advertised', async () => {
     mockCommands({
       ps: psLine(900, '/opt/antigravity/language_server --csrf_token=csrf-abc'),
@@ -286,7 +309,12 @@ describe('antigravity language-server discovery', () => {
       mockCommands({});
 
       await expect(fetchLimits()).resolves.toMatchObject({ status: 'unsupported' });
-      expect(execFile).toHaveBeenCalledWith('ps', expect.anything(), expect.anything());
+      expect(execFile).toHaveBeenCalledWith(
+        'ps',
+        expect.anything(),
+        expect.anything(),
+        expect.anything()
+      );
       execFile.mockReset();
     }
   });

@@ -697,6 +697,32 @@ describe('ProviderLimitService', () => {
     });
   });
 
+  it('times out a non-settling adapter and retries after the error cache expires', async () => {
+    mocks.fetchProviderLimitFromAdapterMock.mockReturnValueOnce(deferred().promise);
+    const service = new ProviderLimitService(createServer());
+
+    const first = service.get('openai', 'gpt-5.4');
+    const duplicate = service.get('openai', 'gpt-5.4');
+    expect(duplicate).toBe(first);
+    await vi.waitFor(() =>
+      expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(1)
+    );
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(first).resolves.toMatchObject({
+      providerID: 'openai',
+      modelID: 'gpt-5.4',
+      status: 'error',
+      source: 'provider',
+      note: 'Provider limit adapter failed: timed out after 30000ms',
+    });
+
+    mocks.fetchProviderLimitFromAdapterMock.mockResolvedValue(null);
+    await vi.advanceTimersByTimeAsync(15_000);
+    await service.get('openai', 'gpt-5.4');
+    expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(2);
+  });
+
   it('serves the last successful snapshot when the adapter later throws', async () => {
     vi.useFakeTimers();
     try {

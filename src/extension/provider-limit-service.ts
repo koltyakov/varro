@@ -23,6 +23,7 @@ export class ProviderLimitService {
   } as const;
   private static readonly RATE_LIMIT_ERROR_CACHE_TTL_MS = 60_000;
   private static readonly MAX_RATE_LIMIT_ERROR_CACHE_TTL_MS = 60 * 60_000;
+  private static readonly PROVIDER_LIMIT_ADAPTER_TIMEOUT_MS = 30_000;
   private static readonly CACHE_TTL_MS = 60_000;
 
   private readonly providerLimitCache = new Map<
@@ -85,7 +86,7 @@ export class ProviderLimitService {
       });
 
     this.providerLimitCache.set(cacheKey, {
-      expiresAt: Number.POSITIVE_INFINITY,
+      expiresAt: now + ProviderLimitService.PROVIDER_LIMIT_ADAPTER_TIMEOUT_MS,
       promise,
     });
 
@@ -182,12 +183,15 @@ export class ProviderLimitService {
 
     let providerLimit: ProviderLimitStatus | null;
     try {
-      providerLimit = await fetchProviderLimitFromAdapter({
-        provider,
-        authStore,
-        modelID,
-        checkedAt,
-      });
+      providerLimit = await withTimeout(
+        fetchProviderLimitFromAdapter({
+          provider,
+          authStore,
+          modelID,
+          checkedAt,
+        }),
+        ProviderLimitService.PROVIDER_LIMIT_ADAPTER_TIMEOUT_MS
+      );
     } catch (err) {
       providerLimit = {
         providerID,
@@ -337,6 +341,20 @@ function createProviderLimitLoadResult(
     ttlStatus: status,
     rememberLastKnownGood: rememberLastKnownGood && status.status === 'available',
   };
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error(`timed out after ${timeoutMs}ms`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 function isRateLimitedProviderError(status: ProviderLimitStatus) {

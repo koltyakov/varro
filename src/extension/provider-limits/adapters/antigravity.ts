@@ -32,6 +32,8 @@ const ANTIGRAVITY_USER_STATUS_BODY = JSON.stringify({
 });
 const ANTIGRAVITY_BASE_URL_ENV = 'ANTIGRAVITY_BASE_URL';
 const ANTIGRAVITY_CSRF_TOKEN_ENV = 'ANTIGRAVITY_CSRF_TOKEN';
+const ANTIGRAVITY_PROCESS_TIMEOUT_MS = 10_000;
+const ANTIGRAVITY_PROCESS_MAX_BUFFER_BYTES = 4 * 1_024 * 1_024;
 
 type AntigravityConnection = {
   baseURL: string;
@@ -443,14 +445,28 @@ function execFileAsync(command: string, args: string[]) {
     return Promise.reject(new Error('execFile is unavailable'));
   }
 
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.toUpperCase().startsWith('LSOF'))
+  );
   return new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-    execFile(command, args, (error, stdout, stderr) => {
-      if (error) {
-        reject(error);
-        return;
+    execFile(
+      command,
+      args,
+      {
+        encoding: 'utf8',
+        env,
+        maxBuffer: ANTIGRAVITY_PROCESS_MAX_BUFFER_BYTES,
+        timeout: ANTIGRAVITY_PROCESS_TIMEOUT_MS,
+        windowsHide: true,
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve({ stdout, stderr });
       }
-      resolve({ stdout, stderr });
-    });
+    );
   });
 }
 
