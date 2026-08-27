@@ -115,7 +115,7 @@ export class AutoApproveJudge {
     let verdictCacheKey: string | null = null;
     const decision = await this.withTimeout(
       (async () => {
-        const model = await this.resolveModel(request.model);
+        const model = await this.resolveModel(request.model, workspacePath);
         verdictCacheKey = buildVerdictCacheKey(
           permission,
           approvedReferences,
@@ -128,7 +128,7 @@ export class AutoApproveJudge {
           return cached;
         }
 
-        return this.runJudge(permission, model, approvedReferences);
+        return this.runJudge(permission, model, approvedReferences, workspacePath);
       })(),
       AUTO_APPROVE_JUDGE_TIMEOUT_MS
     ).catch((err): AutoApproveJudgeResponse => {
@@ -190,19 +190,25 @@ export class AutoApproveJudge {
   private async runJudge(
     permission: NormalizedJudgePermission,
     model: JudgeModel | null,
-    approvedReferences: AutoApproveJudgeReference[]
+    approvedReferences: AutoApproveJudgeReference[],
+    workspacePath?: string
   ): Promise<AutoApproveJudgeResponse> {
     const title = `${PERMISSION_JUDGE_SESSION_TITLE_PREFIX}${permission.id}`;
     this.hiddenSessions.registerPendingTitle(title);
     let sessionID: string | null = null;
 
     try {
-      const session = await this.server.request('POST', '/session', {
-        title,
-        parentID: permission.sessionID,
-        metadata: PERMISSION_JUDGE_SESSION_METADATA,
-        permission: DENY_ALL_PERMISSION_RULES,
-      });
+      const session = await this.request(
+        'POST',
+        '/session',
+        {
+          title,
+          parentID: permission.sessionID,
+          metadata: PERMISSION_JUDGE_SESSION_METADATA,
+          permission: DENY_ALL_PERMISSION_RULES,
+        },
+        workspacePath
+      );
       sessionID = getString(asRecord(session)?.id);
       this.hiddenSessions.hide(sessionID);
       if (!sessionID) return { decision: 'ask', reason: 'Judge session was not created.' };
@@ -221,10 +227,11 @@ export class AutoApproveJudge {
         request.model = { providerID: model.providerID, modelID: model.modelID };
         if (model.variant) request.variant = model.variant;
       }
-      const response = await this.server.request(
+      const response = await this.request(
         'POST',
         `/session/${encodeURIComponent(sessionID)}/message`,
-        request
+        request,
+        workspacePath
       );
 
       return normalizeJudgeResponse(response);
@@ -232,9 +239,11 @@ export class AutoApproveJudge {
       this.hiddenSessions.forgetPendingTitle(title);
       if (sessionID) {
         try {
-          const deleted = await this.server.request(
+          const deleted = await this.request(
             'DELETE',
-            `/session/${encodeURIComponent(sessionID)}`
+            `/session/${encodeURIComponent(sessionID)}`,
+            undefined,
+            workspacePath
           );
           if (deleted === true) {
             this.hiddenSessions.retainUntilDeleted(sessionID);
@@ -254,17 +263,29 @@ export class AutoApproveJudge {
     }
   }
 
-  async resolveModel(fallbackModel: AutoApproveJudgeRequest['model']): Promise<JudgeModel | null> {
+  async resolveModel(
+    fallbackModel: AutoApproveJudgeRequest['model'],
+    workspacePath?: string
+  ): Promise<JudgeModel | null> {
     return resolveHelperModel({
       configuredModel: this.getConfiguredModel(),
       loadSmallModel: async () => {
-        const config = asRecord(await this.server.request('GET', '/config'));
+        const config = asRecord(await this.request('GET', '/config', undefined, workspacePath));
         return config?.small_model;
       },
-      loadProviderConfig: () => this.server.request('GET', '/config/providers'),
+      loadProviderConfig: () => this.request('GET', '/config/providers', undefined, workspacePath),
       fallbackModel: normalizeModel(fallbackModel),
       isOpenAIPro: this.isOpenAIPro,
     });
+  }
+
+  private request(method: string, path: string, body: unknown, workspacePath?: string) {
+    if (workspacePath) {
+      return this.server.request(method, path, body, { directory: workspacePath });
+    }
+    return body === undefined
+      ? this.server.request(method, path)
+      : this.server.request(method, path, body);
   }
 
   private async withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {

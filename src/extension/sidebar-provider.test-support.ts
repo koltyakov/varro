@@ -184,7 +184,7 @@ export function createContextProvider() {
   const provider = {
     context,
     terminalSelection: null,
-    getOpenWorkspaceRoot: vi.fn((path: string) => path),
+    getOpenWorkspaceRoot: vi.fn<(path: string) => string | null>((path: string) => path),
     clearTerminalSelection: vi.fn(),
     readFile: vi.fn(() => Promise.resolve()),
     openPath: vi.fn(() => Promise.resolve()),

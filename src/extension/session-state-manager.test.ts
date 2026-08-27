@@ -33,7 +33,7 @@ type WorkspaceStateMock = {
   remove: ReturnType<typeof vi.fn>;
 };
 
-function createManager(shouldShow: () => boolean = () => true) {
+function createManager(shouldShow: (sessionID: string) => boolean = () => true) {
   const workspaceState = {
     get: vi.fn(() => undefined),
     set: vi.fn(() => Promise.resolve()),
@@ -121,6 +121,29 @@ describe('SessionStateManager notifications', () => {
     });
 
     expect(vscodeMock.window.showWarningMessage).not.toHaveBeenCalled();
+  });
+
+  it('remembers the envelope workspace before gating a blocking notification', () => {
+    const holder = { manager: null as SessionStateManager | null };
+    const shouldShow = vi.fn(
+      (sessionID: string) => holder.manager?.directoryFor(sessionID) === '/repo-b'
+    );
+    const manager = createManager(shouldShow);
+    holder.manager = manager;
+
+    manager.handleServerEvent({
+      type: 'question.asked',
+      workspaceDirectory: '/repo-b',
+      properties: {
+        id: 'question-1',
+        sessionID: 'session-b',
+        questions: [{ header: 'Choice', question: 'Choose', options: [] }],
+      },
+    });
+
+    expect(shouldShow).toHaveBeenCalledWith('session-b');
+    expect(manager.directoryFor('session-b')).toBe('/repo-b');
+    expect(vscodeMock.window.showWarningMessage).toHaveBeenCalled();
   });
 
   it('reveals deferred permission attention after the judge timeout', async () => {

@@ -112,6 +112,20 @@ describe('routingStore', () => {
     expect(state.workspaceCatalogReloadPending).toBe(false);
   });
 
+  it('can release a workspace reload lock with empty replacement catalogs', () => {
+    setState('workspaceCatalogReloadPending', true);
+    setState('providers', []);
+    setState('agents', []);
+    setState('commands', []);
+
+    routingStore.finishWorkspaceCatalogReload();
+
+    expect(state.workspaceCatalogReloadPending).toBe(false);
+    expect(state.providers).toEqual([]);
+    expect(state.agents).toEqual([]);
+    expect(state.commands).toEqual([]);
+  });
+
   it('updates provider and model visibility', () => {
     const provider = createProvider('provider-1');
 

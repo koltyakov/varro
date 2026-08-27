@@ -69,6 +69,7 @@ export class ProviderFileRefreshController {
   private observedFilesSignature: string | null = null;
   private pendingScope: PendingRefreshScope | null = null;
   private readonly pendingWorkspaceDirectories = new Set<string>();
+  private readonly workspaceRoutingBaselines = new Map<string, OpenCodeModelRouting>();
   private workspaceRoutingBaseline: OpenCodeModelRouting | null = null;
   private authChangePending = false;
   private configChangePending = false;
@@ -172,6 +173,26 @@ export class ProviderFileRefreshController {
   ) {
     if (this.disposed) return;
     this.dependencies.clearProviderLimitCache();
+    const directoryBaseline = directory ? this.workspaceRoutingBaselines.get(directory) : undefined;
+    if (
+      directory &&
+      directoryBaseline &&
+      currentRouting &&
+      areOpenCodeRoutesEqual(directoryBaseline, currentRouting)
+    ) {
+      const generation = ++this.refreshGeneration;
+      this.pendingWorkspaceDirectories.delete(directory);
+      this.workspaceRoutingBaselines.delete(directory);
+      if (this.pendingScope === 'workspace' && this.pendingWorkspaceDirectories.size === 0) {
+        await this.cancelWorkspaceRefresh();
+      } else if (this.pendingScope === 'workspace') {
+        await this.markRefreshPending('workspace');
+      }
+      if (this.disposed || generation !== this.refreshGeneration) return;
+      this.dependencies.postRefresh();
+      if (this.pendingScope) await this.maybeRestart(generation, 0);
+      return;
+    }
     if (
       directory &&
       previousRouting &&
@@ -199,7 +220,12 @@ export class ProviderFileRefreshController {
     if (!this.pendingScope && previousRouting) {
       this.workspaceRoutingBaseline = previousRouting;
     }
-    if (directory) this.pendingWorkspaceDirectories.add(directory);
+    if (directory) {
+      if (previousRouting && !this.workspaceRoutingBaselines.has(directory)) {
+        this.workspaceRoutingBaselines.set(directory, previousRouting);
+      }
+      this.pendingWorkspaceDirectories.add(directory);
+    }
     await this.markRefreshPending('workspace');
     if (this.disposed || generation !== this.refreshGeneration) return;
     this.dependencies.postRefresh();
@@ -453,6 +479,7 @@ export class ProviderFileRefreshController {
       if (pendingRevision === this.pendingRevision) {
         this.pendingScope = null;
         this.pendingWorkspaceDirectories.clear();
+        this.workspaceRoutingBaselines.clear();
         this.pendingAuthOnlyInvalidation = false;
         await this.clearPersistedPendingState();
         if (!this.disposed && this.pendingStatusPosted) {
@@ -556,7 +583,10 @@ export class ProviderFileRefreshController {
     if (!this.pendingScope || scope === 'global') {
       this.pendingScope = scope;
     }
-    if (scope === 'global') this.workspaceRoutingBaseline = null;
+    if (scope === 'global') {
+      this.workspaceRoutingBaseline = null;
+      this.workspaceRoutingBaselines.clear();
+    }
     try {
       const common = {
         scope: this.pendingScope,
@@ -599,6 +629,7 @@ export class ProviderFileRefreshController {
     if (wasPending) {
       this.pendingScope = null;
       this.pendingWorkspaceDirectories.clear();
+      this.workspaceRoutingBaselines.clear();
       await this.clearPersistedPendingState();
     }
     this.workspaceRoutingBaseline = null;

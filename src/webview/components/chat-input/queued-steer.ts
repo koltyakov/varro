@@ -1,16 +1,20 @@
 import { createSignal } from 'solid-js';
 import {
   claimQueuedMessageDispatch,
+  getSelectedModelForSession,
   ownsQueuedMessage,
   releaseQueuedMessageDispatch,
   removeQueuedMessage,
   replaceQueuedMessage,
+  setState,
   state,
 } from '../../lib/state';
 import { sendMessage } from '../../hooks/useOpenCode';
 import { isString, isObject } from '../../lib/runtime-values';
 import { createOpenCodeMessageID } from '../../../shared/opencode-id';
 import { queuedMessageWasAdmitted } from './queued-message-history';
+import type { ChatModelSelection, QueuedContextSnapshot } from '../../../shared/protocol';
+import type { Provider } from '../../types';
 
 const [steeringQueuedMessageIds, setSteeringQueuedMessageIds] = createSignal<ReadonlySet<string>>(
   new Set()
@@ -20,6 +24,62 @@ const [failedSteerQueuedMessageIds, setFailedSteerQueuedMessageIds] = createSign
 >(new Set());
 
 export { steeringQueuedMessageIds, failedSteerQueuedMessageIds };
+
+type QueuedModelSnapshot = NonNullable<QueuedContextSnapshot['editorContext']['queuedModel']>;
+
+export function sendWithQueuedModelSnapshot<T>(
+  item: (typeof state.queuedMessages)[number],
+  send: (selectedModel: ChatModelSelection | undefined) => Promise<T>
+): Promise<T> {
+  const snapshot = item.queuedContext?.editorContext.queuedModel;
+  const selectedModel =
+    snapshot?.selection ?? getSelectedModelForSession(item.sessionId) ?? undefined;
+  if (!snapshot) return send(selectedModel);
+
+  const previousProviders = [...state.providers];
+  setState('providers', applyQueuedModelCapabilities(previousProviders, snapshot));
+  try {
+    return send(selectedModel);
+  } finally {
+    setState('providers', previousProviders);
+  }
+}
+
+function applyQueuedModelCapabilities(
+  providers: Provider[],
+  snapshot: QueuedModelSnapshot
+): Provider[] {
+  const { providerID, modelID } = snapshot.selection;
+  const provider = providers.find((item) => item.id === providerID);
+  const existingModel = provider?.models[modelID];
+  const model = {
+    ...(existingModel ?? {
+      id: modelID,
+      name: modelID,
+      cost: { input: 0, output: 0 },
+    }),
+    capabilities: {
+      ...existingModel?.capabilities,
+      vision: snapshot.capabilities.vision,
+      toolcall: snapshot.capabilities.tools,
+      input: snapshot.capabilities.pdf ? ['pdf'] : [],
+    },
+  };
+  if (provider) {
+    return providers.map((item) =>
+      item === provider ? { ...item, models: { ...item.models, [modelID]: model } } : item
+    );
+  }
+  return [
+    ...providers,
+    {
+      id: providerID,
+      name: providerID,
+      source: 'custom',
+      models: { [modelID]: model },
+    },
+  ];
+}
 
 function updateQueuedSteerId(
   setter: typeof setSteeringQueuedMessageIds,
@@ -79,20 +139,31 @@ export async function sendQueuedAsSteer(item: (typeof state.queuedMessages)[numb
   let sent = false;
   let dispatchLease: number | null = null;
   try {
-    if (
-      priorAttemptId &&
-      (await queuedMessageWasAdmitted(item.sessionId, priorAttemptId, workspaceDirectory))
-    ) {
-      removeQueuedMessage(item.id);
-      return;
+    if (priorAttemptId) {
+      dispatchLease = await claimQueuedMessageDispatch(item, 'steer');
+      if (dispatchLease === null) return;
+      const admitted = await queuedMessageWasAdmitted(
+        item.sessionId,
+        priorAttemptId,
+        workspaceDirectory,
+        { itemId: item.id, lease: dispatchLease }
+      );
+      releaseQueuedMessageDispatch(item, dispatchLease);
+      dispatchLease = null;
+      if (admitted) {
+        removeQueuedMessage(item.id);
+        return;
+      }
     }
     dispatchLease = await claimQueuedMessageDispatch(item, 'steer');
     if (dispatchLease === null) return;
     if (state.messagesLoading && state.activeSessionId === item.sessionId) return;
-    sent =
-      (await sendMessage(item.text, {
+    sent = await sendWithQueuedModelSnapshot(item, async (selectedModel) => {
+      const options: NonNullable<Parameters<typeof sendMessage>[1]> & {
+        selectedModel?: ChatModelSelection;
+      } = {
         messageId,
-        delivery: 'steer',
+        delivery: 'steer' as const,
         agent: item.agent ? item.agent : undefined,
         queuedAttachments: {
           droppedFiles: item.droppedFiles,
@@ -105,8 +176,11 @@ export async function sendQueuedAsSteer(item: (typeof state.queuedMessages)[numb
         preserveComposer: true,
         targetSessionId: item.sessionId,
         workspaceDirectory,
-        queuedMessageDispatch: { itemId: item.id, lease: dispatchLease },
-      })) !== false;
+        queuedMessageDispatch: { itemId: item.id, lease: dispatchLease! },
+      };
+      if (selectedModel) options.selectedModel = selectedModel;
+      return (await sendMessage(item.text, options)) !== false;
+    });
   } catch {
     sent = false;
   } finally {

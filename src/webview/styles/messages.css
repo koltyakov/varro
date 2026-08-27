@@ -2451,6 +2451,12 @@ body.vscode-light .interactive-session .chat-input-toolbars.toolbar-meta {
   display: none;
 }
 
+.workspace-picker-button .toolbar-picker-label {
+  min-width: 0;
+  max-width: 100%;
+  flex: 0 1 auto;
+}
+
 .interactive-session
   .chat-input-toolbars.toolbar-meta
   .workspace-picker-button

@@ -44,6 +44,7 @@ export type PendingAttentionReconciliation = {
 export type InterruptedSessionSnapshot = {
   id: string;
   title?: string;
+  directory?: string;
 };
 
 export type BlockingRequestSnapshot = {
@@ -409,6 +410,7 @@ export class SessionStateManager {
   handleServerEvent(event: ServerEvent): void {
     const { type, properties: props } = event;
     let changed = false;
+    this.rememberEventWorkspace(event);
 
     switch (type) {
       case 'session.created':
@@ -604,6 +606,8 @@ export class SessionStateManager {
           if (!this.unclaimedInterruptedSessions.has(session.id)) {
             this.unclaimedInterruptedSessions.set(session.id, session);
           }
+          const directory = trimOptionalString(session.directory);
+          if (directory) this.setSessionMetadata(this.sessionDirectories, session.id, directory);
         }
       }
       const rawBlockingRequests = this.persistence.get<unknown>(BLOCKING_REQUESTS_KEY);
@@ -913,12 +917,15 @@ export class SessionStateManager {
     const snapshots = new Map(this.unclaimedInterruptedSessions);
     for (const id of this.busySessions) {
       if (this.isIgnoredBackgroundSession(id)) continue;
-      snapshots.set(id, {
+      const snapshot: InterruptedSessionSnapshot = {
         id,
         title: trimOptionalString(
           this.getSessionMetadata(this.sessionTitles, id)?.trim() || undefined
         ),
-      });
+      };
+      const directory = trimOptionalString(this.getSessionMetadata(this.sessionDirectories, id));
+      if (directory) snapshot.directory = directory;
+      snapshots.set(id, snapshot);
     }
     return [...snapshots.values()]
       .toSorted((a, b) => a.id.localeCompare(b.id))
@@ -993,6 +1000,24 @@ export class SessionStateManager {
     if (sessionID && parentID) {
       this.setSessionMetadata(this.sessionParentIDs, sessionID, parentID);
     }
+  }
+
+  private rememberEventWorkspace(event: ServerEvent) {
+    const directory = trimOptionalString(event.workspaceDirectory);
+    if (!directory) return;
+    const properties = asRecord(event.properties);
+    const info = asRecord(properties?.info);
+    const part = asRecord(properties?.part);
+    const sessionID =
+      getString(properties?.sessionID) ||
+      getString(info?.sessionID) ||
+      getString(part?.sessionID) ||
+      (event.type === 'session.created' ||
+      event.type === 'session.updated' ||
+      event.type === 'session.deleted'
+        ? getString(info?.id)
+        : undefined);
+    if (sessionID) this.setSessionMetadata(this.sessionDirectories, sessionID, directory);
   }
 
   private getSessionMetadata(map: Map<string, string>, sessionID: string) {
@@ -1422,6 +1447,7 @@ function validateInterruptedSessionSnapshots(value: unknown): InterruptedSession
     (item): item is InterruptedSessionSnapshot =>
       typeof item?.id === 'string' &&
       item.id.trim().length > 0 &&
+      (item.directory === undefined || typeof item.directory === 'string') &&
       !isSubagentSessionTitle(item.title)
   );
 }

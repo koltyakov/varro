@@ -41,8 +41,31 @@ export function getSessionIdsForEvent(event: ServerEvent) {
   };
 
   add(properties?.sessionID);
-  add(asRecord(properties?.info)?.id);
-  add(asRecord(properties?.info)?.sessionID);
+  const info = asRecord(properties?.info);
+  add(info?.id);
+  add(info?.sessionID);
+  add(asRecord(properties?.part)?.sessionID);
+
+  return [...ids];
+}
+
+export function getWorkspaceSessionIdsForEvent(event: ServerEvent) {
+  const ids = new Set<string>();
+  const properties = asRecord(event.properties);
+  const add = (value: unknown) => {
+    if (typeof value === 'string' && value) ids.add(value);
+  };
+
+  add(properties?.sessionID);
+  const info = asRecord(properties?.info);
+  if (
+    event.type === 'session.created' ||
+    event.type === 'session.updated' ||
+    event.type === 'session.deleted'
+  ) {
+    add(info?.id);
+  }
+  add(info?.sessionID);
   add(asRecord(properties?.part)?.sessionID);
 
   return [...ids];

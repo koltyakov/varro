@@ -69,6 +69,14 @@ function formatWorkspaceAbbreviation(name: string) {
   return initials.toLowerCase() || name.slice(0, 1).toLowerCase();
 }
 
+function shouldAbbreviateWorkspaceName(name: string) {
+  return getWorkspaceNameParts(name).filter((part) => part.initial).length > 2;
+}
+
+function formatWorkspaceCompactLabel(name: string) {
+  return shouldAbbreviateWorkspaceName(name) ? formatWorkspaceAbbreviation(name) : name;
+}
+
 function bindOverflowTitle(element: HTMLElement, text: string) {
   const update = () => {
     if (element.scrollWidth > element.clientWidth + 1) element.title = text;
@@ -99,12 +107,13 @@ export function WorkspacePicker(props: {
   onSelect: (path: string) => void;
 }) {
   const selected = () => props.folders.find((folder) => folder.path === props.selectedPath);
-  const selectedAbbreviation = () => {
+  const selectedCompactLabel = () => {
     const folder = selected();
-    if (!folder) return formatWorkspaceAbbreviation('Workspace');
-    const abbreviation = formatWorkspaceAbbreviation(folder.name);
+    if (!folder) return 'Workspace';
+    const abbreviation = formatWorkspaceCompactLabel(folder.name);
+    if (abbreviation === folder.name) return abbreviation;
     const matches = props.folders.filter(
-      (candidate) => formatWorkspaceAbbreviation(candidate.name) === abbreviation
+      (candidate) => formatWorkspaceCompactLabel(candidate.name) === abbreviation
     );
     if (matches.length < 2) return abbreviation;
     return `${abbreviation}${matches.findIndex((candidate) => candidate.path === folder.path) + 1}`;
@@ -112,7 +121,9 @@ export function WorkspacePicker(props: {
   const selectedAriaLabel = () => {
     const folder = selected();
     return folder
-      ? `Selected workspace: ${folder.name}, ${selectedAbbreviation()}`
+      ? `Selected workspace: ${folder.name}${
+          selectedCompactLabel() === folder.name ? '' : `, ${selectedCompactLabel()}`
+        }`
       : 'Select workspace folder';
   };
   let popupEl: HTMLDivElement | undefined;
@@ -160,7 +171,7 @@ export function WorkspacePicker(props: {
             {selected()?.name ?? 'Workspace'}
           </span>
           <span class="toolbar-picker-label workspace-picker-abbreviation" aria-hidden="true">
-            {selectedAbbreviation()}
+            {selectedCompactLabel()}
           </span>
           <PickerChevron />
         </button>
@@ -194,7 +205,9 @@ export function WorkspacePicker(props: {
                       {(part) => (
                         <span
                           class={
-                            part.initial && folder.path === props.selectedPath
+                            part.initial &&
+                            shouldAbbreviateWorkspaceName(folder.name) &&
+                            folder.path === props.selectedPath
                               ? 'workspace-name-initial'
                               : undefined
                           }

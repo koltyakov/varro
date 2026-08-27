@@ -78,6 +78,7 @@ function createLoaderDeps(overrides: Partial<DataLoaderDependencies> = {}): Data
     setProviderAuthMethods: vi.fn(),
     listWorkspaceStatuses: async () => [],
     setWorkspaceStatuses: vi.fn(),
+    finishWorkspaceCatalogReload: vi.fn(),
     listSessions: async () => [],
     applySessions: vi.fn(),
     listRecycleBin: async () => [],
@@ -593,6 +594,87 @@ describe('data loaders', () => {
     providers = [...providers, provider('newly-connected', {})];
     await operations.loadProviders();
     expect(setProviders).toHaveBeenLastCalledWith(providers, {}, []);
+  });
+
+  it('retries only failed workspace catalogs and releases the reload lock after exhaustion', async () => {
+    const listAgents = vi
+      .fn<DataLoaderDependencies['listAgents']>()
+      .mockRejectedValueOnce(new Error('agents unavailable'))
+      .mockResolvedValueOnce([]);
+    const listCommands = vi.fn<DataLoaderDependencies['listCommands']>().mockResolvedValue([]);
+    const listProviders = vi
+      .fn<DataLoaderDependencies['listProviders']>()
+      .mockRejectedValue(new Error('providers unavailable'));
+    const finishWorkspaceCatalogReload = vi.fn();
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listAgents,
+        listCommands,
+        listProviders,
+        finishWorkspaceCatalogReload,
+      })
+    );
+
+    await expect(operations.reloadWorkspaceCatalogs()).resolves.toBe(false);
+
+    expect(listAgents).toHaveBeenCalledTimes(2);
+    expect(listCommands).toHaveBeenCalledOnce();
+    expect(listProviders).toHaveBeenCalledTimes(2);
+    expect(finishWorkspaceCatalogReload).toHaveBeenCalledOnce();
+  });
+
+  it('bounds workspace catalog reloads that do not settle', async () => {
+    vi.useFakeTimers();
+    const never = new Promise<never>(() => {});
+    const listAgents = vi.fn<DataLoaderDependencies['listAgents']>(() => never);
+    const listCommands = vi.fn<DataLoaderDependencies['listCommands']>(() => never);
+    const listProviders = vi.fn<DataLoaderDependencies['listProviders']>(() => never);
+    const finishWorkspaceCatalogReload = vi.fn();
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listAgents,
+        listCommands,
+        listProviders,
+        finishWorkspaceCatalogReload,
+      })
+    );
+
+    try {
+      const reload = operations.reloadWorkspaceCatalogs();
+      await vi.runAllTimersAsync();
+
+      await expect(reload).resolves.toBe(false);
+      expect(listAgents).toHaveBeenCalledTimes(2);
+      expect(listCommands).toHaveBeenCalledTimes(2);
+      expect(listProviders).toHaveBeenCalledTimes(2);
+      expect(finishWorkspaceCatalogReload).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not let an invalidated catalog reload release the next workspace lock', async () => {
+    const agents = deferred<Agent[]>();
+    const commands = deferred<Array<{ name: string; template: string }>>();
+    const providers = deferred<Awaited<ReturnType<DataLoaderDependencies['listProviders']>>>();
+    const finishWorkspaceCatalogReload = vi.fn();
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listAgents: () => agents.promise,
+        listCommands: () => commands.promise,
+        listProviders: () => providers.promise,
+        finishWorkspaceCatalogReload,
+      })
+    );
+
+    const reload = operations.reloadWorkspaceCatalogs();
+    operations.invalidateWorkspace();
+    agents.resolve([buildAgent('old')]);
+    commands.resolve([{ name: 'old', template: '/old' }]);
+    providers.resolve({ providers: [provider('old', {})], default: {} });
+
+    await expect(reload).resolves.toBe(false);
+    expect(finishWorkspaceCatalogReload).not.toHaveBeenCalled();
   });
 
   it('excludes unavailable models from OpenAI', async () => {

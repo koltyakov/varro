@@ -24,6 +24,8 @@ type Logger = (context: string, cause: unknown) => void;
 const EMPTY_SESSION_SNAPSHOT_CONFIRMATIONS = 2;
 const SESSION_PAGE_SIZE = 100;
 const MAX_SESSION_PAGE_LIMIT = 1_000_000;
+const WORKSPACE_CATALOG_RELOAD_ATTEMPTS = 2;
+const WORKSPACE_CATALOG_LOAD_TIMEOUT_MS = 10_000;
 
 async function runLoad<T>(
   label: string,
@@ -85,6 +87,7 @@ export function createStateBoundDataLoaderOperations(deps: {
     setProviderAuthMethods: routingStore.setProviderAuthMethods,
     listWorkspaceStatuses: () => client.config.workspaceStatus(),
     setWorkspaceStatuses: routingStore.setWorkspaceStatuses,
+    finishWorkspaceCatalogReload: routingStore.finishWorkspaceCatalogReload,
     listSessions: (limit) => client.session.list({ limit }),
     applySessions: deps.applySessions,
     setSessionsLoadError: (message) => appStore.setState('sessionsLoadError', message),
@@ -158,6 +161,7 @@ export function createDataLoaderOperations(deps: {
   setProviderAuthMethods(methods: ProviderAuthMethodsByProvider): void;
   listWorkspaceStatuses(): Promise<WorkspaceStatusEntry[]>;
   setWorkspaceStatuses(entries: WorkspaceStatusEntry[]): void;
+  finishWorkspaceCatalogReload(): void;
   listSessions(limit?: number): Promise<Session[] | SessionListPage>;
   applySessions(sessions: Session[]): void;
   setSessionsLoadError?(message: string | null): void;
@@ -257,7 +261,7 @@ export function createDataLoaderOperations(deps: {
   const loadAgents = async () => {
     const workspace = workspaceGeneration;
     const generation = ++agentLoadGeneration;
-    await loadAgentsWithDependencies(
+    return await loadAgentsWithDependencies(
       {
         listAgents: deps.listAgents,
         getActiveSessionId: deps.getActiveSessionId,
@@ -276,7 +280,7 @@ export function createDataLoaderOperations(deps: {
   const loadCommands = async () => {
     const workspace = workspaceGeneration;
     const generation = ++commandLoadGeneration;
-    await loadCommandsWithDependencies(
+    return await loadCommandsWithDependencies(
       {
         listCommands: deps.listCommands,
         setCommands: deps.setCommands,
@@ -289,7 +293,7 @@ export function createDataLoaderOperations(deps: {
   const loadProviders = async () => {
     const workspace = workspaceGeneration;
     const generation = ++providerLoadGeneration;
-    await loadProvidersWithDependencies(
+    return await loadProvidersWithDependencies(
       {
         listProviders: deps.listProviders,
         setProvidersLoaded: deps.setProvidersLoaded,
@@ -317,6 +321,27 @@ export function createDataLoaderOperations(deps: {
 
   const refreshRoutingState = async () => {
     await Promise.all([loadAgents(), loadProviders()]);
+  };
+
+  const reloadWorkspaceCatalogs = async () => {
+    const workspace = workspaceGeneration;
+    let agentsLoaded = false;
+    let commandsLoaded = false;
+    let providersLoaded = false;
+
+    for (let attempt = 0; attempt < WORKSPACE_CATALOG_RELOAD_ATTEMPTS; attempt += 1) {
+      [agentsLoaded, commandsLoaded, providersLoaded] = await Promise.all([
+        agentsLoaded ? true : runWorkspaceCatalogLoadWithTimeout(loadAgents),
+        commandsLoaded ? true : runWorkspaceCatalogLoadWithTimeout(loadCommands),
+        providersLoaded ? true : runWorkspaceCatalogLoadWithTimeout(loadProviders),
+      ]);
+      if (workspace !== workspaceGeneration) return false;
+      if (agentsLoaded && commandsLoaded && providersLoaded) break;
+    }
+
+    if (workspace !== workspaceGeneration) return false;
+    deps.finishWorkspaceCatalogReload();
+    return agentsLoaded && commandsLoaded && providersLoaded;
   };
 
   const refreshProviderLimit = async (providerID: string, modelID?: string | null) => {
@@ -492,6 +517,7 @@ export function createDataLoaderOperations(deps: {
     loadCommands,
     loadProviders,
     refreshRoutingState,
+    reloadWorkspaceCatalogs,
     refreshProviderLimit,
     loadCompatibilityState,
     loadSessions,
@@ -500,6 +526,20 @@ export function createDataLoaderOperations(deps: {
     hydrateSessionStatuses,
     invalidateWorkspace,
   };
+}
+
+async function runWorkspaceCatalogLoadWithTimeout(load: () => Promise<boolean>) {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      load().catch(() => false),
+      new Promise<false>((resolve) => {
+        timeout = setTimeout(() => resolve(false), WORKSPACE_CATALOG_LOAD_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
 }
 
 function createMutationAwareSnapshotReconciler<T extends { id: string }>(getCurrent: () => T[]) {
@@ -631,7 +671,7 @@ export async function loadAgentsWithDependencies(
 ) {
   try {
     const loadedAgents = await deps.listAgents();
-    if (!isCurrent()) return;
+    if (!isCurrent()) return true;
     const activeSessionId = deps.getActiveSessionId();
     const routingState = reconcileLoadedAgents({
       loadedAgents,
@@ -651,8 +691,10 @@ export async function loadAgentsWithDependencies(
         routingState.nextSelectedAgent.options
       );
     }
+    return true;
   } catch (err) {
     if (isCurrent()) logError('loadAgents', err);
+    return false;
   }
 }
 
@@ -664,7 +706,7 @@ export async function loadCommandsWithDependencies(
   logError: Logger,
   isCurrent: () => boolean = () => true
 ) {
-  await runLoad(
+  return await runLoad(
     'loadCommands',
     deps.listCommands,
     (commands) => deps.setCommands(commands || []),
@@ -697,7 +739,7 @@ export async function loadProvidersWithDependencies(
   deps.setProvidersLoaded(false);
   try {
     const res = await deps.listProviders();
-    if (!isCurrent()) return;
+    if (!isCurrent()) return true;
     const providers = res.providers.map((provider) =>
       provider.id === 'openai'
         ? {
@@ -747,8 +789,10 @@ export async function loadProvidersWithDependencies(
     } else if (composerSessionId && sessionSelectedModel && routingState.effectiveModel) {
       deps.setSelectedModel(routingState.effectiveModel, { persistGlobal: false });
     }
+    return true;
   } catch (err) {
     if (isCurrent()) logError('loadProviders', err);
+    return false;
   }
 }
 

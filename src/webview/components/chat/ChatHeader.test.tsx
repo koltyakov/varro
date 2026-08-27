@@ -191,16 +191,26 @@ describe('ActiveChatHeader', () => {
     expect(document.body.querySelector('.sibling-workspace-alerts-menu')).toBeNull();
   });
 
-  it('animates the sibling workspace notification icon when a new event arrives', () => {
-    renderHeader(null, { showActions: true });
+  it('animates the sibling workspace notification icon every 30 seconds', () => {
+    vi.useFakeTimers();
+    try {
+      renderHeader(null, { showActions: true });
 
-    setState('siblingWorkspaceAlerts', [
-      { name: 'Repo B', path: '/repo-b', kinds: ['attention'], count: 1 },
-    ]);
+      setState('siblingWorkspaceAlerts', [
+        { name: 'Repo B', path: '/repo-b', kinds: ['attention'], count: 1 },
+      ]);
 
-    expect(
-      container.querySelector('.chat-header-sibling-alert-icon')?.classList.contains('is-ringing')
-    ).toBe(true);
+      const icon = container.querySelector('.chat-header-sibling-alert-icon')!;
+      expect(icon.classList.contains('is-ringing')).toBe(true);
+
+      icon.classList.remove('is-ringing');
+      vi.advanceTimersByTime(29_999);
+      expect(icon.classList.contains('is-ringing')).toBe(false);
+      vi.advanceTimersByTime(1);
+      expect(icon.classList.contains('is-ringing')).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('renders a plain new-chat tooltip without a modifier shortcut', async () => {

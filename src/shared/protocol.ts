@@ -434,6 +434,8 @@ export type ServerEvent = {
     id?: string;
     /** Varro transport marker: advance sequence observers without reapplying the mutation. */
     sequenceOnly?: true;
+    /** Workspace carried by OpenCode's global event envelope. */
+    workspaceDirectory?: string;
     type: Name;
     properties?: ServerEventPropertiesByName[Name];
     /**
@@ -450,6 +452,7 @@ type ParsedServerEvent = {
   type: ServerEventName;
   id?: string;
   sequenceOnly?: true;
+  workspaceDirectory?: string;
   seq?: number;
   properties?: UnknownRecord;
 };
@@ -462,11 +465,24 @@ export function parseServerEvent<T>(value: T): ServerEvent | null {
   const record = asRecord(value);
   if (!record) return null;
 
-  return (
-    parseServerEventRecord(record) ||
+  const location = asRecord(record.location);
+  const directory = record.directory;
+  const locationDirectory = location?.directory;
+  const workspaceDirectory =
+    (isString(directory) && directory.length > 0 ? directory : undefined) ||
+    (isString(locationDirectory) && locationDirectory.length > 0 ? locationDirectory : undefined);
+  const direct = parseServerEventRecord(record);
+  if (direct) {
+    return workspaceDirectory && !direct.workspaceDirectory
+      ? { ...direct, workspaceDirectory }
+      : direct;
+  }
+
+  const nested =
     parseServerEventRecord(asRecord(record.payload)) ||
-    parseServerEventRecord(asRecord(record.data))
-  );
+    parseServerEventRecord(asRecord(record.data));
+  if (!nested) return null;
+  return workspaceDirectory ? { ...nested, workspaceDirectory } : nested;
 }
 
 function parseServerEventRecord(record: UnknownRecord | null): ServerEvent | null {
@@ -485,12 +501,16 @@ function parseServerEventRecord(record: UnknownRecord | null): ServerEvent | nul
   );
   const id = getServerEventId(record);
   const sequenceOnly = record.sequenceOnly === true;
+  const workspaceDirectory = isString(record.workspaceDirectory)
+    ? record.workspaceDirectory
+    : undefined;
   // Current `/api/event` payloads put the durable cursor under `durable.seq`;
   // transitional/legacy sync wrappers may still expose it at the top level.
   const seq = getServerEventSeq(record);
   const event: ParsedServerEvent = { type: eventType };
   if (id !== undefined) event.id = id;
   if (sequenceOnly) event.sequenceOnly = true;
+  if (workspaceDirectory) event.workspaceDirectory = workspaceDirectory;
   if (seq !== undefined) event.seq = seq;
   if (properties) event.properties = properties;
   // SAFETY: eventType was normalized against SERVER_EVENT_NAMES; property payloads remain intentionally shallow-validated.
@@ -506,10 +526,14 @@ function parseSyncEventRecord(record: UnknownRecord | null): ServerEvent | null 
   const properties = asRecord(record.data);
   const id = getServerEventId(record);
   const sequenceOnly = record.sequenceOnly === true;
+  const workspaceDirectory = isString(record.workspaceDirectory)
+    ? record.workspaceDirectory
+    : undefined;
   const seq = getServerEventSeq(record);
   const event: ParsedServerEvent = { type: eventType };
   if (id !== undefined) event.id = id;
   if (sequenceOnly) event.sequenceOnly = true;
+  if (workspaceDirectory) event.workspaceDirectory = workspaceDirectory;
   if (seq !== undefined) event.seq = seq;
   if (properties) event.properties = properties;
   // SAFETY: eventType was normalized against SERVER_EVENT_NAMES; property payloads remain intentionally shallow-validated.
@@ -572,7 +596,16 @@ export type ClipboardImageSnapshot = {
 };
 
 export type QueuedContextSnapshot = {
-  editorContext: EditorContext;
+  editorContext: EditorContext & {
+    queuedModel?: {
+      selection: ChatModelSelection;
+      capabilities: {
+        vision: boolean;
+        pdf: boolean;
+        tools: boolean;
+      };
+    };
+  };
   currentDocumentEnabled: boolean;
 };
 

@@ -41,6 +41,42 @@ function resolveToolAction(rules: PermissionRule[], tool: string) {
 }
 
 describe('SessionTitleFallback', () => {
+  it('scopes the rename and helper flow to the session workspace', async () => {
+    const request = vi.fn(
+      async (method: string, path: string, _body?: unknown, _options?: unknown) => {
+        if (method === 'GET' && path === '/session/session-1') {
+          return { id: 'session-1', title: 'New session' };
+        }
+        if (method === 'GET' && path === '/session/session-1/message?limit=20') {
+          return [
+            {
+              info: { role: 'user' },
+              parts: [{ type: 'text', text: 'Fix workspace title routing' }],
+            },
+          ];
+        }
+        if (method === 'GET' && path === '/config') return {};
+        if (method === 'GET' && path === '/config/providers') return { providers: [] };
+        if (method === 'POST' && path === '/session') return { id: 'hidden-1' };
+        if (method === 'POST' && path === '/session/hidden-1/message') {
+          return { info: { structured: { title: 'Fix Workspace Title Routing' } } };
+        }
+        if (method === 'PATCH' && path === '/session/session-1') {
+          return { id: 'session-1', title: 'Fix Workspace Title Routing' };
+        }
+        if (method === 'DELETE' && path === '/session/hidden-1') return true;
+        throw new Error(`Unexpected request ${method} ${path}`);
+      }
+    );
+    const fallback = new SessionTitleFallback({ request }, createHiddenSessions(), () => true);
+
+    await fallback.renameIfUntitled('session-1', '/session-workspace');
+
+    for (const [method, path, _body, options] of request.mock.calls) {
+      expect(options, `${method} ${path}`).toEqual({ directory: '/session-workspace' });
+    }
+  });
+
   it('renames placeholder sessions from a hidden generated title', async () => {
     const request = vi.fn(async (method: string, path: string, body?: unknown) => {
       if (method === 'GET' && path === '/session/session-1') {

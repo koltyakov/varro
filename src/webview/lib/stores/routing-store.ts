@@ -65,6 +65,9 @@ export const routingStore = {
   setMcpStatus,
   setProviderAuthMethods,
   setWorkspaceStatuses,
+  finishWorkspaceCatalogReload() {
+    setState('workspaceCatalogReloadPending', false);
+  },
   getAvailableMcpNames,
   setCommands(commands: Command[]) {
     setCommandsState(commands);

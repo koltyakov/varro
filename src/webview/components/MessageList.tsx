@@ -2396,7 +2396,11 @@ export function MessageList() {
   function captureMountedVisibleScrollAnchorWithTopPad(
     topPad: number,
     preferStableRenderItem = false,
-    skipThinkingRenderItems = false
+    options?: {
+      maxRenderItemTopClip?: number;
+      restrictToFirstVisibleRow?: boolean;
+      skipThinkingRenderItems?: boolean;
+    }
   ) {
     if (!containerRef) return null;
 
@@ -2419,14 +2423,18 @@ export function MessageList() {
       // Compact activity summaries can move to an older owner after a prepend. Follow their
       // preserved group identity across rows; otherwise prefer stable transcript content.
       for (const element of row.querySelectorAll<HTMLElement>('[data-assistant-render-key]')) {
-        if (skipThinkingRenderItems && element.querySelector('.chat-thinking-box')) continue;
+        if (options?.skipThinkingRenderItems && element.querySelector('.chat-thinking-box')) {
+          continue;
+        }
         const renderKey = element.dataset.assistantRenderKey;
         if (!renderKey || element.getClientRects().length === 0) continue;
         const elementRect = element.getBoundingClientRect();
         if (
           elementRect.bottom <= containerRect.top ||
           elementRect.top >= containerRect.bottom ||
-          elementRect.height <= 0
+          elementRect.height <= 0 ||
+          elementRect.top <
+            containerRect.top - (options?.maxRenderItemTopClip ?? Number.POSITIVE_INFINITY)
         ) {
           continue;
         }
@@ -2449,6 +2457,7 @@ export function MessageList() {
           topPad,
         };
       }
+      if (options?.restrictToFirstVisibleRow) return firstVisibleRow;
     }
     return firstVisibleRow;
   }
@@ -5228,7 +5237,11 @@ export function MessageList() {
         !stickyNavigationOwnsScroll() &&
         !editingMessage() &&
         !pendingExpansionScrollAnchor
-          ? captureMountedVisibleScrollAnchorWithTopPad(0, true, true)
+          ? captureMountedVisibleScrollAnchorWithTopPad(0, true, {
+              maxRenderItemTopClip: WIDTH_RESIZE_ANCHOR_INSET_PX,
+              restrictToFirstVisibleRow: true,
+              skipThinkingRenderItems: true,
+            })
           : null;
     });
     onCleanup(stopCapturingThinkingAnchor);

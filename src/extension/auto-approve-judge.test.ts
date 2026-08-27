@@ -66,6 +66,38 @@ function resolveToolAction(rules: PermissionRule[], tool: string) {
 }
 
 describe('AutoApproveJudge', () => {
+  it('scopes model resolution and helper session requests to the permission workspace', async () => {
+    const request = vi.fn(
+      async (method: string, path: string, _body?: unknown, _options?: unknown) => {
+        if (method === 'GET' && path === '/config') return {};
+        if (method === 'GET' && path === '/config/providers') return { providers: [] };
+        if (method === 'POST' && path === '/session') return { id: 'judge-session-1' };
+        if (method === 'POST' && path === '/session/judge-session-1/message') {
+          return { info: { structured: { decision: 'ask', reason: 'Review.' } } };
+        }
+        if (method === 'DELETE' && path === '/session/judge-session-1') return true;
+        throw new Error(`Unexpected request: ${method} ${path}`);
+      }
+    );
+    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+
+    await judge.judge(
+      { permission: cargoBuildPermission('perm-workspace') },
+      '/permission-workspace'
+    );
+
+    for (const [method, path, _body, options] of request.mock.calls) {
+      expect(options, `${method} ${path}`).toEqual({ directory: '/permission-workspace' });
+    }
+    expect(request.mock.calls.map(([method, path]) => `${method} ${path}`)).toEqual([
+      'GET /config',
+      'GET /config/providers',
+      'POST /session',
+      'POST /session/judge-session-1/message',
+      'DELETE /session/judge-session-1',
+    ]);
+  });
+
   it('routes webfetch through the model judge', async () => {
     const request = createAskJudgeRequest();
     const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
@@ -365,7 +397,9 @@ describe('AutoApproveJudge', () => {
         workspace
       )
     ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
-    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object), {
+      directory: workspace,
+    });
   });
 
   it('does not locally allow edits to Git metadata', async () => {
@@ -387,7 +421,9 @@ describe('AutoApproveJudge', () => {
         workspace
       )
     ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
-    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object), {
+      directory: workspace,
+    });
   });
 
   it('ignores inherited Git environment overrides when checking repository membership', async () => {
@@ -423,7 +459,9 @@ describe('AutoApproveJudge', () => {
       if (previousGitWorkTree === undefined) delete process.env.GIT_WORK_TREE;
       else process.env.GIT_WORK_TREE = previousGitWorkTree;
     }
-    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object), {
+      directory: workspace,
+    });
   });
 
   it('does not locally allow edit permissions outside the workspace or file deletion', async () => {
@@ -464,7 +502,9 @@ describe('AutoApproveJudge', () => {
         workspace
       )
     ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
-    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object), {
+      directory: workspace,
+    });
   });
 
   it('does not locally allow an edit when any requested path is ambiguous', async () => {
@@ -505,7 +545,9 @@ describe('AutoApproveJudge', () => {
         workspace
       )
     ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
-    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object), {
+      directory: workspace,
+    });
   });
 
   it('does not locally allow relative edit paths that escape the workspace', async () => {
@@ -530,7 +572,9 @@ describe('AutoApproveJudge', () => {
         workspace
       )
     ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
-    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object), {
+      directory: workspace,
+    });
   });
 
   it('still locally allows relative edit paths that stay inside the workspace', async () => {
@@ -672,7 +716,9 @@ describe('AutoApproveJudge', () => {
         workspace
       )
     ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
-    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object), {
+      directory: workspace,
+    });
   });
 
   it('does not locally allow title-only or malformed edit paths', async () => {
@@ -878,7 +924,9 @@ describe('AutoApproveJudge', () => {
         workspace
       )
     ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
-    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object), {
+      directory: workspace,
+    });
   });
 
   it('does not locally allow conflicting command metadata', async () => {
@@ -900,7 +948,9 @@ describe('AutoApproveJudge', () => {
         workspace
       )
     ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
-    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object), {
+      directory: workspace,
+    });
   });
 
   it.each([
@@ -934,7 +984,9 @@ describe('AutoApproveJudge', () => {
         workspace
       )
     ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
-    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object), {
+      directory: workspace,
+    });
   });
 
   it.each([
@@ -967,7 +1019,9 @@ describe('AutoApproveJudge', () => {
         workspace
       )
     ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
-    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object), {
+      directory: workspace,
+    });
   });
 
   it.each([
@@ -997,7 +1051,9 @@ describe('AutoApproveJudge', () => {
         workspace
       )
     ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
-    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object), {
+      directory: workspace,
+    });
   });
 
   it('defers arbitrary npm scripts and executable version commands to the judge', async () => {
@@ -1062,7 +1118,9 @@ describe('AutoApproveJudge', () => {
         )
       ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
     }
-    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object), {
+      directory: workspace,
+    });
   });
 
   it('defers backslash git -C paths even when the host reports Windows', async () => {
@@ -1094,7 +1152,9 @@ describe('AutoApproveJudge', () => {
       Object.defineProperty(process, 'platform', { value: originalPlatform });
     }
 
-    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object), {
+      directory: workspace,
+    });
   });
 
   it('does not locally allow new files through a symlink outside the workspace', async () => {
@@ -1123,7 +1183,9 @@ describe('AutoApproveJudge', () => {
         workspace
       )
     ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
-    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object), {
+      directory: workspace,
+    });
   });
 
   it('does not locally allow chained local bash commands', async () => {
@@ -1240,7 +1302,9 @@ describe('AutoApproveJudge', () => {
         workspace
       )
     ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
-    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object), {
+      directory: workspace,
+    });
   });
 
   it('asks without calling OpenCode when permission context is incomplete', async () => {

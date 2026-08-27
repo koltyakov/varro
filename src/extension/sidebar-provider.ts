@@ -61,7 +61,7 @@ import { SidebarProviderContextFiles } from './sidebar-provider-context-files';
 import { SidebarProviderRuntime } from './sidebar-provider-runtime';
 import { WebviewSession } from './webview-session';
 import { UsageReportService } from './usage-report-service';
-import { getSessionIdsForEvent } from './sidebar-provider-utils';
+import { getWorkspaceSessionIdsForEvent } from './sidebar-provider-utils';
 import { resolveServerLaunch } from './util/server-launch';
 
 const maximumTestedOpenCodeVersion = readMaximumTestedOpenCodeVersion();
@@ -109,6 +109,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private static readonly SESSION_RECONCILE_INTERVAL_MS = 10_000;
   private static readonly QUEUE_RECONCILE_INTERVAL_MS = 1_000;
   private static readonly SESSION_RECONCILE_GRACE_MS = 10_000;
+  private static readonly MAX_DEFERRED_WORKSPACE_EVENTS = 1_000;
 
   private lastStatusBarStateKey = '';
   private openCodeVersionCheck: 'idle' | 'checking' | 'checked' = 'idle';
@@ -159,13 +160,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly permissionModeQueues = new Map<string, Promise<unknown>>();
   private readonly deferredWorkspaceEvents: ServerEvent[] = [];
   private readonly permissionAutomationOwnerViewIds = new Set<string>();
+  private readonly permissionAutomationOwnerWorkspaces = new Map<string, string>();
   private permissionAutomationLease = 0;
   private interruptedRecoveryClaim: {
     claimId: number;
     sessionIds: string[];
     viewId: string;
   } | null = null;
-  private interruptedRecoveryOwnerViewId: string | null = null;
   private readonly deferredInterruptedRecoveryIds = new Set<string>();
   private nextInterruptedRecoveryClaimId = 0;
   private nextEditorId = 0;
@@ -474,9 +475,24 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.droppedFilesService.removeSessionOwnedFiles(sessionIds),
       postApiResponse: (requestGeneration, payload) =>
         webviewSession.postApiResponse(payload, requestGeneration),
-      isPermissionAutomationLeaseCurrent: (lease) =>
-        this.permissionAutomationOwnerViewIds.has(webviewContext.viewId) &&
-        this.permissionAutomationLease === lease,
+      isPermissionAutomationLeaseCurrent: (lease, request) => {
+        if (
+          !this.permissionAutomationOwnerViewIds.has(webviewContext.viewId) ||
+          this.permissionAutomationLease !== lease
+        ) {
+          return false;
+        }
+        const sessionID =
+          request.sessionID ||
+          (request.permissionID
+            ? this.sessionState.pending.get(request.permissionID)?.sessionID
+            : undefined);
+        const directory = sessionID ? this.sessionState.directoryFor(sessionID) : undefined;
+        return isSameWorkspacePath(
+          directory,
+          endpointRef.endpoint?.workspacePath ?? initialWorkspacePath
+        );
+      },
       beginQueuedMessageDispatchClaim: async (sessionId, itemId, lease, requestId, messageId) =>
         endpointRef.endpoint?.ready === true &&
         (await this.queuedMessages.beginDispatchAdmission(
@@ -560,11 +576,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         providerReauthenticated: () => this.providerReauthenticated(),
         postContext: () => post({ type: 'context/update', payload: getEndpointContext() }),
         selectWorkspace: async (path) => {
-          initialWorkspacePath = path;
-          if (endpointRef.endpoint) endpointRef.endpoint.workspacePath = path;
+          const workspacePath = this.contextProvider.getOpenWorkspaceRoot(path);
+          if (!workspacePath) throw new Error('Selected workspace folder is not open');
+          initialWorkspacePath = workspacePath;
+          if (endpointRef.endpoint) endpointRef.endpoint.workspacePath = workspacePath;
           this.reconcilePermissionAutomationOwners();
           if (webviewContext.surface === 'sidebar') {
-            await this.contextProvider.selectWorkspace(path);
+            await this.contextProvider.selectWorkspace(workspacePath);
           } else {
             post({ type: 'context/update', payload: getEndpointContext() });
           }
@@ -983,9 +1001,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (msg.type === 'server/event') this.postQueuedSessionStatus(msg.payload);
     if (msg.type === 'server/event' && this.shouldDeferWorkspaceEvent(msg.payload)) {
       this.deferredWorkspaceEvents.push(msg.payload);
+      if (this.deferredWorkspaceEvents.length > SidebarProvider.MAX_DEFERRED_WORKSPACE_EVENTS) {
+        this.deferredWorkspaceEvents.shift();
+        logger.warn('Dropped oldest deferred workspace event after reaching the queue limit');
+      }
       this.updateEditorPanelTitles();
       return;
     }
+    if (msg.type === 'server/event') this.flushDeferredWorkspaceEvents();
+    this.postToEndpoints(msg);
+    if (msg.type === 'server/event') this.updateEditorPanelTitles();
+    if (msg.type === 'context/update') this.postSiblingWorkspaceAlerts();
+  }
+
+  private postToEndpoints(msg: ExtensionMessage) {
     for (const endpoint of this.endpoints) {
       if (msg.type === 'server/event' && !this.isEventInEndpointWorkspace(msg.payload, endpoint)) {
         continue;
@@ -996,9 +1025,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           : msg
       );
     }
-    if (msg.type === 'server/event') this.updateEditorPanelTitles();
-    if (msg.type === 'context/update') this.postSiblingWorkspaceAlerts();
-    if (msg.type === 'server/event') this.flushDeferredWorkspaceEvents();
   }
 
   private postQueuedSessionStatus(event: ServerEvent) {
@@ -1042,25 +1068,31 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private shouldDeferWorkspaceEvent(event: ServerEvent) {
-    const sessionIDs = getSessionIdsForEvent(event);
+    if (event.workspaceDirectory) return false;
+    const sessionIDs = getWorkspaceSessionIdsForEvent(event);
     return sessionIDs.some((sessionID) => !this.sessionState.directoryFor(sessionID));
   }
 
   private flushDeferredWorkspaceEvents() {
     if (this.deferredWorkspaceEvents.length === 0) return;
     const ready: ServerEvent[] = [];
-    for (let index = this.deferredWorkspaceEvents.length - 1; index >= 0; index -= 1) {
-      const event = this.deferredWorkspaceEvents[index]!;
-      if (this.shouldDeferWorkspaceEvent(event)) continue;
-      ready.unshift(event);
-      this.deferredWorkspaceEvents.splice(index, 1);
+    const pending: ServerEvent[] = [];
+    for (const event of this.deferredWorkspaceEvents) {
+      (this.shouldDeferWorkspaceEvent(event) ? pending : ready).push(event);
     }
-    for (const event of ready) this.post({ type: 'server/event', payload: event });
+    this.deferredWorkspaceEvents.splice(0, this.deferredWorkspaceEvents.length, ...pending);
+    for (const event of ready) {
+      this.postToEndpoints({ type: 'server/event', payload: event });
+      this.updateEditorPanelTitles();
+    }
   }
 
   private isEventInEndpointWorkspace(event: ServerEvent, endpoint: WebviewEndpoint) {
     if (!endpoint.workspacePath) return true;
-    const sessionIDs = getSessionIdsForEvent(event);
+    if (event.workspaceDirectory) {
+      return isSameWorkspacePath(event.workspaceDirectory, endpoint.workspacePath);
+    }
+    const sessionIDs = getWorkspaceSessionIdsForEvent(event);
     if (sessionIDs.length === 0) return true;
     let knownMatch = false;
     for (const sessionID of sessionIDs) {
@@ -1082,6 +1114,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (endpoint.ready === ready) return;
     endpoint.ready = ready;
     if (!ready) endpoint.siblingAlertsKey = '';
+    if (!ready) this.deferredInterruptedRecoveryIds.clear();
     if (!ready) this.queuedMessages.releaseDispatchClaimsForView(endpoint.viewId);
     if (!this.disposing) this.reconcileQueuedMessageOwners();
     this.reconcilePermissionAutomationOwners();
@@ -1105,14 +1138,28 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       owners.push(group.find((endpoint) => endpoint.surface === 'sidebar') ?? current ?? group[0]!);
     }
     const nextOwnerViewIds = new Set(owners.map((endpoint) => endpoint.viewId));
+    const nextOwnerWorkspaces = new Map(
+      owners.map((endpoint) => [
+        endpoint.viewId,
+        normalizeWorkspaceIdentity(endpoint.workspacePath) ?? '*',
+      ])
+    );
     if (
       nextOwnerViewIds.size === this.permissionAutomationOwnerViewIds.size &&
-      [...nextOwnerViewIds].every((viewId) => this.permissionAutomationOwnerViewIds.has(viewId))
+      [...nextOwnerViewIds].every(
+        (viewId) =>
+          this.permissionAutomationOwnerViewIds.has(viewId) &&
+          this.permissionAutomationOwnerWorkspaces.get(viewId) === nextOwnerWorkspaces.get(viewId)
+      )
     ) {
       return;
     }
     this.permissionAutomationOwnerViewIds.clear();
+    this.permissionAutomationOwnerWorkspaces.clear();
     for (const viewId of nextOwnerViewIds) this.permissionAutomationOwnerViewIds.add(viewId);
+    for (const [viewId, workspace] of nextOwnerWorkspaces) {
+      this.permissionAutomationOwnerWorkspaces.set(viewId, workspace);
+    }
     this.permissionAutomationLease += 1;
     for (const endpoint of this.endpoints) {
       if (!endpoint.ready) continue;
@@ -1128,9 +1175,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         payload: { permissionId },
       });
     }
-    this.reconcileInterruptedRecoveryOwner(
-      owners.find((endpoint) => endpoint.surface === 'sidebar') ?? owners[0]
-    );
+    this.reconcileInterruptedRecoveryOwners(owners);
   }
 
   private permissionAutomationOwnerForSession(sessionID: string) {
@@ -1143,17 +1188,38 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       : owners[0];
   }
 
-  private reconcileInterruptedRecoveryOwner(owner: WebviewEndpoint | undefined) {
-    const ownerViewId = owner?.viewId ?? null;
-    if (this.interruptedRecoveryOwnerViewId !== ownerViewId) {
-      this.interruptedRecoveryOwnerViewId = ownerViewId;
+  private reconcileInterruptedRecoveryOwners(owners: WebviewEndpoint[]) {
+    const activeClaim = this.interruptedRecoveryClaim;
+    if (activeClaim && !owners.some((owner) => owner.viewId === activeClaim.viewId)) {
       this.interruptedRecoveryClaim = null;
-      this.deferredInterruptedRecoveryIds.clear();
     }
-    if (!owner || this.interruptedRecoveryClaim) return;
-    const sessions = this.sessionState
+    if (this.interruptedRecoveryClaim) return;
+    const candidates = this.sessionState
       .claimInterruptedSessions()
       .filter((session) => !this.deferredInterruptedRecoveryIds.has(session.id));
+    const workspaceKeys = new Set(
+      owners.map((owner) => normalizeWorkspaceIdentity(owner.workspacePath) ?? '*')
+    );
+    const soleWorkspace = workspaceKeys.size === 1 ? [...workspaceKeys][0] : undefined;
+    const owner = owners.find((candidate) =>
+      candidates.some((session) =>
+        session.directory || this.sessionState.directoryFor(session.id)
+          ? isSameWorkspacePath(
+              session.directory ?? this.sessionState.directoryFor(session.id),
+              candidate.workspacePath
+            )
+          : normalizeWorkspaceIdentity(candidate.workspacePath) === soleWorkspace
+      )
+    );
+    if (!owner) return;
+    const sessions = candidates.filter((session) =>
+      session.directory || this.sessionState.directoryFor(session.id)
+        ? isSameWorkspacePath(
+            session.directory ?? this.sessionState.directoryFor(session.id),
+            owner.workspacePath
+          )
+        : normalizeWorkspaceIdentity(owner.workspacePath) === soleWorkspace
+    );
     if (sessions.length === 0) return;
     const claim = {
       claimId: ++this.nextInterruptedRecoveryClaimId,
@@ -1180,10 +1246,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       if (consumedSet.has(sessionId)) this.deferredInterruptedRecoveryIds.delete(sessionId);
       else this.deferredInterruptedRecoveryIds.add(sessionId);
     }
-    const owner = [...this.endpoints].find(
-      (endpoint) => endpoint.ready && endpoint.viewId === this.interruptedRecoveryOwnerViewId
+    const owners = [...this.endpoints].filter(
+      (endpoint) => endpoint.ready && this.permissionAutomationOwnerViewIds.has(endpoint.viewId)
     );
-    this.reconcileInterruptedRecoveryOwner(owner);
+    this.reconcileInterruptedRecoveryOwners(owners);
   }
 
   private claimQueuedMessage(
@@ -1972,6 +2038,25 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           ...(pendingRequests.length > 3 ? [`+${pendingRequests.length - 3} more`] : []),
           '',
           'Click to open chat.',
+        ].join('\n'),
+      };
+    }
+
+    const sidebarEndpoint = [...this.endpoints].find((endpoint) => endpoint.surface === 'sidebar');
+    const siblingAlerts = sidebarEndpoint ? this.siblingWorkspaceAlertsFor(sidebarEndpoint) : [];
+    const siblingAlertCount = siblingAlerts.reduce((count, alert) => count + alert.count, 0);
+    if (siblingAlertCount > 0) {
+      return {
+        visible: true,
+        action: 'focus',
+        text: `$(bell-dot) Varro: ${siblingAlertCount} elsewhere`,
+        backgroundColor: new vscode.ThemeColor('statusBarItem.warningBackground'),
+        tooltip: [
+          'Varro needs your attention in another workspace.',
+          ...siblingAlerts.slice(0, 3).map((alert) => `${alert.name}: ${alert.count}`),
+          ...(siblingAlerts.length > 3 ? [`+${siblingAlerts.length - 3} more workspaces`] : []),
+          '',
+          'Click to open Varro.',
         ].join('\n'),
       };
     }

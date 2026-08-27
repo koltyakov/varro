@@ -119,6 +119,14 @@ describe('SidebarProvider editor panels', () => {
     expect(lastSiblingWorkspaceAlerts(posted)).toEqual([
       { name: 'Repo B', path: '/repo-b', kinds: ['attention'], count: 1 },
     ]);
+    const statusItemIndex = getVscodeMock().window.createStatusBarItem.mock.calls.findIndex(
+      ([id]) => id === 'varro.session-status'
+    );
+    const statusItem =
+      getVscodeMock().window.createStatusBarItem.mock.results[statusItemIndex]?.value;
+    expect(statusItem?.text).toBe('$(bell-dot) Varro: 1 elsewhere');
+    expect(statusItem?.tooltip).toContain('Repo B: 1');
+    expect(statusItem?.show).toHaveBeenCalled();
 
     const editor = createPanel();
     getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
@@ -284,6 +292,31 @@ describe('SidebarProvider editor panels', () => {
     );
   });
 
+  it('rejects workspace selections outside the open workspace folders', async () => {
+    const contextProvider = createContextProvider();
+    contextProvider.getOpenWorkspaceRoot.mockImplementation((path: string) =>
+      path === '/repo' ? path : null
+    );
+    const { provider, server } = await createSidebarProviderInstance({ contextProvider });
+    const editor = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+    await provider.openNewEditor();
+
+    editor.receive({ type: 'workspace/select', payload: { path: '/outside' } });
+    editor.receive({
+      type: 'api/request',
+      payload: { id: 42, method: 'GET', path: '/config/providers' },
+    });
+
+    await vi.waitFor(() => expect(server.request).toHaveBeenCalled());
+    expect(server.request).not.toHaveBeenCalledWith(
+      'GET',
+      '/config/providers',
+      undefined,
+      expect.objectContaining({ directory: '/outside' })
+    );
+  });
+
   it('routes session events only to endpoints in the matching workspace', async () => {
     const contextProvider = createContextProvider();
     contextProvider.context.workspacePath = '/repo-a';
@@ -329,6 +362,58 @@ describe('SidebarProvider editor panels', () => {
       .filter((message) => message.type === 'server/event');
     expect(sidebarEvents).toEqual([{ type: 'server/event', payload: eventA }]);
     expect(editorEvents).toEqual([{ type: 'server/event', payload: eventB }]);
+  });
+
+  it('routes envelope-scoped workspace events only to the matching endpoint', async () => {
+    const contextProvider = createContextProvider();
+    contextProvider.context.workspacePath = '/repo-a';
+    const { provider } = await createSidebarProviderInstance({ contextProvider });
+    const { posted } = attachTestView(provider);
+    const editor = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+    await provider.openNewEditor();
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    await vi.waitFor(() =>
+      expect(
+        lastEditorContext(editor.panel.webview.postMessage.mock.calls.map(([message]) => message))
+          ?.workspacePath
+      ).toBe('/repo-b')
+    );
+    posted.length = 0;
+    editor.panel.webview.postMessage.mockClear();
+    const event = { type: 'catalog.updated' as const, workspaceDirectory: '/repo-b' };
+
+    provider.post({ type: 'server/event', payload: event });
+
+    expect(posted).toEqual([]);
+    expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
+      type: 'server/event',
+      payload: event,
+    });
+  });
+
+  it('does not defer message updates because their info id is a message id', async () => {
+    const contextProvider = createContextProvider();
+    contextProvider.context.workspacePath = '/repo-a';
+    const { provider } = await createSidebarProviderInstance({ contextProvider });
+    const { posted } = attachTestView(provider);
+    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
+      .sessionState;
+    sessionState.handleServerEvent({
+      type: 'session.created',
+      properties: { info: { id: 'session-a', directory: '/repo-a' } },
+    });
+    posted.length = 0;
+    const event = {
+      type: 'message.updated' as const,
+      properties: {
+        info: { id: 'message-1', sessionID: 'session-a', role: 'assistant' as const },
+      },
+    };
+
+    provider.post({ type: 'server/event', payload: event });
+
+    expect(posted).toContainEqual({ type: 'server/event', payload: event });
   });
 
   it('routes sibling session lifecycle events to the endpoint that owns its queue', async () => {
@@ -435,6 +520,29 @@ describe('SidebarProvider editor panels', () => {
     });
   });
 
+  it('advances the permission automation lease when an owner changes workspaces', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const editor = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+    await provider.openNewEditor();
+    editor.receive({ type: 'ready' });
+    await vi.waitFor(() =>
+      expect(editor.panel.webview.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'permission-automation/update' })
+      )
+    );
+    const updates = () =>
+      editor.panel.webview.postMessage.mock.calls
+        .map(([message]) => message as { type?: string; payload?: { lease?: number } })
+        .filter((message) => message.type === 'permission-automation/update');
+    const initialLease = updates().at(-1)?.payload?.lease;
+
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+
+    await vi.waitFor(() => expect(updates().at(-1)?.payload?.lease).not.toBe(initialLease));
+    expect(updates().at(-1)?.payload?.lease).toBeGreaterThan(initialLease ?? -1);
+  });
+
   it('routes session deletion before removing its workspace metadata', async () => {
     const contextProvider = createContextProvider();
     contextProvider.context.workspacePath = '/repo-a';
@@ -505,6 +613,12 @@ describe('SidebarProvider editor panels', () => {
       type: 'server/event',
       payload: event,
     });
+    expect(
+      editor.panel.webview.postMessage.mock.calls
+        .map(([message]) => message as { type?: string; payload?: unknown })
+        .filter((message) => message.type === 'server/event')
+        .map((message) => message.payload)
+    ).toEqual([event, created]);
   });
 
   it('does not expose an external active file to workspace-scoped endpoints', async () => {
@@ -1160,6 +1274,73 @@ describe('SidebarProvider editor panels', () => {
     await Promise.resolve();
     expect(third.panel.webview.postMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: 'recovery/interrupted-sessions' })
+    );
+  });
+
+  it('partitions interrupted recovery claims by endpoint workspace', async () => {
+    const storage = new Map<string, unknown>([
+      [
+        'varro.interruptedSessions',
+        [
+          { id: 'session-a', title: 'A', directory: '/repo-a' },
+          { id: 'session-b', title: 'B', directory: '/repo-b' },
+        ],
+      ],
+    ]);
+    const workspaceState = {
+      get: vi.fn((key: string, fallback?: unknown) =>
+        storage.has(key) ? storage.get(key) : fallback
+      ),
+      update: vi.fn((key: string, value: unknown) => {
+        if (value === undefined) storage.delete(key);
+        else storage.set(key, value);
+        return Promise.resolve();
+      }),
+    };
+    const { provider } = await createSidebarProviderInstance({ workspaceState });
+    const first = createPanel();
+    const second = createPanel();
+    await provider.deserializeWebviewPanel(first.panel as never, {
+      'varro.editorViewId': 'editor-first',
+      'varro.workspacePath': '/repo-a',
+    });
+    await provider.deserializeWebviewPanel(second.panel as never, {
+      'varro.editorViewId': 'editor-second',
+      'varro.workspacePath': '/repo-b',
+    });
+    await vi.waitFor(() => expect(first.panel.webview.html).toContain('varro-editor-surface'));
+    await vi.waitFor(() => expect(second.panel.webview.html).toContain('varro-editor-surface'));
+
+    first.receive({ type: 'ready' });
+    second.receive({ type: 'ready' });
+    await vi.waitFor(() =>
+      expect(first.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'recovery/interrupted-sessions',
+        payload: { claimId: 1, sessionIds: ['session-a'] },
+      })
+    );
+    expect(second.panel.webview.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'recovery/interrupted-sessions',
+        payload: expect.objectContaining({ sessionIds: expect.arrayContaining(['session-a']) }),
+      })
+    );
+
+    first.receive({
+      type: 'recovery/interrupted-sessions-ack',
+      payload: { claimId: 1, consumedSessionIds: ['session-a'] },
+    });
+    await vi.waitFor(() =>
+      expect(second.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'recovery/interrupted-sessions',
+        payload: { claimId: 2, sessionIds: ['session-b'] },
+      })
+    );
+    expect(first.panel.webview.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'recovery/interrupted-sessions',
+        payload: expect.objectContaining({ sessionIds: expect.arrayContaining(['session-b']) }),
+      })
     );
   });
 

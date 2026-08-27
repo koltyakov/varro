@@ -48,6 +48,7 @@ describe('protocol parsers', () => {
     ).toEqual({
       id: 'event-1',
       type: 'session.updated',
+      workspaceDirectory: '/repo',
       properties: {
         sessionID: 'session-1',
         info: {
@@ -55,6 +56,20 @@ describe('protocol parsers', () => {
           title: 'Implement parser fix',
         },
       },
+    });
+  });
+
+  it('preserves the workspace from direct event locations', () => {
+    expect(
+      parseServerEvent({
+        type: 'catalog.updated',
+        location: { directory: '/repo-b' },
+        properties: {},
+      })
+    ).toEqual({
+      type: 'catalog.updated',
+      workspaceDirectory: '/repo-b',
+      properties: {},
     });
   });
 
@@ -80,6 +95,7 @@ describe('protocol parsers', () => {
     ).toEqual({
       id: 'event-1',
       type: 'session.updated',
+      workspaceDirectory: '/repo',
       seq: 42,
       properties: {
         sessionID: 'session-1',
@@ -116,6 +132,7 @@ describe('protocol parsers', () => {
     ).toEqual({
       id: 'event-2',
       type: 'session.next.text.ended',
+      workspaceDirectory: '/repo',
       seq: 42,
       properties: {
         timestamp: 1_234,

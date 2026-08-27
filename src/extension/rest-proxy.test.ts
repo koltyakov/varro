@@ -1203,11 +1203,14 @@ describe('RestProxy handleRequest', () => {
       )
     );
 
-    expect(callbacks.autoApproveJudge.resolveModel).toHaveBeenCalledWith({
-      providerID: 'openai',
-      modelID: 'gpt-4.1',
-      variant: 'low',
-    });
+    expect(callbacks.autoApproveJudge.resolveModel).toHaveBeenCalledWith(
+      {
+        providerID: 'openai',
+        modelID: 'gpt-4.1',
+        variant: 'low',
+      },
+      '/repo'
+    );
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 82, data: model });
   });
 
@@ -1222,7 +1225,10 @@ describe('RestProxy handleRequest', () => {
       makePayload(1, 'POST', '/varro/session/session-1/rename-if-untitled')
     );
 
-    expect(callbacks.sessionTitleFallback.renameIfUntitled).toHaveBeenCalledWith('session-1');
+    expect(callbacks.sessionTitleFallback.renameIfUntitled).toHaveBeenCalledWith(
+      'session-1',
+      '/repo'
+    );
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 1,
       data: { id: 'session-1', title: 'Fix build' },
@@ -2793,6 +2799,62 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
+  it('authorizes a queued history check for its open session workspace', async () => {
+    const serverRequest = vi.fn(async (method: string, path: string) => {
+      if (method === 'GET' && path === '/session/session-1?directory=%2Frepo-a') {
+        return { id: 'session-1', directory: '/repo-a' };
+      }
+      if (method === 'GET' && path === '/session/session-1/message?limit=200&directory=%2Frepo-a') {
+        return { data: [], nextCursor: undefined };
+      }
+      throw new Error(`Unexpected request ${method} ${path}`);
+    });
+    const beginQueuedMessageDispatchClaim = vi.fn(() => Promise.resolve(true));
+    const { proxy, callbacks } = createProxy({
+      getWorkspacePath: () => '/repo-b',
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      sessionState: {
+        ...createCallbacks().sessionState,
+        isSessionInWorkspace: vi.fn(() => false),
+      } as never,
+      beginQueuedMessageDispatchClaim,
+    });
+
+    await proxy.handleRequest({
+      ...makePayload(309, 'GET', '/session/session-1/message?limit=200', {
+        messageID: 'message-1',
+        workspaceDirectory: '/repo-a',
+      }),
+      queuedMessageDispatch: { itemId: 'queue-1', lease: 12 },
+    });
+
+    expect(beginQueuedMessageDispatchClaim).toHaveBeenCalledWith(
+      'session-1',
+      'queue-1',
+      12,
+      309,
+      'message-1'
+    );
+    expect(serverRequest).toHaveBeenNthCalledWith(
+      2,
+      'GET',
+      '/session/session-1/message?limit=200&directory=%2Frepo-a',
+      undefined,
+      expect.objectContaining({ directory: '/repo-a' })
+    );
+    expect(callbacks.completeQueuedMessageDispatchClaim).not.toHaveBeenCalled();
+    expect(callbacks.releaseQueuedMessageDispatchClaim).toHaveBeenCalledWith(
+      'session-1',
+      'queue-1',
+      12,
+      309
+    );
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 309,
+      data: { items: [], nextCursor: undefined },
+    });
+  });
+
   it('rejects a queued prompt whose dispatch lease is stale', async () => {
     const beginQueuedMessageDispatchClaim = vi.fn(() => Promise.resolve(false));
     const { proxy, callbacks } = createProxy({ beginQueuedMessageDispatchClaim });
@@ -3144,7 +3206,7 @@ describe('RestProxy handleRequest', () => {
 
     expect(serverRequest.mock.calls).toEqual([
       ['POST', '/session/session-1/prompt_async', { messageID: 'message-32', parts: [] }],
-      ['GET', '/session/status'],
+      ['GET', '/session/status', undefined, { directory: '/repo' }],
     ]);
     expect(reconcilePromptFailure).toHaveBeenCalledWith(attempt, undefined);
     expect(callbacks.releaseQueuedMessageDispatchClaim).toHaveBeenCalledWith(
@@ -3203,7 +3265,7 @@ describe('RestProxy handleRequest', () => {
 
     expect(serverRequest.mock.calls).toEqual([
       ['POST', '/session/session-1/prompt_async', undefined],
-      ['GET', '/session/status'],
+      ['GET', '/session/status', undefined, { directory: '/repo' }],
     ]);
     expect(deferPromptFailure).toHaveBeenCalledWith(attempt);
     expect(reconcilePromptFailure).not.toHaveBeenCalled();

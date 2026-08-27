@@ -176,6 +176,7 @@ import {
   estimateNestedContextBreakdown,
 } from '../../shared/context-breakdown';
 import type {
+  ChatModelSelection,
   DroppedFile,
   ExtensionMessage,
   InitialWebviewState,
@@ -247,6 +248,7 @@ import {
   acceptQueuedSteer,
   failedSteerQueuedMessageIds,
   getPromptEventText,
+  sendWithQueuedModelSnapshot,
   sendQueuedAsSteer,
   steeringQueuedMessageIds,
 } from './chat-input/queued-steer';
@@ -256,6 +258,24 @@ import { McpPicker } from './McpPicker';
 import { ModelPicker } from './ModelPicker';
 
 const COMPOSER_BUSY_DISPLAY_SETTLE_DELAY_MS = 700;
+
+interface CurrentComposerModel {
+  providerID: string | null;
+  modelID: string | null;
+  variant: string | null;
+  providerName: string;
+  modelName: string;
+  contextLimit: number | null;
+}
+
+const EMPTY_CURRENT_COMPOSER_MODEL: CurrentComposerModel = {
+  providerID: null,
+  modelID: null,
+  variant: null,
+  providerName: '',
+  modelName: '',
+  contextLimit: null,
+};
 
 function isRemoteExtensionHost() {
   return (
@@ -901,25 +921,37 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     !!composerTerminalSelection() ||
     !!state.attachedDiagnostics;
 
-  const currentModel = createMemo(() => {
+  const currentModel = createMemo<CurrentComposerModel>((previous) => {
     const editing = composerEditingMessage();
     const editSelection = editing ? editSelectedModel() || editing.model : null;
+    const resolvedSelection = resolveSelectedModel(
+      state.selectedModel,
+      state.providers,
+      state.providerDefaults,
+      { allowHidden: true }
+    );
     const selected =
       editSelection ||
-      resolveSelectedModel(state.selectedModel, state.providers, state.providerDefaults, {
-        allowHidden: true,
-      });
+      resolvedSelection ||
+      (state.workspaceCatalogReloadPending ? state.selectedModel : null);
     if (selected) {
       const provider = state.providers.find((item) => item.id === selected.providerID);
       const model = provider?.models[selected.modelID];
+      const preservePresentation =
+        state.workspaceCatalogReloadPending &&
+        previous.providerID === selected.providerID &&
+        previous.modelID === selected.modelID;
       return {
         providerID: selected.providerID,
         modelID: selected.modelID,
         variant: selected.variant || null,
-        providerName: provider?.name || selected.providerID,
+        providerName:
+          provider?.name || (preservePresentation ? previous.providerName : selected.providerID),
         modelName: model
           ? getModelDisplayName(selected.providerID, selected.modelID, model.name)
-          : selected.modelID,
+          : preservePresentation
+            ? previous.modelName
+            : getModelDisplayName(selected.providerID, selected.modelID, selected.modelID),
         contextLimit: model?.limit?.context || null,
       };
     }
@@ -970,19 +1002,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       }
     }
 
-    return {
-      // SAFETY: The surrounding shape or discriminator check establishes the string contract used below.
-      providerID: null as string | null,
-      // SAFETY: The surrounding shape or discriminator check establishes the string contract used below.
-      modelID: null as string | null,
-      // SAFETY: The surrounding shape or discriminator check establishes the string contract used below.
-      variant: null as string | null,
-      providerName: '',
-      modelName: '',
-      // SAFETY: The surrounding shape or discriminator check establishes the number contract used below.
-      contextLimit: null as number | null,
-    };
-  });
+    return EMPTY_CURRENT_COMPOSER_MODEL;
+  }, EMPTY_CURRENT_COMPOSER_MODEL);
 
   const hasMentions = () =>
     visibleFiles().length > 0 ||
@@ -1769,6 +1790,31 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     return true;
   }
 
+  function captureQueuedModelSnapshot(sessionId: string) {
+    const persistedSelection = getSelectedModelForSession(sessionId);
+    const current = currentModel();
+    const selection =
+      persistedSelection ??
+      (current.providerID && current.modelID
+        ? {
+            providerID: current.providerID,
+            modelID: current.modelID,
+            variant: effectiveVariant() || undefined,
+          }
+        : null);
+    if (!selection) return {};
+    return {
+      queuedModel: {
+        selection: { ...selection },
+        capabilities: {
+          vision: modelSupportsVision(selection.providerID, selection.modelID, state.providers),
+          pdf: modelSupportsPdf(selection.providerID, selection.modelID, state.providers),
+          tools: modelSupportsTools(selection.providerID, selection.modelID, state.providers),
+        },
+      },
+    };
+  }
+
   async function handleSend(mode?: 'queue' | 'steer' | 'after-stop') {
     const text = inputText();
     if (isAbortSlashCommand(text)) {
@@ -1961,6 +2007,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
                 }
               : state.editorContext.editorText,
             diagnostics: state.editorContext.diagnostics.map((diagnostic) => ({ ...diagnostic })),
+            ...captureQueuedModelSnapshot(sessionId),
           },
           currentDocumentEnabled: activeContextEnabled(sessionId),
         },
@@ -2060,12 +2107,21 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     let sent = false;
     let dispatchLease: number | null = null;
     try {
-      if (
-        priorAttemptId &&
-        (await queuedMessageWasAdmitted(item.sessionId, priorAttemptId, workspaceDirectory))
-      ) {
-        removeQueuedMessage(item.id);
-        return;
+      if (priorAttemptId) {
+        dispatchLease = await claimQueuedMessageDispatch(item);
+        if (dispatchLease === null) return;
+        const admitted = await queuedMessageWasAdmitted(
+          item.sessionId,
+          priorAttemptId,
+          workspaceDirectory,
+          { itemId: item.id, lease: dispatchLease }
+        );
+        releaseQueuedMessageDispatch(item, dispatchLease);
+        dispatchLease = null;
+        if (admitted) {
+          removeQueuedMessage(item.id);
+          return;
+        }
       }
       dispatchLease = await claimQueuedMessageDispatch(item);
       if (dispatchLease === null) return;
@@ -2076,30 +2132,36 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           phase: 'awaiting-busy',
         });
       }
-      sent = await sendMessage(item.text, {
-        messageId,
-        agent: item.agent ? item.agent : undefined,
-        queuedAttachments: {
-          droppedFiles: item.droppedFiles,
-          clipboardImages: item.clipboardImages,
-          nativePdfs: item.nativePdfs,
-          terminalSelection: item.terminalSelection,
-          attachedDiagnostics: item.attachedDiagnostics ? item.attachedDiagnostics : undefined,
-        },
-        queuedContext: item.queuedContext ?? {
-          editorContext: {
-            workspacePath:
-              state.sessions.find((session) => session.id === item.sessionId)?.directory ?? null,
-            activeFile: null,
-            selection: null,
-            diagnostics: [],
+      sent = await sendWithQueuedModelSnapshot(item, (selectedModel) => {
+        const options: NonNullable<Parameters<typeof sendMessage>[1]> & {
+          selectedModel?: ChatModelSelection;
+        } = {
+          messageId,
+          agent: item.agent ? item.agent : undefined,
+          queuedAttachments: {
+            droppedFiles: item.droppedFiles,
+            clipboardImages: item.clipboardImages,
+            nativePdfs: item.nativePdfs,
+            terminalSelection: item.terminalSelection,
+            attachedDiagnostics: item.attachedDiagnostics ? item.attachedDiagnostics : undefined,
           },
-          currentDocumentEnabled: false,
-        },
-        preserveComposer: true,
-        targetSessionId: item.sessionId,
-        workspaceDirectory,
-        queuedMessageDispatch: { itemId: item.id, lease: dispatchLease },
+          queuedContext: item.queuedContext ?? {
+            editorContext: {
+              workspacePath:
+                state.sessions.find((session) => session.id === item.sessionId)?.directory ?? null,
+              activeFile: null,
+              selection: null,
+              diagnostics: [],
+            },
+            currentDocumentEnabled: false,
+          },
+          preserveComposer: true,
+          targetSessionId: item.sessionId,
+          workspaceDirectory,
+          queuedMessageDispatch: { itemId: item.id, lease: dispatchLease! },
+        };
+        if (selectedModel) options.selectedModel = selectedModel;
+        return sendMessage(item.text, options);
       });
     } catch {
       sent = false;

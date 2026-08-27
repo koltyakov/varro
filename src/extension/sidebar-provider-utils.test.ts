@@ -4,6 +4,7 @@ import {
   asRecord,
   assertValidJson,
   getSessionIdsForEvent,
+  getWorkspaceSessionIdsForEvent,
   normalizeCliOutput,
   parseModelRoute,
 } from './sidebar-provider-utils';
@@ -39,6 +40,11 @@ describe('sidebar-provider utils', () => {
     expect(getSessionIdsForEvent(event)).toEqual([
       'session-root',
       'message-1',
+      'session-info',
+      'session-part',
+    ]);
+    expect(getWorkspaceSessionIdsForEvent(event)).toEqual([
+      'session-root',
       'session-info',
       'session-part',
     ]);

@@ -736,6 +736,28 @@ describe('ProviderFileRefreshController', () => {
       expect(h.server.restart).not.toHaveBeenCalled();
     });
 
+    it('cancels a scoped workspace reload when that folder routing is reverted', async () => {
+      const h = createHarness();
+      await activateWatching(h);
+      resetCalls(h);
+      h.setIdle(false);
+      const original = routing('gpt-5-mini');
+      const changed = routing('gpt-5-nano');
+
+      await h.controller.refreshWorkspaceState(original, changed, '/repo-a');
+      await h.controller.refreshWorkspaceState(changed, original, '/repo-a');
+
+      expect(h.persistence.remove).toHaveBeenCalledWith(PENDING_STATE_KEY);
+      expect(h.postPendingStatus).toHaveBeenCalledWith(false);
+
+      h.setIdle(true);
+      await vi.advanceTimersByTimeAsync(RETRY_MS);
+
+      expect(h.server.request).not.toHaveBeenCalledWith('POST', '/instance/dispose', undefined, {
+        directory: '/repo-a',
+      });
+    });
+
     it('does not supersede a pending workspace refresh with an unchanged sibling update', async () => {
       const h = createHarness();
       await activateWatching(h);

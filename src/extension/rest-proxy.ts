@@ -155,7 +155,10 @@ export interface RestProxyCallbacks {
   cleanupExpiredRecycleBin(): Promise<void>;
   removeSessionImages(sessionIds: Iterable<string>): Promise<void>;
   postApiResponse(requestGeneration: number, payload: ApiResponsePayload): void;
-  isPermissionAutomationLeaseCurrent(lease: number): boolean;
+  isPermissionAutomationLeaseCurrent(
+    lease: number,
+    request: { sessionID?: string; permissionID?: string }
+  ): boolean;
   beginQueuedMessageDispatchClaim(
     sessionId: string,
     itemId: string,
@@ -229,7 +232,9 @@ export class RestProxy {
     const requestGeneration = this.callbacks.getRequestGeneration();
     const method = payload.method.toUpperCase();
     const promptSessionID = this.parsePromptSessionID(method, payload.path);
-    const queuedDispatch = promptSessionID ? payload.queuedMessageDispatch : undefined;
+    const queuedHistorySessionID = this.parseQueuedHistorySessionID(method, payload);
+    const queuedDispatchSessionID = promptSessionID ?? queuedHistorySessionID;
+    const queuedDispatch = queuedDispatchSessionID ? payload.queuedMessageDispatch : undefined;
     const queuedMessageId = queuedDispatch ? asRecord(payload.body)?.messageID : undefined;
     let queuedDispatchActive = false;
     if (this.disposed) {
@@ -250,7 +255,7 @@ export class RestProxy {
         queuedDispatch &&
         (!isSafePersistedSessionId(queuedMessageId) ||
           !(await this.callbacks.beginQueuedMessageDispatchClaim(
-            promptSessionID!,
+            queuedDispatchSessionID!,
             queuedDispatch.itemId,
             queuedDispatch.lease,
             payload.id,
@@ -267,10 +272,22 @@ export class RestProxy {
       }
       this.assertPermissionAutomationLeaseCurrent(method, payload);
 
-      const requestedWorkspaceDirectory = getExplicitWorkspaceDirectory(payload.path);
+      const queuedHistoryWorkspaceDirectory = queuedHistorySessionID
+        ? asRecord(payload.body)?.workspaceDirectory
+        : undefined;
+      const requestedWorkspaceDirectory =
+        getExplicitWorkspaceDirectory(payload.path) ??
+        (typeof queuedHistoryWorkspaceDirectory === 'string'
+          ? queuedHistoryWorkspaceDirectory.trim() || null
+          : null);
       const explicitWorkspaceDirectory = requestedWorkspaceDirectory
         ? this.requireOpenWorkspaceRoot(requestedWorkspaceDirectory)
         : null;
+      const promptWorkspaceDirectory = promptSessionID
+        ? (explicitWorkspaceDirectory ??
+          this.getCurrentWorkspaceResolutionRoot() ??
+          this.getCurrentWorkspacePath())
+        : undefined;
       let forwardedPath = explicitWorkspaceDirectory
         ? setExplicitWorkspaceDirectory(payload.path, explicitWorkspaceDirectory)
         : payload.path;
@@ -428,14 +445,20 @@ export class RestProxy {
 
       const judgeModelRequest = this.parseJudgeModelRequest(method, payload.path);
       if (judgeModelRequest) {
-        const data = await this.callbacks.autoApproveJudge.resolveModel(judgeModelRequest.model);
+        const data = await this.callbacks.autoApproveJudge.resolveModel(
+          judgeModelRequest.model,
+          explicitWorkspaceDirectory ?? this.getCurrentWorkspaceResolutionRoot()
+        );
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
       }
 
       const renameSessionID = this.parseRenameIfUntitledRequest(method, payload.path);
       if (renameSessionID) {
-        const data = await this.callbacks.sessionTitleFallback.renameIfUntitled(renameSessionID);
+        const data = await this.callbacks.sessionTitleFallback.renameIfUntitled(
+          renameSessionID,
+          explicitWorkspaceDirectory ?? this.getCurrentWorkspaceResolutionRoot()
+        );
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
       }
@@ -479,14 +502,10 @@ export class RestProxy {
       // admission, and on fast turns the finish can land first; pre-marking
       // here ensures the busy marker exists before any finish event arrives.
       if (promptSessionID) {
-        const workspacePath =
-          explicitWorkspaceDirectory ??
-          this.getCurrentWorkspaceResolutionRoot() ??
-          this.getCurrentWorkspacePath();
         if (
-          workspacePath &&
-          normalizeWorkspaceIdentity(workspacePath) &&
-          !(await this.confirmPromptAdmission(workspacePath, request?.controller.signal))
+          promptWorkspaceDirectory &&
+          normalizeWorkspaceIdentity(promptWorkspaceDirectory) &&
+          !(await this.confirmPromptAdmission(promptWorkspaceDirectory, request?.controller.signal))
         ) {
           throw new Error('Prompt cancelled because generated dependencies are not ignored by Git');
         }
@@ -537,11 +556,23 @@ export class RestProxy {
             request?.controller.signal
           );
         } else if (paginatedMessages) {
+          if (
+            queuedDispatch &&
+            !this.callbacks.isQueuedMessageDispatchClaimCurrent(
+              queuedDispatchSessionID!,
+              queuedDispatch.itemId,
+              queuedDispatch.lease,
+              payload.id
+            )
+          ) {
+            throw new Error('Queued message dispatch lease is no longer current');
+          }
           responsePromise = this.requestPaginatedMessages(
             method,
             forwardedPath,
-            payload.body,
-            request?.controller.signal
+            queuedHistorySessionID ? undefined : payload.body,
+            request?.controller.signal,
+            queuedDispatch ? (explicitWorkspaceDirectory ?? undefined) : undefined
           );
         } else {
           this.assertPermissionAutomationLeaseCurrent(method, payload);
@@ -549,7 +580,7 @@ export class RestProxy {
           if (
             queuedDispatch &&
             !this.callbacks.isQueuedMessageDispatchClaimCurrent(
-              promptSessionID!,
+              queuedDispatchSessionID!,
               queuedDispatch.itemId,
               queuedDispatch.lease,
               payload.id
@@ -584,7 +615,9 @@ export class RestProxy {
             pendingAttentionReconciliation
           );
         }
-        if (promptAttempt) await this.reconcileFailedPrompt(promptAttempt, err);
+        if (promptAttempt) {
+          await this.reconcileFailedPrompt(promptAttempt, err, promptWorkspaceDirectory);
+        }
         throw err;
       }
       let response: unknown;
@@ -596,10 +629,12 @@ export class RestProxy {
             pendingAttentionReconciliation
           );
         }
-        if (promptAttempt) await this.reconcileFailedPrompt(promptAttempt, err);
+        if (promptAttempt) {
+          await this.reconcileFailedPrompt(promptAttempt, err, promptWorkspaceDirectory);
+        }
         throw err;
       }
-      if (queuedDispatch) {
+      if (queuedDispatch && promptSessionID) {
         try {
           const completed = await this.callbacks.completeQueuedMessageDispatchClaim(
             promptSessionID!,
@@ -656,7 +691,7 @@ export class RestProxy {
     } finally {
       if (queuedDispatch && queuedDispatchActive) {
         this.callbacks.releaseQueuedMessageDispatchClaim(
-          promptSessionID!,
+          queuedDispatchSessionID!,
           queuedDispatch.itemId,
           queuedDispatch.lease,
           payload.id
@@ -671,7 +706,13 @@ export class RestProxy {
   private assertPermissionAutomationLeaseCurrent(method: string, payload: ApiRequestPayload) {
     const lease = payload.permissionAutomationLease;
     if (lease === undefined || !isPermissionAutomationRequest(method, payload.path)) return;
-    if (!this.callbacks.isPermissionAutomationLeaseCurrent(lease)) {
+    const pathname = new URL(payload.path, 'http://localhost').pathname;
+    const permission = asRecord(asRecord(payload.body)?.permission);
+    const replyMatch = pathname.match(/^\/permission\/([^/]+)\/reply$/);
+    const request: { sessionID?: string; permissionID?: string } = {};
+    if (typeof permission?.sessionID === 'string') request.sessionID = permission.sessionID;
+    if (replyMatch?.[1]) request.permissionID = decodeURIComponent(replyMatch[1]);
+    if (!this.callbacks.isPermissionAutomationLeaseCurrent(lease, request)) {
       throw new Error('Permission automation ownership changed');
     }
   }
@@ -774,16 +815,33 @@ export class RestProxy {
     return parseSessionPromptEndpoint(path) ?? undefined;
   }
 
+  private parseQueuedHistorySessionID(
+    method: string,
+    payload: ApiRequestPayload
+  ): string | undefined {
+    if (method !== 'GET' || !payload.queuedMessageDispatch) return undefined;
+    const messageID = asRecord(payload.body)?.messageID;
+    if (!isSafePersistedSessionId(messageID)) return undefined;
+    const pathname = new URL(payload.path, 'http://localhost').pathname;
+    const match = pathname.match(/^\/session\/([^/]+)\/message$/);
+    return match?.[1] ? decodeURIComponent(match[1]) : undefined;
+  }
+
   private async reconcileFailedPrompt(
     attempt: SessionBusyAttempt,
-    requestError: unknown
+    requestError: unknown,
+    workspaceDirectory?: string
   ): Promise<void> {
     if (isKnownPreAdmissionPromptFailure(requestError)) {
       this.callbacks.sessionState.reconcilePromptFailure(attempt, undefined);
       return;
     }
     try {
-      const result = await this.callbacks.server.request('GET', '/session/status');
+      const result = workspaceDirectory
+        ? await this.callbacks.server.request('GET', '/session/status', undefined, {
+            directory: workspaceDirectory,
+          })
+        : await this.callbacks.server.request('GET', '/session/status');
       const statuses = Array.isArray(result) ? undefined : asRecord(result);
       if (!statuses) {
         this.callbacks.sessionState.deferPromptFailure(attempt);
@@ -808,7 +866,8 @@ export class RestProxy {
     method: string,
     path: string,
     body: unknown,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    workspaceDirectory?: string
   ) {
     const options: OpenCodeRequestOptions = {
       captureNextCursor: true,
@@ -817,6 +876,7 @@ export class RestProxy {
       stripSummaryDiffs: true,
     };
     if (signal) options.signal = signal;
+    if (workspaceDirectory) options.directory = workspaceDirectory;
     try {
       return await this.callbacks.server.request(method, path, body, options);
     } catch (err) {

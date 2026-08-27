@@ -29,6 +29,8 @@ import { Tooltip } from '../Tooltip';
 import { UiIcon } from '../UiIcon';
 import { PlusIcon } from '../PlusIcon';
 
+const SIBLING_ALERT_REMINDER_INTERVAL_MS = 30_000;
+
 function getActiveSession() {
   return state.sessions.find((session) => session.id === state.activeSessionId) ?? null;
 }
@@ -181,6 +183,12 @@ function SiblingWorkspaceAlertsButton() {
             : (current - 1 + items.length) % items.length;
     items[next]?.focus();
   };
+  const ringIcon = () => {
+    if (!iconRef) return;
+    iconRef.classList.remove('is-ringing');
+    void iconRef.offsetWidth;
+    iconRef.classList.add('is-ringing');
+  };
 
   createEffect(() => {
     const alerts = siblingWorkspaceAlerts();
@@ -198,10 +206,10 @@ function SiblingWorkspaceAlertsButton() {
         { count: alert.count, kinds: new Set<string>(alert.kinds) },
       ])
     );
-    if (!hasNewEvent || !iconRef) return;
-    iconRef.classList.remove('is-ringing');
-    void iconRef.offsetWidth;
-    iconRef.classList.add('is-ringing');
+    if (alerts.length === 0) return;
+    if (hasNewEvent) ringIcon();
+    const reminder = window.setInterval(ringIcon, SIBLING_ALERT_REMINDER_INTERVAL_MS);
+    onCleanup(() => window.clearInterval(reminder));
   });
 
   createEffect(() => {

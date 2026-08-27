@@ -38,6 +38,7 @@ interface TitleMessageRequest {
 
 type RenameAttempt = {
   controller: AbortController;
+  workspaceDirectory?: string;
   pendingTitle: string | null;
   hiddenSessionID: string | null;
   hiddenSessionCleanupStarted: boolean;
@@ -85,10 +86,14 @@ export class SessionTitleFallback {
     private readonly isEnabled: () => boolean
   ) {}
 
-  async renameIfUntitled(sessionID: string): Promise<SessionRecord | null> {
+  async renameIfUntitled(
+    sessionID: string,
+    workspaceDirectory?: string
+  ): Promise<SessionRecord | null> {
     if (!this.isEnabled() || !sessionID || this.inFlight.has(sessionID)) return null;
     const attempt: RenameAttempt = {
       controller: new AbortController(),
+      workspaceDirectory,
       pendingTitle: null,
       hiddenSessionID: null,
       hiddenSessionCleanupStarted: false,
@@ -117,12 +122,19 @@ export class SessionTitleFallback {
     sessionID: string,
     attempt: RenameAttempt
   ): Promise<SessionRecord | null> {
-    const session = normalizeSession(await this.server.request('GET', sessionPath(sessionID)));
+    const session = normalizeSession(
+      await this.request('GET', sessionPath(sessionID), undefined, attempt.workspaceDirectory)
+    );
     if (!this.isCurrentAttempt(sessionID, attempt)) return null;
     if (!session || !isPlaceholderSessionTitle(session.title)) return null;
 
     const messages = normalizeMessages(
-      await this.server.request('GET', `${sessionPath(sessionID)}/message?limit=20`)
+      await this.request(
+        'GET',
+        `${sessionPath(sessionID)}/message?limit=20`,
+        undefined,
+        attempt.workspaceDirectory
+      )
     );
     if (!this.isCurrentAttempt(sessionID, attempt)) return null;
     const transcript = buildTranscript(messages);
@@ -131,11 +143,15 @@ export class SessionTitleFallback {
     const title = await this.generateTitle(sessionID, transcript, messages, attempt);
     if (!title || !this.isEnabled() || !this.isCurrentAttempt(sessionID, attempt)) return null;
 
-    const latest = normalizeSession(await this.server.request('GET', sessionPath(sessionID)));
+    const latest = normalizeSession(
+      await this.request('GET', sessionPath(sessionID), undefined, attempt.workspaceDirectory)
+    );
     if (!this.isCurrentAttempt(sessionID, attempt)) return null;
     if (!latest || !isPlaceholderSessionTitle(latest.title)) return null;
 
-    return normalizeSession(await this.server.request('PATCH', sessionPath(sessionID), { title }));
+    return normalizeSession(
+      await this.request('PATCH', sessionPath(sessionID), { title }, attempt.workspaceDirectory)
+    );
   }
 
   private async generateTitle(
@@ -149,15 +165,17 @@ export class SessionTitleFallback {
     this.hiddenSessions.registerPendingTitle(title);
 
     try {
-      const session = await this.server.request('POST', '/session', {
-        title,
-        permission: DENY_ALL_PERMISSION_RULES,
-      });
+      const session = await this.request(
+        'POST',
+        '/session',
+        { title, permission: DENY_ALL_PERMISSION_RULES },
+        attempt.workspaceDirectory
+      );
       attempt.hiddenSessionID = getString(asRecord(session)?.id);
       this.hiddenSessions.hide(attempt.hiddenSessionID);
       if (!attempt.hiddenSessionID || !this.isCurrentAttempt(sessionID, attempt)) return null;
 
-      const route = await this.resolveTitleModel(messages);
+      const route = await this.resolveTitleModel(messages, attempt.workspaceDirectory);
       if (!this.isCurrentAttempt(sessionID, attempt)) return null;
       const request: TitleMessageRequest = {
         system: buildTitleSystemPrompt(),
@@ -168,10 +186,11 @@ export class SessionTitleFallback {
         request.model = { providerID: route.providerID, modelID: route.modelID };
         if (route.variant) request.variant = route.variant;
       }
-      const response = await this.server.request(
+      const response = await this.request(
         'POST',
         `${sessionPath(attempt.hiddenSessionID)}/message`,
-        request
+        request,
+        attempt.workspaceDirectory
       );
       if (!this.isCurrentAttempt(sessionID, attempt)) return null;
       return normalizeGeneratedTitle(response);
@@ -193,7 +212,12 @@ export class SessionTitleFallback {
     const sessionID = attempt.hiddenSessionID;
     attempt.hiddenSessionCleanupStarted = true;
     try {
-      const deleted = await this.server.request('DELETE', sessionPath(sessionID));
+      const deleted = await this.request(
+        'DELETE',
+        sessionPath(sessionID),
+        undefined,
+        attempt.workspaceDirectory
+      );
       if (deleted === true) {
         this.hiddenSessions.retainUntilDeleted(sessionID);
       } else {
@@ -210,18 +234,37 @@ export class SessionTitleFallback {
     }
   }
 
-  private async resolveTitleModel(messages: MessageEntry[]): Promise<ModelRoute | null> {
-    const config = asRecord(await this.server.request('GET', '/config').catch(() => null));
+  private async resolveTitleModel(
+    messages: MessageEntry[],
+    workspaceDirectory?: string
+  ): Promise<ModelRoute | null> {
+    const config = asRecord(
+      await this.request('GET', '/config', undefined, workspaceDirectory).catch(() => null)
+    );
     const smallModel = parseModelRoute(config?.small_model);
     if (smallModel) return smallModel;
 
     const currentModel = findCurrentModel(messages);
     if (!currentModel) return null;
-    const providers = await this.server.request('GET', '/config/providers').catch(() => null);
+    const providers = await this.request(
+      'GET',
+      '/config/providers',
+      undefined,
+      workspaceDirectory
+    ).catch(() => null);
     const variant = findNoReasoningVariant(providers, currentModel);
     const route: ModelRoute = { ...currentModel };
     if (variant) route.variant = variant;
     return route;
+  }
+
+  private request(method: string, path: string, body: unknown, workspaceDirectory?: string) {
+    if (workspaceDirectory) {
+      return this.server.request(method, path, body, { directory: workspaceDirectory });
+    }
+    return body === undefined
+      ? this.server.request(method, path)
+      : this.server.request(method, path, body);
   }
 
   private async withTimeout<T>(

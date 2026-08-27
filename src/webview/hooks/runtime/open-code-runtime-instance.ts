@@ -1779,9 +1779,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   const {
     loadMcps,
     loadQuestions,
-    loadAgents,
-    loadCommands,
-    loadProviders,
+    reloadWorkspaceCatalogs,
     loadCompatibilityState,
     refreshProviderLimit,
     loadSessions,
@@ -1815,8 +1813,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       syncPendingPermissions(),
       loadMcps(),
       loadLsps(),
-      loadCommands(),
-      refreshRoutingState(),
+      reloadWorkspaceCatalogs(),
+      loadCompatibilityState(),
       ...(activeSessionId ? [syncSession(activeSessionId)] : []),
     ]);
     for (const result of results) {
@@ -1912,9 +1910,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     loadInitialData: async () => {
       await Promise.all([
         loadSessions(),
-        loadAgents(),
-        loadCommands(),
-        loadProviders(),
+        reloadWorkspaceCatalogs(),
         loadCompatibilityState(),
         loadMcps(),
         loadLsps(),

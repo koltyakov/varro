@@ -60,6 +60,7 @@ const {
   undoSessionMock,
   runSlashCommandByNameMock,
   sendMessageMock,
+  queuedMessageWasAdmittedMock,
   serverEventHandlers,
   serverEventsOnMock,
 } = vi.hoisted(() => ({
@@ -73,6 +74,7 @@ const {
   undoSessionMock: vi.fn(async () => {}),
   runSlashCommandByNameMock: vi.fn(async () => true),
   sendMessageMock: vi.fn<typeof UseOpenCodeModule.sendMessage>(async () => true),
+  queuedMessageWasAdmittedMock: vi.fn(),
   serverEventHandlers: new Map<
     string,
     Set<(event: { type: string; properties?: UnknownRecord }) => void>
@@ -105,6 +107,10 @@ vi.mock('../hooks/useOpenCode', async () => {
 
 vi.mock('./chat/SessionActionFeedback', () => ({
   showSessionActionFeedback: showSessionActionFeedbackMock,
+}));
+
+vi.mock('./chat-input/queued-message-history', () => ({
+  queuedMessageWasAdmitted: queuedMessageWasAdmittedMock,
 }));
 
 vi.mock('../lib/client', () => ({
@@ -245,6 +251,22 @@ afterEach(() => {
   setSessionHistoryPrompts('session-1', []);
   resetMessageEditState();
   sendMessageMock.mockReset();
+  queuedMessageWasAdmittedMock.mockReset();
+  queuedMessageWasAdmittedMock.mockImplementation(
+    async (sessionId: string, messageId: string, workspaceDirectory?: string) => {
+      let before: string | undefined;
+      do {
+        const messages = await client.session.messages(sessionId, {
+          limit: 200,
+          before,
+          directory: workspaceDirectory,
+        });
+        if (messages.some((message) => message.info.id === messageId)) return true;
+        before = messages.nextCursor;
+      } while (before);
+      return false;
+    }
+  );
   loadOlderSessionPromptsMock.mockReset();
   loadOlderSessionPromptsMock.mockResolvedValue(false);
   serverEventHandlers.clear();
@@ -2544,6 +2566,7 @@ describe('ChatInput', () => {
   });
 
   it('queues busy composer attachments and clears them from the input', () => {
+    setupModelState();
     setInputText('Follow up with context');
     setIsLoading(true);
     setState('activeSessionId', 'session-1');
@@ -2591,6 +2614,14 @@ describe('ChatInput', () => {
         },
       ],
       terminalSelection: { text: 'npm test', terminalName: 'zsh' },
+      queuedContext: {
+        editorContext: {
+          queuedModel: {
+            selection: { providerID: 'openai', modelID: 'gpt-4o' },
+            capabilities: { vision: true, pdf: false, tools: true },
+          },
+        },
+      },
     });
   });
 
@@ -2809,6 +2840,73 @@ describe('ChatInput', () => {
     );
     expect(state.activeSessionId).toBe('session-2');
     expect(state.queuedMessages).toEqual([]);
+  });
+
+  it('uses the queued model snapshot instead of the displayed workspace catalog', async () => {
+    vi.useFakeTimers();
+    setState('activeSessionId', 'session-2');
+    setState('editorContext', 'workspacePath', '/repo-b');
+    setState('sessionStatus', 'session-1', { type: 'idle' });
+    setState('providers', [
+      {
+        id: 'custom',
+        name: 'Workspace B',
+        source: 'custom',
+        models: {
+          shared: {
+            id: 'shared',
+            name: 'Shared text model',
+            capabilities: { vision: false, toolcall: false, input: [] },
+            cost: { input: 0, output: 0 },
+          },
+        },
+      },
+    ]);
+    setState('queuedMessages', [
+      {
+        id: 'q1',
+        sessionId: 'session-1',
+        text: 'Describe the attachment',
+        queuedContext: {
+          editorContext: {
+            workspacePath: '/repo-a',
+            activeFile: null,
+            selection: null,
+            diagnostics: [],
+            queuedModel: {
+              selection: { providerID: 'custom', modelID: 'shared', variant: 'original' },
+              capabilities: { vision: true, pdf: true, tools: true },
+            },
+          },
+          currentDocumentEnabled: false,
+        },
+      },
+    ]);
+    let capturedCapabilities: unknown;
+    sendMessageMock.mockImplementation(async (_text, options) => {
+      capturedCapabilities = state.providers[0]?.models.shared?.capabilities;
+      expect(options).toMatchObject({
+        selectedModel: { providerID: 'custom', modelID: 'shared', variant: 'original' },
+        targetSessionId: 'session-1',
+        workspaceDirectory: '/repo-a',
+      });
+      return true;
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+
+    expect(capturedCapabilities).toMatchObject({
+      vision: true,
+      toolcall: true,
+      input: ['pdf'],
+    });
+    expect(state.providers[0]?.models.shared?.capabilities).toMatchObject({
+      vision: false,
+      toolcall: false,
+      input: [],
+    });
   });
 
   it('dispatches sibling workspace queue items one at a time after each idle event', async () => {
@@ -4670,6 +4768,46 @@ describe('ChatInput', () => {
 
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(inputText()).toBe('Preserved draft');
+  });
+
+  it('keeps the selected model visible while workspace catalogs reload', async () => {
+    setupModelState();
+    cleanup = render(() => ChatInput({ newSession: true }), container!);
+
+    const modelButton = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
+    expect(modelButton?.textContent).toContain('GPT-4o');
+
+    setState('workspaceCatalogReloadPending', true);
+    setState('providers', []);
+    setState('providerDefaults', {});
+    await Promise.resolve();
+
+    expect(modelButton?.textContent).toContain('GPT-4o');
+    expect(modelButton?.textContent).not.toBe('Model');
+    expect(modelButton?.dataset.providerId).toBe('openai');
+    expect(modelButton?.dataset.modelId).toBe('gpt-4o');
+
+    setState('providers', [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'Workspace GPT-4o',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+            limit: { context: 2_000, output: 1_000 },
+          },
+        },
+      },
+    ]);
+    setState('providerDefaults', { openai: 'gpt-4o' });
+    setState('workspaceCatalogReloadPending', false);
+    await Promise.resolve();
+
+    expect(modelButton?.textContent).toContain('Workspace GPT-4o');
   });
 
   it('still selects a completion on Enter before queueing a pending-request message', async () => {

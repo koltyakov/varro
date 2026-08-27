@@ -47,7 +47,7 @@ afterEach(() => {
 });
 
 describe('ToolbarPickers', () => {
-  it('provides compact workspace abbreviations for constrained layouts', () => {
+  it('only abbreviates workspace names with more than two words', () => {
     const [selectedPath, setSelectedPath] = createSignal('/jira-stats-tj');
     cleanup = render(
       () => (
@@ -55,6 +55,8 @@ describe('ToolbarPickers', () => {
           folders={[
             { name: 'jira-stats-tj', path: '/jira-stats-tj' },
             { name: 'MyDotNetProject', path: '/MyDotNetProject' },
+            { name: 'gosip', path: '/gosip' },
+            { name: 'Drop Box', path: '/Drop Box' },
           ]}
           selectedPath={selectedPath()}
           showPicker={true}
@@ -78,6 +80,14 @@ describe('ToolbarPickers', () => {
         (initial) => initial.textContent
       )
     ).toEqual(['M', 'D', 'N', 'P']);
+    setSelectedPath('/gosip');
+    expect(container?.querySelector('.workspace-picker-abbreviation')?.textContent).toBe('gosip');
+    expect(container?.querySelectorAll('.workspace-name-initial')).toHaveLength(0);
+    setSelectedPath('/Drop Box');
+    expect(container?.querySelector('.workspace-picker-abbreviation')?.textContent).toBe(
+      'Drop Box'
+    );
+    expect(container?.querySelectorAll('.workspace-name-initial')).toHaveLength(0);
   });
 
   it('indexes duplicate abbreviations in VS Code workspace order', () => {
@@ -124,7 +134,7 @@ describe('ToolbarPickers', () => {
     );
 
     expect(container?.querySelector('.workspace-picker-button')?.getAttribute('aria-label')).toBe(
-      'Selected workspace: Repo B, rb'
+      'Selected workspace: Repo B'
     );
     expect(
       container?.querySelector('[data-workspace-path="/repo-b"]')?.getAttribute('aria-current')

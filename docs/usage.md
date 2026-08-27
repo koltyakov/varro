@@ -176,7 +176,7 @@ Opening a session fetches the newest 200 messages. Scrolling to the top automati
 
 On large layouts, Varro can keep a persistent session pane beside the chat. Use `varro.chat.desktopSessionPaneSide` to choose whether that pane appears on the left or right.
 
-If the sidebar is hidden, Varro can show VS Code notifications when a plan is ready, a top-level session fails, or the agent is blocked on a permission or question. It also exposes a status bar item that summarizes waiting or completed top-level sessions, including ordinary completed sessions that do not produce a notification. Clicking that item opens pending-attention sessions first, otherwise it focuses Varro.
+If the sidebar is hidden, Varro can show VS Code notifications when a plan is ready, a top-level session fails, or the agent is blocked on a permission or question. It also exposes a status bar item that summarizes waiting or completed top-level sessions, including ordinary completed sessions that do not produce a notification, and alerts in sibling workspaces. Clicking that item opens pending-attention sessions first, otherwise it focuses Varro.
 
 If VS Code reloads while a session was running, Varro reconnects to those sessions and can continue interrupted work automatically when the session is still resumable.
 
