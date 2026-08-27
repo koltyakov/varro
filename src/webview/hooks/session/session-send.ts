@@ -74,6 +74,7 @@ type ComposerState = {
   attachedDiagnostics?: AttachedDiagnostics | null;
   allAgents?: Agent[];
   visionDelegationTexts?: string[];
+  visionDelegationAvailable?: boolean;
 };
 
 export type SessionSendBody = {
@@ -209,11 +210,12 @@ export function buildSessionSendBody(
       effectiveModel.modelID,
       composerState.providers
     ) &&
-    canDelegateVision(
-      [text, ...(composerState.visionDelegationTexts ?? [])],
-      composerState.allAgents ?? [],
-      composerState.providers
-    ) &&
+    (composerState.visionDelegationAvailable ??
+      canDelegateVision(
+        [text, ...(composerState.visionDelegationTexts ?? [])],
+        composerState.allAgents ?? [],
+        composerState.providers
+      )) &&
     composerState.clipboardImages.every((image) => image.contextFile);
   const includeClipboardImages = includeNativeClipboardImages || delegateClipboardImages;
   const promptText = getPromptTextForClipboardImages(
@@ -815,6 +817,7 @@ export class SessionSendOperations {
               : []
           )
         : [],
+      visionDelegationAvailable: options?.queuedContext?.visionDelegationAvailable,
     };
     const currentDocumentEnabled =
       options?.queuedContext?.currentDocumentEnabled ??

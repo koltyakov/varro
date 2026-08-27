@@ -656,6 +656,9 @@ describe('webview message validation', () => {
     expect(parseQueuedMessageUpdate([{ ...valid, agent: 'x'.repeat(513) }])).toBeNull();
     expect(parseQueuedMessageUpdate([{ ...valid, paused: 'false' }])).toBeNull();
     expect(
+      parseQueuedMessageUpdate([{ ...valid, queuedContext: { visionDelegationAvailable: 'yes' } }])
+    ).toBeNull();
+    expect(
       parseQueuedMessageUpdate([{ ...valid, text: 'x'.repeat(8 * 1024 * 1024 + 1) }])
     ).toBeNull();
   });

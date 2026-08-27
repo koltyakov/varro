@@ -292,6 +292,48 @@ describe('SidebarProvider editor panels', () => {
     );
   });
 
+  it('keeps an API request in the workspace where dispatch started', async () => {
+    const { provider, server } = await createSidebarProviderInstance();
+    const editor = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+    await provider.openNewEditor();
+
+    editor.receive({
+      type: 'api/request',
+      payload: { id: 42, method: 'GET', path: '/config/providers' },
+    });
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+
+    await vi.waitFor(() =>
+      expect(server.request).toHaveBeenCalledWith(
+        'GET',
+        '/config/providers',
+        undefined,
+        expect.objectContaining({ directory: '/repo' })
+      )
+    );
+  });
+
+  it('opens relative editor paths from the editor workspace', async () => {
+    const contextProvider = createContextProvider();
+    const { provider } = await createSidebarProviderInstance({ contextProvider });
+    const editor = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+    await provider.openNewEditor();
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+
+    editor.receive({ type: 'vscode/open', payload: { path: 'src/app.ts', kind: 'file' } });
+
+    await vi.waitFor(() =>
+      expect(contextProvider.openPath).toHaveBeenCalledWith('src/app.ts', {
+        line: undefined,
+        kind: 'file',
+        view: undefined,
+        workspaceDirectory: '/repo-b',
+      })
+    );
+  });
+
   it('rejects workspace selections outside the open workspace folders', async () => {
     const contextProvider = createContextProvider();
     contextProvider.getOpenWorkspaceRoot.mockImplementation((path: string) =>
@@ -619,6 +661,74 @@ describe('SidebarProvider editor panels', () => {
         .filter((message) => message.type === 'server/event')
         .map((message) => message.payload)
     ).toEqual([event, created]);
+  });
+
+  it('flushes deferred events when REST bootstrap learns the session workspace', async () => {
+    const contextProvider = createContextProvider();
+    contextProvider.context.workspacePath = '/repo-a';
+    const { provider, server } = await createSidebarProviderInstance({ contextProvider });
+    const { posted } = attachTestView(provider);
+    const editor = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+    await provider.openNewEditor();
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    posted.length = 0;
+    editor.panel.webview.postMessage.mockClear();
+    const event = {
+      type: 'permission.asked' as const,
+      properties: {
+        id: 'permission-bootstrap',
+        sessionID: 'session-bootstrap',
+        permission: 'bash',
+      },
+    };
+    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
+      .sessionState;
+    sessionState.handleServerEvent(event);
+    provider.post({ type: 'server/event', payload: event });
+    server.request.mockImplementation(async (_method: string, path: string) => {
+      if (path === '/session') return [{ id: 'session-bootstrap', directory: '/repo-b' }];
+      throw new Error(`Unexpected path: ${path}`);
+    });
+
+    editor.receive({
+      type: 'api/request',
+      payload: { id: 43, method: 'GET', path: '/session' },
+    });
+
+    await vi.waitFor(() =>
+      expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'server/event',
+        payload: event,
+      })
+    );
+    expect(posted).not.toContainEqual({ type: 'server/event', payload: event });
+  });
+
+  it('coalesces session-directory reconciliation during bulk bootstrap', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const access = provider as unknown as {
+      sessionState: SessionStateManager;
+      flushDeferredWorkspaceEvents(): void;
+      reconcilePermissionAutomationOwners(): void;
+    };
+    const flushDeferred = vi.spyOn(access, 'flushDeferredWorkspaceEvents');
+    const reconcileOwners = vi.spyOn(access, 'reconcilePermissionAutomationOwners');
+
+    access.sessionState.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'session-a', directory: '/repo-a' } },
+    });
+    access.sessionState.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'session-b', directory: '/repo-b' } },
+    });
+
+    expect(flushDeferred).not.toHaveBeenCalled();
+    expect(reconcileOwners).not.toHaveBeenCalled();
+    await Promise.resolve();
+    expect(flushDeferred).toHaveBeenCalledOnce();
+    expect(reconcileOwners).toHaveBeenCalledOnce();
   });
 
   it('does not expose an external active file to workspace-scoped endpoints', async () => {
@@ -1203,7 +1313,10 @@ describe('SidebarProvider editor panels', () => {
 
   it('keeps interrupted recovery claimable until the elected view acknowledges it', async () => {
     const storage = new Map<string, unknown>([
-      ['varro.interruptedSessions', [{ id: 'session-1', title: 'Interrupted' }]],
+      [
+        'varro.interruptedSessions',
+        [{ id: 'session-1', title: 'Interrupted', directory: '/repo' }],
+      ],
     ]);
     const workspaceState = {
       get: vi.fn((key: string, fallback?: unknown) =>
@@ -1255,7 +1368,7 @@ describe('SidebarProvider editor panels', () => {
     });
     await Promise.resolve();
     expect(storage.get('varro.interruptedSessions')).toEqual([
-      { id: 'session-1', title: 'Interrupted' },
+      { id: 'session-1', title: 'Interrupted', directory: '/repo' },
     ]);
 
     second.receive({
@@ -1344,9 +1457,108 @@ describe('SidebarProvider editor panels', () => {
     );
   });
 
+  it('reassigns interrupted recovery when the claiming view changes workspace', async () => {
+    const storage = new Map<string, unknown>([
+      [
+        'varro.interruptedSessions',
+        [{ id: 'session-a', title: 'Interrupted', directory: '/repo-a' }],
+      ],
+    ]);
+    const workspaceState = {
+      get: vi.fn((key: string, fallback?: unknown) =>
+        storage.has(key) ? storage.get(key) : fallback
+      ),
+      update: vi.fn((key: string, value: unknown) => {
+        if (value === undefined) storage.delete(key);
+        else storage.set(key, value);
+        return Promise.resolve();
+      }),
+    };
+    const { provider } = await createSidebarProviderInstance({ workspaceState });
+    const first = createPanel();
+    const second = createPanel();
+    await provider.deserializeWebviewPanel(first.panel as never, {
+      'varro.editorViewId': 'editor-first',
+      'varro.workspacePath': '/repo-a',
+    });
+    await provider.deserializeWebviewPanel(second.panel as never, {
+      'varro.editorViewId': 'editor-second',
+      'varro.workspacePath': '/repo-a',
+    });
+    await vi.waitFor(() => expect(first.panel.webview.html).toContain('varro-editor-surface'));
+    await vi.waitFor(() => expect(second.panel.webview.html).toContain('varro-editor-surface'));
+    first.receive({ type: 'ready' });
+    second.receive({ type: 'ready' });
+    await vi.waitFor(() =>
+      expect(first.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'recovery/interrupted-sessions',
+        payload: { claimId: 1, sessionIds: ['session-a'] },
+      })
+    );
+
+    first.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+
+    await vi.waitFor(() =>
+      expect(second.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'recovery/interrupted-sessions',
+        payload: { claimId: 2, sessionIds: ['session-a'] },
+      })
+    );
+  });
+
+  it('retains legacy interrupted recovery until bootstrap resolves its workspace', async () => {
+    const storage = new Map<string, unknown>([
+      ['varro.interruptedSessions', [{ id: 'session-legacy', title: 'Legacy' }]],
+    ]);
+    const workspaceState = {
+      get: vi.fn((key: string, fallback?: unknown) =>
+        storage.has(key) ? storage.get(key) : fallback
+      ),
+      update: vi.fn((key: string, value: unknown) => {
+        if (value === undefined) storage.delete(key);
+        else storage.set(key, value);
+        return Promise.resolve();
+      }),
+    };
+    const { provider, server } = await createSidebarProviderInstance({ workspaceState });
+    const editor = createPanel();
+    await provider.deserializeWebviewPanel(editor.panel as never, {
+      'varro.editorViewId': 'editor-legacy',
+      'varro.workspacePath': '/repo-b',
+    });
+    await vi.waitFor(() => expect(editor.panel.webview.html).toContain('varro-editor-surface'));
+    editor.receive({ type: 'ready' });
+    await Promise.resolve();
+    expect(editor.panel.webview.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'recovery/interrupted-sessions' })
+    );
+    expect(storage.get('varro.interruptedSessions')).toEqual([
+      { id: 'session-legacy', title: 'Legacy' },
+    ]);
+    server.request.mockImplementation(async (_method: string, path: string) => {
+      if (path === '/session') return [{ id: 'session-legacy', directory: '/repo-b' }];
+      throw new Error(`Unexpected path: ${path}`);
+    });
+
+    editor.receive({
+      type: 'api/request',
+      payload: { id: 44, method: 'GET', path: '/session' },
+    });
+
+    await vi.waitFor(() =>
+      expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'recovery/interrupted-sessions',
+        payload: { claimId: 1, sessionIds: ['session-legacy'] },
+      })
+    );
+  });
+
   it('redelivers an unacknowledged recovery claim after the webview reloads', async () => {
     const storage = new Map<string, unknown>([
-      ['varro.interruptedSessions', [{ id: 'session-1', title: 'Interrupted' }]],
+      [
+        'varro.interruptedSessions',
+        [{ id: 'session-1', title: 'Interrupted', directory: '/repo' }],
+      ],
     ]);
     const workspaceState = {
       get: vi.fn((key: string, fallback?: unknown) =>
@@ -1391,14 +1603,17 @@ describe('SidebarProvider editor panels', () => {
       })
     );
     expect(storage.get('varro.interruptedSessions')).toEqual([
-      { id: 'session-1', title: 'Interrupted' },
+      { id: 'session-1', title: 'Interrupted', directory: '/repo' },
     ]);
     await provider.dispose();
   });
 
   it('retains failed recovery work without retrying until the webview reloads', async () => {
     const storage = new Map<string, unknown>([
-      ['varro.interruptedSessions', [{ id: 'session-1', title: 'Interrupted' }]],
+      [
+        'varro.interruptedSessions',
+        [{ id: 'session-1', title: 'Interrupted', directory: '/repo' }],
+      ],
     ]);
     const workspaceState = {
       get: vi.fn((key: string, fallback?: unknown) =>
@@ -1431,11 +1646,11 @@ describe('SidebarProvider editor panels', () => {
     });
     await vi.waitFor(() =>
       expect(workspaceState.update).toHaveBeenCalledWith('varro.interruptedSessions', [
-        { id: 'session-1', title: 'Interrupted' },
+        { id: 'session-1', title: 'Interrupted', directory: '/repo' },
       ])
     );
     expect(storage.get('varro.interruptedSessions')).toEqual([
-      { id: 'session-1', title: 'Interrupted' },
+      { id: 'session-1', title: 'Interrupted', directory: '/repo' },
     ]);
     expect(editor.panel.webview.postMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: 'recovery/interrupted-sessions' })

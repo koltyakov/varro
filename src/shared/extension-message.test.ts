@@ -207,6 +207,19 @@ describe('parseExtensionMessage', () => {
     } as const;
 
     expect(parseExtensionMessage(message)).toEqual(message);
+    expect(
+      parseExtensionMessage({
+        ...message,
+        payload: {
+          messages: [
+            {
+              ...message.payload.messages[0],
+              queuedContext: { visionDelegationAvailable: 'yes' },
+            },
+          ],
+        },
+      })
+    ).toBeNull();
   });
 
   it('parses host permission mode snapshots', () => {

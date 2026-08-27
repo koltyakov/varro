@@ -52,6 +52,17 @@ function applyQueuedModelCapabilities(
   const { providerID, modelID } = snapshot.selection;
   const provider = providers.find((item) => item.id === providerID);
   const existingModel = provider?.models[modelID];
+  const existingInput = existingModel?.capabilities.input;
+  const input = Array.isArray(existingInput)
+    ? snapshot.capabilities.pdf
+      ? [...new Set([...existingInput, 'pdf'])]
+      : existingInput.filter((modality) => modality !== 'pdf')
+    : existingInput
+      ? { ...existingInput, pdf: snapshot.capabilities.pdf }
+      : snapshot.capabilities.pdf
+        ? ['pdf']
+        : undefined;
+  const variant = snapshot.selection.variant;
   const model = {
     ...(existingModel ?? {
       id: modelID,
@@ -62,8 +73,11 @@ function applyQueuedModelCapabilities(
       ...existingModel?.capabilities,
       vision: snapshot.capabilities.vision,
       toolcall: snapshot.capabilities.tools,
-      input: snapshot.capabilities.pdf ? ['pdf'] : [],
+      input,
     },
+    variants: variant
+      ? { ...existingModel?.variants, [variant]: existingModel?.variants?.[variant] ?? {} }
+      : existingModel?.variants,
   };
   if (provider) {
     return providers.map((item) =>

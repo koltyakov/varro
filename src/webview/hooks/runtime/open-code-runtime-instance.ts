@@ -109,6 +109,7 @@ import { SessionEventHandlerOperations } from '../session/session-event-handlers
 import {
   getDeletedSessionTreeIds,
   getNextSessionIdAfterDeletion,
+  normalizeProjectPath,
   SessionLifecycleOperations,
 } from '../session/session-lifecycle';
 import { SessionManagementOperations } from '../session/session-management';
@@ -946,7 +947,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   const permissionDecisionReferencesByTree = new Map<string, AutoApproveJudgeReference[]>();
   const permissionJudgeAttempts = new Map<string, PermissionJudgeAttempt>();
   const permissionSessionSyncs = new Map<string, Promise<void>>();
-  const hiddenRestoredPermissions = new Map<string, Permission>();
+  const hiddenRestoredPermissions = new Map<
+    string,
+    { permission: Permission; workspacePath: string | null }
+  >();
   let permissionSyncGeneration = 0;
   let latestPermissionSyncGeneration = 0;
   let permissionSnapshotGeneration = 0;
@@ -1388,7 +1392,14 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   async function syncPendingPermissions() {
     const syncGeneration = ++permissionSyncGeneration;
     const reconciliation = permissionsStore.beginPermissionReconciliation();
-    const restoredPermissions = [...hiddenRestoredPermissions.values()];
+    const workspacePath = normalizeProjectPath(
+      currentWorkspacePath === undefined
+        ? initialWebviewState.editorContext?.workspacePath
+        : currentWorkspacePath
+    );
+    const restoredPermissions = [...hiddenRestoredPermissions.values()]
+      .filter((entry) => entry.workspacePath === workspacePath)
+      .map((entry) => entry.permission);
     try {
       const pendingPermissions = await client.permission.list();
       if (syncGeneration < latestPermissionSyncGeneration) return;
@@ -1521,8 +1532,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         (!isPermissionSessionKnown(permission.sessionID) && hasStoredAutomaticMode) ||
         permissionsStore.getPermissionModeForSession(permission.sessionID) !== 'default'
     );
+    const workspacePath = normalizeProjectPath(initialWebviewState.editorContext?.workspacePath);
     for (const permission of restoredPermissions) {
-      hiddenRestoredPermissions.set(permission.id, permission);
+      hiddenRestoredPermissions.set(permission.id, { permission, workspacePath });
       permissionsStore.removePermission(permission.id, { removeGroup: true });
     }
   }

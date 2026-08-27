@@ -607,6 +607,7 @@ export type QueuedContextSnapshot = {
     };
   };
   currentDocumentEnabled: boolean;
+  visionDelegationAvailable?: boolean;
 };
 
 export type QueuedMessageSnapshot = {

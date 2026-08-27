@@ -516,14 +516,27 @@ export class ContextProvider implements vscode.Disposable {
 
   async openPath(
     path: string,
-    options?: { line?: number; kind?: 'auto' | 'file' | 'directory'; view?: 'diff' }
+    options?: {
+      line?: number;
+      kind?: 'auto' | 'file' | 'directory';
+      view?: 'diff';
+      workspaceDirectory?: string;
+    }
   ): Promise<'opened' | 'unavailable'> {
     try {
+      const input = path.trim();
+      if (
+        !isAbsolute(input) &&
+        options?.workspaceDirectory &&
+        !this.getOpenWorkspaceFolder(options.workspaceDirectory)
+      ) {
+        return 'unavailable';
+      }
       let resolved = await this.resolveWorkspaceUri(path, {
         allowMissing: options?.view === 'diff',
+        workspaceDirectory: options?.workspaceDirectory,
       });
       if (!resolved && options?.view !== 'diff') {
-        const input = path.trim();
         const basenameOnly = !isAbsolute(input) && !/[\\/]/.test(input);
         const missingAbsolute = isAbsolute(input);
         const filename = basenameOnly
@@ -532,10 +545,21 @@ export class ContextProvider implements vscode.Disposable {
             ? input.split(/[\\/]/).at(-1) || ''
             : '';
         if (/^[\w.@+-]+$/.test(filename)) {
-          const matches = await vscode.workspace.findFiles(`**/${filename}`, null, 2);
+          const workspaceFolder =
+            !isAbsolute(input) && options?.workspaceDirectory
+              ? this.getOpenWorkspaceFolder(options.workspaceDirectory)
+              : undefined;
+          const matches = await vscode.workspace.findFiles(
+            workspaceFolder
+              ? new vscode.RelativePattern(workspaceFolder, `**/${filename}`)
+              : `**/${filename}`,
+            null,
+            2
+          );
           const parentDirectory = missingAbsolute ? dirname(input) : '';
-          const searchRoots =
-            parentDirectory && parentDirectory !== parse(parentDirectory).root
+          const searchRoots = workspaceFolder
+            ? [workspaceFolder.uri]
+            : parentDirectory && parentDirectory !== parse(parentDirectory).root
               ? [vscode.Uri.file(parentDirectory)]
               : undefined;
           let uri =
@@ -700,11 +724,12 @@ export class ContextProvider implements vscode.Disposable {
     if (!input) return null;
     if (restrictToWorkspace && hasRawParentTraversal(input)) return null;
 
-    const restrictedWorkspaceFolder =
-      restrictToWorkspace && options?.workspaceDirectory
+    const shouldUseRequestedWorkspace = !isAbsolute(input) || restrictToWorkspace;
+    const requestedWorkspaceFolder =
+      shouldUseRequestedWorkspace && options?.workspaceDirectory
         ? this.getOpenWorkspaceFolder(options.workspaceDirectory)
         : undefined;
-    if (restrictToWorkspace && options?.workspaceDirectory && !restrictedWorkspaceFolder) {
+    if (shouldUseRequestedWorkspace && options?.workspaceDirectory && !requestedWorkspaceFolder) {
       return null;
     }
 
@@ -712,7 +737,8 @@ export class ContextProvider implements vscode.Disposable {
       const uri = vscode.Uri.file(input);
       if (allowMissing) {
         const workspaceFolder =
-          restrictedWorkspaceFolder ?? vscode.workspace.getWorkspaceFolder(uri);
+          (restrictToWorkspace ? requestedWorkspaceFolder : undefined) ??
+          vscode.workspace.getWorkspaceFolder(uri);
         if (!restrictToWorkspace) return workspaceFolder ? { uri, workspaceFolder } : { uri };
         const verifiedUri = await resolveInsideWorkspace(uri, workspaceFolder);
         return verifiedUri ? { uri, workspaceFolder, verifiedUri } : null;
@@ -720,7 +746,8 @@ export class ContextProvider implements vscode.Disposable {
       try {
         await vscode.workspace.fs.stat(uri);
         const workspaceFolder =
-          restrictedWorkspaceFolder ?? vscode.workspace.getWorkspaceFolder(uri);
+          (restrictToWorkspace ? requestedWorkspaceFolder : undefined) ??
+          vscode.workspace.getWorkspaceFolder(uri);
         if (!restrictToWorkspace) return workspaceFolder ? { uri, workspaceFolder } : { uri };
         const verifiedUri = await resolveInsideWorkspace(uri, workspaceFolder);
         return verifiedUri ? { uri, workspaceFolder, verifiedUri } : null;
@@ -729,8 +756,8 @@ export class ContextProvider implements vscode.Disposable {
       }
     }
 
-    const folders = restrictedWorkspaceFolder
-      ? [restrictedWorkspaceFolder]
+    const folders = requestedWorkspaceFolder
+      ? [requestedWorkspaceFolder]
       : this.getWorkspaceFoldersInResolutionOrder();
     const resolved = resolveWorkspaceRelativePath(input, folders);
     if (!resolved) return null;

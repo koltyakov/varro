@@ -440,6 +440,24 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
+  it('keeps the request-scoped workspace directory through asynchronous preparation', async () => {
+    const cleanup = deferred<void>();
+    const serverRequest = vi.fn(() => Promise.resolve([]));
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      cleanupExpiredRecycleBin: vi.fn(() => cleanup.promise),
+    });
+
+    const request = proxy.handleRequest(makePayload(44, 'GET', '/config/providers'), '/repo-a');
+    await vi.waitFor(() => expect(callbacks.cleanupExpiredRecycleBin).toHaveBeenCalled());
+    cleanup.resolve();
+    await request;
+
+    expect(serverRequest).toHaveBeenCalledWith('GET', '/config/providers', undefined, {
+      directory: '/repo-a',
+    });
+  });
+
   it('returns error for disallowed API request', async () => {
     const { proxy, callbacks } = createProxy();
     await proxy.handleRequest(makePayload(1, 'DELETE', '/global/health'));
@@ -645,13 +663,16 @@ describe('RestProxy handleRequest', () => {
       server: { ...createCallbacks().server, request: serverRequest } as never,
     });
 
-    await proxy.handleRequest({
-      ...makePayload(932, 'POST', '/session/session-a/prompt_async?directory=%2Frepo-a', {
-        messageID: 'message-932',
-        parts: [],
-      }),
-      queuedMessageDispatch: { itemId: 'queue-1', lease: 4 },
-    });
+    await proxy.handleRequest(
+      {
+        ...makePayload(932, 'POST', '/session/session-a/prompt_async?directory=%2Frepo-a', {
+          messageID: 'message-932',
+          parts: [],
+        }),
+        queuedMessageDispatch: { itemId: 'queue-1', lease: 4 },
+      },
+      '/repo-b'
+    );
 
     expect(serverRequest).toHaveBeenCalledWith(
       'POST',

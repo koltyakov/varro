@@ -124,6 +124,12 @@ const vscodeMock = vi.hoisted(() => ({
       fsPath: `${uri.fsPath.replace(/\/$/, '')}/${name}`,
     })),
   },
+  RelativePattern: class RelativePattern {
+    constructor(
+      public readonly base: unknown,
+      public readonly pattern: string
+    ) {}
+  },
   FileType: {
     Directory: 2,
   },
@@ -952,6 +958,55 @@ describe('ContextProvider', () => {
 
       expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(uri);
       expect(vscodeMock.window.showTextDocument).toHaveBeenCalledWith(document, { preview: false });
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('uses an explicit workspace only for relative open paths', async () => {
+    const provider = new ContextProvider(vi.fn());
+    const repoA = { name: 'repo-a', uri: { fsPath: '/repo-a' } };
+    const repoB = { name: 'repo-b', uri: { fsPath: '/repo-b' } };
+    vscodeMock.workspace.workspaceFolders = [repoA, repoB];
+    vscodeMock.workspace.getWorkspaceFolder.mockImplementation((uri: { fsPath: string }) =>
+      uri.fsPath.startsWith('/repo-a/')
+        ? repoA
+        : uri.fsPath.startsWith('/repo-b/')
+          ? repoB
+          : undefined
+    );
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 0 });
+    vscodeMock.workspace.openTextDocument.mockImplementation((uri: unknown) =>
+      Promise.resolve({ uri })
+    );
+    vscodeMock.window.showTextDocument.mockResolvedValue({});
+
+    try {
+      await provider.openPath('src/app.ts', { workspaceDirectory: '/repo-b' });
+      await provider.openPath('/tmp/outside.ts', { workspaceDirectory: '/repo-b' });
+
+      expect(vscodeMock.workspace.openTextDocument).toHaveBeenNthCalledWith(1, {
+        fsPath: '/repo-b/src/app.ts',
+      });
+      expect(vscodeMock.workspace.openTextDocument).toHaveBeenNthCalledWith(2, {
+        fsPath: '/tmp/outside.ts',
+      });
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('does not search other roots when a relative path workspace is no longer open', async () => {
+    const provider = new ContextProvider(vi.fn());
+    vscodeMock.workspace.workspaceFolders = [{ name: 'repo-a', uri: { fsPath: '/repo-a' } }];
+    vscodeMock.workspace.findFiles.mockResolvedValue([{ fsPath: '/repo-a/src/app.ts' }]);
+
+    try {
+      await expect(
+        provider.openPath('src/app.ts', { workspaceDirectory: '/closed-repo' })
+      ).resolves.toBe('unavailable');
+      expect(vscodeMock.workspace.findFiles).not.toHaveBeenCalled();
+      expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
     } finally {
       provider.dispose();
     }

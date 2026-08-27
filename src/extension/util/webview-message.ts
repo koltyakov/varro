@@ -1264,7 +1264,14 @@ function isValidQueuedMessageRouting(record: UnknownRecord) {
   if (!Array.isArray(record.droppedFiles) || !Array.isArray(record.clipboardImages)) return false;
   if (record.attachedDiagnostics !== undefined && !asRecord(record.attachedDiagnostics))
     return false;
-  if (record.queuedContext !== undefined && !asRecord(record.queuedContext)) return false;
+  const queuedContext = asRecord(record.queuedContext);
+  if (record.queuedContext !== undefined && !queuedContext) return false;
+  if (
+    queuedContext?.visionDelegationAvailable !== undefined &&
+    typeof queuedContext.visionDelegationAvailable !== 'boolean'
+  ) {
+    return false;
+  }
   if (record.terminalSelection === null) return true;
   const terminalSelection = asRecord(record.terminalSelection);
   return (

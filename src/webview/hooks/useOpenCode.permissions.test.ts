@@ -551,6 +551,98 @@ describe('useOpenCode permission and config flows', () => {
     }
   });
 
+  it('does not restore a hidden permission after switching workspaces when sync fails', async () => {
+    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
+    bridgeOnMessage.mockImplementation((handler) => {
+      bridgeHandler = handler;
+      return () => {
+        bridgeHandler = undefined;
+      };
+    });
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    clientMocks.permissionList.mockRejectedValue(new Error('Permission list failed'));
+    // SAFETY: The fixture provides the initial recovery snapshot read by the runtime.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      editorContext: {
+        workspacePath: '/repo-a',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+      sessionPermissionModes: { 'session-1': 'auto' },
+      pendingPermissions: [permissionListItem('perm-restored-a')],
+    };
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      expect(stateModule.state.permissions).toEqual([]);
+      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
+      bridgeHandler({
+        type: 'context/update',
+        payload: {
+          workspacePath: '/repo-a',
+          activeFile: null,
+          selection: null,
+          diagnostics: [],
+        },
+      });
+      bridgeHandler({
+        type: 'context/update',
+        payload: {
+          workspacePath: '/repo-b',
+          activeFile: null,
+          selection: null,
+          diagnostics: [],
+        },
+      });
+
+      serverEventHandlers.get('server.connected')?.({});
+      await vi.waitFor(() => expect(clientMocks.permissionList).toHaveBeenCalledOnce());
+      await vi.waitFor(() =>
+        expect(stateModule.getPermissionReconciliationMetadataSize().activeReconciliations).toBe(0)
+      );
+
+      expect(stateModule.state.permissions).toEqual([]);
+      expect(bridgeMocks.postMessage).not.toHaveBeenCalledWith({
+        type: 'permission/reveal',
+        payload: { permissionId: 'perm-restored-a' },
+      });
+
+      bridgeHandler({
+        type: 'context/update',
+        payload: {
+          workspacePath: '/repo-a',
+          activeFile: null,
+          selection: null,
+          diagnostics: [],
+        },
+      });
+      bridgeHandler({
+        type: 'permission/actionable',
+        payload: { permissionId: 'perm-restored-a' },
+      });
+
+      await vi.waitFor(() => expect(clientMocks.permissionList).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() =>
+        expect(stateModule.state.permissions).toEqual([
+          expect.objectContaining({ id: 'perm-restored-a' }),
+        ])
+      );
+      expect(bridgeMocks.postMessage).toHaveBeenCalledWith({
+        type: 'permission/reveal',
+        payload: { permissionId: 'perm-restored-a' },
+      });
+    } finally {
+      dispose();
+    }
+  });
+
   it('auto-approves a visible timed-out permission when the judge responds late', async () => {
     vi.useFakeTimers();
     const serverEventHandlers = captureServerEventHandlers();

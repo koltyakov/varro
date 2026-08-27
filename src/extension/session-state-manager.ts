@@ -82,6 +82,8 @@ export type SessionBusyAttempt = {
 export interface SessionStateListener {
   /** Called whenever any state that the status bar renders has changed. */
   onStatusChange(): void;
+  /** Called when routing learns or changes a session's workspace directory. */
+  onSessionDirectoryChange?(): void;
 }
 
 export interface NotificationGate {
@@ -607,7 +609,7 @@ export class SessionStateManager {
             this.unclaimedInterruptedSessions.set(session.id, session);
           }
           const directory = trimOptionalString(session.directory);
-          if (directory) this.setSessionMetadata(this.sessionDirectories, session.id, directory);
+          if (directory) this.setSessionDirectory(session.id, directory);
         }
       }
       const rawBlockingRequests = this.persistence.get<unknown>(BLOCKING_REQUESTS_KEY);
@@ -800,7 +802,7 @@ export class SessionStateManager {
       if (item.kind === 'permission') this.deferPermissionAttention(item.id);
       const directory = trimOptionalString(item.directory);
       if (directory) {
-        this.setSessionMetadata(this.sessionDirectories, item.sessionID, directory);
+        this.setSessionDirectory(item.sessionID, directory);
       }
     }
   }
@@ -993,7 +995,7 @@ export class SessionStateManager {
 
     const directory = trimOptionalString(getString(info?.directory));
     if (sessionID && directory) {
-      this.setSessionMetadata(this.sessionDirectories, sessionID, directory);
+      this.setSessionDirectory(sessionID, directory);
     }
 
     const parentID = getString(info?.parentID);
@@ -1017,7 +1019,7 @@ export class SessionStateManager {
       event.type === 'session.deleted'
         ? getString(info?.id)
         : undefined);
-    if (sessionID) this.setSessionMetadata(this.sessionDirectories, sessionID, directory);
+    if (sessionID) this.setSessionDirectory(sessionID, directory);
   }
 
   private getSessionMetadata(map: Map<string, string>, sessionID: string) {
@@ -1040,6 +1042,12 @@ export class SessionStateManager {
     map.delete(sessionID);
     map.set(sessionID, value);
     this.evictOldestSessionMetadata(map);
+  }
+
+  private setSessionDirectory(sessionID: string, directory: string) {
+    const previous = this.sessionDirectories.get(sessionID);
+    this.setSessionMetadata(this.sessionDirectories, sessionID, directory);
+    if (!isSameWorkspacePath(previous, directory)) this.listener.onSessionDirectoryChange?.();
   }
 
   private evictOldestSessionMetadata(map: Map<string, string>) {

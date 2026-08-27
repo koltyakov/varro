@@ -1,6 +1,7 @@
 /* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/no-unsafe-dictionary-type -- REST payloads are untrusted and validated against endpoint contracts before use. */
 /* oxlint-disable anti-slop/no-known-value-widening, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Endpoint assertions follow route-specific runtime validation. */
 import * as vscode from 'vscode';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { existsSync } from 'fs';
 import { posix, win32 } from 'path';
 import { applyEdits, modify, parse, printParseErrorCode, type ParseError } from 'jsonc-parser';
@@ -188,6 +189,7 @@ export interface RestProxyCallbacks {
 }
 
 export class RestProxy {
+  private readonly requestWorkspaceDirectory = new AsyncLocalStorage<string | undefined>();
   private sessionDirectories = new Map<string, string>();
   private hasSessionDirectorySnapshot = false;
   private sessionDirectoryBootstrapPromise: Promise<ReadonlyMap<string, string>> | null = null;
@@ -228,7 +230,13 @@ export class RestProxy {
     this.activeRequests.clear();
   }
 
-  async handleRequest(payload: ApiRequestPayload) {
+  handleRequest(payload: ApiRequestPayload, defaultWorkspaceDirectory?: string) {
+    return this.requestWorkspaceDirectory.run(defaultWorkspaceDirectory, () =>
+      this.handleRequestInScope(payload)
+    );
+  }
+
+  private async handleRequestInScope(payload: ApiRequestPayload) {
     const requestGeneration = this.callbacks.getRequestGeneration();
     const method = payload.method.toUpperCase();
     const promptSessionID = this.parsePromptSessionID(method, payload.path);
@@ -593,18 +601,18 @@ export class RestProxy {
             : undefined;
           responsePromise = request
             ? queuedWorkspaceDirectory
-              ? this.callbacks.server.request(method, forwardedPath, payload.body, {
+              ? this.requestServer(method, forwardedPath, payload.body, {
                   signal: request.controller.signal,
                   directory: queuedWorkspaceDirectory,
                 })
-              : this.callbacks.server.request(method, forwardedPath, payload.body, {
+              : this.requestServer(method, forwardedPath, payload.body, {
                   signal: request.controller.signal,
                 })
             : queuedWorkspaceDirectory
-              ? this.callbacks.server.request(method, forwardedPath, payload.body, {
+              ? this.requestServer(method, forwardedPath, payload.body, {
                   directory: queuedWorkspaceDirectory,
                 })
-              : this.callbacks.server.request(method, forwardedPath, payload.body);
+              : this.requestServer(method, forwardedPath, payload.body);
         }
         if (this.isSessionListRequest(method, payload.path) && sessionPageLimit === null) {
           this.trackSessionDirectoryBootstrap(responsePromise, false);
@@ -703,6 +711,15 @@ export class RestProxy {
     }
   }
 
+  private requestServer(
+    ...args: Parameters<OpenCodeServer['request']>
+  ): ReturnType<OpenCodeServer['request']> {
+    const [method, path, body, options] = args;
+    const directory = options?.directory ?? this.requestWorkspaceDirectory.getStore();
+    if (!directory) return this.callbacks.server.request(...args);
+    return this.callbacks.server.request(method, path, body, { ...options, directory });
+  }
+
   private assertPermissionAutomationLeaseCurrent(method: string, payload: ApiRequestPayload) {
     const lease = payload.permissionAutomationLease;
     if (lease === undefined || !isPermissionAutomationRequest(method, payload.path)) return;
@@ -747,8 +764,8 @@ export class RestProxy {
     let response: unknown;
     try {
       response = signal
-        ? await this.callbacks.server.request('GET', '/model/default', undefined, { signal })
-        : await this.callbacks.server.request('GET', '/model/default');
+        ? await this.requestServer('GET', '/model/default', undefined, { signal })
+        : await this.requestServer('GET', '/model/default');
     } catch (err) {
       if (signal?.aborted) throw err;
       logger.warn(
@@ -769,8 +786,8 @@ export class RestProxy {
         : '/config';
       const config = asRecord(
         signal
-          ? await this.callbacks.server.request('GET', configPath, undefined, { signal })
-          : await this.callbacks.server.request('GET', configPath)
+          ? await this.requestServer('GET', configPath, undefined, { signal })
+          : await this.requestServer('GET', configPath)
       );
       return parseModelRoute(config?.model) ?? undefined;
     } catch (err) {
@@ -838,10 +855,10 @@ export class RestProxy {
     }
     try {
       const result = workspaceDirectory
-        ? await this.callbacks.server.request('GET', '/session/status', undefined, {
+        ? await this.requestServer('GET', '/session/status', undefined, {
             directory: workspaceDirectory,
           })
-        : await this.callbacks.server.request('GET', '/session/status');
+        : await this.requestServer('GET', '/session/status');
       const statuses = Array.isArray(result) ? undefined : asRecord(result);
       if (!statuses) {
         this.callbacks.sessionState.deferPromptFailure(attempt);
@@ -878,7 +895,7 @@ export class RestProxy {
     if (signal) options.signal = signal;
     if (workspaceDirectory) options.directory = workspaceDirectory;
     try {
-      return await this.callbacks.server.request(method, path, body, options);
+      return await this.requestServer(method, path, body, options);
     } catch (err) {
       if (!(err instanceof OpenCodeResponseTooLargeError)) throw err;
       const url = new URL(path, 'http://localhost');
@@ -890,7 +907,7 @@ export class RestProxy {
         url.searchParams.set('limit', String(SESSION_MESSAGE_RECOVERY_PAGE_SIZE));
         const recoveryPath = `${url.pathname}${url.search}`;
         logger.warn(`Retrying oversized message page with a smaller window: ${recoveryPath}`);
-        return this.callbacks.server.request(method, recoveryPath, body, options);
+        return this.requestServer(method, recoveryPath, body, options);
       }
       throw err;
     }
@@ -980,7 +997,7 @@ export class RestProxy {
   private async readSessionDiffSummary(sessionID: string): Promise<SessionDiffSummary> {
     const encodedSessionID = encodeURIComponent(sessionID);
     const [diffs, messages, sessions] = await Promise.all([
-      this.callbacks.server.request('GET', `/session/${encodedSessionID}/diff`),
+      this.requestServer('GET', `/session/${encodedSessionID}/diff`),
       this.requestSessionMessagesForSummary(`/session/${encodedSessionID}/message`),
       this.readSessionListForSummary(),
     ]);
@@ -1048,7 +1065,7 @@ export class RestProxy {
   private async requestSessionMessagesForSummary(path: string) {
     try {
       return projectMessageHistory(
-        await this.callbacks.server.request('GET', path, undefined, {
+        await this.requestServer('GET', path, undefined, {
           maxResponseBytes: SESSION_MESSAGE_FALLBACK_MAX_BYTES,
           maxProjectedResponseBytes: SESSION_MESSAGE_RESPONSE_MAX_BYTES,
           stripSummaryDiffs: true,
@@ -1074,10 +1091,7 @@ export class RestProxy {
       SESSION_SUMMARY_DESCENDANT_CONCURRENCY,
       (descendant) =>
         this.withSessionSummaryDescendantSlot(() =>
-          this.callbacks.server.request(
-            'GET',
-            `/session/${encodeURIComponent(descendant.id)}/message`
-          )
+          this.requestServer('GET', `/session/${encodeURIComponent(descendant.id)}/message`)
         )
     );
     for (let index = 0; index < descendants.length; index += 1) {
@@ -1352,7 +1366,7 @@ export class RestProxy {
       return Promise.resolve(new Map(this.sessionDirectories));
     }
     return this.trackSessionDirectoryBootstrap(
-      this.callbacks.server.request('GET', FULL_SESSION_LIST_PATH),
+      this.requestServer('GET', FULL_SESSION_LIST_PATH),
       true
     );
   }
@@ -1412,6 +1426,7 @@ export class RestProxy {
 
   private getCurrentWorkspacePath() {
     return (
+      this.requestWorkspaceDirectory.getStore() ||
       this.callbacks.getWorkspacePath?.() ||
       this.callbacks.contextProvider.context.workspacePath ||
       this.callbacks.server.getWorkspaceCwd()
@@ -1577,7 +1592,7 @@ export class RestProxy {
   }
 
   private async moveSessionToRecycleBin(sessionID: string) {
-    const sessions = (await this.callbacks.server.request('GET', FULL_SESSION_LIST_PATH)) as Array<
+    const sessions = (await this.requestServer('GET', FULL_SESSION_LIST_PATH)) as Array<
       Record<string, unknown>
     >;
     const entry = await this.callbacks.sessionTrash.moveToTrash(sessionID, sessions);
@@ -1600,7 +1615,7 @@ export class RestProxy {
   private async deleteSessionForDirectory(session: SessionDeleteTarget) {
     const path = this.buildScopedSessionPath(session.id, session.directory);
     try {
-      const result = await this.callbacks.server.request('DELETE', path);
+      const result = await this.requestServer('DELETE', path);
       await this.callbacks.removeSessionImages([session.id]);
       return result;
     } catch (err) {
@@ -1615,7 +1630,7 @@ export class RestProxy {
 
   private async sessionExistsOnServer(sessionID: string) {
     try {
-      await this.callbacks.server.request('GET', `/session/${encodeURIComponent(sessionID)}`);
+      await this.requestServer('GET', `/session/${encodeURIComponent(sessionID)}`);
       return true;
     } catch (err) {
       return !isNotFoundError(err);
@@ -1624,7 +1639,7 @@ export class RestProxy {
 
   private async lookupSessionDirectory(sessionID: string, workspaceDirectory?: string) {
     const path = this.buildScopedSessionPath(sessionID, workspaceDirectory);
-    const session = await this.callbacks.server.request('GET', path);
+    const session = await this.requestServer('GET', path);
     const record = asRecord(session);
     if (record) this.rememberSessionPage([record], false);
     return typeof record?.directory === 'string' ? record.directory : undefined;

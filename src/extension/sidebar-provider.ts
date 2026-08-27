@@ -166,8 +166,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     claimId: number;
     sessionIds: string[];
     viewId: string;
+    workspacePath: string | null;
   } | null = null;
   private readonly deferredInterruptedRecoveryIds = new Set<string>();
+  private sessionDirectoryReconciliationScheduled = false;
   private nextInterruptedRecoveryClaimId = 0;
   private nextEditorId = 0;
   private disposing = false;
@@ -244,6 +246,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       persistence,
       {
         onStatusChange: () => this.updateStatusBarItem(),
+        onSessionDirectoryChange: () => this.scheduleSessionDirectoryReconciliation(),
       },
       {
         shouldShow: (sessionID) =>
@@ -565,6 +568,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
               ),
         usageReportService: this.usageReportService,
         restProxy,
+        getWorkspaceDirectory: () => endpointServer.getWorkspaceCwd(),
         sessionDiffProvider: {
           open: (sessionID, path) => this.sessionDiffProvider.open(sessionID, path, endpointServer),
         },
@@ -1087,6 +1091,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  private scheduleSessionDirectoryReconciliation() {
+    if (this.sessionDirectoryReconciliationScheduled) return;
+    this.sessionDirectoryReconciliationScheduled = true;
+    queueMicrotask(() => {
+      this.sessionDirectoryReconciliationScheduled = false;
+      if (this.disposing) return;
+      this.flushDeferredWorkspaceEvents();
+      this.reconcilePermissionAutomationOwners();
+    });
+  }
+
   private isEventInEndpointWorkspace(event: ServerEvent, endpoint: WebviewEndpoint) {
     if (!endpoint.workspacePath) return true;
     if (event.workspaceDirectory) {
@@ -1152,6 +1167,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.permissionAutomationOwnerWorkspaces.get(viewId) === nextOwnerWorkspaces.get(viewId)
       )
     ) {
+      this.reconcileInterruptedRecoveryOwners(owners);
       return;
     }
     this.permissionAutomationOwnerViewIds.clear();
@@ -1190,41 +1206,33 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private reconcileInterruptedRecoveryOwners(owners: WebviewEndpoint[]) {
     const activeClaim = this.interruptedRecoveryClaim;
-    if (activeClaim && !owners.some((owner) => owner.viewId === activeClaim.viewId)) {
-      this.interruptedRecoveryClaim = null;
+    if (activeClaim) {
+      const owner = owners.find((candidate) => candidate.viewId === activeClaim.viewId);
+      if (!owner || !isSameWorkspacePath(owner.workspacePath, activeClaim.workspacePath)) {
+        this.interruptedRecoveryClaim = null;
+      }
     }
     if (this.interruptedRecoveryClaim) return;
     const candidates = this.sessionState
       .claimInterruptedSessions()
       .filter((session) => !this.deferredInterruptedRecoveryIds.has(session.id));
-    const workspaceKeys = new Set(
-      owners.map((owner) => normalizeWorkspaceIdentity(owner.workspacePath) ?? '*')
-    );
-    const soleWorkspace = workspaceKeys.size === 1 ? [...workspaceKeys][0] : undefined;
     const owner = owners.find((candidate) =>
-      candidates.some((session) =>
-        session.directory || this.sessionState.directoryFor(session.id)
-          ? isSameWorkspacePath(
-              session.directory ?? this.sessionState.directoryFor(session.id),
-              candidate.workspacePath
-            )
-          : normalizeWorkspaceIdentity(candidate.workspacePath) === soleWorkspace
-      )
+      candidates.some((session) => {
+        const directory = session.directory ?? this.sessionState.directoryFor(session.id);
+        return directory ? isSameWorkspacePath(directory, candidate.workspacePath) : false;
+      })
     );
     if (!owner) return;
-    const sessions = candidates.filter((session) =>
-      session.directory || this.sessionState.directoryFor(session.id)
-        ? isSameWorkspacePath(
-            session.directory ?? this.sessionState.directoryFor(session.id),
-            owner.workspacePath
-          )
-        : normalizeWorkspaceIdentity(owner.workspacePath) === soleWorkspace
-    );
+    const sessions = candidates.filter((session) => {
+      const directory = session.directory ?? this.sessionState.directoryFor(session.id);
+      return directory ? isSameWorkspacePath(directory, owner.workspacePath) : false;
+    });
     if (sessions.length === 0) return;
     const claim = {
       claimId: ++this.nextInterruptedRecoveryClaimId,
       sessionIds: sessions.map((session) => session.id),
       viewId: owner.viewId,
+      workspacePath: owner.workspacePath,
     };
     this.interruptedRecoveryClaim = claim;
     void owner.webviewSession.deliverInterruptedSessions(claim.claimId, sessions);

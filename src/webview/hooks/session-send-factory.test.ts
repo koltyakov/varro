@@ -693,6 +693,84 @@ describe('SessionSendOperations', () => {
     expect(recheckSessionStatus).not.toHaveBeenCalled();
   });
 
+  it('uses the queued workspace vision-delegation decision', async () => {
+    appStore.setState('activeSessionId', 'session-2');
+    appStore.setState('editorContext', {
+      workspacePath: '/repo-b',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    appStore.setState('providers', [
+      {
+        id: 'custom',
+        name: 'Current workspace',
+        source: 'custom',
+        models: {
+          text: {
+            id: 'text',
+            name: 'Text model',
+            capabilities: { vision: false, toolcall: true },
+            cost: { input: 0, output: 0 },
+          },
+        },
+      },
+    ]);
+    appStore.setState('allAgents', []);
+    const sendAsync = vi.fn<SendAsync>(async () => {});
+    const operations = createOperations(sendAsync);
+
+    await operations.sendMessage('Inspect the queued image', {
+      selectedModel: { providerID: 'custom', modelID: 'text' },
+      targetSessionId: 'session-1',
+      workspaceDirectory: '/repo-a',
+      queuedAttachments: {
+        droppedFiles: [],
+        clipboardImages: [
+          {
+            id: 'image-1',
+            url: 'data:image/png;base64,aW1hZ2U=',
+            mime: 'image/png',
+            filename: 'Image 1',
+            size: 5,
+            contextFile: {
+              path: '/tmp/varro-drops/repo-a/Image 1.png',
+              relativePath: 'Image 1.png',
+              type: 'file',
+            },
+          },
+        ],
+        terminalSelection: null,
+      },
+      queuedContext: {
+        editorContext: {
+          workspacePath: '/repo-a',
+          activeFile: null,
+          selection: null,
+          diagnostics: [],
+        },
+        currentDocumentEnabled: false,
+        visionDelegationAvailable: true,
+      },
+      preserveComposer: true,
+    });
+
+    expect(sendAsync).toHaveBeenCalledWith(
+      'session-1',
+      expect.objectContaining({
+        parts: expect.arrayContaining([
+          {
+            type: 'text',
+            text:
+              '[Image for @vision: /tmp/varro-drops/repo-a/Image 1.png]\n' +
+              'When calling the vision subagent, include {file:/tmp/varro-drops/repo-a/Image 1.png} in its task prompt.',
+          },
+        ]),
+      }),
+      { directory: '/repo-a' }
+    );
+  });
+
   it('sends a same-workspace queued retry without repeating session preparation', async () => {
     appStore.setState('activeSessionId', 'session-1');
     appStore.setState('editorContext', {

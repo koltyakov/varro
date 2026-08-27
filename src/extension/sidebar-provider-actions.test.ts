@@ -120,6 +120,7 @@ function createActionFixture() {
     usageReportService:
       usageReportService as unknown as SidebarProviderActionDeps['usageReportService'],
     restProxy: restProxy as unknown as SidebarProviderActionDeps['restProxy'],
+    getWorkspaceDirectory: vi.fn(() => '/repo'),
     sessionDiffProvider,
     toolOutputProvider,
     server: server as unknown as SidebarProviderActionDeps['server'],
@@ -388,13 +389,17 @@ describe('createSidebarProviderActions', () => {
       line: 12,
       kind: 'file',
       view: 'diff',
+      workspaceDirectory: '/repo',
     });
-    expect(restProxy.handleRequest).toHaveBeenCalledWith({
-      id: 4,
-      method: 'GET',
-      path: '/api',
-      body: { ok: true },
-    });
+    expect(restProxy.handleRequest).toHaveBeenCalledWith(
+      {
+        id: 4,
+        method: 'GET',
+        path: '/api',
+        body: { ok: true },
+      },
+      '/repo'
+    );
   });
 
   it('opens settings with explicit and default extension queries', async () => {

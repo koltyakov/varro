@@ -37,6 +37,7 @@ export interface SidebarProviderActionDeps {
   sessionExportService: SessionExportService;
   usageReportService: UsageReportService;
   restProxy: RestProxy;
+  getWorkspaceDirectory(): string | undefined;
   sessionDiffProvider: Pick<SessionDiffDocumentProvider, 'open'>;
   toolOutputProvider: ToolOutputDocumentProvider;
   server: OpenCodeServer;
@@ -199,6 +200,7 @@ export function createSidebarProviderActions(
       deps.postContext();
     },
     openPath: async (payload: OpenPathPayload) => {
+      const workspaceDirectory = deps.getWorkspaceDirectory();
       if (payload.view === 'diff' && payload.sessionID) {
         const result = await deps.sessionDiffProvider.open(payload.sessionID, payload.path);
         if (result !== 'unavailable') {
@@ -218,6 +220,7 @@ export function createSidebarProviderActions(
         line: payload.line,
         kind: payload.kind,
         view: payload.view,
+        workspaceDirectory,
       });
       if (payload.requestId !== undefined) {
         deps.post({
@@ -252,7 +255,8 @@ export function createSidebarProviderActions(
         );
       deps.postConfigState();
     },
-    handleApiRequest: (payload) => deps.restProxy.handleRequest(payload),
+    handleApiRequest: (payload) =>
+      deps.restProxy.handleRequest(payload, deps.getWorkspaceDirectory()),
     cancelApiRequest: (payload) => deps.restProxy.cancelRequest(payload),
     log: (payload) => {
       const level = payload.level || 'info';

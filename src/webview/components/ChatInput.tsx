@@ -258,6 +258,7 @@ import { McpPicker } from './McpPicker';
 import { ModelPicker } from './ModelPicker';
 
 const COMPOSER_BUSY_DISPLAY_SETTLE_DELAY_MS = 700;
+const AUTHORITATIVE_QUEUED_STATUS_MAX_AGE_MS = 5_000;
 
 interface CurrentComposerModel {
   providerID: string | null;
@@ -672,6 +673,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const [showMcpPicker, setShowMcpPicker] = createSignal(false);
   const [showLspPicker, setShowLspPicker] = createSignal(false);
   const [editSelectedModel, setEditSelectedModel] = createSignal<RalphSelectedModel | null>(null);
+  const [workspaceSendPending, setWorkspaceSendPending] = createSignal(false);
+  const authoritativeQueuedSessionStatuses = new Map<
+    string,
+    { status: 'busy' | 'idle'; observedAt: number }
+  >();
   const composerSessionId = () => (props.newSession ? null : state.activeSessionId);
   const composerEditingMessage = () => (props.newSession ? null : editingMessage());
   const composerHasActiveQuestion = () => !props.newSession && hasActiveQuestion();
@@ -682,12 +688,22 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       (!state.messagesLoading &&
         getMessageEntriesForSession(state.messages, composerSessionId()).length === 0)
   );
-  let previousInputEmpty = untrack(() => inputText().trim().length === 0);
+  let previousDraftNonempty = untrack(
+    () =>
+      inputText().trim().length > 0 ||
+      state.droppedFiles.length > 0 ||
+      state.clipboardImages.length > 0 ||
+      state.nativePdfs.length > 0 ||
+      !!state.terminalSelection ||
+      !!state.attachedDiagnostics
+  );
 
   createEffect(() => {
-    const inputEmpty = inputText().trim().length === 0;
-    if (inputEmpty && !previousInputEmpty) setManualWorkspaceSelection(false);
-    previousInputEmpty = inputEmpty;
+    const sendPending = workspaceSendPending();
+    const draftNonempty = hasSendableComposerContent();
+    if (sendPending) return;
+    if (!draftNonempty && previousDraftNonempty) setManualWorkspaceSelection(false);
+    previousDraftNonempty = draftNonempty;
   });
 
   createEffect(() => {
@@ -695,7 +711,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (
       !activeWorkspacePath ||
       !canSelectWorkspace() ||
-      inputText().trim().length > 0 ||
+      hasSendableComposerContent() ||
       manualWorkspaceSelection() ||
       isSamePath(activeWorkspacePath, state.editorContext.workspacePath) ||
       isSamePath(activeWorkspacePath, pendingWorkspacePath())
@@ -2010,6 +2026,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             ...captureQueuedModelSnapshot(sessionId),
           },
           currentDocumentEnabled: activeContextEnabled(sessionId),
+          visionDelegationAvailable: canDelegateCurrentImages(text),
         },
       };
       const replaced =
@@ -2035,13 +2052,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     setHistoryDraft('');
     setCompletionIndex(0);
     holdComposerHeightUntilMessageAppend(sendSessionId);
+    setWorkspaceSendPending(true);
     setInputText('');
     const clearedInputVersion = inputTextMutationVersion();
     resetPastedImageIndex();
     clearUsageLimitsForSessionTree(composerSessionId());
     let sent = false;
     try {
-      sent = await sendMessage(
+      const pendingSend = sendMessage(
         text,
         mode === 'steer'
           ? { delivery: 'steer' }
@@ -2050,6 +2068,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               queuedAttachments: props.newSession ? queuedAttachments : undefined,
             }
       );
+      sent = await pendingSend;
     } catch {
       sent = false;
     }
@@ -2058,13 +2077,16 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       setQueuedMessageEdit(null);
     }
     if (!sent) releaseHeldComposerHeight();
-    if (
+    const shouldRestoreFailedInput =
       !sent &&
       composerSessionId() === sendSessionId &&
       inputTextMutationVersion() === clearedInputVersion &&
-      inputText() === ''
-    ) {
-      setInputText(text);
+      inputText() === '';
+    batch(() => {
+      if (shouldRestoreFailedInput) setInputText(text);
+      setWorkspaceSendPending(false);
+    });
+    if (shouldRestoreFailedInput) {
       setErrorRetry(() => {
         setErrorRetry(null);
         void handleSend();
@@ -2126,7 +2148,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       dispatchLease = await claimQueuedMessageDispatch(item);
       if (dispatchLease === null) return;
       if (isQueuedSessionHydrating(item.sessionId)) return;
-      if (isForeignWorkspace) {
+      if (isForeignWorkspace || item.sessionId !== state.activeSessionId) {
         queuedSessionDispatchPhases.set(item.sessionId, {
           itemId: item.id,
           phase: 'awaiting-busy',
@@ -2190,6 +2212,37 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
   }
 
+  const getAuthoritativeQueuedSessionStatus = (sessionId: string) => {
+    const entry = authoritativeQueuedSessionStatuses.get(sessionId);
+    if (!entry) return undefined;
+    if (Date.now() - entry.observedAt <= AUTHORITATIVE_QUEUED_STATUS_MAX_AGE_MS) {
+      return entry.status;
+    }
+    authoritativeQueuedSessionStatuses.delete(sessionId);
+    return undefined;
+  };
+  const getQueuedSessionStatusType = (sessionId: string) =>
+    sessionId !== state.activeSessionId
+      ? (getAuthoritativeQueuedSessionStatus(sessionId) ?? state.sessionStatus[sessionId]?.type)
+      : state.sessionStatus[sessionId]?.type;
+  const isQueuedSessionTreeWorking = (sessionId: string) => {
+    const authoritativeStatus = getAuthoritativeQueuedSessionStatus(sessionId);
+    return authoritativeStatus
+      ? authoritativeStatus === 'busy'
+      : isSessionTreeStatusWorking(sessionId);
+  };
+
+  createEffect(() => {
+    const queuedStatusSessionIds = new Set(
+      state.queuedMessages.map((message) => message.sessionId)
+    );
+    for (const sessionId of authoritativeQueuedSessionStatuses.keys()) {
+      if (!queuedStatusSessionIds.has(sessionId)) {
+        authoritativeQueuedSessionStatuses.delete(sessionId);
+      }
+    }
+  });
+
   function findNextQueuedMessageForDispatch() {
     const steeringIds = steeringQueuedMessageIds();
     const failedSteerIds = failedSteerQueuedMessageIds();
@@ -2225,7 +2278,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         getSessionTreeIdsForSession(item.sessionId).some(
           (sessionId) =>
             state.failedSessionIds.includes(sessionId) &&
-            state.sessionStatus[sessionId]?.type !== 'busy'
+            getQueuedSessionStatusType(sessionId) !== 'busy'
         )
       ) {
         blockedSessionIds.add(item.sessionId);
@@ -2237,7 +2290,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         isSessionAwaitingInput(item.sessionId) ||
         (item.sessionId === state.activeSessionId
           ? isActiveSessionWorking()
-          : isSessionTreeStatusWorking(item.sessionId))
+          : isQueuedSessionTreeWorking(item.sessionId))
       ) {
         blockedSessionIds.add(item.sessionId);
         continue;
@@ -2269,6 +2322,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   });
   let queueDispatchDisposed = false;
   const observeQueuedSessionStatus = (sessionId: string, status: 'busy' | 'idle') => {
+    if (state.queuedMessages.some((message) => message.sessionId === sessionId)) {
+      authoritativeQueuedSessionStatuses.set(sessionId, { status, observedAt: Date.now() });
+    } else {
+      authoritativeQueuedSessionStatuses.delete(sessionId);
+    }
     const dispatch = queuedSessionDispatchPhases.get(sessionId);
     if (!dispatch) return true;
     if (status === 'busy') {
@@ -3193,6 +3251,17 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   function hasSendableClipboardImages() {
     return currentPromptCanHandleImages() && state.clipboardImages.length > 0;
+  }
+
+  function hasSendableComposerContent() {
+    return !!(
+      getSendableInputText().trim() ||
+      state.droppedFiles.length > 0 ||
+      hasSendableClipboardImages() ||
+      state.nativePdfs.length > 0 ||
+      state.terminalSelection ||
+      state.attachedDiagnostics
+    );
   }
 
   function getSendableInputText(text = inputText()) {

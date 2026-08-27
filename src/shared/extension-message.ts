@@ -261,12 +261,16 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
       if (!payload || !Array.isArray(payload.messages)) return null;
       for (const message of payload.messages) {
         const item = asRecord(message);
+        const queuedContext = asRecord(item?.queuedContext);
         if (
           !item ||
           !isString(item.id) ||
           !isString(item.sessionId) ||
           !isString(item.text) ||
-          (item.ownerViewId !== undefined && !isString(item.ownerViewId))
+          (item.ownerViewId !== undefined && !isString(item.ownerViewId)) ||
+          (item.queuedContext !== undefined && !queuedContext) ||
+          (queuedContext?.visionDelegationAvailable !== undefined &&
+            !isBoolean(queuedContext.visionDelegationAvailable))
         ) {
           return null;
         }
