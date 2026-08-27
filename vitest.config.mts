@@ -26,11 +26,13 @@ export default defineConfig({
         'src/test/**',
         'src/webview/perf/harness.ts',
       ],
+      // Kept within ~2 points of the measured numbers so an actual regression
+      // fails CI. Raise these alongside coverage rather than leaving slack.
       thresholds: {
-        statements: 80,
-        branches: 71,
-        functions: 82,
-        lines: 83,
+        statements: 86,
+        branches: 78,
+        functions: 89,
+        lines: 89,
       },
     },
   },

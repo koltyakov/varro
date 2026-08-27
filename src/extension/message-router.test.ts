@@ -10,8 +10,11 @@ vi.mock('vscode', () => ({
 }));
 vi.mock('./logger', () => ({ logger: mocks.logger }));
 
+import type { WebviewMessage } from '../shared/protocol';
 import type { MessageRouterCallbacks } from './message-router';
 import { MessageRouter } from './message-router';
+import { WEBVIEW_MESSAGE_TYPES } from './util/webview-message';
+import { VALID_WEBVIEW_MESSAGES } from './util/webview-message.test-support';
 
 function createCallbacks(): MessageRouterCallbacks {
   return {
@@ -437,4 +440,216 @@ describe('MessageRouter', () => {
       expect.stringContaining('handleMessage(ready) failed: boom')
     );
   });
+});
+
+type DispatchExpectation = {
+  callback: keyof MessageRouterCallbacks;
+  args: unknown[];
+};
+
+/**
+ * The callback each protocol type must reach, with the exact arguments it must
+ * forward. Keyed by message type so the `Record` fails to typecheck until a
+ * newly added type is routed here too. Two handlers with the same signature
+ * would still typecheck if their cases were swapped, so each case also asserts
+ * that no other callback fired.
+ */
+const DISPATCH_EXPECTATIONS = {
+  ready: [{ callback: 'ready', args: [] }],
+  'context/request': [{ callback: 'requestContext', args: [] }],
+  'providers/refresh': [{ callback: 'refreshProviders', args: [] }],
+  'providers/reauthenticated': [{ callback: 'providerReauthenticated', args: [] }],
+  'terminal-selection/clear': [{ callback: 'clearTerminalSelection', args: [] }],
+  'files/clear': [
+    { callback: 'clearContextFiles', args: [] },
+    { callback: 'notifyContextFilesChanged', args: [] },
+  ],
+  'files/pick': [{ callback: 'pickFiles', args: [] }],
+  'webview/reload': [{ callback: 'reloadWebview', args: [] }],
+  'vscode/open-folder': [{ callback: 'openFolder', args: [] }],
+  'vscode/show-output': [{ callback: 'showOutput', args: [] }],
+  'chat/new-editor': [{ callback: 'openNewEditor', args: [] }],
+  'workspace/select': [{ callback: 'selectWorkspace', args: ['/workspace'] }],
+  'commands/state': [
+    {
+      callback: 'updateCommandState',
+      args: [true, false, { providerID: 'anthropic', modelID: 'claude-opus-5' }, 'session-1'],
+    },
+  ],
+  'session/seen': [{ callback: 'acknowledgeSessionSeen', args: ['session-1'] }],
+  'webview/focus': [{ callback: 'setWebviewFocus', args: [true] }],
+  'permission/reveal': [{ callback: 'revealPermission', args: ['permission-1'] }],
+  'providers/watch': [{ callback: 'setProviderWatchActive', args: [true] }],
+  'terminal/run': [{ callback: 'runInTerminal', args: ['opencode auth login', 'OpenCode'] }],
+  'session/open-in-editor': [
+    {
+      callback: 'openSessionInEditor',
+      args: [
+        'session-1',
+        'Session',
+        { providerID: 'anthropic', modelID: 'claude-opus-5' },
+        'root-1',
+      ],
+    },
+  ],
+  'session/open-in-sidebar': [{ callback: 'openSessionInSidebar', args: ['session-1'] }],
+  'session/open-in-opencode': [{ callback: 'openSessionInOpenCode', args: ['session-1'] }],
+  'editor/route-changed': [
+    { callback: 'editorRouteChanged', args: [{ type: 'session', sessionId: 'session-1' }] },
+  ],
+  'session-model/update': [
+    {
+      callback: 'updateSessionModel',
+      args: [
+        { sessionId: 'session-1', model: { providerID: 'anthropic', modelID: 'claude-opus-5' } },
+      ],
+    },
+  ],
+  'session-models/migrate': [
+    {
+      callback: 'migrateSessionModels',
+      args: [{ models: { 'session-1': { providerID: 'anthropic', modelID: 'claude-opus-5' } } }],
+    },
+  ],
+  'session-plan-state/update': [
+    {
+      callback: 'updateSessionPlanState',
+      args: [{ sessionId: 'session-1', skippedAt: 1_700_000_000_000, agent: 'plan' }],
+    },
+  ],
+  'model-preferences/update': [
+    {
+      callback: 'updateModelPreferences',
+      args: [VALID_WEBVIEW_MESSAGES['model-preferences/update'].payload],
+    },
+  ],
+  'model-preferences/migrate': [
+    {
+      callback: 'migrateModelPreferences',
+      args: [VALID_WEBVIEW_MESSAGES['model-preferences/migrate'].payload],
+    },
+  ],
+  'session/export': [{ callback: 'exportSession', args: ['session-1'] }],
+  'usage/report': [{ callback: 'generateUsageReport', args: [true] }],
+  'vscode/open-settings': [{ callback: 'openSettings', args: ['varro.server'] }],
+  'vscode/mermaid-preview': [{ callback: 'setMermaidPreviewOpen', args: [true] }],
+  'server/restart': [{ callback: 'restartServer', args: [true] }],
+  'server/restart/check': [{ callback: 'checkServerRestart', args: [3] }],
+  'files/drop': [{ callback: 'handleDroppedPaths', args: [['/workspace/a.ts']] }],
+  'files/drop-content': [
+    { callback: 'handleDroppedContent', args: [[{ name: 'a.txt', content: 'YQ==', size: 1 }]] },
+  ],
+  'pdfs/store': [
+    { callback: 'storePdf', args: [{ id: 'pdf-1', name: 'a.pdf', content: 'YQ==', size: 1 }] },
+  ],
+  'images/store': [
+    { callback: 'storeImage', args: [{ id: 'image-1', name: 'a.png', content: 'YQ==', size: 1 }] },
+  ],
+  'images/release': [
+    {
+      callback: 'releaseImages',
+      args: [{ paths: ['/tmp/a.png'], deferred: false, sessionId: 'session-1' }],
+    },
+  ],
+  'composer/images-update': [{ callback: 'updateDraftImages', args: [{ images: [] }] }],
+  'files/remove': [{ callback: 'removeContextFile', args: ['/workspace/a.ts'] }],
+  'queued-messages/update': [
+    {
+      callback: 'updateQueuedMessages',
+      args: [VALID_WEBVIEW_MESSAGES['queued-messages/update'].payload],
+    },
+  ],
+  'queued-messages/claim': [
+    {
+      callback: 'claimQueuedMessage',
+      args: [{ requestId: 7, itemId: 'queued-1', sessionId: 'session-1', mode: 'steer' }],
+    },
+  ],
+  'queued-messages/release': [
+    {
+      callback: 'releaseQueuedMessage',
+      args: [{ itemId: 'queued-1', sessionId: 'session-1', lease: 4 }],
+    },
+  ],
+  'recovery/interrupted-sessions-ack': [
+    {
+      callback: 'acknowledgeInterruptedSessions',
+      args: [{ claimId: 2, consumedSessionIds: ['session-1'] }],
+    },
+  ],
+  'permission-mode/update': [
+    { callback: 'updatePermissionMode', args: [{ sessionId: 'session-1', mode: 'edits' }] },
+  ],
+  'permission-modes/migrate': [
+    { callback: 'migratePermissionModes', args: [{ modes: { 'session-1': 'full' } }] },
+  ],
+  'files/search': [{ callback: 'searchFiles', args: [5, 'src', 20] }],
+  'file/read': [{ callback: 'readContextFile', args: ['/workspace/a.ts'] }],
+  'vscode/open': [{ callback: 'openPath', args: [{ path: '/workspace/a.ts', line: 12 }] }],
+  'vscode/open-text': [
+    {
+      callback: 'openText',
+      args: [{ content: 'output', title: 'Tool output', language: 'plaintext' }],
+    },
+  ],
+  'vscode/open-external': [{ callback: 'openExternal', args: ['https://example.com'] }],
+  'config/update': [
+    {
+      callback: 'updateConfig',
+      args: [{ desktopSessionPaneSide: 'right', defaultPermissionMode: 'auto' }],
+    },
+  ],
+  'api/request': [
+    { callback: 'handleApiRequest', args: [{ id: 1, method: 'GET', path: '/session' }] },
+  ],
+  'api/cancel': [{ callback: 'cancelApiRequest', args: [{ id: 1, cancelKey: 'session-1' }] }],
+  'ralph/start': [
+    { callback: 'handleRalphMessage', args: [VALID_WEBVIEW_MESSAGES['ralph/start']] },
+  ],
+  'ralph/stop': [{ callback: 'handleRalphMessage', args: [VALID_WEBVIEW_MESSAGES['ralph/stop']] }],
+  'ralph/pause': [
+    { callback: 'handleRalphMessage', args: [VALID_WEBVIEW_MESSAGES['ralph/pause']] },
+  ],
+  'ralph/resume': [
+    { callback: 'handleRalphMessage', args: [VALID_WEBVIEW_MESSAGES['ralph/resume']] },
+  ],
+  'ralph/update-model': [
+    { callback: 'handleRalphMessage', args: [VALID_WEBVIEW_MESSAGES['ralph/update-model']] },
+  ],
+  'ralph/sync': [{ callback: 'handleRalphMessage', args: [VALID_WEBVIEW_MESSAGES['ralph/sync']] }],
+  log: [{ callback: 'log', args: [{ msg: 'hello', level: 'warn' }] }],
+} as const satisfies Record<WebviewMessage['type'], readonly DispatchExpectation[]>;
+
+describe('MessageRouter dispatch table', () => {
+  const entries = Object.entries(DISPATCH_EXPECTATIONS) as Array<
+    [WebviewMessage['type'], readonly DispatchExpectation[]]
+  >;
+
+  it('routes every accepted webview message type', () => {
+    expect(entries.map(([type]) => type).toSorted()).toEqual(
+      Object.keys(WEBVIEW_MESSAGE_TYPES).toSorted()
+    );
+  });
+
+  for (const [type, expected] of entries) {
+    it(`routes ${type} to ${expected.map((entry) => entry.callback).join(' and ')}`, async () => {
+      const cb = createCallbacks();
+      const router = new MessageRouter(cb);
+
+      await router.handleMessage(VALID_WEBVIEW_MESSAGES[type]);
+
+      for (const { callback, args } of expected) {
+        expect(cb[callback]).toHaveBeenCalledTimes(1);
+        expect(cb[callback]).toHaveBeenCalledWith(...args);
+      }
+      // A swapped case still typechecks whenever two handlers share a
+      // signature, so assert the negative side too.
+      const expectedNames = new Set<string>(expected.map((entry) => entry.callback));
+      const unexpected = Object.entries(cb)
+        .filter(([name]) => !expectedNames.has(name))
+        .filter(([, fn]) => (fn as ReturnType<typeof vi.fn>).mock.calls.length > 0)
+        .map(([name]) => name);
+      expect(unexpected).toEqual([]);
+    });
+  }
 });

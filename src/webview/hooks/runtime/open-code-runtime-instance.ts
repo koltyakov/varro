@@ -31,6 +31,7 @@ import { normalizePermissionEvent } from '../../lib/session-event-reducer';
 import { flushPendingStreamingDeltasFor } from '../../lib/streaming-deltas';
 import { resetToolCallExpansionState } from '../../lib/tool-call-expansion-state';
 import { applyWebviewTheme } from '../../lib/theme';
+import { DeferredMessageRemovals } from './deferred-message-removals';
 import type { MessageEntry, Permission, Session, SessionStatus } from '../../types';
 import {
   clearQueuedMessagesForSession,
@@ -1017,29 +1018,14 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     sessionLifecycleOperations;
   const sessionTitleFallbackAttempts = new Map<string, number>();
   const sessionTitleFallbacks = new Map<string, Promise<void>>();
-  const deferredMessageRemovals = new Map<string, Map<string, number>>();
+  const deferredMessageRemovals = new DeferredMessageRemovals();
 
   function deferMessageRemovals(sessionId: string, messageIds: string[]) {
-    const sessionCounts = deferredMessageRemovals.get(sessionId) ?? new Map<string, number>();
-    deferredMessageRemovals.set(sessionId, sessionCounts);
-    for (const messageId of messageIds) {
-      sessionCounts.set(messageId, (sessionCounts.get(messageId) ?? 0) + 1);
-    }
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      for (const messageId of messageIds) {
-        const count = sessionCounts.get(messageId) ?? 0;
-        if (count <= 1) sessionCounts.delete(messageId);
-        else sessionCounts.set(messageId, count - 1);
-      }
-      if (sessionCounts.size === 0) deferredMessageRemovals.delete(sessionId);
-    };
+    return deferredMessageRemovals.defer(sessionId, messageIds);
   }
 
   function isMessageRemovalDeferred(sessionId: string, messageId: string) {
-    return (deferredMessageRemovals.get(sessionId)?.get(messageId) ?? 0) > 0;
+    return deferredMessageRemovals.isDeferred(sessionId, messageId);
   }
 
   function repairSessionTitle(sessionId: string): Promise<void> {

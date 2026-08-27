@@ -766,3 +766,202 @@ describe('parseExtensionMessage', () => {
     });
   });
 });
+
+describe('parseExtensionMessage queued message claim results', () => {
+  const base = { requestId: 1, itemId: 'queued-1', sessionId: 'session-1' };
+
+  it('parses a granted claim carrying its lease', () => {
+    expect(
+      parseExtensionMessage({
+        type: 'queued-messages/claim-result',
+        payload: { ...base, granted: true, lease: 9 },
+      })
+    ).toEqual({
+      type: 'queued-messages/claim-result',
+      payload: {
+        requestId: 1,
+        itemId: 'queued-1',
+        sessionId: 'session-1',
+        granted: true,
+        lease: 9,
+      },
+    });
+  });
+
+  it('parses a refused claim with no lease', () => {
+    expect(
+      parseExtensionMessage({
+        type: 'queued-messages/claim-result',
+        payload: { ...base, granted: false },
+      })
+    ).toEqual({
+      type: 'queued-messages/claim-result',
+      payload: { requestId: 1, itemId: 'queued-1', sessionId: 'session-1', granted: false },
+    });
+  });
+
+  it('rejects a granted claim without a lease', () => {
+    // A grant is the mutual-exclusion token for dispatching a queued message.
+    // Accepting one without a lease would let two windows both believe they own it.
+    expect(
+      parseExtensionMessage({
+        type: 'queued-messages/claim-result',
+        payload: { ...base, granted: true },
+      })
+    ).toBeNull();
+  });
+
+  it('rejects a refused claim that still carries a lease', () => {
+    expect(
+      parseExtensionMessage({
+        type: 'queued-messages/claim-result',
+        payload: { ...base, granted: false, lease: 9 },
+      })
+    ).toBeNull();
+  });
+
+  it('rejects malformed leases on a granted claim', () => {
+    for (const lease of [0, -1, 1.5, '9', null, Number.NaN]) {
+      expect(
+        parseExtensionMessage({
+          type: 'queued-messages/claim-result',
+          payload: { ...base, granted: true, lease },
+        })
+      ).toBeNull();
+    }
+  });
+
+  it('rejects malformed identity and request fields', () => {
+    expect(
+      parseExtensionMessage({
+        type: 'queued-messages/claim-result',
+        payload: { ...base, requestId: -1, granted: false },
+      })
+    ).toBeNull();
+    expect(
+      parseExtensionMessage({
+        type: 'queued-messages/claim-result',
+        payload: { ...base, requestId: 1.5, granted: false },
+      })
+    ).toBeNull();
+    expect(
+      parseExtensionMessage({
+        type: 'queued-messages/claim-result',
+        payload: { ...base, itemId: 7, granted: false },
+      })
+    ).toBeNull();
+    expect(
+      parseExtensionMessage({
+        type: 'queued-messages/claim-result',
+        payload: { ...base, sessionId: null, granted: false },
+      })
+    ).toBeNull();
+    expect(
+      parseExtensionMessage({
+        type: 'queued-messages/claim-result',
+        payload: { ...base, granted: 'yes' },
+      })
+    ).toBeNull();
+    expect(parseExtensionMessage({ type: 'queued-messages/claim-result' })).toBeNull();
+  });
+
+  it('accepts requestId 0 as the first request of a session', () => {
+    expect(
+      parseExtensionMessage({
+        type: 'queued-messages/claim-result',
+        payload: { ...base, requestId: 0, granted: false },
+      })
+    ).toMatchObject({ payload: { requestId: 0 } });
+  });
+});
+
+describe('parseExtensionMessage plan state and model preference syncs', () => {
+  it('parses a plan-state update carrying a skip time', () => {
+    expect(
+      parseExtensionMessage({
+        type: 'session-plan-state/update',
+        payload: { sessionId: 'session-1', skippedAt: 200 },
+      })
+    ).toEqual({
+      type: 'session-plan-state/update',
+      payload: { sessionId: 'session-1', skippedAt: 200 },
+    });
+  });
+
+  it('parses a plan-state update carrying only an agent', () => {
+    expect(
+      parseExtensionMessage({
+        type: 'session-plan-state/update',
+        payload: { sessionId: 'session-1', agent: 'plan' },
+      })
+    ).toEqual({
+      type: 'session-plan-state/update',
+      payload: { sessionId: 'session-1', agent: 'plan' },
+    });
+  });
+
+  it('preserves an explicit null skip time that clears the skip', () => {
+    expect(
+      parseExtensionMessage({
+        type: 'session-plan-state/update',
+        payload: { sessionId: 'session-1', skippedAt: null },
+      })
+    ).toEqual({
+      type: 'session-plan-state/update',
+      payload: { sessionId: 'session-1', skippedAt: null },
+    });
+  });
+
+  it('rejects a plan-state update that changes nothing', () => {
+    expect(
+      parseExtensionMessage({
+        type: 'session-plan-state/update',
+        payload: { sessionId: 'session-1' },
+      })
+    ).toBeNull();
+  });
+
+  it('rejects malformed plan-state updates', () => {
+    expect(
+      parseExtensionMessage({
+        type: 'session-plan-state/update',
+        payload: { sessionId: '', skippedAt: 1 },
+      })
+    ).toBeNull();
+    expect(
+      parseExtensionMessage({
+        type: 'session-plan-state/update',
+        payload: { sessionId: '__proto__', skippedAt: 1 },
+      })
+    ).toBeNull();
+    expect(
+      parseExtensionMessage({
+        type: 'session-plan-state/update',
+        payload: { sessionId: 'session-1', skippedAt: Number.NaN },
+      })
+    ).toBeNull();
+    expect(
+      parseExtensionMessage({
+        type: 'session-plan-state/update',
+        payload: { sessionId: 'session-1', agent: '  ' },
+      })
+    ).toBeNull();
+  });
+
+  it('parses a model preference sync and rejects a non-object payload', () => {
+    const preferences = {
+      modelVariantSelections: { 'anthropic/claude-opus-5': 'thinking' },
+      hiddenProviders: ['openai'],
+      hiddenModels: [],
+      addedModels: [],
+      pinnedModels: [],
+      modelDisplayNames: {},
+    };
+
+    expect(parseExtensionMessage({ type: 'model-preferences/sync', payload: preferences })).toEqual(
+      { type: 'model-preferences/sync', payload: preferences }
+    );
+    expect(parseExtensionMessage({ type: 'model-preferences/sync' })).toBeNull();
+    expect(parseExtensionMessage({ type: 'model-preferences/sync', payload: [] })).toBeNull();
+  });
+});

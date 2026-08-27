@@ -1,6 +1,13 @@
 /* oxlint-disable anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: These tests deliberately pass open, malformed webview payloads through the parser. */
 import { describe, expect, it } from 'vitest';
-import { isAllowedApiRequest, isAllowedExternalUrl, parseWebviewMessage } from './webview-message';
+import type { WebviewMessage } from '../../shared/protocol';
+import {
+  WEBVIEW_MESSAGE_TYPES,
+  isAllowedApiRequest,
+  isAllowedExternalUrl,
+  parseWebviewMessage,
+} from './webview-message';
+import { VALID_WEBVIEW_MESSAGES } from './webview-message.test-support';
 
 function parseQueuedMessageUpdate(messages: unknown[]) {
   return parseWebviewMessage({ type: 'queued-messages/update', payload: { messages } });
@@ -1455,5 +1462,217 @@ describe('webview message validation', () => {
     expect(isAllowedExternalUrl('not a url')).toBe(false);
     expect(isAllowedApiRequest('GET', '/session/../message')).toBe(false);
     expect(isAllowedApiRequest('POST', '/mcp/%2F/connect')).toBe(false);
+  });
+});
+
+describe('parseWebviewMessage protocol coverage', () => {
+  const entries = Object.entries(VALID_WEBVIEW_MESSAGES) as Array<
+    [WebviewMessage['type'], WebviewMessage]
+  >;
+
+  it('has a fixture for every accepted message type', () => {
+    expect(entries.map(([type]) => type).toSorted()).toEqual(
+      Object.keys(WEBVIEW_MESSAGE_TYPES).toSorted()
+    );
+  });
+
+  for (const [type, message] of entries) {
+    it(`accepts a well-formed ${type}`, () => {
+      // Round-trips through a structured clone the way the real bridge does,
+      // so a fixture cannot accidentally pass by object identity.
+      expect(parseWebviewMessage(structuredClone(message))).toEqual(message);
+    });
+  }
+
+  /**
+   * Types whose payload is optional by design: a missing or garbage payload
+   * degrades to the no-payload form instead of dropping the message. Listing
+   * them explicitly means a type cannot quietly join the set later.
+   */
+  const OPTIONAL_PAYLOAD_TYPES = new Set<WebviewMessage['type']>([
+    'ready',
+    'context/request',
+    'providers/refresh',
+    'providers/reauthenticated',
+    'terminal-selection/clear',
+    'files/clear',
+    'files/pick',
+    'webview/reload',
+    'vscode/open-folder',
+    'vscode/show-output',
+    'chat/new-editor',
+    'vscode/open-settings',
+    'server/restart',
+  ]);
+
+  it('tolerates a garbage payload only for the types that opt into it', () => {
+    const tolerant = Object.keys(WEBVIEW_MESSAGE_TYPES).filter((type) =>
+      [null, 'string', 42, true, []].some(
+        (payload) => parseWebviewMessage({ type, payload }) !== null
+      )
+    );
+    expect(tolerant.toSorted()).toEqual([...OPTIONAL_PAYLOAD_TYPES].toSorted());
+  });
+
+  for (const [type] of entries) {
+    if (OPTIONAL_PAYLOAD_TYPES.has(type)) continue;
+    it(`rejects ${type} with a non-object payload`, () => {
+      for (const payload of [null, 'string', 42, true, []]) {
+        expect(parseWebviewMessage({ type, payload })).toBeNull();
+      }
+      expect(parseWebviewMessage({ type })).toBeNull();
+    });
+  }
+});
+
+describe('parseWebviewMessage rejection paths', () => {
+  it('rejects files/drop with unusable or oversized path lists', () => {
+    expect(parseWebviewMessage({ type: 'files/drop', payload: { paths: '/a.ts' } })).toBeNull();
+    expect(
+      parseWebviewMessage({ type: 'files/drop', payload: { paths: ['/a.ts', 7] } })
+    ).toBeNull();
+    expect(parseWebviewMessage({ type: 'files/drop', payload: { paths: [''] } })).toBeNull();
+    expect(
+      parseWebviewMessage({ type: 'files/drop', payload: { paths: ['a'.repeat(4097)] } })
+    ).toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'files/drop',
+        payload: { paths: Array.from({ length: 101 }, (_, index) => `/f${String(index)}.ts`) },
+      })
+    ).toBeNull();
+  });
+
+  it('accepts files/drop at the path-count boundary', () => {
+    const paths = Array.from({ length: 100 }, (_, index) => `/f${String(index)}.ts`);
+    expect(parseWebviewMessage({ type: 'files/drop', payload: { paths } })).toEqual({
+      type: 'files/drop',
+      payload: { paths },
+    });
+  });
+
+  it('rejects file/read and files/remove without a usable path', () => {
+    for (const type of ['file/read', 'files/remove'] as const) {
+      expect(parseWebviewMessage({ type, payload: {} })).toBeNull();
+      expect(parseWebviewMessage({ type, payload: { path: '' } })).toBeNull();
+      expect(parseWebviewMessage({ type, payload: { path: 12 } })).toBeNull();
+      expect(parseWebviewMessage({ type, payload: { path: 'a'.repeat(4097) } })).toBeNull();
+    }
+  });
+
+  it('keeps file/read and files/remove as distinct types', () => {
+    expect(parseWebviewMessage({ type: 'file/read', payload: { path: '/a.ts' } })).toEqual({
+      type: 'file/read',
+      payload: { path: '/a.ts' },
+    });
+    expect(parseWebviewMessage({ type: 'files/remove', payload: { path: '/a.ts' } })).toEqual({
+      type: 'files/remove',
+      payload: { path: '/a.ts' },
+    });
+  });
+
+  it('rejects pdfs/store whose declared size disagrees with its base64 content', () => {
+    expect(
+      parseWebviewMessage({
+        type: 'pdfs/store',
+        payload: { id: 'pdf-1', name: 'a.pdf', content: 'YQ==', size: 99 },
+      })
+    ).toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'pdfs/store',
+        payload: { id: '', name: 'a.pdf', content: 'YQ==', size: 1 },
+      })
+    ).toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'pdfs/store',
+        payload: { id: 'pdf-1', name: '', content: 'YQ==', size: 1 },
+      })
+    ).toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'pdfs/store',
+        payload: { id: 'pdf-1', name: 'a.pdf', content: 'YQ==', size: 1.5 },
+      })
+    ).toBeNull();
+  });
+
+  it('rejects queued-messages/release without a positive integer lease', () => {
+    const base = { itemId: 'queued-1', sessionId: 'session-1' };
+    expect(parseWebviewMessage({ type: 'queued-messages/release', payload: base })).toBeNull();
+    for (const lease of [0, -1, 1.5, '4', Number.NaN]) {
+      expect(
+        parseWebviewMessage({ type: 'queued-messages/release', payload: { ...base, lease } })
+      ).toBeNull();
+    }
+    expect(
+      parseWebviewMessage({
+        type: 'queued-messages/release',
+        payload: { itemId: '', sessionId: 'session-1', lease: 4 },
+      })
+    ).toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'queued-messages/release',
+        payload: { itemId: 'queued-1', sessionId: '', lease: 4 },
+      })
+    ).toBeNull();
+  });
+
+  it('requires session-plan-state/update to carry at least one tracked field', () => {
+    expect(
+      parseWebviewMessage({
+        type: 'session-plan-state/update',
+        payload: { sessionId: 'session-1' },
+      })
+    ).toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'session-plan-state/update',
+        payload: { sessionId: 'session-1', skippedAt: Number.POSITIVE_INFINITY },
+      })
+    ).toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'session-plan-state/update',
+        payload: { sessionId: 'session-1', agent: '   ' },
+      })
+    ).toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'session-plan-state/update',
+        payload: { sessionId: 'session-1', skippedAt: null },
+      })
+    ).toEqual({
+      type: 'session-plan-state/update',
+      payload: { sessionId: 'session-1', skippedAt: null },
+    });
+  });
+
+  it('rejects log messages without a message or with an unknown level', () => {
+    expect(parseWebviewMessage({ type: 'log', payload: { msg: '' } })).toBeNull();
+    expect(parseWebviewMessage({ type: 'log', payload: { msg: 'hi', level: 'debug' } })).toBeNull();
+    expect(parseWebviewMessage({ type: 'log', payload: { msg: 'hi' } })).toEqual({
+      type: 'log',
+      payload: { msg: 'hi' },
+    });
+  });
+
+  it('drops payloads supplied for payload-free message types', () => {
+    expect(parseWebviewMessage({ type: 'files/clear', payload: { path: '/etc/passwd' } })).toEqual({
+      type: 'files/clear',
+    });
+    expect(parseWebviewMessage({ type: 'files/pick', payload: { anything: true } })).toEqual({
+      type: 'files/pick',
+    });
+    expect(parseWebviewMessage({ type: 'context/request', payload: 42 })).toEqual({
+      type: 'context/request',
+    });
+  });
+
+  it('rejects model-preferences/migrate without an object payload', () => {
+    expect(parseWebviewMessage({ type: 'model-preferences/migrate' })).toBeNull();
+    expect(parseWebviewMessage({ type: 'model-preferences/migrate', payload: [] })).toBeNull();
   });
 });

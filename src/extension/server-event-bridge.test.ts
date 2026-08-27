@@ -881,3 +881,140 @@ describe('ServerEventBridge', () => {
     expect(sessionState.handleServerEvent).not.toHaveBeenCalled();
   });
 });
+
+describe('ServerEventBridge streaming bounds', () => {
+  const DELTA_PROPERTIES = {
+    sessionID: 'session-1',
+    messageID: 'message-1',
+    partID: 'part-1',
+    field: 'text',
+  };
+
+  function createDelta(delta: string) {
+    return {
+      type: 'message.part.delta',
+      properties: { ...DELTA_PROPERTIES, delta },
+    } as ServerEvent;
+  }
+
+  it('flushes a batch once it reaches the fragment cap instead of growing without bound', () => {
+    vi.useFakeTimers();
+    useParsedEvents();
+    const { bridge, handlers, post } = createMocks();
+    bridge.attach();
+
+    // 256 fragments fill the batch; the 257th cannot join it and forces a flush.
+    for (let index = 0; index < 256; index += 1) handlers.event!(createDelta('a'));
+    expect(post).not.toHaveBeenCalled();
+
+    handlers.event!(createDelta('b'));
+
+    expect(post).toHaveBeenCalledOnce();
+    expect(post.mock.calls[0]?.[0]).toEqual({
+      type: 'server/event',
+      payload: {
+        type: 'message.part.delta',
+        properties: { ...DELTA_PROPERTIES, delta: 'a'.repeat(256) },
+      },
+    });
+
+    vi.advanceTimersByTime(16);
+
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(post.mock.calls[1]?.[0]).toEqual({
+      type: 'server/event',
+      payload: { type: 'message.part.delta', properties: { ...DELTA_PROPERTIES, delta: 'b' } },
+    });
+    vi.useRealTimers();
+  });
+
+  it('flushes a batch before it exceeds the character cap', () => {
+    vi.useFakeTimers();
+    useParsedEvents();
+    const { bridge, handlers, post } = createMocks();
+    bridge.attach();
+
+    const half = 32 * 1024;
+    handlers.event!(createDelta('a'.repeat(half)));
+    handlers.event!(createDelta('b'.repeat(half)));
+    expect(post).not.toHaveBeenCalled();
+
+    // The batch is exactly at 64KB, so one more character cannot be merged.
+    handlers.event!(createDelta('c'));
+
+    expect(post).toHaveBeenCalledOnce();
+    const flushed = post.mock.calls[0]?.[0] as
+      | { payload: { properties: { delta: string } } }
+      | undefined;
+    expect(flushed?.payload.properties.delta).toHaveLength(64 * 1024);
+
+    vi.advanceTimersByTime(16);
+    expect(post).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it('forwards a single oversized fragment immediately without batching it', () => {
+    vi.useFakeTimers();
+    useParsedEvents();
+    const { bridge, handlers, post } = createMocks();
+    bridge.attach();
+
+    const oversized = createDelta('a'.repeat(64 * 1024 + 1));
+    handlers.event!(oversized);
+
+    expect(post).toHaveBeenCalledOnce();
+    expect(post).toHaveBeenCalledWith({ type: 'server/event', payload: oversized });
+
+    // Nothing may remain pending, so no timer can flush a duplicate later.
+    vi.advanceTimersByTime(1_000);
+    expect(post).toHaveBeenCalledOnce();
+    vi.useRealTimers();
+  });
+
+  it('preserves order when an oversized fragment interrupts an open batch', () => {
+    vi.useFakeTimers();
+    useParsedEvents();
+    const { bridge, handlers, post } = createMocks();
+    bridge.attach();
+
+    handlers.event!(createDelta('small'));
+    const oversized = createDelta('a'.repeat(64 * 1024 + 1));
+    handlers.event!(oversized);
+
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(post.mock.calls[0]?.[0]).toEqual({
+      type: 'server/event',
+      payload: { type: 'message.part.delta', properties: { ...DELTA_PROPERTIES, delta: 'small' } },
+    });
+    expect(post.mock.calls[1]?.[0]).toEqual({ type: 'server/event', payload: oversized });
+
+    vi.advanceTimersByTime(1_000);
+    expect(post).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it('bounds the unknown event types it remembers for rate limiting', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-11T00:00:00Z'));
+    const { bridge, handlers } = createMocks();
+    mocks.parseServerEvent.mockReturnValue(null);
+    mocks.loggerWarn.mockClear();
+    bridge.attach();
+
+    handlers.event!({ payload: { type: 'unknown-0' } });
+    // 100 further types evict the oldest entry from the rate-limit map.
+    for (let index = 1; index <= 100; index += 1) {
+      handlers.event!({ payload: { type: `unknown-${String(index)}` } });
+    }
+    expect(mocks.loggerWarn).toHaveBeenCalledTimes(101);
+
+    // Evicted, so it logs again well inside the one-minute window.
+    handlers.event!({ payload: { type: 'unknown-0' } });
+    expect(mocks.loggerWarn).toHaveBeenCalledTimes(102);
+
+    // A type still held in the map stays rate limited.
+    handlers.event!({ payload: { type: 'unknown-100' } });
+    expect(mocks.loggerWarn).toHaveBeenCalledTimes(102);
+    vi.useRealTimers();
+  });
+});

@@ -104,7 +104,11 @@ interface RalphContentBudget {
   pathEntries: number;
 }
 
-const WEBVIEW_MESSAGE_TYPES = {
+/**
+ * Single source of truth for the accepted webview message types. Exported so
+ * tests can assert their own tables stay exhaustive as the protocol grows.
+ */
+export const WEBVIEW_MESSAGE_TYPES = {
   'context/request': true,
   'workspace/select': true,
   'commands/state': true,
