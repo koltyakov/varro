@@ -282,7 +282,7 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  left: calc(-1 * var(--chat-horizontal-padding));
+  left: calc(1px - var(--chat-horizontal-padding));
   width: 1px;
   background: var(--assistant-rail-color);
   pointer-events: none;
@@ -296,7 +296,7 @@
   content: '';
   position: absolute;
   top: -12px;
-  left: calc(-1 * var(--chat-horizontal-padding) - 1px);
+  left: calc(-1 * var(--chat-horizontal-padding));
   width: 3px;
   height: 24px;
   border-radius: 999px;
@@ -846,7 +846,7 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  left: calc(-1 * var(--chat-horizontal-padding));
+  left: calc(1px - var(--chat-horizontal-padding));
   width: 1px;
   background: var(--assistant-rail-color);
   pointer-events: none;

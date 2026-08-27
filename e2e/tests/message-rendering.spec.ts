@@ -77,8 +77,10 @@ test('closes read mode with escape', async ({ page }) => {
 });
 
 test('keeps final-answer rails visible in virtualized transcripts', async ({ page }) => {
+  await page.setViewportSize({ width: 600, height: 720 });
   await page.goto('/e2e/harness/index.html?scenario=large-transcript');
 
+  const list = page.locator('.interactive-list');
   const track = page.locator('.interactive-list-track');
   await expect(track).toHaveClass(/virtualized/);
 
@@ -91,12 +93,15 @@ test('keeps final-answer rails visible in virtualized transcripts', async ({ pag
   const ordinaryContainment = await ordinaryRow.evaluate((row) => getComputedStyle(row).contain);
   const rail = await finalItem.evaluate((item) => {
     const style = getComputedStyle(item, '::before');
+    const itemRect = item.getBoundingClientRect();
     return {
       content: style.content,
       width: style.width,
       backgroundColor: style.backgroundColor,
+      left: itemRect.left + Number.parseFloat(style.left),
     };
   });
+  const listLeft = await list.evaluate((element) => element.getBoundingClientRect().left);
 
   expect(containment).toContain('layout');
   expect(containment).not.toBe('content');
@@ -104,6 +109,7 @@ test('keeps final-answer rails visible in virtualized transcripts', async ({ pag
   expect(rail.content).not.toBe('none');
   expect(rail.width).toBe('1px');
   expect(rail.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+  expect(rail.left).toBeGreaterThanOrEqual(listLeft + 1);
 });
 
 test('routes safe external markdown links through the extension bridge', async ({ page }) => {
