@@ -108,6 +108,7 @@ export const routingStore = {
   ) {
     const newlyConnectedProviderSet = new Set(newlyConnectedProviderIDs);
     const nextHiddenModels = new Set(state.hiddenModels);
+    let hiddenModelsChanged = false;
 
     for (const provider of providers) {
       if (!newlyConnectedProviderSet.has(provider.id)) continue;
@@ -118,12 +119,14 @@ export const routingStore = {
       ]);
       for (const modelID of getSupersededModelIds(Object.values(provider.models))) {
         if (!protectedModelIDs.has(modelID)) {
+          const previousSize = nextHiddenModels.size;
           nextHiddenModels.add(modelVisibilityKey(provider.id, modelID));
+          hiddenModelsChanged ||= nextHiddenModels.size !== previousSize;
         }
       }
     }
 
-    if (nextHiddenModels.size !== state.hiddenModels.length) {
+    if (hiddenModelsChanged) {
       const hiddenModels = [...nextHiddenModels];
       setState('hiddenModels', hiddenModels);
       writeStored(STORAGE_KEYS.hiddenModels, hiddenModels);

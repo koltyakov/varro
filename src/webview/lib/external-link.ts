@@ -29,9 +29,12 @@ export function getGitRemoteHttpsUrl(remote: string): string | null {
 
 function trimUrlEnd(candidate: string) {
   let end = candidate.length;
-  while (end > 0 && TRAILING_URL_PUNCTUATION_RE.test(candidate[end - 1]!)) end -= 1;
-
   while (end > 0) {
+    if (TRAILING_URL_PUNCTUATION_RE.test(candidate[end - 1]!)) {
+      end -= 1;
+      continue;
+    }
+
     // SAFETY: The surrounding shape or discriminator check establishes the keyof contract used below.
     const closing = candidate[end - 1] as keyof typeof CLOSING_DELIMITERS;
     const opening = CLOSING_DELIMITERS[closing];

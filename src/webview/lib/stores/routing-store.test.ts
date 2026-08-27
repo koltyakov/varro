@@ -169,6 +169,28 @@ describe('routingStore', () => {
     expect(routingStore.isModelVisible('provider-1', 'model-1')).toBe(true);
   });
 
+  it('hides newly superseded models when persisted visibility contains duplicates', () => {
+    const connected = createProvider('provider-1');
+    connected.models['model-1'] = {
+      ...connected.models['model-1']!,
+      family: 'model',
+      release_date: '2025-01-01',
+    };
+    connected.models['model-2'] = {
+      ...connected.models['model-2']!,
+      family: 'model',
+      release_date: '2026-01-01',
+    };
+    setState('hiddenModels', ['provider-1:existing', 'provider-1:existing']);
+
+    routingStore.setProviders([connected], {}, ['provider-1']);
+
+    expect(state.hiddenModels).toEqual(['provider-1:existing', 'provider-1:model-1']);
+    expect(JSON.parse(window.localStorage.getItem('varro.hiddenModels') ?? 'null')).toEqual(
+      state.hiddenModels
+    );
+  });
+
   it('keeps the provider default enabled on first connection', () => {
     const connected = createProvider('provider-1');
     connected.models['model-1'] = {
