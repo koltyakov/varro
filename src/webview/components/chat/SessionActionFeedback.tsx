@@ -1,7 +1,7 @@
 import { Show, createSignal, onCleanup } from 'solid-js';
 import type { Accessor } from 'solid-js';
 import { Portal } from 'solid-js/web';
-import { checkIcon, priorityHighIcon, xmarkIcon } from '../../lib/ui-icons';
+import { checkIcon, xmarkIcon } from '../../lib/ui-icons';
 import { UiIcon } from '../UiIcon';
 
 const SUCCESS_VISIBLE_MS = 1_600;
@@ -74,17 +74,7 @@ export function SessionActionFeedback(props: SessionActionFeedbackProps = {}) {
                   />
                 }
               >
-                <Show
-                  when={currentError()}
-                  fallback={<span class="session-action-feedback-warning-glyph">!</span>}
-                >
-                  <UiIcon
-                    source={priorityHighIcon}
-                    class="session-action-feedback-glyph"
-                    width={11}
-                    height={11}
-                  />
-                </Show>
+                <span class="session-action-feedback-attention-glyph">!</span>
               </Show>
             </span>
             <span class="session-action-feedback-message" title={visibleMessage()}>

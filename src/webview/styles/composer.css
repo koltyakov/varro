@@ -987,15 +987,15 @@
   justify-content: flex-start;
   align-items: center;
   margin-left: 1px;
-  width: 96px;
+  width: auto;
   min-width: 0;
-  max-width: 96px;
+  max-width: 56px;
   height: 20px;
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-x: contain;
   scrollbar-width: none;
-  flex: 1 1 96px;
+  flex: 0 1 auto;
 }
 
 .permission-activity::-webkit-scrollbar {
@@ -1199,6 +1199,38 @@
   background: currentColor;
   -webkit-mask: var(--toolbar-selected-icon) center / contain no-repeat;
   mask: var(--toolbar-selected-icon) center / contain no-repeat;
+}
+
+.workspace-popover .toolbar-popover-item {
+  gap: 6px;
+}
+
+.workspace-popover .toolbar-popover-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.workspace-popover .toolbar-popover-item:disabled:hover {
+  background: none;
+}
+
+.workspace-popover .toolbar-popover-item.selected:disabled,
+.workspace-popover .toolbar-popover-item.selected:disabled:hover {
+  background: color-mix(in srgb, var(--color-vscode-accent) 16%, transparent);
+}
+
+.workspace-popover-notice {
+  margin: 2px 4px 5px;
+  padding: 5px 6px;
+  border-radius: var(--radius-chip);
+  background: color-mix(in srgb, var(--color-vscode-fg) 5%, transparent);
+  color: var(--color-vscode-muted);
+  font-size: 10px;
+  line-height: 1.3;
+}
+
+.workspace-popover-path {
+  font-weight: 400;
 }
 
 .permission-mode-option-copy {

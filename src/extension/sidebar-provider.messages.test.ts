@@ -172,8 +172,8 @@ describe('SidebarProvider session message responses', () => {
     });
 
     expect(server.request.mock.calls).toEqual([
-      ['GET', '/session/session-1?directory=%2Frepo'],
-      ['GET', '/session/session-1/message', undefined],
+      ['GET', '/session/session-1?directory=%2Frepo', undefined, { directory: '/repo' }],
+      ['GET', '/session/session-1/message', undefined, { directory: '/repo' }],
     ]);
     expect(posted).toContainEqual({
       type: 'api/response',

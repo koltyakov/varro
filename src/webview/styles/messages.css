@@ -2391,10 +2391,17 @@ body.vscode-light .interactive-session .chat-input-toolbars.toolbar-meta {
 
 .interactive-session .chat-input-toolbars.toolbar-meta .toolbar-meta-left {
   flex: 1 1 auto;
+  gap: 0;
+}
+
+.interactive-session .chat-input-toolbars.toolbar-meta .toolbar-meta-left .permission-mode-picker,
+.interactive-session .chat-input-toolbars.toolbar-meta .toolbar-meta-left .workspace-picker {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .interactive-session .chat-input-toolbars.toolbar-meta .toolbar-meta-left .permission-mode-picker {
-  flex: 0 1 auto;
+  flex-shrink: 0;
 }
 
 .interactive-session .chat-input-toolbars.toolbar-meta .toolbar-meta-right {
@@ -2427,7 +2434,8 @@ body.vscode-light .interactive-session .chat-input-toolbars.toolbar-meta {
   flex: 0 0 auto;
 }
 
-.interactive-session .chat-input-toolbars.toolbar-meta .toolbar-picker.permission-mode-button {
+.interactive-session .chat-input-toolbars.toolbar-meta .toolbar-picker.permission-mode-button,
+.interactive-session .chat-input-toolbars.toolbar-meta .toolbar-picker.workspace-picker-button {
   height: 22px;
   padding: 0 4px 0 6px;
   gap: 2px;
@@ -2439,9 +2447,59 @@ body.vscode-light .interactive-session .chat-input-toolbars.toolbar-meta {
   font-weight: 400;
 }
 
+.workspace-picker-abbreviation {
+  display: none;
+}
+
 .interactive-session
   .chat-input-toolbars.toolbar-meta
-  .toolbar-picker.permission-mode-button:hover {
+  .workspace-picker-button
+  .workspace-picker-folder-icon {
+  margin-right: 2px;
+}
+
+@container (max-width: 500px) {
+  .interactive-session
+    .chat-input-toolbars.toolbar-meta
+    .workspace-picker-button
+    .workspace-picker-full-label {
+    display: none;
+  }
+
+  .interactive-session
+    .chat-input-toolbars.toolbar-meta
+    .workspace-picker-button
+    .workspace-picker-abbreviation {
+    display: inline;
+  }
+
+  .workspace-popover .toolbar-popover-item.selected .workspace-name-initial {
+    font-weight: 700;
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+  }
+}
+
+.interactive-session
+  .chat-input-toolbars.toolbar-meta
+  .toolbar-meta-left
+  .toolbar-picker.workspace-picker-button {
+  padding-right: 1px;
+}
+
+.interactive-session
+  .chat-input-toolbars.toolbar-meta
+  .workspace-picker
+  + .permission-mode-picker
+  .toolbar-picker.permission-mode-button {
+  padding-left: 2px;
+}
+
+.interactive-session .chat-input-toolbars.toolbar-meta .toolbar-picker.permission-mode-button:hover,
+.interactive-session
+  .chat-input-toolbars.toolbar-meta
+  .toolbar-picker.workspace-picker-button:hover {
   background: transparent;
   border-color: transparent;
   color: var(--color-vscode-fg);
@@ -2449,7 +2507,10 @@ body.vscode-light .interactive-session .chat-input-toolbars.toolbar-meta {
 
 .interactive-session
   .chat-input-toolbars.toolbar-meta
-  .toolbar-picker.permission-mode-button[aria-expanded='true'] {
+  .toolbar-picker.permission-mode-button[aria-expanded='true'],
+.interactive-session
+  .chat-input-toolbars.toolbar-meta
+  .toolbar-picker.workspace-picker-button[aria-expanded='true'] {
   background: transparent;
   border-color: transparent;
   box-shadow: none;
@@ -2463,12 +2524,21 @@ body.vscode-light .interactive-session .chat-input-toolbars.toolbar-meta {
     .toolbar-picker-label,
   .interactive-session
     .chat-input-toolbars.toolbar-meta
+    .toolbar-picker.workspace-picker-button
+    .toolbar-picker-label,
+  .interactive-session
+    .chat-input-toolbars.toolbar-meta
     .toolbar-picker.permission-mode-button
+    .codicon-chevron,
+  .interactive-session
+    .chat-input-toolbars.toolbar-meta
+    .toolbar-picker.workspace-picker-button
     .codicon-chevron {
     display: none;
   }
 
-  .interactive-session .chat-input-toolbars.toolbar-meta .toolbar-picker.permission-mode-button {
+  .interactive-session .chat-input-toolbars.toolbar-meta .toolbar-picker.permission-mode-button,
+  .interactive-session .chat-input-toolbars.toolbar-meta .toolbar-picker.workspace-picker-button {
     width: 26px;
     min-width: 26px;
     padding: 0;
@@ -2502,6 +2572,13 @@ body.vscode-light .interactive-session .chat-input-toolbars.toolbar-meta {
 .interactive-session
   .chat-input-toolbars.toolbar-meta
   .toolbar-picker.permission-mode-button
+  .codicon-chevron {
+  opacity: 0.6;
+}
+
+.interactive-session
+  .chat-input-toolbars.toolbar-meta
+  .toolbar-picker.workspace-picker-button
   .codicon-chevron {
   opacity: 0.6;
 }

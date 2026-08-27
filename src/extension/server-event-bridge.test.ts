@@ -78,8 +78,7 @@ function createMocks(options?: {
     hiddenSessions as never,
     providerLimitService as never,
     post,
-    updateStatusBarItem,
-    options && 'workspacePath' in options ? { getPath: () => options.workspacePath } : undefined
+    updateStatusBarItem
   );
   return {
     handlers,
@@ -694,7 +693,7 @@ describe('ServerEventBridge', () => {
     expect(post).not.toHaveBeenCalled();
   });
 
-  it('event handler suppresses session updates from nested workspace directories', () => {
+  it('forwards sibling workspace metadata for endpoint-level routing', () => {
     const { bridge, handlers, post, sessionState } = createMocks({ workspacePath: '/repo' });
     const parsed = {
       type: 'session.updated' as const,
@@ -704,8 +703,8 @@ describe('ServerEventBridge', () => {
     mocks.getSessionIdsForEvent.mockReturnValue(['nested-session']);
     bridge.attach();
     handlers.event!({});
-    expect(sessionState.handleServerEvent).not.toHaveBeenCalled();
-    expect(post).not.toHaveBeenCalled();
+    expect(sessionState.handleServerEvent).toHaveBeenCalledWith(parsed);
+    expect(post).toHaveBeenCalledWith({ type: 'server/event', payload: parsed });
   });
 
   it('accepts UNC session metadata with equivalent casing and separators', () => {
@@ -725,7 +724,7 @@ describe('ServerEventBridge', () => {
     expect(post).toHaveBeenCalledWith({ type: 'server/event', payload: parsed });
   });
 
-  it('event handler suppresses non-metadata events for sessions outside the workspace', () => {
+  it('forwards sibling session events for endpoint-level routing', () => {
     const { bridge, handlers, post, sessionState } = createMocks({
       workspacePath: '/repo',
       isSessionInWorkspace: () => false,
@@ -735,8 +734,8 @@ describe('ServerEventBridge', () => {
     mocks.getSessionIdsForEvent.mockReturnValue(['session-1']);
     bridge.attach();
     handlers.event!({});
-    expect(sessionState.handleServerEvent).not.toHaveBeenCalled();
-    expect(post).not.toHaveBeenCalled();
+    expect(sessionState.handleServerEvent).toHaveBeenCalledWith(parsed);
+    expect(post).toHaveBeenCalledWith({ type: 'server/event', payload: parsed });
   });
 
   it('does not treat an unknown session directory as a foreign workspace', () => {

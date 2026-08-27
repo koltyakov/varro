@@ -74,11 +74,15 @@ export async function sendQueuedAsSteer(item: (typeof state.queuedMessages)[numb
   updateQueuedSteerId(setFailedSteerQueuedMessageIds, item.id, false);
   const priorAttemptId = item.messageId;
   const messageId = priorAttemptId ?? createOpenCodeMessageID();
+  const workspaceDirectory = item.queuedContext?.editorContext.workspacePath ?? undefined;
   if (!priorAttemptId) replaceQueuedMessage(item.id, { ...item, messageId });
   let sent = false;
   let dispatchLease: number | null = null;
   try {
-    if (priorAttemptId && (await queuedMessageWasAdmitted(item.sessionId, priorAttemptId))) {
+    if (
+      priorAttemptId &&
+      (await queuedMessageWasAdmitted(item.sessionId, priorAttemptId, workspaceDirectory))
+    ) {
       removeQueuedMessage(item.id);
       return;
     }
@@ -97,8 +101,10 @@ export async function sendQueuedAsSteer(item: (typeof state.queuedMessages)[numb
           terminalSelection: item.terminalSelection,
           attachedDiagnostics: item.attachedDiagnostics ? item.attachedDiagnostics : undefined,
         },
+        queuedContext: item.queuedContext,
         preserveComposer: true,
         targetSessionId: item.sessionId,
+        workspaceDirectory,
         queuedMessageDispatch: { itemId: item.id, lease: dispatchLease },
       })) !== false;
   } catch {

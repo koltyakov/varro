@@ -1,4 +1,5 @@
 import archiveIcon from 'iconoir/icons/archive.svg';
+import appNotificationIcon from 'iconoir/icons/app-notification.svg';
 import arrowLeftIcon from 'iconoir/icons/arrow-left.svg';
 import arrowUpIcon from 'iconoir/icons/arrow-up.svg';
 import attachmentIcon from 'iconoir/icons/attachment.svg';
@@ -63,6 +64,7 @@ import xmarkIcon from 'iconoir/icons/xmark.svg';
 
 export {
   archiveIcon,
+  appNotificationIcon,
   arrowLeftIcon,
   arrowUpIcon,
   attachmentIcon,

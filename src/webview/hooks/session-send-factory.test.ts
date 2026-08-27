@@ -33,9 +33,16 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function createOperations(sendAsync: SendAsync) {
+function createOperations(
+  sendAsync: SendAsync,
+  ensureSessionPermission?: ConstructorParameters<
+    typeof SessionSendOperations
+  >[0]['ensureSessionPermission'],
+  overrides: Partial<ConstructorParameters<typeof SessionSendOperations>[0]> = {}
+) {
   return new SessionSendOperations({
     createSession: vi.fn(async () => 'session-2'),
+    ensureSessionPermission,
     clearPendingAbort: vi.fn(),
     resetTodoSync: vi.fn(),
     syncSessionMcps: vi.fn(async () => {}),
@@ -46,6 +53,7 @@ function createOperations(sendAsync: SendAsync) {
     setSessionStatusEntry: vi.fn(),
     getMessageCount: () => 1,
     continueInterruptedSession: vi.fn(async () => {}),
+    ...overrides,
   });
 }
 
@@ -633,5 +641,83 @@ describe('SessionSendOperations', () => {
         { type: 'text', text: '[Selection from original.ts lines 4]' },
       ],
     });
+  });
+
+  it('scopes a queued dispatch to its original workspace', async () => {
+    appStore.setState('activeSessionId', 'session-2');
+    appStore.setState('editorContext', {
+      workspacePath: '/repo-b',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    const sendAsync = vi.fn<SendAsync>(async () => {});
+    const ensureSessionPermission = vi.fn(async () => true);
+    const syncSession = vi.fn(async () => {});
+    const syncSessionMessages = vi.fn(async () => {});
+    const recheckSessionStatus = vi.fn(async () => {});
+    const operations = createOperations(sendAsync, ensureSessionPermission, {
+      syncSession,
+      syncSessionMessages,
+      recheckSessionStatus,
+    });
+
+    await operations.sendMessage('queued prompt', {
+      messageId: 'msg_queued_workspace',
+      targetSessionId: 'session-1',
+      workspaceDirectory: '/repo-a',
+      queuedContext: {
+        editorContext: {
+          workspacePath: '/repo-a',
+          activeFile: null,
+          selection: null,
+          diagnostics: [],
+        },
+        currentDocumentEnabled: false,
+      },
+      queuedMessageDispatch: { itemId: 'queue-1', lease: 2 },
+      preserveComposer: true,
+    });
+
+    expect(sendAsync).toHaveBeenCalledWith(
+      'session-1',
+      expect.objectContaining({
+        messageID: 'msg_queued_workspace',
+        queuedMessageDispatch: { itemId: 'queue-1', lease: 2 },
+      }),
+      { directory: '/repo-a' }
+    );
+    expect(ensureSessionPermission).not.toHaveBeenCalled();
+    expect(syncSession).not.toHaveBeenCalled();
+    expect(syncSessionMessages).not.toHaveBeenCalled();
+    expect(recheckSessionStatus).not.toHaveBeenCalled();
+  });
+
+  it('sends a same-workspace queued retry without repeating session preparation', async () => {
+    appStore.setState('activeSessionId', 'session-1');
+    appStore.setState('editorContext', {
+      workspacePath: '/repo-a',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    const sendAsync = vi.fn<SendAsync>(async () => {});
+    const ensureSessionPermission = vi.fn(async () => true);
+    const operations = createOperations(sendAsync, ensureSessionPermission);
+
+    await operations.sendMessage('retry queued prompt', {
+      messageId: 'msg_queued_retry',
+      targetSessionId: 'session-1',
+      workspaceDirectory: '/repo-a',
+      queuedMessageDispatch: { itemId: 'queue-1', lease: 3 },
+      preserveComposer: true,
+    });
+
+    expect(ensureSessionPermission).not.toHaveBeenCalled();
+    expect(sendAsync).toHaveBeenCalledWith(
+      'session-1',
+      expect.objectContaining({ messageID: 'msg_queued_retry' }),
+      { directory: '/repo-a' }
+    );
   });
 });

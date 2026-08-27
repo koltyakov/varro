@@ -1,10 +1,18 @@
 import { client } from '../../lib/client';
 
-export async function queuedMessageWasAdmitted(sessionId: string, messageId: string) {
+export async function queuedMessageWasAdmitted(
+  sessionId: string,
+  messageId: string,
+  workspaceDirectory?: string
+) {
   let before: string | undefined;
   const consumedCursors = new Set<string>();
   do {
-    const messages = await client.session.messages(sessionId, { limit: 200, before });
+    const messages = await client.session.messages(sessionId, {
+      limit: 200,
+      before,
+      directory: workspaceDirectory,
+    });
     if (messages.some((message) => message.info.id === messageId)) return true;
     const nextCursor = messages.nextCursor;
     if (!nextCursor) return false;

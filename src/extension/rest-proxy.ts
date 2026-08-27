@@ -144,11 +144,13 @@ export interface RestProxyCallbacks {
   simulateNoProviders: boolean;
   getRequestGeneration(): number;
   getStatus(): ServerStatus;
+  getWorkspacePath?(): string | null | undefined;
   ensureServerStarted(): Promise<string | undefined>;
   confirmPromptAdmission(workspacePath: string): Promise<boolean>;
   refreshOpenCodeConfig?(
     previousRouting: OpenCodeModelRouting,
-    currentRouting: OpenCodeModelRouting
+    currentRouting: OpenCodeModelRouting,
+    workspacePath: string
   ): Promise<void>;
   cleanupExpiredRecycleBin(): Promise<void>;
   removeSessionImages(sessionIds: Iterable<string>): Promise<void>;
@@ -279,14 +281,19 @@ export class RestProxy {
         if (
           explicitWorkspaceDirectory &&
           currentWorkspaceDirectory &&
-          !isSameWorkspacePath(explicitWorkspaceDirectory, currentWorkspaceDirectory)
+          !isSameWorkspacePath(explicitWorkspaceDirectory, currentWorkspaceDirectory) &&
+          !queuedDispatch
         ) {
           throw new Error('404 Session not found');
         }
+        const sessionWorkspaceDirectory =
+          queuedDispatch && explicitWorkspaceDirectory
+            ? explicitWorkspaceDirectory
+            : currentWorkspaceDirectory;
         await this.assertSessionInWorkspace(
           directSessionID,
-          currentWorkspaceDirectory ?? this.getCurrentWorkspacePath(),
-          currentWorkspaceDirectory ?? explicitWorkspaceDirectory ?? undefined
+          sessionWorkspaceDirectory ?? this.getCurrentWorkspacePath(),
+          sessionWorkspaceDirectory ?? explicitWorkspaceDirectory ?? undefined
         );
       }
 
@@ -506,7 +513,10 @@ export class RestProxy {
             ? ('question' as const)
             : undefined;
       const pendingAttentionReconciliation = pendingAttentionKind
-        ? this.callbacks.sessionState.beginPendingAttentionReconciliation(pendingAttentionKind)
+        ? this.callbacks.sessionState.beginPendingAttentionReconciliation(
+            pendingAttentionKind,
+            this.getCurrentWorkspacePath()
+          )
         : undefined;
 
       const sessionPageLimit = this.parseSessionPageLimit(method, payload.path);
@@ -547,11 +557,23 @@ export class RestProxy {
           ) {
             throw new Error('Queued message dispatch lease is no longer current');
           }
+          const queuedWorkspaceDirectory = queuedDispatch
+            ? (explicitWorkspaceDirectory ?? undefined)
+            : undefined;
           responsePromise = request
-            ? this.callbacks.server.request(method, forwardedPath, payload.body, {
-                signal: request.controller.signal,
-              })
-            : this.callbacks.server.request(method, forwardedPath, payload.body);
+            ? queuedWorkspaceDirectory
+              ? this.callbacks.server.request(method, forwardedPath, payload.body, {
+                  signal: request.controller.signal,
+                  directory: queuedWorkspaceDirectory,
+                })
+              : this.callbacks.server.request(method, forwardedPath, payload.body, {
+                  signal: request.controller.signal,
+                })
+            : queuedWorkspaceDirectory
+              ? this.callbacks.server.request(method, forwardedPath, payload.body, {
+                  directory: queuedWorkspaceDirectory,
+                })
+              : this.callbacks.server.request(method, forwardedPath, payload.body);
         }
         if (this.isSessionListRequest(method, payload.path) && sessionPageLimit === null) {
           this.trackSessionDirectoryBootstrap(responsePromise, false);
@@ -1110,7 +1132,10 @@ export class RestProxy {
     if (method === 'GET' && url.pathname === '/question' && Array.isArray(data)) {
       const requests = this.callbacks.sessionTrash.filterVisibleSessionRequests(
         this.callbacks.hiddenSessions.filterVisibleSessionRequests(
-          await this.filterSessionRequestsForCurrentWorkspace(data as Array<{ sessionID: string }>)
+          await this.filterSessionRequestsForCurrentWorkspace(
+            data as Array<{ sessionID: string }>,
+            pendingAttentionReconciliation?.workspacePath
+          )
         )
       );
       this.callbacks.sessionState.reconcilePendingAttention(
@@ -1123,7 +1148,10 @@ export class RestProxy {
     if (method === 'GET' && url.pathname === '/permission' && Array.isArray(data)) {
       const requests = this.callbacks.sessionTrash.filterVisibleSessionRequests(
         this.callbacks.hiddenSessions.filterVisibleSessionRequests(
-          await this.filterSessionRequestsForCurrentWorkspace(data as Array<{ sessionID: string }>)
+          await this.filterSessionRequestsForCurrentWorkspace(
+            data as Array<{ sessionID: string }>,
+            pendingAttentionReconciliation?.workspacePath
+          )
         )
       );
       this.callbacks.sessionState.reconcilePendingAttention(
@@ -1225,9 +1253,9 @@ export class RestProxy {
   }
 
   private async filterSessionRequestsForCurrentWorkspace<T extends { sessionID: string }>(
-    requests: T[]
+    requests: T[],
+    workspacePath = this.getCurrentWorkspacePath()
   ) {
-    const workspacePath = this.getCurrentWorkspacePath();
     const normalizedWorkspacePath = normalizeWorkspaceIdentity(workspacePath);
     if (!normalizedWorkspacePath) return requests;
     const visibleSessionIDs = await this.getVisibleWorkspaceSessionIDs(
@@ -1324,6 +1352,7 @@ export class RestProxy {
 
   private getCurrentWorkspacePath() {
     return (
+      this.callbacks.getWorkspacePath?.() ||
       this.callbacks.contextProvider.context.workspacePath ||
       this.callbacks.server.getWorkspaceCwd()
     );
@@ -1737,9 +1766,7 @@ export class RestProxy {
   }
 
   private getOpenCodeWorkspacePath() {
-    const workspacePath =
-      this.callbacks.contextProvider.context.workspacePath ||
-      this.callbacks.server.getWorkspaceCwd();
+    const workspacePath = this.getCurrentWorkspacePath();
     if (!workspacePath) {
       throw new Error('Open a workspace folder before editing project OpenCode config');
     }
@@ -1881,7 +1908,12 @@ export class RestProxy {
     if (request.target !== 'small_model' && request.target !== 'agent') {
       throw new Error('Unsupported OpenCode model routing target');
     }
-    const { files, config, target: defaultTarget } = await this.readOpenCodeConfigObject();
+    const {
+      workspacePath,
+      files,
+      config,
+      target: defaultTarget,
+    } = await this.readOpenCodeConfigObject();
     const target = request.unset
       ? files.toReversed().find((file) => {
           const route =
@@ -1961,7 +1993,7 @@ export class RestProxy {
       effectiveConfig = mergeOpenCodeConfig(effectiveConfig, nextTargetConfig);
     }
     const currentRouting = this.normalizeOpenCodeModelRouting(effectiveConfig);
-    await this.callbacks.refreshOpenCodeConfig?.(previousRouting, currentRouting);
+    await this.callbacks.refreshOpenCodeConfig?.(previousRouting, currentRouting, workspacePath);
     return currentRouting;
   }
 

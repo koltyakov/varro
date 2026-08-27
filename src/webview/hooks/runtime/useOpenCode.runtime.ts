@@ -106,6 +106,7 @@ export async function sendMessage(
     queuedContext?: QueuedContextSnapshot;
     preserveComposer?: boolean;
     targetSessionId?: string;
+    workspaceDirectory?: string;
     queuedMessageDispatch?: { itemId: string; lease: number };
   }
 ): Promise<boolean> {

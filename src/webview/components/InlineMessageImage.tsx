@@ -67,7 +67,7 @@ export function getInlineImagePresentation(
   return coverScale <= 1 ? 'cover' : 'contain';
 }
 
-export function InlineMessageImage(props: { src: string; alt: string }) {
+export function InlineMessageImage(props: { src: string; alt: string; allowCover?: boolean }) {
   const [presentation, setPresentation] = createSignal<InlineImagePresentation>('contain');
   let currentSrc = props.src;
   let imageRef: HTMLImageElement | undefined;
@@ -78,8 +78,14 @@ export function InlineMessageImage(props: { src: string; alt: string }) {
     height: number
   ) => {
     const frame = image.parentElement?.getBoundingClientRect();
+    const nextPresentation = getInlineImagePresentation(
+      width,
+      height,
+      frame?.width ?? 0,
+      frame?.height ?? 0
+    );
     setPresentation(
-      getInlineImagePresentation(width, height, frame?.width ?? 0, frame?.height ?? 0)
+      props.allowCover === false && nextPresentation === 'cover' ? 'ambient' : nextPresentation
     );
   };
 

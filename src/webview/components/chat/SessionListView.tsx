@@ -10,6 +10,7 @@ import {
   isSessionUnread,
   isSkippedPlanSession,
   setPersistentShowSessionPicker as setShowSessionPicker,
+  setManualWorkspaceSelection,
   setError,
   setState,
   sessionSearchFocusKey,
@@ -65,6 +66,7 @@ import {
 import { SharedSessionIcon } from './SharedSessionIcon';
 import { isNumber, isString, type UnknownRecord, isObject } from '../../lib/runtime-values';
 import { UiIcon } from '../UiIcon';
+import { WorkspacePicker } from '../chat-input/ToolbarPickers';
 
 type SessionGroups = {
   pinned: (typeof state.sessions)[number][];
@@ -885,6 +887,63 @@ function SessionListContinuation() {
   );
 }
 
+function SessionListWorkspaceSelector() {
+  const [showPicker, setShowPicker] = createSignal(false);
+  let buttonRef: HTMLButtonElement | undefined;
+  let popoverRef: HTMLDivElement | undefined;
+
+  createEffect(() => {
+    if (!showPicker()) return;
+    const closeIfOutside = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (buttonRef?.contains(target) || popoverRef?.contains(target)) return;
+      setShowPicker(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setShowPicker(false);
+      buttonRef?.focus();
+    };
+    window.addEventListener('pointerdown', closeIfOutside, true);
+    window.addEventListener('keydown', closeOnEscape, true);
+    onCleanup(() => {
+      window.removeEventListener('pointerdown', closeIfOutside, true);
+      window.removeEventListener('keydown', closeOnEscape, true);
+    });
+  });
+
+  return (
+    <Show when={(state.editorContext.workspaceFolders?.length ?? 0) > 1}>
+      <div class="session-list-workspace-selector">
+        <span class="session-list-workspace-label">Workspace:</span>
+        <div class="session-list-workspace-picker">
+          <WorkspacePicker
+            buttonRef={(element) => {
+              buttonRef = element;
+            }}
+            popoverRef={(element) => {
+              popoverRef = element;
+            }}
+            folders={state.editorContext.workspaceFolders ?? []}
+            selectedPath={state.editorContext.workspacePath}
+            showIcon={false}
+            showPicker={showPicker()}
+            onToggle={() => setShowPicker((open) => !open)}
+            onSelect={(path) => {
+              setShowPicker(false);
+              setShowSessionPicker(true);
+              setManualWorkspaceSelection(true);
+              setState('pendingWorkspaceSelectionPath', path);
+              postMessage({ type: 'workspace/select', payload: { path } });
+            }}
+          />
+        </div>
+      </div>
+    </Show>
+  );
+}
+
 export function SessionListView(props: {
   sessionFilter?: SessionListFilter | null;
   subagentParentId?: string | null;
@@ -1512,6 +1571,7 @@ export function SessionListView(props: {
       }}
       onKeyDown={handleKeydown}
     >
+      <SessionListWorkspaceSelector />
       <Show when={shouldShowSearch()}>
         <div class="session-list-search">
           <input

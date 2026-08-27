@@ -5,7 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../../types';
 import type { WebviewMessage } from '../../../shared/protocol';
 import { client } from '../../lib/client';
-import { setShowSessionPicker, setState, showSessionPicker } from '../../lib/state';
+import {
+  setManualWorkspaceSelection,
+  setShowSessionPicker,
+  setState,
+  showSessionPicker,
+} from '../../lib/state';
 import { ActiveChatHeader, SessionPickerHeader } from './ChatHeader';
 import { SessionActionFeedback } from './SessionActionFeedback';
 
@@ -35,7 +40,7 @@ function session(overrides: Partial<Session> = {}): Session {
 
 function renderHeader(
   activeSubagentRootId: string | null = null,
-  options: { showActions?: boolean; onCreateSession?: () => void } = {}
+  options: { showActions?: boolean; onCreateSession?: () => void; failedCount?: number } = {}
 ) {
   cleanup = render(
     () => (
@@ -48,7 +53,7 @@ function renderHeader(
           activeSubagentRootId={activeSubagentRootId}
           activeSubagentCount={activeSubagentRootId ? 2 : 0}
           activeSubagentLabel="Subagents"
-          failedCount={0}
+          failedCount={options.failedCount ?? 0}
           attentionCount={0}
           planReadyCount={0}
           completedCount={0}
@@ -75,7 +80,10 @@ beforeEach(() => {
   setState('sessions', [session()]);
   setState('activeSessionId', 'session-1');
   setState('pinnedSessionIds', []);
+  setState('siblingWorkspaceAlerts', []);
   setShowSessionPicker(false);
+  setManualWorkspaceSelection(false);
+  setState('pendingWorkspaceSelectionPath', null);
   deleteSessionMock.mockReset();
   deleteSessionMock.mockResolvedValue(undefined);
   renameSessionMock.mockReset();
@@ -89,12 +97,16 @@ afterEach(() => {
   setState('sessions', []);
   setState('activeSessionId', null);
   setState('pinnedSessionIds', []);
+  setState('siblingWorkspaceAlerts', []);
   setShowSessionPicker(false);
+  setManualWorkspaceSelection(false);
+  setState('pendingWorkspaceSelectionPath', null);
+  Reflect.deleteProperty(window, '__sendToExtension');
   vi.restoreAllMocks();
 });
 
 describe('SessionActionFeedback icon state', () => {
-  it('uses sized adapter icons for errors and preserves dismissal behavior', () => {
+  it('uses an exclamation mark for errors and preserves dismissal behavior', () => {
     const onDismissError = vi.fn();
     cleanup = render(
       () => (
@@ -107,9 +119,10 @@ describe('SessionActionFeedback icon state', () => {
     expect(feedback?.classList).toContain('is-error');
     expect(feedback?.getAttribute('role')).toBe('alert');
 
-    const glyph = feedback?.querySelector<HTMLElement>('.session-action-feedback-glyph');
-    expect(glyph?.classList).toContain('ui-icon');
-    expect(glyph?.style.getPropertyValue('--ui-icon-width')).toBe('11px');
+    expect(feedback?.querySelector('.session-action-feedback-attention-glyph')?.textContent).toBe(
+      '!'
+    );
+    expect(feedback?.querySelector('.session-action-feedback-glyph')).toBeNull();
 
     const dismissIcon = feedback?.querySelector<HTMLElement>(
       '.session-action-feedback-dismiss-icon'
@@ -123,6 +136,73 @@ describe('SessionActionFeedback icon state', () => {
 });
 
 describe('ActiveChatHeader', () => {
+  it('opens a single sibling workspace alert directly before status indicators', () => {
+    const send = vi.fn<(message: WebviewMessage) => void>();
+    // SAFETY: The fixture provides the bridge callback used by postMessage.
+    (window as { __sendToExtension?: (message: WebviewMessage) => void }).__sendToExtension = send;
+    setState('siblingWorkspaceAlerts', [
+      { name: 'Repo B', path: '/repo-b', kinds: ['error'], count: 1 },
+    ]);
+    renderHeader(null, { showActions: true, failedCount: 1 });
+
+    const actions = container.querySelector('.chat-header-actions')!;
+    const alertButton = actions.querySelector<HTMLButtonElement>('.chat-header-sibling-alerts')!;
+    expect(actions.firstElementChild).toBe(alertButton);
+    alertButton.click();
+
+    expect(send).toHaveBeenCalledWith({
+      type: 'workspace/select',
+      payload: { path: '/repo-b' },
+    });
+    expect(showSessionPicker()).toBe(true);
+    expect(document.body.querySelector('.sibling-workspace-alerts-menu')).toBeNull();
+  });
+
+  it('offers a workspace dropdown when sibling events span multiple workspaces', async () => {
+    const send = vi.fn<(message: WebviewMessage) => void>();
+    // SAFETY: The fixture provides the bridge callback used by postMessage.
+    (window as { __sendToExtension?: (message: WebviewMessage) => void }).__sendToExtension = send;
+    setState('siblingWorkspaceAlerts', [
+      { name: 'Repo B', path: '/repo-b', kinds: ['attention'], count: 2 },
+      { name: 'Repo C', path: '/repo-c', kinds: ['plan-ready'], count: 1 },
+    ]);
+    renderHeader(null, { showActions: true });
+
+    container.querySelector<HTMLButtonElement>('.chat-header-sibling-alerts')!.click();
+    await Promise.resolve();
+
+    const menu = document.body.querySelector<HTMLElement>('.sibling-workspace-alerts-menu');
+    expect(menu?.getAttribute('role')).toBe('menu');
+    const repoC = Array.from(
+      menu?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []
+    ).find((button) => button.textContent?.includes('Repo C'))!;
+    menu?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect(document.activeElement).toBe(repoC);
+    menu?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    expect(document.activeElement).toBe(menu?.querySelector('[role="menuitem"]'));
+    menu?.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    expect(document.activeElement).toBe(repoC);
+    repoC.click();
+
+    expect(send).toHaveBeenCalledWith({
+      type: 'workspace/select',
+      payload: { path: '/repo-c' },
+    });
+    expect(document.body.querySelector('.sibling-workspace-alerts-menu')).toBeNull();
+  });
+
+  it('animates the sibling workspace notification icon when a new event arrives', () => {
+    renderHeader(null, { showActions: true });
+
+    setState('siblingWorkspaceAlerts', [
+      { name: 'Repo B', path: '/repo-b', kinds: ['attention'], count: 1 },
+    ]);
+
+    expect(
+      container.querySelector('.chat-header-sibling-alert-icon')?.classList.contains('is-ringing')
+    ).toBe(true);
+  });
+
   it('renders a plain new-chat tooltip without a modifier shortcut', async () => {
     vi.useFakeTimers();
     try {

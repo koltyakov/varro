@@ -56,7 +56,7 @@ Chat and context commands route through `SidebarProvider` and `ContextProvider`;
 
 - Orchestrates OpenCode startup, compatibility policy, restart safety, and workspace selection
 - Checks health before auto-starting
-- Connects to the OpenCode event stream at `/global/event` and filters events to the active workspace
+- Connects to the OpenCode event stream at `/global/event` and routes events to workspace-scoped endpoints
 - Emits `status` and `event` to the rest of the extension
 
 The implementation is split across focused components: `open-code-process.ts` owns CLI discovery, process, port, and update behavior; `open-code-transport.ts` owns REST and SSE transport; and `server-lifecycle.ts` coordinates lifecycle state.

@@ -2,6 +2,13 @@
 
 This changelog summarizes the main user-facing improvements in each Varro minor release line. Patch releases are consolidated into their parent minor version. Dates reflect the development history.
 
+## 0.27.x - August 2026
+
+- Added independent workspace selection for sidebar and editor chats in multi-root workspaces, with workspace choices preserved when editor chats reopen.
+- Added workspace controls to the session list and composer, with new prompts following the active editor's workspace until a folder is chosen manually.
+- Added sibling-workspace notifications for sessions that need attention, failed sessions, and completed plans, with quick switching to the relevant workspace.
+- Scoped chat context, OpenCode requests, session events, permissions, and recovery state to each view's selected workspace.
+
 ## 0.26.x - August 2026
 
 - Added editor-tab chats for working with sessions side by side, with terminal access and synchronized model, reasoning, permission, queue, and session state across Varro views.

@@ -230,6 +230,25 @@ describe('ProviderFileRefreshController', () => {
       expect(h.server.request).not.toHaveBeenCalled();
     });
 
+    it('restores the workspace directory for a pending scoped refresh', async () => {
+      const h = createHarness({
+        persisted: {
+          version: 4,
+          scope: 'workspace',
+          revalidateAuth: false,
+          source: 'config',
+          workspaceDirectories: ['/repo-b'],
+        },
+      });
+
+      emitStatusEvent(h.server, { state: 'running', url: 'http://127.0.0.1:4096' });
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(h.server.request).toHaveBeenCalledWith('POST', '/instance/dispose', undefined, {
+        directory: '/repo-b',
+      });
+    });
+
     it('completes a restored v1 pending refresh when the server reaches running state', async () => {
       const h = createHarness({ persisted: { version: 1, revalidateAuth: true } });
 
@@ -651,6 +670,22 @@ describe('ProviderFileRefreshController', () => {
   });
 
   describe('workspace refresh', () => {
+    it('disposes the workspace instance whose config changed', async () => {
+      const h = createHarness();
+      await activateWatching(h);
+      resetCalls(h);
+
+      await h.controller.refreshWorkspaceState(
+        routing('gpt-5-mini'),
+        routing('gpt-5-nano'),
+        '/repo-b'
+      );
+
+      expect(h.server.request).toHaveBeenCalledWith('POST', '/instance/dispose', undefined, {
+        directory: '/repo-b',
+      });
+    });
+
     it('queues a workspace reload until the server is idle', async () => {
       const h = createHarness();
       await activateWatching(h);
@@ -699,6 +734,30 @@ describe('ProviderFileRefreshController', () => {
 
       expect(h.server.request).not.toHaveBeenCalledWith('POST', '/instance/dispose');
       expect(h.server.restart).not.toHaveBeenCalled();
+    });
+
+    it('does not supersede a pending workspace refresh with an unchanged sibling update', async () => {
+      const h = createHarness();
+      await activateWatching(h);
+      resetCalls(h);
+      h.setIdle(false);
+
+      await h.controller.refreshWorkspaceState(
+        routing('gpt-5-mini'),
+        routing('gpt-5-nano'),
+        '/repo-a'
+      );
+      await h.controller.refreshWorkspaceState(
+        routing('gpt-5-mini'),
+        routing('gpt-5-mini'),
+        '/repo-b'
+      );
+      h.setIdle(true);
+      await vi.advanceTimersByTimeAsync(RETRY_MS);
+
+      expect(h.server.request).toHaveBeenCalledWith('POST', '/instance/dispose', undefined, {
+        directory: '/repo-a',
+      });
     });
 
     it('skips pending work when routing is unchanged', async () => {

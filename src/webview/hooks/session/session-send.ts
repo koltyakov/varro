@@ -111,6 +111,7 @@ type SessionSendOptions = SendFlowOptions & {
   queuedContext?: QueuedContextSnapshot;
   preserveComposer?: boolean;
   targetSessionId?: string;
+  workspaceDirectory?: string;
   queuedMessageDispatch?: { itemId: string; lease: number };
 };
 
@@ -140,11 +141,15 @@ type ClearedComposerAttachments = {
 type StateBoundSendDependencies = {
   getWorkspaceGeneration?(): number;
   createSession(initialPermissionMode: PermissionMode): Promise<string | null>;
-  ensureSessionPermission?(sessionId: string): Promise<boolean>;
+  ensureSessionPermission?(sessionId: string, options?: { directory?: string }): Promise<boolean>;
   clearPendingAbort(sessionId: string): void;
   resetTodoSync(): void;
   syncSessionMcps(sessionId: string): Promise<void | boolean | object>;
-  sendAsync(sessionId: string, body: SessionSendBody): Promise<void | boolean | object>;
+  sendAsync(
+    sessionId: string,
+    body: SessionSendBody,
+    options?: { directory?: string }
+  ): Promise<void | boolean | object>;
   syncSession(sessionId: string): Promise<void | boolean | object>;
   syncSessionMessages(sessionId: string): Promise<void | boolean | object>;
   recheckSessionStatus(sessionId: string): Promise<void | boolean | object>;
@@ -321,11 +326,17 @@ export function buildSessionSendBody(
     if (attachment.kind === 'file') {
       if (currentDocumentEnabled && isSamePath(attachment.file.path, activeFile?.path)) continue;
       const fileReference = getAttachmentReference(attachment.file, workspacePath);
+      const isExternalFile =
+        attachment.file.type === 'file' &&
+        !!workspacePath &&
+        getWorkspaceRelativePath(attachment.file.path, workspacePath) === null;
       parts.push({
         type: 'text',
         text: attachment.file.lineRanges?.length
           ? formatSelectionReference(fileReference, attachment.file.lineRanges)
-          : fileReference,
+          : isExternalFile
+            ? `[Attached file: ${fileReference}]`
+            : fileReference,
       });
       continue;
     }
@@ -933,7 +944,7 @@ export async function sendMessageWithDependencies(
     getSelectedAgent?(): string | null;
     applySelectedAgentForSession?(agent: string, sessionId: string): void;
     createSession(initialPermissionMode: PermissionMode): Promise<string | null>;
-    ensureSessionPermission?(sessionId: string): Promise<boolean>;
+    ensureSessionPermission?(sessionId: string, options?: { directory?: string }): Promise<boolean>;
     clearPendingAbort(sessionId: string): void;
     syncSessionMcps(sessionId: string): Promise<void | boolean | object>;
     buildSendPayload(
@@ -952,7 +963,11 @@ export async function sendMessageWithDependencies(
     beforeOptimisticPublish?(): void;
     appendOptimisticMessage?(entry: OptimisticMessageEntry): void;
     removeOptimisticMessage?(messageId: string): void;
-    sendAsync(sessionId: string, body: SessionSendBody): Promise<void | boolean | object>;
+    sendAsync(
+      sessionId: string,
+      body: SessionSendBody,
+      options?: { directory?: string }
+    ): Promise<void | boolean | object>;
     getMessageCount(sessionId: string): number;
     clearDroppedFiles(): void;
     clearTerminalSelection(): void;
@@ -987,11 +1002,25 @@ export async function sendMessageWithDependencies(
     }
   }
 
-  if (deps.ensureSessionPermission && !(await deps.ensureSessionPermission(sessionId)))
-    return false;
+  const isQueuedDispatch = !!options?.queuedMessageDispatch;
+  const currentWorkspaceDirectory = appStore.state.editorContext.workspacePath;
+  const isForeignQueuedDispatch =
+    isQueuedDispatch &&
+    !!options?.workspaceDirectory &&
+    (!currentWorkspaceDirectory ||
+      !isSamePath(options.workspaceDirectory, currentWorkspaceDirectory));
+
+  if (deps.ensureSessionPermission && !isQueuedDispatch) {
+    const permitted = options?.workspaceDirectory
+      ? await deps.ensureSessionPermission(sessionId, { directory: options.workspaceDirectory })
+      : await deps.ensureSessionPermission(sessionId);
+    if (!permitted) return false;
+  }
 
   deps.clearPendingAbort(sessionId);
-  await deps.syncSessionMcps(sessionId);
+  if (!isQueuedDispatch) {
+    await deps.syncSessionMcps(sessionId);
+  }
 
   const sendPayload = deps.buildSendPayload(sessionId, text, options);
   if (!sendPayload) return false;
@@ -1047,7 +1076,11 @@ export async function sendMessageWithDependencies(
   if (canClearComposerBeforeSend) deps.clearSentComposerAttachments?.();
 
   try {
-    await deps.sendAsync(sessionId, sendBody);
+    if (options?.workspaceDirectory) {
+      await deps.sendAsync(sessionId, sendBody, { directory: options.workspaceDirectory });
+    } else {
+      await deps.sendAsync(sessionId, sendBody);
+    }
     if (shouldClearComposer) {
       if (canClearComposerBeforeSend) {
         deps.commitSentComposerAttachments?.(sessionId);
@@ -1061,6 +1094,7 @@ export async function sendMessageWithDependencies(
         deps.postTerminalSelectionClear();
       }
     }
+    if (isForeignQueuedDispatch) return true;
     const syncResults = await Promise.allSettled([
       deps.syncSession(sessionId),
       deps.syncSessionMessages(sessionId),

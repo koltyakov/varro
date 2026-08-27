@@ -849,6 +849,18 @@ async function deleteSessionImmediately(id: string) {
 }
 
 export function resetWorkspaceDerivedState() {
+  const queuedTreeSessionIds = new Set(
+    appStore.state.queuedMessages.flatMap((message) => {
+      const rootId = getSessionTreeRootId(message.sessionId) || message.sessionId;
+      return [rootId, message.sessionId, ...getSessionTreeIds(rootId)];
+    })
+  );
+  const queuedWorkingStatuses = Object.fromEntries(
+    Object.entries(appStore.state.sessionStatus).filter(
+      ([sessionId, status]) =>
+        queuedTreeSessionIds.has(sessionId) && (status?.type === 'busy' || status?.type === 'retry')
+    )
+  );
   batch(() => {
     sessionStore.setActiveSessionId(null);
     sessionStore.persistActiveSessionId(null);
@@ -861,12 +873,11 @@ export function resetWorkspaceDerivedState() {
     appStore.setState('recycleBinEntries', []);
     appStore.setState('recycleBinLoadError', null);
     appStore.setState('messagesLoading', false);
-    appStore.setState('sessionStatus', reconcile({}));
+    appStore.setState('sessionStatus', reconcile(queuedWorkingStatuses));
     appStore.setState('permissions', []);
     appStore.setState('questions', []);
     appStore.setState('compactingSessionIds', []);
     appStore.setState('queuedMessageDispatchingId', null);
-    appStore.setState('failedQueuedMessageIds', []);
     setQueuedMessageEdit(null);
     appStore.setState('failedSessionIds', []);
     appStore.setState('failedSessionUpdatedAt', {});
@@ -874,7 +885,11 @@ export function resetWorkspaceDerivedState() {
     appStore.setState('sessionUsageLimits', reconcile({}));
     appStore.setState('interruptedSessionIds', []);
 
+    // Do not let the composer send catalog entries from the previous workspace.
     appStore.setState('providersLoaded', false);
+    appStore.setState('workspaceCatalogReloadPending', true);
+    appStore.setState('agentsLoaded', false);
+    appStore.setState('commandsLoaded', false);
     appStore.setState('agents', []);
     appStore.setState('allAgents', []);
     appStore.setState('commands', []);
@@ -882,17 +897,15 @@ export function resetWorkspaceDerivedState() {
     appStore.setState('providerLimits', reconcile({}));
     appStore.setState('mcpStatus', reconcile({}));
     appStore.setState('lspStatus', []);
-    appStore.setState('providerDefaults', reconcile({}));
     appStore.setState('sessionAutoPermissionCounts', reconcile({}));
     appStore.setState('sessionAutoPermissionActivity', reconcile({}));
     appStore.setState('autoPermissionCountsSince', Date.now());
     appStore.setState('providerAuthMethods', reconcile({}));
+    appStore.setState('providerDefaults', reconcile({}));
     appStore.setState('workspaceStatuses', []);
     appStore.setState('workspaceStatusSummary', reconcile({ entries: [] }));
     appStore.setState('draftSelectedMcps', null);
-    routingStore.setSelectedAgent(routingStore.getPersistedSelectedAgent(), {
-      persistGlobal: false,
-    });
+    routingStore.setSelectedAgent(null, { persistGlobal: false });
     routingStore.setSelectedModel(routingStore.getPersistedSelectedModel(), {
       persistGlobal: false,
     });
@@ -901,11 +914,9 @@ export function resetWorkspaceDerivedState() {
     composerStore.clearClipboardImages();
     composerStore.clearTerminalSelection();
     composerStore.clearAttachedDiagnostics();
-    composerStore.setInputText('');
     composerStore.resetPastedImageIndex();
     uiStore.stopLoading();
     uiStore.setError(null);
-    uiStore.setShowSessionPicker(false);
     uiStore.setShowModelPicker(false);
     uiStore.setShowModels(false);
   });
@@ -1976,13 +1987,13 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   const sessionSendOperations = new SessionSendOperations({
     getWorkspaceGeneration: () => workspaceGeneration,
     createSession: (initialPermissionMode) => createSession(undefined, initialPermissionMode),
-    ensureSessionPermission: (sessionId) =>
+    ensureSessionPermission: (sessionId, options) =>
       ensureSessionPermissionWithDependencies(
         {
           getSession: (id) => appStore.state.sessions.find((session) => session.id === id),
           buildPermissionRules: (mode) => getSessionPermissionRulesForMode(mode, 'update'),
           getPermissionMode: permissionsStore.getPermissionModeForSession,
-          updateSessionPermission: (id, input) => client.session.update(id, input),
+          updateSessionPermission: (id, input) => client.session.update(id, input, options),
           upsertSession,
           setError: uiStore.setError,
         },
@@ -1991,8 +2002,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     clearPendingAbort,
     resetTodoSync,
     syncSessionMcps,
-    sendAsync: async (sessionId, body) => {
-      const response = await client.session.sendAsync(sessionId, body);
+    sendAsync: async (sessionId, body, options) => {
+      const response = options
+        ? await client.session.sendAsync(sessionId, body, options)
+        : await client.session.sendAsync(sessionId, body);
       void repairSessionTitle(sessionId).catch((err) => logError('repairSessionTitle', err));
       return response;
     },
@@ -2481,6 +2494,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       queuedContext?: QueuedContextSnapshot;
       preserveComposer?: boolean;
       targetSessionId?: string;
+      workspaceDirectory?: string;
+      queuedMessageDispatch?: { itemId: string; lease: number };
     }
   ): Promise<boolean> {
     return await sessionSendOperations.sendMessage(text, options);

@@ -189,7 +189,7 @@ export function isSessionTreeStatusWorking(
   if (!sessionId) return false;
 
   const rootId = getSessionTreeRootId(sessionId) || sessionId;
-  const sessionIds = new Set(getSessionTreeIds(rootId));
+  const sessionIds = new Set([rootId, sessionId, ...getSessionTreeIds(rootId)]);
   return [...sessionIds].some((candidateSessionId) =>
     isSessionStatusWorking(statuses[candidateSessionId])
   );

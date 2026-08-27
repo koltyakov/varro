@@ -11,6 +11,7 @@ import {
   type RalphStatePayload,
   type RestartBlockedState,
   type ServerStatus,
+  type SiblingWorkspaceAlert,
   type WebviewThemeKind,
 } from './protocol';
 import { MAX_NATIVE_PDF_TOTAL_BYTES, isNativePdfAttachment } from './native-pdf';
@@ -37,6 +38,7 @@ const KNOWN_TYPES = new Set<string>([
   'vscode/open-result',
   'api/response',
   'queued-messages/sync',
+  'queued-messages/session-status',
   'queued-messages/claim-result',
   'permission-modes/sync',
   'session-models/sync',
@@ -44,6 +46,7 @@ const KNOWN_TYPES = new Set<string>([
   'session-plan-state/update',
   'model-preferences/sync',
   'editor-tabs/state',
+  'sibling-workspace-alerts/update',
   'permission-automation/update',
   'permission/actionable',
   'recovery/interrupted-sessions',
@@ -128,6 +131,11 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
     case 'context/update': {
       const payload = asRecord(record.payload);
       return isEditorContext(payload) ? { type, payload } : null;
+    }
+
+    case 'sibling-workspace-alerts/update': {
+      const payload = parseSiblingWorkspaceAlerts(record.payload);
+      return payload ? { type, payload } : null;
     }
 
     case 'terminal-selection/update': {
@@ -273,6 +281,17 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
           >['payload']['messages'],
         },
       };
+    }
+
+    case 'queued-messages/session-status': {
+      const payload = asRecord(record.payload);
+      if (
+        !isString(payload?.sessionId) ||
+        (payload.status !== 'busy' && payload.status !== 'idle')
+      ) {
+        return null;
+      }
+      return { type, payload: { sessionId: payload.sessionId, status: payload.status } };
     }
 
     case 'queued-messages/claim-result': {
@@ -544,6 +563,13 @@ export function isEditorContext<T>(value: T): value is T & EditorContext {
   const record = asRecord(value);
   if (!record) return false;
   if (record.workspacePath !== null && !isString(record.workspacePath)) return false;
+  if (
+    record.activeWorkspacePath !== undefined &&
+    record.activeWorkspacePath !== null &&
+    !isString(record.activeWorkspacePath)
+  ) {
+    return false;
+  }
   if (!isActiveFile(record.activeFile)) return false;
   if (!isSelection(record.selection)) return false;
   if (record.workspaceFolders !== undefined && !isWorkspaceFolders(record.workspaceFolders)) {
@@ -570,6 +596,36 @@ function isWorkspaceFolders<T>(value: T): boolean {
       return !!record && isString(record.name) && isString(record.path);
     })
   );
+}
+
+function parseSiblingWorkspaceAlerts<T>(value: T): SiblingWorkspaceAlert[] | null {
+  if (!Array.isArray(value) || value.length > 100) return null;
+  const alerts: SiblingWorkspaceAlert[] = [];
+  for (const item of value) {
+    const record = asRecord(item);
+    if (
+      !record ||
+      !isString(record.name) ||
+      !isString(record.path) ||
+      !isNumber(record.count) ||
+      !Number.isSafeInteger(record.count) ||
+      record.count < 1 ||
+      !Array.isArray(record.kinds) ||
+      record.kinds.length < 1 ||
+      record.kinds.length > 3 ||
+      new Set(record.kinds).size !== record.kinds.length ||
+      record.kinds.some((kind) => kind !== 'attention' && kind !== 'error' && kind !== 'plan-ready')
+    ) {
+      return null;
+    }
+    alerts.push({
+      name: record.name,
+      path: record.path,
+      count: record.count,
+      kinds: record.kinds,
+    });
+  }
+  return alerts;
 }
 
 function isEditorText<T>(value: T): boolean {

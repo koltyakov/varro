@@ -1,6 +1,7 @@
 /* oxlint-disable anti-slop/no-module-mocking, anti-slop/no-object-parameters, anti-slop/no-unknown-parameters, anti-slop/require-safety-comment-for-type-assertion -- This support module supplies extension-host import fakes and protocol-shaped fixtures shared by sidebar tests. */
 import { beforeEach, vi } from 'vitest';
 import type * as FsPromises from 'fs/promises';
+import type { EditorContext } from '../shared/protocol';
 
 const mocks = vi.hoisted(() => ({
   configurationValues: new Map<string, unknown>(),
@@ -174,19 +175,24 @@ export function createWorkspaceState() {
 }
 
 export function createContextProvider() {
-  return {
-    context: {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    },
+  const context: EditorContext = {
+    workspacePath: '/repo',
+    activeFile: null,
+    selection: null,
+    diagnostics: [],
+  };
+  const provider = {
+    context,
     terminalSelection: null,
     getOpenWorkspaceRoot: vi.fn((path: string) => path),
     clearTerminalSelection: vi.fn(),
     readFile: vi.fn(() => Promise.resolve()),
     openPath: vi.fn(() => Promise.resolve()),
+    selectWorkspace: vi.fn(async (path: string) => {
+      provider.context.workspacePath = path;
+    }),
   };
+  return provider;
 }
 
 export function createServer(

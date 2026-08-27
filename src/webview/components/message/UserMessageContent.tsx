@@ -1510,7 +1510,7 @@ function UserMessageImageTiles(props: {
                   props.onOpenPreview(index());
                 }}
               >
-                <img src={part.url} alt={displayName()} />
+                <InlineMessageImage src={part.url} alt={displayName()} allowCover={false} />
               </button>
             );
           }}

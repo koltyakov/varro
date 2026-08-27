@@ -114,13 +114,13 @@ plain and v2 `properties.info` wrappers. Do not update only one event shape.
 
 ### Multi-Webview Ownership
 
-Every ready webview can receive the same OpenCode permission event, but only one may run automatic
-permission work. The extension host elects that endpoint and publishes an owner flag with a
-generation lease. A ready sidebar is preferred; otherwise, the current ready owner or the next ready
-editor owns automation.
+Permission events and snapshots are routed to webviews in the same workspace. Only one ready
+webview per workspace may run automatic permission work. The extension host elects those endpoints
+and publishes owner flags with a shared generation lease. A ready sidebar is preferred in its
+workspace; otherwise, the current ready owner or the next ready editor owns automation there.
 
-- Only the elected owner may auto-accept edits, run the model judge, answer full-mode requests, or
-  automatically process a pending-permission snapshot.
+- Only the elected owner for a workspace may auto-accept edits, run the model judge, answer full-mode
+  requests, or automatically process that workspace's pending-permission snapshot.
 - Automatic judge and reply API requests carry the lease they started under. The host rejects a
   request when that endpoint no longer owns the matching lease.
 - Manual permission replies do not use the automation lease.
@@ -128,7 +128,7 @@ editor owns automation.
   actionable and notifies the current owner so it can reconcile the pending snapshot.
 - Losing ownership must not remove the visible fallback. A late automatic decision still needs a
   current lease before its reply can reach OpenCode.
-- Interrupted-session recovery is claimed by the elected endpoint, not by every webview that loads.
+- Interrupted-session recovery is claimed by one elected endpoint, not by every webview that loads.
 
 The lease check belongs in the extension host, not only in webview state. Multiple runtimes can be
 alive during editor visibility changes, and a stale runtime cannot be trusted to stop before an

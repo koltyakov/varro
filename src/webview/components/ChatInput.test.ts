@@ -25,6 +25,7 @@ import {
   resetPastedImageIndex,
   resetDefaultAppState,
   setQueuedMessageEdit,
+  setManualWorkspaceSelection,
 } from '../lib/state';
 import { client } from '../lib/client';
 import { resetMessageEditState, startEditingMessage } from '../lib/message-edit-state';
@@ -196,6 +197,9 @@ afterEach(() => {
   setIsLoading(false);
   setShowChangedFiles(false);
   setShowModelPicker(false);
+  setManualWorkspaceSelection(false);
+  setState('pendingWorkspaceSelectionPath', null);
+  setState('workspaceCatalogReloadPending', false);
   resetProviderConnectionState();
   setState('activeSessionId', null);
   setState('messagesLoading', false);
@@ -226,6 +230,7 @@ afterEach(() => {
   setState('attachedDiagnostics', null);
   setState('editorContext', {
     workspacePath: null,
+    activeWorkspacePath: null,
     activeFile: null,
     selection: null,
     diagnostics: [],
@@ -387,6 +392,17 @@ async function flushAsyncWork(count = 16) {
   for (let index = 0; index < count; index += 1) {
     await Promise.resolve();
   }
+}
+
+function postQueuedSessionStatus(sessionId: string, status: 'busy' | 'idle') {
+  window.dispatchEvent(
+    new MessageEvent('message', {
+      data: {
+        type: 'queued-messages/session-status',
+        payload: { sessionId, status },
+      },
+    })
+  );
 }
 
 async function waitForDropdown() {
@@ -2592,7 +2608,6 @@ describe('ChatInput', () => {
       selection: { startLine: 6, endLine: 26 },
       diagnostics: [],
     });
-
     cleanup = render(() => ChatInput(), container!);
 
     const queueButton = container?.querySelector<HTMLButtonElement>(
@@ -2613,12 +2628,15 @@ describe('ChatInput', () => {
     expect(state.queuedMessages[0]?.queuedContext).toEqual({
       editorContext: {
         workspacePath: '/repo',
+        workspaceFolders: undefined,
+        activeWorkspacePath: null,
         activeFile: {
           path: '/repo/src/menus.css',
           relativePath: 'src/menus.css',
           language: 'css',
         },
         selection: { startLine: 6, endLine: 26 },
+        editorText: undefined,
         diagnostics: [],
       },
       currentDocumentEnabled: true,
@@ -2750,6 +2768,100 @@ describe('ChatInput', () => {
       queuedMessageDispatch: { itemId: 'q1', lease: expect.any(Number) },
     });
     expect(state.activeSessionId).toBe('session-1');
+    expect(state.queuedMessages).toEqual([]);
+  });
+
+  it('dispatches a queued message through its original workspace after switching workspaces', async () => {
+    vi.useFakeTimers();
+    setState('activeSessionId', 'session-2');
+    setState('editorContext', 'workspacePath', '/repo-b');
+    setState('sessions', [
+      session('session-2', 1, { title: 'Current workspace', directory: '/repo-b' }),
+    ]);
+    setState('queuedMessages', [
+      {
+        id: 'q1',
+        sessionId: 'session-1',
+        text: 'Continue in the original workspace',
+        queuedContext: {
+          editorContext: {
+            workspacePath: '/repo-a',
+            activeFile: null,
+            selection: null,
+            diagnostics: [],
+          },
+          currentDocumentEnabled: false,
+        },
+      },
+    ]);
+    sendMessageMock.mockResolvedValue(true);
+
+    cleanup = render(() => ChatInput(), container!);
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+
+    expect(sendMessageMock).toHaveBeenCalledWith(
+      'Continue in the original workspace',
+      expect.objectContaining({
+        targetSessionId: 'session-1',
+        workspaceDirectory: '/repo-a',
+      })
+    );
+    expect(state.activeSessionId).toBe('session-2');
+    expect(state.queuedMessages).toEqual([]);
+  });
+
+  it('dispatches sibling workspace queue items one at a time after each idle event', async () => {
+    vi.useFakeTimers();
+    setState('activeSessionId', 'session-2');
+    setState('editorContext', 'workspacePath', '/repo-b');
+    setState('sessions', [session('session-2', 1, { directory: '/repo-b' })]);
+    setState('sessionStatus', { 'session-1': { type: 'busy' }, 'session-2': { type: 'idle' } });
+    const queuedContext = {
+      editorContext: {
+        workspacePath: '/repo-a',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+      currentDocumentEnabled: false,
+    };
+    setState('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'First sibling prompt', queuedContext },
+      { id: 'q2', sessionId: 'session-1', text: 'Second sibling prompt', queuedContext },
+    ]);
+    sendMessageMock.mockImplementation(async (_text, options) => {
+      if (options?.targetSessionId) {
+        setState('sessionStatus', options.targetSessionId, { type: 'busy' });
+      }
+      return true;
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    setState('sessionStatus', 'session-1', { type: 'idle' });
+    postQueuedSessionStatus('session-1', 'idle');
+    await flushAsyncWork();
+
+    expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual(['First sibling prompt']);
+    expect(state.queuedMessages.map((message) => message.id)).toEqual(['q2']);
+
+    setState('sessionStatus', 'session-1', { type: 'idle' });
+    postQueuedSessionStatus('session-1', 'idle');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+
+    postQueuedSessionStatus('session-1', 'busy');
+    setState('sessionStatus', 'session-1', { type: 'busy' });
+    setState('sessionStatus', 'session-1', { type: 'idle' });
+    postQueuedSessionStatus('session-1', 'idle');
+    await flushAsyncWork();
+
+    expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual([
+      'First sibling prompt',
+      'Second sibling prompt',
+    ]);
     expect(state.queuedMessages).toEqual([]);
   });
 
@@ -3504,6 +3616,8 @@ describe('ChatInput', () => {
       '[aria-label="Retry queued message"]'
     );
     expect(retry?.disabled).toBe(false);
+    expect(retry?.querySelector('svg')?.getAttribute('width')).toBe('14');
+    expect(retry?.querySelector('svg')?.getAttribute('height')).toBe('14');
     retry?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await flushAsyncWork();
 
@@ -4283,7 +4397,209 @@ describe('ChatInput', () => {
     ]);
   });
 
-  it('does not submit on Enter while a workspace switch is pending', async () => {
+  it('shows a read-only workspace dropdown in an active chat', () => {
+    setState('activeSessionId', 'session-1');
+    setState('editorContext', {
+      workspacePath: '/repo-a',
+      workspaceFolders: [
+        { name: 'Repo A', path: '/repo-a' },
+        { name: 'Repo B', path: '/repo-b' },
+      ],
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    setState('messages', [assistantMessageEntry({ input: 100, output: 20 })]);
+
+    cleanup = render(() => ChatInput(), container!);
+
+    container
+      ?.querySelector<HTMLButtonElement>('.workspace-picker-button')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(container?.querySelector('.workspace-popover-notice')?.textContent).toContain(
+      "Workspace can't be changed in an active chat."
+    );
+    const option = container?.querySelector<HTMLButtonElement>('[data-workspace-path="/repo-b"]');
+    expect(option?.disabled).toBe(true);
+    option?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(container?.querySelector('.workspace-popover')).not.toBeNull();
+  });
+
+  it('allows workspace switching in an active new chat with no messages', () => {
+    setState('activeSessionId', 'session-1');
+    setState('editorContext', {
+      workspacePath: '/repo-a',
+      workspaceFolders: [
+        { name: 'Repo A', path: '/repo-a' },
+        { name: 'Repo B', path: '/repo-b' },
+      ],
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+    container
+      ?.querySelector<HTMLButtonElement>('.workspace-picker-button')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(container?.querySelector('.workspace-popover-notice')).toBeNull();
+    const option = container?.querySelector<HTMLButtonElement>('[data-workspace-path="/repo-b"]');
+    expect(option?.disabled).toBe(false);
+    option?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(container?.querySelector('.workspace-popover')).toBeNull();
+  });
+
+  it('selects the active file workspace for an empty new chat', async () => {
+    const messages: WebviewMessage[] = [];
+    fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension = (
+      message
+    ) => messages.push(message);
+    setState('editorContext', {
+      workspacePath: '/repo-a',
+      workspaceFolders: [
+        { name: 'Repo A', path: '/repo-a' },
+        { name: 'Repo B', path: '/repo-b' },
+      ],
+      activeWorkspacePath: '/repo-b',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(() => ChatInput({ newSession: true }), container!);
+    await flushAsyncWork();
+
+    expect(messages).toContainEqual({
+      type: 'workspace/select',
+      payload: { path: '/repo-b' },
+    });
+  });
+
+  it('does not override a workspace selected outside the composer', async () => {
+    const messages: WebviewMessage[] = [];
+    fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension = (
+      message
+    ) => messages.push(message);
+    setManualWorkspaceSelection(true);
+    setState('editorContext', {
+      workspacePath: '/repo-b',
+      workspaceFolders: [
+        { name: 'Repo A', path: '/repo-a' },
+        { name: 'Repo B', path: '/repo-b' },
+      ],
+      activeWorkspacePath: '/repo-a',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(() => ChatInput({ newSession: true }), container!);
+    await flushAsyncWork();
+
+    expect(messages).not.toContainEqual(expect.objectContaining({ type: 'workspace/select' }));
+  });
+
+  it('waits for a typed new-chat draft to become empty before selecting the active workspace', async () => {
+    const messages: WebviewMessage[] = [];
+    fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension = (
+      message
+    ) => messages.push(message);
+    setInputText('Keep this workspace');
+    setState('editorContext', {
+      workspacePath: '/repo-a',
+      workspaceFolders: [
+        { name: 'Repo A', path: '/repo-a' },
+        { name: 'Repo B', path: '/repo-b' },
+      ],
+      activeWorkspacePath: '/repo-b',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(() => ChatInput({ newSession: true }), container!);
+    await flushAsyncWork();
+    expect(messages).not.toContainEqual(expect.objectContaining({ type: 'workspace/select' }));
+
+    setInputText('');
+    await flushAsyncWork();
+
+    expect(messages).toContainEqual({
+      type: 'workspace/select',
+      payload: { path: '/repo-b' },
+    });
+  });
+
+  it('preserves a manual composer workspace until the draft becomes empty again', async () => {
+    const messages: WebviewMessage[] = [];
+    fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension = (
+      message
+    ) => messages.push(message);
+    setState('editorContext', {
+      workspacePath: '/repo-a',
+      workspaceFolders: [
+        { name: 'Repo A', path: '/repo-a' },
+        { name: 'Repo B', path: '/repo-b' },
+      ],
+      activeWorkspacePath: '/repo-a',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    cleanup = render(() => ChatInput({ newSession: true }), container!);
+
+    container
+      ?.querySelector<HTMLButtonElement>('.workspace-picker-button')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    container
+      ?.querySelector<HTMLButtonElement>('button[data-workspace-path="/repo-b"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    setState('editorContext', 'workspacePath', '/repo-b');
+    setState('editorContext', 'activeWorkspacePath', '/repo-a');
+    await flushAsyncWork();
+
+    expect(messages.filter((message) => message.type === 'workspace/select')).toEqual([
+      { type: 'workspace/select', payload: { path: '/repo-b' } },
+    ]);
+
+    setInputText('Reset the manual choice');
+    setInputText('');
+    await flushAsyncWork();
+
+    expect(messages.filter((message) => message.type === 'workspace/select')).toEqual([
+      { type: 'workspace/select', payload: { path: '/repo-b' } },
+      { type: 'workspace/select', payload: { path: '/repo-a' } },
+    ]);
+  });
+
+  it('does not switch an established chat to the active file workspace', async () => {
+    const messages: WebviewMessage[] = [];
+    fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension = (
+      message
+    ) => messages.push(message);
+    setState('activeSessionId', 'session-1');
+    setState('messages', [assistantMessageEntry({ input: 100, output: 20 })]);
+    setState('editorContext', {
+      workspacePath: '/repo-a',
+      workspaceFolders: [
+        { name: 'Repo A', path: '/repo-a' },
+        { name: 'Repo B', path: '/repo-b' },
+      ],
+      activeWorkspacePath: '/repo-b',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+    await flushAsyncWork();
+
+    expect(messages).not.toContainEqual(expect.objectContaining({ type: 'workspace/select' }));
+  });
+
+  it('does not submit a new chat on Enter while a workspace switch is pending', async () => {
     setState('activeSessionId', 'session-1');
     setState('editorContext', {
       workspacePath: '/repo-a',
@@ -4297,13 +4613,33 @@ describe('ChatInput', () => {
     });
     setInputText('Send after switching');
 
-    cleanup = render(() => ChatInput(), container!);
+    cleanup = render(() => ChatInput({ newSession: true }), container!);
+
+    const mainRow = container?.querySelector('.toolbar-main');
+    const metaLeftButtons = container?.querySelectorAll<HTMLButtonElement>(
+      '.toolbar-meta-left button'
+    );
+    expect(mainRow?.querySelector('.workspace-picker-button')).toBeNull();
+    expect(metaLeftButtons?.[0]?.getAttribute('aria-label')).toContain(
+      'Selected workspace: Repo A'
+    );
+    expect(metaLeftButtons?.[0]?.classList.contains('workspace-picker-button')).toBe(true);
+    expect(metaLeftButtons?.[1]?.classList.contains('permission-mode-button')).toBe(true);
 
     container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Select workspace folder"]')
+      ?.querySelector<HTMLButtonElement>('.workspace-picker-button')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(container?.querySelector('.chat-input-shell')?.className).toContain(
+      'showing-floating-popover'
+    );
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(container?.querySelector('.workspace-popover')).toBeNull();
+
+    container
+      ?.querySelector<HTMLButtonElement>('.workspace-picker-button')
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     container
-      ?.querySelector<HTMLButtonElement>('button[title="/repo-b"]')
+      ?.querySelector<HTMLButtonElement>('button[data-workspace-path="/repo-b"]')
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
@@ -4317,6 +4653,23 @@ describe('ChatInput', () => {
 
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(inputText()).toBe('Send after switching');
+  });
+
+  it('keeps a preserved draft disabled until workspace catalogs reload', async () => {
+    setState('workspaceCatalogReloadPending', true);
+    setInputText('Preserved draft');
+    cleanup = render(() => ChatInput({ newSession: true }), container!);
+
+    expect(
+      container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')?.disabled
+    ).toBe(true);
+    container
+      ?.querySelector<HTMLDivElement>('.rich-composer')
+      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flushAsyncWork();
+
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(inputText()).toBe('Preserved draft');
   });
 
   it('still selects a completion on Enter before queueing a pending-request message', async () => {
@@ -4410,7 +4763,7 @@ describe('ChatInput', () => {
     expect(state.clipboardImages).toEqual([expect.objectContaining({ id: 'permission-image' })]);
   });
 
-  it('runs /abort with attachments while a workspace switch blocks normal sends', async () => {
+  it('runs /abort with attachments while a new-chat workspace switch blocks normal sends', async () => {
     setState('activeSessionId', 'session-1');
     setState('editorContext', {
       workspacePath: '/repo-a',
@@ -4427,12 +4780,12 @@ describe('ChatInput', () => {
     ]);
     setInputText('/abort');
 
-    cleanup = render(() => ChatInput(), container!);
+    cleanup = render(() => ChatInput({ newSession: true }), container!);
     container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Select workspace folder"]')
+      ?.querySelector<HTMLButtonElement>('.workspace-picker-button')
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     container
-      ?.querySelector<HTMLButtonElement>('button[title="/repo-b"]')
+      ?.querySelector<HTMLButtonElement>('button[data-workspace-path="/repo-b"]')
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
     container
@@ -6683,6 +7036,12 @@ describe('ChatInput', () => {
     );
 
     setState('selectedModel', { providerID: 'openai', modelID: 'gpt-5.5', variant: 'low' });
+    expect(container?.querySelector('.model-selection-cost-warning')).not.toBeNull();
+
+    setState('sessionStatus', 'session-1', { type: 'busy' });
+    expect(container?.querySelector('.model-selection-cost-warning')).toBeNull();
+
+    setState('sessionStatus', 'session-1', { type: 'idle' });
     expect(container?.querySelector('.model-selection-cost-warning')).not.toBeNull();
 
     setState('selectedModel', {

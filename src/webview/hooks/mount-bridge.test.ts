@@ -144,6 +144,18 @@ function createMessageDependencies(
 }
 
 describe('mount bridge helpers', () => {
+  it('applies sibling workspace alert snapshots', () => {
+    const setSiblingWorkspaceAlerts = vi.fn();
+    const alerts = [{ name: 'Repo B', path: '/repo-b', kinds: ['attention' as const], count: 1 }];
+
+    handleExtensionMessageWithDependencies(
+      createMessageDependencies({ setSiblingWorkspaceAlerts }),
+      { type: 'sibling-workspace-alerts/update', payload: alerts }
+    );
+
+    expect(setSiblingWorkspaceAlerts).toHaveBeenCalledWith(alerts);
+  });
+
   it('applies host model preferences to the current webview', () => {
     const preferences = {
       modelVariantSelections: {},

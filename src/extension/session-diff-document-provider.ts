@@ -29,24 +29,25 @@ export class SessionDiffDocumentProvider implements vscode.TextDocumentContentPr
     return this.contents.get(uri.toString()) ?? '';
   }
 
-  async open(sessionID: string, requestedPath: string): Promise<SessionDiffOpenResult> {
+  async open(
+    sessionID: string,
+    requestedPath: string,
+    server: Pick<OpenCodeServer, 'getWorkspaceCwd' | 'request'> = this.server
+  ): Promise<SessionDiffOpenResult> {
     if (this.disposed) return 'unavailable';
-    const workspaceIdentity = normalizeWorkspaceIdentity(this.server.getWorkspaceCwd());
+    const workspaceIdentity = normalizeWorkspaceIdentity(server.getWorkspaceCwd());
     const workspaceChanged = () =>
       Boolean(
         workspaceIdentity &&
-        normalizeWorkspaceIdentity(this.server.getWorkspaceCwd()) !== workspaceIdentity
+        normalizeWorkspaceIdentity(server.getWorkspaceCwd()) !== workspaceIdentity
       );
     try {
-      await assertSessionInCurrentWorkspace(this.server, sessionID);
+      await assertSessionInCurrentWorkspace(server, sessionID);
     } catch {
       return 'forbidden';
     }
     try {
-      const value = await this.server.request(
-        'GET',
-        `/session/${encodeURIComponent(sessionID)}/diff`
-      );
+      const value = await server.request('GET', `/session/${encodeURIComponent(sessionID)}/diff`);
       if (workspaceChanged()) return 'forbidden';
       if (this.disposed || !Array.isArray(value)) return 'unavailable';
       const diff = findFileDiff(value, requestedPath);

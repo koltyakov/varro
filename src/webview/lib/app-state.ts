@@ -37,6 +37,7 @@ import type {
   RecycleBinEntry,
   RestartBlockedState,
   ServerStatus,
+  SiblingWorkspaceAlert,
   WebviewThemeKind,
   WorkspaceStatusEventSummary,
 } from '../../shared/protocol';
@@ -101,6 +102,10 @@ export interface AppState {
   serverStatus: ServerStatus;
   restartBlocked: RestartBlockedState | null;
   providersLoaded: boolean;
+  workspaceCatalogReloadPending: boolean;
+  agentsLoaded: boolean;
+  commandsLoaded: boolean;
+  pendingWorkspaceSelectionPath: string | null;
   providerRefreshPending: boolean;
   editorContext: EditorContext;
   terminalSelection: { text: string; terminalName: string } | null;
@@ -124,6 +129,7 @@ export interface AppState {
   editorTabsOpen: boolean;
   /** Root session ids currently visible in editor tabs. */
   editorSessionIds: string[];
+  siblingWorkspaceAlerts: SiblingWorkspaceAlert[];
   currentDocumentEnabledBySession: Record<string, boolean>;
   sessionStatus: Record<string, SessionStatus>;
   messages: MessageEntry[];
@@ -221,6 +227,8 @@ export interface AppStateInstance {
   setConnectionInitialized: Setter<boolean>;
   showSessionPicker: Accessor<boolean>;
   setShowSessionPicker: Setter<boolean>;
+  manualWorkspaceSelection: Accessor<boolean>;
+  setManualWorkspaceSelection: Setter<boolean>;
   showModelPicker: Accessor<boolean>;
   setShowModelPicker: Setter<boolean>;
   showModels: Accessor<boolean>;
@@ -325,6 +333,10 @@ export function createAppState(): AppStateInstance {
     serverStatus: initialWebviewState.serverStatus ?? { state: 'stopped' },
     restartBlocked: null,
     providersLoaded: false,
+    workspaceCatalogReloadPending: false,
+    agentsLoaded: false,
+    commandsLoaded: false,
+    pendingWorkspaceSelectionPath: null,
     providerRefreshPending: false,
     editorContext: initialWebviewState.editorContext ?? defaultEditorContext,
     terminalSelection: discardQueuedEditDraft
@@ -351,6 +363,7 @@ export function createAppState(): AppStateInstance {
     activeSessionId: null,
     editorTabsOpen: initialWebviewState.editorTabsOpen ?? false,
     editorSessionIds: initialWebviewState.editorSessionIds ?? [],
+    siblingWorkspaceAlerts: initialWebviewState.siblingWorkspaceAlerts ?? [],
     currentDocumentEnabledBySession: {},
     sessionStatus: {},
     messages: [],
@@ -458,6 +471,7 @@ export function createAppState(): AppStateInstance {
   };
   const [connectionInitialized, setConnectionInitialized] = createSignal(false);
   const [showSessionPicker, setShowSessionPicker] = createSignal(false);
+  const [manualWorkspaceSelection, setManualWorkspaceSelection] = createSignal(false);
   const [showModelPicker, setShowModelPicker] = createSignal(false);
   const [showModels, setShowModels] = createSignal(false);
   const [composerFocusKey, setComposerFocusKey] = createSignal(0);
@@ -532,6 +546,8 @@ export function createAppState(): AppStateInstance {
     setConnectionInitialized,
     showSessionPicker,
     setShowSessionPicker,
+    manualWorkspaceSelection,
+    setManualWorkspaceSelection,
     showModelPicker,
     setShowModelPicker,
     showModels,
@@ -619,6 +635,8 @@ export const connectionInitialized = defaultAppState.connectionInitialized;
 export const setConnectionInitialized = defaultAppState.setConnectionInitialized;
 export const showSessionPicker = defaultAppState.showSessionPicker;
 export const setShowSessionPicker = defaultAppState.setShowSessionPicker;
+export const manualWorkspaceSelection = defaultAppState.manualWorkspaceSelection;
+export const setManualWorkspaceSelection = defaultAppState.setManualWorkspaceSelection;
 
 export const showModelPicker = defaultAppState.showModelPicker;
 export const setShowModelPicker = defaultAppState.setShowModelPicker;
@@ -673,6 +691,7 @@ export function resetDefaultAppState() {
   setError(next.error());
   setConnectionInitialized(next.connectionInitialized());
   setShowSessionPicker(next.showSessionPicker());
+  setManualWorkspaceSelection(next.manualWorkspaceSelection());
   setShowModelPicker(next.showModelPicker());
   setShowModels(next.showModels());
   setComposerFocusKey(next.composerFocusKey());

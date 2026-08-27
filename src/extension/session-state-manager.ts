@@ -16,6 +16,13 @@ import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/works
 import { logger } from './logger';
 
 export type PendingAttentionKind = 'permission' | 'question';
+export type SiblingSessionAlertKind = 'attention' | 'error' | 'plan-ready';
+export type SiblingSessionAlertCandidate = {
+  sessionID: string;
+  rootSessionID: string;
+  directory: string;
+  kinds: SiblingSessionAlertKind[];
+};
 export type PermissionAskEventType = 'permission.asked' | 'permission.v2.asked';
 
 export type PendingAttentionEntry = {
@@ -31,6 +38,7 @@ export type PendingAttentionReconciliation = {
   readonly kind: PendingAttentionKind;
   readonly mutationRevision: number;
   readonly requestGeneration: number;
+  readonly workspacePath?: string;
 };
 
 export type InterruptedSessionSnapshot = {
@@ -144,10 +152,10 @@ export class SessionStateManager {
   };
   private readonly reconciledPendingAttentionRequestGenerations: Record<
     PendingAttentionKind,
-    number
+    Map<string, number>
   > = {
-    permission: 0,
-    question: 0,
+    permission: new Map(),
+    question: new Map(),
   };
   private readonly recoveryDeletedSessionIDs = new Set<string>();
   private readonly unclaimedInterruptedSessions = new Map<string, InterruptedSessionSnapshot>();
@@ -175,6 +183,10 @@ export class SessionStateManager {
 
   get completed(): ReadonlySet<string> {
     return this.completedSessions;
+  }
+
+  get failed(): ReadonlySet<string> {
+    return this.failedSessions;
   }
 
   get pending(): ReadonlyMap<string, PendingAttentionEntry> {
@@ -235,6 +247,57 @@ export class SessionStateManager {
     return this.getSessionMetadata(this.sessionAgents, sessionID) === 'plan';
   }
 
+  directoryFor(sessionID: string): string | undefined {
+    const directory = this.getSessionMetadata(this.sessionDirectories, sessionID);
+    if (directory) return directory;
+    const rootSessionID = this.rootSessionIdFor(sessionID);
+    return rootSessionID === sessionID
+      ? undefined
+      : this.getSessionMetadata(this.sessionDirectories, rootSessionID);
+  }
+
+  getSiblingAlertCandidates(): SiblingSessionAlertCandidate[] {
+    const candidates = new Map<
+      string,
+      {
+        sessionID: string;
+        rootSessionID: string;
+        directory: string;
+        kinds: Set<SiblingSessionAlertKind>;
+      }
+    >();
+    const add = (sessionID: string, kind: SiblingSessionAlertKind) => {
+      const rootSessionID = this.rootSessionIdFor(sessionID);
+      const directory = this.directoryFor(sessionID);
+      if (!directory) return;
+      const existing = candidates.get(rootSessionID);
+      if (existing) {
+        existing.kinds.add(kind);
+        return;
+      }
+      candidates.set(rootSessionID, {
+        sessionID,
+        rootSessionID,
+        directory,
+        kinds: new Set([kind]),
+      });
+    };
+
+    for (const request of this.pendingForUser.values()) add(request.sessionID, 'attention');
+    for (const sessionID of this.failedSessions) add(sessionID, 'error');
+    for (const sessionID of this.completedSessions) {
+      if (this.isPlanSession(sessionID)) add(sessionID, 'plan-ready');
+    }
+
+    return [...candidates.values()]
+      .map((candidate) => ({ ...candidate, kinds: [...candidate.kinds].toSorted() }))
+      .toSorted(
+        (left, right) =>
+          left.directory.localeCompare(right.directory) ||
+          left.rootSessionID.localeCompare(right.rootSessionID)
+      );
+  }
+
   isSessionInWorkspace(sessionID: string, workspacePath: string | null | undefined): boolean {
     return this.getSessionWorkspaceMatch(sessionID, workspacePath) ?? false;
   }
@@ -264,6 +327,16 @@ export class SessionStateManager {
     if (this.completedSessions.size === 0) return;
     this.completedSessions.clear();
     this.listener.onStatusChange();
+  }
+
+  clearCompletedInWorkspace(workspacePath: string | null | undefined): void {
+    let changed = false;
+    for (const sessionID of this.completedSessions) {
+      if (!this.isSessionInWorkspace(sessionID, workspacePath)) continue;
+      this.completedSessions.delete(sessionID);
+      changed = true;
+    }
+    if (changed) this.listener.onStatusChange();
   }
 
   acknowledgeCompletedSession(sessionID: string): void {
@@ -577,12 +650,15 @@ export class SessionStateManager {
     return operation;
   }
 
-  beginPendingAttentionReconciliation(kind: PendingAttentionKind): PendingAttentionReconciliation {
+  beginPendingAttentionReconciliation(
+    kind: PendingAttentionKind,
+    workspacePath?: string
+  ): PendingAttentionReconciliation {
     const requestGeneration = this.pendingAttentionRequestGenerations[kind] + 1;
     this.pendingAttentionRequestGenerations[kind] = requestGeneration;
     const mutationRevision = this.pendingAttentionRevisions[kind];
     this.activePendingAttentionReconciliations[kind].set(requestGeneration, mutationRevision);
-    return { kind, mutationRevision, requestGeneration };
+    return { kind, mutationRevision, requestGeneration, workspacePath };
   }
 
   reconcilePendingAttention(
@@ -598,13 +674,22 @@ export class SessionStateManager {
         reconciliation.requestGeneration
       );
       if (mutationRevision === undefined) return;
-      if (
-        reconciliation.requestGeneration < this.reconciledPendingAttentionRequestGenerations[kind]
-      ) {
+      const workspaceKey = normalizeWorkspaceIdentity(reconciliation.workspacePath) ?? '*';
+      const reconciledGeneration =
+        this.reconciledPendingAttentionRequestGenerations[kind].get(workspaceKey) ?? 0;
+      if (reconciliation.requestGeneration < reconciledGeneration) {
         return;
       }
-      this.reconciledPendingAttentionRequestGenerations[kind] = reconciliation.requestGeneration;
-      this.applyPendingAttentionSnapshot(kind, requests, mutationRevision);
+      this.reconciledPendingAttentionRequestGenerations[kind].set(
+        workspaceKey,
+        reconciliation.requestGeneration
+      );
+      this.applyPendingAttentionSnapshot(
+        kind,
+        requests,
+        mutationRevision,
+        reconciliation.workspacePath
+      );
     } finally {
       this.finishPendingAttentionReconciliation(reconciliation);
     }
@@ -620,7 +705,8 @@ export class SessionStateManager {
   private applyPendingAttentionSnapshot(
     kind: PendingAttentionKind,
     requests: readonly unknown[],
-    startedAtRevision: number
+    startedAtRevision: number,
+    workspacePath?: string
   ): void {
     const snapshots = requests
       .map((value) => {
@@ -639,6 +725,12 @@ export class SessionStateManager {
 
     for (const [id, request] of this.pendingAttention) {
       if (request.kind !== kind || snapshotIDs.has(id)) continue;
+      if (
+        workspacePath &&
+        this.getSessionWorkspaceMatch(request.sessionID, workspacePath) !== true
+      ) {
+        continue;
+      }
       if ((this.pendingAttentionMutationRevisions[kind].get(id) ?? 0) > startedAtRevision) {
         continue;
       }

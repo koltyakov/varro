@@ -98,9 +98,10 @@ export const client = {
     },
     async update(
       id: string,
-      body: { title?: string; permission?: PermissionRule[] }
+      body: { title?: string; permission?: PermissionRule[] },
+      options?: { directory?: string }
     ): Promise<Session> {
-      return apiCall('PATCH', `/session/${id}`, body);
+      return apiCall('PATCH', withDirectory(`/session/${id}`, options?.directory), body);
     },
     async fork(id: string, messageID?: string): Promise<Session> {
       return apiCall('POST', `/session/${id}/fork`, messageID ? { messageID } : undefined);
@@ -132,11 +133,12 @@ export const client = {
     },
     async messages(
       id: string,
-      options?: { limit?: number; before?: string }
+      options?: { limit?: number; before?: string; directory?: string }
     ): Promise<SessionMessagePage> {
       const params = new URLSearchParams();
       if (options?.limit) params.set('limit', String(options.limit));
       if (options?.before) params.set('before', options.before);
+      if (options?.directory) params.set('directory', options.directory);
       const query = params.size > 0 ? `?${params.toString()}` : '';
       const path = `/session/${id}/message${query}`;
       const response = await apiCall('GET', path);

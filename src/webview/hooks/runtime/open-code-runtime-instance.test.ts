@@ -2,11 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   inputText,
   resetDefaultAppState,
+  setShowSessionPicker,
   setInputText,
   setSelectedAgent,
   setSelectedModel,
   setState,
   state,
+  showSessionPicker,
 } from '../../lib/state';
 import {
   getSessionHistoryCursor,
@@ -200,28 +202,62 @@ describe('open code runtime synchronization', () => {
     setState('queuedMessageEdit', { id: 'queued-old', sessionId: oldSession.id });
     setState('lastSeenSessions', oldSession.id, 10);
     setState('hiddenProviders', ['hidden-provider']);
+    setState('agents', [
+      {
+        name: 'build',
+        description: 'Build agent',
+        mode: 'primary',
+        builtIn: true,
+        permission: [],
+        tools: {},
+      },
+    ]);
+    setState('providers', [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          'gpt-5': {
+            id: 'gpt-5',
+            name: 'GPT-5',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+          },
+        },
+      },
+    ]);
+    setState('providerDefaults', { openai: 'gpt-5' });
     setState('providersLoaded', true);
     setState('providerLimits', { 'openai:session': null });
     setInputText('old draft');
     startEditingMessage('message-old', oldSession.id, 'old message');
     setSessionHistoryCursor(oldSession.id, 'cursor-old');
+    setShowSessionPicker(true);
 
     resetWorkspaceDerivedState();
 
     expect(state.editorContext.workspacePath).toBe('/repo-next');
     expect(state.sessions).toEqual([]);
     expect(state.activeSessionId).toBeNull();
-    expect(state.sessionStatus).toEqual({});
+    expect(state.sessionStatus).toEqual({ 'session-old': { type: 'busy' } });
     expect(state.permissions).toEqual([]);
     expect(state.questions).toEqual([]);
     expect(state.providersLoaded).toBe(false);
+    expect(state.workspaceCatalogReloadPending).toBe(true);
+    expect(state.agentsLoaded).toBe(false);
+    expect(state.commandsLoaded).toBe(false);
+    expect(state.agents).toEqual([]);
+    expect(state.providers).toEqual([]);
+    expect(state.providerDefaults).toEqual({});
     expect(state.providerLimits).toEqual({});
-    expect(inputText()).toBe('');
+    expect(showSessionPicker()).toBe(true);
+    expect(inputText()).toBe('old draft');
     expect(editingMessage()).toBeNull();
     expect(getSessionHistoryCursor(oldSession.id)).toBeUndefined();
     expect(isSessionHistoryTruncated(oldSession.id)).toBe(false);
 
-    expect(state.selectedAgent).toBe('global-agent');
+    expect(state.selectedAgent).toBeNull();
     expect(state.selectedModel).toEqual(globalModel);
     expect(state.sessionSelectedAgents[oldSession.id]).toBe('session-agent');
     expect(state.sessionSelectedModels[oldSession.id]).toEqual(sessionModel);
@@ -231,7 +267,7 @@ describe('open code runtime synchronization', () => {
       { id: 'queued-old', sessionId: oldSession.id, text: 'preserve me' },
     ]);
     expect(state.queuedMessageDispatchingId).toBeNull();
-    expect(state.failedQueuedMessageIds).toEqual([]);
+    expect(state.failedQueuedMessageIds).toEqual(['queued-old']);
     expect(state.queuedMessageEdit).toBeNull();
     expect(state.lastSeenSessions[oldSession.id]).toBe(10);
     expect(state.hiddenProviders).toEqual(['hidden-provider']);

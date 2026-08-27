@@ -10,6 +10,7 @@ import { postMessage } from '../lib/bridge';
 import { applyChatFontConfig } from '../lib/chat-font-config';
 import { getWorkspaceStatusEventSummary } from '../lib/client';
 import { isString } from '../lib/runtime-values';
+import { STORAGE_KEYS, writeStored } from '../lib/state-storage';
 import {
   applyModelPreferencesSnapshot,
   applySessionSelectedAgentUpdate,
@@ -84,6 +85,7 @@ export function createMountBridgeOperations(deps: {
         getPreviousActiveFilePath: () => appStore.state.editorContext.activeFile?.path ?? null,
         getCurrentWorkspacePath: deps.getCurrentWorkspacePath,
         setCurrentWorkspacePath: deps.setCurrentWorkspacePath,
+        persistWorkspacePath: (path) => writeStored(STORAGE_KEYS.workspacePath, path),
         setEditorContext: composerStore.setEditorContext,
         rememberCurrentDocumentNavigation: composerStore.rememberCurrentDocumentNavigation,
         syncWorkspaceState: (path) => {
@@ -125,6 +127,7 @@ export function createMountBridgeOperations(deps: {
           appStore.setState('editorTabsOpen', open);
           appStore.setState('editorSessionIds', sessionIds);
         },
+        setSiblingWorkspaceAlerts: (alerts) => appStore.setState('siblingWorkspaceAlerts', alerts),
         setPermissionAutomation: deps.setPermissionAutomation,
         permissionModesSynced: deps.permissionModesSynced,
         revealPermission: deps.revealPermission,
@@ -153,6 +156,7 @@ export function handleExtensionMessageWithDependencies(
     getPreviousActiveFilePath(): string | null;
     getCurrentWorkspacePath(): string | null | undefined;
     setCurrentWorkspacePath(path: string | null): void;
+    persistWorkspacePath?(path: string | null): void;
     setEditorContext(
       payload: Extract<ExtensionMessage, { type: 'context/update' }>['payload']
     ): void;
@@ -187,6 +191,9 @@ export function handleExtensionMessageWithDependencies(
       }[]
     ): void;
     setEditorTabsState?(open: boolean, sessionIds: string[]): void;
+    setSiblingWorkspaceAlerts?(
+      alerts: Extract<ExtensionMessage, { type: 'sibling-workspace-alerts/update' }>['payload']
+    ): void;
     setPermissionAutomation?(owner: boolean, lease: number): void;
     permissionModesSynced?(): void;
     revealPermission?(permissionId: string): void;
@@ -228,6 +235,7 @@ export function handleExtensionMessageWithDependencies(
       const workspaceChanged =
         !initialWorkspaceContext && nextWorkspacePath !== previousWorkspacePath;
       deps.setCurrentWorkspacePath(nextWorkspacePath);
+      deps.persistWorkspacePath?.(nextWorkspacePath);
       deps.setEditorContext(msg.payload);
       if (initialWorkspaceContext || workspaceChanged) {
         deps.syncWorkspaceState(nextWorkspacePath);
@@ -351,6 +359,9 @@ export function handleExtensionMessageWithDependencies(
       break;
     case 'editor-tabs/state':
       deps.setEditorTabsState?.(msg.payload.open, msg.payload.sessionIds);
+      break;
+    case 'sibling-workspace-alerts/update':
+      deps.setSiblingWorkspaceAlerts?.(msg.payload);
       break;
     case 'permission-automation/update':
       deps.setPermissionAutomation?.(msg.payload.owner, msg.payload.lease);

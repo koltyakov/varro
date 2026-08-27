@@ -15,6 +15,8 @@ import {
   inputTextMutationVersion,
   setState,
   setInputText,
+  manualWorkspaceSelection,
+  setManualWorkspaceSelection,
   nextPastedImageIndex,
   setNextPastedImageIndex,
   resetPastedImageIndex,
@@ -310,6 +312,11 @@ function failedQueuedMessageIds() {
   return new Set(state.failedQueuedMessageIds);
 }
 
+const queuedSessionDispatchPhases = new Map<
+  string,
+  { itemId: string; phase: 'awaiting-busy' | 'running' }
+>();
+
 function canEditQueuedMessage() {
   return (
     inputText().length === 0 &&
@@ -589,7 +596,15 @@ function isQueuedSessionHydrating(sessionId: string) {
   return state.messagesLoading && state.activeSessionId === sessionId;
 }
 
+const pendingWorkspacePath = () => state.pendingWorkspaceSelectionPath;
+const setPendingWorkspacePath = (path: string | null) =>
+  setState('pendingWorkspaceSelectionPath', path);
+
 export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => void } = {}) {
+  const queuedSessionIds = new Set(state.queuedMessages.map((message) => message.sessionId));
+  for (const sessionId of queuedSessionDispatchPhases.keys()) {
+    if (!queuedSessionIds.has(sessionId)) queuedSessionDispatchPhases.delete(sessionId);
+  }
   const queueOwnerViewId = readWebviewInstanceContext()?.viewId ?? 'sidebar';
   const ownsQueuedMessage = (item: (typeof state.queuedMessages)[number]) =>
     (item.ownerViewId ?? 'sidebar') === queueOwnerViewId;
@@ -623,7 +638,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const [isDraggingOver, setIsDraggingOver] = createSignal(false);
   const [showAgentPicker, setShowAgentPicker] = createSignal(false);
   const [showWorkspacePicker, setShowWorkspacePicker] = createSignal(false);
-  const [pendingWorkspacePath, setPendingWorkspacePath] = createSignal<string | null>(null);
   const [agentFocusIndex, setAgentFocusIndex] = createSignal(0);
   const [showBusyMenu, setShowBusyMenu] = createSignal(false);
   const [showVariantPicker, setShowVariantPicker] = createSignal(false);
@@ -642,6 +656,36 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const composerEditingMessage = () => (props.newSession ? null : editingMessage());
   const composerHasActiveQuestion = () => !props.newSession && hasActiveQuestion();
   const composerHasActivePermission = () => !props.newSession && hasActivePermission();
+  const canSelectWorkspace = createMemo(
+    () =>
+      !!props.newSession ||
+      (!state.messagesLoading &&
+        getMessageEntriesForSession(state.messages, composerSessionId()).length === 0)
+  );
+  let previousInputEmpty = untrack(() => inputText().trim().length === 0);
+
+  createEffect(() => {
+    const inputEmpty = inputText().trim().length === 0;
+    if (inputEmpty && !previousInputEmpty) setManualWorkspaceSelection(false);
+    previousInputEmpty = inputEmpty;
+  });
+
+  createEffect(() => {
+    const activeWorkspacePath = state.editorContext.activeWorkspacePath;
+    if (
+      !activeWorkspacePath ||
+      !canSelectWorkspace() ||
+      inputText().trim().length > 0 ||
+      manualWorkspaceSelection() ||
+      isSamePath(activeWorkspacePath, state.editorContext.workspacePath) ||
+      isSamePath(activeWorkspacePath, pendingWorkspacePath())
+    ) {
+      return;
+    }
+
+    setPendingWorkspacePath(activeWorkspacePath);
+    postMessage({ type: 'workspace/select', payload: { path: activeWorkspacePath } });
+  });
 
   async function attachNativePdfFiles(files: File[]) {
     let remaining =
@@ -737,7 +781,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   createEffect(() => {
     const pending = pendingWorkspacePath();
-    if (pending && state.editorContext.workspacePath === pending) setPendingWorkspacePath(null);
+    if (pending && isSamePath(state.editorContext.workspacePath, pending)) {
+      setPendingWorkspacePath(null);
+    }
   });
 
   const [isFocused, setIsFocused] = createSignal(false);
@@ -1421,6 +1467,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   const showFloatingInputPopover = createMemo(
     () =>
+      showWorkspacePicker() ||
       showModelPicker() ||
       showMcpPicker() ||
       showLspPicker() ||
@@ -2000,17 +2047,35 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     setDispatchingQueuedMessageId(item.id);
     const priorAttemptId = item.messageId;
     const messageId = priorAttemptId ?? createOpenCodeMessageID();
+    const capturedWorkspaceDirectory = item.queuedContext?.editorContext.workspacePath;
+    const workspaceDirectory =
+      capturedWorkspaceDirectory === undefined
+        ? state.sessions.find((session) => session.id === item.sessionId)?.directory
+        : capturedWorkspaceDirectory || undefined;
+    const currentWorkspaceDirectory = state.editorContext.workspacePath;
+    const isForeignWorkspace =
+      !!workspaceDirectory &&
+      (!currentWorkspaceDirectory || !isSamePath(workspaceDirectory, currentWorkspaceDirectory));
     if (!priorAttemptId) replaceQueuedMessage(item.id, { ...item, messageId });
     let sent = false;
     let dispatchLease: number | null = null;
     try {
-      if (priorAttemptId && (await queuedMessageWasAdmitted(item.sessionId, priorAttemptId))) {
+      if (
+        priorAttemptId &&
+        (await queuedMessageWasAdmitted(item.sessionId, priorAttemptId, workspaceDirectory))
+      ) {
         removeQueuedMessage(item.id);
         return;
       }
       dispatchLease = await claimQueuedMessageDispatch(item);
       if (dispatchLease === null) return;
       if (isQueuedSessionHydrating(item.sessionId)) return;
+      if (isForeignWorkspace) {
+        queuedSessionDispatchPhases.set(item.sessionId, {
+          itemId: item.id,
+          phase: 'awaiting-busy',
+        });
+      }
       sent = await sendMessage(item.text, {
         messageId,
         agent: item.agent ? item.agent : undefined,
@@ -2033,16 +2098,31 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         },
         preserveComposer: true,
         targetSessionId: item.sessionId,
+        workspaceDirectory,
         queuedMessageDispatch: { itemId: item.id, lease: dispatchLease },
       });
     } catch {
       sent = false;
     } finally {
-      if (!sent && dispatchLease !== null) releaseQueuedMessageDispatch(item, dispatchLease);
+      if (!sent && dispatchLease !== null) {
+        releaseQueuedMessageDispatch(item, dispatchLease);
+        if (queuedSessionDispatchPhases.get(item.sessionId)?.itemId === item.id) {
+          queuedSessionDispatchPhases.delete(item.sessionId);
+        }
+      }
       setDispatchingQueuedMessageId(null);
     }
     if (sent) {
+      const hasNextForSession = state.queuedMessages.some(
+        (queued) => queued.id !== item.id && queued.sessionId === item.sessionId
+      );
       removeQueuedMessage(item.id);
+      if (
+        !hasNextForSession &&
+        queuedSessionDispatchPhases.get(item.sessionId)?.itemId === item.id
+      ) {
+        queuedSessionDispatchPhases.delete(item.sessionId);
+      }
     } else if (state.queuedMessages.some((queued) => queued.id === item.id)) {
       setQueuedMessageFailed(item.id, true);
     }
@@ -2067,6 +2147,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       if (!ownsQueuedMessage(item)) continue;
       if (item.paused || steeringIds.has(item.id) || failedSteerIds.has(item.id)) continue;
       if (blockedSessionIds.has(item.sessionId)) continue;
+      if (queuedSessionDispatchPhases.has(item.sessionId)) {
+        blockedSessionIds.add(item.sessionId);
+        continue;
+      }
       if (isQueuedSessionHydrating(item.sessionId)) {
         blockedSessionIds.add(item.sessionId);
         continue;
@@ -2122,6 +2206,17 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }, 250);
   });
   let queueDispatchDisposed = false;
+  const observeQueuedSessionStatus = (sessionId: string, status: 'busy' | 'idle') => {
+    const dispatch = queuedSessionDispatchPhases.get(sessionId);
+    if (!dispatch) return true;
+    if (status === 'busy') {
+      dispatch.phase = 'running';
+      return false;
+    }
+    if (dispatch.phase !== 'running') return false;
+    queuedSessionDispatchPhases.delete(sessionId);
+    return true;
+  };
   const dispatchAfterAuthoritativeIdle = (sessionId: string) => {
     queueMicrotask(() => {
       if (queueDispatchDisposed || !connectionInitialized() || dispatchingQueuedMessageId()) return;
@@ -2136,12 +2231,20 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const queuedSteerAdmissionCleanups = [
     serverEvents.on('session.status', (event) => {
       const properties = event.properties;
-      if (properties?.status?.type !== 'idle' || !isString(properties.sessionID)) return;
+      if (!isString(properties?.sessionID)) return;
+      const status = properties.status?.type;
+      if (status === 'busy') {
+        observeQueuedSessionStatus(properties.sessionID, 'busy');
+        return;
+      }
+      if (status !== 'idle' || !observeQueuedSessionStatus(properties.sessionID, 'idle')) return;
       dispatchAfterAuthoritativeIdle(properties.sessionID);
     }),
     serverEvents.on('session.idle', (event) => {
       const sessionId = event.properties?.sessionID;
-      if (isString(sessionId)) dispatchAfterAuthoritativeIdle(sessionId);
+      if (isString(sessionId) && observeQueuedSessionStatus(sessionId, 'idle')) {
+        dispatchAfterAuthoritativeIdle(sessionId);
+      }
     }),
     serverEvents.on('session.next.prompted', (event) => {
       const properties = event.properties;
@@ -2714,6 +2817,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   onMount(() => {
     const disposeBridge = onMessage((msg: ExtensionMessage) => {
+      if (msg.type === 'queued-messages/session-status') {
+        if (msg.payload.status === 'busy') {
+          observeQueuedSessionStatus(msg.payload.sessionId, 'busy');
+        } else if (observeQueuedSessionStatus(msg.payload.sessionId, 'idle')) {
+          dispatchAfterAuthoritativeIdle(msg.payload.sessionId);
+        }
+        return;
+      }
       if (msg.type === 'pdfs/picked') {
         const rejected = msg.payload.filter((pdf) => !addNativePdf(pdf));
         if (rejected.length > 0) {
@@ -2751,6 +2862,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
       if (!clickedInsideInteractiveArea) {
         setShowAgentPicker(false);
+        setShowWorkspacePicker(false);
         setShowModelPicker(false);
         setShowMcpPicker(false);
         setShowLspPicker(false);
@@ -3057,7 +3169,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const canSend = () =>
     !state.messagesLoading &&
     (isAbortSlashCommand(inputText()) ||
-      (!pendingWorkspacePath() &&
+      (!state.workspaceCatalogReloadPending &&
+        !pendingWorkspacePath() &&
         !hasPendingPdfFallback() &&
         !hasPendingDelegatedImages() &&
         (!hasPendingApproval() || !composerEditingMessage()) &&
@@ -3295,7 +3408,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   const selectionCostWarning = createMemo(() => {
     const sessionId = composerSessionId();
-    if (!sessionId || state.messagesLoading || composerEditingMessage()) return null;
+    if (!sessionId || state.messagesLoading || isComposerBusy() || composerEditingMessage())
+      return null;
     const previous = deriveSelectedModelFromMessages(
       getMessageEntriesForSession(state.messages, sessionId)
     );
@@ -3886,26 +4000,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               toolbarRightRef = el;
             }}
             compactTight={toolbarCompactMode() === 'tight'}
-            showLeftPopupState={showWorkspacePicker() || showAgentPicker() || showVariantPicker()}
-            workspaceFolders={state.editorContext.workspaceFolders ?? []}
-            selectedWorkspacePath={state.editorContext.workspacePath}
-            showWorkspacePicker={showWorkspacePicker()}
-            workspaceButtonRef={(el) => {
-              workspacePickerRef = el;
-            }}
-            workspacePopoverRef={(el) => {
-              workspacePopoverRef = el;
-            }}
-            onToggleWorkspacePicker={() => {
-              const next = !showWorkspacePicker();
-              closePopups(next ? 'workspace' : undefined);
-              setShowWorkspacePicker(next);
-            }}
-            onSelectWorkspace={(path) => {
-              setPendingWorkspacePath(path);
-              setShowWorkspacePicker(false);
-              postMessage({ type: 'workspace/select', payload: { path } });
-            }}
+            showLeftPopupState={showAgentPicker() || showVariantPicker()}
             showPermissionControl={true}
             permissionButtonRef={(el) => {
               permissionPickerRef = el;
@@ -4067,6 +4162,28 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           compactTight={toolbarCompactMode() === 'tight'}
           inputFrameRef={inputFrameRef}
           allowRepositoryLink={!composerEditingMessage()}
+          workspaceFolders={state.editorContext.workspaceFolders ?? []}
+          selectedWorkspacePath={state.editorContext.workspacePath}
+          canSelectWorkspace={canSelectWorkspace()}
+          showWorkspacePicker={showWorkspacePicker()}
+          workspaceButtonRef={(el) => {
+            workspacePickerRef = el;
+          }}
+          workspacePopoverRef={(el) => {
+            workspacePopoverRef = el;
+          }}
+          onToggleWorkspacePicker={() => {
+            const next = !showWorkspacePicker();
+            closePopups(next ? 'workspace' : undefined);
+            setShowWorkspacePicker(next);
+          }}
+          onSelectWorkspace={(path) => {
+            if (!canSelectWorkspace()) return;
+            setManualWorkspaceSelection(true);
+            setPendingWorkspacePath(path);
+            setShowWorkspacePicker(false);
+            postMessage({ type: 'workspace/select', payload: { path } });
+          }}
           showMcpControl={!composerEditingMessage() && showMcpControl()}
           showMcpPicker={showMcpPicker()}
           enabledMcpCount={enabledMcpCount()}

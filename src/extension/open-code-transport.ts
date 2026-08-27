@@ -3,7 +3,6 @@
 import { parseHealthResponse } from '../shared/health';
 import { CURRENT_OPENCODE_ENDPOINTS } from '../shared/opencode-endpoints';
 import { parseServerEvent, type ServerStatus } from '../shared/protocol';
-import { isSameWorkspacePath } from '../shared/workspace-path';
 import { logger } from './logger';
 import { getOpenCodeDirectoryHeaders, scopeOpenCodeRequest } from './util/opencode-request';
 import { anySignal, asRecord, findSseChunkBoundary, getString } from './server-utils';
@@ -22,6 +21,7 @@ export type OpenCodeRequestOptions = {
   stripMessageParts?: boolean;
   stripSummaryDiffs?: boolean;
   unscoped?: boolean;
+  directory?: string;
   signal?: AbortSignal;
 };
 
@@ -38,7 +38,7 @@ export type OpenCodeRescopeResult = {
 };
 
 // The global stream survives per-workspace instance disposal. Its envelopes retain
-// the event directory so Varro can filter them to the active workspace locally.
+// the event directory so Varro can route them to workspace-scoped endpoints.
 const EVENT_STREAM_PATH = CURRENT_OPENCODE_ENDPOINTS.eventStream;
 
 interface OpenCodeTransportOptions {
@@ -89,7 +89,9 @@ export class OpenCodeTransport {
     const scoped = scopeOpenCodeRequest(
       this.options.getUrl(),
       path,
-      options?.unscoped ? undefined : this.getWorkspaceDirectoryForRequest(method, path)
+      options?.unscoped
+        ? undefined
+        : (options?.directory ?? this.getWorkspaceDirectoryForRequest(method, path))
     );
     const controller = new AbortController();
     const timeoutSignal = AbortSignal.timeout(this.getRequestTimeoutMs(method, path));
@@ -450,7 +452,6 @@ export class OpenCodeTransport {
     ) {
       return;
     }
-    if (!this.isEventInCurrentDirectory(parsed)) return;
     try {
       this.observeServerEvent(parsed);
     } catch (err) {
@@ -511,17 +512,6 @@ export class OpenCodeTransport {
         break;
       }
     }
-  }
-
-  private isEventInCurrentDirectory(event: unknown) {
-    const evt = asRecord(event);
-    const location = asRecord(evt?.location);
-    const directory = getString(evt?.directory) || getString(location?.directory);
-    return (
-      !directory ||
-      !this.eventStreamDirectory ||
-      isSameWorkspacePath(directory, this.eventStreamDirectory)
-    );
   }
 
   private getEventReconnectDelay() {

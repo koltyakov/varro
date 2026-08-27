@@ -37,13 +37,15 @@ export interface SidebarProviderActionDeps {
   sessionExportService: SessionExportService;
   usageReportService: UsageReportService;
   restProxy: RestProxy;
-  sessionDiffProvider: SessionDiffDocumentProvider;
+  sessionDiffProvider: Pick<SessionDiffDocumentProvider, 'open'>;
   toolOutputProvider: ToolOutputDocumentProvider;
   server: OpenCodeServer;
+  sessionServer?: Pick<OpenCodeServer, 'getWorkspaceCwd' | 'request'>;
   post(message: ExtensionMessage): void;
   refreshProviders(): Promise<void>;
   providerReauthenticated(): Promise<void>;
   postContext(): void;
+  selectWorkspace(path: string): Promise<void>;
   postTerminalSelection(selection: { text: string; terminalName: string } | null): void;
   postConfigState(): void;
   handleReadyMessage(): Promise<void>;
@@ -126,7 +128,7 @@ export function createSidebarProviderActions(
       deps.postTerminalSelection(deps.contextProvider.terminalSelection);
     },
     selectWorkspace: async (path) => {
-      await deps.contextProvider.selectWorkspace(path);
+      await deps.selectWorkspace(path);
     },
     refreshProviders: () => deps.refreshProviders(),
     providerReauthenticated: () => deps.providerReauthenticated(),
@@ -136,15 +138,15 @@ export function createSidebarProviderActions(
     },
     runInTerminal: (command, title) => deps.runInTerminal(command, title),
     openSessionInOpenCode: async (sessionId) => {
-      await assertSessionInCurrentWorkspace(deps.server, sessionId);
+      await assertSessionInCurrentWorkspace(deps.sessionServer ?? deps.server, sessionId);
       await deps.openSessionInTerminal(sessionId);
     },
     openSessionInEditor: async (sessionId, title, model, rootSessionId) => {
-      await assertSessionInCurrentWorkspace(deps.server, sessionId);
+      await assertSessionInCurrentWorkspace(deps.sessionServer ?? deps.server, sessionId);
       await deps.openSessionInEditor(sessionId, title, model, rootSessionId);
     },
     openSessionInSidebar: async (sessionId) => {
-      await assertSessionInCurrentWorkspace(deps.server, sessionId);
+      await assertSessionInCurrentWorkspace(deps.sessionServer ?? deps.server, sessionId);
       await deps.openSessionInSidebar(sessionId);
     },
     openNewEditor: () => deps.openNewEditor(),

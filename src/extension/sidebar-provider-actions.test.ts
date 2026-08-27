@@ -133,6 +133,7 @@ function createActionFixture() {
     refreshProviders: vi.fn(() => Promise.resolve()),
     providerReauthenticated: vi.fn(() => Promise.resolve()),
     postContext: vi.fn(),
+    selectWorkspace: vi.fn(() => Promise.resolve()),
     postTerminalSelection: vi.fn(),
     postConfigState: vi.fn(),
     handleReadyMessage: vi.fn(() => Promise.resolve()),
@@ -204,6 +205,14 @@ describe('createSidebarProviderActions', () => {
     vi.clearAllMocks();
     mocks.vscode.workspace.getConfiguration.mockReturnValue(mocks.config);
     mocks.vscode.Uri.parse.mockImplementation((value: string) => ({ value }));
+  });
+
+  it('routes workspace selection through the endpoint callback', async () => {
+    const { actions, deps } = createActionFixture();
+
+    await actions.selectWorkspace('/repo-b');
+
+    expect(deps.selectWorkspace).toHaveBeenCalledWith('/repo-b');
   });
 
   it('opens an OpenCode session in the terminal', async () => {

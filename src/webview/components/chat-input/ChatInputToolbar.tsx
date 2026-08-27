@@ -136,19 +136,12 @@ type ChatInputMainToolbarProps = ToolbarSharedProps & {
   toolbarLeftRef: (el: HTMLDivElement) => void;
   toolbarRightRef: (el: HTMLDivElement) => void;
   showLeftPopupState: boolean;
-  workspaceFolders: WorkspaceFolderContext[];
-  selectedWorkspacePath: string | null;
-  showWorkspacePicker: boolean;
   showModelPicker: boolean;
   selectionCostWarning: {
     providerName: string;
     modelName: string;
     reasoningLabel: string;
   } | null;
-  workspaceButtonRef?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
-  workspacePopoverRef?: HTMLDivElement | ((el: HTMLDivElement) => void);
-  onToggleWorkspacePicker: () => void;
-  onSelectWorkspace: (path: string) => void;
 };
 
 const SELECTION_COST_WARNING =
@@ -209,6 +202,14 @@ function SelectionCostWarning(props: {
 
 type ChatInputMetaToolbarProps = ToolbarSharedProps & {
   allowRepositoryLink: boolean;
+  workspaceFolders: WorkspaceFolderContext[];
+  selectedWorkspacePath: string | null;
+  canSelectWorkspace: boolean;
+  showWorkspacePicker: boolean;
+  workspaceButtonRef?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
+  workspacePopoverRef?: HTMLDivElement | ((el: HTMLDivElement) => void);
+  onToggleWorkspacePicker: () => void;
+  onSelectWorkspace: (path: string) => void;
   showMcpControl: boolean;
   showMcpPicker: boolean;
   enabledMcpCount: number;
@@ -231,18 +232,6 @@ export function ChatInputMainToolbar(props: ChatInputMainToolbarProps) {
         ref={props.toolbarLeftRef}
         class={`toolbar-left${props.showLeftPopupState ? ' showing-context-popup' : ''}`}
       >
-        <Show when={props.workspaceFolders.length > 1}>
-          <WorkspacePicker
-            buttonRef={props.workspaceButtonRef}
-            popoverRef={props.workspacePopoverRef}
-            folders={props.workspaceFolders}
-            selectedPath={props.selectedWorkspacePath}
-            showPicker={props.showWorkspacePicker}
-            onToggle={props.onToggleWorkspacePicker}
-            onSelect={props.onSelectWorkspace}
-          />
-        </Show>
-
         <Show when={props.agents.length > 0 && props.showAgentControl}>
           <AgentPicker
             buttonRef={props.agentButtonRef}
@@ -338,6 +327,7 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
     props.providerLimitBadges.length === 0;
   const showMetaRow = () =>
     props.showPermissionControl ||
+    props.workspaceFolders.length > 1 ||
     props.showMcpControl ||
     props.activeLspNames.length > 0 ||
     hasContextControl() ||
@@ -348,12 +338,28 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
     <Show when={showMetaRow()}>
       <div class={`chat-input-toolbars toolbar-meta ${props.compactTight ? 'compact-tight' : ''}`}>
         <div class="toolbar-meta-left">
+          <Show when={props.workspaceFolders.length > 1}>
+            <WorkspacePicker
+              buttonRef={props.workspaceButtonRef}
+              popoverRef={props.workspacePopoverRef}
+              boundaryRef={props.inputFrameRef}
+              alignTo="left"
+              folders={props.workspaceFolders}
+              selectedPath={props.selectedWorkspacePath}
+              canSelect={props.canSelectWorkspace}
+              showPicker={props.showWorkspacePicker}
+              onToggle={props.onToggleWorkspacePicker}
+              onSelect={props.onSelectWorkspace}
+            />
+          </Show>
+
           <Show when={props.showPermissionControl}>
             <PermissionModePicker
               buttonRef={props.permissionButtonRef}
               popoverRef={props.permissionPopoverRef}
               boundaryRef={props.inputFrameRef}
               alignTo="left"
+              alignToTriggerWhenPossible={props.workspaceFolders.length > 1}
               mode={props.permissionMode}
               activity={props.autoPermissionActivity}
               judgeModel={props.autoApproveJudgeModel}

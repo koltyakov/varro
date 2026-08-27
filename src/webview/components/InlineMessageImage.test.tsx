@@ -9,10 +9,13 @@ import {
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
 
-function renderImage(src = 'https://example.test/image.png') {
+function renderImage(src = 'https://example.test/image.png', allowCover?: boolean) {
   container = document.createElement('div');
   document.body.appendChild(container);
-  cleanup = render(() => <InlineMessageImage src={src} alt="diagram.png" />, container!);
+  cleanup = render(
+    () => <InlineMessageImage src={src} alt="diagram.png" allowCover={allowCover} />,
+    container!
+  );
   return container.querySelector<HTMLImageElement>('.chat-image-img')!;
 }
 
@@ -51,6 +54,15 @@ describe('InlineMessageImage', () => {
 
     expect(image.classList.contains('chat-image-img-cover')).toBe(true);
     expect(container?.querySelector('.chat-image-ambient')).toBeNull();
+  });
+
+  it('contains images with ambient fill when cover is disabled', () => {
+    const image = renderImage('https://example.test/tile.png', false);
+
+    loadImage(image, 1600, 1000);
+
+    expect(image.classList.contains('chat-image-img-ambient')).toBe(true);
+    expect(container?.querySelector('.chat-image-ambient')).toBeInstanceOf(HTMLImageElement);
   });
 
   it('places a blurred copy behind portrait images', () => {

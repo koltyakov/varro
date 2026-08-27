@@ -23,7 +23,7 @@ import {
   resetModelVisibility,
   resetDraftSelectedMcps,
   resolveSelectedModel,
-  setCommands,
+  setCommands as setCommandsState,
   setDraftSelectedMcps,
   setMcpStatus,
   setModelVisible,
@@ -40,6 +40,12 @@ import {
   setWorkspaceStatuses,
   state,
 } from '../state';
+
+function releaseWorkspaceCatalogReloadLock() {
+  if (state.providersLoaded && state.agentsLoaded && state.commandsLoaded) {
+    setState('workspaceCatalogReloadPending', false);
+  }
+}
 
 export const routingStore = {
   getPersistedSelectedModel,
@@ -60,7 +66,11 @@ export const routingStore = {
   setProviderAuthMethods,
   setWorkspaceStatuses,
   getAvailableMcpNames,
-  setCommands,
+  setCommands(commands: Command[]) {
+    setCommandsState(commands);
+    setState('commandsLoaded', true);
+    releaseWorkspaceCatalogReloadLock();
+  },
   getProviderLimit,
   setProviderLimit,
   modelVisibilityKey,
@@ -81,9 +91,12 @@ export const routingStore = {
   },
   setPrimaryAgents(agents: Agent[]) {
     setState('agents', agents);
+    setState('agentsLoaded', true);
+    releaseWorkspaceCatalogReloadLock();
   },
   setProvidersLoaded(value: boolean) {
     setState('providersLoaded', value);
+    if (value) releaseWorkspaceCatalogReloadLock();
   },
   setProviders(
     providers: Provider[],

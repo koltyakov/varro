@@ -45,50 +45,166 @@ function getAutoApproveActivityTitle(activity: AutoApproveActivity) {
   return `${label}: ${activity.title}${activity.detail ? `. ${activity.detail}` : ''}`;
 }
 
+const WORKSPACE_NAME_WORD_PATTERN = /[A-Z]+(?=[A-Z][a-z]|[^A-Za-z0-9]|$)|[A-Z]?[a-z]+|[0-9]+/g;
+
+function getWorkspaceNameParts(name: string) {
+  const parts: Array<{ text: string; initial: boolean }> = [];
+  let offset = 0;
+  for (const match of name.matchAll(WORKSPACE_NAME_WORD_PATTERN)) {
+    const index = match.index;
+    if (index > offset) parts.push({ text: name.slice(offset, index), initial: false });
+    parts.push({ text: match[0].slice(0, 1), initial: true });
+    if (match[0].length > 1) parts.push({ text: match[0].slice(1), initial: false });
+    offset = index + match[0].length;
+  }
+  if (offset < name.length) parts.push({ text: name.slice(offset), initial: false });
+  return parts;
+}
+
+function formatWorkspaceAbbreviation(name: string) {
+  const initials = getWorkspaceNameParts(name)
+    .filter((part) => part.initial)
+    .map((part) => part.text)
+    .join('');
+  return initials.toLowerCase() || name.slice(0, 1).toLowerCase();
+}
+
+function bindOverflowTitle(element: HTMLElement, text: string) {
+  const update = () => {
+    if (element.scrollWidth > element.clientWidth + 1) element.title = text;
+    else element.removeAttribute('title');
+  };
+  queueMicrotask(update);
+  window.addEventListener('resize', update);
+  const observer =
+    globalThis.ResizeObserver === undefined ? null : new ResizeObserver(() => update());
+  observer?.observe(element);
+  onCleanup(() => {
+    window.removeEventListener('resize', update);
+    observer?.disconnect();
+  });
+}
+
 export function WorkspacePicker(props: {
   buttonRef?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
   popoverRef?: HTMLDivElement | ((el: HTMLDivElement) => void);
+  boundaryRef?: HTMLElement;
+  alignTo?: 'left' | 'right';
   folders: WorkspaceFolderContext[];
   selectedPath: string | null;
+  canSelect?: boolean;
+  showIcon?: boolean;
   showPicker: boolean;
   onToggle: () => void;
   onSelect: (path: string) => void;
 }) {
   const selected = () => props.folders.find((folder) => folder.path === props.selectedPath);
+  const selectedAbbreviation = () => {
+    const folder = selected();
+    if (!folder) return formatWorkspaceAbbreviation('Workspace');
+    const abbreviation = formatWorkspaceAbbreviation(folder.name);
+    const matches = props.folders.filter(
+      (candidate) => formatWorkspaceAbbreviation(candidate.name) === abbreviation
+    );
+    if (matches.length < 2) return abbreviation;
+    return `${abbreviation}${matches.findIndex((candidate) => candidate.path === folder.path) + 1}`;
+  };
+  const selectedAriaLabel = () => {
+    const folder = selected();
+    return folder
+      ? `Selected workspace: ${folder.name}, ${selectedAbbreviation()}`
+      : 'Select workspace folder';
+  };
+  let popupEl: HTMLDivElement | undefined;
+
+  createEffect(() => {
+    if (!props.showPicker || !popupEl) return;
+
+    const reposition = () => {
+      if (!popupEl) return;
+      flipPopupDownIfNeeded(popupEl);
+      if (props.boundaryRef) {
+        alignPopupToBoundary(popupEl, props.boundaryRef, props.alignTo ?? 'left');
+      }
+      clampPopupToViewport(popupEl);
+    };
+
+    onCleanup(observePopupViewport(popupEl, reposition));
+  });
+
+  const setPopoverRef = (el: HTMLDivElement) => {
+    popupEl = el;
+    const forwarded = props.popoverRef;
+    if (isFunction(forwarded)) forwarded(el);
+  };
+
   return (
-    <div style={{ position: 'relative' }}>
+    <div class="workspace-picker" style={{ position: 'relative' }}>
       <Tooltip content={selected()?.path ?? 'Select workspace folder'}>
         <button
           ref={props.buttonRef}
-          class="toolbar-picker"
-          aria-label="Select workspace folder"
+          class="toolbar-picker workspace-picker-button"
+          aria-label={selectedAriaLabel()}
           aria-expanded={props.showPicker}
           onClick={props.onToggle}
         >
-          <FolderIcon width={14} height={14} />
-          <span class="toolbar-picker-label">{selected()?.name ?? 'Workspace'}</span>
+          <Show when={props.showIcon !== false}>
+            <FolderIcon class="workspace-picker-folder-icon" width={14} height={14} />
+          </Show>
+          <span class="toolbar-picker-label workspace-picker-full-label">
+            {selected()?.name ?? 'Workspace'}
+          </span>
+          <span class="toolbar-picker-label workspace-picker-abbreviation" aria-hidden="true">
+            {selectedAbbreviation()}
+          </span>
           <PickerChevron />
         </button>
       </Tooltip>
       <Show when={props.showPicker}>
         <div
-          ref={props.popoverRef}
-          class="toolbar-popover"
+          ref={setPopoverRef}
+          class="toolbar-popover workspace-popover"
           style={selectedIconStyle}
           onClick={(e) => e.stopPropagation()}
         >
           <div class="toolbar-popover-header">Working directory</div>
+          <Show when={props.canSelect === false}>
+            <div class="workspace-popover-notice">
+              Workspace can't be changed in an active chat.
+            </div>
+          </Show>
           <For each={props.folders}>
             {(folder) => (
               <button
                 class={`toolbar-popover-item ${folder.path === props.selectedPath ? 'selected' : ''}`}
-                title={folder.path}
+                data-workspace-path={folder.path}
+                aria-current={folder.path === props.selectedPath ? 'true' : undefined}
+                disabled={props.canSelect === false}
                 onClick={() => props.onSelect(folder.path)}
               >
                 <FolderIcon width={14} height={14} />
                 <span class="min-w-0">
-                  <span class="block truncate">{folder.name}</span>
-                  <span class="block truncate text-[10px] text-vscode-muted">{folder.path}</span>
+                  <span class="workspace-popover-name block truncate">
+                    <For each={getWorkspaceNameParts(folder.name)}>
+                      {(part) => (
+                        <span
+                          class={
+                            part.initial && folder.path === props.selectedPath
+                              ? 'workspace-name-initial'
+                              : undefined
+                          }
+                        >
+                          {part.text}
+                        </span>
+                      )}
+                    </For>
+                  </span>
+                  <span
+                    ref={(element) => bindOverflowTitle(element, folder.path)}
+                    class="workspace-popover-path block truncate text-[10px] text-vscode-muted"
+                  >
+                    {folder.path}
+                  </span>
                 </span>
               </button>
             )}
@@ -104,6 +220,7 @@ export function PermissionModePicker(props: {
   popoverRef?: HTMLDivElement | ((el: HTMLDivElement) => void);
   boundaryRef?: HTMLElement;
   alignTo?: 'left' | 'right';
+  alignToTriggerWhenPossible?: boolean;
   mode: PermissionMode;
   activity?: AutoApproveActivity[];
   judgeModel?: { providerName: string; modelName: string } | null;
@@ -172,8 +289,27 @@ export function PermissionModePicker(props: {
           288,
           popupEl.scrollWidth || popupEl.getBoundingClientRect().width
         );
-        popupEl.style.width = `${Math.min(naturalWidth, boundaryWidth)}px`;
-        alignPopupToBoundary(popupEl, props.boundaryRef, props.alignTo ?? 'left');
+        const popupWidth = Math.min(naturalWidth, boundaryWidth);
+        popupEl.style.width = `${popupWidth}px`;
+        const positionedAncestor =
+          popupEl.offsetParent instanceof HTMLElement
+            ? popupEl.offsetParent
+            : popupEl.parentElement;
+        const ancestorBox = positionedAncestor?.getBoundingClientRect();
+        const fitsAtTrigger =
+          props.alignToTriggerWhenPossible &&
+          ancestorBox &&
+          ancestorBox.left >= boundaryLeft &&
+          ancestorBox.left + popupWidth <= boundaryRight;
+        if (fitsAtTrigger) {
+          popupEl.style.right = 'auto';
+          popupEl.style.left = '0px';
+        } else if (props.alignToTriggerWhenPossible && ancestorBox) {
+          popupEl.style.right = 'auto';
+          popupEl.style.left = `${Math.round(boundaryLeft + (boundaryWidth - popupWidth) / 2 - ancestorBox.left)}px`;
+        } else {
+          alignPopupToBoundary(popupEl, props.boundaryRef, props.alignTo ?? 'left');
+        }
       }
       clampPopupToViewport(popupEl);
     };
@@ -208,7 +344,7 @@ export function PermissionModePicker(props: {
       <Show when={props.showLabel && props.mode === 'auto' && props.activity?.length}>
         <span class="permission-activity" aria-label="Auto-approve activity">
           <span class="permission-activity-strip">
-            <For each={props.activity?.slice(-13)}>
+            <For each={props.activity?.slice(-8)}>
               {(activity) => (
                 <span
                   class={`permission-activity-item ${activity.status}`}

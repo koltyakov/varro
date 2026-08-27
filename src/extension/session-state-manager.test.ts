@@ -1437,6 +1437,31 @@ describe('SessionStateManager notifications', () => {
     expect([...manager.pending.keys()]).toEqual(['permission-live']);
   });
 
+  it('does not clear pending requests from another workspace during scoped reconciliation', () => {
+    const manager = createManager();
+    manager.handleServerEvent({
+      type: 'session.created',
+      properties: { info: { id: 'session-a', directory: '/repo-a' } },
+    });
+    manager.handleServerEvent({
+      type: 'session.created',
+      properties: { info: { id: 'session-b', directory: '/repo-b' } },
+    });
+    manager.handleServerEvent({
+      type: 'permission.asked',
+      properties: { id: 'permission-a', sessionID: 'session-a', permission: 'bash' },
+    });
+    manager.handleServerEvent({
+      type: 'permission.asked',
+      properties: { id: 'permission-b', sessionID: 'session-b', permission: 'bash' },
+    });
+
+    const reconciliation = manager.beginPendingAttentionReconciliation('permission', '/repo-a');
+    manager.reconcilePendingAttention('permission', [], reconciliation);
+
+    expect([...manager.pending.keys()]).toEqual(['permission-b']);
+  });
+
   it('preserves newer ask and reply events while an older snapshot is in flight', () => {
     const manager = createManager(() => false);
     manager.handleServerEvent({
@@ -1829,6 +1854,110 @@ describe('SessionStateManager notifications', () => {
 
     expect(manager.isSessionInWorkspace('session-1', '/repo-a///')).toBe(true);
     expect(manager.isSessionInWorkspace('session-1', '/repo-b')).toBe(false);
+  });
+
+  it('aggregates only actionable sibling alert candidates by session tree', () => {
+    const manager = createManager(() => false);
+    manager.handleServerEvent({
+      type: 'session.created',
+      properties: { info: { id: 'root', directory: '/repo-b', title: 'Root' } },
+    });
+    manager.handleServerEvent({
+      type: 'session.created',
+      properties: { info: { id: 'child', parentID: 'root', directory: '/repo-b' } },
+    });
+    manager.handleServerEvent({
+      type: 'question.asked',
+      properties: {
+        id: 'question-1',
+        sessionID: 'child',
+        questions: [{ header: 'Choice', question: 'Choose an option', options: [] }],
+      },
+    });
+    manager.handleServerEvent({
+      type: 'session.error',
+      properties: {
+        sessionID: 'root',
+        error: { name: 'UnknownError', data: { message: 'Failed' } },
+      },
+    });
+    manager.handleServerEvent({
+      type: 'session.created',
+      properties: { info: { id: 'plan', directory: '/repo-c', title: 'Plan' } },
+    });
+    manager.handleServerEvent({
+      type: 'message.updated',
+      properties: { info: { sessionID: 'plan', role: 'assistant', agent: 'plan' } },
+    });
+    markBusy(manager, 'plan');
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'plan', status: { type: 'idle' } },
+    });
+    manager.handleServerEvent({
+      type: 'session.created',
+      properties: { info: { id: 'regular', directory: '/repo-d', title: 'Regular' } },
+    });
+    markBusy(manager, 'regular');
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'regular', status: { type: 'idle' } },
+    });
+
+    expect(manager.getSiblingAlertCandidates()).toEqual([
+      {
+        sessionID: 'child',
+        rootSessionID: 'root',
+        directory: '/repo-b',
+        kinds: ['attention', 'error'],
+      },
+      {
+        sessionID: 'plan',
+        rootSessionID: 'plan',
+        directory: '/repo-c',
+        kinds: ['plan-ready'],
+      },
+    ]);
+
+    manager.clearCompletedInWorkspace('/repo-c');
+    expect(manager.getSiblingAlertCandidates()).toEqual([
+      {
+        sessionID: 'child',
+        rootSessionID: 'root',
+        directory: '/repo-b',
+        kinds: ['attention', 'error'],
+      },
+    ]);
+  });
+
+  it('alerts for a sibling permission only while it is actionable and pending', () => {
+    const manager = createManager(() => false);
+    manager.handleServerEvent({
+      type: 'session.created',
+      properties: { info: { id: 'session-1', directory: '/repo-b', title: 'Permission' } },
+    });
+    manager.handleServerEvent({
+      type: 'permission.asked',
+      properties: { id: 'permission-1', sessionID: 'session-1', permission: 'bash' },
+    });
+
+    expect(manager.getSiblingAlertCandidates()).toEqual([]);
+
+    manager.revealPermission('permission-1');
+    expect(manager.getSiblingAlertCandidates()).toEqual([
+      {
+        sessionID: 'session-1',
+        rootSessionID: 'session-1',
+        directory: '/repo-b',
+        kinds: ['attention'],
+      },
+    ]);
+
+    manager.handleServerEvent({
+      type: 'permission.replied',
+      properties: { permissionID: 'permission-1', sessionID: 'session-1' },
+    });
+    expect(manager.getSiblingAlertCandidates()).toEqual([]);
   });
 
   it('matches UNC workspace identity case-insensitively', () => {

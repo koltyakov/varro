@@ -46,6 +46,13 @@ type PersistedPendingRefreshState =
       scope: PendingRefreshScope;
       revalidateAuth: boolean;
       source: 'auth' | 'config';
+    }
+  | {
+      version: 4;
+      scope: PendingRefreshScope;
+      revalidateAuth: boolean;
+      source: 'auth' | 'config';
+      workspaceDirectories: string[];
     };
 
 export class ProviderFileRefreshController {
@@ -61,6 +68,7 @@ export class ProviderFileRefreshController {
   private refreshGeneration = 0;
   private observedFilesSignature: string | null = null;
   private pendingScope: PendingRefreshScope | null = null;
+  private readonly pendingWorkspaceDirectories = new Set<string>();
   private workspaceRoutingBaseline: OpenCodeModelRouting | null = null;
   private authChangePending = false;
   private configChangePending = false;
@@ -95,9 +103,14 @@ export class ProviderFileRefreshController {
       this.pendingRevision = 1;
       this.authRevalidationPending = pendingState.revalidateAuth;
       this.pendingAuthOnlyInvalidation =
-        pendingState.version === 3
+        pendingState.version === 3 || pendingState.version === 4
           ? pendingState.source === 'auth'
           : this.pendingScope === 'global' && pendingState.revalidateAuth;
+      if (pendingState.version === 4) {
+        for (const directory of pendingState.workspaceDirectories) {
+          this.pendingWorkspaceDirectories.add(directory);
+        }
+      }
     }
     dependencies.server.on('status', this.handleServerStatus);
   }
@@ -155,11 +168,22 @@ export class ProviderFileRefreshController {
   async refreshWorkspaceState(
     previousRouting?: OpenCodeModelRouting,
     currentRouting?: OpenCodeModelRouting,
-    generation = ++this.refreshGeneration
+    directory?: string
   ) {
-    if (this.disposed || generation !== this.refreshGeneration) return;
+    if (this.disposed) return;
     this.dependencies.clearProviderLimitCache();
     if (
+      directory &&
+      previousRouting &&
+      currentRouting &&
+      areOpenCodeRoutesEqual(previousRouting, currentRouting)
+    ) {
+      this.dependencies.postRefresh();
+      return;
+    }
+    const generation = ++this.refreshGeneration;
+    if (
+      !directory &&
       previousRouting &&
       currentRouting &&
       ((!this.pendingScope && areOpenCodeRoutesEqual(previousRouting, currentRouting)) ||
@@ -175,6 +199,7 @@ export class ProviderFileRefreshController {
     if (!this.pendingScope && previousRouting) {
       this.workspaceRoutingBaseline = previousRouting;
     }
+    if (directory) this.pendingWorkspaceDirectories.add(directory);
     await this.markRefreshPending('workspace');
     if (this.disposed || generation !== this.refreshGeneration) return;
     this.dependencies.postRefresh();
@@ -360,7 +385,14 @@ export class ProviderFileRefreshController {
       }
       managedProcessConfirmed = managedProcess;
     }
-    const idle = await this.isServerIdle();
+    const idleDirectories =
+      pendingScope === 'workspace' ? [...this.pendingWorkspaceDirectories] : [];
+    const idleResults = await Promise.all(
+      idleDirectories.length > 0
+        ? idleDirectories.map((directory) => this.isServerIdle(directory))
+        : [this.isServerIdle()]
+    );
+    const idle = idleResults.includes(false) ? false : idleResults.includes(null) ? null : true;
     if (this.disposed || generation !== this.refreshGeneration) return;
     if (idle === false) {
       this.postPendingStatus();
@@ -400,7 +432,18 @@ export class ProviderFileRefreshController {
     this.invalidationInFlight = true;
     try {
       if (pendingScope === 'workspace') {
-        await this.dependencies.server.request('POST', '/instance/dispose');
+        const directories = [...this.pendingWorkspaceDirectories];
+        if (directories.length === 0) {
+          await this.dependencies.server.request('POST', '/instance/dispose');
+        } else {
+          await Promise.all(
+            directories.map((directory) =>
+              this.dependencies.server.request('POST', '/instance/dispose', undefined, {
+                directory,
+              })
+            )
+          );
+        }
       } else if (stillManaged) {
         await this.dependencies.server.restart();
       } else {
@@ -409,6 +452,7 @@ export class ProviderFileRefreshController {
       }
       if (pendingRevision === this.pendingRevision) {
         this.pendingScope = null;
+        this.pendingWorkspaceDirectories.clear();
         this.pendingAuthOnlyInvalidation = false;
         await this.clearPersistedPendingState();
         if (!this.disposed && this.pendingStatusPosted) {
@@ -451,12 +495,16 @@ export class ProviderFileRefreshController {
       : authOnly;
   }
 
-  private async isServerIdle(): Promise<boolean | null> {
+  private async isServerIdle(directory?: string): Promise<boolean | null> {
     try {
+      const request = (path: string) =>
+        directory
+          ? this.dependencies.server.request('GET', path, undefined, { directory })
+          : this.dependencies.server.request('GET', path);
       const [statuses, questions, permissions] = await Promise.all([
-        this.dependencies.server.request('GET', '/session/status'),
-        this.dependencies.server.request('GET', '/question'),
-        this.dependencies.server.request('GET', '/permission'),
+        request('/session/status'),
+        request('/question'),
+        request('/permission'),
       ]);
       if (!statuses || typeof statuses !== 'object' || Array.isArray(statuses)) return null;
       if (!Array.isArray(questions)) return null;
@@ -510,12 +558,21 @@ export class ProviderFileRefreshController {
     }
     if (scope === 'global') this.workspaceRoutingBaseline = null;
     try {
-      await this.dependencies.persistence.set(ProviderFileRefreshController.PENDING_STATE_KEY, {
-        version: 3,
+      const common = {
         scope: this.pendingScope,
         revalidateAuth: this.authRevalidationPending,
-        source: this.pendingAuthOnlyInvalidation ? 'auth' : 'config',
-      });
+        source: this.pendingAuthOnlyInvalidation ? ('auth' as const) : ('config' as const),
+      };
+      await this.dependencies.persistence.set(
+        ProviderFileRefreshController.PENDING_STATE_KEY,
+        this.pendingWorkspaceDirectories.size > 0
+          ? {
+              version: 4,
+              ...common,
+              workspaceDirectories: [...this.pendingWorkspaceDirectories],
+            }
+          : { version: 3, ...common }
+      );
     } catch (err) {
       logger.warn(
         `Failed to persist provider refresh state: ${err instanceof Error ? err.message : String(err)}`
@@ -541,6 +598,7 @@ export class ProviderFileRefreshController {
     const wasPending = this.pendingScope === 'workspace';
     if (wasPending) {
       this.pendingScope = null;
+      this.pendingWorkspaceDirectories.clear();
       await this.clearPersistedPendingState();
     }
     this.workspaceRoutingBaseline = null;
@@ -593,9 +651,12 @@ function isPersistedPendingState(value: unknown): value is PersistedPendingRefre
     return true;
   }
   return (
-    record.version === 3 &&
+    (record.version === 3 || record.version === 4) &&
     (record.scope === 'workspace' || record.scope === 'global') &&
     typeof record.revalidateAuth === 'boolean' &&
-    (record.source === 'auth' || record.source === 'config')
+    (record.source === 'auth' || record.source === 'config') &&
+    (record.version !== 4 ||
+      (Array.isArray(record.workspaceDirectories) &&
+        record.workspaceDirectories.every((directory) => typeof directory === 'string')))
   );
 }

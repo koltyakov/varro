@@ -12,6 +12,75 @@
   padding-top: 6px;
 }
 
+.session-list-workspace-selector {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 12px;
+}
+
+.session-list-view-sidebar .session-list-workspace-selector {
+  padding: 8px 12px 0;
+}
+
+.session-list-workspace-label {
+  flex: 0 0 auto;
+  color: var(--color-vscode-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.session-list-workspace-picker {
+  min-width: 0;
+  max-width: 240px;
+  flex: 1 1 auto;
+}
+
+.session-list-workspace-picker .workspace-picker {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.session-list-workspace-picker .workspace-picker-button {
+  width: 100%;
+  height: 22px;
+  max-width: 100%;
+  padding: 0 3px;
+  gap: 2px;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  color: var(--color-vscode-fg-soft);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.session-list-workspace-picker .workspace-picker-button .toolbar-picker-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-list-workspace-picker .workspace-picker-button:hover {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--color-vscode-fg);
+}
+
+.session-list-workspace-picker .workspace-picker-button[aria-expanded='true'] {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--color-vscode-fg);
+}
+
+.session-list-workspace-picker .workspace-picker-button .codicon-chevron {
+  flex: 0 0 auto;
+  margin-left: 1px;
+}
+
 .session-list-view-sidebar .session-list-search {
   padding: 12px;
 }
@@ -560,7 +629,7 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   height: 11px;
 }
 
-.session-action-feedback-warning-glyph {
+.session-action-feedback-attention-glyph {
   font-size: 12px;
   font-weight: 700;
   line-height: 1;

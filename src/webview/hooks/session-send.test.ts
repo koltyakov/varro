@@ -646,6 +646,28 @@ describe('session-send helpers', () => {
     expect(getAttachmentReference({ path: '/repo', type: 'directory' }, '/repo')).toBe('./');
   });
 
+  it('marks external files explicitly so paths with spaces remain attachments', () => {
+    const result = buildSessionSendBody(
+      createState({
+        droppedFiles: [
+          {
+            path: '/Users/andrew/Downloads/Userlane Integration Blueprint [Draft] (1).md',
+            relativePath: 'Userlane Integration Blueprint [Draft] (1).md',
+            type: 'file',
+          },
+        ],
+      }),
+      'session-1',
+      'Use the attached blueprint',
+      () => false
+    );
+
+    expect(result?.body.parts).toContainEqual({
+      type: 'text',
+      text: '[Attached file: /Users/andrew/Downloads/Userlane Integration Blueprint [Draft] (1).md]',
+    });
+  });
+
   it('clones queued attachment snapshots so later composer edits do not mutate them', () => {
     const droppedFiles: DroppedFile[] = [
       {

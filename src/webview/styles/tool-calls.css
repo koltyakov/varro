@@ -2573,6 +2573,7 @@ kbd {
 }
 
 .user-message-image-tile {
+  position: relative;
   flex: 0 1 72px;
   min-width: 36px;
   width: 72px;
@@ -2587,11 +2588,13 @@ kbd {
   cursor: zoom-in;
 }
 
-.user-message-image-tile img {
+.user-message-image-tile .chat-image-img {
+  position: relative;
+  z-index: 1;
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   user-select: none;
   -webkit-user-select: none;
   -webkit-user-drag: none;

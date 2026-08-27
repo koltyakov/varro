@@ -275,27 +275,27 @@ describe('OpenCodeTransport event stream path', () => {
     expect(getOpenCodeDirectoryHeaders).toHaveBeenCalledWith(undefined);
   });
 
-  it('filters global event envelopes to the active workspace', () => {
+  it('continues forwarding sibling workspace envelopes after the REST scope changes', async () => {
     const transport = createTransport() as unknown as {
-      eventStreamDirectory: string;
+      rescopeEventStream(directory: string): Promise<unknown>;
       processSseChunk(chunk: string): void;
     };
-    transport.eventStreamDirectory = '/repo-a';
-    const matchingEvent = {
+    await transport.rescopeEventStream('/repo-b');
+    const siblingEvent = {
       directory: '/repo-a',
       payload: { type: 'session.created', properties: { info: { id: 'session-1' } } },
     };
+    const activeEvent = {
+      directory: '/repo-b',
+      payload: { type: 'session.created', properties: { info: { id: 'session-2' } } },
+    };
 
-    transport.processSseChunk(
-      `data: ${JSON.stringify({
-        directory: '/repo-b',
-        payload: { type: 'session.created', properties: { info: { id: 'session-2' } } },
-      })}`
-    );
-    transport.processSseChunk(`data: ${JSON.stringify(matchingEvent)}`);
+    transport.processSseChunk(`data: ${JSON.stringify(siblingEvent)}`);
+    transport.processSseChunk(`data: ${JSON.stringify(activeEvent)}`);
 
-    expect(emitEventMock).toHaveBeenCalledTimes(1);
-    expect(emitEventMock).toHaveBeenCalledWith(matchingEvent);
+    expect(emitEventMock).toHaveBeenCalledTimes(2);
+    expect(emitEventMock).toHaveBeenNthCalledWith(1, siblingEvent);
+    expect(emitEventMock).toHaveBeenNthCalledWith(2, activeEvent);
   });
 
   it('tracks direct v2 permission events from properties payloads', () => {
@@ -1069,6 +1069,35 @@ describe('OpenCodeTransport request scoping', () => {
     expect(getOpenCodeDirectoryHeaders).toHaveBeenLastCalledWith(
       'C:\\Users\\Andrew\\Projects\\Varro'
     );
+  });
+
+  it('uses a request-specific workspace directory instead of the global workspace', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, text: async () => '{}' }));
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const transport = new OpenCodeTransport({
+      getUrl: () => 'http://localhost:4096',
+      getWorkspaceCwd: () => '/repo-a',
+      getStatus: () => ({ state: 'running', url: 'http://localhost:4096', eventStream: 'healthy' }),
+      isDisposing: () => false,
+      updateEventStreamState: updateEventStreamStateMock,
+      emitEvent: emitEventMock,
+    });
+
+    await transport.request(
+      'POST',
+      '/session/session-b/prompt_async',
+      { parts: [] },
+      {
+        directory: '/repo-b',
+      }
+    );
+
+    expect(scopeOpenCodeRequest).toHaveBeenLastCalledWith(
+      'http://localhost:4096',
+      '/session/session-b/prompt_async',
+      '/repo-b'
+    );
+    expect(getOpenCodeDirectoryHeaders).toHaveBeenLastCalledWith('/repo-b');
   });
 
   it('still scopes session creation to the current workspace directory', async () => {

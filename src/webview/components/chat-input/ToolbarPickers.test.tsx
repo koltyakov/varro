@@ -8,6 +8,7 @@ import {
   PermissionModePicker,
   ProviderLimitChip,
   VariantPicker,
+  WorkspacePicker,
 } from './ToolbarPickers';
 
 let container: HTMLDivElement | null = null;
@@ -46,6 +47,161 @@ afterEach(() => {
 });
 
 describe('ToolbarPickers', () => {
+  it('provides compact workspace abbreviations for constrained layouts', () => {
+    const [selectedPath, setSelectedPath] = createSignal('/jira-stats-tj');
+    cleanup = render(
+      () => (
+        <WorkspacePicker
+          folders={[
+            { name: 'jira-stats-tj', path: '/jira-stats-tj' },
+            { name: 'MyDotNetProject', path: '/MyDotNetProject' },
+          ]}
+          selectedPath={selectedPath()}
+          showPicker={true}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+        />
+      ),
+      container!
+    );
+
+    expect(container?.querySelector('.workspace-picker-abbreviation')?.textContent).toBe('jst');
+    expect(
+      [...(container?.querySelectorAll('.workspace-name-initial') ?? [])].map(
+        (initial) => initial.textContent
+      )
+    ).toEqual(['j', 's', 't']);
+    setSelectedPath('/MyDotNetProject');
+    expect(container?.querySelector('.workspace-picker-abbreviation')?.textContent).toBe('mdnp');
+    expect(
+      [...(container?.querySelectorAll('.workspace-name-initial') ?? [])].map(
+        (initial) => initial.textContent
+      )
+    ).toEqual(['M', 'D', 'N', 'P']);
+  });
+
+  it('indexes duplicate abbreviations in VS Code workspace order', () => {
+    const [selectedPath, setSelectedPath] = createSignal('/jira-stats-tool');
+    cleanup = render(
+      () => (
+        <WorkspacePicker
+          folders={[
+            { name: 'jira-stats-tool', path: '/jira-stats-tool' },
+            { name: 'jobs-service-test', path: '/jobs-service-test' },
+            { name: 'java-script-tools', path: '/java-script-tools' },
+          ]}
+          selectedPath={selectedPath()}
+          showPicker={false}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+        />
+      ),
+      container!
+    );
+
+    expect(container?.querySelector('.workspace-picker-abbreviation')?.textContent).toBe('jst1');
+    setSelectedPath('/jobs-service-test');
+    expect(container?.querySelector('.workspace-picker-abbreviation')?.textContent).toBe('jst2');
+    setSelectedPath('/java-script-tools');
+    expect(container?.querySelector('.workspace-picker-abbreviation')?.textContent).toBe('jst3');
+  });
+
+  it('announces the selected workspace and marks its option as current', () => {
+    cleanup = render(
+      () => (
+        <WorkspacePicker
+          folders={[
+            { name: 'Repo A', path: '/repo-a' },
+            { name: 'Repo B', path: '/repo-b' },
+          ]}
+          selectedPath="/repo-b"
+          showPicker={true}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+        />
+      ),
+      container!
+    );
+
+    expect(container?.querySelector('.workspace-picker-button')?.getAttribute('aria-label')).toBe(
+      'Selected workspace: Repo B, rb'
+    );
+    expect(
+      container?.querySelector('[data-workspace-path="/repo-b"]')?.getAttribute('aria-current')
+    ).toBe('true');
+  });
+
+  it('shows a workspace path title only when the path is truncated', async () => {
+    cleanup = render(
+      () => (
+        <WorkspacePicker
+          folders={[
+            { name: 'Repo A', path: '/repo-a' },
+            { name: 'Repo B', path: '/a/long/path/to/repo-b' },
+          ]}
+          selectedPath="/repo-a"
+          showPicker={true}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+        />
+      ),
+      container!
+    );
+    const path = container?.querySelector<HTMLElement>(
+      '[data-workspace-path="/a/long/path/to/repo-b"] .workspace-popover-path'
+    );
+    let clientWidth = 200;
+    vi.spyOn(path!, 'scrollWidth', 'get').mockReturnValue(160);
+    vi.spyOn(path!, 'clientWidth', 'get').mockImplementation(() => clientWidth);
+    window.dispatchEvent(new Event('resize'));
+    expect(path?.getAttribute('title')).toBeNull();
+
+    clientWidth = 100;
+    window.dispatchEvent(new Event('resize'));
+    expect(path?.getAttribute('title')).toBe('/a/long/path/to/repo-b');
+
+    clientWidth = 200;
+    window.dispatchEvent(new Event('resize'));
+    expect(path?.getAttribute('title')).toBeNull();
+    await flushMicrotasks();
+  });
+
+  it('aligns the workspace popup to the same left boundary as permissions', async () => {
+    const boundary = document.createElement('div');
+    vi.spyOn(boundary, 'getBoundingClientRect').mockReturnValue({
+      x: 24,
+      y: 0,
+      top: 0,
+      left: 24,
+      right: 320,
+      bottom: 100,
+      width: 296,
+      height: 100,
+      toJSON: () => ({}),
+    });
+
+    cleanup = render(
+      () => (
+        <WorkspacePicker
+          boundaryRef={boundary}
+          alignTo="left"
+          folders={[
+            { name: 'Repo A', path: '/repo-a' },
+            { name: 'Repo B', path: '/repo-b' },
+          ]}
+          selectedPath="/repo-a"
+          showPicker={true}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+        />
+      ),
+      container!
+    );
+    await flushMicrotasks();
+
+    expect(container?.querySelector<HTMLElement>('.toolbar-popover')?.style.left).toBe('24px');
+  });
+
   it('renders the permission picker title, selection, and click handlers', () => {
     const onToggle = vi.fn();
     const onSelect = vi.fn();
@@ -323,6 +479,60 @@ describe('ToolbarPickers', () => {
 
     expect(popup?.style.width).toBe('250px');
     expect(popup?.style.left).toBe('-200px');
+  });
+
+  it('aligns permissions to its trigger and centers it when space is limited', async () => {
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(700);
+    let boundary: HTMLDivElement | undefined;
+    cleanup = render(
+      () => (
+        <div
+          ref={(el) => {
+            boundary = el;
+          }}
+        >
+          <PermissionModePicker
+            boundaryRef={boundary}
+            alignToTriggerWhenPossible={true}
+            mode="default"
+            showPicker={true}
+            showLabel={true}
+            onToggle={vi.fn()}
+            onSelect={vi.fn()}
+          />
+        </div>
+      ),
+      container!
+    );
+    const popup = container?.querySelector<HTMLElement>('.permission-mode-popover');
+    const parent = popup?.parentElement;
+    vi.spyOn(popup!, 'offsetParent', 'get').mockReturnValue(parent ?? null);
+    const boundaryRect = vi.spyOn(boundary!, 'getBoundingClientRect').mockReturnValue({
+      ...boundary!.getBoundingClientRect(),
+      left: 100,
+      right: 500,
+    });
+    vi.spyOn(parent!, 'getBoundingClientRect').mockReturnValue({
+      ...parent!.getBoundingClientRect(),
+      left: 300,
+      right: 400,
+    });
+    vi.spyOn(popup!, 'scrollWidth', 'get').mockReturnValue(288);
+    window.dispatchEvent(new Event('resize'));
+    await flushMicrotasks();
+
+    expect(popup?.style.width).toBe('288px');
+    expect(popup?.style.left).toBe('-144px');
+
+    boundaryRect.mockReturnValue({
+      ...boundary!.getBoundingClientRect(),
+      left: 100,
+      right: 700,
+    });
+    window.dispatchEvent(new Event('resize'));
+    await flushMicrotasks();
+
+    expect(popup?.style.left).toBe('0px');
   });
 
   it('renders the agent picker state and forwards hover and selection', () => {

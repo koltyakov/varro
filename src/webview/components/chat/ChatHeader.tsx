@@ -6,10 +6,11 @@ import { postMessage } from '../../lib/bridge';
 import { client } from '../../lib/client';
 import { formatDuration } from '../../lib/message-metrics';
 import { clampPopupToViewport } from '../../lib/popup-position';
-import { cableTagIcon, pinIcon, xmarkIcon } from '../../lib/ui-icons';
+import { appNotificationIcon, cableTagIcon, pinIcon, xmarkIcon } from '../../lib/ui-icons';
 import { NavArrowLeftControlIcon } from '../ControlIcons';
 import {
   setError,
+  setManualWorkspaceSelection,
   setPersistentShowSessionPicker as setShowSessionPicker,
   setState,
   state,
@@ -42,6 +43,10 @@ function isActiveSessionRunning() {
   if (!sessionId) return false;
   const type = state.sessionStatus[sessionId]?.type;
   return type === 'busy' || type === 'retry';
+}
+
+function siblingWorkspaceAlerts() {
+  return state.siblingWorkspaceAlerts;
 }
 
 function NewChatButton(props: { onCreateSession: () => void }) {
@@ -143,6 +148,152 @@ function NewChatButton(props: { onCreateSession: () => void }) {
   );
 }
 
+function SiblingWorkspaceAlertsButton() {
+  const [showMenu, setShowMenu] = createSignal(false);
+  let buttonRef: HTMLButtonElement | undefined;
+  let iconRef: HTMLSpanElement | undefined;
+  let menuRef: HTMLDivElement | undefined;
+  let previousAlerts = new Map<string, { count: number; kinds: Set<string> }>();
+  const label = () =>
+    siblingWorkspaceAlerts().length === 1
+      ? `Events in sibling workspace ${siblingWorkspaceAlerts()[0]!.name}`
+      : `Events in ${siblingWorkspaceAlerts().length} sibling workspaces`;
+  const openWorkspace = (path: string) => {
+    setShowMenu(false);
+    setShowSessionPicker(true);
+    setManualWorkspaceSelection(true);
+    setState('pendingWorkspaceSelectionPath', path);
+    postMessage({ type: 'workspace/select', payload: { path } });
+  };
+  const moveMenuFocus = (event: KeyboardEvent) => {
+    if (!menuRef || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    const items = [...menuRef.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+    if (items.length === 0) return;
+    event.preventDefault();
+    const current = items.findIndex((item) => item === document.activeElement);
+    const next =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? items.length - 1
+          : event.key === 'ArrowDown'
+            ? (current + 1) % items.length
+            : (current - 1 + items.length) % items.length;
+    items[next]?.focus();
+  };
+
+  createEffect(() => {
+    const alerts = siblingWorkspaceAlerts();
+    const hasNewEvent = alerts.some((alert) => {
+      const previous = previousAlerts.get(alert.path);
+      return (
+        !previous ||
+        alert.count > previous.count ||
+        alert.kinds.some((kind) => !previous.kinds.has(kind))
+      );
+    });
+    previousAlerts = new Map(
+      alerts.map((alert) => [
+        alert.path,
+        { count: alert.count, kinds: new Set<string>(alert.kinds) },
+      ])
+    );
+    if (!hasNewEvent || !iconRef) return;
+    iconRef.classList.remove('is-ringing');
+    void iconRef.offsetWidth;
+    iconRef.classList.add('is-ringing');
+  });
+
+  createEffect(() => {
+    if (!showMenu()) return;
+    if (siblingWorkspaceAlerts().length < 2) {
+      setShowMenu(false);
+      return;
+    }
+    const closeIfOutside = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (buttonRef?.contains(target) || menuRef?.contains(target)) return;
+      setShowMenu(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setShowMenu(false);
+      buttonRef?.focus();
+    };
+    window.addEventListener('pointerdown', closeIfOutside, true);
+    window.addEventListener('keydown', closeOnEscape, true);
+    onCleanup(() => {
+      window.removeEventListener('pointerdown', closeIfOutside, true);
+      window.removeEventListener('keydown', closeOnEscape, true);
+    });
+  });
+
+  createEffect(() => {
+    if (!showMenu()) return;
+    queueMicrotask(() => {
+      if (!buttonRef || !menuRef) return;
+      const buttonBox = buttonRef.getBoundingClientRect();
+      menuRef.style.left = `${buttonBox.right - menuRef.offsetWidth}px`;
+      menuRef.style.top = `${buttonBox.bottom + 4}px`;
+      clampPopupToViewport(menuRef);
+      menuRef.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
+    });
+  });
+
+  return (
+    <Show when={siblingWorkspaceAlerts().length > 0}>
+      <Tooltip content={label()}>
+        <button
+          ref={(element) => {
+            buttonRef = element;
+          }}
+          type="button"
+          class="chat-header-sibling-alerts"
+          aria-label={label()}
+          aria-haspopup={siblingWorkspaceAlerts().length > 1 ? 'menu' : undefined}
+          aria-expanded={siblingWorkspaceAlerts().length > 1 ? showMenu() : undefined}
+          onClick={() => {
+            const current = siblingWorkspaceAlerts();
+            if (current.length === 1) openWorkspace(current[0]!.path);
+            else setShowMenu((open) => !open);
+          }}
+        >
+          <UiIcon
+            ref={(element) => {
+              iconRef = element;
+            }}
+            class="chat-header-sibling-alert-icon"
+            source={appNotificationIcon}
+            width={15}
+            height={15}
+          />
+        </button>
+      </Tooltip>
+      <Show when={showMenu()}>
+        <Portal>
+          <div
+            ref={(element) => {
+              menuRef = element;
+            }}
+            class="session-item-actions-menu sibling-workspace-alerts-menu"
+            role="menu"
+            aria-label="Sibling workspace events"
+            onKeyDown={moveMenuFocus}
+          >
+            {siblingWorkspaceAlerts().map((alert) => (
+              <button type="button" role="menuitem" onClick={() => openWorkspace(alert.path)}>
+                <span>{alert.name}</span>
+                <span class="sibling-workspace-alert-count">{alert.count}</span>
+              </button>
+            ))}
+          </div>
+        </Portal>
+      </Show>
+    </Show>
+  );
+}
+
 async function toggleSessionPinned(sessionId: string) {
   const pinned = !state.pinnedSessionIds.includes(sessionId);
   try {
@@ -235,6 +386,7 @@ export function SessionPickerHeader(props: {
         </Show>
       </div>
       <div class="chat-header-actions">
+        <SiblingWorkspaceAlertsButton />
         <Show when={props.showFailedBadge}>
           <FailedSessionsBadge count={props.failedCount} onClick={props.onOpenFailedSessions} />
         </Show>
@@ -429,6 +581,7 @@ export function ActiveChatHeader(props: {
       </div>
       <Show when={props.showActions}>
         <div class="chat-header-actions">
+          <SiblingWorkspaceAlertsButton />
           <FailedSessionsBadge count={props.failedCount} onClick={props.onOpenFailedSessions} />
           <AttentionSessionsBadge
             count={props.attentionCount}

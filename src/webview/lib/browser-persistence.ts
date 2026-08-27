@@ -86,14 +86,18 @@ const EDITOR_INSTANCE_KEYS = new Set([
   'varro.queuedMessageEdit',
   'varro.queuedMessages',
   'varro.editorViewId',
+  'varro.workspacePath',
   'varro.lastActiveSessionId',
   'varro.lastOpenedView',
 ]);
+
+const WEBVIEW_INSTANCE_KEYS = new Set(['varro.inputDraftFiles']);
 
 function shouldUseLocalStorage(key: string): boolean {
   const initialState = asRecord(window)?.__initialWebviewState;
   const webviewContext = asRecord(initialState)?.webviewContext;
   const contextRecord = asRecord(webviewContext);
+  if (contextRecord?.surface && WEBVIEW_INSTANCE_KEYS.has(key)) return false;
   return !(contextRecord?.surface === 'editor' && EDITOR_INSTANCE_KEYS.has(key));
 }
 

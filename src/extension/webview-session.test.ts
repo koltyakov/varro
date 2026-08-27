@@ -39,7 +39,10 @@ const RUNNING_STATUS: ServerStatus = { state: 'running', url: 'http://127.0.0.1:
 
 type WebviewSessionState = Pick<
   SessionStateManager,
-  'clearCompleted' | 'consumeRecoverySnapshot' | 'isSessionInWorkspace' | 'replayBlockingRequests'
+  | 'clearCompletedInWorkspace'
+  | 'consumeRecoverySnapshot'
+  | 'isSessionInWorkspace'
+  | 'replayBlockingRequests'
 >;
 
 function createDeferred<T>() {
@@ -119,7 +122,7 @@ function createSession(options?: {
   };
 
   const sessionState = {
-    clearCompleted: vi.fn<WebviewSessionState['clearCompleted']>(),
+    clearCompletedInWorkspace: vi.fn<WebviewSessionState['clearCompletedInWorkspace']>(),
     consumeRecoverySnapshot: vi.fn<WebviewSessionState['consumeRecoverySnapshot']>(() =>
       Promise.resolve({
         interruptedSessions: [],
@@ -298,7 +301,7 @@ describe('WebviewSession', () => {
     expect(postedTypes.filter((type) => type === 'command/open-completed-sessions')).toHaveLength(
       1
     );
-    expect(sessionState.clearCompleted).toHaveBeenCalledOnce();
+    expect(sessionState.clearCompletedInWorkspace).toHaveBeenCalledWith('/repo');
     expect(deps.handleVisibleSideEffects).toHaveBeenCalledOnce();
   });
 
@@ -723,7 +726,7 @@ describe('WebviewSession', () => {
     await flushMicrotasks();
 
     bridge.post.mockClear();
-    sessionState.clearCompleted.mockClear();
+    sessionState.clearCompletedInWorkspace.mockClear();
     deps.handleVisibleSideEffects.mockClear();
     deps.ensureServerStarted.mockClear();
     deps.onHidden.mockClear();
@@ -736,7 +739,7 @@ describe('WebviewSession', () => {
     expect(deps.updateStatusBarItem).toHaveBeenCalledOnce();
 
     bridge.post.mockClear();
-    sessionState.clearCompleted.mockClear();
+    sessionState.clearCompletedInWorkspace.mockClear();
     deps.handleVisibleSideEffects.mockClear();
     deps.ensureServerStarted.mockClear();
     deps.updateStatusBarItem.mockClear();
@@ -744,7 +747,7 @@ describe('WebviewSession', () => {
     view.visible = true;
     view.listeners.visibility?.();
 
-    expect(sessionState.clearCompleted).toHaveBeenCalledOnce();
+    expect(sessionState.clearCompletedInWorkspace).toHaveBeenCalledWith('/repo');
     expect(deps.handleVisibleSideEffects).toHaveBeenCalledOnce();
     expect(deps.ensureServerStarted).toHaveBeenCalledOnce();
     expect(deps.updateStatusBarItem).toHaveBeenCalledOnce();

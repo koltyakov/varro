@@ -2901,7 +2901,9 @@ test.describe('auto-scroll', () => {
     });
     expect(frameBeforeRelease).toEqual({ width: 72, height: 72 });
     expect(
-      await imageFrame.locator('img').evaluate((image: HTMLImageElement) => image.naturalWidth)
+      await imageFrame
+        .locator('.chat-image-img')
+        .evaluate((image: HTMLImageElement) => image.naturalWidth)
     ).toBe(0);
     await expect.poll(pendingHistoryRequestCount).toBe(1);
 
@@ -2985,14 +2987,18 @@ test.describe('auto-scroll', () => {
       const scrollList = element.closest<HTMLElement>('.interactive-list')!;
       return element.getBoundingClientRect().top - scrollList.getBoundingClientRect().top;
     });
-    await imageFrame.locator('img').evaluate((image: HTMLImageElement) => image.decode());
+    await imageFrame
+      .locator('.chat-image-img')
+      .evaluate((image: HTMLImageElement) => image.decode());
     const frameAfterRelease = await imageFrame.evaluate((element) => {
       const box = element.getBoundingClientRect();
       return { width: box.width, height: box.height };
     });
     expect(frameAfterRelease).toEqual(frameBeforeRelease);
     expect(
-      await imageFrame.locator('img').evaluate((image: HTMLImageElement) => image.naturalWidth)
+      await imageFrame
+        .locator('.chat-image-img')
+        .evaluate((image: HTMLImageElement) => image.naturalWidth)
     ).toBe(640);
     expect(imageRequestCount).toBeGreaterThan(0);
 

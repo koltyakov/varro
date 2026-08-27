@@ -2,10 +2,29 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   attachTestView,
+  createContextProvider,
   createSidebarProviderInstance,
   getVscodeMock,
 } from './sidebar-provider.test-support';
-import type { DroppedFile, QueuedMessageSnapshot } from '../shared/protocol';
+import type {
+  DroppedFile,
+  EditorContext,
+  QueuedMessageSnapshot,
+  SiblingWorkspaceAlert,
+} from '../shared/protocol';
+import type { SessionStateManager } from './session-state-manager';
+
+function lastEditorContext(messages: unknown[]) {
+  return (messages as Array<{ type?: string; payload?: EditorContext }>)
+    .filter((message) => message.type === 'context/update')
+    .at(-1)?.payload;
+}
+
+function lastSiblingWorkspaceAlerts(messages: unknown[]) {
+  return (messages as Array<{ type?: string; payload?: SiblingWorkspaceAlert[] }>)
+    .filter((message) => message.type === 'sibling-workspace-alerts/update')
+    .at(-1)?.payload;
+}
 
 function createPanel() {
   const messageListeners: Array<(message: unknown) => void> = [];
@@ -58,6 +77,508 @@ function createPanel() {
 }
 
 describe('SidebarProvider editor panels', () => {
+  it('alerts only for requested sibling events whose chat is not open', async () => {
+    const contextProvider = createContextProvider();
+    contextProvider.context.workspacePath = '/repo-a';
+    contextProvider.context.workspaceFolders = [
+      { name: 'Repo A', path: '/repo-a' },
+      { name: 'Repo B', path: '/repo-b' },
+      { name: 'Repo C', path: '/repo-c' },
+    ];
+    const { provider } = await createSidebarProviderInstance({ contextProvider });
+    const { posted } = attachTestView(provider);
+    await provider.handleMessage({ type: 'ready' });
+    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
+      .sessionState;
+
+    sessionState.handleServerEvent({
+      type: 'session.created',
+      properties: { info: { id: 'sibling', directory: '/repo-b', title: 'Sibling work' } },
+    });
+    sessionState.handleServerEvent({
+      type: 'question.asked',
+      properties: {
+        id: 'question-1',
+        sessionID: 'sibling',
+        questions: [{ header: 'Choice', question: 'Choose', options: [] }],
+      },
+    });
+    sessionState.handleServerEvent({
+      type: 'session.created',
+      properties: { info: { id: 'regular', directory: '/repo-c', title: 'Regular work' } },
+    });
+    sessionState.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'regular', status: { type: 'busy' } },
+    });
+    sessionState.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'regular', status: { type: 'idle' } },
+    });
+
+    expect(lastSiblingWorkspaceAlerts(posted)).toEqual([
+      { name: 'Repo B', path: '/repo-b', kinds: ['attention'], count: 1 },
+    ]);
+
+    const editor = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+    await provider.openSessionInEditor('sibling');
+    await vi.waitFor(() => expect(editor.panel.webview.onDidReceiveMessage).toHaveBeenCalled());
+    editor.receive({
+      type: 'editor/route-changed',
+      payload: { route: { type: 'session', sessionId: 'sibling' } },
+    });
+
+    await vi.waitFor(() => expect(lastSiblingWorkspaceAlerts(posted)).toEqual([]));
+  });
+
+  it('recomputes sibling alerts when workspace folders change', async () => {
+    const contextProvider = createContextProvider();
+    contextProvider.context.workspacePath = '/repo-a';
+    contextProvider.context.workspaceFolders = [{ name: 'Repo A', path: '/repo-a' }];
+    const { provider } = await createSidebarProviderInstance({ contextProvider });
+    const { posted } = attachTestView(provider);
+    await provider.handleMessage({ type: 'ready' });
+    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
+      .sessionState;
+    sessionState.handleServerEvent({
+      type: 'session.created',
+      properties: { info: { id: 'sibling', directory: '/repo-b' } },
+    });
+    sessionState.handleServerEvent({
+      type: 'question.asked',
+      properties: {
+        id: 'question-1',
+        sessionID: 'sibling',
+        questions: [{ header: 'Choice', question: 'Choose', options: [] }],
+      },
+    });
+    expect(lastSiblingWorkspaceAlerts(posted)).toEqual([]);
+
+    contextProvider.context.workspaceFolders.push({ name: 'Repo B', path: '/repo-b' });
+    provider.post({ type: 'context/update', payload: contextProvider.context });
+
+    expect(lastSiblingWorkspaceAlerts(posted)).toEqual([
+      { name: 'Repo B', path: '/repo-b', kinds: ['attention'], count: 1 },
+    ]);
+  });
+
+  it('alerts when the previously open session needs attention after switching workspaces', async () => {
+    const contextProvider = createContextProvider();
+    contextProvider.context.workspacePath = '/repo-a';
+    contextProvider.context.workspaceFolders = [
+      { name: 'Repo A', path: '/repo-a' },
+      { name: 'Repo B', path: '/repo-b' },
+    ];
+    const { provider } = await createSidebarProviderInstance({ contextProvider });
+    const { posted } = attachTestView(provider);
+    await provider.handleMessage({ type: 'ready' });
+    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
+      .sessionState;
+    sessionState.handleServerEvent({
+      type: 'session.created',
+      properties: { info: { id: 'session-a', directory: '/repo-a' } },
+    });
+    await provider.handleMessage({
+      type: 'commands/state',
+      payload: {
+        canAbort: false,
+        canSwitchSessions: false,
+        model: null,
+        sessionId: 'session-a',
+      },
+    });
+
+    await provider.handleMessage({
+      type: 'workspace/select',
+      payload: { path: '/repo-b' },
+    });
+    sessionState.handleServerEvent({
+      type: 'question.asked',
+      properties: {
+        id: 'question-a',
+        sessionID: 'session-a',
+        questions: [{ header: 'Choice', question: 'Choose', options: [] }],
+      },
+    });
+
+    expect(lastSiblingWorkspaceAlerts(posted)).toEqual([
+      { name: 'Repo A', path: '/repo-a', kinds: ['attention'], count: 1 },
+    ]);
+  });
+
+  it('keeps sidebar and editor workspace selections independent', async () => {
+    const contextProvider = createContextProvider();
+    const { provider } = await createSidebarProviderInstance({ contextProvider });
+    const { posted } = attachTestView(provider);
+    const editor = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+    await provider.openNewEditor();
+
+    await provider.handleMessage({
+      type: 'workspace/select',
+      payload: { path: '/repo-b' },
+    });
+    contextProvider.context.activeFile = {
+      path: '/repo-b/app.ts',
+      relativePath: 'app.ts',
+      language: 'typescript',
+    };
+    contextProvider.context.activeWorkspacePath = '/repo-b';
+    provider.post({ type: 'context/update', payload: contextProvider.context });
+
+    expect(lastEditorContext(posted)?.workspacePath).toBe('/repo-b');
+    expect(
+      lastEditorContext(editor.panel.webview.postMessage.mock.calls.map(([message]) => message))
+    ).toMatchObject({ workspacePath: '/repo', activeFile: null });
+
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-c' } });
+    await vi.waitFor(() =>
+      expect(
+        lastEditorContext(editor.panel.webview.postMessage.mock.calls.map(([message]) => message))
+          ?.workspacePath
+      ).toBe('/repo-c')
+    );
+    expect(contextProvider.selectWorkspace).not.toHaveBeenCalledWith('/repo-c');
+    contextProvider.context.activeFile = null;
+    provider.post({ type: 'context/update', payload: contextProvider.context });
+
+    expect(lastEditorContext(posted)?.workspacePath).toBe('/repo-b');
+    expect(
+      lastEditorContext(editor.panel.webview.postMessage.mock.calls.map(([message]) => message))
+        ?.workspacePath
+    ).toBe('/repo-c');
+
+    const secondEditor = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(secondEditor.panel);
+    await provider.openNewEditor();
+    provider.post({ type: 'context/update', payload: contextProvider.context });
+
+    expect(
+      lastEditorContext(
+        secondEditor.panel.webview.postMessage.mock.calls.map(([message]) => message)
+      )?.workspacePath
+    ).toBe('/repo-b');
+  });
+
+  it('scopes editor API requests to the editor workspace', async () => {
+    const { provider, server } = await createSidebarProviderInstance();
+    attachTestView(provider);
+    const editor = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+    await provider.openNewEditor();
+
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    editor.receive({
+      type: 'api/request',
+      payload: { id: 41, method: 'GET', path: '/config/providers' },
+    });
+
+    await vi.waitFor(() =>
+      expect(server.request).toHaveBeenCalledWith(
+        'GET',
+        '/config/providers',
+        undefined,
+        expect.objectContaining({ directory: '/repo-b' })
+      )
+    );
+  });
+
+  it('routes session events only to endpoints in the matching workspace', async () => {
+    const contextProvider = createContextProvider();
+    contextProvider.context.workspacePath = '/repo-a';
+    const { provider } = await createSidebarProviderInstance({ contextProvider });
+    const { posted } = attachTestView(provider);
+    const editor = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+    await provider.openNewEditor();
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    await vi.waitFor(() =>
+      expect(
+        lastEditorContext(editor.panel.webview.postMessage.mock.calls.map(([message]) => message))
+          ?.workspacePath
+      ).toBe('/repo-b')
+    );
+
+    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
+      .sessionState;
+    sessionState.handleServerEvent({
+      type: 'session.created',
+      properties: { info: { id: 'session-a', directory: '/repo-a' } },
+    });
+    sessionState.handleServerEvent({
+      type: 'session.created',
+      properties: { info: { id: 'session-b', directory: '/repo-b' } },
+    });
+    const eventA = {
+      type: 'session.status' as const,
+      properties: { sessionID: 'session-a', status: { type: 'busy' as const } },
+    };
+    const eventB = {
+      type: 'session.status' as const,
+      properties: { sessionID: 'session-b', status: { type: 'busy' as const } },
+    };
+    provider.post({ type: 'server/event', payload: eventA });
+    provider.post({ type: 'server/event', payload: eventB });
+
+    const sidebarEvents = (posted as Array<{ type?: string; payload?: unknown }>).filter(
+      (message) => message.type === 'server/event'
+    );
+    const editorEvents = editor.panel.webview.postMessage.mock.calls
+      .map(([message]) => message as { type?: string; payload?: unknown })
+      .filter((message) => message.type === 'server/event');
+    expect(sidebarEvents).toEqual([{ type: 'server/event', payload: eventA }]);
+    expect(editorEvents).toEqual([{ type: 'server/event', payload: eventB }]);
+  });
+
+  it('routes sibling session lifecycle events to the endpoint that owns its queue', async () => {
+    const contextProvider = createContextProvider();
+    contextProvider.context.workspacePath = '/repo-a';
+    const { provider, server } = await createSidebarProviderInstance({ contextProvider });
+    const { posted } = attachTestView(provider);
+    await provider.handleMessage({ type: 'ready' });
+    const internals = provider as unknown as {
+      queuedMessages: { update(messages: QueuedMessageSnapshot[]): Promise<void> };
+      runSessionReconcile(): Promise<void>;
+    };
+    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
+      .sessionState;
+    sessionState.handleServerEvent({
+      type: 'session.created',
+      properties: { info: { id: 'session-b', directory: '/repo-b' } },
+    });
+    await internals.queuedMessages.update([
+      {
+        id: 'queue-1',
+        sessionId: 'session-b',
+        text: 'Continue in sibling workspace',
+        droppedFiles: [],
+        clipboardImages: [],
+        terminalSelection: null,
+      },
+    ]);
+    server.request.mockResolvedValueOnce({});
+    await internals.runSessionReconcile();
+    expect(posted).toContainEqual({
+      type: 'queued-messages/session-status',
+      payload: { sessionId: 'session-b', status: 'idle' },
+    });
+    const busyEvent = {
+      type: 'session.status' as const,
+      properties: { sessionID: 'session-b', status: { type: 'busy' as const } },
+    };
+    const idleEvent = {
+      type: 'session.idle' as const,
+      properties: { sessionID: 'session-b' },
+    };
+    const completionEvent = {
+      type: 'message.updated' as const,
+      properties: {
+        info: {
+          id: 'assistant-1',
+          sessionID: 'session-b',
+          role: 'assistant' as const,
+          time: { created: 1, completed: 2 },
+        },
+      },
+    };
+
+    provider.post({ type: 'server/event', payload: busyEvent });
+    provider.post({ type: 'server/event', payload: idleEvent });
+    sessionState.handleServerEvent(busyEvent);
+    sessionState.handleServerEvent(completionEvent);
+    provider.post({ type: 'server/event', payload: completionEvent });
+
+    const lifecycleEvents = (posted as Array<{ type?: string; payload?: unknown }>).filter(
+      (message) => message.type === 'server/event'
+    );
+    expect(lifecycleEvents).toEqual([]);
+    expect(posted).toContainEqual({
+      type: 'queued-messages/session-status',
+      payload: { sessionId: 'session-b', status: 'busy' },
+    });
+    expect(posted).toContainEqual({
+      type: 'queued-messages/session-status',
+      payload: { sessionId: 'session-b', status: 'idle' },
+    });
+    expect(
+      (posted as Array<{ type?: string; payload?: unknown }>).filter(
+        (message) =>
+          message.type === 'queued-messages/session-status' &&
+          (message.payload as { status?: string } | undefined)?.status === 'idle'
+      )
+    ).toHaveLength(3);
+  });
+
+  it('elects one permission automation owner in each endpoint workspace', async () => {
+    const contextProvider = createContextProvider();
+    contextProvider.context.workspacePath = '/repo-a';
+    const { provider } = await createSidebarProviderInstance({ contextProvider });
+    const { posted } = attachTestView(provider);
+    await provider.handleMessage({ type: 'ready' });
+    const editor = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+    await provider.openNewEditor();
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    editor.receive({ type: 'ready' });
+
+    await vi.waitFor(() => {
+      const sidebarOwner = (posted as Array<{ type?: string; payload?: { owner?: boolean } }>)
+        .filter((message) => message.type === 'permission-automation/update')
+        .at(-1)?.payload?.owner;
+      const editorOwner = editor.panel.webview.postMessage.mock.calls
+        .map(([message]) => message as { type?: string; payload?: { owner?: boolean } })
+        .filter((message) => message.type === 'permission-automation/update')
+        .at(-1)?.payload?.owner;
+      expect(sidebarOwner).toBe(true);
+      expect(editorOwner).toBe(true);
+    });
+  });
+
+  it('routes session deletion before removing its workspace metadata', async () => {
+    const contextProvider = createContextProvider();
+    contextProvider.context.workspacePath = '/repo-a';
+    const { provider, server } = await createSidebarProviderInstance({ contextProvider });
+    const { posted } = attachTestView(provider);
+    const editor = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+    await provider.openNewEditor();
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
+      .sessionState;
+    sessionState.handleServerEvent({
+      type: 'session.created',
+      properties: { info: { id: 'session-a', directory: '/repo-a' } },
+    });
+    posted.length = 0;
+    editor.panel.webview.postMessage.mockClear();
+    const eventHandler = server.on.mock.calls.find(([type]) => type === 'event')?.[1];
+
+    eventHandler?.({ type: 'session.deleted', properties: { info: { id: 'session-a' } } });
+
+    expect(posted).toContainEqual({
+      type: 'server/event',
+      payload: { type: 'session.deleted', properties: { info: { id: 'session-a' } } },
+    });
+    expect(editor.panel.webview.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'server/event' })
+    );
+  });
+
+  it('defers unknown-session events until their workspace is known', async () => {
+    const contextProvider = createContextProvider();
+    contextProvider.context.workspacePath = '/repo-a';
+    const { provider } = await createSidebarProviderInstance({ contextProvider });
+    const { posted } = attachTestView(provider);
+    const editor = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+    await provider.openNewEditor();
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    posted.length = 0;
+    editor.panel.webview.postMessage.mockClear();
+    const event = {
+      type: 'permission.asked' as const,
+      properties: { id: 'permission-unknown', sessionID: 'session-unknown', permission: 'bash' },
+    };
+    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
+      .sessionState;
+    sessionState.handleServerEvent(event);
+
+    provider.post({ type: 'server/event', payload: event });
+
+    expect(posted).toEqual([]);
+    expect(editor.panel.webview.postMessage).not.toHaveBeenCalled();
+
+    const created = {
+      type: 'session.created' as const,
+      properties: { info: { id: 'session-unknown', directory: '/repo-b' } },
+    };
+    sessionState.handleServerEvent(created);
+    provider.post({ type: 'server/event', payload: created });
+
+    expect(posted).toEqual([]);
+    expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
+      type: 'server/event',
+      payload: created,
+    });
+    expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
+      type: 'server/event',
+      payload: event,
+    });
+  });
+
+  it('does not expose an external active file to workspace-scoped endpoints', async () => {
+    const contextProvider = createContextProvider();
+    contextProvider.context.workspacePath = '/repo-a';
+    const { provider } = await createSidebarProviderInstance({ contextProvider });
+    const { posted } = attachTestView(provider);
+    const editor = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+    await provider.openNewEditor();
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    contextProvider.context.activeWorkspacePath = null;
+    contextProvider.context.activeFile = {
+      path: '/tmp/notes.ts',
+      relativePath: '/tmp/notes.ts',
+      language: 'typescript',
+    };
+    provider.post({ type: 'context/update', payload: contextProvider.context });
+
+    expect(lastEditorContext(posted)?.activeFile).toBeNull();
+    expect(
+      lastEditorContext(editor.panel.webview.postMessage.mock.calls.map(([message]) => message))
+        ?.activeFile
+    ).toBeNull();
+  });
+
+  it('runs editor terminal commands in the editor workspace', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    attachTestView(provider);
+    const editor = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+    await provider.openNewEditor();
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    await vi.waitFor(() =>
+      expect(
+        lastEditorContext(editor.panel.webview.postMessage.mock.calls.map(([message]) => message))
+          ?.workspacePath
+      ).toBe('/repo-b')
+    );
+    editor.receive({
+      type: 'terminal/run',
+      payload: { command: 'opencode auth login', title: 'OpenCode' },
+    });
+
+    await vi.waitFor(() =>
+      expect(getVscodeMock().window.createTerminal).toHaveBeenCalledWith({
+        name: 'OpenCode',
+        cwd: '/repo-b',
+      })
+    );
+  });
+
+  it('restores an editor workspace from its persisted panel state', async () => {
+    const contextProvider = createContextProvider();
+    contextProvider.context.workspacePath = '/repo-a';
+    const { provider } = await createSidebarProviderInstance({ contextProvider });
+    attachTestView(provider);
+    const restored = createPanel();
+
+    await provider.deserializeWebviewPanel(restored.panel as never, {
+      'varro.editorViewId': 'editor-repo-b',
+      'varro.lastOpenedView': { type: 'session', sessionId: 'session-b' },
+      'varro.workspacePath': '/repo-b',
+    });
+    restored.receive({ type: 'ready' });
+
+    await vi.waitFor(() =>
+      expect(
+        lastEditorContext(restored.panel.webview.postMessage.mock.calls.map(([message]) => message))
+          ?.workspacePath
+      ).toBe('/repo-b')
+    );
+  });
+
   it('lets VS Code release hidden editor content and broadcasts the editor-tab lifecycle', async () => {
     const { provider } = await createSidebarProviderInstance();
     const { posted } = attachTestView(provider);

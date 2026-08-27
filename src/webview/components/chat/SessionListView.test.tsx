@@ -3,7 +3,13 @@ import { reconcile } from 'solid-js/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../../types';
 import { client } from '../../lib/client';
-import { setSessions, setState, state as appState } from '../../lib/state';
+import {
+  setSessions,
+  setShowSessionPicker,
+  setState,
+  showSessionPicker,
+  state as appState,
+} from '../../lib/state';
 import { selectSession } from '../../hooks/useOpenCode';
 import {
   getSessionDiffSummaryStateForTests,
@@ -101,6 +107,13 @@ beforeEach(() => {
   setState('editorSessionIds', []);
   setState('sessionStatus', {});
   setState('queuedMessages', []);
+  setState('editorContext', {
+    workspacePath: null,
+    workspaceFolders: [],
+    activeFile: null,
+    selection: null,
+    diagnostics: [],
+  });
   setState('editorTabsOpen', false);
   setState('completedSessionResponses', reconcile({}));
   setState('sessionsLoadError', null);
@@ -178,6 +191,43 @@ describe('SessionListSectionHeader icons', () => {
 });
 
 describe('SessionListView model details', () => {
+  it('shows a workspace selector above search for multi-root workspaces', () => {
+    const send = vi.fn((message: TestRuntimeValue) => {
+      structuredClone(message);
+    });
+    // SAFETY: The fixture provides the bridge callback used by postMessage.
+    (window as { __sendToExtension?: (message: TestRuntimeValue) => void }).__sendToExtension =
+      send;
+    setState('editorContext', {
+      workspacePath: '/repo-a',
+      workspaceFolders: [
+        { name: 'Repo A', path: '/repo-a' },
+        { name: 'Repo B', path: '/repo-b' },
+      ],
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    setState('sessions', [session('session-1', 2), session('session-2', 1)]);
+    setShowSessionPicker(false);
+
+    cleanup = render(() => <SessionListView />, container);
+
+    const selector = container.querySelector('.session-list-workspace-selector');
+    const search = container.querySelector('.session-list-search');
+    expect(selector?.nextElementSibling).toBe(search);
+    expect(selector?.textContent).toContain('Workspace:');
+    expect(selector?.querySelector('.workspace-picker-folder-icon')).toBeNull();
+
+    selector?.querySelector<HTMLButtonElement>('.workspace-picker-button')?.click();
+    selector?.querySelector<HTMLButtonElement>('[data-workspace-path="/repo-b"]')?.click();
+    expect(send).toHaveBeenCalledWith({
+      type: 'workspace/select',
+      payload: { path: '/repo-b' },
+    });
+    expect(showSessionPicker()).toBe(true);
+  });
+
   it('opens an Alt-clicked session row in an editor tab', () => {
     const send = vi.fn((message: TestRuntimeValue) => {
       structuredClone(message);

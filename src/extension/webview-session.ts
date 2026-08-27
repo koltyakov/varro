@@ -59,7 +59,7 @@ export class WebviewSession {
     private readonly bridge: SidebarProviderBridge,
     private readonly sessionState: Pick<
       SessionStateManager,
-      | 'clearCompleted'
+      | 'clearCompletedInWorkspace'
       | 'consumeRecoverySnapshot'
       | 'isSessionInWorkspace'
       | 'replayBlockingRequests'
@@ -103,6 +103,7 @@ export class WebviewSession {
       cancelApiRequestsBeforeGeneration(generation: number): void;
       handleUnavailableSideEffects(): void;
       handleDisposedSideEffects(): void;
+      editorContext?(): InitialWebviewState['editorContext'];
     },
     private readonly webviewContext?: WebviewInstanceContext,
     private readonly manageCommandContext = true
@@ -112,6 +113,10 @@ export class WebviewSession {
       this.webviewReady = false;
       this.deps.handleUnavailableSideEffects();
     });
+  }
+
+  private getEditorContext() {
+    return this.deps.editorContext?.() ?? this.contextProvider.context;
   }
 
   private deliveryRecoveryPending = false;
@@ -338,7 +343,7 @@ export class WebviewSession {
 
   handleVisible() {
     const status = this.deps.renderStatus();
-    this.sessionState.clearCompleted();
+    this.sessionState.clearCompletedInWorkspace(this.getEditorContext().workspacePath);
     this.deliveryRecoveryPending = false;
     this.postBootMessages(status);
     void this.deps.handleVisibleSideEffects().catch((err) => {
@@ -391,11 +396,12 @@ export class WebviewSession {
 
   private buildInitialState(serverStatus: ServerStatus): InitialWebviewState {
     const config = this.deps.readConfig();
+    const editorContext = this.getEditorContext();
     return {
       webviewContext: this.webviewContext,
       theme: this.deps.currentTheme(),
       serverStatus,
-      editorContext: this.contextProvider.context,
+      editorContext,
       terminalSelection: this.contextProvider.terminalSelection,
       droppedFiles: this.contextFilesState.getContextFiles(),
       clipboardImages: this.deps.draftImages(),
@@ -423,20 +429,14 @@ export class WebviewSession {
         .filter((item) => item.kind === 'permission')
         .filter((item) => !this.isHiddenSession(item.sessionID))
         .filter((item) =>
-          this.sessionState.isSessionInWorkspace(
-            item.sessionID,
-            this.contextProvider.context.workspacePath
-          )
+          this.sessionState.isSessionInWorkspace(item.sessionID, editorContext.workspacePath)
         )
         .map((item) => item.props),
       pendingQuestions: this.blockingRequestsForWebview
         .filter((item) => item.kind === 'question')
         .filter((item) => !this.isHiddenSession(item.sessionID))
         .filter((item) =>
-          this.sessionState.isSessionInWorkspace(
-            item.sessionID,
-            this.contextProvider.context.workspacePath
-          )
+          this.sessionState.isSessionInWorkspace(item.sessionID, editorContext.workspacePath)
         )
         .map((item) => item.props),
       pinnedSessionIds: this.pinnedSessions.list(),
@@ -449,7 +449,8 @@ export class WebviewSession {
   }
 
   private postBootMessages(status: ServerStatus, options?: { clearResolvedEmbedded?: boolean }) {
-    this.bridge.post({ type: 'context/update', payload: this.contextProvider.context });
+    const editorContext = this.getEditorContext();
+    this.bridge.post({ type: 'context/update', payload: editorContext });
     this.bridge.post({
       type: 'terminal-selection/update',
       payload: this.contextProvider.terminalSelection,
@@ -503,7 +504,7 @@ export class WebviewSession {
       {
         previousRequests: this.blockingRequestsForWebview,
         clearResolvedEmbedded: options?.clearResolvedEmbedded,
-        workspacePath: this.contextProvider.context.workspacePath,
+        workspacePath: editorContext.workspacePath,
       }
     );
     this.flushPendingInputFocus();

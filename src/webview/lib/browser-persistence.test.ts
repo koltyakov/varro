@@ -172,6 +172,7 @@ describe('BrowserPersistence', () => {
       type: 'session',
       sessionId: 'session-1',
     });
+    new BrowserPersistence().set('varro.workspacePath', '/repo-a');
 
     let secondViewState: TestRuntimeRecord = {};
     window.__vscodeWebviewState = {
@@ -184,6 +185,7 @@ describe('BrowserPersistence', () => {
       type: 'session',
       sessionId: 'session-2',
     });
+    new BrowserPersistence().set('varro.workspacePath', '/repo-b');
 
     window.__vscodeWebviewState = {
       getState: () => firstViewState,
@@ -196,7 +198,57 @@ describe('BrowserPersistence', () => {
       type: 'session',
       sessionId: 'session-1',
     });
+    expect(new BrowserPersistence().get('varro.workspacePath')).toBe('/repo-a');
     expect(window.localStorage.getItem('varro.lastOpenedView')).toBeNull();
+    expect(window.localStorage.getItem('varro.workspacePath')).toBeNull();
+  });
+
+  it('keeps sidebar attachment drafts private across two webview instances', () => {
+    setInitialWebviewState({
+      webviewContext: {
+        viewId: 'sidebar',
+        surface: 'sidebar',
+        initialRoute: { type: 'new-session' },
+      },
+    });
+    window.localStorage.setItem(
+      'varro.inputDraftFiles',
+      JSON.stringify([{ path: '/stale/file.ts', relativePath: 'file.ts', type: 'file' }])
+    );
+    let firstViewState: TestRuntimeRecord = {};
+    window.__vscodeWebviewState = {
+      getState: () => firstViewState,
+      setState: (state) => {
+        firstViewState = state;
+      },
+    };
+    const firstFiles = [{ path: '/repo-a/file.ts', relativePath: 'file.ts', type: 'file' }];
+    const firstStorage = new BrowserPersistence();
+
+    expect(firstStorage.get('varro.inputDraftFiles')).toBeUndefined();
+    firstStorage.set('varro.inputDraftFiles', firstFiles);
+
+    let secondViewState: TestRuntimeRecord = {};
+    window.__vscodeWebviewState = {
+      getState: () => secondViewState,
+      setState: (state) => {
+        secondViewState = state;
+      },
+    };
+
+    expect(new BrowserPersistence().get('varro.inputDraftFiles')).toBeUndefined();
+
+    window.__vscodeWebviewState = {
+      getState: () => firstViewState,
+      setState: (state) => {
+        firstViewState = state;
+      },
+    };
+
+    expect(new BrowserPersistence().get('varro.inputDraftFiles')).toEqual(firstFiles);
+    expect(JSON.parse(window.localStorage.getItem('varro.inputDraftFiles') || 'null')).toEqual([
+      { path: '/stale/file.ts', relativePath: 'file.ts', type: 'file' },
+    ]);
   });
 
   it('continues with VSCode state when localStorage acquisition is denied', () => {

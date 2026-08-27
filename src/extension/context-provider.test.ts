@@ -1232,6 +1232,7 @@ describe('ContextProvider', () => {
       expect(onChange).toHaveBeenLastCalledWith({
         workspacePath: '/repo',
         workspaceFolders: [{ name: 'repo', path: '/repo' }],
+        activeWorkspacePath: '/repo',
         activeFile: {
           path: '/repo/src/app.ts',
           relativePath: 'src/app.ts',
@@ -1299,6 +1300,7 @@ describe('ContextProvider', () => {
       expect(onChange).toHaveBeenLastCalledWith({
         workspacePath: '/repo',
         workspaceFolders: [{ name: 'repo', path: '/repo' }],
+        activeWorkspacePath: '/repo',
         activeFile: {
           path: '/repo/src/app.ts',
           relativePath: 'src/app.ts',
@@ -1430,8 +1432,8 @@ describe('ContextProvider', () => {
       await provider.selectWorkspace('/second');
 
       expect(provider.context.workspacePath).toBe('/second');
-      expect(provider.context.activeFile).toBeNull();
-      expect(provider.context.diagnostics).toEqual([]);
+      expect(provider.context.activeWorkspacePath).toBe('/first');
+      expect(provider.context.activeFile?.path).toBe('/first/app.ts');
       expect(workspaceState.update).toHaveBeenCalledWith(
         'varro.selectedWorkspaceFolder',
         '/second'

@@ -170,7 +170,9 @@ describe('SidebarProvider local config routing', () => {
         },
       },
     });
-    expect(server.request).toHaveBeenCalledWith('POST', '/instance/dispose');
+    expect(server.request).toHaveBeenCalledWith('POST', '/instance/dispose', undefined, {
+      directory: '/repo',
+    });
     expect(server.restart).not.toHaveBeenCalled();
   });
 
@@ -330,7 +332,9 @@ describe('SidebarProvider local config routing', () => {
         review: { model: 'anthropic/claude-sonnet-4' },
       },
     });
-    expect(server.request).toHaveBeenCalledWith('POST', '/instance/dispose');
+    expect(server.request).toHaveBeenCalledWith('POST', '/instance/dispose', undefined, {
+      directory: '/repo',
+    });
     expect(server.restart).not.toHaveBeenCalled();
   });
 
@@ -468,6 +472,7 @@ describe('SidebarProvider local config routing', () => {
       terminalSelection: null,
       clearTerminalSelection: vi.fn(),
       openPath: vi.fn(),
+      selectWorkspace: vi.fn(() => Promise.resolve()),
     };
 
     const { provider } = await createSidebarProviderInstance({ contextProvider });

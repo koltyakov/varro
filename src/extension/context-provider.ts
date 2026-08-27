@@ -41,6 +41,7 @@ export class ContextProvider implements vscode.Disposable {
   private _context: EditorContext = {
     workspacePath: null,
     workspaceFolders: [],
+    activeWorkspacePath: null,
     activeFile: null,
     selection: null,
     editorText: null,
@@ -339,6 +340,7 @@ export class ContextProvider implements vscode.Disposable {
           this.update();
           return;
         }
+        this._context.activeWorkspacePath = null;
         this._context.activeFile = null;
         this._context.selection = null;
         this._context.editorText = null;
@@ -350,6 +352,7 @@ export class ContextProvider implements vscode.Disposable {
 
     const doc = editor.document;
     if (doc.isUntitled || doc.uri.scheme === 'untitled') {
+      this._context.activeWorkspacePath = null;
       this._context.activeFile = null;
       const selection = editor.selection;
       this._context.selection = !selection.isEmpty
@@ -362,8 +365,7 @@ export class ContextProvider implements vscode.Disposable {
     }
 
     const workspaceFolder = vscode.workspace.getWorkspaceFolder(doc.uri);
-    const belongsToSelectedWorkspace =
-      !this.selectedWorkspacePath || workspaceFolder?.uri.fsPath === this.selectedWorkspacePath;
+    this._context.activeWorkspacePath = workspaceFolder?.uri.fsPath ?? null;
     // For files outside any workspace folder we surface the absolute fsPath
     // as `relativePath` so that downstream consumers (e.g. Ralph plan input)
     // receive a path that ContextProvider.readFile can resolve. Display sites
@@ -372,16 +374,14 @@ export class ContextProvider implements vscode.Disposable {
       ? getRelativePath(doc.uri, workspaceFolder)
       : doc.uri.fsPath;
 
-    this._context.activeFile = belongsToSelectedWorkspace
-      ? {
-          path: doc.uri.fsPath,
-          relativePath,
-          language: doc.languageId,
-        }
-      : null;
+    this._context.activeFile = {
+      path: doc.uri.fsPath,
+      relativePath,
+      language: doc.languageId,
+    };
 
     const selection = editor.selection;
-    if (!selection.isEmpty && belongsToSelectedWorkspace) {
+    if (!selection.isEmpty) {
       this._context.selection = {
         startLine: selection.start.line + 1,
         endLine: selection.end.line + 1,
@@ -389,9 +389,7 @@ export class ContextProvider implements vscode.Disposable {
     } else {
       this._context.selection = null;
     }
-    this._context.editorText = belongsToSelectedWorkspace
-      ? this.createEditorTextContext(editor, doc.uri.fsPath, relativePath)
-      : null;
+    this._context.editorText = this.createEditorTextContext(editor, doc.uri.fsPath, relativePath);
 
     if (!this.captureContextSnapshot()) return;
 
@@ -413,14 +411,6 @@ export class ContextProvider implements vscode.Disposable {
   private updateDiagnostics() {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
-      this._context.diagnostics = [];
-      this._context.diagnosticsTotal = 0;
-      this.emitContextIfChanged();
-      return;
-    }
-
-    const workspaceFolder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
-    if (this.selectedWorkspacePath && workspaceFolder?.uri.fsPath !== this.selectedWorkspacePath) {
       this._context.diagnostics = [];
       this._context.diagnosticsTotal = 0;
       this.emitContextIfChanged();
@@ -458,6 +448,7 @@ export class ContextProvider implements vscode.Disposable {
     return {
       workspacePath: this._context.workspacePath,
       workspaceFolders: this._context.workspaceFolders?.map((folder) => ({ ...folder })),
+      activeWorkspacePath: this._context.activeWorkspacePath,
       activeFile: activeFile
         ? {
             path: activeFile.path,
@@ -938,13 +929,19 @@ async function resolveInsideWorkspace(
 
 type ContextSnapshot = Pick<
   EditorContext,
-  'workspacePath' | 'workspaceFolders' | 'activeFile' | 'selection' | 'editorText'
+  | 'workspacePath'
+  | 'workspaceFolders'
+  | 'activeWorkspacePath'
+  | 'activeFile'
+  | 'selection'
+  | 'editorText'
 >;
 
 function areContextSnapshotsEqual(a: ContextSnapshot | null, b: ContextSnapshot | null) {
   return (
     a?.workspacePath === b?.workspacePath &&
     JSON.stringify(a?.workspaceFolders ?? []) === JSON.stringify(b?.workspaceFolders ?? []) &&
+    a?.activeWorkspacePath === b?.activeWorkspacePath &&
     areActiveFilesEqual(a?.activeFile ?? null, b?.activeFile ?? null) &&
     areSelectionsEqual(a?.selection ?? null, b?.selection ?? null) &&
     areEditorTextContextsEqual(a?.editorText ?? null, b?.editorText ?? null)
@@ -955,6 +952,7 @@ function areEditorContextsEqual(a: EditorContext, b: EditorContext | null) {
   return (
     a.workspacePath === b?.workspacePath &&
     JSON.stringify(a.workspaceFolders ?? []) === JSON.stringify(b?.workspaceFolders ?? []) &&
+    a.activeWorkspacePath === b?.activeWorkspacePath &&
     areActiveFilesEqual(a.activeFile, b?.activeFile ?? null) &&
     areSelectionsEqual(a.selection, b?.selection ?? null) &&
     areEditorTextContextsEqual(a.editorText ?? null, b?.editorText ?? null) &&
@@ -1004,6 +1002,7 @@ function cloneEditorContext(context: EditorContext): EditorContext {
   return {
     workspacePath: context.workspacePath,
     workspaceFolders: context.workspaceFolders?.map((folder) => ({ ...folder })),
+    activeWorkspacePath: context.activeWorkspacePath,
     activeFile: context.activeFile ? { ...context.activeFile } : null,
     selection: context.selection ? { ...context.selection } : null,
     editorText: context.editorText ? { ...context.editorText } : null,

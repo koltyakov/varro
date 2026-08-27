@@ -32,6 +32,7 @@ export interface EditorDiagnostic {
 export interface EditorContext {
   workspacePath: string | null;
   workspaceFolders?: WorkspaceFolderContext[];
+  activeWorkspacePath?: string | null;
   activeFile: {
     path: string;
     relativePath: string;
@@ -591,6 +592,15 @@ export type QueuedMessageSnapshot = {
   queuedContext?: QueuedContextSnapshot;
 };
 
+export type SiblingWorkspaceAlertKind = 'attention' | 'error' | 'plan-ready';
+
+export type SiblingWorkspaceAlert = {
+  name: string;
+  path: string;
+  kinds: SiblingWorkspaceAlertKind[];
+  count: number;
+};
+
 export type InitialWebviewState = {
   webviewContext?: WebviewInstanceContext;
   theme: WebviewThemeKind;
@@ -618,6 +628,7 @@ export type InitialWebviewState = {
   editorTabsOpen?: boolean;
   /** Root session ids currently visible in editor tabs. */
   editorSessionIds?: string[];
+  siblingWorkspaceAlerts?: SiblingWorkspaceAlert[];
   permissionAutomation?: { owner: boolean; lease: number };
   interruptedSessionIds?: string[];
   pendingPermissions?: UnknownRecord[];
@@ -673,6 +684,10 @@ export type ExtensionMessage =
   | { type: 'api/response'; payload: { id: number; data?: unknown; error?: string } }
   | { type: 'queued-messages/sync'; payload: { messages: QueuedMessageSnapshot[] } }
   | {
+      type: 'queued-messages/session-status';
+      payload: { sessionId: string; status: 'busy' | 'idle' };
+    }
+  | {
       type: 'queued-messages/claim-result';
       payload: {
         requestId: number;
@@ -697,6 +712,7 @@ export type ExtensionMessage =
     }
   | { type: 'model-preferences/sync'; payload: ModelPreferences }
   | { type: 'editor-tabs/state'; payload: { open: boolean; sessionIds: string[] } }
+  | { type: 'sibling-workspace-alerts/update'; payload: SiblingWorkspaceAlert[] }
   | { type: 'permission-automation/update'; payload: { owner: boolean; lease: number } }
   | { type: 'permission/actionable'; payload: { permissionId: string } }
   | {

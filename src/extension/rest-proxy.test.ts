@@ -592,6 +592,79 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 93, data: [] });
   });
 
+  it('uses the endpoint workspace when validating an explicitly scoped session request', async () => {
+    const serverRequest = vi.fn(() => Promise.resolve([]));
+    const { proxy, callbacks } = createProxy({
+      getWorkspacePath: () => '/repo-b',
+      contextProvider: {
+        ...createCallbacks().contextProvider,
+        context: {
+          workspacePath: '/repo-a',
+          activeFile: null,
+          selection: null,
+          diagnostics: [],
+        },
+      } as never,
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(
+      makePayload(931, 'POST', '/session/session-b/prompt_async?directory=%2Frepo-b', {
+        parts: [],
+      })
+    );
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 931, data: [] });
+    expect(serverRequest).toHaveBeenCalledWith(
+      'POST',
+      '/session/session-b/prompt_async?directory=%2Frepo-b',
+      { parts: [] }
+    );
+  });
+
+  it('allows a leased queued prompt to target another open workspace', async () => {
+    const serverRequest = vi.fn(() => Promise.resolve({ ok: true }));
+    const { proxy, callbacks } = createProxy({
+      getWorkspacePath: () => '/repo-b',
+      contextProvider: {
+        ...createCallbacks().contextProvider,
+        context: {
+          workspacePath: '/repo-b',
+          workspaceFolders: [
+            { name: 'repo-a', path: '/repo-a' },
+            { name: 'repo-b', path: '/repo-b' },
+          ],
+          activeFile: null,
+          selection: null,
+          diagnostics: [],
+        },
+        getOpenWorkspaceRoot: vi.fn((path: string) =>
+          path === '/repo-a' || path === '/repo-b' ? path : null
+        ),
+      } as never,
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest({
+      ...makePayload(932, 'POST', '/session/session-a/prompt_async?directory=%2Frepo-a', {
+        messageID: 'message-932',
+        parts: [],
+      }),
+      queuedMessageDispatch: { itemId: 'queue-1', lease: 4 },
+    });
+
+    expect(serverRequest).toHaveBeenCalledWith(
+      'POST',
+      '/session/session-a/prompt_async?directory=%2Frepo-a',
+      { messageID: 'message-932', parts: [] },
+      { directory: '/repo-a' }
+    );
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 932,
+      data: { ok: true },
+    });
+  });
+
   it('rejects an explicit directory outside open roots before server startup', async () => {
     const { proxy, callbacks } = createProxy({
       contextProvider: {

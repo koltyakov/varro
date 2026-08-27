@@ -278,6 +278,38 @@ describe('parseExtensionMessage', () => {
     ).toBeNull();
   });
 
+  it('parses sibling workspace alert updates', () => {
+    expect(
+      parseExtensionMessage({
+        type: 'sibling-workspace-alerts/update',
+        payload: [
+          {
+            name: 'Repo B',
+            path: '/repo-b',
+            kinds: ['attention', 'error', 'plan-ready'],
+            count: 2,
+          },
+        ],
+      })
+    ).toEqual({
+      type: 'sibling-workspace-alerts/update',
+      payload: [
+        {
+          name: 'Repo B',
+          path: '/repo-b',
+          kinds: ['attention', 'error', 'plan-ready'],
+          count: 2,
+        },
+      ],
+    });
+    expect(
+      parseExtensionMessage({
+        type: 'sibling-workspace-alerts/update',
+        payload: [{ name: 'Repo B', path: '/repo-b', kinds: ['completed'], count: 1 }],
+      })
+    ).toBeNull();
+  });
+
   it('parses permission ownership and recovery updates', () => {
     expect(
       parseExtensionMessage({
@@ -475,6 +507,19 @@ describe('parseExtensionMessage', () => {
         diagnostics: [],
       },
     });
+
+    expect(
+      parseExtensionMessage({
+        type: 'context/update',
+        payload: {
+          workspacePath: '/repo',
+          activeWorkspacePath: 42,
+          activeFile: null,
+          selection: null,
+          diagnostics: [],
+        },
+      })
+    ).toBeNull();
   });
 
   it('rejects malformed dropped file payloads', () => {
@@ -872,6 +917,31 @@ describe('parseExtensionMessage queued message claim results', () => {
         payload: { ...base, requestId: 0, granted: false },
       })
     ).toMatchObject({ payload: { requestId: 0 } });
+  });
+});
+
+describe('parseExtensionMessage queued session status', () => {
+  it('parses busy and idle queue lifecycle updates', () => {
+    for (const status of ['busy', 'idle'] as const) {
+      expect(
+        parseExtensionMessage({
+          type: 'queued-messages/session-status',
+          payload: { sessionId: 'session-1', status },
+        })
+      ).toEqual({
+        type: 'queued-messages/session-status',
+        payload: { sessionId: 'session-1', status },
+      });
+    }
+  });
+
+  it('rejects malformed queue lifecycle updates', () => {
+    expect(
+      parseExtensionMessage({
+        type: 'queued-messages/session-status',
+        payload: { sessionId: 'session-1', status: 'retry' },
+      })
+    ).toBeNull();
   });
 });
 

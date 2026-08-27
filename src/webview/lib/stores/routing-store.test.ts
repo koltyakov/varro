@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { ProviderLimitStatus } from '../../../shared/protocol';
 import type { Agent, Command, Provider } from '../../types';
 import { routingStore } from './routing-store';
-import { resetDefaultAppState, state } from '../state';
+import { resetDefaultAppState, setState, state } from '../state';
 
 function createAgent(name: string): Agent {
   return {
@@ -98,6 +98,18 @@ describe('routingStore', () => {
     expect(routingStore.hasCommand('/review')).toBe(true);
     expect(routingStore.getConnectedMcpNames()).toEqual(['alpha', 'zebra']);
     expect(routingStore.getProviderLimit('provider-1', 'model-1')).toEqual(limit);
+  });
+
+  it('releases a workspace reload lock only after every send catalog loads', () => {
+    setState('workspaceCatalogReloadPending', true);
+
+    routingStore.setProvidersLoaded(true);
+    expect(state.workspaceCatalogReloadPending).toBe(true);
+    routingStore.setPrimaryAgents([]);
+    expect(state.workspaceCatalogReloadPending).toBe(true);
+    routingStore.setCommands([]);
+
+    expect(state.workspaceCatalogReloadPending).toBe(false);
   });
 
   it('updates provider and model visibility', () => {

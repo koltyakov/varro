@@ -4,7 +4,6 @@ import * as vscode from 'vscode';
 import type { ExtensionMessage, ServerEvent, ServerStatus } from '../shared/protocol';
 import { parseServerEvent } from '../shared/protocol';
 import { asRecord } from '../shared/type-utils';
-import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import type { OpenCodeServer } from './server';
 import type { HiddenSessionManager } from './hidden-session-manager';
 import { logger } from './logger';
@@ -64,8 +63,7 @@ export class ServerEventBridge {
       clearCache(): void;
     },
     private readonly post: PostMessage,
-    private readonly updateStatusBarItem: () => void,
-    private readonly workspace?: { getPath(): string | null | undefined }
+    private readonly updateStatusBarItem: () => void
   ) {
     this.openCodeStatusBarItem = vscode.window.createStatusBarItem(
       'varro.opencode-version',
@@ -174,14 +172,24 @@ export class ServerEventBridge {
     const delta = getCoalescableDelta(event);
     if (!delta || this.pendingDelta?.key !== delta.key) this.flushPendingDelta();
     this.hiddenSessions.observeEvent?.(event);
-    if (this.shouldSuppress(event) || this.shouldSuppressWorkspace(event)) {
+    if (this.shouldSuppress(event)) {
       this.flushPendingDelta();
       return;
     }
+    const routeBeforeStateMutation = event.type === 'session.deleted';
+    if (routeBeforeStateMutation) {
+      if (recent) recent.forwarded = true;
+      this.post({ type: 'server/event', payload: event });
+    }
     this.sessionState.handleServerEvent(event);
-    if (recent) recent.forwarded = true;
-    if (delta) this.enqueueDelta(event, delta);
-    else this.post({ type: 'server/event', payload: event });
+    if (event.type === 'session.created' || event.type === 'session.updated') {
+      this.updateStatusBarItem();
+    }
+    if (!routeBeforeStateMutation) {
+      if (recent) recent.forwarded = true;
+      if (delta) this.enqueueDelta(event, delta);
+      else this.post({ type: 'server/event', payload: event });
+    }
   }
 
   private enqueueDelta(event: ServerEvent, delta: CoalescableDelta) {
@@ -242,21 +250,6 @@ export class ServerEventBridge {
   private shouldSuppress(event: ServerEvent) {
     return getSessionIdsForEvent(event).some((sessionID) =>
       this.hiddenSessions.isHidden(sessionID)
-    );
-  }
-
-  private shouldSuppressWorkspace(event: ServerEvent) {
-    const workspacePath = this.workspace?.getPath();
-    if (!normalizeWorkspaceIdentity(workspacePath)) return false;
-
-    const info = asRecord(asRecord(event.properties)?.info);
-    const directory = typeof info?.directory === 'string' ? info.directory : undefined;
-    if (directory) return !isDirectoryInWorkspace(directory, workspacePath);
-
-    const sessionIDs = getSessionIdsForEvent(event);
-    if (sessionIDs.length === 0) return false;
-    return sessionIDs.some(
-      (sessionID) => this.sessionState.getSessionWorkspaceMatch(sessionID, workspacePath) === false
     );
   }
 }
@@ -363,12 +356,4 @@ function getRawEventType(value: unknown): string | null {
   const syncEvent = asRecord(candidate.syncEvent);
   const type = syncEvent?.type ?? (candidate.type === 'sync' ? candidate.name : candidate.type);
   return typeof type === 'string' && type.trim() ? type : null;
-}
-
-function isDirectoryInWorkspace(
-  directory: string,
-  workspacePath: string | null | undefined
-): boolean {
-  if (!normalizeWorkspaceIdentity(workspacePath)) return true;
-  return isSameWorkspacePath(directory, workspacePath);
 }

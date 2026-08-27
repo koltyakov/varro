@@ -299,9 +299,9 @@ describe('AppRoot', () => {
     expect(warningToast?.classList.contains('is-warning')).toBe(true);
     expect(warningToast?.getAttribute('role')).toBe('status');
     expect(warningToast?.getAttribute('aria-live')).toBe('polite');
-    expect(warningToast?.querySelector('.session-action-feedback-warning-glyph')?.textContent).toBe(
-      '!'
-    );
+    expect(
+      warningToast?.querySelector('.session-action-feedback-attention-glyph')?.textContent
+    ).toBe('!');
     expect(warningToast?.querySelector('.session-action-feedback-glyph')).toBeNull();
 
     vi.advanceTimersByTime(1_600);
