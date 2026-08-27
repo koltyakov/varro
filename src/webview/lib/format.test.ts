@@ -318,6 +318,38 @@ describe('format helpers', () => {
     ]);
   });
 
+  it('orders Ollama Cloud session before weekly and includes both compact badges', () => {
+    const limit = availableLimit([
+      {
+        id: 'weekly',
+        label: 'Weekly (7d)',
+        unit: 'unknown',
+        remaining: 97,
+        limit: 100,
+        resetAt: null,
+        percent: 3,
+      },
+      {
+        id: 'five_hour',
+        label: 'Session (5h)',
+        unit: 'unknown',
+        remaining: 95,
+        limit: 100,
+        resetAt: null,
+        percent: 5,
+      },
+    ]);
+
+    expect(getOrderedProviderLimitWindows(limit).map((window) => window.id)).toEqual([
+      'five_hour',
+      'weekly',
+    ]);
+    expect(getProviderLimitCompactBadges(limit)).toEqual([
+      { label: '95%', tone: 'default' },
+      { label: '97%', tone: 'default' },
+    ]);
+  });
+
   it('derives period prefixes for weekly and monthly windows', () => {
     expect(
       formatProviderLimitCompactPrefix(

@@ -166,6 +166,15 @@ describe('formatToolTitle', () => {
     ).toBe('Trace Varro diff logic');
   });
 
+  it('uses the URL as the webfetch title', () => {
+    expect(
+      formatToolTitle(
+        'webfetch',
+        completedState({ url: 'https://sourcegraph.com/search/stream?q=context' })
+      )
+    ).toBe('https://sourcegraph.com/search/stream?q=context');
+  });
+
   it('falls back to the command for errored bash calls without a title', () => {
     expect(
       formatToolTitle('bash', {

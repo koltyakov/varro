@@ -1237,7 +1237,7 @@ describe('sendMessage', () => {
       parts: [
         {
           type: 'text',
-          text: 'Continue from where you were interrupted before the extension reload. Review the existing conversation, do not repeat completed work, and proceed with the next unfinished step.',
+          text: 'Continue from where you were interrupted by the server restart or extension reload. Review the existing conversation, do not repeat completed work, and proceed with the next unfinished step.',
         },
       ],
     });

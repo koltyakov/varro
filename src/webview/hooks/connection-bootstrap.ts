@@ -20,7 +20,7 @@ export type InterruptedSessionContinueBody = {
 };
 
 export const INTERRUPTED_SESSION_CONTINUE_PROMPT =
-  'Continue from where you were interrupted before the extension reload. Review the existing conversation, do not repeat completed work, and proceed with the next unfinished step.';
+  'Continue from where you were interrupted by the server restart or extension reload. Review the existing conversation, do not repeat completed work, and proceed with the next unfinished step.';
 
 export function buildInterruptedSessionContinueBody(args: {
   agent: string | null;

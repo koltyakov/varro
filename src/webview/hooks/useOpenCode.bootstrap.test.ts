@@ -354,7 +354,7 @@ describe('useOpenCode initialization', () => {
     }
   });
 
-  it('continues sessions that were interrupted by extension reload', async () => {
+  it('continues sessions interrupted by a server restart or extension reload', async () => {
     let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
     bridgeOnMessage.mockImplementation((handler) => {
       bridgeHandler = handler;
@@ -409,7 +409,7 @@ describe('useOpenCode initialization', () => {
           parts: [
             {
               type: 'text',
-              text: 'Continue from where you were interrupted before the extension reload. Review the existing conversation, do not repeat completed work, and proceed with the next unfinished step.',
+              text: 'Continue from where you were interrupted by the server restart or extension reload. Review the existing conversation, do not repeat completed work, and proceed with the next unfinished step.',
             },
           ],
         });

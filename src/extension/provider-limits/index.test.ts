@@ -69,6 +69,18 @@ describe('provider limit adapters', () => {
     expect(adapter?.id).toBe('openrouter');
   });
 
+  it('matches the Ollama Cloud adapter', () => {
+    const adapter = findProviderLimitAdapter(
+      {
+        id: 'ollama-cloud',
+        models: { 'qwen3-coder:480b': { api: { url: 'https://ollama.com/api' } } },
+      },
+      { 'ollama-cloud': { type: 'api', key: 'ollama-api-key' } }
+    );
+
+    expect(adapter?.id).toBe('ollama-cloud');
+  });
+
   it('matches the Gemini adapter for Gemini provider aliases', () => {
     const adapter = findProviderLimitAdapter(
       {

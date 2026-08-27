@@ -4,6 +4,7 @@ import deepseekIcon from '../assets/provider-icons/deepseek.svg';
 import geminiIcon from '../assets/provider-icons/gemini.svg';
 import githubCopilotIcon from '../assets/provider-icons/copilot.svg';
 import kimiIcon from '../assets/provider-icons/kimi.svg';
+import ollamaIcon from '../assets/provider-icons/ollama.svg';
 import opencodeIcon from '../assets/provider-icons/opencode.svg';
 import openaiIcon from '../assets/provider-icons/openai.svg';
 import openrouterIcon from '../assets/provider-icons/openrouter.svg';
@@ -41,6 +42,7 @@ describe('getProviderIcon', () => {
     ['qwen', qwenIcon],
     ['kimi', kimiIcon],
     ['kimi-for-coding', kimiIcon],
+    ['ollama-cloud', ollamaIcon],
   ])('maps provider "%s" to the expected icon asset', (provider, icon) => {
     expect(getProviderIcon(provider)).toBe(icon);
   });

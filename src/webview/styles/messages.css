@@ -2511,6 +2511,10 @@ body.vscode-light .interactive-session .chat-input-toolbars.toolbar-meta {
   justify-content: flex-end;
 }
 
+.interactive-session .chat-input-toolbars.toolbar-meta .toolbar-mcp-count + .context-anchor {
+  margin-left: 4px;
+}
+
 .toolbar-picker-label {
   overflow: hidden;
   text-overflow: ellipsis;

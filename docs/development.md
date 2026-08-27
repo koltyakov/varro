@@ -265,7 +265,7 @@ Permission handling is governed by the lifecycle, inheritance, timeout, and visi
 - Subscribes to extension messages and OpenCode server events
 - Builds prompt parts before sending messages
 - Keeps session state in sync during streaming, compaction, follow-up actions, usage-limit retries, and permission mode changes
-- Recovers interrupted sessions after extension reload when they are safe to continue
+- Recovers interrupted sessions after a server restart or extension reload when they are safe to continue
 - Synchronizes per-session MCP selection with OpenCode connect and disconnect calls
 - Opens saved plan documents and supports plan-to-build handoff flows
 

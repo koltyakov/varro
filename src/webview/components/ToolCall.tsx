@@ -294,6 +294,11 @@ export function formatToolTitle(toolName: string, state: ToolPart['state']) {
     if (isString(description) && description.trim()) return description.trim();
   }
 
+  if (normalizedToolName === 'webfetch') {
+    const url = input.url;
+    if (isString(url) && url.trim()) return url.trim();
+  }
+
   // Error and pending states carry no server title; fall back to the command so
   // failed bash calls keep the same title shape as completed ones.
   if (normalizedToolName === 'bash' && !title) {

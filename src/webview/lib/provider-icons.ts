@@ -8,6 +8,7 @@ import deepseekIcon from '../assets/provider-icons/deepseek.svg';
 import xaiIcon from '../assets/provider-icons/xai.svg';
 import qwenIcon from '../assets/provider-icons/qwen.svg';
 import kimiIcon from '../assets/provider-icons/kimi.svg';
+import ollamaIcon from '../assets/provider-icons/ollama.svg';
 import opencodeIcon from '../assets/provider-icons/opencode.svg';
 import metaIcon from '../assets/provider-icons/meta.svg';
 
@@ -32,6 +33,7 @@ const PROVIDER_ICON_MAP = new Map<string, string>(
     qwen: qwenIcon,
     kimi: kimiIcon,
     'kimi-for-coding': kimiIcon,
+    'ollama-cloud': ollamaIcon,
     meta: metaIcon,
   })
 );

@@ -6,6 +6,7 @@ import { createGeminiAdapter } from './gemini';
 import { createHeaderProbeAdapter } from './header-probe';
 import { createKimiAdapter } from './kimi';
 import { createMiniMaxAdapter } from './minimax';
+import { createOllamaCloudAdapter } from './ollama-cloud';
 import { createOpenRouterAdapter } from './openrouter';
 import { createZaiAdapter } from './zai';
 
@@ -15,6 +16,7 @@ export const providerLimitAdapters = [
   createCodexAdapter(),
   createCopilotAdapter(),
   createGeminiAdapter(),
+  createOllamaCloudAdapter(),
   createOpenRouterAdapter(),
   createZaiAdapter(),
   createMiniMaxAdapter(),
