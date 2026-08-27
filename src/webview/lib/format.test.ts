@@ -201,7 +201,7 @@ describe('format helpers', () => {
     );
   });
 
-  it('formats sub-dollar provider limits in cents', () => {
+  it('formats provider limits as precise USD values', () => {
     const window = {
       id: 'spend',
       label: 'Spend',
@@ -212,9 +212,9 @@ describe('format helpers', () => {
     };
     const limit = availableLimit([window]);
 
-    expect(formatProviderLimitWindowValue(window, window.remaining)).toBe('90¢');
-    expect(formatProviderLimitWindowValue(window, window.limit)).toBe('$1');
-    expect(formatProviderLimitTitle(limit)).toBe('Spend: 90¢ / $1 left');
+    expect(formatProviderLimitWindowValue(window, window.remaining)).toBe('$0.90');
+    expect(formatProviderLimitWindowValue(window, window.limit)).toBe('$1.00');
+    expect(formatProviderLimitTitle(limit)).toBe('Spend: $0.90 / $1.00 left');
   });
 
   it('keeps a compact badge for a single unprefixed window', () => {
@@ -792,7 +792,7 @@ describe('format helpers', () => {
 
     expect(getPrimaryProviderLimitWindow(limit)).toEqual(limit.windows[1]);
     expect(formatProviderLimitTitle(limit, 0)).toBe(
-      'Requests: 80 left (20% used) | Monthly Spend: $12.5 / $40 left (68.8% used), resets in 1m'
+      'Requests: 80 left (20% used) | Monthly Spend: $12.50 / $40.00 left (68.8% used), resets in 1m'
     );
   });
 

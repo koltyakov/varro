@@ -1072,6 +1072,8 @@
   padding: 3px 10px;
   cursor: pointer;
   transition: background-color 0.08s;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .models-model-row:hover {

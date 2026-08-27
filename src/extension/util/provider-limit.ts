@@ -31,11 +31,13 @@ const OPENCODE_OAUTH_DUMMY_KEY = 'opencode-oauth-dummy-key';
 const PROVIDER_LIMIT_PROBE_BASES: Record<string, string> = {
   openai: 'https://api.openai.com/v1',
   'github-copilot': 'https://api.githubcopilot.com',
+  xai: 'https://api.x.ai/v1',
 };
 
 const PROVIDER_LIMIT_PROBE_HOSTS: Record<string, string> = {
   openai: 'api.openai.com',
   'github-copilot': 'api.githubcopilot.com',
+  xai: 'api.x.ai',
 };
 
 const DIRECT_WINDOW_DEFS: Array<{ key: string; label: string; unit: ProviderLimitUnit }> = [

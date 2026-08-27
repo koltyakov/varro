@@ -141,6 +141,7 @@ describe('provider limit helpers', () => {
       JSON.stringify({
         openai: { type: 'oauth', access: 'token-1', accountId: 'acct_openai' },
         'github-copilot': { type: 'oauth', access: 'token-2' },
+        xai: { type: 'api', key: 'xai-api-key' },
       })
     );
 
@@ -185,6 +186,22 @@ describe('provider limit helpers', () => {
         'Editor-Plugin-Version': 'varro/0.1.0',
       },
     });
+
+    expect(
+      buildProviderLimitProbe(
+        {
+          id: 'xai',
+          models: { 'grok-code-fast-1': { api: { url: 'https://api.x.ai/v1' } } },
+        },
+        authStore
+      )
+    ).toEqual({
+      url: 'https://api.x.ai/v1/models',
+      headers: {
+        Accept: 'application/json',
+        Authorization: 'Bearer xai-api-key',
+      },
+    });
   });
 
   it('does not send auth tokens to provider metadata URLs for unknown providers', () => {
@@ -219,6 +236,18 @@ describe('provider limit helpers', () => {
           models: { model: { api: { url: 'https://openai-compatible.example.test/v1' } } },
         },
         authStore
+      )
+    ).toBeNull();
+  });
+
+  it('does not send xAI auth tokens to compatible custom API hosts', () => {
+    expect(
+      buildProviderLimitProbe(
+        {
+          id: 'xai',
+          models: { model: { api: { url: 'https://xai-compatible.example.test/v1' } } },
+        },
+        { xai: { type: 'api', key: 'xai-api-key' } }
       )
     ).toBeNull();
   });

@@ -5,13 +5,13 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 ## 0.26.x - August 2026
 
 - Added editor-tab chats for working with sessions side by side, with terminal access and synchronized model, reasoning, permission, queue, and session state across Varro views.
-- Added quick controls for inline file changes and status-bar indicators for the active OpenCode version and available updates.
-- Improved messages with secure Markdown, external and mixed-content images, expandable long content, code-block truncation, clearer timestamps, and more reliable editing and rendering.
-- Made model catalogs easier to manage with search, selective additions and hiding, persistent session defaults, clearer model and thinking changes, cost warnings, and expanded thinking during active turns.
-- Improved the composer with language server status and output, persistent diff previews, steadier caret and focus behavior, and more reliable chip and prompt interactions.
+- Added quick controls for new chats and inline file changes, plus status-bar indicators for the active OpenCode version and available updates.
+- Improved messages with secure Markdown, external and mixed-content images, expandable long content, copyable final responses, code-block truncation, and more reliable editing and rendering.
+- Made model catalogs easier to manage with search, selective additions and hiding, persistent session defaults, clearer model and thinking changes, cost warnings, provider usage limits, and expanded thinking during active turns.
+- Improved the composer and Ralph workflows with language server output, persistent diff previews, steadier editing, clearer progress, and more reliable slash commands and review prompts.
 - Strengthened session, queue, and multi-view handling across editor context, model choices, permissions, attachments, manual steering, reconnects, forks, deletions, and provider or MCP refreshes.
 - Stabilized long conversations during history loading, streaming, content reflow, resizing, and queued-message removal, with activity shown in jump-to-latest navigation.
-- Refined tool cards and chat presentation with consistent spacing, contrast, VS Code chat typography, and full descriptions for agents and other truncated details.
+- Refined tool cards and chat presentation with consistent spacing, contrast, configurable typography, and full descriptions for agents and other truncated details.
 - Moved About diagnostics and usage reports into readable Markdown documents with richer local usage data.
 
 ## 0.25.x - August 2026

@@ -330,8 +330,12 @@ function getProviderLimitWindowPeriodLabel(window: ProviderLimitWindow) {
 
 function formatWindowValue(window: ProviderLimitWindow, value: number) {
   if (window.unit === 'usd') {
-    if (value > 0 && value < 1) return `${Math.round(value * 100)}¢`;
-    return `$${formatCompactValue(value, 'usd')}`;
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value);
   }
   if (window.unit !== 'tokens' && Math.abs(value) < 10_000) {
     return new Intl.NumberFormat('en-US', { maximumFractionDigits: value < 10 ? 1 : 0 }).format(

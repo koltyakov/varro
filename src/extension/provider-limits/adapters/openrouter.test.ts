@@ -148,6 +148,33 @@ describe('createOpenRouterAdapter', () => {
     });
   });
 
+  it('derives precise remaining spend when limit_remaining is rounded', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: {
+            usage: 0.18,
+            limit: 1,
+            limit_remaining: 1,
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
+
+    const status = await adapter.fetch({
+      provider,
+      authStore: { openrouter: { type: 'api', key: 'sk-or-v1-test' } },
+      modelID: null,
+      checkedAt: 1_000,
+    });
+
+    expect(status).toMatchObject({ status: 'available' });
+    if (status.status !== 'available') throw new Error('Expected available OpenRouter limits');
+    expect(status.windows[0]).toMatchObject({ limit: 1, percent: 18 });
+    expect(status.windows[0]?.remaining).toBeCloseTo(0.82);
+  });
+
   it('accepts oauth auth and camelCase spend fields', async () => {
     vi.mocked(fetch).mockResolvedValue(
       new Response(

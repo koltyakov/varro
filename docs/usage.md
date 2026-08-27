@@ -278,7 +278,7 @@ Provider and configuration changes are revalidated without interrupting running 
 
 Provider-limit polling is enabled. Varro polls every `120` seconds and every `30` seconds while the active session is working. Results are cached briefly in the extension host.
 
-Adapter coverage currently includes Antigravity, Anthropic, OpenAI/Codex, GitHub Copilot, Gemini, OpenRouter, Z.AI, MiniMax, and Kimi, plus metadata-header probes for compatible OpenAI and GitHub Copilot configurations. Availability depends on the provider and credential type; unsupported providers simply do not show quota details.
+Adapter coverage currently includes Antigravity, Anthropic, OpenAI/Codex, GitHub Copilot, Gemini, OpenRouter, Z.AI, MiniMax, Kimi, Ollama Cloud, and xAI SuperGrok, plus metadata-header probes for compatible OpenAI, GitHub Copilot, and xAI API-key configurations. Availability depends on the provider and credential type; unsupported providers simply do not show quota details.
 
 To retrieve quota metadata, the extension host can:
 

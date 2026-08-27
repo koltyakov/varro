@@ -4,6 +4,7 @@ import { createHeaderProbeAdapter } from './header-probe';
 
 const openAiAdapter = createHeaderProbeAdapter('openai');
 const copilotAdapter = createHeaderProbeAdapter('github-copilot');
+const xAiAdapter = createHeaderProbeAdapter('xai');
 
 const openAiApiKeyProvider: ProviderMetadata = {
   id: 'openai',
@@ -20,6 +21,11 @@ const openAiOAuthProvider: ProviderMetadata = {
 const copilotProvider: ProviderMetadata = {
   id: 'github-copilot',
   models: {},
+};
+
+const xAiProvider: ProviderMetadata = {
+  id: 'xai',
+  models: { 'grok-code-fast-1': { api: { url: 'https://api.x.ai/v1' } } },
 };
 
 describe('createHeaderProbeAdapter', () => {
@@ -44,6 +50,9 @@ describe('createHeaderProbeAdapter', () => {
         'github-copilot': { type: 'oauth', access: 'copilot-oauth-token' },
       })
     ).toBe(true);
+    expect(xAiAdapter.matches(xAiProvider, { xai: { type: 'api', key: 'xai-api-key' } })).toBe(
+      true
+    );
   });
 
   it('parses request and token headers for OpenAI probes', async () => {
@@ -154,6 +163,49 @@ describe('createHeaderProbeAdapter', () => {
           limit: 5000,
           resetAt: Date.parse('2026-05-02T12:00:00.000Z'),
         },
+      ],
+    });
+  });
+
+  it('polls xAI request and token limits from its models endpoint', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response('', {
+        status: 200,
+        headers: {
+          'x-ratelimit-limit-requests': '60',
+          'x-ratelimit-remaining-requests': '48',
+          'x-ratelimit-reset-requests': '15s',
+          'x-ratelimit-limit-tokens': '100000',
+          'x-ratelimit-remaining-tokens': '75000',
+          'x-ratelimit-reset-tokens': '1m',
+        },
+      })
+    );
+
+    const status = await xAiAdapter.fetch({
+      provider: xAiProvider,
+      authStore: { xai: { type: 'api', key: 'xai-api-key' } },
+      modelID: 'grok-code-fast-1',
+      checkedAt: 5_000,
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      'https://api.x.ai/v1/models',
+      expect.objectContaining({
+        headers: {
+          Accept: 'application/json',
+          Authorization: 'Bearer xai-api-key',
+        },
+      })
+    );
+    expect(status).toMatchObject({
+      providerID: 'xai',
+      modelID: 'grok-code-fast-1',
+      status: 'available',
+      source: 'provider',
+      windows: [
+        { id: 'requests', remaining: 48, limit: 60, resetAt: 20_000 },
+        { id: 'tokens', remaining: 75_000, limit: 100_000, resetAt: 65_000 },
       ],
     });
   });

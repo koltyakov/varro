@@ -110,9 +110,9 @@ function extractOpenRouterSpendWindow(payload: unknown): ProviderLimitWindow | n
   const limit = parseFiniteNumber(data.limit);
   const usage = parseFiniteNumber(data.usage);
   const remaining =
-    parseFiniteNumber(data.limit_remaining) ??
-    parseFiniteNumber(data.limitRemaining) ??
-    (limit != null && usage != null ? Math.max(limit - usage, 0) : null);
+    limit != null && usage != null
+      ? Math.max(limit - usage, 0)
+      : (parseFiniteNumber(data.limit_remaining) ?? parseFiniteNumber(data.limitRemaining));
   if (remaining == null) return null;
 
   const percent =

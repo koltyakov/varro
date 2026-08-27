@@ -69,6 +69,26 @@ describe('provider limit adapters', () => {
     expect(adapter?.id).toBe('openrouter');
   });
 
+  it('matches the xAI adapter for SuperGrok and API-key credentials', () => {
+    const superGrokAdapter = findProviderLimitAdapter(
+      {
+        id: 'xai',
+        models: { 'grok-code-fast-1': { api: { url: 'https://api.x.ai/v1' } } },
+      },
+      { xai: { type: 'oauth', access: 'supergrok-access-token' } }
+    );
+    const adapter = findProviderLimitAdapter(
+      {
+        id: 'xai',
+        models: { 'grok-code-fast-1': { api: { url: 'https://api.x.ai/v1' } } },
+      },
+      { xai: { type: 'api', key: 'xai-api-key' } }
+    );
+
+    expect(superGrokAdapter?.id).toBe('xai');
+    expect(adapter?.id).toBe('xai');
+  });
+
   it('matches the Ollama Cloud adapter', () => {
     const adapter = findProviderLimitAdapter(
       {

@@ -76,3 +76,29 @@ test('opens manage models from the picker and filters the model catalog', async 
   await expect(page.getByText('GPT-4.1', { exact: true })).toBeVisible();
   await expect(page.getByText('GitHub Copilot', { exact: true })).toHaveCount(0);
 });
+
+test('prevents text selection across model rows', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+
+  await page.getByLabel('GitHub Copilot / GPT-5 mini').click();
+  await page.getByRole('button', { name: 'Manage models', exact: true }).click();
+
+  const modelNames = page.locator('.models-model-name');
+  await expect(modelNames.first()).toBeVisible();
+  await expect(page.locator('.models-model-row').first()).toHaveCSS('user-select', 'none');
+
+  const firstBox = await modelNames.nth(0).boundingBox();
+  const secondBox = await modelNames.nth(1).boundingBox();
+  expect(firstBox).not.toBeNull();
+  expect(secondBox).not.toBeNull();
+  if (!firstBox || !secondBox) return;
+
+  await page.mouse.move(firstBox.x + 2, firstBox.y + firstBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(secondBox.x + secondBox.width - 2, secondBox.y + secondBox.height / 2, {
+    steps: 5,
+  });
+  await page.mouse.up();
+
+  expect(await page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('');
+});

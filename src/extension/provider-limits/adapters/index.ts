@@ -8,6 +8,7 @@ import { createKimiAdapter } from './kimi';
 import { createMiniMaxAdapter } from './minimax';
 import { createOllamaCloudAdapter } from './ollama-cloud';
 import { createOpenRouterAdapter } from './openrouter';
+import { createXaiAdapter } from './xai';
 import { createZaiAdapter } from './zai';
 
 export const providerLimitAdapters = [
@@ -21,6 +22,8 @@ export const providerLimitAdapters = [
   createZaiAdapter(),
   createMiniMaxAdapter(),
   createKimiAdapter(),
+  createXaiAdapter(),
   createHeaderProbeAdapter('openai'),
   createHeaderProbeAdapter('github-copilot'),
+  createHeaderProbeAdapter('xai'),
 ];
