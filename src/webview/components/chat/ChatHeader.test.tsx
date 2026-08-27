@@ -147,6 +147,9 @@ describe('ActiveChatHeader', () => {
 
     const actions = container.querySelector('.chat-header-actions')!;
     const alertButton = actions.querySelector<HTMLButtonElement>('.chat-header-sibling-alerts')!;
+    expect(
+      alertButton.querySelector('.chat-header-sibling-alert-icon')?.getAttribute('data-kind')
+    ).toBe('error');
     expect(actions.firstElementChild).toBe(alertButton);
     alertButton.click();
 
@@ -191,7 +194,7 @@ describe('ActiveChatHeader', () => {
     expect(document.body.querySelector('.sibling-workspace-alerts-menu')).toBeNull();
   });
 
-  it('animates the sibling workspace notification icon every 30 seconds', () => {
+  it('animates the sibling workspace notification icon every 10 seconds', () => {
     vi.useFakeTimers();
     try {
       renderHeader(null, { showActions: true });
@@ -204,10 +207,44 @@ describe('ActiveChatHeader', () => {
       expect(icon.classList.contains('is-ringing')).toBe(true);
 
       icon.classList.remove('is-ringing');
-      vi.advanceTimersByTime(29_999);
+      vi.advanceTimersByTime(9_999);
       expect(icon.classList.contains('is-ringing')).toBe(false);
       vi.advanceTimersByTime(1);
       expect(icon.classList.contains('is-ringing')).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cycles the sibling workspace notification color through distinct event kinds', () => {
+    vi.useFakeTimers();
+    try {
+      setState('siblingWorkspaceAlerts', [
+        {
+          name: 'Repo B',
+          path: '/repo-b',
+          kinds: ['attention', 'error'],
+          count: 2,
+        },
+        {
+          name: 'Repo C',
+          path: '/repo-c',
+          kinds: ['completed', 'error', 'plan-ready'],
+          count: 3,
+        },
+      ]);
+      renderHeader(null, { showActions: true });
+
+      const icon = container.querySelector('.chat-header-sibling-alert-icon')!;
+      expect(icon.getAttribute('data-kind')).toBe('attention');
+      vi.advanceTimersByTime(2_000);
+      expect(icon.getAttribute('data-kind')).toBe('completed');
+      vi.advanceTimersByTime(2_000);
+      expect(icon.getAttribute('data-kind')).toBe('error');
+      vi.advanceTimersByTime(2_000);
+      expect(icon.getAttribute('data-kind')).toBe('plan-ready');
+      vi.advanceTimersByTime(2_000);
+      expect(icon.getAttribute('data-kind')).toBe('attention');
     } finally {
       vi.useRealTimers();
     }

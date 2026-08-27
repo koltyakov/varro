@@ -1653,6 +1653,30 @@ describe('parseWebviewMessage rejection paths', () => {
     });
   });
 
+  it('parses bounded session unread state updates', () => {
+    expect(
+      parseWebviewMessage({
+        type: 'session-unread-state/update',
+        payload: { sessionId: 'session-1', kind: 'completed', unread: true },
+      })
+    ).toEqual({
+      type: 'session-unread-state/update',
+      payload: { sessionId: 'session-1', kind: 'completed', unread: true },
+    });
+    expect(
+      parseWebviewMessage({
+        type: 'session-unread-state/update',
+        payload: { sessionId: 'session-1', kind: 'unknown', unread: true },
+      })
+    ).toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'session-unread-state/update',
+        payload: { sessionId: 'session-1', kind: 'plan-ready', unread: 'yes' },
+      })
+    ).toBeNull();
+  });
+
   it('rejects log messages without a message or with an unknown level', () => {
     expect(parseWebviewMessage({ type: 'log', payload: { msg: '' } })).toBeNull();
     expect(parseWebviewMessage({ type: 'log', payload: { msg: 'hi', level: 'debug' } })).toBeNull();

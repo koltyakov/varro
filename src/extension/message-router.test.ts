@@ -25,6 +25,7 @@ function createCallbacks(): MessageRouterCallbacks {
     revealPermission: vi.fn(),
     migrateSessionModels: vi.fn(() => Promise.resolve()),
     updateSessionPlanState: vi.fn(() => Promise.resolve()),
+    updateSessionUnreadState: vi.fn(),
     updateModelPreferences: vi.fn(() => Promise.resolve()),
     migrateModelPreferences: vi.fn(() => Promise.resolve()),
     setProviderWatchActive: vi.fn(),
@@ -515,6 +516,12 @@ const DISPATCH_EXPECTATIONS = {
     {
       callback: 'updateSessionPlanState',
       args: [{ sessionId: 'session-1', skippedAt: 1_700_000_000_000, agent: 'plan' }],
+    },
+  ],
+  'session-unread-state/update': [
+    {
+      callback: 'updateSessionUnreadState',
+      args: [{ sessionId: 'session-1', kind: 'completed', unread: true }],
     },
   ],
   'model-preferences/update': [

@@ -1,12 +1,12 @@
-import { Show, createEffect, createSignal, onCleanup } from 'solid-js';
+import { Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import { Portal } from 'solid-js/web';
-import type { SessionDiffSummary } from '../../../shared/protocol';
+import type { SessionDiffSummary, SiblingWorkspaceAlertKind } from '../../../shared/protocol';
 import { deleteSession } from '../../hooks/useOpenCode';
 import { postMessage } from '../../lib/bridge';
 import { client } from '../../lib/client';
 import { formatDuration } from '../../lib/message-metrics';
 import { clampPopupToViewport } from '../../lib/popup-position';
-import { appNotificationIcon, cableTagIcon, pinIcon, xmarkIcon } from '../../lib/ui-icons';
+import { cableTagIcon, pinIcon, xmarkIcon } from '../../lib/ui-icons';
 import { NavArrowLeftControlIcon } from '../ControlIcons';
 import {
   setError,
@@ -29,7 +29,8 @@ import { Tooltip } from '../Tooltip';
 import { UiIcon } from '../UiIcon';
 import { PlusIcon } from '../PlusIcon';
 
-const SIBLING_ALERT_REMINDER_INTERVAL_MS = 30_000;
+const SIBLING_ALERT_REMINDER_INTERVAL_MS = 10_000;
+const SIBLING_ALERT_COLOR_INTERVAL_MS = 2_000;
 
 function getActiveSession() {
   return state.sessions.find((session) => session.id === state.activeSessionId) ?? null;
@@ -152,10 +153,22 @@ function NewChatButton(props: { onCreateSession: () => void }) {
 
 function SiblingWorkspaceAlertsButton() {
   const [showMenu, setShowMenu] = createSignal(false);
+  const [activeKindIndex, setActiveKindIndex] = createSignal(0);
   let buttonRef: HTMLButtonElement | undefined;
   let iconRef: HTMLSpanElement | undefined;
   let menuRef: HTMLDivElement | undefined;
   let previousAlerts = new Map<string, { count: number; kinds: Set<string> }>();
+  const alertKinds = createMemo(() => {
+    const kinds = new Set<SiblingWorkspaceAlertKind>();
+    for (const alert of siblingWorkspaceAlerts()) {
+      for (const kind of alert.kinds) kinds.add(kind);
+    }
+    return [...kinds].toSorted();
+  });
+  const activeKind = () => {
+    const kinds = alertKinds();
+    return kinds[activeKindIndex() % kinds.length];
+  };
   const label = () =>
     siblingWorkspaceAlerts().length === 1
       ? `Events in sibling workspace ${siblingWorkspaceAlerts()[0]!.name}`
@@ -189,6 +202,16 @@ function SiblingWorkspaceAlertsButton() {
     void iconRef.offsetWidth;
     iconRef.classList.add('is-ringing');
   };
+
+  createEffect(() => {
+    const kindCount = alertKinds().length;
+    setActiveKindIndex(0);
+    if (kindCount <= 1) return;
+    const interval = window.setInterval(() => {
+      setActiveKindIndex((index) => (index + 1) % kindCount);
+    }, SIBLING_ALERT_COLOR_INTERVAL_MS);
+    onCleanup(() => window.clearInterval(interval));
+  });
 
   createEffect(() => {
     const alerts = siblingWorkspaceAlerts();
@@ -267,15 +290,31 @@ function SiblingWorkspaceAlertsButton() {
             else setShowMenu((open) => !open);
           }}
         >
-          <UiIcon
+          <span
             ref={(element) => {
               iconRef = element;
             }}
             class="chat-header-sibling-alert-icon"
-            source={appNotificationIcon}
-            width={15}
-            height={15}
-          />
+            data-kind={activeKind()}
+            aria-hidden="true"
+          >
+            <svg viewBox="0 0 24 24" fill="none" width="15" height="15">
+              <path
+                d="M21 12V15C21 18.3137 18.3137 21 15 21H9C5.68629 21 3 18.3137 3 15V9C3 5.68629 5.68629 3 9 3H12"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+              <circle
+                class="chat-header-sibling-alert-dot"
+                cx="19"
+                cy="5"
+                r="3"
+                stroke-width="1.5"
+              />
+            </svg>
+          </span>
         </button>
       </Tooltip>
       <Show when={showMenu()}>

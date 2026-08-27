@@ -116,6 +116,36 @@
   animation: sibling-alert-icon-ring 1.1s ease-in-out;
 }
 
+.chat-header-sibling-alert-icon {
+  display: inline-flex;
+  width: 15px;
+  height: 15px;
+}
+
+.chat-header-sibling-alert-dot {
+  fill: var(--sibling-alert-color);
+  stroke: var(--sibling-alert-color);
+  transition:
+    fill 0.2s ease,
+    stroke 0.2s ease;
+}
+
+.chat-header-sibling-alert-icon[data-kind='attention'] {
+  --sibling-alert-color: var(--color-vscode-accent);
+}
+
+.chat-header-sibling-alert-icon[data-kind='completed'] {
+  --sibling-alert-color: var(--color-vscode-success);
+}
+
+.chat-header-sibling-alert-icon[data-kind='error'] {
+  --sibling-alert-color: var(--color-vscode-error);
+}
+
+.chat-header-sibling-alert-icon[data-kind='plan-ready'] {
+  --sibling-alert-color: var(--color-vscode-warning);
+}
+
 @keyframes sibling-alert-icon-ring {
   0%,
   100% {

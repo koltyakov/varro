@@ -16,7 +16,7 @@ import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/works
 import { logger } from './logger';
 
 export type PendingAttentionKind = 'permission' | 'question';
-export type SiblingSessionAlertKind = 'attention' | 'error' | 'plan-ready';
+export type SiblingSessionAlertKind = 'attention' | 'completed' | 'error' | 'plan-ready';
 export type SiblingSessionAlertCandidate = {
   sessionID: string;
   rootSessionID: string;
@@ -250,6 +250,30 @@ export class SessionStateManager {
     return this.getSessionMetadata(this.sessionAgents, sessionID) === 'plan';
   }
 
+  setSessionAgent(sessionID: string, agent: string): void {
+    if (!sessionID || !agent) return;
+    if (this.rememberSessionAgent(sessionID, agent)) this.listener.onStatusChange();
+  }
+
+  setSessionUnreadState(
+    sessionID: string,
+    kind: 'completed' | 'plan-ready',
+    unread: boolean,
+    directory?: string
+  ): void {
+    if (!unread) {
+      if (kind === 'plan-ready') this.acknowledgePlanSession(sessionID);
+      else this.acknowledgeCompletedSession(sessionID);
+      return;
+    }
+    if (directory) this.setSessionDirectory(sessionID, directory);
+    if (kind === 'plan-ready') this.setSessionMetadata(this.sessionAgents, sessionID, 'plan');
+    else this.sessionAgents.delete(sessionID);
+    if (this.completedSessions.has(sessionID)) return;
+    this.completedSessions.add(sessionID);
+    this.listener.onStatusChange();
+  }
+
   directoryFor(sessionID: string): string | undefined {
     const directory = this.getSessionMetadata(this.sessionDirectories, sessionID);
     if (directory) return directory;
@@ -289,7 +313,7 @@ export class SessionStateManager {
     for (const request of this.pendingForUser.values()) add(request.sessionID, 'attention');
     for (const sessionID of this.failedSessions) add(sessionID, 'error');
     for (const sessionID of this.completedSessions) {
-      if (this.isPlanSession(sessionID)) add(sessionID, 'plan-ready');
+      add(sessionID, this.isPlanSession(sessionID) ? 'plan-ready' : 'completed');
     }
 
     return [...candidates.values()]
@@ -335,7 +359,9 @@ export class SessionStateManager {
   clearCompletedInWorkspace(workspacePath: string | null | undefined): void {
     let changed = false;
     for (const sessionID of this.completedSessions) {
-      if (!this.isSessionInWorkspace(sessionID, workspacePath)) continue;
+      if (this.isPlanSession(sessionID) || !this.isSessionInWorkspace(sessionID, workspacePath)) {
+        continue;
+      }
       this.completedSessions.delete(sessionID);
       changed = true;
     }
@@ -347,6 +373,19 @@ export class SessionStateManager {
     let changed = false;
     for (const completedSessionID of this.completedSessions) {
       if (this.rootSessionIdFor(completedSessionID) !== rootSessionID) continue;
+      if (this.isPlanSession(completedSessionID)) continue;
+      this.completedSessions.delete(completedSessionID);
+      changed = true;
+    }
+    if (changed) this.listener.onStatusChange();
+  }
+
+  acknowledgePlanSession(sessionID: string): void {
+    const rootSessionID = this.rootSessionIdFor(sessionID);
+    let changed = false;
+    for (const completedSessionID of this.completedSessions) {
+      if (this.rootSessionIdFor(completedSessionID) !== rootSessionID) continue;
+      if (!this.isPlanSession(completedSessionID)) continue;
       this.completedSessions.delete(completedSessionID);
       changed = true;
     }
@@ -417,10 +456,11 @@ export class SessionStateManager {
     switch (type) {
       case 'session.created':
       case 'session.updated': {
-        this.rememberSessionMetadata(
-          asRecord(props?.info) ?? undefined,
-          getString(props?.sessionID)
-        );
+        changed =
+          this.rememberSessionMetadata(
+            asRecord(props?.info) ?? undefined,
+            getString(props?.sessionID)
+          ) || changed;
         break;
       }
       case 'session.deleted': {
@@ -466,6 +506,12 @@ export class SessionStateManager {
         if (sessionID) this.trailingBusyAfterCompletion.delete(sessionID);
         break;
       }
+      case 'session.next.agent.switched': {
+        const sessionID = getString(props?.sessionID);
+        const agent = getString(props?.agent);
+        if (sessionID && agent) changed = this.rememberSessionAgent(sessionID, agent) || changed;
+        break;
+      }
       case 'session.error': {
         const sessionID = getString(props?.sessionID);
         if (!sessionID) break;
@@ -484,7 +530,7 @@ export class SessionStateManager {
 
         const agent = getString(info?.agent);
         if (agent) {
-          this.setSessionMetadata(this.sessionAgents, sessionID, agent);
+          changed = this.rememberSessionAgent(sessionID, agent) || changed;
         }
 
         const mode = getString(info?.mode);
@@ -985,9 +1031,11 @@ export class SessionStateManager {
   private rememberSessionMetadata(
     info: Record<string, unknown> | undefined,
     fallbackSessionID?: string
-  ) {
+  ): boolean {
     const sessionID = getString(info?.id) || fallbackSessionID;
     if (sessionID) this.touchSessionMetadata(sessionID);
+    const agent = getString(info?.agent);
+    const alertChanged = !!sessionID && !!agent && this.rememberSessionAgent(sessionID, agent);
     const title = normalizeSessionTitle(getString(info?.title));
     if (sessionID && title) {
       this.setSessionMetadata(this.sessionTitles, sessionID, title);
@@ -1002,6 +1050,13 @@ export class SessionStateManager {
     if (sessionID && parentID) {
       this.setSessionMetadata(this.sessionParentIDs, sessionID, parentID);
     }
+    return alertChanged;
+  }
+
+  private rememberSessionAgent(sessionID: string, agent: string): boolean {
+    const changed = this.sessionAgents.get(sessionID) !== agent;
+    this.setSessionMetadata(this.sessionAgents, sessionID, agent);
+    return changed && this.completedSessions.has(sessionID);
   }
 
   private rememberEventWorkspace(event: ServerEvent) {

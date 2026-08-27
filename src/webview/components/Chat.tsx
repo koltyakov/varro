@@ -135,6 +135,41 @@ export function Chat() {
   const [sessionListNow, setSessionListNow] = createSignal(Date.now());
   const rawSessionIndicators = createMemo(() => deriveSessionIndicators(state.sessions));
   const sessionIndicators = createStableSessionIndicators(rawSessionIndicators);
+  let publishedUnreadWorkspace: string | null = null;
+  const publishedUnreadKinds = new Map<string, 'completed' | 'plan-ready'>();
+  createEffect(() => {
+    const workspacePath = state.editorContext.workspacePath;
+    const indicators = sessionIndicators();
+    if (!workspacePath) return;
+    if (publishedUnreadWorkspace !== workspacePath) {
+      publishedUnreadWorkspace = workspacePath;
+      publishedUnreadKinds.clear();
+    }
+    for (const session of state.sessions) {
+      const previousKind = publishedUnreadKinds.get(session.id);
+      const kind = indicators.planReadyIds.has(session.id)
+        ? 'plan-ready'
+        : indicators.newlyCompletedIds.has(session.id)
+          ? 'completed'
+          : undefined;
+      if (previousKind === kind) continue;
+      if (previousKind) {
+        postMessage({
+          type: 'session-unread-state/update',
+          payload: { sessionId: session.id, kind: previousKind, unread: false },
+        });
+      }
+      if (kind) {
+        publishedUnreadKinds.set(session.id, kind);
+        postMessage({
+          type: 'session-unread-state/update',
+          payload: { sessionId: session.id, kind, unread: true },
+        });
+      } else {
+        publishedUnreadKinds.delete(session.id);
+      }
+    }
+  });
   const recycleBinSessionIds = createMemo(() => getRecycleBinSessionIds(state.recycleBinEntries));
   const visibleSessions = createMemo(() => {
     const indicators = sessionIndicators();

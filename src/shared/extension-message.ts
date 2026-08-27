@@ -616,9 +616,12 @@ function parseSiblingWorkspaceAlerts<T>(value: T): SiblingWorkspaceAlert[] | nul
       record.count < 1 ||
       !Array.isArray(record.kinds) ||
       record.kinds.length < 1 ||
-      record.kinds.length > 3 ||
+      record.kinds.length > 4 ||
       new Set(record.kinds).size !== record.kinds.length ||
-      record.kinds.some((kind) => kind !== 'attention' && kind !== 'error' && kind !== 'plan-ready')
+      record.kinds.some(
+        (kind) =>
+          kind !== 'attention' && kind !== 'completed' && kind !== 'error' && kind !== 'plan-ready'
+      )
     ) {
       return null;
     }

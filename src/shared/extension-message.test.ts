@@ -299,7 +299,7 @@ describe('parseExtensionMessage', () => {
           {
             name: 'Repo B',
             path: '/repo-b',
-            kinds: ['attention', 'error', 'plan-ready'],
+            kinds: ['attention', 'completed', 'error', 'plan-ready'],
             count: 2,
           },
         ],
@@ -310,7 +310,7 @@ describe('parseExtensionMessage', () => {
         {
           name: 'Repo B',
           path: '/repo-b',
-          kinds: ['attention', 'error', 'plan-ready'],
+          kinds: ['attention', 'completed', 'error', 'plan-ready'],
           count: 2,
         },
       ],
@@ -318,7 +318,7 @@ describe('parseExtensionMessage', () => {
     expect(
       parseExtensionMessage({
         type: 'sibling-workspace-alerts/update',
-        payload: [{ name: 'Repo B', path: '/repo-b', kinds: ['completed'], count: 1 }],
+        payload: [{ name: 'Repo B', path: '/repo-b', kinds: ['unknown'], count: 1 }],
       })
     ).toBeNull();
   });

@@ -256,6 +256,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           ) !== false && !this.isAnyChatVisible(),
       }
     );
+    for (const [sessionId, agent] of Object.entries(this.sessionPlanState.listAgents())) {
+      this.sessionState.setSessionAgent(sessionId, agent);
+    }
     this.contextFilesState = new SidebarProviderContextFiles(this.droppedFilesService);
     this.sessionExportService = new SessionExportService(server, SidebarProvider.EXPORT_TIMEOUT_MS);
     this.sessionDiffProvider = new SessionDiffDocumentProvider(server);
@@ -671,9 +674,33 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.post({ type: 'session-models/sync', payload: { models: migrated } });
         },
         updateSessionPlanState: async (payload) => {
-          await this.sessionPlanState.update(payload.sessionId, payload);
-          this.post({ type: 'session-plan-state/update', payload });
+          if (payload.skippedAt !== undefined || payload.agent) {
+            await this.sessionPlanState.update(payload.sessionId, payload);
+          }
+          if (payload.agent) this.sessionState.setSessionAgent(payload.sessionId, payload.agent);
+          if (typeof payload.skippedAt === 'number') {
+            this.sessionState.acknowledgePlanSession(payload.sessionId);
+          }
+          if (payload.skippedAt !== undefined || payload.agent) {
+            const update: Extract<
+              ExtensionMessage,
+              { type: 'session-plan-state/update' }
+            >['payload'] = { sessionId: payload.sessionId };
+            if (payload.skippedAt !== undefined) update.skippedAt = payload.skippedAt;
+            if (payload.agent) update.agent = payload.agent;
+            this.post({
+              type: 'session-plan-state/update',
+              payload: update,
+            });
+          }
         },
+        updateSessionUnreadState: ({ sessionId, kind, unread }) =>
+          this.sessionState.setSessionUnreadState(
+            sessionId,
+            kind,
+            unread,
+            endpointRef.endpoint?.workspacePath ?? undefined
+          ),
         updateModelPreferences: async ({ base, preferences }) => {
           const updated = await this.modelPreferences.update(base, preferences);
           this.post({ type: 'model-preferences/sync', payload: updated });
@@ -1402,14 +1429,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       if (!folder || isSameWorkspacePath(folder.path, endpoint.workspacePath)) continue;
       const existing = alerts.get(folder.path);
       if (existing) {
-        existing.count += 1;
+        existing.count += candidate.kinds.length;
         for (const kind of candidate.kinds) existing.kinds.add(kind);
       } else {
         alerts.set(folder.path, {
           name: folder.name,
           path: folder.path,
           kinds: new Set(candidate.kinds),
-          count: 1,
+          count: candidate.kinds.length,
         });
       }
     }
@@ -1509,6 +1536,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   getStatusBarClickAction() {
     return this.getStatusBarState().action;
+  }
+
+  async openSiblingWorkspaceSessions() {
+    const sidebarEndpoint = [...this.endpoints].find((endpoint) => endpoint.surface === 'sidebar');
+    const alert = sidebarEndpoint ? this.siblingWorkspaceAlertsFor(sidebarEndpoint)[0] : undefined;
+    if (!sidebarEndpoint || !alert) return;
+
+    const workspacePath = this.contextProvider.getOpenWorkspaceRoot(alert.path);
+    if (!workspacePath) return;
+    sidebarEndpoint.workspacePath = workspacePath;
+    this.reconcilePermissionAutomationOwners();
+    await this.contextProvider.selectWorkspace(workspacePath);
+    this.postSiblingWorkspaceAlerts();
+    this.webviewSession.searchSessions();
   }
 
   openAttentionSessions() {
@@ -2012,7 +2053,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     | { visible: false; action: 'focus' }
     | {
         visible: true;
-        action: 'focus' | 'attention' | 'completed';
+        action: 'focus' | 'attention' | 'completed' | 'sibling';
         text: string;
         tooltip: string;
         backgroundColor?: vscode.ThemeColor;
@@ -2056,15 +2097,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (siblingAlertCount > 0) {
       return {
         visible: true,
-        action: 'focus',
-        text: `$(bell-dot) Varro: ${siblingAlertCount} elsewhere`,
+        action: 'sibling',
+        text: `$(bell-dot) Varro: ${siblingAlertCount} workspace ${siblingAlertCount === 1 ? 'event' : 'events'}`,
         backgroundColor: new vscode.ThemeColor('statusBarItem.warningBackground'),
         tooltip: [
           'Varro needs your attention in another workspace.',
           ...siblingAlerts.slice(0, 3).map((alert) => `${alert.name}: ${alert.count}`),
           ...(siblingAlerts.length > 3 ? [`+${siblingAlerts.length - 3} more workspaces`] : []),
           '',
-          'Click to open Varro.',
+          'Click to open the first workspace session list.',
         ].join('\n'),
       };
     }

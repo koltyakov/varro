@@ -91,9 +91,12 @@ function register(
     requestInputFocus: vi.fn(),
     searchSessions: vi.fn(),
     switchSession: vi.fn(),
-    getStatusBarClickAction: vi.fn<() => 'focus' | 'attention' | 'completed'>(() => 'focus'),
+    getStatusBarClickAction: vi.fn<() => 'focus' | 'attention' | 'completed' | 'sibling'>(
+      () => 'focus'
+    ),
     openAttentionSessions: vi.fn(),
     openCompletedSessions: vi.fn(),
+    openSiblingWorkspaceSessions: vi.fn(() => Promise.resolve()),
     postDroppedFiles: vi.fn(),
     postTerminalSelection: vi.fn(),
     generateCommitMessage: vi.fn(() => Promise.resolve()),
@@ -615,6 +618,16 @@ describe('sidebar navigation commands', () => {
 
     expect(sidebar.openCompletedSessions).toHaveBeenCalledOnce();
     expect(sidebar.openAttentionSessions).not.toHaveBeenCalled();
+    expect(sidebar.requestInputFocus).not.toHaveBeenCalled();
+  });
+
+  it('opens sibling workspace sessions from the workspace event status item', async () => {
+    const { sidebar } = register();
+    sidebar.getStatusBarClickAction.mockReturnValue('sibling');
+
+    await runCommand('varro.chat.statusBarClick');
+
+    expect(sidebar.openSiblingWorkspaceSessions).toHaveBeenCalledOnce();
     expect(sidebar.requestInputFocus).not.toHaveBeenCalled();
   });
 

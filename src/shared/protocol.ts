@@ -626,7 +626,7 @@ export type QueuedMessageSnapshot = {
   queuedContext?: QueuedContextSnapshot;
 };
 
-export type SiblingWorkspaceAlertKind = 'attention' | 'error' | 'plan-ready';
+export type SiblingWorkspaceAlertKind = 'attention' | 'completed' | 'error' | 'plan-ready';
 
 export type SiblingWorkspaceAlert = {
   name: string;
@@ -807,6 +807,14 @@ export type WebviewMessage =
   | {
       type: 'session-plan-state/update';
       payload: { sessionId: string; skippedAt?: number | null; agent?: string };
+    }
+  | {
+      type: 'session-unread-state/update';
+      payload: {
+        sessionId: string;
+        kind: 'completed' | 'plan-ready';
+        unread: boolean;
+      };
     }
   | {
       type: 'model-preferences/update';

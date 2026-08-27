@@ -116,6 +116,7 @@ export const WEBVIEW_MESSAGE_TYPES = {
   'session-model/update': true,
   'session-models/migrate': true,
   'session-plan-state/update': true,
+  'session-unread-state/update': true,
   'model-preferences/update': true,
   'model-preferences/migrate': true,
   'webview/focus': true,
@@ -381,6 +382,21 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       if (skippedAt !== undefined) result.payload.skippedAt = skippedAt as number | null;
       if (agent) result.payload.agent = agent;
       return result;
+    }
+
+    case 'session-unread-state/update': {
+      const payload = asRecord(message?.payload);
+      const sessionId = payload?.sessionId;
+      const kind = payload?.kind;
+      const unread = payload?.unread;
+      if (
+        !isSafePersistedSessionId(sessionId) ||
+        (kind !== 'completed' && kind !== 'plan-ready') ||
+        typeof unread !== 'boolean'
+      ) {
+        return null;
+      }
+      return { type, payload: { sessionId, kind, unread } };
     }
 
     case 'composer/images-update': {

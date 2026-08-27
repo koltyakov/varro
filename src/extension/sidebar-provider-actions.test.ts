@@ -177,6 +177,7 @@ function createActionFixture() {
     updateSessionPlanState: vi.fn<SidebarProviderActionDeps['updateSessionPlanState']>(() =>
       Promise.resolve()
     ),
+    updateSessionUnreadState: vi.fn<SidebarProviderActionDeps['updateSessionUnreadState']>(),
     updateModelPreferences: vi.fn<SidebarProviderActionDeps['updateModelPreferences']>(() =>
       Promise.resolve()
     ),

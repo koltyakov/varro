@@ -658,6 +658,31 @@ describe('SessionStateManager notifications', () => {
     expect(manager.completed.has('session-2')).toBe(true);
   });
 
+  it('keeps plan-ready conversations until the plan is acknowledged', () => {
+    const manager = createManager();
+    manager.setSessionUnreadState('plan-1', 'plan-ready', true, '/repo');
+
+    manager.acknowledgeCompletedSession('plan-1');
+    manager.clearCompletedInWorkspace('/repo');
+
+    expect(manager.getSiblingAlertCandidates()[0]?.kinds).toEqual(['plan-ready']);
+
+    manager.acknowledgePlanSession('plan-1');
+
+    expect(manager.getSiblingAlertCandidates()).toEqual([]);
+  });
+
+  it('synchronizes ordinary unread completions until the session is seen', () => {
+    const manager = createManager();
+    manager.setSessionUnreadState('session-1', 'completed', true, '/repo');
+
+    expect(manager.getSiblingAlertCandidates()[0]?.kinds).toEqual(['completed']);
+
+    manager.setSessionUnreadState('session-1', 'completed', false, '/repo');
+
+    expect(manager.getSiblingAlertCandidates()).toEqual([]);
+  });
+
   it('remembers sync session metadata when id is only on the event properties', () => {
     const manager = createManager(() => false);
 
@@ -1906,11 +1931,7 @@ describe('SessionStateManager notifications', () => {
     });
     manager.handleServerEvent({
       type: 'session.created',
-      properties: { info: { id: 'plan', directory: '/repo-c', title: 'Plan' } },
-    });
-    manager.handleServerEvent({
-      type: 'message.updated',
-      properties: { info: { sessionID: 'plan', role: 'assistant', agent: 'plan' } },
+      properties: { info: { id: 'plan', directory: '/repo-c', title: 'Plan', agent: 'plan' } },
     });
     markBusy(manager, 'plan');
     manager.handleServerEvent({
@@ -1919,7 +1940,7 @@ describe('SessionStateManager notifications', () => {
     });
     manager.handleServerEvent({
       type: 'session.created',
-      properties: { info: { id: 'regular', directory: '/repo-d', title: 'Regular' } },
+      properties: { info: { id: 'regular', directory: '/repo-c', title: 'Regular' } },
     });
     markBusy(manager, 'regular');
     manager.handleServerEvent({
@@ -1940,6 +1961,12 @@ describe('SessionStateManager notifications', () => {
         directory: '/repo-c',
         kinds: ['plan-ready'],
       },
+      {
+        sessionID: 'regular',
+        rootSessionID: 'regular',
+        directory: '/repo-c',
+        kinds: ['completed'],
+      },
     ]);
 
     manager.clearCompletedInWorkspace('/repo-c');
@@ -1950,7 +1977,35 @@ describe('SessionStateManager notifications', () => {
         directory: '/repo-b',
         kinds: ['attention', 'error'],
       },
+      {
+        sessionID: 'plan',
+        rootSessionID: 'plan',
+        directory: '/repo-c',
+        kinds: ['plan-ready'],
+      },
     ]);
+  });
+
+  it('updates a completed sibling event when its agent switches to plan', () => {
+    const manager = createManager(() => false);
+    manager.handleServerEvent({
+      type: 'session.created',
+      properties: { info: { id: 'session-1', directory: '/repo-b' } },
+    });
+    markBusy(manager, 'session-1');
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    });
+
+    expect(manager.getSiblingAlertCandidates()[0]?.kinds).toEqual(['completed']);
+
+    manager.handleServerEvent({
+      type: 'session.next.agent.switched',
+      properties: { sessionID: 'session-1', agent: 'plan' },
+    });
+
+    expect(manager.getSiblingAlertCandidates()[0]?.kinds).toEqual(['plan-ready']);
   });
 
   it('alerts for a sibling permission only while it is actionable and pending', () => {

@@ -82,6 +82,7 @@ export interface SidebarProviderActionDeps {
   updateSessionModel: MessageRouterCallbacks['updateSessionModel'];
   migrateSessionModels: MessageRouterCallbacks['migrateSessionModels'];
   updateSessionPlanState: MessageRouterCallbacks['updateSessionPlanState'];
+  updateSessionUnreadState: MessageRouterCallbacks['updateSessionUnreadState'];
   updateModelPreferences: MessageRouterCallbacks['updateModelPreferences'];
   migrateModelPreferences: MessageRouterCallbacks['migrateModelPreferences'];
   updateDraftImages: MessageRouterCallbacks['updateDraftImages'];
@@ -162,6 +163,7 @@ export function createSidebarProviderActions(
     updateSessionModel: (payload) => deps.updateSessionModel(payload),
     migrateSessionModels: (payload) => deps.migrateSessionModels(payload),
     updateSessionPlanState: (payload) => deps.updateSessionPlanState(payload),
+    updateSessionUnreadState: (payload) => deps.updateSessionUnreadState(payload),
     updateModelPreferences: (payload) => deps.updateModelPreferences(payload),
     migrateModelPreferences: (payload) => deps.migrateModelPreferences(payload),
     updateDraftImages: (payload) => deps.updateDraftImages(payload),

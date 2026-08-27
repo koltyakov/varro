@@ -58,6 +58,10 @@ export function registerCommands(
           sidebar.openCompletedSessions();
           return;
         }
+        if (action === 'sibling') {
+          await sidebar.openSiblingWorkspaceSessions();
+          return;
+        }
         sidebar.requestInputFocus();
       } catch (err) {
         logger.error(

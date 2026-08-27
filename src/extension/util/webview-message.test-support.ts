@@ -93,6 +93,10 @@ export const VALID_WEBVIEW_MESSAGES = {
     type: 'session-plan-state/update',
     payload: { sessionId: 'session-1', skippedAt: 1_700_000_000_000, agent: 'plan' },
   },
+  'session-unread-state/update': {
+    type: 'session-unread-state/update',
+    payload: { sessionId: 'session-1', kind: 'completed', unread: true },
+  },
   'model-preferences/update': {
     type: 'model-preferences/update',
     payload: { base: MODEL_PREFERENCES, preferences: MODEL_PREFERENCES },

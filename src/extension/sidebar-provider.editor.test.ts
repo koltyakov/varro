@@ -77,6 +77,50 @@ function createPanel() {
 }
 
 describe('SidebarProvider editor panels', () => {
+  it('keeps a sibling plan-ready event after the plan session is seen', async () => {
+    const contextProvider = createContextProvider();
+    contextProvider.context.workspacePath = '/repo-a';
+    contextProvider.context.workspaceFolders = [
+      { name: 'Repo A', path: '/repo-a' },
+      { name: 'Repo B', path: '/repo-b' },
+    ];
+    const { provider } = await createSidebarProviderInstance({ contextProvider });
+    const { posted } = attachTestView(provider);
+    await provider.handleMessage({ type: 'ready' });
+    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
+      .sessionState;
+
+    sessionState.handleServerEvent({
+      type: 'session.created',
+      properties: { info: { id: 'plan-1', agent: 'plan', directory: '/repo-b' } },
+    });
+    sessionState.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'plan-1', status: { type: 'busy' } },
+    });
+    sessionState.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'plan-1', status: { type: 'idle' } },
+    });
+
+    expect(lastSiblingWorkspaceAlerts(posted)).toEqual([
+      { name: 'Repo B', path: '/repo-b', kinds: ['plan-ready'], count: 1 },
+    ]);
+
+    await provider.handleMessage({ type: 'session/seen', payload: { sessionId: 'plan-1' } });
+
+    expect(lastSiblingWorkspaceAlerts(posted)).toEqual([
+      { name: 'Repo B', path: '/repo-b', kinds: ['plan-ready'], count: 1 },
+    ]);
+
+    await provider.handleMessage({
+      type: 'session-plan-state/update',
+      payload: { sessionId: 'plan-1', skippedAt: 1 },
+    });
+
+    expect(lastSiblingWorkspaceAlerts(posted)).toEqual([]);
+  });
+
   it('alerts only for requested sibling events whose chat is not open', async () => {
     const contextProvider = createContextProvider();
     contextProvider.context.workspacePath = '/repo-a';
@@ -105,7 +149,7 @@ describe('SidebarProvider editor panels', () => {
     });
     sessionState.handleServerEvent({
       type: 'session.created',
-      properties: { info: { id: 'regular', directory: '/repo-c', title: 'Regular work' } },
+      properties: { info: { id: 'regular', directory: '/repo-b', title: 'Regular work' } },
     });
     sessionState.handleServerEvent({
       type: 'session.status',
@@ -117,16 +161,21 @@ describe('SidebarProvider editor panels', () => {
     });
 
     expect(lastSiblingWorkspaceAlerts(posted)).toEqual([
-      { name: 'Repo B', path: '/repo-b', kinds: ['attention'], count: 1 },
+      { name: 'Repo B', path: '/repo-b', kinds: ['attention', 'completed'], count: 2 },
     ]);
     const statusItemIndex = getVscodeMock().window.createStatusBarItem.mock.calls.findIndex(
       ([id]) => id === 'varro.session-status'
     );
     const statusItem =
       getVscodeMock().window.createStatusBarItem.mock.results[statusItemIndex]?.value;
-    expect(statusItem?.text).toBe('$(bell-dot) Varro: 1 elsewhere');
-    expect(statusItem?.tooltip).toContain('Repo B: 1');
+    expect(statusItem?.text).toBe('$(bell-dot) Varro: 2 workspace events');
+    expect(statusItem?.tooltip).toContain('Repo B: 2');
     expect(statusItem?.show).toHaveBeenCalled();
+
+    await provider.openSiblingWorkspaceSessions();
+
+    expect(contextProvider.selectWorkspace).toHaveBeenCalledWith('/repo-b');
+    expect(posted).toContainEqual({ type: 'command/search-sessions' });
 
     const editor = createPanel();
     getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
