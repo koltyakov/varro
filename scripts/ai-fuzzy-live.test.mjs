@@ -245,6 +245,37 @@ test('accepts a transcript wheel at its requested scroll boundary', () => {
   );
 });
 
+test('accepts a boundary wheel while streaming layout changes bottom geometry', () => {
+  const before = {
+    focusOwner: 'transcript',
+    transcript: {
+      scrollTop: 500,
+      scrollHeight: 1_000,
+      clientHeight: 500,
+      firstVisibleMessageId: 'message-1',
+      firstVisibleTop: -5,
+    },
+  };
+  const after = {
+    focusOwner: 'transcript',
+    transcript: {
+      scrollTop: 498,
+      scrollHeight: 998,
+      clientHeight: 500,
+      firstVisibleMessageId: 'message-1',
+      firstVisibleTop: -3,
+    },
+  };
+
+  assert.deepEqual(
+    verifyActionEffect({ action: 'wheel transcript', delta: 420 }, before, after, {
+      dispatched: true,
+      settledAfter: after,
+    }),
+    { verified: true }
+  );
+});
+
 test('distinguishes canonical prompt admission from queued and unobserved input', () => {
   const marker = '[VFZ:abc:TOOLS-A1]';
   const messages = [

@@ -1859,10 +1859,9 @@ export function verifyActionEffect(action, before, after, details = {}) {
     action.action.endsWith('on transcript') ||
     action.action === 'key on transcript'
   ) {
+    if (transcriptAtBoundary(action, before)) return { verified: true };
     if (!transcriptMoved(before, after)) {
-      return transcriptAtBoundary(action, before)
-        ? { verified: true }
-        : { verified: false, reason: 'transcript destination did not move' };
+      return { verified: false, reason: 'transcript destination did not move' };
     }
     const expectedDirection = expectedTranscriptDirection(action);
     if (

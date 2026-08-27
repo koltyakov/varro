@@ -534,10 +534,13 @@ Precondition: the long session has complete prompt-number history.
 1. Hold `Alt` or `Option` until absolute prompt badges appear.
 2. Record three target numbers selected by seed: one near the beginning, one near the middle, and one
    in the newest window.
-3. Use the visible prompt-number navigation behavior to visit each target, including an unloaded old
+3. If the conversation-turn navigation controls are hidden at the baseline narrow width, widen the same
+   tracked sidebar until they appear (currently at least `1100` CSS pixels). Keep the same surface,
+   `viewId`, and session route, and record both widths.
+4. Use the visible prompt-number navigation behavior to visit each target, including an unloaded old
    target when the UI offers it.
-4. During one settle, click or wheel at the destination to cancel programmatic ownership.
-5. Navigate back to the newest selected prompt.
+5. During one settle, click or wheel at the destination to cancel programmatic ownership.
+6. Navigate back to the newest selected prompt, then restore the baseline narrow width.
 
 Pass invariants:
 
@@ -547,9 +550,10 @@ Pass invariants:
 - Final alignment is to the real prompt card and remains stable for two seconds.
 - User input cancels settling immediately and is not reversed by a later frame.
 
-If the current UI exposes prompt numbers but no direct numbered navigation action, mark the direct
-navigation step `BLOCKED`, verify badge stability and sticky click navigation, and record the missing
-interaction rather than inventing one.
+If the current UI exposes prompt numbers but no direct numbered navigation action at any supported
+width, mark the direct navigation step `BLOCKED`, verify badge stability and sticky click navigation,
+and record the missing interaction rather than inventing one. Do not mark the step blocked only because
+responsive layout hides the controls at the baseline narrow width.
 
 ### AI-05 Cold Scroll To Real Top
 
