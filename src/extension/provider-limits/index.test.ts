@@ -101,6 +101,18 @@ describe('provider limit adapters', () => {
     expect(adapter?.id).toBe('ollama-cloud');
   });
 
+  it('matches the OpenCode Go adapter', () => {
+    const adapter = findProviderLimitAdapter(
+      {
+        id: 'opencode-go',
+        models: { 'kimi-k3': { api: { url: 'https://opencode.ai/zen/go/v1' } } },
+      },
+      { 'opencode-go': { type: 'api', key: 'go-api-key' } }
+    );
+
+    expect(adapter?.id).toBe('opencode-go');
+  });
+
   it('matches the Gemini adapter for Gemini provider aliases', () => {
     const adapter = findProviderLimitAdapter(
       {

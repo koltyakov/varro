@@ -7,6 +7,7 @@ import { createHeaderProbeAdapter } from './header-probe';
 import { createKimiAdapter } from './kimi';
 import { createMiniMaxAdapter } from './minimax';
 import { createOllamaCloudAdapter } from './ollama-cloud';
+import { createOpenCodeGoAdapter } from './opencode-go';
 import { createOpenRouterAdapter } from './openrouter';
 import { createXaiAdapter } from './xai';
 import { createZaiAdapter } from './zai';
@@ -18,6 +19,7 @@ export const providerLimitAdapters = [
   createCopilotAdapter(),
   createGeminiAdapter(),
   createOllamaCloudAdapter(),
+  createOpenCodeGoAdapter(),
   createOpenRouterAdapter(),
   createZaiAdapter(),
   createMiniMaxAdapter(),
