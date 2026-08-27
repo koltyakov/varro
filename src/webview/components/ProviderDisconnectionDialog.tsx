@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import type { Provider } from '../types';
 import { postMessage } from '../lib/bridge';
@@ -13,19 +13,38 @@ export function ProviderDisconnectionDialog(props: {
   connectedProviderIDs: string[];
   providerLoadError: string;
   isLoadingProviders: boolean;
+  initialProviderID?: string | null;
+  providerConfigPaths?: Record<string, string[]>;
   onClose: () => void;
 }) {
   const [query, setQuery] = createSignal('');
-  const [selectedProviderID, setSelectedProviderID] = createSignal<string | null>(null);
+  const [selectedProviderID, setSelectedProviderID] = createSignal<string | null>(
+    props.initialProviderID ?? null
+  );
   const [isDeleting, setIsDeleting] = createSignal(false);
   const [errorMessage, setErrorMessage] = createSignal('');
 
   const providers = createMemo(() => {
     if (props.isLoadingProviders) return [];
-    const names = new Map(props.catalogProviders.map((provider) => [provider.id, provider.name]));
-    return props.connectedProviderIDs
+    const catalog = new Map(props.catalogProviders.map((provider) => [provider.id, provider]));
+    const providerIDs = [...props.connectedProviderIDs];
+    const initialProviderID = props.initialProviderID;
+    if (
+      initialProviderID &&
+      initialProviderID !== 'opencode' &&
+      catalog.has(initialProviderID) &&
+      !providerIDs.includes(initialProviderID)
+    ) {
+      providerIDs.push(initialProviderID);
+    }
+    return providerIDs
       .filter((id) => id !== 'opencode')
-      .map((id) => ({ id, name: names.get(id) ?? formatProviderID(id) }))
+      .map((id) => ({
+        id,
+        name: catalog.get(id)?.name ?? formatProviderID(id),
+        source: catalog.get(id)?.source,
+        connected: props.connectedProviderIDs.includes(id),
+      }))
       .toSorted((a, b) => a.name.localeCompare(b.name));
   });
   const filteredProviders = createMemo(() => {
@@ -38,6 +57,14 @@ export function ProviderDisconnectionDialog(props: {
   const selectedProvider = createMemo(() =>
     providers().find((provider) => provider.id === selectedProviderID())
   );
+  const selectedProviderConfigPaths = createMemo(
+    () => props.providerConfigPaths?.[selectedProviderID() ?? ''] ?? []
+  );
+
+  createEffect(() => {
+    if (props.isLoadingProviders || !selectedProviderID()) return;
+    if (!selectedProvider()) setSelectedProviderID(null);
+  });
 
   onMount(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -174,8 +201,45 @@ export function ProviderDisconnectionDialog(props: {
                     Back to providers
                   </button>
                   <div class="provider-disconnect-confirmation">
-                    Remove the saved credential for <strong>{provider().name}</strong>?
+                    <Show
+                      when={provider().connected}
+                      fallback={
+                        <>
+                          <strong>{provider().name}</strong> has no saved credential to disconnect.
+                        </>
+                      }
+                    >
+                      Remove the saved credential for <strong>{provider().name}</strong>?
+                    </Show>
                   </div>
+                  <Show
+                    when={
+                      provider().source === 'config' || selectedProviderConfigPaths().length > 0
+                    }
+                  >
+                    <div class="provider-disconnect-config-notice">
+                      <span>
+                        This provider is configured in OpenCode config. Disconnecting its saved
+                        credential may not remove it until you update the config.
+                      </span>
+                      <For each={selectedProviderConfigPaths()}>
+                        {(path) => (
+                          <button
+                            type="button"
+                            title={path}
+                            onClick={() =>
+                              postMessage({
+                                type: 'vscode/open',
+                                payload: { path, kind: 'file' },
+                              })
+                            }
+                          >
+                            Open {formatConfigFilename(path)}
+                          </button>
+                        )}
+                      </For>
+                    </div>
+                  </Show>
                   <Show when={errorMessage()}>
                     <div class="provider-connect-error" role="alert">
                       {errorMessage()}
@@ -190,14 +254,16 @@ export function ProviderDisconnectionDialog(props: {
                     >
                       Cancel
                     </button>
-                    <button
-                      type="button"
-                      class="provider-connect-danger"
-                      onClick={() => void disconnect()}
-                      disabled={isDeleting()}
-                    >
-                      {isDeleting() ? 'Disconnecting...' : 'Disconnect'}
-                    </button>
+                    <Show when={provider().connected}>
+                      <button
+                        type="button"
+                        class="provider-connect-danger"
+                        onClick={() => void disconnect()}
+                        disabled={isDeleting()}
+                      >
+                        {isDeleting() ? 'Disconnecting...' : 'Disconnect'}
+                      </button>
+                    </Show>
                   </div>
                 </div>
               )}
@@ -238,4 +304,8 @@ function formatProviderID(providerID: string) {
     .filter(Boolean)
     .map((part) => part.charAt(0).toLocaleUpperCase() + part.slice(1))
     .join(' ');
+}
+
+function formatConfigFilename(path: string) {
+  return path.split(/[\\/]/).at(-1) || 'OpenCode config';
 }

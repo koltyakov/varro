@@ -62,6 +62,11 @@ type ModelContextMenuState = {
   providerID: string;
   modelID: string;
 };
+type ProviderContextMenuState = {
+  x: number;
+  y: number;
+  providerID: string;
+};
 type ModelRenameState = {
   providerID: string;
   modelID: string;
@@ -92,6 +97,8 @@ export function ModelsPanel() {
   const [routing, setRouting] = createSignal<OpenCodeModelRouting>(createEmptyRouting());
   const [previousRouting, setPreviousRouting] = createSignal<OpenCodeModelRouting | null>(null);
   const [contextMenu, setContextMenu] = createSignal<ModelContextMenuState | null>(null);
+  const [providerContextMenu, setProviderContextMenu] =
+    createSignal<ProviderContextMenuState | null>(null);
   const [renameDialog, setRenameDialog] = createSignal<ModelRenameState | null>(null);
   const [modelCatalogProvider, setModelCatalogProvider] = createSignal<ModelProvider | null>(null);
   const [showProviderActions, setShowProviderActions] = createSignal(false);
@@ -108,6 +115,7 @@ export function ModelsPanel() {
     connected: string[];
     error: string;
     loading: boolean;
+    initialProviderID: string | null;
   } | null>(null);
   let bodyRef: HTMLDivElement | undefined;
   let providerActionsButtonRef: HTMLButtonElement | undefined;
@@ -335,9 +343,15 @@ export function ModelsPanel() {
     }
   }
 
-  async function openProviderDisconnection() {
+  async function openProviderDisconnection(initialProviderID: string | null = null) {
     if (providerDisconnectionData()) return;
-    const loadingState = { providers: [], connected: [], error: '', loading: true };
+    const loadingState = {
+      providers: [],
+      connected: [],
+      error: '',
+      loading: true,
+      initialProviderID,
+    };
     setProviderDisconnectionData(loadingState);
     try {
       const catalog = await client.config.providerCatalog();
@@ -347,6 +361,7 @@ export function ModelsPanel() {
         connected: catalog.connected,
         error: '',
         loading: false,
+        initialProviderID,
       });
     } catch (error) {
       if (providerDisconnectionData() !== loadingState) return;
@@ -355,6 +370,7 @@ export function ModelsPanel() {
         connected: [],
         error: error instanceof Error ? error.message : String(error),
         loading: false,
+        initialProviderID,
       });
     }
   }
@@ -373,13 +389,20 @@ export function ModelsPanel() {
   onMount(() => {
     const onPointerDown = () => {
       closeContextMenu();
+      setProviderContextMenu(null);
       setShowProviderActions(false);
     };
     const onEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || (!contextMenu() && !showProviderActions())) return;
+      if (
+        event.key !== 'Escape' ||
+        (!contextMenu() && !providerContextMenu() && !showProviderActions())
+      ) {
+        return;
+      }
       event.preventDefault();
       if (showProviderActions()) providerActionsButtonRef?.focus();
       closeContextMenu();
+      setProviderContextMenu(null);
       setShowProviderActions(false);
     };
     window.addEventListener('pointerdown', onPointerDown);
@@ -558,7 +581,14 @@ export function ModelsPanel() {
                     forceExpanded={normalizedQuery().length > 0}
                     routing={routing()}
                     previousRouting={state.providerRefreshPending ? previousRouting() : null}
-                    onOpenContextMenu={(next) => setContextMenu(next)}
+                    onOpenContextMenu={(next) => {
+                      setProviderContextMenu(null);
+                      setContextMenu(next);
+                    }}
+                    onOpenProviderContextMenu={(next) => {
+                      closeContextMenu();
+                      setProviderContextMenu(next);
+                    }}
                     onOpenModelCatalog={() => setModelCatalogProvider(provider)}
                   />
                 )}
@@ -707,6 +737,30 @@ export function ModelsPanel() {
           </Portal>
         )}
       </Show>
+      <Show when={providerContextMenu()} keyed>
+        {(menu) => (
+          <Portal>
+            <div
+              ref={(element) => positionContextMenu(element, menu.x, menu.y)}
+              class="models-context-menu models-provider-context-menu"
+              style={{ left: `${menu.x}px`, top: `${menu.y}px` }}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <button
+                type="button"
+                class="models-context-menu-item"
+                disabled={menu.providerID === 'opencode'}
+                onClick={() => {
+                  setProviderContextMenu(null);
+                  void openProviderDisconnection(menu.providerID);
+                }}
+              >
+                Delete provider
+              </button>
+            </div>
+          </Portal>
+        )}
+      </Show>
       <Show when={renameDialog()}>
         {(rename) => (
           <Portal>
@@ -813,6 +867,8 @@ export function ModelsPanel() {
             connectedProviderIDs={data().connected}
             providerLoadError={data().error}
             isLoadingProviders={data().loading}
+            initialProviderID={data().initialProviderID}
+            providerConfigPaths={routing().providerConfigPaths}
             onClose={() => setProviderDisconnectionData(null)}
           />
         )}
@@ -1049,6 +1105,7 @@ function ProviderSection(props: {
   routing: OpenCodeModelRouting;
   previousRouting: OpenCodeModelRouting | null;
   onOpenContextMenu: (menu: ModelContextMenuState) => void;
+  onOpenProviderContextMenu: (menu: ProviderContextMenuState) => void;
   onOpenModelCatalog: () => void;
 }) {
   const enabledCount = () =>
@@ -1075,7 +1132,17 @@ function ProviderSection(props: {
 
   return (
     <div class="models-provider">
-      <div class="models-provider-header">
+      <div
+        class="models-provider-header"
+        onContextMenu={(event) => {
+          event.preventDefault();
+          props.onOpenProviderContextMenu({
+            x: event.clientX,
+            y: event.clientY,
+            providerID: props.provider.id,
+          });
+        }}
+      >
         <button
           class="models-provider-toggle"
           onClick={() => !props.forceExpanded && setExpanded((v) => !v)}
@@ -1476,6 +1543,8 @@ function normalizeModelRouting<T>(value: T): OpenCodeModelRouting {
   }
 
   const rawAgentModels = asRecord(record.agentModels);
+  const rawProviderConfigPaths = asRecord(record.providerConfigPaths);
+  const providerConfigPaths: Record<string, string[]> = {};
 
   if (rawAgentModels) {
     for (const [agentName, routeValue] of Object.entries(rawAgentModels)) {
@@ -1484,7 +1553,23 @@ function normalizeModelRouting<T>(value: T): OpenCodeModelRouting {
     }
   }
 
-  return { smallModel, agentModels, commitMessageModel, autoApproveModel };
+  if (rawProviderConfigPaths) {
+    for (const [providerID, paths] of Object.entries(rawProviderConfigPaths)) {
+      if (!Array.isArray(paths)) continue;
+      const validPaths = paths.filter(isString);
+      if (validPaths.length > 0) providerConfigPaths[providerID] = validPaths;
+    }
+  }
+
+  const normalized: OpenCodeModelRouting = {
+    smallModel,
+    agentModels,
+    commitMessageModel,
+    autoApproveModel,
+  };
+  if (Object.keys(providerConfigPaths).length > 0)
+    normalized.providerConfigPaths = providerConfigPaths;
+  return normalized;
 }
 
 function parseModelRoute<T>(value: T): OpenCodeModelRouting['smallModel'] {

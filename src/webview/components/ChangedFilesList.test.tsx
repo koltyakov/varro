@@ -205,6 +205,8 @@ describe('ChangedFilesList', () => {
     cleanup = render(() => <ChangedFilesList />, container!);
     container?.querySelector<HTMLButtonElement>('.todo-block-header')?.click();
     expect(container?.querySelector('.changed-files-file-icon')).toBeInstanceOf(HTMLImageElement);
+    const row = container?.querySelector('.changed-files-row-button');
+    expect(row?.lastElementChild?.classList.contains('changed-files-badge')).toBe(true);
     container?.querySelector<HTMLButtonElement>('.changed-files-row-button')?.click();
 
     expect(send).toHaveBeenCalledWith({
@@ -216,6 +218,33 @@ describe('ChangedFilesList', () => {
         sessionID: 'session-1',
       },
     });
+  });
+
+  it('orders files by total line changes and then by path', () => {
+    const zPart = fileEditPart('src/z.ts');
+    const bPart = fileEditPart('src/b.ts');
+    const aPart = fileEditPart('src/a.ts');
+    if (zPart.type === 'tool') zPart.state.input = { path: 'src/z.ts', additions: 1 };
+    if (bPart.type === 'tool') bPart.state.input = { path: 'src/b.ts', additions: 4 };
+    if (aPart.type === 'tool') aPart.state.input = { path: 'src/a.ts', deletions: 4 };
+
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session()]);
+    setState('messages', [
+      {
+        info: assistantMessage(),
+        parts: [zPart, bPart, aPart],
+      },
+    ]);
+
+    cleanup = render(() => <ChangedFilesList />, container!);
+    container?.querySelector<HTMLButtonElement>('.todo-block-header')?.click();
+
+    expect(
+      [...(container?.querySelectorAll('.changed-files-path') ?? [])].map(
+        (item) => item.textContent
+      )
+    ).toEqual(['src/a.ts', 'src/b.ts', 'src/z.ts']);
   });
 
   it('hides backend summary files for an idle session that made no edits', () => {

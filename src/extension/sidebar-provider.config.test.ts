@@ -49,6 +49,9 @@ describe('SidebarProvider local config routing', () => {
                   build: { model: 'openai/gpt-5' },
                   review: { model: 'anthropic/claude-sonnet-4' },
                 },
+                provider: {
+                  anthropic: { options: { baseURL: 'http://127.0.0.1:3456' } },
+                },
               })
             )
           )
@@ -77,6 +80,7 @@ describe('SidebarProvider local config routing', () => {
           },
           commitMessageModel: null,
           autoApproveModel: null,
+          providerConfigPaths: { anthropic: ['/repo/opencode.json'] },
         },
       },
     });

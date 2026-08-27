@@ -113,11 +113,11 @@ describe('ModelPicker', () => {
     expect(onSelect).toHaveBeenCalledWith({ providerID: 'openai', modelID: 'gpt-5' });
   });
 
-  it('labels the GPT Fast lightning symbol on hover', async () => {
+  it('labels the Claude Fast lightning symbol on hover', async () => {
     setState('providers', [
-      createProvider('openai', 'OpenAI', {
-        fast: createModel('fast', 'GPT-5.6 Fast'),
-        standard: createModel('standard', 'GPT-5.6'),
+      createProvider('anthropic', 'Anthropic', {
+        fast: createModel('fast', 'Claude Opus 5 Fast'),
+        standard: createModel('standard', 'Claude Opus 5'),
       }),
     ]);
 
@@ -125,7 +125,7 @@ describe('ModelPicker', () => {
     await flushMicrotasks();
 
     const fastLabel = Array.from(container?.querySelectorAll('.dropdown-name') ?? []).find(
-      (item) => item.textContent === 'GPT-5.6 ⚡'
+      (item) => item.textContent === 'Claude Opus 5 ⚡'
     );
     const fastSymbol = fastLabel?.querySelector(
       '[aria-label="Fast mode may consume usage limits faster and cost more."]'

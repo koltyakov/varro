@@ -44,6 +44,7 @@ export type OpenCodeModelRouting = {
   agentModels: Record<string, OpenCodeModelRoute>;
   commitMessageModel: OpenCodeModelRoute | null;
   autoApproveModel: OpenCodeModelRoute | null;
+  providerConfigPaths?: Record<string, string[]>;
 };
 
 export type ProviderAuthError = {

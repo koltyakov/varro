@@ -855,6 +855,32 @@
   border-radius: var(--radius-control);
 }
 
+.provider-disconnect-config-notice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 9px 10px;
+  color: var(--color-vscode-muted);
+  font-size: 11px;
+  line-height: 1.45;
+  background: color-mix(in srgb, var(--color-vscode-accent) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-vscode-accent) 25%, var(--color-vscode-border));
+  border-radius: var(--radius-control);
+}
+
+.provider-disconnect-config-notice button {
+  padding: 0;
+  color: var(--color-vscode-accent);
+  font-size: inherit;
+  background: none;
+  border: 0;
+}
+
+.provider-disconnect-config-notice button:hover {
+  text-decoration: underline;
+}
+
 .provider-disconnect-options {
   border-top: 0;
 }
@@ -1303,6 +1329,15 @@
   border-radius: var(--radius-card);
   background: var(--color-vscode-widget-bg);
   box-shadow: var(--shadow-popover);
+}
+
+.models-provider-context-menu {
+  width: max-content;
+  min-width: 0;
+}
+
+.models-provider-context-menu .models-context-menu-item {
+  white-space: nowrap;
 }
 
 .models-context-menu-separator {

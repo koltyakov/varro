@@ -740,14 +740,14 @@ describe('ToolbarPickers', () => {
     expect(providerIcon?.style.getPropertyValue('--provider-icon-mask')).toContain('url(');
   });
 
-  it('renders GPT Fast models with a lightning symbol and cost warning', async () => {
+  it('renders Claude Fast models with a lightning symbol and cost warning', async () => {
     vi.useFakeTimers();
     cleanup = render(
       () => (
         <ModelPickerButton
-          providerID="openai"
-          providerName="OpenAI"
-          modelName="GPT-5.6 Fast"
+          providerID="anthropic"
+          providerName="Anthropic"
+          modelName="Claude Opus 5 Fast"
           canEllipsize={false}
           onToggle={vi.fn()}
         />
@@ -756,16 +756,16 @@ describe('ToolbarPickers', () => {
     );
 
     const button = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
-    expect(button?.getAttribute('aria-label')).toBe('OpenAI / GPT-5.6 Fast');
+    expect(button?.getAttribute('aria-label')).toBe('Anthropic / Claude Opus 5 Fast');
     expect(button?.className).toContain('fast-model-selected');
-    expect(container?.querySelector('.model-name-text')?.textContent).toBe('GPT-5.6 ⚡');
+    expect(container?.querySelector('.model-name-text')?.textContent).toBe('Claude Opus 5 ⚡');
 
     button?.dispatchEvent(new MouseEvent('mouseenter'));
     await vi.advanceTimersByTimeAsync(1_500);
 
     const tooltip = document.querySelector('[role="tooltip"]');
     expect(tooltip?.querySelector('.model-picker-tooltip > span')?.textContent).toBe(
-      'OpenAI / GPT-5.6 Fast'
+      'Anthropic / Claude Opus 5 Fast'
     );
     expect(tooltip?.querySelector('.model-picker-tooltip-detail')?.textContent).toBe(
       'Fast mode may consume usage limits faster and cost more.'

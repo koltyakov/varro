@@ -408,8 +408,8 @@ describe('ModelsPanel', () => {
     expect(Object.keys(state.providers[0]?.models ?? {})).toHaveLength(541);
   });
 
-  it('labels the GPT Fast lightning symbol on hover', async () => {
-    setState('providers', 0, 'models', 'gpt-5', 'name', 'GPT-5 Fast');
+  it('labels the Claude Fast lightning symbol on hover', async () => {
+    setState('providers', 0, 'models', 'gpt-5', 'name', 'Claude Opus 5 Fast');
     cleanup = render(() => ModelsPanel(), container!);
     await Promise.resolve();
 
@@ -455,6 +455,120 @@ describe('ModelsPanel', () => {
     expect(logoutButton).toBeInstanceOf(HTMLButtonElement);
     expect(document.body.textContent).toContain('Disconnect provider');
     expect(providerSetupMocks.openProviderLogout).not.toHaveBeenCalled();
+  });
+
+  it('opens a provider context menu and preselects that provider for deletion', async () => {
+    const send = vi.fn();
+    window.__sendToExtension = send;
+    clientMocks.openCodeConfig.mockResolvedValue({
+      smallModel: null,
+      agentModels: {},
+      commitMessageModel: null,
+      autoApproveModel: null,
+      providerConfigPaths: { openai: ['/Users/test/.config/opencode/opencode.json'] },
+    });
+    clientMocks.providerCatalog.mockResolvedValue({
+      all: [{ id: 'openai', name: 'OpenAI', source: 'config', models: {} }],
+      default: {},
+      connected: ['openai'],
+    });
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    container
+      ?.querySelector<HTMLElement>('.models-provider-header')
+      ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    const deleteButton = findButton(document.body, 'Delete provider');
+    deleteButton?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
+    expect(deleteButton).toBeInstanceOf(HTMLButtonElement);
+    expect(dialog?.textContent).toContain('OpenAI');
+    expect(dialog?.textContent).toContain('Remove the saved credential for OpenAI?');
+    expect(dialog?.textContent).toContain('configured in OpenCode config');
+    expect(dialog?.querySelector('.provider-connect-options')).toBeNull();
+    findButton(dialog, 'Open opencode.json')?.click();
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open',
+      payload: {
+        path: '/Users/test/.config/opencode/opencode.json',
+        kind: 'file',
+      },
+    });
+  });
+
+  it('shows but disables provider deletion for OpenCode Zen', () => {
+    setState('providers', [
+      {
+        id: 'opencode',
+        name: 'OpenCode Zen',
+        source: 'api',
+        models: {
+          'claude-opus': {
+            id: 'claude-opus',
+            name: 'Claude Opus',
+            capabilities: { toolcall: true },
+            cost: { input: 1, output: 1 },
+          },
+        },
+      },
+    ]);
+    cleanup = render(() => ModelsPanel(), container!);
+
+    container
+      ?.querySelector<HTMLElement>('.models-provider-header')
+      ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    const deleteButton = findButton(document.body, 'Delete provider');
+
+    expect(deleteButton).toBeInstanceOf(HTMLButtonElement);
+    expect(deleteButton?.disabled).toBe(true);
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('opens config guidance for a provider without a saved credential', async () => {
+    clientMocks.openCodeConfig.mockResolvedValue({
+      smallModel: null,
+      agentModels: {},
+      commitMessageModel: null,
+      autoApproveModel: null,
+      providerConfigPaths: { custom: ['/repo/opencode.jsonc'] },
+    });
+    clientMocks.providerCatalog.mockResolvedValue({
+      all: [{ id: 'custom', name: 'Custom', source: 'config', models: {} }],
+      default: {},
+      connected: [],
+    });
+    setState('providers', [
+      {
+        id: 'custom',
+        name: 'Custom',
+        source: 'config',
+        models: {
+          model: {
+            id: 'model',
+            name: 'Model',
+            capabilities: { toolcall: true },
+            cost: { input: 1, output: 1 },
+          },
+        },
+      },
+    ]);
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    container
+      ?.querySelector<HTMLElement>('.models-provider-header')
+      ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    findButton(document.body, 'Delete provider')?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
+    expect(dialog?.textContent).toContain('has no saved credential to disconnect');
+    expect(findButton(dialog, 'Open opencode.jsonc')).toBeInstanceOf(HTMLButtonElement);
+    expect(findButton(dialog, 'Disconnect')).toBeUndefined();
   });
 
   it('uses terminal provider actions on Option-click', () => {

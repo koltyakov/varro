@@ -32,6 +32,7 @@ import { logger } from './logger';
 import type { ProviderLimitService } from './provider-limit-service';
 import type { PinnedSessionManager } from './pinned-session-manager';
 import type { OpenCodeServer } from './server';
+import { getOpenCodeConfigPaths } from './open-code-process';
 import {
   OpenCodeResponseTooLargeError,
   type OpenCodeRequestOptions,
@@ -1815,8 +1816,45 @@ export class RestProxy {
   }
 
   private async readOpenCodeModelRouting(): Promise<OpenCodeModelRouting> {
-    const { config } = await this.readOpenCodeConfigObject();
-    return this.normalizeOpenCodeModelRouting(config);
+    const { config, files } = await this.readOpenCodeConfigObject();
+    const routing = this.normalizeOpenCodeModelRouting(config);
+    const providerConfigPaths = await this.readOpenCodeProviderConfigPaths(files);
+    return Object.keys(providerConfigPaths).length > 0
+      ? { ...routing, providerConfigPaths }
+      : routing;
+  }
+
+  private async readOpenCodeProviderConfigPaths(
+    projectFiles: Array<{ path: string; config: Record<string, unknown> }>
+  ) {
+    const configuredPath = process.env.OPENCODE_CONFIG?.trim();
+    const candidatePaths = [
+      ...getOpenCodeConfigPaths(),
+      ...(configuredPath ? [configuredPath] : []),
+      ...projectFiles.map((file) => file.path),
+    ].filter((path, index, paths) => paths.indexOf(path) === index);
+    const projectConfigByPath = new Map(projectFiles.map((file) => [file.path, file.config]));
+    const providerConfigPaths: Record<string, string[]> = {};
+
+    for (const path of candidatePaths) {
+      let config = projectConfigByPath.get(path);
+      if (!config) {
+        try {
+          const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(path));
+          config = parseOpenCodeConfig(new TextDecoder().decode(bytes), path);
+        } catch {
+          continue;
+        }
+      }
+
+      const providers = asRecord(config.provider);
+      if (!providers) continue;
+      for (const providerID of Object.keys(providers)) {
+        (providerConfigPaths[providerID] ??= []).push(path);
+      }
+    }
+
+    return providerConfigPaths;
   }
 
   private async updateModelRouting(

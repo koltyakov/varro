@@ -2619,7 +2619,7 @@ kbd {
   padding: 12px 15px;
   border: 1px solid color-mix(in srgb, var(--color-vscode-request-border) 45%, transparent);
   border-radius: var(--chat-radius-card);
-  border-top-right-radius: var(--radius-chip);
+  border-top-right-radius: var(--radius-card);
   background: var(--color-vscode-request-bubble);
 }
 

@@ -30,7 +30,7 @@ export function formatContextLimit(value: number) {
 }
 
 export function formatModelName(name: string) {
-  if (!/^\s*gpt-/i.test(name)) return name;
+  if (!/^\s*(?:gpt-|claude\b)/i.test(name)) return name;
   return name.replace(/\bfast\b/gi, '⚡');
 }
 

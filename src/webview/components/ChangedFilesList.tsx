@@ -136,7 +136,18 @@ export function ChangedFilesList() {
     });
   };
   const totalLabel = () => (truncated() ? 'Details omitted' : String(total()));
-  const visibleChanges = () => changes().slice(0, CHANGED_FILE_DISPLAY_LIMIT);
+  const visibleChanges = () =>
+    changes()
+      .toSorted((a, b) => {
+        const countDifference =
+          (b.additions ?? 0) + (b.deletions ?? 0) - ((a.additions ?? 0) + (a.deletions ?? 0));
+        if (countDifference !== 0) return countDifference;
+
+        const aPath = formatDisplayPath(a.toPath || a.path, state.editorContext.workspacePath);
+        const bPath = formatDisplayPath(b.toPath || b.path, state.editorContext.workspacePath);
+        return aPath < bPath ? -1 : aPath > bPath ? 1 : 0;
+      })
+      .slice(0, CHANGED_FILE_DISPLAY_LIMIT);
   const additions = () =>
     summaryStats()?.additions ??
     changes().reduce((sum, change) => sum + (change.additions ?? 0), 0);
@@ -205,14 +216,6 @@ function ChangedFileItem(props: { change: FileChange }) {
 
   const content = (
     <>
-      <span
-        class={`changed-files-badge ${badge().class}`}
-        role="img"
-        aria-label={badge().title}
-        title={badge().title}
-      >
-        {badge().label}
-      </span>
       <FileTypeIcon path={openPath()} class="changed-files-file-icon" />
       <span class="changed-files-path">
         <span class="changed-files-dir">{dir()}</span>
@@ -229,6 +232,14 @@ function ChangedFileItem(props: { change: FileChange }) {
           </Show>
         </span>
       </Show>
+      <span
+        class={`changed-files-badge ${badge().class}`}
+        role="img"
+        aria-label={badge().title}
+        title={badge().title}
+      >
+        {badge().label}
+      </span>
     </>
   );
 

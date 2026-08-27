@@ -71,11 +71,12 @@ describe('format helpers', () => {
     expect(formatContextLimit(12_000_000)).toBe('12M');
   });
 
-  it('replaces Fast in GPT model display names with a lightning symbol', () => {
+  it('replaces Fast in GPT and Claude model display names with a lightning symbol', () => {
     expect(formatModelName('GPT-5.6 Fast')).toBe('GPT-5.6 ⚡');
     expect(formatModelName('GPT-5 Fast Reasoning')).toBe('GPT-5 ⚡ Reasoning');
-    expect(formatModelName('Claude Fast')).toBe('Claude Fast');
+    expect(formatModelName('Claude Opus 5 Fast')).toBe('Claude Opus 5 ⚡');
     expect(formatModelName('GPT-5 Faster')).toBe('GPT-5 Faster');
+    expect(formatModelName('Grok Code Fast')).toBe('Grok Code Fast');
   });
 
   it('formats model release dates in UTC and ignores invalid values', () => {
