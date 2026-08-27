@@ -124,6 +124,11 @@ export function WorkspacePicker(props: {
       if (!popupEl) return;
       flipPopupDownIfNeeded(popupEl);
       if (props.boundaryRef) {
+        const viewportMargin = 8;
+        const boundaryBox = props.boundaryRef.getBoundingClientRect();
+        const boundaryLeft = Math.max(viewportMargin, boundaryBox.left);
+        const boundaryRight = Math.min(window.innerWidth - viewportMargin, boundaryBox.right);
+        popupEl.style.width = `${Math.min(360, Math.max(0, boundaryRight - boundaryLeft))}px`;
         alignPopupToBoundary(popupEl, props.boundaryRef, props.alignTo ?? 'left');
       }
       clampPopupToViewport(popupEl);

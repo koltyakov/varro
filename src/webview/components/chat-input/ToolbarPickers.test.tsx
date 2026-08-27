@@ -166,9 +166,9 @@ describe('ToolbarPickers', () => {
     await flushMicrotasks();
   });
 
-  it('aligns the workspace popup to the same left boundary as permissions', async () => {
+  it('aligns the workspace popup and resizes it to the available boundary width', async () => {
     const boundary = document.createElement('div');
-    vi.spyOn(boundary, 'getBoundingClientRect').mockReturnValue({
+    const boundaryRect = vi.spyOn(boundary, 'getBoundingClientRect').mockReturnValue({
       x: 24,
       y: 0,
       top: 0,
@@ -199,7 +199,25 @@ describe('ToolbarPickers', () => {
     );
     await flushMicrotasks();
 
-    expect(container?.querySelector<HTMLElement>('.toolbar-popover')?.style.left).toBe('24px');
+    const popup = container?.querySelector<HTMLElement>('.toolbar-popover');
+    expect(popup?.style.left).toBe('24px');
+    expect(popup?.style.width).toBe('296px');
+
+    boundaryRect.mockReturnValue({
+      x: 24,
+      y: 0,
+      top: 0,
+      left: 24,
+      right: 204,
+      bottom: 100,
+      width: 180,
+      height: 100,
+      toJSON: () => ({}),
+    });
+    window.dispatchEvent(new Event('resize'));
+    await flushMicrotasks();
+
+    expect(popup?.style.width).toBe('180px');
   });
 
   it('renders the permission picker title, selection, and click handlers', () => {

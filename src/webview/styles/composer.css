@@ -1105,6 +1105,12 @@
   max-height: 240px;
 }
 
+.toolbar-popover.workspace-popover {
+  width: 360px;
+  max-width: calc(100vw - 16px);
+  max-height: min(360px, calc(100dvh - 16px));
+}
+
 .toolbar-popover.permission-mode-popover {
   width: max-content;
   max-width: 288px;
@@ -1269,6 +1275,13 @@
   margin-bottom: 4px;
   user-select: none;
   -webkit-user-select: none;
+}
+
+.workspace-popover .toolbar-popover-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--color-vscode-surface-raised);
 }
 
 .toolbar-picker.stop-button {
