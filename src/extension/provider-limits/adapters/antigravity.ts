@@ -3,7 +3,7 @@
 import { execFile } from 'child_process';
 import { request as httpRequest } from 'http';
 import { request as httpsRequest } from 'https';
-import type { OutgoingHttpHeaders } from 'http';
+import type { IncomingMessage, OutgoingHttpHeaders } from 'http';
 import type { RequestOptions } from 'https';
 import type { ProviderLimitWindow } from '../../../shared/protocol';
 import type { ProviderLimitAdapter, ProviderLimitAdapterContext } from '../types';
@@ -337,16 +337,38 @@ async function postAntigravityRequest(
   if (url.protocol === 'https:') options.rejectUnauthorized = false;
 
   return new Promise<{ status: number; bodyText: string }>((resolve, reject) => {
+    let activeResponse: IncomingMessage | null = null;
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      activeResponse?.destroy(error);
+      request.destroy(error);
+      reject(error);
+    };
+
     const request = (url.protocol === 'https:' ? httpsRequest : httpRequest)(
       url,
       options,
       (response) => {
+        activeResponse = response;
         const chunks: Buffer[] = [];
         response.on('data', (chunk: Buffer | string) => {
           const buffer = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
           chunks.push(buffer);
         });
+        response.once('error', fail);
+        response.once('aborted', () => fail(new Error('response aborted')));
+        response.once('close', () => {
+          if (!response.complete) fail(new Error('response closed before completion'));
+        });
         response.on('end', () => {
+          if (settled) return;
+          settled = true;
+          if (timer) clearTimeout(timer);
           resolve({
             status: response.statusCode ?? 0,
             bodyText: Buffer.concat(chunks).toString('utf8'),
@@ -355,10 +377,8 @@ async function postAntigravityRequest(
       }
     );
 
-    request.setTimeout(timeoutMs, () => {
-      request.destroy(new Error('timeout'));
-    });
-    request.once('error', reject);
+    timer = setTimeout(() => fail(new Error('request timed out')), timeoutMs);
+    request.once('error', fail);
     request.write(body);
     request.end();
   });

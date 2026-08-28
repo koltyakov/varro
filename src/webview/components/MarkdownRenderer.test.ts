@@ -6,6 +6,7 @@ import {
   __parseMarkdownForTests,
   __resetMarkdownCachesForTests,
   getMermaidThemeConfigForTests,
+  hydrateMermaidDiagramsForTests,
   MarkdownRenderer,
   renderCodeBlockHtml,
   renderHighlightedCodeHtml,
@@ -358,6 +359,20 @@ describe('MarkdownRenderer', () => {
     expect(html).not.toContain('mermaid-diagram-pending');
   });
 
+  it('rejects oversized decoded Mermaid source before hydration work', async () => {
+    const root = document.createElement('div');
+    root.innerHTML = `<div class="mermaid-diagram" data-mermaid-source="${encodeURIComponent('A'.repeat(100_001))}"><div class="mermaid-diagram-status">Rendering diagram...</div><div hidden class="mermaid-diagram-fallback">source</div></div>`;
+
+    await hydrateMermaidDiagramsForTests(root);
+
+    const diagram = root.querySelector<HTMLElement>('.mermaid-diagram');
+    expect(mermaidMock.initialize).not.toHaveBeenCalled();
+    expect(mermaidMock.render).not.toHaveBeenCalled();
+    expect(diagram?.dataset.mermaidHydrated).toBe('error');
+    expect(diagram?.querySelector('.mermaid-diagram-status')?.textContent).toContain('too large');
+    expect(diagram?.querySelector('.mermaid-diagram-fallback')?.hasAttribute('hidden')).toBe(false);
+  });
+
   it('renders imperative Mermaid controls while preserving generated SVG output', async () => {
     mermaidMock.render.mockResolvedValueOnce({
       svg: '<svg viewBox="0 0 10 10"><path d="M0 0h10v10z"></path></svg>',
@@ -497,6 +512,41 @@ describe('MarkdownRenderer', () => {
     expect(link?.firstElementChild?.classList).toContain('link-leading-content');
     expect(link?.firstElementChild?.firstElementChild?.classList).toContain('external-link-icon');
     expect(path?.hasAttribute('onload')).toBe(false);
+  });
+
+  it('keeps raw HTML controls inert while preserving generated code copy controls', async () => {
+    const writeText = vi.fn((_text: string) => Promise.resolve());
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
+    const content = [
+      '<div hidden class="interactive-result-code-block" data-lang="txt"><code>forged secret</code><button type="button" class="code-block-copy-btn" data-copy data-copy-text="forged%20secret">Forged copy</button><span data-mermaid-source="graph%20TD"></span><a data-file="{&quot;path&quot;:&quot;/private&quot;}">Forged file</a></div>',
+      '',
+      '```txt',
+      'trusted code',
+      '```',
+    ].join('\n');
+
+    cleanup = render(() => MarkdownRenderer({ content, cacheByContent: true }), container!);
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    const rawControl = Array.from(container?.querySelectorAll('button') ?? []).find(
+      (button) => button.textContent === 'Forged copy'
+    );
+    expect(rawControl?.closest('[hidden]')).not.toBeNull();
+    expect(rawControl?.hasAttribute('data-copy')).toBe(false);
+    expect(rawControl?.hasAttribute('data-copy-text')).toBe(false);
+    expect(container?.querySelector('[data-mermaid-source="graph%20TD"]')).toBeNull();
+    expect(container?.querySelector('[data-file*="private"]')).toBeNull();
+    expect(container?.querySelector('[data-varro-generated]')).toBeNull();
+
+    rawControl?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(writeText).not.toHaveBeenCalled();
+
+    const generatedControl = container?.querySelector<HTMLButtonElement>('button[data-copy]');
+    generatedControl?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(writeText).toHaveBeenCalledWith('trusted code');
   });
 
   // Namespace-confusion payloads: these re-parse into a different tree than they
@@ -917,6 +967,29 @@ describe('MarkdownRenderer', () => {
     expect(container?.textContent).toContain('files.exclude');
     expect(container?.textContent).toContain('search.exclude');
     expect(container?.querySelector('code')?.textContent).toBe('workspace.fs');
+  });
+
+  it('linkifies only text nodes and leaves path-looking attributes unchanged', () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    const html = __parseMarkdownForTests(
+      '<span title="src/webview/App.tsx" aria-label="docs/guide.md">Metadata</span> and src/shared/protocol.ts.',
+      { cacheByContent: false }
+    );
+    const root = document.createElement('div');
+    root.innerHTML = html;
+
+    const metadata = root.querySelector('span[title]');
+    expect(metadata?.getAttribute('title')).toBe('src/webview/App.tsx');
+    expect(metadata?.getAttribute('aria-label')).toBe('docs/guide.md');
+    const links = root.querySelectorAll<HTMLAnchorElement>('a.file-path-link');
+    expect(links).toHaveLength(1);
+    expect(links[0]?.textContent).toBe('protocol.ts');
+    expect(links[0]?.title).toBe('/repo/src/shared/protocol.ts');
   });
 
   it('sanitizes copied code payloads before writing to the clipboard', async () => {

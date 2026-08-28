@@ -844,8 +844,16 @@ function SessionListContinuation() {
     }
   };
 
-  onMount(() => {
-    if (!sentinelRef || globalThis.IntersectionObserver === undefined) return;
+  const disconnectObserver = () => {
+    observer?.disconnect();
+    observer = undefined;
+    sentinelRef = undefined;
+  };
+
+  const observeSentinel = (element: HTMLDivElement) => {
+    disconnectObserver();
+    sentinelRef = element;
+    if (globalThis.IntersectionObserver === undefined) return;
     observer = new IntersectionObserver(
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) void loadNextPage();
@@ -855,16 +863,19 @@ function SessionListContinuation() {
         rootMargin: '120px 0px',
       }
     );
-    observer.observe(sentinelRef);
-    onCleanup(() => observer?.disconnect());
+    observer.observe(element);
+  };
+
+  createEffect(() => {
+    if (state.sessionsHasMore || state.sessionsPaginationError) return;
+    disconnectObserver();
   });
+  onCleanup(disconnectObserver);
 
   return (
     <Show when={state.sessionsHasMore || state.sessionsPaginationError}>
       <div
-        ref={(element) => {
-          sentinelRef = element;
-        }}
+        ref={observeSentinel}
         class={`session-list-continuation ${state.sessionsLoadingMore || state.sessionsPaginationError ? 'visible' : ''}`}
       >
         <Show when={state.sessionsLoadingMore}>

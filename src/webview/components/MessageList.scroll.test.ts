@@ -46,6 +46,32 @@ installMessageListTestEnvironment({
 });
 
 describe('MessageList auto-scroll', () => {
+  it('cancels a pending first-turn alignment frame on unmount', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    setState('activeSessionId', 'session-1');
+    cleanup = render(() => MessageList(), container!);
+
+    replaceMessages([
+      { info: userMessage('user-first'), parts: [textPart('text-first', 'First prompt')] },
+    ]);
+    await Promise.resolve();
+    requestMessageListScrollToBottom('user-first');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const requestFrame = vi.mocked(globalThis.requestAnimationFrame);
+    const alignmentCallIndex = requestFrame.mock.calls.findLastIndex(([callback]) =>
+      callback.toString().includes('pendingNewTurnMessageId')
+    );
+    expect(alignmentCallIndex).toBeGreaterThanOrEqual(0);
+    const alignmentRafId = requestFrame.mock.results[alignmentCallIndex]?.value;
+
+    cleanup();
+    cleanup = undefined;
+    expect(globalThis.cancelAnimationFrame).toHaveBeenCalledWith(alignmentRafId);
+    animationFrames.restore();
+  });
+
   it('updates the virtualized range when initial bottom scroll is programmatic', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
 

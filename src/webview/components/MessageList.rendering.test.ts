@@ -21,6 +21,7 @@ import { MessageList, getNewlyAppendedMessageIds } from './MessageList';
 import { getRenderEmptyMessageIds } from './message-list/row-layout';
 import { getVisibleThreadMessages } from './message-list/thread-visibility';
 import { markSessionHistoryLoadFailed, setSessionHistoryCursor } from '../lib/message-window';
+import { fixture } from '../test-fixtures';
 import {
   assistantMessage,
   filePart,
@@ -948,6 +949,88 @@ describe('MessageList compact activity', () => {
       'Explored: 1 file, 1 search'
     );
     expect(container?.querySelector('[data-activity-part-id="search-1"]')).toBeNull();
+  });
+
+  it('disconnects the activity exit summary observer on unmount', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const observers: MutationObserver[] = [];
+    vi.spyOn(globalThis, 'MutationObserver').mockImplementation(function TestMutationObserver() {
+      const observer = fixture<MutationObserver>({
+        disconnect: vi.fn(),
+        observe: vi.fn(),
+        takeRecords: () => [],
+      });
+      observers.push(observer);
+      return observer;
+    });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        return new DOMRect(0, 0, 500, this.dataset.activityPartId ? 24 : 0);
+      }
+    );
+
+    const read = toolPart('read-teardown', 'assistant-teardown', 'call-read-teardown');
+    read.tool = 'read';
+    read.state = {
+      status: 'completed',
+      input: { filePath: 'src/app.ts' },
+      output: 'source',
+      title: 'src/app.ts',
+      metadata: {},
+      time: { start: 0, end: 1 },
+    };
+    const search = toolPart('search-teardown', 'assistant-teardown', 'call-search-teardown');
+    search.tool = 'grep';
+    search.state = {
+      status: 'running',
+      input: { pattern: 'activity' },
+      title: 'Searching',
+      time: { start: 1 },
+    };
+    const user = {
+      info: userMessage('user-teardown'),
+      parts: [textPart('prompt-teardown', 'Search the code')],
+    };
+    const info = assistantMessage('assistant-teardown', { parentID: 'user-teardown' });
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    replaceMessages([user, { info, parts: [read, search] }]);
+
+    cleanup = render(() => MessageList(), container!);
+    await vi.advanceTimersByTimeAsync(500);
+    replaceMessages([
+      user,
+      {
+        info,
+        parts: [
+          read,
+          {
+            ...search,
+            state: {
+              status: 'completed',
+              input: { pattern: 'activity' },
+              output: 'Found matches',
+              title: 'Searching',
+              metadata: {},
+              time: { start: 1, end: 2 },
+            },
+          },
+        ],
+      },
+    ]);
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    const track = container?.querySelector('.interactive-list-track');
+    const activityObserver = observers.find((observer) =>
+      vi.mocked(observer.observe).mock.calls.some(([target]) => target === track)
+    );
+    expect(activityObserver).toBeDefined();
+
+    cleanup();
+    cleanup = undefined;
+    expect(activityObserver?.disconnect).toHaveBeenCalledOnce();
+    animationFrames.restore();
   });
 
   it('keeps running activity outside an expanded Explored group', async () => {

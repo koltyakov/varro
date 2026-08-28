@@ -157,6 +157,32 @@ describe('DiffView', () => {
     ]);
   });
 
+  it('ends a malformed hunk before later file headers', () => {
+    expect(
+      parseUnifiedPatch(
+        [
+          '@@ -1,2 +1,2 @@',
+          '-old',
+          '+new',
+          'diff --git a/second.ts b/second.ts',
+          '--- a/second.ts',
+          '+++ b/second.ts',
+        ].join('\n')
+      )
+    ).toEqual([
+      { kind: 'hunk', content: '@@ -1,2 +1,2 @@', oldLine: null, newLine: null },
+      { kind: 'deletion', content: 'old', oldLine: 1, newLine: null },
+      { kind: 'addition', content: 'new', oldLine: null, newLine: 1 },
+    ]);
+  });
+
+  it('preserves an empty context line inside a hunk', () => {
+    expect(parseUnifiedPatch('@@ -1 +1 @@\n ')).toEqual([
+      { kind: 'hunk', content: '@@ -1 +1 @@', oldLine: null, newLine: null },
+      { kind: 'context', content: '', oldLine: 1, newLine: 1 },
+    ]);
+  });
+
   it('shows line-by-line changes when inline rendering is enabled', async () => {
     cleanup = render(
       () =>

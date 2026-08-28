@@ -1079,6 +1079,7 @@ describe('ralph runner restart safety', () => {
     const harness = createHarness();
     const config = createConfig({ iterations: 1 });
     harness.getSessionStatus.mockResolvedValue({ type: 'missing' });
+    harness.abortSession.mockRejectedValue(new Error('abort endpoint unavailable'));
     harness.store.startRun(config);
     harness.store.upsertIteration(
       config.managerSessionId,
@@ -1094,6 +1095,15 @@ describe('ralph runner restart safety', () => {
     expect(harness.createSession).not.toHaveBeenCalled();
     expect(harness.store.getRun(config.managerSessionId)?.iterations[0]?.note).toContain(
       'missing from the authoritative status snapshot'
+    );
+    expect(harness.abortSession).toHaveBeenCalledWith(
+      'child-1',
+      expect.any(AbortSignal),
+      '/workspace'
+    );
+    expect(harness.logError).toHaveBeenCalledWith(
+      'iteration 1 failed',
+      expect.objectContaining({ message: expect.stringContaining('authoritative status snapshot') })
     );
   });
 
@@ -1321,6 +1331,7 @@ describe('ralph runner iteration repair', () => {
     const config = createConfig({ iterations: 1 });
     harness.createSession.mockResolvedValueOnce('child-1');
     harness.listMessages.mockRejectedValue(new Error('message endpoint unavailable'));
+    harness.abortSession.mockRejectedValue(new Error('abort endpoint unavailable'));
     settlePromptsViaIdle(harness);
 
     await harness.runner.start(config);
@@ -1329,6 +1340,15 @@ describe('ralph runner iteration repair', () => {
     expect(run?.status).toBe('failed');
     expect(run?.iterations[0]?.status).toBe('failed');
     expect(run?.iterations[0]?.note).toContain('Failed to read Ralph session child-1 messages');
+    expect(harness.abortSession).toHaveBeenCalledWith(
+      'child-1',
+      expect.any(AbortSignal),
+      '/workspace'
+    );
+    expect(harness.logError).toHaveBeenCalledWith(
+      'iteration 1 failed',
+      expect.objectContaining({ message: 'Failed to read Ralph session child-1 messages' })
+    );
   });
 
   it('does not get stuck when the child session becomes idle before sendPrompt resolves', async () => {

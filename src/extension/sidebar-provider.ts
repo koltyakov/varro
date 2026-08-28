@@ -168,7 +168,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     viewId: string;
     workspacePath: string | null;
   } | null = null;
-  private readonly deferredInterruptedRecoveryIds = new Set<string>();
+  private readonly deferredInterruptedRecoveryOwners = new Map<string, string>();
   private sessionDirectoryReconciliationScheduled = false;
   private nextInterruptedRecoveryClaimId = 0;
   private nextEditorId = 0;
@@ -997,7 +997,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const persisted = state['varro.lastOpenedView'];
     if (!persisted || typeof persisted !== 'object') return { type: 'new-session' };
     const route = persisted as Record<string, unknown>;
-    return route.type === 'session' && typeof route.sessionId === 'string'
+    return route.type === 'session' &&
+      typeof route.sessionId === 'string' &&
+      !this.sessionTrash.isHidden(route.sessionId) &&
+      !this.hiddenSessions.isHidden(route.sessionId)
       ? {
           type: 'session',
           sessionId: route.sessionId,
@@ -1030,6 +1033,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   post(msg: ExtensionMessage) {
     if (msg.type === 'server/event') this.postQueuedSessionStatus(msg.payload);
+    if (msg.type === 'server/event') this.releaseDeletedEditorRestorations(msg.payload);
     if (msg.type === 'server/event' && this.shouldDeferWorkspaceEvent(msg.payload)) {
       this.deferredWorkspaceEvents.push(msg.payload);
       if (this.deferredWorkspaceEvents.length > SidebarProvider.MAX_DEFERRED_WORKSPACE_EVENTS) {
@@ -1055,6 +1059,22 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           ? { ...msg, payload: this.withWorkspacePath(msg.payload, endpoint.workspacePath) }
           : msg
       );
+    }
+  }
+
+  private releaseDeletedEditorRestorations(event: ServerEvent) {
+    if (event.type !== 'session.deleted') return;
+    const deletedSessionId = event.properties?.info?.id || event.properties?.sessionID;
+    if (!deletedSessionId) return;
+    for (const endpoint of this.editorPanels.values()) {
+      const restoringSessionId = endpoint.restoringSessionId;
+      if (
+        restoringSessionId &&
+        (restoringSessionId === deletedSessionId ||
+          this.sessionState.rootSessionIdFor(restoringSessionId) === deletedSessionId)
+      ) {
+        endpoint.restoringSessionId = undefined;
+      }
     }
   }
 
@@ -1156,7 +1176,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (endpoint.ready === ready) return;
     endpoint.ready = ready;
     if (!ready) endpoint.siblingAlertsKey = '';
-    if (!ready) this.deferredInterruptedRecoveryIds.clear();
+    if (!ready) {
+      for (const [sessionId, viewId] of this.deferredInterruptedRecoveryOwners) {
+        if (viewId === endpoint.viewId) this.deferredInterruptedRecoveryOwners.delete(sessionId);
+      }
+    }
     if (!ready) this.queuedMessages.releaseDispatchClaimsForView(endpoint.viewId);
     if (!this.disposing) this.reconcileQueuedMessageOwners();
     this.reconcilePermissionAutomationOwners();
@@ -1242,7 +1266,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (this.interruptedRecoveryClaim) return;
     const candidates = this.sessionState
       .claimInterruptedSessions()
-      .filter((session) => !this.deferredInterruptedRecoveryIds.has(session.id));
+      .filter((session) => !this.deferredInterruptedRecoveryOwners.has(session.id));
     const owner = owners.find((candidate) =>
       candidates.some((session) => {
         const directory = session.directory ?? this.sessionState.directoryFor(session.id);
@@ -1278,8 +1302,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await this.sessionState.acknowledgeInterruptedSessions(consumed);
     this.interruptedRecoveryClaim = null;
     for (const sessionId of claim.sessionIds) {
-      if (consumedSet.has(sessionId)) this.deferredInterruptedRecoveryIds.delete(sessionId);
-      else this.deferredInterruptedRecoveryIds.add(sessionId);
+      if (consumedSet.has(sessionId)) this.deferredInterruptedRecoveryOwners.delete(sessionId);
+      else this.deferredInterruptedRecoveryOwners.set(sessionId, claim.viewId);
     }
     const owners = [...this.endpoints].filter(
       (endpoint) => endpoint.ready && this.permissionAutomationOwnerViewIds.has(endpoint.viewId)

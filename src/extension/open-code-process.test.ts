@@ -17,18 +17,31 @@ import { dirname, join } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as ServerUtils from './server-utils';
 
-const { spawnMock, waitForProcessExitMock } = vi.hoisted(() => ({
+const { loggerMock, spawnMock, vscodeMock, waitForProcessExitMock } = vi.hoisted(() => ({
+  loggerMock: {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    show: vi.fn(),
+  },
   spawnMock: vi.fn(),
+  vscodeMock: {
+    window: {
+      createOutputChannel: vi.fn(() => ({ appendLine: vi.fn(), dispose: vi.fn() })),
+      showInformationMessage: vi.fn(() => Promise.resolve<string | undefined>(undefined)),
+      showWarningMessage: vi.fn(() => Promise.resolve<string | undefined>(undefined)),
+    },
+    workspace: {
+      getConfiguration: vi.fn(() => ({
+        get: <T>(_key: string, fallback: T) => fallback,
+      })),
+    },
+  },
   waitForProcessExitMock: vi.fn(),
 }));
 
-vi.mock('vscode', () => ({
-  window: { createOutputChannel: vi.fn(() => ({ appendLine: vi.fn(), dispose: vi.fn() })) },
-  workspace: {},
-}));
-vi.mock('./logger', () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-}));
+vi.mock('vscode', () => vscodeMock);
+vi.mock('./logger', () => ({ logger: loggerMock }));
 vi.mock('child_process', () => ({ spawn: spawnMock, default: { spawn: spawnMock } }));
 vi.mock('./server-utils', async () => {
   const actual = await vi.importActual<typeof ServerUtils>('./server-utils');
@@ -41,6 +54,7 @@ import {
   normalizeCompactionSettings,
   OpenCodeProcess,
   sweepStaleInjectedConfigDirectories,
+  type UpgradeFailureReport,
 } from './open-code-process';
 
 const originalPlatform = process.platform;
@@ -312,7 +326,7 @@ describe('OpenCodeProcess Windows termination', () => {
     expect(listenerQueries).toBeGreaterThanOrEqual(2);
   });
 
-  it('kills a surviving cmd listener after the wrapper has already exited', async () => {
+  it('kills a surviving cmd listener without taskkilling its exited wrapper PID', async () => {
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
     waitForProcessExitMock.mockResolvedValue(true);
     let listening = true;
@@ -357,7 +371,8 @@ describe('OpenCodeProcess Windows termination', () => {
     wrapper.emit('exit', 0, null);
     await manager.releaseExitedProcess(wrapper as unknown as ChildProcess);
 
-    expect(spawnMock).toHaveBeenCalledWith(
+    expect(wrapper.kill).not.toHaveBeenCalled();
+    expect(spawnMock).not.toHaveBeenCalledWith(
       'taskkill.exe',
       ['/PID', '123', '/T', '/F'],
       expect.anything()
@@ -396,6 +411,63 @@ describe('OpenCodeProcess Windows termination', () => {
       expect.anything(),
       expect.anything()
     );
+  });
+});
+
+describe('OpenCodeProcess update notification actions', () => {
+  it('logs a rejected update action chain instead of leaving it unhandled', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    vscodeMock.window.showInformationMessage.mockResolvedValueOnce('Run Upgrade');
+    const manager = new OpenCodeProcess(4096, false);
+
+    await manager.maybeSuggestCliUpdate('1.14.20', {
+      readLatestCliVersion: vi.fn().mockResolvedValue('1.14.22'),
+      upgradeRunningServer: vi.fn().mockRejectedValue(new Error('upgrade endpoint failed')),
+      requestMaintenanceCheck: vi.fn(),
+      getWorkspaceCwd: () => undefined,
+      prepareForWindowsCliUpgrade: vi.fn().mockResolvedValue(undefined),
+    });
+
+    await vi.waitFor(() => {
+      expect(loggerMock.warn).toHaveBeenCalledWith(
+        'Failed to handle OpenCode CLI update notification action: upgrade endpoint failed'
+      );
+    });
+  });
+
+  it('logs a rejected failure-notification action chain instead of leaving it unhandled', async () => {
+    vscodeMock.window.showWarningMessage.mockResolvedValueOnce('Update in Terminal');
+    const manager = new OpenCodeProcess(4096, false);
+    const failure: UpgradeFailureReport = {
+      cause: 'permission denied',
+      kind: 'permission-denied',
+      installMethod: 'npm',
+      guidance: 'Use the npm install command instead.',
+      suggestedCommand: 'npm install -g opencode-ai@latest',
+    };
+    const notificationCallbacks = {
+      readLatestCliVersion: vi.fn().mockResolvedValue(null),
+      upgradeRunningServer: vi.fn().mockResolvedValue(false),
+      requestMaintenanceCheck: vi.fn(),
+      getWorkspaceCwd: () => undefined,
+      prepareForWindowsCliUpgrade: vi.fn().mockRejectedValue(new Error('active sessions')),
+    };
+
+    (
+      manager as unknown as {
+        reportFailedBackgroundUpgrade: (
+          latestCliVersion: string,
+          failure: UpgradeFailureReport,
+          callbacks: typeof notificationCallbacks
+        ) => void;
+      }
+    ).reportFailedBackgroundUpgrade('1.14.22', failure, notificationCallbacks);
+
+    await vi.waitFor(() => {
+      expect(loggerMock.warn).toHaveBeenCalledWith(
+        'Failed to handle OpenCode CLI update failure notification action: active sessions'
+      );
+    });
   });
 });
 

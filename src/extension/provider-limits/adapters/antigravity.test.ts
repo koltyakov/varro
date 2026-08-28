@@ -48,6 +48,7 @@ async function withLanguageServer(
 
 describe('createAntigravityAdapter', () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllEnvs();
   });
 
@@ -236,6 +237,85 @@ describe('createAntigravityAdapter', () => {
           checkedAt: 1_000,
           note: 'Antigravity language server returned an invalid response',
         });
+      }
+    );
+  });
+
+  it('reports an aborted response instead of waiting for an end event', async () => {
+    await withLanguageServer(
+      (_request, response) => {
+        response.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Content-Length': '1024',
+        });
+        response.write('{"userStatus":');
+        setImmediate(() => response.destroy());
+      },
+      async (baseURL) => {
+        vi.stubEnv('ANTIGRAVITY_BASE_URL', baseURL);
+
+        await expect(
+          adapter.fetch({
+            provider,
+            authStore: {},
+            modelID: null,
+            checkedAt: 1_000,
+          })
+        ).resolves.toEqual({
+          providerID: 'antigravity',
+          modelID: null,
+          status: 'error',
+          source: 'provider',
+          checkedAt: 1_000,
+          note: 'Failed to poll the local Antigravity language server',
+        });
+      }
+    );
+  });
+
+  it('applies one absolute deadline and tears down a response that keeps sending data', async () => {
+    vi.useFakeTimers();
+    let requestStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      requestStarted = resolve;
+    });
+    let responseClosed!: () => void;
+    const closed = new Promise<void>((resolve) => {
+      responseClosed = resolve;
+    });
+
+    await withLanguageServer(
+      (_request, response) => {
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.flushHeaders();
+        const interval = setInterval(() => response.write(' '), 1_000);
+        response.once('close', () => {
+          clearInterval(interval);
+          responseClosed();
+        });
+        requestStarted();
+      },
+      async (baseURL) => {
+        vi.stubEnv('ANTIGRAVITY_BASE_URL', baseURL);
+        const status = adapter.fetch({
+          provider,
+          authStore: {},
+          modelID: null,
+          checkedAt: 1_000,
+        });
+
+        await started;
+        await vi.advanceTimersByTimeAsync(10_001);
+
+        await expect(status).resolves.toEqual({
+          providerID: 'antigravity',
+          modelID: null,
+          status: 'error',
+          source: 'provider',
+          checkedAt: 1_000,
+          note: 'Failed to poll the local Antigravity language server',
+        });
+        await closed;
       }
     );
   });

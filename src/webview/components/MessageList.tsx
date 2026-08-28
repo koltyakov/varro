@@ -450,6 +450,8 @@ export function MessageList() {
   onCleanup(() => {
     disposed = true;
     altHeld = false;
+    cancelPendingScroll();
+    clearActivityExitSummaryAnchor();
     if (timestampAnimationSuppressionTimer) clearTimeout(timestampAnimationSuppressionTimer);
     window.removeEventListener('keydown', handleAltDown);
     window.removeEventListener('keyup', handleAltUp);

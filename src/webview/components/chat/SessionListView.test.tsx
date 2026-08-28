@@ -1830,6 +1830,56 @@ describe('SessionListView load errors', () => {
     expect(container.textContent).not.toContain('Load more');
   });
 
+  it('observes a continuation sentinel that appears after mount and disconnects on disposal', async () => {
+    const observed = new Map<Element, IntersectionObserverCallback>();
+    const disconnect = vi.fn();
+    class TestIntersectionObserver {
+      constructor(private readonly callback: IntersectionObserverCallback) {}
+      observe(target: Element) {
+        observed.set(target, this.callback);
+      }
+      unobserve(target: Element) {
+        observed.delete(target);
+      }
+      disconnect() {
+        disconnect();
+        observed.clear();
+      }
+    }
+    globalThis.IntersectionObserver =
+      fixture<typeof IntersectionObserver>(TestIntersectionObserver);
+
+    cleanup = render(() => <SessionListView />, container);
+    expect(container.querySelector('.session-list-continuation')).toBeNull();
+    await Promise.resolve();
+
+    setState('sessionsHasMore', true);
+    await Promise.resolve();
+
+    const continuation = container.querySelector('.session-list-continuation')!;
+    expect(observed.has(continuation)).toBe(true);
+    loadMoreSessionsMock.mockClear();
+    // SAFETY: The callback fixture supplies the browser entry and observer shapes used by this test.
+    observed.get(continuation)?.(
+      [{ target: continuation, isIntersecting: true } as IntersectionObserverEntry],
+      {} as IntersectionObserver
+    );
+    await vi.waitFor(() => expect(loadMoreSessionsMock).toHaveBeenCalledOnce());
+
+    setState('sessionsHasMore', false);
+    await Promise.resolve();
+    expect(disconnect).toHaveBeenCalledOnce();
+    expect(observed.size).toBe(0);
+
+    setState('sessionsHasMore', true);
+    await Promise.resolve();
+    expect(observed.has(container.querySelector('.session-list-continuation')!)).toBe(true);
+
+    cleanup();
+    cleanup = undefined;
+    expect(disconnect).toHaveBeenCalledTimes(2);
+  });
+
   it('does not paginate beyond recent sessions for a status filter', () => {
     setState('sessions', [session('running', Date.now())]);
     setState('sessionStatus', { running: { type: 'busy' } });

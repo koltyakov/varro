@@ -962,6 +962,53 @@ describe('SidebarProvider editor panels', () => {
     expect(duplicate.panel.dispose).toHaveBeenCalledOnce();
   });
 
+  it('normalizes a persisted trashed-session route to a new session', async () => {
+    const trashedSession = {
+      id: 'session-trashed',
+      projectID: 'project-1',
+      directory: '/repo',
+      title: 'Trashed session',
+      version: '1',
+      time: { created: 1, updated: 2 },
+    };
+    const storage = new Map<string, unknown>([
+      [
+        'varro.sessionTrash',
+        [
+          {
+            rootID: trashedSession.id,
+            deletedAt: 3,
+            expiresAt: 4,
+            root: trashedSession,
+            sessions: [trashedSession],
+          },
+        ],
+      ],
+    ]);
+    const workspaceState = {
+      get: vi.fn((key: string, fallback?: unknown) =>
+        storage.has(key) ? storage.get(key) : fallback
+      ),
+      update: vi.fn(() => Promise.resolve()),
+    };
+    const { provider } = await createSidebarProviderInstance({ workspaceState });
+    const restored = createPanel();
+
+    await provider.deserializeWebviewPanel(restored.panel as never, {
+      'varro.lastOpenedView': { type: 'session', sessionId: trashedSession.id, timestamp: 1 },
+    });
+    restored.receive({
+      type: 'editor/route-changed',
+      payload: { route: { type: 'new-session' } },
+    });
+    await Promise.resolve();
+
+    expect(restored.panel.title).toBe('Varro: New Session');
+    expect(restored.panel.webview.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'command/open-session' })
+    );
+  });
+
   it('deduplicates restored panels that share a persisted view identity', async () => {
     const { provider } = await createSidebarProviderInstance();
     const first = createPanel();
@@ -1006,6 +1053,32 @@ describe('SidebarProvider editor panels', () => {
     await Promise.resolve();
 
     expect(restored.panel.title).toBe('Restored session');
+  });
+
+  it('releases a restored-session latch after authoritative deletion', async () => {
+    const { provider, server } = await createSidebarProviderInstance();
+    const restored = createPanel();
+
+    await provider.deserializeWebviewPanel(restored.panel as never, {
+      'varro.lastOpenedView': { type: 'session', sessionId: 'session-deleted', timestamp: 1 },
+    });
+    const eventHandler = server.on.mock.calls.find(([type]) => type === 'event')?.[1];
+    eventHandler?.({
+      type: 'session.deleted',
+      properties: { info: { id: 'session-deleted' } },
+    });
+    restored.panel.webview.postMessage.mockClear();
+
+    restored.receive({
+      type: 'editor/route-changed',
+      payload: { route: { type: 'new-session' } },
+    });
+    await Promise.resolve();
+
+    expect(restored.panel.title).toBe('Varro: New Session');
+    expect(restored.panel.webview.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'command/open-session' })
+    );
   });
 
   it('rekeys a draft when its editor route changes', async () => {
@@ -1719,6 +1792,85 @@ describe('SidebarProvider editor panels', () => {
       expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
         type: 'recovery/interrupted-sessions',
         payload: { claimId: 2, sessionIds: ['session-1'] },
+      })
+    );
+    await provider.dispose();
+  });
+
+  it('releases failed recovery only when its claimant endpoint becomes unready', async () => {
+    const storage = new Map<string, unknown>([
+      [
+        'varro.interruptedSessions',
+        [{ id: 'session-a', title: 'Interrupted', directory: '/repo-a' }],
+      ],
+    ]);
+    const workspaceState = {
+      get: vi.fn((key: string, fallback?: unknown) =>
+        storage.has(key) ? storage.get(key) : fallback
+      ),
+      update: vi.fn((key: string, value: unknown) => {
+        storage.set(key, value);
+        return Promise.resolve();
+      }),
+    };
+    const { provider } = await createSidebarProviderInstance({ workspaceState });
+    const claimant = createPanel();
+    const unrelated = createPanel();
+    await provider.deserializeWebviewPanel(claimant.panel as never, {
+      'varro.editorViewId': 'editor-claimant',
+      'varro.workspacePath': '/repo-a',
+    });
+    await provider.deserializeWebviewPanel(unrelated.panel as never, {
+      'varro.editorViewId': 'editor-unrelated',
+      'varro.workspacePath': '/repo-b',
+    });
+    await vi.waitFor(() => expect(claimant.panel.webview.html).toContain('varro-editor-surface'));
+    await vi.waitFor(() => expect(unrelated.panel.webview.html).toContain('varro-editor-surface'));
+    claimant.receive({ type: 'ready' });
+    unrelated.receive({ type: 'ready' });
+    await vi.waitFor(() =>
+      expect(claimant.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'recovery/interrupted-sessions',
+        payload: { claimId: 1, sessionIds: ['session-a'] },
+      })
+    );
+    claimant.receive({
+      type: 'recovery/interrupted-sessions-ack',
+      payload: { claimId: 1, consumedSessionIds: [] },
+    });
+    await vi.waitFor(() =>
+      expect(workspaceState.update).toHaveBeenCalledWith(
+        'varro.interruptedSessions',
+        expect.any(Array)
+      )
+    );
+    claimant.panel.webview.postMessage.mockClear();
+
+    unrelated.setVisible(false);
+    await Promise.resolve();
+
+    expect(claimant.panel.webview.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'recovery/interrupted-sessions' })
+    );
+
+    const claimantEndpoint = [
+      ...(
+        provider as unknown as {
+          editorPanels: Map<
+            string,
+            { viewId: string; webviewSession: { reload(): Promise<void> } }
+          >;
+        }
+      ).editorPanels.values(),
+    ].find((endpoint) => endpoint.viewId === 'editor-claimant');
+    if (!claimantEndpoint) throw new Error('Expected the claimant editor endpoint');
+    await claimantEndpoint.webviewSession.reload();
+    claimant.receive({ type: 'ready' });
+
+    await vi.waitFor(() =>
+      expect(claimant.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'recovery/interrupted-sessions',
+        payload: { claimId: 2, sessionIds: ['session-a'] },
       })
     );
     await provider.dispose();

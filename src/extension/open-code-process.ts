@@ -1735,13 +1735,16 @@ export class OpenCodeProcess {
     let wrapperExited = await waitForProcessExit(proc, PROCESS_STOP_TIMEOUT_MS);
     managedListeners = await this.findManagedListeningPids(proc, launch, knownListenerPids);
 
-    if (wrapperAlreadyExited || !wrapperExited || managedListeners.length > 0) {
+    if (!wrapperAlreadyExited && !wrapperExited) {
       await runProcess(
         'taskkill.exe',
         ['/PID', String(proc.pid), '/T', '/F'],
         PROCESS_STOP_TIMEOUT_MS
       );
       managedListeners = await this.findManagedListeningPids(proc, launch, knownListenerPids);
+      wrapperExited = await waitForProcessExit(proc, PROCESS_STOP_TIMEOUT_MS);
+    }
+    if (managedListeners.length > 0) {
       for (const pid of managedListeners) {
         if (pid === proc.pid) continue;
         await runProcess(
@@ -1749,9 +1752,6 @@ export class OpenCodeProcess {
           ['/PID', String(pid), '/T', '/F'],
           PROCESS_STOP_TIMEOUT_MS
         );
-      }
-      if (!wrapperExited) {
-        wrapperExited = await waitForProcessExit(proc, PROCESS_STOP_TIMEOUT_MS);
       }
     }
 
@@ -2433,8 +2433,9 @@ export class OpenCodeProcess {
       ? `OpenCode CLI ${latestCliVersion} is available, but Varro has only been tested through ${maximumTestedOpenCodeVersion}. Review compatibility before updating with: ${upgradeCommand}`
       : `OpenCode CLI ${latestCliVersion} is available (installed: ${installedCliVersion}). Update with: ${upgradeCommand}`;
     logger.info(message);
-    void vscode.window
-      .showInformationMessage(message, OpenCodeProcess.CLI_UPGRADE_ACTION)
+    void Promise.resolve(
+      vscode.window.showInformationMessage(message, OpenCodeProcess.CLI_UPGRADE_ACTION)
+    )
       .then(async (action) => {
         if (action === OpenCodeProcess.CLI_UPGRADE_ACTION) {
           if (await callbacks.upgradeRunningServer(latestCliVersion)) {
@@ -2443,6 +2444,11 @@ export class OpenCodeProcess {
           }
           await this.runTerminalCliUpgrade(callbacks);
         }
+      })
+      .catch((err: unknown) => {
+        logger.warn(
+          `Failed to handle OpenCode CLI update notification action: ${err instanceof Error ? err.message : String(err)}`
+        );
       });
     return null;
   }
@@ -2476,19 +2482,25 @@ export class OpenCodeProcess {
     if (failure.suggestedCommand) actions.push(OpenCodeProcess.CLI_UPGRADE_IN_TERMINAL_ACTION);
     actions.push(OpenCodeProcess.SHOW_LOGS_ACTION);
 
-    void vscode.window.showWarningMessage(message, ...actions).then(async (action) => {
-      if (action === OpenCodeProcess.SHOW_LOGS_ACTION) {
-        logger.show();
-        return;
-      }
-      if (action === OpenCodeProcess.CLI_UPGRADE_IN_TERMINAL_ACTION && failure.suggestedCommand) {
-        // Same prerequisite as the regular terminal upgrade: on Windows the
-        // managed server holds opencode.exe open, and the manual retry would
-        // hit the very file lock this guidance is about.
-        await callbacks.prepareForWindowsCliUpgrade();
-        this.runInTerminal(failure.suggestedCommand, 'OpenCode Update', callbacks);
-      }
-    });
+    void Promise.resolve(vscode.window.showWarningMessage(message, ...actions))
+      .then(async (action) => {
+        if (action === OpenCodeProcess.SHOW_LOGS_ACTION) {
+          logger.show();
+          return;
+        }
+        if (action === OpenCodeProcess.CLI_UPGRADE_IN_TERMINAL_ACTION && failure.suggestedCommand) {
+          // Same prerequisite as the regular terminal upgrade: on Windows the
+          // managed server holds opencode.exe open, and the manual retry would
+          // hit the very file lock this guidance is about.
+          await callbacks.prepareForWindowsCliUpgrade();
+          this.runInTerminal(failure.suggestedCommand, 'OpenCode Update', callbacks);
+        }
+      })
+      .catch((err: unknown) => {
+        logger.warn(
+          `Failed to handle OpenCode CLI update failure notification action: ${err instanceof Error ? err.message : String(err)}`
+        );
+      });
   }
 
   async readInstalledCliVersion(): Promise<string | null> {

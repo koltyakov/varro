@@ -167,6 +167,7 @@ const ALLOWED_HTML_ATTRIBUTES = [
   'data-file',
   'data-lang',
   'data-mermaid-source',
+  'data-varro-generated',
   'd',
   'fill',
   'height',
@@ -194,6 +195,15 @@ const MARKDOWN_CACHE_BYTE_BUDGET = 2 * 1024 * 1024;
 const MAX_COPY_TEXT_LENGTH = 20_000;
 const MAX_MERMAID_SOURCE_LENGTH = 100_000;
 const MERMAID_SVG_CACHE_LIMIT = 20;
+const TRUSTED_RENDERER_ATTRIBUTE = 'data-varro-generated';
+const PRIVATE_RENDERER_ATTRIBUTES = [
+  'data-copy',
+  'data-copy-text',
+  'data-external',
+  'data-file',
+  'data-lang',
+  'data-mermaid-source',
+];
 const codeBlockHtmlCache: MarkdownStringCache = new Map();
 const highlightedCodeCache: MarkdownStringCache = new Map();
 const renderedMarkdownCache: MarkdownStringCache = new Map();
@@ -364,13 +374,13 @@ export function renderCodeBlockHtml(params: CodeBlockHtmlParams): string {
     ? `<span class="code-block-detail">${escapeHtml(params.headerDetail)}</span>`
     : '';
   const copyBtn = showCopyButton
-    ? `<button type="button" class="code-block-copy-btn" data-copy data-copy-text="${encodeCopyPayload(copyText)}" aria-label="Copy code" title="Copy code"></button>`
+    ? `<button type="button" class="code-block-copy-btn" ${TRUSTED_RENDERER_ATTRIBUTE} data-copy data-copy-text="${encodeCopyPayload(copyText)}" aria-label="Copy code" title="Copy code"></button>`
     : '';
   const header =
     langLabel || headerDetail || copyBtn
       ? `<div class="code-block-header">${langLabel}${headerDetail}${copyBtn}</div>`
       : '';
-  const langAttr = lang ? ` data-lang="${escapeHtml(lang)}"` : '';
+  const langAttr = lang ? ` ${TRUSTED_RENDERER_ATTRIBUTE} data-lang="${escapeHtml(lang)}"` : '';
   const classAttr = ['interactive-result-code-block', className].filter(Boolean).join(' ');
   const html = `<div class="${classAttr}"${langAttr}>${header}<pre class="code-block"><code class="hljs">${highlighted}</code></pre></div>`;
 
@@ -461,15 +471,84 @@ function buildFileLink(raw: string, label?: string) {
   const title = `${absolutePath}${parsed.lineSuffix ?? ''}`;
 
   return {
-    href: escapeHtml(href),
-    payload: escapeHtml(payload),
-    label: escapeHtml(visibleLabel),
-    title: escapeHtml(title),
+    href,
+    payload,
+    label: visibleLabel,
+    title,
   };
 }
 
+function stripPrivateAttributesFromRawHtml(html: string) {
+  let result = '';
+  let index = 0;
+
+  while (index < html.length) {
+    const tagStart = html.indexOf('<', index);
+    if (tagStart < 0) return result + html.slice(index);
+    result += html.slice(index, tagStart);
+
+    const first = html[tagStart + 1];
+    if (!first || first === '/' || first === '!' || first === '?' || !/[A-Za-z]/.test(first)) {
+      result += '<';
+      index = tagStart + 1;
+      continue;
+    }
+
+    let cursor = tagStart + 1;
+    while (cursor < html.length && !/[\t\n\f\r />]/.test(html[cursor]!)) cursor += 1;
+    result += html.slice(tagStart, cursor);
+
+    while (cursor < html.length) {
+      const attributeStart = cursor;
+      while (cursor < html.length && /[\t\n\f\r ]/.test(html[cursor]!)) cursor += 1;
+      if (cursor >= html.length || html[cursor] === '>') {
+        result += html.slice(attributeStart, Math.min(cursor + 1, html.length));
+        index = Math.min(cursor + 1, html.length);
+        break;
+      }
+      if (html[cursor] === '/' && html[cursor + 1] === '>') {
+        result += html.slice(attributeStart, cursor + 2);
+        index = cursor + 2;
+        break;
+      }
+
+      const nameStart = cursor;
+      while (cursor < html.length && !/[\t\n\f\r />=]/.test(html[cursor]!)) cursor += 1;
+      if (cursor === nameStart) {
+        cursor += 1;
+        result += html.slice(attributeStart, cursor);
+        index = cursor;
+        continue;
+      }
+      const attributeName = html.slice(nameStart, cursor).toLowerCase();
+      while (cursor < html.length && /[\t\n\f\r ]/.test(html[cursor]!)) cursor += 1;
+      if (html[cursor] === '=') {
+        cursor += 1;
+        while (cursor < html.length && /[\t\n\f\r ]/.test(html[cursor]!)) cursor += 1;
+        const quote = html[cursor];
+        if (quote === '"' || quote === "'") {
+          cursor += 1;
+          while (cursor < html.length && html[cursor] !== quote) cursor += 1;
+          if (cursor < html.length) cursor += 1;
+        } else {
+          while (cursor < html.length && !/[\t\n\f\r >]/.test(html[cursor]!)) cursor += 1;
+        }
+      }
+
+      if (!attributeName.startsWith('data-')) result += html.slice(attributeStart, cursor);
+      index = cursor;
+    }
+
+    if (cursor >= html.length) index = cursor;
+  }
+
+  return result;
+}
+
 renderer.html = function ({ text }: { text: string }) {
-  return renderMarkdownContext?.escapeHtml ? escapeHtml(text) : text;
+  return renderMarkdownContext?.escapeHtml
+    ? escapeHtml(text)
+    : stripPrivateAttributesFromRawHtml(text);
 };
 
 renderer.listitem = function (item: Tokens.ListItem) {
@@ -504,7 +583,7 @@ renderer.code = function ({ text, lang }: { text: string; lang?: string }) {
       '<div class="interactive-result-code-block',
       '<div hidden class="interactive-result-code-block'
     );
-    return `<div class="mermaid-diagram" data-mermaid-source="${encodeCopyPayload(text)}"><div class="mermaid-diagram-status"><span>Rendering diagram...</span></div>${fallback}</div>`;
+    return `<div class="mermaid-diagram" ${TRUSTED_RENDERER_ATTRIBUTE} data-mermaid-source="${encodeCopyPayload(text)}"><div class="mermaid-diagram-status"><span>Rendering diagram...</span></div>${fallback}</div>`;
   }
 
   const workspacePath = state.editorContext.workspacePath || '';
@@ -524,7 +603,7 @@ renderer.codespan = function ({ text }: { text: string }) {
   if (!renderMarkdownContext?.disablePathLinkify && isLikelyFilePathReference(text)) {
     const link = buildFileLink(text);
     if (link) {
-      return `<a href="${link.href}" class="file-path-link" data-file="${link.payload}" title="${link.title}">${link.label}</a>`;
+      return `<a href="${escapeHtml(link.href)}" class="file-path-link" ${TRUSTED_RENDERER_ATTRIBUTE} data-file="${escapeHtml(link.payload)}" title="${escapeHtml(link.title)}">${escapeHtml(link.label)}</a>`;
     }
   }
 
@@ -538,8 +617,8 @@ renderer.link = function ({ href, text: rawText, title, tokens }) {
   if (isLocalFileHref(href)) {
     const link = buildFileLink(href, rawText);
     if (link) {
-      const titleAttr = ` title="${title ? escapeHtml(title) : link.title}"`;
-      return `<a href="${link.href}" class="file-path-link" data-file="${link.payload}"${titleAttr}>${link.label}</a>`;
+      const titleAttr = ` title="${escapeHtml(title || link.title)}"`;
+      return `<a href="${escapeHtml(link.href)}" class="file-path-link" ${TRUSTED_RENDERER_ATTRIBUTE} data-file="${escapeHtml(link.payload)}"${titleAttr}>${escapeHtml(link.label)}</a>`;
     }
   }
 
@@ -600,15 +679,8 @@ const CANONICAL_SPECIAL_FILE_NAMES = new Set([
   'LICENSE',
   'Makefile',
 ]);
-const PRESERVED_HTML_PLACEHOLDER_RE = /@@VARRO_PRESERVE_(\d+)@@/g;
 const MARKDOWN_FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
 const MARKDOWN_FENCE_INFO_RE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
-const ANCHOR_RE = /(<a[\s\S]*?<\/a>)/gi;
-const IMAGE_RE = /(<img\b[^>]*>)/gi;
-const SVG_RE = /(<svg[\s\S]*?<\/svg>)/gi;
-const BUTTON_RE = /(<button[\s\S]*?<\/button>)/gi;
-const INLINE_CODE_RE = /(<code[\s\S]*?<\/code>)/gi;
-const PRE_RE = /(<pre[\s\S]*?<\/pre>)/gi;
 
 function requestIdleWork(callback: () => void): IdleWorkHandle {
   // SAFETY: The surrounding shape or discriminator check establishes the IdleSchedulerGlobal contract used below.
@@ -769,8 +841,13 @@ function linkifySessionReferences(fragment: DocumentFragment) {
   }
 }
 
-function sanitizeHtml(html: string, disableCache: boolean, sessionContextKey: string): string {
-  const cacheKey = `${sessionContextKey}\u0000${html}`;
+function sanitizeHtml(
+  html: string,
+  disableCache: boolean,
+  sessionContextKey: string,
+  disablePathLinkify: boolean
+): string {
+  const cacheKey = `${sessionContextKey}\u0000${disablePathLinkify ? 'no-paths' : 'paths'}\u0000${html}`;
   if (!disableCache) {
     const cached = getCachedValue(sanitizeHtmlCache, cacheKey);
     if (cached !== undefined) return cached;
@@ -783,9 +860,21 @@ function sanitizeHtml(html: string, disableCache: boolean, sessionContextKey: st
   const fragment = DOMPurify.sanitize(html, {
     ALLOWED_TAGS: ALLOWED_HTML_TAGS,
     ALLOWED_ATTR: ALLOWED_HTML_ATTRIBUTES,
+    ALLOW_DATA_ATTR: false,
     FORBID_ATTR: ['style'],
     RETURN_DOM_FRAGMENT: true,
   });
+
+  const privateSelector = PRIVATE_RENDERER_ATTRIBUTES.map((name) => `[${name}]`).join(',');
+  for (const element of Array.from(fragment.querySelectorAll<HTMLElement>(privateSelector))) {
+    if (element.hasAttribute(TRUSTED_RENDERER_ATTRIBUTE)) continue;
+    for (const attribute of PRIVATE_RENDERER_ATTRIBUTES) element.removeAttribute(attribute);
+  }
+  for (const element of Array.from(
+    fragment.querySelectorAll<HTMLElement>(`[${TRUSTED_RENDERER_ATTRIBUTE}]`)
+  )) {
+    element.removeAttribute(TRUSTED_RENDERER_ATTRIBUTE);
+  }
 
   for (const image of Array.from(fragment.querySelectorAll<HTMLImageElement>('img'))) {
     const src = image.getAttribute('src')?.trim() || '';
@@ -800,6 +889,7 @@ function sanitizeHtml(html: string, disableCache: boolean, sessionContextKey: st
   for (const anchor of Array.from(fragment.querySelectorAll<HTMLAnchorElement>('a'))) {
     sanitizeAnchorHref(anchor);
   }
+  if (!disablePathLinkify) linkifyPaths(fragment);
   linkifySessionReferences(fragment);
 
   const container = document.createElement('div');
@@ -833,9 +923,10 @@ function renderMarkdownHtml(
     const parsed = marked.parse(content) as string;
     const sessionContextKey = getSessionReferenceContextKey(content);
     return sanitizeHtml(
-      options?.disablePathLinkify ? parsed : linkifyPaths(parsed),
+      parsed,
       options?.disableCache === true,
-      sessionContextKey
+      sessionContextKey,
+      options?.disablePathLinkify === true
     );
   } catch {
     return `<p>${escapeHtml(content)}</p>`;
@@ -1257,43 +1348,59 @@ export function getMarkdownCacheStatsForTests() {
   };
 }
 
-function linkifyPaths(html: string): string {
-  if (!FILE_PATH_CANDIDATE_RE.test(html)) return html;
-
-  const preserved: string[] = [];
-  let idx = 0;
-  const placeholder = () => `@@VARRO_PRESERVE_${idx++}@@`;
-  const protect = (re: RegExp) => {
-    html = html.replace(re, (m) => {
-      preserved.push(m);
-      return placeholder();
-    });
-  };
-
-  protect(SVG_RE);
-  protect(BUTTON_RE);
-  protect(ANCHOR_RE);
-  protect(IMAGE_RE);
-  protect(PRE_RE);
-  protect(INLINE_CODE_RE);
-
-  html = html.replace(
-    FILE_PATH_RE,
-    (full, openingTick: string, path: string, closingTick: string) => {
-      if (!isLikelyFilePathReference(path, true)) return full;
-      const link = buildFileLink(path);
-      if (!link) return full;
-      return full.replace(
-        `${openingTick}${path}${closingTick}`,
-        `<a href="${link.href}" class="file-path-link" data-file="${link.payload}" title="${link.title}">${link.label}</a>`
-      );
+function linkifyPaths(fragment: DocumentFragment) {
+  const walker = document.createTreeWalker(fragment, NodeFilter.SHOW_TEXT);
+  const textNodes: Text[] = [];
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    if (!(node instanceof Text) || !FILE_PATH_CANDIDATE_RE.test(node.data)) continue;
+    const parent = node.parentElement;
+    if (
+      !parent ||
+      parent.closest(
+        'a, button, code, pre, svg, .interactive-result-code-block, .mermaid-diagram, .markdown-task-checkbox, .markdown-inline-slot'
+      )
+    ) {
+      continue;
     }
-  );
+    textNodes.push(node);
+  }
 
-  return html.replace(
-    PRESERVED_HTML_PLACEHOLDER_RE,
-    (_match, index: string) => preserved[Number(index)] || ''
-  );
+  for (const node of textNodes) {
+    const replacement = document.createDocumentFragment();
+    let offset = 0;
+    let changed = false;
+    FILE_PATH_RE.lastIndex = 0;
+
+    for (let match = FILE_PATH_RE.exec(node.data); match; match = FILE_PATH_RE.exec(node.data)) {
+      const openingTick = match[1] || '';
+      const path = match[2]!;
+      const closingTick = match[3] || '';
+      if (!isLikelyFilePathReference(path, true)) continue;
+      const link = buildFileLink(path);
+      if (!link) continue;
+
+      const matchedPath = `${openingTick}${path}${closingTick}`;
+      const pathStart = match.index + match[0].indexOf(matchedPath);
+      replacement.append(node.data.slice(offset, pathStart));
+
+      const anchor = document.createElement('a');
+      anchor.href = link.href;
+      anchor.className = 'file-path-link';
+      anchor.dataset.file = link.payload;
+      anchor.title = link.title;
+      anchor.textContent = link.label;
+      sanitizeAnchorHref(anchor);
+      replacement.append(anchor);
+
+      offset = pathStart + matchedPath.length;
+      changed = true;
+    }
+
+    if (!changed) continue;
+    replacement.append(node.data.slice(offset));
+    node.replaceWith(replacement);
+  }
 }
 
 function normalizeCellText(value: string): string {
@@ -1582,7 +1689,7 @@ export function resetMermaidDiagramsForThemeForTests(root: HTMLElement | undefin
   }
 }
 
-async function hydrateMermaidDiagrams(root: HTMLDivElement | undefined) {
+export async function hydrateMermaidDiagramsForTests(root: HTMLDivElement | undefined) {
   if (!root) return;
   const hydrationGeneration = mermaidHydrationGeneration;
 
@@ -1601,6 +1708,10 @@ async function hydrateMermaidDiagrams(root: HTMLDivElement | undefined) {
   }> = [];
   for (const diagram of diagrams) {
     const source = decodeCopyPayload(diagram.dataset.mermaidSource || '');
+    if (source.length > MAX_MERMAID_SOURCE_LENGTH) {
+      showMermaidFailure(diagram, 'Diagram source is too large. Showing Mermaid source.');
+      continue;
+    }
     const config = getMermaidThemeConfigForTests();
     const cacheKey = `${JSON.stringify(config)}\u0000${source}`;
     const cached = getCachedMermaidSvg(cacheKey);
@@ -1655,7 +1766,7 @@ async function hydrateMermaidDiagrams(root: HTMLDivElement | undefined) {
 function hydrateRenderedMarkdown(root: HTMLDivElement | undefined, flags: MarkdownHydrationFlags) {
   if (flags.tables) applyTableColumnClasses(root);
   if (flags.copyButtons) applyCodeBlockCopyIcons(root);
-  if (flags.mermaid) void hydrateMermaidDiagrams(root);
+  if (flags.mermaid) void hydrateMermaidDiagramsForTests(root);
 }
 
 export function MarkdownRenderer(props: MarkdownProps) {
@@ -2007,8 +2118,8 @@ export function MarkdownRenderer(props: MarkdownProps) {
     resetMermaidDiagramsForThemeForTests(tailRef);
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        void hydrateMermaidDiagrams(stableRef);
-        void hydrateMermaidDiagrams(tailRef);
+        void hydrateMermaidDiagramsForTests(stableRef);
+        void hydrateMermaidDiagramsForTests(tailRef);
       });
     });
   });

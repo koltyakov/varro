@@ -269,6 +269,8 @@ export function parseUnifiedPatch(
       if (newLine !== null) newLine += 1;
       if (oldRemaining !== null) oldRemaining = Math.max(0, oldRemaining - 1);
       if (newRemaining !== null) newRemaining = Math.max(0, newRemaining - 1);
+    } else {
+      insideHunk = false;
     }
   }
 

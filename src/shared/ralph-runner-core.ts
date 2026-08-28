@@ -400,6 +400,7 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
               }
               break;
             }
+            if (state.currentChildId) abortChildSession(state, state.currentChildId);
             failIteration(managerSessionId, unsettledIteration, err);
             break;
           }
@@ -488,6 +489,7 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
             break;
           }
           const latestIteration = getIteration(managerSessionId, nextIndex) ?? iteration;
+          if (state.currentChildId) abortChildSession(state, state.currentChildId);
           failIteration(managerSessionId, latestIteration, err);
           break;
         }
