@@ -145,7 +145,7 @@ export class DroppedFilesService {
               const safeName = sanitizeDroppedFileName(file.name);
               const targetPath = join(
                 dropsDir,
-                `${Date.now()}-${randomBytes(4).toString('hex')}-${safeName}`
+                `${Date.now()}-${randomBytes(16).toString('hex')}-${safeName}`
               );
               await this.tempDropsOps.write(targetPath, buffer, { mode: 0o600 });
               createdPaths.push(targetPath);

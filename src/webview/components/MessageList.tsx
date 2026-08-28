@@ -4399,19 +4399,23 @@ export function MessageList() {
   function scheduleDetachedVisibleAnchorRefresh() {
     if (detachedAnchorRefreshRafId || !containerRef) return;
     const sessionId = state.activeSessionId;
+    const clientWidth = containerRef.clientWidth;
     detachedAnchorRefreshRafId = requestAnimationFrame(() => {
       detachedAnchorRefreshRafId = 0;
       if (
         !containerRef ||
-        directMovementAnchor ||
         state.activeSessionId !== sessionId ||
         autoScroll() ||
-        widthResizeActive ||
         stickyNavigationOwnsScroll() ||
         editingMessage()
       ) {
         return;
       }
+      if (Math.abs(containerRef.clientWidth - clientWidth) > 0.5) {
+        if (!widthResizeActive) beginWidthResize({ anchor: lastDetachedVisibleAnchor });
+        return;
+      }
+      if (directMovementAnchor || widthResizeActive) return;
       const anchor = replaceClippedRequestWidthResizeAnchor(
         captureWidthResizeVisibleScrollAnchor()
       );

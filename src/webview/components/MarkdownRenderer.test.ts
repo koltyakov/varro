@@ -398,6 +398,30 @@ describe('MarkdownRenderer', () => {
     expectUiIcon(closeButton?.firstElementChild, xmarkIcon, 14);
   });
 
+  it('mounts Mermaid output without executable or foreign HTML content', async () => {
+    mermaidMock.render.mockResolvedValueOnce({
+      svg: `<svg onload="alert(1)"><script>alert(1)</script><foreignObject><div onclick="alert(1)">unsafe</div></foreignObject><path d="M0 0h10v10z"></path></svg>`,
+    });
+    cleanup = render(
+      () => MarkdownRenderer({ content: '```mermaid\ngraph TD\n  A --> B\n```' }),
+      container!
+    );
+    await vi.waitFor(() =>
+      expect(container?.querySelector('.mermaid-diagram-output > svg path')).not.toBeNull()
+    );
+
+    const output = container?.querySelector('.mermaid-diagram-output');
+    expect(output?.querySelector('script, foreignObject')).toBeNull();
+    expect(output?.querySelector('svg')?.hasAttribute('onload')).toBe(false);
+
+    container
+      ?.querySelector<HTMLButtonElement>('button[data-mermaid-expand]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    const preview = document.body.querySelector('.mermaid-preview-canvas');
+    expect(preview?.querySelector('script, foreignObject')).toBeNull();
+    expect(preview?.querySelector('svg')?.hasAttribute('onload')).toBe(false);
+  });
+
   it('splits streaming markdown at the last safe paragraph boundary', () => {
     expect(splitStreamingMarkdownContent('First paragraph\n\nSecond paragraph')).toEqual({
       stableContent: 'First paragraph',

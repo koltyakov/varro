@@ -1644,6 +1644,21 @@ function showMermaidFailure(diagram: HTMLElement, message: string) {
   diagram.dataset.mermaidHydrated = 'error';
 }
 
+function sanitizeMermaidSvg(svg: string) {
+  return DOMPurify.sanitize(svg, {
+    USE_PROFILES: { svg: true, svgFilters: true },
+    FORBID_TAGS: ['script', 'foreignObject', 'iframe'],
+  });
+}
+
+function createSanitizedMermaidFragment(svg: string) {
+  return DOMPurify.sanitize(svg, {
+    USE_PROFILES: { svg: true, svgFilters: true },
+    FORBID_TAGS: ['script', 'foreignObject', 'iframe'],
+    RETURN_DOM_FRAGMENT: true,
+  });
+}
+
 function mountMermaidSvg(diagram: HTMLElement, svg: string) {
   const toolbar = document.createElement('div');
   toolbar.className = 'mermaid-diagram-toolbar';
@@ -1662,7 +1677,7 @@ function mountMermaidSvg(diagram: HTMLElement, svg: string) {
   toolbar.append(copyButton, expandButton);
   const output = document.createElement('div');
   output.className = 'mermaid-diagram-output';
-  output.innerHTML = svg;
+  output.replaceChildren(createSanitizedMermaidFragment(svg));
   diagram.prepend(output);
   diagram.prepend(toolbar);
   diagram.querySelector('.mermaid-diagram-status')?.remove();
@@ -1748,9 +1763,7 @@ export async function hydrateMermaidDiagramsForTests(root: HTMLDivElement | unde
         const cached = getCachedMermaidSvg(cacheKey);
         if (cached !== undefined) return cached;
         const { svg } = await renderMermaidWithColdRetryForTests(mermaid, source, config);
-        const clean = DOMPurify.sanitize(svg, {
-          USE_PROFILES: { svg: true, svgFilters: true },
-        });
+        const clean = sanitizeMermaidSvg(svg);
         cacheMermaidSvg(cacheKey, clean);
         return clean;
       });
@@ -2319,9 +2332,11 @@ function MermaidPreviewOverlay(props: { preview: { svg: string } | null; onClose
               </button>
             </div>
             <div
+              ref={(element) =>
+                element.replaceChildren(createSanitizedMermaidFragment(preview().svg))
+              }
               class="mermaid-preview-canvas"
               onClick={(event) => event.stopPropagation()}
-              innerHTML={preview().svg}
             />
           </div>
         )}

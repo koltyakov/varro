@@ -913,7 +913,7 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
-  it('does not replace a fully visible resize anchor with a clipped wrapping request', async () => {
+  it('does not refresh a fully visible resize anchor after local width reflow', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     const observers: Array<{
       callback: ResizeObserverCallback;
@@ -1018,8 +1018,10 @@ describe('MessageList auto-scroll', () => {
     scrollTopValue = rowTop(userIndex) + 14;
     list.dispatchEvent(new Event('scroll'));
     await Promise.resolve();
-    // Flush the queued detached-anchor refresh before the width observer reports wrapping.
     animationFrames.flush();
+    await Promise.resolve();
+    // Leave the next coalesced refresh pending so local reflow can precede it.
+    list.dispatchEvent(new Event('scroll'));
     await Promise.resolve();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
@@ -1037,6 +1039,10 @@ describe('MessageList auto-scroll', () => {
 
     rowHeights[userIndex] = 103;
     listWidth = 360;
+    // Local layout can change before ResizeObserver reports the new row sizes. A pending detached
+    // anchor refresh must not replace the pre-reflow anchor with this already-moved geometry.
+    animationFrames.flush();
+    await Promise.resolve();
     // SAFETY: The fixture provides the unknown fields read by this statement.
     rowObserver!.callback(
       [

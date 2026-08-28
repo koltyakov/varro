@@ -1,6 +1,7 @@
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: VS Code URI values are established by the editor API before conversion. */
 import * as vscode from 'vscode';
 import { Buffer } from 'buffer';
+import { randomUUID } from 'crypto';
 import type { DroppedFile, ExtensionMessage, TerminalSelection } from '../shared/protocol';
 import { areContextFilesEqual, mergeContextFile } from '../shared/context-files';
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
@@ -112,7 +113,7 @@ export class SidebarProviderContextFiles {
           files.push({
             type: 'pdf',
             value: {
-              id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              id: randomUUID(),
               url: `data:${NATIVE_PDF_MIME};base64,${Buffer.from(content).toString('base64')}`,
               mime: NATIVE_PDF_MIME,
               filename: uri.path.split('/').pop() || 'document.pdf',
