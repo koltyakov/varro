@@ -433,6 +433,7 @@ export type Permission = {
   time: { created: number };
   autoApproveReason?: string;
   actionSummary?: string;
+  recoveredIncomplete?: true;
   duplicateIDs?: string[];
   groupMembers?: PermissionGroupMember[];
 };

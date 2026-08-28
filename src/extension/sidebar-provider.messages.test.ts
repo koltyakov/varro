@@ -11,7 +11,11 @@ describe('SidebarProvider session message responses', () => {
   it('keeps a server-confirmed permission mode when persistence fails', async () => {
     const workspaceState = {
       get: vi.fn(() => undefined),
-      update: vi.fn(() => Promise.reject(new Error('disk full'))),
+      update: vi.fn((key: string) =>
+        key === 'varro.sessionPermissionModes'
+          ? Promise.reject(new Error('disk full'))
+          : Promise.resolve()
+      ),
     };
     const server = createServer({
       request: vi.fn(async () => ({ id: 'session-1', directory: '/repo' })),

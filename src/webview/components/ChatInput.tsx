@@ -310,6 +310,17 @@ function removeClipboardImageWithCleanup(id: string) {
   }
 }
 
+function removeNativePdfWithCleanup(id: string) {
+  const path = state.nativePdfs.find((pdf) => pdf.id === id)?.contextFile?.path;
+  removeNativePdf(id);
+  if (path) {
+    postMessage({
+      type: 'images/release',
+      payload: { paths: [path], deferred: false },
+    });
+  }
+}
+
 function composerSelection() {
   return state.editorContext.selection;
 }
@@ -2966,7 +2977,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         return;
       }
       if (msg.type === 'pdfs/stored') {
-        setNativePdfContextFile(msg.payload.id, msg.payload.contextFile);
+        if (!setNativePdfContextFile(msg.payload.id, msg.payload.contextFile)) {
+          postMessage({
+            type: 'images/release',
+            payload: { paths: [msg.payload.contextFile.path], deferred: false },
+          });
+        }
         return;
       }
       if (msg.type === 'images/stored') {
@@ -3314,7 +3330,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     connectionInitialized() &&
     !state.messagesLoading &&
     (isAbortSlashCommand(inputText()) ||
-      (!state.workspaceCatalogReloadPending &&
+      (!state.providerRefreshPending &&
+        !state.workspaceCatalogReloadPending &&
         !pendingWorkspacePath() &&
         !hasPendingPdfFallback() &&
         !hasPendingDelegatedImages() &&
@@ -4023,7 +4040,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
                 postMessage({ type: 'files/remove', payload: { path } });
               }}
               onRemoveClipboardImage={removeClipboardImage}
-              onRemoveNativePdf={removeNativePdf}
+              onRemoveNativePdf={removeNativePdfWithCleanup}
               onOpenFile={openContextFileInEditor}
               onPreviewImage={(image) => setPreviewImageId(image.id)}
             />

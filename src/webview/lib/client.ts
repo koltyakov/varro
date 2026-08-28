@@ -719,20 +719,6 @@ onMessage((msg) => {
     }
   }
   // SAFETY: The surrounding shape or discriminator check establishes the Set<EventHandler> contract used below.
-  const handlers = eventListeners.get(evt.type) as Set<EventHandler> | undefined;
-  if (applyEvent && handlers) {
-    for (const h of handlers) {
-      try {
-        h(evt);
-      } catch (err) {
-        postMessage({
-          type: 'log',
-          payload: { msg: 'event handler error', error: String(err), level: 'error' },
-        });
-      }
-    }
-  }
-  // SAFETY: The surrounding shape or discriminator check establishes the Set<EventHandler> contract used below.
   const wildcard = eventListeners.get('*') as Set<EventHandler> | undefined;
   if (wildcard) {
     for (const h of wildcard) {
@@ -742,6 +728,20 @@ onMessage((msg) => {
         postMessage({
           type: 'log',
           payload: { msg: 'wildcard handler error', error: String(err), level: 'error' },
+        });
+      }
+    }
+  }
+  // SAFETY: The surrounding shape or discriminator check establishes the Set<EventHandler> contract used below.
+  const handlers = eventListeners.get(evt.type) as Set<EventHandler> | undefined;
+  if (applyEvent && handlers) {
+    for (const h of handlers) {
+      try {
+        h(evt);
+      } catch (err) {
+        postMessage({
+          type: 'log',
+          payload: { msg: 'event handler error', error: String(err), level: 'error' },
         });
       }
     }

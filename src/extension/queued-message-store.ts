@@ -1,13 +1,16 @@
 import type { Persistence } from '../shared/persistence';
 import type { QueuedMessageSnapshot } from '../shared/protocol';
+import { isString } from '../shared/type-utils';
 import { sanitizeQueuedMessages } from './util/webview-message';
 
 const QUEUED_MESSAGES_KEY = 'varro.queuedMessages';
+const QUEUED_MESSAGE_REMOVALS_KEY = 'varro.queuedMessageRemovals';
 const COMPLETION_PERSIST_ATTEMPTS = 3;
 const MAX_COMPLETED_DISPATCHES = 512;
 
 export class QueuedMessageStore {
   private messages: QueuedMessageSnapshot[] | undefined;
+  private readonly removalTombstones: Set<string>;
   private persistenceQueue: Promise<void> = Promise.resolve();
   private readonly dispatchClaims = new Map<
     string,
@@ -18,7 +21,14 @@ export class QueuedMessageStore {
 
   constructor(private readonly persistence: Persistence) {
     const stored = persistence.get<unknown>(QUEUED_MESSAGES_KEY);
-    this.messages = stored === undefined ? undefined : (sanitizeQueuedMessages(stored) ?? []);
+    const storedRemovals = persistence.get<unknown>(QUEUED_MESSAGE_REMOVALS_KEY);
+    this.removalTombstones = new Set(
+      Array.isArray(storedRemovals) ? storedRemovals.filter(isString) : []
+    );
+    const messages = stored === undefined ? undefined : (sanitizeQueuedMessages(stored) ?? []);
+    this.messages = messages?.filter(
+      (message) => !this.removalTombstones.has(dispatchKey(message.sessionId, message.id))
+    );
   }
 
   list(): QueuedMessageSnapshot[] | undefined {
@@ -55,7 +65,21 @@ export class QueuedMessageStore {
     next.push(...replacements.slice(replacementIndex));
 
     this.messages = next;
-    return this.persist(next);
+    const removedKeys = current
+      .filter(
+        (message) =>
+          ownerViewId(message) === viewId &&
+          !next.some(
+            (candidate) => candidate.id === message.id && candidate.sessionId === message.sessionId
+          )
+      )
+      .map((message) => dispatchKey(message.sessionId, message.id));
+    const persistence =
+      removedKeys.length > 0 ? this.persistRemoval(next, removedKeys) : this.persist(next);
+    return persistence.catch((err) => {
+      if (this.messages === next) this.messages = current;
+      throw err;
+    });
   }
 
   transferOwner(fromViewId: string, toViewId: string): Promise<void> {
@@ -258,6 +282,34 @@ export class QueuedMessageStore {
         }
       }
       throw failure;
+    });
+    this.persistenceQueue = operation.then(
+      () => {},
+      () => {}
+    );
+    return operation;
+  }
+
+  private persistRemoval(messages: QueuedMessageSnapshot[], removedKeys: string[]): Promise<void> {
+    const operation = this.persistenceQueue.then(async () => {
+      for (const key of removedKeys) this.removalTombstones.add(key);
+      try {
+        await this.persistence.set(QUEUED_MESSAGE_REMOVALS_KEY, [...this.removalTombstones]);
+      } catch (err) {
+        for (const key of removedKeys) this.removalTombstones.delete(key);
+        throw err;
+      }
+
+      try {
+        await this.persistence.set(QUEUED_MESSAGES_KEY, messages);
+      } catch {
+        return;
+      }
+
+      this.removalTombstones.clear();
+      try {
+        await this.persistence.set(QUEUED_MESSAGE_REMOVALS_KEY, []);
+      } catch {}
     });
     this.persistenceQueue = operation.then(
       () => {},

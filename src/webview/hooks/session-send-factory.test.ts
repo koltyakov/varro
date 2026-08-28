@@ -101,6 +101,21 @@ describe('SessionSendOperations', () => {
         },
       },
     ]);
+    appStore.setState('nativePdfs', [
+      {
+        id: 'pdf-1',
+        url: 'data:application/pdf;base64,JVBERi0=',
+        mime: 'application/pdf',
+        filename: 'spec.pdf',
+        size: 5,
+        attachmentSequence: 3,
+        contextFile: {
+          path: '/tmp/varro-drops/spec.pdf',
+          relativePath: 'spec.pdf',
+          type: 'file',
+        },
+      },
+    ]);
     appStore.setState('todos', [
       { id: 'todo-1', content: 'Keep visible', status: 'completed', priority: 'high' },
     ]);
@@ -152,11 +167,13 @@ describe('SessionSendOperations', () => {
           filename: 'image.png',
           url: 'blob:image-1',
         },
+        { type: 'text', text: '[Attached file: /tmp/varro-drops/spec.pdf]' },
       ],
     });
     expect(appStore.state.droppedFiles).toEqual([]);
     expect(appStore.state.terminalSelection).toBeNull();
     expect(appStore.state.clipboardImages).toEqual([]);
+    expect(appStore.state.nativePdfs).toEqual([]);
     expect(appStore.state.todos).toEqual([
       { id: 'todo-1', content: 'Keep visible', status: 'completed', priority: 'high' },
     ]);
@@ -166,7 +183,7 @@ describe('SessionSendOperations', () => {
     expect(postMessage).toHaveBeenCalledWith({
       type: 'images/release',
       payload: {
-        paths: ['/tmp/varro-drops/image.png'],
+        paths: ['/tmp/varro-drops/image.png', '/tmp/varro-drops/spec.pdf'],
         deferred: true,
         sessionId: 'session-1',
       },

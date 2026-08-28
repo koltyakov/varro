@@ -177,6 +177,7 @@ interface ManagedServerOwnershipClaim {
 interface ManagedServerOwnershipClaimHandle {
   path: string;
   handle: Awaited<ReturnType<typeof openFile>>;
+  claim: ManagedServerOwnershipClaim;
 }
 
 export type OpenCodeServerOwnership = 'current-host' | 'other-host' | 'unmanaged';
@@ -2127,14 +2128,18 @@ export class OpenCodeProcess {
       }
 
       try {
+        const hostIdentity = await this.readOwnershipHostIdentity();
         const claim: ManagedServerOwnershipClaim = {
           version: 1,
           host: this.hostOwner,
-          hostPid: process.pid,
+          hostPid: hostIdentity.hostPid ?? process.pid,
           createdAt: Date.now(),
         };
+        if (hostIdentity.hostBirthIdentity) {
+          claim.hostBirthIdentity = hostIdentity.hostBirthIdentity;
+        }
         await handle.writeFile(`${JSON.stringify(claim)}\n`, { encoding: 'utf-8' });
-        return { path, handle };
+        return { path, handle, claim };
       } catch (err) {
         await handle.close().catch(() => {});
         await rm(path, { force: true }).catch(() => {});
@@ -2180,7 +2185,19 @@ export class OpenCodeProcess {
 
   private async releaseOwnershipClaim(claim: ManagedServerOwnershipClaimHandle) {
     await claim.handle.close().catch(() => {});
-    await rm(claim.path, { force: true }).catch(() => {});
+    try {
+      const current = parseManagedServerOwnershipClaim(
+        JSON.parse(await readFile(claim.path, 'utf-8'))
+      );
+      if (
+        current?.host === claim.claim.host &&
+        current.hostPid === claim.claim.hostPid &&
+        current.hostBirthIdentity === claim.claim.hostBirthIdentity &&
+        current.createdAt === claim.claim.createdAt
+      ) {
+        await rm(claim.path, { force: true });
+      }
+    } catch {}
   }
 
   private async claimAvailableOwnershipLease(

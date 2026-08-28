@@ -2,7 +2,7 @@ import type { Persistence } from '../../shared/persistence';
 import { postMessage } from './bridge';
 import { logWarn } from './log';
 import type { UnknownRecord } from '../../shared/type-utils';
-import { asRecord, isObject } from './runtime-values';
+import { asRecord, isObject, isString } from './runtime-values';
 
 export class BrowserPersistence implements Persistence {
   private warnedRemoveFailure = false;
@@ -20,6 +20,9 @@ export class BrowserPersistence implements Persistence {
 
     try {
       const raw = this.storage?.getItem(key);
+      if (readLocalStorageFailureMarker(key) === raw) {
+        return readVsCodeWebviewStateValue<T>(key);
+      }
       if (raw) {
         // SAFETY: Persistence callers own the key's value contract and validate domain values after reading.
         return JSON.parse(raw) as T;
@@ -42,11 +45,14 @@ export class BrowserPersistence implements Persistence {
       const serialized = JSON.stringify(value);
       if (serialized === undefined) {
         this.storage?.removeItem(key);
+        clearLocalStorageFailureMarker(key);
         return;
       }
       if (this.storage?.getItem(key) === serialized) return;
       this.storage?.setItem(key, serialized);
+      clearLocalStorageFailureMarker(key);
     } catch (err) {
+      markLocalStorageFailure(key, this.readLocalStorageValue(key));
       if (!this.warnedSetFailure) {
         this.warnedSetFailure = true;
         postMessage({
@@ -71,14 +77,26 @@ export class BrowserPersistence implements Persistence {
     if (!shouldUseLocalStorage(key)) return;
     try {
       this.storage?.removeItem(key);
+      clearLocalStorageFailureMarker(key);
     } catch (err) {
+      markLocalStorageFailure(key, this.readLocalStorageValue(key));
       if (!this.warnedRemoveFailure) {
         this.warnedRemoveFailure = true;
         logWarn(`browser-persistence:remove:${key}`, err);
       }
     }
   }
+
+  private readLocalStorageValue(key: string): string | null {
+    try {
+      return this.storage?.getItem(key) ?? null;
+    } catch {
+      return null;
+    }
+  }
 }
+
+const LOCAL_STORAGE_FAILURES_STATE_KEY = '__varroLocalStorageFailures';
 
 const EDITOR_INSTANCE_KEYS = new Set([
   'varro.inputDraft',
@@ -153,4 +171,42 @@ function removeVsCodeWebviewStateValue(key: string): { error: unknown } | undefi
   } catch (err) {
     return { error: err };
   }
+}
+
+function readLocalStorageFailureMarker(key: string): string | null | undefined {
+  const failures = asRecord(readVsCodeWebviewStateValue<unknown>(LOCAL_STORAGE_FAILURES_STATE_KEY));
+  const value = failures?.[key];
+  return isString(value) || value === null ? value : undefined;
+}
+
+function markLocalStorageFailure(key: string, staleValue: string | null) {
+  try {
+    const api = getVsCodeWebviewStateApi();
+    if (!api) return;
+    const state = api.getState();
+    const failures = asRecord(state[LOCAL_STORAGE_FAILURES_STATE_KEY]) ?? {};
+    api.setState({
+      ...state,
+      [LOCAL_STORAGE_FAILURES_STATE_KEY]: { ...failures, [key]: staleValue },
+    });
+  } catch {}
+}
+
+function clearLocalStorageFailureMarker(key: string) {
+  try {
+    const api = getVsCodeWebviewStateApi();
+    if (!api) return;
+    const state = api.getState();
+    const failures = asRecord(state[LOCAL_STORAGE_FAILURES_STATE_KEY]);
+    if (!failures || !Object.hasOwn(failures, key)) return;
+    const nextFailures = { ...failures };
+    delete nextFailures[key];
+    const next = { ...state };
+    if (Object.keys(nextFailures).length > 0) {
+      next[LOCAL_STORAGE_FAILURES_STATE_KEY] = nextFailures;
+    } else {
+      delete next[LOCAL_STORAGE_FAILURES_STATE_KEY];
+    }
+    api.setState(next);
+  } catch {}
 }

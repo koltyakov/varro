@@ -7,9 +7,11 @@ import {
 import { asRecord } from '../shared/type-utils';
 
 const SESSION_PERMISSION_MODES_KEY = 'varro.sessionPermissionModes';
+const SESSION_PERMISSION_MODE_FALLBACKS_KEY = 'varro.sessionPermissionModeFallbacks';
 
 export class SessionPermissionModeStore {
   private modes: Record<string, PermissionMode>;
+  private fallbackSessionIds: Set<string>;
   private mutationQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly persistence: Persistence) {
@@ -22,6 +24,13 @@ export class SessionPermissionModeStore {
           )
         )
       : {};
+    const storedFallbacks = persistence.get<unknown>(SESSION_PERMISSION_MODE_FALLBACKS_KEY);
+    this.fallbackSessionIds = new Set(
+      Array.isArray(storedFallbacks)
+        ? storedFallbacks.filter((value): value is string => isSafePersistedSessionId(value))
+        : []
+    );
+    for (const sessionId of this.fallbackSessionIds) this.modes[sessionId] = 'default';
   }
 
   list() {
@@ -38,7 +47,38 @@ export class SessionPermissionModeStore {
       else next[sessionId] = mode;
       this.modes = next;
       await this.persistence.set(SESSION_PERMISSION_MODES_KEY, next);
+      if (this.fallbackSessionIds.delete(sessionId)) {
+        await this.persistFallbacks();
+      }
       return this.list();
+    });
+  }
+
+  stageSafeFallback(sessionId: string): Promise<void> {
+    if (!isSafePersistedSessionId(sessionId)) {
+      return Promise.reject(new Error('Invalid persisted session ID'));
+    }
+    return this.mutate(async () => {
+      if (this.fallbackSessionIds.has(sessionId)) return;
+      this.fallbackSessionIds.add(sessionId);
+      try {
+        await this.persistFallbacks();
+      } catch (err) {
+        this.fallbackSessionIds.delete(sessionId);
+        throw err;
+      }
+    });
+  }
+
+  clearSafeFallback(sessionId: string): Promise<void> {
+    return this.mutate(async () => {
+      if (!this.fallbackSessionIds.delete(sessionId)) return;
+      try {
+        await this.persistFallbacks();
+      } catch (err) {
+        this.fallbackSessionIds.add(sessionId);
+        throw err;
+      }
     });
   }
 
@@ -70,5 +110,11 @@ export class SessionPermissionModeStore {
       () => undefined
     );
     return result;
+  }
+
+  private persistFallbacks() {
+    return this.persistence.set(SESSION_PERMISSION_MODE_FALLBACKS_KEY, [
+      ...this.fallbackSessionIds,
+    ]);
   }
 }

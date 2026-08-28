@@ -283,6 +283,32 @@ describe('BrowserPersistence', () => {
     }
   });
 
+  it('prefers newer VSCode state when a shared localStorage write fails', () => {
+    let vscodeState: TestRuntimeRecord = {};
+    window.__vscodeWebviewState = {
+      getState: () => vscodeState,
+      setState: (state) => {
+        vscodeState = state;
+      },
+    };
+    const values = new Map([['varro.selectedModel', JSON.stringify({ modelID: 'old' })]]);
+    const failingStorage = fixture<Storage>({
+      getItem: (key) => values.get(key) ?? null,
+      setItem: () => {
+        throw new Error('quota exceeded');
+      },
+      removeItem: () => {
+        throw new Error('quota exceeded');
+      },
+    });
+
+    new BrowserPersistence(failingStorage).set('varro.selectedModel', { modelID: 'new' });
+
+    expect(new BrowserPersistence(failingStorage).get('varro.selectedModel')).toEqual({
+      modelID: 'new',
+    });
+  });
+
   it('warns once when storage removal keeps failing', () => {
     const send = vi.fn();
     window.__sendToExtension = send;

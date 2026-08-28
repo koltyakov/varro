@@ -554,6 +554,9 @@ async function readResponseText(
 
   const contentLength = Number(response.headers?.get('content-length'));
   if (!stripSummaryDiffs && Number.isFinite(contentLength) && contentLength > maxBytes) {
+    try {
+      await response.body?.cancel();
+    } catch {}
     throw new OpenCodeResponseTooLargeError(maxBytes);
   }
   if (!response.body) {

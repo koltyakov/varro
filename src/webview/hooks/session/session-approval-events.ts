@@ -36,6 +36,11 @@ export function registerApprovalEventHandlers(deps: ApprovalEventDependencies): 
   let disposed = false;
 
   function handleKnownPermission(permission: Permission) {
+    if (permission.recoveredIncomplete) {
+      permissionsStore.addPermission(permission);
+      deps.permissionVisible?.(permission.id);
+      return;
+    }
     if (deps.shouldAutoApprovePermissions(permission.sessionID)) {
       const respond = deps.respondAutomaticPermission ?? deps.respondPermission;
       void respond(permission.sessionID, permission.id, 'always', { rethrow: true }).catch(() => {

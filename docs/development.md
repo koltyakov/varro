@@ -275,7 +275,7 @@ Permission handling is governed by the lifecycle, inheritance, timeout, and visi
 - `src/webview/lib/bridge.ts` wraps `postMessage` and API request/response correlation.
 - `src/webview/lib/client.ts` exposes typed helpers for OpenCode endpoints such as `/session`, `/agent`, `/config/providers`, `/provider`, `/provider/auth`, provider OAuth, `/auth/:providerID`, `/question`, `/mcp`, and Varro pseudo-endpoints.
 
-Provider credentials are submitted from the webview directly through the existing `api/request` proxy to OpenCode. `ProviderConnectionDialog` supports API-key and OAuth methods advertised by OpenCode, while `ProviderDisconnectionDialog` removes saved credentials. Terminal login and logout remain fallback paths. On successful targeted reauthentication, the webview sends `providers/reauthenticated` so `ProviderFileRefreshController` can acknowledge an authentication-only file change without restarting the server; configuration changes still follow the normal deferred invalidation path.
+Provider credentials are submitted from the webview directly through the existing `api/request` proxy to OpenCode. `ProviderConnectionDialog` supports API-key and OAuth methods advertised by OpenCode, while `ProviderDisconnectionDialog` removes saved credentials. Terminal login and logout remain fallback paths. On a successful embedded authentication change, the webview sends `providers/auth-changed` so `ProviderFileRefreshController` can coalesce the auth-file event and restart a managed server after sustained idle. The process restart is required for providers such as Amazon Bedrock that copy saved credentials into process environment state. Configuration-only changes continue to use deferred instance invalidation.
 
 ## Context Semantics
 

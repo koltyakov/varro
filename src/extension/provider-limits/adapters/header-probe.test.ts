@@ -114,6 +114,28 @@ describe('createHeaderProbeAdapter', () => {
     });
   });
 
+  it('cancels the unused probe response body', async () => {
+    const cancel = vi.fn();
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(new ReadableStream({ cancel }), {
+        status: 200,
+        headers: {
+          'x-ratelimit-limit-requests': '100',
+          'x-ratelimit-remaining-requests': '42',
+        },
+      })
+    );
+
+    await openAiAdapter.fetch({
+      provider: openAiApiKeyProvider,
+      authStore: {},
+      modelID: 'gpt-5.4',
+      checkedAt: 5_000,
+    });
+
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
   it('uses Copilot metadata headers and generic rate-limit fields', async () => {
     vi.mocked(fetch).mockResolvedValue(
       new Response('', {

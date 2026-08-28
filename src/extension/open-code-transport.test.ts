@@ -823,12 +823,13 @@ describe('OpenCodeTransport requests', () => {
 
   it('rejects oversized responses before reading their bodies', async () => {
     const text = vi.fn(async () => 'should not be read');
+    const cancel = vi.fn();
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => ({
         ok: true,
         text,
-        body: null,
+        body: new ReadableStream({ cancel }),
         headers: new Headers({ 'content-length': '1025' }),
       })) as unknown as typeof fetch
     );
@@ -839,6 +840,7 @@ describe('OpenCodeTransport requests', () => {
       })
     ).rejects.toThrow('OpenCode response exceeded the 1024-byte safety limit');
     expect(text).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledOnce();
   });
 
   it('streams oversized message responses while removing diff arrays', async () => {

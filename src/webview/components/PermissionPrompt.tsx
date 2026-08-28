@@ -131,8 +131,15 @@ export function PermissionPrompt(props: {
       </Show>
 
       <div class="permission-prompt-scope-note">
-        "Always allow" covers matching requests.
-        <Show when={isAutoApproveMode()}>
+        <Show
+          when={!props.permission.recoveredIncomplete}
+          fallback={
+            <>Approval details are incomplete after reload. Reject or wait for reconnection.</>
+          }
+        >
+          "Always allow" covers matching requests.
+        </Show>
+        <Show when={isAutoApproveMode() && !props.permission.recoveredIncomplete}>
           {' '}
           In Auto approve mode, it also guides AI review toward similar non-destructive actions.
         </Show>
@@ -142,7 +149,7 @@ export function PermissionPrompt(props: {
         <button
           class="question-btn question-btn-primary"
           aria-label="Allow once"
-          disabled={responding()}
+          disabled={responding() || props.permission.recoveredIncomplete}
           onClick={() => handleRespond('once')}
         >
           <span class="permission-action-label permission-action-label-full" aria-hidden="true">
@@ -160,7 +167,7 @@ export function PermissionPrompt(props: {
               ? 'Allow matching future requests and guide AI review of similar non-destructive actions'
               : 'Allow matching future requests'
           }
-          disabled={responding()}
+          disabled={responding() || props.permission.recoveredIncomplete}
           onClick={() => handleRespond('always')}
         >
           <span class="permission-action-label permission-action-label-full" aria-hidden="true">

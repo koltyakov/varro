@@ -434,7 +434,7 @@ describe('MarkdownRenderer', () => {
     });
   });
 
-  it('sanitizes html while keeping safe external links and images routable', () => {
+  it('sanitizes html while blocking remote images and keeping external links routable', () => {
     const send = vi.fn();
     window.__sendToExtension = send;
 
@@ -448,10 +448,7 @@ describe('MarkdownRenderer', () => {
     );
 
     expect(container?.querySelector('script')).toBeNull();
-    const image = container?.querySelector<HTMLImageElement>('img:not(.external-link-icon)');
-    expect(image?.getAttribute('src')).toBe('https://example.test/x.png');
-    expect(image?.getAttribute('loading')).toBe('lazy');
-    expect(image?.hasAttribute('onerror')).toBe(false);
+    expect(container?.querySelector('img:not(.external-link-icon)')).toBeNull();
     expect(container?.textContent).not.toContain('alert(1)');
 
     const links = Array.from(container?.querySelectorAll('a') || []);
@@ -477,7 +474,7 @@ describe('MarkdownRenderer', () => {
     });
   });
 
-  it('renders linked badge markdown as images', () => {
+  it('renders linked badge markdown as user-clicked text links', () => {
     cleanup = render(
       () =>
         MarkdownRenderer({
@@ -487,24 +484,15 @@ describe('MarkdownRenderer', () => {
       container!
     );
 
-    const images = Array.from(
-      container?.querySelectorAll<HTMLImageElement>('img:not(.external-link-icon)') || []
+    expect(container?.querySelector('img:not(.external-link-icon)')).toBeNull();
+    const link = Array.from(container?.querySelectorAll('a') || []).find((item) =>
+      item.textContent?.includes('Visual Studio Marketplace')
     );
-    expect(images).toHaveLength(2);
-    expect(images[0]?.getAttribute('src')).toBe(
-      'https://badgen.net/vs-marketplace/v/koltyakov.varro?color=0078d4'
-    );
-    expect(images[0]?.getAttribute('alt')).toBe('Visual Studio Marketplace');
-    expect(images[0]?.getAttribute('loading')).toBe('lazy');
-
-    const link = images[0]?.closest('a');
-    expect(link?.getAttribute('aria-label')).toBe('Visual Studio Marketplace');
     expect(link?.getAttribute('data-external')).toBe('true');
-    expect(link?.querySelector('.external-link-icon')).toBeNull();
-    expect(images[0]?.closest('.markdown-image-frame')).toBeNull();
+    expect(link?.textContent).toContain('Visual Studio Marketplace');
   });
 
-  it('reserves bounded frames for linked and unlinked content images', () => {
+  it('renders remote content images as text without resource elements', () => {
     cleanup = render(
       () =>
         MarkdownRenderer({
@@ -514,15 +502,13 @@ describe('MarkdownRenderer', () => {
       container!
     );
 
-    const frames = container?.querySelectorAll<HTMLElement>('.markdown-image-frame');
-    expect(frames).toHaveLength(2);
-    expect(frames?.[0]?.querySelector('img')?.getAttribute('src')).toBe(
-      'https://example.test/screenshot.png'
-    );
-    expect(frames?.[1]?.closest('a')?.getAttribute('href')).toBe('https://example.test/details');
+    expect(container?.querySelector('.markdown-image-frame')).toBeNull();
+    expect(container?.querySelector('img:not(.external-link-icon)')).toBeNull();
+    expect(container?.textContent).toContain('Screenshot');
+    expect(container?.textContent).toContain('Linked screenshot');
   });
 
-  it('keeps compact icons and portraits at their intrinsic geometry', () => {
+  it('blocks compact remote icons, portraits, and raw images', () => {
     cleanup = render(
       () =>
         MarkdownRenderer({
@@ -533,7 +519,9 @@ describe('MarkdownRenderer', () => {
     );
 
     expect(container?.querySelectorAll('.markdown-image-frame')).toHaveLength(0);
-    expect(container?.querySelectorAll('img:not(.external-link-icon)')).toHaveLength(3);
+    expect(container?.querySelectorAll('img:not(.external-link-icon)')).toHaveLength(0);
+    expect(container?.textContent).toContain('App icon');
+    expect(container?.textContent).toContain('Author portrait');
   });
 
   it('removes images with non-HTTPS sources', () => {

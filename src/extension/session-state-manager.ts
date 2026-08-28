@@ -1739,6 +1739,7 @@ function serializePermissionRequestProps(props: Record<string, unknown>): Record
   const result: Record<string, unknown> = {
     id: getString(props.id) || getString(props.permissionID) || getString(props.requestID) || '',
     sessionID: getString(props.sessionID) || '',
+    recoveredIncomplete: true,
   };
 
   const permission = trimOptionalString(getString(props.permission));

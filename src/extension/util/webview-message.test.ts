@@ -1703,4 +1703,32 @@ describe('parseWebviewMessage rejection paths', () => {
     expect(parseWebviewMessage({ type: 'model-preferences/migrate' })).toBeNull();
     expect(parseWebviewMessage({ type: 'model-preferences/migrate', payload: [] })).toBeNull();
   });
+
+  it('bounds oversized legacy model preferences during migration', () => {
+    const oversized = 'x'.repeat(4_097);
+    const parsed = parseWebviewMessage({
+      type: 'model-preferences/migrate',
+      payload: {
+        modelVariantSelections: { valid: 'high', oversized },
+        hiddenProviders: ['openai', oversized],
+        hiddenModels: Array.from({ length: 10_001 }, (_, index) => `provider/model-${index}`),
+        addedModels: [],
+        pinnedModels: [],
+        modelDisplayNames: { valid: 'Valid', [oversized]: 'Invalid' },
+      },
+    });
+
+    expect(parsed).toEqual({
+      type: 'model-preferences/migrate',
+      payload: expect.objectContaining({
+        modelVariantSelections: { valid: 'high' },
+        hiddenProviders: ['openai'],
+        hiddenModels: expect.any(Array),
+        modelDisplayNames: { valid: 'Valid' },
+      }),
+    });
+    if (parsed?.type === 'model-preferences/migrate') {
+      expect(parsed.payload.hiddenModels).toHaveLength(10_000);
+    }
+  });
 });

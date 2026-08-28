@@ -75,9 +75,15 @@ export class DroppedFilesService {
     private readonly tempDropsOps = DEFAULT_TEMP_DROPS_OPS
   ) {}
 
-  async fromContent(files: Array<{ name: string; content: string; size: number }>) {
+  async fromContent(
+    files: Array<{ name: string; content: string; size: number }>,
+    options: { maxFileBytes?: number } = {}
+  ) {
     if (this.disposePromise) await this.disposePromise;
-    const operation = this.fromContentNow(files);
+    const operation = this.fromContentNow(
+      files,
+      options.maxFileBytes ?? MAX_DROPPED_CONTENT_FILE_BYTES
+    );
     this.activeContentWrites.add(operation);
     try {
       return await operation;
@@ -86,7 +92,10 @@ export class DroppedFilesService {
     }
   }
 
-  private async fromContentNow(files: Array<{ name: string; content: string; size: number }>) {
+  private async fromContentNow(
+    files: Array<{ name: string; content: string; size: number }>,
+    maxFileBytes: number
+  ) {
     const candidates = files.slice(0, MAX_DROPPED_CONTENT_FILES);
     if (files.length > candidates.length) {
       logger.warn(
@@ -97,7 +106,7 @@ export class DroppedFilesService {
     const acceptedFiles: typeof candidates = [];
     let totalSize = 0;
     for (const file of candidates) {
-      if (!isDroppedContentSizeWithinLimits(file)) continue;
+      if (!isDroppedContentSizeWithinLimits(file, maxFileBytes)) continue;
       if (totalSize + file.size > MAX_DROPPED_CONTENT_TOTAL_BYTES) {
         logger.warn(
           `Ignoring dropped file ${file.name}: aggregate content is larger than ${MAX_DROPPED_CONTENT_TOTAL_BYTES} bytes`
@@ -105,7 +114,7 @@ export class DroppedFilesService {
         continue;
       }
       totalSize += file.size;
-      if (isDroppedContentEncodingValid(file)) acceptedFiles.push(file);
+      if (isDroppedContentEncodingValid(file, maxFileBytes)) acceptedFiles.push(file);
     }
 
     if (acceptedFiles.length === 0) return [];
@@ -529,25 +538,25 @@ function sanitizeDroppedFileName(name: string): string {
   return sanitized || 'dropped';
 }
 
-function isDroppedContentSizeWithinLimits(file: { name: string; size: number }) {
-  if (
-    !Number.isSafeInteger(file.size) ||
-    file.size < 0 ||
-    file.size > MAX_DROPPED_CONTENT_FILE_BYTES
-  ) {
-    logger.warn(
-      `Ignoring dropped file ${file.name}: file is larger than ${MAX_DROPPED_CONTENT_FILE_BYTES} bytes`
-    );
+function isDroppedContentSizeWithinLimits(
+  file: { name: string; size: number },
+  maxFileBytes: number
+) {
+  if (!Number.isSafeInteger(file.size) || file.size < 0 || file.size > maxFileBytes) {
+    logger.warn(`Ignoring dropped file ${file.name}: file is larger than ${maxFileBytes} bytes`);
     return false;
   }
   return true;
 }
 
-function isDroppedContentEncodingValid(file: { name: string; content: string; size: number }) {
-  const maxBase64Length = Math.ceil(MAX_DROPPED_CONTENT_FILE_BYTES / 3) * 4;
+function isDroppedContentEncodingValid(
+  file: { name: string; content: string; size: number },
+  maxFileBytes: number
+) {
+  const maxBase64Length = Math.ceil(maxFileBytes / 3) * 4;
   if (typeof file.content !== 'string' || file.content.length > maxBase64Length) {
     logger.warn(
-      `Ignoring dropped file ${file.name}: encoded content is larger than ${MAX_DROPPED_CONTENT_FILE_BYTES} bytes`
+      `Ignoring dropped file ${file.name}: encoded content is larger than ${maxFileBytes} bytes`
     );
     return false;
   }

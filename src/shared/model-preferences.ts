@@ -34,32 +34,41 @@ export function parseRequiredModelPreferences(value: unknown): ModelPreferences 
 }
 
 function parseStringArray(value: unknown): string[] {
-  return Array.isArray(value)
-    ? [...new Set(value.filter((item): item is string => typeof item === 'string'))]
-    : [];
+  if (!Array.isArray(value)) return [];
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (!isBoundedString(item) || seen.has(item)) continue;
+    seen.add(item);
+    result.push(item);
+    if (result.length >= MAX_MODEL_PREFERENCE_ENTRIES) break;
+  }
+  return result;
 }
 
 function parseStringRecord(value: unknown): Record<string, string> {
   const record = asRecord(value);
-  return record
-    ? Object.fromEntries(
-        Object.entries(record).filter(
-          (entry): entry is [string, string] => typeof entry[1] === 'string'
-        )
+  if (!record) return {};
+  return Object.fromEntries(
+    Object.entries(record)
+      .filter(
+        (entry): entry is [string, string] => isBoundedString(entry[0]) && isBoundedString(entry[1])
       )
-    : {};
+      .slice(0, MAX_MODEL_PREFERENCE_ENTRIES)
+  );
 }
 
 function parseNullableStringRecord(value: unknown): Record<string, string | null> {
   const record = asRecord(value);
-  return record
-    ? Object.fromEntries(
-        Object.entries(record).filter(
-          (entry): entry is [string, string | null] =>
-            typeof entry[1] === 'string' || entry[1] === null
-        )
+  if (!record) return {};
+  return Object.fromEntries(
+    Object.entries(record)
+      .filter(
+        (entry): entry is [string, string | null] =>
+          isBoundedString(entry[0]) && (entry[1] === null || isBoundedString(entry[1]))
       )
-    : {};
+      .slice(0, MAX_MODEL_PREFERENCE_ENTRIES)
+  );
 }
 
 function isStringArray(value: unknown): value is string[] {

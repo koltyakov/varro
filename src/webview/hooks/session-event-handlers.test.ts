@@ -215,8 +215,8 @@ function emitServerEvent(
   data: Omit<EventData, 'type'>
 ) {
   const event = { ...data, type: eventName };
-  handlers.get(eventName)?.(event);
   handlers.get('*')?.(event);
+  handlers.get(eventName)?.(event);
 }
 
 function createDefaultDeps(
@@ -343,6 +343,56 @@ describe('registerSessionEventHandlers', () => {
       );
     });
     expect(addPermission).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'perm-auto' }));
+  });
+
+  it('never automates a recovered permission with incomplete details', async () => {
+    addPermission.mockClear();
+    const handlers = installHandlers();
+    const judgePermission = vi.fn().mockResolvedValue(undefined);
+    const respondPermission = vi.fn().mockResolvedValue(undefined);
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        shouldAutoApprovePermissions: () => true,
+        shouldAutoJudgePermissions: () => true,
+        judgePermission,
+        respondPermission,
+      })
+    );
+
+    handlers.get('permission.asked')?.({
+      properties: {
+        id: 'perm-restored',
+        sessionID: 'session-1',
+        permission: 'bash',
+        title: 'Run truncated command',
+        recoveredIncomplete: true,
+      },
+    });
+
+    expect(addPermission).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'perm-restored', recoveredIncomplete: true })
+    );
+    expect(judgePermission).not.toHaveBeenCalled();
+    expect(respondPermission).not.toHaveBeenCalled();
+  });
+
+  it('ignores a stale sequenced session deletion until canonical repair', () => {
+    const handlers = installHandlers();
+    const removeDeletedSessionTree = vi.fn();
+    const syncSession = vi.fn().mockResolvedValue(undefined);
+    registerSessionEventHandlers(createDefaultDeps({ removeDeletedSessionTree, syncSession }));
+    emitServerEvent(handlers, 'session.updated', {
+      seq: 10,
+      properties: { info: { id: 'session-1', title: 'Current' } },
+    });
+
+    emitServerEvent(handlers, 'session.deleted', {
+      seq: 9,
+      properties: { info: { id: 'session-1' } },
+    });
+
+    expect(removeDeletedSessionTree).not.toHaveBeenCalled();
+    expect(syncSession).toHaveBeenCalledWith('session-1', expect.any(Object));
   });
 
   it('auto-accepts edit permissions while leaving other requests supervised', async () => {

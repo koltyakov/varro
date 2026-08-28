@@ -137,7 +137,6 @@ const ALLOWED_HTML_TAGS = [
   'h5',
   'h6',
   'hr',
-  'img',
   'li',
   'line',
   'ol',
@@ -173,14 +172,12 @@ const ALLOWED_HTML_ATTRIBUTES = [
   'height',
   'hidden',
   'href',
-  'loading',
   'points',
   'role',
   'stroke',
   'stroke-linecap',
   'stroke-linejoin',
   'stroke-width',
-  'src',
   'title',
   'type',
   'viewBox',
@@ -626,19 +623,8 @@ renderer.link = function ({ href, text: rawText, title, tokens }) {
   return `<a href="${escapeHtml(href)}"${titleAttr}>${text}</a>`;
 };
 
-renderer.image = function ({
-  href,
-  text,
-  title,
-}: {
-  href: string;
-  text: string;
-  title?: string | null;
-}) {
-  if (!isSafeExternalHref(href)) return escapeHtml(text);
-
-  const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
-  return `<img src="${escapeHtml(href)}" alt="${escapeHtml(text)}" loading="lazy"${titleAttr}>`;
+renderer.image = function ({ text }: { href: string; text: string; title?: string | null }) {
+  return escapeHtml(text);
 };
 
 marked.setOptions({
@@ -767,22 +753,6 @@ function sanitizeAnchorHref(anchor: HTMLAnchorElement) {
   anchor.removeAttribute('data-external');
 }
 
-function isCompactMarkdownImage(image: HTMLImageElement) {
-  const width = Number.parseFloat(image.getAttribute('width') || '');
-  const height = Number.parseFloat(image.getAttribute('height') || '');
-  if (width > 0 && height > 0 && (Math.max(width, height) <= 160 || width / height >= 2.5)) {
-    return true;
-  }
-
-  const source = `${image.getAttribute('src') || ''} ${image.getAttribute('alt') || ''}`;
-  return (
-    /https:\/\/(?:[^/]+\.)?(?:badgen\.net|shields\.io)\//i.test(source) ||
-    /(?:^|[^a-z0-9])(badge|icon|logo|avatar|portrait|headshot|profile[-_ ]?(?:picture|photo)?)(?:[^a-z0-9]|$)/i.test(
-      source
-    )
-  );
-}
-
 function prependLinkIcon(anchor: HTMLAnchorElement, icon: HTMLElement, keepFirstWord = false) {
   anchor.setAttribute('aria-label', anchor.textContent ?? '');
   const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
@@ -890,22 +860,6 @@ function sanitizeHtml(
     fragment.querySelectorAll<HTMLElement>(`[${TRUSTED_RENDERER_ATTRIBUTE}]`)
   )) {
     element.removeAttribute(TRUSTED_RENDERER_ATTRIBUTE);
-  }
-
-  for (const image of Array.from(fragment.querySelectorAll<HTMLImageElement>('img'))) {
-    const src = image.getAttribute('src')?.trim() || '';
-    if (!isSafeExternalHref(src)) {
-      image.remove();
-      continue;
-    }
-    image.setAttribute('src', src);
-    image.setAttribute('loading', 'lazy');
-    if (!isCompactMarkdownImage(image)) {
-      const frame = document.createElement('span');
-      frame.className = 'markdown-image-frame';
-      image.replaceWith(frame);
-      frame.append(image);
-    }
   }
 
   for (const anchor of Array.from(fragment.querySelectorAll<HTMLAnchorElement>('a'))) {

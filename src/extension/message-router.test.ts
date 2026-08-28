@@ -546,9 +546,7 @@ const DISPATCH_EXPECTATIONS = {
   'files/drop-content': [
     { callback: 'handleDroppedContent', args: [[{ name: 'a.txt', content: 'YQ==', size: 1 }]] },
   ],
-  'pdfs/store': [
-    { callback: 'storePdf', args: [{ id: 'pdf-1', name: 'a.pdf', content: 'YQ==', size: 1 }] },
-  ],
+  'pdfs/store': [{ callback: 'storePdf', args: [VALID_WEBVIEW_MESSAGES['pdfs/store'].payload] }],
   'images/store': [
     { callback: 'storeImage', args: [{ id: 'image-1', name: 'a.png', content: 'YQ==', size: 1 }] },
   ],

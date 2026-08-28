@@ -162,6 +162,35 @@ describe('QueuedMessageStore', () => {
     expect(storage.get('varro.queuedMessages')).toEqual(latest);
   });
 
+  it('rolls back an owned queue removal when persistence fails', async () => {
+    const { persistence } = createPersistence();
+    const store = new QueuedMessageStore(persistence);
+    const message = queuedMessage('queue-1', 'keep me', 'editor-a');
+    await store.update([message]);
+    vi.mocked(persistence.set).mockRejectedValueOnce(new Error('disk full'));
+
+    await expect(store.updateOwned('editor-a', [])).rejects.toThrow('disk full');
+
+    expect(store.list()).toEqual([message]);
+  });
+
+  it('uses a durable tombstone when the queue snapshot removal fails', async () => {
+    const { persistence, storage } = createPersistence();
+    const store = new QueuedMessageStore(persistence);
+    const message = queuedMessage('queue-1', 'remove me', 'editor-a');
+    await store.update([message]);
+    vi.mocked(persistence.set)
+      .mockImplementationOnce((key, value) => {
+        storage.set(key, value);
+      })
+      .mockRejectedValueOnce(new Error('queue snapshot failed'));
+
+    await expect(store.updateOwned('editor-a', [])).resolves.toBeUndefined();
+
+    expect(store.list()).toEqual([]);
+    expect(new QueuedMessageStore(persistence).list()).toEqual([]);
+  });
+
   it('updates only messages owned by the requesting view', async () => {
     const { persistence } = createPersistence();
     const store = new QueuedMessageStore(persistence);

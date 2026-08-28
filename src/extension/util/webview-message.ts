@@ -37,6 +37,7 @@ import {
   MAX_NATIVE_PDF_FILENAME_LENGTH,
   NATIVE_PDF_MIME,
   getPdfDataUrlSize,
+  isPdfBytes,
   isNativePdfAttachment,
 } from '../../shared/native-pdf';
 
@@ -63,6 +64,7 @@ const OPEN_TEXT_LANGUAGES = new Set(['plaintext', 'json', 'markdown', 'shellscri
 const MAX_DROPPED_PATHS = 100;
 const MAX_DROPPED_CONTENT_NAME_LENGTH = 512;
 const MAX_DROPPED_CONTENT_BASE64_LENGTH = Math.ceil(MAX_DROPPED_CONTENT_FILE_BYTES / 3) * 4;
+const MAX_NATIVE_PDF_BASE64_LENGTH = Math.ceil(MAX_NATIVE_PDF_TOTAL_BYTES / 3) * 4;
 const MAX_RALPH_ID_LENGTH = 512;
 const MAX_RALPH_PROMPT_LENGTH = 100_000;
 const MAX_RALPH_LEGACY_RUNS = 100;
@@ -598,7 +600,26 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       return { type, payload: { files } };
     }
 
-    case 'pdfs/store':
+    case 'pdfs/store': {
+      const payload = asRecord(message?.payload);
+      const id = getBoundedString(payload?.id, 512);
+      const name = getBoundedString(payload?.name, MAX_DROPPED_CONTENT_NAME_LENGTH);
+      const content = getBoundedString(payload?.content, MAX_NATIVE_PDF_BASE64_LENGTH, true);
+      const size = getSafeInteger(payload?.size);
+      if (
+        !id ||
+        !name ||
+        content === null ||
+        size === null ||
+        size > MAX_NATIVE_PDF_TOTAL_BYTES ||
+        getBase64DecodedSize(content) !== size ||
+        !isPdfBytes(Buffer.from(content.slice(0, 8), 'base64'))
+      ) {
+        return null;
+      }
+      return { type, payload: { id, name, content, size } };
+    }
+
     case 'images/store': {
       const payload = asRecord(message?.payload);
       const id = getBoundedString(payload?.id, 512);

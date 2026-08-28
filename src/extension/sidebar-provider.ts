@@ -2,6 +2,7 @@
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Provider responses are parsed before command-specific use. */
 import * as vscode from 'vscode';
 import { replacesOpenCodeBinary } from '../shared/opencode-install';
+import { MAX_NATIVE_PDF_TOTAL_BYTES } from '../shared/native-pdf';
 import type { OpenCodeModelRouting } from '../shared/opencode-types';
 import { getSessionPermissionRulesForMode } from '../shared/permission-rules';
 import type {
@@ -1410,12 +1411,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const operation = previous
       .catch(() => undefined)
       .then(async () => {
-        const session = await this.server.request(
-          'PATCH',
-          `/session/${encodeURIComponent(sessionID)}`,
-          { permission: getSessionPermissionRulesForMode(mode, 'update') },
-          { directory }
-        );
+        await this.sessionPermissionModes.stageSafeFallback(sessionID);
+        let session: unknown;
+        try {
+          session = await this.server.request(
+            'PATCH',
+            `/session/${encodeURIComponent(sessionID)}`,
+            { permission: getSessionPermissionRulesForMode(mode, 'update') },
+            { directory }
+          );
+        } catch (err) {
+          await this.sessionPermissionModes.clearSafeFallback(sessionID).catch(() => undefined);
+          throw err;
+        }
         let modes: Record<string, PermissionMode>;
         try {
           modes = await this.sessionPermissionModes.set(sessionID, mode);
@@ -1720,11 +1728,28 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private async updateQueuedMessages(viewId: string, messages: QueuedMessageSnapshot[]) {
     const endpoint = [...this.endpoints].find((item) => item.viewId === viewId);
     if (!endpoint?.ready) return;
-    const persistence = this.queuedMessages.updateOwned(viewId, messages);
+    const previousPdfPaths = new Set(
+      (this.queuedMessagesFor(viewId) ?? []).flatMap((message) =>
+        (message.nativePdfs ?? []).flatMap((pdf) => (pdf.contextFile ? [pdf.contextFile.path] : []))
+      )
+    );
+    try {
+      await this.queuedMessages.updateOwned(viewId, messages);
+    } catch (err) {
+      this.postQueuedMessageSnapshots();
+      throw err;
+    }
     this.postQueuedMessageSnapshots();
     this.updateSessionReconcileTimer();
     void this.runSessionReconcile();
-    await persistence;
+    const currentPdfPaths = new Set(
+      (this.queuedMessagesFor(viewId) ?? []).flatMap((message) =>
+        (message.nativePdfs ?? []).flatMap((pdf) => (pdf.contextFile ? [pdf.contextFile.path] : []))
+      )
+    );
+    await this.droppedFilesService.removeOwnedFiles(
+      [...previousPdfPaths].filter((path) => !currentPdfPaths.has(path))
+    );
   }
 
   private async transferEditorDraftState(viewId: string) {
@@ -1862,9 +1887,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     post: (message: ExtensionMessage) => void = (message) => this.post(message),
     isAvailable: () => boolean = () => true
   ) {
-    const [contextFile] = await this.droppedFilesService.fromContent([
-      { name: payload.name, content: payload.content, size: payload.size },
-    ]);
+    const [contextFile] = await this.droppedFilesService.fromContent(
+      [{ name: payload.name, content: payload.content, size: payload.size }],
+      { maxFileBytes: MAX_NATIVE_PDF_TOTAL_BYTES }
+    );
     if (contextFile) {
       if (!isAvailable()) {
         await this.droppedFilesService.removeOwnedFile(contextFile.path);

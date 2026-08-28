@@ -486,7 +486,7 @@ export function ModelsPanel() {
                     else void openProviderDisconnection();
                   }}
                 >
-                  Remove provider
+                  Disconnect provider
                 </button>
                 <button
                   type="button"
@@ -506,18 +506,28 @@ export function ModelsPanel() {
         </div>
       </div>
 
-      <Show when={state.providerRefreshPending && runningAgentCount() > 0}>
+      <Show when={state.providerRefreshPending}>
         <div class="models-provider-refresh-notice" role="status">
           <UiIcon source={warningCircleIcon} width={14} height={14} aria-hidden="true" />
-          <span>
-            <strong>Configuration update queued.</strong> Changes will appear automatically when{' '}
-            {runningAgentCount()} running{' '}
-            {runningAgentCount() === 1 ? 'agent finishes' : 'agents finish'}.
-            <Show when={previousRouting()}>
-              {' '}
-              Old and new assignments are labeled in the model list.
-            </Show>
-          </span>
+          <Show
+            when={runningAgentCount() > 0}
+            fallback={
+              <span>
+                <strong>Refreshing provider configuration.</strong> The provider list will update
+                automatically.
+              </span>
+            }
+          >
+            <span>
+              <strong>Configuration update queued.</strong> Changes will appear automatically when{' '}
+              {runningAgentCount()} running{' '}
+              {runningAgentCount() === 1 ? 'agent finishes' : 'agents finish'}.
+              <Show when={previousRouting()}>
+                {' '}
+                Old and new assignments are labeled in the model list.
+              </Show>
+            </span>
+          </Show>
         </div>
       </Show>
 
@@ -755,7 +765,7 @@ export function ModelsPanel() {
                   void openProviderDisconnection(menu.providerID);
                 }}
               >
-                Delete provider
+                Disconnect provider
               </button>
             </div>
           </Portal>

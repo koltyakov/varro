@@ -24,29 +24,35 @@ export function createHeaderProbeAdapter(id: string): ProviderLimitAdapter {
           headers: probe.headers,
           signal: AbortSignal.timeout(10_000),
         });
-        const windows = parseProviderLimitHeaders(response.headers, checkedAt);
-        if (windows.length > 0) {
+        try {
+          const windows = parseProviderLimitHeaders(response.headers, checkedAt);
+          if (windows.length > 0) {
+            return {
+              providerID: provider.id,
+              modelID,
+              status: 'available',
+              source: 'provider',
+              checkedAt,
+              windows,
+              note: 'Polled provider metadata headers',
+            };
+          }
+
           return {
             providerID: provider.id,
             modelID,
-            status: 'available',
+            status: 'unsupported',
             source: 'provider',
             checkedAt,
-            windows,
-            note: 'Polled provider metadata headers',
+            note: response.ok
+              ? 'Provider metadata endpoint did not expose remaining limits'
+              : `Provider metadata endpoint returned ${response.status}`,
           };
+        } finally {
+          try {
+            await response.body?.cancel();
+          } catch {}
         }
-
-        return {
-          providerID: provider.id,
-          modelID,
-          status: 'unsupported',
-          source: 'provider',
-          checkedAt,
-          note: response.ok
-            ? 'Provider metadata endpoint did not expose remaining limits'
-            : `Provider metadata endpoint returned ${response.status}`,
-        };
       } catch {
         return {
           providerID: provider.id,

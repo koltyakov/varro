@@ -554,8 +554,10 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     const status = noteSeq(sessionId, event.seq);
     sequenceStatusByEvent.set(event, status);
     if (sessionId && event.seq !== undefined) {
-      if (status === 'gap') markDirtyGap(sessionId);
-      else {
+      if (status === 'gap') {
+        markDirtyGap(sessionId);
+        schedulePendingPermissionSync();
+      } else {
         const dirty = dirtyGaps.get(sessionId);
         if (dirty) {
           dirty.retryPending = true;
@@ -1135,6 +1137,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
 
   cleanups.push(
     serverEvents.on('session.deleted', (data) => {
+      if (observeSequence(data) === 'gap') return;
       // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
       const id = (data.properties?.info as { id: string } | undefined)?.id;
       if (id) {

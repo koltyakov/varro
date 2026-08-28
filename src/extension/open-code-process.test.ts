@@ -1365,7 +1365,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     );
     let birthQueries = 0;
     mockLinuxLeaseProcess({
-      birthIdentity: () => (++birthQueries <= 2 ? 'original-process' : 'replacement-process'),
+      birthIdentity: () => (++birthQueries <= 3 ? 'original-process' : 'replacement-process'),
     });
     const kill = vi.spyOn(process, 'kill');
     const manager = new OpenCodeProcess(4096, true, 'opencode', false, undefined, leasePath);
@@ -1611,7 +1611,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     await rm(directory, { recursive: true, force: true });
   });
 
-  it('can explicitly restart after reconstructing a missing lease', async () => {
+  it('keeps a live host claim and does not remove a replacement claim', async () => {
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
     const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
     const leasePath = join(directory, 'lease.json');
@@ -1647,9 +1647,28 @@ describe('OpenCodeProcess server ownership leases', () => {
       owner: 'restart-owner',
       state: 'active',
     });
+    const claimPath = `${leasePath}.claim`;
+    expect(JSON.parse(await readFile(claimPath, 'utf-8'))).toMatchObject({
+      hostPid: process.pid,
+      hostBirthIdentity: expect.any(String),
+    });
+
+    await rm(claimPath);
+    await writeFile(
+      claimPath,
+      JSON.stringify({
+        version: 1,
+        host: 'replacement-host',
+        hostPid: process.pid,
+        createdAt: Date.now() + 1,
+      }),
+      'utf-8'
+    );
 
     await release();
-    await expect(stat(`${leasePath}.claim`)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(JSON.parse(await readFile(claimPath, 'utf-8'))).toMatchObject({
+      host: 'replacement-host',
+    });
     await rm(directory, { recursive: true, force: true });
   });
 

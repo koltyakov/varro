@@ -874,8 +874,11 @@ export class SessionSendOperations {
           },
           commitSentComposerAttachments: (sentSessionId) => {
             if (!clearedAttachments) return;
-            const imagePaths = clearedAttachments.clipboardImages.flatMap((image) =>
-              image.contextFile ? [image.contextFile.path] : []
+            const imagePaths = [
+              ...clearedAttachments.clipboardImages,
+              ...clearedAttachments.nativePdfs,
+            ].flatMap((attachment) =>
+              attachment.contextFile ? [attachment.contextFile.path] : []
             );
             if (imagePaths.length > 0) {
               postMessage({

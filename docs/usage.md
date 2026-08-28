@@ -215,7 +215,7 @@ External edits to project-level OpenCode configuration may not be detected. If a
 - MCP servers that require OAuth open an authorization flow with code entry and saved-credential recovery. Servers that require a pre-registered OAuth client show configuration guidance instead of starting an unsupported flow.
 - Open the model picker footer to hide or show providers and individual models.
 - Pin frequently used models to a dedicated group in the picker, or assign a local display name from the Models view. These preferences do not change the OpenCode provider/model ID.
-- Use the add and remove actions in the Models view to connect or disconnect provider credentials. Option/Alt-click either action to use OpenCode's terminal manager instead.
+- Use the add and disconnect actions in the Models view to connect or disconnect provider credentials. Option/Alt-click either action to use OpenCode's terminal manager instead.
 - In the Models view, right-click a model to assign it to project `small_model`, an available sub-agent, commit-message generation, or the auto-approve judge. Project and agent assignments update the project OpenCode configuration after checking for unsaved or concurrent changes. Commit-message and auto-approve assignments update their VS Code user settings instead.
 
 The Models view also shows whether a model exposes tools, variants, vision support, and a known context-window size. A lightning marker identifies GPT model names containing `Fast`; its tooltip notes that fast models can be more expensive.

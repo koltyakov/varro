@@ -78,4 +78,25 @@ describe('SessionPermissionModeStore', () => {
 
     expect(store.list()).toEqual({ 'session-1': 'full' });
   });
+
+  it('restores the safe default when a confirmed downgrade is not durable', async () => {
+    const values = new Map<string, unknown>([
+      ['varro.sessionPermissionModes', { 'session-1': 'full' }],
+    ]);
+    const persistence: Persistence = {
+      get: <T>(key: string) => values.get(key) as T | undefined,
+      set: vi.fn(async <T>(key: string, value: T) => {
+        if (key === 'varro.sessionPermissionModes') throw new Error('disk full');
+        values.set(key, value);
+      }),
+      remove: vi.fn(),
+    };
+    const store = new SessionPermissionModeStore(persistence);
+
+    await store.stageSafeFallback('session-1');
+    await expect(store.set('session-1', 'default')).rejects.toThrow('disk full');
+
+    expect(store.list()).toEqual({ 'session-1': 'default' });
+    expect(new SessionPermissionModeStore(persistence).list()).toEqual({ 'session-1': 'default' });
+  });
 });

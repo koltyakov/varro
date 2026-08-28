@@ -349,11 +349,13 @@ export function addNativePdfs(pdfs: NativePdfAttachment[]) {
 }
 
 export function setNativePdfContextFile(id: string, contextFile: DroppedFile) {
+  if (!state.nativePdfs.some((pdf) => pdf.id === id)) return false;
   setState('nativePdfs', (pdfs) =>
     pdfs.map((pdf) =>
       pdf.id === id ? { ...pdf, contextFile: { ...contextFile, type: 'file' as const } } : pdf
     )
   );
+  return true;
 }
 
 export function removeNativePdf(id: string) {

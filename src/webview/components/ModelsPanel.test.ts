@@ -435,7 +435,7 @@ describe('ModelsPanel', () => {
     const menu = container?.querySelector('[role="menu"]');
     expect(
       Array.from(menu?.querySelectorAll('[role="menuitem"]') ?? []).map((item) => item.textContent)
-    ).toEqual(['Add provider', 'Remove provider', 'Refresh list']);
+    ).toEqual(['Add provider', 'Disconnect provider', 'Refresh list']);
     findButton(menu, 'Refresh list')?.click();
 
     expect(actionsButton).toBeInstanceOf(HTMLButtonElement);
@@ -447,7 +447,7 @@ describe('ModelsPanel', () => {
     cleanup = render(() => ModelsPanel(), container!);
 
     container?.querySelector<HTMLButtonElement>('[aria-label="Provider actions"]')?.click();
-    const logoutButton = findButton(container, 'Remove provider');
+    const logoutButton = findButton(container, 'Disconnect provider');
     logoutButton?.click();
     await Promise.resolve();
     await Promise.resolve();
@@ -478,7 +478,7 @@ describe('ModelsPanel', () => {
     container
       ?.querySelector<HTMLElement>('.models-provider-header')
       ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    const deleteButton = findButton(document.body, 'Delete provider');
+    const deleteButton = findButton(document.body, 'Disconnect provider');
     deleteButton?.click();
     await Promise.resolve();
     await Promise.resolve();
@@ -520,7 +520,7 @@ describe('ModelsPanel', () => {
     container
       ?.querySelector<HTMLElement>('.models-provider-header')
       ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    const deleteButton = findButton(document.body, 'Delete provider');
+    const deleteButton = findButton(document.body, 'Disconnect provider');
 
     expect(deleteButton).toBeInstanceOf(HTMLButtonElement);
     expect(deleteButton?.disabled).toBe(true);
@@ -561,7 +561,7 @@ describe('ModelsPanel', () => {
     container
       ?.querySelector<HTMLElement>('.models-provider-header')
       ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    findButton(document.body, 'Delete provider')?.click();
+    findButton(document.body, 'Disconnect provider')?.click();
     await Promise.resolve();
     await Promise.resolve();
 
@@ -569,6 +569,50 @@ describe('ModelsPanel', () => {
     expect(dialog?.textContent).toContain('has no saved credential to disconnect');
     expect(findButton(dialog, 'Open opencode.jsonc')).toBeInstanceOf(HTMLButtonElement);
     expect(findButton(dialog, 'Disconnect')).toBeUndefined();
+  });
+
+  it('explains when environment credentials keep a provider connected', async () => {
+    clientMocks.providerCatalog.mockResolvedValue({
+      all: [
+        {
+          id: 'amazon-bedrock',
+          name: 'Amazon Bedrock',
+          source: 'env',
+          env: ['AWS_PROFILE', 'AWS_ACCESS_KEY_ID'],
+          models: {},
+        },
+      ],
+      default: {},
+      connected: ['amazon-bedrock'],
+    });
+    setState('providers', [
+      {
+        id: 'amazon-bedrock',
+        name: 'Amazon Bedrock',
+        source: 'env',
+        env: ['AWS_PROFILE', 'AWS_ACCESS_KEY_ID'],
+        models: {
+          model: {
+            id: 'model',
+            name: 'Model',
+            capabilities: { toolcall: true },
+            cost: { input: 1, output: 1 },
+          },
+        },
+      },
+    ]);
+    cleanup = render(() => ModelsPanel(), container!);
+
+    container
+      ?.querySelector<HTMLElement>('.models-provider-header')
+      ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    findButton(document.body, 'Disconnect provider')?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
+    expect(dialog?.textContent).toContain('supplied by environment credentials');
+    expect(dialog?.textContent).toContain('AWS_PROFILE, AWS_ACCESS_KEY_ID');
   });
 
   it('uses terminal provider actions on Option-click', () => {
@@ -581,7 +625,7 @@ describe('ModelsPanel', () => {
     const addButton = findButton(container, 'Add provider');
     addButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, altKey: true }));
     actionsButton?.click();
-    const removeButton = findButton(container, 'Remove provider');
+    const removeButton = findButton(container, 'Disconnect provider');
     removeButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, altKey: true }));
 
     expect(addButton).toBeInstanceOf(HTMLButtonElement);
@@ -604,7 +648,7 @@ describe('ModelsPanel', () => {
     });
     cleanup = render(() => ModelsPanel(), container!);
 
-    openProviderAction(container, 'Remove provider')?.click();
+    openProviderAction(container, 'Disconnect provider')?.click();
     await Promise.resolve();
     await Promise.resolve();
     const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
@@ -884,7 +928,7 @@ describe('ModelsPanel', () => {
     const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
     dialog?.querySelector<HTMLButtonElement>('.provider-connect-option')?.click();
     dialog?.querySelector<HTMLButtonElement>('.provider-connect-method')?.click();
-    findButton(dialog, 'Continue in browser')?.click();
+    findButton(dialog, 'Continue')?.click();
     await Promise.resolve();
     await Promise.resolve();
 
@@ -941,11 +985,13 @@ describe('ModelsPanel', () => {
     expect(send).toHaveBeenCalledTimes(2);
   });
 
-  it('does not show a queued notice without running sessions', () => {
+  it('shows provider refresh progress without running sessions', () => {
     setState('providerRefreshPending', true);
     cleanup = render(() => ModelsPanel(), container!);
 
-    expect(container?.querySelector('.models-provider-refresh-notice')).toBeNull();
+    expect(container?.querySelector('.models-provider-refresh-notice')?.textContent).toContain(
+      'Refreshing provider configuration.'
+    );
   });
 
   it('counts only running parent sessions in the queued provider notice', () => {

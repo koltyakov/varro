@@ -78,6 +78,7 @@ export class ProviderFileRefreshController {
   private pendingStatusPosted = false;
   private invalidationInFlight = false;
   private pendingRevision = 0;
+  private authIdleCandidate: { generation: number; since: number } | null = null;
   private unmanagedServerSynchronized = false;
   private disposed = false;
   private readonly handleServerStatus = (status: ServerStatus) => {
@@ -234,6 +235,7 @@ export class ProviderFileRefreshController {
 
   async acknowledgeEmbeddedAuthChange() {
     const generation = ++this.refreshGeneration;
+    this.authIdleCandidate = null;
     if (this.refreshTimer) {
       clearTimeout(this.refreshTimer);
       this.refreshTimer = null;
@@ -242,22 +244,18 @@ export class ProviderFileRefreshController {
     if (this.disposed || generation !== this.refreshGeneration) return;
     if (!this.configChangePending) this.observedFilesSignature = signature;
     this.authChangePending = false;
-    if (this.pendingAuthOnlyInvalidation && !this.configChangePending) {
-      this.pendingScope = null;
-      this.workspaceRoutingBaseline = null;
-      this.pendingAuthOnlyInvalidation = false;
-      this.authRevalidationPending = false;
-      await this.clearPersistedPendingState();
-      if (this.pendingStatusPosted) {
-        this.pendingStatusPosted = false;
-        this.dependencies.postPendingStatus(false);
-      }
-    }
+    this.authRevalidationPending = true;
     this.dependencies.clearProviderLimitCache();
     this.dependencies.postRefresh();
     if (this.configChangePending) {
       await this.refreshState(++this.refreshGeneration, true);
+      return;
     }
+    this.pendingAuthOnlyInvalidation = this.pendingScope ? this.pendingAuthOnlyInvalidation : true;
+    await this.markRefreshPending('global');
+    if (this.disposed || generation !== this.refreshGeneration) return;
+    this.postStatus();
+    await this.maybeInvalidate(generation, 0);
   }
 
   async refreshState(generation = ++this.refreshGeneration, requireSignatureChange = false) {
@@ -393,10 +391,14 @@ export class ProviderFileRefreshController {
       return;
     }
     if (this.dependencies.server.status.state === 'starting') {
+      this.authIdleCandidate = null;
       this.scheduleInvalidationRetry(generation, retryCount, false);
       return;
     }
-    if (this.dependencies.server.status.state !== 'running') return;
+    if (this.dependencies.server.status.state !== 'running') {
+      this.authIdleCandidate = null;
+      return;
+    }
 
     const idleDirectories =
       pendingScope === 'workspace' ? [...this.pendingWorkspaceDirectories] : [];
@@ -408,14 +410,31 @@ export class ProviderFileRefreshController {
     const idle = idleResults.includes(false) ? false : idleResults.includes(null) ? null : true;
     if (this.disposed || generation !== this.refreshGeneration) return;
     if (idle === false) {
+      this.authIdleCandidate = null;
       this.postPendingStatus();
       this.scheduleInvalidationRetry(generation, retryCount, false);
       return;
     }
     if (idle === null) {
+      this.authIdleCandidate = null;
       this.scheduleInvalidationRetry(generation, retryCount);
       return;
     }
+    if (this.authRevalidationPending && this.authWatcher) {
+      const now = Date.now();
+      if (
+        this.authIdleCandidate?.generation !== generation ||
+        now - this.authIdleCandidate.since < ProviderFileRefreshController.RETRY_MS
+      ) {
+        if (this.authIdleCandidate?.generation !== generation) {
+          this.authIdleCandidate = { generation, since: now };
+        }
+        this.postPendingStatus();
+        this.scheduleInvalidationRetry(generation, retryCount, false);
+        return;
+      }
+    }
+    this.authIdleCandidate = null;
 
     const pendingRevision = this.pendingRevision;
     this.invalidationInFlight = true;
@@ -434,16 +453,24 @@ export class ProviderFileRefreshController {
           );
         }
       } else {
-        try {
-          await this.dependencies.server.request('POST', '/global/dispose');
-        } catch (disposeError) {
-          const managedState = await this.readManagedServerState();
-          if (this.disposed || generation !== this.refreshGeneration) return;
-          if (managedState !== true) throw disposeError;
-          logger.warn(
-            `Provider global dispose failed; restarting managed server: ${disposeError instanceof Error ? disposeError.message : String(disposeError)}`
-          );
+        const managedState = this.authRevalidationPending
+          ? await this.readManagedServerState()
+          : false;
+        if (this.disposed || generation !== this.refreshGeneration) return;
+        if (managedState === true) {
           await this.dependencies.server.restart();
+        } else {
+          try {
+            await this.dependencies.server.request('POST', '/global/dispose');
+          } catch (disposeError) {
+            const fallbackManagedState = await this.readManagedServerState();
+            if (this.disposed || generation !== this.refreshGeneration) return;
+            if (fallbackManagedState !== true) throw disposeError;
+            logger.warn(
+              `Provider global dispose failed; restarting managed server: ${disposeError instanceof Error ? disposeError.message : String(disposeError)}`
+            );
+            await this.dependencies.server.restart();
+          }
         }
         this.unmanagedServerSynchronized = true;
       }

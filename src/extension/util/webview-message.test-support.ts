@@ -115,7 +115,7 @@ export const VALID_WEBVIEW_MESSAGES = {
   },
   'pdfs/store': {
     type: 'pdfs/store',
-    payload: { id: 'pdf-1', name: 'a.pdf', content: 'YQ==', size: 1 },
+    payload: { id: 'pdf-1', name: 'a.pdf', content: 'JVBERi0=', size: 5 },
   },
   'images/store': {
     type: 'images/store',

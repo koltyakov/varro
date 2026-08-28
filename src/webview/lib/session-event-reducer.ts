@@ -99,5 +99,6 @@ export function normalizePermissionEvent<T>(props: T): Permission | null {
     title,
     metadata: asRecord(source.metadata) ?? {},
     time: { created: createdAt },
+    recoveredIncomplete: source.recoveredIncomplete === true ? true : undefined,
   };
 }

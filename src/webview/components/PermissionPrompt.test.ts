@@ -77,6 +77,27 @@ describe('PermissionPrompt', () => {
     expect(scopeNote).not.toContain('guides AI review');
   });
 
+  it('allows only rejection when recovered details are incomplete', () => {
+    cleanup = render(
+      () =>
+        PermissionPrompt({
+          permission: createPermission({ recoveredIncomplete: true }),
+        }),
+      container!
+    );
+
+    expect(container?.querySelector<HTMLButtonElement>('[aria-label="Allow once"]')?.disabled).toBe(
+      true
+    );
+    expect(
+      container?.querySelector<HTMLButtonElement>('[aria-label="Allow always"]')?.disabled
+    ).toBe(true);
+    expect(container?.querySelector<HTMLButtonElement>('[aria-label="Reject"]')?.disabled).toBe(
+      false
+    );
+    expect(container?.textContent).toContain('Approval details are incomplete after reload');
+  });
+
   it('explains how always approval guides review in auto approve mode', () => {
     mocks.permissionMode = 'auto';
     cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);

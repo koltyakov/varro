@@ -831,19 +831,30 @@ describe('client', () => {
     expect(bridgeMocks.postMessage).toHaveBeenNthCalledWith(1, {
       type: 'log',
       payload: {
-        msg: 'event handler error',
-        error: 'Error: specific boom',
+        msg: 'wildcard handler error',
+        error: 'Error: wildcard boom',
         level: 'error',
       },
     });
     expect(bridgeMocks.postMessage).toHaveBeenNthCalledWith(2, {
       type: 'log',
       payload: {
-        msg: 'wildcard handler error',
-        error: 'Error: wildcard boom',
+        msg: 'event handler error',
+        error: 'Error: specific boom',
         level: 'error',
       },
     });
+  });
+
+  it('runs wildcard sequence observers before typed event handlers', async () => {
+    const { serverEvents } = await loadClient();
+    const order: string[] = [];
+    serverEvents.on('session.deleted', () => order.push('typed'));
+    serverEvents.on('*', () => order.push('wildcard'));
+
+    emitMessage({ type: 'server/event', payload: { type: 'session.deleted' } });
+
+    expect(order).toEqual(['wildcard', 'typed']);
   });
 
   it('ignores non-server messages for event listeners', async () => {

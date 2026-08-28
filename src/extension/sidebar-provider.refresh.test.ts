@@ -79,8 +79,12 @@ describe('SidebarProvider provider refresh', () => {
     authWatcher?.onDidChange.mock.calls[0]?.[0]();
     await vi.advanceTimersByTimeAsync(300);
 
-    expect(server.request).toHaveBeenCalledWith('POST', '/global/dispose');
-    expect(server.restart).not.toHaveBeenCalled();
+    expect(server.request).not.toHaveBeenCalledWith('POST', '/global/dispose');
+
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(server.request).not.toHaveBeenCalledWith('POST', '/global/dispose');
+    expect(server.restart).toHaveBeenCalledOnce();
     expect(posted).toContainEqual({ type: 'providers/refresh' });
     expect(posted).toContainEqual({ type: 'providers/refresh' });
     await provider.dispose();
@@ -109,9 +113,13 @@ describe('SidebarProvider provider refresh', () => {
     await provider.dispose();
   });
 
-  it('acknowledges embedded reauthentication without restarting OpenCode', async () => {
+  it('restarts managed OpenCode after embedded reauthentication', async () => {
     vi.useFakeTimers();
-    const server = createServer();
+    const server = createServer({
+      request: vi.fn(async (_method: string, path: string) =>
+        path === '/session/status' ? {} : []
+      ),
+    });
     const { provider } = await createSidebarProviderInstance({ server });
     const { posted } = attachTestView(provider);
     const access = provider as unknown as ProviderRefreshAccess;
@@ -132,16 +140,22 @@ describe('SidebarProvider provider refresh', () => {
     authWatcher?.onDidChange.mock.calls[0]?.[0]();
 
     await provider.handleMessage({ type: 'providers/auth-changed' });
-    await vi.advanceTimersByTimeAsync(300);
+    await vi.advanceTimersByTimeAsync(1_000);
 
-    expect(server.restart).not.toHaveBeenCalled();
+    expect(server.restart).toHaveBeenCalledOnce();
     expect(server.request).not.toHaveBeenCalledWith('POST', '/global/dispose');
     expect(server.request).not.toHaveBeenCalledWith('POST', '/instance/dispose');
+    expect(posted).toContainEqual({ type: 'providers/status', payload: { pending: true } });
+    expect(posted).toContainEqual({ type: 'providers/status', payload: { pending: false } });
+    expect(posted).toContainEqual({
+      type: 'providers/refresh',
+      payload: { revalidateAuth: true },
+    });
     expect(posted).toContainEqual({ type: 'providers/refresh' });
     await provider.dispose();
   });
 
-  it('cancels a deferred auth-file restart after embedded reauthentication', async () => {
+  it('defers an embedded auth reload until the active turn is idle', async () => {
     vi.useFakeTimers();
     let idle = false;
     const server = createServer({
@@ -176,15 +190,19 @@ describe('SidebarProvider provider refresh', () => {
 
     await provider.handleMessage({ type: 'providers/auth-changed' });
     idle = true;
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(2_000);
 
-    expect(server.restart).not.toHaveBeenCalled();
+    expect(server.restart).toHaveBeenCalledOnce();
+    expect(server.request).not.toHaveBeenCalledWith('POST', '/global/dispose');
     expect(posted).toContainEqual({ type: 'providers/status', payload: { pending: false } });
-    expect(posted).toContainEqual({ type: 'providers/refresh' });
+    expect(posted).toContainEqual({
+      type: 'providers/refresh',
+      payload: { revalidateAuth: true },
+    });
     await provider.dispose();
   });
 
-  it('cancels a restored deferred auth-only restart after embedded reauthentication', async () => {
+  it('keeps a restored auth reload pending while a turn is busy', async () => {
     vi.useFakeTimers();
     const values = new Map<string, unknown>([
       [
@@ -222,7 +240,9 @@ describe('SidebarProvider provider refresh', () => {
     await vi.advanceTimersByTimeAsync(1_000);
 
     expect(server.restart).not.toHaveBeenCalled();
-    expect(values.has('varro.providerRefresh.pending')).toBe(false);
+    expect(server.request).not.toHaveBeenCalledWith('POST', '/global/dispose');
+    expect(values.has('varro.providerRefresh.pending')).toBe(true);
+    expect(posted).toContainEqual({ type: 'providers/status', payload: { pending: true } });
     expect(posted).toContainEqual({ type: 'providers/refresh' });
     await provider.dispose();
   });
@@ -258,8 +278,10 @@ describe('SidebarProvider provider refresh', () => {
 
     await provider.handleMessage({ type: 'providers/auth-changed' });
 
-    expect(server.request).toHaveBeenCalledWith('POST', '/global/dispose');
-    expect(server.restart).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(server.request).not.toHaveBeenCalledWith('POST', '/global/dispose');
+    expect(server.restart).toHaveBeenCalledOnce();
     await provider.dispose();
   });
 

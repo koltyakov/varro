@@ -208,6 +208,7 @@ afterEach(() => {
   setShowModelPicker(false);
   setManualWorkspaceSelection(false);
   setState('pendingWorkspaceSelectionPath', null);
+  setState('providerRefreshPending', false);
   setState('workspaceCatalogReloadPending', false);
   resetProviderConnectionState();
   setState('activeSessionId', null);
@@ -5028,6 +5029,26 @@ describe('ChatInput', () => {
 
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(inputText()).toBe('Preserved draft');
+  });
+
+  it('keeps a draft disabled until provider authentication reloads', async () => {
+    setState('providerRefreshPending', true);
+    setInputText('Send with the new provider');
+    cleanup = render(() => ChatInput({ newSession: true }), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    const sendButton = container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]');
+    expect(sendButton?.disabled).toBe(true);
+
+    editor?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flushAsyncWork();
+
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(inputText()).toBe('Send with the new provider');
+
+    setState('providerRefreshPending', false);
+    await Promise.resolve();
+    expect(sendButton?.disabled).toBe(false);
   });
 
   it('keeps the selected model visible while workspace catalogs reload', async () => {

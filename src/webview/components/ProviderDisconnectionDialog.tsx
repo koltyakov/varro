@@ -43,6 +43,7 @@ export function ProviderDisconnectionDialog(props: {
         id,
         name: catalog.get(id)?.name ?? formatProviderID(id),
         source: catalog.get(id)?.source,
+        env: catalog.get(id)?.env ?? [],
         connected: props.connectedProviderIDs.includes(id),
       }))
       .toSorted((a, b) => a.name.localeCompare(b.name));
@@ -238,6 +239,16 @@ export function ProviderDisconnectionDialog(props: {
                           </button>
                         )}
                       </For>
+                    </div>
+                  </Show>
+                  <Show when={provider().source === 'env'}>
+                    <div class="provider-disconnect-config-notice">
+                      This provider is supplied by environment credentials
+                      <Show when={provider().env.length > 0}>
+                        {` (${provider().env.join(', ')})`}
+                      </Show>
+                      . Disconnecting a saved credential will not remove it while those credentials
+                      remain available to OpenCode.
                     </div>
                   </Show>
                   <Show when={errorMessage()}>
