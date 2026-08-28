@@ -93,6 +93,21 @@ describe('QueuedMessageStore', () => {
     expect(new QueuedMessageStore(persistence).list()).toEqual(messages);
   });
 
+  it('discards persisted snapshots that do not satisfy the queued-message contract', () => {
+    const { persistence, storage } = createPersistence();
+    storage.set('varro.queuedMessages', [
+      {
+        id: 'queue-1',
+        sessionId: 'session-1',
+        text: 'run the tests',
+        clipboardImages: [],
+        terminalSelection: null,
+      },
+    ]);
+
+    expect(new QueuedMessageStore(persistence).list()).toEqual([]);
+  });
+
   it('serializes writes so the newest queue snapshot wins', async () => {
     const storage = new Map<string, unknown>();
     let releaseFirstWrite: (() => void) | undefined;

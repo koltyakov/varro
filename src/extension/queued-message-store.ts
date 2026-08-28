@@ -1,5 +1,6 @@
 import type { Persistence } from '../shared/persistence';
 import type { QueuedMessageSnapshot } from '../shared/protocol';
+import { sanitizeQueuedMessages } from './util/webview-message';
 
 const QUEUED_MESSAGES_KEY = 'varro.queuedMessages';
 const COMPLETION_PERSIST_ATTEMPTS = 3;
@@ -17,7 +18,7 @@ export class QueuedMessageStore {
 
   constructor(private readonly persistence: Persistence) {
     const stored = persistence.get<unknown>(QUEUED_MESSAGES_KEY);
-    this.messages = stored === undefined ? undefined : Array.isArray(stored) ? stored : [];
+    this.messages = stored === undefined ? undefined : (sanitizeQueuedMessages(stored) ?? []);
   }
 
   list(): QueuedMessageSnapshot[] | undefined {

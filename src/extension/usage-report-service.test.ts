@@ -19,6 +19,30 @@ const mocks = vi.hoisted(() => {
   };
 });
 
+const workerMocks = vi.hoisted(() => {
+  class FakeWorker {
+    readonly listeners = new Map<string, (...args: unknown[]) => void>();
+    readonly terminate = vi.fn(async () => 0);
+
+    constructor() {
+      instances.push(this);
+    }
+
+    once(event: string, listener: (...args: unknown[]) => void): this {
+      this.listeners.set(event, listener);
+      return this;
+    }
+  }
+
+  const instances: FakeWorker[] = [];
+  return { FakeWorker, instances };
+});
+
+vi.mock('node:worker_threads', () => ({
+  default: { Worker: workerMocks.FakeWorker },
+  Worker: workerMocks.FakeWorker,
+}));
+
 vi.mock('vscode', () => ({
   ProgressLocation: { Notification: 15 },
   commands: { executeCommand: mocks.executeCommand },
@@ -149,6 +173,27 @@ describe('UsageReportService', () => {
     expect(reportContent()).toContain('from 2 sessions scanned');
     expect(reportSection(reportContent(), 'Today')).toContain(
       '| provider-local | model-local | 1 | 100 |'
+    );
+  });
+
+  it('terminates a stalled local database worker and falls back to the server', async () => {
+    const request = vi.fn<Request>(async () => ({ data: [] }));
+    const service = new UsageReportService(
+      { request },
+      vi.fn(async () => undefined)
+    );
+
+    const report = service.openReport();
+    await vi.advanceTimersByTimeAsync(30_000);
+    await report;
+
+    expect(workerMocks.instances).toHaveLength(1);
+    expect(workerMocks.instances[0]?.terminate).toHaveBeenCalledOnce();
+    expect(request).toHaveBeenCalledWith(
+      'GET',
+      `/experimental/session?archived=true&limit=1000&start=${RECENT_START}`,
+      undefined,
+      { unscoped: true, captureNextCursor: true }
     );
   });
 

@@ -1223,7 +1223,7 @@ function sanitizeApiRequestBody(value: unknown): SanitizedJsonValue | typeof INV
   }
 }
 
-function sanitizeQueuedMessages(
+export function sanitizeQueuedMessages(
   value: unknown
 ): Extract<WebviewMessage, { type: 'queued-messages/update' }>['payload']['messages'] | null {
   if (!Array.isArray(value) || value.length > 1_000) return null;

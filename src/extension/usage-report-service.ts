@@ -60,6 +60,7 @@ const SESSION_PAGE_LIMIT = 1_000;
 const SESSION_CONCURRENCY = 32;
 const SESSION_HISTORY_MAX_BYTES = 256 * 1024 * 1024;
 const SESSION_USAGE_MAX_BYTES = 16 * 1024 * 1024;
+const LOCAL_USAGE_WORKER_TIMEOUT_MS = 30_000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export class UsageReportService {
@@ -245,13 +246,14 @@ async function readLocalUsageDatabase(start?: number): Promise<LocalUsageSnapsho
     const finish = (result: LocalUsageSnapshot | null) => {
       if (settled) return;
       settled = true;
+      clearTimeout(timeout);
+      void worker.terminate().catch(() => {});
       resolve(result);
     };
+    const timeout = setTimeout(() => finish(null), LOCAL_USAGE_WORKER_TIMEOUT_MS);
     worker.once('message', (value: unknown) => finish(normalizeLocalUsageSnapshot(value)));
     worker.once('error', () => finish(null));
-    worker.once('exit', (code) => {
-      if (code !== 0) finish(null);
-    });
+    worker.once('exit', () => finish(null));
   });
 }
 
