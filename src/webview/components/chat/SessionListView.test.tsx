@@ -216,7 +216,7 @@ describe('SessionListView model details', () => {
     const selector = container.querySelector('.session-list-workspace-selector');
     const search = container.querySelector('.session-list-search');
     expect(selector?.nextElementSibling).toBe(search);
-    expect(selector?.textContent).toContain('Workspace:');
+    expect(selector?.textContent).toContain('Working directory:');
     expect(selector?.querySelector('.workspace-picker-folder-icon')).toBeNull();
 
     selector?.querySelector<HTMLButtonElement>('.workspace-picker-button')?.click();

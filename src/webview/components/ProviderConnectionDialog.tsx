@@ -205,7 +205,9 @@ export function ProviderConnectionDialog(props: {
       );
       if (controller.signal.aborted) return;
       setAuthorization(nextAuthorization);
-      postMessage({ type: 'vscode/open-external', payload: { url: nextAuthorization.url } });
+      if (nextAuthorization.url) {
+        postMessage({ type: 'vscode/open-external', payload: { url: nextAuthorization.url } });
+      }
       if (nextAuthorization.method === 'auto') {
         await client.config.completeProviderAuth(
           { providerID: id, method: index },
@@ -407,8 +409,8 @@ export function ProviderConnectionDialog(props: {
                                 Continue with {selectedProvider()?.name}
                               </div>
                               <div class="provider-connect-oauth-copy">
-                                Your browser will open to complete authorization. OpenCode securely
-                                stores the resulting credential.
+                                OpenCode will guide you through authorization and securely store the
+                                resulting credential.
                               </div>
                             </div>
                           </div>
@@ -465,18 +467,20 @@ export function ProviderConnectionDialog(props: {
                         {(auth) => (
                           <div class="provider-connect-authorization">
                             <AuthorizationInstructions text={auth().instructions} />
-                            <button
-                              type="button"
-                              class="provider-connect-secondary"
-                              onClick={() =>
-                                postMessage({
-                                  type: 'vscode/open-external',
-                                  payload: { url: auth().url },
-                                })
-                              }
-                            >
-                              Open authorization page
-                            </button>
+                            <Show when={auth().url}>
+                              <button
+                                type="button"
+                                class="provider-connect-secondary"
+                                onClick={() =>
+                                  postMessage({
+                                    type: 'vscode/open-external',
+                                    payload: { url: auth().url },
+                                  })
+                                }
+                              >
+                                Open authorization page
+                              </button>
+                            </Show>
                             <Show when={auth().method === 'code'}>
                               <label class="provider-connect-field">
                                 <span>Authorization code</span>
@@ -525,7 +529,7 @@ export function ProviderConnectionDialog(props: {
                             : authorization()?.method === 'code'
                               ? 'Complete connection'
                               : method().type === 'oauth'
-                                ? 'Continue in browser'
+                                ? 'Continue'
                                 : 'Connect'}
                         </button>
                       </div>

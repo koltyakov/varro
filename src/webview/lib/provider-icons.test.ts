@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import amazonIcon from '../assets/provider-icons/amazon.svg';
 import anthropicIcon from '../assets/provider-icons/anthropic.svg';
+import azureIcon from '../assets/provider-icons/azure.svg';
 import deepseekIcon from '../assets/provider-icons/deepseek.svg';
 import geminiIcon from '../assets/provider-icons/gemini.svg';
 import githubCopilotIcon from '../assets/provider-icons/copilot.svg';
@@ -43,6 +45,9 @@ describe('getProviderIcon', () => {
     ['kimi', kimiIcon],
     ['kimi-for-coding', kimiIcon],
     ['ollama-cloud', ollamaIcon],
+    ['azure', azureIcon],
+    ['azure-cognitive-services', azureIcon],
+    ['amazon-bedrock', amazonIcon],
   ])('maps provider "%s" to the expected icon asset', (provider, icon) => {
     expect(getProviderIcon(provider)).toBe(icon);
   });

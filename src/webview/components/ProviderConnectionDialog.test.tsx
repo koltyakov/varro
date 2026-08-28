@@ -345,8 +345,8 @@ describe('ProviderConnectionDialog method selection', () => {
     chooseMethod('ChatGPT subscription');
 
     expect(dialog()?.textContent).toContain('Continue with OpenAI');
-    expect(dialog()?.textContent).toContain('Your browser will open to complete authorization.');
-    expect(primaryButton().textContent).toBe('Continue in browser');
+    expect(dialog()?.textContent).toContain('OpenCode will guide you through authorization');
+    expect(primaryButton().textContent).toBe('Continue');
   });
 
   it('falls back to a generic API key method for catalog providers without plugins', () => {
@@ -645,6 +645,34 @@ describe('ProviderConnectionDialog OAuth flow', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('completes automatic authorization without opening an empty URL', async () => {
+    clientMocks.authorizeProvider.mockResolvedValue({
+      url: '',
+      method: 'auto',
+      instructions: 'Sign in with `az login` before continuing.',
+    });
+    setState('providerAuthMethods', {
+      azure: [{ type: 'oauth', label: 'Microsoft Entra ID (Azure CLI)' }],
+    });
+    const onClose = renderDialog({ catalogProviders: [catalogProvider('azure', 'Azure')] });
+
+    chooseProvider('Azure');
+    chooseMethod('Microsoft Entra ID (Azure CLI)');
+    primaryButton().click();
+    await flush();
+
+    expect(postMessageMock).not.toHaveBeenCalledWith({
+      type: 'vscode/open-external',
+      payload: { url: '' },
+    });
+    expect(findButton('Open authorization page')).toBeUndefined();
+    expect(clientMocks.completeProviderAuth).toHaveBeenCalledWith(
+      { providerID: 'azure', method: 0 },
+      { signal: expect.any(AbortSignal) }
+    );
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('collects and submits an authorization code for manual exchanges', async () => {
     clientMocks.authorizeProvider.mockResolvedValue({
       url: 'https://auth.example.com/device',
@@ -702,7 +730,7 @@ describe('ProviderConnectionDialog OAuth flow', () => {
 
     expect(alertText()).toContain('Browser blocked the redirect');
     expect(onClose).not.toHaveBeenCalled();
-    expect(primaryButton().textContent).toBe('Continue in browser');
+    expect(primaryButton().textContent).toBe('Continue');
     expect(primaryButton().disabled).toBe(false);
   });
 });

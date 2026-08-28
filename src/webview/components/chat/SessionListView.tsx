@@ -927,7 +927,7 @@ function SessionListWorkspaceSelector() {
   return (
     <Show when={(state.editorContext.workspaceFolders?.length ?? 0) > 1}>
       <div class="session-list-workspace-selector">
-        <span class="session-list-workspace-label">Workspace:</span>
+        <span class="session-list-workspace-label">Working directory:</span>
         <div class="session-list-workspace-picker">
           <WorkspacePicker
             buttonRef={(element) => {

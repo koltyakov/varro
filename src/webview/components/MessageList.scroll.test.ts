@@ -1209,6 +1209,161 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
+  it('does not reverse an upward wheel for a delayed stale measurement above its user anchor', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const observers: Array<{
+      callback: ResizeObserverCallback;
+      targets: Set<Element>;
+    }> = [];
+    class TestResizeObserver {
+      readonly targets = new Set<Element>();
+
+      constructor(readonly callback: ResizeObserverCallback) {
+        observers.push(this);
+      }
+      observe(target: Element) {
+        this.targets.add(target);
+      }
+      unobserve(target: Element) {
+        this.targets.delete(target);
+      }
+      disconnect() {
+        this.targets.clear();
+      }
+    }
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+
+    const rowHeights: number[] = Array.from({ length: 60 }, (_, index) =>
+      index % 2 === 0 ? 65 : 82
+    );
+    const rowTop = (index: number) =>
+      rowHeights.slice(0, index).reduce((total, height) => total + height, 0);
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 0, 720, 514);
+        }
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(
+            0,
+            0,
+            720,
+            rowHeights.reduce((total, height) => total + height, 0)
+          );
+        }
+        const row = this.dataset.msgId
+          ? this
+          : (this.closest<HTMLElement>('[data-msg-id]') ?? null);
+        const messageId = row?.dataset.msgId;
+        if (messageId?.startsWith('user-') || messageId?.startsWith('assistant-')) {
+          const index = Number(messageId.slice(messageId.lastIndexOf('-') + 1));
+          const top = rowTop(index) - scrollTopValue;
+          return this.classList.contains('user-message-card')
+            ? new DOMRect(0, top, 720, 40)
+            : new DOMRect(0, top, 720, rowHeights[index]);
+        }
+        return new DOMRect(0, 0, 720, 40);
+      }
+    );
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 60 }, (_, index) => {
+        const messageId = index % 2 === 0 ? `assistant-${index}` : `user-${index}`;
+        return {
+          info: index % 2 === 0 ? assistantMessage(messageId) : userMessage(messageId),
+          parts: [{ ...textPart(`text-${index}`, `Message ${index}`), messageID: messageId }],
+        };
+      })
+    );
+    cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 514 });
+    Object.defineProperty(list, 'clientWidth', { configurable: true, value: 720 });
+    Object.defineProperty(list, 'offsetWidth', { configurable: true, value: 720 });
+    Object.defineProperty(list, 'scrollHeight', {
+      configurable: true,
+      get: () => rowHeights.reduce((total, height) => total + height, 0),
+    });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    scrollTopValue = rowTop(20) + 23;
+    list.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    // The browser has already laid out this 2px change, but its observer entry is delayed until
+    // after the next direct wheel destination is established.
+    rowHeights[20] = rowHeights[20]! + 2;
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -180 }));
+    scrollTopValue -= 180;
+    list.dispatchEvent(new Event('scroll'));
+    const wheelDestination = scrollTopValue;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
+    const anchorCard = container?.querySelector(
+      '[data-msg-id="user-21"] .user-message-card'
+    ) as HTMLDivElement;
+    const anchorTop = anchorCard.getBoundingClientRect().top;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
+    const staleRow = container?.querySelector('[data-msg-id="assistant-20"]') as HTMLDivElement;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
+    const growingRow = container?.querySelector('[data-msg-id="assistant-24"]') as HTMLDivElement;
+    const rowObserver = observers.find(
+      (observer) => observer.targets.has(staleRow) && observer.targets.has(growingRow)
+    );
+    expect(rowObserver).toBeDefined();
+
+    rowHeights[24] = rowHeights[24]! + 134;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    rowObserver!.callback(
+      [
+        fixture<ResizeObserverEntry>({
+          target: staleRow,
+          borderBoxSize: [{ blockSize: rowHeights[20]!, inlineSize: 720 }],
+        }),
+        fixture<ResizeObserverEntry>({
+          target: growingRow,
+          borderBoxSize: [{ blockSize: rowHeights[24]!, inlineSize: 720 }],
+        }),
+      ],
+      fixture<ResizeObserver>(rowObserver)
+    );
+
+    expect(scrollTopValue).toBe(wheelDestination);
+    expect(anchorCard.getBoundingClientRect().top).toBe(anchorTop);
+
+    // A stale remembered position can also outlive an unrelated layout shift. An unchanged
+    // observer batch must not turn that displacement into a programmatic scroll correction.
+    rowHeights[20] = rowHeights[20]! + 179;
+    rowObserver!.callback(
+      [
+        fixture<ResizeObserverEntry>({
+          target: growingRow,
+          borderBoxSize: [{ blockSize: rowHeights[24]!, inlineSize: 720 }],
+        }),
+      ],
+      fixture<ResizeObserver>(rowObserver)
+    );
+    expect(scrollTopValue).toBe(wheelDestination);
+    animationFrames.restore();
+  });
+
   it('does not treat a visible row below pre-message chrome as above the viewport', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     const observers: Array<{
@@ -2987,7 +3142,7 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
-  it('ignores external PageUp but stops following after in-list PageUp movement', async () => {
+  it('yields bottom follow before a delayed in-list Shift+Space scroll event', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     const resizeCallbacks: ResizeObserverCallback[] = [];
     let trackHeight = 1200;
@@ -3060,9 +3215,8 @@ describe('MessageList auto-scroll', () => {
 
     expect(scrollTopValue).toBe(1000);
 
-    list?.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp', bubbles: true }));
-    scrollTopValue = 700;
-    list?.dispatchEvent(new Event('scroll'));
+    list?.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', shiftKey: true, bubbles: true }));
+    const keyboardOwnedTop = scrollTopValue;
 
     trackHeight = 1600;
     scrollHeightValue = 1600;
@@ -3072,7 +3226,10 @@ describe('MessageList auto-scroll', () => {
     }
     animationFrames.flush();
 
-    expect(scrollTopValue).toBe(700);
+    expect(scrollTopValue).toBe(keyboardOwnedTop);
+    list?.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(keyboardOwnedTop);
     animationFrames.restore();
   });
 

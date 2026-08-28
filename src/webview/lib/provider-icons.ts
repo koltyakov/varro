@@ -11,6 +11,8 @@ import kimiIcon from '../assets/provider-icons/kimi.svg';
 import ollamaIcon from '../assets/provider-icons/ollama.svg';
 import opencodeIcon from '../assets/provider-icons/opencode.svg';
 import metaIcon from '../assets/provider-icons/meta.svg';
+import azureIcon from '../assets/provider-icons/azure.svg';
+import amazonIcon from '../assets/provider-icons/amazon.svg';
 
 // Provider SVGs sourced from https://uxwing.com
 import githubCopilotIcon from '../assets/provider-icons/copilot.svg';
@@ -35,6 +37,9 @@ const PROVIDER_ICON_MAP = new Map<string, string>(
     'kimi-for-coding': kimiIcon,
     'ollama-cloud': ollamaIcon,
     meta: metaIcon,
+    azure: azureIcon,
+    'azure-cognitive-services': azureIcon,
+    'amazon-bedrock': amazonIcon,
   })
 );
 

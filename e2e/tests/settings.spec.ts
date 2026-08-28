@@ -62,6 +62,18 @@ test('thinking visibility preserves a detached virtualized anchor', async ({ pag
   const anchorElement = page
     .locator(`[data-assistant-render-key="${anchor.renderKey}"] ${anchor.tag}`)
     .nth(anchor.ordinal);
+  const shell = page.locator('.chat-main-column-shell');
+  for (const width of [900, 600, 1000, 700]) {
+    await shell.evaluate((element, nextWidth) => {
+      element.style.maxWidth = 'none';
+      element.style.width = `${nextWidth}px`;
+    }, width);
+    await page.waitForTimeout(150);
+  }
+  const afterResize = await anchorElement.evaluate(
+    (element) => element.getBoundingClientRect().top
+  );
+  expect(Math.abs(afterResize - anchor.top)).toBeLessThan(1.5);
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
 
   for (const expectedThinkingCount of [0, 1]) {
@@ -223,7 +235,7 @@ test('chat font changes preserve main typography proportions and a detached anch
   }
 });
 
-test('hiding thinking preserves visible markdown inside the same clipped assistant row', async ({
+test('hiding thinking during width reflow preserves visible markdown in the same assistant row', async ({
   page,
 }) => {
   await page.goto(
@@ -265,9 +277,17 @@ test('hiding thinking preserves visible markdown inside the same clipped assista
   );
 
   await expect(anchor).toBeVisible();
-  const before = await anchor.evaluate((element) => element.getBoundingClientRect().top);
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.fill('/thinking');
+  const widths = await page.locator('.chat-main-column-shell').evaluate(async (element) => {
+    const before = element.getBoundingClientRect().width;
+    element.style.maxWidth = 'none';
+    element.style.width = `${before - 56}px`;
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    return { before, after: element.getBoundingClientRect().width };
+  });
+  expect(widths.before - widths.after).toBeGreaterThan(40);
+  const before = await anchor.evaluate((element) => element.getBoundingClientRect().top);
   await page.keyboard.press('Enter');
   await expect(row.locator('.chat-thinking-box')).toHaveCount(0);
 

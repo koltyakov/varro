@@ -1141,7 +1141,7 @@ export function MessageList() {
     widthResizeSettleTimer = setTimeout(() => finishWidthResize(epoch), WIDTH_RESIZE_SETTLE_MS);
   }
 
-  function cancelWidthResize() {
+  function cancelWidthResize(pinnedMessageId: string | null = null) {
     widthResizeEpoch += 1;
     if (widthResizeSettleTimer) clearTimeout(widthResizeSettleTimer);
     widthResizeSettleTimer = 0;
@@ -1151,7 +1151,7 @@ export function MessageList() {
     pendingWidthStickyRefresh = false;
     pendingWidthFollowCorrection = false;
     widthResizeAnchor = null;
-    setWidthResizePinnedMessageId(null);
+    setWidthResizePinnedMessageId(pinnedMessageId);
   }
 
   function widthResizeCanOwnScroll() {
@@ -2252,11 +2252,31 @@ export function MessageList() {
       activeSessionId && getCurrentPendingHistoryAnchor(activeSessionId)?.anchor
     );
     let firstVisibleIndex: number | null = null;
+    let mountedDetachedAnchorAlreadyPreserved = false;
     if (metricsBefore && containerRef && !autoScroll() && !historyOwnsAnchor) {
+      const detachedAnchorElement = lastDetachedVisibleAnchor
+        ? getMountedScrollAnchorElement(lastDetachedVisibleAnchor)
+        : null;
+      const detachedAnchorTargetTop = lastDetachedVisibleAnchor
+        ? detachedAnchorElement?.dataset.msgId === lastDetachedVisibleAnchor.messageId
+          ? (lastDetachedVisibleAnchor.messageTop ?? lastDetachedVisibleAnchor.top)
+          : lastDetachedVisibleAnchor.top
+        : 0;
+      mountedDetachedAnchorAlreadyPreserved = !!(
+        !options?.widthReflow &&
+        lastDetachedVisibleAnchor &&
+        detachedAnchorElement &&
+        Math.abs(containerRef.scrollTop - lastDetachedVisibleAnchorScrollTop) <= 1 &&
+        Math.abs(
+          detachedAnchorElement.getBoundingClientRect().top -
+            containerRef.getBoundingClientRect().top -
+            detachedAnchorTargetTop
+        ) <= 1
+      );
       firstVisibleIndex =
         options?.widthReflow && widthResizeAnchor
           ? (messageIndexById().get(widthResizeAnchor.messageId) ?? null)
-          : lastDetachedVisibleAnchor && getMountedScrollAnchorElement(lastDetachedVisibleAnchor)
+          : lastDetachedVisibleAnchor && detachedAnchorElement
             ? (messageIndexById().get(lastDetachedVisibleAnchor.messageId) ?? null)
             : getFirstVisibleMessageIndexFromVirtualMetrics({
                 metrics: metricsBefore,
@@ -2293,8 +2313,9 @@ export function MessageList() {
       changed = true;
     }
 
-    if (containerRef && Math.abs(scrollAdjustment) > 0.5) {
-      setPreservedScrollTop(containerRef.scrollTop + scrollAdjustment);
+    const resolvedScrollAdjustment = mountedDetachedAnchorAlreadyPreserved ? 0 : scrollAdjustment;
+    if (containerRef && Math.abs(resolvedScrollAdjustment) > 0.5) {
+      setPreservedScrollTop(containerRef.scrollTop + resolvedScrollAdjustment);
     }
     if (widthResizeActive && widthResizeAnchor && widthResizeCanOwnScroll()) {
       restoreVisibleScrollAnchor(widthResizeAnchor);
@@ -5031,7 +5052,12 @@ export function MessageList() {
       } else if (event.key === 'Home') nextScrollTop = 0;
       else if (event.key === 'End') nextScrollTop = maximumScrollTop;
       event.preventDefault();
-      containerRef.scrollTop = Math.min(maximumScrollTop, Math.max(0, nextScrollTop));
+      const resolvedScrollTop = Math.min(maximumScrollTop, Math.max(0, nextScrollTop));
+      if (resolvedScrollTop < containerRef.scrollTop - 0.5) {
+        disengageBottomFollow();
+        resumeAutoScrollAfterDiffFocus = false;
+      }
+      containerRef.scrollTop = resolvedScrollTop;
       directMovementAnchor = null;
       const sessionId = state.activeSessionId;
       if (keydownDestinationRafId) cancelAnimationFrame(keydownDestinationRafId);
@@ -5293,23 +5319,56 @@ export function MessageList() {
     );
     onCleanup(unregisterQueuedMessageRemoval);
     const stopCapturingThinkingAnchor = onBeforeShowThinkingPreferenceChange(() => {
-      if (widthResizeActive) {
-        publishPendingWidthMeasurements({ preserveVisibleAnchor: false });
-        cancelWidthResize();
-      }
-      const anchor =
+      const canPreserveAnchor =
         !autoScroll() &&
         !stickyNavigationOwnsScroll() &&
         !editingMessage() &&
-        !pendingExpansionScrollAnchor
-          ? (captureThinkingVisibleScrollAnchor() ??
-            captureMountedVisibleScrollAnchorWithTopPad(0, true, {
-              maxRenderItemTopClip: WIDTH_RESIZE_ANCHOR_INSET_PX,
-              restrictToFirstVisibleRow: true,
-              skipThinkingRenderItems: true,
-            }))
+        !pendingExpansionScrollAnchor;
+      const widthAnchorElement =
+        canPreserveAnchor && widthResizeAnchor
+          ? getMountedScrollAnchorElement(widthResizeAnchor)
           : null;
+      const detachedAnchorElement =
+        canPreserveAnchor && lastDetachedVisibleAnchor
+          ? getMountedScrollAnchorElement(lastDetachedVisibleAnchor)
+          : null;
+      const detachedAnchorTargetTop = lastDetachedVisibleAnchor
+        ? detachedAnchorElement?.dataset.msgId === lastDetachedVisibleAnchor.messageId
+          ? (lastDetachedVisibleAnchor.messageTop ?? lastDetachedVisibleAnchor.top)
+          : lastDetachedVisibleAnchor.top
+        : 0;
+      const detachedAnchorIsCurrent = !!(
+        containerRef &&
+        lastDetachedVisibleAnchor &&
+        detachedAnchorElement &&
+        ((lastDetachedVisibleAnchor.renderKey && lastDetachedVisibleAnchor.elementTag) ||
+          detachedAnchorElement.classList.contains('user-message-card')) &&
+        Math.abs(
+          detachedAnchorElement.getBoundingClientRect().top -
+            containerRef.getBoundingClientRect().top -
+            detachedAnchorTargetTop
+        ) <= 1
+      );
+      const anchor = canPreserveAnchor
+        ? ((widthAnchorElement && !widthAnchorElement.closest('.chat-thinking-box')
+            ? widthResizeAnchor
+            : null) ??
+          (detachedAnchorIsCurrent && !detachedAnchorElement.closest('.chat-thinking-box')
+            ? lastDetachedVisibleAnchor
+            : null) ??
+          captureThinkingVisibleScrollAnchor() ??
+          captureMountedVisibleScrollAnchorWithTopPad(0, true, {
+            maxRenderItemTopClip: WIDTH_RESIZE_ANCHOR_INSET_PX,
+            restrictToFirstVisibleRow: true,
+            skipThinkingRenderItems: true,
+          }))
+        : null;
       pendingThinkingLayoutAnchor = anchor;
+      if (widthResizeActive) {
+        publishPendingWidthMeasurements({ preserveVisibleAnchor: false });
+        cancelWidthResize(anchor?.messageId ?? null);
+        restoreVisibleScrollAnchor(anchor);
+      }
     });
     onCleanup(stopCapturingThinkingAnchor);
     // SAFETY: The surrounding shape or discriminator check establishes the EventListener contract used below.
@@ -6197,6 +6256,13 @@ export function MessageList() {
     requestAnimationFrame(() => {
       if (pendingThinkingLayoutAnchor === preferredAnchor) {
         pendingThinkingLayoutAnchor = null;
+        if (
+          !widthResizeActive &&
+          preferredAnchor &&
+          untrack(widthResizePinnedMessageId) === preferredAnchor.messageId
+        ) {
+          setWidthResizePinnedMessageId(null);
+        }
       }
     });
 
