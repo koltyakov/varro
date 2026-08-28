@@ -719,6 +719,35 @@ describe('state helpers', () => {
     expect(stateModule.getPermissionModeForSession('session-1')).toBe('auto');
   });
 
+  it('treats a pending ancestor permission mode as pending for descendants', async () => {
+    const stateModule = await loadState();
+    stateModule.setSessions([
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'Parent',
+        version: '1',
+        time: { created: 0, updated: 0 },
+      },
+      {
+        id: 'child-1',
+        projectID: 'project-1',
+        directory: '/repo',
+        parentID: 'session-1',
+        title: 'Child',
+        version: '1',
+        time: { created: 0, updated: 0 },
+      },
+    ]);
+
+    stateModule.setPendingSessionPermissionMode('session-1', 'full');
+
+    expect(stateModule.isSessionPermissionModePending('session-1')).toBe(true);
+    expect(stateModule.isSessionPermissionModePending('child-1')).toBe(true);
+    expect(stateModule.isSessionPermissionModePending('session-2')).toBe(false);
+  });
+
   it('inherits a parent session permission mode for child sessions', async () => {
     const stateModule = await loadState();
 

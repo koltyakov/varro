@@ -29,10 +29,12 @@ Object.assign(clientMocks, { serverEventsOn });
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((next) => {
+  let reject!: (reason?: Error) => void;
+  const promise = new Promise<T>((next, fail) => {
     resolve = next;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function permission(id = 'perm-1'): Permission {
@@ -540,6 +542,104 @@ describe('useOpenCode permission and config flows', () => {
     try {
       expect(stateModule.state.permissions).toEqual([]);
       serverEventHandlers.get('server.connected')?.({});
+
+      await vi.waitFor(() =>
+        expect(stateModule.state.permissions).toEqual([
+          expect.objectContaining({ id: 'perm-restored' }),
+        ])
+      );
+    } finally {
+      dispose();
+    }
+  });
+
+  it('restores a hidden prompt when permission sync fails during a pending full PATCH', async () => {
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    const modeUpdate = deferred<ReturnType<typeof session>>();
+    clientMocks.varroSessionUpdatePermissionMode.mockReturnValue(modeUpdate.promise);
+    clientMocks.permissionList.mockRejectedValue(new Error('Permission list failed'));
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setState('sessions', [session('session-1')]);
+    stateModule.setPermissionModeForSession('session-1', 'auto');
+    stateModule.addPermission(permission('perm-pending-full'));
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      expect(stateModule.state.permissions).toEqual([]);
+      const update = hookModule.updatePermissionModeForSession('full', 'session-1');
+      await vi.waitFor(() =>
+        expect(clientMocks.varroSessionUpdatePermissionMode).toHaveBeenCalledWith(
+          'session-1',
+          'full'
+        )
+      );
+
+      serverEventHandlers.get('server.connected')?.({});
+      await vi.waitFor(() =>
+        expect(stateModule.state.permissions).toContainEqual(
+          expect.objectContaining({ id: 'perm-pending-full' })
+        )
+      );
+      expect(bridgeMocks.postMessage).toHaveBeenCalledWith({
+        type: 'permission/reveal',
+        payload: { permissionId: 'perm-pending-full' },
+      });
+      expect(clientMocks.sessionRespondPermission).not.toHaveBeenCalled();
+
+      modeUpdate.reject(new Error('Permission mode update failed'));
+      await update;
+
+      expect(stateModule.getPermissionModeForSession('session-1')).toBe('auto');
+      expect(stateModule.state.permissions).toContainEqual(
+        expect.objectContaining({ id: 'perm-pending-full' })
+      );
+    } finally {
+      dispose();
+    }
+  });
+
+  it('restores a hidden prompt when a newer overlapping permission sync fails', async () => {
+    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
+    bridgeOnMessage.mockImplementation((handler) => {
+      bridgeHandler = handler;
+      return () => {
+        bridgeHandler = undefined;
+      };
+    });
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    const firstList = deferred<ReturnType<typeof permissionListItem>[]>();
+    const secondList = deferred<ReturnType<typeof permissionListItem>[]>();
+    clientMocks.permissionList
+      .mockReturnValueOnce(firstList.promise)
+      .mockReturnValueOnce(secondList.promise);
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setPermissionModeForSession('session-1', 'auto');
+    stateModule.addPermission(permission('perm-restored'));
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      serverEventHandlers.get('server.connected')?.({});
+      await vi.waitFor(() => expect(clientMocks.permissionList).toHaveBeenCalledOnce());
+      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
+      bridgeHandler({
+        type: 'permission/actionable',
+        payload: { permissionId: 'perm-restored' },
+      });
+      await vi.waitFor(() => expect(clientMocks.permissionList).toHaveBeenCalledTimes(2));
+
+      firstList.resolve([]);
+      await Promise.resolve();
+      secondList.reject(new Error('newer sync failed'));
 
       await vi.waitFor(() =>
         expect(stateModule.state.permissions).toEqual([
@@ -1294,11 +1394,12 @@ describe('useOpenCode permission and config flows', () => {
     configureReconciliationMocks();
     clientMocks.permissionList.mockResolvedValue([]);
     clientMocks.sessionRespondPermission.mockResolvedValue(undefined);
+    const recheck = deferred<{ decision: 'allow'; reason: string }>();
     clientMocks.varroJudgePermission
       .mockResolvedValue({ decision: 'ask', reason: 'review' })
       .mockResolvedValueOnce({ decision: 'ask', reason: 'first request needs review' })
       .mockResolvedValueOnce({ decision: 'ask', reason: 'second request needs review' })
-      .mockResolvedValueOnce({ decision: 'allow', reason: 'matches the always preference' });
+      .mockReturnValueOnce(recheck.promise);
 
     const { stateModule, hookModule } = await loadModules();
     stateModule.setPermissionModeForSession('session-1', 'auto');
@@ -1342,6 +1443,9 @@ describe('useOpenCode permission and config flows', () => {
       await hookModule.respondPermission('session-1', 'perm-first', 'always');
 
       await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledTimes(3));
+      expect(stateModule.state.permissions).toContainEqual(
+        expect.objectContaining({ id: 'perm-second' })
+      );
       expect(clientMocks.varroJudgePermission.mock.calls[2]?.[0]).toEqual(
         expect.objectContaining({
           permission: expect.objectContaining({ id: 'perm-second' }),
@@ -1355,6 +1459,7 @@ describe('useOpenCode permission and config flows', () => {
           ],
         })
       );
+      recheck.resolve({ decision: 'allow', reason: 'matches the always preference' });
       await vi.waitFor(() =>
         expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
           'session-1',
@@ -1429,6 +1534,135 @@ describe('useOpenCode permission and config flows', () => {
         )
       );
       expect(stateModule.state.permissions).toEqual([]);
+    } finally {
+      dispose();
+    }
+  });
+
+  it('keeps an optimistic full-mode request visible until the PATCH is confirmed', async () => {
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    const modeUpdate = deferred<ReturnType<typeof session>>();
+    clientMocks.varroSessionUpdatePermissionMode.mockReturnValue(modeUpdate.promise);
+    clientMocks.sessionRespondPermission.mockResolvedValue(undefined);
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setState('sessions', [session('session-1')]);
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      const update = hookModule.updatePermissionModeForSession('full', 'session-1');
+      await vi.waitFor(() =>
+        expect(clientMocks.varroSessionUpdatePermissionMode).toHaveBeenCalledWith(
+          'session-1',
+          'full'
+        )
+      );
+
+      serverEventHandlers.get('permission.asked')?.({
+        properties: permissionListItem('perm-during-patch'),
+      });
+      expect(clientMocks.sessionRespondPermission).not.toHaveBeenCalled();
+      expect(stateModule.state.permissions).toContainEqual(
+        expect.objectContaining({ id: 'perm-during-patch' })
+      );
+
+      modeUpdate.resolve(session('session-1'));
+      await update;
+
+      expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
+        'session-1',
+        'perm-during-patch',
+        'always'
+      );
+    } finally {
+      dispose();
+    }
+  });
+
+  it('keeps an optimistic edits-mode request visible until the PATCH is confirmed', async () => {
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    const modeUpdate = deferred<ReturnType<typeof session>>();
+    const editRequest = {
+      ...permissionListItem('edit-during-patch'),
+      permission: 'edit',
+    };
+    clientMocks.varroSessionUpdatePermissionMode.mockReturnValue(modeUpdate.promise);
+    clientMocks.permissionList.mockResolvedValue([editRequest]);
+    clientMocks.sessionRespondPermission.mockResolvedValue(undefined);
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setState('sessions', [session('session-1')]);
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      const update = hookModule.updatePermissionModeForSession('edits', 'session-1');
+      await vi.waitFor(() =>
+        expect(clientMocks.varroSessionUpdatePermissionMode).toHaveBeenCalledOnce()
+      );
+      serverEventHandlers.get('permission.asked')?.({ properties: editRequest });
+
+      expect(clientMocks.sessionRespondPermission).not.toHaveBeenCalled();
+      expect(stateModule.state.permissions).toContainEqual(
+        expect.objectContaining({ id: 'edit-during-patch' })
+      );
+
+      modeUpdate.resolve(session('session-1'));
+      await update;
+
+      expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
+        'session-1',
+        'edit-during-patch',
+        'once'
+      );
+    } finally {
+      dispose();
+    }
+  });
+
+  it('sweeps only effective-full request owners in the selected child subtree', async () => {
+    configureReconciliationMocks();
+    clientMocks.sessionRespondPermission.mockResolvedValue(undefined);
+    clientMocks.varroSessionUpdatePermissionMode.mockResolvedValue({
+      ...session('child-1'),
+      parentID: 'root-1',
+    });
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setState('sessions', [
+      session('root-1'),
+      { ...session('child-1'), parentID: 'root-1' },
+      { ...session('sibling-1'), parentID: 'root-1' },
+      { ...session('grandchild-1'), parentID: 'child-1' },
+    ]);
+    stateModule.setPermissionModeForSession('root-1', 'auto');
+    stateModule.setPermissionModeForSession('grandchild-1', 'default');
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      for (const [id, sessionID] of [
+        ['perm-parent', 'root-1'],
+        ['perm-child', 'child-1'],
+        ['perm-sibling', 'sibling-1'],
+        ['perm-restrictive', 'grandchild-1'],
+      ] as const) {
+        stateModule.addPermission({ ...permission(id), sessionID });
+      }
+      await hookModule.updatePermissionModeForSession('full', 'child-1');
+
+      expect(clientMocks.sessionRespondPermission.mock.calls).toEqual([
+        ['child-1', 'perm-child', 'always'],
+      ]);
     } finally {
       dispose();
     }

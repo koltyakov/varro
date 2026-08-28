@@ -1131,11 +1131,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (!(this.queuedMessages.list() ?? []).some((message) => message.sessionId === sessionId)) {
       return;
     }
+    const currentStatus =
+      status === 'idle' && this.sessionState.busy.has(sessionId) ? 'busy' : status;
     for (const endpoint of this.endpoints) {
       if (!endpoint.ready) continue;
       endpoint.bridge.post({
         type: 'queued-messages/session-status',
-        payload: { sessionId, status },
+        payload: { sessionId, status: currentStatus },
       });
     }
   }
@@ -2130,6 +2132,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     );
     const trackedSessionIDs = new Set([...this.sessionState.busy, ...queuedSessionIDs]);
     if (trackedSessionIDs.size === 0) return;
+    const observedBusyRevisions = new Map(
+      [...this.sessionState.busy].map((sessionID) => [
+        sessionID,
+        this.sessionState.busyEvidenceRevisionFor(sessionID),
+      ])
+    );
     let serverStatuses: Record<string, unknown>;
     try {
       const directories = new Set<string | undefined>();
@@ -2159,7 +2167,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
     const stale = this.sessionState.reconcileStaleBusySessions(
       serverStatuses,
-      SidebarProvider.SESSION_RECONCILE_GRACE_MS
+      SidebarProvider.SESSION_RECONCILE_GRACE_MS,
+      Date.now(),
+      observedBusyRevisions
     );
     for (const sessionID of stale) {
       this.post({

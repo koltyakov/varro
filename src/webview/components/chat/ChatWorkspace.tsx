@@ -7,7 +7,7 @@ import { ActiveChatHeader, SessionPickerHeader } from './ChatHeader';
 import { SessionListView } from './SessionListView';
 import type { SessionListFilter } from './SessionListView';
 import type { SlowApiRequest } from '../../lib/bridge';
-import { inlineEditMount } from '../../lib/message-edit-state';
+import { editingMessage, inlineEditMount } from '../../lib/message-edit-state';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { state } from '../../lib/state';
 import { ManagedSubagentFooter } from './ManagedSubagentFooter';
@@ -27,11 +27,14 @@ function activeRalphSessionId() {
 // bottom slot.
 function ComposerHost() {
   const [bottomMount, setBottomMount] = createSignal<HTMLElement | null>(null);
-  const mountTarget = () => inlineEditMount() ?? bottomMount();
+  const [parkingMount, setParkingMount] = createSignal<HTMLElement | null>(null);
+  const mountTarget = () =>
+    inlineEditMount() ?? (editingMessage() ? parkingMount() : bottomMount());
 
   return (
     <>
       <div class="composer-bottom-slot" ref={setBottomMount} />
+      <div hidden ref={setParkingMount} />
       <Show when={!!mountTarget()}>
         <Portal
           mount={mountTarget()!}

@@ -278,7 +278,8 @@ export function getThinkingLayoutSignatures(
     info: { id: string; role: 'user' | 'assistant' };
     parts: readonly Part[];
   }[],
-  enabled: boolean
+  enabled: boolean,
+  expandedMessageIds: ReadonlySet<string> = new Set()
 ) {
   const signatures = new Map<string, string>();
   if (!enabled) return signatures;
@@ -289,7 +290,8 @@ export function getThinkingLayoutSignatures(
       part.type === 'reasoning' && hasVisibleReasoningContent(part.text) ? [part.id] : []
     );
     if (reasoningPartIds.length > 0) {
-      signatures.set(message.info.id, reasoningPartIds.join('\u0000'));
+      const expansionState = expandedMessageIds.has(message.info.id) ? 'expanded' : 'collapsed';
+      signatures.set(message.info.id, `${expansionState}\u0000${reasoningPartIds.join('\u0000')}`);
     }
   }
   return signatures;

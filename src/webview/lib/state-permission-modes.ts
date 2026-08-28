@@ -106,6 +106,17 @@ export function setPendingSessionPermissionMode(sessionId: string, mode: Permiss
   else pendingSessionPermissionModes.set(sessionId, mode);
 }
 
+export function isSessionPermissionModePending(sessionId: string): boolean {
+  const visited = new Set<string>();
+  let currentSessionId: string | undefined = sessionId;
+  while (currentSessionId && !visited.has(currentSessionId)) {
+    if (pendingSessionPermissionModes.has(currentSessionId)) return true;
+    visited.add(currentSessionId);
+    currentSessionId = state.sessions.find((session) => session.id === currentSessionId)?.parentID;
+  }
+  return false;
+}
+
 export function syncSessionPermissionModesToHost() {
   if (readWebviewInstanceContext()?.surface !== 'sidebar') return;
   const hostModes = readInitialWebviewState().sessionPermissionModes ?? {};

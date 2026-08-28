@@ -618,13 +618,13 @@ export function ToolCall(props: {
         state={state()}
         statusClass={statusClass()}
         title={title()}
-        expanded={expanded() && !props.lightweight}
+        expanded={expanded()}
         toggleExpand={toggleExpand}
         inputEntries={inputEntries()}
         fullOutput={fullOutput()}
         runningOutput={runningOutput()}
         waitingForPermission={isWaitingForPermission()}
-        lightweight={props.lightweight}
+        lightweight={props.lightweight && !expanded()}
       />
     );
   };

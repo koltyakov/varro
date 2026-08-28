@@ -501,6 +501,39 @@ describe('MarkdownRenderer', () => {
     expect(link?.getAttribute('aria-label')).toBe('Visual Studio Marketplace');
     expect(link?.getAttribute('data-external')).toBe('true');
     expect(link?.querySelector('.external-link-icon')).toBeNull();
+    expect(images[0]?.closest('.markdown-image-frame')).toBeNull();
+  });
+
+  it('reserves bounded frames for linked and unlinked content images', () => {
+    cleanup = render(
+      () =>
+        MarkdownRenderer({
+          content:
+            '![Screenshot](https://example.test/screenshot.png) [![Linked screenshot](https://example.test/linked-screenshot.png)](https://example.test/details)',
+        }),
+      container!
+    );
+
+    const frames = container?.querySelectorAll<HTMLElement>('.markdown-image-frame');
+    expect(frames).toHaveLength(2);
+    expect(frames?.[0]?.querySelector('img')?.getAttribute('src')).toBe(
+      'https://example.test/screenshot.png'
+    );
+    expect(frames?.[1]?.closest('a')?.getAttribute('href')).toBe('https://example.test/details');
+  });
+
+  it('keeps compact icons and portraits at their intrinsic geometry', () => {
+    cleanup = render(
+      () =>
+        MarkdownRenderer({
+          content:
+            '![App icon](https://example.test/assets/app.png) ![Author portrait](https://example.test/people/author.jpg) <img src="https://example.test/custom.png" width="48" height="48" alt="Custom mark">',
+        }),
+      container!
+    );
+
+    expect(container?.querySelectorAll('.markdown-image-frame')).toHaveLength(0);
+    expect(container?.querySelectorAll('img:not(.external-link-icon)')).toHaveLength(3);
   });
 
   it('removes images with non-HTTPS sources', () => {

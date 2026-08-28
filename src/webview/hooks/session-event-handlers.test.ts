@@ -662,14 +662,23 @@ describe('registerSessionEventHandlers', () => {
   it('reconciles server state after the event stream reconnects', async () => {
     const handlers = installHandlers();
     const reconcileServerState = vi.fn().mockResolvedValue(undefined);
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
 
-    registerSessionEventHandlers(createDefaultDeps({ reconcileServerState }));
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        reconcileServerState,
+        syncSessionMessages,
+      })
+    );
 
     handlers.get('server.connected')?.({});
     handlers.get('server.connected')?.({});
     await Promise.resolve();
 
     expect(reconcileServerState).toHaveBeenCalledTimes(1);
+    expect(syncSessionMessages).toHaveBeenCalledOnce();
+    expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
   });
 
   it('marks session.error events failed and stops active loading', () => {
@@ -2195,6 +2204,60 @@ describe('registerSessionEventHandlers', () => {
     expect(syncSession).toHaveBeenCalledWith('session-1', expect.anything());
     expect(syncSessionMessages).toHaveBeenCalledOnce();
     expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+  });
+
+  it('reconciles a lower sequence as a reset, then accepts the new sequence', async () => {
+    const handlers = installHandlers();
+    const syncSession = vi.fn().mockResolvedValue(undefined);
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+
+    registerSessionEventHandlers(createDefaultDeps({ syncSession, syncSessionMessages }));
+
+    for (const seq of [10, 1]) {
+      emitServerEvent(handlers, 'session.next.step.started', {
+        properties: { sessionID: 'session-1', assistantMessageID: `assistant-${seq}` },
+        seq,
+      });
+    }
+    await vi.waitFor(() => expect(syncSession).toHaveBeenCalledOnce());
+    await Promise.resolve();
+    await Promise.resolve();
+
+    emitServerEvent(handlers, 'session.next.step.ended', {
+      properties: { sessionID: 'session-1', assistantMessageID: 'assistant-2' },
+      seq: 2,
+    });
+    await Promise.resolve();
+
+    expect(syncSession).toHaveBeenCalledOnce();
+    expect(syncSessionMessages).toHaveBeenCalledOnce();
+  });
+
+  it('does not rewind the sequence cursor for a stale lower replay', async () => {
+    const handlers = installHandlers();
+    const syncSession = vi.fn().mockResolvedValue(undefined);
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+
+    registerSessionEventHandlers(createDefaultDeps({ syncSession, syncSessionMessages }));
+
+    for (const seq of [10, 9]) {
+      emitServerEvent(handlers, 'session.next.step.started', {
+        properties: { sessionID: 'session-1', assistantMessageID: `assistant-${seq}` },
+        seq,
+      });
+    }
+    await vi.waitFor(() => expect(syncSession).toHaveBeenCalledOnce());
+    await Promise.resolve();
+    await Promise.resolve();
+
+    emitServerEvent(handlers, 'session.next.step.ended', {
+      properties: { sessionID: 'session-1', assistantMessageID: 'assistant-11' },
+      seq: 11,
+    });
+    await Promise.resolve();
+
+    expect(syncSession).toHaveBeenCalledOnce();
+    expect(syncSessionMessages).toHaveBeenCalledOnce();
   });
 
   it('reconciles a gap observed from sequence-only upgrades', () => {
@@ -4089,7 +4152,7 @@ describe('registerSessionEventHandlers', () => {
     expect(stopLoading).not.toHaveBeenCalled();
   });
 
-  it('keeps a completed child session idle on a trailing busy status', () => {
+  it('does not treat the completed parent transcript tail as a completed child turn', () => {
     const handlers = installHandlers();
     const setSessionStatusEntry = vi.fn();
 
@@ -4101,6 +4164,69 @@ describe('registerSessionEventHandlers', () => {
       createDefaultDeps({
         getActiveSessionId: () => 'session-parent',
         getMessages: () => [createCompletedAssistantEntry(1, 2)],
+        getSessionStatus: () => ({ type: 'idle' }),
+        isSessionInActiveTree: (sessionId) =>
+          sessionId === 'session-parent' || sessionId === 'session-child',
+        setSessionStatusEntry,
+      })
+    );
+
+    handlers.get('session.status')?.({
+      properties: { sessionID: 'session-child', status: { type: 'busy' } },
+    });
+
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-child', { type: 'busy' });
+    expect(startLoading).toHaveBeenCalledTimes(1);
+    expect(stopLoading).not.toHaveBeenCalled();
+
+    loadingStartedAt.mockReturnValue(null);
+  });
+
+  it('does not drop child progress because the parent transcript tail is completed', () => {
+    const handlers = installHandlers();
+    const setSessionStatusEntry = vi.fn();
+
+    loadingStartedAt.mockReturnValue(1);
+    startLoading.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-parent',
+        getMessages: () => [createCompletedAssistantEntry(1, 2)],
+        isSessionInActiveTree: (sessionId) =>
+          sessionId === 'session-parent' || sessionId === 'session-child',
+        setSessionStatusEntry,
+      })
+    );
+
+    handlers.get('session.next.text.delta')?.({
+      properties: { sessionID: 'session-child', text: 'child progress' },
+    });
+
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-child', { type: 'busy' });
+    expect(startLoading).toHaveBeenCalledTimes(1);
+
+    loadingStartedAt.mockReturnValue(null);
+  });
+
+  it('keeps a completed child session idle on a trailing busy status', () => {
+    const handlers = installHandlers();
+    const setSessionStatusEntry = vi.fn();
+
+    loadingStartedAt.mockReturnValue(1);
+    startLoading.mockClear();
+    stopLoading.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-parent',
+        getMessages: () => [
+          createAssistantEntry({
+            sessionID: 'session-child',
+            time: { created: 1, completed: 2 },
+            finish: 'stop',
+          }),
+        ],
         getSessionStatus: () => ({ type: 'idle' }),
         isSessionInActiveTree: (sessionId) =>
           sessionId === 'session-parent' || sessionId === 'session-child',

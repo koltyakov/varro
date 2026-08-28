@@ -40,7 +40,18 @@ export function VirtualizedContent(
   );
   type PinnedSegment =
     | { type: 'gap'; start: number; end: number }
-    | { type: 'message'; index: number; message: MessageEntry };
+    | { type: 'message'; index: number; messageId: string };
+  type MessageRenderItem = { type: 'message'; messageId: string };
+  type RenderItem = { type: 'gap'; start: number; end: number } | MessageRenderItem;
+  const messageRenderItems = new Map<string, MessageRenderItem>();
+  const getMessageRenderItem = (messageId: string) => {
+    let item = messageRenderItems.get(messageId);
+    if (!item) {
+      item = { type: 'message', messageId };
+      messageRenderItems.set(messageId, item);
+    }
+    return item;
+  };
   const pinnedSegments = createMemo<PinnedSegment[]>(() => {
     if (!hasPinnedGap()) return [];
     const start = pinnedGapStart()!;
@@ -54,33 +65,39 @@ export function VirtualizedContent(
         !!props.assistantActivityGroupMap?.has(message.info.id);
       if (!forceContent) continue;
       if (gapStart < index) segments.push({ type: 'gap', start: gapStart, end: index });
-      segments.push({ type: 'message', index, message });
+      segments.push({ type: 'message', index, messageId: message.info.id });
       gapStart = index + 1;
     }
     if (gapStart < end) segments.push({ type: 'gap', start: gapStart, end });
     return segments;
   });
-  type VirtualGap = { virtualGap: true; start: number; end: number };
-  const renderItems = createMemo<Array<MessageEntry | VirtualGap>>(() => {
+  const renderItems = createMemo<RenderItem[]>(() => {
     const range = visibleRange();
-    if (!hasPinnedGap()) return props.messages.slice(range.start, range.end);
+    if (!hasPinnedGap()) {
+      return props.messages
+        .slice(range.start, range.end)
+        .map((message) => getMessageRenderItem(message.info.id));
+    }
 
-    const items: Array<MessageEntry | VirtualGap> = props.messages.slice(
-      range.start,
-      pinnedGapStart()!
-    );
+    const items: RenderItem[] = props.messages
+      .slice(range.start, pinnedGapStart()!)
+      .map((message) => getMessageRenderItem(message.info.id));
     for (const segment of pinnedSegments()) {
       if (segment.type === 'gap') {
-        items.push({ virtualGap: true, start: segment.start, end: segment.end });
+        items.push({ type: 'gap', start: segment.start, end: segment.end });
       } else {
-        items.push(segment.message);
+        items.push(getMessageRenderItem(segment.messageId));
       }
     }
-    items.push(...props.messages.slice(pinnedGapEnd()!, range.end));
+    items.push(
+      ...props.messages
+        .slice(pinnedGapEnd()!, range.end)
+        .map((message) => getMessageRenderItem(message.info.id))
+    );
     return items;
   });
   const messageIndexes = createMemo(
-    () => new Map(props.messages.map((message, index) => [message, index] as const))
+    () => new Map(props.messages.map((message, index) => [message.info.id, index] as const))
   );
   // Keep the temporary gap inert through pin removal, then hydrate its bounded remainder when input is idle.
   const retainedPinnedPlaceholderMessageIds = new Set<string>();
@@ -120,6 +137,9 @@ export function VirtualizedContent(
   };
   createEffect(() => {
     const currentMessageIds = new Set(props.messages.map((message) => message.info.id));
+    for (const messageId of messageRenderItems.keys()) {
+      if (!currentMessageIds.has(messageId)) messageRenderItems.delete(messageId);
+    }
     for (const messageId of retainedPinnedPlaceholderMessageIds) {
       if (!currentMessageIds.has(messageId)) retainedPinnedPlaceholderMessageIds.delete(messageId);
     }
@@ -139,7 +159,8 @@ export function VirtualizedContent(
   });
   onCleanup(cancelRetainedPlaceholderRelease);
 
-  const renderMessage = (msg: MessageEntry, absoluteIndex: () => number) => {
+  const renderMessage = (messageId: string, absoluteIndex: () => number) => {
+    const message = () => props.messages[absoluteIndex()]!;
     const nearViewport = createMemo(() => {
       const index = absoluteIndex();
       return (index >= coreStart() && index < coreEnd()) || index === pinnedIndex();
@@ -152,8 +173,8 @@ export function VirtualizedContent(
     });
     const forceVirtualContent = createMemo(
       () =>
-        !!props.forceVirtualContent?.(msg.info.id) ||
-        !!props.assistantActivityGroupMap?.has(msg.info.id)
+        !!props.forceVirtualContent?.(messageId) ||
+        !!props.assistantActivityGroupMap?.has(messageId)
     );
     const previousVisibleIndex = createMemo(() => {
       let previousIndex = absoluteIndex() - 1;
@@ -168,7 +189,7 @@ export function VirtualizedContent(
     const followsVisibleAssistantResponse = createMemo(() => {
       const previousIndex = previousVisibleIndex();
       return (
-        msg.info.role === 'assistant' &&
+        message().info.role === 'assistant' &&
         previousIndex >= 0 &&
         props.messages[previousIndex]!.info.role === 'assistant'
       );
@@ -176,7 +197,7 @@ export function VirtualizedContent(
     const followsVisibleUserRequest = createMemo(() => {
       const previousIndex = previousVisibleIndex();
       return (
-        msg.info.role === 'assistant' &&
+        message().info.role === 'assistant' &&
         previousIndex >= 0 &&
         props.messages[previousIndex]!.info.role === 'user'
       );
@@ -187,15 +208,15 @@ export function VirtualizedContent(
       const previousMessageId = props.messages[previousIndex]!.info.id;
       return (
         props.messageBlockBoundaryMap?.get(previousMessageId)?.endsBordered === true &&
-        props.messageBlockBoundaryMap?.get(msg.info.id)?.startsBordered === true
+        props.messageBlockBoundaryMap?.get(messageId)?.startsBordered === true
       );
     });
     const continuesVisibleActivityGroup = createMemo(() => {
       const previousIndex = previousVisibleIndex();
-      if (msg.info.role !== 'assistant' || previousIndex < 0) return false;
+      if (message().info.role !== 'assistant' || previousIndex < 0) return false;
       const previousMessage = props.messages[previousIndex]!;
       if (previousMessage.info.role !== 'assistant') return false;
-      const currentGroups = props.assistantActivityGroupMap?.get(msg.info.id);
+      const currentGroups = props.assistantActivityGroupMap?.get(messageId);
       const previousGroups = props.assistantActivityGroupMap?.get(previousMessage.info.id);
       if (!currentGroups || !previousGroups) return false;
       const previousKeys = new Set(previousGroups.map((group) => group.key));
@@ -203,7 +224,6 @@ export function VirtualizedContent(
     });
     const virtualPlaceholder = createMemo(() => {
       retainedPlaceholderVersion();
-      const messageId = msg.info.id;
       if (forceVirtualContent()) {
         retainedPinnedPlaceholderMessageIds.delete(messageId);
         return false;
@@ -212,11 +232,11 @@ export function VirtualizedContent(
     });
     return (
       <MessageRow
-        msg={msg}
+        msg={message()}
         nearViewport={nearViewport()}
         virtualHeight={virtualHeight()}
         virtualPlaceholder={virtualPlaceholder()}
-        renderEmpty={props.renderEmptyMessageIds?.has(msg.info.id)}
+        renderEmpty={props.renderEmptyMessageIds?.has(messageId)}
         followsVisibleUserRequest={followsVisibleUserRequest()}
         followsVisibleAssistantResponse={followsVisibleAssistantResponse()}
         followsBorderedBlock={followsBorderedBlock()}
@@ -265,7 +285,7 @@ export function VirtualizedContent(
       </Show>
       <For each={renderItems()}>
         {(item) =>
-          'virtualGap' in item ? (
+          item.type === 'gap' ? (
             <div
               class="virtual-spacer virtual-pinned-gap"
               style={{
@@ -274,7 +294,7 @@ export function VirtualizedContent(
               aria-hidden="true"
             />
           ) : (
-            renderMessage(item, () => messageIndexes().get(item) ?? -1)
+            renderMessage(item.messageId, () => messageIndexes().get(item.messageId)!)
           )
         }
       </For>

@@ -1851,13 +1851,19 @@ describe('OpenCodeServer compatibility gate', () => {
       };
     };
     api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.17.19' });
-    api.startEventStream = vi.fn();
+    api.startEventStream = vi.fn(() => {
+      expect(server.status.state).not.toBe('running');
+    });
     api.requestMaintenanceCheck = vi.fn();
     api.processManager.prepareForHealthyExistingServer = prepareForHealthyExistingServer;
 
     await expect(server.start()).resolves.toBe(server.url);
 
-    expect(server.status.state).toBe('running');
+    expect(server.status).toEqual({
+      state: 'running',
+      url: server.url,
+      eventStream: 'degraded',
+    });
     expect(prepareForHealthyExistingServer).toHaveBeenCalledOnce();
     expect(spawnMock).not.toHaveBeenCalled();
   });

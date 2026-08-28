@@ -422,8 +422,7 @@ export class OpenCodeServer extends EventEmitter {
               'Varro chat auto-compaction settings require a Varro-managed OpenCode server; project opencode.json still overrides when present'
             );
           }
-          this.setRunningStatus(this.url, 'healthy');
-          this.startEventStream();
+          this.beginRunningEventStream();
           this.requestMaintenanceCheck();
           return this.url;
         }
@@ -750,9 +749,8 @@ export class OpenCodeServer extends EventEmitter {
             failStartup(OpenCodeServer.OWNERSHIP_CONFIRMATION_FAILED_MESSAGE);
             return;
           }
-          this.setRunningStatus(this.url, 'healthy');
           this.processManager.resetPortRetryState();
-          this.startEventStream();
+          this.beginRunningEventStream();
           finishStartup(this.url);
           return;
         }
@@ -1045,9 +1043,8 @@ export class OpenCodeServer extends EventEmitter {
           reject(new Error(OpenCodeServer.OWNERSHIP_CONFIRMATION_FAILED_MESSAGE));
           return;
         }
-        this.setRunningStatus(this.url, 'healthy');
         this.processManager.resetPortRetryState();
-        this.startEventStream();
+        this.beginRunningEventStream();
         resolve(this.url);
       } else {
         this.pollHealth(
@@ -1167,6 +1164,14 @@ export class OpenCodeServer extends EventEmitter {
 
   private async startEventStream() {
     await this.transport.startEventStream();
+  }
+
+  private beginRunningEventStream() {
+    // Start the subscription request before publishing running state so snapshot
+    // reads triggered by that status cannot get ahead of the SSE subscription.
+    const stream = this.startEventStream();
+    this.setRunningStatus(this.url, 'degraded');
+    void stream;
   }
 
   private stopEventStream() {

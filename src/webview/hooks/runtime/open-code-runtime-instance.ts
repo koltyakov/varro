@@ -138,7 +138,10 @@ export interface OpenCodeRuntime {
   applySessionMcps(names: string[], sessionId?: string | null): Promise<void>;
   selectSession(id: string, options?: SessionSelectionOptions): Promise<void>;
   loadFullSessionHistory(sessionId: string): Promise<void>;
-  loadOlderSessionHistoryPage(sessionId: string): Promise<boolean>;
+  loadOlderSessionHistoryPage(
+    sessionId: string,
+    options?: { prefetchBoundaryPrompts?: boolean }
+  ): Promise<boolean>;
   loadOlderSessionPrompts(sessionId: string): Promise<boolean>;
   createSession(title?: string, initialPermissionMode?: PermissionMode): Promise<string | null>;
   renameSession(id: string, title: string): Promise<boolean>;
@@ -1409,9 +1412,6 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       const pendingPermissions = await client.permission.list();
       if (syncGeneration < latestPermissionSyncGeneration) return;
       latestPermissionSyncGeneration = syncGeneration;
-      for (const permission of restoredPermissions) {
-        hiddenRestoredPermissions.delete(permission.id);
-      }
       const normalizedPendingPermissions = pendingPermissions
         .map((item) => normalizePermissionEvent(item))
         .filter((permission): permission is Permission => permission !== null);
@@ -1447,7 +1447,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       for (const permission of normalizedPendingPermissions) {
         if (!isCurrent()) return;
         const mode = permissionsStore.getPermissionModeForSession(permission.sessionID);
-        if (permissionAutomationOwner && mode === 'full') {
+        const modePending = permissionsStore.isSessionPermissionModePending(permission.sessionID);
+        if (permissionAutomationOwner && !modePending && mode === 'full') {
           pendingPermissionHandlers.push(
             sessionApprovalOperations
               .respondPermission(permission.sessionID, permission.id, 'always', {
@@ -1470,13 +1471,18 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           );
           continue;
         }
-        if (permissionAutomationOwner && mode === 'auto') {
+        if (permissionAutomationOwner && !modePending && mode === 'auto') {
           const attempt = permissionJudgeAttempts.get(permission.id);
           if (attempt?.status === 'visible') visiblePermissions.push(attempt.permission);
           else pendingPermissionHandlers.push(judgeAndRespondPermission(permission));
           continue;
         }
-        if (permissionAutomationOwner && mode === 'edits' && isEditPermission(permission.type)) {
+        if (
+          permissionAutomationOwner &&
+          !modePending &&
+          mode === 'edits' &&
+          isEditPermission(permission.type)
+        ) {
           pendingPermissionHandlers.push(
             sessionApprovalOperations
               .respondPermission(permission.sessionID, permission.id, 'once', {
@@ -1504,16 +1510,19 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
       if (isCurrent()) {
         permissionsStore.reconcilePermissions(visiblePermissions, reconciliation);
+        for (const permission of restoredPermissions) {
+          hiddenRestoredPermissions.delete(permission.id);
+        }
       }
     } catch (err) {
       if (syncGeneration === permissionSyncGeneration) {
         for (const permission of restoredPermissions) {
-          hiddenRestoredPermissions.delete(permission.id);
           const mode = permissionsStore.getPermissionModeForSession(permission.sessionID);
+          const modePending = permissionsStore.isSessionPermissionModePending(permission.sessionID);
           const hasJudgeAttempt = permissionsStore
             .getPermissionGroupMembers(permission)
             .some((member) => permissionJudgeAttempts.has(member.id));
-          if (mode !== 'full' && !hasJudgeAttempt) {
+          if ((modePending || mode !== 'full') && !hasJudgeAttempt) {
             permissionsStore.addPermission(permission);
             postMessage({ type: 'permission/reveal', payload: { permissionId: permission.id } });
           }
@@ -1612,10 +1621,13 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     if (attempt.status !== 'judging' && !(acceptVisible && wasVisible)) return;
 
     const mode = permissionsStore.getPermissionModeForSession(permission.sessionID);
-    if (mode !== 'auto') {
+    const modePending = permissionsStore.isSessionPermissionModePending(permission.sessionID);
+    if (modePending || mode !== 'auto') {
       if (!wasVisible) {
         const shouldShow =
-          mode === 'default' || (mode === 'edits' && !isEditPermission(permission.type));
+          modePending ||
+          mode === 'default' ||
+          (mode === 'edits' && !isEditPermission(permission.type));
         attempt.status = shouldShow ? 'visible' : 'responded';
         if (shouldShow) showPermissionAfterJudge(attempt);
       }
@@ -1696,7 +1708,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     }
   }
 
-  function judgeAndRespondPermission(permission: Permission): Promise<void> {
+  function judgeAndRespondPermission(
+    permission: Permission,
+    preserveVisible = false
+  ): Promise<void> {
     if (!permissionAutomationOwner) {
       permissionsStore.addPermission(permission);
       postMessage({ type: 'permission/reveal', payload: { permissionId: permission.id } });
@@ -1705,11 +1720,11 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     const existingAttempt = permissionJudgeAttempts.get(permission.id);
     if (existingAttempt) return existingAttempt.promise;
 
-    permissionsStore.removePermission(permission.id, { removeGroup: true });
+    if (!preserveVisible) permissionsStore.removePermission(permission.id, { removeGroup: true });
     const attempt: PermissionJudgeAttempt = {
       permission,
       automationLease: permissionAutomationLease,
-      status: 'judging',
+      status: preserveVisible ? 'visible' : 'judging',
       countedInFlight: true,
       promise: Promise.resolve(),
     };
@@ -1752,7 +1767,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       }),
     ]).finally(() => clearTimeout(judgeTimeout));
 
-    attempt.promise = judge.then((outcome) => applyPermissionJudgeOutcome(attempt, outcome, false));
+    attempt.promise = judge.then((outcome) =>
+      applyPermissionJudgeOutcome(attempt, outcome, preserveVisible)
+    );
     void judgeRequest.then(async (outcome) => {
       if (timedOut) await applyPermissionJudgeOutcome(attempt, outcome, true);
     });
@@ -1765,13 +1782,14 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       (attempt) =>
         attempt.status === 'visible' &&
         getPermissionDecisionScopeId(attempt.permission.sessionID) === scopeId &&
+        !permissionsStore.isSessionPermissionModePending(attempt.permission.sessionID) &&
         permissionsStore.getPermissionModeForSession(attempt.permission.sessionID) === 'auto'
     );
 
     for (const attempt of visibleAttempts) {
       finishPermissionJudgeAttempt(attempt);
       permissionJudgeAttempts.delete(attempt.permission.id);
-      void judgeAndRespondPermission(attempt.permission);
+      void judgeAndRespondPermission(attempt.permission, true);
     }
   }
 
@@ -2250,15 +2268,16 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       client.varro.session.updatePermissionMode(sessionId, mode),
     upsertSession,
     getPermissionsForSession: (sessionId) => {
-      const rootId = getSessionTreeRootId(sessionId) || sessionId;
-      const sessionIds = new Set(getSessionTreeIds(rootId));
-      return appStore.state.permissions.filter((permission) =>
-        permissionsStore
-          .getPermissionGroupMembers(permission)
-          .some((member) => sessionIds.has(member.sessionID))
+      const sessionIds = new Set(getSessionTreeIds(sessionId));
+      return appStore.state.permissions.filter(
+        (permission) =>
+          sessionIds.has(permission.sessionID) &&
+          !permissionsStore.isSessionPermissionModePending(permission.sessionID) &&
+          permissionsStore.getPermissionModeForSession(permission.sessionID) === 'full'
       );
     },
     syncPendingPermissions,
+    setPendingSessionPermissionMode: permissionsStore.setPendingSessionPermissionMode,
   });
 
   const sessionManagementOperations = new SessionManagementOperations({
@@ -2399,7 +2418,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     return load;
   }
 
-  function loadOlderSessionHistoryPage(sessionId: string): Promise<boolean> {
+  function loadOlderSessionHistoryPage(
+    sessionId: string,
+    options?: { prefetchBoundaryPrompts?: boolean }
+  ): Promise<boolean> {
     const existing = historyPageLoads.get(sessionId);
     const generation = workspaceGeneration;
     const selectionGeneration = sessionSelectionGeneration;
@@ -2441,7 +2463,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         });
         const nextCursor = advanceSessionHistoryCursor(sessionId, cursor, page.nextCursor);
         markSessionHistoryLoadFailed(sessionId, false);
-        if (nextCursor) void loadSessionBoundaryPrompts(sessionId, nextCursor, isCurrent);
+        if (nextCursor && options?.prefetchBoundaryPrompts !== false) {
+          void loadSessionBoundaryPrompts(sessionId, nextCursor, isCurrent);
+        }
         return page.length > 0 || nextCursor !== undefined;
       } catch (err) {
         if (isCurrent()) {

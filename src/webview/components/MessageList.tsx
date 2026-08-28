@@ -128,6 +128,7 @@ import {
   captureExpansionScrollAnchor,
   getDistanceFromBottom,
   performScrollToBottom,
+  recoverScrollAnchorDescendant,
   resolveAutoScrollOnUserScroll,
   restoreExpansionScrollAnchor as restoreExpansionScrollAnchorFromState,
   type ExpansionScrollAnchor,
@@ -184,6 +185,7 @@ const NEW_TURN_ALIGNMENT_MAX_STEP_PX = 24;
 const BOTTOM_FOLLOW_SETTLE_FRAME_COUNT = 2;
 const WIDTH_RESIZE_SETTLE_MS = 100;
 const WIDTH_RESIZE_ANCHOR_INSET_PX = 20;
+const INITIAL_HISTORY_HYDRATION_BATCH_SIZE = 16;
 const APPEND_SCROLL_TRANSITION_MS = 180;
 const EXPANSION_SCROLL_ANCHOR_WINDOW_MS = 250;
 const LOADING_ROW_REAPPEAR_DELAY_MS = 600;
@@ -251,6 +253,9 @@ type VisibleScrollAnchor = {
   activityGroupKey?: string;
   renderKey?: string;
   element?: HTMLElement;
+  elementTag?: string;
+  elementOrdinal?: number;
+  elementText?: string;
 };
 
 type ActivityExitSummaryAnchor = {
@@ -1393,11 +1398,6 @@ export function MessageList() {
     getCompactActivityLayoutSignatures(messages())
   );
   let previousCompactActivityLayoutSignatures = new Map<string, string>();
-  const thinkingLayoutSignatures = createMemo(() =>
-    getThinkingLayoutSignatures(messages(), showThinking())
-  );
-  let previousThinkingLayoutSignatures = new Map<string, string>();
-
   // Bootstrap exact heights once, then keep virtualization active as new rows arrive. Newly added
   // rows use provisional heights until mounted instead of remounting the full transcript.
   const shouldMeasureRows = createMemo(() => messages().length >= VIRTUALIZE_THRESHOLD);
@@ -1577,23 +1577,6 @@ export function MessageList() {
     scheduleChangedLayoutRowMeasurements(previousCompactActivityLayoutSignatures, current);
 
     previousCompactActivityLayoutSignatures = new Map(current);
-  });
-
-  createEffect(() => {
-    const current = thinkingLayoutSignatures();
-    const preferredAnchor = pendingThinkingLayoutAnchor;
-    scheduleChangedLayoutRowMeasurements(
-      previousThinkingLayoutSignatures,
-      current,
-      preferredAnchor
-    );
-    queueMicrotask(() => {
-      if (pendingThinkingLayoutAnchor === preferredAnchor) {
-        pendingThinkingLayoutAnchor = null;
-      }
-    });
-
-    previousThinkingLayoutSignatures = new Map(current);
   });
 
   createEffect(() => {
@@ -1863,8 +1846,10 @@ export function MessageList() {
           ? pendingStructuralScrollAnchor.anchor
           : null;
       const widthAnchorMessageId = widthResizePinnedMessageId();
-      const anchorIndex =
-        pendingAnchor && !pendingAnchor.invalidated && pendingAnchor.anchor
+      const editedMessageId = editingMessage()?.messageId;
+      const anchorIndex = editedMessageId
+        ? messageIndexById().get(editedMessageId)
+        : pendingAnchor && !pendingAnchor.invalidated && pendingAnchor.anchor
           ? messageIndexById().get(pendingAnchor.anchor.messageId)
           : structuralAnchor
             ? messageIndexById().get(structuralAnchor.messageId)
@@ -1934,7 +1919,8 @@ export function MessageList() {
         forcedVirtualContentMessageIds.has(messageId) ||
         viewportForcedVirtualContentMessageIds.has(messageId) ||
         displayedStickyUserMessagePreview()?.id === messageId ||
-        activePermissionMessageId === messageId
+        activePermissionMessageId === messageId ||
+        editingMessage()?.messageId === messageId
       );
     });
   });
@@ -2470,6 +2456,9 @@ export function MessageList() {
   ) {
     if (!containerRef) return null;
 
+    const exactAnchor = captureExactPaintedVisibleScrollAnchor(predictedMovement);
+    if (exactAnchor) return exactAnchor;
+
     const containerRect = containerRef.getBoundingClientRect();
     let firstVisibleRow: VisibleScrollAnchor | null = null;
     for (const row of containerRef.querySelectorAll<HTMLElement>('[data-msg-id]')) {
@@ -2494,6 +2483,64 @@ export function MessageList() {
     return refineTallRenderItemScrollAnchor(firstVisibleRow, WIDTH_RESIZE_ANCHOR_INSET_PX, {
       includeCompact: true,
     });
+  }
+
+  function captureExactPaintedVisibleScrollAnchor(
+    predictedMovement = 0,
+    skipThinking = false
+  ): VisibleScrollAnchor | null {
+    if (!containerRef) return null;
+    const containerRect = containerRef.getBoundingClientRect();
+    const selector = 'p, h1, h2, h3, h4, h5, h6, pre, table, li';
+    const assistantCandidates = Array.from(
+      containerRef.querySelectorAll<HTMLElement>('[data-assistant-render-key]')
+    ).flatMap((renderItem) =>
+      Array.from(renderItem.querySelectorAll<HTMLElement>(selector))
+        .filter((element) => !skipThinking || !element.closest('.chat-thinking-box'))
+        .map((element) => ({ element, renderItem }))
+    );
+    const userCandidates = Array.from(
+      containerRef.querySelectorAll<HTMLElement>('.user-message-card')
+    ).map((element) => ({ element, renderItem: null }));
+    const candidates = [...assistantCandidates, ...userCandidates]
+      .filter(({ element }) => {
+        const rect = element.getBoundingClientRect();
+        return (
+          rect.top - predictedMovement >= containerRect.top + 8 &&
+          rect.bottom - predictedMovement <= containerRect.bottom - 8 &&
+          rect.height > 8
+        );
+      })
+      .toSorted(
+        (left, right) =>
+          left.element.getBoundingClientRect().top - right.element.getBoundingClientRect().top
+      );
+    const selected = candidates[0];
+    const row = selected?.element.closest<HTMLElement>('[data-msg-id]');
+    const messageId = row?.dataset.msgId;
+    if (!selected || !row || !messageId) return null;
+
+    const rect = selected.element.getBoundingClientRect();
+    const sameTag = selected.renderItem
+      ? Array.from(selected.renderItem.querySelectorAll<HTMLElement>(selected.element.tagName))
+      : [];
+    return {
+      messageId,
+      renderKey: selected.renderItem?.dataset.assistantRenderKey,
+      element: selected.element,
+      elementTag: selected.renderItem ? selected.element.tagName : undefined,
+      elementOrdinal: selected.renderItem ? sameTag.indexOf(selected.element) : undefined,
+      elementText: selected.renderItem
+        ? (selected.element.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 120)
+        : undefined,
+      top: rect.top - predictedMovement - containerRect.top,
+      messageTop: row.getBoundingClientRect().top - predictedMovement - containerRect.top,
+      topPad: 0,
+    };
+  }
+
+  function captureThinkingVisibleScrollAnchor() {
+    return captureExactPaintedVisibleScrollAnchor(0, true);
   }
 
   function replaceClippedRequestWidthResizeAnchor(anchor: VisibleScrollAnchor | null) {
@@ -2685,7 +2732,7 @@ export function MessageList() {
   function refineTallRenderItemScrollAnchor(
     anchor: VisibleScrollAnchor | null,
     preferredViewportOffset = 0,
-    options?: { includeCompact?: boolean; skipThinking?: boolean }
+    options?: { includeCompact?: boolean }
   ) {
     if (!containerRef || !anchor) return anchor;
     const containerRect = containerRef.getBoundingClientRect();
@@ -2714,7 +2761,7 @@ export function MessageList() {
       renderItem.querySelectorAll<HTMLElement>(
         '.rendered-markdown :is(p, li, pre, table, blockquote, h1, h2, h3, h4, h5, h6)'
       )
-    ).filter((element) => !options?.skipThinking || !element.closest('.chat-thinking-box'));
+    );
     let low = 0;
     let high = candidates.length;
     while (low < high) {
@@ -2736,9 +2783,13 @@ export function MessageList() {
     if (rect.height <= 0 || rect.top >= containerRect.bottom) return anchor;
 
     const row = mountedMessageRows.get(anchor.messageId);
+    const sameTag = Array.from(renderItem.querySelectorAll<HTMLElement>(element.tagName));
     return {
       ...anchor,
       element,
+      elementTag: element.tagName,
+      elementOrdinal: sameTag.indexOf(element),
+      elementText: (element.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 120),
       top: rect.top - containerRect.top,
       messageTop: row ? row.getBoundingClientRect().top - containerRect.top : undefined,
     };
@@ -2919,21 +2970,26 @@ export function MessageList() {
     const row =
       mountedMessageRows.get(anchor.messageId) ??
       containerRef.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(anchor.messageId)}"]`);
-    if (anchor.activityGroupKey) {
-      return (
-        row?.querySelector<HTMLElement>(
+    const renderItem = anchor.activityGroupKey
+      ? (row?.querySelector<HTMLElement>(
           `[data-assistant-activity-group-key="${CSS.escape(anchor.activityGroupKey)}"]`
-        ) ?? row
-      );
-    }
-    if (anchor.renderKey) {
+        ) ?? row)
+      : anchor.renderKey
+        ? (row?.querySelector<HTMLElement>(
+            `[data-assistant-render-key="${CSS.escape(anchor.renderKey)}"]`
+          ) ?? row)
+        : row;
+    if (renderItem && anchor.elementTag) {
       return (
-        row?.querySelector<HTMLElement>(
-          `[data-assistant-render-key="${CSS.escape(anchor.renderKey)}"]`
-        ) ?? row
+        recoverScrollAnchorDescendant({
+          renderItem,
+          elementTag: anchor.elementTag,
+          elementOrdinal: anchor.elementOrdinal,
+          elementText: anchor.elementText,
+        }) ?? renderItem
       );
     }
-    return row;
+    return renderItem;
   }
 
   function restorePendingHistoryAnchorIfMounted() {
@@ -4322,7 +4378,7 @@ export function MessageList() {
         if (shouldFillInitialViewport) {
           const generation = activeSessionGeneration;
           activeFollowLoopSessionId = null;
-          void handleLoadOlderHistory()?.then(() => {
+          void handleLoadOlderHistory({ requireExactFill: true })?.then(() => {
             if (
               generation !== activeSessionGeneration ||
               state.activeSessionId !== sessionId ||
@@ -4330,10 +4386,7 @@ export function MessageList() {
             ) {
               return;
             }
-            pendingInitialHistoryFillSessionId =
-              isSessionHistoryTruncated(sessionId) && !isSessionHistoryLoadFailed(sessionId)
-                ? sessionId
-                : null;
+            pendingInitialHistoryFillSessionId = null;
             performScroll({ force: true });
             startFollowLoop(sessionId);
           });
@@ -4983,20 +5036,7 @@ export function MessageList() {
       keydownDestinationRafId = requestAnimationFrame(() => {
         keydownDestinationRafId = 0;
         if (disposed || !containerRef || state.activeSessionId !== sessionId) return;
-        const destinationMetrics = shouldVirtualize() ? virtualMetrics() : null;
-        const destinationIndex = destinationMetrics
-          ? getFirstVisibleMessageIndexFromVirtualMetrics({
-              metrics: destinationMetrics,
-              scrollTop: getVirtualScrollTop(containerRef.scrollTop),
-            })
-          : null;
-        const anchor = refineTallRenderItemScrollAnchor(
-          destinationIndex === null
-            ? captureVisibleScrollAnchor({ preferStableRenderItem: true })
-            : capturePaintedVisibleScrollAnchorFromIndex(destinationIndex),
-          0,
-          { includeCompact: true }
-        );
+        const anchor = captureWidthResizeVisibleScrollAnchor();
         if (!anchor) return;
         directMovementAnchor = {
           anchor,
@@ -5238,22 +5278,23 @@ export function MessageList() {
     );
     onCleanup(unregisterQueuedMessageRemoval);
     const stopCapturingThinkingAnchor = onBeforeShowThinkingPreferenceChange(() => {
+      if (widthResizeActive) {
+        publishPendingWidthMeasurements({ preserveVisibleAnchor: false });
+        cancelWidthResize();
+      }
       const anchor =
         !autoScroll() &&
         !stickyNavigationOwnsScroll() &&
         !editingMessage() &&
         !pendingExpansionScrollAnchor
-          ? captureMountedVisibleScrollAnchorWithTopPad(0, true, {
+          ? (captureThinkingVisibleScrollAnchor() ??
+            captureMountedVisibleScrollAnchorWithTopPad(0, true, {
               maxRenderItemTopClip: WIDTH_RESIZE_ANCHOR_INSET_PX,
               restrictToFirstVisibleRow: true,
               skipThinkingRenderItems: true,
-            })
+            }))
           : null;
-      pendingThinkingLayoutAnchor = refineTallRenderItemScrollAnchor(
-        anchor,
-        WIDTH_RESIZE_ANCHOR_INSET_PX,
-        { skipThinking: true }
-      );
+      pendingThinkingLayoutAnchor = anchor;
     });
     onCleanup(stopCapturingThinkingAnchor);
     // SAFETY: The surrounding shape or discriminator check establishes the EventListener contract used below.
@@ -6126,6 +6167,26 @@ export function MessageList() {
   const inlineThinkingMessageIds = createMemo<ReadonlySet<string>>(
     () => inlineThinkingTurn().messageIds
   );
+  const thinkingLayoutSignatures = createMemo(() =>
+    getThinkingLayoutSignatures(messages(), showThinking(), expandedThinkingMessageIds())
+  );
+  let previousThinkingLayoutSignatures = new Map<string, string>();
+  createEffect(() => {
+    const current = thinkingLayoutSignatures();
+    const preferredAnchor = pendingThinkingLayoutAnchor;
+    scheduleChangedLayoutRowMeasurements(
+      previousThinkingLayoutSignatures,
+      current,
+      preferredAnchor
+    );
+    requestAnimationFrame(() => {
+      if (pendingThinkingLayoutAnchor === preferredAnchor) {
+        pendingThinkingLayoutAnchor = null;
+      }
+    });
+
+    previousThinkingLayoutSignatures = new Map(current);
+  });
   const compactActivityMessages = createMemo(() => {
     const previousSignatures = previousTrailingFileEventSignatureMap();
     return messages().map((message) =>
@@ -7102,7 +7163,9 @@ export function MessageList() {
     if (pendingAnchor) pendingAnchor.invalidated = true;
   }
 
-  function handleLoadOlderHistory(): Promise<void> | undefined {
+  function handleLoadOlderHistory(options?: {
+    requireExactFill?: boolean;
+  }): Promise<void> | undefined {
     const sessionId = state.activeSessionId;
     const container = containerRef;
     if (!sessionId || !container) return;
@@ -7124,7 +7187,8 @@ export function MessageList() {
         generation,
         windowVersion,
         loadingOwner,
-        container
+        container,
+        options?.requireExactFill === true
       )
     );
     const activeLoad = { generation, windowVersion, promise: load };
@@ -7143,7 +7207,8 @@ export function MessageList() {
     generation: number,
     windowVersion: number,
     loadingOwner: HistoryLoadingOwner,
-    container: HTMLDivElement
+    container: HTMLDivElement,
+    requireExactFill: boolean
   ): Promise<void> {
     const isCurrentWindow = () =>
       generation === activeSessionGeneration &&
@@ -7199,13 +7264,53 @@ export function MessageList() {
     };
     keepHistoryAnchorAlignedBeforePaint();
     try {
+      const exactRowsFillViewport = (ids: readonly string[]) => {
+        let exactHeight = 0;
+        for (const messageId of ids) {
+          exactHeight += measuredHeights.get(messageId) ?? 0;
+          if (exactHeight >= container.clientHeight - 1) return true;
+        }
+        return false;
+      };
+      const hydrateUntilExactFill = async (ids: readonly string[]) => {
+        if (exactRowsFillViewport(ids)) return true;
+        const unknownIds = ids.filter(
+          (messageId) =>
+            !measuredHeights.has(messageId) && !knownZeroHeightMessageIds().has(messageId)
+        );
+        let forcedIds: string[] = [];
+        try {
+          for (
+            let offset = 0;
+            offset < unknownIds.length;
+            offset += INITIAL_HISTORY_HYDRATION_BATCH_SIZE
+          ) {
+            for (const messageId of forcedIds) forcedVirtualContentMessageIds.delete(messageId);
+            forcedIds = unknownIds
+              .slice(offset, offset + INITIAL_HISTORY_HYDRATION_BATCH_SIZE)
+              .filter((messageId) => !forcedVirtualContentMessageIds.has(messageId));
+            for (const messageId of forcedIds) forcedVirtualContentMessageIds.add(messageId);
+            setMeasurementVersion((version) => version + 1);
+            await waitForAnimationFrame();
+            if (!isCurrentWindow()) return false;
+            measureVisibleItems();
+            if (exactRowsFillViewport(ids)) return true;
+          }
+          return false;
+        } finally {
+          for (const messageId of forcedIds) forcedVirtualContentMessageIds.delete(messageId);
+          if (forcedIds.length > 0) setMeasurementVersion((version) => version + 1);
+        }
+      };
       let loadedAnyPage = false;
       let staleRetryCount = 0;
       while (true) {
         if (!isCurrentWindow()) return;
         const cursorBeforeLoad = getSessionHistoryCursor(sessionId);
         const idsBefore = messages().map((entry) => entry.info.id);
-        const loaded = await loadOlderSessionHistoryPage(sessionId);
+        const loaded = await loadOlderSessionHistoryPage(sessionId, {
+          prefetchBoundaryPrompts: !requireExactFill,
+        });
         if (!isCurrentWindow()) return;
         if (!loaded) {
           if (
@@ -7228,7 +7333,10 @@ export function MessageList() {
           idsBefore.length !== idsAfter.length ||
           idsBefore.some((messageId, index) => messageId !== idsAfter[index]);
         if (!isSessionHistoryTruncated(sessionId)) break;
-        if (structureChanged && container.scrollHeight > container.clientHeight + 1) break;
+        if (structureChanged && container.scrollHeight > container.clientHeight + 1) {
+          if (!requireExactFill) break;
+          if (!shouldVirtualize() || (await hydrateUntilExactFill(idsAfter))) break;
+        }
       }
       if (!loadedAnyPage) return;
       settleOwner = { sessionId, generation, windowVersion };
@@ -7430,7 +7538,8 @@ export function MessageList() {
                   forcedVirtualContentMessageIds.has(messageId) ||
                   viewportForcedVirtualContentMessageIds.has(messageId) ||
                   displayedStickyUserMessagePreview()?.id === messageId ||
-                  pendingPermissionSequence().activePermission?.messageID === messageId
+                  pendingPermissionSequence().activePermission?.messageID === messageId ||
+                  editingMessage()?.messageId === messageId
                 );
               }}
               canReleaseVirtualPlaceholders={() =>

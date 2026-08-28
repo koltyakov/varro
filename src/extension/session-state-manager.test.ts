@@ -341,6 +341,195 @@ describe('SessionStateManager notifications', () => {
     expect(manager.completed.has('session-1')).toBe(false);
   });
 
+  it('keeps a second optimistic attempt busy when the first attempt completes', () => {
+    const manager = createManager();
+    manager.markSessionBusy('session-1');
+    manager.markSessionBusy('session-1');
+
+    manager.handleServerEvent({
+      type: 'session.next.step.ended',
+      properties: { sessionID: 'session-1', finish: 'stop' },
+    });
+
+    expect(manager.busy.has('session-1')).toBe(true);
+    expect(manager.completed.has('session-1')).toBe(false);
+
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+    });
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    });
+
+    expect(manager.busy.has('session-1')).toBe(true);
+    expect(manager.completed.has('session-1')).toBe(false);
+
+    manager.handleServerEvent({
+      type: 'session.next.text.delta',
+      properties: { sessionID: 'session-1', text: 'successor progress' },
+    });
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    });
+
+    expect(manager.busy.has('session-1')).toBe(false);
+    expect(manager.completed.has('session-1')).toBe(true);
+  });
+
+  it('keeps an overlapping steer busy after an existing SSE turn completes', () => {
+    const manager = createManager();
+    markBusy(manager, 'session-1');
+    manager.markSessionBusy('session-1');
+
+    manager.handleServerEvent({
+      type: 'session.next.step.ended',
+      properties: { sessionID: 'session-1', finish: 'stop', timestamp: Date.now() },
+    });
+
+    expect(manager.busy.has('session-1')).toBe(true);
+    expect(manager.completed.has('session-1')).toBe(false);
+
+    manager.handleServerEvent({
+      type: 'session.error',
+      properties: {
+        sessionID: 'session-1',
+        error: { name: 'ProviderError', data: { message: 'failed' } },
+      },
+    });
+
+    expect(manager.busy.has('session-1')).toBe(false);
+    expect(manager.completed.has('session-1')).toBe(false);
+    expect(manager.failed.has('session-1')).toBe(true);
+  });
+
+  it('consumes one generation for duplicate step, message, and idle terminals', () => {
+    const manager = createManager();
+    const completedAt = Date.now();
+    manager.markSessionBusy('session-1');
+    manager.markSessionBusy('session-1');
+
+    manager.handleServerEvent({
+      type: 'session.next.step.ended',
+      properties: {
+        sessionID: 'session-1',
+        assistantMessageID: 'assistant-old',
+        finish: 'stop',
+        timestamp: completedAt,
+      },
+    });
+    manager.handleServerEvent({
+      type: 'message.updated',
+      properties: {
+        info: {
+          id: 'assistant-old',
+          sessionID: 'session-1',
+          role: 'assistant',
+          finish: 'stop',
+          time: { created: completedAt - 1, completed: completedAt },
+        },
+      },
+    });
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    });
+
+    expect(manager.busy.has('session-1')).toBe(true);
+    expect(manager.completed.has('session-1')).toBe(false);
+
+    manager.handleServerEvent({
+      type: 'message.updated',
+      properties: {
+        info: {
+          id: 'assistant-successor',
+          sessionID: 'session-1',
+          role: 'assistant',
+          finish: 'stop',
+          time: { created: completedAt, completed: completedAt + 1 },
+        },
+      },
+    });
+
+    expect(manager.busy.has('session-1')).toBe(false);
+    expect(manager.completed.has('session-1')).toBe(true);
+  });
+
+  it('does not let duplicate failure events consume the successor generation', () => {
+    const manager = createManager();
+    const completedAt = Date.now();
+    const error = { name: 'ProviderError', data: { message: 'failed' } } as const;
+    manager.markSessionBusy('session-1');
+    manager.markSessionBusy('session-1');
+
+    manager.handleServerEvent({
+      type: 'session.error',
+      properties: { sessionID: 'session-1', error },
+    });
+    manager.handleServerEvent({
+      type: 'message.updated',
+      properties: {
+        info: {
+          id: 'assistant-old',
+          sessionID: 'session-1',
+          role: 'assistant',
+          error,
+          time: { created: completedAt - 1, completed: completedAt },
+        },
+      },
+    });
+    manager.handleServerEvent({
+      type: 'session.next.text.delta',
+      properties: { sessionID: 'session-1', text: 'successor progress' },
+    });
+    manager.handleServerEvent({
+      type: 'session.error',
+      properties: { sessionID: 'session-1', error },
+    });
+
+    expect(manager.busy.has('session-1')).toBe(true);
+    expect(manager.failed.has('session-1')).toBe(false);
+
+    manager.handleServerEvent({
+      type: 'message.updated',
+      properties: {
+        info: {
+          id: 'assistant-successor',
+          sessionID: 'session-1',
+          role: 'assistant',
+          error,
+          time: { created: completedAt, completed: completedAt + 1 },
+        },
+      },
+    });
+
+    expect(manager.busy.has('session-1')).toBe(false);
+    expect(manager.completed.has('session-1')).toBe(false);
+    expect(manager.failed.has('session-1')).toBe(true);
+  });
+
+  it('ignores a timestamped completion older than the current busy generation', () => {
+    const manager = createManager();
+    const now = Date.now();
+    manager.markSessionBusy('session-1');
+
+    manager.handleServerEvent({
+      type: 'session.next.step.ended',
+      properties: { sessionID: 'session-1', finish: 'stop', timestamp: now - 6_000 },
+    });
+
+    expect(manager.busy.has('session-1')).toBe(true);
+    expect(manager.completed.has('session-1')).toBe(false);
+
+    manager.handleServerEvent({
+      type: 'session.next.step.ended',
+      properties: { sessionID: 'session-1', finish: 'stop', timestamp: now },
+    });
+    expect(manager.completed.has('session-1')).toBe(true);
+  });
+
   it('rolls back a deferred prompt failure on the next authoritative status snapshot', () => {
     const manager = createManager();
     const attempt = manager.markSessionBusy('session-1');
@@ -2310,6 +2499,20 @@ describe('SessionStateManager.reconcileStaleBusySessions', () => {
     const stale = manager.reconcileStaleBusySessions({}, GRACE_MS, 2000 + GRACE_MS - 1);
     expect(stale).toEqual([]);
     expect(manager.busy.has('s1')).toBe(true);
+  });
+
+  it('does not apply an idle reconciliation captured before newer busy evidence', () => {
+    const manager = createManager();
+    markBusy(manager, 's1');
+    const observed = new Map([['s1', manager.busyEvidenceRevisionFor('s1')]]);
+    manager.reconcileStaleBusySessions({}, GRACE_MS, 1000, observed);
+
+    manager.markSessionBusy('s1');
+    const stale = manager.reconcileStaleBusySessions({}, GRACE_MS, 1000 + GRACE_MS, observed);
+
+    expect(stale).toEqual([]);
+    expect(manager.busy.has('s1')).toBe(true);
+    expect(manager.completed.has('s1')).toBe(false);
   });
 
   it('does not reconcile sessions awaiting input', () => {

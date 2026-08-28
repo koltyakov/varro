@@ -110,7 +110,8 @@ export function MessageRow(
 ) {
   let rowRef: HTMLDivElement | undefined;
   let disposeEntrance: (() => void) | undefined;
-  const claimedEntrance = props.claimMessageEntrance?.(props.msg.info.id) ?? false;
+  const messageId = props.msg.info.id;
+  const claimedEntrance = props.claimMessageEntrance?.(messageId) ?? false;
   const hasImage = props.msg.parts.some(
     (part) => part.type === 'file' && part.mime.startsWith('image/')
   );
@@ -161,7 +162,7 @@ export function MessageRow(
         onFinish: () => setEntrancePending(false),
       });
     }
-    if (rowRef) props.observeMeasuredRow?.(rowRef, props.msg.info.id, true);
+    if (rowRef) props.observeMeasuredRow?.(rowRef, messageId, true);
   });
   createEffect((wasVirtualPlaceholder) => {
     const virtualPlaceholder = isVirtualPlaceholder();
@@ -169,7 +170,7 @@ export function MessageRow(
       // Let Solid publish the hydrated class/content before measuring the row's real geometry.
       queueMicrotask(() => {
         if (rowRef?.isConnected && !isVirtualPlaceholder()) {
-          props.observeMeasuredRow?.(rowRef, props.msg.info.id, true);
+          props.observeMeasuredRow?.(rowRef, messageId, true);
         }
       });
     }
@@ -177,7 +178,7 @@ export function MessageRow(
   }, isVirtualPlaceholder());
   onCleanup(() => {
     disposeEntrance?.();
-    if (rowRef) props.observeMeasuredRow?.(rowRef, props.msg.info.id, false);
+    if (rowRef) props.observeMeasuredRow?.(rowRef, messageId, false);
   });
 
   return (

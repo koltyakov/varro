@@ -47,8 +47,14 @@ export async function loadFullSessionHistory(sessionId: string) {
   await getCurrentOpenCodeRuntime().loadFullSessionHistory(sessionId);
 }
 
-export async function loadOlderSessionHistoryPage(sessionId: string) {
-  return getCurrentOpenCodeRuntime().loadOlderSessionHistoryPage(sessionId);
+export async function loadOlderSessionHistoryPage(
+  sessionId: string,
+  options?: { prefetchBoundaryPrompts?: boolean }
+) {
+  const runtime = getCurrentOpenCodeRuntime();
+  return options
+    ? runtime.loadOlderSessionHistoryPage(sessionId, options)
+    : runtime.loadOlderSessionHistoryPage(sessionId);
 }
 
 export async function loadOlderSessionPrompts(sessionId: string) {

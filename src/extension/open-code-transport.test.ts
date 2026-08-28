@@ -233,6 +233,72 @@ describe('OpenCodeTransport reconnect delay', () => {
 });
 
 describe('OpenCodeTransport event stream path', () => {
+  it('does not report the stream healthy before the SSE handshake completes', async () => {
+    let resolveHandshake!: (response: Response) => void;
+    let signal: AbortSignal | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_input, init) => {
+        signal = init?.signal as AbortSignal;
+        return new Promise<Response>((resolve) => {
+          resolveHandshake = resolve;
+        });
+      })
+    );
+    const transport = createTransport();
+
+    const stream = transport.startEventStream();
+    await Promise.resolve();
+
+    expect(updateEventStreamStateMock).not.toHaveBeenCalledWith('healthy');
+
+    resolveHandshake(createPendingEventResponse(signal!));
+    await vi.waitFor(() => expect(updateEventStreamStateMock).toHaveBeenCalledWith('healthy'));
+    transport.stopEventStream();
+    await stream;
+  });
+
+  it('sends the latest SSE event ID when an ordinary reconnect opens', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    const requestHeaders: Array<Record<string, string>> = [];
+    let requestCount = 0;
+    const fetchMock = vi.fn((_input: string | URL | Request, init?: RequestInit) => {
+      requestHeaders.push(init?.headers as Record<string, string>);
+      requestCount += 1;
+      if (requestCount === 1) {
+        let delivered = false;
+        return Promise.resolve({
+          ok: true,
+          body: {
+            getReader: () => ({
+              read: () => {
+                if (delivered) return Promise.resolve({ value: undefined, done: true });
+                delivered = true;
+                return Promise.resolve({
+                  value: new TextEncoder().encode(
+                    'id: event-42\ndata: {"type":"server.connected","properties":{}}\n\n'
+                  ),
+                  done: false,
+                });
+              },
+            }),
+          },
+        } as unknown as Response);
+      }
+      return Promise.resolve(createPendingEventResponse(init?.signal as AbortSignal));
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const transport = createTransport();
+
+    await transport.startEventStream();
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(requestHeaders[0]).not.toHaveProperty('Last-Event-ID');
+    expect(requestHeaders[1]).toMatchObject({ 'Last-Event-ID': 'event-42' });
+    transport.stopEventStream();
+  });
+
   it('subscribes to the global event stream', async () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error('stop'));
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);

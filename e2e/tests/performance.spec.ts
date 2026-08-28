@@ -206,14 +206,41 @@ test('large transcripts keep rendered rows bounded while narrowing a detached ch
   await waitForAnimationFrame(page);
   const initialAnchor = await list.evaluate((element) => {
     const bounds = element.getBoundingClientRect();
-    const row = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].find((candidate) => {
-      const rect = candidate.getBoundingClientRect();
-      return rect.bottom > bounds.top && rect.top < bounds.bottom;
-    });
-    if (!row?.dataset.msgId) return null;
+    const selector = 'p, h1, h2, h3, h4, h5, h6, pre, table, li';
+    const candidates = [
+      ...[...element.querySelectorAll<HTMLElement>('[data-assistant-render-key]')].flatMap(
+        (renderItem) =>
+          [...renderItem.querySelectorAll<HTMLElement>(selector)].map((anchor) => ({
+            anchor,
+            renderItem,
+          }))
+      ),
+      ...[...element.querySelectorAll<HTMLElement>('.user-message-card')].map((anchor) => ({
+        anchor,
+        renderItem: null,
+      })),
+    ]
+      .filter(({ anchor }) => {
+        const rect = anchor.getBoundingClientRect();
+        return rect.top >= bounds.top + 8 && rect.bottom <= bounds.bottom - 8 && rect.height > 8;
+      })
+      .toSorted(
+        (left, right) =>
+          left.anchor.getBoundingClientRect().top - right.anchor.getBoundingClientRect().top
+      );
+    const selected = candidates[0];
+    const row = selected?.anchor.closest<HTMLElement>('[data-msg-id]');
+    if (!selected || !row?.dataset.msgId) return null;
+    const sameTag = selected.renderItem
+      ? [...selected.renderItem.querySelectorAll<HTMLElement>(selected.anchor.tagName)]
+      : [];
     return {
       id: row.dataset.msgId,
-      top: row.getBoundingClientRect().top - bounds.top,
+      renderKey: selected.renderItem?.dataset.assistantRenderKey ?? null,
+      tag: selected.anchor.tagName,
+      ordinal: selected.renderItem ? sameTag.indexOf(selected.anchor) : 0,
+      text: (selected.anchor.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 120),
+      top: selected.anchor.getBoundingClientRect().top - bounds.top,
       width: bounds.width,
     };
   });
@@ -267,14 +294,31 @@ test('large transcripts keep rendered rows bounded while narrowing a detached ch
       observer;
   });
 
-  const resizeSamples = await shell.evaluate(async (element, anchorId) => {
+  const resizeSamples = await shell.evaluate(async (element, anchorIdentity) => {
     const listElement = document.querySelector<HTMLElement>('.interactive-list')!;
     const sample = (stage: string) => {
-      const anchor = listElement.querySelector<HTMLElement>(
-        `[data-msg-id="${CSS.escape(anchorId)}"]`
+      const row = listElement.querySelector<HTMLElement>(
+        `[data-msg-id="${CSS.escape(anchorIdentity.id)}"]`
       );
+      const renderItem = anchorIdentity.renderKey
+        ? row?.querySelector<HTMLElement>(
+            `[data-assistant-render-key="${CSS.escape(anchorIdentity.renderKey)}"]`
+          )
+        : null;
+      const matches = renderItem
+        ? [...renderItem.querySelectorAll<HTMLElement>(anchorIdentity.tag)].filter(
+            (candidate) =>
+              (candidate.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 120) ===
+              anchorIdentity.text
+          )
+        : [];
+      const anchor = anchorIdentity.renderKey
+        ? (matches[0] ??
+          renderItem?.querySelectorAll<HTMLElement>(anchorIdentity.tag)[anchorIdentity.ordinal] ??
+          null)
+        : (row?.querySelector<HTMLElement>('.user-message-card') ?? null);
       const rows = [...listElement.querySelectorAll<HTMLElement>('[data-msg-id]')];
-      const anchorIndex = rows.indexOf(anchor!);
+      const anchorIndex = rows.indexOf(row!);
       const previousRow = anchorIndex > 0 ? rows[anchorIndex - 1] : null;
       return {
         stage,
@@ -306,7 +350,7 @@ test('large transcripts keep rendered rows bounded while narrowing a detached ch
       samples.push(sample(`settled-${frame}`));
     }
     return samples;
-  }, initialAnchor!.id);
+  }, initialAnchor!);
 
   const resizeStats = await list.evaluate((element) => {
     const result = {

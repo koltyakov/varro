@@ -349,6 +349,7 @@ export class SessionApprovalOperations {
     this.deps.setPendingSessionPermissionMode?.(sessionId, mode);
 
     queue.pending += 1;
+    let pendingCleared = false;
     const request = queue.tail.then(() =>
       updatePermissionModeForSessionWithDependencies(
         {
@@ -375,6 +376,10 @@ export class SessionApprovalOperations {
           getConfirmedMode: () => queue.confirmedMode,
           onConfirmed: () => {
             queue.confirmedMode = mode;
+            if (this.permissionModeGenerationBySession.get(sessionKey) === generation) {
+              this.deps.setPendingSessionPermissionMode?.(sessionId, null);
+              pendingCleared = true;
+            }
           },
         }
       )
@@ -384,7 +389,10 @@ export class SessionApprovalOperations {
       await request;
     } finally {
       queue.pending -= 1;
-      if (this.permissionModeGenerationBySession.get(sessionKey) === generation) {
+      if (
+        !pendingCleared &&
+        this.permissionModeGenerationBySession.get(sessionKey) === generation
+      ) {
         this.deps.setPendingSessionPermissionMode?.(sessionId, null);
       }
       if (queue.pending === 0 && this.permissionModeQueues.get(sessionId) === queue) {

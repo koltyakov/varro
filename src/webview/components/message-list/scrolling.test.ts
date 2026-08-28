@@ -3,9 +3,30 @@ import {
   captureExpansionScrollAnchor,
   getDistanceFromBottom,
   performScrollToBottom,
+  recoverScrollAnchorDescendant,
   resolveAutoScrollOnUserScroll,
   restoreExpansionScrollAnchor,
 } from './scrolling';
+
+describe('recoverScrollAnchorDescendant', () => {
+  it('preserves the captured ordinal when repeated descendants have matching text', () => {
+    const renderItem = document.createElement('div');
+    const first = document.createElement('p');
+    const second = document.createElement('p');
+    first.textContent = 'Repeated paragraph';
+    second.textContent = 'Repeated paragraph';
+    renderItem.append(first, second);
+
+    expect(
+      recoverScrollAnchorDescendant({
+        renderItem,
+        elementTag: 'P',
+        elementOrdinal: 1,
+        elementText: 'Repeated paragraph',
+      })
+    ).toBe(second);
+  });
+});
 
 describe('getDistanceFromBottom', () => {
   it('returns infinity without a container', () => {

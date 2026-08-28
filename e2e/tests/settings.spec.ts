@@ -37,7 +37,31 @@ test('thinking visibility preserves a detached virtualized anchor', async ({ pag
         requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
       )
   );
-  const anchor = await getVisibleMessageAnchor(list);
+  const anchor = await list.evaluate((element) => {
+    const viewport = element.getBoundingClientRect();
+    const candidates = Array.from(
+      element.querySelectorAll<HTMLElement>(
+        '[data-assistant-render-key] .rendered-markdown :is(p, li, pre, table, blockquote, h1, h2, h3, h4, h5, h6)'
+      )
+    ).filter((candidate) => {
+      const rect = candidate.getBoundingClientRect();
+      return rect.top >= viewport.top + 8 && rect.bottom <= viewport.bottom - 8;
+    });
+    const selected = candidates.toSorted(
+      (left, right) => left.getBoundingClientRect().top - right.getBoundingClientRect().top
+    )[0]!;
+    const renderItem = selected.closest<HTMLElement>('[data-assistant-render-key]')!;
+    const sameTag = Array.from(renderItem.querySelectorAll<HTMLElement>(selected.tagName));
+    return {
+      renderKey: renderItem.dataset.assistantRenderKey!,
+      tag: selected.tagName.toLowerCase(),
+      ordinal: sameTag.indexOf(selected),
+      top: selected.getBoundingClientRect().top,
+    };
+  });
+  const anchorElement = page
+    .locator(`[data-assistant-render-key="${anchor.renderKey}"] ${anchor.tag}`)
+    .nth(anchor.ordinal);
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
 
   for (const expectedThinkingCount of [0, 1]) {
@@ -48,10 +72,16 @@ test('thinking visibility preserves a detached virtualized anchor', async ({ pag
     } else {
       await expect.poll(() => page.locator('.chat-thinking-box').count()).toBeGreaterThan(0);
     }
-    const samples = await sampleMessageTopAcrossFrames(list, anchor.id, 12);
+    const samples = await anchorElement.evaluate(async (element) => {
+      const values: number[] = [];
+      for (let frame = 0; frame < 12; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        values.push(element.getBoundingClientRect().top);
+      }
+      return values;
+    });
     for (const top of samples) {
-      expect(top).not.toBeNull();
-      expect(Math.abs(top! - anchor.top)).toBeLessThan(1.5);
+      expect(Math.abs(top - anchor.top)).toBeLessThan(1.5);
     }
   }
 });

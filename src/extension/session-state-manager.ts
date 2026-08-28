@@ -79,6 +79,24 @@ export type SessionBusyAttempt = {
   readonly id: number;
 };
 
+type BusyGeneration = {
+  readonly attemptID?: number;
+  readonly startedAt: number;
+};
+
+type TerminalEvidence = {
+  readonly messageID?: string;
+  readonly completedAt?: number;
+  readonly failureKey?: string;
+};
+
+type TerminalWave = {
+  readonly messageIDs: Set<string>;
+  completedAt?: number;
+  failureKey?: string;
+  successorProgress: boolean;
+};
+
 export interface SessionStateListener {
   /** Called whenever any state that the status bar renders has changed. */
   onStatusChange(): void;
@@ -123,6 +141,7 @@ export class SessionStateManager {
   private readonly pendingAttention = new Map<string, PendingAttentionEntry>();
   private readonly deferredPermissionAttention = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly trailingBusyAfterCompletion = new Set<string>();
+  private readonly trailingTerminalsWhileBusy = new Map<string, TerminalWave>();
   private readonly blockingRequestMutations = new Set<string>();
   private readonly pendingAttentionRevisions: Record<PendingAttentionKind, number> = {
     permission: 0,
@@ -162,7 +181,8 @@ export class SessionStateManager {
   };
   private readonly recoveryDeletedSessionIDs = new Set<string>();
   private readonly unclaimedInterruptedSessions = new Map<string, InterruptedSessionSnapshot>();
-  private readonly busyAttempts = new Map<string, Set<number>>();
+  private readonly busyGenerations = new Map<string, BusyGeneration[]>();
+  private readonly busyEvidenceRevisions = new Map<string, number>();
   private readonly deferredPromptFailures = new Map<
     number,
     { attempt: SessionBusyAttempt; remainingReconciliations: number }
@@ -411,9 +431,7 @@ export class SessionStateManager {
     this.touchSessionMetadata(sessionID);
     this.trailingBusyAfterCompletion.delete(sessionID);
     const attempt = { sessionID, id: ++this.nextBusyAttemptID };
-    const attempts = this.busyAttempts.get(sessionID) ?? new Set<number>();
-    attempts.add(attempt.id);
-    this.busyAttempts.set(sessionID, attempts);
+    this.addBusyGeneration(sessionID, attempt.id);
     if (this.markBusyInternal(sessionID)) {
       this.listener.onStatusChange();
       void this.persist();
@@ -423,16 +441,21 @@ export class SessionStateManager {
 
   reconcilePromptFailure(attempt: SessionBusyAttempt, serverStatus: unknown): void {
     this.deferredPromptFailures.delete(attempt.id);
-    const attempts = this.busyAttempts.get(attempt.sessionID);
-    if (!attempts?.delete(attempt.id)) return;
-    if (attempts.size === 0) this.busyAttempts.delete(attempt.sessionID);
+    const generations = this.busyGenerations.get(attempt.sessionID);
+    const generationIndex = generations?.findIndex((entry) => entry.attemptID === attempt.id) ?? -1;
+    if (!generations || generationIndex < 0) return;
+    generations.splice(generationIndex, 1);
+    if (generations.length === 0) this.busyGenerations.delete(attempt.sessionID);
 
     const statusType = getString(asRecord(serverStatus)?.type);
     let changed = false;
     if (statusType === 'busy' || statusType === 'retry') {
+      if (generations.length === 0) this.addServerBusyGeneration(attempt.sessionID);
       changed = this.markBusyInternal(attempt.sessionID);
-    } else if ((serverStatus === undefined || statusType === 'idle') && attempts.size === 0) {
+    } else if ((serverStatus === undefined || statusType === 'idle') && generations.length === 0) {
       changed = this.clearBusy(attempt.sessionID);
+    } else if (generations.length > 0) {
+      this.busyStartedAt.set(attempt.sessionID, generations[0]!.startedAt);
     }
     if (changed) {
       this.listener.onStatusChange();
@@ -441,7 +464,13 @@ export class SessionStateManager {
   }
 
   deferPromptFailure(attempt: SessionBusyAttempt): void {
-    if (!this.busyAttempts.get(attempt.sessionID)?.has(attempt.id)) return;
+    if (
+      !this.busyGenerations
+        .get(attempt.sessionID)
+        ?.some((generation) => generation.attemptID === attempt.id)
+    ) {
+      return;
+    }
     this.deferredPromptFailures.set(attempt.id, {
       attempt,
       remainingReconciliations: MAX_DEFERRED_PROMPT_RECONCILIATIONS,
@@ -458,6 +487,10 @@ export class SessionStateManager {
     const { type, properties: props } = event;
     let changed = false;
     this.rememberEventWorkspace(event);
+    if (type.startsWith('session.next.') && type !== 'session.next.step.ended') {
+      const sessionID = getString(asRecord(props)?.sessionID);
+      if (sessionID) this.noteSuccessorProgress(sessionID);
+    }
 
     switch (type) {
       case 'session.created':
@@ -482,13 +515,14 @@ export class SessionStateManager {
         if (statusType === 'busy' && this.trailingBusyAfterCompletion.delete(sessionID)) break;
         if (statusType === 'busy' || statusType === 'retry') {
           this.trailingBusyAfterCompletion.delete(sessionID);
+          this.addServerBusyGeneration(sessionID);
           changed = this.markBusyInternal(sessionID) || changed;
         } else if (statusType === 'idle') {
           // `session.status { idle }` is opencode's authoritative turn-finish
           // signal (emitted by the run-state Runner's onIdle). Treat it as a
           // primary completion path so a fast turn whose step.ended/message
           // events lag or are missed still settles immediately.
-          changed = this.finishBusySession(sessionID, undefined) || changed;
+          changed = this.finishBusySession(sessionID, {}) || changed;
         }
         break;
       }
@@ -498,13 +532,17 @@ export class SessionStateManager {
         // the same meaning; finish on it too so either signal recovers the UI.
         const sessionID = getString(props?.sessionID);
         if (!sessionID) break;
-        changed = this.finishBusySession(sessionID, undefined) || changed;
+        changed = this.finishBusySession(sessionID, {}) || changed;
         break;
       }
       case 'session.next.step.ended': {
         const sessionID = getString(props?.sessionID);
         if (!sessionID || isContinuationFinish(getString(props?.finish))) break;
-        changed = this.finishBusySession(sessionID, getNumber(props?.timestamp)) || changed;
+        changed =
+          this.finishBusySession(sessionID, {
+            messageID: getString(props?.assistantMessageID),
+            completedAt: getNumber(props?.timestamp),
+          }) || changed;
         break;
       }
       case 'session.next.prompt.admitted': {
@@ -526,7 +564,10 @@ export class SessionStateManager {
         changed =
           (error && isAbortedErrorRecord(error)
             ? this.clearAbortedSession(sessionID)
-            : this.markSessionFailed(sessionID, error ?? undefined)) || changed;
+            : this.failBusySession(sessionID, error ?? undefined, {
+                messageID: getString(asRecord(props)?.messageID),
+                failureKey: terminalFailureKey(error ?? undefined),
+              })) || changed;
         break;
       }
       case 'message.updated': {
@@ -550,23 +591,32 @@ export class SessionStateManager {
         if (getString(info?.role) !== 'assistant') {
           if (getString(info?.role) === 'user') {
             this.trailingBusyAfterCompletion.delete(sessionID);
+            this.noteSuccessorProgress(sessionID);
           }
           break;
         }
 
         const error = asRecord(info?.error);
-        if (error) {
-          changed = this.markSessionFailed(sessionID, error) || changed;
-        } else {
+        if (!error && typeof asRecord(info?.time)?.completed !== 'number') {
+          this.noteSuccessorProgress(sessionID);
+        }
+        if (!error) {
           changed = this.failedSessions.delete(sessionID) || changed;
         }
         if (error || typeof asRecord(info?.time)?.completed === 'number') {
           if (error) {
-            changed = this.clearBusy(sessionID) || changed;
+            changed =
+              this.failBusySession(sessionID, error, {
+                messageID: getString(info?.id),
+                completedAt: getNumber(asRecord(info?.time)?.completed),
+                failureKey: terminalFailureKey(error),
+              }) || changed;
           } else if (!isContinuationFinish(getString(info?.finish))) {
             changed =
-              this.finishBusySession(sessionID, getNumber(asRecord(info?.time)?.completed)) ||
-              changed;
+              this.finishBusySession(sessionID, {
+                messageID: getString(info?.id),
+                completedAt: getNumber(asRecord(info?.time)?.completed),
+              }) || changed;
           }
         }
         break;
@@ -1182,7 +1232,9 @@ export class SessionStateManager {
     changed = this.sessionModes.delete(sessionID) || changed;
     changed = this.unclaimedInterruptedSessions.delete(sessionID) || changed;
     this.busyStartedAt.delete(sessionID);
+    this.busyEvidenceRevisions.delete(sessionID);
     this.trailingBusyAfterCompletion.delete(sessionID);
+    this.trailingTerminalsWhileBusy.delete(sessionID);
     this.clearBusyAttempts(sessionID);
     for (const [requestID, request] of this.pendingAttention.entries()) {
       if (request.sessionID !== sessionID) continue;
@@ -1271,11 +1323,12 @@ export class SessionStateManager {
     const wasBusy = this.busySessions.delete(sessionID);
     this.clearBusyAttempts(sessionID);
     if (wasBusy) this.busyStartedAt.delete(sessionID);
+    this.trailingTerminalsWhileBusy.delete(sessionID);
     return wasBusy;
   }
 
   private clearBusyAttempts(sessionID: string): void {
-    this.busyAttempts.delete(sessionID);
+    this.busyGenerations.delete(sessionID);
     for (const [attemptID, deferred] of this.deferredPromptFailures) {
       if (deferred.attempt.sessionID === sessionID) {
         this.deferredPromptFailures.delete(attemptID);
@@ -1283,7 +1336,41 @@ export class SessionStateManager {
     }
   }
 
+  private addBusyGeneration(sessionID: string, attemptID?: number): void {
+    const generations = this.busyGenerations.get(sessionID) ?? [];
+    const startedAt = Date.now();
+    generations.push({ attemptID, startedAt });
+    this.busyGenerations.set(sessionID, generations);
+    if (generations.length === 1) this.busyStartedAt.set(sessionID, startedAt);
+  }
+
+  private addServerBusyGeneration(sessionID: string): void {
+    if ((this.busyGenerations.get(sessionID)?.length ?? 0) > 0) return;
+    this.addBusyGeneration(sessionID);
+  }
+
+  private consumeBusyGeneration(
+    sessionID: string,
+    completedAt: number | undefined
+  ): 'stale' | 'pending' | 'settled' {
+    const generations = this.busyGenerations.get(sessionID);
+    const startedAt = generations?.[0]?.startedAt ?? this.busyStartedAt.get(sessionID);
+    if (this.isStaleCompletion(completedAt, startedAt)) return 'stale';
+    if (!generations || generations.length === 0) return 'settled';
+
+    const [completed] = generations.splice(0, 1);
+    if (completed?.attemptID !== undefined) this.deferredPromptFailures.delete(completed.attemptID);
+    if (generations.length > 0) {
+      this.busyStartedAt.set(sessionID, generations[0]!.startedAt);
+      return 'pending';
+    }
+    this.busyGenerations.delete(sessionID);
+    return 'settled';
+  }
+
   private markBusyInternal(sessionID: string): boolean {
+    this.reconcileIdleSince.delete(sessionID);
+    this.busyEvidenceRevisions.set(sessionID, (this.busyEvidenceRevisions.get(sessionID) ?? 0) + 1);
     let changed = !this.busySessions.has(sessionID);
     if (!this.busySessions.has(sessionID)) {
       this.busyStartedAt.set(sessionID, Date.now());
@@ -1294,8 +1381,16 @@ export class SessionStateManager {
     return changed;
   }
 
-  private finishBusySession(sessionID: string, completedAt: number | undefined): boolean {
+  private finishBusySession(sessionID: string, evidence: TerminalEvidence): boolean {
     if (!this.busySessions.has(sessionID)) return false;
+    if (this.isDuplicateTrailingTerminal(sessionID, evidence)) return false;
+
+    const completion = this.consumeBusyGeneration(sessionID, evidence.completedAt);
+    if (completion === 'stale') return false;
+    if (completion === 'pending') {
+      this.trailingTerminalsWhileBusy.set(sessionID, terminalWaveFromEvidence(evidence));
+      return false;
+    }
 
     if (
       this.isIgnoredBackgroundSession(sessionID) ||
@@ -1304,8 +1399,6 @@ export class SessionStateManager {
     ) {
       return this.clearBusy(sessionID);
     }
-
-    if (this.isStaleCompletion(completedAt, this.busyStartedAt.get(sessionID))) return false;
 
     this.clearBusy(sessionID);
     this.completedSessions.add(sessionID);
@@ -1332,6 +1425,42 @@ export class SessionStateManager {
     );
   }
 
+  private isDuplicateTrailingTerminal(sessionID: string, evidence: TerminalEvidence): boolean {
+    const trailing = this.trailingTerminalsWhileBusy.get(sessionID);
+    if (!trailing) return false;
+
+    const sameMessage =
+      evidence.messageID !== undefined && trailing.messageIDs.has(evidence.messageID);
+    const olderTimestamp =
+      evidence.completedAt !== undefined &&
+      trailing.completedAt !== undefined &&
+      evidence.completedAt <= trailing.completedAt;
+    const sameFailure =
+      evidence.failureKey !== undefined &&
+      trailing.failureKey === evidence.failureKey &&
+      (evidence.messageID === undefined ||
+        trailing.messageIDs.size === 0 ||
+        trailing.messageIDs.has(evidence.messageID));
+    const unattributed =
+      !trailing.successorProgress &&
+      evidence.messageID === undefined &&
+      evidence.completedAt === undefined &&
+      evidence.failureKey === undefined;
+    if (!sameMessage && !olderTimestamp && !sameFailure && !unattributed) return false;
+
+    mergeTerminalEvidence(trailing, evidence);
+    return true;
+  }
+
+  private noteSuccessorProgress(sessionID: string): void {
+    const trailing = this.trailingTerminalsWhileBusy.get(sessionID);
+    if (trailing) trailing.successorProgress = true;
+  }
+
+  busyEvidenceRevisionFor(sessionID: string): number {
+    return this.busyEvidenceRevisions.get(sessionID) ?? 0;
+  }
+
   /**
    * Compares locally-tracked busy sessions against server-authoritative status
    * (REST `/session/status`). Returns IDs of sessions the server has reported
@@ -1348,7 +1477,8 @@ export class SessionStateManager {
   reconcileStaleBusySessions(
     serverStatuses: Record<string, unknown>,
     graceMs: number,
-    now: number = Date.now()
+    now: number = Date.now(),
+    observedBusyRevisions?: ReadonlyMap<string, number>
   ): string[] {
     for (const deferred of this.deferredPromptFailures.values()) {
       const { attempt } = deferred;
@@ -1373,6 +1503,12 @@ export class SessionStateManager {
     }
     const stale: string[] = [];
     for (const sessionID of this.busySessions) {
+      if (
+        observedBusyRevisions &&
+        observedBusyRevisions.get(sessionID) !== this.busyEvidenceRevisionFor(sessionID)
+      ) {
+        continue;
+      }
       if (this.hasPendingAttentionForSession(sessionID)) continue;
       const entry =
         serverStatuses[sessionID] && typeof serverStatuses[sessionID] === 'object'
@@ -1390,7 +1526,8 @@ export class SessionStateManager {
       }
       if (now - since < graceMs) continue;
       this.reconcileIdleSince.delete(sessionID);
-      if (this.finishBusySession(sessionID, undefined)) {
+      this.trailingTerminalsWhileBusy.delete(sessionID);
+      if (this.finishBusySession(sessionID, {})) {
         stale.push(sessionID);
       }
     }
@@ -1417,6 +1554,24 @@ export class SessionStateManager {
       this.showFailureNotification(sessionID, error ? describeFailure(error) : undefined);
     }
     return !wasFailed;
+  }
+
+  private failBusySession(
+    sessionID: string,
+    error: Record<string, unknown> | undefined,
+    evidence: TerminalEvidence
+  ): boolean {
+    if (this.busySessions.has(sessionID)) {
+      if (this.isDuplicateTrailingTerminal(sessionID, evidence)) return false;
+      const completion = this.consumeBusyGeneration(sessionID, evidence.completedAt);
+      if (completion === 'stale') return false;
+      if (completion === 'pending') {
+        this.trailingTerminalsWhileBusy.set(sessionID, terminalWaveFromEvidence(evidence));
+        return false;
+      }
+      this.clearBusy(sessionID);
+    }
+    return this.markSessionFailed(sessionID, error);
   }
 
   private clearAbortedSession(sessionID: string): boolean {
@@ -1658,6 +1813,36 @@ function serializePersistedStringArray(value: unknown): string[] {
     .filter((item): item is string => Boolean(item))
     .slice(0, MAX_PERSISTED_METADATA_ENTRIES)
     .map((item) => trimRequiredString(item));
+}
+
+function terminalWaveFromEvidence(evidence: TerminalEvidence): TerminalWave {
+  return {
+    messageIDs: new Set(evidence.messageID ? [evidence.messageID] : []),
+    completedAt: evidence.completedAt,
+    failureKey: evidence.failureKey,
+    successorProgress: false,
+  };
+}
+
+function mergeTerminalEvidence(wave: TerminalWave, evidence: TerminalEvidence): void {
+  if (evidence.messageID) wave.messageIDs.add(evidence.messageID);
+  if (
+    evidence.completedAt !== undefined &&
+    (wave.completedAt === undefined || evidence.completedAt > wave.completedAt)
+  ) {
+    wave.completedAt = evidence.completedAt;
+  }
+  if (evidence.failureKey) wave.failureKey = evidence.failureKey;
+}
+
+function terminalFailureKey(error: Record<string, unknown> | undefined): string | undefined {
+  if (!error) return undefined;
+  const data = asRecord(error.data);
+  return JSON.stringify([
+    getString(error.name),
+    getString(error.message) || getString(data?.message),
+    getString(error.code) || getString(data?.code),
+  ]);
 }
 
 function serializePersistedStringOrArray(value: unknown): string | string[] | undefined {

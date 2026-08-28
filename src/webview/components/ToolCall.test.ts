@@ -263,6 +263,24 @@ describe('ToolCall', () => {
     expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(terminalIcon));
   });
 
+  it('keeps an expanded generic tool body mounted in lightweight mode', () => {
+    const part: ToolPart = {
+      id: 'tool-expanded',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-expanded',
+      tool: 'custom_tool',
+      state: completedState({ query: 'details' }, 'expanded output'),
+    };
+    setToolCallExpanded(getToolCallExpansionKey(part), true);
+
+    cleanup = render(() => ToolCall({ part, lightweight: true }), container!);
+
+    expect(container?.querySelector('.tool-invocation-detail')).not.toBeNull();
+    expect(container?.textContent).toContain('expanded output');
+  });
+
   it('does not repeat long commands in the collapsed preview', () => {
     const command = `npm run test -- ${'src/webview/components/MessageList.test.ts '.repeat(3)}`;
     const part: ToolPart = {

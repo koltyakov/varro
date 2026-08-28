@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => ({
     varroJudgePermission: vi.fn(),
     varroResolveJudgeModel: vi.fn(),
     varroSessionRenameIfUntitled: vi.fn(),
+    varroSessionUpdatePermissionMode: vi.fn(),
     recycleBinList: vi.fn(),
     recycleBinRestore: vi.fn(),
     recycleBinDelete: vi.fn(),
@@ -100,6 +101,7 @@ vi.mock('../lib/client', () => ({
       resolveJudgeModel: clientMocks.varroResolveJudgeModel,
       session: {
         renameIfUntitled: clientMocks.varroSessionRenameIfUntitled,
+        updatePermissionMode: clientMocks.varroSessionUpdatePermissionMode,
       },
       recycleBin: {
         list: clientMocks.recycleBinList,
@@ -245,6 +247,7 @@ beforeEach(() => {
   clientMocks.varroJudgePermission.mockReset();
   clientMocks.varroResolveJudgeModel.mockReset();
   clientMocks.varroSessionRenameIfUntitled.mockReset();
+  clientMocks.varroSessionUpdatePermissionMode.mockReset();
   clientMocks.recycleBinList.mockReset();
   clientMocks.recycleBinRestore.mockReset();
   clientMocks.recycleBinDelete.mockReset();
@@ -278,6 +281,9 @@ beforeEach(() => {
   clientMocks.varroJudgePermission.mockResolvedValue({ decision: 'ask', reason: 'test' });
   clientMocks.varroResolveJudgeModel.mockResolvedValue(null);
   clientMocks.varroSessionRenameIfUntitled.mockResolvedValue(null);
+  clientMocks.varroSessionUpdatePermissionMode.mockImplementation(async (sessionId: string) =>
+    session(sessionId)
+  );
   clientMocks.recycleBinList.mockResolvedValue([]);
   clientMocks.recycleBinRestore.mockResolvedValue(true);
   clientMocks.recycleBinDelete.mockResolvedValue(true);

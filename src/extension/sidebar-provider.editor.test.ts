@@ -637,6 +637,40 @@ describe('SidebarProvider editor panels', () => {
     ).toHaveLength(3);
   });
 
+  it('does not report queued-message idle while a newer busy attempt remains', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const { posted } = attachTestView(provider);
+    await provider.handleMessage({ type: 'ready' });
+    const internals = provider as unknown as {
+      queuedMessages: { update(messages: QueuedMessageSnapshot[]): Promise<void> };
+      postQueuedSessionStatusFor(sessionId: string, status: 'busy' | 'idle'): void;
+      sessionState: SessionStateManager;
+    };
+    await internals.queuedMessages.update([
+      {
+        id: 'queue-1',
+        sessionId: 'session-1',
+        text: 'Follow up',
+        droppedFiles: [],
+        clipboardImages: [],
+        terminalSelection: null,
+      },
+    ]);
+    internals.sessionState.markSessionBusy('session-1');
+    posted.length = 0;
+
+    internals.postQueuedSessionStatusFor('session-1', 'idle');
+
+    expect(posted).toContainEqual({
+      type: 'queued-messages/session-status',
+      payload: { sessionId: 'session-1', status: 'busy' },
+    });
+    expect(posted).not.toContainEqual({
+      type: 'queued-messages/session-status',
+      payload: { sessionId: 'session-1', status: 'idle' },
+    });
+  });
+
   it('elects one permission automation owner in each endpoint workspace', async () => {
     const contextProvider = createContextProvider();
     contextProvider.context.workspacePath = '/repo-a';

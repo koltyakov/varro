@@ -13,6 +13,23 @@ export type AutoScrollDecision = {
   shouldCancelPendingScroll: boolean;
 };
 
+export function recoverScrollAnchorDescendant(args: {
+  renderItem: HTMLElement;
+  elementTag: string;
+  elementOrdinal?: number;
+  elementText?: string;
+}) {
+  const matches = Array.from(
+    args.renderItem.querySelectorAll<HTMLElement>(args.elementTag.toLowerCase())
+  );
+  const ordinalMatch = args.elementOrdinal === undefined ? undefined : matches[args.elementOrdinal];
+  if (ordinalMatch) return ordinalMatch;
+  return matches.find(
+    (element) =>
+      (element.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 120) === args.elementText
+  );
+}
+
 export function getDistanceFromBottom(container: HTMLElement | null | undefined) {
   if (!container) return Number.POSITIVE_INFINITY;
 

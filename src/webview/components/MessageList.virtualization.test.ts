@@ -19,10 +19,12 @@ import {
   getCompactActivityLayoutSignatures,
   getInlinePreviewLayoutSignatures,
   getMessageBlockBoundaryMap,
+  getThinkingLayoutSignatures,
 } from './message-list/row-layout';
 import { startEditingMessage } from '../lib/message-edit-state';
 import {
   cacheSessionHistoryPage,
+  getSessionHistoryCursor,
   invalidateSessionMessageWindowRequests,
   markSessionHistoryLoadFailed,
   resetSessionMessageWindowForRefetch,
@@ -308,6 +310,24 @@ describe('compact activity virtualization signatures', () => {
   });
 });
 
+describe('thinking virtualization signatures', () => {
+  it('revises cached row geometry when thinking auto-expands', () => {
+    const messages = [
+      {
+        info: { id: 'assistant-1', role: 'assistant' as const },
+        parts: [reasoningPart('reasoning-1', 'Working')],
+      },
+    ];
+
+    const collapsed = getThinkingLayoutSignatures(messages, true, new Set());
+    const expanded = getThinkingLayoutSignatures(messages, true, new Set(['assistant-1']));
+
+    expect(
+      getChangedInlinePreviewMessageIds(collapsed, expanded, new Set(['assistant-1']))
+    ).toEqual(['assistant-1']);
+  });
+});
+
 describe('bordered message projection', () => {
   it('distinguishes bordered cards from prose and row chrome', () => {
     const messages: MessageEntry[] = [
@@ -448,6 +468,41 @@ describe('width resize ownership', () => {
     for (const owner of strongerOwners) {
       expect(canWidthResizeOwnAnchor({ ...noOwners, [owner]: true }), owner).toBe(false);
     }
+  });
+});
+
+describe('virtualized editing', () => {
+  it('pins a distant edited row with full content in a bounded range', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 400);
+        if (this.dataset.msgId) return new DOMRect(0, 0, 500, 100);
+        return new DOMRect(0, 0, 500, 0);
+      }
+    );
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 60 }, (_, index) => ({
+        info: userMessage(`user-${index}`),
+        parts: [textPart(`text-${index}`, `Prompt ${index}`)],
+      }))
+    );
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(container?.querySelector('.interactive-list-track.virtualized')).not.toBeNull();
+    expect(container?.querySelector('[data-msg-id="user-59"]')).toBeNull();
+
+    startEditingMessage('user-59', 'session-1', 'Prompt 59');
+    await Promise.resolve();
+
+    const editedRow = container?.querySelector<HTMLElement>('[data-msg-id="user-59"]');
+    expect(editedRow).not.toBeNull();
+    expect(editedRow?.classList).toContain('interactive-request-editing');
+    expect(editedRow?.classList).not.toContain('interactive-item-virtual-placeholder');
+    expect(editedRow?.querySelector('.inline-edit-composer-slot')).not.toBeNull();
+    expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(30);
   });
 });
 
@@ -1338,6 +1393,7 @@ describe('MessageList history pagination', () => {
 
     const currentRow = () =>
       container?.querySelector<HTMLElement>(`[data-msg-id="${currentMessageId}"]`);
+    const originalRow = currentRow();
     expect(currentRow()?.textContent).toContain('1 / 2');
     currentRow()?.querySelector<HTMLButtonElement>('[aria-label="Next image"]')?.click();
     await Promise.resolve();
@@ -1350,12 +1406,16 @@ describe('MessageList history pagination', () => {
       },
       {
         info: { ...current.info },
-        parts: current.parts.map((part) => ({ ...part })),
+        parts: [
+          ...current.parts.map((part) => ({ ...part })),
+          { ...filePart('image-3', 'Image 3'), messageID: currentMessageId },
+        ],
       },
     ]);
     await Promise.resolve();
 
-    expect(currentRow()?.textContent).toContain('2 / 2');
+    expect(currentRow()).toBe(originalRow);
+    expect(currentRow()?.textContent).toContain('2 / 3');
   });
 
   it.each([
@@ -1601,6 +1661,112 @@ describe('MessageList history pagination', () => {
       before: 'cursor-oldest',
     });
     await vi.waitFor(() => expect(list.scrollTop).toBe(200));
+  });
+
+  it('does not treat provisional virtual overflow as a filled initial viewport', async () => {
+    const currentMessages = Array.from({ length: 60 }, (_, index) => ({
+      info: userMessage(`current-user-${index}`),
+      parts: [textPart(`current-text-${index}`, `Current prompt ${index}`)],
+    }));
+    // SAFETY: The fixtures provide the complete domain shape read by this statement.
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      info: userMessage(`older-user-${index}`),
+      parts: [textPart(`older-text-${index}`, `Older prompt ${index}`)],
+    })) as Awaited<ReturnType<typeof client.session.messages>>;
+    firstPage.nextCursor = 'cursor-oldest';
+    // SAFETY: The fixtures provide the complete domain shape read by this statement.
+    const secondPage = [
+      { info: userMessage('oldest-user'), parts: [textPart('oldest-text', 'Oldest prompt')] },
+    ] as Awaited<ReturnType<typeof client.session.messages>>;
+    const messagesSpy = vi
+      .spyOn(client.session, 'messages')
+      .mockResolvedValueOnce(firstPage)
+      .mockResolvedValueOnce(secondPage);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this.dataset.msgId) return new DOMRect(0, 0, 500, 1);
+        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+        return new DOMRect(0, 0, 500, 60);
+      }
+    );
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryCursor('session-1', 'cursor-older');
+    replaceMessages(currentMessages);
+
+    cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'scrollHeight', {
+      configurable: true,
+      get: () =>
+        state.messages.length === currentMessages.length ? 60 : state.messages.length * 160,
+    });
+    Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 0 });
+
+    await vi.waitFor(() => expect(messagesSpy).toHaveBeenCalledTimes(2));
+
+    expect(messagesSpy).toHaveBeenNthCalledWith(2, 'session-1', {
+      limit: 200,
+      before: 'cursor-oldest',
+    });
+    expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(50);
+  });
+
+  it('stops initial fill when one hydrated page exactly fills the viewport', async () => {
+    const currentMessages = Array.from({ length: 60 }, (_, index) => ({
+      info: userMessage(`current-user-${index}`),
+      parts: [textPart(`current-text-${index}`, `Current prompt ${index}`)],
+    }));
+    // SAFETY: The page fixture provides the complete domain shape consumed by history loading.
+    // Its rows are exactly 500px and fit in one bounded hydration batch.
+    const fillingPage = Array.from({ length: 13 }, (_, index) => ({
+      info: userMessage(`filling-user-${index}`),
+      parts: [textPart(`filling-text-${index}`, `Filling prompt ${index}`)],
+    })) as Awaited<ReturnType<typeof client.session.messages>>;
+    fillingPage.nextCursor = 'cursor-must-not-load';
+    const messagesSpy = vi.spyOn(client.session, 'messages').mockResolvedValueOnce(fillingPage);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this.dataset.msgId) {
+          const height = this.dataset.msgId.startsWith('filling-user-12')
+            ? 20
+            : this.dataset.msgId.startsWith('filling-user-')
+              ? 40
+              : 1;
+          return new DOMRect(0, 0, 500, height);
+        }
+        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+        return new DOMRect(0, 0, 500, 60);
+      }
+    );
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryCursor('session-1', 'cursor-filling');
+    replaceMessages(currentMessages);
+
+    cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'scrollHeight', {
+      configurable: true,
+      get: () => (state.messages.length === currentMessages.length ? 60 : 11_360),
+    });
+    Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 0 });
+
+    await vi.waitFor(() => expect(messagesSpy).toHaveBeenCalled());
+    await vi.waitFor(() =>
+      expect(
+        container?.querySelector('.message-history-banner')?.classList.contains('is-loading')
+      ).toBe(false)
+    );
+
+    expect(messagesSpy).toHaveBeenCalledOnce();
+    expect(messagesSpy).not.toHaveBeenCalledWith('session-1', {
+      limit: 200,
+      before: 'cursor-must-not-load',
+    });
+    expect(getSessionHistoryCursor('session-1')).toBe('cursor-must-not-load');
   });
 
   it('continues ordinary pagination when a page advances the cursor without adding rows', async () => {

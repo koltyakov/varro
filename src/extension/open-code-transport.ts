@@ -69,6 +69,8 @@ export class OpenCodeTransport {
   private eventReconnectDelay = 1000;
   private eventReconnectCount = 0;
   private eventStreamGeneration = 0;
+  private eventStreamServerUrl: string | undefined;
+  private lastEventId = '';
   private requestWorkspaceDirectory: string | undefined;
   private eventStreamDirectory: string | undefined;
   private readonly requestControllers = new Set<AbortController>();
@@ -216,6 +218,9 @@ export class OpenCodeTransport {
     eventStreamDirectory = this.requestWorkspaceDirectory,
     promoteDirectoryImmediately = true
   ) {
+    const serverUrl = this.options.getUrl();
+    if (this.eventStreamServerUrl !== serverUrl) this.lastEventId = '';
+    this.eventStreamServerUrl = serverUrl;
     this.resetEventStream();
     this.eventStreamDirectory = eventStreamDirectory;
     if (promoteDirectoryImmediately) {
@@ -226,11 +231,7 @@ export class OpenCodeTransport {
     const controller = this.eventController;
     let shouldReconnect = false;
     let continuityEstablished = false;
-    const eventStreamRequest = scopeOpenCodeRequest(
-      this.options.getUrl(),
-      EVENT_STREAM_PATH,
-      undefined
-    );
+    const eventStreamRequest = scopeOpenCodeRequest(serverUrl, EVENT_STREAM_PATH, undefined);
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
     let connectTimer: ReturnType<typeof setTimeout> | null = null;
     let stabilityTimer: ReturnType<typeof setTimeout> | null = null;
@@ -264,12 +265,14 @@ export class OpenCodeTransport {
     }, OpenCodeTransport.EVENT_CONNECT_TIMEOUT_MS);
 
     try {
+      const headers: Record<string, string> = {
+        Accept: 'text/event-stream',
+        ...getOpenCodeDirectoryHeaders(eventStreamRequest.directory),
+      };
+      if (this.lastEventId) headers['Last-Event-ID'] = this.lastEventId;
       const res = await fetch(eventStreamRequest.url, {
         signal: controller.signal,
-        headers: {
-          Accept: 'text/event-stream',
-          ...getOpenCodeDirectoryHeaders(eventStreamRequest.directory),
-        },
+        headers,
       });
       clearConnectTimer();
       if (!isCurrentStream()) return;
@@ -385,6 +388,8 @@ export class OpenCodeTransport {
 
   stopEventStream() {
     this.resetEventStream();
+    this.eventStreamServerUrl = undefined;
+    this.lastEventId = '';
   }
 
   private resetEventStream() {
@@ -424,10 +429,17 @@ export class OpenCodeTransport {
 
   private processSseChunk(chunk: string, controller?: AbortController, generation?: number) {
     let data = '';
+    let eventId: string | undefined;
     for (const line of chunk.split(/\r\n|[\r\n]/)) {
-      if (!line.startsWith('data:')) continue;
-      const value = line.slice(5).trimStart();
-      data = data.length === 0 ? value : `${data}\n${value}`;
+      if (line === 'id') {
+        eventId = '';
+      } else if (line.startsWith('id:')) {
+        const value = line.slice(3).replace(/^ /, '');
+        if (!value.includes('\0')) eventId = value;
+      } else if (line.startsWith('data:')) {
+        const value = line.slice(5).trimStart();
+        data = data.length === 0 ? value : `${data}\n${value}`;
+      }
     }
     if (data.length === 0) return;
     if (data.length > OpenCodeTransport.EVENT_MAX_PAYLOAD_CHARS) {
@@ -436,6 +448,14 @@ export class OpenCodeTransport {
       );
       return;
     }
+    if (
+      controller &&
+      generation !== undefined &&
+      !this.isCurrentEventStream(controller, generation)
+    ) {
+      return;
+    }
+    if (eventId !== undefined) this.lastEventId = eventId;
     let parsed: unknown;
     try {
       parsed = JSON.parse(data);
@@ -443,13 +463,6 @@ export class OpenCodeTransport {
       logger.warn(
         `Ignoring malformed event stream payload: ${err instanceof Error ? err.message : String(err)}`
       );
-      return;
-    }
-    if (
-      controller &&
-      generation !== undefined &&
-      !this.isCurrentEventStream(controller, generation)
-    ) {
       return;
     }
     try {

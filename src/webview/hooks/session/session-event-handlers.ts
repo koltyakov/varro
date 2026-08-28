@@ -252,13 +252,16 @@ export class SessionEventHandlerOperations {
       syncTodosForSession: this.deps.todoSyncOperations.syncTodosForSession,
       shouldAutoApprovePermissions: (sessionId) =>
         this.deps.isPermissionAutomationOwner?.() !== false &&
+        !permissionsStore.isSessionPermissionModePending(sessionId) &&
         permissionsStore.getPermissionModeForSession(sessionId) === 'full',
       shouldAutoApproveEdit: (permission) =>
         this.deps.isPermissionAutomationOwner?.() !== false &&
+        !permissionsStore.isSessionPermissionModePending(permission.sessionID) &&
         permissionsStore.getPermissionModeForSession(permission.sessionID) === 'edits' &&
         isEditPermission(permission.type),
       shouldAutoJudgePermissions: (sessionId) =>
         this.deps.isPermissionAutomationOwner?.() !== false &&
+        !permissionsStore.isSessionPermissionModePending(sessionId) &&
         permissionsStore.getPermissionModeForSession(sessionId) === 'auto',
       isPermissionSessionKnown: this.deps.sessionApprovalOperations.isPermissionSessionKnown,
       syncPermissionSession: this.deps.sessionApprovalOperations.syncPermissionSession,
@@ -301,6 +304,9 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   // delta fragments carry no `seq`). Lets us resync only when a durable event was
   // actually missed, instead of defensively on every progress event.
   const lastSeqBySession = new Map<string, number>();
+  // A lower seq may be a stale replay or a server reset. Keep the old cursor until
+  // canonical repair succeeds and the lower sequence advances.
+  const pendingSequenceResets = new Map<string, { seq: number; repaired: boolean }>();
   const evictedSequenceSessions = new Set<string>();
   // A cursor can advance past a gap before reconciliation finishes. Keep the session
   // dirty until both canonical metadata and transcript reads succeed.
@@ -325,6 +331,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   };
   const invalidateSequenceCursor = (sessionId: string) => {
     lastSeqBySession.delete(sessionId);
+    pendingSequenceResets.delete(sessionId);
     rememberSequenceEviction(sessionId);
   };
   const noteSeq = (
@@ -340,12 +347,26 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         const oldestSessionId = lastSeqBySession.keys().next().value;
         if (oldestSessionId === undefined) break;
         lastSeqBySession.delete(oldestSessionId);
+        pendingSequenceResets.delete(oldestSessionId);
         rememberSequenceEviction(oldestSessionId);
       }
       lastSeqBySession.set(sessionId, seq);
       return requiresRecovery ? 'gap' : 'ok';
     }
-    if (seq <= last) return 'ok';
+    if (seq === last) return 'ok';
+    if (seq < last) {
+      const reset = pendingSequenceResets.get(sessionId);
+      if (reset?.repaired && seq === reset.seq + 1) {
+        pendingSequenceResets.delete(sessionId);
+        lastSeqBySession.set(sessionId, seq);
+        return 'ok';
+      }
+      if (!reset || reset.repaired || seq > reset.seq) {
+        pendingSequenceResets.set(sessionId, { seq, repaired: false });
+      }
+      return 'gap';
+    }
+    pendingSequenceResets.delete(sessionId);
     lastSeqBySession.set(sessionId, seq);
     return seq === last + 1 ? 'ok' : 'gap';
   };
@@ -363,11 +384,13 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     const activeSessionId = deps.getActiveSessionId();
     return activeSessionId ? deps.isSessionTreeStatusWorking(activeSessionId) : false;
   };
+  const messagesForSession = (sessionId: string) =>
+    deps.getMessages().filter((entry) => entry.info.sessionID === sessionId);
   const isStaleProgressAfterFinishedAssistant = (sessionId: string) =>
     isSessionInActiveTree(sessionId) &&
-    latestAssistantFinishedBeforeLoading(deps.getMessages(), uiStore.loadingStartedAt());
-  const latestAssistantHasExplicitTerminalFinish = () => {
-    const latest = deps.getMessages().at(-1)?.info;
+    latestAssistantFinishedBeforeLoading(messagesForSession(sessionId), uiStore.loadingStartedAt());
+  const latestAssistantHasExplicitTerminalFinish = (sessionId: string) => {
+    const latest = messagesForSession(sessionId).at(-1)?.info;
     return (
       latest?.role === 'assistant' &&
       !!latest.time.completed &&
@@ -456,6 +479,8 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         const succeeded =
           metadataResult.status === 'fulfilled' && transcriptResult.status === 'fulfilled';
         if (succeeded && state.generation === generation && !state.retryPending) {
+          const reset = pendingSequenceResets.get(sessionId);
+          if (reset) reset.repaired = true;
           dirtyGaps.delete(sessionId);
           return;
         }
@@ -1032,6 +1057,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     }
     pendingMissingPartDeltas.clear();
     lastSeqBySession.clear();
+    pendingSequenceResets.clear();
     evictedSequenceSessions.clear();
     for (const dirty of dirtyGaps.values()) {
       if (dirty.retryTimer !== undefined) clearTimeout(dirty.retryTimer);
@@ -1046,10 +1072,26 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
 
   cleanups.push(
     serverEvents.on('server.connected', () => {
-      if (!deps.reconcileServerState || serverReconciliation) return;
-      serverReconciliation = deps
-        .reconcileServerState()
-        .catch((err) => deps.logError('reconcileServerState', err))
+      if (serverReconciliation) return;
+      const activeSessionId = deps.getActiveSessionId();
+      const recoveries: Array<Promise<void | boolean | object>> = [];
+      if (deps.reconcileServerState) {
+        recoveries.push(
+          runGapSync(deps.reconcileServerState).catch((err) => {
+            deps.logError('reconcileServerState', err);
+          })
+        );
+      }
+      if (activeSessionId) {
+        recoveries.push(
+          runGapSync(() => deps.syncSessionMessages(activeSessionId)).catch((err) => {
+            deps.logError('syncSessionMessages', err);
+          })
+        );
+      }
+      if (recoveries.length === 0) return;
+      serverReconciliation = Promise.all(recoveries)
+        .then(() => undefined)
         .finally(() => {
           serverReconciliation = null;
         });
@@ -1123,9 +1165,12 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       if (
         status.type === 'busy' &&
         isSessionInActiveTree(sessionID) &&
-        latestAssistantFinishedBeforeLoading(deps.getMessages(), uiStore.loadingStartedAt()) &&
+        latestAssistantFinishedBeforeLoading(
+          messagesForSession(sessionID),
+          uiStore.loadingStartedAt()
+        ) &&
         (!isRunningSessionStatus(deps.getSessionStatus(sessionID)) ||
-          latestAssistantHasExplicitTerminalFinish())
+          latestAssistantHasExplicitTerminalFinish(sessionID))
       ) {
         deps.setSessionStatusEntry(sessionID, { type: 'idle' });
         if (!isActiveTreeWorking()) uiStore.stopLoading();

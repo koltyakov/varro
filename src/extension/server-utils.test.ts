@@ -41,7 +41,7 @@ describe('server utils', () => {
     ).toEqual({
       state: 'running',
       url: 'http://127.0.0.1:4096',
-      eventStream: 'healthy',
+      eventStream: 'degraded',
     });
 
     expect(

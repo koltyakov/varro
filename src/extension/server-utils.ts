@@ -14,8 +14,8 @@ export function isPortInUseMessage(text: string): boolean {
 export function normalizeRunningStatus(next: ServerStatus, previous: ServerStatus): ServerStatus {
   if (next.state !== 'running') return next;
   if (next.eventStream) return next;
-  if (previous.state !== 'running') return { ...next, eventStream: 'healthy' };
-  return { ...next, eventStream: previous.eventStream || 'healthy' };
+  if (previous.state !== 'running') return { ...next, eventStream: 'degraded' };
+  return { ...next, eventStream: previous.eventStream || 'degraded' };
 }
 
 const SSE_CHUNK_BOUNDARY_RE = /\r\n\r\n|\n\n|\r\r|\r\n\n|\n\r\n/g;

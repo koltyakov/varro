@@ -411,6 +411,10 @@ describe('session-approvals helpers', () => {
     expect(updateSessionPermission).toHaveBeenNthCalledWith(2, 'session-1', 'auto', {
       permission: [{ permission: 'bash', pattern: '*', action: 'ask' }],
     });
+    expect(setPendingSessionPermissionMode.mock.calls).toEqual([
+      ['session-1', 'full'],
+      ['session-1', 'auto'],
+    ]);
     autoUpdate.resolve(session('session-1'));
     await Promise.all([full, auto]);
 
