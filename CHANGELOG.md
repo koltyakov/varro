@@ -8,8 +8,9 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 - Added workspace controls to the session list and composer, with new prompts following the active editor's workspace until a folder is chosen manually.
 - Added sibling-workspace notifications for sessions that need attention, failed sessions, and completed plans, with quick switching to the relevant workspace and child sessions excluded from unread alerts.
 - Scoped chat context, OpenCode requests, session events, permissions, and recovery state to each view's selected workspace.
-- Improved session recovery and cleanup across managed restarts, provider authentication refreshes, restored editor chats, resumed streams, failed Ralph runs, and workspace changes.
-- Hardened native Windows integration, Markdown and Mermaid rendering, auto-approval command checks, provider usage discovery, and stale webview event handling.
+- Improved session continuity and cleanup across managed restarts, provider authentication refreshes, restored editor chats, reconnected streams, overlapping requests, failed Ralph runs, and workspace changes.
+- Stabilized long-conversation scrolling during history loading, content expansion, image rendering, and resize reflow, preserving the visible position across layout changes.
+- Hardened native Windows integration, Markdown and Mermaid rendering, queued-message restoration, local usage reporting, auto-approval command checks, provider usage discovery, session path validation, and stale webview event handling.
 - Fixed links followed by punctuation, session token totals that included cache reads, hidden-model persistence across workspaces, transcript rail overflow, and chat action colors.
 
 ## 0.26.x - August 2026

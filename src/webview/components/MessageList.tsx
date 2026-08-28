@@ -2456,8 +2456,10 @@ export function MessageList() {
   ) {
     if (!containerRef) return null;
 
-    const exactAnchor = captureExactPaintedVisibleScrollAnchor(predictedMovement);
-    if (exactAnchor) return exactAnchor;
+    if (!preferFullyVisible) {
+      const exactAnchor = captureExactPaintedVisibleScrollAnchor(predictedMovement);
+      if (exactAnchor) return exactAnchor;
+    }
 
     const containerRect = containerRef.getBoundingClientRect();
     let firstVisibleRow: VisibleScrollAnchor | null = null;
@@ -5036,7 +5038,20 @@ export function MessageList() {
       keydownDestinationRafId = requestAnimationFrame(() => {
         keydownDestinationRafId = 0;
         if (disposed || !containerRef || state.activeSessionId !== sessionId) return;
-        const anchor = captureWidthResizeVisibleScrollAnchor();
+        const destinationMetrics = shouldVirtualize() ? virtualMetrics() : null;
+        const destinationIndex = destinationMetrics
+          ? getFirstVisibleMessageIndexFromVirtualMetrics({
+              metrics: destinationMetrics,
+              scrollTop: getVirtualScrollTop(containerRef.scrollTop),
+            })
+          : null;
+        const anchor = refineTallRenderItemScrollAnchor(
+          destinationIndex === null
+            ? captureVisibleScrollAnchor({ preferStableRenderItem: true })
+            : capturePaintedVisibleScrollAnchorFromIndex(destinationIndex),
+          0,
+          { includeCompact: true }
+        );
         if (!anchor) return;
         directMovementAnchor = {
           anchor,
