@@ -272,6 +272,25 @@
   color: var(--color-vscode-fg);
 }
 
+.context-popup-row-cache-read .context-popup-row-value {
+  color: color-mix(in srgb, var(--color-vscode-muted) 70%, transparent);
+}
+
+.context-popup-cache-read-info {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 4px;
+  border-radius: var(--radius-xs);
+  color: inherit;
+  cursor: help;
+  vertical-align: -1px;
+}
+
+.context-popup-cache-read-info:focus-visible {
+  outline: 1px solid var(--color-vscode-focus-border);
+  outline-offset: 1px;
+}
+
 .context-popup-row-total {
   margin-top: 2px;
   padding-top: 4px;

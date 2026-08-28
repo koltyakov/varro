@@ -1010,7 +1010,9 @@ export class RestProxy {
     const model = summarizeSessionModel(messages);
     const result: SessionDiffSummary = {
       ...editStats,
-      tokens: tokenBreakdown.session.total + tokenBreakdown.subagents.total,
+      tokens:
+        getSessionTokensExcludingCacheReads(tokenBreakdown.session) +
+        getSessionTokensExcludingCacheReads(tokenBreakdown.subagents),
       ...summarizeSessionDuration(messages),
     };
     if (historyStatsUnavailable) result.historyStatsUnavailable = true;
@@ -2443,6 +2445,10 @@ function summarizeTokenUsageRecord(tokens: Record<string, unknown> | undefined):
 
 function emptySessionTokenUsage(): SessionTokenUsage {
   return { total: 0, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 };
+}
+
+function getSessionTokensExcludingCacheReads(usage: SessionTokenUsage): number {
+  return Math.max(0, usage.total - usage.cacheRead);
 }
 
 function addSessionTokenUsage(target: SessionTokenUsage, source: SessionTokenUsage) {

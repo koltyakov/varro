@@ -1,5 +1,10 @@
 import { For, createSignal, onCleanup, onMount, Show } from 'solid-js';
-import { checkSquareIcon, navArrowRightIcon, squareIcon } from '../../lib/ui-icons';
+import {
+  checkSquareIcon,
+  databaseBackupIcon,
+  navArrowRightIcon,
+  squareIcon,
+} from '../../lib/ui-icons';
 import { formatCost, formatNumber } from '../../lib/message-metrics';
 import {
   alignPopupToBoundary,
@@ -17,6 +22,8 @@ import { isFunction } from '../../lib/runtime-values';
 
 const CONTEXT_USAGE_WARNING_PERCENT = 70;
 const CONTEXT_USAGE_ERROR_PERCENT = 90;
+const CACHE_READ_TOOLTIP =
+  "Tokens reused from the provider's prompt cache. They count toward the context window but are excluded from session totals.";
 
 type ContextBreakdownLabels = Record<ContextBreakdownKey, string>;
 
@@ -37,6 +44,12 @@ type ContextTokens = {
   cacheWrite: number;
 };
 
+type ContextTokenRow = {
+  key: 'input' | 'output' | 'reasoning' | 'cacheRead' | 'cacheWrite';
+  label: string;
+  value: number;
+};
+
 function getSessionInputTokens(tokens: ContextTokens) {
   return tokens.input + tokens.cacheWrite;
 }
@@ -49,15 +62,31 @@ function getSessionTotalTokens(tokens: ContextTokens) {
   return getSessionInputTokens(tokens) + getSessionOutputTokens(tokens);
 }
 
-function getTokenRows(tokens: ContextTokens) {
-  const items: Array<{ label: string; value: number }> = [
-    { label: 'Input', value: getSessionInputTokens(tokens) },
-    { label: 'Output', value: getSessionOutputTokens(tokens) },
+function getTokenRows(tokens: ContextTokens): ContextTokenRow[] {
+  const items: ContextTokenRow[] = [
+    { key: 'input', label: 'Input', value: getSessionInputTokens(tokens) },
+    { key: 'output', label: 'Output', value: getSessionOutputTokens(tokens) },
   ];
-  if (tokens.reasoning > 0) items.push({ label: 'Reasoning', value: tokens.reasoning });
-  if (tokens.cacheRead > 0) items.push({ label: 'Cache read', value: tokens.cacheRead });
-  if (tokens.cacheWrite > 0) items.push({ label: 'Cache write', value: tokens.cacheWrite });
+  if (tokens.reasoning > 0) {
+    items.push({ key: 'reasoning', label: 'Reasoning', value: tokens.reasoning });
+  }
+  if (tokens.cacheRead > 0) {
+    items.push({ key: 'cacheRead', label: 'Cache read', value: tokens.cacheRead });
+  }
+  if (tokens.cacheWrite > 0) {
+    items.push({ key: 'cacheWrite', label: 'Cache write', value: tokens.cacheWrite });
+  }
   return items;
+}
+
+function CacheReadInfo() {
+  return (
+    <Tooltip content={CACHE_READ_TOOLTIP}>
+      <span class="context-popup-cache-read-info" tabindex="0" aria-label="Cache read details">
+        <UiIcon source={databaseBackupIcon} width="11" height="11" />
+      </span>
+    </Tooltip>
+  );
 }
 
 export function ContextPopup(props: {
@@ -136,11 +165,17 @@ export function ContextPopup(props: {
       <div class="context-popup-rows">
         <For each={getTokenRows(props.tokens)}>
           {(row) => (
-            <div class="context-popup-row">
+            <div
+              class="context-popup-row"
+              classList={{ 'context-popup-row-cache-read': row.key === 'cacheRead' }}
+            >
               <span class="context-popup-row-label">{row.label}</span>
               <span
                 class={`context-popup-row-value${sessionTokensAvailable() ? '' : ' unavailable'}`}
               >
+                <Show when={row.key === 'cacheRead'}>
+                  <CacheReadInfo />
+                </Show>
                 {sessionTokensAvailable() ? formatNumber(row.value) : '--'}
               </span>
             </div>
@@ -227,9 +262,17 @@ export function ContextPopup(props: {
           <div class="context-popup-rows context-popup-subagent-rows">
             <For each={getTokenRows(props.subagentTokens)}>
               {(row) => (
-                <div class="context-popup-row">
+                <div
+                  class="context-popup-row"
+                  classList={{ 'context-popup-row-cache-read': row.key === 'cacheRead' }}
+                >
                   <span class="context-popup-row-label">{row.label}</span>
-                  <span class="context-popup-row-value">{formatNumber(row.value)}</span>
+                  <span class="context-popup-row-value">
+                    <Show when={row.key === 'cacheRead'}>
+                      <CacheReadInfo />
+                    </Show>
+                    {formatNumber(row.value)}
+                  </span>
                 </div>
               )}
             </For>

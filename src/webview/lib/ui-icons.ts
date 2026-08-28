@@ -15,6 +15,7 @@ import checkCircleIcon from 'iconoir/icons/check-circle.svg';
 import checkSquareIcon from 'iconoir/icons/check-square.svg';
 import clockIcon from 'iconoir/icons/clock.svg';
 import copyIcon from 'iconoir/icons/copy.svg';
+import databaseBackupIcon from 'iconoir/icons/database-backup.svg';
 import downloadIcon from 'iconoir/icons/download.svg';
 import editPencilIcon from 'iconoir/icons/edit-pencil.svg';
 import emptyPageIcon from 'iconoir/icons/empty-page.svg';
@@ -80,6 +81,7 @@ export {
   checkSquareIcon,
   clockIcon,
   copyIcon,
+  databaseBackupIcon,
   downloadIcon,
   editPencilIcon,
   emptyPageIcon,

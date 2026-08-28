@@ -44,6 +44,8 @@ import {
   syncQueuedMessages,
 } from '../lib/state-queued-messages';
 import { sendQueuedAsSteer } from './chat-input/queued-steer';
+import { databaseBackupIcon } from '../lib/ui-icons';
+import { toCssUrl } from './UiIcon';
 
 interface SessionEventProperties extends UnknownRecord {
   sessionID: string;
@@ -1461,6 +1463,10 @@ describe('ChatInput', () => {
       'Cache read': '50',
       Total: '600',
     });
+    const agentCacheReadRow = subagentToggle.nextElementSibling?.querySelector(
+      '.context-popup-row-cache-read'
+    );
+    expect(agentCacheReadRow?.querySelector('.context-popup-cache-read-info')).not.toBeNull();
     expect(container?.querySelector('.context-popup-overall-total')?.textContent).toContain(
       'Overall1,100'
     );
@@ -1534,6 +1540,44 @@ describe('ChatInput', () => {
       'Cache write': '25',
       Total: '1,275',
     });
+  });
+
+  it('dims cache reads and explains why they are excluded from session totals', async () => {
+    vi.useFakeTimers();
+    setupModelState();
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [
+      session('session-1', 2_000, {
+        tokens: {
+          input: 1_000,
+          output: 200,
+          reasoning: 0,
+          cache: { read: 100, write: 0 },
+        },
+      }),
+    ]);
+    setState('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
+
+    cleanup = render(() => ChatInput(), container!);
+    container
+      ?.querySelector<HTMLButtonElement>('.chat-context-usage')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    const cacheReadRow = container?.querySelector('.context-popup-row-cache-read');
+    const info = cacheReadRow?.querySelector<HTMLElement>('.context-popup-cache-read-info');
+    const icon = info?.querySelector<HTMLElement>('.ui-icon');
+    expect(cacheReadRow?.querySelector('.context-popup-row-label')?.textContent).toBe('Cache read');
+    expect(cacheReadRow?.querySelector('.context-popup-row-value')?.textContent).toBe('100');
+    expect(info?.tabIndex).toBe(0);
+    expect(info?.getAttribute('aria-describedby')).toBeTruthy();
+    expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(databaseBackupIcon));
+
+    info?.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
+      "Tokens reused from the provider's prompt cache. They count toward the context window but are excluded from session totals."
+    );
   });
 
   it('shows OpenCode session cost as a separate context detail row', async () => {

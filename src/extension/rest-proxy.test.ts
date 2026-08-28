@@ -1384,7 +1384,7 @@ describe('RestProxy handleRequest', () => {
         files: 2,
         additions: 6,
         deletions: 4,
-        tokens: 4_175,
+        tokens: 4_025,
         model: { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'high' },
         tokenBreakdown: {
           session: {
