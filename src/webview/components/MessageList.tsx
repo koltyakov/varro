@@ -2685,7 +2685,7 @@ export function MessageList() {
   function refineTallRenderItemScrollAnchor(
     anchor: VisibleScrollAnchor | null,
     preferredViewportOffset = 0,
-    options?: { includeCompact?: boolean }
+    options?: { includeCompact?: boolean; skipThinking?: boolean }
   ) {
     if (!containerRef || !anchor) return anchor;
     const containerRect = containerRef.getBoundingClientRect();
@@ -2714,7 +2714,7 @@ export function MessageList() {
       renderItem.querySelectorAll<HTMLElement>(
         '.rendered-markdown :is(p, li, pre, table, blockquote, h1, h2, h3, h4, h5, h6)'
       )
-    );
+    ).filter((element) => !options?.skipThinking || !element.closest('.chat-thinking-box'));
     let low = 0;
     let high = candidates.length;
     while (low < high) {
@@ -5238,7 +5238,7 @@ export function MessageList() {
     );
     onCleanup(unregisterQueuedMessageRemoval);
     const stopCapturingThinkingAnchor = onBeforeShowThinkingPreferenceChange(() => {
-      pendingThinkingLayoutAnchor =
+      const anchor =
         !autoScroll() &&
         !stickyNavigationOwnsScroll() &&
         !editingMessage() &&
@@ -5249,6 +5249,11 @@ export function MessageList() {
               skipThinkingRenderItems: true,
             })
           : null;
+      pendingThinkingLayoutAnchor = refineTallRenderItemScrollAnchor(
+        anchor,
+        WIDTH_RESIZE_ANCHOR_INSET_PX,
+        { skipThinking: true }
+      );
     });
     onCleanup(stopCapturingThinkingAnchor);
     // SAFETY: The surrounding shape or discriminator check establishes the EventListener contract used below.

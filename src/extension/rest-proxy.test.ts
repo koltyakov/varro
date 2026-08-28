@@ -467,6 +467,33 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
+  it('returns an error for malformed prompt session encoding', async () => {
+    const { proxy, callbacks } = createProxy();
+
+    await proxy.handleRequest(makePayload(2, 'POST', '/session/%/prompt_async'));
+
+    expect(callbacks.server.request).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 2,
+      error: 'URI malformed',
+    });
+  });
+
+  it('returns an error for malformed queued-history session encoding', async () => {
+    const { proxy, callbacks } = createProxy();
+
+    await proxy.handleRequest({
+      ...makePayload(3, 'GET', '/session/%/message', { messageID: 'message-3' }),
+      queuedMessageDispatch: { itemId: 'queue-3', lease: 1 },
+    });
+
+    expect(callbacks.server.request).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 3,
+      error: 'URI malformed',
+    });
+  });
+
   it('forwards session unshare requests to OpenCode', async () => {
     const response = {
       id: 'session-1',

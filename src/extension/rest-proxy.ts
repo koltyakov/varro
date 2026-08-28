@@ -239,11 +239,8 @@ export class RestProxy {
   private async handleRequestInScope(payload: ApiRequestPayload) {
     const requestGeneration = this.callbacks.getRequestGeneration();
     const method = payload.method.toUpperCase();
-    const promptSessionID = this.parsePromptSessionID(method, payload.path);
-    const queuedHistorySessionID = this.parseQueuedHistorySessionID(method, payload);
-    const queuedDispatchSessionID = promptSessionID ?? queuedHistorySessionID;
-    const queuedDispatch = queuedDispatchSessionID ? payload.queuedMessageDispatch : undefined;
-    const queuedMessageId = queuedDispatch ? asRecord(payload.body)?.messageID : undefined;
+    let queuedDispatchSessionID: string | undefined;
+    let queuedDispatch: ApiRequestPayload['queuedMessageDispatch'];
     let queuedDispatchActive = false;
     if (this.disposed) {
       this.callbacks.postApiResponse(requestGeneration, {
@@ -259,6 +256,11 @@ export class RestProxy {
       if (!isAllowedApiRequest(method, payload.path)) {
         throw new Error('Unsupported API request');
       }
+      const promptSessionID = this.parsePromptSessionID(method, payload.path);
+      const queuedHistorySessionID = this.parseQueuedHistorySessionID(method, payload);
+      queuedDispatchSessionID = promptSessionID ?? queuedHistorySessionID;
+      queuedDispatch = queuedDispatchSessionID ? payload.queuedMessageDispatch : undefined;
+      const queuedMessageId = queuedDispatch ? asRecord(payload.body)?.messageID : undefined;
       if (
         queuedDispatch &&
         (!isSafePersistedSessionId(queuedMessageId) ||

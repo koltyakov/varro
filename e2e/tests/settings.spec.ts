@@ -197,7 +197,7 @@ test('hiding thinking preserves visible markdown inside the same clipped assista
   page,
 }) => {
   await page.goto(
-    '/e2e/harness/index.html?scenario=heterogeneous-large-transcript&expandedActivity=1'
+    '/e2e/harness/index.html?scenario=heterogeneous-large-transcript&expandedActivity=1&tallThinkingAnchor=1'
   );
   const list = page.locator('.interactive-list');
   await list.evaluate((element) => {
@@ -219,8 +219,21 @@ test('hiding thinking preserves visible markdown inside the same clipped assista
         requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
       )
   );
+  const anchor = row.locator('[data-assistant-render-key] .rendered-markdown li').nth(40);
+  await expect(anchor).toBeAttached();
+  await anchor.evaluate((element) => {
+    const transcript = element.closest<HTMLElement>('.interactive-list')!;
+    transcript.scrollTop +=
+      element.getBoundingClientRect().top - transcript.getBoundingClientRect().top - 16;
+    transcript.dispatchEvent(new Event('scroll'));
+  });
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      )
+  );
 
-  const anchor = row.locator('[data-assistant-render-key] .rendered-markdown p').last();
   await expect(anchor).toBeVisible();
   const before = await anchor.evaluate((element) => element.getBoundingClientRect().top);
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
