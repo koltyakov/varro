@@ -171,6 +171,26 @@ describe('SessionStateManager notifications', () => {
     }
   });
 
+  it('cancels deferred permission attention when disposed', async () => {
+    vi.useFakeTimers();
+    const manager = createManager();
+
+    try {
+      manager.handleServerEvent({
+        type: 'permission.asked',
+        properties: { id: 'perm-timeout', sessionID: 'session-1', title: 'Use Bash' },
+      });
+
+      manager.dispose();
+      await vi.advanceTimersByTimeAsync(AUTO_APPROVE_JUDGE_TIMEOUT_MS);
+
+      expect(vscodeMock.window.showWarningMessage).not.toHaveBeenCalled();
+      expect(manager.pendingForUser.size).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('never reveals a permission resolved before the judge timeout', async () => {
     vi.useFakeTimers();
     const manager = createManager();

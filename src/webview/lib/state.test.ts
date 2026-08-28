@@ -20,6 +20,7 @@ import {
   hasActiveUsageLimit,
   inputText,
   removePermission,
+  removeMessage,
   removeClipboardImage,
   setSessionFailed,
   setInputText,
@@ -133,6 +134,19 @@ describe('state streaming deltas', () => {
       text: 'Planning',
       time: { start: expect.any(Number) },
     });
+  });
+
+  it('preserves an unrelated active stream when removing a message', () => {
+    const activePart = textPart('active-part', '');
+    upsertMessage({ info: assistantMessage('message-1'), parts: [activePart] });
+    upsertMessage({ info: assistantMessage('message-2'), parts: [] });
+    applyMessagePartDelta('message-1', activePart.id, 'Streaming', 'session-1');
+
+    removeMessage('session-1', 'message-2');
+
+    expect(state.messages).toHaveLength(1);
+    expect(state.streamingPartId).toBe(activePart.id);
+    expect(state.streamingText).toBe('Streaming');
   });
 
   it('commits reasoning deltas superseded by text in the same frame', async () => {

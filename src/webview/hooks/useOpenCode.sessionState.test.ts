@@ -1,4 +1,4 @@
-import { createRoot } from 'solid-js';
+import { createComputed, createRoot } from 'solid-js';
 import { describe, expect, it, vi } from 'vitest';
 import type { ServerEventName } from '../../shared/protocol';
 import type { onMessage } from '../lib/bridge';
@@ -589,7 +589,22 @@ describe('useOpenCode session state flows', () => {
     stateModule.setState('streamingText', 'Parent response in progress');
     messageWindow.setSessionHistoryCursor('session-1', 'cursor-older');
 
-    await hookModule.loadOlderSessionHistoryPage('session-1');
+    const observedStreamingState: Array<[string | null, string]> = [];
+    const dispose = createRoot((cleanup) => {
+      createComputed(() => {
+        observedStreamingState.push([
+          stateModule.state.streamingPartId,
+          stateModule.state.streamingText,
+        ]);
+      });
+      return cleanup;
+    });
+
+    try {
+      await hookModule.loadOlderSessionHistoryPage('session-1');
+    } finally {
+      dispose();
+    }
 
     expect({
       messageIds: stateModule.state.messages.map((entry) => entry.info.id),
@@ -600,6 +615,7 @@ describe('useOpenCode session state flows', () => {
       streamingPartId: 'parent-text',
       streamingText: 'Parent response in progress',
     });
+    expect(observedStreamingState).not.toContainEqual([null, '']);
   });
 
   it('preserves a queued active-session delta while prepending older history', async () => {

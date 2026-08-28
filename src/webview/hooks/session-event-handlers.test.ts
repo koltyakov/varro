@@ -44,6 +44,7 @@ const {
   markSessionSeen,
   markSessionResponseCompleted,
   removePermission,
+  removeMessage,
   removeMessagePart,
   removeQuestion,
   replaceMessages,
@@ -83,6 +84,7 @@ const {
     markSessionSeen: vi.fn(),
     markSessionResponseCompleted: vi.fn(),
     removePermission: vi.fn(),
+    removeMessage: vi.fn(),
     removeMessagePart: vi.fn(),
     removeQuestion: vi.fn(),
     replaceMessages: vi.fn(),
@@ -122,6 +124,7 @@ vi.mock('../lib/state', async () => {
     clearStreamingState,
     markSessionSeen,
     removeMessagePart,
+    removeMessage,
     removeQuestion,
     replaceMessages,
     state,
@@ -149,6 +152,7 @@ vi.mock('../lib/stores/session-store', async () => {
       finishMessageStreaming,
       markSessionSeen,
       markSessionResponseCompleted,
+      removeMessage,
       removeMessagePart,
       replaceMessages,
       setSessionCompacting: setSessionCompactingStore,
@@ -4617,9 +4621,8 @@ describe('registerSessionEventHandlers', () => {
     const removedMessage = createAssistantEntry({ id: 'remove-message' });
     const syncTodosFromMessages = vi.fn();
 
-    clearStreamingState.mockClear();
+    removeMessage.mockClear();
     removeMessagePart.mockClear();
-    replaceMessages.mockClear();
 
     registerSessionEventHandlers(
       createDefaultDeps({
@@ -4637,10 +4640,9 @@ describe('registerSessionEventHandlers', () => {
     });
 
     expect(removeMessagePart).toHaveBeenCalledWith('session-1', 'remove-message', 'part-1');
-    expect(clearStreamingState).toHaveBeenCalledTimes(1);
-    expect(replaceMessages).toHaveBeenCalledWith([remainingMessage]);
+    expect(removeMessage).toHaveBeenCalledWith('session-1', 'remove-message');
     expect(syncTodosFromMessages).toHaveBeenCalledTimes(2);
-    expect(syncTodosFromMessages).toHaveBeenLastCalledWith([remainingMessage]);
+    expect(syncTodosFromMessages).toHaveBeenLastCalledWith();
   });
 
   it('defers local message removal while an edited replacement is pending', () => {

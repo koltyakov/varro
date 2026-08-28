@@ -1461,10 +1461,8 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       if (deps.isMessageRemovalDeferred?.(sessionId, messageId)) return;
       if (isSessionInActiveTree(sessionId)) {
         uiStore.markLoadingActivity();
-        sessionStore.clearStreamingState();
-        const nextMessages = deps.getMessages().filter((m) => m.info.id !== messageId);
-        sessionStore.replaceMessages(nextMessages);
-        deps.syncTodosFromMessages(nextMessages);
+        sessionStore.removeMessage(sessionId, messageId);
+        deps.syncTodosFromMessages();
         scheduleMessageSync(sessionId, true);
       }
     })

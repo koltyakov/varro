@@ -294,6 +294,7 @@ export class WebviewSession {
   }
 
   async handleReady() {
+    this.bridge.invalidatePendingDeliveries();
     const status = this.deps.renderStatus();
     this.webviewReady = true;
     this.deliveryRecoveryPending = false;

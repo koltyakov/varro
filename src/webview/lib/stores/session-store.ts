@@ -27,6 +27,7 @@ import {
   persistLastOpenedView,
   persistActiveSessionId,
   pruneMessagesFrom,
+  removeMessage,
   removeMessagePart,
   replaceMessages,
   setMessagesIncremental,
@@ -102,6 +103,7 @@ export const sessionStore = {
   upsertMessageInfo,
   upsertPart,
   applyMessagePartDelta,
+  removeMessage,
   removeMessagePart,
   setActiveSessionId(sessionId: string | null) {
     setState('activeSessionId', sessionId);

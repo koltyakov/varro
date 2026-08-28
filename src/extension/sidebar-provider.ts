@@ -161,7 +161,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly deferredWorkspaceEvents: ServerEvent[] = [];
   private readonly permissionAutomationOwnerViewIds = new Set<string>();
   private readonly permissionAutomationOwnerWorkspaces = new Map<string, string>();
-  private permissionAutomationLease = 0;
+  private readonly permissionAutomationLeases = new Map<string, number>();
+  private nextPermissionAutomationLease = 0;
   private interruptedRecoveryClaim: {
     claimId: number;
     sessionIds: string[];
@@ -482,9 +483,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       postApiResponse: (requestGeneration, payload) =>
         webviewSession.postApiResponse(payload, requestGeneration),
       isPermissionAutomationLeaseCurrent: (lease, request) => {
+        const workspace =
+          normalizeWorkspaceIdentity(endpointRef.endpoint?.workspacePath ?? initialWorkspacePath) ??
+          '*';
         if (
           !this.permissionAutomationOwnerViewIds.has(webviewContext.viewId) ||
-          this.permissionAutomationLease !== lease
+          this.permissionAutomationLeases.get(workspace) !== lease
         ) {
           return false;
         }
@@ -1166,9 +1170,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private permissionAutomationFor(viewId: string) {
+    const workspace =
+      this.permissionAutomationOwnerWorkspaces.get(viewId) ??
+      normalizeWorkspaceIdentity(
+        [...this.endpoints].find((endpoint) => endpoint.viewId === viewId)?.workspacePath
+      ) ??
+      '*';
     return {
       owner: this.permissionAutomationOwnerViewIds.has(viewId),
-      lease: this.permissionAutomationLease,
+      lease: this.permissionAutomationLeases.get(workspace) ?? 0,
     };
   }
 
@@ -1210,6 +1220,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         normalizeWorkspaceIdentity(endpoint.workspacePath) ?? '*',
       ])
     );
+    const previousOwnerByWorkspace = new Map(
+      [...this.permissionAutomationOwnerWorkspaces].map(([viewId, workspace]) => [
+        workspace,
+        viewId,
+      ])
+    );
+    const nextOwnerByWorkspace = new Map(
+      [...nextOwnerWorkspaces].map(([viewId, workspace]) => [workspace, viewId])
+    );
     if (
       nextOwnerViewIds.size === this.permissionAutomationOwnerViewIds.size &&
       [...nextOwnerViewIds].every(
@@ -1221,13 +1240,23 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.reconcileInterruptedRecoveryOwners(owners);
       return;
     }
+    for (const workspace of new Set([
+      ...previousOwnerByWorkspace.keys(),
+      ...nextOwnerByWorkspace.keys(),
+    ])) {
+      if (previousOwnerByWorkspace.get(workspace) === nextOwnerByWorkspace.get(workspace)) continue;
+      if (nextOwnerByWorkspace.has(workspace)) {
+        this.permissionAutomationLeases.set(workspace, ++this.nextPermissionAutomationLease);
+      } else {
+        this.permissionAutomationLeases.delete(workspace);
+      }
+    }
     this.permissionAutomationOwnerViewIds.clear();
     this.permissionAutomationOwnerWorkspaces.clear();
     for (const viewId of nextOwnerViewIds) this.permissionAutomationOwnerViewIds.add(viewId);
     for (const [viewId, workspace] of nextOwnerWorkspaces) {
       this.permissionAutomationOwnerWorkspaces.set(viewId, workspace);
     }
-    this.permissionAutomationLease += 1;
     for (const endpoint of this.endpoints) {
       if (!endpoint.ready) continue;
       endpoint.bridge.post({
@@ -1586,6 +1615,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   async dispose() {
     this.disposing = true;
+    this.sessionState.dispose();
     this.providerFileRefresh.beginDispose();
     for (const endpoint of this.endpoints) this.setEndpointReady(endpoint, false);
     for (const endpoint of this.editorPanels.values()) {

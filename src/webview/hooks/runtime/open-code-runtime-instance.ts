@@ -555,20 +555,25 @@ function setSessionMessagesIncremental(
         (behavior?.preserveSessionStreaming || entry.info.sessionID !== sessionId) &&
         entry.parts.some((part) => part.id === streamingPartId)
     );
-  sessionStore.setMessagesIncremental(mergeSessionMessages(current, sessionId, messages), options);
-  setCachedSessionMessages(
-    sessionId,
-    appStore.state.messages.filter((entry) => entry.info.sessionID === sessionId)
-  );
-  if (
-    preserveStreamingState &&
-    appStore.state.messages.some((entry) => entry.parts.some((part) => part.id === streamingPartId))
-  ) {
-    batch(() => {
+  batch(() => {
+    sessionStore.setMessagesIncremental(
+      mergeSessionMessages(current, sessionId, messages),
+      options
+    );
+    setCachedSessionMessages(
+      sessionId,
+      appStore.state.messages.filter((entry) => entry.info.sessionID === sessionId)
+    );
+    if (
+      preserveStreamingState &&
+      appStore.state.messages.some((entry) =>
+        entry.parts.some((part) => part.id === streamingPartId)
+      )
+    ) {
       appStore.setState('streamingPartId', streamingPartId);
       appStore.setState('streamingText', streamingText);
-    });
-  }
+    }
+  });
 }
 
 async function fetchSessionMessages(

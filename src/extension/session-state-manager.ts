@@ -172,6 +172,7 @@ export class SessionStateManager {
   private recoverySnapshotPromise: Promise<RecoverySnapshot> | undefined;
   private interruptedRecoveryLoaded = false;
   private blockingRecoveryCleanupPending = false;
+  private disposed = false;
   private nextBusyAttemptID = 0;
 
   constructor(
@@ -449,6 +450,7 @@ export class SessionStateManager {
   }
 
   handleServerEvent(event: ServerEvent): void {
+    if (this.disposed) return;
     const { type, properties: props } = event;
     let changed = false;
     this.rememberEventWorkspace(event);
@@ -1190,7 +1192,7 @@ export class SessionStateManager {
   }
 
   private deferPermissionAttention(requestID: string): void {
-    if (this.deferredPermissionAttention.has(requestID)) return;
+    if (this.disposed || this.deferredPermissionAttention.has(requestID)) return;
     const timer = setTimeout(() => this.revealPermission(requestID), AUTO_APPROVE_JUDGE_TIMEOUT_MS);
     this.deferredPermissionAttention.set(requestID, timer);
   }
@@ -1199,6 +1201,13 @@ export class SessionStateManager {
     const timer = this.deferredPermissionAttention.get(requestID);
     if (timer) clearTimeout(timer);
     this.deferredPermissionAttention.delete(requestID);
+  }
+
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    for (const timer of this.deferredPermissionAttention.values()) clearTimeout(timer);
+    this.deferredPermissionAttention.clear();
   }
 
   private recordBlockingRequestMutation(kind: PendingAttentionKind, requestID: string): void {

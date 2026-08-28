@@ -2612,6 +2612,56 @@ describe('RestProxy handleRequest', () => {
     }
   );
 
+  it('resolves a pending request missing from the session snapshot before admitting it', async () => {
+    const permission = { id: 'permission-1', sessionID: 'early-child' };
+    const serverRequest = vi.fn(async (_method: string, path: string) => {
+      if (path === '/permission') return [permission];
+      if (path === '/session') return [];
+      if (path === '/session/early-child?directory=%2Frepo') {
+        return { id: 'early-child', directory: '/repo' };
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      sessionState: {
+        ...createCallbacks().sessionState,
+        getSessionWorkspaceMatch: vi.fn(() => undefined),
+      } as never,
+    });
+
+    await proxy.handleRequest(makePayload(222, 'GET', '/permission'));
+
+    expect(serverRequest).toHaveBeenCalledWith('GET', '/session/early-child?directory=%2Frepo');
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 222,
+      data: [permission],
+    });
+  });
+
+  it('does not admit a pending request whose unknown session cannot be resolved', async () => {
+    const permission = { id: 'permission-1', sessionID: 'unknown-child' };
+    const serverRequest = vi.fn(async (_method: string, path: string) => {
+      if (path === '/permission') return [permission];
+      if (path === '/session') return [];
+      if (path === '/session/unknown-child?directory=%2Frepo') {
+        throw new Error('404 Session not found');
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      sessionState: {
+        ...createCallbacks().sessionState,
+        getSessionWorkspaceMatch: vi.fn(() => undefined),
+      } as never,
+    });
+
+    await proxy.handleRequest(makePayload(223, 'GET', '/permission'));
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 223, data: [] });
+  });
+
   it('uses the authoritative session snapshot after bounded metadata evicts old sessions', async () => {
     const manager = new SessionStateManager(
       {

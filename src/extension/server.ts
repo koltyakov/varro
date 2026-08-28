@@ -931,6 +931,7 @@ export class OpenCodeServer extends EventEmitter {
     processCleanup: Promise<void>
   ) {
     this.transport.clearPendingAttentionRequests();
+    this.transport.abortRequests();
     this.clearRetryResetTimer();
     this.setStatus({ state: 'stopped' });
     if (this.retryCount >= OpenCodeServer.MAX_RETRIES) {
@@ -942,7 +943,7 @@ export class OpenCodeServer extends EventEmitter {
     const retryAttempt = ++this.retryCount;
     const delay = this.getRestartDelay(retryAttempt);
     logger.info(`Restarting server in ${delay}ms (attempt ${retryAttempt})`);
-    void processCleanup.then(
+    void Promise.all([processCleanup, this.transport.waitForRequestsToSettle()]).then(
       () => {
         if (!this.lifecycle.isCurrentStartAttempt(startAttemptId, disposeGeneration)) return;
         this.restartTimer = setTimeout(() => {

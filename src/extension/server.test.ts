@@ -2500,6 +2500,36 @@ describe('OpenCodeServer managed process lifecycle', () => {
     expect(server.status.state).toBe('running');
   });
 
+  it('aborts and drains requests before restarting after a managed child exits', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const { children } = configureManagedStartup(server);
+    const requestsSettled = deferred<void>();
+    const transport = (
+      server as unknown as {
+        transport: {
+          abortRequests(): void;
+          waitForRequestsToSettle(): Promise<void>;
+        };
+      }
+    ).transport;
+    const abortRequests = vi.spyOn(transport, 'abortRequests');
+    vi.spyOn(transport, 'waitForRequestsToSettle').mockReturnValue(requestsSettled.promise);
+
+    await server.start();
+    children[0]!.emit('exit', 1, null);
+
+    expect(abortRequests).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await flushMicrotasks();
+    expect(children).toHaveLength(1);
+
+    requestsSettled.resolve();
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await flushMicrotasks();
+    expect(children).toHaveLength(2);
+  });
+
   it('isolates stale exit and error callbacks from a replacement child', async () => {
     const server = new OpenCodeServer(4096, true);
     const { children } = configureManagedStartup(server);

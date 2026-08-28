@@ -238,6 +238,19 @@ describe('WebviewSession', () => {
     expect(deps.cancelApiRequestsBeforeGeneration.mock.calls).toEqual([[1], [2]]);
   });
 
+  it('invalidates deliveries from an older webview document before handling ready', async () => {
+    const { session, bridge } = createSession({ editorSurface: true });
+    await session.resolve(createWebviewView(true) as never);
+    bridge.invalidatePendingDeliveries.mockClear();
+
+    await session.handleReady();
+
+    expect(bridge.invalidatePendingDeliveries).toHaveBeenCalledOnce();
+    expect(bridge.invalidatePendingDeliveries.mock.invocationCallOrder[0]).toBeLessThan(
+      bridge.post.mock.invocationCallOrder[0]!
+    );
+  });
+
   it('cancels requests owned by the disposed current view', async () => {
     const { session, bridge, deps } = createSession();
     const view = createWebviewView(true);

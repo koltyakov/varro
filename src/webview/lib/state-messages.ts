@@ -430,6 +430,33 @@ export function removeMessagePart(sessionId: string, messageId: string, partId: 
   });
 }
 
+export function removeMessage(sessionId: string, messageId: string) {
+  flushPendingStreamingDeltas();
+  const messageIndexToRemove = state.messages.findIndex(
+    (entry) => entry.info.sessionID === sessionId && entry.info.id === messageId
+  );
+  if (messageIndexToRemove === -1) return;
+
+  const removedStreamingPart = state.messages[messageIndexToRemove]!.parts.some(
+    (part) => part.id === state.streamingPartId
+  );
+  if (removedStreamingPart) streamingDeltaQueue.reset();
+  batch(() => {
+    setState(
+      'messages',
+      produce((messages) => {
+        messages.splice(messageIndexToRemove, 1);
+      })
+    );
+    if (removedStreamingPart) {
+      setState('streamingPartId', null);
+      setState('streamingText', '');
+    }
+  });
+  messageIndex.invalidate();
+  recordSettledAssistantMarkers(state.messages);
+}
+
 export function clearStreamingState() {
   streamingDeltaQueue.reset();
   batch(() => {

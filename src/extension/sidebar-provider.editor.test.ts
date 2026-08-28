@@ -634,6 +634,31 @@ describe('SidebarProvider editor panels', () => {
     expect(updates().at(-1)?.payload?.lease).toBeGreaterThan(initialLease ?? -1);
   });
 
+  it("keeps workspace A's permission automation lease when workspace B loses its owner", async () => {
+    const contextProvider = createContextProvider();
+    contextProvider.context.workspacePath = '/repo-a';
+    const { provider } = await createSidebarProviderInstance({ contextProvider });
+    const { posted } = attachTestView(provider);
+    await provider.handleMessage({ type: 'ready' });
+    const editor = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+    await provider.openNewEditor();
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    editor.receive({ type: 'ready' });
+
+    const sidebarUpdates = () =>
+      (posted as Array<{ type?: string; payload?: { lease?: number } }>).filter(
+        (message) => message.type === 'permission-automation/update'
+      );
+    await vi.waitFor(() => expect(sidebarUpdates().at(-1)?.payload?.lease).toBeTypeOf('number'));
+    const workspaceALease = sidebarUpdates().at(-1)?.payload?.lease;
+
+    editor.setVisible(false);
+
+    await vi.waitFor(() => expect(sidebarUpdates().length).toBeGreaterThan(1));
+    expect(sidebarUpdates().at(-1)?.payload?.lease).toBe(workspaceALease);
+  });
+
   it('routes session deletion before removing its workspace metadata', async () => {
     const contextProvider = createContextProvider();
     contextProvider.context.workspacePath = '/repo-a';

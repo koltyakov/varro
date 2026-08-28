@@ -1353,10 +1353,21 @@ export class RestProxy {
     if (unknown.length === 0) return visible;
 
     const directories = await this.loadSessionDirectorySnapshot();
-    for (const sessionID of unknown) {
-      const directory = directories.get(sessionID);
-      if (!directory || isSameWorkspacePath(directory, workspacePath)) visible.add(sessionID);
-    }
+    await Promise.all(
+      unknown.map(async (sessionID) => {
+        const knownDirectory = directories.get(sessionID);
+        if (knownDirectory) {
+          if (isSameWorkspacePath(knownDirectory, workspacePath)) visible.add(sessionID);
+          return;
+        }
+        try {
+          const directory = await this.lookupSessionDirectory(sessionID, workspacePath);
+          if (isSameWorkspacePath(directory, workspacePath)) visible.add(sessionID);
+        } catch {
+          // An unresolved session cannot be assigned to this workspace safely.
+        }
+      })
+    );
     return visible;
   }
 
