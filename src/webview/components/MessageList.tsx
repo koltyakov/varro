@@ -1006,12 +1006,17 @@ export function MessageList() {
     widthResizeSettleTimer = 0;
     widthResizeActive = false;
     widthResizeIncludesFontChange = false;
+    const settledAnchor = widthResizeAnchor;
 
     const refreshStickyPreview = pendingWidthStickyRefresh;
     const correctBottom = pendingWidthFollowCorrection;
     pendingWidthStickyRefresh = false;
     pendingWidthFollowCorrection = false;
     publishPendingWidthMeasurements();
+    if (settledAnchor && widthResizeCanOwnScroll()) {
+      restoreVisibleScrollAnchor(settledAnchor);
+      rememberDetachedVisibleAnchor(settledAnchor);
+    }
     widthResizeAnchor = null;
     queueMicrotask(() => {
       if (epoch === widthResizeEpoch && !widthResizeActive) {
@@ -1233,6 +1238,7 @@ export function MessageList() {
 
   function flushRowHeightCorrections() {
     rowHeightCorrectionScheduled = false;
+    let changed = false;
     for (const [element, correction] of pendingRowHeightCorrections) {
       if (!element.isConnected) continue;
       if (Math.abs((appliedRowHeightCorrections.get(element) ?? 0) - correction) < 0.001) {
@@ -1244,8 +1250,12 @@ export function MessageList() {
         element.style.removeProperty('--interactive-item-block-correction');
       }
       appliedRowHeightCorrections.set(element, correction);
+      changed = true;
     }
     pendingRowHeightCorrections.clear();
+    if (changed && widthResizeActive && widthResizeAnchor && widthResizeCanOwnScroll()) {
+      restoreVisibleScrollAnchor(widthResizeAnchor);
+    }
   }
 
   function alignMeasuredRowBlockSize(element: HTMLElement, measuredBlockSize: number) {

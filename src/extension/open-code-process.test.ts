@@ -85,7 +85,7 @@ afterEach(() => {
 });
 
 function mockLinuxLeaseProcess(options?: {
-  birthIdentity?: () => string;
+  birthIdentity?: (pid: number) => string;
   executable?: string;
   lsofMissing?: boolean;
   parentPid?: number;
@@ -119,9 +119,10 @@ function mockLinuxLeaseProcess(options?: {
       } else if (command === 'ps' && args.includes('ppid=')) {
         result.stdout.emit('data', Buffer.from(`${options?.parentPid ?? 1}\n`));
       } else if (command === 'ps' && args.includes('lstart=')) {
+        const queriedPid = Number(args[args.indexOf('-p') + 1]);
         result.stdout.emit(
           'data',
-          Buffer.from(`${options?.birthIdentity?.() ?? 'Fri Jul 10 12:00:00 2026'}\n`)
+          Buffer.from(`${options?.birthIdentity?.(queriedPid) ?? 'Fri Jul 10 12:00:00 2026'}\n`)
         );
       }
       result.emit('close', 0);
@@ -1365,7 +1366,8 @@ describe('OpenCodeProcess server ownership leases', () => {
     );
     let birthQueries = 0;
     mockLinuxLeaseProcess({
-      birthIdentity: () => (++birthQueries <= 3 ? 'original-process' : 'replacement-process'),
+      birthIdentity: (pid) =>
+        pid !== MOCK_LINUX_PID || ++birthQueries <= 2 ? 'original-process' : 'replacement-process',
     });
     const kill = vi.spyOn(process, 'kill');
     const manager = new OpenCodeProcess(4096, true, 'opencode', false, undefined, leasePath);

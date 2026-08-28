@@ -918,6 +918,7 @@ describe('MessageList auto-scroll', () => {
   });
 
   it('does not refresh a fully visible resize anchor after local width reflow', async () => {
+    vi.useFakeTimers();
     const animationFrames = installQueuedAnimationFrameMocks();
     const observers: Array<{
       callback: ResizeObserverCallback;
@@ -945,8 +946,18 @@ describe('MessageList auto-scroll', () => {
     const rowHeights: number[] = Array.from({ length: 50 }, (_, index) =>
       index % 2 === 0 ? 82 : 65
     );
+    const rowElements = new Map<number, HTMLElement>();
+    const rowHeight = (index: number) => {
+      const row = rowElements.get(index);
+      const correction = Number.parseFloat(
+        row?.style.getPropertyValue('--interactive-item-block-correction') ?? ''
+      );
+      return rowHeights[index]! + (Number.isFinite(correction) ? correction : 0);
+    };
     const rowTop = (index: number) =>
-      rowHeights.slice(0, index).reduce((total, height) => total + height, 0);
+      rowHeights
+        .slice(0, index)
+        .reduce((total, _height, rowIndex) => total + rowHeight(rowIndex), 0);
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
     let listWidth = 486;
@@ -960,7 +971,7 @@ describe('MessageList auto-scroll', () => {
             0,
             0,
             listWidth,
-            rowHeights.reduce((total, height) => total + height, 0)
+            rowHeights.reduce((total, _height, index) => total + rowHeight(index), 0)
           );
         }
         const row = this.dataset.msgId
@@ -974,7 +985,7 @@ describe('MessageList auto-scroll', () => {
           if (this.classList.contains('user-message-card')) {
             return new DOMRect(0, top + 6, listWidth, Math.max(1, rowHeights[index]! - 12));
           }
-          return new DOMRect(0, top, listWidth, rowHeights[index]);
+          return new DOMRect(0, top, listWidth, rowHeight(index));
         }
         return new DOMRect(0, 0, listWidth, 40);
       }
@@ -996,12 +1007,17 @@ describe('MessageList auto-scroll', () => {
     cleanup = render(() => MessageList(), container!);
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    for (const row of container?.querySelectorAll<HTMLElement>('[data-msg-id]') ?? []) {
+      const messageId = row.dataset.msgId;
+      if (!messageId) continue;
+      rowElements.set(Number(messageId.slice(messageId.lastIndexOf('-') + 1)), row);
+    }
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 631 });
     Object.defineProperty(list, 'clientWidth', { configurable: true, get: () => listWidth });
     Object.defineProperty(list, 'offsetWidth', { configurable: true, get: () => listWidth });
     Object.defineProperty(list, 'scrollHeight', {
       configurable: true,
-      get: () => rowHeights.reduce((total, height) => total + height, 0),
+      get: () => rowHeights.reduce((total, _height, index) => total + rowHeight(index), 0),
     });
     Object.defineProperty(list, 'scrollTop', {
       configurable: true,
@@ -1041,7 +1057,7 @@ describe('MessageList auto-scroll', () => {
     expect(assistantRow.getBoundingClientRect().top).toBe(68);
     expect(rowObserver).toBeDefined();
 
-    rowHeights[userIndex] = 103;
+    rowHeights[userIndex] = 103.25;
     listWidth = 360;
     // Local layout can change before ResizeObserver reports the new row sizes. A pending detached
     // anchor refresh must not replace the pre-reflow anchor with this already-moved geometry.
@@ -1052,11 +1068,33 @@ describe('MessageList auto-scroll', () => {
       [
         fixture<ResizeObserverEntry>({
           target: userRow,
-          borderBoxSize: [{ blockSize: 103, inlineSize: 360 }],
+          borderBoxSize: [{ blockSize: 103.25, inlineSize: 360 }],
         }),
         fixture<ResizeObserverEntry>({
           target: assistantRow,
           borderBoxSize: [{ blockSize: 65, inlineSize: 360 }],
+        }),
+      ],
+      fixture<ResizeObserver>(rowObserver)
+    );
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+      expect(assistantRow.getBoundingClientRect().top).toBe(68);
+    }
+
+    await vi.advanceTimersByTimeAsync(101);
+    rowHeights[userIndex] = 125.5;
+    listWidth = 480;
+    rowObserver!.callback(
+      [
+        fixture<ResizeObserverEntry>({
+          target: userRow,
+          borderBoxSize: [{ blockSize: rowHeight(userIndex), inlineSize: 480 }],
+        }),
+        fixture<ResizeObserverEntry>({
+          target: assistantRow,
+          borderBoxSize: [{ blockSize: 65, inlineSize: 480 }],
         }),
       ],
       fixture<ResizeObserver>(rowObserver)

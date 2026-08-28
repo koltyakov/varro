@@ -110,7 +110,12 @@ const EDITOR_INSTANCE_KEYS = new Set([
   'varro.lastOpenedView',
 ]);
 
-const WEBVIEW_INSTANCE_KEYS = new Set(['varro.inputDraftFiles']);
+const WEBVIEW_INSTANCE_KEYS = new Set([
+  'varro.inputDraft',
+  'varro.inputDraftFiles',
+  'varro.queuedMessageEdit',
+  'varro.queuedMessages',
+]);
 
 function shouldUseLocalStorage(key: string): boolean {
   const initialState = asRecord(window)?.__initialWebviewState;

@@ -206,7 +206,7 @@ describe('BrowserPersistence', () => {
     expect(window.localStorage.getItem('varro.workspacePath')).toBeNull();
   });
 
-  it('keeps sidebar attachment drafts private across two webview instances', () => {
+  it('keeps sidebar composer state private across two webview instances', () => {
     setInitialWebviewState({
       webviewContext: {
         viewId: 'sidebar',
@@ -218,6 +218,15 @@ describe('BrowserPersistence', () => {
       'varro.inputDraftFiles',
       JSON.stringify([{ path: '/stale/file.ts', relativePath: 'file.ts', type: 'file' }])
     );
+    window.localStorage.setItem('varro.inputDraft', JSON.stringify('stale draft'));
+    window.localStorage.setItem(
+      'varro.queuedMessageEdit',
+      JSON.stringify({ id: 'stale-message', sessionId: 'stale-session' })
+    );
+    window.localStorage.setItem(
+      'varro.queuedMessages',
+      JSON.stringify([{ id: 'stale-message', sessionId: 'stale-session', text: 'stale queue' }])
+    );
     let firstViewState: TestRuntimeRecord = {};
     window.__vscodeWebviewState = {
       getState: () => firstViewState,
@@ -226,10 +235,18 @@ describe('BrowserPersistence', () => {
       },
     };
     const firstFiles = [{ path: '/repo-a/file.ts', relativePath: 'file.ts', type: 'file' }];
+    const firstEdit = { id: 'message-1', sessionId: 'session-1' };
+    const firstQueue = [{ id: 'message-1', sessionId: 'session-1', text: 'queued message' }];
     const firstStorage = new BrowserPersistence();
 
+    expect(firstStorage.get('varro.inputDraft')).toBeUndefined();
     expect(firstStorage.get('varro.inputDraftFiles')).toBeUndefined();
+    expect(firstStorage.get('varro.queuedMessageEdit')).toBeUndefined();
+    expect(firstStorage.get('varro.queuedMessages')).toBeUndefined();
+    firstStorage.set('varro.inputDraft', 'first draft');
     firstStorage.set('varro.inputDraftFiles', firstFiles);
+    firstStorage.set('varro.queuedMessageEdit', firstEdit);
+    firstStorage.set('varro.queuedMessages', firstQueue);
 
     let secondViewState: TestRuntimeRecord = {};
     window.__vscodeWebviewState = {
@@ -239,7 +256,10 @@ describe('BrowserPersistence', () => {
       },
     };
 
+    expect(new BrowserPersistence().get('varro.inputDraft')).toBeUndefined();
     expect(new BrowserPersistence().get('varro.inputDraftFiles')).toBeUndefined();
+    expect(new BrowserPersistence().get('varro.queuedMessageEdit')).toBeUndefined();
+    expect(new BrowserPersistence().get('varro.queuedMessages')).toBeUndefined();
 
     window.__vscodeWebviewState = {
       getState: () => firstViewState,
@@ -248,9 +268,22 @@ describe('BrowserPersistence', () => {
       },
     };
 
+    expect(new BrowserPersistence().get('varro.inputDraft')).toBe('first draft');
     expect(new BrowserPersistence().get('varro.inputDraftFiles')).toEqual(firstFiles);
+    expect(new BrowserPersistence().get('varro.queuedMessageEdit')).toEqual(firstEdit);
+    expect(new BrowserPersistence().get('varro.queuedMessages')).toEqual(firstQueue);
+    expect(JSON.parse(window.localStorage.getItem('varro.inputDraft') || 'null')).toBe(
+      'stale draft'
+    );
     expect(JSON.parse(window.localStorage.getItem('varro.inputDraftFiles') || 'null')).toEqual([
       { path: '/stale/file.ts', relativePath: 'file.ts', type: 'file' },
+    ]);
+    expect(JSON.parse(window.localStorage.getItem('varro.queuedMessageEdit') || 'null')).toEqual({
+      id: 'stale-message',
+      sessionId: 'stale-session',
+    });
+    expect(JSON.parse(window.localStorage.getItem('varro.queuedMessages') || 'null')).toEqual([
+      { id: 'stale-message', sessionId: 'stale-session', text: 'stale queue' },
     ]);
   });
 
