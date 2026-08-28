@@ -149,6 +149,9 @@ const vscodeMock = vi.hoisted(() => ({
   TextEditorRevealType: {
     InCenter: 0,
   },
+  TabInputText: class TabInputText {
+    constructor(public readonly uri: unknown) {}
+  },
 }));
 
 vi.mock('./logger', () => ({ logger: loggerMock }));
@@ -1301,6 +1304,49 @@ describe('ContextProvider', () => {
         diagnostics: [],
         diagnosticsTotal: 0,
       });
+    } finally {
+      provider.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('captures active file metadata from a text tab when the editor is not synchronized', async () => {
+    vi.useFakeTimers();
+    const onChange = vi.fn();
+    const uri = {
+      fsPath: '/repo/ingest.sh',
+      scheme: 'file',
+      toString: () => 'file:///repo/ingest.sh',
+    };
+    vscodeMock.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' } }];
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue(
+      vscodeMock.workspace.workspaceFolders[0]
+    );
+    vscodeMock.workspace.asRelativePath.mockReturnValue('ingest.sh');
+    vscodeMock.window.tabGroups.activeTabGroup.activeTab = {
+      input: new vscodeMock.TabInputText(uri),
+    };
+
+    const provider = new ContextProvider(onChange);
+
+    try {
+      await vi.advanceTimersByTimeAsync(60);
+
+      expect(onChange).toHaveBeenLastCalledWith({
+        workspacePath: '/repo',
+        workspaceFolders: [{ name: 'repo', path: '/repo' }],
+        activeWorkspacePath: '/repo',
+        activeFile: {
+          path: '/repo/ingest.sh',
+          relativePath: 'ingest.sh',
+          language: '',
+        },
+        selection: null,
+        editorText: null,
+        diagnostics: [],
+        diagnosticsTotal: 0,
+      });
+      expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
     } finally {
       provider.dispose();
       vi.useRealTimers();

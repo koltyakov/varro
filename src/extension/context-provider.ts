@@ -340,6 +340,23 @@ export class ContextProvider implements vscode.Disposable {
           this.update();
           return;
         }
+        const activeTabInput = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+        if (activeTabInput instanceof vscode.TabInputText) {
+          const workspaceFolder = vscode.workspace.getWorkspaceFolder(activeTabInput.uri);
+          this._context.activeWorkspacePath = workspaceFolder?.uri.fsPath ?? null;
+          this._context.activeFile = {
+            path: activeTabInput.uri.fsPath,
+            relativePath: workspaceFolder
+              ? getRelativePath(activeTabInput.uri, workspaceFolder)
+              : activeTabInput.uri.fsPath,
+            language: '',
+          };
+          this._context.selection = null;
+          this._context.editorText = null;
+          if (!this.captureContextSnapshot()) return;
+          this.refreshDiagnosticsIfNeeded();
+          return;
+        }
         this._context.activeWorkspacePath = null;
         this._context.activeFile = null;
         this._context.selection = null;
