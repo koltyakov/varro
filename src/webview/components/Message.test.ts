@@ -2708,6 +2708,46 @@ describe('Message assistant final answer rendering', () => {
     expect(container?.querySelector('.assistant-message-flow-item-error-action')).toBeNull();
   });
 
+  it('shows provider credential validation details instead of a signed-out message', () => {
+    const errorMessage = 'Bearer token is not region-scoped for this endpoint';
+    const assistant = {
+      ...assistantMessage('message-3'),
+      providerID: 'amazon-bedrock',
+      error: {
+        name: 'ProviderAuthError' as const,
+        data: {
+          providerID: 'amazon-bedrock',
+          message: errorMessage,
+        },
+      },
+    };
+
+    cleanup = render(
+      () =>
+        Message({
+          info: assistant,
+          parts: [reasoningPart('reason-1', 'Inspecting')],
+          isLastAssistant: true,
+        }),
+      container!
+    );
+
+    const errorBlock = container?.querySelector('.assistant-message-flow-item-error');
+    const retryButton = container?.querySelector<HTMLButtonElement>(
+      '.assistant-message-flow-item-error-action'
+    );
+
+    expect(errorBlock?.textContent).toContain(errorMessage);
+    expect(errorBlock?.textContent).not.toContain('You are signed out');
+    expect(retryButton?.textContent).toContain('Retry');
+    expect(providerRequiresReconnection('amazon-bedrock')).toBe(false);
+
+    retryButton?.click();
+
+    expect(retryMessageMock).toHaveBeenCalledWith('message-3', 'session-1');
+    expect(providerConnectionRequest()).toBeNull();
+  });
+
   it('shows friendly label for MessageOutputLengthError (no data.message)', () => {
     cleanup = render(
       () =>

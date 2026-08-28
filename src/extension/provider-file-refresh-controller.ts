@@ -35,6 +35,7 @@ type ProviderFileRefreshDependencies = {
   clearProviderLimitCache(): void;
   postRefresh(options?: { revalidateAuth: true }): void;
   postPendingStatus(pending: boolean): void;
+  getWorkspaceDirectories(): readonly string[];
 };
 
 type PendingRefreshScope = 'workspace' | 'global';
@@ -401,7 +402,9 @@ export class ProviderFileRefreshController {
     }
 
     const idleDirectories =
-      pendingScope === 'workspace' ? [...this.pendingWorkspaceDirectories] : [];
+      pendingScope === 'workspace'
+        ? [...this.pendingWorkspaceDirectories]
+        : [...new Set(this.dependencies.getWorkspaceDirectories().filter(Boolean))];
     const idleResults = await Promise.all(
       idleDirectories.length > 0
         ? idleDirectories.map((directory) => this.isServerIdle(directory))

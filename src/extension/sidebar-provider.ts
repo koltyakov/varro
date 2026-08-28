@@ -327,6 +327,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           ),
         postPendingStatus: (pending) =>
           this.post({ type: 'providers/status', payload: { pending } }),
+        getWorkspaceDirectories: () => {
+          const serverWorkspace = this.server.getWorkspaceCwd();
+          return [
+            ...(this.contextProvider.context.workspaceFolders ?? []).map((folder) => folder.path),
+            ...[...this.endpoints]
+              .map((endpoint) => endpoint.workspacePath)
+              .filter((workspacePath): workspacePath is string => workspacePath !== null),
+            ...(serverWorkspace ? [serverWorkspace] : []),
+          ];
+        },
       },
       providerSignatureFileSystem
     );

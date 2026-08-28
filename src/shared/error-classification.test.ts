@@ -62,13 +62,28 @@ describe('isAbortedAssistantError', () => {
 });
 
 describe('isProviderAuthFailure', () => {
-  it('detects provider auth errors without relying on provider-specific messages', () => {
+  it('detects provider auth errors that require reconnection', () => {
     expect(
       isProviderAuthFailure({
         name: 'ProviderAuthError',
         data: { message: 'Token refresh failed: 401' },
       })
     ).toBe(true);
+    expect(
+      isProviderAuthFailure({
+        name: 'ProviderAuthError',
+        data: { message: 'Token expired' },
+      })
+    ).toBe(true);
+  });
+
+  it('preserves provider credential validation errors', () => {
+    expect(
+      isProviderAuthFailure({
+        name: 'ProviderAuthError',
+        data: { message: 'Bearer token is not region-scoped for this endpoint' },
+      })
+    ).toBe(false);
   });
 
   it('detects unauthorized API responses and invalidated-token messages', () => {

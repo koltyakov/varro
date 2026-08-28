@@ -79,7 +79,12 @@ function createFileSystemMock(initialFiles: Record<string, string> = {}) {
 }
 
 function createHarness(
-  options: { files?: Record<string, string>; managedProcess?: boolean; persisted?: unknown } = {}
+  options: {
+    files?: Record<string, string>;
+    managedProcess?: boolean;
+    persisted?: unknown;
+    workspaceDirectories?: string[];
+  } = {}
 ) {
   const fileSystem = createFileSystemMock(options.files);
   let idle = true;
@@ -118,6 +123,7 @@ function createHarness(
       clearProviderLimitCache,
       postRefresh,
       postPendingStatus,
+      getWorkspaceDirectories: () => options.workspaceDirectories ?? [],
     },
     fileSystem
   );
@@ -553,6 +559,49 @@ describe('ProviderFileRefreshController', () => {
       expect(h.server.request).not.toHaveBeenCalledWith('POST', '/global/dispose');
       expect(h.server.restart).not.toHaveBeenCalled();
       expect(h.values.has(PENDING_STATE_KEY)).toBe(true);
+    });
+
+    it('waits for every workspace to become idle before restarting for an auth change', async () => {
+      const h = createHarness({
+        files: { [AUTH_PATH]: 'a1' },
+        workspaceDirectories: ['/repo-a', '/repo-b'],
+      });
+      await activateWatching(h);
+      resetCalls(h);
+      let siblingBusy = true;
+      h.server.request.mockImplementation(
+        async (
+          _method: string,
+          path: string,
+          _body?: unknown,
+          options?: { directory?: string }
+        ) => {
+          if (path === '/session/status') {
+            return options?.directory === '/repo-b' && siblingBusy
+              ? { active: { type: 'busy' } }
+              : {};
+          }
+          if (path === '/question' || path === '/permission') return [];
+          return undefined;
+        }
+      );
+      h.fileSystem.files.set(AUTH_PATH, 'a2');
+      fireWatcherEvent(3);
+
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + RETRY_MS);
+
+      expect(h.server.restart).not.toHaveBeenCalled();
+      expect(h.server.request).toHaveBeenCalledWith('GET', '/session/status', undefined, {
+        directory: '/repo-a',
+      });
+      expect(h.server.request).toHaveBeenCalledWith('GET', '/session/status', undefined, {
+        directory: '/repo-b',
+      });
+
+      siblingBusy = false;
+      await vi.advanceTimersByTimeAsync(2 * RETRY_MS);
+
+      expect(h.server.restart).toHaveBeenCalledOnce();
     });
 
     it('treats combined auth and config changes as config-sourced', async () => {
