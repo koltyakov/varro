@@ -970,6 +970,7 @@ export function SessionListView(props: {
   subagentParentId?: string | null;
   onOpenSubagents?: (parentSessionId: string) => void;
   onActiveSessionReselect?: () => void;
+  onPrimarySessionsCountChange?: (count: number) => void;
   embedded?: boolean;
   class?: string;
 }) {
@@ -997,6 +998,7 @@ export function SessionListView(props: {
   const [isSearchingAllSessions, setIsSearchingAllSessions] = createSignal(false);
   const [showAllModelDetails, setShowAllModelDetails] = createSignal(false);
   const [frozenSessionOrder, setFrozenSessionOrder] = createSignal<string[] | null>(null);
+  const [hasScrollableContent, setHasScrollableContent] = createSignal(false);
   let containerRef: HTMLDivElement | undefined;
   let searchInputRef: HTMLInputElement | undefined;
   let hasPointerInteraction = false;
@@ -1158,6 +1160,9 @@ export function SessionListView(props: {
         isVisibleSession(session) && matchesFolderFilter(session.directory, session.workspaceScope)
     )
   );
+  createEffect(() => {
+    props.onPrimarySessionsCountChange?.(visibleSessionsForList().filter(isPrimarySession).length);
+  });
   const groupedSessions = createMemo(() =>
     groupSessions(
       visibleSessionsForList(),
@@ -1236,6 +1241,10 @@ export function SessionListView(props: {
   const isDefaultGroupedView = createMemo(
     () => !props.sessionFilter && !props.subagentParentId && !trimmedSearchQuery()
   );
+  const hasSecondaryGroupedSection = createMemo(
+    () =>
+      isDefaultGroupedView() && availableGroupedSections().some((section) => section !== 'recent')
+  );
   createEffect(() => {
     if (
       !isDefaultGroupedView() ||
@@ -1270,6 +1279,43 @@ export function SessionListView(props: {
   const visibleSessions = createMemo(() => {
     if (shouldShowSearch() && trimmedSearchQuery()) return searchResultSessions();
     return baseVisibleSessions();
+  });
+
+  const updateScrollableContent = () => {
+    const scroll = containerRef?.querySelector<HTMLElement>('.session-list-scroll');
+    setHasScrollableContent(!!scroll && scroll.scrollHeight > scroll.clientHeight);
+  };
+  let scrollabilityUpdateScheduled = false;
+  let scrollabilityUpdateDisposed = false;
+  const scheduleScrollableContentUpdate = () => {
+    if (scrollabilityUpdateScheduled || scrollabilityUpdateDisposed) return;
+    scrollabilityUpdateScheduled = true;
+    queueMicrotask(() => {
+      scrollabilityUpdateScheduled = false;
+      if (!scrollabilityUpdateDisposed) updateScrollableContent();
+    });
+  };
+
+  createEffect(() => {
+    visibleSessions();
+    expandedGroupedSection();
+    sessionDiffSummaryCache();
+    scheduleScrollableContentUpdate();
+  });
+
+  onMount(() => {
+    const observer =
+      globalThis.ResizeObserver === undefined
+        ? null
+        : new ResizeObserver(scheduleScrollableContentUpdate);
+    if (containerRef) observer?.observe(containerRef);
+    window.addEventListener('resize', scheduleScrollableContentUpdate);
+    scheduleScrollableContentUpdate();
+    onCleanup(() => {
+      scrollabilityUpdateDisposed = true;
+      observer?.disconnect();
+      window.removeEventListener('resize', scheduleScrollableContentUpdate);
+    });
   });
 
   createEffect(() => {
@@ -1643,7 +1689,7 @@ export function SessionListView(props: {
       ref={(el) => {
         containerRef = el;
       }}
-      class={`session-list-view ${showAllModelDetails() ? 'show-all-model-details' : ''} ${props.class || ''}`.trim()}
+      class={`session-list-view ${showAllModelDetails() ? 'show-all-model-details' : ''} ${hasSecondaryGroupedSection() || hasScrollableContent() ? 'has-bottom-separator' : ''} ${props.class || ''}`.trim()}
       tabindex="-1"
       onPointerDown={() => {
         hasPointerInteraction = true;

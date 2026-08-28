@@ -78,6 +78,7 @@ export interface WorkspaceFilePick {
 
 export type PermissionMode = 'default' | 'edits' | 'auto' | 'full';
 export type SessionWorkspaceScope = 'workspace' | 'folder';
+export const VARRO_SESSION_METADATA_VERSION = 1;
 
 export const MAX_PERSISTED_SESSION_ID_LENGTH = 512;
 
@@ -104,6 +105,20 @@ export function isPermissionMode<T>(value: T): value is T & PermissionMode {
 
 export function isSessionWorkspaceScope<T>(value: T): value is T & SessionWorkspaceScope {
   return value === 'workspace' || value === 'folder';
+}
+
+export function getSessionWorkspaceScopeFromMetadata<T>(metadata: T): SessionWorkspaceScope | null {
+  const scope = asRecord(asRecord(metadata)?.varro)?.workspaceScope;
+  return isSessionWorkspaceScope(scope) ? scope : null;
+}
+
+export function createSessionWorkspaceMetadata(scope: SessionWorkspaceScope) {
+  return {
+    varro: {
+      workspaceScope: scope,
+      schemaVersion: VARRO_SESSION_METADATA_VERSION,
+    },
+  };
 }
 
 export type AutoApproveJudgeDecision = 'allow' | 'reject' | 'ask';
@@ -840,6 +855,7 @@ export type WebviewMessage =
         directory?: string;
         kind: 'completed' | 'plan-ready';
         unread: boolean;
+        markerAt?: number;
       };
     }
   | {

@@ -12,8 +12,9 @@ import {
 import type { Message, Part } from '../shared/opencode-types';
 import { parseSessionPromptEndpoint } from '../shared/opencode-endpoints';
 import {
+  createSessionWorkspaceMetadata,
+  getSessionWorkspaceScopeFromMetadata,
   isSafePersistedSessionId,
-  isSessionWorkspaceScope,
   VARRO_API_ENDPOINTS,
 } from '../shared/protocol';
 import type {
@@ -50,7 +51,6 @@ import type {
   SessionStateManager,
 } from './session-state-manager';
 import type { SessionTitleFallback } from './session-title-fallback';
-import type { SessionWorkspaceScopeStore } from './session-workspace-scope-store';
 import type { SessionDeleteTarget, SessionTrashManager } from './session-trash-manager';
 import { asRecord, parseModelRoute } from './sidebar-provider-utils';
 import {
@@ -148,7 +148,6 @@ export interface RestProxyCallbacks {
   >;
   autoApproveJudge: Pick<AutoApproveJudge, 'judge' | 'resolveModel'>;
   sessionTitleFallback: Pick<SessionTitleFallback, 'renameIfUntitled'>;
-  sessionWorkspaceScopes: Pick<SessionWorkspaceScopeStore, 'get' | 'set'>;
   simulateNoProviders: boolean;
   getRequestGeneration(): number;
   getStatus(): ServerStatus;
@@ -203,6 +202,7 @@ export interface RestProxyCallbacks {
 export class RestProxy {
   private readonly requestWorkspaceDirectory = new AsyncLocalStorage<string | undefined>();
   private sessionDirectories = new Map<string, string>();
+  private sessionWorkspaceScopes = new Map<string, SessionWorkspaceScope>();
   private hasSessionDirectorySnapshot = false;
   private sessionDirectoryBootstrapPromise: Promise<ReadonlyMap<string, string>> | null = null;
   private readonly permissionJudgeCleanupRequests = new Set<string>();
@@ -398,9 +398,7 @@ export class RestProxy {
       let forwardedPath = explicitWorkspaceDirectory
         ? setExplicitWorkspaceDirectory(payload.path, explicitWorkspaceDirectory)
         : payload.path;
-      let forwardedBody = sessionCreationScope
-        ? this.withoutSessionCreationScope(payload.body)
-        : payload.body;
+      let forwardedBody = payload.body;
 
       if (directSessionID && !activationRequest) {
         const currentWorkspaceDirectory = this.getCurrentWorkspaceResolutionRoot();
@@ -669,7 +667,7 @@ export class RestProxy {
       if (promptSessionID && promptWorkspaceDirectory) {
         forwardedBody = this.withWorkspaceScopeSystemPrompt(
           forwardedBody,
-          this.callbacks.sessionWorkspaceScopes.get(promptSessionID),
+          this.getSessionWorkspaceScope(promptSessionID),
           promptWorkspaceDirectory
         );
       }
@@ -808,16 +806,14 @@ export class RestProxy {
         if (!isSafePersistedSessionId(session?.id)) {
           throw new Error('Malformed session creation response');
         }
-        await this.callbacks.sessionWorkspaceScopes.set(session.id, sessionCreationScope);
         response = this.withSessionWorkspaceScope(session, sessionCreationScope);
       }
       const forkParentSessionID = this.parseForkParentSessionID(method, payload.path);
       if (forkParentSessionID) {
         const session = asRecord(response);
         if (isSafePersistedSessionId(session?.id)) {
-          const inheritedScope = this.callbacks.sessionWorkspaceScopes.get(forkParentSessionID);
-          await this.callbacks.sessionWorkspaceScopes.set(session.id, inheritedScope);
-          response = this.withSessionWorkspaceScope(session, inheritedScope);
+          const inheritedScope = this.getSessionWorkspaceScope(forkParentSessionID);
+          response = await this.persistForkWorkspaceScope(session, inheritedScope);
         }
       }
       let data: unknown;
@@ -1133,7 +1129,7 @@ export class RestProxy {
               .filter(
                 (session) =>
                   !this.isDedicatedWorkspaceDirectory(root) ||
-                  this.callbacks.sessionWorkspaceScopes.get(session.id) === 'workspace'
+                  this.getSessionWorkspaceScope(session.id) === 'workspace'
               ),
           };
         })
@@ -1191,7 +1187,7 @@ export class RestProxy {
           .filter(
             (session) =>
               !this.isDedicatedWorkspaceDirectory(root) ||
-              this.callbacks.sessionWorkspaceScopes.get(session.id) === 'workspace'
+              this.getSessionWorkspaceScope(session.id) === 'workspace'
           );
         const visibleIDs = new Set(
           this.filterWorkspaceVisibleSessions(sessions).map((session) => session.id)
@@ -1273,7 +1269,7 @@ export class RestProxy {
         id: session.id,
         directory: session.directory,
       },
-      this.callbacks.sessionWorkspaceScopes.get(session.id)
+      this.readAndRememberSessionWorkspaceScope(session)
     );
     const endpointWorkspaceDirectory =
       this.callbacks.getWorkspacePath?.() ??
@@ -1651,7 +1647,7 @@ export class RestProxy {
     ) {
       return this.withSessionWorkspaceScope(
         session,
-        this.callbacks.sessionWorkspaceScopes.get(session.id)
+        this.readAndRememberSessionWorkspaceScope(session)
       );
     }
     return data;
@@ -1902,7 +1898,20 @@ export class RestProxy {
     session: T,
     scope: SessionWorkspaceScope
   ): T {
-    return scope === 'workspace' ? ({ ...session, workspaceScope: scope } as T) : session;
+    if (isSafePersistedSessionId(session.id)) this.sessionWorkspaceScopes.set(session.id, scope);
+    if (scope === 'workspace') return { ...session, workspaceScope: scope } as T;
+    const { workspaceScope: _workspaceScope, ...rest } = session;
+    return rest as T;
+  }
+
+  private readAndRememberSessionWorkspaceScope(session: Record<string, unknown>) {
+    const scope = getSessionWorkspaceScopeFromMetadata(session.metadata) ?? 'folder';
+    if (isSafePersistedSessionId(session.id)) this.sessionWorkspaceScopes.set(session.id, scope);
+    return scope;
+  }
+
+  private getSessionWorkspaceScope(sessionID: string): SessionWorkspaceScope {
+    return this.sessionWorkspaceScopes.get(sessionID) ?? 'folder';
   }
 
   private parseSessionCreationScope(
@@ -1911,10 +1920,7 @@ export class RestProxy {
     body: unknown
   ): SessionWorkspaceScope | null {
     if (method !== 'POST' || new URL(path, 'http://localhost').pathname !== '/session') return null;
-    const scope = asRecord(body)?.workspaceScope;
-    if (scope === undefined) return 'folder';
-    if (!isSessionWorkspaceScope(scope)) throw new Error('Invalid session workspace scope');
-    return scope;
+    return getSessionWorkspaceScopeFromMetadata(asRecord(body)?.metadata) ?? 'folder';
   }
 
   private parseForkParentSessionID(method: string, path: string): string | null {
@@ -1923,11 +1929,40 @@ export class RestProxy {
     return match?.[1] ? decodeURIComponent(match[1]) : null;
   }
 
-  private withoutSessionCreationScope(body: unknown): unknown {
-    const record = asRecord(body);
-    if (!record) return body;
-    const { workspaceScope: _workspaceScope, ...rest } = record;
-    return rest;
+  private async persistForkWorkspaceScope(
+    session: Record<string, unknown>,
+    scope: SessionWorkspaceScope
+  ) {
+    if (getSessionWorkspaceScopeFromMetadata(session.metadata) === scope) {
+      return this.withSessionWorkspaceScope(session, scope);
+    }
+    if (!isSafePersistedSessionId(session.id) || typeof session.directory !== 'string') {
+      throw new Error('Malformed session fork response');
+    }
+    const metadata = asRecord(session.metadata) ?? {};
+    const existingVarro = asRecord(metadata.varro) ?? {};
+    const scopeMetadata = createSessionWorkspaceMetadata(scope);
+    const updated = await this.requestServer(
+      'PATCH',
+      this.buildScopedSessionPath(session.id, session.directory),
+      {
+        metadata: {
+          ...metadata,
+          varro: { ...existingVarro, ...scopeMetadata.varro },
+        },
+      }
+    );
+    const updatedSession = asRecord(updated);
+    return this.withSessionWorkspaceScope(
+      updatedSession ?? {
+        ...session,
+        metadata: {
+          ...metadata,
+          varro: { ...existingVarro, ...scopeMetadata.varro },
+        },
+      },
+      scope
+    );
   }
 
   private withWorkspaceScopeSystemPrompt(
@@ -1946,7 +1981,14 @@ export class RestProxy {
             )}.`,
             `The OpenCode working directory is ${JSON.stringify(workingDirectory)}. It is the base for commands and relative paths, not the boundary of the logical workspace.`,
           ].join(' ')
-        : `You are working in the VS Code workspace folder ${JSON.stringify(workingDirectory)}. This folder is the scope for this session and the OpenCode working directory. Other folders open in the same VS Code window are outside this session's scope.`;
+        : [
+            'You are working in a VS Code multi-root workspace.',
+            `The folder selected for this session and the OpenCode working directory is ${JSON.stringify(workingDirectory)}.`,
+            `The workspace contains these folders: ${JSON.stringify(
+              this.callbacks.contextProvider.context.workspaceFolders ?? []
+            )}.`,
+            'Treat the selected folder as the primary working scope. The other listed folders are sibling workspace context; accessing them may require external_directory approval.',
+          ].join(' ');
     const existing = typeof record.system === 'string' ? record.system.trim() : '';
     return {
       ...record,
@@ -2086,8 +2128,10 @@ export class RestProxy {
     const sessions = (
       (await this.requestServer('GET', FULL_SESSION_LIST_PATH)) as Array<Record<string, unknown>>
     ).map((session) => {
-      const id = typeof session.id === 'string' ? session.id : '';
-      return this.withSessionWorkspaceScope(session, this.callbacks.sessionWorkspaceScopes.get(id));
+      return this.withSessionWorkspaceScope(
+        session,
+        this.readAndRememberSessionWorkspaceScope(session)
+      );
     });
     const entry = await this.callbacks.sessionTrash.moveToTrash(sessionID, sessions);
     if (!entry) {
@@ -2116,7 +2160,7 @@ export class RestProxy {
     try {
       const result = await this.requestServer('DELETE', path);
       await this.callbacks.removeSessionImages([session.id]);
-      await this.callbacks.sessionWorkspaceScopes.set(session.id, null);
+      this.sessionWorkspaceScopes.delete(session.id);
       return result;
     } catch (err) {
       // Sessions can predate the server's current ID format (legacy ULIDs get
@@ -2124,7 +2168,7 @@ export class RestProxy {
       // Only propagate the failure when the session still exists server-side.
       if (await this.sessionExistsOnServer(session.id, session.directory)) throw err;
       await this.callbacks.removeSessionImages([session.id]);
-      await this.callbacks.sessionWorkspaceScopes.set(session.id, null);
+      this.sessionWorkspaceScopes.delete(session.id);
       return true;
     }
   }

@@ -908,6 +908,63 @@ describe('SessionStateManager notifications', () => {
     manager.setSessionUnreadState('session-1', 'completed', false, '/repo');
 
     expect(manager.getSiblingAlertCandidates()).toEqual([]);
+
+    manager.setSessionUnreadState('session-1', 'completed', true, '/repo');
+
+    expect(manager.getSiblingAlertCandidates()).toEqual([]);
+  });
+
+  it('accepts a synchronized completion again after the session starts new work', () => {
+    const manager = createManager();
+    manager.setSessionUnreadState('session-1', 'completed', true, '/repo');
+    manager.setSessionUnreadState('session-1', 'completed', false, '/repo');
+
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+    });
+    manager.setSessionUnreadState('session-1', 'completed', true, '/repo');
+
+    expect(manager.completed.has('session-1')).toBe(true);
+  });
+
+  it('does not restore workspace completions cleared when the chat becomes visible', () => {
+    const manager = createManager();
+    manager.setSessionUnreadState('session-1', 'completed', true, '/repo');
+
+    manager.clearCompletedInWorkspace('/repo');
+    manager.setSessionUnreadState('session-1', 'completed', true, '/repo');
+
+    expect(manager.completed.has('session-1')).toBe(false);
+  });
+
+  it('keeps completion acknowledgements across extension-host restarts', async () => {
+    const values = new Map<string, unknown>();
+    const workspaceState = {
+      get: vi.fn((key: string) => values.get(key)),
+      set: vi.fn((key: string, value: unknown) => {
+        values.set(key, value);
+        return Promise.resolve();
+      }),
+      remove: vi.fn(() => Promise.resolve()),
+    };
+    const create = () =>
+      new SessionStateManager(
+        workspaceState as never,
+        { onStatusChange: vi.fn() },
+        { shouldShow: () => false }
+      );
+    const manager = create();
+    manager.setSessionUnreadState('session-1', 'completed', true, '/repo', 100);
+    manager.setSessionUnreadState('session-1', 'completed', false, '/repo', 200);
+    await manager.flush();
+
+    const recovered = create();
+    recovered.setSessionUnreadState('session-1', 'completed', true, '/repo', 100);
+    expect(recovered.completed.has('session-1')).toBe(false);
+
+    recovered.setSessionUnreadState('session-1', 'completed', true, '/repo', 201);
+    expect(recovered.completed.has('session-1')).toBe(true);
   });
 
   it.each(['completed', 'plan-ready'] as const)(
@@ -1932,7 +1989,7 @@ describe('SessionStateManager notifications', () => {
     await vi.waitFor(() => expect(workspaceState.remove).toHaveBeenCalledOnce());
     for (const release of releaseRemoves) release();
     await Promise.all([first, second]);
-    expect(workspaceState.get).toHaveBeenCalledTimes(2);
+    expect(workspaceState.get).toHaveBeenCalledTimes(3);
   });
 
   it('preserves permission and question events that arrive during recovery', async () => {

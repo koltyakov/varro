@@ -7,7 +7,10 @@ import type {
   QueuedContextSnapshot,
   WebviewThemeKind,
 } from '../../../shared/protocol';
-import { AUTO_APPROVE_JUDGE_TIMEOUT_MS } from '../../../shared/protocol';
+import {
+  AUTO_APPROVE_JUDGE_TIMEOUT_MS,
+  createSessionWorkspaceMetadata,
+} from '../../../shared/protocol';
 import { DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../../../shared/provider-limit-config';
 import { isPlaceholderSessionTitle } from '../../../shared/session-title';
 import { isSameWorkspacePath } from '../../../shared/workspace-path';
@@ -2361,7 +2364,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
             appStore.state.editorContext.workspaceFolders?.[0]?.path ??
             undefined)
           : (appStore.state.editorContext.workspacePath ?? undefined);
-      return client.session.create({ ...body, workspaceScope }, { directory });
+      return client.session.create(
+        { ...body, metadata: createSessionWorkspaceMetadata(workspaceScope) },
+        { directory }
+      );
     },
     updateRemoteSession: (sessionId, body) =>
       client.session.update(sessionId, body, { directory: getSessionDirectory(sessionId) }),

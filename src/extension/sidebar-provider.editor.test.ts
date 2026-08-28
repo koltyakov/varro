@@ -718,6 +718,13 @@ describe('SidebarProvider editor panels', () => {
     provider.post({ type: 'server/event', payload: busyEvent });
     provider.post({ type: 'server/event', payload: idleEvent });
     sessionState.handleServerEvent(busyEvent);
+    const idleStatusCountBeforeCompletion = (
+      posted as Array<{ type?: string; payload?: unknown }>
+    ).filter(
+      (message) =>
+        message.type === 'queued-messages/session-status' &&
+        (message.payload as { status?: string } | undefined)?.status === 'idle'
+    ).length;
     sessionState.handleServerEvent(completionEvent);
     provider.post({ type: 'server/event', payload: completionEvent });
 
@@ -736,13 +743,14 @@ describe('SidebarProvider editor panels', () => {
       type: 'queued-messages/session-status',
       payload: { sessionId: 'session-b', status: 'idle' },
     });
+    expect(idleStatusCountBeforeCompletion).toBe(2);
     expect(
       (posted as Array<{ type?: string; payload?: unknown }>).filter(
         (message) =>
           message.type === 'queued-messages/session-status' &&
           (message.payload as { status?: string } | undefined)?.status === 'idle'
       )
-    ).toHaveLength(3);
+    ).toHaveLength(idleStatusCountBeforeCompletion);
   });
 
   it('does not report queued-message idle while a newer busy attempt remains', async () => {

@@ -1663,11 +1663,11 @@ describe('parseWebviewMessage rejection paths', () => {
     expect(
       parseWebviewMessage({
         type: 'session-unread-state/update',
-        payload: { sessionId: 'session-1', kind: 'completed', unread: true },
+        payload: { sessionId: 'session-1', kind: 'completed', unread: true, markerAt: 123 },
       })
     ).toEqual({
       type: 'session-unread-state/update',
-      payload: { sessionId: 'session-1', kind: 'completed', unread: true },
+      payload: { sessionId: 'session-1', kind: 'completed', unread: true, markerAt: 123 },
     });
     expect(
       parseWebviewMessage({
@@ -1679,6 +1679,12 @@ describe('parseWebviewMessage rejection paths', () => {
       parseWebviewMessage({
         type: 'session-unread-state/update',
         payload: { sessionId: 'session-1', kind: 'plan-ready', unread: 'yes' },
+      })
+    ).toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'session-unread-state/update',
+        payload: { sessionId: 'session-1', kind: 'completed', unread: true, markerAt: NaN },
       })
     ).toBeNull();
   });

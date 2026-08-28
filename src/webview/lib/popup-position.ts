@@ -237,19 +237,39 @@ export function placeDropdownAnchor(
 }
 
 export function observePopupViewport(el: HTMLElement, reposition: () => void): () => void {
-  const run = () => queueMicrotask(reposition);
+  let scheduled = false;
+  let disposed = false;
+  const run = () => {
+    if (scheduled || disposed) return;
+    scheduled = true;
+    queueMicrotask(() => {
+      scheduled = false;
+      if (!disposed) reposition();
+    });
+  };
 
   run();
   window.addEventListener('resize', run);
 
   if (globalThis.ResizeObserver === undefined) {
-    return () => window.removeEventListener('resize', run);
+    return () => {
+      disposed = true;
+      window.removeEventListener('resize', run);
+    };
   }
 
-  const observer = new ResizeObserver(run);
+  let initialResizePending = true;
+  const observer = new ResizeObserver(() => {
+    if (initialResizePending) {
+      initialResizePending = false;
+      return;
+    }
+    run();
+  });
   observer.observe(el);
 
   return () => {
+    disposed = true;
     window.removeEventListener('resize', run);
     observer.disconnect();
   };

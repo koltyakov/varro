@@ -31,9 +31,10 @@
 }
 
 .session-list-workspace-picker {
+  width: fit-content;
   min-width: 0;
   max-width: 240px;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
 }
 
 .session-list-workspace-picker .workspace-picker {
@@ -197,6 +198,9 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 .session-list-new-session {
   flex-shrink: 0;
   margin-top: auto;
+}
+
+.session-list-view.has-bottom-separator + .session-list-new-session {
   border-top: 1px solid var(--color-vscode-border-soft);
 }
 

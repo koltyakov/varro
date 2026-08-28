@@ -360,6 +360,13 @@ describe('popup-position', () => {
       // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       resizeCallback?.([], {} as ResizeObserver);
       await Promise.resolve();
+      expect(reposition).toHaveBeenCalledTimes(1);
+
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
+      resizeCallback?.([], {} as ResizeObserver);
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
+      resizeCallback?.([], {} as ResizeObserver);
+      await Promise.resolve();
       expect(reposition).toHaveBeenCalledTimes(2);
 
       window.dispatchEvent(new Event('resize'));
@@ -368,6 +375,25 @@ describe('popup-position', () => {
 
       cleanup();
       expect(disconnected).toBe(true);
+    } finally {
+      globalThis.ResizeObserver = originalResizeObserver;
+    }
+  });
+
+  it('cancels a queued reposition during cleanup', async () => {
+    const originalResizeObserver = globalThis.ResizeObserver;
+    Object.defineProperty(globalThis, 'ResizeObserver', {
+      configurable: true,
+      writable: true,
+      value: undefined,
+    });
+    const reposition = vi.fn();
+
+    try {
+      const cleanup = observePopupViewport(document.createElement('div'), reposition);
+      cleanup();
+      await Promise.resolve();
+      expect(reposition).not.toHaveBeenCalled();
     } finally {
       globalThis.ResizeObserver = originalResizeObserver;
     }

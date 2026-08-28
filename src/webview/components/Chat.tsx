@@ -164,6 +164,7 @@ export function Chat() {
             directory: session.directory,
             kind: previousKind,
             unread: false,
+            markerAt: state.lastSeenSessions[session.id],
           },
         });
       }
@@ -171,7 +172,16 @@ export function Chat() {
         publishedUnreadKinds.set(session.id, kind);
         postMessage({
           type: 'session-unread-state/update',
-          payload: { sessionId: session.id, directory: session.directory, kind, unread: true },
+          payload: {
+            sessionId: session.id,
+            directory: session.directory,
+            kind,
+            unread: true,
+            markerAt:
+              kind === 'completed'
+                ? state.completedSessionResponses[session.id]
+                : session.time.updated,
+          },
         });
       } else if (state.completedSessionResponses[session.id] !== undefined) {
         publishedUnreadKinds.set(session.id, null);
@@ -182,6 +192,8 @@ export function Chat() {
             directory: session.directory,
             kind: getSelectedAgentForSession(session.id) === 'plan' ? 'plan-ready' : 'completed',
             unread: false,
+            markerAt:
+              state.lastSeenSessions[session.id] ?? state.completedSessionResponses[session.id],
           },
         });
       } else {

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { parseExtensionMessage } from './extension-message';
 import {
+  createSessionWorkspaceMetadata,
+  getSessionWorkspaceScopeFromMetadata,
   isPermissionMode,
   isSafePersistedSessionId,
   isSessionWorkspaceScope,
@@ -25,6 +27,16 @@ describe('protocol parsers', () => {
   it('recognizes only supported session workspace scopes', () => {
     expect(['workspace', 'folder'].every(isSessionWorkspaceScope)).toBe(true);
     expect(['', 'Workspace', 'all', null, undefined].some(isSessionWorkspaceScope)).toBe(false);
+  });
+
+  it('round-trips namespaced session workspace metadata', () => {
+    const metadata = createSessionWorkspaceMetadata('workspace');
+    expect(metadata).toEqual({
+      varro: { workspaceScope: 'workspace', schemaVersion: 1 },
+    });
+    expect(getSessionWorkspaceScopeFromMetadata(metadata)).toBe('workspace');
+    expect(getSessionWorkspaceScopeFromMetadata({ varro: { workspaceScope: 'other' } })).toBeNull();
+    expect(getSessionWorkspaceScopeFromMetadata(null)).toBeNull();
   });
 
   it('validator round-trips a server/status running payload', () => {

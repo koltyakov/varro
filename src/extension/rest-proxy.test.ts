@@ -146,10 +146,6 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
     sessionTitleFallback: {
       renameIfUntitled: vi.fn(() => Promise.resolve(null)),
     },
-    sessionWorkspaceScopes: {
-      get: vi.fn(() => 'folder' as const),
-      set: vi.fn(() => Promise.resolve()),
-    },
     simulateNoProviders: false,
     getRequestGeneration: vi.fn(() => 1),
     getStatus: vi.fn(() => ({ state: 'running' as const, url: 'http://127.0.0.1:4096' })),
@@ -376,31 +372,29 @@ describe('getOpenCodeDirectoryHeaders', () => {
 });
 
 describe('RestProxy handleRequest', () => {
-  it('persists workspace scope on creation and strips it from OpenCode', async () => {
+  it('persists workspace scope in OpenCode session metadata', async () => {
     const { proxy, callbacks } = createProxy();
+    const metadata = {
+      varro: { workspaceScope: 'workspace', schemaVersion: 1 },
+    };
     vi.mocked(callbacks.server.request).mockResolvedValue({
       id: 'session-workspace',
       directory: '/repo',
       title: 'Workspace session',
+      metadata,
     });
 
-    await proxy.handleRequest(
-      makePayload(1, 'POST', '/session?directory=%2Frepo', { workspaceScope: 'workspace' })
-    );
+    await proxy.handleRequest(makePayload(1, 'POST', '/session?directory=%2Frepo', { metadata }));
 
     expect(callbacks.server.request).toHaveBeenCalledWith(
       'POST',
       '/session?directory=%2Frepo',
-      {},
+      { metadata },
       expect.anything()
-    );
-    expect(callbacks.sessionWorkspaceScopes.set).toHaveBeenCalledWith(
-      'session-workspace',
-      'workspace'
     );
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 1,
-      data: expect.objectContaining({ workspaceScope: 'workspace' }),
+      data: expect.objectContaining({ metadata, workspaceScope: 'workspace' }),
     });
   });
 
@@ -422,11 +416,23 @@ describe('RestProxy handleRequest', () => {
         readFile: vi.fn(() => Promise.resolve(null)),
         resolvePath: vi.fn(() => Promise.resolve(null)),
       },
-      sessionWorkspaceScopes: {
-        get: vi.fn((id: string) => (id === 'workspace-session' ? 'workspace' : 'folder')),
-        set: vi.fn(() => Promise.resolve()),
-      },
     });
+
+    const workspaceMetadata = {
+      varro: { workspaceScope: 'workspace', schemaVersion: 1 },
+    };
+    vi.mocked(callbacks.server.request).mockResolvedValueOnce({
+      id: 'workspace-session',
+      directory: '/workspace',
+      title: 'Workspace session',
+      metadata: workspaceMetadata,
+    });
+    await proxy.handleRequest(
+      makePayload(0, 'POST', '/session?directory=%2Fworkspace', {
+        metadata: workspaceMetadata,
+      })
+    );
+    vi.mocked(callbacks.server.request).mockClear();
 
     await proxy.handleRequest(
       makePayload(1, 'POST', '/session/workspace-session/prompt_async?directory=%2Fworkspace', {
@@ -458,6 +464,45 @@ describe('RestProxy handleRequest', () => {
     expect(folderBody).toEqual(
       expect.objectContaining({ system: expect.stringContaining('/repo-a') })
     );
+    expect(folderBody).toEqual(
+      expect.objectContaining({ system: expect.stringContaining('/repo-b') })
+    );
+  });
+
+  it('persists inherited workspace metadata when OpenCode omits it from a fork', async () => {
+    const { proxy, callbacks } = createProxy();
+    const metadata = {
+      varro: { workspaceScope: 'workspace', schemaVersion: 1 },
+    };
+    vi.mocked(callbacks.server.request)
+      .mockResolvedValueOnce({
+        id: 'parent',
+        directory: '/repo',
+        title: 'Parent',
+        metadata,
+      })
+      .mockResolvedValueOnce({ id: 'child', directory: '/repo', title: 'Child' })
+      .mockResolvedValueOnce({
+        id: 'child',
+        directory: '/repo',
+        title: 'Child',
+        metadata,
+      });
+
+    await proxy.handleRequest(makePayload(1, 'POST', '/session', { metadata }));
+    vi.mocked(callbacks.server.request).mockClear();
+    await proxy.handleRequest(makePayload(2, 'POST', '/session/parent/fork', {}));
+
+    expect(callbacks.server.request).toHaveBeenNthCalledWith(
+      2,
+      'PATCH',
+      '/session/child?directory=%2Frepo',
+      { metadata }
+    );
+    expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+      id: 2,
+      data: expect.objectContaining({ metadata, workspaceScope: 'workspace' }),
+    });
   });
   it('aborts only the request matching an opaque cancellation key', async () => {
     let requestSignal: AbortSignal | undefined;
@@ -784,7 +829,7 @@ describe('RestProxy handleRequest', () => {
       '/session/session-b/prompt_async?directory=%2Frepo-b',
       {
         parts: [],
-        system: expect.stringContaining('VS Code workspace folder'),
+        system: expect.stringContaining('folder selected for this session'),
       },
       withSignal({ directory: '/repo-b' })
     );
@@ -830,7 +875,7 @@ describe('RestProxy handleRequest', () => {
       {
         messageID: 'message-932',
         parts: [],
-        system: expect.stringContaining('VS Code workspace folder'),
+        system: expect.stringContaining('folder selected for this session'),
       },
       withSignal({ directory: '/repo-a' })
     );
@@ -999,7 +1044,7 @@ describe('RestProxy handleRequest', () => {
         '/session/session-a/prompt_async?directory=%2Frepo',
         {
           parts: [],
-          system: expect.stringContaining('VS Code workspace folder'),
+          system: expect.stringContaining('folder selected for this session'),
         },
         withSignal({ directory: '/repo' }),
       ],
@@ -3706,7 +3751,7 @@ describe('RestProxy handleRequest', () => {
         {
           messageID: 'message-32',
           parts: [],
-          system: expect.stringContaining('VS Code workspace folder'),
+          system: expect.stringContaining('folder selected for this session'),
         },
         withSignal(),
       ],

@@ -2,6 +2,7 @@ import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Agent } from '../../types';
+import { DEFAULT_TOOLTIP_DELAY } from '../Tooltip';
 import {
   AgentPicker,
   ModelPickerButton,
@@ -167,6 +168,39 @@ describe('ToolbarPickers', () => {
     );
   });
 
+  it('uses a folder count for the workspace tooltip and a path for folder tooltips', async () => {
+    vi.useFakeTimers();
+    const [selectedPath, setSelectedPath] = createSignal<string | null>(null);
+    cleanup = render(
+      () => (
+        <WorkspacePicker
+          folders={[
+            { name: 'Repo A', path: '/repo-a' },
+            { name: 'Repo B', path: '/repo-b' },
+          ]}
+          selectedPath={selectedPath()}
+          showPicker={false}
+          allLabel="Workspace"
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+          onSelectAll={vi.fn()}
+        />
+      ),
+      container!
+    );
+
+    const button = container?.querySelector('.workspace-picker-button');
+    button?.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(DEFAULT_TOOLTIP_DELAY);
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe('2 folders in workspace');
+
+    button?.dispatchEvent(new MouseEvent('mouseleave'));
+    setSelectedPath('/repo-b');
+    button?.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(DEFAULT_TOOLTIP_DELAY);
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe('/repo-b');
+  });
+
   it('marks an equivalent UNC workspace spelling as selected', () => {
     cleanup = render(
       () => (
@@ -212,16 +246,57 @@ describe('ToolbarPickers', () => {
     vi.spyOn(path!, 'scrollWidth', 'get').mockReturnValue(160);
     vi.spyOn(path!, 'clientWidth', 'get').mockImplementation(() => clientWidth);
     window.dispatchEvent(new Event('resize'));
+    await flushMicrotasks();
     expect(path?.getAttribute('title')).toBeNull();
 
     clientWidth = 100;
     window.dispatchEvent(new Event('resize'));
+    await flushMicrotasks();
     expect(path?.getAttribute('title')).toBe('/a/long/path/to/repo-b');
 
     clientWidth = 200;
     window.dispatchEvent(new Event('resize'));
-    expect(path?.getAttribute('title')).toBeNull();
     await flushMicrotasks();
+    expect(path?.getAttribute('title')).toBeNull();
+  });
+
+  it('uses one resize observer for the workspace popup', async () => {
+    const originalResizeObserver = globalThis.ResizeObserver;
+    let observerCount = 0;
+    class ResizeObserverSpy {
+      constructor(_callback: ResizeObserverCallback) {
+        observerCount += 1;
+      }
+      observe() {}
+      disconnect() {}
+    }
+    Object.defineProperty(globalThis, 'ResizeObserver', {
+      configurable: true,
+      writable: true,
+      value: ResizeObserverSpy,
+    });
+
+    try {
+      cleanup = render(
+        () => (
+          <WorkspacePicker
+            folders={Array.from({ length: 20 }, (_, index) => ({
+              name: `Repo ${index}`,
+              path: `/repo-${index}`,
+            }))}
+            selectedPath={null}
+            showPicker={true}
+            onToggle={vi.fn()}
+            onSelect={vi.fn()}
+          />
+        ),
+        container!
+      );
+      await flushMicrotasks();
+      expect(observerCount).toBe(1);
+    } finally {
+      globalThis.ResizeObserver = originalResizeObserver;
+    }
   });
 
   it('aligns the workspace popup and resizes it to the available boundary width', async () => {

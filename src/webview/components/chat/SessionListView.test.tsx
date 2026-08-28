@@ -192,6 +192,7 @@ describe('SessionListSectionHeader icons', () => {
 
 describe('SessionListView model details', () => {
   it('shows a workspace selector above search for multi-root workspaces', () => {
+    const onPrimarySessionsCountChange = vi.fn();
     const send = vi.fn((message: TestRuntimeValue) => {
       structuredClone(message);
     });
@@ -214,7 +215,10 @@ describe('SessionListView model details', () => {
     ]);
     setShowSessionPicker(false);
 
-    cleanup = render(() => <SessionListView />, container);
+    cleanup = render(
+      () => <SessionListView onPrimarySessionsCountChange={onPrimarySessionsCountChange} />,
+      container
+    );
 
     const selector = container.querySelector('.session-list-workspace-selector');
     const search = container.querySelector('.session-list-search');
@@ -223,6 +227,7 @@ describe('SessionListView model details', () => {
     expect(selector?.textContent).toContain('Workspace');
     expect(selector?.querySelector('.workspace-picker-folder-icon')).toBeNull();
     expect(container.querySelectorAll('.session-item-folder-meta-icon')).toHaveLength(2);
+    expect(onPrimarySessionsCountChange).toHaveBeenLastCalledWith(2);
     expect(
       Array.from(container.querySelectorAll('.session-item-folder')).map(
         (element) => element.textContent
@@ -244,12 +249,14 @@ describe('SessionListView model details', () => {
     ).toEqual(['session-2']);
     expect(container.querySelectorAll('.session-item-folder-meta-icon')).toHaveLength(0);
     expect(container.querySelector('.session-item-meta')?.textContent).not.toContain('Repo B');
+    expect(onPrimarySessionsCountChange).toHaveBeenLastCalledWith(1);
 
     selector?.querySelector<HTMLButtonElement>('.workspace-picker-button')?.click();
     selector?.querySelector<HTMLButtonElement>('.workspace-popover-all')?.click();
     setState('editorContext', 'workspacePath', '/repo-b');
     expect(selector?.textContent).toContain('Workspace');
     expect(container.querySelectorAll('.session-item-title-text')).toHaveLength(2);
+    expect(onPrimarySessionsCountChange).toHaveBeenLastCalledWith(2);
 
     send.mockClear();
     selector?.querySelector<HTMLButtonElement>('.workspace-picker-button')?.click();
@@ -1866,6 +1873,33 @@ describe('SessionListView actions', () => {
 });
 
 describe('SessionListView load errors', () => {
+  it('shows the bottom separator only for secondary groups or overflowing sessions', async () => {
+    const now = Date.now();
+    setState('sessions', [session('recent', now)]);
+    cleanup = render(() => <SessionListView />, container);
+
+    const list = container.querySelector<HTMLElement>('.session-list-view')!;
+    const scroll = container.querySelector<HTMLElement>('.session-list-scroll')!;
+    expect(list.classList).not.toContain('has-bottom-separator');
+
+    Object.defineProperties(scroll, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 101 },
+    });
+    window.dispatchEvent(new Event('resize'));
+    await Promise.resolve();
+    expect(list.classList).toContain('has-bottom-separator');
+
+    Object.defineProperty(scroll, 'scrollHeight', { configurable: true, value: 100 });
+    window.dispatchEvent(new Event('resize'));
+    await Promise.resolve();
+    expect(list.classList).not.toContain('has-bottom-separator');
+
+    setState('sessions', [session('recent', now), session('archived', now - 2 * 86_400_000)]);
+    await Promise.resolve();
+    expect(list.classList).toContain('has-bottom-separator');
+  });
+
   it('loads an archive session instead of showing an unknown zero count', async () => {
     const now = Date.now();
     const recent = session('recent', now);

@@ -111,6 +111,7 @@ export interface NotificationGate {
 
 const INTERRUPTED_SESSIONS_KEY = 'varro.interruptedSessions';
 const BLOCKING_REQUESTS_KEY = 'varro.blockingRequests';
+const ACKNOWLEDGED_COMPLETIONS_KEY = 'varro.acknowledgedCompletions';
 const MAX_PERSISTED_INTERRUPTED_SESSIONS = 50;
 const MAX_PERSISTED_BLOCKING_REQUESTS = 100;
 const MAX_PERSISTED_METADATA_ENTRIES = 20;
@@ -132,6 +133,7 @@ export class SessionStateManager {
   private readonly busySessions = new Set<string>();
   private readonly serverBusySessions = new Set<string>();
   private readonly completedSessions = new Set<string>();
+  private readonly acknowledgedCompletedRoots: Map<string, number>;
   private readonly failedSessions = new Set<string>();
   private readonly sessionAgents = new Map<string, string>();
   private readonly sessionTitles = new Map<string, string>();
@@ -200,7 +202,11 @@ export class SessionStateManager {
     private readonly persistence: Persistence,
     private readonly listener: SessionStateListener,
     private readonly notificationGate: NotificationGate
-  ) {}
+  ) {
+    this.acknowledgedCompletedRoots = validateAcknowledgedCompletions(
+      this.persistence.get<unknown>(ACKNOWLEDGED_COMPLETIONS_KEY)
+    );
+  }
 
   get busy(): ReadonlySet<string> {
     return this.busySessions;
@@ -281,11 +287,12 @@ export class SessionStateManager {
     sessionID: string,
     kind: 'completed' | 'plan-ready',
     unread: boolean,
-    directory?: string
+    directory?: string,
+    markerAt?: number
   ): void {
     if (!unread) {
       if (kind === 'plan-ready') this.acknowledgePlanSession(sessionID);
-      else this.acknowledgeCompletedSession(sessionID);
+      else this.acknowledgeCompletedSession(sessionID, markerAt);
       return;
     }
     if (directory) this.setSessionDirectory(sessionID, directory);
@@ -295,6 +302,17 @@ export class SessionStateManager {
     }
     if (kind === 'plan-ready') this.setSessionMetadata(this.sessionAgents, sessionID, 'plan');
     else this.sessionAgents.delete(sessionID);
+    if (kind === 'completed') {
+      const rootSessionID = this.rootSessionIdFor(sessionID);
+      const acknowledgedAt = this.acknowledgedCompletedRoots.get(rootSessionID);
+      if (acknowledgedAt !== undefined && (markerAt === undefined || markerAt <= acknowledgedAt)) {
+        return;
+      }
+      if (acknowledgedAt !== undefined) {
+        this.acknowledgedCompletedRoots.delete(rootSessionID);
+        void this.persistAcknowledgedCompletions();
+      }
+    }
     if (this.completedSessions.has(sessionID)) return;
     this.completedSessions.add(sessionID);
     this.listener.onStatusChange();
@@ -401,13 +419,15 @@ export class SessionStateManager {
         continue;
       }
       this.completedSessions.delete(sessionID);
+      this.acknowledgeCompletedRoot(this.rootSessionIdFor(sessionID), Date.now());
       changed = true;
     }
     if (changed) this.listener.onStatusChange();
   }
 
-  acknowledgeCompletedSession(sessionID: string): void {
+  acknowledgeCompletedSession(sessionID: string, acknowledgedAt = Date.now()): void {
     const rootSessionID = this.rootSessionIdFor(sessionID);
+    this.acknowledgeCompletedRoot(rootSessionID, acknowledgedAt);
     let changed = false;
     for (const completedSessionID of this.completedSessions) {
       if (this.rootSessionIdFor(completedSessionID) !== rootSessionID) continue;
@@ -703,12 +723,16 @@ export class SessionStateManager {
   persist(): Promise<void> {
     const interruptedSessions = this.getInterruptedSessionSnapshots();
     const blockingRequests = this.getBlockingRequestSnapshots();
+    const acknowledgedCompletions = Object.fromEntries(this.acknowledgedCompletedRoots);
     return this.enqueuePersistence(async () => {
       const results = await Promise.allSettled([
         Promise.resolve().then(() =>
           this.persistence.set(INTERRUPTED_SESSIONS_KEY, interruptedSessions)
         ),
         Promise.resolve().then(() => this.persistence.set(BLOCKING_REQUESTS_KEY, blockingRequests)),
+        Promise.resolve().then(() =>
+          this.persistence.set(ACKNOWLEDGED_COMPLETIONS_KEY, acknowledgedCompletions)
+        ),
       ]);
       for (const result of results) {
         if (result.status === 'rejected') {
@@ -906,6 +930,19 @@ export class SessionStateManager {
       () => undefined
     );
     return result;
+  }
+
+  private persistAcknowledgedCompletions(): Promise<void> {
+    const snapshot = Object.fromEntries(this.acknowledgedCompletedRoots);
+    return this.enqueuePersistence(async () => {
+      try {
+        await this.persistence.set(ACKNOWLEDGED_COMPLETIONS_KEY, snapshot);
+      } catch (err) {
+        logger.warn(
+          `Failed to persist completed-session acknowledgements: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    });
   }
 
   private mergeBlockingRequests(snapshots: BlockingRequestSnapshot[]): void {
@@ -1185,6 +1222,18 @@ export class SessionStateManager {
     this.evictOldestSessionMetadata(map);
   }
 
+  private acknowledgeCompletedRoot(rootSessionID: string, acknowledgedAt: number) {
+    const current = this.acknowledgedCompletedRoots.get(rootSessionID) ?? 0;
+    this.acknowledgedCompletedRoots.delete(rootSessionID);
+    this.acknowledgedCompletedRoots.set(rootSessionID, Math.max(current, acknowledgedAt));
+    while (this.acknowledgedCompletedRoots.size > MAX_SESSION_METADATA_ENTRIES) {
+      const oldest = this.acknowledgedCompletedRoots.keys().next().value;
+      if (oldest === undefined) break;
+      this.acknowledgedCompletedRoots.delete(oldest);
+    }
+    void this.persistAcknowledgedCompletions();
+  }
+
   private setSessionDirectory(sessionID: string, directory: string) {
     const previous = this.sessionDirectories.get(sessionID);
     this.setSessionMetadata(this.sessionDirectories, sessionID, directory);
@@ -1241,6 +1290,7 @@ export class SessionStateManager {
   }
 
   private removeSession(sessionID: string) {
+    const rootSessionID = this.rootSessionIdFor(sessionID);
     this.recordPendingAttentionSessionDeletion(sessionID);
     if (this.recoverySnapshotPromise || this.blockingRecoveryCleanupPending) {
       this.recoveryDeletedSessionIDs.add(sessionID);
@@ -1260,6 +1310,9 @@ export class SessionStateManager {
     this.busyEvidenceRevisions.delete(sessionID);
     this.trailingBusyAfterCompletion.delete(sessionID);
     this.trailingTerminalsWhileBusy.delete(sessionID);
+    if (rootSessionID === sessionID && this.acknowledgedCompletedRoots.delete(rootSessionID)) {
+      void this.persistAcknowledgedCompletions();
+    }
     this.clearBusyAttempts(sessionID);
     for (const [requestID, request] of this.pendingAttention.entries()) {
       if (request.sessionID !== sessionID) continue;
@@ -1402,6 +1455,9 @@ export class SessionStateManager {
       this.busyStartedAt.set(sessionID, Date.now());
     }
     this.busySessions.add(sessionID);
+    if (this.acknowledgedCompletedRoots.delete(this.rootSessionIdFor(sessionID))) {
+      void this.persistAcknowledgedCompletions();
+    }
     changed = this.completedSessions.delete(sessionID) || changed;
     changed = this.failedSessions.delete(sessionID) || changed;
     return changed;
@@ -1882,6 +1938,22 @@ function terminalFailureKey(error: Record<string, unknown> | undefined): string 
     getString(error.message) || getString(data?.message),
     getString(error.code) || getString(data?.code),
   ]);
+}
+
+function validateAcknowledgedCompletions(value: unknown): Map<string, number> {
+  const record = asRecord(value);
+  if (!record) return new Map();
+  return new Map(
+    Object.entries(record)
+      .filter(
+        (entry): entry is [string, number] =>
+          entry[0].length > 0 &&
+          entry[0].length <= MAX_PERSISTED_STRING_LENGTH &&
+          typeof entry[1] === 'number' &&
+          Number.isFinite(entry[1])
+      )
+      .slice(-MAX_SESSION_METADATA_ENTRIES)
+  );
 }
 
 function serializePersistedStringOrArray(value: unknown): string | string[] | undefined {

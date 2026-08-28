@@ -392,6 +392,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       const kind = payload?.kind;
       const unread = payload?.unread;
       const directory = payload?.directory;
+      const markerAt = payload?.markerAt;
       if (
         !isSafePersistedSessionId(sessionId) ||
         (kind !== 'completed' && kind !== 'plan-ready') ||
@@ -402,11 +403,15 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       if (directory !== undefined && (typeof directory !== 'string' || !directory.trim())) {
         return null;
       }
+      if (markerAt !== undefined && (typeof markerAt !== 'number' || !Number.isFinite(markerAt))) {
+        return null;
+      }
       const parsedPayload: Extract<
         WebviewMessage,
         { type: 'session-unread-state/update' }
       >['payload'] = { sessionId, kind, unread };
       if (typeof directory === 'string') parsedPayload.directory = directory;
+      if (typeof markerAt === 'number') parsedPayload.markerAt = markerAt;
       return { type, payload: parsedPayload };
     }
 

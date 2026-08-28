@@ -106,6 +106,9 @@ export function ChatWorkspace(props: {
   onCreateSession: () => void;
 }) {
   let chatContentRef: HTMLDivElement | undefined;
+  const [visiblePrimarySessionsCount, setVisiblePrimarySessionsCount] = createSignal(
+    props.primarySessionsCount
+  );
   const showActiveSessionCue = () => {
     if (!chatContentRef) return;
     chatContentRef.classList.remove('active-session-reselected');
@@ -125,7 +128,7 @@ export function ChatWorkspace(props: {
       filterLabel={useSidebarCounts ? sidebarFilterLabel() : props.sessionListFilterLabel}
       filterPrefix={useSidebarCounts ? sidebarFilterPrefix() : props.sessionListFilterPrefix}
       filterTitle={useSidebarCounts ? sidebarFilterTitle() : props.sessionListFilterTitle}
-      primarySessionsCount={props.primarySessionsCount}
+      primarySessionsCount={visiblePrimarySessionsCount()}
       showBackButton={!!(useSidebarCounts ? sidebarSubagentParentId() : props.subagentParentId)}
       backTitle={useSidebarCounts ? 'Back to sessions' : undefined}
       showFailedBadge={props.shouldShowFailedBadge}
@@ -199,6 +202,7 @@ export function ChatWorkspace(props: {
         subagentParentId={sidebarSubagentParentId()}
         onOpenSubagents={props.onOpenSidebarSubagentSessions}
         onActiveSessionReselect={showActiveSessionCue}
+        onPrimarySessionsCountChange={setVisiblePrimarySessionsCount}
       />
     </aside>
   );
@@ -305,6 +309,7 @@ export function ChatWorkspace(props: {
               sessionFilter={props.sessionFilter}
               subagentParentId={props.subagentParentId}
               onOpenSubagents={props.onOpenSubagentSessions}
+              onPrimarySessionsCountChange={setVisiblePrimarySessionsCount}
             />
             <div class="session-list-new-session">
               <ChatInput newSession onBeforeSend={props.onCreateSessionFromPicker} />

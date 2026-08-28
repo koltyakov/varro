@@ -93,20 +93,12 @@ export function getWorkspaceCompactLabel(
   return `${abbreviation}${matches.findIndex((candidate) => candidate.path === folder.path) + 1}`;
 }
 
-function bindOverflowTitle(element: HTMLElement, text: string) {
-  const update = () => {
-    if (element.scrollWidth > element.clientWidth + 1) element.title = text;
+function updateOverflowTitles(popup: HTMLElement) {
+  for (const element of popup.querySelectorAll<HTMLElement>('[data-overflow-title]')) {
+    const text = element.dataset.overflowTitle;
+    if (text && element.scrollWidth > element.clientWidth + 1) element.title = text;
     else element.removeAttribute('title');
-  };
-  queueMicrotask(update);
-  window.addEventListener('resize', update);
-  const observer =
-    globalThis.ResizeObserver === undefined ? null : new ResizeObserver(() => update());
-  observer?.observe(element);
-  onCleanup(() => {
-    window.removeEventListener('resize', update);
-    observer?.disconnect();
-  });
+  }
 }
 
 export function WorkspacePicker(props: {
@@ -142,6 +134,12 @@ export function WorkspacePicker(props: {
         ? `Selected workspace filter: ${props.allLabel ?? 'All folders'}`
         : 'Select workspace folder';
   };
+  const tooltipContent = () => {
+    const folder = selected();
+    if (folder) return folder.path;
+    if (!props.onSelectAll) return 'Select workspace folder';
+    return `${props.folders.length} ${props.folders.length === 1 ? 'folder' : 'folders'} in workspace`;
+  };
   let popupEl: HTMLDivElement | undefined;
 
   createEffect(() => {
@@ -159,6 +157,7 @@ export function WorkspacePicker(props: {
         alignPopupToBoundary(popupEl, props.boundaryRef, props.alignTo ?? 'left');
       }
       clampPopupToViewport(popupEl);
+      updateOverflowTitles(popupEl);
     };
 
     onCleanup(observePopupViewport(popupEl, reposition));
@@ -172,7 +171,7 @@ export function WorkspacePicker(props: {
 
   return (
     <div class="workspace-picker" style={{ position: 'relative' }}>
-      <Tooltip content={selected()?.path ?? props.allLabel ?? 'Select workspace folder'}>
+      <Tooltip content={tooltipContent()}>
         <button
           ref={props.buttonRef}
           class="toolbar-picker workspace-picker-button"
@@ -265,7 +264,7 @@ export function WorkspacePicker(props: {
                     </For>
                   </span>
                   <span
-                    ref={(element) => bindOverflowTitle(element, folder.path)}
+                    data-overflow-title={folder.path}
                     class="workspace-popover-path block truncate text-[10px] text-vscode-muted"
                   >
                     {folder.path}
