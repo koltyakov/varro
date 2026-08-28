@@ -77,6 +77,57 @@ function createPanel() {
 }
 
 describe('SidebarProvider editor panels', () => {
+  it('routes external context to the last focused chat and clears only that workspace draft', async () => {
+    const contextProvider = createContextProvider();
+    contextProvider.context.workspacePath = '/repo-a';
+    const { provider } = await createSidebarProviderInstance({ contextProvider });
+    const { posted } = attachTestView(provider);
+    const editor = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+    await provider.openNewEditor();
+    editor.receive({ type: 'webview/focus', payload: { focused: true } });
+    const targetViewId = provider.captureContextTarget();
+    const sidebarFile = {
+      path: '/repo-a/sidebar.ts',
+      relativePath: 'sidebar.ts',
+      type: 'file',
+    } as const;
+    const editorFile = {
+      path: '/repo-a/editor.ts',
+      relativePath: 'editor.ts',
+      type: 'file',
+    } as const;
+
+    provider.postDroppedFiles([sidebarFile]);
+    provider.postDroppedFiles([editorFile], targetViewId);
+    provider.postTerminalSelection({ text: 'npm test', terminalName: 'Terminal 1' }, targetViewId);
+
+    expect(targetViewId).not.toBe('sidebar');
+    expect(posted).toContainEqual({ type: 'files/dropped', payload: [sidebarFile] });
+    expect(posted).not.toContainEqual({ type: 'files/dropped', payload: [editorFile] });
+    expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
+      type: 'files/dropped',
+      payload: [editorFile],
+    });
+    expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
+      type: 'terminal-selection/update',
+      payload: { text: 'npm test', terminalName: 'Terminal 1' },
+    });
+
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    editor.panel.webview.postMessage.mockClear();
+    editor.receive({ type: 'context/request' });
+
+    expect(provider.getContextFiles()).toEqual([sidebarFile]);
+    expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
+      type: 'terminal-selection/update',
+      payload: null,
+    });
+    expect(editor.panel.webview.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'files/dropped' })
+    );
+  });
+
   it('keeps a sibling plan-ready event after the plan session is seen', async () => {
     const contextProvider = createContextProvider();
     contextProvider.context.workspacePath = '/repo-a';
@@ -803,6 +854,67 @@ describe('SidebarProvider editor panels', () => {
     await Promise.resolve();
     expect(flushDeferred).toHaveBeenCalledOnce();
     expect(reconcileOwners).toHaveBeenCalledOnce();
+  });
+
+  it('reassigns an actionable permission after its session workspace is discovered', async () => {
+    const contextProvider = createContextProvider();
+    contextProvider.context.workspacePath = '/repo-a';
+    const { provider } = await createSidebarProviderInstance({ contextProvider });
+    const { posted } = attachTestView(provider);
+    await provider.handleMessage({ type: 'ready' });
+    const editor = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+    await provider.openNewEditor();
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    editor.receive({ type: 'ready' });
+    await vi.waitFor(() =>
+      expect(editor.panel.webview.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'permission-automation/update' })
+      )
+    );
+    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
+      .sessionState;
+    sessionState.handleServerEvent({
+      type: 'permission.asked',
+      properties: {
+        id: 'permission-late-workspace',
+        sessionID: 'session-late-workspace',
+        permission: 'bash',
+      },
+    });
+    const access = provider as unknown as {
+      reconcilePermissionAutomationOwners(resendActionable?: boolean): void;
+    };
+    access.reconcilePermissionAutomationOwners(true);
+    expect(posted).not.toContainEqual({
+      type: 'permission/actionable',
+      payload: { permissionId: 'permission-late-workspace' },
+    });
+    expect(editor.panel.webview.postMessage).not.toHaveBeenCalledWith({
+      type: 'permission/actionable',
+      payload: { permissionId: 'permission-late-workspace' },
+    });
+    posted.length = 0;
+    editor.panel.webview.postMessage.mockClear();
+
+    sessionState.handleServerEvent({
+      type: 'session.created',
+      properties: { info: { id: 'session-late-workspace', directory: '/repo-b' } },
+    });
+
+    await vi.waitFor(() =>
+      expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'permission/actionable',
+        payload: { permissionId: 'permission-late-workspace' },
+      })
+    );
+    expect(posted).not.toContainEqual({
+      type: 'permission/actionable',
+      payload: { permissionId: 'permission-late-workspace' },
+    });
+    expect(editor.panel.webview.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'permission-automation/update' })
+    );
   });
 
   it('does not expose an external active file to workspace-scoped endpoints', async () => {

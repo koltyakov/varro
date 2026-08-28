@@ -76,8 +76,16 @@ function createActionFixture() {
     updateCommandState: vi.fn(),
     reload: vi.fn(() => Promise.resolve()),
   };
+  let terminalSelection = { text: 'npm test', terminalName: 'Terminal 1' } as {
+    text: string;
+    terminalName: string;
+  } | null;
   const contextFilesState = {
     notifyContextFilesChanged: vi.fn(),
+    getTerminalSelection: vi.fn(() => terminalSelection),
+    setTerminalSelection: vi.fn((selection: typeof terminalSelection) => {
+      terminalSelection = selection;
+    }),
   };
   const sessionExportService = {
     exportSession: vi.fn(() => Promise.resolve()),
@@ -128,6 +136,7 @@ function createActionFixture() {
     setProviderWatchActive: vi.fn(),
     setActiveChatModel: vi.fn(),
     acknowledgeSessionSeen: vi.fn(),
+    setWebviewFocus: vi.fn(),
     revealPermission: vi.fn(),
     setMermaidPreviewOpen: vi.fn(),
     setActiveRoute: vi.fn(),
@@ -362,6 +371,7 @@ describe('createSidebarProviderActions', () => {
     await actions.handleApiRequest({ id: 4, method: 'GET', path: '/api', body: { ok: true } });
 
     expect(deps.handleReadyMessage).toHaveBeenCalledOnce();
+    expect(deps.setWebviewFocus).toHaveBeenCalledWith(true);
     expect(deps.setProviderWatchActive).toHaveBeenCalledWith(true);
     expect(deps.postContext).toHaveBeenCalledTimes(2);
     expect(deps.refreshProviders).toHaveBeenCalledOnce();
@@ -371,7 +381,7 @@ describe('createSidebarProviderActions', () => {
       terminalName: 'Terminal 1',
     });
     expect(deps.postTerminalSelection).toHaveBeenNthCalledWith(2, null);
-    expect(contextProvider.clearTerminalSelection).toHaveBeenCalledOnce();
+    expect(contextFilesState.setTerminalSelection).toHaveBeenCalledWith(null);
     expect(deps.runInTerminal).toHaveBeenCalledWith('npm test', 'Tests');
     expect(sessionExportService.exportSession).toHaveBeenCalledWith('session-1');
     expect(usageReportService.openReport).toHaveBeenCalledWith(false);

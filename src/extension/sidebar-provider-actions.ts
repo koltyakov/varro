@@ -12,7 +12,12 @@ import type { ToolOutputDocumentProvider } from './tool-output-document-provider
 import type { OpenCodeServer } from './server';
 import { assertSessionInCurrentWorkspace } from './session-workspace';
 import type { UsageReportService } from './usage-report-service';
-import type { ChatModelSelection, ExtensionMessage, WebviewRoute } from '../shared/protocol';
+import type {
+  ChatModelSelection,
+  ExtensionMessage,
+  TerminalSelection,
+  WebviewRoute,
+} from '../shared/protocol';
 
 type ConfigPayload = Extract<
   Parameters<MessageRouterCallbacks['updateConfig']>[0],
@@ -32,6 +37,7 @@ export interface SidebarProviderActionDeps {
   setActiveChatModel(model: ChatModelSelection | null): void;
   setActiveRoute(sessionId: string | null | undefined): void;
   acknowledgeSessionSeen(sessionId: string): void;
+  setWebviewFocus(focused: boolean): void;
   revealPermission(permissionId: string): void;
   contextFilesState: SidebarProviderContextFiles;
   sessionExportService: SessionExportService;
@@ -47,7 +53,7 @@ export interface SidebarProviderActionDeps {
   providerReauthenticated(): Promise<void>;
   postContext(): void;
   selectWorkspace(path: string): Promise<void>;
-  postTerminalSelection(selection: { text: string; terminalName: string } | null): void;
+  postTerminalSelection(selection: TerminalSelection | null): void;
   postConfigState(): void;
   handleReadyMessage(): Promise<void>;
   handleDroppedPaths(paths: string[]): Promise<void>;
@@ -119,7 +125,7 @@ export function createSidebarProviderActions(
       deps.setActiveRoute(sessionId);
     },
     acknowledgeSessionSeen: (sessionId) => deps.acknowledgeSessionSeen(sessionId),
-    setWebviewFocus: () => {},
+    setWebviewFocus: (focused) => deps.setWebviewFocus(focused),
     revealPermission: (permissionId) => deps.revealPermission(permissionId),
     setMermaidPreviewOpen: (open) => deps.setMermaidPreviewOpen(open),
     setProviderWatchActive: (active) => {
@@ -127,7 +133,7 @@ export function createSidebarProviderActions(
     },
     requestContext: () => {
       deps.postContext();
-      deps.postTerminalSelection(deps.contextProvider.terminalSelection);
+      deps.postTerminalSelection(deps.contextFilesState.getTerminalSelection());
     },
     selectWorkspace: async (path) => {
       await deps.selectWorkspace(path);
@@ -135,8 +141,8 @@ export function createSidebarProviderActions(
     refreshProviders: () => deps.refreshProviders(),
     providerReauthenticated: () => deps.providerReauthenticated(),
     clearTerminalSelection: () => {
-      deps.contextProvider.clearTerminalSelection();
-      deps.postTerminalSelection(deps.contextProvider.terminalSelection);
+      deps.contextFilesState.setTerminalSelection(null);
+      deps.postTerminalSelection(null);
     },
     runInTerminal: (command, title) => deps.runInTerminal(command, title),
     openSessionInOpenCode: async (sessionId) => {

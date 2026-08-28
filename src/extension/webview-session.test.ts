@@ -151,11 +151,11 @@ function createSession(options?: {
       selection: null,
       diagnostics: [],
     },
-    terminalSelection: null,
   };
 
   const contextFilesState = {
     getContextFiles: vi.fn(() => []),
+    getTerminalSelection: vi.fn<() => InitialWebviewState['terminalSelection']>(() => null),
     postContextFiles: vi.fn(),
   };
   const pinnedSessions = { list: vi.fn(() => ['pinned-session']) };
@@ -497,6 +497,19 @@ describe('WebviewSession', () => {
       expect.objectContaining({
         pinnedSessionIds: ['pinned-session'],
       })
+    );
+  });
+
+  it('uses the endpoint-owned terminal selection in initial state', async () => {
+    const { session, bridge, contextFilesState } = createSession();
+    const selection = { text: 'npm test', terminalName: 'Terminal 1' };
+    contextFilesState.getTerminalSelection.mockReturnValue(selection);
+
+    await session.resolve(createWebviewView(true) as never);
+    await flushMicrotasks();
+
+    expect(bridge.renderHtml).toHaveBeenCalledWith(
+      expect.objectContaining({ terminalSelection: selection })
     );
   });
 

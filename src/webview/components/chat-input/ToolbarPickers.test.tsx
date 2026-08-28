@@ -141,6 +141,28 @@ describe('ToolbarPickers', () => {
     ).toBe('true');
   });
 
+  it('marks an equivalent UNC workspace spelling as selected', () => {
+    cleanup = render(
+      () => (
+        <WorkspacePicker
+          folders={[{ name: 'Varro', path: '\\\\BuildServer\\Projects\\Varro' }]}
+          selectedPath="//buildserver/PROJECTS/varro/"
+          showPicker={true}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+        />
+      ),
+      container!
+    );
+
+    expect(container?.querySelector('.workspace-picker-button')?.getAttribute('aria-label')).toBe(
+      'Selected workspace: Varro'
+    );
+    expect(container?.querySelector('.toolbar-popover-item')?.getAttribute('aria-current')).toBe(
+      'true'
+    );
+  });
+
   it('shows a workspace path title only when the path is truncated', async () => {
     cleanup = render(
       () => (

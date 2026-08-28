@@ -43,6 +43,7 @@ import type {
 } from '../../shared/protocol';
 import { isPermissionMode } from '../../shared/protocol';
 import { mergeContextFile } from '../../shared/context-files';
+import { isSameWorkspacePath } from '../../shared/workspace-path';
 import type {
   ProviderAuthMethodsByProvider,
   WorkspaceStatusEntry,
@@ -471,7 +472,19 @@ export function createAppState(): AppStateInstance {
   };
   const [connectionInitialized, setConnectionInitialized] = createSignal(false);
   const [showSessionPicker, setShowSessionPicker] = createSignal(false);
-  const [manualWorkspaceSelection, setManualWorkspaceSelection] = createSignal(false);
+  const storedWorkspacePath = readStored<unknown>(STORAGE_KEYS.workspacePath);
+  const initialManualWorkspaceSelection =
+    readStored<unknown>(STORAGE_KEYS.manualWorkspaceSelection) === true &&
+    isString(storedWorkspacePath) &&
+    isSameWorkspacePath(storedWorkspacePath, initialWebviewState.editorContext?.workspacePath);
+  const [manualWorkspaceSelection, setManualWorkspaceSelectionSignal] = createSignal(
+    initialManualWorkspaceSelection
+  );
+  const setManualWorkspaceSelection: Setter<boolean> = (value) => {
+    const nextValue = setManualWorkspaceSelectionSignal(value);
+    writeStored(STORAGE_KEYS.manualWorkspaceSelection, nextValue || null);
+    return nextValue;
+  };
   const [showModelPicker, setShowModelPicker] = createSignal(false);
   const [showModels, setShowModels] = createSignal(false);
   const [composerFocusKey, setComposerFocusKey] = createSignal(0);

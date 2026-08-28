@@ -2100,6 +2100,46 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.changed-files-block')).toBe(files);
   });
 
+  it('reissues an active file search when the workspace changes', async () => {
+    const messages: WebviewMessage[] = [];
+    fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension = (
+      message
+    ) => messages.push(message);
+    setState('editorContext', {
+      workspacePath: '/repo-a',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    setInputText('@app');
+    cleanup = render(() => ChatInput({ newSession: true }), container!);
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
+    editor.focus();
+    setCollapsedSelection(editor.firstChild, '@app'.length);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'p', bubbles: true }));
+
+    await vi.waitFor(() =>
+      expect(messages.filter((message) => message.type === 'files/search')).toHaveLength(1)
+    );
+
+    setState('editorContext', 'workspacePath', '/repo-b');
+
+    await vi.waitFor(() =>
+      expect(messages.filter((message) => message.type === 'files/search')).toHaveLength(2)
+    );
+    const searches = messages.filter((message) => message.type === 'files/search');
+    expect(searches[1]).toEqual({
+      type: 'files/search',
+      payload: {
+        requestId: expect.any(Number),
+        query: 'app',
+        limit: 12,
+      },
+    });
+    expect(searches[1]?.payload.requestId).not.toBe(searches[0]?.payload.requestId);
+  });
+
   it.each([
     { trigger: '@', initial: '@hel', shortened: '@he' },
     { trigger: '&', initial: '&aut', shortened: '&au' },
@@ -4612,6 +4652,26 @@ describe('ChatInput', () => {
       type: 'workspace/select',
       payload: { path: '/repo-b' },
     });
+  });
+
+  it('does not reselect an equivalent UNC workspace for an empty new chat', async () => {
+    const messages: WebviewMessage[] = [];
+    fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension = (
+      message
+    ) => messages.push(message);
+    setState('editorContext', {
+      workspacePath: '\\\\BuildServer\\Projects\\Varro',
+      workspaceFolders: [{ name: 'Varro', path: '\\\\BuildServer\\Projects\\Varro' }],
+      activeWorkspacePath: '//buildserver/PROJECTS/varro/',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(() => ChatInput({ newSession: true }), container!);
+    await flushAsyncWork();
+
+    expect(messages).not.toContainEqual(expect.objectContaining({ type: 'workspace/select' }));
   });
 
   it('does not override a workspace selected outside the composer', async () => {

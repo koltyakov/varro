@@ -103,7 +103,7 @@ export class ContextProvider implements vscode.Disposable {
   }
 
   async selectWorkspace(path: string) {
-    const folder = vscode.workspace.workspaceFolders?.find((item) => item.uri.fsPath === path);
+    const folder = this.getOpenWorkspaceFolder(path);
     if (!folder) throw new Error('Selected workspace folder is not open');
     this.selectedWorkspacePath = folder.uri.fsPath;
     await this.workspaceState?.update(
@@ -828,9 +828,7 @@ export class ContextProvider implements vscode.Disposable {
 
   private getPreferredWorkspacePath(): string | null {
     if (this.selectedWorkspacePath) {
-      const selectedFolder = vscode.workspace.workspaceFolders?.find(
-        (folder) => folder.uri.fsPath === this.selectedWorkspacePath
-      );
+      const selectedFolder = this.getOpenWorkspaceFolder(this.selectedWorkspacePath);
       if (selectedFolder) return selectedFolder.uri.fsPath;
       this.selectedWorkspacePath = null;
       void this.workspaceState?.update(ContextProvider.SELECTED_WORKSPACE_KEY, undefined);

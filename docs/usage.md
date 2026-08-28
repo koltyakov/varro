@@ -62,7 +62,7 @@ Varro can include more than the text in the composer.
 
 The current document appears as a chip above the composer. You can click that chip to disable or re-enable live current-document context for the active session.
 
-In a multi-root workspace, use the working-directory picker in the composer toolbar to choose which root owns sessions and OpenCode requests. Varro remembers that root for the workspace instead of switching it when editor focus changes.
+In a multi-root workspace, a new empty chat follows the active editor's root. Use the working-directory picker in the composer toolbar to choose which root owns sessions and OpenCode requests. Restored editor chats retain a manual root instead of switching it when editor focus changes.
 
 When the active file is also attached explicitly, Varro avoids duplicating overlapping line ranges.
 

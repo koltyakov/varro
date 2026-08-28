@@ -413,6 +413,62 @@ describe('mount bridge helpers', () => {
     );
   });
 
+  it('does not reset workspace state for an equivalent Windows path', () => {
+    const setCurrentWorkspacePath = vi.fn();
+    const syncWorkspaceState = vi.fn();
+    const resetWorkspaceForChange = vi.fn();
+    const reloadWorkspaceAfterChange = vi.fn();
+
+    handleExtensionMessageWithDependencies(
+      {
+        setServerStatus: vi.fn(),
+        clearError: vi.fn(),
+        ensureConnectionInitialized: vi.fn(),
+        getServerState: () => 'running',
+        invalidateConnection: vi.fn(),
+        clearProvidersState: vi.fn(),
+        setTheme: vi.fn(),
+        setConfig: vi.fn(),
+        getPreviousActiveFilePath: () => null,
+        getCurrentWorkspacePath: () => 'C:\\Users\\Andrew\\Repo',
+        setCurrentWorkspacePath,
+        setEditorContext: vi.fn(),
+        rememberCurrentDocumentNavigation: vi.fn(),
+        syncWorkspaceState,
+        resetWorkspaceForChange,
+        reloadWorkspaceAfterChange,
+        isInitialized: () => true,
+        setTerminalSelection: vi.fn(),
+        addContextFiles: vi.fn(),
+        removeContextFile: vi.fn(),
+        createSession: vi.fn(),
+        requestComposerFocus: vi.fn(),
+        requestOpenAttentionSessions: vi.fn(),
+        requestOpenCompletedSessions: vi.fn(),
+        abortSession: vi.fn(),
+        refreshMcps: vi.fn(),
+        refreshProviders: vi.fn(),
+        setWorkspaceStatusSummary: vi.fn(),
+        setWorkspaceStatuses: vi.fn(),
+      },
+      {
+        type: 'context/update',
+        payload: {
+          workspacePath: 'c:/users/andrew/repo/',
+          workspaceFolders: [],
+          activeFile: null,
+          selection: null,
+          diagnostics: [],
+        },
+      }
+    );
+
+    expect(setCurrentWorkspacePath).toHaveBeenCalledWith('c:/users/andrew/repo');
+    expect(syncWorkspaceState).not.toHaveBeenCalled();
+    expect(resetWorkspaceForChange).not.toHaveBeenCalled();
+    expect(reloadWorkspaceAfterChange).not.toHaveBeenCalled();
+  });
+
   it('treats the first context update as a seed without resetting workspace state', () => {
     const syncWorkspaceState = vi.fn();
     const resetWorkspaceForChange = vi.fn();

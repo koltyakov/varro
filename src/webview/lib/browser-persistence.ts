@@ -87,6 +87,7 @@ const EDITOR_INSTANCE_KEYS = new Set([
   'varro.queuedMessages',
   'varro.editorViewId',
   'varro.workspacePath',
+  'varro.manualWorkspaceSelection',
   'varro.lastActiveSessionId',
   'varro.lastOpenedView',
 ]);

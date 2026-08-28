@@ -70,10 +70,10 @@ export class WebviewSession {
     >,
     private readonly pinnedSessions: Pick<PinnedSessionManager, 'list'>,
     private readonly hiddenSessions: Pick<HiddenSessionManager, 'hiddenSessionIds' | 'isHidden'>,
-    private readonly contextProvider: Pick<ContextProvider, 'context' | 'terminalSelection'>,
+    private readonly contextProvider: Pick<ContextProvider, 'context'>,
     private readonly contextFilesState: Pick<
       SidebarProviderContextFiles,
-      'getContextFiles' | 'postContextFiles'
+      'getContextFiles' | 'getTerminalSelection' | 'postContextFiles'
     >,
     private readonly deps: {
       handleMessage(message: WebviewMessage): Promise<void>;
@@ -403,7 +403,7 @@ export class WebviewSession {
       theme: this.deps.currentTheme(),
       serverStatus,
       editorContext,
-      terminalSelection: this.contextProvider.terminalSelection,
+      terminalSelection: this.contextFilesState.getTerminalSelection(),
       droppedFiles: this.contextFilesState.getContextFiles(),
       clipboardImages: this.deps.draftImages(),
       emptyStateLogoUri: this.bridge.emptyStateLogoUri() || '',
@@ -454,7 +454,7 @@ export class WebviewSession {
     this.bridge.post({ type: 'context/update', payload: editorContext });
     this.bridge.post({
       type: 'terminal-selection/update',
-      payload: this.contextProvider.terminalSelection,
+      payload: this.contextFilesState.getTerminalSelection(),
     });
     this.contextFilesState.postContextFiles((message) => this.bridge.post(message));
     this.bridge.post({

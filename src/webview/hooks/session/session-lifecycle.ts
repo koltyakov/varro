@@ -2,7 +2,7 @@ import { batch } from 'solid-js';
 import { normalizeSessionTitle } from '../../../shared/session-title';
 import { appStore } from '../../lib/stores/app-store';
 import { composerStore } from '../../lib/stores/composer-store';
-import { isSamePath } from '../../lib/path-display';
+import { isSameWorkspacePath } from '../../../shared/workspace-path';
 import { compareSessionsByActivity } from '../../lib/session-order';
 import { collectSessionTreeIds } from '../../lib/session-tree-index';
 import { permissionsStore } from '../../lib/stores/permissions-store';
@@ -133,7 +133,7 @@ export function isSessionInWorkspace(
   if (!normalizedWorkspace) return true;
   const normalizedSessionDirectory = normalizeProjectPath(session.directory);
   if (!normalizedSessionDirectory) return false;
-  return isSamePath(normalizedSessionDirectory, normalizedWorkspace);
+  return isSameWorkspacePath(normalizedSessionDirectory, normalizedWorkspace);
 }
 
 export function sortSessions(sessions: Session[], now = Date.now()) {

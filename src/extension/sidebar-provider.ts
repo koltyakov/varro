@@ -16,6 +16,7 @@ import type {
   WebviewMessage,
   WebviewRoute,
   SiblingWorkspaceAlert,
+  TerminalSelection,
 } from '../shared/protocol';
 import { asRecord } from '../shared/type-utils';
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
@@ -157,6 +158,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly generatedDependencyTreeGuard: GeneratedDependencyTreeGuard;
   private readonly endpoints = new Set<WebviewEndpoint>();
   private readonly editorPanels = new Map<string, EditorEndpoint>();
+  private lastFocusedContextViewId: string | null = null;
   private readonly permissionModeQueues = new Map<string, Promise<unknown>>();
   private readonly deferredWorkspaceEvents: ServerEvent[] = [];
   private readonly permissionAutomationOwnerViewIds = new Set<string>();
@@ -561,6 +563,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         },
         acknowledgeSessionSeen: (sessionId) =>
           this.sessionState.acknowledgeCompletedSession(sessionId),
+        setWebviewFocus: (focused) => {
+          if (focused) this.lastFocusedContextViewId = webviewContext.viewId;
+        },
         revealPermission: (permissionId) => this.revealPermission(permissionId),
         contextFilesState,
         sessionExportService:
@@ -590,7 +595,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           const workspacePath = this.contextProvider.getOpenWorkspaceRoot(path);
           if (!workspacePath) throw new Error('Selected workspace folder is not open');
           initialWorkspacePath = workspacePath;
-          if (endpointRef.endpoint) endpointRef.endpoint.workspacePath = workspacePath;
+          if (endpointRef.endpoint) this.setEndpointWorkspace(endpointRef.endpoint, workspacePath);
           this.reconcilePermissionAutomationOwners();
           if (webviewContext.surface === 'sidebar') {
             await this.contextProvider.selectWorkspace(workspacePath);
@@ -635,8 +640,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         pickFiles: () => contextFilesState.pickFiles((message) => post(message)),
         searchFiles: (requestId, query, limit) => {
           const generation = webviewSession.getRequestGeneration();
-          this.searchFiles(requestId, query, limit, post, fileSearch, () =>
-            this.isEndpointGenerationAvailable(endpointRef.endpoint, generation)
+          const workspaceDirectory = endpointServer.getWorkspaceCwd();
+          this.searchFiles(
+            requestId,
+            query,
+            limit,
+            workspaceDirectory,
+            post,
+            fileSearch,
+            () =>
+              this.isEndpointGenerationAvailable(endpointRef.endpoint, generation) &&
+              isSameWorkspacePath(
+                endpointRef.endpoint?.workspacePath ?? initialWorkspacePath,
+                workspaceDirectory
+              )
           );
         },
         runInTerminal: (command, title) =>
@@ -925,6 +942,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       if (removed) this.postEditorTabsState();
       this.endpoints.delete(endpoint);
       this.setEndpointReady(endpoint, false);
+      endpoint.contextFilesState.clearContextFiles();
       endpoint.fileSearch.dispose();
       endpoint.restProxy.dispose();
       void endpoint.webviewSession.dispose();
@@ -1149,7 +1167,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.sessionDirectoryReconciliationScheduled = false;
       if (this.disposing) return;
       this.flushDeferredWorkspaceEvents();
-      this.reconcilePermissionAutomationOwners();
+      this.reconcilePermissionAutomationOwners(true);
     });
   }
 
@@ -1197,7 +1215,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.postSiblingWorkspaceAlerts();
   }
 
-  private reconcilePermissionAutomationOwners() {
+  private reconcilePermissionAutomationOwners(resendActionable = false) {
     const owners: WebviewEndpoint[] = [];
     const workspaceGroups = new Map<string, WebviewEndpoint[]>();
     for (const endpoint of this.endpoints) {
@@ -1237,6 +1255,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.permissionAutomationOwnerWorkspaces.get(viewId) === nextOwnerWorkspaces.get(viewId)
       )
     ) {
+      if (resendActionable) this.postPendingPermissionActionables();
       this.reconcileInterruptedRecoveryOwners(owners);
       return;
     }
@@ -1264,6 +1283,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         payload: this.permissionAutomationFor(endpoint.viewId),
       });
     }
+    this.postPendingPermissionActionables();
+    this.reconcileInterruptedRecoveryOwners(owners);
+  }
+
+  private postPendingPermissionActionables() {
     for (const [permissionId, request] of this.sessionState.pending) {
       if (request.kind !== 'permission') continue;
       this.permissionAutomationOwnerForSession(request.sessionID)?.bridge.post({
@@ -1271,17 +1295,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         payload: { permissionId },
       });
     }
-    this.reconcileInterruptedRecoveryOwners(owners);
   }
 
   private permissionAutomationOwnerForSession(sessionID: string) {
     const directory = this.sessionState.directoryFor(sessionID);
+    if (!directory) return undefined;
     const owners = [...this.endpoints].filter(
       (endpoint) => endpoint.ready && this.permissionAutomationOwnerViewIds.has(endpoint.viewId)
     );
-    return directory
-      ? owners.find((endpoint) => isSameWorkspacePath(endpoint.workspacePath, directory))
-      : owners[0];
+    return owners.find((endpoint) => isSameWorkspacePath(endpoint.workspacePath, directory));
   }
 
   private reconcileInterruptedRecoveryOwners(owners: WebviewEndpoint[]) {
@@ -1534,12 +1556,34 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return this.contextFilesState.getContextFiles();
   }
 
-  postDroppedFiles(files: Array<Pick<DroppedFile, 'path' | 'relativePath' | 'type'>>) {
-    this.contextFilesState.postDroppedFiles(files, (message) => this.bridge.post(message));
+  captureContextTarget() {
+    return this.resolveContextEndpoint(this.lastFocusedContextViewId).viewId;
   }
 
-  postTerminalSelection(selection: { text: string; terminalName: string } | null) {
-    this.post({ type: 'terminal-selection/update', payload: selection });
+  postDroppedFiles(
+    files: Array<Pick<DroppedFile, 'path' | 'relativePath' | 'type'>>,
+    targetViewId?: string
+  ) {
+    const endpoint = this.resolveContextEndpoint(targetViewId);
+    endpoint.contextFilesState.postDroppedFiles(files, (message) => endpoint.bridge.post(message));
+  }
+
+  postTerminalSelection(selection: TerminalSelection | null, targetViewId?: string) {
+    const endpoint = this.resolveContextEndpoint(targetViewId);
+    endpoint.contextFilesState.setTerminalSelection(selection);
+    endpoint.bridge.post({ type: 'terminal-selection/update', payload: selection });
+  }
+
+  async revealContextTarget(targetViewId: string, revealSidebar: () => PromiseLike<void>) {
+    const endpoint = this.resolveContextEndpoint(targetViewId);
+    if (endpoint.surface === 'sidebar') {
+      await revealSidebar();
+      return;
+    }
+    const editor = [...this.editorPanels.values()].find(
+      (candidate) => candidate.viewId === endpoint.viewId
+    );
+    if (editor) editor.panel.reveal(editor.panel.viewColumn, false);
   }
 
   postCommand(cmd: 'new-session' | 'abort', payload?: { prefill: string }) {
@@ -1598,7 +1642,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     const workspacePath = this.contextProvider.getOpenWorkspaceRoot(alert.path);
     if (!workspacePath) return;
-    sidebarEndpoint.workspacePath = workspacePath;
+    this.setEndpointWorkspace(sidebarEndpoint, workspacePath);
     this.reconcilePermissionAutomationOwners();
     await this.contextProvider.selectWorkspace(workspacePath);
     this.postSiblingWorkspaceAlerts();
@@ -1795,6 +1839,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     };
   }
 
+  private resolveContextEndpoint(targetViewId?: string | null) {
+    const target = targetViewId
+      ? [...this.endpoints].find((endpoint) => endpoint.viewId === targetViewId)
+      : undefined;
+    return target ?? [...this.endpoints].find((endpoint) => endpoint.surface === 'sidebar')!;
+  }
+
+  private setEndpointWorkspace(endpoint: WebviewEndpoint, workspacePath: string) {
+    if (isSameWorkspacePath(endpoint.workspacePath, workspacePath)) return;
+    endpoint.contextFilesState.clearContextFiles();
+    endpoint.contextFilesState.setTerminalSelection(null);
+    endpoint.workspacePath = workspacePath;
+  }
+
   private async storePdf(
     payload: Extract<WebviewMessage, { type: 'pdfs/store' }>['payload'],
     post: (message: ExtensionMessage) => void = (message) => this.post(message),
@@ -1845,11 +1903,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     requestId: number,
     query: string,
     limit = 12,
+    workspaceDirectory: string | null | undefined = this.contextProvider.context.workspacePath,
     post: (message: ExtensionMessage) => void = (message) => this.post(message),
     fileSearch = this.fileSearch,
     isAvailable: () => boolean = () => true
   ) {
-    fileSearch.search(requestId, query, limit, (result) => {
+    fileSearch.search(requestId, query, limit, workspaceDirectory, (result) => {
       if (!isAvailable()) return;
       post({ type: 'files/search-results', payload: result });
     });

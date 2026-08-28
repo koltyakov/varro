@@ -6,6 +6,7 @@ import type {
   PermissionMode,
   WorkspaceFolderContext,
 } from '../../../shared/protocol';
+import { isSameWorkspacePath } from '../../../shared/workspace-path';
 import { getProviderIcon } from '../../lib/provider-icons';
 import { checkIcon, navArrowDownIcon } from '../../lib/ui-icons';
 import { formatModelName } from '../../lib/format';
@@ -106,7 +107,8 @@ export function WorkspacePicker(props: {
   onToggle: () => void;
   onSelect: (path: string) => void;
 }) {
-  const selected = () => props.folders.find((folder) => folder.path === props.selectedPath);
+  const isSelected = (path: string) => isSameWorkspacePath(path, props.selectedPath);
+  const selected = () => props.folders.find((folder) => isSelected(folder.path));
   const selectedCompactLabel = () => {
     const folder = selected();
     if (!folder) return 'Workspace';
@@ -192,9 +194,9 @@ export function WorkspacePicker(props: {
           <For each={props.folders}>
             {(folder) => (
               <button
-                class={`toolbar-popover-item ${folder.path === props.selectedPath ? 'selected' : ''}`}
+                class={`toolbar-popover-item ${isSelected(folder.path) ? 'selected' : ''}`}
                 data-workspace-path={folder.path}
-                aria-current={folder.path === props.selectedPath ? 'true' : undefined}
+                aria-current={isSelected(folder.path) ? 'true' : undefined}
                 disabled={props.canSelect === false}
                 onClick={() => props.onSelect(folder.path)}
               >
@@ -207,7 +209,7 @@ export function WorkspacePicker(props: {
                           class={
                             part.initial &&
                             shouldAbbreviateWorkspaceName(folder.name) &&
-                            folder.path === props.selectedPath
+                            isSelected(folder.path)
                               ? 'workspace-name-initial'
                               : undefined
                           }

@@ -99,6 +99,8 @@ function register(
     openSiblingWorkspaceSessions: vi.fn(() => Promise.resolve()),
     postDroppedFiles: vi.fn(),
     postTerminalSelection: vi.fn(),
+    captureContextTarget: vi.fn(() => 'sidebar'),
+    revealContextTarget: vi.fn(async (_target: string, reveal: () => Promise<unknown>) => reveal()),
     generateCommitMessage: vi.fn(() => Promise.resolve()),
     generateUsageReport: vi.fn(() => Promise.resolve()),
     openMarkdownDocument: vi.fn(async (content: string, title: string, _show?: boolean) => {
@@ -399,6 +401,25 @@ describe('terminal selection command', () => {
       'workbench.view.extension.varro'
     );
   });
+
+  it('posts a successful capture only to the selected editor target', async () => {
+    const { contextProvider, sidebar } = register();
+    sidebar.captureContextTarget.mockReturnValue('editor-1');
+    sidebar.revealContextTarget.mockResolvedValue(undefined);
+    contextProvider.terminalSelection = { text: 'npm test', terminalName: 'Terminal 1' };
+    contextProvider.captureTerminalSelection.mockResolvedValue({
+      ok: true,
+      terminalName: 'Terminal 1',
+    });
+
+    await runCommand('varro.chat.addTerminalSelectionToContext');
+
+    expect(sidebar.postTerminalSelection).toHaveBeenCalledWith(
+      { text: 'npm test', terminalName: 'Terminal 1' },
+      'editor-1'
+    );
+    expect(sidebar.revealContextTarget).toHaveBeenCalledWith('editor-1', expect.any(Function));
+  });
 });
 
 describe('varro.chat.addToContext', () => {
@@ -429,6 +450,23 @@ describe('varro.chat.addToContext', () => {
       { path: '/repo/b.ts', relativePath: 'b.ts', type: 'file' },
     ]);
     expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith(
+      'workbench.view.extension.varro'
+    );
+  });
+
+  it('posts files only to the selected editor target', async () => {
+    const { sidebar } = register();
+    sidebar.captureContextTarget.mockReturnValue('editor-1');
+    sidebar.revealContextTarget.mockResolvedValue(undefined);
+
+    await addToContext(fileUri('/repo/a.ts'));
+
+    expect(sidebar.postDroppedFiles).toHaveBeenCalledWith(
+      [{ path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' }],
+      'editor-1'
+    );
+    expect(sidebar.revealContextTarget).toHaveBeenCalledWith('editor-1', expect.any(Function));
+    expect(vscodeMock.commands.executeCommand).not.toHaveBeenCalledWith(
       'workbench.view.extension.varro'
     );
   });

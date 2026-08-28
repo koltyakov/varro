@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { basename } from 'path';
 import type { DroppedFile } from '../shared/protocol';
+import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import { getRelativePath } from './util/path';
 import { logger } from './logger';
 
@@ -36,6 +37,8 @@ export class FileSearchService {
   private static readonly RESULT_LIMIT = 30;
 
   private workspaceWatcher: vscode.FileSystemWatcher | null = null;
+  private workspaceFolder: vscode.WorkspaceFolder | null = null;
+  private workspaceScope: string | null = null;
   private workspaceFileCache: WorkspaceFileSearchEntry[] = [];
   private workspaceFileCacheAt = 0;
   private hasWorkspaceFileCache = false;
@@ -54,15 +57,21 @@ export class FileSearchService {
     requestId: number,
     query: string,
     limit: number,
+    workspaceDirectory: string | null | undefined,
     onResult: (result: FileSearchResult) => void
   ): void {
-    this.ensureWorkspaceWatcher();
-    this.resetWatcherInactivityTimer();
+    const workspaceFolder = this.setWorkspaceScope(workspaceDirectory);
     this.fileSearchCts?.cancel();
     this.fileSearchCts?.dispose();
     this.fileSearchCts = new vscode.CancellationTokenSource();
     const token = this.fileSearchCts.token;
-    void this.executeSearch(requestId, query, limit, token, onResult);
+    if (!workspaceFolder) {
+      onResult({ requestId, query, files: [] });
+      return;
+    }
+    this.ensureWorkspaceWatcher(workspaceFolder);
+    this.resetWatcherInactivityTimer();
+    void this.executeSearch(requestId, query, limit, workspaceFolder, token, onResult);
   }
 
   dispose(): void {
@@ -78,11 +87,35 @@ export class FileSearchService {
     this.clearWorkspaceFileCache();
   }
 
-  private ensureWorkspaceWatcher() {
+  private setWorkspaceScope(workspaceDirectory: string | null | undefined) {
+    const folder = workspaceDirectory
+      ? vscode.workspace.workspaceFolders?.find((candidate) =>
+          isSameWorkspacePath(candidate.uri.fsPath, workspaceDirectory)
+        )
+      : undefined;
+    const scope = normalizeWorkspaceIdentity(folder?.uri.fsPath);
+    if (scope === this.workspaceScope) return this.workspaceFolder ?? undefined;
+
+    this.workspaceScope = scope;
+    this.workspaceFolder = folder ?? null;
+    this.fileSearchCts?.cancel();
+    this.fileSearchCts?.dispose();
+    this.fileSearchCts = null;
+    this.disposeWorkspaceWatcher();
+    if (this.cacheInvalidationDebounceTimer) {
+      clearTimeout(this.cacheInvalidationDebounceTimer);
+      this.cacheInvalidationDebounceTimer = null;
+    }
+    this.hasPendingWorkspaceFileCacheClear = false;
+    this.clearWorkspaceFileCache();
+    return folder;
+  }
+
+  private ensureWorkspaceWatcher(workspaceFolder: vscode.WorkspaceFolder) {
     if (this.workspaceWatcher) return;
 
     const watcher = vscode.workspace.createFileSystemWatcher(
-      WORKSPACE_FILE_GLOB,
+      new vscode.RelativePattern(workspaceFolder, WORKSPACE_FILE_GLOB),
       false,
       true,
       false
@@ -143,6 +176,7 @@ export class FileSearchService {
     requestId: number,
     query: string,
     limit: number,
+    workspaceFolder: vscode.WorkspaceFolder,
     token: vscode.CancellationToken,
     onResult: (result: FileSearchResult) => void
   ): Promise<void> {
@@ -151,7 +185,7 @@ export class FileSearchService {
       let cacheInvalidationRetries = 0;
       while (true) {
         try {
-          files = await this.getWorkspaceFiles();
+          files = await this.getWorkspaceFiles(workspaceFolder);
           break;
         } catch (err) {
           if (token.isCancellationRequested) return;
@@ -182,7 +216,9 @@ export class FileSearchService {
     }
   }
 
-  private async getWorkspaceFiles(): Promise<WorkspaceFileSearchEntry[]> {
+  private async getWorkspaceFiles(
+    workspaceFolder: vscode.WorkspaceFolder
+  ): Promise<WorkspaceFileSearchEntry[]> {
     const now = Date.now();
     if (
       this.hasWorkspaceFileCache &&
@@ -195,7 +231,7 @@ export class FileSearchService {
     const cacheGeneration = this.workspaceFileCacheGeneration;
     const promise = Promise.resolve(
       vscode.workspace.findFiles(
-        WORKSPACE_FILE_GLOB,
+        new vscode.RelativePattern(workspaceFolder, WORKSPACE_FILE_GLOB),
         WORKSPACE_FILE_EXCLUDE_GLOB,
         FileSearchService.MAX_CANDIDATES
       )
@@ -204,12 +240,7 @@ export class FileSearchService {
         if (cacheGeneration !== this.workspaceFileCacheGeneration) {
           throw new WorkspaceFileCacheInvalidatedError();
         }
-        const workspaceFolders = (vscode.workspace.workspaceFolders || []).map((folder) => ({
-          folder,
-          normalizedPath: normalizeWorkspacePath(folder.uri.fsPath),
-        }));
         const entries = files.map((uri) => {
-          const workspaceFolder = findWorkspaceFolder(uri.fsPath, workspaceFolders);
           const relativePath = getRelativePath(uri, workspaceFolder);
           return {
             path: uri.fsPath,
@@ -308,32 +339,4 @@ function getFileSearchScore(file: WorkspaceFileSearchEntry, query: string) {
     index = next + 1;
   }
   return score - haystack.length;
-}
-
-function normalizeWorkspacePath(path: string) {
-  return path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
-}
-
-function findWorkspaceFolder(
-  filePath: string,
-  folders: Array<{ folder: vscode.WorkspaceFolder; normalizedPath: string }>
-) {
-  const normalizedFilePath = normalizeWorkspacePath(filePath);
-  let bestMatch: vscode.WorkspaceFolder | undefined;
-
-  for (const { folder, normalizedPath } of folders) {
-    if (
-      normalizedFilePath === normalizedPath ||
-      normalizedFilePath.startsWith(`${normalizedPath}/`)
-    ) {
-      if (
-        !bestMatch ||
-        normalizedPath.length > normalizeWorkspacePath(bestMatch.uri.fsPath).length
-      ) {
-        bestMatch = folder;
-      }
-    }
-  }
-
-  return bestMatch;
 }

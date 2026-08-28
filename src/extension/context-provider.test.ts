@@ -1497,4 +1497,29 @@ describe('ContextProvider', () => {
       provider.dispose();
     }
   });
+
+  it('restores and selects a canonical Windows workspace by path identity', async () => {
+    const canonicalPath = 'C:\\Users\\Andrew\\Repo';
+    const workspaceState = {
+      get: vi.fn(() => 'c:/users/andrew/repo/'),
+      update: vi.fn(() => Promise.resolve()),
+    };
+    vscodeMock.workspace.workspaceFolders = [{ name: 'Repo', uri: { fsPath: canonicalPath } }];
+
+    const provider = new ContextProvider(vi.fn(), workspaceState);
+    try {
+      expect(provider.context.workspacePath).toBe(canonicalPath);
+      expect(workspaceState.update).not.toHaveBeenCalled();
+
+      await provider.selectWorkspace('c:/USERS/andrew/REPO');
+
+      expect(provider.context.workspacePath).toBe(canonicalPath);
+      expect(workspaceState.update).toHaveBeenCalledWith(
+        'varro.selectedWorkspaceFolder',
+        canonicalPath
+      );
+    } finally {
+      provider.dispose();
+    }
+  });
 });

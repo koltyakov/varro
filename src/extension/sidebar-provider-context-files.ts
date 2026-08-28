@@ -1,7 +1,7 @@
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: VS Code URI values are established by the editor API before conversion. */
 import * as vscode from 'vscode';
 import { Buffer } from 'buffer';
-import type { DroppedFile, ExtensionMessage } from '../shared/protocol';
+import type { DroppedFile, ExtensionMessage, TerminalSelection } from '../shared/protocol';
 import { areContextFilesEqual, mergeContextFile } from '../shared/context-files';
 import {
   MAX_NATIVE_PDF_TOTAL_BYTES,
@@ -14,6 +14,7 @@ import { getRelativePath } from './util/path';
 
 export class SidebarProviderContextFiles {
   private contextFiles: DroppedFile[] = [];
+  private terminalSelection: TerminalSelection | null = null;
   private onContextFilesChanged?: () => void;
   private clearGeneration = 0;
   private mutationSequence = 0;
@@ -31,6 +32,14 @@ export class SidebarProviderContextFiles {
 
   getContextFiles() {
     return this.contextFiles;
+  }
+
+  getTerminalSelection() {
+    return this.terminalSelection;
+  }
+
+  setTerminalSelection(selection: TerminalSelection | null) {
+    this.terminalSelection = selection;
   }
 
   clearContextFiles() {

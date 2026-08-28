@@ -210,12 +210,15 @@ export function registerCommands(
     ),
 
     vscode.commands.registerCommand('varro.chat.addTerminalSelectionToContext', async () => {
+      const targetViewId = sidebar.captureContextTarget();
       try {
-        const ok = await captureTerminalSelectionForContext(sidebar, contextProvider);
+        const ok = await captureTerminalSelectionForContext(sidebar, contextProvider, targetViewId);
         if (!ok) {
           return;
         }
-        await revealSidebar();
+        await sidebar.revealContextTarget(targetViewId, async () => {
+          await revealSidebar();
+        });
       } catch (err) {
         logger.error(
           `varro.chat.addTerminalSelectionToContext: ${err instanceof Error ? err.message : String(err)}`
@@ -224,11 +227,15 @@ export function registerCommands(
     }),
 
     vscode.commands.registerCommand('varro.chat.addSelectionToContext', async () => {
+      const targetViewId = sidebar.captureContextTarget();
       try {
         const selectionTarget = await getEditorSelectionTarget();
         if (!selectionTarget) return;
-        sidebar.postDroppedFiles([selectionTarget]);
-        await revealSidebar();
+        if (targetViewId === 'sidebar') sidebar.postDroppedFiles([selectionTarget]);
+        else sidebar.postDroppedFiles([selectionTarget], targetViewId);
+        await sidebar.revealContextTarget(targetViewId, async () => {
+          await revealSidebar();
+        });
       } catch (err) {
         logger.error(
           `varro.chat.addSelectionToContext: ${err instanceof Error ? err.message : String(err)}`
@@ -241,6 +248,7 @@ export function registerCommands(
     vscode.commands.registerCommand(
       'varro.chat.addToContext',
       async (uri?: vscode.Uri, uris?: vscode.Uri[]) => {
+        const targetViewId = sidebar.captureContextTarget();
         try {
           const targets = uris && uris.length > 0 ? uris : uri ? [uri] : [];
 
@@ -275,8 +283,11 @@ export function registerCommands(
               f !== null
           );
           if (valid.length > 0) {
-            sidebar.postDroppedFiles(valid);
-            await revealSidebar();
+            if (targetViewId === 'sidebar') sidebar.postDroppedFiles(valid);
+            else sidebar.postDroppedFiles(valid, targetViewId);
+            await sidebar.revealContextTarget(targetViewId, async () => {
+              await revealSidebar();
+            });
           }
         } catch (err) {
           logger.error(
@@ -485,18 +496,21 @@ async function getEditorSelectionTarget() {
 async function captureTerminalSelectionForContext(
   sidebar: SidebarProvider,
   contextProvider: ContextProvider,
+  targetViewId: string,
   options?: { silent?: boolean }
 ) {
   let result: Awaited<ReturnType<ContextProvider['captureTerminalSelection']>>;
   try {
     result = await contextProvider.captureTerminalSelection();
   } catch (err) {
-    sidebar.postTerminalSelection(null);
+    if (targetViewId === 'sidebar') sidebar.postTerminalSelection(null);
+    else sidebar.postTerminalSelection(null, targetViewId);
     throw err;
   }
 
   if (!result.ok) {
-    sidebar.postTerminalSelection(null);
+    if (targetViewId === 'sidebar') sidebar.postTerminalSelection(null);
+    else sidebar.postTerminalSelection(null, targetViewId);
     if (!options?.silent) {
       const message =
         result.reason === 'no-terminal'
@@ -507,6 +521,7 @@ async function captureTerminalSelectionForContext(
     return false;
   }
 
-  sidebar.postTerminalSelection(contextProvider.terminalSelection);
+  if (targetViewId === 'sidebar') sidebar.postTerminalSelection(contextProvider.terminalSelection);
+  else sidebar.postTerminalSelection(contextProvider.terminalSelection, targetViewId);
   return true;
 }

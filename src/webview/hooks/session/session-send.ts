@@ -43,6 +43,7 @@ import {
 import { getVariantsForModel } from '../../lib/model-variants';
 import { getNewChatDraftGeneration } from '../../lib/new-chat-draft';
 import { getWorkspaceRelativePath, isSamePath } from '../../lib/path-display';
+import { isSameWorkspacePath } from '../../../shared/workspace-path';
 import { getModelVariantSelectionKey } from '../../lib/state-model-selection';
 import {
   clearPendingOptimisticUserMessage,
@@ -1011,7 +1012,7 @@ export async function sendMessageWithDependencies(
     isQueuedDispatch &&
     !!options?.workspaceDirectory &&
     (!currentWorkspaceDirectory ||
-      !isSamePath(options.workspaceDirectory, currentWorkspaceDirectory));
+      !isSameWorkspacePath(options.workspaceDirectory, currentWorkspaceDirectory));
 
   if (deps.ensureSessionPermission && !isQueuedDispatch) {
     const permitted = options?.workspaceDirectory

@@ -9,6 +9,7 @@ import {
   onMount,
   untrack,
 } from 'solid-js';
+import { isSameWorkspacePath } from '../../shared/workspace-path';
 import {
   state,
   inputText,
@@ -713,8 +714,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       !canSelectWorkspace() ||
       hasSendableComposerContent() ||
       manualWorkspaceSelection() ||
-      isSamePath(activeWorkspacePath, state.editorContext.workspacePath) ||
-      isSamePath(activeWorkspacePath, pendingWorkspacePath())
+      isSameWorkspacePath(activeWorkspacePath, state.editorContext.workspacePath) ||
+      isSameWorkspacePath(activeWorkspacePath, pendingWorkspacePath())
     ) {
       return;
     }
@@ -817,7 +818,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   createEffect(() => {
     const pending = pendingWorkspacePath();
-    if (pending && isSamePath(state.editorContext.workspacePath, pending)) {
+    if (pending && isSameWorkspacePath(state.editorContext.workspacePath, pending)) {
       setPendingWorkspacePath(null);
     }
   });
@@ -848,6 +849,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const [sendComposerMinHeight, setSendComposerMinHeight] = createSignal(0);
   let latestFileSearchRequestId = 0;
   let latestFileSearchQuery = '';
+  let latestFileSearchWorkspace = state.editorContext.workspacePath;
   let fileSearchTimer: ReturnType<typeof setTimeout> | null = null;
   let sessionSearchTimer: ReturnType<typeof setTimeout> | null = null;
   let sessionSearchAbortController: AbortController | undefined;
@@ -1049,7 +1051,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         .get(id)
         .then((session) => {
           if (session.parentID || session.time.archived) return;
-          if (workspacePath && !isSamePath(session.directory, workspacePath)) return;
+          if (workspacePath && !isSameWorkspacePath(session.directory, workspacePath)) return;
           if (!getSessionReferenceIds(inputText()).includes(id)) return;
           rememberSessionReference(session);
         })
@@ -1291,6 +1293,16 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   createEffect(() => {
     const completion = activeCompletion();
+    const workspacePath = state.editorContext.workspacePath;
+    if (
+      workspacePath !== latestFileSearchWorkspace &&
+      !isSameWorkspacePath(workspacePath, latestFileSearchWorkspace)
+    ) {
+      latestFileSearchWorkspace = workspacePath;
+      latestFileSearchRequestId += 1;
+      latestFileSearchQuery = '';
+      setFileSearchResults([]);
+    }
     if (completion?.type !== 'mention') {
       if (fileSearchTimer) {
         clearTimeout(fileSearchTimer);
@@ -1381,7 +1393,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             exactSession &&
             !exactSession.parentID &&
             !exactSession.time.archived &&
-            (!workspacePath || isSamePath(exactSession.directory, workspacePath))
+            (!workspacePath || isSameWorkspacePath(exactSession.directory, workspacePath))
           ) {
             sessions.unshift(exactSession);
           }
@@ -2124,7 +2136,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const currentWorkspaceDirectory = state.editorContext.workspacePath;
     const isForeignWorkspace =
       !!workspaceDirectory &&
-      (!currentWorkspaceDirectory || !isSamePath(workspaceDirectory, currentWorkspaceDirectory));
+      (!currentWorkspaceDirectory ||
+        !isSameWorkspacePath(workspaceDirectory, currentWorkspaceDirectory));
     if (!priorAttemptId) replaceQueuedMessage(item.id, { ...item, messageId });
     let sent = false;
     let dispatchLease: number | null = null;

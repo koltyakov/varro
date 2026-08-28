@@ -27,6 +27,14 @@ const vscodeMock = vi.hoisted(() => ({
       this.dispose = vi.fn();
     }
   ),
+  RelativePattern: vi.fn(function (
+    this: { base: unknown; pattern: string },
+    base: unknown,
+    pattern: string
+  ) {
+    this.base = base;
+    this.pattern = pattern;
+  }),
 }));
 
 vi.mock('./logger', () => ({ logger: loggerMock }));
@@ -44,6 +52,25 @@ function deferred<T>() {
     reject = rej;
   });
   return { promise, resolve, reject };
+}
+
+function search(
+  service: {
+    search(
+      requestId: number,
+      query: string,
+      limit: number,
+      workspaceDirectory: string,
+      onResult: (result: unknown) => void
+    ): void;
+  },
+  requestId: number,
+  query: string,
+  limit: number,
+  onResult: (result: unknown) => void,
+  workspaceDirectory = '/repo'
+) {
+  service.search(requestId, query, limit, workspaceDirectory, onResult);
 }
 
 describe('FileSearchService', () => {
@@ -91,14 +118,14 @@ describe('FileSearchService', () => {
     expect(vscodeMock.workspace.createFileSystemWatcher).not.toHaveBeenCalled();
 
     const onResult = vi.fn();
-    service.search(1, '', 10, onResult);
+    search(service, 1, '', 10, onResult);
     await vi.waitFor(() => {
       expect(onResult).toHaveBeenCalledTimes(1);
     });
 
     expect(vscodeMock.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(1);
     expect(vscodeMock.workspace.createFileSystemWatcher).toHaveBeenCalledWith(
-      '**/*',
+      expect.objectContaining({ base: vscodeMock.workspaceFolder, pattern: '**/*' }),
       false,
       true,
       false
@@ -113,14 +140,14 @@ describe('FileSearchService', () => {
     const firstResult = vi.fn();
     const secondResult = vi.fn();
 
-    service.search(1, '', 10, firstResult);
+    search(service, 1, '', 10, firstResult);
     await vi.waitFor(() => expect(firstResult).toHaveBeenCalledTimes(1));
 
     const watcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[0]?.value as {
       fireChange: () => void;
     };
     watcher.fireChange();
-    service.search(2, '', 10, secondResult);
+    search(service, 2, '', 10, secondResult);
     await vi.waitFor(() => expect(secondResult).toHaveBeenCalledTimes(1));
 
     expect(vscodeMock.workspace.findFiles).toHaveBeenCalledTimes(1);
@@ -134,7 +161,7 @@ describe('FileSearchService', () => {
     const service = new FileSearchService();
     const firstResult = vi.fn();
 
-    service.search(1, '', 10, firstResult);
+    search(service, 1, '', 10, firstResult);
     await vi.advanceTimersByTimeAsync(0);
     expect(firstResult).toHaveBeenCalledTimes(1);
     const firstWatcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[0]?.value as {
@@ -146,7 +173,7 @@ describe('FileSearchService', () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(firstWatcher.dispose).toHaveBeenCalledTimes(1);
 
-    service.search(2, '', 10, vi.fn());
+    search(service, 2, '', 10, vi.fn());
     expect(vscodeMock.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(2);
     expect(vscodeMock.workspace.findFiles).toHaveBeenCalledTimes(2);
     service.dispose();
@@ -159,8 +186,8 @@ describe('FileSearchService', () => {
     const { FileSearchService } = await loadModule();
     const service = new FileSearchService();
 
-    service.search(1, 'first', 10, onResult);
-    service.search(2, 'reader', 10, onResult);
+    search(service, 1, 'first', 10, onResult);
+    search(service, 2, 'reader', 10, onResult);
     pendingFiles.resolve([{ fsPath: '/repo/docs/readme.md' }, { fsPath: '/repo/src/reader.ts' }]);
     await vi.waitFor(() => {
       expect(onResult).toHaveBeenCalledTimes(1);
@@ -175,7 +202,7 @@ describe('FileSearchService', () => {
     expect(firstSearch?.dispose).toHaveBeenCalledTimes(1);
     expect(vscodeMock.workspace.findFiles.mock.calls[0]).toHaveLength(3);
     expect(vscodeMock.workspace.findFiles).toHaveBeenCalledWith(
-      '**/*',
+      expect.objectContaining({ base: vscodeMock.workspaceFolder, pattern: '**/*' }),
       '{**/node_modules/**,**/.venv/**,**/venv/**,**/.tox/**,**/__pycache__/**,**/.git/**,**/dist/**,**/build/**,**/out/**,**/.next/**,**/.turbo/**,**/tmp/**,**/coverage/**}',
       4_000
     );
@@ -202,11 +229,11 @@ describe('FileSearchService', () => {
     const secondResult = vi.fn();
     const thirdResult = vi.fn();
 
-    service.search(1, '', 0, firstResult);
+    search(service, 1, '', 0, firstResult);
     await vi.waitFor(() => {
       expect(firstResult).toHaveBeenCalledTimes(1);
     });
-    service.search(2, '', 5, secondResult);
+    search(service, 2, '', 5, secondResult);
     await vi.waitFor(() => {
       expect(secondResult).toHaveBeenCalledTimes(1);
     });
@@ -232,7 +259,7 @@ describe('FileSearchService', () => {
 
     service.dispose();
 
-    service.search(3, '', 5, thirdResult);
+    search(service, 3, '', 5, thirdResult);
     await vi.waitFor(() => {
       expect(thirdResult).toHaveBeenCalledTimes(1);
     });
@@ -250,7 +277,7 @@ describe('FileSearchService', () => {
     const firstResult = vi.fn();
     const secondResult = vi.fn();
 
-    service.search(1, '', 10, firstResult);
+    search(service, 1, '', 10, firstResult);
     await vi.waitFor(() => {
       expect(firstResult).toHaveBeenCalledTimes(1);
     });
@@ -261,7 +288,7 @@ describe('FileSearchService', () => {
 
     watcher.fireCreate();
 
-    service.search(2, '', 10, secondResult);
+    search(service, 2, '', 10, secondResult);
     await vi.waitFor(() => {
       expect(secondResult).toHaveBeenCalledTimes(1);
     });
@@ -290,7 +317,7 @@ describe('FileSearchService', () => {
     const service = new FileSearchService();
     const onResult = vi.fn();
 
-    service.search(1, '', 10, onResult);
+    search(service, 1, '', 10, onResult);
     const watcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[0]?.value as {
       fireCreate: () => void;
     };
@@ -320,7 +347,7 @@ describe('FileSearchService', () => {
     const service = new FileSearchService();
     const onResult = vi.fn();
 
-    service.search(1, '', 10, onResult);
+    search(service, 1, '', 10, onResult);
     const watcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[0]?.value as {
       fireCreate: () => void;
       fireDelete: () => void;
@@ -354,7 +381,7 @@ describe('FileSearchService', () => {
     const firstResult = vi.fn();
     const secondResult = vi.fn();
 
-    service.search(1, '', 10, firstResult);
+    search(service, 1, '', 10, firstResult);
     await vi.waitFor(() => {
       expect(firstResult).toHaveBeenCalledTimes(1);
     });
@@ -366,7 +393,7 @@ describe('FileSearchService', () => {
     watcher.fireCreate();
     watcher.fireDelete();
 
-    service.search(2, '', 10, secondResult);
+    search(service, 2, '', 10, secondResult);
     await vi.waitFor(() => {
       expect(secondResult).toHaveBeenCalledTimes(1);
     });
@@ -387,7 +414,7 @@ describe('FileSearchService', () => {
     const secondResult = vi.fn();
     const thirdResult = vi.fn();
 
-    service.search(1, '', 10, firstResult);
+    search(service, 1, '', 10, firstResult);
     await vi.waitFor(() => {
       expect(firstResult).toHaveBeenCalledTimes(1);
     });
@@ -399,7 +426,7 @@ describe('FileSearchService', () => {
 
     watcher.fireCreate();
 
-    service.search(2, '', 10, secondResult);
+    search(service, 2, '', 10, secondResult);
     await vi.waitFor(() => {
       expect(secondResult).toHaveBeenCalledTimes(1);
     });
@@ -408,7 +435,7 @@ describe('FileSearchService', () => {
 
     await vi.advanceTimersByTimeAsync(100);
 
-    service.search(3, '', 10, thirdResult);
+    search(service, 3, '', 10, thirdResult);
     await vi.waitFor(() => {
       expect(thirdResult).toHaveBeenCalledTimes(1);
     });
@@ -428,15 +455,12 @@ describe('FileSearchService', () => {
     service.dispose();
   });
 
-  it('resolves workspace folders without per-file getWorkspaceFolder lookups', async () => {
+  it('limits discovery and results to the selected workspace folder', async () => {
     vscodeMock.workspace.workspaceFolders = [
       { name: 'repo', uri: { fsPath: '/repo' } },
       { name: 'docs', uri: { fsPath: '/docs' } },
     ];
-    vscodeMock.workspace.findFiles.mockResolvedValue([
-      { fsPath: '/repo/src/app.ts' },
-      { fsPath: '/docs/guide.md' },
-    ]);
+    vscodeMock.workspace.findFiles.mockResolvedValue([{ fsPath: '/repo/src/app.ts' }]);
     vscodeMock.workspace.asRelativePath.mockImplementation((uri: { fsPath: string }) => {
       if (uri.fsPath.startsWith('/repo/')) return uri.fsPath.replace('/repo/', '');
       if (uri.fsPath.startsWith('/docs/')) return uri.fsPath.replace('/docs/', '');
@@ -447,7 +471,7 @@ describe('FileSearchService', () => {
     const service = new FileSearchService();
     const onResult = vi.fn();
 
-    service.search(1, '', 10, onResult);
+    search(service, 1, '', 10, onResult);
     await vi.waitFor(() => {
       expect(onResult).toHaveBeenCalledTimes(1);
     });
@@ -456,11 +480,57 @@ describe('FileSearchService', () => {
     expect(onResult).toHaveBeenCalledWith({
       requestId: 1,
       query: '',
-      files: [
-        { path: '/docs/guide.md', relativePath: 'docs/guide.md', type: 'file' },
-        { path: '/repo/src/app.ts', relativePath: 'repo/src/app.ts', type: 'file' },
-      ],
+      files: [{ path: '/repo/src/app.ts', relativePath: 'repo/src/app.ts', type: 'file' }],
     });
+    expect(vscodeMock.workspace.findFiles).toHaveBeenCalledWith(
+      expect.objectContaining({
+        base: vscodeMock.workspace.workspaceFolders[0],
+        pattern: '**/*',
+      }),
+      expect.any(String),
+      4_000
+    );
+  });
+
+  it('clears its cache and recreates its watcher when the workspace changes', async () => {
+    const repo = vscodeMock.workspaceFolder;
+    const docs = { name: 'docs', uri: { fsPath: '/docs' } };
+    vscodeMock.workspace.workspaceFolders = [repo, docs];
+    vscodeMock.workspace.findFiles
+      .mockResolvedValueOnce([{ fsPath: '/repo/src/app.ts' }])
+      .mockResolvedValueOnce([{ fsPath: '/docs/guide.md' }]);
+    vscodeMock.workspace.asRelativePath.mockImplementation((uri: { fsPath: string }) =>
+      uri.fsPath.replace(/^\/(?:repo|docs)\//, '')
+    );
+    const { FileSearchService } = await loadModule();
+    const service = new FileSearchService();
+    const repoResult = vi.fn();
+    const docsResult = vi.fn();
+
+    search(service, 1, '', 10, repoResult, '/repo');
+    await vi.waitFor(() => expect(repoResult).toHaveBeenCalledOnce());
+    search(service, 2, '', 10, docsResult, '/docs');
+    await vi.waitFor(() => expect(docsResult).toHaveBeenCalledOnce());
+
+    expect(vscodeMock.workspace.findFiles).toHaveBeenCalledTimes(2);
+    expect(vscodeMock.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(2);
+    expect(docsResult).toHaveBeenCalledWith({
+      requestId: 2,
+      query: '',
+      files: [{ path: '/docs/guide.md', relativePath: 'docs/guide.md', type: 'file' }],
+    });
+  });
+
+  it('returns no files when the endpoint workspace is not open', async () => {
+    const { FileSearchService } = await loadModule();
+    const service = new FileSearchService();
+    const onResult = vi.fn();
+
+    search(service, 1, 'app', 10, onResult, '/closed');
+
+    expect(onResult).toHaveBeenCalledWith({ requestId: 1, query: 'app', files: [] });
+    expect(vscodeMock.workspace.findFiles).not.toHaveBeenCalled();
+    expect(vscodeMock.workspace.createFileSystemWatcher).not.toHaveBeenCalled();
   });
 
   it('returns an empty result and logs a warning when discovery fails', async () => {
@@ -469,7 +539,7 @@ describe('FileSearchService', () => {
     const { FileSearchService } = await loadModule();
     const service = new FileSearchService();
 
-    service.search(7, 'missing', 10, onResult);
+    search(service, 7, 'missing', 10, onResult);
     await vi.waitFor(() => {
       expect(onResult).toHaveBeenCalledTimes(1);
     });
@@ -485,12 +555,12 @@ describe('FileSearchService', () => {
     const firstResult = vi.fn();
     const secondResult = vi.fn();
 
-    service.search(1, 'missing', 5, firstResult);
+    search(service, 1, 'missing', 5, firstResult);
     await vi.waitFor(() => {
       expect(firstResult).toHaveBeenCalledTimes(1);
     });
 
-    service.search(2, 'missing', 5, secondResult);
+    search(service, 2, 'missing', 5, secondResult);
     await vi.waitFor(() => {
       expect(secondResult).toHaveBeenCalledTimes(1);
     });

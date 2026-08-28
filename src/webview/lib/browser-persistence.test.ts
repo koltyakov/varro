@@ -173,6 +173,7 @@ describe('BrowserPersistence', () => {
       sessionId: 'session-1',
     });
     new BrowserPersistence().set('varro.workspacePath', '/repo-a');
+    new BrowserPersistence().set('varro.manualWorkspaceSelection', true);
 
     let secondViewState: TestRuntimeRecord = {};
     window.__vscodeWebviewState = {
@@ -186,6 +187,7 @@ describe('BrowserPersistence', () => {
       sessionId: 'session-2',
     });
     new BrowserPersistence().set('varro.workspacePath', '/repo-b');
+    new BrowserPersistence().set('varro.manualWorkspaceSelection', false);
 
     window.__vscodeWebviewState = {
       getState: () => firstViewState,
@@ -199,6 +201,7 @@ describe('BrowserPersistence', () => {
       sessionId: 'session-1',
     });
     expect(new BrowserPersistence().get('varro.workspacePath')).toBe('/repo-a');
+    expect(new BrowserPersistence().get('varro.manualWorkspaceSelection')).toBe(true);
     expect(window.localStorage.getItem('varro.lastOpenedView')).toBeNull();
     expect(window.localStorage.getItem('varro.workspacePath')).toBeNull();
   });

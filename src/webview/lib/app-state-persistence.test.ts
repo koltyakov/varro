@@ -141,6 +141,86 @@ describe('composer draft persistence', () => {
     expect(vscodeState[STORAGE_KEYS.inputDraft]).toBe('Keep this VS Code draft');
   });
 
+  it('restores a manual editor workspace selection across path spelling changes', () => {
+    let vscodeState: UnknownRecord = {
+      [STORAGE_KEYS.workspacePath]: 'C:\\Users\\Andrew\\Repo',
+      [STORAGE_KEYS.manualWorkspaceSelection]: true,
+    };
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    (
+      window as {
+        __vscodeWebviewState: {
+          getState(): UnknownRecord;
+          setState(state: UnknownRecord): void;
+        };
+      }
+    ).__vscodeWebviewState = {
+      getState: () => vscodeState,
+      setState: (state) => {
+        vscodeState = state;
+      },
+    };
+    // SAFETY: The fixture provides the host-owned initial webview state.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      webviewContext: {
+        viewId: 'editor-1',
+        surface: 'editor',
+        initialRoute: { type: 'new-session' },
+      },
+      editorContext: {
+        workspacePath: 'c:/users/andrew/repo',
+        workspaceFolders: [],
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+    };
+
+    const restored = createAppState();
+
+    expect(restored.manualWorkspaceSelection()).toBe(true);
+    restored.setManualWorkspaceSelection(false);
+    expect(vscodeState[STORAGE_KEYS.manualWorkspaceSelection]).toBeUndefined();
+  });
+
+  it('does not restore a manual selection for a different workspace', () => {
+    let vscodeState: UnknownRecord = {
+      [STORAGE_KEYS.workspacePath]: '/repo-a',
+      [STORAGE_KEYS.manualWorkspaceSelection]: true,
+    };
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    (
+      window as {
+        __vscodeWebviewState: {
+          getState(): UnknownRecord;
+          setState(state: UnknownRecord): void;
+        };
+      }
+    ).__vscodeWebviewState = {
+      getState: () => vscodeState,
+      setState: (state) => {
+        vscodeState = state;
+      },
+    };
+    // SAFETY: The fixture provides the host-owned initial webview state.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      webviewContext: {
+        viewId: 'editor-1',
+        surface: 'editor',
+        initialRoute: { type: 'new-session' },
+      },
+      editorContext: {
+        workspacePath: '/repo-b',
+        workspaceFolders: [],
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+    };
+
+    expect(createAppState().manualWorkspaceSelection()).toBe(false);
+  });
+
   it('persists functional updates and removes an empty draft', () => {
     const appState = createAppState();
     appState.setInputText('Keep');

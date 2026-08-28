@@ -69,6 +69,20 @@ describe('SidebarProviderContextFiles', () => {
     vi.clearAllMocks();
   });
 
+  it('owns terminal selection independently from file context', () => {
+    const { service } = createService();
+    const selection = { text: 'npm test', terminalName: 'Terminal 1' };
+
+    service.setTerminalSelection(selection);
+    expect(service.getTerminalSelection()).toEqual(selection);
+
+    service.clearContextFiles();
+    expect(service.getTerminalSelection()).toEqual(selection);
+
+    service.setTerminalSelection(null);
+    expect(service.getTerminalSelection()).toBeNull();
+  });
+
   it('posts dropped content returned by the dropped file service', async () => {
     const { service, droppedFilesService, onContextFilesChanged, post } = createService();
     const droppedFiles: DroppedFile[] = [

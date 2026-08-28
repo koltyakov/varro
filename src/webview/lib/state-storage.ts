@@ -29,6 +29,7 @@ export const STORAGE_KEYS = {
   lastOpenedView: 'varro.lastOpenedView',
   editorViewId: 'varro.editorViewId',
   workspacePath: 'varro.workspacePath',
+  manualWorkspaceSelection: 'varro.manualWorkspaceSelection',
   showThinking: 'varro.showThinking',
   todoListCollapsed: 'varro.todoListCollapsed',
 } as const;

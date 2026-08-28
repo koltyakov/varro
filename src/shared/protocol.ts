@@ -60,6 +60,11 @@ export interface DroppedFile {
   attachmentSequence?: number;
 }
 
+export interface TerminalSelection {
+  text: string;
+  terminalName: string;
+}
+
 export interface WorkspaceFilePick {
   path: string;
   workspaceDirectory: string | null;
@@ -621,7 +626,7 @@ export type QueuedMessageSnapshot = {
   droppedFiles: DroppedFile[];
   clipboardImages: ClipboardImageSnapshot[];
   nativePdfs?: NativePdfAttachment[];
-  terminalSelection: { text: string; terminalName: string } | null;
+  terminalSelection: TerminalSelection | null;
   attachedDiagnostics?: { diagnostics: EditorDiagnostic[]; total: number };
   queuedContext?: QueuedContextSnapshot;
 };
@@ -640,7 +645,7 @@ export type InitialWebviewState = {
   theme: WebviewThemeKind;
   serverStatus: ServerStatus;
   editorContext: EditorContext;
-  terminalSelection: { text: string; terminalName: string } | null;
+  terminalSelection: TerminalSelection | null;
   droppedFiles: DroppedFile[];
   clipboardImages?: ClipboardImageSnapshot[];
   emptyStateLogoUri: string;
@@ -696,7 +701,7 @@ export type ExtensionMessage =
   | { type: 'providers/refresh'; payload?: { revalidateAuth: true } }
   | { type: 'providers/status'; payload: { pending: boolean } }
   | { type: 'context/update'; payload: EditorContext }
-  | { type: 'terminal-selection/update'; payload: { text: string; terminalName: string } | null }
+  | { type: 'terminal-selection/update'; payload: TerminalSelection | null }
   | { type: 'files/dropped'; payload: DroppedFile[] }
   | { type: 'pdfs/picked'; payload: NativePdfAttachment[] }
   | { type: 'pdfs/stored'; payload: { id: string; contextFile: DroppedFile } }

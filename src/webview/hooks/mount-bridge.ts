@@ -1,5 +1,6 @@
 import { reconcile } from 'solid-js/store';
 import type { ExtensionMessage, WebviewThemeKind } from '../../shared/protocol';
+import { isSameWorkspacePath } from '../../shared/workspace-path';
 import { appStore } from '../lib/stores/app-store';
 import { composerStore } from '../lib/stores/composer-store';
 import { permissionsStore } from '../lib/stores/permissions-store';
@@ -233,7 +234,9 @@ export function handleExtensionMessageWithDependencies(
       const previousWorkspacePath = deps.getCurrentWorkspacePath();
       const initialWorkspaceContext = previousWorkspacePath === undefined;
       const workspaceChanged =
-        !initialWorkspaceContext && nextWorkspacePath !== previousWorkspacePath;
+        !initialWorkspaceContext &&
+        nextWorkspacePath !== previousWorkspacePath &&
+        !isSameWorkspacePath(nextWorkspacePath, previousWorkspacePath);
       deps.setCurrentWorkspacePath(nextWorkspacePath);
       deps.persistWorkspacePath?.(nextWorkspacePath);
       deps.setEditorContext(msg.payload);
