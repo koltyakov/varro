@@ -11,6 +11,7 @@ import {
   setShowFileDiffs,
   setShowThinkingPreference,
   setState,
+  state,
   startLoading,
   stopLoading,
   upsertPart,
@@ -1235,6 +1236,90 @@ describe('MessageList compact activity', () => {
     await Promise.resolve();
 
     expect(container?.querySelector('[data-activity-part-id="search-before-stream"]')).toBeNull();
+  });
+
+  it('keeps a late-identified apply_patch visible while response text streams', async () => {
+    const read = toolPart('read-before-patch', 'assistant-1', 'call-read-before-patch');
+    read.tool = 'read';
+    read.state = {
+      status: 'completed',
+      input: { filePath: 'src/app.ts' },
+      output: 'source',
+      title: 'src/app.ts',
+      metadata: {},
+      time: { start: 0, end: 1 },
+    };
+    const patch = toolPart('patch-running', 'assistant-1', 'call-patch-running');
+    patch.tool = '';
+    patch.state = {
+      status: 'running',
+      input: {
+        patchText: '*** Begin Patch\n*** Update File: src/app.ts\n@@\n-old\n+new\n*** End Patch',
+      },
+      title: 'apply_patch',
+      time: { start: 1 },
+    };
+    // SAFETY: The fixture provides the TextPart fields read by this test.
+    const response: TextPart = {
+      ...(textPart('response-after-patch', '') as TextPart),
+      messageID: 'assistant-2',
+    };
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Update the file')] },
+      {
+        info: assistantMessage('assistant-1', { parentID: 'user-1' }),
+        parts: [read, patch],
+      },
+      {
+        info: assistantMessage('assistant-2', { parentID: 'user-1' }),
+        parts: [response],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await vi.advanceTimersByTimeAsync(500);
+    batch(() => {
+      setState('streamingPartId', response.id);
+      setState('streamingText', 'Applying the requested change.');
+    });
+    await Promise.resolve();
+
+    const patchTitle = [...container!.querySelectorAll<HTMLElement>('.tool-invocation-title')].find(
+      (element) => element.textContent === 'apply_patch'
+    );
+    expect(patchTitle).toBeDefined();
+    expect(patchTitle?.closest('.assistant-activity-details')).toBeNull();
+    expect(
+      patchTitle?.closest('.chat-tool-invocation-part')?.querySelector('.tool-status-running')
+    ).not.toBeNull();
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored: 1 file'
+    );
+
+    upsertPart({
+      ...patch,
+      tool: 'functions.apply_patch',
+      state: { status: 'pending', input: patch.state.input, raw: '' },
+    });
+    await Promise.resolve();
+
+    const storedPatch = state.messages
+      .flatMap((message) => message.parts)
+      .find((part) => part.id === patch.id);
+    expect(storedPatch).toMatchObject({
+      tool: 'functions.apply_patch',
+      state: { status: 'running' },
+    });
+    const identifiedPatchTitle = [
+      ...container!.querySelectorAll<HTMLElement>('.tool-invocation-title'),
+    ].find((element) => element.textContent === 'apply_patch');
+    expect(identifiedPatchTitle).toBeDefined();
+    expect(identifiedPatchTitle?.closest('.assistant-activity-details')).toBeNull();
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).not.toContain(
+      'tool call'
+    );
   });
 
   it('keeps active activity visible behind streamed reasoning', async () => {

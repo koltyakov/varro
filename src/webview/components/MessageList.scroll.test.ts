@@ -904,12 +904,16 @@ describe('MessageList auto-scroll', () => {
     );
     expect(marker?.getBoundingClientRect().top).toBe(140);
 
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 22 }));
+    scrollTopValue += 22;
+    expect(marker?.getBoundingClientRect().top).toBe(118);
+
     markerOffset = 162;
     hostWidth = 360;
     window.dispatchEvent(new Event('resize'));
-    expect(marker?.getBoundingClientRect().top).toBe(140);
+    expect(marker?.getBoundingClientRect().top).toBe(118);
     animationFrames.flush();
-    expect(marker?.getBoundingClientRect().top).toBe(140);
+    expect(marker?.getBoundingClientRect().top).toBe(118);
     animationFrames.restore();
   });
 

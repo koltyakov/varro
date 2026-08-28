@@ -287,11 +287,12 @@ function mergeToolPartUpdate(
   incoming: Extract<Part, { type: 'tool' }>
 ): Part {
   if (current.callID !== incoming.callID) return incoming;
-  if (getToolStateProgressRank(current.state) <= getToolStateProgressRank(incoming.state)) {
-    return incoming;
-  }
-
-  return current;
+  const winner =
+    getToolStateProgressRank(current.state) <= getToolStateProgressRank(incoming.state)
+      ? incoming
+      : current;
+  const other = winner === incoming ? current : incoming;
+  return winner.tool.trim() || !other.tool.trim() ? winner : { ...winner, tool: other.tool };
 }
 
 function getToolStateProgressRank(toolState: Extract<Part, { type: 'tool' }>['state']) {

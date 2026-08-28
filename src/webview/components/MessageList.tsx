@@ -4805,10 +4805,7 @@ export function MessageList() {
     clearActivityExitReserve();
     historyAnchorSettleOwner = null;
     const deltaY = getWheelDeltaPixels(event);
-    if (
-      containerRef &&
-      directMovementAnchor?.anchor.element?.classList.contains('user-message-card')
-    ) {
+    if (containerRef && directMovementAnchor) {
       const targetScrollTop = Math.min(
         Math.max(0, containerRef.scrollHeight - containerRef.clientHeight),
         Math.max(0, containerRef.scrollTop + deltaY)
@@ -4826,7 +4823,8 @@ export function MessageList() {
         Math.abs(movement) > 1.5
           ? {
               anchor:
-                ((predictedAnchor.messageTop ?? predictedAnchor.top) < 0
+                (directMovementAnchor.anchor.element?.classList.contains('user-message-card') &&
+                (predictedAnchor.messageTop ?? predictedAnchor.top) < 0
                   ? captureWidthResizeVisibleScrollAnchor(movement, true)
                   : null) ?? predictedAnchor,
               scrollTop: targetScrollTop,

@@ -19,6 +19,7 @@ import {
   hasActiveQuestion,
   hasActiveUsageLimit,
   inputText,
+  messageStructureVersion,
   removePermission,
   removeMessage,
   removeClipboardImage,
@@ -92,7 +93,7 @@ function toolPart(id: string): ToolPart {
   };
 }
 
-function pendingToolPart(id: string): Part {
+function pendingToolPart(id: string): ToolPart {
   return {
     id,
     sessionID: 'session-1',
@@ -257,16 +258,18 @@ describe('state streaming deltas', () => {
   });
 
   it('keeps projected tool progress when an active-session refresh is stale', () => {
+    const running = { ...toolPart('tool-1'), tool: '' };
+    const pending = { ...pendingToolPart('tool-1'), tool: 'functions.apply_patch' };
     upsertMessage({
       info: assistantMessage(),
-      parts: [toolPart('tool-1')],
+      parts: [running],
     });
 
     setMessagesIncremental(
       [
         {
           info: assistantMessage(),
-          parts: [pendingToolPart('tool-1')],
+          parts: [pending],
         },
       ],
       { preserveExtraParts: true }
@@ -274,6 +277,37 @@ describe('state streaming deltas', () => {
 
     const part = state.messages[0]?.parts[0];
     if (!part || part.type !== 'tool') throw new Error('Expected a tool part');
+    expect(part.state.status).toBe('running');
+    expect(part.tool).toBe('functions.apply_patch');
+  });
+
+  it('publishes tool identity learned from a stale progress update', () => {
+    upsertMessage({
+      info: assistantMessage(),
+      parts: [{ ...toolPart('tool-1'), tool: '' }],
+    });
+    const version = messageStructureVersion();
+
+    upsertPart({ ...pendingToolPart('tool-1'), tool: 'functions.apply_patch' });
+
+    const part = state.messages[0]?.parts[0];
+    if (!part || part.type !== 'tool') throw new Error('Expected a tool part');
+    expect(part.tool).toBe('functions.apply_patch');
+    expect(part.state.status).toBe('running');
+    expect(messageStructureVersion()).toBe(version + 1);
+  });
+
+  it('does not erase known tool identity when progress advances', () => {
+    upsertMessage({
+      info: assistantMessage(),
+      parts: [{ ...pendingToolPart('tool-1'), tool: 'functions.apply_patch' }],
+    });
+
+    upsertPart({ ...toolPart('tool-1'), tool: '' });
+
+    const part = state.messages[0]?.parts[0];
+    if (!part || part.type !== 'tool') throw new Error('Expected a tool part');
+    expect(part.tool).toBe('functions.apply_patch');
     expect(part.state.status).toBe('running');
   });
 

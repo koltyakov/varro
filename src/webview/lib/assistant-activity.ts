@@ -117,7 +117,11 @@ export function shouldCompactAssistantActivityPart(
   options: { keepEditInline: boolean; keepReasoningInline: boolean }
 ) {
   if (part.type === 'tool' && isPermissionRejectedToolError(part.state)) return false;
-  if (part.type === 'tool' && isApplyPatchTool(part.tool) && isAssistantActivityPartRunning(part)) {
+  if (
+    part.type === 'tool' &&
+    isAssistantActivityPartRunning(part) &&
+    (!part.tool.trim() || isApplyPatchTool(part.tool))
+  ) {
     return false;
   }
   if (

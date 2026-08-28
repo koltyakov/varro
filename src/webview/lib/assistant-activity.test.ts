@@ -249,6 +249,40 @@ describe('assistant activity summaries', () => {
     ).toBe(true);
   });
 
+  it('keeps active anonymous tools outside compact activity', () => {
+    const tool: ToolPart = {
+      ...completedTool('anonymous-1', ''),
+      state: {
+        status: 'running',
+        input: {},
+        title: 'apply_patch',
+        time: { start: 1 },
+      },
+    };
+
+    expect(
+      shouldCompactAssistantActivityPart(tool, {
+        keepEditInline: false,
+        keepReasoningInline: false,
+      })
+    ).toBe(false);
+
+    tool.state = {
+      status: 'completed',
+      input: {},
+      output: 'Done',
+      title: 'apply_patch',
+      metadata: {},
+      time: { start: 1, end: 2 },
+    };
+    expect(
+      shouldCompactAssistantActivityPart(tool, {
+        keepEditInline: false,
+        keepReasoningInline: false,
+      })
+    ).toBe(true);
+  });
+
   it('groups routine activity across primary assistant messages in one user turn', () => {
     const command = completedTool('bash-1', 'bash');
     const thought = { ...reasoning('reasoning-1', 2), messageID: 'assistant-2' };
