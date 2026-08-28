@@ -5118,6 +5118,11 @@ async function handleApiRequest(
     return session;
   }
 
+  const activationMatch = path.match(/^\/varro\/session\/([^/]+)\/activate$/);
+  if (activationMatch && method === 'POST') {
+    return getSession(state, decodeURIComponent(activationMatch[1]!));
+  }
+
   const permissionModeMatch = path.match(/^\/varro\/session\/([^/]+)\/permission-mode$/);
   if (permissionModeMatch && method === 'POST') {
     const sessionId = decodeURIComponent(permissionModeMatch[1]!);

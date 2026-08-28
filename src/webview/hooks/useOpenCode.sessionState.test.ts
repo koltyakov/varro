@@ -97,6 +97,189 @@ describe('useOpenCode session state flows', () => {
     }
   });
 
+  it('keeps a cross-root selection alive through its activation context update', async () => {
+    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
+    bridgeOnMessage.mockImplementation((handler) => {
+      bridgeHandler = handler;
+      return () => {
+        bridgeHandler = undefined;
+      };
+    });
+    mockRuntimeBootstrap();
+    const siblingSession = { ...session('session-b'), directory: '/repo-b' };
+    const siblingMessage = userEntry('message-b', 'session-b');
+    clientMocks.sessionGet.mockResolvedValue(siblingSession);
+    clientMocks.sessionMessages.mockResolvedValue([siblingMessage]);
+    clientMocks.sessionActivate.mockImplementation(async () => {
+      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
+      bridgeHandler({
+        type: 'context/update',
+        payload: {
+          workspacePath: '/repo-b',
+          workspaceFolders: [
+            { name: 'Repo A', path: '/repo-a' },
+            { name: 'Repo B', path: '/repo-b' },
+          ],
+          activeFile: null,
+          selection: null,
+          diagnostics: [],
+        },
+      });
+      return siblingSession;
+    });
+    // SAFETY: The fixture provides the initial context snapshot read by the runtime.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      editorContext: {
+        workspacePath: '/repo-a',
+        workspaceFolders: [
+          { name: 'Repo A', path: '/repo-a' },
+          { name: 'Repo B', path: '/repo-b' },
+        ],
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+    };
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      stateModule.setState('sessions', [siblingSession]);
+
+      await hookModule.selectSession('session-b', { directory: '/repo-b' });
+
+      expect(clientMocks.sessionActivate).toHaveBeenCalledWith(
+        'session-b',
+        '/repo-b',
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
+      expect(stateModule.state.editorContext.workspacePath).toBe('/repo-b');
+      expect(stateModule.state.activeSessionId).toBe('session-b');
+      expect(stateModule.state.messages).toEqual([siblingMessage]);
+    } finally {
+      dispose();
+    }
+  });
+
+  it('does not surface a best-effort restoration activation failure', async () => {
+    const siblingSession = { ...session('session-b'), directory: '/repo-b' };
+    clientMocks.sessionActivate.mockRejectedValue(
+      new Error('Workspace directory is not an open workspace folder')
+    );
+    // SAFETY: The fixture provides the initial context snapshot read by the runtime.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      editorContext: {
+        workspacePath: '/repo-a',
+        workspaceFolders: [{ name: 'Repo A', path: '/repo-a' }],
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+    };
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setState('sessions', [siblingSession]);
+
+    await hookModule.selectSession('session-b', {
+      directory: '/repo-b',
+      reportActivationError: false,
+    });
+
+    expect(clientMocks.sessionActivate).toHaveBeenCalledOnce();
+    expect(stateModule.error()).toBeNull();
+    expect(stateModule.state.activeSessionId).toBeNull();
+  });
+
+  it('does not reactivate an explicitly scoped session in the current workspace', async () => {
+    const localSession = { ...session('session-a'), directory: '/repo-a' };
+    clientMocks.sessionGet.mockResolvedValue(localSession);
+    clientMocks.sessionMessages.mockResolvedValue([]);
+    // SAFETY: The fixture provides the initial context snapshot read by the runtime.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      editorContext: {
+        workspacePath: '/repo-a',
+        workspaceFolders: [{ name: 'Repo A', path: '/repo-a' }],
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+    };
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setState('sessions', [localSession]);
+
+    await hookModule.selectSession('session-a', { directory: '/repo-a' });
+
+    expect(clientMocks.sessionActivate).not.toHaveBeenCalled();
+    expect(stateModule.state.activeSessionId).toBe('session-a');
+  });
+
+  it('preserves the active chat when only workspace folder membership changes', async () => {
+    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
+    bridgeOnMessage.mockImplementation((handler) => {
+      bridgeHandler = handler;
+      return () => {
+        bridgeHandler = undefined;
+      };
+    });
+    mockRuntimeBootstrap();
+    const siblingSession = { ...session('session-b'), directory: '/repo-b' };
+    const siblingMessage = userEntry('message-b', 'session-b');
+    clientMocks.sessionGet.mockResolvedValue(siblingSession);
+    clientMocks.sessionMessages.mockResolvedValue([siblingMessage]);
+    clientMocks.sessionActivate.mockResolvedValue(siblingSession);
+    // SAFETY: The fixture provides the initial context snapshot read by the runtime.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      editorContext: {
+        workspacePath: '/repo-a',
+        workspaceFolders: [
+          { name: 'Repo A', path: '/repo-a' },
+          { name: 'Repo B', path: '/repo-b' },
+        ],
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+    };
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      stateModule.setState('sessions', [siblingSession]);
+      await hookModule.selectSession('session-b', { directory: '/repo-b' });
+      clientMocks.sessionList.mockResolvedValue([siblingSession]);
+      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
+
+      bridgeHandler({
+        type: 'context/update',
+        payload: {
+          workspacePath: '/repo-a',
+          workspaceFolders: [
+            { name: 'Repo A', path: '/repo-a' },
+            { name: 'Repo B', path: '/repo-b' },
+            { name: 'Repo C', path: '/repo-c' },
+          ],
+          activeFile: null,
+          selection: null,
+          diagnostics: [],
+        },
+      });
+
+      expect(stateModule.state.activeSessionId).toBe('session-b');
+      expect(stateModule.state.messages).toEqual([siblingMessage]);
+    } finally {
+      dispose();
+    }
+  });
+
   it('keeps the chat connected when the event stream is degraded', async () => {
     let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
     bridgeOnMessage.mockImplementation((handler) => {
@@ -184,7 +367,9 @@ describe('useOpenCode session state flows', () => {
       handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
 
       await vi.waitFor(() => {
-        expect(clientMocks.sessionGet).toHaveBeenCalledWith('session-1');
+        expect(clientMocks.sessionGet).toHaveBeenCalledWith('session-1', {
+          directory: undefined,
+        });
       });
 
       expect(clientMocks.sessionMessages).not.toHaveBeenCalled();
@@ -228,7 +413,9 @@ describe('useOpenCode session state flows', () => {
       await vi.waitFor(() => {
         expect(stateModule.state.sessions[0]?.title).toBe('Test Message');
       });
-      expect(clientMocks.varroSessionRenameIfUntitled).toHaveBeenCalledWith('session-1');
+      expect(clientMocks.varroSessionRenameIfUntitled).toHaveBeenCalledWith('session-1', {
+        directory: '/repo',
+      });
     } finally {
       dispose();
     }
@@ -482,6 +669,7 @@ describe('useOpenCode session state flows', () => {
       expect(clientMocks.sessionMessages).toHaveBeenLastCalledWith('session-1', {
         limit: 200,
         before: 'cursor-older',
+        directory: '/repo',
       });
     });
     stateModule.upsertMessage({ info: userMessage('user-4'), parts: [] });
@@ -847,6 +1035,7 @@ describe('useOpenCode session state flows', () => {
     expect(clientMocks.sessionMessages).toHaveBeenNthCalledWith(3, 'session-1', {
       limit: 200,
       before: 'cursor-2',
+      directory: '/repo',
     });
     expect(messageWindow.getSessionHistoryCursor('session-1')).toBe('cursor-2');
 
@@ -854,6 +1043,7 @@ describe('useOpenCode session state flows', () => {
       expect(clientMocks.sessionMessages).toHaveBeenNthCalledWith(3, 'session-1', {
         limit: 200,
         before: 'cursor-2',
+        directory: '/repo',
       });
       expect(
         messageWindow.getSessionHistoryPrompts('session-1').map((entry) => entry.info.id)
@@ -964,6 +1154,7 @@ describe('useOpenCode session state flows', () => {
       expect(clientMocks.sessionMessages).toHaveBeenCalledWith('session-1', {
         limit: 200,
         before: 'cursor-a',
+        directory: undefined,
       });
     });
 
@@ -974,6 +1165,7 @@ describe('useOpenCode session state flows', () => {
         expect(clientMocks.sessionMessages).toHaveBeenCalledWith('session-1', {
           limit: 200,
           before: 'cursor-b',
+          directory: '/repo',
         });
       });
       await expect(pageLoad).resolves.toBe(true);
@@ -1445,6 +1637,7 @@ describe('useOpenCode session state flows', () => {
         expect(clientMocks.sessionMessages).toHaveBeenCalledWith('session-1', {
           limit: 200,
           before: 'cursor-older',
+          directory: '/repo',
         });
       });
       handlers.get('message.removed')?.({

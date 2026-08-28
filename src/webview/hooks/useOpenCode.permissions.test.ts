@@ -575,7 +575,8 @@ describe('useOpenCode permission and config flows', () => {
       await vi.waitFor(() =>
         expect(clientMocks.varroSessionUpdatePermissionMode).toHaveBeenCalledWith(
           'session-1',
-          'full'
+          'full',
+          { directory: '/repo' }
         )
       );
 
@@ -1066,7 +1067,9 @@ describe('useOpenCode permission and config flows', () => {
         properties: { ...permissionListItem('perm-child'), sessionID: 'child-1' },
       });
 
-      await vi.waitFor(() => expect(clientMocks.sessionGet).toHaveBeenCalledWith('child-1'));
+      await vi.waitFor(() =>
+        expect(clientMocks.sessionGet).toHaveBeenCalledWith('child-1', { directory: undefined })
+      );
       expect(clientMocks.varroJudgePermission).not.toHaveBeenCalled();
       expect(stateModule.state.permissions).toEqual([]);
 
@@ -1112,7 +1115,9 @@ describe('useOpenCode permission and config flows', () => {
         properties: { ...permissionListItem('perm-child-timeout'), sessionID: 'child-1' },
       });
 
-      await vi.waitFor(() => expect(clientMocks.sessionGet).toHaveBeenCalledWith('child-1'));
+      await vi.waitFor(() =>
+        expect(clientMocks.sessionGet).toHaveBeenCalledWith('child-1', { directory: undefined })
+      );
       expect(stateModule.state.permissions).toEqual([]);
 
       await vi.advanceTimersByTimeAsync(AUTO_APPROVE_JUDGE_TIMEOUT_MS);
@@ -1274,8 +1279,10 @@ describe('useOpenCode permission and config flows', () => {
       });
 
       await vi.waitFor(() => {
-        expect(clientMocks.sessionGet).toHaveBeenCalledWith('grandchild-1');
-        expect(clientMocks.sessionGet).toHaveBeenCalledWith('child-1');
+        expect(clientMocks.sessionGet).toHaveBeenCalledWith('grandchild-1', {
+          directory: undefined,
+        });
+        expect(clientMocks.sessionGet).toHaveBeenCalledWith('child-1', { directory: undefined });
       });
       await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce());
       expect(stateModule.state.permissions).toEqual([]);
@@ -1558,7 +1565,8 @@ describe('useOpenCode permission and config flows', () => {
       await vi.waitFor(() =>
         expect(clientMocks.varroSessionUpdatePermissionMode).toHaveBeenCalledWith(
           'session-1',
-          'full'
+          'full',
+          { directory: '/repo' }
         )
       );
 

@@ -63,22 +63,32 @@ export function reconcileLoadedAgents(args: {
   const primaryAgents = visibleAgents.filter((agent) => agent.mode !== 'subagent');
   let nextSelectedAgent: AgentSelectionUpdate | null = null;
 
-  if (args.selectedAgent && !primaryAgents.some((agent) => agent.name === args.selectedAgent)) {
+  if (!args.activeSessionId) {
+    const fallback = [
+      args.persistedSelectedAgent,
+      args.selectedAgent,
+      getDefaultPrimaryAgentName(primaryAgents),
+    ].find(
+      (candidate): candidate is string =>
+        !!candidate && primaryAgents.some((agent) => agent.name === candidate)
+    );
+    if ((fallback ?? null) !== args.selectedAgent) {
+      nextSelectedAgent = {
+        value: fallback ?? null,
+        options: { persistGlobal: false },
+      };
+    }
+  } else if (
+    args.selectedAgent &&
+    !primaryAgents.some((agent) => agent.name === args.selectedAgent)
+  ) {
     nextSelectedAgent = {
       value: null,
       options: {
         sessionId: args.activeSessionId,
-        persistGlobal: !args.activeSessionId,
+        persistGlobal: false,
       },
     };
-  } else if (!args.activeSessionId) {
-    const defaultAgent = getDefaultPrimaryAgentName(primaryAgents);
-    if (defaultAgent && args.selectedAgent !== defaultAgent) {
-      nextSelectedAgent = {
-        value: defaultAgent,
-        options: { persistGlobal: false },
-      };
-    }
   } else if (!args.selectedAgent) {
     const fallback = [
       args.sessionSelectedAgent,

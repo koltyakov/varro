@@ -12,6 +12,11 @@ export interface WorkspaceFolderContext {
   path: string;
 }
 
+export type SessionLocator = {
+  id: string;
+  directory: string;
+};
+
 export interface EditorTextContext {
   kind: 'selection' | 'dirty-buffer';
   path: string | null;
@@ -319,6 +324,7 @@ export const VARRO_API_ENDPOINTS = {
 } as const;
 
 export type VarroSessionEndpointAction =
+  | 'activate'
   | 'delete'
   | 'diff-summary'
   | 'permission-mode'
@@ -571,7 +577,13 @@ export type WebviewThemeKind = 'light' | 'dark' | 'high-contrast' | 'high-contra
 export type DesktopSessionPaneSide = 'left' | 'right';
 
 export type WebviewRoute =
-  | { type: 'session'; sessionId: string; rootSessionId?: string; title?: string }
+  | {
+      type: 'session';
+      sessionId: string;
+      directory?: string;
+      rootSessionId?: string;
+      title?: string;
+    }
   | { type: 'new-session' };
 
 export type WebviewInstanceContext = {
@@ -759,7 +771,7 @@ export type ExtensionMessage =
       payload: { claimId: number; sessionIds: string[] };
     }
   | { type: 'command/new-session'; payload?: { prefill: string } }
-  | { type: 'command/open-session'; payload: { sessionId: string } }
+  | { type: 'command/open-session'; payload: { sessionId: string; directory?: string } }
   | { type: 'command/focus-input' }
   | { type: 'command/search-sessions' }
   | { type: 'command/open-attention-sessions' }
@@ -792,13 +804,14 @@ export type WebviewMessage =
       type: 'session/open-in-editor';
       payload: {
         sessionId: string;
+        directory?: string;
         rootSessionId?: string;
         title?: string;
         model?: ChatModelSelection;
       };
     }
-  | { type: 'session/open-in-sidebar'; payload: { sessionId: string } }
-  | { type: 'session/open-in-opencode'; payload: { sessionId: string } }
+  | { type: 'session/open-in-sidebar'; payload: { sessionId: string; directory?: string } }
+  | { type: 'session/open-in-opencode'; payload: { sessionId: string; directory?: string } }
   | { type: 'chat/new-editor' }
   | { type: 'editor/route-changed'; payload: { route: WebviewRoute } }
   | {
@@ -817,6 +830,7 @@ export type WebviewMessage =
       type: 'session-unread-state/update';
       payload: {
         sessionId: string;
+        directory?: string;
         kind: 'completed' | 'plan-ready';
         unread: boolean;
       };
@@ -826,7 +840,7 @@ export type WebviewMessage =
       payload: { base: ModelPreferences; preferences: ModelPreferences };
     }
   | { type: 'model-preferences/migrate'; payload: ModelPreferences }
-  | { type: 'session/export'; payload: { sessionId: string } }
+  | { type: 'session/export'; payload: { sessionId: string; directory?: string } }
   | { type: 'usage/report'; payload: { includeAllTime: boolean } }
   | { type: 'webview/reload' }
   | { type: 'vscode/open-folder' }

@@ -185,7 +185,7 @@ describe('useOpenCode initialization', () => {
     }
   });
 
-  it('defaults the extension toolbar agent to build on startup', async () => {
+  it('restores the persisted toolbar agent on startup', async () => {
     let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
     bridgeOnMessage.mockImplementation((handler) => {
       bridgeHandler = handler;
@@ -232,10 +232,8 @@ describe('useOpenCode initialization', () => {
         payload: { state: 'running', url: 'http://127.0.0.1:4096' },
       });
 
-      await vi.waitFor(() => {
-        expect(stateModule.state.selectedAgent).toBe('build');
-      });
-      expect(stateModule.connectionInitialized()).toBe(true);
+      await vi.waitFor(() => expect(stateModule.connectionInitialized()).toBe(true));
+      expect(stateModule.state.selectedAgent).toBe('plan');
       expect(stateModule.getPersistedSelectedAgent()).toBe('plan');
     } finally {
       dispose();

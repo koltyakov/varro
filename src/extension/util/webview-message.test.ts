@@ -278,13 +278,15 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('POST', '/session?directory=')).toBe(false);
     expect(isAllowedApiRequest('POST', '/session?directory=%2Fa&directory=%2Fb')).toBe(false);
     expect(isAllowedApiRequest('POST', '/session?directory=%2Fa&extra=1')).toBe(false);
-    expect(isAllowedApiRequest('POST', '/session/abc/abort?directory=%2Frepo-a')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/session/abc/abort?directory=%2Frepo-a')).toBe(true);
     expect(isAllowedApiRequest('GET', '/session/abc/share')).toBe(false);
     expect(isAllowedApiRequest('POST', '/session/abc/share?directory=')).toBe(false);
     expect(isAllowedApiRequest('DELETE', '/session/abc/share?extra=1')).toBe(false);
     expect(isAllowedApiRequest('DELETE', '/config/providers')).toBe(false);
     expect(isAllowedApiRequest('POST', '/model/default')).toBe(false);
     expect(isAllowedApiRequest('GET', '/model/default?directory=%2Frepo')).toBe(false);
+    expect(isAllowedApiRequest('GET', '/permission?directory=%2Frepo')).toBe(false);
+    expect(isAllowedApiRequest('GET', '/question?directory=%2Frepo')).toBe(false);
     expect(isAllowedApiRequest('GET', '/model/default/extra')).toBe(false);
     expect(isAllowedApiRequest('GET', '/session/abc/diff?messageID=1&extra=1')).toBe(false);
     expect(isAllowedApiRequest('GET', '/session/abc/message?limit=5&extra=1')).toBe(false);
@@ -293,6 +295,9 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('GET', '/session/abc/message/message-1')).toBe(false);
     expect(isAllowedApiRequest('GET', '/varro/provider-limit?modelID=gpt')).toBe(false);
     expect(isAllowedApiRequest('GET', '/varro/workspace-file')).toBe(false);
+    expect(
+      isAllowedApiRequest('GET', '/varro/workspace-file?path=package.json&directory=%2Frepo')
+    ).toBe(false);
     expect(isAllowedApiRequest('GET', '/varro/workspace-path/resolve')).toBe(false);
     expect(isAllowedApiRequest('POST', '/varro/opencode-config')).toBe(false);
     expect(isAllowedApiRequest('GET', '/varro/opencode-config/model-routing')).toBe(false);

@@ -56,14 +56,14 @@ Chat and context commands route through `SidebarProvider` and `ContextProvider`;
 
 - Orchestrates OpenCode startup, compatibility policy, restart safety, and workspace selection
 - Checks health before auto-starting
-- Connects to the OpenCode event stream at `/global/event` and routes events to workspace-scoped endpoints
+- Connects to the OpenCode event stream at `/global/event` and routes detailed events to directory owners while projecting safe session catalog events across open workspace roots
 - Emits `status` and `event` to the rest of the extension
 
 The implementation is split across focused components: `open-code-process.ts` owns CLI discovery, process, port, and update behavior; `open-code-transport.ts` owns REST and SSE transport; and `server-lifecycle.ts` coordinates lifecycle state.
 
 Important behavior:
 
-- Workspace-sensitive non-global requests are scoped through both a `directory` query param and `x-opencode-directory` header. Global paths omit the `directory` query param; health and `/global/event` are explicitly unscoped, while generic global REST calls can still carry the directory header. Session status and most session-child routes are deliberately unscoped; Windows leaves additional session reads unscoped to avoid path casing and separator regressions. Aggregate session lists, statuses, permissions, and questions are filtered locally to the active workspace. Direct session-child routes remain ID-addressed and are normally reached through IDs from filtered session state.
+- Workspace-sensitive requests carry an authoritative directory through both the request bridge and OpenCode transport. `RestProxy` aggregates session lists and statuses across exact open VS Code roots, filters hidden and recycled sessions before global sorting and pagination, and validates direct session operations against the requested root. Permissions, questions, messages, tools, and diffs remain directory-owned.
 - If the SSE stream drops while the server is running, Varro retries with exponential backoff.
 - If the event stream drops but REST still works, Varro marks the event stream as degraded so the UI can show a reconnecting banner.
 - If the child process exits after startup, Varro attempts a limited restart sequence.
@@ -96,7 +96,7 @@ Supporting host components define the main boundaries:
 - `src/extension/rest-proxy.ts`: OpenCode REST forwarding and local `/varro/*` endpoints
 - `src/extension/hidden-session-manager.ts`: internal helper-session identification, user-visible
   filtering, and stale permission-judge cleanup
-- `src/extension/server-event-bridge.ts`: server status and workspace-scoped event forwarding
+- `src/extension/server-event-bridge.ts`: server status and event normalization; `SidebarProvider` keeps detailed events directory-scoped and broadcasts sequence-free lifecycle/status summaries across open roots
 - `src/extension/ralph-host.ts`: persisted Ralph execution independent of webview lifetime
 - `src/extension/commit-message-service.ts` and `usage-report-service.ts`: repository-aware commit generation and retained-history usage reports
 - `src/extension/queued-message-store.ts`: authoritative workspace-state persistence for queued prompts and attachment data
@@ -117,6 +117,7 @@ It also exposes the Varro extension-host API namespace, `/varro/*`.
 - `GET /varro/session/:sessionID/diff-summary`
 - `POST /varro/session/:sessionID/pin`
 - `POST /varro/session/:sessionID/rename-if-untitled`
+- `POST /varro/session/:sessionID/activate`
 - `DELETE /varro/session/:sessionID/delete`
 - `GET /varro/session-trash`
 - `POST /varro/session-trash/:rootID/restore`
@@ -155,7 +156,7 @@ Defines:
 
 The protocol is intentionally transport-oriented. Shared OpenCode domain and event types such as `Session`, `Message`, and `Part` live in `src/shared/opencode-types.ts`. `src/webview/types/index.ts` re-exports those contracts for webview consumers.
 
-Next to the `/varro/*` namespace, the architectural choice is explicit: Varro treats the extension host as a transport boundary, not as a semantic event coordinator for webview state. The extension forwards raw `server/event` payloads and serves local `/varro/*` requests, while the webview derives UI facts like pending attention and recycle-bin views from those transport primitives plus targeted REST reloads.
+Next to the `/varro/*` namespace, the architectural choice is explicit: Varro treats the extension host as the authorization and routing boundary. It forwards raw detailed events only to the endpoint that owns their execution directory, projects safe session lifecycle/status summaries across open roots, and serves local `/varro/*` requests. The webview derives UI facts like pending attention and recycle-bin views from those transport primitives plus targeted REST reloads.
 
 #### `src/shared/context-files.ts`
 
@@ -232,7 +233,7 @@ Responsibilities:
 - synchronize per-session MCP selections with OpenCode
 - recover interrupted sessions after reload when the previous run still looks incomplete
 
-The runtime also handles workspace filtering for sessions, stale loading recovery, and model/provider limit refreshes.
+The runtime keeps a workspace-wide session catalog separate from the active execution directory, atomically activates a session's recorded directory before loading it, and handles stale loading recovery and model/provider limit refreshes.
 
 #### UI composition
 
@@ -376,7 +377,7 @@ The webview adds more derived states on top of that data.
 
 - The webview JavaScript and CSS are bundled as separate local webview resources; only initial state and the small host bridge bootstrap are inline under a CSP nonce.
 - File search uses `vscode.workspace.findFiles()` with a short-lived cache and ranking heuristic rather than shelling out.
-- Session lists are filtered to the active workspace path, which prevents unrelated project sessions from appearing in the sidebar.
+- Session lists aggregate exact open workspace roots. Unrelated OpenCode history is rejected, and an optional webview filter narrows the catalog without changing execution scope.
 - Queued follow-up prompts are persisted in extension-host workspace state and auto-dispatched once their owning session is connected and idle, including background sessions. The browser-side mirror excludes image-bearing entries from synchronous local storage.
 - Message loads are windowed: opening a session fetches the newest 200 messages, reaching the top automatically prepends the next 200-message page while preserving the visible anchor, and the boundary banner becomes a `Retry` action only after a page request fails.
 - Finder or browser drops that do not expose file paths fall back to temporary file writes in `varro-drops`.

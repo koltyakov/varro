@@ -693,10 +693,41 @@ describe('ContextProvider', () => {
     vscodeMock.workspace.workspaceFolders = [first, second];
     vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 0 });
     vscodeMock.workspace.getWorkspaceFolder.mockReturnValue(second);
+    vscodeMock.workspace.asRelativePath.mockReturnValue('RALPH.md');
     vscodeMock.workspace.openTextDocument.mockResolvedValue({ getText: () => '# Other plan' });
     const provider = new ContextProvider(vi.fn());
 
     try {
+      await expect(
+        provider.readFile('/second/RALPH.md', {
+          restrictToWorkspace: true,
+          workspaceDirectory: '/first',
+        })
+      ).resolves.toBeNull();
+      expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('resolves sibling-root metadata without broadening restricted file reads', async () => {
+    const first = { name: 'first', uri: { fsPath: '/first' } };
+    const second = { name: 'second', uri: { fsPath: '/second' } };
+    vscodeMock.workspace.workspaceFolders = [first, second];
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 0 });
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue(second);
+    vscodeMock.workspace.asRelativePath.mockReturnValue('RALPH.md');
+    vscodeMock.workspace.openTextDocument.mockResolvedValue({ getText: () => '# Other plan' });
+    const provider = new ContextProvider(vi.fn());
+
+    try {
+      await expect(
+        provider.resolvePath('/second/RALPH.md', {
+          restrictToWorkspace: true,
+          workspaceDirectory: '/first',
+          allowSiblingWorkspaceFolders: true,
+        })
+      ).resolves.toMatchObject({ path: '/second/RALPH.md', type: 'file' });
       await expect(
         provider.readFile('/second/RALPH.md', {
           restrictToWorkspace: true,

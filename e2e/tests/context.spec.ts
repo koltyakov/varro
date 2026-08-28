@@ -11,10 +11,20 @@ test('opens the context popup and compacts the session', async ({ page }) => {
   await page.getByRole('button', { name: 'Compact session' }).click();
 
   const summarizeCount = await getE2EState(page, () => {
-    const value = (window as Window & {
-      __varroE2E?: { requests: Array<{ path: string }> };
-    }).__varroE2E;
-    return value?.requests.filter((request) => request.path.endsWith('/summarize')).length || 0;
+    const value = (
+      window as Window & {
+        __varroE2E?: { requests: Array<{ path: string }> };
+      }
+    ).__varroE2E;
+    return (
+      value?.requests.filter((request) => {
+        const url = new URL(request.path, 'http://varro.test');
+        return (
+          url.pathname.endsWith('/summarize') &&
+          url.searchParams.get('directory') === '/workspace/varro'
+        );
+      }).length || 0
+    );
   });
 
   expect(summarizeCount).toBe(1);

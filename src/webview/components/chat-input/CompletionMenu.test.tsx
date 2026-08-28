@@ -277,6 +277,6 @@ describe('CompletionMenu', () => {
     expect(icon?.classList).toContain('material-chip-icon');
     expect(icon?.classList).toContain('completion-session-icon');
     expect(age?.textContent).toBe('5m');
-    expect(age?.getAttribute('title')).toBeNull();
+    expect(age?.getAttribute('title')).toBe('/workspace');
   });
 });

@@ -221,8 +221,12 @@ describe('useOpenCode session control flows', () => {
       });
 
       expect(clientMocks.sessionAbort).toHaveBeenCalledTimes(2);
-      expect(clientMocks.sessionAbort).toHaveBeenNthCalledWith(1, 'session-1');
-      expect(clientMocks.sessionAbort).toHaveBeenNthCalledWith(2, 'child-1');
+      expect(clientMocks.sessionAbort).toHaveBeenNthCalledWith(1, 'session-1', {
+        directory: '/repo',
+      });
+      expect(clientMocks.sessionAbort).toHaveBeenNthCalledWith(2, 'child-1', {
+        directory: '/repo',
+      });
     } finally {
       dispose();
     }
@@ -283,9 +287,15 @@ describe('useOpenCode session control flows', () => {
       await hookModule.abortSession();
 
       expect(clientMocks.sessionAbort).toHaveBeenCalledTimes(3);
-      expect(clientMocks.sessionAbort).toHaveBeenNthCalledWith(1, 'session-1');
-      expect(clientMocks.sessionAbort).toHaveBeenNthCalledWith(2, 'child-1');
-      expect(clientMocks.sessionAbort).toHaveBeenNthCalledWith(3, 'child-2');
+      expect(clientMocks.sessionAbort).toHaveBeenNthCalledWith(1, 'session-1', {
+        directory: '/repo',
+      });
+      expect(clientMocks.sessionAbort).toHaveBeenNthCalledWith(2, 'child-1', {
+        directory: '/repo',
+      });
+      expect(clientMocks.sessionAbort).toHaveBeenNthCalledWith(3, 'child-2', {
+        directory: '/repo',
+      });
       expect(stateModule.state.sessionStatus['session-1']).toEqual({ type: 'idle' });
       expect(stateModule.state.sessionStatus['child-1']).toEqual({ type: 'idle' });
       expect(stateModule.state.sessionStatus['child-2']).toEqual({ type: 'idle' });
@@ -330,9 +340,15 @@ describe('useOpenCode session control flows', () => {
       await hookModule.abortSession();
 
       expect(clientMocks.sessionAbort).toHaveBeenCalledTimes(3);
-      expect(clientMocks.sessionAbort).toHaveBeenNthCalledWith(1, 'session-1');
-      expect(clientMocks.sessionAbort).toHaveBeenNthCalledWith(2, 'child-1');
-      expect(clientMocks.sessionAbort).toHaveBeenNthCalledWith(3, 'child-2');
+      expect(clientMocks.sessionAbort).toHaveBeenNthCalledWith(1, 'session-1', {
+        directory: '/repo',
+      });
+      expect(clientMocks.sessionAbort).toHaveBeenNthCalledWith(2, 'child-1', {
+        directory: '/repo',
+      });
+      expect(clientMocks.sessionAbort).toHaveBeenNthCalledWith(3, 'child-2', {
+        directory: '/repo',
+      });
     } finally {
       dispose();
     }

@@ -741,7 +741,7 @@ describe('mount bridge helpers', () => {
 
     expect(createSession).toHaveBeenNthCalledWith(1, undefined);
     expect(createSession).toHaveBeenNthCalledWith(2, '/init');
-    expect(openSession).toHaveBeenCalledWith('session-1');
+    expect(openSession).toHaveBeenCalledWith('session-1', undefined);
     expect(focusComposer).toHaveBeenCalledTimes(1);
     expect(openAttentionSessions).toHaveBeenCalledTimes(1);
     expect(openCompletedSessions).toHaveBeenCalledTimes(1);

@@ -342,6 +342,7 @@ describe('ActiveChatHeader', () => {
       type: 'session/open-in-editor',
       payload: {
         sessionId: 'session-1',
+        directory: '/repo',
         title: 'Session one',
         model: undefined,
       },
@@ -465,7 +466,9 @@ describe('ActiveChatHeader', () => {
     ).find((button) => button.textContent === 'Unpin session');
     unpin!.click();
 
-    await vi.waitFor(() => expect(setPinned).toHaveBeenCalledWith('session-1', false));
+    await vi.waitFor(() =>
+      expect(setPinned).toHaveBeenCalledWith('session-1', false, { directory: '/repo' })
+    );
     await vi.waitFor(() => {
       expect(container.querySelector('[aria-label="Pinned session"]')).toBeNull();
     });

@@ -16,7 +16,7 @@
   display: flex;
   align-items: center;
   gap: 3px;
-  padding: 4px 12px;
+  padding: 4px 12px 4px 16px;
 }
 
 .session-list-view-sidebar .session-list-workspace-selector {
@@ -790,6 +790,13 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   height: 10px;
   margin-inline: 0;
   display: inline-block;
+}
+
+.session-item-folder {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  vertical-align: text-bottom;
 }
 
 .session-item-indicator.is-running,

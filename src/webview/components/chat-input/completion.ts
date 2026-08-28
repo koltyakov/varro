@@ -1,7 +1,8 @@
 import type { CompletionItem, MentionCompletionItem } from './CompletionMenu';
 import type { Agent, Session } from '../../types';
-import type { DroppedFile } from '../../../shared/protocol';
+import type { DroppedFile, WorkspaceFolderContext } from '../../../shared/protocol';
 import { normalizeSessionTitle } from '../../../shared/session-title';
+import { getWorkspaceFolderLabel } from '../../../shared/workspace-folders';
 
 export const SKILLS_COMMAND_NAME = 'skills';
 
@@ -106,12 +107,18 @@ export function applySlashCompletion(
   return { value, cursor: value.length };
 }
 
-export function getSessionCompletionItems(sessions: Session[]): MentionCompletionItem[] {
+export function getSessionCompletionItems(
+  sessions: Session[],
+  workspaceFolders: readonly WorkspaceFolderContext[] = []
+): MentionCompletionItem[] {
   return sessions.slice(0, 10).map((session) => ({
     key: `session:${session.id}`,
     type: 'session',
     label: normalizeSessionTitle(session.title) || 'Untitled',
-    detail: '',
+    detail:
+      workspaceFolders.length > 1
+        ? (getWorkspaceFolderLabel(session.directory, workspaceFolders) ?? '')
+        : '',
     value: `session:${session.id} `,
     session,
   }));

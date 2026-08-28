@@ -70,19 +70,20 @@ export interface MessageRouterCallbacks {
   providerAuthChanged(): Promise<void>;
   clearTerminalSelection(): void;
   runInTerminal(command: string, title?: string): void | Promise<void>;
-  openSessionInOpenCode(sessionId: string): void | Promise<void>;
+  openSessionInOpenCode(sessionId: string, directory?: string): void | Promise<void>;
   openSessionInEditor(
     sessionId: string,
     title?: string,
     model?: Extract<WebviewMessage, { type: 'session/open-in-editor' }>['payload']['model'],
-    rootSessionId?: string
+    rootSessionId?: string,
+    directory?: string
   ): void | Promise<void>;
-  openSessionInSidebar(sessionId: string): void | Promise<void>;
+  openSessionInSidebar(sessionId: string, directory?: string): void | Promise<void>;
   openNewEditor(): void | Promise<void>;
   editorRouteChanged(
     route: Extract<WebviewMessage, { type: 'editor/route-changed' }>['payload']['route']
   ): void;
-  exportSession(sessionId: string): Promise<void>;
+  exportSession(sessionId: string, directory?: string): Promise<void>;
   generateUsageReport(includeAllTime: boolean): Promise<void>;
   reloadWebview(): Promise<void>;
   openFolder(): Promise<void>;
@@ -222,18 +223,30 @@ export class MessageRouter {
           await this.handleTerminalRunMessage(msg);
           break;
         case 'session/open-in-opencode':
-          await this.callbacks.openSessionInOpenCode(msg.payload.sessionId);
+          await (msg.payload.directory
+            ? this.callbacks.openSessionInOpenCode(msg.payload.sessionId, msg.payload.directory)
+            : this.callbacks.openSessionInOpenCode(msg.payload.sessionId));
           break;
         case 'session/open-in-editor':
-          await this.callbacks.openSessionInEditor(
-            msg.payload.sessionId,
-            msg.payload.title,
-            msg.payload.model,
-            msg.payload.rootSessionId
-          );
+          await (msg.payload.directory
+            ? this.callbacks.openSessionInEditor(
+                msg.payload.sessionId,
+                msg.payload.title,
+                msg.payload.model,
+                msg.payload.rootSessionId,
+                msg.payload.directory
+              )
+            : this.callbacks.openSessionInEditor(
+                msg.payload.sessionId,
+                msg.payload.title,
+                msg.payload.model,
+                msg.payload.rootSessionId
+              ));
           break;
         case 'session/open-in-sidebar':
-          await this.callbacks.openSessionInSidebar(msg.payload.sessionId);
+          await (msg.payload.directory
+            ? this.callbacks.openSessionInSidebar(msg.payload.sessionId, msg.payload.directory)
+            : this.callbacks.openSessionInSidebar(msg.payload.sessionId));
           break;
         case 'chat/new-editor':
           await this.callbacks.openNewEditor();
@@ -366,7 +379,9 @@ export class MessageRouter {
   private async handleSessionExportMessage(
     msg: Extract<WebviewMessage, { type: 'session/export' }>
   ) {
-    await this.callbacks.exportSession(msg.payload.sessionId);
+    await (msg.payload.directory
+      ? this.callbacks.exportSession(msg.payload.sessionId, msg.payload.directory)
+      : this.callbacks.exportSession(msg.payload.sessionId));
   }
 
   private async handleOpenSettingsMessage(

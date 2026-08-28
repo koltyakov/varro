@@ -10,6 +10,7 @@ import {
   nextSkippedPlanSessions,
   pruneSkippedPlanSessions,
   readInitialSessionMarkerScope,
+  readMergedSessionMarkerState,
   readScopedSessionMarkerState,
   removeSessionMarker,
   writeScopedSessionMarkerState,
@@ -76,6 +77,25 @@ describe('state session markers', () => {
     expect(storage.get('varro.lastSeenSessions')).toEqual({ '/repo': { legacy: 123 } });
   });
 
+  it('uses one marker scope for equivalent Windows workspace paths', () => {
+    const storage = createStorage({
+      'varro.lastSeenSessions': {
+        'c:/users/andrew/repo': { 'session-1': 100 },
+      },
+    });
+
+    expect(getSessionMarkerWorkspaceScope('C:\\Users\\Andrew\\Repo\\')).toBe(
+      'c:/users/andrew/repo'
+    );
+    expect(
+      readScopedSessionMarkerState(
+        storage,
+        'varro.lastSeenSessions',
+        getSessionMarkerWorkspaceScope('C:\\Users\\Andrew\\Repo\\')
+      )
+    ).toEqual({ 'session-1': 100 });
+  });
+
   it('reads and writes markers by workspace scope', () => {
     const storage = createStorage({
       'varro.lastSeenSessions': {
@@ -93,6 +113,20 @@ describe('state session markers', () => {
     expect(storage.get('varro.lastSeenSessions')).toEqual({
       '/repo-b': { 'session-b': 200 },
     });
+  });
+
+  it('merges markers from open workspace roots using the latest timestamp', () => {
+    const storage = createStorage({
+      'varro.lastSeenSessions': {
+        '/repo-a': { shared: 100, 'session-a': 150 },
+        '/repo-b': { shared: 200, 'session-b': 250 },
+        '/closed': { closed: 300 },
+      },
+    });
+
+    expect(
+      readMergedSessionMarkerState(storage, 'varro.lastSeenSessions', ['/repo-a', '/repo-b'])
+    ).toEqual({ shared: 200, 'session-a': 150, 'session-b': 250 });
   });
 
   it('derives next seen, skipped, and pruned marker maps', () => {

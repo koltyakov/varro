@@ -1355,7 +1355,12 @@ describe('header status badges', () => {
       expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([
         {
           type: 'session-unread-state/update',
-          payload: { sessionId: 'primary-1', kind: 'completed', unread: true },
+          payload: {
+            sessionId: 'primary-1',
+            directory: '/repo',
+            kind: 'completed',
+            unread: true,
+          },
         },
       ]);
     } finally {

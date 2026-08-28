@@ -391,6 +391,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       const sessionId = payload?.sessionId;
       const kind = payload?.kind;
       const unread = payload?.unread;
+      const directory = payload?.directory;
       if (
         !isSafePersistedSessionId(sessionId) ||
         (kind !== 'completed' && kind !== 'plan-ready') ||
@@ -398,7 +399,15 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       ) {
         return null;
       }
-      return { type, payload: { sessionId, kind, unread } };
+      if (directory !== undefined && (typeof directory !== 'string' || !directory.trim())) {
+        return null;
+      }
+      const parsedPayload: Extract<
+        WebviewMessage,
+        { type: 'session-unread-state/update' }
+      >['payload'] = { sessionId, kind, unread };
+      if (typeof directory === 'string') parsedPayload.directory = directory;
+      return { type, payload: parsedPayload };
     }
 
     case 'composer/images-update': {
@@ -421,9 +430,11 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
     case 'session/open-in-editor': {
       const payload = asRecord(message?.payload);
       const sessionId = getBoundedString(payload?.sessionId, 512);
+      const directory = getBoundedString(payload?.directory, MAX_PATH_LENGTH);
       const rootSessionId = getBoundedString(payload?.rootSessionId, 512);
       const title = getBoundedString(payload?.title, 512);
       if (!sessionId || !/^[A-Za-z0-9_-]+$/.test(sessionId)) return null;
+      if (payload?.directory !== undefined && !directory) return null;
       if (
         payload?.rootSessionId !== undefined &&
         (!rootSessionId || !/^[A-Za-z0-9_-]+$/.test(rootSessionId))
@@ -434,6 +445,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       if (payload?.model !== undefined && !model) return null;
       const parsedPayload: Extract<WebviewMessage, { type: 'session/open-in-editor' }>['payload'] =
         { sessionId };
+      if (directory) parsedPayload.directory = directory;
       if (rootSessionId) parsedPayload.rootSessionId = rootSessionId;
       if (title) parsedPayload.title = title;
       if (model) parsedPayload.model = model;
@@ -444,9 +456,15 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
     case 'session/open-in-opencode': {
       const payload = asRecord(message?.payload);
       const sessionId = getBoundedString(payload?.sessionId, 512);
-      return sessionId && /^[A-Za-z0-9_-]+$/.test(sessionId)
-        ? { type, payload: { sessionId } }
-        : null;
+      const directory = getBoundedString(payload?.directory, MAX_PATH_LENGTH);
+      if (!sessionId || !/^[A-Za-z0-9_-]+$/.test(sessionId)) return null;
+      if (payload?.directory !== undefined && !directory) return null;
+      const parsedPayload: Extract<
+        WebviewMessage,
+        { type: 'session/open-in-sidebar' | 'session/open-in-opencode' }
+      >['payload'] = { sessionId };
+      if (directory) parsedPayload.directory = directory;
+      return { type, payload: parsedPayload };
     }
 
     case 'editor/route-changed': {
@@ -455,11 +473,13 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       if (route?.type === 'new-session')
         return { type, payload: { route: { type: 'new-session' } } };
       const sessionId = getBoundedString(route?.sessionId, 512);
+      const directory = getBoundedString(route?.directory, MAX_PATH_LENGTH);
       const rootSessionId = getBoundedString(route?.rootSessionId, 512);
       const title = getBoundedString(route?.title, 512);
       if (route?.type !== 'session' || !sessionId || !/^[A-Za-z0-9_-]+$/.test(sessionId)) {
         return null;
       }
+      if (route.directory !== undefined && !directory) return null;
       if (
         route.rootSessionId !== undefined &&
         (!rootSessionId || !/^[A-Za-z0-9_-]+$/.test(rootSessionId))
@@ -470,6 +490,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
         WebviewMessage,
         { type: 'editor/route-changed' }
       >['payload']['route'] = { type: 'session', sessionId };
+      if (directory) parsedRoute.directory = directory;
       if (rootSessionId) parsedRoute.rootSessionId = rootSessionId;
       if (title) parsedRoute.title = title;
       return { type, payload: { route: parsedRoute } };
@@ -478,7 +499,14 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
     case 'session/export': {
       const payload = asRecord(message?.payload);
       const sessionId = getBoundedString(payload?.sessionId, 512);
-      return sessionId ? { type, payload: { sessionId } } : null;
+      const directory = getBoundedString(payload?.directory, MAX_PATH_LENGTH);
+      if (payload?.directory !== undefined && !directory) return null;
+      if (!sessionId) return null;
+      const parsedPayload: Extract<WebviewMessage, { type: 'session/export' }>['payload'] = {
+        sessionId,
+      };
+      if (directory) parsedPayload.directory = directory;
+      return { type, payload: parsedPayload };
     }
 
     case 'workspace/select': {
@@ -1598,8 +1626,17 @@ const optionalDirectoryQuery = (url: URL) => {
   );
 };
 
+const queryWithOptionalDirectory = (url: URL, ...keys: string[]) => {
+  const directories = url.searchParams.getAll('directory');
+  return (
+    onlyQuery(url, ...keys, 'directory') &&
+    directories.length <= 1 &&
+    (directories.length === 0 || requiredQuery(url, 'directory'))
+  );
+};
+
 const sessionSearchQuery = (url: URL) =>
-  onlyQuery(url, 'limit', 'search', 'roots') &&
+  queryWithOptionalDirectory(url, 'limit', 'search', 'roots') &&
   positiveIntegerQuery(url, 'limit') &&
   singleRequiredQuery(url, 'search') &&
   url.searchParams.getAll('roots').length === 1 &&
@@ -1656,7 +1693,7 @@ const API_ROUTES: ApiRoute[] = [
     ({ method, url }) =>
       (method === 'GET' &&
         (noQuery(url) ||
-          (onlyQuery(url, 'limit') && positiveIntegerQuery(url, 'limit')) ||
+          (queryWithOptionalDirectory(url, 'limit') && positiveIntegerQuery(url, 'limit')) ||
           sessionSearchQuery(url))) ||
       (method === 'POST' && optionalDirectoryQuery(url))
   ),
@@ -1687,12 +1724,25 @@ const API_ROUTES: ApiRoute[] = [
   ),
   route(
     `${VARRO_API_ENDPOINTS.session}/:id/diff-summary`,
-    ({ method, url }) => method === 'GET' && onlyQuery(url, 'revision')
+    ({ method, url }) => method === 'GET' && queryWithOptionalDirectory(url, 'revision')
   ),
-  route(`${VARRO_API_ENDPOINTS.session}/:id/pin`, methodsNoQuery('POST')),
-  route(`${VARRO_API_ENDPOINTS.session}/:id/permission-mode`, methodsNoQuery('POST')),
-  route(`${VARRO_API_ENDPOINTS.session}/:id/rename-if-untitled`, methodsNoQuery('POST')),
-  route(`${VARRO_API_ENDPOINTS.session}/:id/delete`, methodsNoQuery('DELETE')),
+  route(`${VARRO_API_ENDPOINTS.session}/:id/activate`, methodsNoQuery('POST')),
+  route(
+    `${VARRO_API_ENDPOINTS.session}/:id/pin`,
+    ({ method, url }) => method === 'POST' && optionalDirectoryQuery(url)
+  ),
+  route(
+    `${VARRO_API_ENDPOINTS.session}/:id/permission-mode`,
+    ({ method, url }) => method === 'POST' && optionalDirectoryQuery(url)
+  ),
+  route(
+    `${VARRO_API_ENDPOINTS.session}/:id/rename-if-untitled`,
+    ({ method, url }) => method === 'POST' && optionalDirectoryQuery(url)
+  ),
+  route(
+    `${VARRO_API_ENDPOINTS.session}/:id/delete`,
+    ({ method, url }) => method === 'DELETE' && optionalDirectoryQuery(url)
+  ),
   route(VARRO_API_ENDPOINTS.sessionTrash, methodsNoQuery('GET', 'DELETE')),
   route(VARRO_API_ENDPOINTS.planOpen, methodsNoQuery('POST')),
   route(
@@ -1725,16 +1775,22 @@ const API_ROUTES: ApiRoute[] = [
       (params.action === 'authorize' || params.action === 'callback')
   ),
   route('/experimental/workspace/warp', methodsNoQuery('POST')),
-  route('/session/:id/diff', ({ method, url }) => method === 'GET' && onlyQuery(url, 'messageID')),
+  route(
+    '/session/:id/diff',
+    ({ method, url }) => method === 'GET' && queryWithOptionalDirectory(url, 'messageID')
+  ),
   route(
     '/session/:id/message',
     ({ method, url }) =>
       method === 'GET' &&
-      onlyQuery(url, 'limit', 'before') &&
+      queryWithOptionalDirectory(url, 'limit', 'before') &&
       (!url.searchParams.has('before') || requiredQuery(url, 'limit'))
   ),
-  route('/session/:id/message/:messageId', methodsNoQuery('DELETE')),
-  route('/session/:id/todo', methodsNoQuery('GET')),
+  route(
+    '/session/:id/message/:messageId',
+    ({ method, url }) => method === 'DELETE' && optionalDirectoryQuery(url)
+  ),
+  route('/session/:id/todo', ({ method, url }) => method === 'GET' && optionalDirectoryQuery(url)),
   route(
     '/session/:id/share',
     ({ method, url }) => (method === 'POST' || method === 'DELETE') && optionalDirectoryQuery(url)
@@ -1742,11 +1798,13 @@ const API_ROUTES: ApiRoute[] = [
   route(
     '/session/:id/:action',
     ({ method, url, params }) =>
-      method === 'POST' &&
-      SESSION_ACTIONS.has(params.action!) &&
-      (params.action === 'prompt_async' ? optionalDirectoryQuery(url) : noQuery(url))
+      method === 'POST' && SESSION_ACTIONS.has(params.action!) && optionalDirectoryQuery(url)
   ),
-  route('/session/:id', methodsNoQuery('GET', 'PATCH', 'DELETE')),
+  route(
+    '/session/:id',
+    ({ method, url }) =>
+      (method === 'GET' || method === 'PATCH' || method === 'DELETE') && optionalDirectoryQuery(url)
+  ),
 ];
 
 function parseRelativeApiUrl(path: string): URL | null {

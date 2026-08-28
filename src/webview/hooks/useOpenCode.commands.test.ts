@@ -32,10 +32,14 @@ describe('command helpers', () => {
     const result = await hookModule.runSlashCommandByName('test', '--watch');
 
     expect(result).toBe(true);
-    expect(clientMocks.sessionCommand).toHaveBeenCalledWith('session-1', {
-      command: 'test',
-      arguments: '--watch',
-    });
+    expect(clientMocks.sessionCommand).toHaveBeenCalledWith(
+      'session-1',
+      {
+        command: 'test',
+        arguments: '--watch',
+      },
+      { directory: undefined }
+    );
   });
 
   it('initializes a blank session by sending an AGENTS.md prompt', async () => {
@@ -170,6 +174,8 @@ describe('command helpers', () => {
 
     await hookModule.redoSession();
 
-    expect(clientMocks.sessionUnrevert).toHaveBeenCalledWith('session-1');
+    expect(clientMocks.sessionUnrevert).toHaveBeenCalledWith('session-1', {
+      directory: undefined,
+    });
   });
 });

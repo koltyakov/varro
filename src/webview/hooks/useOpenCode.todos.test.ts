@@ -47,7 +47,9 @@ describe('useOpenCode todo synchronization', () => {
 
       await hookModule.selectSession('session-1');
 
-      expect(clientMocks.sessionTodos).toHaveBeenCalledWith('session-1');
+      expect(clientMocks.sessionTodos).toHaveBeenCalledWith('session-1', {
+        directory: '/repo',
+      });
       expect(stateModule.state.todos).toEqual([
         {
           id: 'Native persisted todo',

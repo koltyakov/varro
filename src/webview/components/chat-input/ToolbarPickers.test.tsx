@@ -141,6 +141,32 @@ describe('ToolbarPickers', () => {
     ).toBe('true');
   });
 
+  it('gives the all-folders option a secondary folder count', () => {
+    cleanup = render(
+      () => (
+        <WorkspacePicker
+          folders={[
+            { name: 'Repo A', path: '/repo-a' },
+            { name: 'Repo B', path: '/repo-b' },
+          ]}
+          selectedPath={null}
+          showPicker={true}
+          allLabel="All folders"
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+          onSelectAll={vi.fn()}
+        />
+      ),
+      container!
+    );
+
+    const allFolders = container?.querySelector('.workspace-popover-all');
+    expect(allFolders?.querySelector('.workspace-popover-name')?.textContent).toBe('All folders');
+    expect(allFolders?.querySelector('.workspace-popover-path')?.textContent).toBe(
+      '2 workspace folders'
+    );
+  });
+
   it('marks an equivalent UNC workspace spelling as selected', () => {
     cleanup = render(
       () => (

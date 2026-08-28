@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { basename } from 'path';
 import type { DroppedFile } from '../shared/protocol';
+import { getWorkspaceFolderLabel } from '../shared/workspace-folders';
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import { getRelativePath } from './util/path';
 import { logger } from './logger';
@@ -36,8 +37,8 @@ export class FileSearchService {
   private static readonly MAX_CANDIDATES = 4_000;
   private static readonly RESULT_LIMIT = 30;
 
-  private workspaceWatcher: vscode.FileSystemWatcher | null = null;
-  private workspaceFolder: vscode.WorkspaceFolder | null = null;
+  private workspaceWatchers: vscode.FileSystemWatcher[] = [];
+  private workspaceFolders: readonly vscode.WorkspaceFolder[] = [];
   private workspaceScope: string | null = null;
   private workspaceFileCache: WorkspaceFileSearchEntry[] = [];
   private workspaceFileCacheAt = 0;
@@ -60,18 +61,18 @@ export class FileSearchService {
     workspaceDirectory: string | null | undefined,
     onResult: (result: FileSearchResult) => void
   ): void {
-    const workspaceFolder = this.setWorkspaceScope(workspaceDirectory);
+    const workspaceFolders = this.setWorkspaceScope(workspaceDirectory);
     this.fileSearchCts?.cancel();
     this.fileSearchCts?.dispose();
     this.fileSearchCts = new vscode.CancellationTokenSource();
     const token = this.fileSearchCts.token;
-    if (!workspaceFolder) {
+    if (!workspaceFolders) {
       onResult({ requestId, query, files: [] });
       return;
     }
-    this.ensureWorkspaceWatcher(workspaceFolder);
+    this.ensureWorkspaceWatchers(workspaceFolders);
     this.resetWatcherInactivityTimer();
-    void this.executeSearch(requestId, query, limit, workspaceFolder, token, onResult);
+    void this.executeSearch(requestId, query, limit, workspaceFolders, token, onResult);
   }
 
   dispose(): void {
@@ -88,16 +89,23 @@ export class FileSearchService {
   }
 
   private setWorkspaceScope(workspaceDirectory: string | null | undefined) {
-    const folder = workspaceDirectory
+    const openFolders = vscode.workspace.workspaceFolders ?? [];
+    const primaryFolder = workspaceDirectory
       ? vscode.workspace.workspaceFolders?.find((candidate) =>
           isSameWorkspacePath(candidate.uri.fsPath, workspaceDirectory)
         )
       : undefined;
-    const scope = normalizeWorkspaceIdentity(folder?.uri.fsPath);
-    if (scope === this.workspaceScope) return this.workspaceFolder ?? undefined;
+    const scope = primaryFolder
+      ? JSON.stringify(
+          openFolders.map((folder) => [folder.name, normalizeWorkspaceIdentity(folder.uri.fsPath)])
+        )
+      : '';
+    if (scope === this.workspaceScope) {
+      return primaryFolder ? this.workspaceFolders : undefined;
+    }
 
     this.workspaceScope = scope;
-    this.workspaceFolder = folder ?? null;
+    this.workspaceFolders = primaryFolder ? [...openFolders] : [];
     this.fileSearchCts?.cancel();
     this.fileSearchCts?.dispose();
     this.fileSearchCts = null;
@@ -108,21 +116,22 @@ export class FileSearchService {
     }
     this.hasPendingWorkspaceFileCacheClear = false;
     this.clearWorkspaceFileCache();
-    return folder;
+    return primaryFolder ? this.workspaceFolders : undefined;
   }
 
-  private ensureWorkspaceWatcher(workspaceFolder: vscode.WorkspaceFolder) {
-    if (this.workspaceWatcher) return;
-
-    const watcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(workspaceFolder, WORKSPACE_FILE_GLOB),
-      false,
-      true,
-      false
-    );
-    watcher.onDidCreate(() => this.scheduleWorkspaceFileCacheClear());
-    watcher.onDidDelete(() => this.scheduleWorkspaceFileCacheClear());
-    this.workspaceWatcher = watcher;
+  private ensureWorkspaceWatchers(workspaceFolders: readonly vscode.WorkspaceFolder[]) {
+    if (this.workspaceWatchers.length > 0) return;
+    this.workspaceWatchers = workspaceFolders.map((workspaceFolder) => {
+      const watcher = vscode.workspace.createFileSystemWatcher(
+        new vscode.RelativePattern(workspaceFolder, WORKSPACE_FILE_GLOB),
+        false,
+        true,
+        false
+      );
+      watcher.onDidCreate(() => this.scheduleWorkspaceFileCacheClear());
+      watcher.onDidDelete(() => this.scheduleWorkspaceFileCacheClear());
+      return watcher;
+    });
   }
 
   private resetWatcherInactivityTimer() {
@@ -139,8 +148,8 @@ export class FileSearchService {
       clearTimeout(this.watcherInactivityTimer);
       this.watcherInactivityTimer = null;
     }
-    this.workspaceWatcher?.dispose();
-    this.workspaceWatcher = null;
+    for (const watcher of this.workspaceWatchers) watcher.dispose();
+    this.workspaceWatchers = [];
   }
 
   private scheduleWorkspaceFileCacheClear() {
@@ -176,7 +185,7 @@ export class FileSearchService {
     requestId: number,
     query: string,
     limit: number,
-    workspaceFolder: vscode.WorkspaceFolder,
+    workspaceFolders: readonly vscode.WorkspaceFolder[],
     token: vscode.CancellationToken,
     onResult: (result: FileSearchResult) => void
   ): Promise<void> {
@@ -185,7 +194,7 @@ export class FileSearchService {
       let cacheInvalidationRetries = 0;
       while (true) {
         try {
-          files = await this.getWorkspaceFiles(workspaceFolder);
+          files = await this.getWorkspaceFiles(workspaceFolders);
           break;
         } catch (err) {
           if (token.isCancellationRequested) return;
@@ -217,7 +226,7 @@ export class FileSearchService {
   }
 
   private async getWorkspaceFiles(
-    workspaceFolder: vscode.WorkspaceFolder
+    workspaceFolders: readonly vscode.WorkspaceFolder[]
   ): Promise<WorkspaceFileSearchEntry[]> {
     const now = Date.now();
     if (
@@ -229,19 +238,37 @@ export class FileSearchService {
     if (this.workspaceFileCachePromise) return this.workspaceFileCachePromise;
 
     const cacheGeneration = this.workspaceFileCacheGeneration;
-    const promise = Promise.resolve(
-      vscode.workspace.findFiles(
-        new vscode.RelativePattern(workspaceFolder, WORKSPACE_FILE_GLOB),
-        WORKSPACE_FILE_EXCLUDE_GLOB,
-        FileSearchService.MAX_CANDIDATES
+    const promise = Promise.all(
+      workspaceFolders.map((workspaceFolder) =>
+        Promise.resolve(
+          vscode.workspace.findFiles(
+            new vscode.RelativePattern(workspaceFolder, WORKSPACE_FILE_GLOB),
+            WORKSPACE_FILE_EXCLUDE_GLOB,
+            FileSearchService.MAX_CANDIDATES
+          )
+        ).then((files) => files.map((uri) => ({ uri, workspaceFolder })))
       )
     )
-      .then((files) => {
+      .then((fileGroups) => {
         if (cacheGeneration !== this.workspaceFileCacheGeneration) {
           throw new WorkspaceFileCacheInvalidatedError();
         }
-        const entries = files.map((uri) => {
-          const relativePath = getRelativePath(uri, workspaceFolder);
+        const folderContexts = workspaceFolders.map((folder) => ({
+          name: folder.name,
+          path: folder.uri.fsPath,
+        }));
+        const seen = new Set<string>();
+        const entries = fileGroups.flat().flatMap(({ uri, workspaceFolder }) => {
+          const identity = normalizeWorkspaceIdentity(uri.fsPath) ?? uri.fsPath;
+          if (seen.has(identity)) return [];
+          seen.add(identity);
+          const owningFolder = vscode.workspace.getWorkspaceFolder(uri) ?? workspaceFolder;
+          const relativePath =
+            workspaceFolders.length > 1
+              ? `${getWorkspaceFolderLabel(owningFolder.uri.fsPath, folderContexts) ?? owningFolder.name}/${vscode.workspace
+                  .asRelativePath(uri, false)
+                  .replace(/\\/g, '/')}`
+              : getRelativePath(uri, owningFolder);
           return {
             path: uri.fsPath,
             relativePath,

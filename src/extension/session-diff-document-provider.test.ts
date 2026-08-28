@@ -64,7 +64,9 @@ describe('SessionDiffDocumentProvider', () => {
 
     try {
       await expect(provider.open('session/1', '/repo/src/app.ts')).resolves.toBe('opened');
-      expect(server.request).toHaveBeenCalledWith('GET', '/session/session%2F1');
+      expect(server.request).toHaveBeenCalledWith('GET', '/session/session%2F1', undefined, {
+        directory: '/repo',
+      });
       expect(server.request).toHaveBeenCalledWith('GET', '/session/session%2F1/diff');
       expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith(
         'vscode.diff',
@@ -130,7 +132,9 @@ describe('SessionDiffDocumentProvider', () => {
 
     try {
       await expect(provider.open('session-foreign', 'src/app.ts')).resolves.toBe('forbidden');
-      expect(request).toHaveBeenCalledWith('GET', '/session/session-foreign');
+      expect(request).toHaveBeenCalledWith('GET', '/session/session-foreign', undefined, {
+        directory: '/repo',
+      });
       expect(request).not.toHaveBeenCalledWith('GET', '/session/session-foreign/diff');
       expect(vscodeMock.commands.executeCommand).not.toHaveBeenCalled();
     } finally {

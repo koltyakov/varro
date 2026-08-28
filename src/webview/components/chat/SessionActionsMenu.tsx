@@ -172,10 +172,11 @@ export function SessionActionsMenu(props: {
                   role="menuitem"
                   onClick={() => {
                     const sessionId = props.session.id;
+                    const directory = props.session.directory;
                     props.state.close();
                     postMessage({
                       type: 'session/open-in-sidebar',
-                      payload: { sessionId },
+                      payload: { sessionId, directory },
                     });
                   }}
                 >
@@ -189,6 +190,7 @@ export function SessionActionsMenu(props: {
                   onClick={() => {
                     const sessionId = props.session.id;
                     const title = props.session.title;
+                    const directory = props.session.directory;
                     const selectedModel = getSelectedModelForSession(sessionId);
                     const sessionModel = props.session.model
                       ? {
@@ -209,6 +211,7 @@ export function SessionActionsMenu(props: {
                       type: 'session/open-in-editor',
                       payload: {
                         sessionId,
+                        directory,
                         title,
                         model,
                       },
@@ -224,10 +227,11 @@ export function SessionActionsMenu(props: {
                 role="menuitem"
                 onClick={() => {
                   const sessionId = props.session.id;
+                  const directory = props.session.directory;
                   props.state.close();
                   postMessage({
                     type: 'session/open-in-opencode',
-                    payload: { sessionId },
+                    payload: { sessionId, directory },
                   });
                 }}
               >

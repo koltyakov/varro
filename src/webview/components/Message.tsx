@@ -372,7 +372,11 @@ export function Message(props: {
   const [diffs] = createResource(diffRequest, async (requestKey) => {
     const [sessionID, messageID] = requestKey.split('\u0000');
     // SAFETY: The surrounding shape or discriminator check establishes the FileDiff contract used below.
-    return client.session.diff(sessionID!, messageID!).catch(() => [] as FileDiff[]);
+    return client.session
+      .diff(sessionID!, messageID!, {
+        directory: state.sessions.find((session) => session.id === sessionID)?.directory,
+      })
+      .catch(() => [] as FileDiff[]);
   });
   const visibleDiffs = createMemo(() => (diffRequest() ? diffs() || [] : []));
   const compactionDivider = createMemo<CompactionPart | null>(() => {

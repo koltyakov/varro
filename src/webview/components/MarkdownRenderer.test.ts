@@ -840,7 +840,7 @@ describe('MarkdownRenderer', () => {
     expect(container?.querySelector('code a')).toBeNull();
 
     dispatchAnchorClick(link);
-    expect(selectSessionMock).toHaveBeenCalledWith('ses_found123');
+    expect(selectSessionMock).toHaveBeenCalledWith('ses_found123', { directory: '/repo' });
     expect(getDirectSessionReturnId('ses_found123')).toBe('ses_origin123');
   });
 

@@ -120,7 +120,7 @@ export function CompletionMenu(props: {
           const title = 'name' in item ? `/${item.name}` : item.label;
           const detail =
             item.type === 'session'
-              ? formatRelativeAge(item.session.time.updated, Date.now())
+              ? `${item.detail ? `${item.detail} · ` : ''}${formatRelativeAge(item.session.time.updated, Date.now())}`
               : 'description' in item
                 ? item.description
                 : item.detail;
@@ -157,7 +157,7 @@ export function CompletionMenu(props: {
               <CompletionTitle title={title} />
               <span
                 class={`composer-completion-detail${item.type === 'session' ? ' composer-completion-age' : ''}`}
-                title={item.type === 'session' ? undefined : detail}
+                title={item.type === 'session' ? item.session.directory : detail}
               >
                 {detail}
               </span>

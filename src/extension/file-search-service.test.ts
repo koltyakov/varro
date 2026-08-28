@@ -455,12 +455,24 @@ describe('FileSearchService', () => {
     service.dispose();
   });
 
-  it('limits discovery and results to the selected workspace folder', async () => {
+  it('discovers and root-qualifies results from every open workspace folder', async () => {
     vscodeMock.workspace.workspaceFolders = [
       { name: 'repo', uri: { fsPath: '/repo' } },
       { name: 'docs', uri: { fsPath: '/docs' } },
     ];
-    vscodeMock.workspace.findFiles.mockResolvedValue([{ fsPath: '/repo/src/app.ts' }]);
+    vscodeMock.workspace.findFiles.mockImplementation(
+      (pattern: { base: { uri: { fsPath: string } } }) =>
+        Promise.resolve(
+          pattern.base.uri.fsPath === '/repo'
+            ? [{ fsPath: '/repo/src/app.ts' }]
+            : [{ fsPath: '/docs/guide.md' }]
+        )
+    );
+    vscodeMock.workspace.getWorkspaceFolder.mockImplementation((uri: { fsPath: string }) =>
+      vscodeMock.workspace.workspaceFolders.find((folder) =>
+        uri.fsPath.startsWith(folder.uri.fsPath)
+      )
+    );
     vscodeMock.workspace.asRelativePath.mockImplementation((uri: { fsPath: string }) => {
       if (uri.fsPath.startsWith('/repo/')) return uri.fsPath.replace('/repo/', '');
       if (uri.fsPath.startsWith('/docs/')) return uri.fsPath.replace('/docs/', '');
@@ -476,11 +488,13 @@ describe('FileSearchService', () => {
       expect(onResult).toHaveBeenCalledTimes(1);
     });
 
-    expect(vscodeMock.workspace.getWorkspaceFolder).not.toHaveBeenCalled();
     expect(onResult).toHaveBeenCalledWith({
       requestId: 1,
       query: '',
-      files: [{ path: '/repo/src/app.ts', relativePath: 'repo/src/app.ts', type: 'file' }],
+      files: [
+        { path: '/docs/guide.md', relativePath: 'docs/guide.md', type: 'file' },
+        { path: '/repo/src/app.ts', relativePath: 'repo/src/app.ts', type: 'file' },
+      ],
     });
     expect(vscodeMock.workspace.findFiles).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -492,13 +506,18 @@ describe('FileSearchService', () => {
     );
   });
 
-  it('clears its cache and recreates its watcher when the workspace changes', async () => {
+  it('keeps the shared workspace cache when only the primary directory changes', async () => {
     const repo = vscodeMock.workspaceFolder;
     const docs = { name: 'docs', uri: { fsPath: '/docs' } };
     vscodeMock.workspace.workspaceFolders = [repo, docs];
     vscodeMock.workspace.findFiles
       .mockResolvedValueOnce([{ fsPath: '/repo/src/app.ts' }])
       .mockResolvedValueOnce([{ fsPath: '/docs/guide.md' }]);
+    vscodeMock.workspace.getWorkspaceFolder.mockImplementation((uri: { fsPath: string }) =>
+      vscodeMock.workspace.workspaceFolders.find((folder) =>
+        uri.fsPath.startsWith(folder.uri.fsPath)
+      )
+    );
     vscodeMock.workspace.asRelativePath.mockImplementation((uri: { fsPath: string }) =>
       uri.fsPath.replace(/^\/(?:repo|docs)\//, '')
     );
@@ -517,7 +536,10 @@ describe('FileSearchService', () => {
     expect(docsResult).toHaveBeenCalledWith({
       requestId: 2,
       query: '',
-      files: [{ path: '/docs/guide.md', relativePath: 'docs/guide.md', type: 'file' }],
+      files: [
+        { path: '/docs/guide.md', relativePath: 'docs/guide.md', type: 'file' },
+        { path: '/repo/src/app.ts', relativePath: 'repo/src/app.ts', type: 'file' },
+      ],
     });
   });
 

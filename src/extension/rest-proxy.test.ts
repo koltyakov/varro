@@ -41,6 +41,7 @@ import { HiddenSessionManager } from './hidden-session-manager';
 import { QueuedMessageStore } from './queued-message-store';
 import { SessionStateManager } from './session-state-manager';
 import type { Persistence } from '../shared/persistence';
+import type { RecycleBinEntry } from '../shared/protocol';
 
 type SanitizedMessageResponse = {
   id: number;
@@ -61,6 +62,10 @@ function deferred<T>() {
 }
 
 const allViewsEligible = () => true;
+
+function withSignal(options: Record<string, unknown> = {}) {
+  return { ...options, signal: expect.any(AbortSignal) };
+}
 
 function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxyCallbacks {
   return {
@@ -92,6 +97,7 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
         })
       ),
     },
+    activateSession: vi.fn(() => Promise.resolve()),
     sessionState: {
       handleServerEvent: vi.fn(),
       getSessionWorkspaceMatch: vi.fn(() => true),
@@ -165,6 +171,28 @@ function createProxy(overrides: Partial<RestProxyCallbacks> = {}) {
 
 function makePayload(id: number, method: string, path: string, body?: unknown) {
   return { id, method, path, body };
+}
+
+function recycleBinEntry(
+  rootID: string,
+  directory: string,
+  sessionIDs: string[] = [rootID]
+): RecycleBinEntry {
+  const session = (id: string) => ({
+    id,
+    projectID: 'project-1',
+    directory,
+    title: id,
+    version: '1',
+    time: { created: 1, updated: 2 },
+  });
+  return {
+    rootID,
+    deletedAt: 1,
+    expiresAt: 2,
+    root: session(rootID),
+    sessions: sessionIDs.map(session),
+  };
 }
 
 function makeSessionMessage(messageID: string, partID: string, sessionID = 's1') {
@@ -453,9 +481,12 @@ describe('RestProxy handleRequest', () => {
     cleanup.resolve();
     await request;
 
-    expect(serverRequest).toHaveBeenCalledWith('GET', '/config/providers', undefined, {
-      directory: '/repo-a',
-    });
+    expect(serverRequest).toHaveBeenCalledWith(
+      'GET',
+      '/config/providers',
+      undefined,
+      withSignal({ directory: '/repo-a' })
+    );
   });
 
   it('returns error for disallowed API request', async () => {
@@ -515,7 +546,8 @@ describe('RestProxy handleRequest', () => {
     expect(serverRequest).toHaveBeenCalledWith(
       'DELETE',
       '/session/session-1/share?directory=%2Frepo',
-      undefined
+      undefined,
+      withSignal({ directory: '/repo' })
     );
     expect(callbacks.sessionTrash.moveToTrash).not.toHaveBeenCalled();
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 7, data: response });
@@ -632,7 +664,7 @@ describe('RestProxy handleRequest', () => {
 
     expect(serverRequest.mock.calls).toEqual([
       ['GET', '/session/session%20one?directory=C%3A%5CUsers%5CAndrew%5CProjects%5CVarro'],
-      ['GET', '/session/session%20one/message', undefined],
+      ['GET', '/session/session%20one/message', undefined, withSignal()],
     ]);
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 93, data: [] });
   });
@@ -663,7 +695,8 @@ describe('RestProxy handleRequest', () => {
     expect(serverRequest).toHaveBeenCalledWith(
       'POST',
       '/session/session-b/prompt_async?directory=%2Frepo-b',
-      { parts: [] }
+      { parts: [] },
+      withSignal({ directory: '/repo-b' })
     );
   });
 
@@ -705,11 +738,96 @@ describe('RestProxy handleRequest', () => {
       'POST',
       '/session/session-a/prompt_async?directory=%2Frepo-a',
       { messageID: 'message-932', parts: [] },
-      { directory: '/repo-a' }
+      withSignal({ directory: '/repo-a' })
     );
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 932,
       data: { ok: true },
+    });
+  });
+
+  it('cancels a sibling-root request when that workspace folder closes', async () => {
+    const promptStarted = deferred<void>();
+    const serverRequest = vi.fn(
+      (_method: string, path: string, _body: unknown, options?: { signal?: AbortSignal }) => {
+        if (path !== '/session/session-b/prompt_async?directory=%2Frepo-b') {
+          throw new Error(`Unexpected path: ${path}`);
+        }
+        promptStarted.resolve();
+        return new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener('abort', () => reject(options.signal?.reason), {
+            once: true,
+          });
+        });
+      }
+    );
+    const { proxy, callbacks } = createProxy({
+      getWorkspacePath: () => '/repo-a',
+      contextProvider: {
+        ...createCallbacks().contextProvider,
+        context: {
+          workspacePath: '/repo-a',
+          workspaceFolders: [
+            { name: 'repo-a', path: '/repo-a' },
+            { name: 'repo-b', path: '/repo-b' },
+          ],
+          activeFile: null,
+          selection: null,
+          diagnostics: [],
+        },
+        getOpenWorkspaceRoot: vi.fn((path: string) =>
+          path === '/repo-a' || path === '/repo-b' ? path : null
+        ),
+      } as never,
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    const request = proxy.handleRequest(
+      makePayload(933, 'POST', '/session/session-b/prompt_async?directory=%2Frepo-b', {
+        parts: [],
+      })
+    );
+    await promptStarted.promise;
+    proxy.cancelRequestsOutsideDirectories(['/repo-a']);
+    await request;
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 933,
+      error: 'Workspace folder was removed',
+    });
+  });
+
+  it('rejects sibling-root overrides for non-session snapshots before forwarding', async () => {
+    const serverRequest = vi.fn();
+    const { proxy, callbacks } = createProxy({
+      getWorkspacePath: () => '/repo-a',
+      contextProvider: {
+        ...createCallbacks().contextProvider,
+        context: {
+          workspacePath: '/repo-a',
+          workspaceFolders: [
+            { name: 'repo-a', path: '/repo-a' },
+            { name: 'repo-b', path: '/repo-b' },
+          ],
+          activeFile: null,
+          selection: null,
+          diagnostics: [],
+        },
+        getOpenWorkspaceRoot: vi.fn((path: string) =>
+          path === '/repo-a' || path === '/repo-b' ? path : null
+        ),
+      } as never,
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(
+      makePayload(934, 'GET', '/varro/workspace-file?path=README.md&directory=%2Frepo-b')
+    );
+
+    expect(serverRequest).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 934,
+      error: 'Unsupported API request',
     });
   });
 
@@ -749,7 +867,8 @@ describe('RestProxy handleRequest', () => {
     expect(serverRequest).toHaveBeenCalledWith(
       'POST',
       '/session?directory=C%3A%5CProjects%5CVarro',
-      {}
+      {},
+      withSignal({ directory: 'C:\\Projects\\Varro' })
     );
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 941,
@@ -780,8 +899,13 @@ describe('RestProxy handleRequest', () => {
     );
 
     expect(serverRequest.mock.calls).toEqual([
-      ['GET', '/session/session-a?directory=%2Frepo'],
-      ['POST', '/session/session-a/prompt_async?directory=%2Frepo', { parts: [] }],
+      ['GET', '/session/session-a?directory=%2Frepo', undefined, { directory: '/repo' }],
+      [
+        'POST',
+        '/session/session-a/prompt_async?directory=%2Frepo',
+        { parts: [] },
+        withSignal({ directory: '/repo' }),
+      ],
     ]);
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 95,
@@ -790,9 +914,9 @@ describe('RestProxy handleRequest', () => {
   });
 
   it.each(['prompt_async', 'share'])(
-    'rejects a direct %s request whose explicit directory differs from the selected root',
+    'rejects a direct %s request when the session does not belong to its explicit open root',
     async (route) => {
-      const serverRequest = vi.fn();
+      const serverRequest = vi.fn(() => Promise.resolve({ id: 'session-a', directory: '/repo-a' }));
       const { proxy, callbacks } = createProxy({
         server: { ...createCallbacks().server, request: serverRequest } as never,
         sessionState: {
@@ -805,7 +929,12 @@ describe('RestProxy handleRequest', () => {
         makePayload(96, 'POST', `/session/session-a/${route}?directory=%2Frepo-b`)
       );
 
-      expect(serverRequest).not.toHaveBeenCalled();
+      expect(serverRequest).toHaveBeenCalledWith(
+        'GET',
+        '/session/session-a?directory=%2Frepo-b',
+        undefined,
+        { directory: '/repo-b' }
+      );
       expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
         id: 96,
         error: '404 Session not found',
@@ -813,8 +942,25 @@ describe('RestProxy handleRequest', () => {
     }
   );
 
+  it('activates a session in another open root before changing endpoint scope', async () => {
+    const activateSession = vi.fn(() => Promise.resolve({ id: 'session-b', directory: '/repo-b' }));
+    const { proxy, callbacks } = createProxy({ activateSession });
+
+    await proxy.handleRequest(
+      makePayload(97, 'POST', '/varro/session/session-b/activate', {
+        directory: '/repo-b',
+      })
+    );
+
+    expect(activateSession).toHaveBeenCalledWith('session-b', '/repo-b', expect.any(AbortSignal));
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 97,
+      data: { id: 'session-b', directory: '/repo-b' },
+    });
+  });
+
   it('routes recycle bin list request', async () => {
-    const trashList = [{ rootID: 'abc' }];
+    const trashList = [recycleBinEntry('abc', '/repo')];
     const { proxy, callbacks } = createProxy({
       sessionTrash: {
         ...createCallbacks().sessionTrash,
@@ -822,16 +968,19 @@ describe('RestProxy handleRequest', () => {
       } as never,
     });
     await proxy.handleRequest(makePayload(2, 'GET', '/varro/session-trash'));
-    expect(callbacks.sessionTrash.list).toHaveBeenCalledWith('/repo');
+    expect(callbacks.sessionTrash.list).toHaveBeenCalledWith();
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 2, data: trashList });
   });
 
   it('routes recycle bin empty request', async () => {
     const empty = vi.fn(
-      async (deleteSession: (session: { id: string; directory?: string }) => Promise<unknown>) => {
-        await deleteSession({ id: 's1', directory: '/repo/a' });
-        await deleteSession({ id: 's2', directory: '/repo/b' });
-        return [{ sessions: [{ id: 's1' }, { id: 's2' }] } as never];
+      async (
+        deleteSession: (session: { id: string; directory?: string }) => Promise<unknown>,
+        directory: string
+      ) => {
+        const id = directory === '/repo/a' ? 's1' : 's2';
+        await deleteSession({ id, directory });
+        return [{ sessions: [{ id }] } as never];
       }
     );
     const serverRequest = vi.fn(() => Promise.resolve(true));
@@ -843,10 +992,12 @@ describe('RestProxy handleRequest', () => {
       sessionTrash: {
         ...createCallbacks().sessionTrash,
         empty,
+        list: vi.fn(() => [recycleBinEntry('s1', '/repo/a'), recycleBinEntry('s2', '/repo/b')]),
       } as never,
     });
     await proxy.handleRequest(makePayload(3, 'DELETE', '/varro/session-trash'));
-    expect(callbacks.sessionTrash.empty).toHaveBeenCalledWith(expect.any(Function), '/repo');
+    expect(callbacks.sessionTrash.empty).toHaveBeenCalledWith(expect.any(Function), '/repo/a');
+    expect(callbacks.sessionTrash.empty).toHaveBeenCalledWith(expect.any(Function), '/repo/b');
     expect(serverRequest.mock.calls).toEqual([
       ['DELETE', '/session/s1?directory=%2Frepo%2Fa'],
       ['DELETE', '/session/s2?directory=%2Frepo%2Fb'],
@@ -860,6 +1011,7 @@ describe('RestProxy handleRequest', () => {
       sessionTrash: {
         ...createCallbacks().sessionTrash,
         restore: vi.fn(() => Promise.resolve(restored)),
+        list: vi.fn(() => [recycleBinEntry('abc', '/repo')]),
       } as never,
     });
     await proxy.handleRequest(makePayload(4, 'POST', '/varro/session-trash/abc/restore'));
@@ -888,6 +1040,7 @@ describe('RestProxy handleRequest', () => {
       sessionTrash: {
         ...createCallbacks().sessionTrash,
         deletePermanently,
+        list: vi.fn(() => [recycleBinEntry('abc', '/repo', ['s1', 's2'])]),
       } as never,
     });
     await proxy.handleRequest(makePayload(5, 'DELETE', '/varro/session-trash/abc/delete'));
@@ -929,6 +1082,7 @@ describe('RestProxy handleRequest', () => {
       sessionTrash: {
         ...createCallbacks().sessionTrash,
         deletePermanently,
+        list: vi.fn(() => [recycleBinEntry('legacy-1', '/repo')]),
       } as never,
     });
     await proxy.handleRequest(makePayload(6, 'DELETE', '/varro/session-trash/legacy-1/delete'));
@@ -958,6 +1112,7 @@ describe('RestProxy handleRequest', () => {
       sessionTrash: {
         ...createCallbacks().sessionTrash,
         deletePermanently,
+        list: vi.fn(() => [recycleBinEntry('busy-1', '/repo')]),
       } as never,
     });
     await proxy.handleRequest(makePayload(7, 'DELETE', '/varro/session-trash/busy-1/delete'));
@@ -1001,6 +1156,7 @@ describe('RestProxy handleRequest', () => {
     );
 
     expect(callbacks.contextProvider.resolvePath).toHaveBeenCalledWith('src/foo.ts', {
+      allowSiblingWorkspaceFolders: true,
       restrictToWorkspace: true,
       workspaceDirectory: '/repo',
     });
@@ -1175,7 +1331,13 @@ describe('RestProxy handleRequest', () => {
   });
 
   it('does not apply permission leases to unrelated API requests', async () => {
-    const serverRequest = vi.fn(() => Promise.resolve({ ok: true }));
+    const serverRequest = vi.fn((_method: string, path: string) =>
+      Promise.resolve(
+        path === '/session/status'
+          ? { 'session-1': { type: 'idle' } }
+          : [{ id: 'session-1', directory: '/repo' }]
+      )
+    );
     const { proxy, callbacks } = createProxy({
       server: { ...createCallbacks().server, request: serverRequest } as never,
       isPermissionAutomationLeaseCurrent: vi.fn(() => false),
@@ -1186,10 +1348,15 @@ describe('RestProxy handleRequest', () => {
       permissionAutomationLease: 7,
     });
 
-    expect(serverRequest).toHaveBeenCalledWith('GET', '/session/status', undefined);
+    expect(serverRequest).toHaveBeenCalledWith(
+      'GET',
+      '/session/status',
+      undefined,
+      withSignal({ directory: '/repo' })
+    );
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 88,
-      data: { ok: true },
+      data: { 'session-1': { type: 'idle' } },
     });
   });
 
@@ -1206,7 +1373,7 @@ describe('RestProxy handleRequest', () => {
       makePayload(85, 'POST', '/varro/session/session-1/permission-mode', { mode: 'edits' })
     );
 
-    expect(callbacks.updatePermissionMode).toHaveBeenCalledWith('session-1', 'edits');
+    expect(callbacks.updatePermissionMode).toHaveBeenCalledWith('session-1', 'edits', '/repo');
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 85, data: session });
   });
 
@@ -1390,7 +1557,7 @@ describe('RestProxy handleRequest', () => {
     await proxy.handleRequest(makePayload(82, 'GET', '/varro/session/session-1/diff-summary'));
 
     expect(serverRequest.mock.calls).toEqual([
-      ['GET', '/session/session-1/diff'],
+      ['GET', '/session/session-1/diff', undefined, { directory: '/repo' }],
       [
         'GET',
         '/session/session-1/message',
@@ -1399,11 +1566,12 @@ describe('RestProxy handleRequest', () => {
           maxResponseBytes: 256 * 1024 * 1024,
           maxProjectedResponseBytes: 16 * 1024 * 1024,
           stripSummaryDiffs: true,
+          directory: '/repo',
         },
       ],
-      ['GET', '/session?limit=1000000'],
-      ['GET', '/session/child-1/message'],
-      ['GET', '/session/grandchild-1/message'],
+      ['GET', '/session?limit=1000000', undefined, { directory: '/repo' }],
+      ['GET', '/session/child-1/message', undefined, { directory: '/repo' }],
+      ['GET', '/session/grandchild-1/message', undefined, { directory: '/repo' }],
     ]);
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 82,
@@ -1498,7 +1666,9 @@ describe('RestProxy handleRequest', () => {
 
     await proxy.handleRequest(makePayload(821, 'GET', '/varro/session/session-1/diff-summary'));
 
-    expect(serverRequest).toHaveBeenCalledWith('GET', '/session?limit=1000000');
+    expect(serverRequest).toHaveBeenCalledWith('GET', '/session?limit=1000000', undefined, {
+      directory: '/repo',
+    });
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 821,
       data: expect.objectContaining({
@@ -1834,8 +2004,20 @@ describe('RestProxy handleRequest', () => {
 
     await proxy.handleRequest(makePayload(901, 'GET', '/model/default'));
 
-    expect(serverRequest).toHaveBeenNthCalledWith(1, 'GET', '/model/default');
-    expect(serverRequest).toHaveBeenNthCalledWith(2, 'GET', '/config?directory=%2Frepo');
+    expect(serverRequest).toHaveBeenNthCalledWith(
+      1,
+      'GET',
+      '/model/default',
+      undefined,
+      withSignal()
+    );
+    expect(serverRequest).toHaveBeenNthCalledWith(
+      2,
+      'GET',
+      '/config?directory=%2Frepo',
+      undefined,
+      withSignal()
+    );
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 901,
       data: { providerID: 'openai', modelID: 'gpt-5.6-sol' },
@@ -1901,7 +2083,9 @@ describe('RestProxy handleRequest', () => {
       } as never,
     });
     await proxy.handleRequest(makePayload(11, 'DELETE', '/session/some-id'));
-    expect(serverRequest).toHaveBeenCalledWith('GET', '/session?limit=1000000');
+    expect(serverRequest).toHaveBeenCalledWith('GET', '/session?limit=1000000', undefined, {
+      directory: '/repo',
+    });
     expect(callbacks.sessionTrash.moveToTrash).toHaveBeenCalledWith('some-id', []);
     expect(callbacks.removeSessionImages).toHaveBeenCalledWith(['s1']);
     expect(callbacks.sessionState.removeSessions).toHaveBeenCalledWith(['s1']);
@@ -1911,7 +2095,7 @@ describe('RestProxy handleRequest', () => {
   it('routes varro permanent delete directly to the server without recycle bin', async () => {
     const serverRequest = vi
       .fn()
-      .mockResolvedValueOnce({ id: 'some-id', directory: '/repo/archive' })
+      .mockResolvedValueOnce({ id: 'some-id', directory: '/repo' })
       .mockResolvedValueOnce(true);
     const { proxy, callbacks } = createProxy({
       server: {
@@ -1924,7 +2108,7 @@ describe('RestProxy handleRequest', () => {
 
     expect(serverRequest.mock.calls).toEqual([
       ['GET', '/session/some-id'],
-      ['DELETE', '/session/some-id?directory=%2Frepo%2Farchive'],
+      ['DELETE', '/session/some-id?directory=%2Frepo'],
     ]);
     expect(callbacks.sessionTrash.moveToTrash).not.toHaveBeenCalled();
     expect(callbacks.removeSessionImages).toHaveBeenCalledWith(['some-id']);
@@ -1957,7 +2141,9 @@ describe('RestProxy handleRequest', () => {
 
     await proxy.handleRequest(makePayload(12, 'DELETE', '/session/some-id'));
 
-    expect(serverRequest).toHaveBeenCalledWith('GET', '/session?limit=1000000');
+    expect(serverRequest).toHaveBeenCalledWith('GET', '/session?limit=1000000', undefined, {
+      directory: 'C:\\Users\\Andrew\\Projects\\Varro',
+    });
     expect(callbacks.sessionTrash.moveToTrash).toHaveBeenCalledWith('some-id', []);
   });
 
@@ -1996,7 +2182,7 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.ensureServerStarted).not.toHaveBeenCalled();
   });
 
-  it('forwards passthrough requests to server', async () => {
+  it('loads the full session catalog for an unpaginated workspace request', async () => {
     const serverData = [{ id: 's1', directory: '/repo' }];
     const serverRequest = vi.fn(() => Promise.resolve(serverData));
     const { proxy, callbacks } = createProxy({
@@ -2006,7 +2192,12 @@ describe('RestProxy handleRequest', () => {
       } as never,
     });
     await proxy.handleRequest(makePayload(15, 'GET', '/session'));
-    expect(serverRequest).toHaveBeenCalledWith('GET', '/session', undefined);
+    expect(serverRequest).toHaveBeenCalledWith(
+      'GET',
+      '/session?limit=1000000',
+      undefined,
+      withSignal({ directory: '/repo' })
+    );
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 15,
       data: serverData,
@@ -2026,7 +2217,12 @@ describe('RestProxy handleRequest', () => {
 
     await proxy.handleRequest(makePayload(151, 'GET', '/session?limit=2'));
 
-    expect(serverRequest).toHaveBeenCalledWith('GET', '/session?limit=3', undefined);
+    expect(serverRequest).toHaveBeenCalledWith(
+      'GET',
+      '/session?limit=3',
+      undefined,
+      withSignal({ directory: '/repo' })
+    );
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 151,
       data: {
@@ -2090,7 +2286,8 @@ describe('RestProxy handleRequest', () => {
     expect(serverRequest).toHaveBeenCalledWith(
       'GET',
       '/session?limit=31&search=dark+mode&roots=true',
-      undefined
+      undefined,
+      withSignal({ directory: '/repo' })
     );
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 1511,
@@ -2107,7 +2304,7 @@ describe('RestProxy handleRequest', () => {
         return Promise.resolve({ foreign: { type: 'busy' } });
       }
       if (path === '/session?limit=1000000') {
-        return Promise.resolve([{ id: 'foreign', directory: '/other' }]);
+        return Promise.resolve([]);
       }
       return Promise.resolve(undefined);
     });
@@ -2124,7 +2321,12 @@ describe('RestProxy handleRequest', () => {
     );
     await proxy.handleRequest(makePayload(1513, 'GET', '/session/status'));
 
-    expect(serverRequest).toHaveBeenCalledWith('GET', '/session?limit=1000000');
+    expect(serverRequest).toHaveBeenCalledWith(
+      'GET',
+      '/session?limit=1000000',
+      undefined,
+      withSignal({ directory: '/repo' })
+    );
     expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
       id: 1513,
       data: {},
@@ -2161,9 +2363,7 @@ describe('RestProxy handleRequest', () => {
       if (path === '/session/status') {
         return Promise.resolve({ 'foreign-old': { type: 'busy' } });
       }
-      if (path === '/session?limit=1000000') {
-        return Promise.resolve([{ id: 'foreign-old', directory: '/other' }]);
-      }
+      if (path === '/session?limit=1000000') return Promise.resolve([]);
       return Promise.resolve(undefined);
     });
     const { proxy, callbacks } = createProxy({
@@ -2177,11 +2377,21 @@ describe('RestProxy handleRequest', () => {
     await proxy.handleRequest(makePayload(152, 'GET', '/session?limit=2'));
     const partialRequest = proxy.handleRequest(makePayload(153, 'GET', '/session?limit=1'));
     await vi.waitFor(() => {
-      expect(serverRequest).toHaveBeenCalledWith('GET', '/session?limit=2', undefined);
+      expect(serverRequest).toHaveBeenCalledWith(
+        'GET',
+        '/session?limit=2',
+        undefined,
+        withSignal({ directory: '/repo' })
+      );
     });
     await proxy.handleRequest(makePayload(154, 'GET', '/session/status'));
 
-    expect(serverRequest).toHaveBeenCalledWith('GET', '/session?limit=1000000');
+    expect(serverRequest).toHaveBeenCalledWith(
+      'GET',
+      '/session?limit=1000000',
+      undefined,
+      withSignal({ directory: '/repo' })
+    );
     expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
       id: 154,
       data: {},
@@ -2209,7 +2419,7 @@ describe('RestProxy handleRequest', () => {
       } as never,
     });
     await proxy.handleRequest(makePayload(16, 'GET', '/session'));
-    expect(filterVisible).toHaveBeenCalledWith(sessions);
+    expect(filterVisible).toHaveBeenCalledWith([sessions[1], sessions[0]]);
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 16, data: filtered });
   });
 
@@ -2246,12 +2456,16 @@ describe('RestProxy handleRequest', () => {
       data: { items: [sessions[0]], hasMore: false },
     });
     await vi.waitFor(() => {
-      expect(serverRequest).toHaveBeenCalledWith('DELETE', '/session/legacy-judge');
-      expect(serverRequest).toHaveBeenCalledWith('DELETE', '/session/marked-judge');
+      expect(serverRequest).toHaveBeenCalledWith('DELETE', '/session/legacy-judge', undefined, {
+        directory: '/repo',
+      });
+      expect(serverRequest).toHaveBeenCalledWith('DELETE', '/session/marked-judge', undefined, {
+        directory: '/repo',
+      });
     });
   });
 
-  it('filters session list to the exact current workspace directory', async () => {
+  it('rejects a session list containing entries outside its requested root', async () => {
     const sessions = [
       { id: 'root', directory: '/repo' },
       { id: 'nested', directory: '/repo/project-a' },
@@ -2264,18 +2478,15 @@ describe('RestProxy handleRequest', () => {
 
     await proxy.handleRequest(makePayload(116, 'GET', '/session'));
 
-    expect(callbacks.sessionState.handleServerEvent).toHaveBeenCalledTimes(3);
+    expect(callbacks.sessionState.handleServerEvent).not.toHaveBeenCalled();
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 116,
-      data: [{ id: 'root', directory: '/repo' }],
+      error: 'OpenCode returned a session outside workspace root /repo',
     });
   });
 
   it('filters UNC sessions using case-insensitive Windows identity', async () => {
-    const sessions = [
-      { id: 'same', directory: '//buildserver/PROJECTS/varro/' },
-      { id: 'other', directory: '//buildserver/Projects/other' },
-    ];
+    const sessions = [{ id: 'same', directory: '//buildserver/PROJECTS/varro/' }];
     const { proxy, callbacks } = createProxy({
       contextProvider: {
         ...createCallbacks().contextProvider,
@@ -2394,12 +2605,17 @@ describe('RestProxy handleRequest', () => {
 
     await proxy.handleRequest(makePayload(117, 'GET', '/session/s1/message?limit=200'));
 
-    expect(serverRequest).toHaveBeenCalledWith('GET', '/session/s1/message?limit=200', undefined, {
-      captureNextCursor: true,
-      maxResponseBytes: 256 * 1024 * 1024,
-      maxProjectedResponseBytes: 16 * 1024 * 1024,
-      stripSummaryDiffs: true,
-    });
+    expect(serverRequest).toHaveBeenCalledWith(
+      'GET',
+      '/session/s1/message?limit=200',
+      undefined,
+      withSignal({
+        captureNextCursor: true,
+        maxResponseBytes: 256 * 1024 * 1024,
+        maxProjectedResponseBytes: 16 * 1024 * 1024,
+        stripSummaryDiffs: true,
+      })
+    );
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 117,
       data: { items: messages, nextCursor: 'cursor-2' },
@@ -2423,12 +2639,12 @@ describe('RestProxy handleRequest', () => {
       'GET',
       '/session/s1/message?limit=20',
       undefined,
-      {
+      withSignal({
         captureNextCursor: true,
         maxResponseBytes: 256 * 1024 * 1024,
         maxProjectedResponseBytes: 16 * 1024 * 1024,
         stripSummaryDiffs: true,
-      }
+      })
     );
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 118,
@@ -2454,12 +2670,12 @@ describe('RestProxy handleRequest', () => {
       'GET',
       '/session/s1/message?limit=20&before=cursor-3',
       undefined,
-      {
+      withSignal({
         captureNextCursor: true,
         maxResponseBytes: 256 * 1024 * 1024,
         maxProjectedResponseBytes: 16 * 1024 * 1024,
         stripSummaryDiffs: true,
-      }
+      })
     );
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 119,
@@ -2575,67 +2791,47 @@ describe('RestProxy handleRequest', () => {
   it('filters session status responses through sessionTrash', async () => {
     const statuses = { s1: { state: 'active' }, s2: { state: 'idle' } };
     const filtered = { s1: { state: 'active' } };
-    const serverRequest = vi.fn(() => Promise.resolve(statuses));
-    const filterStatuses = vi.fn(() => filtered);
+    const sessions = [
+      { id: 's1', directory: '/repo' },
+      { id: 's2', directory: '/repo' },
+    ];
+    const serverRequest = vi.fn((_method: string, path: string) =>
+      Promise.resolve(path === '/session/status' ? statuses : sessions)
+    );
+    const filterSessions = vi.fn(() => [sessions[0]]);
     const { proxy, callbacks } = createProxy({
       server: { ...createCallbacks().server, request: serverRequest } as never,
       sessionTrash: {
         ...createCallbacks().sessionTrash,
-        filterVisibleSessionStatuses: filterStatuses,
+        filterVisibleSessions: filterSessions,
       } as never,
     });
     await proxy.handleRequest(makePayload(22, 'GET', '/session/status'));
-    expect(filterStatuses).toHaveBeenCalledWith(statuses);
+    expect(filterSessions).toHaveBeenCalledWith(sessions);
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 22, data: filtered });
   });
 
-  it.each([
-    [
-      '/session/status',
-      { local: { type: 'busy' }, foreign: { type: 'idle' } },
-      { local: { type: 'busy' } },
-    ],
-    ['/question', [{ sessionID: 'local' }, { sessionID: 'foreign' }], [{ sessionID: 'local' }]],
-    ['/permission', [{ sessionID: 'local' }, { sessionID: 'foreign' }], [{ sessionID: 'local' }]],
-  ])(
-    'reconciles unknown workspace metadata with a concurrent session bootstrap for %s',
-    async (path, bulkResponse, expected) => {
-      const sessionList = deferred<unknown[]>();
-      const serverRequest = vi.fn(async (_method: string, requestPath: string) => {
-        if (requestPath === '/session') return sessionList.promise;
-        if (requestPath === path) return bulkResponse;
-        throw new Error(`Unexpected path: ${requestPath}`);
-      });
+  it.each(['/question', '/permission'])(
+    'filters %s snapshots to sessions in the endpoint directory',
+    async (path) => {
+      const local = { sessionID: 'local' };
+      const foreign = { sessionID: 'foreign' };
+      const serverRequest = vi.fn(() => Promise.resolve([local, foreign]));
       const { proxy, callbacks } = createProxy({
         server: { ...createCallbacks().server, request: serverRequest } as never,
         sessionState: {
           ...createCallbacks().sessionState,
-          getSessionWorkspaceMatch: vi.fn(() => undefined),
-          isSessionInWorkspace: vi.fn(() => false),
+          getSessionWorkspaceMatch: vi.fn((sessionID: string) => sessionID === 'local'),
+          isSessionInWorkspace: vi.fn((sessionID: string) => sessionID === 'local'),
         } as never,
       });
 
-      const bootstrap = proxy.handleRequest(makePayload(220, 'GET', '/session'));
-      await vi.waitFor(() =>
-        expect(serverRequest).toHaveBeenCalledWith('GET', '/session', undefined)
-      );
-      const bulk = proxy.handleRequest(makePayload(221, 'GET', path));
-      await Promise.resolve();
-      expect(callbacks.postApiResponse).not.toHaveBeenCalledWith(
-        1,
-        expect.objectContaining({ id: 221 })
-      );
+      await proxy.handleRequest(makePayload(221, 'GET', path));
 
-      sessionList.resolve([
-        { id: 'local', directory: '/repo' },
-        { id: 'foreign', directory: '/other' },
-      ]);
-      await Promise.all([bootstrap, bulk]);
-
-      expect(
-        serverRequest.mock.calls.filter(([, requestPath]) => requestPath === '/session')
-      ).toHaveLength(1);
-      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 221, data: expected });
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+        id: 221,
+        data: [local],
+      });
     }
   );
 
@@ -2689,7 +2885,7 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 223, data: [] });
   });
 
-  it('uses the authoritative session snapshot after bounded metadata evicts old sessions', async () => {
+  it('uses each root session snapshot to filter aggregate statuses', async () => {
     const manager = new SessionStateManager(
       {
         get: vi.fn(),
@@ -2699,19 +2895,16 @@ describe('RestProxy handleRequest', () => {
       { onStatusChange: vi.fn() },
       { shouldShow: () => false }
     );
-    const sessions = [
-      { id: 'foreign', directory: '/other' },
-      ...Array.from({ length: 251 }, (_, index) => ({
-        id: `local-${index}`,
-        directory: '/repo',
-      })),
-    ];
+    const sessions = Array.from({ length: 251 }, (_, index) => ({
+      id: `local-${index}`,
+      directory: '/repo',
+    }));
     const statuses = {
       foreign: { type: 'idle' },
       'local-0': { type: 'busy' },
     };
     const serverRequest = vi.fn(async (_method: string, path: string) => {
-      if (path === '/session') return sessions;
+      if (path === '/session?limit=1000000') return sessions;
       if (path === '/session/status') return statuses;
       throw new Error(`Unexpected path: ${path}`);
     });
@@ -2731,13 +2924,120 @@ describe('RestProxy handleRequest', () => {
 
     await proxy.handleRequest(makePayload(222, 'GET', '/session'));
     expect(manager.getSessionWorkspaceMatch('local-0', '/repo')).toBeUndefined();
-    expect(manager.getSessionWorkspaceMatch('foreign', '/repo')).toBeUndefined();
     await proxy.handleRequest(makePayload(223, 'GET', '/session/status'));
 
-    expect(serverRequest.mock.calls.filter(([, path]) => path === '/session')).toHaveLength(1);
+    expect(
+      serverRequest.mock.calls.filter(([, path]) => path === '/session?limit=1000000')
+    ).toHaveLength(2);
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 223,
       data: { 'local-0': { type: 'busy' } },
+    });
+  });
+
+  it('sanitizes sibling-root catalog sessions and statuses', async () => {
+    const localSession = {
+      id: 'local',
+      directory: '/repo-a',
+      permission: { edit: 'allow' },
+      revert: { messageID: 'message-local' },
+      metadata: { secret: true },
+      path: { cwd: '/repo-a', root: '/repo-a' },
+      summary: {
+        additions: 1,
+        deletions: 2,
+        files: 1,
+        diffs: [{ file: 'local.ts', before: '', after: 'secret' }],
+      },
+    };
+    const siblingSession = {
+      id: 'sibling',
+      directory: '/repo-b',
+      permission: { edit: 'allow' },
+      revert: { messageID: 'message-sibling' },
+      metadata: { secret: true },
+      path: { cwd: '/repo-b', root: '/repo-b' },
+      summary: {
+        additions: 3,
+        deletions: 4,
+        files: 2,
+        diffs: [{ file: 'sibling.ts', before: '', after: 'secret' }],
+      },
+    };
+    const localStatus = {
+      type: 'busy',
+      metadata: { secret: true },
+      summary: { diffs: [{ file: 'local.ts', before: '', after: 'secret' }] },
+    };
+    const siblingStatus = {
+      type: 'busy',
+      metadata: { secret: true },
+      summary: { diffs: [{ file: 'sibling.ts', before: '', after: 'secret' }] },
+    };
+    const serverRequest = vi.fn(
+      async (_method: string, path: string, _body: unknown, options?: { directory?: string }) => {
+        if (path === '/session?limit=1000000') {
+          return options?.directory === '/repo-b' ? [siblingSession] : [localSession];
+        }
+        if (path === '/session/status') {
+          return options?.directory === '/repo-b'
+            ? { sibling: siblingStatus }
+            : { local: localStatus };
+        }
+        throw new Error(`Unexpected path: ${path}`);
+      }
+    );
+    const { proxy, callbacks } = createProxy({
+      getWorkspacePath: () => '/repo-a',
+      contextProvider: {
+        ...createCallbacks().contextProvider,
+        context: {
+          workspacePath: '/repo-a',
+          workspaceFolders: [
+            { name: 'repo-a', path: '/repo-a' },
+            { name: 'repo-b', path: '/repo-b' },
+          ],
+          activeFile: null,
+          selection: null,
+          diagnostics: [],
+        },
+      } as never,
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(makePayload(224, 'GET', '/session'));
+    const sessionResponse = vi
+      .mocked(callbacks.postApiResponse)
+      .mock.calls.find(([, response]) => response.id === 224)?.[1];
+    const sessions = sessionResponse && 'data' in sessionResponse ? sessionResponse.data : null;
+    expect(sessions).toEqual(expect.any(Array));
+    const [projectedLocal, projectedSibling] = sessions as Array<Record<string, unknown>>;
+    expect(projectedLocal).toMatchObject({
+      id: 'local',
+      permission: { edit: 'allow' },
+      metadata: { secret: true },
+    });
+    expect(projectedLocal?.summary).toMatchObject({
+      diffs: [{ file: 'local.ts', additions: 0, deletions: 0 }],
+    });
+    expect(projectedSibling).toMatchObject({
+      id: 'sibling',
+      directory: '/repo-b',
+      summary: { additions: 3, deletions: 4, files: 2 },
+    });
+    expect(projectedSibling).not.toHaveProperty('permission');
+    expect(projectedSibling).not.toHaveProperty('revert');
+    expect(projectedSibling).not.toHaveProperty('metadata');
+    expect(projectedSibling).not.toHaveProperty('path');
+    expect(projectedSibling?.summary).not.toHaveProperty('diffs');
+
+    await proxy.handleRequest(makePayload(225, 'GET', '/session/status'));
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 225,
+      data: {
+        local: localStatus,
+        sibling: { type: 'busy' },
+      },
     });
   });
 
@@ -3303,7 +3603,12 @@ describe('RestProxy handleRequest', () => {
     });
 
     expect(serverRequest.mock.calls).toEqual([
-      ['POST', '/session/session-1/prompt_async', { messageID: 'message-32', parts: [] }],
+      [
+        'POST',
+        '/session/session-1/prompt_async',
+        { messageID: 'message-32', parts: [] },
+        withSignal(),
+      ],
       ['GET', '/session/status', undefined, { directory: '/repo' }],
     ]);
     expect(reconcilePromptFailure).toHaveBeenCalledWith(attempt, undefined);
@@ -3362,7 +3667,7 @@ describe('RestProxy handleRequest', () => {
     await proxy.handleRequest(makePayload(34, 'POST', '/session/session-1/prompt_async'));
 
     expect(serverRequest.mock.calls).toEqual([
-      ['POST', '/session/session-1/prompt_async', undefined],
+      ['POST', '/session/session-1/prompt_async', undefined, withSignal()],
       ['GET', '/session/status', undefined, { directory: '/repo' }],
     ]);
     expect(deferPromptFailure).toHaveBeenCalledWith(attempt);

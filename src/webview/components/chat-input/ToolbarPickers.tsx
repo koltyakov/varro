@@ -78,6 +78,21 @@ function formatWorkspaceCompactLabel(name: string) {
   return shouldAbbreviateWorkspaceName(name) ? formatWorkspaceAbbreviation(name) : name;
 }
 
+export function getWorkspaceCompactLabel(
+  directory: string | null | undefined,
+  folders: readonly WorkspaceFolderContext[]
+) {
+  const folder = folders.find((candidate) => isSameWorkspacePath(candidate.path, directory));
+  if (!folder) return null;
+  const abbreviation = formatWorkspaceCompactLabel(folder.name);
+  if (abbreviation === folder.name) return abbreviation;
+  const matches = folders.filter(
+    (candidate) => formatWorkspaceCompactLabel(candidate.name) === abbreviation
+  );
+  if (matches.length < 2) return abbreviation;
+  return `${abbreviation}${matches.findIndex((candidate) => candidate.path === folder.path) + 1}`;
+}
+
 function bindOverflowTitle(element: HTMLElement, text: string) {
   const update = () => {
     if (element.scrollWidth > element.clientWidth + 1) element.title = text;
@@ -104,21 +119,18 @@ export function WorkspacePicker(props: {
   canSelect?: boolean;
   showIcon?: boolean;
   showPicker: boolean;
+  allLabel?: string;
+  popoverTitle?: string;
   onToggle: () => void;
   onSelect: (path: string) => void;
+  onSelectAll?: () => void;
 }) {
   const isSelected = (path: string) => isSameWorkspacePath(path, props.selectedPath);
   const selected = () => props.folders.find((folder) => isSelected(folder.path));
   const selectedCompactLabel = () => {
     const folder = selected();
-    if (!folder) return 'Workspace';
-    const abbreviation = formatWorkspaceCompactLabel(folder.name);
-    if (abbreviation === folder.name) return abbreviation;
-    const matches = props.folders.filter(
-      (candidate) => formatWorkspaceCompactLabel(candidate.name) === abbreviation
-    );
-    if (matches.length < 2) return abbreviation;
-    return `${abbreviation}${matches.findIndex((candidate) => candidate.path === folder.path) + 1}`;
+    if (!folder) return props.allLabel ?? 'Workspace';
+    return getWorkspaceCompactLabel(folder.path, props.folders) ?? folder.name;
   };
   const selectedAriaLabel = () => {
     const folder = selected();
@@ -126,7 +138,9 @@ export function WorkspacePicker(props: {
       ? `Selected workspace: ${folder.name}${
           selectedCompactLabel() === folder.name ? '' : `, ${selectedCompactLabel()}`
         }`
-      : 'Select workspace folder';
+      : props.onSelectAll
+        ? `Selected workspace filter: ${props.allLabel ?? 'All folders'}`
+        : 'Select workspace folder';
   };
   let popupEl: HTMLDivElement | undefined;
 
@@ -170,7 +184,7 @@ export function WorkspacePicker(props: {
             <FolderIcon class="workspace-picker-folder-icon" width={14} height={14} />
           </Show>
           <span class="toolbar-picker-label workspace-picker-full-label">
-            {selected()?.name ?? 'Workspace'}
+            {selected()?.name ?? props.allLabel ?? 'Workspace'}
           </span>
           <span class="toolbar-picker-label workspace-picker-abbreviation" aria-hidden="true">
             {selectedCompactLabel()}
@@ -185,11 +199,29 @@ export function WorkspacePicker(props: {
           style={selectedIconStyle}
           onClick={(e) => e.stopPropagation()}
         >
-          <div class="toolbar-popover-header">Working directory</div>
+          <div class="toolbar-popover-header">{props.popoverTitle ?? 'Working directory'}</div>
           <Show when={props.canSelect === false}>
             <div class="workspace-popover-notice">
               Workspace can't be changed in an active chat.
             </div>
+          </Show>
+          <Show when={props.onSelectAll}>
+            <button
+              class={`toolbar-popover-item workspace-popover-all ${selected() ? '' : 'selected'}`}
+              aria-current={selected() ? undefined : 'true'}
+              onClick={() => props.onSelectAll?.()}
+            >
+              <FolderIcon width={14} height={14} />
+              <span class="min-w-0">
+                <span class="workspace-popover-name block truncate">
+                  {props.allLabel ?? 'All folders'}
+                </span>
+                <span class="workspace-popover-path block truncate text-[10px] text-vscode-muted">
+                  {props.folders.length} workspace{' '}
+                  {props.folders.length === 1 ? 'folder' : 'folders'}
+                </span>
+              </span>
+            </button>
           </Show>
           <For each={props.folders}>
             {(folder) => (

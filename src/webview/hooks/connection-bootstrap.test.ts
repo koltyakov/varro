@@ -423,6 +423,118 @@ describe('connection-bootstrap helpers', () => {
     expect(selectSession).toHaveBeenCalledWith('session-1');
   });
 
+  it('opens the session picker when a persisted directory-scoped session cannot activate', async () => {
+    const setShowSessionPicker = vi.fn();
+    const selectSession = vi.fn(async () => false);
+
+    await initConnectionWithDependencies(
+      {
+        health: vi.fn(async () => HEALTHY_RESPONSE),
+        loadInitialData: vi.fn(async () => {}),
+        hydrateSessionStatuses: vi.fn(async () => {}),
+        getActiveSessionId: () => null,
+        getPersistedActiveSessionId: () => 'session-b',
+        getPersistedLastOpenedView: () => ({
+          type: 'session',
+          sessionId: 'session-b',
+          directory: '/repo-b',
+          timestamp: 1_000_000,
+        }),
+        getSessionCount: () => 2,
+        getOnlyPrimarySessionId: () => null,
+        hasSession: () => true,
+        selectSession,
+        setShowSessionPicker,
+        recoverInterruptedSessions: vi.fn(async () => {}),
+        setInitialized: vi.fn(),
+        setError: vi.fn(),
+        now: () => 1_000_001,
+      },
+      {
+        next: () => 1,
+        isCurrent: () => true,
+      }
+    );
+
+    expect(selectSession).toHaveBeenCalledWith('session-b', '/repo-b');
+    expect(setShowSessionPicker).toHaveBeenLastCalledWith(true);
+  });
+
+  it('prefers the freshly loaded session directory over persisted restoration data', async () => {
+    const setShowSessionPicker = vi.fn();
+    const selectSession = vi.fn(async () => true);
+
+    await initConnectionWithDependencies(
+      {
+        health: vi.fn(async () => HEALTHY_RESPONSE),
+        loadInitialData: vi.fn(async () => {}),
+        hydrateSessionStatuses: vi.fn(async () => {}),
+        getActiveSessionId: () => null,
+        getPersistedActiveSessionId: () => 'session-b',
+        getPersistedLastOpenedView: () => ({
+          type: 'session',
+          sessionId: 'session-b',
+          directory: '/closed-folder',
+          timestamp: 1_000_000,
+        }),
+        getSessionCount: () => 2,
+        getOnlyPrimarySessionId: () => null,
+        hasSession: () => true,
+        getSessionDirectory: () => '/repo-b',
+        selectSession,
+        setShowSessionPicker,
+        recoverInterruptedSessions: vi.fn(async () => {}),
+        setInitialized: vi.fn(),
+        setError: vi.fn(),
+        now: () => 1_000_001,
+      },
+      {
+        next: () => 1,
+        isCurrent: () => true,
+      }
+    );
+
+    expect(selectSession).toHaveBeenCalledWith('session-b', '/repo-b');
+    expect(setShowSessionPicker).toHaveBeenLastCalledWith(false);
+  });
+
+  it('does not restore a persisted session that is absent from the fresh catalog', async () => {
+    const setShowSessionPicker = vi.fn();
+    const selectSession = vi.fn(async () => true);
+
+    await initConnectionWithDependencies(
+      {
+        health: vi.fn(async () => HEALTHY_RESPONSE),
+        loadInitialData: vi.fn(async () => {}),
+        hydrateSessionStatuses: vi.fn(async () => {}),
+        getActiveSessionId: () => null,
+        getPersistedActiveSessionId: () => 'session-closed',
+        getPersistedLastOpenedView: () => ({
+          type: 'session',
+          sessionId: 'session-closed',
+          directory: '/closed-folder',
+          timestamp: 1_000_000,
+        }),
+        getSessionCount: () => 2,
+        getOnlyPrimarySessionId: () => null,
+        hasSession: () => false,
+        selectSession,
+        setShowSessionPicker,
+        recoverInterruptedSessions: vi.fn(async () => {}),
+        setInitialized: vi.fn(),
+        setError: vi.fn(),
+        now: () => 1_000_001,
+      },
+      {
+        next: () => 1,
+        isCurrent: () => true,
+      }
+    );
+
+    expect(selectSession).not.toHaveBeenCalled();
+    expect(setShowSessionPicker).toHaveBeenLastCalledWith(true);
+  });
+
   it('lets an editor session route override the recent startup view', async () => {
     const setShowSessionPicker = vi.fn();
     const selectSession = vi.fn(async () => {});

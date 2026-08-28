@@ -216,6 +216,49 @@ describe('session-send helpers', () => {
     ]);
   });
 
+  it('includes the open-root map and an absolute sibling editor path', () => {
+    const result = buildSessionSendBody(
+      createState({
+        editorContext: createEditorContext({
+          workspacePath: '/repo-a',
+          workspaceFolders: [
+            { name: 'Repo A', path: '/repo-a' },
+            { name: 'Repo B', path: '/repo-b' },
+          ],
+          activeFile: {
+            path: '/repo-b/src/app.ts',
+            relativePath: 'Repo B/src/app.ts',
+            language: 'typescript',
+          },
+          editorText: {
+            kind: 'dirty-buffer',
+            path: '/repo-b/src/app.ts',
+            relativePath: 'Repo B/src/app.ts',
+            language: 'typescript',
+            range: { startLine: 1, endLine: 1 },
+            text: 'const sibling = true;',
+            truncated: false,
+          },
+        }),
+      }),
+      'session-1',
+      'Review sibling',
+      () => true
+    );
+
+    expect(result?.body.parts[1]).toEqual({
+      type: 'text',
+      text: `[Working directory: /repo-a; Workspace folders: ${JSON.stringify([
+        { name: 'Repo A', path: '/repo-a', primary: true },
+        { name: 'Repo B', path: '/repo-b', primary: false },
+      ])}; sibling workspace access is governed by external_directory permissions]`,
+    });
+    expect(result?.body.parts[2]).toMatchObject({
+      type: 'text',
+      text: expect.stringContaining('Unsaved buffer from /repo-b/src/app.ts lines 1-1'),
+    });
+  });
+
   it('omits current document when disabled while keeping other attachments and vision files', () => {
     const result = buildSessionSendBody(
       createState({

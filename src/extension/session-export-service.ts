@@ -19,24 +19,27 @@ export class SessionExportService {
     private readonly exportTimeoutMs: number
   ) {}
 
-  async exportSession(sessionId: string) {
+  async exportSession(sessionId: string, directory?: string) {
     try {
-      const workspacePath = this.server.getWorkspaceCwd();
+      const workspacePath = directory ?? this.server.getWorkspaceCwd();
       const workspaceIdentity = normalizeWorkspaceIdentity(workspacePath);
-      await assertSessionInCurrentWorkspace(this.server, sessionId);
-      this.assertWorkspaceUnchanged(workspaceIdentity);
+      await (directory
+        ? assertSessionInCurrentWorkspace(this.server, sessionId, workspacePath)
+        : assertSessionInCurrentWorkspace(this.server, sessionId));
+      if (!directory) this.assertWorkspaceUnchanged(workspaceIdentity);
       const content = await this.readExportContentFromTempFile(
         sessionId,
         workspacePath,
-        workspaceIdentity
+        workspaceIdentity,
+        !directory
       );
-      this.assertWorkspaceUnchanged(workspaceIdentity);
+      if (!directory) this.assertWorkspaceUnchanged(workspaceIdentity);
       assertValidJson(content, 'OpenCode export');
       const document = await vscode.workspace.openTextDocument({
         language: 'json',
         content,
       });
-      this.assertWorkspaceUnchanged(workspaceIdentity);
+      if (!directory) this.assertWorkspaceUnchanged(workspaceIdentity);
       await vscode.window.showTextDocument(document, { preview: false });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -48,14 +51,20 @@ export class SessionExportService {
   private async readExportContentFromTempFile(
     sessionId: string,
     workspacePath: string | undefined,
-    workspaceIdentity: string | null
+    workspaceIdentity: string | null,
+    enforceWorkspaceStability: boolean
   ): Promise<string> {
     const tempDir = await mkdtemp(join(tmpdir(), 'varro-opencode-export-'));
     const tempFile = join(tempDir, 'session-export.json');
 
     try {
-      this.assertWorkspaceUnchanged(workspaceIdentity);
-      await this.runCliCommandToFile(['export', sessionId], tempFile, workspacePath);
+      if (enforceWorkspaceStability) this.assertWorkspaceUnchanged(workspaceIdentity);
+      await this.runCliCommandToFile(
+        ['export', sessionId],
+        tempFile,
+        workspacePath,
+        enforceWorkspaceStability
+      );
       return normalizeCliOutput(await readFile(tempFile, 'utf-8'));
     } finally {
       await rm(tempDir, { recursive: true, force: true });
@@ -65,7 +74,8 @@ export class SessionExportService {
   private async runCliCommandToFile(
     args: string[],
     outputPath: string,
-    workspacePath: string | undefined
+    workspacePath: string | undefined,
+    enforceWorkspaceStability: boolean
   ): Promise<void> {
     const fileHandle = await open(outputPath, 'w');
 
@@ -136,7 +146,9 @@ export class SessionExportService {
       };
 
       try {
-        this.assertWorkspaceUnchanged(normalizeWorkspaceIdentity(workspacePath));
+        if (enforceWorkspaceStability) {
+          this.assertWorkspaceUnchanged(normalizeWorkspaceIdentity(workspacePath));
+        }
         const command = this.server.resolveCommand();
         const spawnOptions: SpawnOptions = {
           stdio: ['ignore', fileHandle.fd, 'pipe'],

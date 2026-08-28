@@ -21,6 +21,27 @@ import type {
 } from '../shared/protocol';
 import { asRecord } from '../shared/type-utils';
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
+
+const WORKSPACE_CATALOG_EVENT_TYPES = new Set<ServerEvent['type']>([
+  'session.created',
+  'session.updated',
+  'session.deleted',
+  'session.status',
+  'session.idle',
+]);
+const WORKSPACE_INDEPENDENT_EVENT_TYPES = new Set<ServerEvent['type']>([
+  'server.connected',
+  'server.heartbeat',
+  'server.instance.disposed',
+  'global.disposed',
+  'catalog.updated',
+  'models-dev.refreshed',
+  'installation.updated',
+  'installation.update-available',
+  'workspace.ready',
+  'workspace.failed',
+  'workspace.status',
+]);
 import { AutoApproveJudge } from './auto-approve-judge';
 import { CommitMessageService } from './commit-message-service';
 import type { ContextProvider } from './context-provider';
@@ -388,19 +409,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     )?.workspacePath;
     const sessionWorkspacePath =
       webviewContext.initialRoute.type === 'session'
-        ? this.sessionState.directoryFor(webviewContext.initialRoute.sessionId)
+        ? (webviewContext.initialRoute.directory ??
+          this.sessionState.directoryFor(webviewContext.initialRoute.sessionId))
         : undefined;
     let initialWorkspacePath =
-      restoredWorkspacePath ??
-      (webviewContext.surface === 'editor'
-        ? (sessionWorkspacePath ??
-          sidebarWorkspacePath ??
-          this.contextProvider.context.workspacePath)
-        : this.contextProvider.context.workspacePath);
+      webviewContext.surface === 'editor' && sessionWorkspacePath
+        ? sessionWorkspacePath
+        : (restoredWorkspacePath ??
+          (webviewContext.surface === 'editor'
+            ? (sidebarWorkspacePath ?? this.contextProvider.context.workspacePath)
+            : this.contextProvider.context.workspacePath));
     const getEndpointContext = () =>
       this.withWorkspacePath(
         this.contextProvider.context,
-        endpointRef.endpoint?.workspacePath ?? initialWorkspacePath
+        endpointRef.endpoint ? endpointRef.endpoint.workspacePath : initialWorkspacePath
       );
     const post = (message: ExtensionMessage) => bridge.post(message);
     const fileSearch =
@@ -459,16 +481,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     const endpointServer = {
       getWorkspaceCwd: () =>
-        endpointRef.endpoint?.workspacePath ?? initialWorkspacePath ?? undefined,
+        endpointRef.endpoint
+          ? (endpointRef.endpoint.workspacePath ?? undefined)
+          : (initialWorkspacePath ?? undefined),
       // oxlint-disable-next-line anti-slop/no-unknown-parameters -- RestProxy validates each route before forwarding its opaque request body.
       request: (method: string, path: string, body?: unknown, options?: { directory?: string }) =>
         this.server.request(method, path, body, {
           ...options,
           directory:
             options?.directory ??
-            endpointRef.endpoint?.workspacePath ??
-            initialWorkspacePath ??
-            undefined,
+            (endpointRef.endpoint
+              ? (endpointRef.endpoint.workspacePath ?? undefined)
+              : (initialWorkspacePath ?? undefined)),
         }),
     };
     const restProxy = new RestProxy({
@@ -558,8 +582,43 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           lease,
           requestId
         ),
-      updatePermissionMode: (sessionID, mode) =>
-        this.updateConfirmedPermissionMode(sessionID, mode, endpointServer.getWorkspaceCwd()),
+      updatePermissionMode: (sessionID, mode, directory) =>
+        this.updateConfirmedPermissionMode(
+          sessionID,
+          mode,
+          directory ?? endpointServer.getWorkspaceCwd()
+        ),
+      activateSession: async (sessionID, directory, signal) => {
+        const workspacePath = this.contextProvider.getOpenWorkspaceRoot(directory);
+        if (!workspacePath) throw new Error('Session workspace folder is not open');
+        const session = asRecord(
+          await this.server.request('GET', `/session/${encodeURIComponent(sessionID)}`, undefined, {
+            directory: workspacePath,
+            signal,
+          })
+        );
+        signal?.throwIfAborted();
+        const currentWorkspacePath = this.contextProvider.getOpenWorkspaceRoot(workspacePath);
+        if (!currentWorkspacePath) throw new Error('Session workspace folder is not open');
+        if (
+          session?.id !== sessionID ||
+          typeof session.directory !== 'string' ||
+          !isSameWorkspacePath(session.directory, currentWorkspacePath)
+        ) {
+          throw new Error('404 Session not found');
+        }
+        initialWorkspacePath = currentWorkspacePath;
+        if (endpointRef.endpoint) {
+          this.setEndpointWorkspace(endpointRef.endpoint, currentWorkspacePath);
+        }
+        this.reconcilePermissionAutomationOwners();
+        if (webviewContext.surface === 'sidebar') {
+          await this.contextProvider.selectWorkspace(currentWorkspacePath);
+        }
+        post({ type: 'context/update', payload: getEndpointContext() });
+        this.postSiblingWorkspaceAlerts();
+        return session;
+      },
     });
     endpointRef.restProxy = restProxy;
 
@@ -669,11 +728,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         },
         runInTerminal: (command, title) =>
           this.runInTerminal(command, title, endpointServer.getWorkspaceCwd()),
-        openSessionInTerminal: (sessionId) =>
-          this.openSessionInTerminal(sessionId, endpointServer.getWorkspaceCwd()),
-        openSessionInEditor: (sessionId, title, model, rootSessionId) =>
-          this.openSessionInEditor(sessionId, title, model, rootSessionId),
-        openSessionInSidebar: (sessionId) => this.openSessionInSidebar(sessionId),
+        openSessionInTerminal: (sessionId, directory) =>
+          this.openSessionInTerminal(sessionId, directory ?? endpointServer.getWorkspaceCwd()),
+        openSessionInEditor: (sessionId, title, model, rootSessionId, directory) =>
+          this.openSessionInEditor(sessionId, title, model, rootSessionId, directory),
+        openSessionInSidebar: (sessionId, directory) =>
+          this.openSessionInSidebar(sessionId, directory),
         openNewEditor: () => this.openNewEditor(),
         editorRouteChanged: (route) => this.editorRouteChanged(webviewContext.viewId, route),
         handleRalphMessage: (msg) => this.ralphHost.handleMessage(msg),
@@ -726,13 +786,24 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             });
           }
         },
-        updateSessionUnreadState: ({ sessionId, kind, unread }) =>
+        updateSessionUnreadState: ({ sessionId, directory, kind, unread }) => {
+          const workspacePath = directory
+            ? this.contextProvider.getOpenWorkspaceRoot(directory)
+            : endpointRef.endpoint?.workspacePath;
+          if (directory && !workspacePath) return;
+          if (
+            workspacePath &&
+            this.sessionState.getSessionWorkspaceMatch(sessionId, workspacePath) === false
+          ) {
+            return;
+          }
           this.sessionState.setSessionUnreadState(
             sessionId,
             kind,
             unread,
-            endpointRef.endpoint?.workspacePath ?? undefined
-          ),
+            workspacePath ?? undefined
+          );
+        },
         updateModelPreferences: async ({ base, preferences }) => {
           const updated = await this.modelPreferences.update(base, preferences);
           this.post({ type: 'model-preferences/sync', payload: updated });
@@ -750,6 +821,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             ? {
                 type: 'session',
                 sessionId,
+                directory:
+                  this.sessionState.directoryFor(sessionId) ?? endpoint.workspacePath ?? undefined,
               }
             : { type: 'new-session' };
           this.updateStatusBarItem();
@@ -795,7 +868,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     sessionId: string,
     title?: string,
     model?: ChatModelSelection,
-    rootSessionId?: string
+    rootSessionId?: string,
+    directory?: string
   ) {
     if (this.disposing) return;
     if (model) {
@@ -810,7 +884,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
     if (this.disposing) return;
     const rootId = rootSessionId || this.sessionState.rootSessionIdFor(sessionId);
-    const key = `session:${rootId}`;
+    const workspacePath = directory ?? this.sessionState.directoryFor(sessionId);
+    const key = this.sessionEditorKey(rootId, workspacePath);
     const existing = this.editorPanels.get(key);
     if (existing) {
       existing.panel.reveal(existing.panel.viewColumn, false);
@@ -818,6 +893,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         const nextRoute: WebviewRoute = {
           type: 'session',
           sessionId,
+          directory: workspacePath,
           rootSessionId: rootId,
           title,
         };
@@ -826,22 +902,37 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         existing.panel.title = this.editorTitle(nextRoute);
         existing.webviewSession.queueCommand({
           type: 'command/open-session',
-          payload: { sessionId },
+          payload: workspacePath ? { sessionId, directory: workspacePath } : { sessionId },
         });
         this.reconcileQueuedMessageOwners();
       }
       return;
     }
-    await this.openEditorPanel({ type: 'session', sessionId, rootSessionId: rootId, title });
+    await this.openEditorPanel({
+      type: 'session',
+      sessionId,
+      directory: workspacePath,
+      rootSessionId: rootId,
+      title,
+    });
   }
 
-  async openSessionInSidebar(sessionId: string) {
+  async openSessionInSidebar(sessionId: string, directory?: string) {
     await vscode.commands.executeCommand(`${SidebarProvider.viewType}.focus`);
+    const sidebarEndpoint = [...this.endpoints].find((endpoint) => endpoint.surface === 'sidebar');
+    if (directory) {
+      const workspacePath = this.contextProvider.getOpenWorkspaceRoot(directory);
+      if (!workspacePath) throw new Error('Session workspace folder is not open');
+      if (sidebarEndpoint) this.setEndpointWorkspace(sidebarEndpoint, workspacePath);
+      this.reconcilePermissionAutomationOwners();
+      await this.contextProvider.selectWorkspace(workspacePath);
+      this.postSiblingWorkspaceAlerts();
+    }
     const rootId = this.sessionState.rootSessionIdFor(sessionId);
-    this.editorPanels.get(`session:${rootId}`)?.panel.dispose();
+    this.editorPanels.get(this.sessionEditorKey(rootId, directory))?.panel.dispose();
     this.webviewSession.queueCommand({
       type: 'command/open-session',
-      payload: { sessionId },
+      payload: directory ? { sessionId, directory } : { sessionId },
     });
   }
 
@@ -981,7 +1072,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       } else {
         endpoint.bridge.post({
           type: 'command/open-session',
-          payload: { sessionId: endpoint.restoringSessionId },
+          payload:
+            endpoint.route.type === 'session' && endpoint.route.directory
+              ? { sessionId: endpoint.restoringSessionId, directory: endpoint.route.directory }
+              : { sessionId: endpoint.restoringSessionId },
         });
         return;
       }
@@ -1016,8 +1110,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private editorKey(route: WebviewRoute, viewId: string) {
     return route.type === 'session'
-      ? `session:${route.rootSessionId || route.sessionId}`
+      ? this.sessionEditorKey(route.rootSessionId || route.sessionId, route.directory)
       : `draft:${viewId}`;
+  }
+
+  private sessionEditorKey(rootSessionId: string, directory?: string | null) {
+    return `session:${normalizeWorkspaceIdentity(directory) ?? '*'}:${rootSessionId}`;
   }
 
   private editorTitle(route: WebviewRoute) {
@@ -1030,16 +1128,24 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const persisted = state['varro.lastOpenedView'];
     if (!persisted || typeof persisted !== 'object') return { type: 'new-session' };
     const route = persisted as Record<string, unknown>;
-    return route.type === 'session' &&
-      typeof route.sessionId === 'string' &&
-      !this.sessionTrash.isHidden(route.sessionId) &&
-      !this.hiddenSessions.isHidden(route.sessionId)
-      ? {
-          type: 'session',
-          sessionId: route.sessionId,
-          rootSessionId: this.sessionState.rootSessionIdFor(route.sessionId),
-        }
-      : { type: 'new-session' };
+    if (
+      route.type !== 'session' ||
+      typeof route.sessionId !== 'string' ||
+      this.sessionTrash.isHidden(route.sessionId) ||
+      this.hiddenSessions.isHidden(route.sessionId)
+    ) {
+      return { type: 'new-session' };
+    }
+    const restoredRoute: WebviewRoute = {
+      type: 'session',
+      sessionId: route.sessionId,
+      rootSessionId: this.sessionState.rootSessionIdFor(route.sessionId),
+    };
+    if (typeof route.directory === 'string') {
+      const directory = this.contextProvider.getOpenWorkspaceRoot(route.directory);
+      if (directory) restoredRoute.directory = directory;
+    }
+    return restoredRoute;
   }
 
   private readPersistedEditorViewId(state: PersistedEditorState) {
@@ -1077,22 +1183,81 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       return;
     }
     if (msg.type === 'server/event') this.flushDeferredWorkspaceEvents();
+    if (msg.type === 'context/update') this.reconcileWorkspaceMembership(msg.payload);
     this.postToEndpoints(msg);
     if (msg.type === 'server/event') this.updateEditorPanelTitles();
     if (msg.type === 'context/update') this.postSiblingWorkspaceAlerts();
   }
 
-  private postToEndpoints(msg: ExtensionMessage) {
+  private reconcileWorkspaceMembership(context: EditorContext) {
+    const workspaceDirectories = (context.workspaceFolders ?? []).map((folder) => folder.path);
     for (const endpoint of this.endpoints) {
-      if (msg.type === 'server/event' && !this.isEventInEndpointWorkspace(msg.payload, endpoint)) {
+      endpoint.restProxy.cancelRequestsOutsideDirectories(workspaceDirectories);
+    }
+    this.sessionState.removeSessionsOutsideWorkspaceDirectories(workspaceDirectories);
+    const fallbackWorkspacePath = context.workspacePath
+      ? this.contextProvider.getOpenWorkspaceRoot(context.workspacePath)
+      : workspaceDirectories[0];
+
+    for (const endpoint of this.endpoints) {
+      if (
+        !endpoint.workspacePath ||
+        this.contextProvider.getOpenWorkspaceRoot(endpoint.workspacePath)
+      ) {
         continue;
       }
-      endpoint.bridge.post(
-        msg.type === 'context/update'
-          ? { ...msg, payload: this.withWorkspacePath(msg.payload, endpoint.workspacePath) }
-          : msg
-      );
+      endpoint.restProxy.cancelAllRequests('Workspace folder was removed');
+      if (endpoint.surface === 'editor') {
+        const editorEndpoint = endpoint as EditorEndpoint;
+        editorEndpoint.panel.dispose();
+        continue;
+      }
+      endpoint.workspacePath = fallbackWorkspacePath ?? null;
+      endpoint.route = { type: 'new-session' };
+      endpoint.contextFilesState.clearContextFiles();
+      endpoint.contextFilesState.setTerminalSelection(null);
     }
+    this.reconcilePermissionAutomationOwners(true);
+    this.reconcileQueuedMessageOwners();
+  }
+
+  private postToEndpoints(msg: ExtensionMessage) {
+    for (const endpoint of this.endpoints) {
+      const endpointMessage =
+        msg.type === 'server/event'
+          ? this.projectEventForEndpoint(msg, endpoint)
+          : msg.type === 'context/update'
+            ? { ...msg, payload: this.withWorkspacePath(msg.payload, endpoint.workspacePath) }
+            : msg;
+      if (endpointMessage) endpoint.bridge.post(endpointMessage);
+    }
+  }
+
+  private projectEventForEndpoint(
+    msg: Extract<ExtensionMessage, { type: 'server/event' }>,
+    endpoint: WebviewEndpoint
+  ): Extract<ExtensionMessage, { type: 'server/event' }> | null {
+    if (this.isEventInEndpointWorkspace(msg.payload, endpoint)) return msg;
+    if (
+      !WORKSPACE_CATALOG_EVENT_TYPES.has(msg.payload.type) ||
+      !this.isEventInOpenWorkspace(msg.payload)
+    ) {
+      return null;
+    }
+
+    const projected = projectWorkspaceCatalogEvent(msg.payload);
+    const { seq: _seq, sequenceOnly: _sequenceOnly, ...event } = projected;
+    return { type: 'server/event', payload: event as ServerEvent };
+  }
+
+  private isEventInOpenWorkspace(event: ServerEvent) {
+    if (event.workspaceDirectory) {
+      return Boolean(this.contextProvider.getOpenWorkspaceRoot(event.workspaceDirectory));
+    }
+    return getWorkspaceSessionIdsForEvent(event).some((sessionID) => {
+      const directory = this.sessionState.directoryFor(sessionID);
+      return Boolean(directory && this.contextProvider.getOpenWorkspaceRoot(directory));
+    });
   }
 
   private releaseDeletedEditorRestorations(event: ServerEvent) {
@@ -1190,7 +1355,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       return isSameWorkspacePath(event.workspaceDirectory, endpoint.workspacePath);
     }
     const sessionIDs = getWorkspaceSessionIdsForEvent(event);
-    if (sessionIDs.length === 0) return true;
+    if (sessionIDs.length === 0) return WORKSPACE_INDEPENDENT_EVENT_TYPES.has(event.type);
     let knownMatch = false;
     for (const sessionID of sessionIDs) {
       const match = this.sessionState.getSessionWorkspaceMatch(sessionID, endpoint.workspacePath);
@@ -2295,4 +2460,54 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     return idleState;
   }
+}
+
+function projectWorkspaceCatalogEvent(event: ServerEvent): ServerEvent {
+  if ((event.type === 'session.created' || event.type === 'session.updated') && event.properties) {
+    const info = asRecord(event.properties.info);
+    if (!info) return event;
+    return {
+      ...event,
+      properties: {
+        ...event.properties,
+        info: projectWorkspaceCatalogSessionInfo(info),
+      },
+    } as ServerEvent;
+  }
+  if (event.type === 'session.status') {
+    const status = event.properties?.status;
+    if (!status) return event;
+    return {
+      ...event,
+      properties: {
+        ...event.properties,
+        status:
+          status.type === 'retry'
+            ? {
+                type: 'retry',
+                attempt: status.attempt,
+                next: status.next,
+                message: 'Session is retrying',
+              }
+            : { type: status.type },
+      },
+    } as ServerEvent;
+  }
+  return event;
+}
+
+function projectWorkspaceCatalogSessionInfo(info: Record<string, unknown>) {
+  const {
+    permission: _permission,
+    revert: _revert,
+    metadata: _metadata,
+    path: _path,
+    ...catalogInfo
+  } = info;
+  const summary = asRecord(catalogInfo.summary);
+  if (summary) {
+    const { diffs: _diffs, ...summaryWithoutDiffs } = summary;
+    catalogInfo.summary = summaryWithoutDiffs;
+  }
+  return catalogInfo;
 }

@@ -68,14 +68,15 @@ export interface SidebarProviderActionDeps {
   pickFiles(): Promise<void>;
   searchFiles(requestId: number, query: string, limit?: number): void;
   runInTerminal(command: string, title?: string): void | Promise<void>;
-  openSessionInTerminal(sessionId: string): void | Promise<void>;
+  openSessionInTerminal(sessionId: string, directory?: string): void | Promise<void>;
   openSessionInEditor(
     sessionId: string,
     title?: string,
     model?: ChatModelSelection,
-    rootSessionId?: string
+    rootSessionId?: string,
+    directory?: string
   ): void | Promise<void>;
-  openSessionInSidebar(sessionId: string): void | Promise<void>;
+  openSessionInSidebar(sessionId: string, directory?: string): void | Promise<void>;
   openNewEditor(): void | Promise<void>;
   editorRouteChanged(route: WebviewRoute): void;
   handleRalphMessage: MessageRouterCallbacks['handleRalphMessage'];
@@ -145,17 +146,43 @@ export function createSidebarProviderActions(
       deps.postTerminalSelection(null);
     },
     runInTerminal: (command, title) => deps.runInTerminal(command, title),
-    openSessionInOpenCode: async (sessionId) => {
-      await assertSessionInCurrentWorkspace(deps.sessionServer ?? deps.server, sessionId);
-      await deps.openSessionInTerminal(sessionId);
+    openSessionInOpenCode: async (sessionId, requestedDirectory) => {
+      const directory = requestedDirectory
+        ? deps.contextProvider.getOpenWorkspaceRoot(requestedDirectory)
+        : undefined;
+      if (requestedDirectory && !directory) throw new Error('Session workspace folder is not open');
+      await assertSessionInCurrentWorkspace(
+        deps.sessionServer ?? deps.server,
+        sessionId,
+        directory ?? undefined
+      );
+      await (directory
+        ? deps.openSessionInTerminal(sessionId, directory)
+        : deps.openSessionInTerminal(sessionId));
     },
-    openSessionInEditor: async (sessionId, title, model, rootSessionId) => {
-      await assertSessionInCurrentWorkspace(deps.sessionServer ?? deps.server, sessionId);
-      await deps.openSessionInEditor(sessionId, title, model, rootSessionId);
+    openSessionInEditor: async (sessionId, title, model, rootSessionId, requestedDirectory) => {
+      const directory = requestedDirectory
+        ? deps.contextProvider.getOpenWorkspaceRoot(requestedDirectory)
+        : undefined;
+      if (requestedDirectory && !directory) throw new Error('Session workspace folder is not open');
+      const validatedDirectory = await assertSessionInCurrentWorkspace(
+        deps.sessionServer ?? deps.server,
+        sessionId,
+        directory ?? undefined
+      );
+      await deps.openSessionInEditor(sessionId, title, model, rootSessionId, validatedDirectory);
     },
-    openSessionInSidebar: async (sessionId) => {
-      await assertSessionInCurrentWorkspace(deps.sessionServer ?? deps.server, sessionId);
-      await deps.openSessionInSidebar(sessionId);
+    openSessionInSidebar: async (sessionId, requestedDirectory) => {
+      const directory = requestedDirectory
+        ? deps.contextProvider.getOpenWorkspaceRoot(requestedDirectory)
+        : undefined;
+      if (requestedDirectory && !directory) throw new Error('Session workspace folder is not open');
+      const validatedDirectory = await assertSessionInCurrentWorkspace(
+        deps.sessionServer ?? deps.server,
+        sessionId,
+        directory ?? undefined
+      );
+      await deps.openSessionInSidebar(sessionId, validatedDirectory);
     },
     openNewEditor: () => deps.openNewEditor(),
     editorRouteChanged: (route) => deps.editorRouteChanged(route),
@@ -173,7 +200,20 @@ export function createSidebarProviderActions(
     updateModelPreferences: (payload) => deps.updateModelPreferences(payload),
     migrateModelPreferences: (payload) => deps.migrateModelPreferences(payload),
     updateDraftImages: (payload) => deps.updateDraftImages(payload),
-    exportSession: (sessionId) => deps.sessionExportService.exportSession(sessionId),
+    exportSession: async (sessionId, requestedDirectory) => {
+      const directory = requestedDirectory
+        ? deps.contextProvider.getOpenWorkspaceRoot(requestedDirectory)
+        : undefined;
+      if (requestedDirectory && !directory) throw new Error('Session workspace folder is not open');
+      const validatedDirectory = await assertSessionInCurrentWorkspace(
+        deps.sessionServer ?? deps.server,
+        sessionId,
+        directory ?? undefined
+      );
+      await (requestedDirectory
+        ? deps.sessionExportService.exportSession(sessionId, validatedDirectory)
+        : deps.sessionExportService.exportSession(sessionId));
+    },
     generateUsageReport: (includeAllTime) => deps.usageReportService.openReport(includeAllTime),
     reloadWebview: () => deps.webviewSession.reload(),
     openFolder: async () => {

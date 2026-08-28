@@ -56,7 +56,7 @@ VS Code WSL follows the same rule. Check the lower-left remote indicator before 
 
 Varro can include more than the text in the composer.
 
-- Workspace path, sent as `[Working directory: ...]`
+- Working directory and, in multi-root workspaces, the open workspace-folder map
 - Active file, when live current-document context is enabled for the session
 - Current selection, including unsaved selected text, or a bounded window of a dirty editor buffer when there is no selection, when live current-document context is enabled
 - Selected terminal text
@@ -68,7 +68,9 @@ Varro can include more than the text in the composer.
 
 The current document appears as a chip above the composer. You can click that chip to disable or re-enable live current-document context for the active session.
 
-In a multi-root workspace, a new empty chat follows the active editor's root. Use the working-directory picker in the composer toolbar to choose which root owns sessions and OpenCode requests. Restored editor chats retain a manual root instead of switching it when editor focus changes.
+In a multi-root workspace, session history and search cover every open root. The session-list folder picker filters that workspace-wide catalog without changing where new work runs. A new empty chat follows the active editor's root; use the working-directory picker in the composer toolbar to choose another root. Existing and restored sessions always run in their recorded directory and cannot be moved between roots.
+
+OpenCode still has one working directory per session. Varro tells the agent about sibling workspace roots and can attach or search files from them, but access outside the session's working directory remains subject to OpenCode's `external_directory` permission.
 
 When the active file is also attached explicitly, Varro avoids duplicating overlapping line ranges.
 
@@ -82,7 +84,7 @@ Use any of these flows to add more context.
 - Drag files or folders into the composer.
 - Use the attachment button beside the composer.
 - Paste an image or PDF into the composer.
-- Type `@path/to/file` to search workspace files.
+- Type `@path/to/file` to search files across all open roots. Multi-root results include their folder label.
 - Type `@agent-name` to mention an available agent.
 - Type `&` to search recent root sessions and insert a stable `session:<id>` reference. Session references in the composer and rendered responses open the referenced session.
 
@@ -164,7 +166,7 @@ Use `Varro: Open Global AGENTS.md` to edit OpenCode's global instructions. `Varr
 
 ## Sessions
 
-Sessions are filtered to the current workspace directory. The default list is split into `Recent`, `Archive`, and `Recycle Bin`. `Archive` is a UI grouping for older ordinary sessions; opening it does not alter those sessions in OpenCode. Pinned and active-state sessions remain surfaced, while other sessions are ordered approximately by activity age.
+Sessions from every open workspace root appear in one catalog. Use the folder filter above search to narrow the list; it defaults to `All folders`. Folder labels appear only when multiple roots are open. The default list is split into `Recent`, `Archive`, and `Recycle Bin`. `Archive` is a UI grouping for older ordinary sessions; opening it does not alter those sessions in OpenCode. Pinned and active-state sessions remain surfaced, while other sessions are ordered approximately by activity age.
 
 - Start a fresh session with `Varro: New Session` or the new chat button. Right-click the button to choose `New Chat` or `New Chat in Editor`. Crafted composer text is kept for the new session, while file, image, terminal, and message-edit context is cleared.
 - Open the session list from the back button in the header.

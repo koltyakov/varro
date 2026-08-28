@@ -11,10 +11,20 @@ test('host abort command stops the active busy session', async ({ page }) => {
   await expect
     .poll(() =>
       getE2EState(page, () => {
-        const value = (window as Window & {
-          __varroE2E?: { requests: Array<{ path: string }> };
-        }).__varroE2E;
-        return value?.requests.filter((request) => request.path.endsWith('/abort')).length || 0;
+        const value = (
+          window as Window & {
+            __varroE2E?: { requests: Array<{ path: string }> };
+          }
+        ).__varroE2E;
+        return (
+          value?.requests.filter((request) => {
+            const url = new URL(request.path, 'http://varro.test');
+            return (
+              url.pathname.endsWith('/abort') &&
+              url.searchParams.get('directory') === '/workspace/varro'
+            );
+          }).length || 0
+        );
       })
     )
     .toBe(1);

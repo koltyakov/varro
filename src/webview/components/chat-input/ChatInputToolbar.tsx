@@ -202,6 +202,7 @@ function SelectionCostWarning(props: {
 
 type ChatInputMetaToolbarProps = ToolbarSharedProps & {
   allowRepositoryLink: boolean;
+  showWorkspaceControl: boolean;
   workspaceFolders: WorkspaceFolderContext[];
   selectedWorkspacePath: string | null;
   canSelectWorkspace: boolean;
@@ -327,7 +328,7 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
     props.providerLimitBadges.length === 0;
   const showMetaRow = () =>
     props.showPermissionControl ||
-    props.workspaceFolders.length > 1 ||
+    (props.showWorkspaceControl && props.workspaceFolders.length > 1) ||
     props.showMcpControl ||
     props.activeLspNames.length > 0 ||
     hasContextControl() ||
@@ -338,7 +339,7 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
     <Show when={showMetaRow()}>
       <div class={`chat-input-toolbars toolbar-meta ${props.compactTight ? 'compact-tight' : ''}`}>
         <div class="toolbar-meta-left">
-          <Show when={props.workspaceFolders.length > 1}>
+          <Show when={props.showWorkspaceControl && props.workspaceFolders.length > 1}>
             <WorkspacePicker
               buttonRef={props.workspaceButtonRef}
               popoverRef={props.workspacePopoverRef}
@@ -359,7 +360,9 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
               popoverRef={props.permissionPopoverRef}
               boundaryRef={props.inputFrameRef}
               alignTo="left"
-              alignToTriggerWhenPossible={props.workspaceFolders.length > 1}
+              alignToTriggerWhenPossible={
+                props.showWorkspaceControl && props.workspaceFolders.length > 1
+              }
               mode={props.permissionMode}
               activity={props.autoPermissionActivity}
               judgeModel={props.autoApproveJudgeModel}

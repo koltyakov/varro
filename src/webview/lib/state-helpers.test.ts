@@ -530,7 +530,7 @@ describe('state helpers', () => {
     expect(stateModule.isSkippedPlanSession('session-1', 200)).toBe(true);
     expect(stateModule.isSkippedPlanSession('session-1', 201)).toBe(false);
     expect(window.localStorage.getItem('varro.skippedPlanSessions')).toBe(
-      JSON.stringify({ '__varro.no-workspace__': { 'session-1': 200 } })
+      JSON.stringify({ '/repo': { 'session-1': 200 } })
     );
     expect(sent).toContainEqual({
       type: 'session-plan-state/update',
@@ -550,9 +550,7 @@ describe('state helpers', () => {
     stateModule.setState('lastSeenSessions', { 'session-1': 100, 'session-2': 200 });
     stateModule.clearSessionSeen('session-1');
     expect(stateModule.state.lastSeenSessions).toEqual({ 'session-2': 200 });
-    expect(window.localStorage.getItem('varro.lastSeenSessions')).toBe(
-      JSON.stringify({ '__varro.no-workspace__': { 'session-2': 200 } })
-    );
+    expect(window.localStorage.getItem('varro.lastSeenSessions')).toBe(JSON.stringify({}));
   });
 
   it('prunes stale skipped session markers when sessions refresh', async () => {

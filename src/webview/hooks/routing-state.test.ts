@@ -38,7 +38,7 @@ describe('routing-state helpers', () => {
     expect(getBuildAgentName([agent('plan'), agent('build')])).toBe('build');
   });
 
-  it('reconciles loaded agents for startup and invalid selection cleanup', () => {
+  it('preserves the persisted draft agent and cleans up invalid session selections', () => {
     const loadedAgents = [agent('plan'), agent('build'), agent('review', { hidden: true })];
 
     expect(
@@ -52,10 +52,7 @@ describe('routing-state helpers', () => {
     ).toMatchObject({
       visibleAgents: [agent('plan'), agent('build')],
       primaryAgents: [agent('plan'), agent('build')],
-      nextSelectedAgent: {
-        value: 'build',
-        options: { persistGlobal: false },
-      },
+      nextSelectedAgent: null,
     });
 
     expect(
@@ -72,6 +69,28 @@ describe('routing-state helpers', () => {
         options: { sessionId: 'session-1', persistGlobal: false },
       },
     });
+  });
+
+  it('uses a temporary default when the persisted draft agent is unavailable', () => {
+    expect(
+      reconcileLoadedAgents({
+        loadedAgents: [agent('build')],
+        activeSessionId: null,
+        selectedAgent: 'plan',
+        sessionSelectedAgent: null,
+        persistedSelectedAgent: 'plan',
+      }).nextSelectedAgent
+    ).toEqual({ value: 'build', options: { persistGlobal: false } });
+
+    expect(
+      reconcileLoadedAgents({
+        loadedAgents: [agent('plan'), agent('build')],
+        activeSessionId: null,
+        selectedAgent: 'build',
+        sessionSelectedAgent: null,
+        persistedSelectedAgent: 'plan',
+      }).nextSelectedAgent
+    ).toEqual({ value: 'plan', options: { persistGlobal: false } });
   });
 
   it('restores the best available session agent for active sessions', () => {

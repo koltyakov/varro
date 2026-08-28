@@ -124,7 +124,9 @@ describe('sendMessage', () => {
 
     await hookModule.sendMessage('Fix the delayed session title');
 
-    expect(clientMocks.varroSessionRenameIfUntitled).toHaveBeenCalledWith('session-1');
+    expect(clientMocks.varroSessionRenameIfUntitled).toHaveBeenCalledWith('session-1', {
+      directory: '/repo',
+    });
   });
 
   it('sends a valid OpenCode ID for exact optimistic reconciliation', async () => {

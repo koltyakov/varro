@@ -8,7 +8,7 @@ type ResolvedModel = { providerID: string; modelID: string; variant?: string };
 type LastOpenedView =
   | { type: 'new-session'; timestamp: number }
   | { type: 'sessions-list'; timestamp: number }
-  | { type: 'session'; sessionId: string; timestamp: number };
+  | { type: 'session'; sessionId: string; directory?: string; timestamp: number };
 
 export const STARTUP_VIEW_RESTORE_WINDOW_MS = 10 * 60 * 1000;
 
@@ -148,7 +148,8 @@ export async function initConnectionWithDependencies(
     getSessionCount?(): number;
     getOnlyPrimarySessionId(): string | null;
     hasSession(sessionId: string): boolean;
-    selectSession(sessionId: string): Promise<void | boolean | object>;
+    getSessionDirectory?(sessionId: string): string | undefined;
+    selectSession(sessionId: string, directory?: string): Promise<void | boolean | object>;
     startNewSession?(): void;
     setShowSessionPicker(value: boolean): void;
     recoverInterruptedSessions(generation: number): Promise<void | boolean | object>;
@@ -197,7 +198,8 @@ async function restoreStartupView(
     getSessionCount?(): number;
     getOnlyPrimarySessionId(): string | null;
     hasSession(sessionId: string): boolean;
-    selectSession(sessionId: string): Promise<void | boolean | object>;
+    getSessionDirectory?(sessionId: string): string | undefined;
+    selectSession(sessionId: string, directory?: string): Promise<void | boolean | object>;
     startNewSession?(): void;
     setShowSessionPicker(value: boolean): void;
     now?(): number;
@@ -213,7 +215,12 @@ async function restoreStartupView(
     if (initialRoute.type === 'new-session') deps.startNewSession?.();
     deps.setShowSessionPicker(false);
     if (initialRoute.type === 'session') {
-      await deps.selectSession(initialRoute.sessionId);
+      const directory =
+        deps.getSessionDirectory?.(initialRoute.sessionId) ?? initialRoute.directory;
+      const selected = await (directory
+        ? deps.selectSession(initialRoute.sessionId, directory)
+        : deps.selectSession(initialRoute.sessionId));
+      if (selected === false) deps.setShowSessionPicker(true);
     }
     deps.markInitialRouteConsumed?.();
     return;
@@ -225,7 +232,12 @@ async function restoreStartupView(
     deps.hasSession(lastOpenedView.sessionId)
   ) {
     deps.setShowSessionPicker(false);
-    await deps.selectSession(lastOpenedView.sessionId);
+    const directory =
+      deps.getSessionDirectory?.(lastOpenedView.sessionId) ?? lastOpenedView.directory;
+    const selected = await (directory
+      ? deps.selectSession(lastOpenedView.sessionId, directory)
+      : deps.selectSession(lastOpenedView.sessionId));
+    if (selected === false) deps.setShowSessionPicker(true);
     return;
   }
 
@@ -288,7 +300,8 @@ export function createConnectionBootstrapOperations(deps: {
   getSessionCount?(): number;
   getOnlyPrimarySessionId(): string | null;
   hasSession(sessionId: string): boolean;
-  selectSession(sessionId: string): Promise<void | boolean | object>;
+  getSessionDirectory?(sessionId: string): string | undefined;
+  selectSession(sessionId: string, directory?: string): Promise<void | boolean | object>;
   startNewSession?(): void;
   setShowSessionPicker(value: boolean): void;
   setInitialized(value: boolean): void;

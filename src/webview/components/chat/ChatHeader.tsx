@@ -344,7 +344,9 @@ function SiblingWorkspaceAlertsButton() {
 async function toggleSessionPinned(sessionId: string) {
   const pinned = !state.pinnedSessionIds.includes(sessionId);
   try {
-    const pinnedSessionIds = await client.varro.session.setPinned(sessionId, pinned);
+    const pinnedSessionIds = await client.varro.session.setPinned(sessionId, pinned, {
+      directory: state.sessions.find((session) => session.id === sessionId)?.directory,
+    });
     setState('pinnedSessionIds', pinnedSessionIds);
   } catch (error) {
     setError(error instanceof Error ? error.message : String(error));

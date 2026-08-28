@@ -1780,6 +1780,11 @@ body.vscode-light
   word-break: normal;
 }
 
+.session-reference-folder {
+  color: var(--color-vscode-muted);
+  font-size: 0.9em;
+}
+
 .session-reference-icon {
   display: inline-block;
   width: 12px;

@@ -60,12 +60,14 @@ export const client = {
       limit?: number;
       search?: string;
       roots?: boolean;
+      directory?: string;
       signal?: AbortSignal;
     }): Promise<Session[] | SessionListPage> {
       const params = new URLSearchParams();
       if (options?.limit) params.set('limit', String(options.limit));
       if (options?.search) params.set('search', options.search);
       if (options?.roots) params.set('roots', 'true');
+      if (options?.directory) params.set('directory', options.directory);
       const query = params.size > 0 ? `?${params.toString()}` : '';
       const path = `/session${query}`;
       const response = options?.signal
@@ -83,8 +85,22 @@ export const client = {
         hasMore: page.hasMore,
       };
     },
-    async get(id: string): Promise<Session> {
-      return apiCall<Session>('GET', `/session/${id}`).then(applySessionShareOverride);
+    async get(id: string, options?: { directory?: string }): Promise<Session> {
+      return apiCall<Session>('GET', withDirectory(`/session/${id}`, options?.directory)).then(
+        applySessionShareOverride
+      );
+    },
+    async activate(
+      id: string,
+      directory: string,
+      options?: { signal?: AbortSignal }
+    ): Promise<Session> {
+      return apiCall<Session>(
+        'POST',
+        buildVarroSessionEndpoint(id, 'activate'),
+        { directory },
+        { signal: options?.signal }
+      ).then(applySessionShareOverride);
     },
     async create(
       body?: {
@@ -103,14 +119,18 @@ export const client = {
     ): Promise<Session> {
       return apiCall('PATCH', withDirectory(`/session/${id}`, options?.directory), body);
     },
-    async fork(id: string, messageID?: string): Promise<Session> {
-      return apiCall('POST', `/session/${id}/fork`, messageID ? { messageID } : undefined);
+    async fork(id: string, messageID?: string, options?: { directory?: string }): Promise<Session> {
+      return apiCall(
+        'POST',
+        withDirectory(`/session/${id}/fork`, options?.directory),
+        messageID ? { messageID } : undefined
+      );
     },
-    async delete(id: string): Promise<boolean> {
-      return apiCall('DELETE', `/session/${id}`);
+    async delete(id: string, options?: { directory?: string }): Promise<boolean> {
+      return apiCall('DELETE', withDirectory(`/session/${id}`, options?.directory));
     },
-    async abort(id: string): Promise<boolean> {
-      return apiCall('POST', `/session/${id}/abort`);
+    async abort(id: string, options?: { directory?: string }): Promise<boolean> {
+      return apiCall('POST', withDirectory(`/session/${id}/abort`, options?.directory));
     },
     async share(id: string, options?: { directory?: string }): Promise<Session> {
       return apiCall('POST', withDirectory(`/session/${id}/share`, options?.directory));
@@ -120,13 +140,20 @@ export const client = {
     },
     async init(
       id: string,
-      body: { messageID: string; providerID: string; modelID: string }
+      body: { messageID: string; providerID: string; modelID: string },
+      options?: { directory?: string }
     ): Promise<boolean> {
-      return apiCall('POST', `/session/${id}/init`, body);
+      return apiCall('POST', withDirectory(`/session/${id}/init`, options?.directory), body);
     },
-    async diff(id: string, messageID?: string): Promise<FileDiff[]> {
+    async diff(
+      id: string,
+      messageID?: string,
+      options?: { directory?: string }
+    ): Promise<FileDiff[]> {
       const query = messageID ? `?messageID=${messageID}` : '';
-      return apiCall('GET', `/session/${id}/diff${query}`).then(validateFileDiffs);
+      return apiCall('GET', withDirectory(`/session/${id}/diff${query}`, options?.directory)).then(
+        validateFileDiffs
+      );
     },
     async status(): Promise<Record<string, SessionStatus>> {
       return getSharedSessionStatus();
@@ -155,14 +182,21 @@ export const client = {
       if (page.nextCursor) items.nextCursor = page.nextCursor;
       return items;
     },
-    async deleteMessage(id: string, messageID: string): Promise<boolean> {
+    async deleteMessage(
+      id: string,
+      messageID: string,
+      options?: { directory?: string }
+    ): Promise<boolean> {
       return apiCall(
         'DELETE',
-        `/session/${encodeURIComponent(id)}/message/${encodeURIComponent(messageID)}`
+        withDirectory(
+          `/session/${encodeURIComponent(id)}/message/${encodeURIComponent(messageID)}`,
+          options?.directory
+        )
       );
     },
-    async todos(id: string): Promise<Todo[]> {
-      return apiCall('GET', `/session/${id}/todo`);
+    async todos(id: string, options?: { directory?: string }): Promise<Todo[]> {
+      return apiCall('GET', withDirectory(`/session/${id}/todo`, options?.directory));
     },
     async sendAsync(
       id: string,
@@ -217,14 +251,24 @@ export const client = {
             permissionAutomationLease: options.permissionAutomationLease,
           });
     },
-    async revert(id: string, messageID: string): Promise<Session> {
-      return apiCall('POST', `/session/${id}/revert`, { messageID });
+    async revert(
+      id: string,
+      messageID: string,
+      options?: { directory?: string }
+    ): Promise<Session> {
+      return apiCall('POST', withDirectory(`/session/${id}/revert`, options?.directory), {
+        messageID,
+      });
     },
-    async unrevert(id: string): Promise<Session> {
-      return apiCall('POST', `/session/${id}/unrevert`);
+    async unrevert(id: string, options?: { directory?: string }): Promise<Session> {
+      return apiCall('POST', withDirectory(`/session/${id}/unrevert`, options?.directory));
     },
-    async compact(id: string, model: { providerID: string; modelID: string }): Promise<boolean> {
-      return apiCall('POST', `/session/${id}/summarize`, model);
+    async compact(
+      id: string,
+      model: { providerID: string; modelID: string },
+      options?: { directory?: string }
+    ): Promise<boolean> {
+      return apiCall('POST', withDirectory(`/session/${id}/summarize`, options?.directory), model);
     },
     async command(
       id: string,
@@ -234,9 +278,10 @@ export const client = {
         messageID?: string;
         agent?: string;
         model?: string;
-      }
+      },
+      options?: { directory?: string }
     ): Promise<MessageEntry> {
-      return apiCall('POST', `/session/${id}/command`, body);
+      return apiCall('POST', withDirectory(`/session/${id}/command`, options?.directory), body);
     },
   },
 
@@ -355,21 +400,60 @@ export const client = {
 
   varro: {
     session: {
-      async deleteImmediately(sessionID: string): Promise<boolean> {
-        return apiCall('DELETE', buildVarroSessionEndpoint(sessionID, 'delete'));
+      async deleteImmediately(
+        sessionID: string,
+        options?: { directory?: string }
+      ): Promise<boolean> {
+        return apiCall(
+          'DELETE',
+          withDirectory(buildVarroSessionEndpoint(sessionID, 'delete'), options?.directory)
+        );
       },
-      async diffSummary(sessionID: string, revision?: number): Promise<SessionDiffSummary> {
+      async diffSummary(
+        sessionID: string,
+        revision?: number,
+        options?: { directory?: string }
+      ): Promise<SessionDiffSummary> {
         const path = buildVarroSessionEndpoint(sessionID, 'diff-summary');
-        return apiCall('GET', revision === undefined ? path : `${path}?revision=${revision}`);
+        const revisionPath = revision === undefined ? path : `${path}?revision=${revision}`;
+        return apiCall('GET', withDirectory(revisionPath, options?.directory));
       },
-      async setPinned(sessionID: string, pinned: boolean): Promise<string[]> {
-        return apiCall('POST', buildVarroSessionEndpoint(sessionID, 'pin'), { pinned });
+      async setPinned(
+        sessionID: string,
+        pinned: boolean,
+        options?: { directory?: string }
+      ): Promise<string[]> {
+        return apiCall(
+          'POST',
+          withDirectory(buildVarroSessionEndpoint(sessionID, 'pin'), options?.directory),
+          { pinned }
+        );
       },
-      async renameIfUntitled(sessionID: string): Promise<SessionTitleFallbackResponse> {
-        return apiCall('POST', buildVarroSessionEndpoint(sessionID, 'rename-if-untitled'));
+      async renameIfUntitled(
+        sessionID: string,
+        options?: { directory?: string }
+      ): Promise<SessionTitleFallbackResponse> {
+        return apiCall(
+          'POST',
+          withDirectory(
+            buildVarroSessionEndpoint(sessionID, 'rename-if-untitled'),
+            options?.directory
+          )
+        );
       },
-      async updatePermissionMode(sessionID: string, mode: PermissionMode): Promise<Session> {
-        return apiCall('POST', buildVarroSessionEndpoint(sessionID, 'permission-mode'), { mode });
+      async updatePermissionMode(
+        sessionID: string,
+        mode: PermissionMode,
+        options?: { directory?: string }
+      ): Promise<Session> {
+        return apiCall(
+          'POST',
+          withDirectory(
+            buildVarroSessionEndpoint(sessionID, 'permission-mode'),
+            options?.directory
+          ),
+          { mode }
+        );
       },
     },
     async openPlan(content: string): Promise<{ path: string }> {
@@ -522,8 +606,9 @@ export const client = {
 
 function withDirectory(path: string, directory: string | undefined): string {
   if (!directory) return path;
-  const params = new URLSearchParams({ directory });
-  return `${path}?${params.toString()}`;
+  const url = new URL(path, 'http://varro.local');
+  url.searchParams.set('directory', directory);
+  return `${url.pathname}${url.search}`;
 }
 
 function requireArray<T, V = unknown>(value: V, path: string): T[] {

@@ -201,14 +201,17 @@ describe('SessionListView model details', () => {
     setState('editorContext', {
       workspacePath: '/repo-a',
       workspaceFolders: [
-        { name: 'Repo A', path: '/repo-a' },
+        { name: 'carpathia-lambda-label-management', path: '/repo-a' },
         { name: 'Repo B', path: '/repo-b' },
       ],
       activeFile: null,
       selection: null,
       diagnostics: [],
     });
-    setState('sessions', [session('session-1', 2), session('session-2', 1)]);
+    setState('sessions', [
+      session('session-1', 2, { directory: '/repo-a' }),
+      session('session-2', 1, { directory: '/repo-b' }),
+    ]);
     setShowSessionPicker(false);
 
     cleanup = render(() => <SessionListView />, container);
@@ -216,8 +219,15 @@ describe('SessionListView model details', () => {
     const selector = container.querySelector('.session-list-workspace-selector');
     const search = container.querySelector('.session-list-search');
     expect(selector?.nextElementSibling).toBe(search);
-    expect(selector?.textContent).toContain('Working directory:');
+    expect(selector?.textContent).toContain('Folder:');
+    expect(selector?.textContent).toContain('All folders');
     expect(selector?.querySelector('.workspace-picker-folder-icon')).toBeNull();
+    expect(container.querySelectorAll('.session-item-folder-meta-icon')).toHaveLength(2);
+    expect(
+      Array.from(container.querySelectorAll('.session-item-folder')).map(
+        (element) => element.textContent
+      )
+    ).toEqual(['cllm', 'Repo B']);
 
     selector?.querySelector<HTMLButtonElement>('.workspace-picker-button')?.click();
     selector?.querySelector<HTMLButtonElement>('[data-workspace-path="/repo-b"]')?.click();
@@ -225,7 +235,42 @@ describe('SessionListView model details', () => {
       type: 'workspace/select',
       payload: { path: '/repo-b' },
     });
-    expect(showSessionPicker()).toBe(true);
+    expect(selector?.textContent).toContain('Repo B');
+    expect(showSessionPicker()).toBe(false);
+    expect(
+      Array.from(container.querySelectorAll('.session-item-title-text')).map(
+        (element) => element.textContent
+      )
+    ).toEqual(['session-2']);
+    expect(container.querySelectorAll('.session-item-folder-meta-icon')).toHaveLength(0);
+    expect(container.querySelector('.session-item-meta')?.textContent).not.toContain('Repo B');
+
+    send.mockClear();
+    selector?.querySelector<HTMLButtonElement>('.workspace-picker-button')?.click();
+    selector?.querySelector<HTMLButtonElement>('.workspace-popover-all')?.click();
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'workspace/select' }));
+  });
+
+  it('shows the empty state when the selected folder has no sessions', () => {
+    setState('editorContext', {
+      workspacePath: '/repo-a',
+      workspaceFolders: [
+        { name: 'Repo A', path: '/repo-a' },
+        { name: 'Repo B', path: '/repo-b' },
+      ],
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    setState('sessions', [session('session-a', 1, { directory: '/repo-a' })]);
+
+    cleanup = render(() => <SessionListView />, container);
+    const selector = container.querySelector('.session-list-workspace-selector');
+    selector?.querySelector<HTMLButtonElement>('.workspace-picker-button')?.click();
+    selector?.querySelector<HTMLButtonElement>('[data-workspace-path="/repo-b"]')?.click();
+
+    expect(container.querySelector('.session-item')).toBeNull();
+    expect(container.textContent).toContain('No sessions yet');
   });
 
   it('opens an Alt-clicked session row in an editor tab', () => {
@@ -247,6 +292,7 @@ describe('SessionListView model details', () => {
       type: 'session/open-in-editor',
       payload: {
         sessionId: 'session-1',
+        directory: '/repo',
         rootSessionId: 'session-1',
         title: 'session-1',
         model: undefined,
@@ -277,6 +323,7 @@ describe('SessionListView model details', () => {
       type: 'session/open-in-editor',
       payload: {
         sessionId: 'session-1',
+        directory: '/repo',
         rootSessionId: 'session-1',
         title: 'session-1',
         model: { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
@@ -328,6 +375,7 @@ describe('SessionListView model details', () => {
       type: 'session/open-in-editor',
       payload: {
         sessionId: 'session-1',
+        directory: '/repo',
         rootSessionId: 'session-1',
         title: 'session-1',
         model: undefined,
@@ -381,6 +429,7 @@ describe('SessionListView model details', () => {
     vi.mocked(selectSession).mockClear();
     container.querySelector<HTMLButtonElement>('.session-item-main')!.click();
     expect(selectSession).toHaveBeenCalledWith('session-1', {
+      directory: '/repo',
       selectedModel: {
         providerID: 'openai',
         modelID: 'gpt-5.6-sol',
@@ -479,6 +528,7 @@ describe('SessionListView model details', () => {
     vi.mocked(selectSession).mockClear();
     container.querySelector<HTMLButtonElement>('.session-item-main')!.click();
     expect(selectSession).toHaveBeenCalledWith('session-1', {
+      directory: '/repo',
       selectedModel: {
         providerID: 'openai',
         modelID: 'gpt-5.6-sol',
@@ -631,7 +681,9 @@ describe('SessionListView diff summaries', () => {
     cleanup = render(() => <SessionListView />, container);
 
     await vi.waitFor(() =>
-      expect(diffSummarySpy).toHaveBeenCalledWith('session-1', expect.any(Number))
+      expect(diffSummarySpy).toHaveBeenCalledWith('session-1', expect.any(Number), {
+        directory: '/repo',
+      })
     );
     await vi.waitFor(() => {
       expect(container.querySelector('.session-item-meta')?.textContent).toContain('2 files');
@@ -709,7 +761,9 @@ describe('SessionListView diff summaries', () => {
     cleanup = render(() => <SessionListView />, container);
 
     await vi.waitFor(() =>
-      expect(diffSummarySpy).toHaveBeenCalledWith('session-1', expect.any(Number))
+      expect(diffSummarySpy).toHaveBeenCalledWith('session-1', expect.any(Number), {
+        directory: '/repo',
+      })
     );
     await vi.waitFor(() => {
       const meta = container.querySelector('.session-item-meta')?.textContent;
@@ -912,7 +966,9 @@ describe('SessionListView diff summaries', () => {
     ]);
 
     await vi.waitFor(() => expect(diffSummarySpy).toHaveBeenCalledTimes(2));
-    expect(diffSummarySpy).toHaveBeenNthCalledWith(2, 'session-1', 100_001);
+    expect(diffSummarySpy).toHaveBeenNthCalledWith(2, 'session-1', 100_001, {
+      directory: '/repo',
+    });
   });
 });
 
@@ -943,7 +999,9 @@ describe('SessionListView pins', () => {
       .find((button) => button.textContent?.trim() === 'Pin session')!
       .click();
 
-    await vi.waitFor(() => expect(setPinned).toHaveBeenCalledWith('session-1', true));
+    await vi.waitFor(() =>
+      expect(setPinned).toHaveBeenCalledWith('session-1', true, { directory: '/repo' })
+    );
     await vi.waitFor(() => {
       expect(row().classList.contains('is-pinned')).toBe(true);
       const pinnedIcon = row().querySelector<HTMLElement>('.session-item-pinned-icon');
@@ -955,7 +1013,9 @@ describe('SessionListView pins', () => {
       .find((button) => button.textContent?.trim() === 'Unpin session')!
       .click();
 
-    await vi.waitFor(() => expect(setPinned).toHaveBeenLastCalledWith('session-1', false));
+    await vi.waitFor(() =>
+      expect(setPinned).toHaveBeenLastCalledWith('session-1', false, { directory: '/repo' })
+    );
     await vi.waitFor(() => {
       expect(row().classList.contains('is-pinned')).toBe(false);
       expect(row().querySelector('[aria-label="Pinned session"]')).toBeNull();
@@ -1088,7 +1148,7 @@ describe('SessionListView selection', () => {
       expect(items[0]?.classList.contains('keyboard-focus')).toBe(true);
 
       list.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-      expect(selectSession).toHaveBeenCalledWith('session-1');
+      expect(selectSession).toHaveBeenCalledWith('session-1', { directory: '/repo' });
     } finally {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
     }
@@ -1153,7 +1213,7 @@ describe('SessionListView selection', () => {
 
     container.querySelector<HTMLElement>('.session-item-age')!.click();
 
-    expect(selectSession).toHaveBeenCalledWith('session-1');
+    expect(selectSession).toHaveBeenCalledWith('session-1', { directory: '/repo' });
   });
 
   it('opens desktop sessions on pointer down without double-selecting on click', () => {
@@ -1173,7 +1233,7 @@ describe('SessionListView selection', () => {
       })
     );
     expect(capturePointer).toHaveBeenCalledWith(7);
-    expect(selectSession).toHaveBeenCalledWith('session-1');
+    expect(selectSession).toHaveBeenCalledWith('session-1', { directory: '/repo' });
 
     row.querySelector<HTMLElement>('.session-item-main')!.click();
     expect(selectSession).toHaveBeenCalledTimes(1);
@@ -1204,7 +1264,7 @@ describe('SessionListView selection', () => {
     row.querySelector<HTMLElement>('.session-item-main')!.dispatchEvent(pointerDown);
 
     expect(pointerDown.defaultPrevented).toBe(true);
-    expect(selectSession).toHaveBeenCalledWith('session-1');
+    expect(selectSession).toHaveBeenCalledWith('session-1', { directory: '/repo' });
     setState('sessions', [session('session-2', now + 1), session('session-1', now)]);
     row.querySelector<HTMLElement>('.session-item-main')!.click();
     expect(selectSession).toHaveBeenCalledTimes(1);
@@ -1353,7 +1413,7 @@ describe('SessionListView actions', () => {
 
     expect(send).toHaveBeenCalledWith({
       type: 'session/open-in-opencode',
-      payload: { sessionId: 'session-1' },
+      payload: { sessionId: 'session-1', directory: '/repo' },
     });
     expect(document.querySelector('[role="menu"]')).toBeNull();
   });
@@ -1373,7 +1433,7 @@ describe('SessionListView actions', () => {
 
     expect(send).toHaveBeenCalledWith({
       type: 'session/open-in-sidebar',
-      payload: { sessionId: 'session-1' },
+      payload: { sessionId: 'session-1', directory: '/repo' },
     });
     expect(document.querySelector('[role="menu"]')).toBeNull();
   });
@@ -1408,6 +1468,7 @@ describe('SessionListView actions', () => {
       type: 'session/open-in-editor',
       payload: {
         sessionId: 'session-1',
+        directory: '/repo',
         title: 'session-1',
         model: { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
       },
@@ -1998,11 +2059,14 @@ describe('SessionListView load errors', () => {
   it('resolves paginated sub-agents without adding archive sessions to loaded state', async () => {
     const now = Date.now();
     const loadedSessions = [
-      session('parent', now),
-      session('loaded-child', now - 1, { parentID: 'parent' }),
+      session('parent', now, { directory: '/repo-a' }),
+      session('loaded-child', now - 1, { parentID: 'parent', directory: '/repo-a' }),
     ];
     const unrelatedArchiveSession = session('unrelated-archive', now - 30 * 86_400_000);
-    const paginatedChild = session('paginated-child', now - 2, { parentID: 'parent' });
+    const paginatedChild = session('paginated-child', now - 2, {
+      parentID: 'parent',
+      directory: '/repo-b',
+    });
     vi.spyOn(client.session, 'list')
       .mockResolvedValueOnce({
         items: [...loadedSessions, unrelatedArchiveSession],
@@ -2014,6 +2078,16 @@ describe('SessionListView load errors', () => {
       });
     setState('sessions', loadedSessions);
     setState('sessionsHasMore', true);
+    setState('editorContext', {
+      workspacePath: '/repo-a',
+      workspaceFolders: [
+        { name: 'Repo A', path: '/repo-a' },
+        { name: 'Repo B', path: '/repo-b' },
+      ],
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
 
     cleanup = render(() => <SessionListView subagentParentId="parent" />, container);
 
@@ -2024,6 +2098,14 @@ describe('SessionListView load errors', () => {
         )
       ).toEqual(['loaded-child', 'paginated-child']);
     });
+    const selector = container.querySelector('.session-list-workspace-selector');
+    selector?.querySelector<HTMLButtonElement>('.workspace-picker-button')?.click();
+    selector?.querySelector<HTMLButtonElement>('[data-workspace-path="/repo-b"]')?.click();
+    expect(
+      Array.from(container.querySelectorAll('.session-item-title-text')).map(
+        (element) => element.textContent
+      )
+    ).toEqual(['paginated-child']);
     expect(client.session.list).toHaveBeenNthCalledWith(1, { limit: 100 });
     expect(client.session.list).toHaveBeenNthCalledWith(2, { limit: 200 });
     expect(loadMoreSessionsMock).not.toHaveBeenCalled();

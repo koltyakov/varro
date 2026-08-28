@@ -10,6 +10,7 @@ import type {
 import { AUTO_APPROVE_JUDGE_TIMEOUT_MS } from '../../../shared/protocol';
 import { DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../../../shared/provider-limit-config';
 import { isPlaceholderSessionTitle } from '../../../shared/session-title';
+import { isSameWorkspacePath } from '../../../shared/workspace-path';
 import { onMessage, postMessage } from '../../lib/bridge';
 import * as clientModule from '../../lib/client';
 import type { SelectedModel, SessionSelectionOptions } from '../../lib/app-state-types';
@@ -126,6 +127,10 @@ import { asRecord, isString } from '../../lib/runtime-values';
 
 const client = clientModule.client;
 
+function getSessionDirectory(sessionId: string): string | undefined {
+  return appStore.state.sessions.find((session) => session.id === sessionId)?.directory;
+}
+
 function invalidateClientWorkspaceState() {
   clientModule.invalidateClientWorkspaceCaches();
 }
@@ -136,7 +141,7 @@ export interface OpenCodeRuntime {
   refreshRoutingState(): Promise<void>;
   continueInterruptedSession(sessionId: string): Promise<void>;
   applySessionMcps(names: string[], sessionId?: string | null): Promise<void>;
-  selectSession(id: string, options?: SessionSelectionOptions): Promise<void>;
+  selectSession(id: string, options?: SessionSelectionOptions): Promise<boolean>;
   loadFullSessionHistory(sessionId: string): Promise<void>;
   loadOlderSessionHistoryPage(
     sessionId: string,
@@ -585,7 +590,10 @@ async function fetchSessionMessages(
 ): Promise<MessageEntry[]> {
   const requestRevision = getSessionMessageWindowRevision(sessionId);
   const requestMutationRevision = getSessionMessageSnapshotMutationRevision(sessionId);
-  const incoming = await client.session.messages(sessionId, { limit: MESSAGE_HISTORY_WINDOW });
+  const incoming = await client.session.messages(sessionId, {
+    limit: MESSAGE_HISTORY_WINDOW,
+    directory: getSessionDirectory(sessionId),
+  });
   const activeMessages = appStore.state.messages.filter(
     (entry) => entry.info.sessionID === sessionId
   );
@@ -680,6 +688,7 @@ function loadOlderSessionPrompts(
       const pageLoad = client.session.messages(sessionId, {
         limit: MESSAGE_HISTORY_WINDOW,
         before: cursor,
+        directory: getSessionDirectory(sessionId),
       });
       promptHistoryPageLoads.set(sessionId, { revision, cursor, promise: pageLoad });
       let page: Awaited<typeof pageLoad>;
@@ -767,7 +776,10 @@ async function loadSessionWithMessages(
     if (isNotFoundError(err)) return [];
     throw err;
   });
-  const [session, messages] = await Promise.all([client.session.get(sessionId), messagesPromise]);
+  const [session, messages] = await Promise.all([
+    client.session.get(sessionId, { directory: getSessionDirectory(sessionId) }),
+    messagesPromise,
+  ]);
   return { session, messages };
 }
 
@@ -852,12 +864,13 @@ function resolvePermissionJudgeModel(sessionId: string) {
 }
 
 async function deleteSessionImmediately(id: string) {
-  await client.varro.session.deleteImmediately(id);
+  await client.varro.session.deleteImmediately(id, { directory: getSessionDirectory(id) });
   clearQueuedMessagesForSession(id);
   clearSessionMessageWindowState(id);
 }
 
-export function resetWorkspaceDerivedState() {
+export function resetWorkspaceDerivedState(options?: { preserveWorkspaceCatalog?: boolean }) {
+  const preserveWorkspaceCatalog = options?.preserveWorkspaceCatalog === true;
   const queuedTreeSessionIds = new Set(
     appStore.state.queuedMessages.flatMap((message) => {
       const rootId = getSessionTreeRootId(message.sessionId) || message.sessionId;
@@ -874,47 +887,46 @@ export function resetWorkspaceDerivedState() {
     sessionStore.setActiveSessionId(null);
     sessionStore.persistActiveSessionId(null);
     sessionStore.clearMessages();
-    appStore.setState('sessions', []);
-    appStore.setState('sessionsLoadError', null);
-    appStore.setState('sessionsHasMore', false);
+    if (!preserveWorkspaceCatalog) {
+      appStore.setState('sessions', []);
+      appStore.setState('sessionsLoadError', null);
+      appStore.setState('sessionsHasMore', false);
+      appStore.setState('recycleBinEntries', []);
+      appStore.setState('recycleBinLoadError', null);
+      appStore.setState('sessionStatus', reconcile(queuedWorkingStatuses));
+      appStore.setState('failedSessionIds', []);
+      appStore.setState('failedSessionUpdatedAt', {});
+      appStore.setState('sessionMessageCounts', reconcile({}));
+      appStore.setState('sessionUsageLimits', reconcile({}));
+    }
     appStore.setState('sessionsLoadingMore', false);
     appStore.setState('sessionsPaginationError', null);
-    appStore.setState('recycleBinEntries', []);
-    appStore.setState('recycleBinLoadError', null);
     appStore.setState('messagesLoading', false);
-    appStore.setState('sessionStatus', reconcile(queuedWorkingStatuses));
     appStore.setState('permissions', []);
     appStore.setState('questions', []);
     appStore.setState('compactingSessionIds', []);
     appStore.setState('queuedMessageDispatchingId', null);
     setQueuedMessageEdit(null);
-    appStore.setState('failedSessionIds', []);
-    appStore.setState('failedSessionUpdatedAt', {});
-    appStore.setState('sessionMessageCounts', reconcile({}));
-    appStore.setState('sessionUsageLimits', reconcile({}));
     appStore.setState('interruptedSessionIds', []);
 
-    // Do not let the composer send catalog entries from the previous workspace.
+    // Keep the toolbar presentation stable while the new catalogs load. Sending
+    // remains blocked by workspaceCatalogReloadPending until they are authoritative.
     appStore.setState('providersLoaded', false);
     appStore.setState('workspaceCatalogReloadPending', true);
     appStore.setState('agentsLoaded', false);
     appStore.setState('commandsLoaded', false);
-    appStore.setState('agents', []);
-    appStore.setState('allAgents', []);
     appStore.setState('commands', []);
-    appStore.setState('providers', []);
-    appStore.setState('providerLimits', reconcile({}));
-    appStore.setState('mcpStatus', reconcile({}));
     appStore.setState('lspStatus', []);
     appStore.setState('sessionAutoPermissionCounts', reconcile({}));
     appStore.setState('sessionAutoPermissionActivity', reconcile({}));
     appStore.setState('autoPermissionCountsSince', Date.now());
     appStore.setState('providerAuthMethods', reconcile({}));
-    appStore.setState('providerDefaults', reconcile({}));
     appStore.setState('workspaceStatuses', []);
     appStore.setState('workspaceStatusSummary', reconcile({ entries: [] }));
     appStore.setState('draftSelectedMcps', null);
-    routingStore.setSelectedAgent(null, { persistGlobal: false });
+    routingStore.setSelectedAgent(routingStore.getPersistedSelectedAgent(), {
+      persistGlobal: false,
+    });
     routingStore.setSelectedModel(routingStore.getPersistedSelectedModel(), {
       persistGlobal: false,
     });
@@ -947,10 +959,14 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   let initializationAttemptGeneration = 0;
   let activeInitializationAttempt: number | null = null;
   let eventHandlerCleanups: Array<() => void> = [];
-  let currentWorkspacePath: string | null | undefined;
+  let currentWorkspacePath = initialWebviewState.editorContext?.workspacePath;
   let workspaceGeneration = 0;
   let connectionGeneration = 0;
   let sessionSelectionGeneration = 0;
+  let sessionActivationGeneration = 0;
+  let sessionActivationController: AbortController | null = null;
+  let sessionActivationDirectory: string | null = null;
+  let initialRouteConsumed = false;
   let restoredPermissionsClassified = false;
   const permissionDecisionReferencesByTree = new Map<string, AutoApproveJudgeReference[]>();
   const permissionJudgeAttempts = new Map<string, PermissionJudgeAttempt>();
@@ -993,7 +1009,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   );
 
   const todoSyncOperations = createTodoSyncOperations({
-    loadSessionTodos: (sessionId) => client.session.todos(sessionId),
+    loadSessionTodos: (sessionId) =>
+      client.session.todos(sessionId, { directory: getSessionDirectory(sessionId) }),
   });
 
   const { syncTodosForSession, syncTodosFromMessages, handoffTodosToMessages } = todoSyncOperations;
@@ -1061,7 +1078,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     sessionTitleFallbackAttempts.set(sessionId, attempts + 1);
 
     const fallback = (async () => {
-      const renamed = await client.varro.session.renameIfUntitled(sessionId);
+      const renamed = await client.varro.session.renameIfUntitled(sessionId, {
+        directory: getSessionDirectory(sessionId),
+      });
       if (!renamed) return;
       const current = appStore.state.sessions.find((session) => session.id === sessionId);
       if (current) {
@@ -1109,7 +1128,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       reconcileServerState,
       invalidateMessageSync: messageSyncGenerations.invalidate,
       isMessageRemovalDeferred,
-      abortRemoteSession: (sessionId: string) => client.session.abort(sessionId),
+      abortRemoteSession: (sessionId: string) =>
+        client.session.abort(sessionId, { directory: getSessionDirectory(sessionId) }),
       continueInterruptedSession,
       logError,
       isPermissionAutomationOwner: () => permissionAutomationOwner,
@@ -1145,9 +1165,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
             composerStore.setInputText(prefill);
           }
         },
-        openSession: (sessionId) => {
+        openSession: (sessionId, directory) => {
           uiStore.setShowSessionPicker(false);
-          void selectSession(sessionId);
+          void selectSession(sessionId, { directory });
         },
         abortSession: () => {
           void abortSession().catch(() => {});
@@ -1883,13 +1903,22 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     activeInitializationAttempt = null;
   }
 
-  function invalidateWorkspaceAsyncWork() {
+  function invalidateWorkspaceAsyncWork(
+    preserveWorkspaceCatalog = false,
+    preserveSessionActivation = false
+  ) {
     workspaceGeneration += 1;
     sessionSelectionGeneration += 1;
     permissionSyncGeneration += 1;
     latestPermissionSyncGeneration = permissionSyncGeneration;
     permissionSnapshotGeneration += 1;
-    invalidateWorkspace();
+    if (!preserveSessionActivation) {
+      sessionActivationGeneration += 1;
+      sessionActivationController?.abort();
+      sessionActivationController = null;
+      sessionActivationDirectory = null;
+    }
+    invalidateWorkspace({ preserveSessionCatalog: preserveWorkspaceCatalog });
     statusSnapshots.clear();
     messageSyncGenerations.clear();
     sessionMcpOperations.invalidate();
@@ -1919,12 +1948,27 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     uiStore.setConnectionInitialized(false);
   }
 
-  function resetWorkspaceForChange() {
+  function resetWorkspaceForChange(options?: {
+    workspaceMembershipChanged?: boolean;
+    nextWorkspacePath?: string | null;
+    executionDirectoryChanged?: boolean;
+  }) {
+    if (options?.workspaceMembershipChanged && !options.executionDirectoryChanged) {
+      invalidateClientWorkspaceState();
+      workspaceGeneration += 1;
+      appStore.setState('workspaceCatalogReloadPending', true);
+      return;
+    }
+    const preserveSessionActivation = Boolean(
+      sessionActivationController &&
+      sessionActivationDirectory &&
+      isSameWorkspacePath(sessionActivationDirectory, options?.nextWorkspacePath)
+    );
     invalidateClientWorkspaceState();
     connectionGeneration += 1;
     invalidateInitializationAttempt();
-    invalidateWorkspaceAsyncWork();
-    resetWorkspaceDerivedState();
+    invalidateWorkspaceAsyncWork(true, preserveSessionActivation);
+    resetWorkspaceDerivedState({ preserveWorkspaceCatalog: true });
   }
 
   function reloadWorkspaceAfterChange(wasInitialized: boolean) {
@@ -1959,8 +2003,12 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     getPersistedActiveSessionId: sessionStore.getPersistedActiveSessionId,
     getPersistedLastOpenedView: sessionStore.getPersistedLastOpenedView,
     getInitialRoute: () => {
+      if (initialRouteConsumed) return null;
       const context = readWebviewInstanceContext();
       return context?.surface === 'editor' ? context.initialRoute : null;
+    },
+    markInitialRouteConsumed: () => {
+      initialRouteConsumed = true;
     },
     getSessionCount: () => appStore.state.sessions.length,
     getOnlyPrimarySessionId: () => {
@@ -1968,7 +2016,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       return primarySessions.length === 1 ? primarySessions[0]?.id || null : null;
     },
     hasSession: (sessionId) => appStore.state.sessions.some((session) => session.id === sessionId),
-    selectSession: (sessionId) => selectSession(sessionId),
+    getSessionDirectory: (sessionId) =>
+      appStore.state.sessions.find((session) => session.id === sessionId)?.directory,
+    selectSession: (sessionId, directory) =>
+      selectSession(sessionId, { directory, reportActivationError: false }),
     startNewSession: startNewChatDraft,
     setShowSessionPicker: uiStore.setShowSessionPicker,
     setInitialized: (value) => {
@@ -2156,7 +2207,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         );
       },
       handoffTodosToMessages,
-      loadSessionMetadata: (id) => client.session.get(id),
+      loadSessionMetadata: (id) => client.session.get(id, { directory: getSessionDirectory(id) }),
     },
     {
       nextSelection: () => ++sessionSelectionGeneration,
@@ -2176,7 +2227,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     markPendingAbortTree,
     setSessionStatusEntry,
     stopLoading: uiStore.stopLoading,
-    abortRemoteSession: (sessionId) => client.session.abort(sessionId),
+    abortRemoteSession: (sessionId) =>
+      client.session.abort(sessionId, { directory: getSessionDirectory(sessionId) }),
     clearPendingAbortTree,
     setSessionUsageLimit: sessionStore.setSessionUsageLimit,
     logError,
@@ -2185,8 +2237,14 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     invalidateMessageSync: (sessionId) => messageSyncGenerations.invalidate(sessionId),
     deferMessageRemovals,
     pruneMessagesFrom: sessionStore.pruneMessagesFrom,
-    deleteMessage: (sessionId, messageId) => client.session.deleteMessage(sessionId, messageId),
-    revertSession: (sessionId, messageId) => client.session.revert(sessionId, messageId),
+    deleteMessage: (sessionId, messageId) =>
+      client.session.deleteMessage(sessionId, messageId, {
+        directory: getSessionDirectory(sessionId),
+      }),
+    revertSession: (sessionId, messageId) =>
+      client.session.revert(sessionId, messageId, {
+        directory: getSessionDirectory(sessionId),
+      }),
     syncSession,
     syncSessionMessages,
     setError: uiStore.setError,
@@ -2202,7 +2260,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         preserveModelSelection: true,
         preserveScrollPosition: true,
       }),
-    unrevertSession: (sessionId) => client.session.unrevert(sessionId),
+    unrevertSession: (sessionId) =>
+      client.session.unrevert(sessionId, { directory: getSessionDirectory(sessionId) }),
     upsertSession,
     clearPendingAbort,
     resolveSelectedModel: () =>
@@ -2212,7 +2271,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         appStore.state.providerDefaults
       ),
     setSessionCompacting: sessionStore.setSessionCompacting,
-    compactRemoteSession: (sessionId, input) => client.session.compact(sessionId, input),
+    compactRemoteSession: (sessionId, input) =>
+      client.session.compact(sessionId, input, { directory: getSessionDirectory(sessionId) }),
     getSession: (sessionId) => appStore.state.sessions.find((session) => session.id === sessionId),
   });
 
@@ -2231,7 +2291,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     getMessageCount: () => appStore.state.messages.length,
     hasCommand: routingStore.hasCommand,
     startLoading: uiStore.startLoading,
-    runSessionCommand: (sessionId, input) => client.session.command(sessionId, input),
+    runSessionCommand: (sessionId, input) =>
+      client.session.command(sessionId, input, { directory: getSessionDirectory(sessionId) }),
     shouldApplyToActiveSession: (sessionId) => appStore.state.activeSessionId === sessionId,
     upsertMessageInfo: sessionStore.upsertMessageInfo,
     upsertPart: sessionStore.upsertPart,
@@ -2265,7 +2326,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     setDraftPermissionMode: permissionsStore.setDraftPermissionMode,
     saveProjectPermissionMode: permissionsStore.saveProjectPermissionMode,
     updateSessionPermission: (sessionId, mode) =>
-      client.varro.session.updatePermissionMode(sessionId, mode),
+      client.varro.session.updatePermissionMode(sessionId, mode, {
+        directory: getSessionDirectory(sessionId),
+      }),
     upsertSession,
     getPermissionsForSession: (sessionId) => {
       const sessionIds = new Set(getSessionTreeIds(sessionId));
@@ -2286,8 +2349,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     getSessionSelectionGeneration: () => sessionSelectionGeneration,
     getNewChatDraftGeneration,
     createRemoteSession: (body) => client.session.create(body),
-    updateRemoteSession: (sessionId, body) => client.session.update(sessionId, body),
-    forkRemoteSession: (sessionId, messageID) => client.session.fork(sessionId, messageID),
+    updateRemoteSession: (sessionId, body) =>
+      client.session.update(sessionId, body, { directory: getSessionDirectory(sessionId) }),
+    forkRemoteSession: (sessionId, messageID) =>
+      client.session.fork(sessionId, messageID, { directory: getSessionDirectory(sessionId) }),
     getPermissionModeForSession: permissionsStore.getPermissionModeForSession,
     buildCreatePermission: (mode) => getSessionPermissionRulesForMode(mode, 'create'),
     upsertSession,
@@ -2327,7 +2392,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     getSessions: () => appStore.state.sessions,
     getDeletedSessionTreeIds,
     getNextSessionIdAfterDeletion,
-    deleteRemoteSession: (sessionId) => client.session.delete(sessionId),
+    deleteRemoteSession: (sessionId) =>
+      client.session.delete(sessionId, { directory: getSessionDirectory(sessionId) }),
     hideDeletedSessionTree,
     loadRecycleBin,
     selectSession,
@@ -2342,11 +2408,52 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   });
 
   async function selectSession(id: string, options?: SessionSelectionOptions) {
+    const activation = ++sessionActivationGeneration;
+    sessionActivationController?.abort();
+    const activationController = new AbortController();
+    sessionActivationController = activationController;
+    const knownSession = appStore.state.sessions.find((session) => session.id === id);
+    const targetDirectory = options?.directory ?? knownSession?.directory;
+    sessionActivationDirectory = null;
+    if (targetDirectory && !isSameWorkspacePath(targetDirectory, currentWorkspacePath)) {
+      sessionActivationDirectory = targetDirectory;
+      try {
+        const activatedSession = await client.session.activate(id, targetDirectory, {
+          signal: activationController.signal,
+        });
+        if (activation !== sessionActivationGeneration) return false;
+        upsertSession(activatedSession);
+      } catch (err) {
+        if (
+          activation === sessionActivationGeneration &&
+          !activationController.signal.aborted &&
+          options?.reportActivationError !== false
+        ) {
+          uiStore.setError(err instanceof Error ? err.message : String(err));
+        }
+        if (sessionActivationController === activationController) {
+          sessionActivationController = null;
+          sessionActivationDirectory = null;
+        }
+        return false;
+      }
+    }
+    if (activation !== sessionActivationGeneration) return false;
+    if (sessionActivationController === activationController) {
+      sessionActivationController = null;
+      sessionActivationDirectory = null;
+    }
     messageSyncGenerations.invalidate(id);
     await sessionSyncOperations.selectSession(id, options);
     if (appStore.state.activeSessionId === id) {
-      sessionStore.persistLastOpenedView({ type: 'session', sessionId: id });
+      const directory = getSessionDirectory(id);
+      sessionStore.persistLastOpenedView(
+        directory
+          ? { type: 'session', sessionId: id, directory }
+          : { type: 'session', sessionId: id }
+      );
     }
+    return appStore.state.activeSessionId === id;
   }
 
   function runSessionMessageSync(sessionId: string): Promise<boolean> {
@@ -2372,7 +2479,12 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     initialPermissionMode = permissionsStore.getPermissionModeForSession(null)
   ): Promise<string | null> {
     const sessionId = await sessionManagementOperations.createSession(title, initialPermissionMode);
-    if (sessionId) sessionStore.persistLastOpenedView({ type: 'session', sessionId });
+    if (sessionId) {
+      const directory = getSessionDirectory(sessionId);
+      sessionStore.persistLastOpenedView(
+        directory ? { type: 'session', sessionId, directory } : { type: 'session', sessionId }
+      );
+    }
     return sessionId;
   }
 
@@ -2453,6 +2565,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         page ??= await client.session.messages(sessionId, {
           limit: MESSAGE_HISTORY_WINDOW,
           before: cursor,
+          directory: getSessionDirectory(sessionId),
         });
         if (!isCurrent()) return false;
         const current = appStore.state.messages.filter(
@@ -2488,7 +2601,12 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   async function forkSession(id: string, messageID?: string): Promise<string | null> {
     const sessionId = await sessionManagementOperations.forkSession(id, messageID);
-    if (sessionId) sessionStore.persistLastOpenedView({ type: 'session', sessionId });
+    if (sessionId) {
+      const directory = getSessionDirectory(sessionId);
+      sessionStore.persistLastOpenedView(
+        directory ? { type: 'session', sessionId, directory } : { type: 'session', sessionId }
+      );
+    }
     return sessionId;
   }
 

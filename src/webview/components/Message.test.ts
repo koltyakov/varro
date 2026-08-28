@@ -755,7 +755,7 @@ describe('Message user prompt rendering', () => {
     expect(container?.textContent).toContain('session:ses_missing456');
 
     link?.click();
-    expect(selectSessionMock).toHaveBeenCalledWith('ses_found123');
+    expect(selectSessionMock).toHaveBeenCalledWith('ses_found123', { directory: '/repo' });
   });
 
   it('renders HTTPS URLs as icon-prefixed external links in user messages', () => {

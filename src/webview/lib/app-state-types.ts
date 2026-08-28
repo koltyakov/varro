@@ -8,7 +8,12 @@ import type {
 import type { NativePdfAttachment } from '../../shared/native-pdf';
 
 export type SelectedModel = ChatModelSelection;
-export type SessionSelectionOptions = { markSeen?: boolean; selectedModel?: SelectedModel };
+export type SessionSelectionOptions = {
+  markSeen?: boolean;
+  selectedModel?: SelectedModel;
+  directory?: string;
+  reportActivationError?: boolean;
+};
 export type ModelVariantSelections = Record<string, string | null>;
 
 export type SessionSelectedAgents = Record<string, string>;

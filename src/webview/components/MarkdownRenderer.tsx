@@ -807,6 +807,7 @@ function linkifySessionReferences(fragment: DocumentFragment) {
       anchor.className = 'session-reference-link';
       anchor.href = segment.reference.href;
       anchor.dataset.sessionId = segment.reference.id;
+      anchor.dataset.sessionDirectory = segment.reference.directory;
       anchor.dataset.copyMarker = segment.reference.marker;
       anchor.title = `Open session ${segment.reference.id}`;
       const icon = createMaterialChipIconElement('session', 'session-reference-icon');
@@ -821,6 +822,12 @@ function linkifySessionReferences(fragment: DocumentFragment) {
       leadingContent.append(icon, leadingLabel);
       label.textContent = segment.reference.title.slice(firstWord.length);
       anchor.append(leadingContent, label);
+      if (segment.reference.folderLabel) {
+        const folderLabel = document.createElement('span');
+        folderLabel.className = 'session-reference-folder';
+        folderLabel.textContent = ` · ${segment.reference.folderLabel}`;
+        anchor.append(folderLabel);
+      }
       replacement.append(anchor);
     }
     node.replaceWith(replacement);
@@ -2216,7 +2223,9 @@ export function MarkdownRenderer(props: MarkdownProps) {
       if (state.activeSessionId) {
         rememberDirectSessionReturn(sessionLink.dataset.sessionId, state.activeSessionId);
       }
-      void selectSession(sessionLink.dataset.sessionId);
+      void selectSession(sessionLink.dataset.sessionId, {
+        directory: sessionLink.dataset.sessionDirectory,
+      });
       return;
     }
 

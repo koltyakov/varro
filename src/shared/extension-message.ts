@@ -84,7 +84,11 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
     case 'command/open-session': {
       const payload = asRecord(record.payload);
       if (!payload || !isString(payload.sessionId)) return null;
-      return { type, payload: { sessionId: payload.sessionId } };
+      if (payload.directory !== undefined && !isString(payload.directory)) return null;
+      const parsedPayload: Extract<ExtensionMessage, { type: 'command/open-session' }>['payload'] =
+        { sessionId: payload.sessionId };
+      if (isString(payload.directory)) parsedPayload.directory = payload.directory;
+      return { type, payload: parsedPayload };
     }
 
     case 'command/focus-input':

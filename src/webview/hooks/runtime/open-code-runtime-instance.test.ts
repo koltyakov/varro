@@ -155,7 +155,7 @@ describe('open code runtime synchronization', () => {
     expect(loadMcps).toHaveBeenCalledOnce();
   });
 
-  it('clears workspace-derived state while preserving preferences and session maps', () => {
+  it('clears workspace-derived state while preserving toolbar catalogs and session maps', () => {
     const oldSession: Session = {
       id: 'session-old',
       projectID: 'project-old',
@@ -230,6 +230,7 @@ describe('open code runtime synchronization', () => {
     setState('providerDefaults', { openai: 'gpt-5' });
     setState('providersLoaded', true);
     setState('providerLimits', { 'openai:session': null });
+    setState('mcpStatus', { docs: { status: 'connected' } });
     setInputText('old draft');
     startEditingMessage('message-old', oldSession.id, 'old message');
     setSessionHistoryCursor(oldSession.id, 'cursor-old');
@@ -247,17 +248,41 @@ describe('open code runtime synchronization', () => {
     expect(state.workspaceCatalogReloadPending).toBe(true);
     expect(state.agentsLoaded).toBe(false);
     expect(state.commandsLoaded).toBe(false);
-    expect(state.agents).toEqual([]);
-    expect(state.providers).toEqual([]);
-    expect(state.providerDefaults).toEqual({});
-    expect(state.providerLimits).toEqual({});
+    expect(state.agents).toEqual([
+      {
+        name: 'build',
+        description: 'Build agent',
+        mode: 'primary',
+        builtIn: true,
+        permission: [],
+        tools: {},
+      },
+    ]);
+    expect(state.providers).toEqual([
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          'gpt-5': {
+            id: 'gpt-5',
+            name: 'GPT-5',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+          },
+        },
+      },
+    ]);
+    expect(state.providerDefaults).toEqual({ openai: 'gpt-5' });
+    expect(state.providerLimits).toEqual({ 'openai:session': null });
+    expect(state.mcpStatus).toEqual({ docs: { status: 'connected' } });
     expect(showSessionPicker()).toBe(true);
     expect(inputText()).toBe('old draft');
     expect(editingMessage()).toBeNull();
     expect(getSessionHistoryCursor(oldSession.id)).toBeUndefined();
     expect(isSessionHistoryTruncated(oldSession.id)).toBe(false);
 
-    expect(state.selectedAgent).toBeNull();
+    expect(state.selectedAgent).toBe('global-agent');
     expect(state.selectedModel).toEqual(globalModel);
     expect(state.sessionSelectedAgents[oldSession.id]).toBe('session-agent');
     expect(state.sessionSelectedModels[oldSession.id]).toEqual(sessionModel);

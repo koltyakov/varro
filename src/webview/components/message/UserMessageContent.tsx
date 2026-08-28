@@ -1365,7 +1365,7 @@ function SessionReferenceLink(props: { reference: SessionReference }) {
     if (state.activeSessionId) {
       rememberDirectSessionReturn(props.reference.id, state.activeSessionId);
     }
-    void selectSession(props.reference.id);
+    void selectSession(props.reference.id, { directory: props.reference.directory });
   };
 
   return (
@@ -1374,6 +1374,7 @@ function SessionReferenceLink(props: { reference: SessionReference }) {
       href={props.reference.href}
       data-copy-marker={props.reference.marker}
       data-session-id={props.reference.id}
+      data-session-directory={props.reference.directory}
       title={`Open session ${props.reference.id}`}
       onClick={openSession}
     >
@@ -1382,6 +1383,9 @@ function SessionReferenceLink(props: { reference: SessionReference }) {
         <span class="link-leading-label">{firstWord}</span>
       </span>
       {props.reference.title.slice(firstWord.length)}
+      <Show when={props.reference.folderLabel}>
+        <span class="session-reference-folder"> · {props.reference.folderLabel}</span>
+      </Show>
     </a>
   );
 }

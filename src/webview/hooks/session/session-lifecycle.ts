@@ -24,6 +24,7 @@ type LifecycleState = {
 type LifecycleDependencies = {
   getState(): LifecycleState;
   getCurrentWorkspacePath(): string | null;
+  getOpenWorkspacePaths(): string[];
   setSessions(sessions: Session[]): void;
   clearSessionStatusEntry(sessionId: string): void;
   clearPendingAbort(sessionId: string | null | undefined): void;
@@ -65,6 +66,8 @@ export class SessionLifecycleOperations {
         showSessionPicker: uiStore.showSessionPicker(),
       }),
       getCurrentWorkspacePath: deps.getCurrentWorkspacePath,
+      getOpenWorkspacePaths: () =>
+        (appStore.state.editorContext?.workspaceFolders ?? []).map((folder) => folder.path),
       setSessions: sessionStore.setSessions,
       clearSessionStatusEntry: sessionStore.clearSessionStatusEntry,
       clearPendingAbort: deps.clearPendingAbort,
@@ -136,6 +139,16 @@ export function isSessionInWorkspace(
   return isSameWorkspacePath(normalizedSessionDirectory, normalizedWorkspace);
 }
 
+export function isSessionInOpenWorkspace(
+  session: Session,
+  workspacePaths: readonly string[],
+  fallbackWorkspacePath: string | null | undefined
+) {
+  return workspacePaths.length > 0
+    ? workspacePaths.some((workspacePath) => isSessionInWorkspace(session, workspacePath))
+    : isSessionInWorkspace(session, fallbackWorkspacePath);
+}
+
 export function sortSessions(sessions: Session[], now = Date.now()) {
   return [...sessions].toSorted((a, b) => compareSessionsByActivity(a, b, now));
 }
@@ -175,7 +188,11 @@ export function applySessions(deps: LifecycleDependencies, sessions: Session[]) 
       .filter(
         (session) =>
           !isNumber(session.time.archived) &&
-          isSessionInWorkspace(session, deps.getCurrentWorkspacePath())
+          isSessionInOpenWorkspace(
+            session,
+            deps.getOpenWorkspacePaths(),
+            deps.getCurrentWorkspacePath()
+          )
       )
       .map((session) => mergeFreshSession(existingById.get(session.id), session))
   );
@@ -222,10 +239,10 @@ export function hideDeletedSessionTree(
   const deletedIds = getDeletedSessionTreeIds(id, sessions);
 
   batch(() => {
-    deps.setSessions(sessions.filter((session) => !deletedIds.has(session.id)));
     for (const deletedId of deletedIds) {
       clearDeletedSessionState(deps, deletedId);
     }
+    deps.setSessions(sessions.filter((session) => !deletedIds.has(session.id)));
   });
 
   return deletedIds;
@@ -247,11 +264,10 @@ export function removeDeletedSessionTree(
   const deletedIds = getDeletedSessionTreeIds(id, sessions);
 
   batch(() => {
-    deps.setSessions(sessions.filter((session) => !deletedIds.has(session.id)));
-
     for (const deletedId of deletedIds) {
       clearDeletedSessionState(deps, deletedId);
     }
+    deps.setSessions(sessions.filter((session) => !deletedIds.has(session.id)));
   });
 
   return deletedIds;
@@ -265,7 +281,9 @@ export function upsertSession(deps: LifecycleDependencies, session: Session) {
     }
     return;
   }
-  if (!isSessionInWorkspace(session, deps.getCurrentWorkspacePath())) {
+  if (
+    !isSessionInOpenWorkspace(session, deps.getOpenWorkspacePaths(), deps.getCurrentWorkspacePath())
+  ) {
     if (sessions.some((item) => item.id === session.id)) {
       applySessions(
         deps,

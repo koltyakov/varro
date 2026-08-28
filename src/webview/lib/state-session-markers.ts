@@ -1,4 +1,5 @@
 import type { Session } from '../types';
+import { normalizeWorkspaceIdentity } from '../../shared/workspace-path';
 import { isNumber, type UnknownRecord, isObject } from './runtime-values';
 
 export type SessionMarkerMap = Record<string, number>;
@@ -12,9 +13,7 @@ type SessionMarkerStorage = {
 };
 
 export function normalizeWorkspacePath(path: string | null | undefined) {
-  if (!path) return null;
-  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
-  return normalized || null;
+  return normalizeWorkspaceIdentity(path);
 }
 
 export function getSessionMarkerWorkspaceScope(workspacePath: string | null | undefined) {
@@ -42,6 +41,22 @@ export function readScopedSessionMarkerState(
   workspaceScope: string
 ): SessionMarkerMap {
   return readScopedSessionMarkerStore(storage, key)[workspaceScope] || {};
+}
+
+export function readMergedSessionMarkerState(
+  storage: SessionMarkerStorage,
+  key: string,
+  workspaceScopes: readonly string[]
+) {
+  const merged: SessionMarkerMap = {};
+  for (const workspaceScope of new Set(workspaceScopes)) {
+    for (const [sessionId, timestamp] of Object.entries(
+      readScopedSessionMarkerState(storage, key, workspaceScope)
+    )) {
+      merged[sessionId] = Math.max(merged[sessionId] ?? 0, timestamp);
+    }
+  }
+  return merged;
 }
 
 export function writeScopedSessionMarkerState(

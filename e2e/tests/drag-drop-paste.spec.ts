@@ -559,8 +559,8 @@ test('reloads and inline-edits an image prompt without losing its attachment', a
       .map((request) => `${request.method} ${request.path}`);
   });
   expect(editRequests).toEqual([
-    `DELETE /session/${sessionId}/message/${initialAssistant!.info.id}`,
-    `DELETE /session/${sessionId}/message/${initialUser!.info.id}`,
+    `DELETE /session/${sessionId}/message/${initialAssistant!.info.id}?directory=%2Fworkspace%2Fvarro`,
+    `DELETE /session/${sessionId}/message/${initialUser!.info.id}?directory=%2Fworkspace%2Fvarro`,
     `POST /session/${sessionId}/prompt_async`,
   ]);
 

@@ -487,10 +487,12 @@ describe('SidebarProvider editor panels', () => {
     });
     const eventA = {
       type: 'session.status' as const,
+      seq: 10,
       properties: { sessionID: 'session-a', status: { type: 'busy' as const } },
     };
     const eventB = {
       type: 'session.status' as const,
+      seq: 20,
       properties: { sessionID: 'session-b', status: { type: 'busy' as const } },
     };
     provider.post({ type: 'server/event', payload: eventA });
@@ -502,8 +504,111 @@ describe('SidebarProvider editor panels', () => {
     const editorEvents = editor.panel.webview.postMessage.mock.calls
       .map(([message]) => message as { type?: string; payload?: unknown })
       .filter((message) => message.type === 'server/event');
-    expect(sidebarEvents).toEqual([{ type: 'server/event', payload: eventA }]);
-    expect(editorEvents).toEqual([{ type: 'server/event', payload: eventB }]);
+    expect(sidebarEvents).toEqual([
+      { type: 'server/event', payload: eventA },
+      {
+        type: 'server/event',
+        payload: { type: eventB.type, properties: eventB.properties },
+      },
+    ]);
+    expect(editorEvents).toEqual([
+      {
+        type: 'server/event',
+        payload: { type: eventA.type, properties: eventA.properties },
+      },
+      { type: 'server/event', payload: eventB },
+    ]);
+  });
+
+  it('projects sibling catalog events without detailed session data', async () => {
+    const contextProvider = createContextProvider();
+    contextProvider.context.workspacePath = '/repo-a';
+    const { provider } = await createSidebarProviderInstance({ contextProvider });
+    const { posted } = attachTestView(provider);
+    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
+      .sessionState;
+    sessionState.handleServerEvent({
+      type: 'session.created',
+      properties: { info: { id: 'session-b', directory: '/repo-b' } },
+    });
+    posted.length = 0;
+    const event = {
+      type: 'session.updated' as const,
+      seq: 42,
+      properties: {
+        info: {
+          id: 'session-b',
+          directory: '/repo-b',
+          title: 'Sibling',
+          permission: { edit: 'allow' },
+          revert: { messageID: 'message-b' },
+          metadata: { secret: true },
+          path: { cwd: '/repo-b', root: '/repo-b' },
+          summary: {
+            additions: 3,
+            deletions: 4,
+            files: 2,
+            diffs: [{ file: 'sibling.ts', before: '', after: 'secret' }],
+          },
+        },
+      },
+    };
+
+    provider.post({ type: 'server/event', payload: event as never });
+
+    expect(posted).toEqual([
+      {
+        type: 'server/event',
+        payload: {
+          type: 'session.updated',
+          properties: {
+            info: {
+              id: 'session-b',
+              directory: '/repo-b',
+              title: 'Sibling',
+              summary: { additions: 3, deletions: 4, files: 2 },
+            },
+          },
+        },
+      },
+    ]);
+
+    posted.length = 0;
+    provider.post({
+      type: 'server/event',
+      payload: {
+        type: 'session.status',
+        seq: 43,
+        properties: {
+          sessionID: 'session-b',
+          status: { type: 'busy', metadata: { secret: true } },
+        },
+      } as never,
+    });
+    expect(posted).toEqual([
+      {
+        type: 'server/event',
+        payload: {
+          type: 'session.status',
+          properties: { sessionID: 'session-b', status: { type: 'busy' } },
+        },
+      },
+    ]);
+  });
+
+  it('drops detailed events that have no provable workspace owner', async () => {
+    const contextProvider = createContextProvider();
+    contextProvider.context.workspacePath = '/repo-a';
+    const { provider } = await createSidebarProviderInstance({ contextProvider });
+    const { posted } = attachTestView(provider);
+    const event = {
+      type: 'message.updated' as const,
+      properties: { info: { id: 'message-without-session', role: 'assistant' as const } },
+    };
+
+    provider.post({ type: 'server/event', payload: event as never });
+
+    expect(posted).toEqual([]);
   });
 
   it('routes envelope-scoped workspace events only to the matching endpoint', async () => {
@@ -619,7 +724,10 @@ describe('SidebarProvider editor panels', () => {
     const lifecycleEvents = (posted as Array<{ type?: string; payload?: unknown }>).filter(
       (message) => message.type === 'server/event'
     );
-    expect(lifecycleEvents).toEqual([]);
+    expect(lifecycleEvents).toEqual([
+      { type: 'server/event', payload: busyEvent },
+      { type: 'server/event', payload: idleEvent },
+    ]);
     expect(posted).toContainEqual({
       type: 'queued-messages/session-status',
       payload: { sessionId: 'session-b', status: 'busy' },
@@ -769,9 +877,10 @@ describe('SidebarProvider editor panels', () => {
       type: 'server/event',
       payload: { type: 'session.deleted', properties: { info: { id: 'session-a' } } },
     });
-    expect(editor.panel.webview.postMessage).not.toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'server/event' })
-    );
+    expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
+      type: 'server/event',
+      payload: { type: 'session.deleted', properties: { info: { id: 'session-a' } } },
+    });
   });
 
   it('defers unknown-session events until their workspace is known', async () => {
@@ -805,7 +914,7 @@ describe('SidebarProvider editor panels', () => {
     sessionState.handleServerEvent(created);
     provider.post({ type: 'server/event', payload: created });
 
-    expect(posted).toEqual([]);
+    expect(posted).toEqual([{ type: 'server/event', payload: created }]);
     expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
       type: 'server/event',
       payload: created,
@@ -846,7 +955,9 @@ describe('SidebarProvider editor panels', () => {
     sessionState.handleServerEvent(event);
     provider.post({ type: 'server/event', payload: event });
     server.request.mockImplementation(async (_method: string, path: string) => {
-      if (path === '/session') return [{ id: 'session-bootstrap', directory: '/repo-b' }];
+      if (path === '/session?limit=1000000') {
+        return [{ id: 'session-bootstrap', directory: '/repo-b' }];
+      }
       throw new Error(`Unexpected path: ${path}`);
     });
 
@@ -1829,7 +1940,9 @@ describe('SidebarProvider editor panels', () => {
       { id: 'session-legacy', title: 'Legacy' },
     ]);
     server.request.mockImplementation(async (_method: string, path: string) => {
-      if (path === '/session') return [{ id: 'session-legacy', directory: '/repo-b' }];
+      if (path === '/session?limit=1000000') {
+        return [{ id: 'session-legacy', directory: '/repo-b' }];
+      }
       throw new Error(`Unexpected path: ${path}`);
     });
 

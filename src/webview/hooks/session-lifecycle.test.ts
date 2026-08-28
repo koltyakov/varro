@@ -100,6 +100,7 @@ function createDeps(overrides?: {
   activeSessionId?: string | null;
   sessions?: Session[];
   workspace?: string | null;
+  workspacePaths?: string[];
   showSessionPicker?: boolean;
 }) {
   const current = {
@@ -137,6 +138,7 @@ function createDeps(overrides?: {
     deps: {
       getState: () => current,
       getCurrentWorkspacePath: () => overrides?.workspace ?? '/repo',
+      getOpenWorkspacePaths: () => overrides?.workspacePaths ?? [overrides?.workspace ?? '/repo'],
       setSessions: (sessions: Session[]) => {
         current.sessions = sessions;
       },
@@ -182,6 +184,25 @@ describe('session-lifecycle helpers', () => {
 
     expect(setup.current.sessions.map((item) => item.id)).toEqual(['session-1']);
     expect(setup.deps.clearActiveSessionState).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps sessions from every open workspace root', () => {
+    const setup = createDeps({
+      activeSessionId: 'session-b',
+      sessions: [
+        session('session-a', '/repo-a', 1),
+        session('session-b', '/repo-b', 2),
+        session('session-closed', '/repo-closed', 3),
+      ],
+      workspace: '/repo-a',
+      workspacePaths: ['/repo-a', '/repo-b'],
+    });
+
+    applySessions(setup.deps, setup.current.sessions);
+
+    expect(setup.current.sessions.map((item) => item.id)).toEqual(['session-b', 'session-a']);
+    expect(setup.current.activeSessionId).toBe('session-b');
+    expect(setup.deps.clearActiveSessionState).not.toHaveBeenCalled();
   });
 
   it('filters sessions archived by OpenCode', () => {
@@ -316,6 +337,24 @@ describe('session-lifecycle helpers', () => {
     expect(setup.deps.clearSessionSeen).toHaveBeenCalledWith('child');
     expect(setup.deps.clearQueuedMessagesForSession).toHaveBeenCalledWith('root');
     expect(setup.deps.clearQueuedMessagesForSession).toHaveBeenCalledWith('child');
+  });
+
+  it('keeps session directory metadata available while clearing deletion markers', () => {
+    const setup = createDeps({
+      sessions: [session('session-b', '/repo-b', 1), session('session-a', '/repo-a', 2)],
+      workspace: '/repo-a',
+      workspacePaths: ['/repo-a', '/repo-b'],
+    });
+    setup.deps.clearSessionSeen = vi.fn((sessionId: string) => {
+      expect(setup.current.sessions.find((item) => item.id === sessionId)?.directory).toBe(
+        '/repo-b'
+      );
+    });
+
+    removeDeletedSessionTree(setup.deps, 'session-b', setup.current.sessions);
+
+    expect(setup.deps.clearSessionSeen).toHaveBeenCalledWith('session-b');
+    expect(setup.current.sessions.map((item) => item.id)).toEqual(['session-a']);
   });
 
   it('upserts sessions inside the current workspace and marks the active one seen', () => {

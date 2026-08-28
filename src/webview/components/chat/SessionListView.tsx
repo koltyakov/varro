@@ -10,7 +10,6 @@ import {
   isSessionUnread,
   isSkippedPlanSession,
   setPersistentShowSessionPicker as setShowSessionPicker,
-  setManualWorkspaceSelection,
   setError,
   setState,
   sessionSearchFocusKey,
@@ -38,6 +37,7 @@ import {
   reloadSessions,
 } from '../../hooks/useOpenCode';
 import { normalizeSessionTitle } from '../../../shared/session-title';
+import { isSameWorkspacePath } from '../../../shared/workspace-path';
 import type { RecycleBinEntry, SessionDiffSummary } from '../../../shared/protocol';
 import type { SelectedModel } from '../../lib/app-state-types';
 import type { Session } from '../../types';
@@ -66,7 +66,8 @@ import {
 import { SharedSessionIcon } from './SharedSessionIcon';
 import { isNumber, isString, type UnknownRecord, isObject } from '../../lib/runtime-values';
 import { UiIcon } from '../UiIcon';
-import { WorkspacePicker } from '../chat-input/ToolbarPickers';
+import { FolderIcon } from '../FolderIcon';
+import { getWorkspaceCompactLabel, WorkspacePicker } from '../chat-input/ToolbarPickers';
 
 type SessionGroups = {
   pinned: (typeof state.sessions)[number][];
@@ -206,9 +207,9 @@ function getSessionDisplayModel(
 function openSessionWithDisplayedModel(session: Session, diffSummary: SessionDiffSummary | null) {
   const selectedModel = getSessionDisplayModel(session, diffSummary);
   if (selectedModel) {
-    void selectSession(session.id, { selectedModel });
+    void selectSession(session.id, { selectedModel, directory: session.directory });
   } else {
-    void selectSession(session.id);
+    void selectSession(session.id, { directory: session.directory });
   }
 }
 
@@ -220,6 +221,7 @@ type SessionDiffSummaryCacheEntry = {
 
 type SessionDiffSummaryRequest = {
   sessionId: string;
+  directory?: string;
   updated: number;
 };
 
@@ -338,7 +340,7 @@ function enqueueDiffSummaryRequest(session: Session, updated = getSessionTreeUpd
   if (diffSummaryQueue.length >= SESSION_DIFF_SUMMARY_QUEUE_LIMIT) return;
 
   queuedDiffSummaryKeys.add(key);
-  diffSummaryQueue.push({ sessionId: session.id, updated });
+  diffSummaryQueue.push({ sessionId: session.id, directory: session.directory, updated });
   setDiffSummaryCacheEntry(session.id, {
     // Keep showing the previous numbers while the refresh is in flight.
     status: 'loading',
@@ -362,7 +364,7 @@ function pumpDiffSummaryQueue() {
     activeDiffSummaryRequests += 1;
     activeDiffSummaryKeys.add(requestKey);
     void client.varro.session
-      .diffSummary(request.sessionId, request.updated)
+      .diffSummary(request.sessionId, request.updated, { directory: request.directory })
       .then((summary) => {
         if (!isCurrentDiffSummaryRequest(request)) return;
         setDiffSummaryCacheEntry(request.sessionId, {
@@ -898,7 +900,10 @@ function SessionListContinuation() {
   );
 }
 
-function SessionListWorkspaceSelector() {
+function SessionListWorkspaceSelector(props: {
+  selectedPath: string | null;
+  onSelect: (path: string | null) => void;
+}) {
   const [showPicker, setShowPicker] = createSignal(false);
   let buttonRef: HTMLButtonElement | undefined;
   let popoverRef: HTMLDivElement | undefined;
@@ -927,7 +932,7 @@ function SessionListWorkspaceSelector() {
   return (
     <Show when={(state.editorContext.workspaceFolders?.length ?? 0) > 1}>
       <div class="session-list-workspace-selector">
-        <span class="session-list-workspace-label">Working directory:</span>
+        <span class="session-list-workspace-label">Folder:</span>
         <div class="session-list-workspace-picker">
           <WorkspacePicker
             buttonRef={(element) => {
@@ -937,16 +942,19 @@ function SessionListWorkspaceSelector() {
               popoverRef = element;
             }}
             folders={state.editorContext.workspaceFolders ?? []}
-            selectedPath={state.editorContext.workspacePath}
+            selectedPath={props.selectedPath}
             showIcon={false}
+            allLabel="All folders"
+            popoverTitle="Session folder"
             showPicker={showPicker()}
             onToggle={() => setShowPicker((open) => !open)}
             onSelect={(path) => {
               setShowPicker(false);
-              setShowSessionPicker(true);
-              setManualWorkspaceSelection(true);
-              setState('pendingWorkspaceSelectionPath', path);
-              postMessage({ type: 'workspace/select', payload: { path } });
+              props.onSelect(path);
+            }}
+            onSelectAll={() => {
+              setShowPicker(false);
+              props.onSelect(null);
             }}
           />
         </div>
@@ -980,6 +988,7 @@ export function SessionListView(props: {
   const [activeGroupedSection, setActiveGroupedSection] =
     createSignal<SessionListGroupedSection | null>(null);
   const [searchQuery, setSearchQuery] = createSignal('');
+  const [folderFilter, setFolderFilter] = createSignal<string | null>(null);
   const [allSessionsForSubagent, setAllSessionsForSubagent] = createSignal<Session[] | null>(null);
   const [isResolvingSubagents, setIsResolvingSubagents] = createSignal(false);
   const [nativeSearchResults, setNativeSearchResults] = createSignal<Session[] | null>(null);
@@ -1082,6 +1091,7 @@ export function SessionListView(props: {
         limit: SESSION_SEARCH_LIMIT,
         search: query,
         roots: true,
+        directory: folderFilter() ?? undefined,
         signal: controller.signal,
       })
       .then((page) => {
@@ -1112,7 +1122,13 @@ export function SessionListView(props: {
     }
     return counts;
   });
-  const recycleBinEntries = createMemo(() => state.recycleBinEntries || []);
+  const matchesFolderFilter = (directory: string | null | undefined) => {
+    const selected = folderFilter();
+    return !selected || isSameWorkspacePath(directory, selected);
+  };
+  const recycleBinEntries = createMemo(() =>
+    (state.recycleBinEntries || []).filter((entry) => matchesFolderFilter(entry.root?.directory))
+  );
   const recycleBinSessionIds = createMemo(() => getRecycleBinSessionIds(recycleBinEntries()));
   const isVisibleSession = (session: Session) => {
     if (recycleBinSessionIds().has(session.id)) return false;
@@ -1127,7 +1143,11 @@ export function SessionListView(props: {
       statusType: state.sessionStatus[session.id]?.type,
     });
   };
-  const visibleSessionsForList = createMemo(() => state.sessions.filter(isVisibleSession));
+  const visibleSessionsForList = createMemo(() =>
+    state.sessions.filter(
+      (session) => isVisibleSession(session) && matchesFolderFilter(session.directory)
+    )
+  );
   const groupedSessions = createMemo(() =>
     groupSessions(
       visibleSessionsForList(),
@@ -1148,7 +1168,9 @@ export function SessionListView(props: {
 
     const mergedSessions = new Map(resolvedSessions.map((session) => [session.id, session]));
     for (const session of state.sessions) mergedSessions.set(session.id, session);
-    return [...mergedSessions.values()].filter(isVisibleSession);
+    return [...mergedSessions.values()].filter(
+      (session) => isVisibleSession(session) && matchesFolderFilter(session.directory)
+    );
   });
   const subagentSessions = createMemo(() =>
     getSubagentSessionsForParent(resolvedSubagentSessions(), props.subagentParentId ?? null)
@@ -1159,7 +1181,7 @@ export function SessionListView(props: {
     const loadedSessions = new Map(state.sessions.map((session) => [session.id, session]));
     return results
       .map((session) => loadedSessions.get(session.id) ?? session)
-      .filter(isVisibleSession);
+      .filter((session) => isVisibleSession(session) && matchesFolderFilter(session.directory));
   });
   const filteredSessions = createMemo(() =>
     props.sessionFilter
@@ -1254,6 +1276,25 @@ export function SessionListView(props: {
       }
     )
   );
+
+  createEffect(
+    on(folderFilter, () => {
+      setActiveGroupedSection(null);
+      setFocusedIndex(-1);
+    })
+  );
+
+  createEffect(() => {
+    const selected = folderFilter();
+    if (
+      selected &&
+      !(state.editorContext.workspaceFolders ?? []).some((folder) =>
+        isSameWorkspacePath(folder.path, selected)
+      )
+    ) {
+      setFolderFilter(null);
+    }
+  });
 
   createEffect(() => {
     const activeSection = activeGroupedSection();
@@ -1361,11 +1402,15 @@ export function SessionListView(props: {
               isCompletedPlanSession={sessionIndicators().planReadyIds.has(sessionId)}
               isPinned={state.pinnedSessionIds.includes(sessionId)}
               startsUnpinnedGroup={startsUnpinnedGroup()}
+              showFolder={
+                !folderFilter() && (state.editorContext.workspaceFolders?.length ?? 0) > 1
+              }
               onTogglePinned={async () => {
                 try {
                   const pinnedSessionIds = await client.varro.session.setPinned(
                     sessionId,
-                    !state.pinnedSessionIds.includes(sessionId)
+                    !state.pinnedSessionIds.includes(sessionId),
+                    { directory: session().directory }
                   );
                   setState('pinnedSessionIds', pinnedSessionIds);
                 } catch (error) {
@@ -1445,7 +1490,15 @@ export function SessionListView(props: {
             <Show when={expanded()}>
               <div class="session-list-scroll session-list-section-scroll">
                 <For each={recycleBinEntries()}>
-                  {(entry) => <RecycleBinListItem entry={entry} now={ageNow} />}
+                  {(entry) => (
+                    <RecycleBinListItem
+                      entry={entry}
+                      now={ageNow}
+                      showFolder={
+                        !folderFilter() && (state.editorContext.workspaceFolders?.length ?? 0) > 1
+                      }
+                    />
+                  )}
                 </For>
               </div>
             </Show>
@@ -1567,7 +1620,7 @@ export function SessionListView(props: {
     if (props.subagentParentId) return subagentSessions().length > 0;
     if (props.sessionFilter) return filteredSessions().length > 0;
     if (state.sessionsHasMore) return true;
-    return state.sessions.length > 0 || recycleBinEntries().length > 0;
+    return visibleSessionsForList().length > 0 || recycleBinEntries().length > 0;
   });
 
   return (
@@ -1582,7 +1635,15 @@ export function SessionListView(props: {
       }}
       onKeyDown={handleKeydown}
     >
-      <SessionListWorkspaceSelector />
+      <SessionListWorkspaceSelector
+        selectedPath={folderFilter()}
+        onSelect={(path) => {
+          setFolderFilter(path);
+          if (path && !isSameWorkspacePath(path, state.editorContext.workspacePath)) {
+            postMessage({ type: 'workspace/select', payload: { path } });
+          }
+        }}
+      />
       <Show when={shouldShowSearch()}>
         <div class="session-list-search">
           <input
@@ -1652,7 +1713,11 @@ export function SessionListView(props: {
   );
 }
 
-function RecycleBinListItem(props: { entry: RecycleBinEntry; now: () => number }) {
+function RecycleBinListItem(props: {
+  entry: RecycleBinEntry;
+  now: () => number;
+  showFolder: boolean;
+}) {
   const [isConfirmingDelete, setIsConfirmingDelete] = createSignal(false);
   const title = () => normalizeSessionTitle(props.entry.root?.title || props.entry.rootID);
   const childCount = () => {
@@ -1672,6 +1737,18 @@ function RecycleBinListItem(props: { entry: RecycleBinEntry; now: () => number }
         <div class="session-item-content">
           <span class="session-item-title">{title() || 'Untitled'}</span>
           <span class="session-item-meta">
+            <Show when={props.showFolder}>
+              <span class="session-item-folder" title={props.entry.root.directory}>
+                <FolderIcon class="session-item-folder-meta-icon" width={10} height={10} />
+                <span>
+                  {getWorkspaceCompactLabel(
+                    props.entry.root.directory,
+                    state.editorContext.workspaceFolders ?? []
+                  )}
+                </span>
+              </span>
+              {' · '}
+            </Show>
             Deleted {formatRelativeAge(props.entry.deletedAt, props.now())} ago
             <Show when={childCount() > 0}>
               {' '}
@@ -1764,6 +1841,7 @@ function SessionListItem(props: {
   isCompletedPlanSession: boolean;
   isPinned: boolean;
   startsUnpinnedGroup: boolean;
+  showFolder: boolean;
   onTogglePinned: () => Promise<void>;
   onOpenSubagents?: (parentSessionId: string) => void;
   onActiveSessionReselect?: () => void;
@@ -1861,6 +1939,7 @@ function SessionListItem(props: {
         type: 'session/open-in-editor',
         payload: {
           sessionId: props.session.id,
+          directory: props.session.directory,
           rootSessionId: sessionRootId,
           title: props.session.title,
           model: model ?? undefined,
@@ -2081,6 +2160,18 @@ function SessionListItem(props: {
             </Show>
           </span>
           <span class="session-item-meta session-item-stats-meta">
+            <Show when={props.showFolder}>
+              <span class="session-item-folder" title={props.session.directory}>
+                <FolderIcon class="session-item-folder-meta-icon" width={10} height={10} />
+                <span>
+                  {getWorkspaceCompactLabel(
+                    props.session.directory,
+                    state.editorContext.workspaceFolders ?? []
+                  )}
+                </span>
+              </span>
+              {' · '}
+            </Show>
             <Show
               when={ralphSummary()}
               fallback={

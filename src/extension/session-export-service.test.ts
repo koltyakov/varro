@@ -270,7 +270,9 @@ describe('SessionExportService', () => {
       'Session does not belong to the current workspace'
     );
 
-    expect(server.request).toHaveBeenCalledWith('GET', '/session/session-1');
+    expect(server.request).toHaveBeenCalledWith('GET', '/session/session-1', undefined, {
+      directory: '/repo',
+    });
     expect(mocks.mkdtemp).not.toHaveBeenCalled();
     expect(mocks.spawn).not.toHaveBeenCalled();
     expect(mocks.showErrorMessage).toHaveBeenCalledWith(
@@ -287,7 +289,9 @@ describe('SessionExportService', () => {
       'Session does not belong to the current workspace'
     );
 
-    expect(server.request).toHaveBeenCalledWith('GET', '/session/session-1');
+    expect(server.request).toHaveBeenCalledWith('GET', '/session/session-1', undefined, {
+      directory: '/repo',
+    });
     expect(mocks.mkdtemp).not.toHaveBeenCalled();
     expect(mocks.spawn).not.toHaveBeenCalled();
   });
@@ -301,7 +305,9 @@ describe('SessionExportService', () => {
       'Session does not belong to the current workspace'
     );
 
-    expect(server.request).toHaveBeenCalledWith('GET', '/session/session-1');
+    expect(server.request).toHaveBeenCalledWith('GET', '/session/session-1', undefined, {
+      directory: '/repo',
+    });
     expect(mocks.mkdtemp).not.toHaveBeenCalled();
     expect(mocks.spawn).not.toHaveBeenCalled();
   });
@@ -331,7 +337,30 @@ describe('SessionExportService', () => {
     }
     await exportPromise;
 
-    expect(server.request).toHaveBeenCalledWith('GET', '/session/session-101');
+    expect(server.request).toHaveBeenCalledWith('GET', '/session/session-101', undefined, {
+      directory: '/repo',
+    });
+  });
+
+  it('exports an explicitly scoped sibling-root session', async () => {
+    const spawnResult = createSpawnResult();
+    const server = createServer();
+    server.request.mockResolvedValue({ id: 'session-b', directory: '/repo-b' });
+    const service = new SessionExportService(server, 1000);
+
+    const exportPromise = service.exportSession('session-b', '/repo-b');
+    await vi.waitFor(() => expect(mocks.spawn).toHaveBeenCalledOnce());
+    spawnResult.handlers.close(0, null);
+    await exportPromise;
+
+    expect(server.request).toHaveBeenCalledWith('GET', '/session/session-b', undefined, {
+      directory: '/repo-b',
+    });
+    expect(mocks.spawn).toHaveBeenCalledWith(
+      'opencode',
+      ['export', 'session-b'],
+      expect.objectContaining({ cwd: '/repo-b' })
+    );
   });
 
   it('exports without workspace isolation in a folderless window', async () => {

@@ -31,9 +31,14 @@ test('stops retrying a usage-limited session', async ({ page }) => {
       }
     ).__varroE2E;
     return (
-      value?.requests.find(
-        (request) => request.method === 'POST' && request.path.endsWith('/abort')
-      ) || null
+      value?.requests.find((request) => {
+        const url = new URL(request.path, 'http://varro.test');
+        return (
+          request.method === 'POST' &&
+          url.pathname.endsWith('/abort') &&
+          url.searchParams.get('directory') === '/workspace/varro'
+        );
+      }) || null
     );
   });
 

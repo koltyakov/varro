@@ -1,8 +1,11 @@
 import { normalizeSessionTitle } from '../../shared/session-title';
+import { getWorkspaceFolderLabel } from '../../shared/workspace-folders';
 import { state } from './state';
 
 export type SessionReference = {
   id: string;
+  directory: string;
+  folderLabel?: string;
   title: string;
   href: string;
   marker: string;
@@ -21,12 +24,20 @@ export function resolveSessionReference(
   const session = state.sessions.find((candidate) => candidate.id === sessionId);
   if (!session) return null;
 
-  return {
+  const folderLabel =
+    (state.editorContext.workspaceFolders?.length ?? 0) > 1
+      ? (getWorkspaceFolderLabel(session.directory, state.editorContext.workspaceFolders ?? []) ??
+        undefined)
+      : undefined;
+  const reference: SessionReference = {
     id: session.id,
+    directory: session.directory,
     title: normalizeSessionTitle(session.title) || 'Untitled',
     href: `#session/${encodeURIComponent(session.id)}`,
     marker,
   };
+  if (folderLabel) reference.folderLabel = folderLabel;
+  return reference;
 }
 
 export function splitSessionReferenceText(content: string): SessionReferenceTextSegment[] {
@@ -60,7 +71,9 @@ export function getSessionReferenceContextKey(content: string): string {
       const match = Array.from(marker.matchAll(SESSION_ID_RE))[0];
       const sessionId = match?.[1] || match?.[2] || marker;
       const reference = resolveSessionReference(sessionId, marker);
-      return reference ? `found:${reference.id}:${reference.title}` : `missing:${marker}`;
+      return reference
+        ? `found:${reference.id}:${reference.directory}:${reference.title}:${reference.folderLabel ?? ''}`
+        : `missing:${marker}`;
     })
     .join('\u0000');
 }

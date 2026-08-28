@@ -492,7 +492,7 @@ export function createDataLoaderOperations(deps: {
     );
   };
 
-  const invalidateWorkspace = () => {
+  const invalidateWorkspace = (options?: { preserveSessionCatalog?: boolean }) => {
     workspaceGeneration += 1;
     mcpLoadGeneration += 1;
     questionLoadGeneration += 1;
@@ -502,8 +502,10 @@ export function createDataLoaderOperations(deps: {
     providerLoadGeneration += 1;
     compatibilityLoadGeneration += 1;
     recycleBinLoadGeneration += 1;
-    emptySessionSnapshotCount = 0;
-    requestedSessionLimit = SESSION_PAGE_SIZE;
+    if (!options?.preserveSessionCatalog) {
+      emptySessionSnapshotCount = 0;
+      requestedSessionLimit = SESSION_PAGE_SIZE;
+    }
     inFlightMcpLoad = null;
     inFlightSessionPageLoad = null;
     deps.setSessionsLoadingMore?.(false);

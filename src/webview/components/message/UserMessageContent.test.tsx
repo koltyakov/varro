@@ -649,7 +649,7 @@ describe('UserMessageContent', () => {
     expect(container?.textContent).toContain('session:ses_missing456');
 
     link?.click();
-    expect(selectSessionMock).toHaveBeenCalledWith('ses_found123');
+    expect(selectSessionMock).toHaveBeenCalledWith('ses_found123', { directory: '/repo' });
     expect(getDirectSessionReturnId('ses_found123')).toBe('ses_origin123');
   });
 

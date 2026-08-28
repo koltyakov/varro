@@ -375,6 +375,18 @@ export class SessionStateManager {
     }
   }
 
+  removeSessionsOutsideWorkspaceDirectories(workspaceDirectories: readonly string[]): string[] {
+    const removed = [...this.sessionDirectories]
+      .filter(([, directory]) =>
+        workspaceDirectories.every(
+          (workspaceDirectory) => !isSameWorkspacePath(directory, workspaceDirectory)
+        )
+      )
+      .map(([sessionID]) => sessionID);
+    this.removeSessions(removed);
+    return removed;
+  }
+
   clearCompleted(): void {
     if (this.completedSessions.size === 0) return;
     this.completedSessions.clear();

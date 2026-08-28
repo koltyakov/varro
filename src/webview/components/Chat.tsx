@@ -158,14 +158,19 @@ export function Chat() {
       if (previousKind) {
         postMessage({
           type: 'session-unread-state/update',
-          payload: { sessionId: session.id, kind: previousKind, unread: false },
+          payload: {
+            sessionId: session.id,
+            directory: session.directory,
+            kind: previousKind,
+            unread: false,
+          },
         });
       }
       if (kind) {
         publishedUnreadKinds.set(session.id, kind);
         postMessage({
           type: 'session-unread-state/update',
-          payload: { sessionId: session.id, kind, unread: true },
+          payload: { sessionId: session.id, directory: session.directory, kind, unread: true },
         });
       } else {
         publishedUnreadKinds.delete(session.id);
@@ -243,7 +248,9 @@ export function Chat() {
     initialEditorRouteReconciled = true;
     const initialRoute = webviewContext.initialRoute;
     if (initialRoute.type === 'session' && state.activeSessionId !== initialRoute.sessionId) {
-      void selectSession(initialRoute.sessionId);
+      void (initialRoute.directory
+        ? selectSession(initialRoute.sessionId, { directory: initialRoute.directory })
+        : selectSession(initialRoute.sessionId));
     }
   });
 
@@ -251,13 +258,20 @@ export function Chat() {
     if (!isEditorSurface || !connectionInitialized()) return;
     const sessionId = state.activeSessionId;
     const title = activeSession()?.title;
+    const directory = activeSession()?.directory;
     const rootSessionId = sessionId ? getSessionTreeRootId(sessionId) || sessionId : undefined;
-    persistLastOpenedView(sessionId ? { type: 'session', sessionId } : { type: 'new-session' });
+    persistLastOpenedView(
+      sessionId
+        ? directory
+          ? { type: 'session', sessionId, directory }
+          : { type: 'session', sessionId }
+        : { type: 'new-session' }
+    );
     postMessage({
       type: 'editor/route-changed',
       payload: {
         route: sessionId
-          ? { type: 'session', sessionId, rootSessionId, title }
+          ? { type: 'session', sessionId, directory, rootSessionId, title }
           : { type: 'new-session' },
       },
     });

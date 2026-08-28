@@ -11,15 +11,25 @@ test('undo slash command reverts the latest assistant response', async ({ page }
   await page.keyboard.press('Enter');
 
   const revertRequest = await getE2EState(page, () => {
-    const value = (window as Window & {
-      __varroE2E?: { requests: Array<{ method: string; path: string; body?: unknown }> };
-    }).__varroE2E;
-    return value?.requests.find((request) => request.path.endsWith('/revert')) || null;
+    const value = (
+      window as Window & {
+        __varroE2E?: { requests: Array<{ method: string; path: string; body?: unknown }> };
+      }
+    ).__varroE2E;
+    return (
+      value?.requests.find((request) => {
+        const url = new URL(request.path, 'http://varro.test');
+        return (
+          url.pathname.endsWith('/revert') &&
+          url.searchParams.get('directory') === '/workspace/varro'
+        );
+      }) || null
+    );
   });
 
   expect(revertRequest).toMatchObject({
     method: 'POST',
-    path: '/session/session-undo/revert',
+    path: '/session/session-undo/revert?directory=%2Fworkspace%2Fvarro',
     body: { messageID: 'message-undo-assistant' },
   });
 });

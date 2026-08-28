@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
     health: vi.fn(),
     commandList: vi.fn(),
     sessionList: vi.fn(),
+    sessionActivate: vi.fn(),
     sessionCreate: vi.fn(),
     sessionDelete: vi.fn(),
     sessionGet: vi.fn(),
@@ -72,6 +73,7 @@ vi.mock('../lib/client', () => ({
     },
     session: {
       list: clientMocks.sessionList,
+      activate: clientMocks.sessionActivate,
       create: clientMocks.sessionCreate,
       delete: clientMocks.sessionDelete,
       get: clientMocks.sessionGet,
@@ -222,6 +224,7 @@ beforeEach(() => {
   clientMocks.health.mockReset();
   clientMocks.commandList.mockReset();
   clientMocks.sessionList.mockReset();
+  clientMocks.sessionActivate.mockReset();
   clientMocks.sessionCreate.mockReset();
   clientMocks.sessionDelete.mockReset();
   clientMocks.sessionGet.mockReset();
@@ -272,6 +275,7 @@ beforeEach(() => {
     parts: [],
   });
   clientMocks.sessionInit.mockResolvedValue(true);
+  clientMocks.sessionActivate.mockImplementation(async (sessionId: string) => session(sessionId));
   clientMocks.sessionUpdate.mockResolvedValue(session());
   clientMocks.sessionUnrevert.mockResolvedValue(session());
   clientMocks.mcpConnect.mockResolvedValue(true);

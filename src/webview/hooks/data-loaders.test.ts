@@ -112,7 +112,7 @@ function deferred<T>() {
 }
 
 describe('data loaders', () => {
-  it('defaults the toolbar agent to build when no session is active', async () => {
+  it('preserves the selected draft agent when no session is active', async () => {
     const setAllAgents = vi.fn();
     const setPrimaryAgents = vi.fn();
     const setSelectedAgent = vi.fn();
@@ -134,8 +134,28 @@ describe('data loaders', () => {
 
     expect(setAllAgents).toHaveBeenCalledTimes(1);
     expect(setPrimaryAgents).toHaveBeenCalledTimes(1);
-    expect(setSelectedAgent).toHaveBeenCalledWith('build', { persistGlobal: false });
+    expect(setSelectedAgent).not.toHaveBeenCalled();
     expect(logError).not.toHaveBeenCalled();
+  });
+
+  it('defaults the toolbar agent to build when no draft agent is selected', async () => {
+    const setSelectedAgent = vi.fn();
+
+    await loadAgentsWithDependencies(
+      {
+        listAgents: async () => [buildAgent('plan'), buildAgent('build')],
+        getActiveSessionId: () => null,
+        getSelectedAgent: () => null,
+        getSelectedAgentForSession: () => null,
+        getPersistedSelectedAgent: () => null,
+        setAllAgents: vi.fn(),
+        setPrimaryAgents: vi.fn(),
+        setSelectedAgent,
+      },
+      vi.fn()
+    );
+
+    expect(setSelectedAgent).toHaveBeenCalledWith('build', { persistGlobal: false });
   });
 
   it('hydrates connected mcps into the active session when none are selected', async () => {

@@ -3,6 +3,7 @@ import type { Message, MessageEntry, Session, SessionStatus } from '../types';
 import type { RecycleBinEntry, WorkspaceStatusEventSummary } from '../../shared/protocol';
 import type { WorkspaceStatusEntry } from '../../shared/opencode-types';
 import { isAbortedAssistantError } from '../../shared/error-classification';
+import { isSameWorkspacePath } from '../../shared/workspace-path';
 import type { UsageLimitNotice } from './usage-limit';
 import {
   getSessionMarkerWorkspaceScopeValue,
@@ -26,6 +27,7 @@ import {
   nextSkippedPlanSessions,
   pruneSessionMarkers,
   pruneSkippedPlanSessions,
+  readMergedSessionMarkerState,
   readScopedSessionMarkerState,
   removeSessionMarker,
   writeScopedSessionMarkerState,
@@ -33,6 +35,34 @@ import {
 import { STORAGE_KEYS, readStored, writeStored } from './state-storage';
 
 const EMPTY_SESSION_TREE_IDS: string[] = [];
+const markerStorage = { readStored, writeStored };
+
+function writeMarkerForSession(key: string, sessionId: string, timestamp: number | undefined) {
+  const directory = state.sessions.find((session) => session.id === sessionId)?.directory;
+  const scope = directory
+    ? getSessionMarkerWorkspaceScope(directory)
+    : getSessionMarkerWorkspaceScopeValue();
+  const markers = { ...readScopedSessionMarkerState(markerStorage, key, scope) };
+  if (timestamp === undefined) delete markers[sessionId];
+  else markers[sessionId] = timestamp;
+  writeScopedSessionMarkerState(markerStorage, key, scope, markers);
+}
+
+function writeOpenWorkspaceMarkerState(key: string, markers: Record<string, number>) {
+  for (const folder of state.editorContext.workspaceFolders ?? []) {
+    const sessionIds = new Set(
+      state.sessions
+        .filter((session) => isSameWorkspacePath(session.directory, folder.path))
+        .map((session) => session.id)
+    );
+    writeScopedSessionMarkerState(
+      markerStorage,
+      key,
+      getSessionMarkerWorkspaceScope(folder.path),
+      Object.fromEntries(Object.entries(markers).filter(([sessionId]) => sessionIds.has(sessionId)))
+    );
+  }
+}
 
 export function consumeInterruptedSessionIds() {
   const ids = [...state.interruptedSessionIds];
@@ -45,12 +75,7 @@ export function markSessionSeen(id: string, updatedAt?: number) {
   const nextSessions = nextSeenSessions(state.lastSeenSessions, id, updatedAt);
   if (!nextSessions) return;
   setState('lastSeenSessions', id, nextSessions[id]!);
-  writeScopedSessionMarkerState(
-    { readStored, writeStored },
-    STORAGE_KEYS.lastSeenSessions,
-    getSessionMarkerWorkspaceScopeValue(),
-    nextSessions
-  );
+  writeMarkerForSession(STORAGE_KEYS.lastSeenSessions, id, nextSessions[id]);
 }
 
 export function markSessionResponseCompleted(id: string, completedAt?: number) {
@@ -61,12 +86,7 @@ export function markSessionResponseCompleted(id: string, completedAt?: number) {
   );
   if (!nextSessions) return;
   setState('completedSessionResponses', id, nextSessions[id]!);
-  writeScopedSessionMarkerState(
-    { readStored, writeStored },
-    STORAGE_KEYS.completedSessionResponses,
-    getSessionMarkerWorkspaceScopeValue(),
-    nextSessions
-  );
+  writeMarkerForSession(STORAGE_KEYS.completedSessionResponses, id, nextSessions[id]);
 }
 
 export function clearSessionSeen(id: string) {
@@ -78,12 +98,7 @@ export function clearSessionSeen(id: string) {
       delete draft[id];
     })
   );
-  writeScopedSessionMarkerState(
-    { readStored, writeStored },
-    STORAGE_KEYS.lastSeenSessions,
-    getSessionMarkerWorkspaceScopeValue(),
-    nextSessions
-  );
+  writeMarkerForSession(STORAGE_KEYS.lastSeenSessions, id, undefined);
 }
 
 export function skipPlanSession(sessionId: string, updatedAt?: number) {
@@ -95,12 +110,7 @@ export function skipPlanSession(sessionId: string, updatedAt?: number) {
   );
   if (!next) return;
   setState('skippedPlanSessions', sessionId, next[sessionId]!);
-  writeScopedSessionMarkerState(
-    { readStored, writeStored },
-    STORAGE_KEYS.skippedPlanSessions,
-    getSessionMarkerWorkspaceScopeValue(),
-    next
-  );
+  writeMarkerForSession(STORAGE_KEYS.skippedPlanSessions, sessionId, next[sessionId]);
   postMessage({
     type: 'session-plan-state/update',
     payload: { sessionId, skippedAt: next[sessionId]! },
@@ -120,12 +130,7 @@ export function clearSkippedPlanSession(sessionId: string) {
       delete draft[sessionId];
     })
   );
-  writeScopedSessionMarkerState(
-    { readStored, writeStored },
-    STORAGE_KEYS.skippedPlanSessions,
-    getSessionMarkerWorkspaceScopeValue(),
-    nextSessions
-  );
+  writeMarkerForSession(STORAGE_KEYS.skippedPlanSessions, sessionId, undefined);
 }
 
 export function applySessionPlanStateUpdate(sessionId: string, skippedAt: number | null) {
@@ -133,12 +138,7 @@ export function applySessionPlanStateUpdate(sessionId: string, skippedAt: number
   if (skippedAt === null) delete nextSessions[sessionId];
   else nextSessions[sessionId] = skippedAt;
   setState('skippedPlanSessions', reconcile(nextSessions));
-  writeScopedSessionMarkerState(
-    { readStored, writeStored },
-    STORAGE_KEYS.skippedPlanSessions,
-    getSessionMarkerWorkspaceScopeValue(),
-    nextSessions
-  );
+  writeMarkerForSession(STORAGE_KEYS.skippedPlanSessions, sessionId, nextSessions[sessionId]);
 }
 
 export function isSkippedPlanSession(sessionId: string, updatedAt: number) {
@@ -245,12 +245,7 @@ export function setSessions(nextSessions: Session[]) {
         }
       })
     );
-    writeScopedSessionMarkerState(
-      { readStored, writeStored },
-      STORAGE_KEYS.skippedPlanSessions,
-      getSessionMarkerWorkspaceScopeValue(),
-      nextMarkers
-    );
+    writeOpenWorkspaceMarkerState(STORAGE_KEYS.skippedPlanSessions, nextMarkers);
   }
   const nextCompletedMarkers = pruneSessionMarkers(state.completedSessionResponses, sessionIds);
   if (nextCompletedMarkers) {
@@ -262,47 +257,32 @@ export function setSessions(nextSessions: Session[]) {
         }
       })
     );
-    writeScopedSessionMarkerState(
-      { readStored, writeStored },
-      STORAGE_KEYS.completedSessionResponses,
-      getSessionMarkerWorkspaceScopeValue(),
-      nextCompletedMarkers
-    );
+    writeOpenWorkspaceMarkerState(STORAGE_KEYS.completedSessionResponses, nextCompletedMarkers);
   }
   sessionTreeIndex.invalidate();
 }
 
-export function syncSessionMarkersForWorkspace(workspacePath: string | null | undefined) {
+export function syncSessionMarkersForWorkspace(
+  workspacePath: string | null | undefined,
+  workspacePaths: readonly string[] = []
+) {
   const scope = getSessionMarkerWorkspaceScope(workspacePath);
+  const scopes = (workspacePaths.length > 0 ? workspacePaths : [workspacePath]).map((path) =>
+    getSessionMarkerWorkspaceScope(path)
+  );
   setSessionMarkerWorkspaceScopeValue(scope);
   setState(
     'lastSeenSessions',
-    reconcile(
-      readScopedSessionMarkerState(
-        { readStored, writeStored },
-        STORAGE_KEYS.lastSeenSessions,
-        scope
-      )
-    )
+    reconcile(readMergedSessionMarkerState(markerStorage, STORAGE_KEYS.lastSeenSessions, scopes))
   );
   setState(
     'skippedPlanSessions',
-    reconcile(
-      readScopedSessionMarkerState(
-        { readStored, writeStored },
-        STORAGE_KEYS.skippedPlanSessions,
-        scope
-      )
-    )
+    reconcile(readMergedSessionMarkerState(markerStorage, STORAGE_KEYS.skippedPlanSessions, scopes))
   );
   setState(
     'completedSessionResponses',
     reconcile(
-      readScopedSessionMarkerState(
-        { readStored, writeStored },
-        STORAGE_KEYS.completedSessionResponses,
-        scope
-      )
+      readMergedSessionMarkerState(markerStorage, STORAGE_KEYS.completedSessionResponses, scopes)
     )
   );
 }

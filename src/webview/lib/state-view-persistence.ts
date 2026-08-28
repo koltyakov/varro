@@ -8,12 +8,12 @@ import { isNumber, isString, type UnknownRecord, isObject } from './runtime-valu
 export type LastOpenedView =
   | { type: 'new-session'; timestamp: number }
   | { type: 'sessions-list'; timestamp: number }
-  | { type: 'session'; sessionId: string; timestamp: number };
+  | { type: 'session'; sessionId: string; directory?: string; timestamp: number };
 
 type LastOpenedViewInput =
   | { type: 'new-session' }
   | { type: 'sessions-list' }
-  | { type: 'session'; sessionId: string };
+  | { type: 'session'; sessionId: string; directory?: string };
 
 export function setPersistentShowSessionPicker(value: boolean) {
   setShowSessionPicker(value);
@@ -25,7 +25,12 @@ export function setPersistentShowSessionPicker(value: boolean) {
   restoreSelectedModelForComposer(state.activeSessionId);
   persistLastOpenedView(
     state.activeSessionId
-      ? { type: 'session', sessionId: state.activeSessionId }
+      ? {
+          type: 'session',
+          sessionId: state.activeSessionId,
+          directory: state.sessions.find((session) => session.id === state.activeSessionId)
+            ?.directory,
+        }
       : { type: 'new-session' }
   );
 }
@@ -54,7 +59,9 @@ function normalizeLastOpenedView<T>(value: T): LastOpenedView | null {
   if (record.type === 'new-session') return { type: 'new-session', timestamp };
   if (record.type === 'sessions-list') return { type: 'sessions-list', timestamp };
   if (record.type === 'session' && isString(record.sessionId)) {
-    return { type: 'session', sessionId: record.sessionId, timestamp };
+    return isString(record.directory)
+      ? { type: 'session', sessionId: record.sessionId, directory: record.directory, timestamp }
+      : { type: 'session', sessionId: record.sessionId, timestamp };
   }
   return null;
 }

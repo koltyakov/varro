@@ -2239,7 +2239,6 @@ describe('ChatInput', () => {
       vi.useFakeTimers();
       const result = session('session-auth', 2_000, { title: 'Investigate authentication' });
       vi.mocked(client.session.list).mockResolvedValue({ items: [result], hasMore: false });
-      vi.mocked(client.session.get).mockResolvedValue(result);
       setInputText(lookup);
 
       cleanup = render(() => ChatInput(), container!);
@@ -2258,9 +2257,6 @@ describe('ChatInput', () => {
         roots: true,
         signal: expect.any(AbortSignal),
       });
-      if (lookup.startsWith('&sessions:')) {
-        expect(client.session.get).toHaveBeenCalledWith('session-auth');
-      }
       const item = container?.querySelector<HTMLButtonElement>('.completion-session');
       expect(item?.querySelector('.composer-completion-title')?.textContent).toBe(
         'Investigate authentication'
@@ -2512,13 +2508,17 @@ describe('ChatInput', () => {
 
   it('resolves pasted session markers to titled links', async () => {
     const result = session('session-auth', 2_000, { title: 'Investigate authentication' });
-    vi.mocked(client.session.get).mockResolvedValue(result);
+    vi.mocked(client.session.list).mockResolvedValue({ items: [result], hasMore: false });
     setInputText('Review session:session-auth');
 
     cleanup = render(() => ChatInput(), container!);
     await flushAsyncWork();
 
-    expect(client.session.get).toHaveBeenCalledWith('session-auth');
+    expect(client.session.list).toHaveBeenCalledWith({
+      limit: 30,
+      search: 'session-auth',
+      roots: true,
+    });
     await vi.waitFor(() =>
       expect(
         container?.querySelector<HTMLElement>(
@@ -4517,6 +4517,27 @@ describe('ChatInput', () => {
     await Promise.resolve();
 
     expect(inputText()).toBe('draft prompt');
+  });
+
+  it('hides the workspace selector while editing a message', async () => {
+    setState('activeSessionId', 'session-1');
+    setState('editorContext', {
+      workspacePath: '/repo-a',
+      workspaceFolders: [
+        { name: 'Repo A', path: '/repo-a' },
+        { name: 'Repo B', path: '/repo-b' },
+      ],
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    cleanup = render(() => ChatInput(), container!);
+    expect(container?.querySelector('.workspace-picker-button')).not.toBeNull();
+
+    startEditingMessage('message-1', 'session-1', 'edited prompt');
+    await Promise.resolve();
+
+    expect(container?.querySelector('.workspace-picker-button')).toBeNull();
   });
 
   it('queues on modifier Enter while a question is pending and dispatches after it clears', async () => {

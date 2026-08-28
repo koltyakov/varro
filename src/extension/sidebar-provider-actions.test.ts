@@ -256,7 +256,8 @@ describe('createSidebarProviderActions', () => {
       'session-1',
       'Editor session',
       undefined,
-      undefined
+      undefined,
+      '/repo'
     );
 
     server.request.mockResolvedValueOnce({ id: 'session-foreign', directory: '/other-repo' });
@@ -270,7 +271,7 @@ describe('createSidebarProviderActions', () => {
     const { actions, deps, server } = createActionFixture();
 
     await actions.openSessionInSidebar('session-1');
-    expect(deps.openSessionInSidebar).toHaveBeenCalledWith('session-1');
+    expect(deps.openSessionInSidebar).toHaveBeenCalledWith('session-1', '/repo');
 
     server.request.mockResolvedValueOnce({ id: 'session-foreign', directory: '/other-repo' });
     await expect(actions.openSessionInSidebar('session-foreign')).rejects.toThrow(

@@ -1,6 +1,10 @@
 import { reconcile } from 'solid-js/store';
-import type { ExtensionMessage, WebviewThemeKind } from '../../shared/protocol';
-import { isSameWorkspacePath } from '../../shared/workspace-path';
+import type {
+  ExtensionMessage,
+  WebviewThemeKind,
+  WorkspaceFolderContext,
+} from '../../shared/protocol';
+import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../../shared/workspace-path';
 import { appStore } from '../lib/stores/app-store';
 import { composerStore } from '../lib/stores/composer-store';
 import { permissionsStore } from '../lib/stores/permissions-store';
@@ -32,11 +36,15 @@ export function createMountBridgeOperations(deps: {
   invalidateConnection(): void;
   getCurrentWorkspacePath(): string | null | undefined;
   setCurrentWorkspacePath(path: string | null): void;
-  resetWorkspaceForChange(): void;
+  resetWorkspaceForChange(options?: {
+    workspaceMembershipChanged?: boolean;
+    nextWorkspacePath?: string | null;
+    executionDirectoryChanged?: boolean;
+  }): void;
   reloadWorkspaceAfterChange(wasInitialized: boolean): void;
   isInitialized(): boolean;
   createSession(prefill?: string): void;
-  openSession?(sessionId: string): void;
+  openSession?(sessionId: string, directory?: string): void;
   abortSession(): void;
   refreshMcps(): void;
   refreshLsps?(): void;
@@ -87,6 +95,7 @@ export function createMountBridgeOperations(deps: {
         },
         getPreviousActiveFilePath: () => appStore.state.editorContext.activeFile?.path ?? null,
         getCurrentWorkspacePath: deps.getCurrentWorkspacePath,
+        getCurrentWorkspaceFolders: () => appStore.state.editorContext.workspaceFolders ?? [],
         setCurrentWorkspacePath: deps.setCurrentWorkspacePath,
         persistWorkspacePath: (path) => writeStored(STORAGE_KEYS.workspacePath, path),
         setEditorContext: composerStore.setEditorContext,
@@ -94,7 +103,10 @@ export function createMountBridgeOperations(deps: {
         syncWorkspaceState: (path) => {
           sessionStore.syncWorkspaceState(path);
           composerStore.syncCurrentDocumentForWorkspace(path);
-          syncSessionMarkersForWorkspace(path);
+          syncSessionMarkersForWorkspace(
+            path,
+            (appStore.state.editorContext.workspaceFolders ?? []).map((folder) => folder.path)
+          );
         },
         resetWorkspaceForChange: deps.resetWorkspaceForChange,
         reloadWorkspaceAfterChange: deps.reloadWorkspaceAfterChange,
@@ -166,7 +178,12 @@ export function handleExtensionMessageWithDependencies(
     ): void;
     rememberCurrentDocumentNavigation(previousPath: string | null, nextPath: string | null): void;
     syncWorkspaceState(path: string | null): void;
-    resetWorkspaceForChange(): void;
+    getCurrentWorkspaceFolders?(): readonly WorkspaceFolderContext[];
+    resetWorkspaceForChange(options?: {
+      workspaceMembershipChanged?: boolean;
+      nextWorkspacePath?: string | null;
+      executionDirectoryChanged?: boolean;
+    }): void;
     reloadWorkspaceAfterChange(wasInitialized: boolean): void;
     isInitialized(): boolean;
     setTerminalSelection(
@@ -175,7 +192,7 @@ export function handleExtensionMessageWithDependencies(
     addContextFiles(payload: Extract<ExtensionMessage, { type: 'files/dropped' }>['payload']): void;
     removeContextFile(path: string): void;
     createSession(prefill?: string): void;
-    openSession?(sessionId: string): void;
+    openSession?(sessionId: string, directory?: string): void;
     requestComposerFocus(): void;
     requestOpenAttentionSessions(): void;
     requestOpenCompletedSessions(): void;
@@ -238,6 +255,7 @@ export function handleExtensionMessageWithDependencies(
       break;
     case 'context/update': {
       const previousActiveFilePath = deps.getPreviousActiveFilePath();
+      const previousWorkspaceFolders = deps.getCurrentWorkspaceFolders?.() ?? [];
       const nextWorkspacePath = normalizeProjectPath(msg.payload.workspacePath);
       const previousWorkspacePath = deps.getCurrentWorkspacePath();
       const initialWorkspaceContext = previousWorkspacePath === undefined;
@@ -245,19 +263,27 @@ export function handleExtensionMessageWithDependencies(
         !initialWorkspaceContext &&
         nextWorkspacePath !== previousWorkspacePath &&
         !isSameWorkspacePath(nextWorkspacePath, previousWorkspacePath);
+      const workspaceMembershipChanged = !haveSameWorkspaceRoots(
+        previousWorkspaceFolders,
+        msg.payload.workspaceFolders ?? []
+      );
       deps.setCurrentWorkspacePath(nextWorkspacePath);
       deps.persistWorkspacePath?.(nextWorkspacePath);
       deps.setEditorContext(msg.payload);
-      if (initialWorkspaceContext || workspaceChanged) {
+      if (initialWorkspaceContext || workspaceChanged || workspaceMembershipChanged) {
         deps.syncWorkspaceState(nextWorkspacePath);
       }
       deps.rememberCurrentDocumentNavigation(
         previousActiveFilePath,
         msg.payload.activeFile?.path ?? null
       );
-      if (workspaceChanged) {
+      if (workspaceChanged || (!initialWorkspaceContext && workspaceMembershipChanged)) {
         const wasInitialized = deps.isInitialized();
-        deps.resetWorkspaceForChange();
+        deps.resetWorkspaceForChange({
+          workspaceMembershipChanged,
+          nextWorkspacePath,
+          executionDirectoryChanged: workspaceChanged,
+        });
         deps.reloadWorkspaceAfterChange(wasInitialized);
       }
       break;
@@ -275,7 +301,7 @@ export function handleExtensionMessageWithDependencies(
       deps.createSession(msg.payload?.prefill);
       break;
     case 'command/open-session':
-      deps.openSession?.(msg.payload.sessionId);
+      deps.openSession?.(msg.payload.sessionId, msg.payload.directory);
       break;
     case 'command/focus-input':
       deps.requestComposerFocus();
@@ -387,6 +413,26 @@ export function handleExtensionMessageWithDependencies(
       ralphStore.applyHostState(msg.payload.runs, msg.payload.activeIds);
       break;
   }
+}
+
+function workspaceRootIdentities(folders: readonly WorkspaceFolderContext[]) {
+  return new Set(
+    folders
+      .map((folder) => normalizeWorkspaceIdentity(folder.path))
+      .filter((identity): identity is string => identity !== null)
+  );
+}
+
+function haveSameWorkspaceRoots(
+  left: readonly WorkspaceFolderContext[],
+  right: readonly WorkspaceFolderContext[]
+) {
+  const leftIdentities = workspaceRootIdentities(left);
+  const rightIdentities = workspaceRootIdentities(right);
+  return (
+    leftIdentities.size === rightIdentities.size &&
+    [...leftIdentities].every((identity) => rightIdentities.has(identity))
+  );
 }
 
 export function postFocusStateWithDependencies(deps: {

@@ -232,7 +232,21 @@ export function buildSessionSendBody(
 
   const workspacePath = composerState.editorContext.workspacePath;
   if (workspacePath) {
-    parts.push({ type: 'text', text: `[Working directory: ${workspacePath}]` });
+    const workspaceFolders = composerState.editorContext.workspaceFolders ?? [];
+    const workspaceMetadata =
+      workspaceFolders.length > 1
+        ? `; Workspace folders: ${JSON.stringify(
+            workspaceFolders.map((folder) => ({
+              name: folder.name,
+              path: folder.path,
+              primary: isSameWorkspacePath(folder.path, workspacePath),
+            }))
+          )}; sibling workspace access is governed by external_directory permissions`
+        : '';
+    parts.push({
+      type: 'text',
+      text: `[Working directory: ${workspacePath}${workspaceMetadata}]`,
+    });
   }
 
   const selection = composerState.editorContext.selection;
@@ -243,9 +257,12 @@ export function buildSessionSendBody(
     const range = `lines ${editorText.range.startLine}-${editorText.range.endLine}`;
     const source = editorText.kind === 'selection' ? 'Unsaved selection' : 'Unsaved buffer';
     const truncation = editorText.truncated ? '; truncated' : '';
+    const editorTextPath = editorText.path
+      ? getAttachmentReference({ path: editorText.path, type: 'file' }, workspacePath)
+      : editorText.relativePath;
     parts.push({
       type: 'text',
-      text: `[${source} from ${editorText.relativePath} ${range}${truncation}]\n\`\`\`${editorText.language || 'text'}\n${editorText.text}\n\`\`\``,
+      text: `[${source} from ${editorTextPath} ${range}${truncation}]\n\`\`\`${editorText.language || 'text'}\n${editorText.text}\n\`\`\``,
     });
   } else if (activeFile && currentDocumentEnabled) {
     const activeFilePath = getAttachmentReference(

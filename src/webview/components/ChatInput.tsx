@@ -9,7 +9,7 @@ import {
   onMount,
   untrack,
 } from 'solid-js';
-import { isSameWorkspacePath } from '../../shared/workspace-path';
+import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../../shared/workspace-path';
 import {
   state,
   inputText,
@@ -633,6 +633,16 @@ const pendingWorkspacePath = () => state.pendingWorkspaceSelectionPath;
 const setPendingWorkspacePath = (path: string | null) =>
   setState('pendingWorkspaceSelectionPath', path);
 
+function getFileSearchScopeKey() {
+  return JSON.stringify({
+    primary: normalizeWorkspaceIdentity(state.editorContext.workspacePath),
+    folders: (state.editorContext.workspaceFolders ?? []).map((folder) => [
+      folder.name,
+      normalizeWorkspaceIdentity(folder.path),
+    ]),
+  });
+}
+
 export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => void } = {}) {
   const queuedSessionIds = new Set(state.queuedMessages.map((message) => message.sessionId));
   for (const sessionId of queuedSessionDispatchPhases.keys()) {
@@ -860,7 +870,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const [sendComposerMinHeight, setSendComposerMinHeight] = createSignal(0);
   let latestFileSearchRequestId = 0;
   let latestFileSearchQuery = '';
-  let latestFileSearchWorkspace = state.editorContext.workspacePath;
+  let latestFileSearchScope = getFileSearchScopeKey();
   let fileSearchTimer: ReturnType<typeof setTimeout> | null = null;
   let sessionSearchTimer: ReturnType<typeof setTimeout> | null = null;
   let sessionSearchAbortController: AbortController | undefined;
@@ -1048,7 +1058,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   createEffect(() => {
     const ids = getSessionReferenceIds(inputText());
     const references = sessionReferences();
-    const workspacePath = state.editorContext.workspacePath;
     for (const id of ids) {
       if (references[id]) continue;
       const loaded = state.sessions.find((session) => session.id === id);
@@ -1059,10 +1068,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       if (pendingSessionReferenceIds.has(id)) continue;
       pendingSessionReferenceIds.add(id);
       void client.session
-        .get(id)
-        .then((session) => {
+        .list({ limit: 30, search: id, roots: true })
+        .then((page) => {
+          const session = (Array.isArray(page) ? page : page.items).find(
+            (candidate) => candidate.id === id
+          );
+          if (!session) return;
           if (session.parentID || session.time.archived) return;
-          if (workspacePath && !isSameWorkspacePath(session.directory, workspacePath)) return;
           if (!getSessionReferenceIds(inputText()).includes(id)) return;
           rememberSessionReference(session);
         })
@@ -1288,7 +1300,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       onExportSession: () => {
         const sessionId = composerSessionId();
         if (!sessionId) return;
-        postMessage({ type: 'session/export', payload: { sessionId } });
+        postMessage({
+          type: 'session/export',
+          payload: {
+            sessionId,
+            directory: state.sessions.find((session) => session.id === sessionId)?.directory,
+          },
+        });
       },
       onGenerateStats: (includeAllTime) => {
         postMessage({ type: 'usage/report', payload: { includeAllTime } });
@@ -1304,12 +1322,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   createEffect(() => {
     const completion = activeCompletion();
-    const workspacePath = state.editorContext.workspacePath;
-    if (
-      workspacePath !== latestFileSearchWorkspace &&
-      !isSameWorkspacePath(workspacePath, latestFileSearchWorkspace)
-    ) {
-      latestFileSearchWorkspace = workspacePath;
+    const fileSearchScope = getFileSearchScopeKey();
+    if (fileSearchScope !== latestFileSearchScope) {
+      latestFileSearchScope = fileSearchScope;
       latestFileSearchRequestId += 1;
       latestFileSearchQuery = '';
       setFileSearchResults([]);
@@ -1371,7 +1386,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const exactSessionId =
       /^sessions?:/i.test(completion.query.trim()) || /^ses_[a-z0-9]+$/i.test(query) ? query : null;
     const currentSessionId = composerSessionId();
-    const workspacePath = state.editorContext.workspacePath;
     const localResults = state.sessions.filter((session) => {
       if (session.id === currentSessionId || session.parentID) return false;
       if (!query) return true;
@@ -1394,20 +1408,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             signal: controller.signal,
           })
           .catch(() => null);
-        const exactRequest = exactSessionId
-          ? client.session.get(exactSessionId).catch(() => null)
-          : Promise.resolve(null);
-        void Promise.all([listRequest, exactRequest]).then(([page, exactSession]) => {
+        void listRequest.then((page) => {
           if (controller.signal.aborted) return;
           const sessions = page ? [...(Array.isArray(page) ? page : page.items)] : [];
-          if (
-            exactSession &&
-            !exactSession.parentID &&
-            !exactSession.time.archived &&
-            (!workspacePath || isSameWorkspacePath(exactSession.directory, workspacePath))
-          ) {
-            sessions.unshift(exactSession);
-          }
+          const exactSession = exactSessionId
+            ? sessions.find((session) => session.id.toLowerCase() === exactSessionId)
+            : undefined;
+          if (exactSession) sessions.unshift(exactSession);
           const seen = new Set<string>();
           const results = sessions.filter((session) => {
             if (session.id === currentSessionId || seen.has(session.id)) return false;
@@ -1439,7 +1446,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   const sessionCompletions = createMemo(() => {
     if (activeCompletion()?.type !== 'session') return [];
-    return getSessionCompletionItems(sessionSearchResults());
+    return getSessionCompletionItems(
+      sessionSearchResults(),
+      state.editorContext.workspaceFolders ?? []
+    );
   });
 
   const slashCompletions = createMemo(() => {
@@ -4324,6 +4334,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           compactTight={toolbarCompactMode() === 'tight'}
           inputFrameRef={inputFrameRef}
           allowRepositoryLink={!composerEditingMessage()}
+          showWorkspaceControl={!composerEditingMessage()}
           workspaceFolders={state.editorContext.workspaceFolders ?? []}
           selectedWorkspacePath={state.editorContext.workspacePath}
           canSelectWorkspace={canSelectWorkspace()}
