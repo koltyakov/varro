@@ -130,6 +130,7 @@ const COMPLETION_NOTIFICATION_CLOCK_SKEW_MS = 5_000;
  */
 export class SessionStateManager {
   private readonly busySessions = new Set<string>();
+  private readonly serverBusySessions = new Set<string>();
   private readonly completedSessions = new Set<string>();
   private readonly failedSessions = new Set<string>();
   private readonly sessionAgents = new Map<string, string>();
@@ -527,6 +528,7 @@ export class SessionStateManager {
         if (statusType === 'busy' && this.trailingBusyAfterCompletion.delete(sessionID)) break;
         if (statusType === 'busy' || statusType === 'retry') {
           this.trailingBusyAfterCompletion.delete(sessionID);
+          this.serverBusySessions.add(sessionID);
           this.addServerBusyGeneration(sessionID);
           changed = this.markBusyInternal(sessionID) || changed;
         } else if (statusType === 'idle') {
@@ -534,6 +536,7 @@ export class SessionStateManager {
           // signal (emitted by the run-state Runner's onIdle). Treat it as a
           // primary completion path so a fast turn whose step.ended/message
           // events lag or are missed still settles immediately.
+          this.serverBusySessions.delete(sessionID);
           changed = this.finishBusySession(sessionID, {}) || changed;
         }
         break;
@@ -544,6 +547,7 @@ export class SessionStateManager {
         // the same meaning; finish on it too so either signal recovers the UI.
         const sessionID = getString(props?.sessionID);
         if (!sessionID) break;
+        this.serverBusySessions.delete(sessionID);
         changed = this.finishBusySession(sessionID, {}) || changed;
         break;
       }
@@ -551,10 +555,14 @@ export class SessionStateManager {
         const sessionID = getString(props?.sessionID);
         if (!sessionID || isContinuationFinish(getString(props?.finish))) break;
         changed =
-          this.finishBusySession(sessionID, {
-            messageID: getString(props?.assistantMessageID),
-            completedAt: getNumber(props?.timestamp),
-          }) || changed;
+          this.finishBusySession(
+            sessionID,
+            {
+              messageID: getString(props?.assistantMessageID),
+              completedAt: getNumber(props?.timestamp),
+            },
+            true
+          ) || changed;
         break;
       }
       case 'session.next.prompt.admitted': {
@@ -625,10 +633,14 @@ export class SessionStateManager {
               }) || changed;
           } else if (!isContinuationFinish(getString(info?.finish))) {
             changed =
-              this.finishBusySession(sessionID, {
-                messageID: getString(info?.id),
-                completedAt: getNumber(asRecord(info?.time)?.completed),
-              }) || changed;
+              this.finishBusySession(
+                sessionID,
+                {
+                  messageID: getString(info?.id),
+                  completedAt: getNumber(asRecord(info?.time)?.completed),
+                },
+                true
+              ) || changed;
           }
         }
         break;
@@ -1235,6 +1247,7 @@ export class SessionStateManager {
     }
     let changed = false;
     changed = this.busySessions.delete(sessionID) || changed;
+    this.serverBusySessions.delete(sessionID);
     changed = this.completedSessions.delete(sessionID) || changed;
     changed = this.failedSessions.delete(sessionID) || changed;
     changed = this.sessionAgents.delete(sessionID) || changed;
@@ -1333,6 +1346,7 @@ export class SessionStateManager {
 
   private clearBusy(sessionID: string): boolean {
     const wasBusy = this.busySessions.delete(sessionID);
+    this.serverBusySessions.delete(sessionID);
     this.clearBusyAttempts(sessionID);
     if (wasBusy) this.busyStartedAt.delete(sessionID);
     this.trailingTerminalsWhileBusy.delete(sessionID);
@@ -1393,9 +1407,21 @@ export class SessionStateManager {
     return changed;
   }
 
-  private finishBusySession(sessionID: string, evidence: TerminalEvidence): boolean {
+  private finishBusySession(
+    sessionID: string,
+    evidence: TerminalEvidence,
+    waitForServerIdle = false
+  ): boolean {
     if (!this.busySessions.has(sessionID)) return false;
     if (this.isDuplicateTrailingTerminal(sessionID, evidence)) return false;
+
+    if (
+      waitForServerIdle &&
+      this.serverBusySessions.has(sessionID) &&
+      (this.busyGenerations.get(sessionID)?.length ?? 0) <= 1
+    ) {
+      return false;
+    }
 
     const completion = this.consumeBusyGeneration(sessionID, evidence.completedAt);
     if (completion === 'stale') return false;

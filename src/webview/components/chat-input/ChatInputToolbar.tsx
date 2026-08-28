@@ -211,6 +211,7 @@ type ChatInputMetaToolbarProps = ToolbarSharedProps & {
   workspacePopoverRef?: HTMLDivElement | ((el: HTMLDivElement) => void);
   onToggleWorkspacePicker: () => void;
   onSelectWorkspace: (path: string) => void;
+  onSelectWorkspaceScope: () => void;
   showMcpControl: boolean;
   showMcpPicker: boolean;
   enabledMcpCount: number;
@@ -348,9 +349,11 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
               folders={props.workspaceFolders}
               selectedPath={props.selectedWorkspacePath}
               canSelect={props.canSelectWorkspace}
+              allLabel="Workspace"
               showPicker={props.showWorkspacePicker}
               onToggle={props.onToggleWorkspacePicker}
               onSelect={props.onSelectWorkspace}
+              onSelectAll={props.onSelectWorkspaceScope}
             />
           </Show>
 

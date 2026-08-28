@@ -36,6 +36,7 @@ export interface EditorDiagnostic {
 
 export interface EditorContext {
   workspacePath: string | null;
+  workspaceDirectory?: string | null;
   workspaceFolders?: WorkspaceFolderContext[];
   activeWorkspacePath?: string | null;
   activeFile: {
@@ -76,6 +77,7 @@ export interface WorkspaceFilePick {
 }
 
 export type PermissionMode = 'default' | 'edits' | 'auto' | 'full';
+export type SessionWorkspaceScope = 'workspace' | 'folder';
 
 export const MAX_PERSISTED_SESSION_ID_LENGTH = 512;
 
@@ -98,6 +100,10 @@ export type ChatModelSelection = {
 
 export function isPermissionMode<T>(value: T): value is T & PermissionMode {
   return value === 'default' || value === 'edits' || value === 'auto' || value === 'full';
+}
+
+export function isSessionWorkspaceScope<T>(value: T): value is T & SessionWorkspaceScope {
+  return value === 'workspace' || value === 'folder';
 }
 
 export type AutoApproveJudgeDecision = 'allow' | 'reject' | 'ask';
@@ -275,6 +281,7 @@ export type RecycleBinSession = {
   id: string;
   projectID: string;
   directory: string;
+  workspaceScope?: SessionWorkspaceScope;
   parentID?: string;
   summary?: {
     additions: number;

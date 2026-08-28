@@ -12,6 +12,7 @@ import {
   isSessionUnread,
   isActiveSessionWorking,
   getSessionTreeRootId,
+  getSelectedAgentForSession,
   persistLastOpenedView,
   setShowModels,
 } from '../lib/state';
@@ -136,7 +137,7 @@ export function Chat() {
   const rawSessionIndicators = createMemo(() => deriveSessionIndicators(state.sessions));
   const sessionIndicators = createStableSessionIndicators(rawSessionIndicators);
   let publishedUnreadWorkspace: string | null = null;
-  const publishedUnreadKinds = new Map<string, 'completed' | 'plan-ready'>();
+  const publishedUnreadKinds = new Map<string, 'completed' | 'plan-ready' | null>();
   createEffect(() => {
     const workspacePath = state.editorContext.workspacePath;
     const indicators = sessionIndicators();
@@ -146,15 +147,15 @@ export function Chat() {
       publishedUnreadKinds.clear();
     }
     for (const session of state.sessions) {
+      if (!isPrimarySession(session)) continue;
+      const hasPublishedKind = publishedUnreadKinds.has(session.id);
       const previousKind = publishedUnreadKinds.get(session.id);
-      const kind = isPrimarySession(session)
-        ? indicators.planReadyIds.has(session.id)
-          ? 'plan-ready'
-          : indicators.newlyCompletedIds.has(session.id)
-            ? 'completed'
-            : undefined
-        : undefined;
-      if (previousKind === kind) continue;
+      const kind = indicators.planReadyIds.has(session.id)
+        ? 'plan-ready'
+        : indicators.newlyCompletedIds.has(session.id)
+          ? 'completed'
+          : undefined;
+      if (hasPublishedKind && previousKind === (kind ?? null)) continue;
       if (previousKind) {
         postMessage({
           type: 'session-unread-state/update',
@@ -171,6 +172,17 @@ export function Chat() {
         postMessage({
           type: 'session-unread-state/update',
           payload: { sessionId: session.id, directory: session.directory, kind, unread: true },
+        });
+      } else if (state.completedSessionResponses[session.id] !== undefined) {
+        publishedUnreadKinds.set(session.id, null);
+        postMessage({
+          type: 'session-unread-state/update',
+          payload: {
+            sessionId: session.id,
+            directory: session.directory,
+            kind: getSelectedAgentForSession(session.id) === 'plan' ? 'plan-ready' : 'completed',
+            unread: false,
+          },
         });
       } else {
         publishedUnreadKinds.delete(session.id);

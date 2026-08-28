@@ -67,7 +67,10 @@ export class SessionLifecycleOperations {
       }),
       getCurrentWorkspacePath: deps.getCurrentWorkspacePath,
       getOpenWorkspacePaths: () =>
-        (appStore.state.editorContext?.workspaceFolders ?? []).map((folder) => folder.path),
+        [
+          ...(appStore.state.editorContext?.workspaceFolders ?? []).map((folder) => folder.path),
+          appStore.state.editorContext?.workspaceDirectory,
+        ].filter((path): path is string => Boolean(path)),
       setSessions: sessionStore.setSessions,
       clearSessionStatusEntry: sessionStore.clearSessionStatusEntry,
       clearPendingAbort: deps.clearPendingAbort,

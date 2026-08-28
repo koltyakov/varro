@@ -43,6 +43,7 @@ import type { SelectedModel } from '../../lib/app-state-types';
 import type { Session } from '../../types';
 import { client } from '../../lib/client';
 import { postMessage } from '../../lib/bridge';
+import { setManualWorkspaceSelection } from '../../lib/app-state';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { isEmptySession, shouldHideEmptySessionFromList } from '../../lib/empty-session';
 import { formatEditCount, formatModelName, formatVariantLabel } from '../../lib/format';
@@ -54,6 +55,7 @@ import {
   forwardMessageIcon,
   navArrowRightIcon,
   cableTagIcon,
+  folderSettingsIcon,
   pinIcon,
   trashIcon,
   xmarkIcon,
@@ -944,7 +946,7 @@ function SessionListWorkspaceSelector(props: {
             folders={state.editorContext.workspaceFolders ?? []}
             selectedPath={props.selectedPath}
             showIcon={false}
-            allLabel="All folders"
+            allLabel="Workspace"
             popoverTitle="Session folder"
             showPicker={showPicker()}
             onToggle={() => setShowPicker((open) => !open)}
@@ -1122,12 +1124,19 @@ export function SessionListView(props: {
     }
     return counts;
   });
-  const matchesFolderFilter = (directory: string | null | undefined) => {
+  const matchesFolderFilter = (
+    directory: string | null | undefined,
+    workspaceScope?: Session['workspaceScope']
+  ) => {
     const selected = folderFilter();
-    return !selected || isSameWorkspacePath(directory, selected);
+    return (
+      !selected || (workspaceScope !== 'workspace' && isSameWorkspacePath(directory, selected))
+    );
   };
   const recycleBinEntries = createMemo(() =>
-    (state.recycleBinEntries || []).filter((entry) => matchesFolderFilter(entry.root?.directory))
+    (state.recycleBinEntries || []).filter((entry) =>
+      matchesFolderFilter(entry.root?.directory, entry.root?.workspaceScope)
+    )
   );
   const recycleBinSessionIds = createMemo(() => getRecycleBinSessionIds(recycleBinEntries()));
   const isVisibleSession = (session: Session) => {
@@ -1145,7 +1154,8 @@ export function SessionListView(props: {
   };
   const visibleSessionsForList = createMemo(() =>
     state.sessions.filter(
-      (session) => isVisibleSession(session) && matchesFolderFilter(session.directory)
+      (session) =>
+        isVisibleSession(session) && matchesFolderFilter(session.directory, session.workspaceScope)
     )
   );
   const groupedSessions = createMemo(() =>
@@ -1169,7 +1179,8 @@ export function SessionListView(props: {
     const mergedSessions = new Map(resolvedSessions.map((session) => [session.id, session]));
     for (const session of state.sessions) mergedSessions.set(session.id, session);
     return [...mergedSessions.values()].filter(
-      (session) => isVisibleSession(session) && matchesFolderFilter(session.directory)
+      (session) =>
+        isVisibleSession(session) && matchesFolderFilter(session.directory, session.workspaceScope)
     );
   });
   const subagentSessions = createMemo(() =>
@@ -1181,7 +1192,11 @@ export function SessionListView(props: {
     const loadedSessions = new Map(state.sessions.map((session) => [session.id, session]));
     return results
       .map((session) => loadedSessions.get(session.id) ?? session)
-      .filter((session) => isVisibleSession(session) && matchesFolderFilter(session.directory));
+      .filter(
+        (session) =>
+          isVisibleSession(session) &&
+          matchesFolderFilter(session.directory, session.workspaceScope)
+      );
   });
   const filteredSessions = createMemo(() =>
     props.sessionFilter
@@ -1639,6 +1654,8 @@ export function SessionListView(props: {
         selectedPath={folderFilter()}
         onSelect={(path) => {
           setFolderFilter(path);
+          setManualWorkspaceSelection(path !== null);
+          setState('pendingWorkspaceSelectionPath', path);
           if (path && !isSameWorkspacePath(path, state.editorContext.workspacePath)) {
             postMessage({ type: 'workspace/select', payload: { path } });
           }
@@ -1739,12 +1756,26 @@ function RecycleBinListItem(props: {
           <span class="session-item-meta">
             <Show when={props.showFolder}>
               <span class="session-item-folder" title={props.entry.root.directory}>
-                <FolderIcon class="session-item-folder-meta-icon" width={10} height={10} />
+                <Show
+                  when={props.entry.root.workspaceScope === 'workspace'}
+                  fallback={
+                    <FolderIcon class="session-item-folder-meta-icon" width={10} height={10} />
+                  }
+                >
+                  <UiIcon
+                    source={folderSettingsIcon}
+                    class="session-item-folder-meta-icon"
+                    width={10}
+                    height={10}
+                  />
+                </Show>
                 <span>
-                  {getWorkspaceCompactLabel(
-                    props.entry.root.directory,
-                    state.editorContext.workspaceFolders ?? []
-                  )}
+                  {props.entry.root.workspaceScope === 'workspace'
+                    ? 'Workspace'
+                    : getWorkspaceCompactLabel(
+                        props.entry.root.directory,
+                        state.editorContext.workspaceFolders ?? []
+                      )}
                 </span>
               </span>
               {' · '}
@@ -2162,12 +2193,26 @@ function SessionListItem(props: {
           <span class="session-item-meta session-item-stats-meta">
             <Show when={props.showFolder}>
               <span class="session-item-folder" title={props.session.directory}>
-                <FolderIcon class="session-item-folder-meta-icon" width={10} height={10} />
+                <Show
+                  when={props.session.workspaceScope === 'workspace'}
+                  fallback={
+                    <FolderIcon class="session-item-folder-meta-icon" width={10} height={10} />
+                  }
+                >
+                  <UiIcon
+                    source={folderSettingsIcon}
+                    class="session-item-folder-meta-icon"
+                    width={10}
+                    height={10}
+                  />
+                </Show>
                 <span>
-                  {getWorkspaceCompactLabel(
-                    props.session.directory,
-                    state.editorContext.workspaceFolders ?? []
-                  )}
+                  {props.session.workspaceScope === 'workspace'
+                    ? 'Workspace'
+                    : getWorkspaceCompactLabel(
+                        props.session.directory,
+                        state.editorContext.workspaceFolders ?? []
+                      )}
                 </span>
               </span>
               {' · '}

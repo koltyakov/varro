@@ -15,6 +15,7 @@ import { onMessage, postMessage } from '../../lib/bridge';
 import * as clientModule from '../../lib/client';
 import type { SelectedModel, SessionSelectionOptions } from '../../lib/app-state-types';
 import { appStore } from '../../lib/stores/app-store';
+import { manualWorkspaceSelection } from '../../lib/app-state';
 import { composerStore } from '../../lib/stores/composer-store';
 import { permissionsStore } from '../../lib/stores/permissions-store';
 import { ralphStore } from '../../lib/stores/ralph-store';
@@ -2348,7 +2349,20 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     getWorkspaceGeneration: () => workspaceGeneration,
     getSessionSelectionGeneration: () => sessionSelectionGeneration,
     getNewChatDraftGeneration,
-    createRemoteSession: (body) => client.session.create(body),
+    createRemoteSession: (body) => {
+      const workspaceScope =
+        !manualWorkspaceSelection() &&
+        (appStore.state.editorContext.workspaceFolders?.length ?? 0) > 1
+          ? 'workspace'
+          : 'folder';
+      const directory =
+        workspaceScope === 'workspace'
+          ? (appStore.state.editorContext.workspaceDirectory ??
+            appStore.state.editorContext.workspaceFolders?.[0]?.path ??
+            undefined)
+          : (appStore.state.editorContext.workspacePath ?? undefined);
+      return client.session.create({ ...body, workspaceScope }, { directory });
+    },
     updateRemoteSession: (sessionId, body) =>
       client.session.update(sessionId, body, { directory: getSessionDirectory(sessionId) }),
     forkRemoteSession: (sessionId, messageID) =>

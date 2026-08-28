@@ -1,3 +1,4 @@
+import type { SessionWorkspaceScope } from './protocol';
 import type { UnknownRecord } from './type-utils';
 
 export type OutputFormatText = {
@@ -337,6 +338,7 @@ export type Session = {
   projectID: string;
   workspaceID?: string;
   directory: string;
+  workspaceScope?: SessionWorkspaceScope;
   path?: string;
   parentID?: string;
   summary?: {

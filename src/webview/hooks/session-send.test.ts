@@ -142,7 +142,6 @@ describe('session-send helpers', () => {
         model: { providerID: 'openai', modelID: 'gpt-4o' },
         parts: [
           { type: 'text', text: 'Review overlap' },
-          { type: 'text', text: '[Working directory: /repo]' },
           { type: 'text', text: '[Selection from src/a.ts lines 5-7, 11]' },
           { type: 'text', text: '[Selection from src/a.ts lines 1-4, 8-10, 12-20]' },
         ],
@@ -204,7 +203,6 @@ describe('session-send helpers', () => {
 
     expect(result?.body.parts).toEqual([
       { type: 'text', text: 'Fix this' },
-      { type: 'text', text: '[Working directory: /repo]' },
       {
         type: 'text',
         text: '[Unsaved selection from src/app.ts lines 2-3]\n```typescript\nconst changed = true;\n```',
@@ -246,14 +244,10 @@ describe('session-send helpers', () => {
       () => true
     );
 
-    expect(result?.body.parts[1]).toEqual({
-      type: 'text',
-      text: `[Working directory: /repo-a; Workspace folders: ${JSON.stringify([
-        { name: 'Repo A', path: '/repo-a', primary: true },
-        { name: 'Repo B', path: '/repo-b', primary: false },
-      ])}; sibling workspace access is governed by external_directory permissions]`,
-    });
-    expect(result?.body.parts[2]).toMatchObject({
+    expect(result?.body.parts).not.toContainEqual(
+      expect.objectContaining({ text: expect.stringContaining('[Working directory:') })
+    );
+    expect(result?.body.parts[1]).toMatchObject({
       type: 'text',
       text: expect.stringContaining('Unsaved buffer from /repo-b/src/app.ts lines 1-1'),
     });
@@ -294,7 +288,6 @@ describe('session-send helpers', () => {
         model: { providerID: 'openai', modelID: 'gpt-4o' },
         parts: [
           { type: 'text', text: 'Review this image' },
-          { type: 'text', text: '[Working directory: /repo]' },
           { type: 'text', text: 'src/extra.ts' },
           { type: 'file', mime: 'image/png', filename: 'img-1.png', url: 'blob:1' },
         ],
@@ -326,7 +319,6 @@ describe('session-send helpers', () => {
 
     expect(result?.body.parts).toEqual([
       { type: 'text', text: 'Review this file' },
-      { type: 'text', text: '[Working directory: /repo]' },
       { type: 'text', text: '[Selection from src/a.ts lines 2-3]' },
     ]);
   });
@@ -361,7 +353,6 @@ describe('session-send helpers', () => {
 
     expect(result?.body.parts).toEqual([
       { type: 'text', text: 'Review this image' },
-      { type: 'text', text: '[Working directory: /repo]' },
       { type: 'file', mime: 'image/png', filename: 'img-1.png', url: 'blob:1' },
       { type: 'text', text: 'src/' },
     ]);
@@ -541,7 +532,6 @@ describe('session-send helpers', () => {
 
     expect(result?.body.parts).toEqual([
       { type: 'text', text: '@vision inspect [Image 1]' },
-      { type: 'text', text: '[Working directory: /repo]' },
       {
         type: 'text',
         text:
@@ -855,10 +845,7 @@ describe('session-send helpers', () => {
         syncSessionMcps: vi.fn(async () => {}),
         buildSendPayload: () => ({
           body: {
-            parts: [
-              { type: 'text', text: 'hello' },
-              { type: 'text', text: '[Working directory: /repo]' },
-            ],
+            parts: [{ type: 'text', text: 'hello' }],
             model: { providerID: 'openai', modelID: 'gpt-4o' },
           },
           effectiveModel: { providerID: 'openai', modelID: 'gpt-4o' },
@@ -913,7 +900,6 @@ describe('session-send helpers', () => {
     });
     expect(optimisticEntry.parts).toMatchObject([
       { type: 'text', text: 'hello' },
-      { type: 'text', text: '[Working directory: /repo]' },
       {
         id: expect.stringContaining('-optimistic-file-0'),
         type: 'file',
@@ -924,10 +910,7 @@ describe('session-send helpers', () => {
     ]);
     expect(sendAsync).toHaveBeenCalledWith('session-1', {
       messageID: optimisticEntry.info.id,
-      parts: [
-        { type: 'text', text: 'hello' },
-        { type: 'text', text: '[Working directory: /repo]' },
-      ],
+      parts: [{ type: 'text', text: 'hello' }],
       model: { providerID: 'openai', modelID: 'gpt-4o' },
     });
     expect(requestMessageListScrollToBottom).toHaveBeenCalledWith(optimisticEntry.info.id);

@@ -42,6 +42,7 @@ export class ContextProvider implements vscode.Disposable {
   private activeEditorSettleTimer: ReturnType<typeof setTimeout> | null = null;
   private _context: EditorContext = {
     workspacePath: null,
+    workspaceDirectory: null,
     workspaceFolders: [],
     activeWorkspacePath: null,
     activeFile: null,
@@ -329,6 +330,7 @@ export class ContextProvider implements vscode.Disposable {
     }
 
     this._context.workspacePath = this.getPreferredWorkspacePath();
+    this._context.workspaceDirectory = this.getWorkspaceDirectory();
     this._context.workspaceFolders = (vscode.workspace.workspaceFolders ?? []).map((folder) => ({
       name: folder.name,
       path: folder.uri.fsPath,
@@ -414,6 +416,13 @@ export class ContextProvider implements vscode.Disposable {
 
     this.emitContextIfChanged();
     this.refreshDiagnosticsIfNeeded();
+  }
+
+  private getWorkspaceDirectory(): string | null {
+    const firstFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? null;
+    const workspaceFile = vscode.workspace.workspaceFile;
+    if (!workspaceFile || workspaceFile.scheme === 'untitled') return firstFolder;
+    return workspaceFile.fsPath ? dirname(workspaceFile.fsPath) : firstFolder;
   }
 
   private refreshDiagnosticsIfNeeded() {

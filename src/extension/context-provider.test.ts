@@ -78,6 +78,7 @@ const vscodeMock = vi.hoisted(() => ({
     onDidChangeConfiguration: vi.fn((_listener?: () => void) => ({ dispose: vi.fn() })),
     getConfiguration: vi.fn(() => ({ get: vi.fn((_key: string, fallback: boolean) => fallback) })),
     workspaceFolders: [] as Array<{ name: string; uri: { fsPath: string } }>,
+    workspaceFile: undefined as { scheme: string; fsPath: string } | undefined,
     getWorkspaceFolder: vi.fn(),
     fs: {
       stat: vi.fn(),
@@ -175,6 +176,7 @@ describe('ContextProvider', () => {
     vscodeMock.window.activeTextEditor = undefined;
     vscodeMock.window.tabGroups.activeTabGroup.activeTab = undefined;
     vscodeMock.workspace.getWorkspaceFolder.mockReset();
+    vscodeMock.workspace.workspaceFile = undefined;
     vscodeMock.workspace.fs.stat.mockReset();
     vscodeMock.workspace.fs.readDirectory.mockReset();
     vscodeMock.workspace.fs.readDirectory.mockResolvedValue([]);
@@ -207,6 +209,25 @@ describe('ContextProvider', () => {
     vscodeMock.workspace.getConfiguration.mockImplementation(() => ({
       get: vi.fn((_key: string, fallback: boolean) => fallback),
     }));
+  });
+
+  it('uses the saved workspace directory and falls back to the first folder', () => {
+    vscodeMock.workspace.workspaceFolders = [
+      { name: 'Repo A', uri: { fsPath: '/repos/a' } },
+      { name: 'Repo B', uri: { fsPath: '/repos/b' } },
+    ];
+    vscodeMock.workspace.workspaceFile = {
+      scheme: 'file',
+      fsPath: '/workspaces/product.code-workspace',
+    };
+    const saved = new ContextProvider(noop);
+    expect(saved.context.workspaceDirectory).toBe('/workspaces');
+    saved.dispose();
+
+    vscodeMock.workspace.workspaceFile = undefined;
+    const unsaved = new ContextProvider(noop);
+    expect(unsaved.context.workspaceDirectory).toBe('/repos/a');
+    unsaved.dispose();
   });
 
   it('does not reuse stale clipboard text when terminal copy captures nothing', async () => {
@@ -1320,6 +1341,7 @@ describe('ContextProvider', () => {
       expect(onChange).toHaveBeenCalledTimes(1);
       expect(onChange).toHaveBeenLastCalledWith({
         workspacePath: '/repo',
+        workspaceDirectory: '/repo',
         workspaceFolders: [{ name: 'repo', path: '/repo' }],
         activeWorkspacePath: '/repo',
         activeFile: {
@@ -1365,6 +1387,7 @@ describe('ContextProvider', () => {
 
       expect(onChange).toHaveBeenLastCalledWith({
         workspacePath: '/repo',
+        workspaceDirectory: '/repo',
         workspaceFolders: [{ name: 'repo', path: '/repo' }],
         activeWorkspacePath: '/repo',
         activeFile: {
@@ -1431,6 +1454,7 @@ describe('ContextProvider', () => {
       expect(onChange).toHaveBeenCalledTimes(2);
       expect(onChange).toHaveBeenLastCalledWith({
         workspacePath: '/repo',
+        workspaceDirectory: '/repo',
         workspaceFolders: [{ name: 'repo', path: '/repo' }],
         activeWorkspacePath: '/repo',
         activeFile: {

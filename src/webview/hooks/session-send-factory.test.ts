@@ -654,7 +654,6 @@ describe('SessionSendOperations', () => {
       messageID: 'msg_queued_context',
       parts: [
         { type: 'text', text: 'queued prompt' },
-        { type: 'text', text: '[Working directory: /original-workspace]' },
         { type: 'text', text: '[Selection from original.ts lines 4]' },
       ],
     });

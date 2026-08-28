@@ -1370,6 +1370,42 @@ describe('header status badges', () => {
     }
   });
 
+  it('publishes a read completion when an editor suppresses the unread indicator', () => {
+    const sent: WebviewMessage[] = [];
+    // SAFETY: The fixture installs the protocol bridge callback owned by the webview host.
+    const bridgeWindow = window as {
+      __sendToExtension?: (message: WebviewMessage) => void;
+    };
+    const originalSend = bridgeWindow.__sendToExtension;
+    const originalWorkspacePath = state.editorContext.workspacePath;
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
+    setState('editorContext', 'workspacePath', '/repo');
+    setState('sessions', [session('session-1', 500)]);
+    setState('completedSessionResponses', { 'session-1': 500 });
+    setState('editorTabsOpen', true);
+    setState('editorSessionIds', ['session-1']);
+
+    try {
+      cleanup = render(() => Chat(), container!);
+
+      expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([
+        {
+          type: 'session-unread-state/update',
+          payload: {
+            sessionId: 'session-1',
+            directory: '/repo',
+            kind: 'completed',
+            unread: false,
+          },
+        },
+      ]);
+    } finally {
+      setState('editorContext', 'workspacePath', originalWorkspacePath);
+      if (originalSend) bridgeWindow.__sendToExtension = originalSend;
+      else delete bridgeWindow.__sendToExtension;
+    }
+  });
+
   it('reconciles a restored editor route before reporting a new-chat route', () => {
     hostWindow.__initialWebviewState = {
       webviewContext: {

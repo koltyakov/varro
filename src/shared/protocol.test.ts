@@ -3,6 +3,7 @@ import { parseExtensionMessage } from './extension-message';
 import {
   isPermissionMode,
   isSafePersistedSessionId,
+  isSessionWorkspaceScope,
   parseServerEvent,
   type ExtensionMessage,
 } from './protocol';
@@ -19,6 +20,11 @@ describe('protocol parsers', () => {
     expect(
       ['', '__proto__', 'constructor', 'prototype', 'x'.repeat(513)].some(isSafePersistedSessionId)
     ).toBe(false);
+  });
+
+  it('recognizes only supported session workspace scopes', () => {
+    expect(['workspace', 'folder'].every(isSessionWorkspaceScope)).toBe(true);
+    expect(['', 'Workspace', 'all', null, undefined].some(isSessionWorkspaceScope)).toBe(false);
   });
 
   it('validator round-trips a server/status running payload', () => {

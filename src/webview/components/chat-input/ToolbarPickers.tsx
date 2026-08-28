@@ -8,7 +8,7 @@ import type {
 } from '../../../shared/protocol';
 import { isSameWorkspacePath } from '../../../shared/workspace-path';
 import { getProviderIcon } from '../../lib/provider-icons';
-import { checkIcon, navArrowDownIcon } from '../../lib/ui-icons';
+import { checkIcon, folderSettingsIcon, navArrowDownIcon } from '../../lib/ui-icons';
 import { formatModelName } from '../../lib/format';
 import { FolderIcon } from '../FolderIcon';
 import { Tooltip } from '../Tooltip';
@@ -172,7 +172,7 @@ export function WorkspacePicker(props: {
 
   return (
     <div class="workspace-picker" style={{ position: 'relative' }}>
-      <Tooltip content={selected()?.path ?? 'Select workspace folder'}>
+      <Tooltip content={selected()?.path ?? props.allLabel ?? 'Select workspace folder'}>
         <button
           ref={props.buttonRef}
           class="toolbar-picker workspace-picker-button"
@@ -181,7 +181,19 @@ export function WorkspacePicker(props: {
           onClick={props.onToggle}
         >
           <Show when={props.showIcon !== false}>
-            <FolderIcon class="workspace-picker-folder-icon" width={14} height={14} />
+            <Show
+              when={selected()}
+              fallback={
+                <UiIcon
+                  source={folderSettingsIcon}
+                  class="workspace-picker-folder-icon"
+                  width={14}
+                  height={14}
+                />
+              }
+            >
+              <FolderIcon class="workspace-picker-folder-icon" width={14} height={14} />
+            </Show>
           </Show>
           <span class="toolbar-picker-label workspace-picker-full-label">
             {selected()?.name ?? props.allLabel ?? 'Workspace'}
@@ -209,9 +221,10 @@ export function WorkspacePicker(props: {
             <button
               class={`toolbar-popover-item workspace-popover-all ${selected() ? '' : 'selected'}`}
               aria-current={selected() ? undefined : 'true'}
+              disabled={props.canSelect === false}
               onClick={() => props.onSelectAll?.()}
             >
-              <FolderIcon width={14} height={14} />
+              <UiIcon source={folderSettingsIcon} width={14} height={14} />
               <span class="min-w-0">
                 <span class="workspace-popover-name block truncate">
                   {props.allLabel ?? 'All folders'}

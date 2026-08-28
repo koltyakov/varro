@@ -209,7 +209,7 @@ describe('SessionListView model details', () => {
       diagnostics: [],
     });
     setState('sessions', [
-      session('session-1', 2, { directory: '/repo-a' }),
+      session('session-1', 2, { directory: '/repo-a', workspaceScope: 'workspace' }),
       session('session-2', 1, { directory: '/repo-b' }),
     ]);
     setShowSessionPicker(false);
@@ -220,14 +220,14 @@ describe('SessionListView model details', () => {
     const search = container.querySelector('.session-list-search');
     expect(selector?.nextElementSibling).toBe(search);
     expect(selector?.textContent).toContain('Folder:');
-    expect(selector?.textContent).toContain('All folders');
+    expect(selector?.textContent).toContain('Workspace');
     expect(selector?.querySelector('.workspace-picker-folder-icon')).toBeNull();
     expect(container.querySelectorAll('.session-item-folder-meta-icon')).toHaveLength(2);
     expect(
       Array.from(container.querySelectorAll('.session-item-folder')).map(
         (element) => element.textContent
       )
-    ).toEqual(['cllm', 'Repo B']);
+    ).toEqual(['Workspace', 'Repo B']);
 
     selector?.querySelector<HTMLButtonElement>('.workspace-picker-button')?.click();
     selector?.querySelector<HTMLButtonElement>('[data-workspace-path="/repo-b"]')?.click();
@@ -244,6 +244,12 @@ describe('SessionListView model details', () => {
     ).toEqual(['session-2']);
     expect(container.querySelectorAll('.session-item-folder-meta-icon')).toHaveLength(0);
     expect(container.querySelector('.session-item-meta')?.textContent).not.toContain('Repo B');
+
+    selector?.querySelector<HTMLButtonElement>('.workspace-picker-button')?.click();
+    selector?.querySelector<HTMLButtonElement>('.workspace-popover-all')?.click();
+    setState('editorContext', 'workspacePath', '/repo-b');
+    expect(selector?.textContent).toContain('Workspace');
+    expect(container.querySelectorAll('.session-item-title-text')).toHaveLength(2);
 
     send.mockClear();
     selector?.querySelector<HTMLButtonElement>('.workspace-picker-button')?.click();

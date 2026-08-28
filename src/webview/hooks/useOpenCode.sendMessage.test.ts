@@ -360,7 +360,6 @@ describe('sendMessage', () => {
       messageID: expect.stringMatching(OPEN_CODE_MESSAGE_ID),
       parts: [
         { type: 'text', text: 'Review this' },
-        { type: 'text', text: '[Working directory: /repo]' },
         { type: 'text', text: '[Selection from src/a.ts lines 3-4, 8-10]' },
       ],
       model: { providerID: 'openai', modelID: 'gpt-4o' },
@@ -412,7 +411,6 @@ describe('sendMessage', () => {
       messageID: expect.stringMatching(OPEN_CODE_MESSAGE_ID),
       parts: [
         { type: 'text', text: 'Review active file' },
-        { type: 'text', text: '[Working directory: /repo]' },
         { type: 'text', text: '[Selection from src/a.ts lines 20-24]' },
         { type: 'text', text: '[Selection from src/a.ts lines 3-4, 8-10]' },
       ],
@@ -471,7 +469,6 @@ describe('sendMessage', () => {
       messageID: expect.stringMatching(OPEN_CODE_MESSAGE_ID),
       parts: [
         { type: 'text', text: 'Review overlap' },
-        { type: 'text', text: '[Working directory: /repo]' },
         { type: 'text', text: '[Selection from src/a.ts lines 5-7, 11]' },
         { type: 'text', text: '[Selection from src/a.ts lines 1-4, 8-10, 12-20]' },
       ],
@@ -517,7 +514,6 @@ describe('sendMessage', () => {
       messageID: expect.stringMatching(OPEN_CODE_MESSAGE_ID),
       parts: [
         { type: 'text', text: 'Review active file' },
-        { type: 'text', text: '[Working directory: /repo]' },
         { type: 'text', text: 'src/a.ts' },
       ],
       model: { providerID: 'openai', modelID: 'gpt-4o' },
@@ -570,7 +566,6 @@ describe('sendMessage', () => {
       messageID: expect.stringMatching(OPEN_CODE_MESSAGE_ID),
       parts: [
         { type: 'text', text: 'Review this image' },
-        { type: 'text', text: '[Working directory: /repo]' },
         { type: 'file', mime: 'image/png', filename: 'img-1.png', url: 'blob:1' },
         { type: 'text', text: 'src/extra.ts' },
       ],

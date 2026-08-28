@@ -710,6 +710,15 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       (!state.messagesLoading &&
         getMessageEntriesForSession(state.messages, composerSessionId()).length === 0)
   );
+  const selectedWorkspacePath = createMemo(() => {
+    if (props.newSession) {
+      return manualWorkspaceSelection()
+        ? (pendingWorkspacePath() ?? state.editorContext.workspacePath)
+        : null;
+    }
+    const session = state.sessions.find((item) => item.id === state.activeSessionId);
+    return session?.workspaceScope === 'workspace' ? null : (session?.directory ?? null);
+  });
   let previousDraftNonempty = untrack(
     () =>
       inputText().trim().length > 0 ||
@@ -4336,7 +4345,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           allowRepositoryLink={!composerEditingMessage()}
           showWorkspaceControl={!composerEditingMessage()}
           workspaceFolders={state.editorContext.workspaceFolders ?? []}
-          selectedWorkspacePath={state.editorContext.workspacePath}
+          selectedWorkspacePath={selectedWorkspacePath()}
           canSelectWorkspace={canSelectWorkspace()}
           showWorkspacePicker={showWorkspacePicker()}
           workspaceButtonRef={(el) => {
@@ -4356,6 +4365,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             setPendingWorkspacePath(path);
             setShowWorkspacePicker(false);
             postMessage({ type: 'workspace/select', payload: { path } });
+          }}
+          onSelectWorkspaceScope={() => {
+            if (!canSelectWorkspace()) return;
+            setManualWorkspaceSelection(false);
+            setPendingWorkspacePath(null);
+            setShowWorkspacePicker(false);
           }}
           showMcpControl={!composerEditingMessage() && showMcpControl()}
           showMcpPicker={showMcpPicker()}

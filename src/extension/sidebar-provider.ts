@@ -78,6 +78,7 @@ import { SessionModelSelectionStore } from './session-model-selection-store';
 import { SessionPlanStateStore } from './session-plan-state-store';
 import { SessionTitleFallback } from './session-title-fallback';
 import { SessionTrashManager } from './session-trash-manager';
+import { SessionWorkspaceScopeStore } from './session-workspace-scope-store';
 import { createSidebarProviderActions } from './sidebar-provider-actions';
 import { SidebarProviderBridge } from './sidebar-provider-bridge';
 import { SidebarProviderContextFiles } from './sidebar-provider-context-files';
@@ -149,6 +150,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly sessionPermissionModes: SessionPermissionModeStore;
   private readonly sessionSelectedModels: SessionModelSelectionStore;
   private readonly sessionPlanState: SessionPlanStateStore;
+  private readonly sessionWorkspaceScopes: SessionWorkspaceScopeStore;
   private readonly modelPreferences: ModelPreferencesStore;
   private readonly draftImages: DraftImageStore;
   private readonly hiddenSessions: HiddenSessionManager;
@@ -255,6 +257,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.sessionPermissionModes = new SessionPermissionModeStore(persistence);
     this.sessionSelectedModels = new SessionModelSelectionStore(persistence);
     this.sessionPlanState = new SessionPlanStateStore(persistence);
+    this.sessionWorkspaceScopes = new SessionWorkspaceScopeStore(persistence);
     this.modelPreferences = new ModelPreferencesStore(persistence);
     this.draftImages = new DraftImageStore(persistence);
     this.hiddenSessions = new HiddenSessionManager();
@@ -505,6 +508,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       hiddenSessions: this.hiddenSessions,
       autoApproveJudge: this.autoApproveJudge,
       sessionTitleFallback: this.sessionTitleFallback,
+      sessionWorkspaceScopes: this.sessionWorkspaceScopes,
       simulateNoProviders: this.simulateNoProviders,
       getRequestGeneration: () => webviewSession.getRequestGeneration(),
       getStatus: () => this.serverEventBridge.getStatus(),
@@ -1190,7 +1194,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private reconcileWorkspaceMembership(context: EditorContext) {
-    const workspaceDirectories = (context.workspaceFolders ?? []).map((folder) => folder.path);
+    const workspaceDirectories = [
+      ...(context.workspaceFolders ?? []).map((folder) => folder.path),
+      context.workspaceDirectory,
+    ].filter((path): path is string => Boolean(path));
     for (const endpoint of this.endpoints) {
       endpoint.restProxy.cancelRequestsOutsideDirectories(workspaceDirectories);
     }
@@ -1252,11 +1259,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private isEventInOpenWorkspace(event: ServerEvent) {
     if (event.workspaceDirectory) {
-      return Boolean(this.contextProvider.getOpenWorkspaceRoot(event.workspaceDirectory));
+      return this.isOpenSessionDirectory(event.workspaceDirectory);
     }
     return getWorkspaceSessionIdsForEvent(event).some((sessionID) => {
       const directory = this.sessionState.directoryFor(sessionID);
-      return Boolean(directory && this.contextProvider.getOpenWorkspaceRoot(directory));
+      return Boolean(directory && this.isOpenSessionDirectory(directory));
     });
   }
 
@@ -1351,18 +1358,33 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private isEventInEndpointWorkspace(event: ServerEvent, endpoint: WebviewEndpoint) {
     if (!endpoint.workspacePath) return true;
+    const workspaceDirectory = this.contextProvider.context.workspaceDirectory;
     if (event.workspaceDirectory) {
+      if (workspaceDirectory && isSameWorkspacePath(event.workspaceDirectory, workspaceDirectory)) {
+        return true;
+      }
       return isSameWorkspacePath(event.workspaceDirectory, endpoint.workspacePath);
     }
     const sessionIDs = getWorkspaceSessionIdsForEvent(event);
     if (sessionIDs.length === 0) return WORKSPACE_INDEPENDENT_EVENT_TYPES.has(event.type);
     let knownMatch = false;
     for (const sessionID of sessionIDs) {
+      const directory = this.sessionState.directoryFor(sessionID);
+      if (workspaceDirectory && isSameWorkspacePath(directory, workspaceDirectory)) {
+        knownMatch = true;
+        continue;
+      }
       const match = this.sessionState.getSessionWorkspaceMatch(sessionID, endpoint.workspacePath);
       if (match === false) return false;
       if (match === true) knownMatch = true;
     }
     return knownMatch;
+  }
+
+  private isOpenSessionDirectory(directory: string) {
+    if (this.contextProvider.getOpenWorkspaceRoot(directory)) return true;
+    const workspaceDirectory = this.contextProvider.context.workspaceDirectory;
+    return Boolean(workspaceDirectory && isSameWorkspacePath(directory, workspaceDirectory));
   }
 
   private permissionAutomationFor(viewId: string) {
@@ -1871,6 +1893,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await this.sessionPermissionModes.dispose();
     await this.sessionSelectedModels.dispose();
     await this.sessionPlanState.dispose();
+    await this.sessionWorkspaceScopes.dispose();
     await this.modelPreferences.dispose();
     this.configDisposable.dispose();
     this.windowStateDisposable.dispose();

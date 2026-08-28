@@ -235,6 +235,15 @@ describe('SessionStateManager notifications', () => {
       properties: { sessionID: 'session-1', finish: 'stop' },
     });
 
+    expect(manager.busy.has('session-1')).toBe(true);
+    expect(manager.completed.has('session-1')).toBe(false);
+    expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
+
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    });
+
     expect(manager.busy.has('session-1')).toBe(false);
     expect(manager.completed.has('session-1')).toBe(true);
     expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledWith(
@@ -629,6 +638,10 @@ describe('SessionStateManager notifications', () => {
       type: 'session.next.step.ended',
       properties: { sessionID: 'child-1', finish: 'stop', timestamp: Date.now() },
     });
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'child-1', status: { type: 'idle' } },
+    });
 
     expect(manager.busy.has('child-1')).toBe(false);
     expect(manager.completed.has('child-1')).toBe(false);
@@ -658,6 +671,10 @@ describe('SessionStateManager notifications', () => {
           time: { created: 1, completed: Date.now() },
         },
       },
+    });
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
     });
 
     expect(manager.busy.has('session-1')).toBe(false);
@@ -694,17 +711,14 @@ describe('SessionStateManager notifications', () => {
     }
   });
 
-  it('marks a busy session complete from assistant completion without session.idle', () => {
+  it('marks an optimistically busy session complete without session.idle', () => {
     const manager = createManager();
 
     manager.handleServerEvent({
       type: 'session.updated',
       properties: { info: { id: 'session-1', title: 'Auth cleanup' } },
     });
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'busy' } },
-    });
+    manager.markSessionBusy('session-1');
     manager.handleServerEvent({
       type: 'message.updated',
       properties: {
@@ -739,7 +753,7 @@ describe('SessionStateManager notifications', () => {
           info: { sessionID: 'session-1', role: 'assistant', agent: 'plan' },
         },
       });
-      markBusy(manager, 'session-1');
+      manager.markSessionBusy('session-1');
 
       manager.handleServerEvent(
         completionKind === 'assistant completion'
@@ -784,7 +798,7 @@ describe('SessionStateManager notifications', () => {
 
   it('accepts busy for a newly admitted prompt after suppressing a terminal trailing busy', () => {
     const manager = createManager();
-    markBusy(manager, 'session-1');
+    manager.markSessionBusy('session-1');
     manager.handleServerEvent({
       type: 'message.updated',
       properties: {
@@ -837,6 +851,10 @@ describe('SessionStateManager notifications', () => {
           time: { created: 1, completed: 2 },
         },
       },
+    });
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
     });
 
     expect(manager.busy.has('session-1')).toBe(false);

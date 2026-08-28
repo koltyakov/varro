@@ -16,6 +16,7 @@ import type {
   Todo,
 } from '../types';
 import type {
+  SessionWorkspaceScope,
   AutoApproveJudgeRequest,
   AutoApproveJudgeResponse,
   ChatModelSelection,
@@ -107,6 +108,7 @@ export const client = {
         title?: string;
         permission?: PermissionRule[];
         parentID?: string;
+        workspaceScope?: SessionWorkspaceScope;
       },
       options?: { directory?: string }
     ): Promise<Session> {

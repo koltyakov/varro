@@ -1,3 +1,4 @@
+import { isSessionWorkspaceScope } from './protocol';
 import type { RecycleBinEntry, RecycleBinSession } from './protocol';
 import { asRecord, isNumber, isString } from './type-utils';
 import type { UnknownRecord } from './type-utils';
@@ -83,7 +84,8 @@ export function normalizeRecycleBinSession<T>(value: T): RecycleBinSession | nul
     !isSaneTimestamp(time.updated) ||
     time.updated < time.created ||
     (time.compacting !== undefined && !isSaneTimestamp(time.compacting)) ||
-    (record.parentID !== undefined && !isNonEmptyString(record.parentID))
+    (record.parentID !== undefined && !isNonEmptyString(record.parentID)) ||
+    (record.workspaceScope !== undefined && !isSessionWorkspaceScope(record.workspaceScope))
   ) {
     return null;
   }
@@ -102,6 +104,9 @@ export function normalizeRecycleBinSession<T>(value: T): RecycleBinSession | nul
     },
   };
   if (isString(record.parentID)) session.parentID = record.parentID;
+  if (isSessionWorkspaceScope(record.workspaceScope)) {
+    session.workspaceScope = record.workspaceScope;
+  }
   if (isRecycleBinSummary(summary)) {
     session.summary = {
       additions: summary.additions,
@@ -118,6 +123,7 @@ function areRecycleBinSessionsEqual(left: RecycleBinSession, right: RecycleBinSe
     left.id === right.id &&
     left.projectID === right.projectID &&
     left.directory === right.directory &&
+    left.workspaceScope === right.workspaceScope &&
     left.parentID === right.parentID &&
     left.title === right.title &&
     left.version === right.version &&

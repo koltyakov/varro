@@ -231,23 +231,6 @@ export function buildSessionSendBody(
   if (promptText.trim()) parts.push({ type: 'text', text: promptText });
 
   const workspacePath = composerState.editorContext.workspacePath;
-  if (workspacePath) {
-    const workspaceFolders = composerState.editorContext.workspaceFolders ?? [];
-    const workspaceMetadata =
-      workspaceFolders.length > 1
-        ? `; Workspace folders: ${JSON.stringify(
-            workspaceFolders.map((folder) => ({
-              name: folder.name,
-              path: folder.path,
-              primary: isSameWorkspacePath(folder.path, workspacePath),
-            }))
-          )}; sibling workspace access is governed by external_directory permissions`
-        : '';
-    parts.push({
-      type: 'text',
-      text: `[Working directory: ${workspacePath}${workspaceMetadata}]`,
-    });
-  }
 
   const selection = composerState.editorContext.selection;
   const activeFile = composerState.editorContext.activeFile;

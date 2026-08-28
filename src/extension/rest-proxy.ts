@@ -11,7 +11,11 @@ import {
 } from '../shared/context-breakdown';
 import type { Message, Part } from '../shared/opencode-types';
 import { parseSessionPromptEndpoint } from '../shared/opencode-endpoints';
-import { isSafePersistedSessionId, VARRO_API_ENDPOINTS } from '../shared/protocol';
+import {
+  isSafePersistedSessionId,
+  isSessionWorkspaceScope,
+  VARRO_API_ENDPOINTS,
+} from '../shared/protocol';
 import type {
   AutoApproveJudgeReference,
   AutoApproveJudgeRequest,
@@ -21,6 +25,7 @@ import type {
   SessionDiffSummary,
   SessionTokenBreakdown,
   SessionTokenUsage,
+  SessionWorkspaceScope,
   WebviewMessage,
   WorkspaceFilePick,
 } from '../shared/protocol';
@@ -45,6 +50,7 @@ import type {
   SessionStateManager,
 } from './session-state-manager';
 import type { SessionTitleFallback } from './session-title-fallback';
+import type { SessionWorkspaceScopeStore } from './session-workspace-scope-store';
 import type { SessionDeleteTarget, SessionTrashManager } from './session-trash-manager';
 import { asRecord, parseModelRoute } from './sidebar-provider-utils';
 import {
@@ -142,6 +148,7 @@ export interface RestProxyCallbacks {
   >;
   autoApproveJudge: Pick<AutoApproveJudge, 'judge' | 'resolveModel'>;
   sessionTitleFallback: Pick<SessionTitleFallback, 'renameIfUntitled'>;
+  sessionWorkspaceScopes: Pick<SessionWorkspaceScopeStore, 'get' | 'set'>;
   simulateNoProviders: boolean;
   getRequestGeneration(): number;
   getStatus(): ServerStatus;
@@ -298,6 +305,11 @@ export class RestProxy {
         throw new Error('Unsupported API request');
       }
       const promptSessionID = this.parsePromptSessionID(method, payload.path);
+      const sessionCreationScope = this.parseSessionCreationScope(
+        method,
+        payload.path,
+        payload.body
+      );
       const queuedHistorySessionID = this.parseQueuedHistorySessionID(method, payload);
       queuedDispatchSessionID = promptSessionID ?? queuedHistorySessionID;
       queuedDispatch = queuedDispatchSessionID ? payload.queuedMessageDispatch : undefined;
@@ -386,6 +398,9 @@ export class RestProxy {
       let forwardedPath = explicitWorkspaceDirectory
         ? setExplicitWorkspaceDirectory(payload.path, explicitWorkspaceDirectory)
         : payload.path;
+      let forwardedBody = sessionCreationScope
+        ? this.withoutSessionCreationScope(payload.body)
+        : payload.body;
 
       if (directSessionID && !activationRequest) {
         const currentWorkspaceDirectory = this.getCurrentWorkspaceResolutionRoot();
@@ -651,6 +666,13 @@ export class RestProxy {
           throw new Error('Queued message dispatch lease is no longer current');
         }
       }
+      if (promptSessionID && promptWorkspaceDirectory) {
+        forwardedBody = this.withWorkspaceScopeSystemPrompt(
+          forwardedBody,
+          this.callbacks.sessionWorkspaceScopes.get(promptSessionID),
+          promptWorkspaceDirectory
+        );
+      }
       const promptAttempt = promptSessionID
         ? this.callbacks.sessionState.markSessionBusy(promptSessionID)
         : undefined;
@@ -722,18 +744,18 @@ export class RestProxy {
             : undefined;
           responsePromise = requestSignal
             ? queuedWorkspaceDirectory
-              ? this.requestServer(method, forwardedPath, payload.body, {
+              ? this.requestServer(method, forwardedPath, forwardedBody, {
                   signal: requestSignal,
                   directory: queuedWorkspaceDirectory,
                 })
-              : this.requestServer(method, forwardedPath, payload.body, {
+              : this.requestServer(method, forwardedPath, forwardedBody, {
                   signal: requestSignal,
                 })
             : queuedWorkspaceDirectory
-              ? this.requestServer(method, forwardedPath, payload.body, {
+              ? this.requestServer(method, forwardedPath, forwardedBody, {
                   directory: queuedWorkspaceDirectory,
                 })
-              : this.requestServer(method, forwardedPath, payload.body);
+              : this.requestServer(method, forwardedPath, forwardedBody);
         }
         if (this.isSessionListRequest(method, payload.path) && sessionPageLimit === null) {
           this.trackSessionDirectoryBootstrap(responsePromise, false);
@@ -780,6 +802,23 @@ export class RestProxy {
           );
         }
         queuedDispatchActive = false;
+      }
+      if (sessionCreationScope) {
+        const session = asRecord(response);
+        if (!isSafePersistedSessionId(session?.id)) {
+          throw new Error('Malformed session creation response');
+        }
+        await this.callbacks.sessionWorkspaceScopes.set(session.id, sessionCreationScope);
+        response = this.withSessionWorkspaceScope(session, sessionCreationScope);
+      }
+      const forkParentSessionID = this.parseForkParentSessionID(method, payload.path);
+      if (forkParentSessionID) {
+        const session = asRecord(response);
+        if (isSafePersistedSessionId(session?.id)) {
+          const inheritedScope = this.callbacks.sessionWorkspaceScopes.get(forkParentSessionID);
+          await this.callbacks.sessionWorkspaceScopes.set(session.id, inheritedScope);
+          response = this.withSessionWorkspaceScope(session, inheritedScope);
+        }
       }
       let data: unknown;
       try {
@@ -1090,7 +1129,12 @@ export class RestProxy {
             hasMore,
             sessions: response
               .slice(0, perRootLimit)
-              .map((session) => this.validateWorkspaceSession(session, root)),
+              .map((session) => this.validateWorkspaceSession(session, root))
+              .filter(
+                (session) =>
+                  !this.isDedicatedWorkspaceDirectory(root) ||
+                  this.callbacks.sessionWorkspaceScopes.get(session.id) === 'workspace'
+              ),
           };
         })
       );
@@ -1142,9 +1186,13 @@ export class RestProxy {
           throw new Error('Malformed session status response');
         }
         if (!Array.isArray(sessionValue)) throw new Error('Malformed session list response');
-        const sessions = sessionValue.map((session) =>
-          this.validateWorkspaceSession(session, root)
-        );
+        const sessions = sessionValue
+          .map((session) => this.validateWorkspaceSession(session, root))
+          .filter(
+            (session) =>
+              !this.isDedicatedWorkspaceDirectory(root) ||
+              this.callbacks.sessionWorkspaceScopes.get(session.id) === 'workspace'
+          );
         const visibleIDs = new Set(
           this.filterWorkspaceVisibleSessions(sessions).map((session) => session.id)
         );
@@ -1181,12 +1229,25 @@ export class RestProxy {
       const identity = normalizeWorkspaceIdentity(root);
       if (root && identity) roots.set(identity, root);
     }
+    const workspaceDirectory = this.callbacks.contextProvider.context.workspaceDirectory;
+    const workspaceIdentity = normalizeWorkspaceIdentity(workspaceDirectory);
+    if (workspaceDirectory && workspaceIdentity) {
+      roots.set(workspaceIdentity, workspaceDirectory);
+    }
     if (roots.size === 0) {
       const current = this.getCurrentWorkspaceResolutionRoot();
       const identity = normalizeWorkspaceIdentity(current);
       if (current && identity) roots.set(identity, current);
     }
     return [...roots.values()];
+  }
+
+  private isDedicatedWorkspaceDirectory(directory: string) {
+    const workspaceDirectory = this.callbacks.contextProvider.context.workspaceDirectory;
+    return (
+      Boolean(workspaceDirectory && isSameWorkspacePath(directory, workspaceDirectory)) &&
+      !this.callbacks.contextProvider.getOpenWorkspaceRoot(directory)
+    );
   }
 
   private validateWorkspaceSession(
@@ -1206,10 +1267,14 @@ export class RestProxy {
     ) {
       throw new Error(`OpenCode returned a session outside workspace root ${root}`);
     }
-    const projected = projectSummaryDiffs(session) as Record<string, unknown> & {
-      id: string;
-      directory: string;
-    };
+    const projected = this.withSessionWorkspaceScope(
+      {
+        ...(projectSummaryDiffs(session) as Record<string, unknown>),
+        id: session.id,
+        directory: session.directory,
+      },
+      this.callbacks.sessionWorkspaceScopes.get(session.id)
+    );
     const endpointWorkspaceDirectory =
       this.callbacks.getWorkspacePath?.() ??
       this.callbacks.contextProvider.context.workspacePath ??
@@ -1578,6 +1643,17 @@ export class RestProxy {
       );
       return requests;
     }
+    const session = asRecord(data);
+    if (
+      isSafePersistedSessionId(session?.id) &&
+      typeof session.directory === 'string' &&
+      /^\/session\/[^/]+(?:\/(?:fork|share))?$/.test(url.pathname)
+    ) {
+      return this.withSessionWorkspaceScope(
+        session,
+        this.callbacks.sessionWorkspaceScopes.get(session.id)
+      );
+    }
     return data;
   }
 
@@ -1815,10 +1891,67 @@ export class RestProxy {
   private requireOpenWorkspaceRoot(workspaceDirectory: string): string {
     const matchedWorkspacePath =
       this.callbacks.contextProvider.getOpenWorkspaceRoot(workspaceDirectory);
-    if (!matchedWorkspacePath) {
-      throw new Error('Workspace directory is not an open workspace folder');
-    }
-    return matchedWorkspacePath;
+    if (matchedWorkspacePath) return matchedWorkspacePath;
+    const workspaceRoot = this.callbacks.contextProvider.context.workspaceDirectory;
+    if (workspaceRoot && isSameWorkspacePath(workspaceDirectory, workspaceRoot))
+      return workspaceRoot;
+    throw new Error('Workspace directory is not an open workspace folder');
+  }
+
+  private withSessionWorkspaceScope<T extends Record<string, unknown>>(
+    session: T,
+    scope: SessionWorkspaceScope
+  ): T {
+    return scope === 'workspace' ? ({ ...session, workspaceScope: scope } as T) : session;
+  }
+
+  private parseSessionCreationScope(
+    method: string,
+    path: string,
+    body: unknown
+  ): SessionWorkspaceScope | null {
+    if (method !== 'POST' || new URL(path, 'http://localhost').pathname !== '/session') return null;
+    const scope = asRecord(body)?.workspaceScope;
+    if (scope === undefined) return 'folder';
+    if (!isSessionWorkspaceScope(scope)) throw new Error('Invalid session workspace scope');
+    return scope;
+  }
+
+  private parseForkParentSessionID(method: string, path: string): string | null {
+    if (method !== 'POST') return null;
+    const match = new URL(path, 'http://localhost').pathname.match(/^\/session\/([^/]+)\/fork$/);
+    return match?.[1] ? decodeURIComponent(match[1]) : null;
+  }
+
+  private withoutSessionCreationScope(body: unknown): unknown {
+    const record = asRecord(body);
+    if (!record) return body;
+    const { workspaceScope: _workspaceScope, ...rest } = record;
+    return rest;
+  }
+
+  private withWorkspaceScopeSystemPrompt(
+    body: unknown,
+    scope: SessionWorkspaceScope,
+    workingDirectory: string
+  ): unknown {
+    const record = asRecord(body);
+    if (!record) return body;
+    const scopePrompt =
+      scope === 'workspace'
+        ? [
+            'You are working in a VS Code multi-root workspace.',
+            `Treat these folders as one logical workspace: ${JSON.stringify(
+              this.callbacks.contextProvider.context.workspaceFolders ?? []
+            )}.`,
+            `The OpenCode working directory is ${JSON.stringify(workingDirectory)}. It is the base for commands and relative paths, not the boundary of the logical workspace.`,
+          ].join(' ')
+        : `You are working in the VS Code workspace folder ${JSON.stringify(workingDirectory)}. This folder is the scope for this session and the OpenCode working directory. Other folders open in the same VS Code window are outside this session's scope.`;
+    const existing = typeof record.system === 'string' ? record.system.trim() : '';
+    return {
+      ...record,
+      system: existing ? `${existing}\n\nVS Code workspace context:\n${scopePrompt}` : scopePrompt,
+    };
   }
 
   private isHiddenSession(sessionID: string | null | undefined) {
@@ -1950,9 +2083,12 @@ export class RestProxy {
   }
 
   private async moveSessionToRecycleBin(sessionID: string) {
-    const sessions = (await this.requestServer('GET', FULL_SESSION_LIST_PATH)) as Array<
-      Record<string, unknown>
-    >;
+    const sessions = (
+      (await this.requestServer('GET', FULL_SESSION_LIST_PATH)) as Array<Record<string, unknown>>
+    ).map((session) => {
+      const id = typeof session.id === 'string' ? session.id : '';
+      return this.withSessionWorkspaceScope(session, this.callbacks.sessionWorkspaceScopes.get(id));
+    });
     const entry = await this.callbacks.sessionTrash.moveToTrash(sessionID, sessions);
     if (!entry) {
       throw new Error('404 Session not found');
@@ -1980,6 +2116,7 @@ export class RestProxy {
     try {
       const result = await this.requestServer('DELETE', path);
       await this.callbacks.removeSessionImages([session.id]);
+      await this.callbacks.sessionWorkspaceScopes.set(session.id, null);
       return result;
     } catch (err) {
       // Sessions can predate the server's current ID format (legacy ULIDs get
@@ -1987,6 +2124,7 @@ export class RestProxy {
       // Only propagate the failure when the session still exists server-side.
       if (await this.sessionExistsOnServer(session.id, session.directory)) throw err;
       await this.callbacks.removeSessionImages([session.id]);
+      await this.callbacks.sessionWorkspaceScopes.set(session.id, null);
       return true;
     }
   }

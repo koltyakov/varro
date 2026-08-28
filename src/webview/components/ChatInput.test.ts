@@ -5001,7 +5001,7 @@ describe('ChatInput', () => {
     );
     expect(mainRow?.querySelector('.workspace-picker-button')).toBeNull();
     expect(metaLeftButtons?.[0]?.getAttribute('aria-label')).toContain(
-      'Selected workspace: Repo A'
+      'Selected workspace filter: Workspace'
     );
     expect(metaLeftButtons?.[0]?.classList.contains('workspace-picker-button')).toBe(true);
     expect(metaLeftButtons?.[1]?.classList.contains('permission-mode-button')).toBe(true);
