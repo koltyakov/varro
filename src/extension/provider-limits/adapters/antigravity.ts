@@ -34,6 +34,11 @@ const ANTIGRAVITY_BASE_URL_ENV = 'ANTIGRAVITY_BASE_URL';
 const ANTIGRAVITY_CSRF_TOKEN_ENV = 'ANTIGRAVITY_CSRF_TOKEN';
 const ANTIGRAVITY_PROCESS_TIMEOUT_MS = 10_000;
 const ANTIGRAVITY_PROCESS_MAX_BUFFER_BYTES = 4 * 1_024 * 1_024;
+const WINDOWS_PROCESS_DISCOVERY_SCRIPT = [
+  "$ErrorActionPreference = 'Stop'",
+  "$processes = @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine -match 'antigravity' } | Select-Object ProcessId, CommandLine)",
+  'ConvertTo-Json -InputObject $processes -Compress',
+].join('; ');
 
 type AntigravityConnection = {
   baseURL: string;
@@ -56,12 +61,24 @@ type AntigravityProcessInfo = {
   extensionServerPort: number | null;
 };
 
+type AntigravityCommandRunner = (
+  command: string,
+  args: string[]
+) => Promise<{ stdout: string; stderr: string }>;
+
+type AntigravityAdapterOptions = {
+  platform?: NodeJS.Platform;
+  runCommand?: AntigravityCommandRunner;
+};
+
 type AntigravityFetchResult =
   | { kind: 'available'; windows: ProviderLimitWindow[] }
   | { kind: 'unsupported'; note: string }
   | { kind: 'error'; note: string };
 
-export function createAntigravityAdapter(): ProviderLimitAdapter {
+export function createAntigravityAdapter(
+  options: AntigravityAdapterOptions = {}
+): ProviderLimitAdapter {
   return {
     id: 'antigravity',
     capabilities: { localIpc: true },
@@ -69,7 +86,10 @@ export function createAntigravityAdapter(): ProviderLimitAdapter {
       return provider.id === 'antigravity';
     },
     async fetch({ provider, modelID, checkedAt }: ProviderLimitAdapterContext) {
-      const connection = await resolveAntigravityConnection();
+      const connection = await resolveAntigravityConnection(
+        options.platform ?? process.platform,
+        options.runCommand ?? execFileAsync
+      );
       if (!connection) {
         return unsupportedProviderStatus(
           provider.id,
@@ -149,20 +169,26 @@ export function createAntigravityAdapter(): ProviderLimitAdapter {
   };
 }
 
-async function resolveAntigravityConnection(): Promise<AntigravityConnection | null> {
+async function resolveAntigravityConnection(
+  platform: NodeJS.Platform,
+  runCommand: AntigravityCommandRunner
+): Promise<AntigravityConnection | null> {
   const envConnection = readAntigravityConnectionFromEnv();
   if (envConnection) return envConnection;
 
-  if (process.platform !== 'darwin' && process.platform !== 'linux') {
+  if (platform !== 'darwin' && platform !== 'linux' && platform !== 'win32') {
     return null;
   }
 
-  const processInfo = await detectAntigravityProcess();
+  const processInfo = await detectAntigravityProcess(platform, runCommand);
   if (!processInfo) return null;
 
   const ports = processInfo.extensionServerPort
-    ? [processInfo.extensionServerPort, ...(await discoverListeningPorts(processInfo.pid))]
-    : await discoverListeningPorts(processInfo.pid);
+    ? [
+        processInfo.extensionServerPort,
+        ...(await discoverListeningPorts(processInfo.pid, platform, runCommand)),
+      ]
+    : await discoverListeningPorts(processInfo.pid, platform, runCommand);
 
   for (const port of dedupeFiniteNumbers(ports)) {
     const connection = await probeAntigravityPort(port, processInfo.csrfToken);
@@ -191,23 +217,40 @@ function readAntigravityConnectionFromEnv(): AntigravityConnection | null {
   }
 }
 
-async function detectAntigravityProcess() {
+async function detectAntigravityProcess(
+  platform: NodeJS.Platform,
+  runCommand: AntigravityCommandRunner
+) {
   try {
-    const { stdout } = await execFileAsync('ps', ['ax', '-o', 'pid=,command=']);
-    return selectBestAntigravityProcess(stdout);
+    if (platform === 'win32') {
+      const { stdout } = await runCommand('powershell.exe', [
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        WINDOWS_PROCESS_DISCOVERY_SCRIPT,
+      ]);
+      return selectBestAntigravityProcess(parseWindowsAntigravityProcesses(stdout));
+    }
+
+    const { stdout } = await runCommand('ps', ['ax', '-o', 'pid=,command=']);
+    return selectBestAntigravityProcess(
+      stdout
+        .split(/\r?\n/g)
+        .map(parseAntigravityProcessLine)
+        .filter((candidate): candidate is AntigravityProcessInfo => candidate != null)
+    );
   } catch {
     return null;
   }
 }
 
-function selectBestAntigravityProcess(output: string) {
-  const candidates = output
-    .split(/\r?\n/g)
-    .map(parseAntigravityProcessLine)
-    .filter((candidate): candidate is AntigravityProcessInfo => candidate != null)
-    .toSorted((left, right) => scoreAntigravityProcess(right) - scoreAntigravityProcess(left));
+function selectBestAntigravityProcess(candidates: AntigravityProcessInfo[]) {
+  const sorted = candidates.toSorted(
+    (left, right) => scoreAntigravityProcess(right) - scoreAntigravityProcess(left)
+  );
 
-  return candidates[0] ?? null;
+  return sorted[0] ?? null;
 }
 
 function parseAntigravityProcessLine(line: string): AntigravityProcessInfo | null {
@@ -217,8 +260,25 @@ function parseAntigravityProcessLine(line: string): AntigravityProcessInfo | nul
   const match = trimmed.match(/^(\d+)\s+(.*)$/);
   if (!match) return null;
 
-  const pid = Number(match[1]);
-  const commandLine = match[2]!.trim();
+  return parseAntigravityProcess(Number(match[1]), match[2]!.trim());
+}
+
+function parseWindowsAntigravityProcesses(output: string) {
+  const payload = parseJsonBody(output);
+  const entries = Array.isArray(payload) ? payload : payload == null ? [] : [payload];
+  return entries
+    .map((entry) => {
+      const record = asRecord(entry);
+      if (!record) return null;
+      return parseAntigravityProcess(
+        parseFiniteNumber(record.ProcessId) ?? NaN,
+        getString(record.CommandLine)
+      );
+    })
+    .filter((candidate): candidate is AntigravityProcessInfo => candidate != null);
+}
+
+function parseAntigravityProcess(pid: number, commandLine: string): AntigravityProcessInfo | null {
   if (!Number.isInteger(pid) || !commandLine) return null;
 
   const normalized = commandLine.toLowerCase();
@@ -263,9 +323,38 @@ function scoreAntigravityProcess(processInfo: AntigravityProcessInfo) {
   return score;
 }
 
-async function discoverListeningPorts(pid: number) {
+async function discoverListeningPorts(
+  pid: number,
+  platform: NodeJS.Platform,
+  runCommand: AntigravityCommandRunner
+) {
+  if (platform === 'win32') {
+    try {
+      const script = [
+        "$ErrorActionPreference = 'Stop'",
+        `Get-NetTCPConnection -OwningProcess ${String(pid)} -State Listen | Select-Object -ExpandProperty LocalPort -Unique`,
+      ].join('; ');
+      const { stdout } = await runCommand('powershell.exe', [
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        script,
+      ]);
+      const ports = parseWindowsAntigravityPorts(stdout);
+      if (ports.length > 0) return ports;
+    } catch {}
+
+    try {
+      const { stdout } = await runCommand('netstat.exe', ['-ano']);
+      return parseWindowsNetstatPorts(stdout, pid);
+    } catch {
+      return [];
+    }
+  }
+
   try {
-    const { stdout } = await execFileAsync('lsof', [
+    const { stdout } = await runCommand('lsof', [
       '-nP',
       '-iTCP',
       '-sTCP:LISTEN',
@@ -277,6 +366,28 @@ async function discoverListeningPorts(pid: number) {
   } catch {
     return [];
   }
+}
+
+function parseWindowsAntigravityPorts(output: string) {
+  return output
+    .split(/\r?\n/g)
+    .map((line) => parsePortNumber(line.trim()))
+    .filter((port) => port > 0);
+}
+
+function parseWindowsNetstatPorts(output: string, pid: number) {
+  const ports: number[] = [];
+  for (const line of output.split(/\r?\n/g)) {
+    const fields = line.trim().split(/\s+/);
+    if (fields.length < 5 || fields[0]?.toUpperCase() !== 'TCP') continue;
+    const remoteAddress = fields[2];
+    if (remoteAddress?.slice(remoteAddress.lastIndexOf(':') + 1) !== '0') continue;
+    if (Number(fields[4]) !== pid) continue;
+    const localAddress = fields[1]!;
+    const port = Number(localAddress.slice(localAddress.lastIndexOf(':') + 1));
+    if (Number.isInteger(port) && port > 0) ports.push(port);
+  }
+  return ports;
 }
 
 function parseAntigravityPorts(output: string) {

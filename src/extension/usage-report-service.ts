@@ -1,10 +1,10 @@
 /* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns -- Usage endpoint payloads are decoded before aggregation. */
 /* oxlint-disable anti-slop/no-known-value-widening -- Query and aggregate values intentionally use their named service contracts. */
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import * as vscode from 'vscode';
 
+import { resolveOpenCodeDataDirectory } from '../shared/opencode-data-directory';
 import { asRecord } from '../shared/type-utils';
 import type { OpenCodeServer } from './server';
 
@@ -234,12 +234,7 @@ async function openAnonymousReportDocument(content: string): Promise<vscode.Uri>
 }
 
 async function readLocalUsageDatabase(start?: number): Promise<LocalUsageSnapshot | null> {
-  const dataHome =
-    process.env.XDG_DATA_HOME?.trim() ||
-    (process.platform === 'win32' && process.env.LOCALAPPDATA
-      ? process.env.LOCALAPPDATA
-      : join(homedir(), '.local', 'share'));
-  const databasePath = join(dataHome, 'opencode', 'opencode.db');
+  const databasePath = join(resolveOpenCodeDataDirectory(), 'opencode.db');
 
   return new Promise((resolve) => {
     const worker = new Worker(LOCAL_USAGE_WORKER, {

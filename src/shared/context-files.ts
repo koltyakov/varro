@@ -1,10 +1,8 @@
 import type { ContextLineRange, DroppedFile, EditorContext } from './protocol';
+import { isSameWorkspacePath } from './workspace-path';
 
-function normalizePath(value: string) {
-  if (!value) return value;
-  const normalized = value.replace(/\\/g, '/');
-  const trimmed = normalized.replace(/\/+$/, '');
-  return trimmed || normalized;
+function isSameContextPath(left: string, right: string): boolean {
+  return isSameWorkspacePath(left.replace(/\\/g, '/'), right.replace(/\\/g, '/'));
 }
 
 function formatLineRangeValue(range: ContextLineRange) {
@@ -45,7 +43,13 @@ function normalizeContextFile(file: DroppedFile): DroppedFile {
 }
 
 export function areContextFilesEqual(a: DroppedFile, b: DroppedFile) {
-  if (a.path !== b.path || a.relativePath !== b.relativePath || a.type !== b.type) return false;
+  if (
+    !isSameContextPath(a.path, b.path) ||
+    a.relativePath !== b.relativePath ||
+    a.type !== b.type
+  ) {
+    return false;
+  }
 
   const aRanges = normalizeContextLineRanges(a.lineRanges);
   const bRanges = normalizeContextLineRanges(b.lineRanges);
@@ -64,7 +68,7 @@ export function mergeContextFile(
   if (!current) return next;
 
   const prev = normalizeContextFile(current);
-  if (normalizePath(prev.path) !== normalizePath(next.path)) return next;
+  if (!isSameContextPath(prev.path, next.path)) return next;
   if (prev.type === 'directory' || next.type === 'directory') {
     return { ...prev, ...next, lineRanges: undefined };
   }
@@ -179,8 +183,7 @@ export function hasExplicitContextForPath(
   path: string | null | undefined
 ): DroppedFile | null {
   if (!path) return null;
-  const normalizedPath = normalizePath(path);
-  return files.find((file) => normalizePath(file.path) === normalizedPath) || null;
+  return files.find((file) => isSameContextPath(file.path, path)) || null;
 }
 
 export function getSelectionRangesFromEditorContext(

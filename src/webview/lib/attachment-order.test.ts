@@ -25,6 +25,15 @@ describe('attachment order state', () => {
     expect(ensureContextFileAttachmentSequence('/repo/src/b.ts')).toBe(2);
   });
 
+  it('reuses and removes sequences through equivalent Windows paths', () => {
+    expect(ensureContextFileAttachmentSequence('C:\\Repo\\File.ts')).toBe(1);
+    expect(ensureContextFileAttachmentSequence('c:/repo/file.ts', 99)).toBe(1);
+    expect(getContextFileAttachmentSequence('C:/REPO/FILE.ts')).toBe(1);
+
+    removeContextFileAttachmentSequence('c:\\repo\\file.ts');
+    expect(getContextFileAttachmentSequence('C:/Repo/File.ts')).toBeUndefined();
+  });
+
   it('advances generated sequences past seeded explicit values', () => {
     seedContextFileAttachmentSequences([
       {

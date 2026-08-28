@@ -11,7 +11,7 @@ describe('development compatibility', () => {
     expect(CSS.escape('-')).toBe('\\-');
   });
 
-  it('aligns CI and documentation with the exact Node floors', async () => {
+  it('keeps CI pinned and documents the supported Node floors', async () => {
     const [workflow, readme, developmentGuide] = await Promise.all([
       readFile(resolve('.github/workflows/ci.yml'), 'utf8'),
       readFile(resolve('README.md'), 'utf8'),
@@ -20,7 +20,7 @@ describe('development compatibility', () => {
     const advertisedFloors = '22.22.2+ on Node 22, or Node 24.15.0+';
 
     expect(packageJson.engines.node).toBe('^22.22.2 || >=24.15.0');
-    expect(workflow).toContain('node-version: [22.22.2, 24.15.0]');
+    expect(workflow).toContain('node-version: [24.18.1]');
     expect(workflow).not.toMatch(/^\s*node-version:\s+(?:22|24)\s*$/m);
     expect(readme).toContain(advertisedFloors);
     expect(developmentGuide).toContain(advertisedFloors);

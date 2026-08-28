@@ -213,6 +213,11 @@ export class OpenCodeServer extends EventEmitter {
   private retryCount = 0;
   private restartReadyToStart = false;
   private pendingTerminalCliUpgrades = 0;
+  private restoreServerAfterTerminalCliUpgrade = false;
+  private terminalCliUpgradeWorkspaceIdentity: string | null = null;
+  private terminalCliUpgradeTargetVersion: string | null = null;
+  private terminalCliUpgradePreparationOperation: Promise<void> | null = null;
+  private terminalCliUpgradeFinishOperation: Promise<void> | null = null;
   private lastCeilingNoticeVersion = '';
   private lastRestartBlockers: RestartBlockedState | null = null;
   private adoptedServerRecoveryOperation: Promise<void> | null = null;
@@ -1065,9 +1070,16 @@ export class OpenCodeServer extends EventEmitter {
     body?: unknown,
     options?: OpenCodeRequestOptions
   ): Promise<unknown> {
+    if (this.isTerminalCliUpgradeActive()) {
+      throw new Error('OpenCode server is not accepting requests while the CLI is being updated');
+    }
     const restartPromise = this.lifecycle.getRestartPromise<string>();
     if (restartPromise) await restartPromise;
-    if (this.lifecycle.phase === 'disposing' || this.lifecycle.phase === 'restarting') {
+    if (
+      this.isTerminalCliUpgradeActive() ||
+      this.lifecycle.phase === 'disposing' ||
+      this.lifecycle.phase === 'restarting'
+    ) {
       throw new Error('OpenCode server is not accepting requests while stopping');
     }
     return this.transport.request(method, path, body, options);
@@ -1634,7 +1646,8 @@ export class OpenCodeServer extends EventEmitter {
       upgradeRunningServer: (targetVersion) => this.upgradeRunningServer(targetVersion),
       requestMaintenanceCheck: () => this.requestMaintenanceCheck(true),
       getWorkspaceCwd: () => this.getWorkspaceCwd(),
-      prepareForWindowsCliUpgrade: () => this.prepareForWindowsCliUpgrade(),
+      prepareForWindowsCliUpgrade: (targetVersion) =>
+        this.prepareForWindowsCliUpgrade(targetVersion),
       finishWindowsCliUpgrade: () => this.finishWindowsCliUpgrade(),
     });
   }
@@ -1664,27 +1677,129 @@ export class OpenCodeServer extends EventEmitter {
    * command in a terminal, which needs the same prerequisite as Varro's own
    * upgrade path. No-op off Windows and when Varro owns no process.
    */
-  async prepareForWindowsCliUpgrade() {
+  async prepareForWindowsCliUpgrade(targetVersion?: string) {
     if (process.platform !== 'win32') return;
-    if (!this.managedProcess && !this.processManager.hasForeignActiveOwnership) {
+    if (this.terminalCliUpgradePreparationOperation) {
+      await this.terminalCliUpgradePreparationOperation;
+    }
+    if (this.terminalCliUpgradeFinishOperation) {
+      await this.terminalCliUpgradeFinishOperation;
+    }
+    if (this.pendingTerminalCliUpgrades > 0) {
+      throw new Error('An OpenCode update terminal is already open; close it before retrying');
+    }
+
+    const operation = this.prepareWindowsCliUpgrade(targetVersion);
+    this.terminalCliUpgradePreparationOperation = operation;
+    try {
+      await operation;
+    } finally {
+      if (this.terminalCliUpgradePreparationOperation === operation) {
+        this.terminalCliUpgradePreparationOperation = null;
+      }
+    }
+  }
+
+  private async prepareWindowsCliUpgrade(targetVersion?: string) {
+    if (this.processManager.hasForeignActiveOwnership) {
+      throw new Error(
+        'The running OpenCode server is owned by another Varro window; close that window or stop its server before updating OpenCode'
+      );
+    }
+
+    const shouldRestore = this.managedProcess;
+    const workspaceIdentity = normalizeWorkspaceIdentity(this.getWorkspaceCwd());
+    await this.transport.waitForRequestsToSettle();
+    if (!this.managedProcess) {
       const health = await this.readHealthInfo();
       if (this._status.state === 'running' || health.healthy) {
         throw new Error(
           'A running OpenCode server is not owned by this Varro window; stop it before updating OpenCode'
         );
       }
-      this.pendingTerminalCliUpgrades += 1;
+    } else {
+      await this.ensureSafeToStopLiveServer();
+      await this.stopManagedProcessForRestart();
+      this.setStatus({ state: 'stopped' });
+    }
+
+    this.restoreServerAfterTerminalCliUpgrade = shouldRestore;
+    this.terminalCliUpgradeWorkspaceIdentity = workspaceIdentity;
+    this.terminalCliUpgradeTargetVersion = targetVersion ?? null;
+    this.pendingTerminalCliUpgrades = 1;
+  }
+
+  private isTerminalCliUpgradeActive(): boolean {
+    return (
+      this.terminalCliUpgradePreparationOperation !== null ||
+      this.pendingTerminalCliUpgrades > 0 ||
+      this.terminalCliUpgradeFinishOperation !== null
+    );
+  }
+
+  async finishWindowsCliUpgrade() {
+    if (process.platform !== 'win32') return;
+    if (this.pendingTerminalCliUpgrades === 0) {
+      if (this.terminalCliUpgradeFinishOperation) {
+        await this.terminalCliUpgradeFinishOperation;
+      }
       return;
     }
 
-    await this.ensureSafeToStopLiveServer();
-    await this.stopManagedProcessForRestart();
-    this.pendingTerminalCliUpgrades += 1;
-    this.setStatus({ state: 'stopped' });
-  }
+    this.pendingTerminalCliUpgrades -= 1;
+    if (this.pendingTerminalCliUpgrades > 0) return;
 
-  finishWindowsCliUpgrade() {
-    this.pendingTerminalCliUpgrades = Math.max(0, this.pendingTerminalCliUpgrades - 1);
+    const shouldRestore = this.restoreServerAfterTerminalCliUpgrade;
+    const workspaceIdentity = this.terminalCliUpgradeWorkspaceIdentity;
+    const targetVersion = this.terminalCliUpgradeTargetVersion;
+    this.restoreServerAfterTerminalCliUpgrade = false;
+    this.terminalCliUpgradeWorkspaceIdentity = null;
+    this.terminalCliUpgradeTargetVersion = null;
+
+    const operation = (async () => {
+      this.processManager.clearResolvedCommandCache();
+      try {
+        const installedVersion = await this.readInstalledCliVersion();
+        if (!installedVersion) {
+          logger.warn(
+            'Windows OpenCode terminal update closed, but the installed CLI is unreadable'
+          );
+        } else if (targetVersion && compareVersions(installedVersion, targetVersion) < 0) {
+          logger.warn(
+            `Windows OpenCode terminal update closed, but CLI ${installedVersion} is older than requested ${targetVersion}`
+          );
+        } else {
+          logger.info(`Verified installed OpenCode CLI ${installedVersion} after terminal update`);
+        }
+      } catch (err) {
+        logger.warn(
+          `Could not verify OpenCode CLI after terminal update: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+
+      if (
+        shouldRestore &&
+        this.processManager.isAutoStartEnabled &&
+        this.lifecycle.phase !== 'disposing' &&
+        normalizeWorkspaceIdentity(this.getWorkspaceCwd()) === workspaceIdentity
+      ) {
+        try {
+          await this.start();
+        } catch (err) {
+          logger.warn(
+            `Failed to restore OpenCode server after terminal update: ${err instanceof Error ? err.message : String(err)}`
+          );
+        }
+      }
+    })();
+    this.terminalCliUpgradeFinishOperation = operation;
+    try {
+      await operation;
+    } finally {
+      if (this.terminalCliUpgradeFinishOperation === operation) {
+        this.terminalCliUpgradeFinishOperation = null;
+      }
+    }
   }
 
   private async readInstalledCliVersion(): Promise<string | null> {
@@ -1812,6 +1927,9 @@ export class OpenCodeServer extends EventEmitter {
 
   private async disposeResources(options: { stopProcess: boolean }) {
     this.pendingTerminalCliUpgrades = 0;
+    this.restoreServerAfterTerminalCliUpgrade = false;
+    this.terminalCliUpgradeWorkspaceIdentity = null;
+    this.terminalCliUpgradeTargetVersion = null;
     this.lifecycle.beginDispose(OpenCodeServer.START_DISPOSED_MESSAGE);
     this.clearRestartTimer();
     this.clearRetryResetTimer();

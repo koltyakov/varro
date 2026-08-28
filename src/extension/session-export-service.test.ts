@@ -23,6 +23,11 @@ vi.mock('node:child_process', () => ({
   default: { spawn: mocks.spawn },
 }));
 
+vi.mock('cross-spawn', () => ({
+  default: mocks.spawn,
+  spawn: mocks.spawn,
+}));
+
 vi.mock('fs/promises', () => ({
   mkdtemp: mocks.mkdtemp,
   open: mocks.open,
@@ -164,6 +169,35 @@ describe('SessionExportService', () => {
       recursive: true,
       force: true,
     });
+  });
+
+  it('passes special-character Windows export arguments to cross-spawn without joining them', async () => {
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    try {
+      const spawnResult = createSpawnResult();
+      const sessionId = 'session & value^with|pipes(100%)!"';
+      const server = createServer();
+      server.resolveCommand.mockReturnValue('C:\\Tools & More\\opencode.cmd');
+      server.request.mockResolvedValue({ id: sessionId, directory: '/repo' });
+      const service = new SessionExportService(server, 1000);
+
+      const exportPromise = service.exportSession(sessionId);
+      await vi.waitFor(() => expect(mocks.spawn).toHaveBeenCalledOnce());
+      spawnResult.handlers.close(0, null);
+      await exportPromise;
+
+      expect(mocks.spawn).toHaveBeenCalledWith(
+        'C:\\Tools & More\\opencode.cmd',
+        ['export', sessionId],
+        expect.objectContaining({ cwd: '/repo', windowsHide: true })
+      );
+    } finally {
+      Object.defineProperty(process, 'platform', {
+        value: originalPlatform,
+        configurable: true,
+      });
+    }
   });
 
   it('does not display an export after the workspace changes', async () => {

@@ -43,6 +43,7 @@ const { loggerMock, spawnMock, vscodeMock, waitForProcessExitMock } = vi.hoisted
 vi.mock('vscode', () => vscodeMock);
 vi.mock('./logger', () => ({ logger: loggerMock }));
 vi.mock('child_process', () => ({ spawn: spawnMock, default: { spawn: spawnMock } }));
+vi.mock('cross-spawn', () => ({ default: spawnMock, spawn: spawnMock }));
 vi.mock('./server-utils', async () => {
   const actual = await vi.importActual<typeof ServerUtils>('./server-utils');
   return { ...actual, waitForProcessExit: waitForProcessExitMock };
@@ -339,7 +340,7 @@ describe('OpenCodeProcess Windows termination', () => {
       signalCode: null as NodeJS.Signals | null,
     });
     spawnMock.mockImplementation((command: string, args: string[]) => {
-      if (command === (process.env.ComSpec || 'cmd.exe')) return wrapper;
+      if (command === 'C:\\OpenCode\\opencode.cmd') return wrapper;
       const child = Object.assign(new EventEmitter(), {
         stdout: new EventEmitter(),
         stderr: new EventEmitter(),
@@ -982,6 +983,154 @@ describe('OpenCodeProcess server ownership leases', () => {
     expect(JSON.parse(await readFile(leasePath, 'utf-8'))).toEqual(
       expect.objectContaining({ pid: MOCK_WINDOWS_PID, state: 'active' })
     );
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  it('falls back to exact netstat listeners while retaining Windows ancestry checks', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
+    const leasePath = join(directory, 'lease.json');
+    const wrapperPid = MOCK_WINDOWS_PID;
+    const listenerPid = MOCK_WINDOWS_PID + 1;
+    const child = Object.assign(new EventEmitter(), {
+      pid: wrapperPid,
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+      kill: vi.fn(),
+      exitCode: null,
+      signalCode: null,
+    });
+    spawnMock.mockImplementation((command: string, args: string[]) => {
+      if (command === 'C:\\OpenCode\\opencode.exe') return child;
+      const result = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+        kill: vi.fn(),
+      });
+      queueMicrotask(() => {
+        const script = args.at(-1) || '';
+        if (command === 'powershell.exe' && script.includes('Get-NetTCPConnection')) {
+          result.stderr.emit('data', Buffer.from('Get-NetTCPConnection is not recognized'));
+          result.emit('close', 1);
+          return;
+        }
+        if (command === 'netstat.exe') {
+          result.stdout.emit(
+            'data',
+            Buffer.from(
+              [
+                `TCP    0.0.0.0:40960    0.0.0.0:0    LISTENING    ${listenerPid + 1}`,
+                `UDP    0.0.0.0:4096     *:*                       ${listenerPid + 2}`,
+                `TCP    [::]:4096        [::]:0         ABHÖREN      ${listenerPid}`,
+              ].join('\r\n')
+            )
+          );
+        } else if (script.includes('ParentProcessId')) {
+          result.stdout.emit('data', Buffer.from(`${wrapperPid}\n`));
+        } else if (script.includes('ExecutablePath')) {
+          result.stdout.emit('data', Buffer.from('C:\\OpenCode\\opencode.exe\n'));
+        } else if (script.includes('CreationDate')) {
+          result.stdout.emit('data', Buffer.from('123456\n'));
+        }
+        result.emit('close', 0);
+      });
+      return result;
+    });
+    const manager = new OpenCodeProcess(
+      4096,
+      true,
+      'C:\\OpenCode\\opencode.exe',
+      false,
+      undefined,
+      leasePath
+    );
+    manager.launchServer({
+      getWorkspaceCwd: () => undefined,
+      onStdout: vi.fn(),
+      onStderr: vi.fn(),
+      onExit: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    await expect(manager.confirmManagedServerOwnership()).resolves.toBe(true);
+
+    expect(spawnMock).toHaveBeenCalledWith('netstat.exe', ['-ano'], expect.anything());
+    expect(JSON.parse(await readFile(leasePath, 'utf-8'))).toEqual(
+      expect.objectContaining({
+        pid: listenerPid,
+        executable: 'C:\\OpenCode\\opencode.exe',
+        birthIdentity: 'win32:123456',
+      })
+    );
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  it('rejects a netstat listener that is not descended from the launched Windows process', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
+    const leasePath = join(directory, 'lease.json');
+    const wrapperPid = MOCK_WINDOWS_PID;
+    const listenerPid = MOCK_WINDOWS_PID + 1;
+    const child = Object.assign(new EventEmitter(), {
+      pid: wrapperPid,
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+      kill: vi.fn(),
+      exitCode: null,
+      signalCode: null,
+    });
+    spawnMock.mockImplementation((command: string, args: string[]) => {
+      if (command === 'C:\\OpenCode\\opencode.exe') return child;
+      const result = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+        kill: vi.fn(),
+      });
+      queueMicrotask(() => {
+        const script = args.at(-1) || '';
+        if (command === 'powershell.exe' && script.includes('Get-NetTCPConnection')) {
+          result.emit('close', 1);
+          return;
+        }
+        if (command === 'netstat.exe') {
+          result.stdout.emit(
+            'data',
+            Buffer.from(`TCP  127.0.0.1:4096  0.0.0.0:0  LISTENING  ${listenerPid}\n`)
+          );
+        } else if (script.includes('ParentProcessId')) {
+          result.stdout.emit('data', Buffer.from('1\n'));
+        }
+        result.emit('close', 0);
+      });
+      return result;
+    });
+    const manager = new OpenCodeProcess(
+      4096,
+      true,
+      'C:\\OpenCode\\opencode.exe',
+      false,
+      undefined,
+      leasePath
+    );
+    manager.launchServer({
+      getWorkspaceCwd: () => undefined,
+      onStdout: vi.fn(),
+      onStderr: vi.fn(),
+      onExit: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    await expect(manager.confirmManagedServerOwnership()).resolves.toBe(false);
+
+    await expect(readFile(leasePath, 'utf-8')).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(
+      spawnMock.mock.calls.some(
+        ([command, args]) =>
+          command === 'powershell.exe' &&
+          Array.isArray(args) &&
+          args.at(-1)?.includes('ExecutablePath')
+      )
+    ).toBe(false);
     await rm(directory, { recursive: true, force: true });
   });
 
@@ -1844,6 +1993,73 @@ describe('OpenCodeProcess config ownership', () => {
       'Cannot launch OpenCode before the previous managed process tree is cleaned'
     );
     expect(spawnMock).toHaveBeenCalledOnce();
+  });
+
+  it('passes a special-character Windows shim path directly to cross-spawn', () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    const child = Object.assign(new EventEmitter(), {
+      pid: 101,
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+      kill: vi.fn(),
+      exitCode: null,
+      signalCode: null,
+    });
+    spawnMock.mockReturnValue(child);
+    const command = 'C:\\Tools & More (x86)\\open^code%20!.cmd';
+    const manager = new OpenCodeProcess(4096, true, command);
+
+    manager.launchServer({
+      getWorkspaceCwd: () => 'C:\\work & trees',
+      onStdout: vi.fn(),
+      onStderr: vi.fn(),
+      onExit: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    expect(spawnMock).toHaveBeenCalledWith(
+      command,
+      ['serve', '--port', '4096'],
+      expect.objectContaining({ cwd: 'C:\\work & trees', windowsHide: true })
+    );
+  });
+
+  it('taskkills a timed-out Windows CLI shim process tree', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    vi.useFakeTimers();
+    const child = Object.assign(new EventEmitter(), {
+      pid: MOCK_WINDOWS_PID,
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+      kill: vi.fn(),
+      exitCode: null,
+      signalCode: null,
+    });
+    spawnMock.mockImplementation((command: string) => {
+      if (command === 'C:\\OpenCode\\opencode.cmd') return child;
+      const result = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+        kill: vi.fn(),
+        exitCode: null,
+        signalCode: null,
+      });
+      queueMicrotask(() => result.emit('close', 0));
+      return result;
+    });
+    const manager = new OpenCodeProcess(4096, true, 'C:\\OpenCode\\opencode.cmd');
+
+    const version = manager.readInstalledCliVersion();
+    const rejection = expect(version).rejects.toThrow('OpenCode CLI command timed out');
+    await vi.advanceTimersByTimeAsync(originalPlatform === 'win32' ? 10_100 : 5_100);
+
+    await rejection;
+    expect(spawnMock).toHaveBeenCalledWith(
+      'taskkill.exe',
+      ['/PID', String(MOCK_WINDOWS_PID), '/T', '/F'],
+      expect.anything()
+    );
+    expect(child.kill).not.toHaveBeenCalled();
   });
 
   it('preserves a child-owned config when disconnect leaves the child alive', async () => {

@@ -21,6 +21,7 @@ import { MAX_NATIVE_PDF_TOTAL_BYTES } from '../../shared/native-pdf';
 import { STORAGE_KEYS, writeStored } from './state-storage';
 import { postMessage } from './bridge';
 import { readStoredBooleanRecord } from './state-stored-values';
+import { isSamePath } from './path-display';
 
 export const MAX_CLIPBOARD_IMAGES = 10;
 export const MAX_CLIPBOARD_IMAGE_SIZE = 5 * 1024 * 1024;
@@ -119,7 +120,7 @@ export function addContextFile(file: DroppedFile) {
   setState(
     'droppedFiles',
     produce((files) => {
-      const idx = files.findIndex((f) => f.path === file.path);
+      const idx = files.findIndex((current) => isSamePath(current.path, file.path));
       if (idx === -1) {
         files.push({ ...file, attachmentSequence });
         return;
@@ -140,7 +141,7 @@ export function addContextFiles(files: DroppedFile[]) {
           file.path,
           file.attachmentSequence
         );
-        const idx = current.findIndex((item) => item.path === file.path);
+        const idx = current.findIndex((item) => isSamePath(item.path, file.path));
         if (idx === -1) {
           current.push({ ...file, attachmentSequence });
           continue;
@@ -157,7 +158,7 @@ export function removeContextFile(path: string) {
   setState(
     'droppedFiles',
     produce((files) => {
-      const idx = files.findIndex((f) => f.path === path);
+      const idx = files.findIndex((file) => isSamePath(file.path, path));
       if (idx !== -1) files.splice(idx, 1);
     })
   );

@@ -285,11 +285,154 @@ describe('antigravity language-server discovery', () => {
   });
 
   it('does not probe processes on unsupported platforms', async () => {
-    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    Object.defineProperty(process, 'platform', { value: 'freebsd', configurable: true });
     mockCommands({ ps: psLine(900, '/opt/antigravity/language_server --extension_server_port=1') });
 
     await expect(fetchLimits()).resolves.toMatchObject({ status: 'unsupported' });
     expect(execFile).not.toHaveBeenCalled();
+  });
+
+  it('discovers the Windows process and listening port through PowerShell', async () => {
+    const { port, seen } = await startLanguageServer();
+    const runCommand = vi.fn(async (_command: string, args: string[]) => {
+      const script = args.at(-1) ?? '';
+      if (script.includes('Get-CimInstance')) {
+        return {
+          stdout: JSON.stringify([
+            {
+              ProcessId: 100,
+              CommandLine: 'C:\\Program Files\\Antigravity\\Antigravity.exe',
+            },
+            {
+              ProcessId: 4242,
+              CommandLine:
+                'C:\\Program Files\\Antigravity\\language_server_windows.exe --csrf_token="windows token"',
+            },
+          ]),
+          stderr: '',
+        };
+      }
+      if (script.includes('Get-NetTCPConnection')) {
+        return { stdout: `warning text\r\n${String(port)}\r\n0\r\n`, stderr: '' };
+      }
+      throw new Error(`unexpected PowerShell script: ${script}`);
+    });
+    const windowsAdapter = createAntigravityAdapter({ platform: 'win32', runCommand });
+
+    await expect(
+      windowsAdapter.fetch({
+        provider,
+        authStore: {},
+        modelID: 'claude-4-5-sonnet',
+        checkedAt: 1_000,
+      })
+    ).resolves.toMatchObject({ status: 'available' });
+
+    expect(seen[0]!.csrf).toBe('windows token');
+    expect(runCommand).toHaveBeenCalledTimes(2);
+    for (const [command, args] of runCommand.mock.calls) {
+      expect(command).toBe('powershell.exe');
+      expect(args).toEqual(expect.arrayContaining(['-NoProfile', '-NonInteractive', '-Command']));
+    }
+    expect(runCommand.mock.calls[1]![1].at(-1)).toContain('Get-NetTCPConnection');
+    expect(runCommand.mock.calls[1]![1].at(-1)).toContain('4242');
+  });
+
+  it('parses a single Windows CIM process object and keeps its advertised port', async () => {
+    const { port } = await startLanguageServer();
+    const runCommand = vi.fn(async (_command: string, args: string[]) => {
+      const script = args.at(-1) ?? '';
+      if (script.includes('Get-CimInstance')) {
+        return {
+          stdout: JSON.stringify({
+            ProcessId: 4242,
+            CommandLine: `C:\\Antigravity\\language_server_windows.exe --extension_server_port=${String(port)}`,
+          }),
+          stderr: '',
+        };
+      }
+      throw new Error('Get-NetTCPConnection is unavailable');
+    });
+    const windowsAdapter = createAntigravityAdapter({ platform: 'win32', runCommand });
+
+    await expect(
+      windowsAdapter.fetch({
+        provider,
+        authStore: {},
+        modelID: 'claude-4-5-sonnet',
+        checkedAt: 1_000,
+      })
+    ).resolves.toMatchObject({ status: 'available' });
+    expect(runCommand).toHaveBeenCalledTimes(3);
+    expect(runCommand).toHaveBeenLastCalledWith('netstat.exe', ['-ano']);
+  });
+
+  it('reports unsupported when Windows CIM output is malformed', async () => {
+    const runCommand = vi.fn().mockResolvedValue({ stdout: 'not json', stderr: '' });
+    const windowsAdapter = createAntigravityAdapter({ platform: 'win32', runCommand });
+
+    await expect(
+      windowsAdapter.fetch({
+        provider,
+        authStore: {},
+        modelID: 'claude-4-5-sonnet',
+        checkedAt: 1_000,
+      })
+    ).resolves.toMatchObject({
+      status: 'unsupported',
+      note: 'Antigravity language server is not running or could not be detected',
+    });
+    expect(runCommand).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports unsupported when Windows process discovery fails', async () => {
+    const runCommand = vi.fn().mockRejectedValue(new Error('CIM access denied'));
+    const windowsAdapter = createAntigravityAdapter({ platform: 'win32', runCommand });
+
+    await expect(
+      windowsAdapter.fetch({
+        provider,
+        authStore: {},
+        modelID: 'claude-4-5-sonnet',
+        checkedAt: 1_000,
+      })
+    ).resolves.toMatchObject({ status: 'unsupported' });
+    expect(runCommand).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to netstat when Windows port discovery fails', async () => {
+    const { port } = await startLanguageServer();
+    const runCommand = vi.fn(async (command: string, args: string[]) => {
+      const script = args.at(-1) ?? '';
+      if (script.includes('Get-CimInstance')) {
+        return {
+          stdout: JSON.stringify({
+            ProcessId: 4242,
+            CommandLine: 'C:\\Antigravity\\language_server_windows.exe --csrf_token=token',
+          }),
+          stderr: '',
+        };
+      }
+      if (command === 'powershell.exe') throw new Error('Get-NetTCPConnection unavailable');
+      if (command === 'netstat.exe') {
+        return {
+          stdout: `TCP    127.0.0.1:${String(port)}    0.0.0.0:0    ABHÖREN    4242\r\n`,
+          stderr: '',
+        };
+      }
+      throw new Error(`unexpected command: ${command}`);
+    });
+    const windowsAdapter = createAntigravityAdapter({ platform: 'win32', runCommand });
+
+    await expect(
+      windowsAdapter.fetch({
+        provider,
+        authStore: {},
+        modelID: 'claude-4-5-sonnet',
+        checkedAt: 1_000,
+      })
+    ).resolves.toMatchObject({ status: 'available' });
+    expect(runCommand).toHaveBeenCalledWith('netstat.exe', ['-ano']);
   });
 
   it('prefers an explicit ANTIGRAVITY_BASE_URL over process discovery', async () => {

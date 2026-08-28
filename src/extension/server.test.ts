@@ -46,6 +46,7 @@ const { getConfigurationMock, loggerMock, mkdirMock, spawnMock, vscodeMock, writ
 vi.mock('./logger', () => ({ logger: loggerMock }));
 vi.mock('vscode', () => vscodeMock);
 vi.mock('child_process', () => ({ spawn: spawnMock, default: { spawn: spawnMock } }));
+vi.mock('cross-spawn', () => ({ default: spawnMock, spawn: spawnMock }));
 vi.mock('os', async () => {
   const actual = await vi.importActual<typeof OsModule>('os');
   return {
@@ -1633,9 +1634,193 @@ describe('OpenCodeServer maintenance', () => {
     expect(startOperation).not.toHaveBeenCalled();
 
     await expect(server.restart()).rejects.toThrow('close it before restarting');
-    server.finishWindowsCliUpgrade();
+    await server.finishWindowsCliUpgrade();
     await expect(server.restart()).resolves.toBe(server.url);
     expect(startOperation).toHaveBeenCalledOnce();
+  });
+
+  it('verifies the terminal update and restores a previously managed server after failure', async () => {
+    stubPlatform('win32');
+    const server = new OpenCodeServer(4096, true);
+    const startOperation = vi.fn().mockResolvedValue(server.url);
+    const clearResolvedCommandCache = vi.fn();
+    const api = server as unknown as {
+      managedProcess: boolean;
+      readHealthInfo: ReturnType<typeof vi.fn>;
+      hasActiveSessions: ReturnType<typeof vi.fn>;
+      readInstalledCliVersion: ReturnType<typeof vi.fn>;
+      stopManagedProcessForRestart: ReturnType<typeof vi.fn>;
+      startOperation: typeof startOperation;
+      getWorkspaceCwd: ReturnType<typeof vi.fn>;
+      processManager: { clearResolvedCommandCache: typeof clearResolvedCommandCache };
+    };
+    api.managedProcess = true;
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.17.0' });
+    api.hasActiveSessions = vi.fn().mockResolvedValue(false);
+    api.readInstalledCliVersion = vi.fn().mockResolvedValue('1.17.0');
+    api.stopManagedProcessForRestart = vi.fn(async () => {
+      api.managedProcess = false;
+    });
+    api.startOperation = startOperation;
+    api.getWorkspaceCwd = vi.fn(() => '/repo');
+    api.processManager.clearResolvedCommandCache = clearResolvedCommandCache;
+    setRunning(server);
+
+    await server.prepareForWindowsCliUpgrade('1.18.0');
+    await server.finishWindowsCliUpgrade();
+
+    expect(clearResolvedCommandCache).toHaveBeenCalledOnce();
+    expect(api.readInstalledCliVersion).toHaveBeenCalledOnce();
+    expect(loggerMock.warn).toHaveBeenCalledWith(
+      'Windows OpenCode terminal update closed, but CLI 1.17.0 is older than requested 1.18.0'
+    );
+    expect(startOperation).toHaveBeenCalledOnce();
+  });
+
+  it('releases a failed terminal update without restoring into a different workspace', async () => {
+    stubPlatform('win32');
+    const server = new OpenCodeServer(4096, true);
+    const startOperation = vi.fn().mockResolvedValue(server.url);
+    let workspacePath = '/repo';
+    const api = server as unknown as {
+      managedProcess: boolean;
+      readHealthInfo: ReturnType<typeof vi.fn>;
+      hasActiveSessions: ReturnType<typeof vi.fn>;
+      readInstalledCliVersion: ReturnType<typeof vi.fn>;
+      stopManagedProcessForRestart: ReturnType<typeof vi.fn>;
+      startOperation: typeof startOperation;
+      getWorkspaceCwd: ReturnType<typeof vi.fn>;
+      pendingTerminalCliUpgrades: number;
+    };
+    api.managedProcess = true;
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.17.0' });
+    api.hasActiveSessions = vi.fn().mockResolvedValue(false);
+    api.readInstalledCliVersion = vi.fn().mockRejectedValue(new Error('update was cancelled'));
+    api.stopManagedProcessForRestart = vi.fn(async () => {
+      api.managedProcess = false;
+    });
+    api.startOperation = startOperation;
+    api.getWorkspaceCwd = vi.fn(() => workspacePath);
+    setRunning(server);
+
+    await server.prepareForWindowsCliUpgrade('1.18.0');
+    workspacePath = '/other-repo';
+    await server.finishWindowsCliUpgrade();
+
+    expect(loggerMock.warn).toHaveBeenCalledWith(
+      'Could not verify OpenCode CLI after terminal update: update was cancelled'
+    );
+    expect(startOperation).not.toHaveBeenCalled();
+    expect(api.pendingTerminalCliUpgrades).toBe(0);
+  });
+
+  it('serializes a new terminal update behind close verification and server restoration', async () => {
+    stubPlatform('win32');
+    const server = new OpenCodeServer(4096, true);
+    const firstVersion = deferred<string | null>();
+    const api = server as unknown as {
+      managedProcess: boolean;
+      readHealthInfo: ReturnType<typeof vi.fn>;
+      hasActiveSessions: ReturnType<typeof vi.fn>;
+      readInstalledCliVersion: ReturnType<typeof vi.fn>;
+      stopManagedProcessForRestart: ReturnType<typeof vi.fn>;
+      startOperation: ReturnType<typeof vi.fn>;
+      getWorkspaceCwd: ReturnType<typeof vi.fn>;
+      pendingTerminalCliUpgrades: number;
+    };
+    api.managedProcess = true;
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.17.0' });
+    api.hasActiveSessions = vi.fn().mockResolvedValue(false);
+    api.readInstalledCliVersion = vi
+      .fn()
+      .mockImplementationOnce(() => firstVersion.promise)
+      .mockResolvedValue('1.18.0');
+    api.stopManagedProcessForRestart = vi.fn(async () => {
+      api.managedProcess = false;
+    });
+    api.startOperation = vi.fn(async () => {
+      api.managedProcess = true;
+      return server.url;
+    });
+    api.getWorkspaceCwd = vi.fn(() => '/repo');
+    setRunning(server);
+
+    await server.prepareForWindowsCliUpgrade('1.18.0');
+    const firstFinish = server.finishWindowsCliUpgrade();
+    const secondPrepare = server.prepareForWindowsCliUpgrade('1.18.0');
+    await Promise.resolve();
+
+    expect(api.stopManagedProcessForRestart).toHaveBeenCalledOnce();
+    firstVersion.resolve('1.18.0');
+    await firstFinish;
+    await secondPrepare;
+
+    expect(api.startOperation).toHaveBeenCalledOnce();
+    expect(api.stopManagedProcessForRestart).toHaveBeenCalledTimes(2);
+    expect(api.pendingTerminalCliUpgrades).toBe(1);
+    await server.finishWindowsCliUpgrade();
+  });
+
+  it('blocks new requests while a Windows terminal update reserves and stops the server', async () => {
+    stubPlatform('win32');
+    const server = new OpenCodeServer(4096, false);
+    const requestsSettled = deferred<void>();
+    const api = server as unknown as {
+      managedProcess: boolean;
+      readHealthInfo: ReturnType<typeof vi.fn>;
+      hasActiveSessions: ReturnType<typeof vi.fn>;
+      readInstalledCliVersion: ReturnType<typeof vi.fn>;
+      stopManagedProcessForRestart: ReturnType<typeof vi.fn>;
+      getWorkspaceCwd: ReturnType<typeof vi.fn>;
+      transport: {
+        request: ReturnType<typeof vi.fn>;
+        waitForRequestsToSettle: ReturnType<typeof vi.fn>;
+      };
+    };
+    api.managedProcess = true;
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.17.0' });
+    api.hasActiveSessions = vi.fn().mockResolvedValue(false);
+    api.readInstalledCliVersion = vi.fn().mockResolvedValue('1.18.0');
+    api.stopManagedProcessForRestart = vi.fn(async () => {
+      api.managedProcess = false;
+    });
+    api.getWorkspaceCwd = vi.fn(() => '/repo');
+    api.transport.request = vi.fn();
+    api.transport.waitForRequestsToSettle = vi.fn(() => requestsSettled.promise);
+
+    const preparation = server.prepareForWindowsCliUpgrade('1.18.0');
+    await Promise.resolve();
+
+    await expect(server.request('POST', '/session')).rejects.toThrow(
+      'not accepting requests while the CLI is being updated'
+    );
+    expect(api.transport.request).not.toHaveBeenCalled();
+
+    requestsSettled.resolve();
+    await preparation;
+    await expect(server.prepareForWindowsCliUpgrade('1.18.0')).rejects.toThrow(
+      'update terminal is already open'
+    );
+    await server.finishWindowsCliUpgrade();
+  });
+
+  it('does not stop a server owned by another live Varro window for an update', async () => {
+    stubPlatform('win32');
+    const server = new OpenCodeServer(4096, true);
+    const api = server as unknown as {
+      processManager: { hasForeignActiveOwnership: boolean };
+      stopManagedProcessForRestart: ReturnType<typeof vi.fn>;
+    };
+    Object.defineProperty(api.processManager, 'hasForeignActiveOwnership', {
+      configurable: true,
+      value: true,
+    });
+    api.stopManagedProcessForRestart = vi.fn();
+
+    await expect(server.prepareForWindowsCliUpgrade()).rejects.toThrow(
+      'owned by another Varro window'
+    );
+    expect(api.stopManagedProcessForRestart).not.toHaveBeenCalled();
   });
 
   it('does not update through a running Windows server owned outside this window', async () => {

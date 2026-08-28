@@ -199,6 +199,11 @@ describe('context file helpers', () => {
     };
 
     expect(hasExplicitContextForPath([file], 'C:\\repo\\a.ts')).toEqual(file);
+    expect(hasExplicitContextForPath([file], '\\\\?\\C:\\REPO\\A.ts')).toEqual(file);
+    expect(hasExplicitContextForPath([{ ...file, path: 'src/a.ts' }], 'src\\a.ts')).toEqual({
+      ...file,
+      path: 'src/a.ts',
+    });
     expect(
       areContextFilesEqual(file, {
         path: 'C:/repo/a.ts',
@@ -210,6 +215,30 @@ describe('context file helpers', () => {
     expect(getSelectionRangesFromEditorContext({ startLine: 7, endLine: 9 })).toEqual([
       { startLine: 7, endLine: 9 },
     ]);
+  });
+
+  it('uses Windows path identity while keeping POSIX paths case-sensitive', () => {
+    const windowsFile = {
+      path: '\\\\Server\\Share\\Repo\\File.ts',
+      relativePath: 'Repo/File.ts',
+      type: 'file' as const,
+      lineRanges: [{ startLine: 1, endLine: 2 }],
+    };
+    expect(
+      mergeContextFile(windowsFile, {
+        path: '\\\\?\\UNC\\server\\share\\repo\\file.ts',
+        relativePath: 'repo/file.ts',
+        type: 'file',
+        lineRanges: [{ startLine: 5, endLine: 6 }],
+      }).lineRanges
+    ).toEqual([
+      { startLine: 1, endLine: 2 },
+      { startLine: 5, endLine: 6 },
+    ]);
+
+    expect(
+      hasExplicitContextForPath([{ ...windowsFile, path: '/repo/File.ts' }], '/repo/file.ts')
+    ).toBeNull();
   });
 
   it('subtracts overlapping explicit ranges from the live selection', () => {

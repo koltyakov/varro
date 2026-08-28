@@ -1,9 +1,16 @@
+import {
+  getRelativePathWithinWorkspace,
+  isAbsoluteWorkspacePath,
+  isSameWorkspacePath,
+} from '../../shared/workspace-path';
+
 export function normalizePath(value: string) {
   if (!value) return value;
   const normalized = value.replace(/\\/g, '/');
   const trimmed = normalized.replace(/\/+$/, '');
   if (!trimmed) return normalized.startsWith('/') ? '/' : normalized;
   if (/^[A-Za-z]:$/.test(trimmed)) return `${trimmed}/`;
+  if (/^\/\/\?\/Volume\{[^/]+\}$/i.test(trimmed)) return `${trimmed}/`;
   return trimmed;
 }
 
@@ -11,14 +18,8 @@ function trimTrailingSlashes(value: string) {
   return value.replace(/\/+$/, '');
 }
 
-function normalizePathForComparison(value: string) {
-  const normalized = normalizePath(value);
-  return /^[A-Za-z]:\//.test(normalized) ? normalized.toLowerCase() : normalized;
-}
-
 export function isAbsolutePath(path: string) {
-  const normalizedPath = normalizePath(path);
-  return normalizedPath.startsWith('/') || /^[A-Za-z]:\//.test(normalizedPath);
+  return isAbsoluteWorkspacePath(path);
 }
 
 export function getLeafPathName(path: string): string {
@@ -37,17 +38,7 @@ export function getWorkspaceRelativePath(
 ): string | null {
   if (!path || !workspacePath) return null;
 
-  const normalizedPath = normalizePath(path);
-  const normalizedWorkspace = trimTrailingSlashes(normalizePath(workspacePath));
-  if (!normalizedWorkspace) return null;
-
-  const comparablePath = normalizePathForComparison(normalizedPath);
-  const comparableWorkspace = normalizePathForComparison(normalizedWorkspace);
-
-  if (comparablePath === comparableWorkspace) return '.';
-  if (!comparablePath.startsWith(`${comparableWorkspace}/`)) return null;
-
-  return normalizedPath.slice(normalizedWorkspace.length + 1);
+  return getRelativePathWithinWorkspace(normalizePath(path), normalizePath(workspacePath));
 }
 
 export function formatDisplayPath(path: string, workspacePath: string | null | undefined): string {
@@ -66,5 +57,5 @@ export function getDroppedFileLabel(file: { path: string; relativePath: string }
 
 export function isSamePath(a: string | null | undefined, b: string | null | undefined) {
   if (!a || !b) return false;
-  return normalizePathForComparison(a) === normalizePathForComparison(b);
+  return isSameWorkspacePath(normalizePath(a), normalizePath(b));
 }

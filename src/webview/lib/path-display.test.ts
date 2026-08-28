@@ -23,12 +23,17 @@ describe('path display helpers', () => {
     expect(normalizePath('C:')).toBe('C:/');
     expect(normalizePath('C:\\')).toBe('C:/');
     expect(normalizePath('c:/')).toBe('c:/');
+    expect(normalizePath('\\\\?\\Volume{ABC}\\')).toBe('//?/Volume{ABC}/');
   });
 
   it('detects absolute paths on unix and windows', () => {
     expect(isAbsolutePath('/repo/file.ts')).toBe(true);
     expect(isAbsolutePath('C:\\repo\\file.ts')).toBe(true);
     expect(isAbsolutePath('C:\\')).toBe(true);
+    expect(isAbsolutePath('\\\\server\\share\\file.ts')).toBe(true);
+    expect(isAbsolutePath('\\\\?\\C:\\repo\\file.ts')).toBe(true);
+    expect(isAbsolutePath('\\\\?\\UNC\\server\\share\\file.ts')).toBe(true);
+    expect(isAbsolutePath('\\\\?\\Volume{abc}\\file.ts')).toBe(true);
     expect(isAbsolutePath('src/file.ts')).toBe(false);
   });
 
@@ -42,6 +47,22 @@ describe('path display helpers', () => {
     expect(getWorkspaceRelativePath('/repo/src/index.ts', '/repo')).toBe('src/index.ts');
     expect(getWorkspaceRelativePath('/repo/src/index.ts', '/repo/')).toBe('src/index.ts');
     expect(getWorkspaceRelativePath('C:\\Repo\\src\\index.ts', 'c:/repo')).toBe('src/index.ts');
+    expect(getWorkspaceRelativePath('C:\\Repo\\Src\\Index.ts', 'c:/repo')).toBe('Src/Index.ts');
+    expect(getWorkspaceRelativePath('\\\\?\\C:\\Repo\\Src\\Index.ts', 'c:/repo')).toBe(
+      'Src/Index.ts'
+    );
+    expect(
+      getWorkspaceRelativePath('\\\\?\\UNC\\Server\\Share\\Source\\Index.ts', '\\\\server\\share')
+    ).toBe('Source/Index.ts');
+    expect(
+      getWorkspaceRelativePath(
+        '\\\\?\\Volume{ABC}\\Repo\\Source\\Index.ts',
+        '\\\\?\\volume{abc}\\repo'
+      )
+    ).toBe('Source/Index.ts');
+    expect(
+      getWorkspaceRelativePath('\\\\?\\Volume{ABC}\\Repo\\Source\\Index.ts', '\\\\?\\volume{abc}\\')
+    ).toBe('Repo/Source/Index.ts');
     expect(getWorkspaceRelativePath('/repo', '/repo')).toBe('.');
     expect(getWorkspaceRelativePath('/other/src/index.ts', '/repo')).toBeNull();
     expect(getWorkspaceRelativePath('/repo/src/index.ts', null)).toBeNull();
@@ -66,7 +87,14 @@ describe('path display helpers', () => {
     expect(isSamePath('/repo/src/index.ts/', '/repo/src/index.ts')).toBe(true);
     expect(isSamePath('C:\\repo\\src\\index.ts', 'C:/repo/src/index.ts')).toBe(true);
     expect(isSamePath('C:\\Repo\\src\\index.ts', 'c:/repo/src/index.ts')).toBe(true);
+    expect(isSamePath('src\\index.ts', 'src/index.ts')).toBe(true);
     expect(isSamePath('C:\\', 'c:\\')).toBe(true);
+    expect(isSamePath('\\\\?\\C:\\Repo\\Index.ts', 'c:/repo/index.ts')).toBe(true);
+    expect(isSamePath('\\\\?\\UNC\\Server\\Share\\Index.ts', '\\\\server\\share\\index.ts')).toBe(
+      true
+    );
+    expect(isSamePath('\\\\.\\PhysicalDrive0', '\\\\.\\PhysicalDrive0')).toBe(false);
+    expect(isSamePath('/repo/Index.ts', '/repo/index.ts')).toBe(false);
     expect(isSamePath('/repo/src/index.ts', '/repo/src/other.ts')).toBe(false);
     expect(isSamePath('/repo/src/index.ts', null)).toBe(false);
   });

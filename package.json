@@ -63,6 +63,7 @@
   },
   "dependencies": {
     "@opencode-ai/sdk": "^1.18.23",
+    "cross-spawn": "7.0.6",
     "dompurify": "^3.4.14",
     "highlight.js": "11.12.0",
     "jsonc-parser": "^3.3.1",
@@ -78,7 +79,6 @@
     "@types/vscode": "1.120.0",
     "@vitest/coverage-v8": "4.1.11",
     "@vscode/vsce": "3.9.2",
-    "cross-spawn": "7.0.6",
     "css.escape": "1.5.1",
     "esbuild": "0.28.2",
     "iconoir": "^7.12.1",
@@ -506,8 +506,8 @@
     "vscode": "^1.120.0"
   },
   "volta": {
-    "node": "24.16.0",
-    "npm": "10.9.8"
+    "node": "24.18.1",
+    "npm": "10.9.9"
   },
   "capabilities": {
     "virtualWorkspaces": {

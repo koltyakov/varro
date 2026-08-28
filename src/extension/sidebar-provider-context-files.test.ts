@@ -288,6 +288,60 @@ describe('SidebarProviderContextFiles', () => {
     expect(onContextFilesChanged).toHaveBeenCalledOnce();
   });
 
+  it('deduplicates and removes equivalent Windows context paths', () => {
+    const { service, post } = createService();
+    service.postDroppedFiles(
+      asPostDroppedFilesInput([
+        {
+          path: 'C:\\Repo\\File.ts',
+          relativePath: 'File.ts',
+          type: 'file',
+          lineRanges: [{ startLine: 1, endLine: 2 }],
+        },
+      ]),
+      post
+    );
+
+    service.postDroppedFiles(
+      asPostDroppedFilesInput([
+        {
+          path: 'c:/repo/file.ts',
+          relativePath: 'File.ts',
+          type: 'file',
+          lineRanges: [{ startLine: 4, endLine: 5 }],
+        },
+      ]),
+      post
+    );
+
+    expect(service.getContextFiles()).toHaveLength(1);
+    expect(service.getContextFiles()[0]?.lineRanges).toEqual([
+      { startLine: 1, endLine: 2 },
+      { startLine: 4, endLine: 5 },
+    ]);
+
+    service.removeContextFile('C:\\REPO\\FILE.ts', post);
+    expect(service.getContextFiles()).toEqual([]);
+  });
+
+  it('does not restore a pending Windows path alias after removal', async () => {
+    const { service, droppedFilesService, post } = createService();
+    const pending = deferred<DroppedFile[]>();
+    service.postDroppedFiles(
+      [{ path: 'C:\\Repo\\File.ts', relativePath: 'File.ts', type: 'file' }],
+      post
+    );
+    droppedFilesService.fromPaths.mockReturnValue(pending.promise);
+
+    const dropping = service.handleDroppedPaths(['c:/repo/file.ts'], post);
+    service.removeContextFile('C:/REPO/FILE.ts', post);
+    pending.resolve([{ path: 'c:/repo/file.ts', relativePath: 'File.ts', type: 'file' }]);
+    await dropping;
+
+    expect(service.getContextFiles()).toEqual([]);
+    expect(droppedFilesService.removeOwnedFiles).toHaveBeenCalledWith(['c:/repo/file.ts']);
+  });
+
   it('skips posting when an incoming file is unchanged after normalization', () => {
     const { service, onContextFilesChanged, post } = createService();
 

@@ -74,6 +74,48 @@ The same process suite runs on `windows-latest` in CI. Windows-specific coverage
 casing, npm/pnpm/Yarn/Volta/Bun locations, `.cmd` and `.bat` quoting, missing shims, process-tree
 termination, file-lock update recovery, and VSIX installation through `code.cmd`.
 
+Windows CI runs unit and host-policy tests, builds, and packages the VSIX on Node `24.18.1`. A
+manually dispatched CI run also launches the real VS Code application on
+`windows-latest` for `clean-install-missing-cli`, `invalid-cli-path`, and `healthy-first-run`. Failed
+sandbox runs upload their isolated profiles as a `windows-vscode-sandbox-*` artifact.
+
+## Windows Host Placement
+
+Verify native Windows and VS Code WSL separately. They are different extension hosts and must not
+share an assumed CLI installation.
+
+1. Open a normal local folder in VS Code on Windows. Install OpenCode from a Windows terminal, open
+   Varro, and run `Varro: About`. Confirm `Platform` is `win32`, the resolved binary is a Windows path,
+   and OpenCode data appears under `%USERPROFILE%\.local\share\opencode`.
+2. Open a folder in a VS Code WSL window. Install OpenCode inside that distribution, open Varro,
+   and run `Varro: About`. Confirm `Platform` is `linux`, the resolved binary is a Linux path, and data
+   appears under `~/.local/share/opencode` in the distribution.
+3. Confirm a Windows-only CLI does not satisfy the WSL host and a WSL-only CLI does not satisfy the
+   native host. `varro.server.command` must also name a path that exists on the active extension host.
+
+OpenCode recommends [WSL for the best Windows experience](https://opencode.ai/docs/windows-wsl), but
+the native flow remains supported.
+
+## Native Windows Checks
+
+- Leave `varro.server.autoUpdate` enabled with an older compatible CLI. Confirm Varro prompts instead
+  of replacing the CLI in the background.
+- Exercise the terminal update fallback with a Varro-managed server. Confirm Varro waits for active
+  work, stops the managed server, then opens the update terminal. Keep that terminal open and confirm
+  Varro does not restart the managed server until the terminal closes, so `opencode.exe` stays
+  unlocked.
+- Connect to a server that Varro does not own and try to update. Confirm Varro asks you to stop that
+  server instead of attempting to replace its locked executable.
+- With an empty Git index, generate a commit message from a tracked unstaged change plus an untracked
+  file. Confirm the tracked diff is present in the helper evidence while the untracked path is marked
+  `content unavailable` and its contents are absent.
+- Run the focused Antigravity discovery tests. They cover PowerShell CIM process output,
+  `Get-NetTCPConnection` port output, malformed data, and command failures:
+
+```sh
+npm run test -- src/extension/provider-limits/adapters/antigravity.discovery.test.ts
+```
+
 ## Manual Checks
 
 Use the `Varro: Extension Development Host` launch configuration for exploratory testing. For a
@@ -87,7 +129,7 @@ Before release, manually inspect situations that are not deterministic on every 
 - Proxy, TLS interception, DNS failure, offline mode, and authentication expiry.
 - Read-only home/config directories, executable permission errors, and full disks.
 - Sleep/wake, network changes, server crashes, and multiple VS Code windows sharing a configured port.
-- Leaving an update terminal open on Windows, where the OpenCode executable can remain reserved.
+- Closing a native Windows update terminal, which allows Varro to use the CLI again after the file lock is released.
 - OpenCode versions newer than Varro's tested ceiling and malformed version output.
 - No providers, provider API failure, provider login cancellation, and invalid provider credentials.
 - Embedded API-key and OAuth connection, code-based and automatic OAuth completion, provider disconnection, terminal fallbacks, and provider-catalog load failure.

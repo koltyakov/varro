@@ -920,6 +920,25 @@ describe('state helpers', () => {
 
     stateModule.clearContextFiles();
     stateModule.addContextFiles([
+      { path: 'C:\\Repo\\File.ts', relativePath: 'File.ts', type: 'file' },
+      {
+        path: 'c:/repo/file.ts',
+        relativePath: 'File.ts',
+        type: 'file',
+        lineRanges: [{ startLine: 2, endLine: 4 }],
+      },
+    ]);
+    expect(stateModule.state.droppedFiles).toEqual([
+      expect.objectContaining({
+        path: 'c:/repo/file.ts',
+        lineRanges: undefined,
+      }),
+    ]);
+    stateModule.removeContextFile('C:/REPO/FILE.ts');
+    expect(stateModule.state.droppedFiles).toEqual([]);
+
+    stateModule.clearContextFiles();
+    stateModule.addContextFiles([
       { path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' },
       {
         path: '/repo/a.ts',

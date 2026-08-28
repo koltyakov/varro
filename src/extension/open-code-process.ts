@@ -3,6 +3,7 @@
 import type { ChildProcess, SpawnOptions } from 'child_process';
 import { spawn } from 'child_process';
 import { randomBytes } from 'crypto';
+import crossSpawn from 'cross-spawn';
 import type { Dirent } from 'fs';
 import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs';
 import {
@@ -42,7 +43,6 @@ import {
   isPortInUseMessage,
   waitForProcessExit,
 } from './server-utils';
-import { resolveServerLaunch } from './util/server-launch';
 import { buildServerEnv, getServerPathEntries } from './util/server-path';
 
 export function getOpenCodeConfigDirectory(
@@ -110,8 +110,8 @@ interface MaybeSuggestCliUpdateCallbacks {
   upgradeRunningServer: (targetVersion: string) => Promise<boolean>;
   requestMaintenanceCheck: () => void;
   getWorkspaceCwd: () => string | undefined;
-  prepareForWindowsCliUpgrade: () => Promise<void>;
-  finishWindowsCliUpgrade?: () => void;
+  prepareForWindowsCliUpgrade: (targetVersion?: string) => Promise<void>;
+  finishWindowsCliUpgrade?: () => void | Promise<void>;
 }
 
 export interface UpgradeFailureReport {
@@ -233,6 +233,22 @@ function parsePids(text: string) {
   return [...pids];
 }
 
+function parseWindowsNetstatListeningPids(text: string, port: number) {
+  const pids = new Set<number>();
+  for (const line of text.split(/\r?\n/)) {
+    const fields = line.trim().split(/\s+/);
+    if (fields.length < 5 || fields[0]?.toUpperCase() !== 'TCP') continue;
+    const remoteAddress = fields[2];
+    if (remoteAddress?.slice(remoteAddress.lastIndexOf(':') + 1) !== '0') continue;
+    const localAddress = fields[1];
+    const localPort = localAddress?.slice(localAddress.lastIndexOf(':') + 1);
+    if (localPort !== String(port)) continue;
+    const pid = Number.parseInt(fields[4] ?? '', 10);
+    if (Number.isSafeInteger(pid) && pid > 0 && pid !== process.pid) pids.add(pid);
+  }
+  return [...pids];
+}
+
 function parseInjectedConfigOwner(value: unknown): InjectedConfigOwner | null {
   if (!value || typeof value !== 'object') return null;
   const record = value as Record<string, unknown>;
@@ -348,6 +364,40 @@ function runProcess(
   });
 }
 
+async function terminateCliProcessTree(proc: ChildProcess): Promise<void> {
+  if (process.platform === 'win32' && proc.pid) {
+    const taskkill = await runProcess(
+      'taskkill.exe',
+      ['/PID', String(proc.pid), '/T', '/F'],
+      PROCESS_STOP_TIMEOUT_MS
+    );
+    if (taskkill.code === 0) return;
+
+    const script = [
+      `$root = ${String(proc.pid)}`,
+      '$ids = @($root)',
+      'do { $children = @(Get-CimInstance Win32_Process | Where-Object { $ids -contains $_.ParentProcessId -and $ids -notcontains $_.ProcessId } | Select-Object -ExpandProperty ProcessId); $ids += $children } while ($children.Count -gt 0)',
+      'Stop-Process -Id ($ids | Sort-Object -Descending) -Force -ErrorAction Stop',
+    ].join('; ');
+    const powershell = await runProcess(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', script],
+      PROCESS_STOP_TIMEOUT_MS
+    );
+    if (powershell.code === 0) return;
+
+    logger.warn(
+      `Failed to terminate timed-out Windows CLI process tree ${proc.pid}: taskkill ${taskkill.stderr.trim() || `exit code ${String(taskkill.code)}`}; PowerShell ${powershell.stderr.trim() || `exit code ${String(powershell.code)}`}`
+    );
+  }
+
+  if (proc.exitCode === null && proc.signalCode === null) {
+    try {
+      proc.kill('SIGKILL');
+    } catch {}
+  }
+}
+
 async function findLinuxListeningPids(port: number, procRoot: string) {
   const socketInodes = new Set<string>();
   await Promise.all(
@@ -422,7 +472,24 @@ async function findListeningPids(port: number, procRoot = '/proc') {
       ['-NoProfile', '-Command', script],
       WINDOWS_PROCESS_INSPECTION_TIMEOUT_MS
     );
-    return parsePids(result.stdout);
+    const pids = parsePids(result.stdout);
+    if (pids.length > 0) return pids;
+    if (result.code !== 0) {
+      logger.warn(
+        `Windows listener inspection with PowerShell failed: ${result.stderr.trim() || `exit code ${String(result.code)}`}`
+      );
+    }
+    const fallback = await runProcess(
+      'netstat.exe',
+      ['-ano'],
+      WINDOWS_PROCESS_INSPECTION_TIMEOUT_MS
+    );
+    if (fallback.code !== 0) {
+      logger.warn(
+        `Windows listener inspection with netstat failed: ${fallback.stderr.trim() || `exit code ${String(fallback.code)}`}`
+      );
+    }
+    return parseWindowsNetstatListeningPids(fallback.stdout, port);
   }
 
   const result = await runProcess('lsof', ['-nP', `-tiTCP:${port}`, '-sTCP:LISTEN']);
@@ -1469,7 +1536,6 @@ export class OpenCodeProcess {
 
     const command = this.resolveCommand();
     const args = ['serve', '--port', String(this._port)];
-    const launch = resolveServerLaunch(command, args);
     logger.info(`Starting OpenCode server with command: ${command}`);
 
     const configPath = this.injectedConfigPath;
@@ -1488,8 +1554,7 @@ export class OpenCodeProcess {
         env: this.buildServerEnv(configPath, owner),
         windowsHide: true,
       };
-      if (launch.windowsVerbatimArguments) spawnOptions.windowsVerbatimArguments = true;
-      proc = spawn(launch.command, launch.args, spawnOptions);
+      proc = crossSpawn(command, args, spawnOptions);
     } catch (err) {
       if (this.ownershipOwner === owner) this.ownershipOwner = null;
       void this.cleanupInjectedConfigFile(configPath);
@@ -2442,7 +2507,7 @@ export class OpenCodeProcess {
             callbacks.requestMaintenanceCheck();
             return;
           }
-          await this.runTerminalCliUpgrade(callbacks);
+          await this.runTerminalCliUpgrade(latestCliVersion, callbacks);
         }
       })
       .catch((err: unknown) => {
@@ -2492,8 +2557,8 @@ export class OpenCodeProcess {
           // Same prerequisite as the regular terminal upgrade: on Windows the
           // managed server holds opencode.exe open, and the manual retry would
           // hit the very file lock this guidance is about.
-          await callbacks.prepareForWindowsCliUpgrade();
-          this.runInTerminal(failure.suggestedCommand, 'OpenCode Update', callbacks);
+          await callbacks.prepareForWindowsCliUpgrade(latestCliVersion);
+          await this.runInTerminal(failure.suggestedCommand, 'OpenCode Update', callbacks);
         }
       })
       .catch((err: unknown) => {
@@ -2609,11 +2674,14 @@ export class OpenCodeProcess {
     throw new Error(reason ? `${reason} (${outcome})` : outcome);
   }
 
-  private async runTerminalCliUpgrade(callbacks: MaybeSuggestCliUpdateCallbacks) {
+  private async runTerminalCliUpgrade(
+    targetVersion: string,
+    callbacks: MaybeSuggestCliUpdateCallbacks
+  ) {
     if (process.platform === 'win32') {
-      await callbacks.prepareForWindowsCliUpgrade();
+      await callbacks.prepareForWindowsCliUpgrade(targetVersion);
     }
-    this.runInTerminal(OpenCodeProcess.CLI_UPGRADE_COMMAND, 'OpenCode Upgrade', callbacks);
+    await this.runInTerminal(OpenCodeProcess.CLI_UPGRADE_COMMAND, 'OpenCode Upgrade', callbacks);
   }
 
   resolveCommand(): string {
@@ -2756,6 +2824,7 @@ export class OpenCodeProcess {
       let stdout = '';
       let stderr = '';
       let settled = false;
+      let timedOut = false;
       let timer: ReturnType<typeof setTimeout> | null = null;
       let proc: ChildProcess | null = null;
       let handleStdout: ((data: Buffer) => void) | null = null;
@@ -2785,15 +2854,13 @@ export class OpenCodeProcess {
 
       try {
         const command = this.resolveCommand();
-        const launch = resolveServerLaunch(command, args);
         const spawnOptions: SpawnOptions = {
           stdio: ['ignore', 'pipe', 'pipe'],
           cwd: this.getWorkspaceCwd(),
           env: this.buildServerEnv(),
           windowsHide: true,
         };
-        if (launch.windowsVerbatimArguments) spawnOptions.windowsVerbatimArguments = true;
-        proc = spawn(launch.command, launch.args, spawnOptions);
+        proc = crossSpawn(command, args, spawnOptions);
 
         handleStdout = (data: Buffer) => {
           stdout += data.toString();
@@ -2807,6 +2874,7 @@ export class OpenCodeProcess {
         proc.stdout?.on('data', handleStdout);
         proc.stderr?.on('data', handleStderr);
         proc.once('error', (err) => {
+          if (timedOut) return;
           finish({
             error: err.message.includes('ENOENT')
               ? new Error(OpenCodeProcess.MISSING_CLI_MESSAGE)
@@ -2814,6 +2882,7 @@ export class OpenCodeProcess {
           });
         });
         proc.once('exit', (code, signal) => {
+          if (timedOut) return;
           if (code === 0) {
             finish({ output: stdout.trim() });
             return;
@@ -2827,10 +2896,14 @@ export class OpenCodeProcess {
 
         timer = setTimeout(() => {
           const runningProc = proc;
-          if (runningProc && runningProc.exitCode === null && runningProc.signalCode === null) {
-            runningProc.kill('SIGKILL');
+          timedOut = true;
+          if (!runningProc) {
+            finish({ error: new Error('OpenCode CLI command timed out') });
+            return;
           }
-          finish({ error: new Error('OpenCode CLI command timed out') });
+          void terminateCliProcessTree(runningProc).then(() => {
+            finish({ error: new Error('OpenCode CLI command timed out') });
+          });
         }, timeoutMs);
       } catch (err) {
         finish({ error: err instanceof Error ? err : new Error(String(err)) });
@@ -2838,12 +2911,12 @@ export class OpenCodeProcess {
     });
   }
 
-  private runInTerminal(
+  private async runInTerminal(
     command: string,
     title: string,
     callbacks: {
       getWorkspaceCwd: () => string | undefined;
-      finishWindowsCliUpgrade?: () => void;
+      finishWindowsCliUpgrade?: () => void | Promise<void>;
     }
   ) {
     const text = command.trim();
@@ -2858,13 +2931,17 @@ export class OpenCodeProcess {
         const disposable = vscode.window.onDidCloseTerminal((closedTerminal) => {
           if (closedTerminal !== terminal) return;
           disposable.dispose();
-          callbacks.finishWindowsCliUpgrade?.();
+          void Promise.resolve(callbacks.finishWindowsCliUpgrade?.()).catch((err: unknown) => {
+            logger.warn(
+              `Failed to finish Windows OpenCode CLI update: ${err instanceof Error ? err.message : String(err)}`
+            );
+          });
         });
       }
       terminal.show(false);
       terminal.sendText(text, true);
     } catch (err) {
-      callbacks.finishWindowsCliUpgrade?.();
+      await callbacks.finishWindowsCliUpgrade?.();
       throw err;
     }
   }

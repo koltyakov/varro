@@ -139,6 +139,7 @@ export function getConfigurationValue(key: string) {
 
 vi.mock('vscode', () => mocks.vscode);
 vi.mock('child_process', () => ({ spawn: mocks.spawn, default: { spawn: mocks.spawn } }));
+vi.mock('cross-spawn', () => ({ default: mocks.spawn, spawn: mocks.spawn }));
 vi.mock('fs/promises', async () => {
   const actual = await vi.importActual<typeof FsPromises>('fs/promises');
   return {

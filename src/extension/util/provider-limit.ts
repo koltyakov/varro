@@ -1,12 +1,12 @@
 /* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type -- Provider API, header, and credential values are decoded before use. */
 /* oxlint-disable anti-slop/no-known-value-widening, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Provider assertions follow credential and numeric quota validation. */
-import { homedir } from 'os';
 import { join } from 'path';
 import type {
   ProviderLimitStatus,
   ProviderLimitUnit,
   ProviderLimitWindow,
 } from '../../shared/protocol';
+import { resolveOpenCodeDataDirectory } from '../../shared/opencode-data-directory';
 import { asRecord, getString } from '../../shared/type-utils';
 
 export type ProviderAuthRecord =
@@ -50,9 +50,8 @@ const DIRECT_WINDOW_DEFS: Array<{ key: string; label: string; unit: ProviderLimi
 
 const DIRECT_CONTAINER_KEYS = ['quota', 'usage', 'rateLimit', 'rateLimits', 'limits', 'billing'];
 
-export function getOpenCodeAuthFilePath(env = process.env, home = homedir()) {
-  const dataHome = env.XDG_DATA_HOME?.trim() || join(home, '.local', 'share');
-  return join(dataHome, 'opencode', 'auth.json');
+export function getOpenCodeAuthFilePath(env = process.env, home?: string) {
+  return join(resolveOpenCodeDataDirectory(env, home), 'auth.json');
 }
 
 export function parseRateLimitResetAt(value: unknown, checkedAt: number) {

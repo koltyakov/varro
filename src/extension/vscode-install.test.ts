@@ -35,7 +35,7 @@ const { createVscodeInstallPlan, selectStaleVsixFiles } = (await import(
 
 describe('VS Code install helper', () => {
   it('uses the pinned cross-spawn Windows command resolver', () => {
-    expect(packageJson.devDependencies['cross-spawn']).toBe('7.0.6');
+    expect(packageJson.dependencies['cross-spawn']).toBe('7.0.6');
   });
 
   it('selects only stale VSIX files for this package', () => {

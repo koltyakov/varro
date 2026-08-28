@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess, type SpawnOptions } from 'child_process';
+import crossSpawn from 'cross-spawn';
 import { mkdtemp, open, readFile, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -7,7 +8,6 @@ import { normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import type { OpenCodeServer } from './server';
 import { assertSessionInCurrentWorkspace } from './session-workspace';
 import { assertValidJson, normalizeCliOutput } from './sidebar-provider-utils';
-import { resolveServerLaunch } from './util/server-launch';
 import { buildServerEnv } from './util/server-path';
 
 const EXPORT_TERMINATION_GRACE_MS = 1_000;
@@ -138,7 +138,6 @@ export class SessionExportService {
       try {
         this.assertWorkspaceUnchanged(normalizeWorkspaceIdentity(workspacePath));
         const command = this.server.resolveCommand();
-        const launch = resolveServerLaunch(command, args);
         const spawnOptions: SpawnOptions = {
           stdio: ['ignore', fileHandle.fd, 'pipe'],
           cwd: workspacePath,
@@ -146,8 +145,7 @@ export class SessionExportService {
           windowsHide: true,
         };
         if (process.platform !== 'win32') spawnOptions.detached = true;
-        if (launch.windowsVerbatimArguments) spawnOptions.windowsVerbatimArguments = true;
-        proc = spawn(launch.command, launch.args, spawnOptions);
+        proc = crossSpawn(command, args, spawnOptions);
 
         proc.stderr?.on('data', (data: Buffer) => {
           stderr += data.toString();

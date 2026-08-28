@@ -18,6 +18,8 @@ OpenCode remains responsible for agents, providers, models, commands, skills, MC
 4. Open a folder in VS Code and select `Varro` from the Activity Bar.
 5. Start a session. Varro starts or connects to OpenCode when needed.
 
+On native Windows, install OpenCode from a Windows terminal because Varro runs it on the local Windows extension host. In a VS Code WSL window, install OpenCode inside that WSL distribution instead. Varro and OpenCode then run on the Linux extension host. OpenCode [recommends WSL for the best Windows experience](https://opencode.ai/docs/windows-wsl), although native Windows is supported. Native OpenCode data, including `auth.json`, logs, and sessions, is under `%USERPROFILE%\.local\share\opencode`.
+
 Varro supports VS Code and VSCodium. Support for other VS Code forks is limited; see [VS Code fork compatibility](https://github.com/koltyakov/varro/blob/main/docs/vscode-forks.md).
 
 ## Why Varro
@@ -122,13 +124,13 @@ Varro shows quota windows and reset times when OpenCode metadata or a supported 
 
 Select the wand in the Source Control toolbar or run `Varro: Generate Commit Message`. Varro uses staged changes if present; otherwise, it uses the unstaged working tree. It follows recent commit style when possible and writes the result to the selected repository's commit input for review.
 
-Varro never mixes staged and unstaged changes, stages files, or commits automatically. It asks before replacing an existing draft, detects source changes during generation, and omits its temporary helper session from chat history.
+Varro never mixes staged and unstaged changes, stages files, or commits automatically. It asks before replacing an existing draft, detects source changes during generation, and omits its temporary helper session from chat history. On native Windows, untracked file paths are included but their contents are omitted because Varro cannot guarantee an atomic no-follow read; tracked unstaged diffs are still included.
 
 ## Server and updates
 
 Varro connects to `http://127.0.0.1:4096` by default. Set `varro.server.port` to another port from 1 through 65535. For manual server management, disable the deprecated debug setting `varro.server.autoStart` and run `opencode serve --port 4096`.
 
-The status bar shows the active OpenCode version and compatible updates. On macOS and Linux, `varro.server.autoUpdate` installs updates only through the OpenCode version tested with the current Varro release. Windows shows an upgrade prompt instead.
+The status bar shows the active OpenCode version and compatible updates. On macOS and Linux, `varro.server.autoUpdate` installs updates only through the OpenCode version tested with the current Varro release. Native Windows does not replace the CLI in the background. It shows an update prompt, waits for active work to finish, and stops a Varro-managed server before opening the update command so Windows releases its lock on `opencode.exe`. Stop a separately managed server yourself before updating.
 
 Varro reloads global OpenCode configuration when OpenCode is idle. Changes to project configuration may require `Varro: Restart Server`. This command waits for active work and only restarts a server managed by Varro. Restart a manually launched server in its terminal.
 

@@ -1,4 +1,5 @@
 import type { DroppedFile } from '../../shared/protocol';
+import { normalizeWorkspaceIdentity } from '../../shared/workspace-path';
 import type { ClipboardImage, NativePdfAttachment } from './app-state-types';
 import { isNumber } from './runtime-values';
 
@@ -26,24 +27,30 @@ export function seedContextFileAttachmentSequences(files: readonly DroppedFile[]
 }
 
 export function getContextFileAttachmentSequence(path: string) {
-  return contextFileAttachmentSequences.get(path);
+  return contextFileAttachmentSequences.get(contextFileKey(path));
 }
 
 export function ensureContextFileAttachmentSequence(path: string, sequence?: number) {
-  const existing = contextFileAttachmentSequences.get(path);
+  const key = contextFileKey(path);
+  const existing = contextFileAttachmentSequences.get(key);
   if (existing !== undefined) return existing;
 
   const next = reserveAttachmentSequence(sequence);
-  contextFileAttachmentSequences.set(path, next);
+  contextFileAttachmentSequences.set(key, next);
   return next;
 }
 
 export function removeContextFileAttachmentSequence(path: string) {
-  contextFileAttachmentSequences.delete(path);
+  contextFileAttachmentSequences.delete(contextFileKey(path));
 }
 
 export function clearContextFileAttachmentSequences() {
   contextFileAttachmentSequences.clear();
+}
+
+function contextFileKey(path: string): string {
+  const normalized = path.replace(/\\/g, '/');
+  return normalizeWorkspaceIdentity(normalized) ?? normalized;
 }
 
 export function seedClipboardImageAttachmentSequences(images: readonly ClipboardImage[]) {

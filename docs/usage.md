@@ -36,6 +36,10 @@ opencode serve --port 4096
 
 If the CLI is installed somewhere that is not on `PATH`, set `varro.server.command` to the executable path.
 
+On native Windows, run the install and authentication commands in PowerShell, Command Prompt, or another Windows terminal. Varro runs on the local Windows extension host and looks for the Windows OpenCode CLI. OpenCode stores native Windows data, including credentials, logs, and sessions, under `%USERPROFILE%\.local\share\opencode`.
+
+OpenCode [recommends WSL for the best Windows experience](https://opencode.ai/docs/windows-wsl). Open the project in a VS Code WSL window, then install and authenticate OpenCode inside that distribution. A WSL window runs Varro and OpenCode on the Linux extension host, where data is under `~/.local/share/opencode`. A CLI installed only on Windows is not available to that host, and a CLI installed only in WSL is not available to a native VS Code window.
+
 ## Workspace And Remote Environments
 
 Varro requires a trusted, non-virtual workspace because it starts a process with access to workspace files. VS Code does not enable the extension in Restricted Mode or virtual workspaces such as repositories opened without a local or remote filesystem checkout.
@@ -45,6 +49,8 @@ Varro is a workspace extension. In Remote SSH, Dev Containers, and similar setup
 - `127.0.0.1`, port `4096`, and a manually started OpenCode server refer to the remote host or container, not your desktop.
 - The OpenCode CLI, `varro.server.command`, provider credentials, and OpenCode configuration must be available on that host.
 - Files dragged from the desktop can use Varro's bounded content-upload fallback when their local paths are unavailable to the remote extension host.
+
+VS Code WSL follows the same rule. Check the lower-left remote indicator before troubleshooting `PATH`, configuration, credentials, or session history. A window with a `WSL` indicator uses the distribution's Linux CLI and files; a normal local window uses the native Windows CLI and files.
 
 ## What Varro Sends As Context
 
@@ -282,7 +288,7 @@ Adapter coverage currently includes Antigravity, Anthropic, OpenAI/Codex, OpenCo
 
 To retrieve quota metadata, the extension host can:
 
-- Read the OpenCode authentication store at `${XDG_DATA_HOME:-~/.local/share}/opencode/auth.json` and provider/model metadata.
+- Read the OpenCode authentication store and provider/model metadata. The default is `${XDG_DATA_HOME:-~/.local/share}/opencode/auth.json` on macOS, Linux, and WSL, and `%USERPROFILE%\.local\share\opencode\auth.json` on native Windows.
 - Read provider-specific local credentials when available: `~/.claude/.credentials.json`, `${CODEX_HOME:-~/.codex}/auth.json` or `CODEX_TOKEN`, `${GEMINI_HOME:-~/.gemini}/oauth_creds.json` or `GEMINI_ACCESS_TOKEN`, and GitHub CLI `hosts.yml` under its configured or default config directory.
 - Contact provider quota or metadata endpoints with those credentials, or inspect supported local metadata and proxy endpoints such as Antigravity and Anthropic status data.
 - Refresh an expired Anthropic OAuth token sourced from `~/.claude/.credentials.json` after an authentication failure and atomically write the refreshed credentials back to that file. OpenCode-sourced Anthropic credentials are not rewritten.
@@ -415,7 +421,7 @@ Varro integrates commit-message generation directly into VS Code Source Control.
 2. Use the quick wand icon in the Source Control toolbar, or run `Varro: Generate Commit Message` from the Command Palette.
 3. Review or edit the generated text in Git's commit input, then commit normally.
 
-Generation is staged-only. Unstaged changes are not sent to the model or described in the result. Varro rejects unresolved merge changes and asks you to stage files when the index is empty.
+Varro uses staged changes when the index is non-empty. If nothing is staged, it uses tracked unstaged changes and untracked files instead. It never mixes the two scopes. Varro rejects unresolved merge changes and reports when neither scope has usable changes.
 
 The model is selected in this order:
 
@@ -427,7 +433,7 @@ The model is selected in this order:
 
 When no explicit route is available, the helper request omits its model and OpenCode uses its default. Right-click a model in the Models view to update the VS Code user setting.
 
-All staged paths, up to the first 100,000 characters of the staged patch, and up to ten recent commit subjects are treated as untrusted input in a temporary tool-disabled session. Split larger staged diffs into smaller commits for the most accurate result. Varro never logs the patch, stages files, or executes the commit. It also rechecks the staged diff and commit input before applying a result, so a slow generation cannot silently overwrite newer work.
+All paths, up to the first 100,000 characters of the selected patch, and up to ten recent commit subjects are treated as untrusted input in a temporary tool-disabled session. Untracked file content has separate per-file and total size limits. On native Windows, Varro includes each untracked path with a `content unavailable` marker but omits its contents because Windows does not provide the atomic no-follow file read used to prevent path replacement during generation. Tracked unstaged diffs are unaffected. Split larger changes into smaller commits for the most accurate result. Varro never logs the patch, stages files, or executes the commit. It also rechecks the selected changes and commit input before applying a result, so a slow generation cannot silently overwrite newer work.
 
 ## Output In The Chat
 
@@ -474,7 +480,7 @@ Editable user messages expose an edit action. Sending the replacement removes th
 - `Varro: Open GitHub`
 - `Varro: Show Output`
 - `Varro: Open Source Control`
-- `Varro: Generate Commit Message` generates from staged changes using the configured VS Code commit-message model, OpenCode `small_model`, OpenAI GPT Luna, GitHub Copilot GPT Luna, or the active chat model at low reasoning, in that order. It fills the selected Git repository's commit input without committing
+- `Varro: Generate Commit Message` generates from staged changes, or from the unstaged working tree when the index is empty, using the configured VS Code commit-message model, OpenCode `small_model`, OpenAI GPT Luna, GitHub Copilot GPT Luna, or the active chat model at low reasoning, in that order. It fills the selected Git repository's commit input without committing
 - `Varro: Open Global AGENTS.md`
 - `Varro: Initialize Project AGENTS.md`
 - `Varro: Add to Context` from Explorer, from the Command Palette (adds the active file), or `Cmd+Shift+K` / `Ctrl+Shift+K` when focus is outside the editor and terminal
@@ -488,7 +494,7 @@ Server:
 - `varro.server.autoStart` - auto-start `opencode serve` when Varro first needs it; defaults to `true` and is marked deprecated/debug-only in VS Code
 - `varro.server.port` - port used for the local OpenCode server (default `4096`); reload the VS Code window after changing it
 - `varro.server.command` - optional path to the OpenCode CLI executable
-- `varro.server.autoUpdate` - automatically install compatible OpenCode CLI updates in the background on macOS and Linux; Windows, or disabling this setting, uses an upgrade prompt instead. Automatic installation is capped at the OpenCode version declared and tested by Varro, and failed automatic updates show tailored recovery guidance.
+- `varro.server.autoUpdate` - automatically install compatible OpenCode CLI updates in the background on macOS and Linux. Native Windows uses an upgrade prompt instead because a running server can lock `opencode.exe`. Before opening a Windows update command, Varro waits for active work and stops its managed server; stop a manually launched server yourself. Automatic installation is capped at the OpenCode version declared and tested by Varro, and failed automatic updates show tailored recovery guidance.
 
 Chat view:
 
@@ -519,6 +525,8 @@ There are also deprecated debug-only settings used for development and recovery 
 - OpenCode CLI missing: install it with `npm install -g opencode-ai`.
 - OpenCode CLI incompatible: `1.16.0` is the runtime floor. `1.18.23` is this release's tested and automatic-update ceiling, not a hard runtime maximum. Newer installed servers are allowed to run, but Varro warns about untested versions and does not offer or automatically install above-ceiling updates by default.
 - CLI not on `PATH`: set `varro.server.command` to the executable path.
+- Windows host mismatch: install OpenCode in Windows for a native VS Code window, or inside the distribution for a VS Code WSL window. Run `Varro: About` and check `Platform` if the active extension host is unclear.
+- Windows update reports a locked file: finish active sessions and close the OpenCode update terminal before retrying. Stop any OpenCode server not managed by Varro yourself.
 - OpenCode already running on another port: update `varro.server.port` and optionally disable `varro.server.autoStart`.
 - No models available: connect a provider from the Models view, run `/connect`, or run `opencode auth login`, then reload providers or reopen Varro.
 - Provider authentication failed: use `Re-authenticate` on the failed response or provider row, complete the API-key or OAuth flow, then send a new prompt. Use terminal setup if the embedded method is unavailable.

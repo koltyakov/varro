@@ -1936,13 +1936,21 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         const disposable = vscode.window.onDidCloseTerminal((closedTerminal) => {
           if (closedTerminal !== terminal) return;
           disposable.dispose();
-          this.server.finishWindowsCliUpgrade();
+          void (async () => {
+            try {
+              await this.server.finishWindowsCliUpgrade();
+            } catch (err) {
+              logger.warn(
+                `Failed to finish Windows OpenCode CLI update: ${err instanceof Error ? err.message : String(err)}`
+              );
+            }
+          })();
         });
       }
       terminal.show(false);
       terminal.sendText(text, true);
     } catch (err) {
-      if (replacesBinary) this.server.finishWindowsCliUpgrade();
+      if (replacesBinary) await this.server.finishWindowsCliUpgrade();
       throw err;
     }
   }

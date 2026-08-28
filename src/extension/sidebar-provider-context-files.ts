@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import { Buffer } from 'buffer';
 import type { DroppedFile, ExtensionMessage, TerminalSelection } from '../shared/protocol';
 import { areContextFilesEqual, mergeContextFile } from '../shared/context-files';
+import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import {
   MAX_NATIVE_PDF_TOTAL_BYTES,
   NATIVE_PDF_MIME,
@@ -68,9 +69,11 @@ export class SidebarProviderContextFiles {
   }
 
   removeContextFile(path: string, post: (message: ExtensionMessage) => void) {
-    const nextFiles = this.contextFiles.filter((f) => f.path !== path);
+    const nextFiles = this.contextFiles.filter(
+      (file) => file.path !== path && !isSameWorkspacePath(file.path, path)
+    );
     if (nextFiles.length === this.contextFiles.length) return;
-    this.removedPaths.set(path, ++this.mutationSequence);
+    this.removedPaths.set(contextPathKey(path), ++this.mutationSequence);
     this.contextFiles = nextFiles;
     void this.droppedFilesService.removeOwnedFile(path);
     post({ type: 'files/removed', payload: { path } });
@@ -154,7 +157,9 @@ export class SidebarProviderContextFiles {
     const updates: DroppedFile[] = [];
     for (const file of files) {
       const incoming = file as DroppedFile;
-      const index = this.contextFiles.findIndex((item) => item.path === incoming.path);
+      const index = this.contextFiles.findIndex(
+        (item) => item.path === incoming.path || isSameWorkspacePath(item.path, incoming.path)
+      );
       if (index === -1) {
         this.contextFiles.push(incoming);
         updates.push(incoming);
@@ -185,13 +190,21 @@ export class SidebarProviderContextFiles {
       return;
     }
 
-    const accepted = files.filter((file) => (this.removedPaths.get(file.path) ?? 0) <= startedAt);
+    const accepted = files.filter(
+      (file) => (this.removedPaths.get(contextPathKey(file.path)) ?? 0) <= startedAt
+    );
     if (accepted.length !== files.length) {
-      const acceptedPaths = new Set(accepted.map((file) => file.path));
+      const acceptedPaths = new Set(accepted.map((file) => contextPathKey(file.path)));
       await this.droppedFilesService.removeOwnedFiles(
-        files.filter((file) => !acceptedPaths.has(file.path)).map((file) => file.path)
+        files
+          .filter((file) => !acceptedPaths.has(contextPathKey(file.path)))
+          .map((file) => file.path)
       );
     }
     if (accepted.length > 0) this.postDroppedFiles(accepted, post);
   }
+}
+
+function contextPathKey(path: string): string {
+  return normalizeWorkspaceIdentity(path) ?? path;
 }
