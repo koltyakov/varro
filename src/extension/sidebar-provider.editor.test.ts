@@ -315,7 +315,7 @@ describe('SidebarProvider editor panels', () => {
     ]);
   });
 
-  it('keeps sidebar and editor workspace selections independent', async () => {
+  it('keeps workspace selections independent while sharing active editor context', async () => {
     const contextProvider = createContextProvider();
     const { provider } = await createSidebarProviderInstance({ contextProvider });
     const { posted } = attachTestView(provider);
@@ -338,7 +338,7 @@ describe('SidebarProvider editor panels', () => {
     expect(lastEditorContext(posted)?.workspacePath).toBe('/repo-b');
     expect(
       lastEditorContext(editor.panel.webview.postMessage.mock.calls.map(([message]) => message))
-    ).toMatchObject({ workspacePath: '/repo', activeFile: null });
+    ).toMatchObject({ workspacePath: '/repo', activeFile: contextProvider.context.activeFile });
 
     editor.receive({ type: 'workspace/select', payload: { path: '/repo-c' } });
     await vi.waitFor(() =>
@@ -951,7 +951,7 @@ describe('SidebarProvider editor panels', () => {
     );
   });
 
-  it('does not expose an external active file to workspace-scoped endpoints', async () => {
+  it('exposes an external active file to workspace-scoped endpoints', async () => {
     const contextProvider = createContextProvider();
     contextProvider.context.workspacePath = '/repo-a';
     const { provider } = await createSidebarProviderInstance({ contextProvider });
@@ -968,11 +968,11 @@ describe('SidebarProvider editor panels', () => {
     };
     provider.post({ type: 'context/update', payload: contextProvider.context });
 
-    expect(lastEditorContext(posted)?.activeFile).toBeNull();
+    expect(lastEditorContext(posted)?.activeFile).toEqual(contextProvider.context.activeFile);
     expect(
       lastEditorContext(editor.panel.webview.postMessage.mock.calls.map(([message]) => message))
         ?.activeFile
-    ).toBeNull();
+    ).toEqual(contextProvider.context.activeFile);
   });
 
   it('runs editor terminal commands in the editor workspace', async () => {

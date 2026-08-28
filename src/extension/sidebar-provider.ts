@@ -1862,20 +1862,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private withWorkspacePath(context: EditorContext, workspacePath: string | null): EditorContext {
-    const activeEditorMatches =
-      context.activeWorkspacePath !== null && context.activeWorkspacePath !== undefined
-        ? isSameWorkspacePath(context.activeWorkspacePath, workspacePath)
-        : !context.activeFile || !workspacePath;
-    if (activeEditorMatches) return { ...context, workspacePath };
-    return {
-      ...context,
-      workspacePath,
-      activeFile: null,
-      selection: null,
-      editorText: null,
-      diagnostics: [],
-      diagnosticsTotal: 0,
-    };
+    return { ...context, workspacePath };
   }
 
   private resolveContextEndpoint(targetViewId?: string | null) {
