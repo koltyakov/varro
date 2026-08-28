@@ -350,7 +350,7 @@ export function getRenderEmptyMessageIds(
     const messageGroups = groups.get(message.info.id) ?? [];
     const groupByPartKey = new Map(
       messageGroups.flatMap((group) =>
-        group.parts.map((part) => [`${part.messageID}\u0000${part.id}`, group] as const)
+        group.parts.map((part) => [getAssistantActivityPartKey(part), group] as const)
       )
     );
     let hasVisibleRowContent = false;

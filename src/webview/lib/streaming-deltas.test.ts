@@ -13,6 +13,10 @@ function captureSchedule() {
   return { scheduleFrame, drain, pendingCount: () => callbacks.length };
 }
 
+function textDelta(item: { messageId: string; partId: string; sessionId?: string; text: string }) {
+  return { ...item, partType: 'text' as const, partStartedAt: 0 };
+}
+
 describe('createStreamingDeltaQueue', () => {
   it('uses a timer when requestAnimationFrame is unavailable', () => {
     vi.useFakeTimers();
@@ -34,29 +38,33 @@ describe('createStreamingDeltaQueue', () => {
   it('stores and retrieves deltas by partId', () => {
     const flush = vi.fn();
     const q = createStreamingDeltaQueue(flush);
-    q.set({ messageId: 'm1', partId: 'p1', text: 'hello' });
+    q.set(textDelta({ messageId: 'm1', partId: 'p1', text: 'hello' }));
 
-    expect(q.get('p1')).toEqual({ messageId: 'm1', partId: 'p1', text: 'hello' });
+    expect(q.get('p1')).toEqual(textDelta({ messageId: 'm1', partId: 'p1', text: 'hello' }));
     expect(q.get('missing')).toBeUndefined();
   });
 
   it('overwrites existing entry with the same partId on set', () => {
     const flush = vi.fn();
     const q = createStreamingDeltaQueue(flush);
-    q.set({ messageId: 'm1', partId: 'p1', text: 'a' });
-    q.set({ messageId: 'm1', partId: 'p1', text: 'b' });
+    q.set(textDelta({ messageId: 'm1', partId: 'p1', text: 'a' }));
+    q.set(textDelta({ messageId: 'm1', partId: 'p1', text: 'b' }));
 
-    expect(q.get('p1')).toEqual({ messageId: 'm1', partId: 'p1', text: 'b' });
+    expect(q.get('p1')).toEqual(textDelta({ messageId: 'm1', partId: 'p1', text: 'b' }));
   });
 
   it('bump updates text for an existing partId', () => {
     const flush = vi.fn();
     const q = createStreamingDeltaQueue(flush);
-    q.set({ messageId: 'm1', partId: 'p1', sessionId: 's1', text: 'old' });
+    q.set(textDelta({ messageId: 'm1', partId: 'p1', sessionId: 's1', text: 'old' }));
     const result = q.bump('p1', 'new');
 
-    expect(result).toEqual({ messageId: 'm1', partId: 'p1', sessionId: 's1', text: 'new' });
-    expect(q.get('p1')).toEqual({ messageId: 'm1', partId: 'p1', sessionId: 's1', text: 'new' });
+    expect(result).toEqual(
+      textDelta({ messageId: 'm1', partId: 'p1', sessionId: 's1', text: 'new' })
+    );
+    expect(q.get('p1')).toEqual(
+      textDelta({ messageId: 'm1', partId: 'p1', sessionId: 's1', text: 'new' })
+    );
   });
 
   it('bump returns null for unknown partId', () => {
@@ -69,8 +77,8 @@ describe('createStreamingDeltaQueue', () => {
   it('takeAll drains all pending deltas', () => {
     const flush = vi.fn();
     const q = createStreamingDeltaQueue(flush);
-    q.set({ messageId: 'm1', partId: 'p1', text: 'a' });
-    q.set({ messageId: 'm2', partId: 'p2', text: 'b' });
+    q.set(textDelta({ messageId: 'm1', partId: 'p1', text: 'a' }));
+    q.set(textDelta({ messageId: 'm2', partId: 'p2', text: 'b' }));
 
     const items = q.takeAll();
     expect(items).toHaveLength(2);
@@ -83,7 +91,7 @@ describe('createStreamingDeltaQueue', () => {
     const flush = vi.fn();
     const q = createStreamingDeltaQueue(flush, scheduleFrame);
 
-    q.set({ messageId: 'm1', partId: 'p1', text: 'a' });
+    q.set(textDelta({ messageId: 'm1', partId: 'p1', text: 'a' }));
     q.scheduleFlush();
     expect(pendingCount()).toBe(1);
 
@@ -124,11 +132,11 @@ describe('createStreamingDeltaQueue', () => {
 
     expect(flush).not.toHaveBeenCalled();
 
-    q.set({ messageId: 'm1', partId: 'p1', text: 'fresh' });
+    q.set(textDelta({ messageId: 'm1', partId: 'p1', text: 'fresh' }));
     q.scheduleFlush();
     drain();
     expect(flush).toHaveBeenCalledTimes(1);
-    expect(q.takeAll()).toEqual([{ messageId: 'm1', partId: 'p1', text: 'fresh' }]);
+    expect(q.takeAll()).toEqual([textDelta({ messageId: 'm1', partId: 'p1', text: 'fresh' })]);
   });
 
   it('takeAll resets flushScheduled so next scheduleFlush queues again', () => {
@@ -136,13 +144,13 @@ describe('createStreamingDeltaQueue', () => {
     const flush = vi.fn();
     const q = createStreamingDeltaQueue(flush, scheduleFrame);
 
-    q.set({ messageId: 'm1', partId: 'p1', text: 'a' });
+    q.set(textDelta({ messageId: 'm1', partId: 'p1', text: 'a' }));
     q.scheduleFlush();
     drain();
     expect(flush).toHaveBeenCalledTimes(1);
 
     q.takeAll();
-    q.set({ messageId: 'm2', partId: 'p2', text: 'b' });
+    q.set(textDelta({ messageId: 'm2', partId: 'p2', text: 'b' }));
     q.scheduleFlush();
     drain();
     expect(flush).toHaveBeenCalledTimes(2);

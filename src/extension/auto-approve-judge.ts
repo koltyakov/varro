@@ -777,12 +777,10 @@ function splitSafeCommandSequence(command: string) {
 function isSafeLocalCommandSegment(command: string, workspacePath: string | undefined) {
   const parsed = parseLiteralShellArguments(command);
   if (!parsed || parsed.length === 0) return false;
-  const args = parsed[0] === 'rtk' ? parsed.slice(1) : parsed;
-  if (args.length === 0) return false;
   return (
-    isSafeBasicInspectionCommand(args) ||
-    isSafeWorkspaceReadCommand(args, workspacePath) ||
-    isSafeGitInspectionCommand(args, workspacePath)
+    isSafeBasicInspectionCommand(parsed) ||
+    isSafeWorkspaceReadCommand(parsed, workspacePath) ||
+    isSafeGitInspectionCommand(parsed, workspacePath)
   );
 }
 

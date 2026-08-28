@@ -206,6 +206,14 @@ describe('session.next.reasoning.ended', () => {
       assistantMessageID: MESSAGE_ID,
       delta: 'partial thought',
     });
+    expect(applyMessagePartDelta).toHaveBeenCalledWith(
+      MESSAGE_ID,
+      REASONING_ID,
+      'partial thought',
+      SESSION_ID,
+      'text',
+      'reasoning'
+    );
     upsertPart.mockClear();
 
     harness.emit('session.next.reasoning.ended', {

@@ -772,20 +772,20 @@ describe('AutoApproveJudge', () => {
         id: 'perm-git-status',
         type: 'bash',
         sessionID: 'session-1',
-        title: 'bash rtk git status --short',
+        title: 'bash git status --short',
       },
       {
         id: 'perm-git-status-log',
         type: 'bash',
         sessionID: 'session-1',
         title:
-          'bash rtk git -C "tmp/opencode" status --short && rtk git -C "tmp/opencode" log --oneline -10',
+          'bash git -C "tmp/opencode" status --short && git -C "tmp/opencode" log --oneline -10',
       },
       {
         id: 'perm-git-diff',
         type: 'bash',
         sessionID: 'session-1',
-        title: 'bash rtk git diff -- src/extension/auto-approve-judge.ts',
+        title: 'bash git diff -- src/extension/auto-approve-judge.ts',
       },
       {
         id: 'perm-git-diff-pathspecs',
@@ -891,6 +891,7 @@ describe('AutoApproveJudge', () => {
   });
 
   it.each([
+    ['unverified command wrapper', 'rtk git status --short'],
     ['outside read', 'cat /etc/hosts'],
     ['recursive symlink traversal', 'ls -RL src'],
     ['du symlink traversal', 'du -aL src'],
@@ -1237,7 +1238,7 @@ describe('AutoApproveJudge', () => {
           id: 'perm-unsafe-git-chain',
           type: 'bash',
           sessionID: 'session-1',
-          title: 'bash rtk git status --short && rtk git reset --hard',
+          title: 'bash git status --short && git reset --hard',
         },
       })
     ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
@@ -1265,7 +1266,7 @@ describe('AutoApproveJudge', () => {
           id: 'perm-git-output',
           type: 'bash',
           sessionID: 'session-1',
-          title: 'bash rtk git diff --output=/tmp/diff.patch',
+          title: 'bash git diff --output=/tmp/diff.patch',
         },
       })
     ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });

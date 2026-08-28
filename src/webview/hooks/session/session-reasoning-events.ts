@@ -123,7 +123,14 @@ export function registerReasoningEventHandlers(ctx: ReasoningEventContext): Arra
         reasoningID,
         (messageID) => {
           ctx.recordSessionMessageSnapshotMutation(sessionID);
-          sessionStore.applyMessagePartDelta(messageID, reasoningID, delta, sessionID, 'text');
+          sessionStore.applyMessagePartDelta(
+            messageID,
+            reasoningID,
+            delta,
+            sessionID,
+            'text',
+            'reasoning'
+          );
         },
         assistantMessageID
       );

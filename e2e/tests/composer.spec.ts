@@ -614,7 +614,7 @@ test('reorders and edits queued follow-up messages in place', async ({ page }) =
   await expect(editingRow.locator('[aria-label="Remove from queue"]')).toBeHidden();
   const cancelEditButton = editingRow.getByRole('button', { name: 'Cancel queued message edit' });
   await expect(cancelEditButton).toBeVisible();
-  await expect(cancelEditButton).toHaveCSS('color', 'rgb(255, 255, 255)');
+  await expect(cancelEditButton).toHaveCSS('color', 'rgb(0, 127, 212)');
   await expect(
     editingRow.getByRole('button', { name: 'Reorder queued message: First follow-up' })
   ).toHaveCSS('visibility', 'visible');

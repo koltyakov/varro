@@ -26,6 +26,9 @@ on:
       - 'src/shared/protocol.ts'
       - 'src/webview/lib/client.ts'
 
+permissions:
+  contents: read
+
 concurrency:
   group: opencode-compatibility-${{ github.ref }}
   cancel-in-progress: true

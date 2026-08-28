@@ -5,6 +5,8 @@ import { isFunction } from './runtime-values';
 type StreamingDelta = {
   messageId: string;
   partId: string;
+  partType: 'text' | 'reasoning';
+  partStartedAt: number;
   sessionId?: string;
   text: string;
 };
@@ -138,16 +140,17 @@ export function flushPendingStreamingDeltasFor(appState: AppStateInstance) {
         item.messageId
       );
       if (msgIdx === -1) continue;
-      appState.setState('messages', msgIdx, 'parts', (parts) => [
-        ...parts,
-        {
-          id: item.partId,
-          messageID: item.messageId,
-          sessionID: item.sessionId || appState.state.messages[msgIdx]!.info.sessionID,
-          type: 'text' as const,
-          text: item.text,
-        },
-      ]);
+      const commonPart = {
+        id: item.partId,
+        messageID: item.messageId,
+        sessionID: item.sessionId || appState.state.messages[msgIdx]!.info.sessionID,
+        text: item.text,
+      };
+      const part =
+        item.partType === 'reasoning'
+          ? { ...commonPart, type: 'reasoning' as const, time: { start: item.partStartedAt } }
+          : { ...commonPart, type: 'text' as const };
+      appState.setState('messages', msgIdx, 'parts', (parts) => [...parts, part]);
       appendedPart = true;
       appState.messageIndex.appendPart(appState.state.messages, item.partId, {
         msgIdx,

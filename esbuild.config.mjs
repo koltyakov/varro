@@ -1,4 +1,5 @@
 import pkg from 'esbuild';
+import { rmSync } from 'fs';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import {
@@ -10,6 +11,8 @@ const { build, context } = pkg;
 const projectRoot = dirname(fileURLToPath(import.meta.url));
 const isWatch = process.argv.includes('--watch');
 const extensionOutfile = resolve(projectRoot, 'dist/extension/extension.js');
+
+rmSync(dirname(extensionOutfile), { force: true, recursive: true });
 
 const verifySelfContainedBundle = {
   name: 'verify-self-contained-extension-bundle',

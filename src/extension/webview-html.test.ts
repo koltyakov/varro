@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { InitialWebviewState } from '../shared/protocol';
 
-const randomBytesMock = vi.hoisted(() => vi.fn(() => Buffer.from('fixed-nonce')));
+const randomBytesMock = vi.hoisted(() => vi.fn());
 
 vi.mock('crypto', () => ({
   default: { randomBytes: randomBytesMock },
@@ -34,7 +34,10 @@ const initialState: InitialWebviewState = {
 
 describe('renderWebviewHtml', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    randomBytesMock.mockReset();
+    randomBytesMock
+      .mockReturnValueOnce(Buffer.from('fixed-nonce'))
+      .mockReturnValueOnce(Buffer.from('fixed-cache-key'));
   });
 
   it('escapes inline state and injects the webview bootstrap assets', () => {
@@ -44,12 +47,12 @@ describe('renderWebviewHtml', () => {
     });
 
     expect(html).toContain(
-      '<link rel="stylesheet" href="webview://assets/webview.css?v=Zml4ZWQtbm9uY2U" />'
+      '<link rel="stylesheet" href="webview://assets/webview.css?v=Zml4ZWQtY2FjaGUta2V5" />'
     );
     expect(html).toContain('role="status" aria-label="Loading workspace"');
     expect(html).not.toContain('Loading workspace...');
     expect(html).toContain(
-      '<script type="module" nonce="Zml4ZWQtbm9uY2U" src="webview://assets/webview.js?v=Zml4ZWQtbm9uY2U"></script>'
+      '<script type="module" nonce="Zml4ZWQtbm9uY2U" src="webview://assets/webview.js?v=Zml4ZWQtY2FjaGUta2V5"></script>'
     );
     expect(html).toContain('window.__initialTheme = window.__initialWebviewState.theme;');
     expect(html).toContain(
@@ -67,10 +70,10 @@ describe('renderWebviewHtml', () => {
     expect(html).toContain('window.__clearVarroBootstrapFailureHandlers = clearHandlers;');
     expect(html).toContain("typeof window.__cleanupVarroBridge === 'function'");
     expect(html.indexOf('window.__clearVarroBootstrapFailureHandlers')).toBeLessThan(
-      html.indexOf('src="webview://assets/webview.js?v=Zml4ZWQtbm9uY2U"')
+      html.indexOf('src="webview://assets/webview.js?v=Zml4ZWQtY2FjaGUta2V5"')
     );
     expect(html.indexOf('role="status" aria-label="Loading workspace"')).toBeLessThan(
-      html.indexOf('src="webview://assets/webview.js?v=Zml4ZWQtbm9uY2U"')
+      html.indexOf('src="webview://assets/webview.js?v=Zml4ZWQtY2FjaGUta2V5"')
     );
   });
 
@@ -151,16 +154,20 @@ describe('renderWebviewHtml', () => {
     expect(scriptSrc).toBe("'nonce-Zml4ZWQtbm9uY2U' vscode-webview-resource:");
   });
 
-  it('reuses the same nonce in the CSP and both inline script tags', () => {
+  it('keeps the CSP nonce out of asset URLs', () => {
     const html = renderWebviewHtml('vscode-webview-resource:', initialState, {
       scriptUri: 'webview.js',
       cssUri: 'webview.css',
     });
     const nonce = html.match(/script-src 'nonce-([^']+)'/)?.[1];
 
-    expect(randomBytesMock).toHaveBeenCalledWith(24);
+    expect(randomBytesMock).toHaveBeenCalledTimes(2);
+    expect(randomBytesMock).toHaveBeenNthCalledWith(1, 24);
+    expect(randomBytesMock).toHaveBeenNthCalledWith(2, 24);
     expect(nonce).toBe('Zml4ZWQtbm9uY2U');
     expect(html.split(`nonce="${nonce}"`).length - 1).toBe(2);
+    expect(html).not.toContain(`?v=${nonce}`);
+    expect(html).toContain('?v=Zml4ZWQtY2FjaGUta2V5');
   });
 
   it('escapes webview asset URIs used in attributes', () => {
@@ -169,7 +176,11 @@ describe('renderWebviewHtml', () => {
       cssUri: 'webview.css?value="<unsafe>&',
     });
 
-    expect(html).toContain('src="webview.js?value=&quot;&lt;unsafe>&amp;&amp;v=Zml4ZWQtbm9uY2U"');
-    expect(html).toContain('href="webview.css?value=&quot;&lt;unsafe>&amp;&amp;v=Zml4ZWQtbm9uY2U"');
+    expect(html).toContain(
+      'src="webview.js?value=&quot;&lt;unsafe>&amp;&amp;v=Zml4ZWQtY2FjaGUta2V5"'
+    );
+    expect(html).toContain(
+      'href="webview.css?value=&quot;&lt;unsafe>&amp;&amp;v=Zml4ZWQtY2FjaGUta2V5"'
+    );
   });
 });

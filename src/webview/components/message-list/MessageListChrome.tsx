@@ -318,7 +318,6 @@ export function LoadingRow(props: { compacting: boolean; visible: boolean }) {
 
   const timer = setInterval(() => {
     setNow(Date.now());
-    if (isStale()) clearInterval(timer);
   }, 1000);
   onCleanup(() => clearInterval(timer));
 

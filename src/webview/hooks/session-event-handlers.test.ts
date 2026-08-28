@@ -1870,7 +1870,8 @@ describe('registerSessionEventHandlers', () => {
       'reason-1',
       'Thinking through the change',
       'session-1',
-      'text'
+      'text',
+      'reasoning'
     );
   });
 
@@ -1912,7 +1913,8 @@ describe('registerSessionEventHandlers', () => {
       'reason-early',
       'Reasoning for the earlier step',
       'session-1',
-      'text'
+      'text',
+      'reasoning'
     );
   });
 
@@ -1962,7 +1964,8 @@ describe('registerSessionEventHandlers', () => {
       'reason-2',
       'New thinking',
       'session-1',
-      'text'
+      'text',
+      'reasoning'
     );
   });
 

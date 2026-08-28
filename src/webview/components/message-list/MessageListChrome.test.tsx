@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
+import { markLoadingActivity, startLoading, stopLoading } from '../../lib/state';
 import { attachmentIcon, mediaImageIcon } from '../../lib/ui-icons';
 import { toCssUrl } from '../UiIcon';
 import type { Permission, QuestionRequest } from '../../types';
@@ -26,6 +27,7 @@ vi.mock('../PermissionPrompt', () => ({
 
 import {
   ChatContentBottomFade,
+  LoadingRow,
   PendingActionRows,
   StickyUserMessagePreviewCard,
   TurnNavigationRail,
@@ -47,6 +49,28 @@ describe('MessageListChrome', () => {
     container = null;
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    stopLoading();
+  });
+
+  it('keeps elapsed time moving after a stale loading session resumes', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-27T12:00:00Z'));
+    startLoading();
+    cleanup = render(() => <LoadingRow compacting={false} visible />, container!);
+
+    vi.advanceTimersByTime(91_000);
+    expect(container?.querySelector('.loading-indicator')?.classList.contains('stale')).toBe(true);
+
+    markLoadingActivity();
+    expect(container?.querySelector('.loading-indicator')?.classList.contains('stale')).toBe(false);
+
+    vi.advanceTimersByTime(10_000);
+    expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('1m 41s');
+
+    stopLoading();
+    startLoading();
+    vi.advanceTimersByTime(10_000);
+    expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('10s');
   });
 
   it('renders the sticky user message preview shell with hidden semantics', () => {

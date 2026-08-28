@@ -119,6 +119,22 @@ describe('state streaming deltas', () => {
     clearStreamingState();
   });
 
+  it('preserves reasoning type when appending a missing streaming part', async () => {
+    upsertMessage({ info: assistantMessage(), parts: [] });
+
+    applyMessagePartDelta('message-1', 'reason-1', 'Planning', 'session-1', 'text', 'reasoning');
+    await nextFrame();
+
+    expect(state.messages[0]?.parts[0]).toMatchObject({
+      id: 'reason-1',
+      messageID: 'message-1',
+      sessionID: 'session-1',
+      type: 'reasoning',
+      text: 'Planning',
+      time: { start: expect.any(Number) },
+    });
+  });
+
   it('commits reasoning deltas superseded by text in the same frame', async () => {
     upsertMessage({
       info: assistantMessage(),

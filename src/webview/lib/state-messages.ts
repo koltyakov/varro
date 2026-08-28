@@ -333,7 +333,8 @@ export function applyMessagePartDelta(
   partId: string,
   delta: string,
   sessionId?: string,
-  field = 'text'
+  field = 'text',
+  fallbackPartType: 'text' | 'reasoning' = 'text'
 ) {
   if (field !== 'text' || !delta) return;
 
@@ -368,6 +369,11 @@ export function applyMessagePartDelta(
   streamingDeltaQueue.set({
     messageId,
     partId,
+    partType:
+      existingPart?.type === 'text' || existingPart?.type === 'reasoning'
+        ? existingPart.type
+        : fallbackPartType,
+    partStartedAt: Date.now(),
     sessionId,
     text: currentStreamingText + delta,
   });

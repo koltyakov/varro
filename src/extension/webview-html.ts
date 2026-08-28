@@ -85,9 +85,10 @@ export function renderWebviewHtml(
   assets: WebviewAssetUris
 ) {
   const nonce = randomNonce();
+  const cacheKey = randomNonce();
   const serializedInitialState = serializeForInlineScript(initialState);
-  const scriptUri = appendCacheKey(assets.scriptUri, nonce);
-  const cssUri = appendCacheKey(assets.cssUri, nonce);
+  const scriptUri = appendCacheKey(assets.scriptUri, cacheKey);
+  const cssUri = appendCacheKey(assets.cssUri, cacheKey);
   const htmlClass =
     initialState.webviewContext?.surface === 'editor'
       ? ' class="varro-editor-surface varro-editor-layout-pending"'
