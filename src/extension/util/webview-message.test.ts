@@ -851,10 +851,11 @@ describe('webview message validation', () => {
     ).toBeNull();
   });
 
-  it('accepts embedded provider reauthentication completion', () => {
-    expect(parseWebviewMessage({ type: 'providers/reauthenticated' })).toEqual({
-      type: 'providers/reauthenticated',
+  it('accepts embedded provider auth changes', () => {
+    expect(parseWebviewMessage({ type: 'providers/auth-changed' })).toEqual({
+      type: 'providers/auth-changed',
     });
+    expect(parseWebviewMessage({ type: 'providers/reauthenticated' })).toBeNull();
   });
 
   it('accepts providers/watch with active state', () => {
@@ -1496,7 +1497,7 @@ describe('parseWebviewMessage protocol coverage', () => {
     'ready',
     'context/request',
     'providers/refresh',
-    'providers/reauthenticated',
+    'providers/auth-changed',
     'terminal-selection/clear',
     'files/clear',
     'files/pick',

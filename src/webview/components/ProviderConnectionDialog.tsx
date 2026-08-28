@@ -254,9 +254,7 @@ export function ProviderConnectionDialog(props: {
     setApiKey('');
     setAuthorizationCode('');
     setInputs({});
-    postMessage(
-      props.reauthentication ? { type: 'providers/reauthenticated' } : { type: 'providers/refresh' }
-    );
+    postMessage({ type: 'providers/auth-changed' });
     props.onClose();
   }
 

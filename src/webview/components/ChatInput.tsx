@@ -3311,6 +3311,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   const hasPendingApproval = () => composerHasActiveQuestion() || composerHasActivePermission();
   const canSend = () =>
+    connectionInitialized() &&
     !state.messagesLoading &&
     (isAbortSlashCommand(inputText()) ||
       (!state.workspaceCatalogReloadPending &&

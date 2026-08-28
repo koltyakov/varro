@@ -33,11 +33,16 @@ function InitializedApp() {
 }
 
 const showChat = () =>
-  defaultAppState.state.serverStatus.state === 'running' &&
+  (defaultAppState.state.serverStatus.state === 'running' ||
+    defaultAppState.state.serverReconnecting) &&
   !(defaultAppState.state.providersLoaded && defaultAppState.state.providers.length === 0);
 
 const isRestoringWorkspace = () =>
-  defaultAppState.state.serverStatus.state === 'running' && !connectionInitialized();
+  defaultAppState.state.serverStatus.state === 'running' &&
+  !defaultAppState.state.serverReconnecting &&
+  !connectionInitialized();
+
+const isReconnecting = () => defaultAppState.state.serverReconnecting && !connectionInitialized();
 
 const hasNoOpenFolder = () => defaultAppState.state.editorContext.workspaceFolders?.length === 0;
 
@@ -96,7 +101,20 @@ export function App() {
             when={defaultAppState.state.restartBlocked}
             fallback={
               <Show when={showChat()} fallback={<ServerStatus />}>
-                <Chat />
+                <div class="contents" inert={isReconnecting()}>
+                  <Chat />
+                </div>
+                <Show when={isReconnecting()}>
+                  <div
+                    class="pointer-events-auto absolute inset-x-0 top-3 z-50 flex justify-center px-3"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <div class="rounded-full border border-vscode-border-soft bg-vscode-card px-3 py-1.5 text-[11px] font-medium text-vscode-fg shadow-md">
+                      Reconnecting to OpenCode
+                    </div>
+                  </div>
+                </Show>
               </Show>
             }
           >

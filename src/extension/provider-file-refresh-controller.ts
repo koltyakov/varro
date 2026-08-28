@@ -89,7 +89,7 @@ export class ProviderFileRefreshController {
     ) {
       return;
     }
-    void this.maybeRestart(this.refreshGeneration, 0);
+    void this.maybeInvalidate(this.refreshGeneration, 0);
   };
 
   constructor(
@@ -190,7 +190,7 @@ export class ProviderFileRefreshController {
       }
       if (this.disposed || generation !== this.refreshGeneration) return;
       this.dependencies.postRefresh();
-      if (this.pendingScope) await this.maybeRestart(generation, 0);
+      if (this.pendingScope) await this.maybeInvalidate(generation, 0);
       return;
     }
     if (
@@ -229,10 +229,10 @@ export class ProviderFileRefreshController {
     await this.markRefreshPending('workspace');
     if (this.disposed || generation !== this.refreshGeneration) return;
     this.dependencies.postRefresh();
-    await this.maybeRestart(generation, 0);
+    await this.maybeInvalidate(generation, 0);
   }
 
-  async acknowledgeEmbeddedReauthentication() {
+  async acknowledgeEmbeddedAuthChange() {
     const generation = ++this.refreshGeneration;
     if (this.refreshTimer) {
       clearTimeout(this.refreshTimer);
@@ -273,13 +273,13 @@ export class ProviderFileRefreshController {
       this.dependencies.clearProviderLimitCache();
       await this.markRefreshPending('global');
       this.dependencies.postRefresh();
-      await this.maybeRestart(generation, 0);
+      await this.maybeInvalidate(generation, 0);
       return;
     }
     if (requireSignatureChange && signature === this.observedFilesSignature) {
       this.authChangePending = false;
       if (this.pendingScope) {
-        await this.maybeRestart(generation, 0);
+        await this.maybeInvalidate(generation, 0);
       }
       return;
     }
@@ -291,7 +291,7 @@ export class ProviderFileRefreshController {
     this.configChangePending = false;
     await this.markRefreshPending('global');
     this.dependencies.postRefresh();
-    await this.maybeRestart(generation, 0);
+    await this.maybeInvalidate(generation, 0);
   }
 
   async readFilesSignature() {
@@ -378,15 +378,11 @@ export class ProviderFileRefreshController {
     }
     this.dependencies.postRefresh();
     if (this.pendingScope) {
-      await this.maybeRestart(generation, 0);
+      await this.maybeInvalidate(generation, 0);
     }
   }
 
-  private async maybeRestart(
-    generation: number,
-    retryCount: number,
-    managedProcessConfirmed = false
-  ) {
+  private async maybeInvalidate(generation: number, retryCount: number) {
     const pendingScope = this.pendingScope;
     if (
       this.disposed ||
@@ -397,20 +393,11 @@ export class ProviderFileRefreshController {
       return;
     }
     if (this.dependencies.server.status.state === 'starting') {
-      this.scheduleRestartRetry(generation, retryCount, false, managedProcessConfirmed);
+      this.scheduleInvalidationRetry(generation, retryCount, false);
       return;
     }
     if (this.dependencies.server.status.state !== 'running') return;
 
-    if (pendingScope === 'global' && !managedProcessConfirmed) {
-      const managedProcess = await this.readManagedServerState();
-      if (this.disposed || generation !== this.refreshGeneration) return;
-      if (managedProcess === null) {
-        this.scheduleRestartRetry(generation, retryCount);
-        return;
-      }
-      managedProcessConfirmed = managedProcess;
-    }
     const idleDirectories =
       pendingScope === 'workspace' ? [...this.pendingWorkspaceDirectories] : [];
     const idleResults = await Promise.all(
@@ -422,35 +409,11 @@ export class ProviderFileRefreshController {
     if (this.disposed || generation !== this.refreshGeneration) return;
     if (idle === false) {
       this.postPendingStatus();
-      this.scheduleRestartRetry(generation, retryCount, false, managedProcessConfirmed);
+      this.scheduleInvalidationRetry(generation, retryCount, false);
       return;
     }
     if (idle === null) {
-      this.scheduleRestartRetry(generation, retryCount, true, managedProcessConfirmed);
-      return;
-    }
-    if (
-      this.disposed ||
-      generation !== this.refreshGeneration ||
-      this.dependencies.server.status.state !== 'running'
-    ) {
-      return;
-    }
-    let stillManaged = false;
-    if (pendingScope === 'global') {
-      const managedState = await this.readManagedServerState();
-      if (this.disposed || generation !== this.refreshGeneration) return;
-      if (managedState === null) {
-        this.scheduleRestartRetry(generation, retryCount, true, managedProcessConfirmed);
-        return;
-      }
-      stillManaged = managedState;
-    }
-    if (
-      this.disposed ||
-      generation !== this.refreshGeneration ||
-      this.dependencies.server.status.state !== 'running'
-    ) {
+      this.scheduleInvalidationRetry(generation, retryCount);
       return;
     }
 
@@ -470,10 +433,18 @@ export class ProviderFileRefreshController {
             )
           );
         }
-      } else if (stillManaged) {
-        await this.dependencies.server.restart();
       } else {
-        await this.dependencies.server.request('POST', '/global/dispose');
+        try {
+          await this.dependencies.server.request('POST', '/global/dispose');
+        } catch (disposeError) {
+          const managedState = await this.readManagedServerState();
+          if (this.disposed || generation !== this.refreshGeneration) return;
+          if (managedState !== true) throw disposeError;
+          logger.warn(
+            `Provider global dispose failed; restarting managed server: ${disposeError instanceof Error ? disposeError.message : String(disposeError)}`
+          );
+          await this.dependencies.server.restart();
+        }
         this.unmanagedServerSynchronized = true;
       }
       if (pendingRevision === this.pendingRevision) {
@@ -497,11 +468,16 @@ export class ProviderFileRefreshController {
       logger.warn(
         `Provider refresh invalidation failed: ${err instanceof Error ? err.message : String(err)}`
       );
-      this.scheduleRestartRetry(generation, retryCount, true, managedProcessConfirmed);
+      this.scheduleInvalidationRetry(generation, retryCount);
     } finally {
       this.invalidationInFlight = false;
-      if (!this.disposed && this.pendingScope) {
-        void this.maybeRestart(this.refreshGeneration, 0);
+      if (
+        !this.disposed &&
+        this.pendingScope &&
+        !this.refreshTimer &&
+        generation !== this.refreshGeneration
+      ) {
+        void this.maybeInvalidate(this.refreshGeneration, 0);
       }
     }
   }
@@ -547,12 +523,7 @@ export class ProviderFileRefreshController {
     }
   }
 
-  private scheduleRestartRetry(
-    generation: number,
-    retryCount: number,
-    bounded = true,
-    managedProcessConfirmed = false
-  ) {
+  private scheduleInvalidationRetry(generation: number, retryCount: number, bounded = true) {
     if (
       this.disposed ||
       generation !== this.refreshGeneration ||
@@ -562,13 +533,13 @@ export class ProviderFileRefreshController {
       return;
     }
     if (bounded && retryCount >= ProviderFileRefreshController.MAX_RETRIES) {
-      logger.info('Provider refresh restart remained deferred after bounded retries');
+      logger.info('Provider refresh invalidation remained deferred after bounded retries');
       return;
     }
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = null;
-      void this.maybeRestart(generation, bounded ? retryCount + 1 : 0, managedProcessConfirmed);
+      void this.maybeInvalidate(generation, bounded ? retryCount + 1 : 0);
     }, ProviderFileRefreshController.RETRY_MS);
   }
 

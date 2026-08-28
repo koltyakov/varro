@@ -34,7 +34,7 @@ export const VALID_WEBVIEW_MESSAGES = {
   ready: { type: 'ready' },
   'context/request': { type: 'context/request' },
   'providers/refresh': { type: 'providers/refresh' },
-  'providers/reauthenticated': { type: 'providers/reauthenticated' },
+  'providers/auth-changed': { type: 'providers/auth-changed' },
   'terminal-selection/clear': { type: 'terminal-selection/clear' },
   'files/clear': { type: 'files/clear' },
   'files/pick': { type: 'files/pick' },

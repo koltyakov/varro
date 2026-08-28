@@ -50,7 +50,7 @@ export interface SidebarProviderActionDeps {
   sessionServer?: Pick<OpenCodeServer, 'getWorkspaceCwd' | 'request'>;
   post(message: ExtensionMessage): void;
   refreshProviders(): Promise<void>;
-  providerReauthenticated(): Promise<void>;
+  providerAuthChanged(): Promise<void>;
   postContext(): void;
   selectWorkspace(path: string): Promise<void>;
   postTerminalSelection(selection: TerminalSelection | null): void;
@@ -139,7 +139,7 @@ export function createSidebarProviderActions(
       await deps.selectWorkspace(path);
     },
     refreshProviders: () => deps.refreshProviders(),
-    providerReauthenticated: () => deps.providerReauthenticated(),
+    providerAuthChanged: () => deps.providerAuthChanged(),
     clearTerminalSelection: () => {
       deps.contextFilesState.setTerminalSelection(null);
       deps.postTerminalSelection(null);

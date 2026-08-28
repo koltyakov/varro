@@ -588,8 +588,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         server: this.server,
         sessionServer: endpointServer,
         post,
-        refreshProviders: () => this.refreshProviderState(),
-        providerReauthenticated: () => this.providerReauthenticated(),
+        refreshProviders: () => this.refreshProviderCatalog(),
+        providerAuthChanged: () => this.providerAuthChanged(),
         postContext: () => post({ type: 'context/update', payload: getEndpointContext() }),
         selectWorkspace: async (path) => {
           const workspacePath = this.contextProvider.getOpenWorkspaceRoot(path);
@@ -1794,12 +1794,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await operation;
   }
 
-  private async refreshProviderState(generation?: number, requireSignatureChange = false) {
-    await this.providerFileRefresh.refreshState(generation, requireSignatureChange);
+  private refreshProviderCatalog() {
+    this.providerLimitService.clearCache();
+    this.post({ type: 'providers/refresh' });
+    return Promise.resolve();
   }
 
-  private async providerReauthenticated() {
-    await this.providerFileRefresh.acknowledgeEmbeddedReauthentication();
+  private async providerAuthChanged() {
+    await this.providerFileRefresh.acknowledgeEmbeddedAuthChange();
   }
 
   private async refreshOpenCodeWorkspaceState(

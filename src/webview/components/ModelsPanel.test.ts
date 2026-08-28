@@ -590,7 +590,7 @@ describe('ModelsPanel', () => {
     expect(document.body.querySelector('[role="dialog"]')).toBeNull();
   });
 
-  it('disconnects the selected provider credential and refreshes providers', async () => {
+  it('disconnects the selected provider credential and reports the auth change', async () => {
     const send = vi.fn();
     window.__sendToExtension = send;
     clientMocks.providerCatalog.mockResolvedValue({
@@ -618,7 +618,7 @@ describe('ModelsPanel', () => {
     await Promise.resolve();
 
     expect(clientMocks.disconnectProvider).toHaveBeenCalledWith('anthropic');
-    expect(send).toHaveBeenCalledWith({ type: 'providers/refresh' });
+    expect(send).toHaveBeenCalledWith({ type: 'providers/auth-changed' });
     expect(document.body.querySelector('[role="dialog"]')).toBeNull();
   });
 
@@ -699,7 +699,7 @@ describe('ModelsPanel', () => {
       },
       { signal: expect.any(AbortSignal) }
     );
-    expect(send).toHaveBeenCalledWith({ type: 'providers/refresh' });
+    expect(send).toHaveBeenCalledWith({ type: 'providers/auth-changed' });
     expect(document.body.querySelector('[role="dialog"]')).toBeNull();
   });
 

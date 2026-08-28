@@ -10,6 +10,7 @@ const appMocks = vi.hoisted(() => ({
   logError: vi.fn(),
   ralphError: { current: null as Error | null },
   useOpenCode: vi.fn(),
+  chatMountCount: 0,
 }));
 
 /* oxlint-disable anti-slop/no-module-mocking -- These tests exercise App's module-level view routing integration. */
@@ -29,7 +30,10 @@ vi.mock('./lib/log', () => ({
 }));
 
 vi.mock('./components/Chat', () => ({
-  Chat: () => 'New Chat',
+  Chat: () => {
+    appMocks.chatMountCount += 1;
+    return 'New Chat';
+  },
 }));
 
 vi.mock('./components/ralph/RalphForm', () => ({
@@ -68,6 +72,7 @@ describe('AppRoot', () => {
     appMocks.logError.mockReset();
     appMocks.postMessage.mockReset().mockReturnValue(true);
     appMocks.useOpenCode.mockReset();
+    appMocks.chatMountCount = 0;
     container = document.createElement('div');
     document.body.appendChild(container);
   });
@@ -140,6 +145,29 @@ describe('AppRoot', () => {
 
     expect(container?.querySelector('[role="status"]')).toBeNull();
     expect(container?.textContent).toContain('New Chat');
+  });
+
+  it('keeps the mounted chat visible while a running server reconnects', () => {
+    setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
+    setConnectionInitialized(true);
+    mountAppRoot();
+
+    expect(appMocks.chatMountCount).toBe(1);
+
+    setState('serverReconnecting', true);
+    setState('serverStatus', { state: 'starting' });
+    setConnectionInitialized(false);
+
+    expect(container?.textContent).toContain('New Chat');
+    expect(container?.textContent).toContain('Reconnecting to OpenCode');
+    expect(appMocks.chatMountCount).toBe(1);
+
+    setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
+    setConnectionInitialized(true);
+    setState('serverReconnecting', false);
+
+    expect(container?.textContent).not.toContain('Reconnecting to OpenCode');
+    expect(appMocks.chatMountCount).toBe(1);
   });
 
   it('suggests opening a folder and opens the native folder picker', () => {

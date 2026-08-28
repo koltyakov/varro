@@ -141,7 +141,7 @@ function createActionFixture() {
     setMermaidPreviewOpen: vi.fn(),
     setActiveRoute: vi.fn(),
     refreshProviders: vi.fn(() => Promise.resolve()),
-    providerReauthenticated: vi.fn(() => Promise.resolve()),
+    providerAuthChanged: vi.fn(() => Promise.resolve()),
     postContext: vi.fn(),
     selectWorkspace: vi.fn(() => Promise.resolve()),
     postTerminalSelection: vi.fn(),
@@ -353,6 +353,7 @@ describe('createSidebarProviderActions', () => {
     actions.setProviderWatchActive(true);
     actions.requestContext();
     await actions.refreshProviders();
+    await actions.providerAuthChanged();
     actions.showOutput();
     actions.clearTerminalSelection();
     actions.runInTerminal('npm test', 'Tests');
@@ -375,6 +376,7 @@ describe('createSidebarProviderActions', () => {
     expect(deps.setProviderWatchActive).toHaveBeenCalledWith(true);
     expect(deps.postContext).toHaveBeenCalledTimes(2);
     expect(deps.refreshProviders).toHaveBeenCalledOnce();
+    expect(deps.providerAuthChanged).toHaveBeenCalledOnce();
     expect(mocks.logger.show).toHaveBeenCalledOnce();
     expect(deps.postTerminalSelection).toHaveBeenNthCalledWith(1, {
       text: 'npm test',

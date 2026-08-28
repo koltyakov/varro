@@ -400,7 +400,7 @@ describe('ProviderConnectionDialog API key flow', () => {
     expect(primaryButton().disabled).toBe(false);
   });
 
-  it('connects with the trimmed key, refreshes providers, and clears failure notices', async () => {
+  it('connects with the trimmed key, reports the auth change, and clears failure notices', async () => {
     markProviderAuthFailure('openai', 'message-1');
     expect(providerRequiresReconnection('openai')).toBe(true);
     const onClose = renderDialog();
@@ -414,12 +414,12 @@ describe('ProviderConnectionDialog API key flow', () => {
       { providerID: 'openai', key: 'sk-test', metadata: {} },
       { signal: expect.any(AbortSignal) }
     );
-    expect(postMessageMock).toHaveBeenCalledWith({ type: 'providers/refresh' });
+    expect(postMessageMock).toHaveBeenCalledWith({ type: 'providers/auth-changed' });
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(providerRequiresReconnection('openai')).toBe(false);
   });
 
-  it('posts providers/reauthenticated when reconnecting a locked provider', async () => {
+  it('posts providers/auth-changed when reconnecting a locked provider', async () => {
     const onClose = renderDialog({
       initialProviderID: 'openai',
       lockProvider: true,
@@ -432,7 +432,7 @@ describe('ProviderConnectionDialog API key flow', () => {
     primaryButton().click();
     await flush();
 
-    expect(postMessageMock).toHaveBeenCalledWith({ type: 'providers/reauthenticated' });
+    expect(postMessageMock).toHaveBeenCalledWith({ type: 'providers/auth-changed' });
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
@@ -618,7 +618,7 @@ describe('ProviderConnectionDialog OAuth flow', () => {
     completion.resolve(true);
     await flush();
 
-    expect(postMessageMock).toHaveBeenCalledWith({ type: 'providers/refresh' });
+    expect(postMessageMock).toHaveBeenCalledWith({ type: 'providers/auth-changed' });
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
@@ -687,7 +687,7 @@ describe('ProviderConnectionDialog OAuth flow', () => {
       { providerID: 'anthropic', method: 0, code: 'GHIJ-7890' },
       { signal: expect.any(AbortSignal) }
     );
-    expect(postMessageMock).toHaveBeenCalledWith({ type: 'providers/refresh' });
+    expect(postMessageMock).toHaveBeenCalledWith({ type: 'providers/auth-changed' });
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 

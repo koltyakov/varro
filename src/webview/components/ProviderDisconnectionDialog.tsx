@@ -83,7 +83,7 @@ export function ProviderDisconnectionDialog(props: {
     setErrorMessage('');
     try {
       await client.config.disconnectProvider(provider.id);
-      postMessage({ type: 'providers/refresh' });
+      postMessage({ type: 'providers/auth-changed' });
       props.onClose();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));

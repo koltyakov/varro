@@ -53,6 +53,8 @@ export function createMountBridgeOperations(deps: {
     handleExtensionMessageWithDependencies(
       {
         setServerStatus: (payload) => appStore.setState('serverStatus', payload),
+        setServerReconnecting: (reconnecting) =>
+          appStore.setState('serverReconnecting', reconnecting),
         setRestartBlocked: (payload) => {
           if (payload?.checkId !== undefined && appStore.state.restartBlocked === null) return;
           appStore.setState('restartBlocked', payload);
@@ -144,6 +146,7 @@ export function createMountBridgeOperations(deps: {
 export function handleExtensionMessageWithDependencies(
   deps: {
     setServerStatus(payload: Extract<ExtensionMessage, { type: 'server/status' }>['payload']): void;
+    setServerReconnecting?(reconnecting: boolean): void;
     setRestartBlocked?(
       payload: Extract<ExtensionMessage, { type: 'server/restart-blocked' }>['payload'] | null
     ): void;
@@ -205,6 +208,11 @@ export function handleExtensionMessageWithDependencies(
   switch (msg.type) {
     case 'server/status': {
       const previousServerState = deps.getServerState();
+      if (previousServerState === 'running' && msg.payload.state === 'starting') {
+        deps.setServerReconnecting?.(true);
+      } else if (msg.payload.state === 'stopped' || msg.payload.state === 'error') {
+        deps.setServerReconnecting?.(false);
+      }
       deps.setServerStatus(msg.payload);
       if (msg.payload.state === 'starting' || msg.payload.state === 'running') {
         deps.setRestartBlocked?.(null);

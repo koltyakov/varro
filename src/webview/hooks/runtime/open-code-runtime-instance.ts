@@ -1956,6 +1956,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     setInitialized: (value) => {
       initialized = value;
       uiStore.setConnectionInitialized(value);
+      if (value) appStore.setState('serverReconnecting', false);
     },
     setError: uiStore.setError,
     nextConnectionGeneration: () => ++connectionGeneration,

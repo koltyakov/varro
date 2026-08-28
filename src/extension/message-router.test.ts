@@ -32,7 +32,7 @@ function createCallbacks(): MessageRouterCallbacks {
     requestContext: vi.fn(),
     selectWorkspace: vi.fn(() => Promise.resolve()),
     refreshProviders: vi.fn(() => Promise.resolve()),
-    providerReauthenticated: vi.fn(() => Promise.resolve()),
+    providerAuthChanged: vi.fn(() => Promise.resolve()),
     clearTerminalSelection: vi.fn(),
     runInTerminal: vi.fn(),
     openSessionInOpenCode: vi.fn(),
@@ -219,11 +219,11 @@ describe('MessageRouter', () => {
     expect(cb.refreshProviders).toHaveBeenCalledOnce();
   });
 
-  it('dispatches providers/reauthenticated', async () => {
+  it('dispatches providers/auth-changed', async () => {
     const cb = createCallbacks();
     const router = new MessageRouter(cb);
-    await router.handleMessage({ type: 'providers/reauthenticated' });
-    expect(cb.providerReauthenticated).toHaveBeenCalledOnce();
+    await router.handleMessage({ type: 'providers/auth-changed' });
+    expect(cb.providerAuthChanged).toHaveBeenCalledOnce();
   });
 
   it('dispatches terminal-selection/clear', async () => {
@@ -459,7 +459,7 @@ const DISPATCH_EXPECTATIONS = {
   ready: [{ callback: 'ready', args: [] }],
   'context/request': [{ callback: 'requestContext', args: [] }],
   'providers/refresh': [{ callback: 'refreshProviders', args: [] }],
-  'providers/reauthenticated': [{ callback: 'providerReauthenticated', args: [] }],
+  'providers/auth-changed': [{ callback: 'providerAuthChanged', args: [] }],
   'terminal-selection/clear': [{ callback: 'clearTerminalSelection', args: [] }],
   'files/clear': [
     { callback: 'clearContextFiles', args: [] },

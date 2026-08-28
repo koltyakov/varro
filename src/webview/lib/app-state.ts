@@ -101,6 +101,7 @@ import { createStreamingDeltaQueue, flushPendingStreamingDeltasFor } from './str
 
 export interface AppState {
   serverStatus: ServerStatus;
+  serverReconnecting: boolean;
   restartBlocked: RestartBlockedState | null;
   providersLoaded: boolean;
   workspaceCatalogReloadPending: boolean;
@@ -332,6 +333,7 @@ export function createAppState(): AppStateInstance {
 
   const [state, setState] = createStore<AppState>({
     serverStatus: initialWebviewState.serverStatus ?? { state: 'stopped' },
+    serverReconnecting: false,
     restartBlocked: null,
     providersLoaded: false,
     workspaceCatalogReloadPending: false,

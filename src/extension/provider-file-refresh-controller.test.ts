@@ -186,6 +186,10 @@ function watcherMocks(): WatcherMock[] {
   );
 }
 
+function globalDisposeCallCount(h: Harness) {
+  return h.server.request.mock.calls.filter(([, path]) => path === '/global/dispose').length;
+}
+
 describe('ProviderFileRefreshController', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -213,7 +217,7 @@ describe('ProviderFileRefreshController', () => {
       expect(h.fileSystem.stat).not.toHaveBeenCalled();
     });
 
-    it('restores a v3 auth-sourced pending refresh and cancels it on embedded reauthentication', async () => {
+    it('restores a v3 auth-sourced pending refresh and cancels it on embedded auth change', async () => {
       const h = createHarness({
         persisted: { version: 3, scope: 'global', revalidateAuth: true, source: 'auth' },
       });
@@ -221,7 +225,7 @@ describe('ProviderFileRefreshController', () => {
       h.controller.postStatus();
       expect(h.postPendingStatus).toHaveBeenCalledWith(true);
 
-      await h.controller.acknowledgeEmbeddedReauthentication();
+      await h.controller.acknowledgeEmbeddedAuthChange();
 
       expect(h.persistence.remove).toHaveBeenCalledWith(PENDING_STATE_KEY);
       expect(h.postPendingStatus).toHaveBeenCalledWith(false);
@@ -262,7 +266,8 @@ describe('ProviderFileRefreshController', () => {
       emitStatusEvent(h.server, { state: 'running', url: 'http://127.0.0.1:4096' });
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(h.server.restart).toHaveBeenCalledOnce();
+      expect(h.server.request).toHaveBeenCalledWith('POST', '/global/dispose');
+      expect(h.server.restart).not.toHaveBeenCalled();
       expect(h.persistence.remove).toHaveBeenCalledWith(PENDING_STATE_KEY);
       expect(h.postPendingStatus).toHaveBeenCalledWith(false);
     });
@@ -356,7 +361,8 @@ describe('ProviderFileRefreshController', () => {
       h.controller.setActive(true);
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(h.server.restart).toHaveBeenCalledOnce();
+      expect(h.server.request).toHaveBeenCalledWith('POST', '/global/dispose');
+      expect(h.server.restart).not.toHaveBeenCalled();
       expect(h.persistence.set).toHaveBeenCalledWith(
         PENDING_STATE_KEY,
         expect.objectContaining({ scope: 'global' })
@@ -416,7 +422,8 @@ describe('ProviderFileRefreshController', () => {
       expect(h.clearProviderLimitCache).not.toHaveBeenCalled();
 
       await vi.advanceTimersByTimeAsync(1);
-      expect(h.server.restart).toHaveBeenCalledOnce();
+      expect(h.server.request).toHaveBeenCalledWith('POST', '/global/dispose');
+      expect(h.server.restart).not.toHaveBeenCalled();
       expect(h.clearProviderLimitCache).toHaveBeenCalled();
       expect(h.postRefresh).toHaveBeenCalled();
       expect(h.persistence.set).toHaveBeenCalledWith(PENDING_STATE_KEY, {
@@ -440,7 +447,8 @@ describe('ProviderFileRefreshController', () => {
 
       await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
 
-      expect(h.server.restart).toHaveBeenCalledOnce();
+      expect(globalDisposeCallCount(h)).toBe(1);
+      expect(h.server.restart).not.toHaveBeenCalled();
       expect(h.persistence.set).toHaveBeenCalledTimes(1);
     });
 
@@ -468,12 +476,14 @@ describe('ProviderFileRefreshController', () => {
       h.fileSystem.files.set(CONFIG_PATHS[1], 'v2');
       fireWatcherEvent(1, 'onDidCreate');
       await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
-      expect(h.server.restart).toHaveBeenCalledTimes(1);
+      expect(globalDisposeCallCount(h)).toBe(1);
+      expect(h.server.restart).not.toHaveBeenCalled();
 
       h.fileSystem.files.delete(AUTH_PATH);
       fireWatcherEvent(3, 'onDidDelete');
       await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
-      expect(h.server.restart).toHaveBeenCalledTimes(2);
+      expect(globalDisposeCallCount(h)).toBe(2);
+      expect(h.server.restart).not.toHaveBeenCalled();
     });
 
     it('revalidates auth after an auth-only change', async () => {
@@ -485,7 +495,8 @@ describe('ProviderFileRefreshController', () => {
 
       await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
 
-      expect(h.server.restart).toHaveBeenCalledOnce();
+      expect(h.server.request).toHaveBeenCalledWith('POST', '/global/dispose');
+      expect(h.server.restart).not.toHaveBeenCalled();
       expect(h.persistence.set).toHaveBeenCalledWith(PENDING_STATE_KEY, {
         version: 3,
         scope: 'global',
@@ -512,7 +523,8 @@ describe('ProviderFileRefreshController', () => {
         revalidateAuth: true,
         source: 'config',
       });
-      expect(h.server.restart).toHaveBeenCalledOnce();
+      expect(h.server.request).toHaveBeenCalledWith('POST', '/global/dispose');
+      expect(h.server.restart).not.toHaveBeenCalled();
       expect(h.postRefresh).toHaveBeenLastCalledWith({ revalidateAuth: true });
     });
 
@@ -525,13 +537,51 @@ describe('ProviderFileRefreshController', () => {
         PENDING_STATE_KEY,
         expect.objectContaining({ scope: 'global' })
       );
-      expect(h.server.restart).toHaveBeenCalledOnce();
+      expect(h.server.request).toHaveBeenCalledWith('POST', '/global/dispose');
+      expect(h.server.restart).not.toHaveBeenCalled();
       expect(h.postRefresh).toHaveBeenCalled();
+    });
+
+    it('preserves a concurrent config change while global dispose is in flight', async () => {
+      const h = createHarness({ files: { [CONFIG_PATHS[0]]: 'c1' } });
+      await activateWatching(h);
+      resetCalls(h);
+      let resolveFirstDispose!: () => void;
+      h.server.request.mockImplementation(async (_method: string, path: string) => {
+        if (path === '/session/status') return {};
+        if (path === '/question' || path === '/permission') return [];
+        if (path === '/global/dispose' && globalDisposeCallCount(h) === 1) {
+          return new Promise<undefined>((resolve) => {
+            resolveFirstDispose = () => resolve(undefined);
+          });
+        }
+        return undefined;
+      });
+
+      h.fileSystem.files.set(CONFIG_PATHS[0], 'c2');
+      fireWatcherEvent(0);
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+      expect(globalDisposeCallCount(h)).toBe(1);
+
+      h.fileSystem.files.set(CONFIG_PATHS[0], 'c3');
+      fireWatcherEvent(0);
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+      expect(globalDisposeCallCount(h)).toBe(1);
+      expect(h.persistence.set).toHaveBeenCalledTimes(2);
+      expect(h.persistence.remove).not.toHaveBeenCalled();
+
+      resolveFirstDispose();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(globalDisposeCallCount(h)).toBe(2);
+      expect(h.persistence.remove).toHaveBeenCalledOnce();
+      expect(h.values.has(PENDING_STATE_KEY)).toBe(false);
+      expect(h.server.restart).not.toHaveBeenCalled();
     });
   });
 
-  describe('restart scheduling', () => {
-    it('refreshes the UI immediately and defers the restart until the server is idle', async () => {
+  describe('invalidation scheduling', () => {
+    it('refreshes the UI immediately and defers invalidation until the server is idle', async () => {
       const h = createHarness({ files: { [CONFIG_PATHS[0]]: 'v1' } });
       await activateWatching(h);
       resetCalls(h);
@@ -547,12 +597,13 @@ describe('ProviderFileRefreshController', () => {
       h.setIdle(true);
       await vi.advanceTimersByTimeAsync(RETRY_MS);
 
-      expect(h.server.restart).toHaveBeenCalledOnce();
+      expect(h.server.request).toHaveBeenCalledWith('POST', '/global/dispose');
+      expect(h.server.restart).not.toHaveBeenCalled();
       expect(h.postPendingStatus).toHaveBeenCalledWith(false);
       expect(h.persistence.remove).toHaveBeenCalledWith(PENDING_STATE_KEY);
     });
 
-    it('waits while the server is starting and restarts once it is running', async () => {
+    it('waits while the server is starting and invalidates once it is running', async () => {
       const h = createHarness({ files: { [CONFIG_PATHS[0]]: 'v1' } });
       await activateWatching(h);
       resetCalls(h);
@@ -568,7 +619,8 @@ describe('ProviderFileRefreshController', () => {
       h.server.status = { state: 'running', url: 'http://127.0.0.1:4096' };
       await vi.advanceTimersByTimeAsync(RETRY_MS);
 
-      expect(h.server.restart).toHaveBeenCalledOnce();
+      expect(h.server.request).toHaveBeenCalledWith('POST', '/global/dispose');
+      expect(h.server.restart).not.toHaveBeenCalled();
     });
 
     it('does not schedule retries while the server is stopped', async () => {
@@ -592,45 +644,95 @@ describe('ProviderFileRefreshController', () => {
       resetCalls(h);
       h.fileSystem.files.set(CONFIG_PATHS[0], 'v2');
       h.server.readServerInfo.mockRejectedValue(new Error('unavailable'));
+      h.server.request.mockImplementation(async (_method: string, path: string) => {
+        if (path === '/session/status') return {};
+        if (path === '/question' || path === '/permission') return [];
+        if (path === '/global/dispose') throw new Error('dispose unavailable');
+        return undefined;
+      });
 
       await h.controller.refreshState();
       await vi.advanceTimersByTimeAsync(10 * RETRY_MS);
 
       expect(h.server.readServerInfo).toHaveBeenCalledTimes(6);
+      expect(globalDisposeCallCount(h)).toBe(6);
       expect(h.server.restart).not.toHaveBeenCalled();
+      expect(h.values.has(PENDING_STATE_KEY)).toBe(true);
       expect(loggerMock.info).toHaveBeenCalledWith(
-        'Provider refresh restart remained deferred after bounded retries'
+        'Provider refresh invalidation remained deferred after bounded retries'
       );
     });
 
-    it('warns and recovers when the invalidation request fails', async () => {
+    it('restarts a managed server when global dispose fails', async () => {
       const h = createHarness({ files: { [CONFIG_PATHS[0]]: 'v1' } });
       await h.controller.initializeSignature();
       h.fileSystem.files.set(CONFIG_PATHS[0], 'v2');
-      h.server.restart.mockRejectedValueOnce(new Error('restart failed'));
+      h.server.request.mockImplementation(async (_method: string, path: string) => {
+        if (path === '/session/status') return {};
+        if (path === '/question' || path === '/permission') return [];
+        if (path === '/global/dispose') throw new Error('dispose failed');
+        return undefined;
+      });
 
       await h.controller.refreshState();
-      await vi.advanceTimersByTimeAsync(0);
 
       expect(loggerMock.warn).toHaveBeenCalledWith(
-        'Provider refresh invalidation failed: restart failed'
+        'Provider global dispose failed; restarting managed server: dispose failed'
       );
-      expect(h.server.restart).toHaveBeenCalledTimes(2);
+      expect(h.server.readServerInfo).toHaveBeenCalledOnce();
+      expect(
+        h.server.request.mock.invocationCallOrder.find(
+          (_, index) => h.server.request.mock.calls[index]?.[1] === '/global/dispose'
+        )
+      ).toBeLessThan(
+        h.server.readServerInfo.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER
+      );
+      expect(h.server.restart).toHaveBeenCalledOnce();
       expect(h.persistence.remove).toHaveBeenCalledWith(PENDING_STATE_KEY);
-
-      await vi.advanceTimersByTimeAsync(RETRY_MS);
-      expect(h.server.restart).toHaveBeenCalledTimes(2);
     });
 
-    it('invalidates an unmanaged server through global dispose without restarting', async () => {
-      const h = createHarness({ files: { [CONFIG_PATHS[0]]: 'v1' }, managedProcess: false });
+    it('keeps an unmanaged failed dispose pending without restarting', async () => {
+      const h = createHarness({ files: { [CONFIG_PATHS[0]]: 'v1' } });
+      await activateWatching(h);
+      resetCalls(h);
+      h.server.readServerInfo.mockResolvedValue({ managedProcess: false });
+      h.server.request.mockImplementation(async (_method: string, path: string) => {
+        if (path === '/session/status') return {};
+        if (path === '/question' || path === '/permission') return [];
+        if (path === '/global/dispose') throw new Error('dispose failed');
+        return undefined;
+      });
+      h.fileSystem.files.set(CONFIG_PATHS[0], 'v2');
+
+      await h.controller.refreshState();
+
+      expect(globalDisposeCallCount(h)).toBe(1);
+      expect(h.server.readServerInfo).toHaveBeenCalledOnce();
+      expect(h.server.restart).not.toHaveBeenCalled();
+      expect(h.values.has(PENDING_STATE_KEY)).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(RETRY_MS);
+      expect(globalDisposeCallCount(h)).toBe(2);
+      expect(h.server.restart).not.toHaveBeenCalled();
+      expect(h.values.has(PENDING_STATE_KEY)).toBe(true);
+    });
+
+    it('invalidates a managed server through global dispose without restarting', async () => {
+      const h = createHarness({ files: { [CONFIG_PATHS[0]]: 'v1' }, managedProcess: true });
       await h.controller.initializeSignature();
       h.fileSystem.files.set(CONFIG_PATHS[0], 'v2');
 
       await h.controller.refreshState();
       await vi.advanceTimersByTimeAsync(0);
 
+      expect(h.server.request.mock.calls.slice(0, 4).map(([, path]) => path)).toEqual([
+        '/session/status',
+        '/question',
+        '/permission',
+        '/global/dispose',
+      ]);
       expect(h.server.request).toHaveBeenCalledWith('POST', '/global/dispose');
+      expect(h.server.readServerInfo).not.toHaveBeenCalled();
       expect(h.server.restart).not.toHaveBeenCalled();
       expect(h.persistence.remove).toHaveBeenCalledWith(PENDING_STATE_KEY);
       expect(h.postRefresh).toHaveBeenCalled();
@@ -648,7 +750,8 @@ describe('ProviderFileRefreshController', () => {
       expect(loggerMock.warn).toHaveBeenCalledWith(
         'Failed to persist provider refresh state: disk full'
       );
-      expect(h.server.restart).toHaveBeenCalledOnce();
+      expect(h.server.request).toHaveBeenCalledWith('POST', '/global/dispose');
+      expect(h.server.restart).not.toHaveBeenCalled();
       expect(h.postRefresh).toHaveBeenCalled();
     });
 
@@ -664,7 +767,8 @@ describe('ProviderFileRefreshController', () => {
       expect(loggerMock.warn).toHaveBeenCalledWith(
         'Failed to clear provider refresh state: locked'
       );
-      expect(h.server.restart).toHaveBeenCalledOnce();
+      expect(h.server.request).toHaveBeenCalledWith('POST', '/global/dispose');
+      expect(h.server.restart).not.toHaveBeenCalled();
       expect(h.postRefresh).toHaveBeenCalled();
     });
   });
@@ -798,8 +902,8 @@ describe('ProviderFileRefreshController', () => {
     });
   });
 
-  describe('embedded reauthentication', () => {
-    it('clears a deferred auth-only restart without restarting the server', async () => {
+  describe('embedded auth changes', () => {
+    it('clears a deferred auth-only invalidation without restarting the server', async () => {
       const h = createHarness({ files: { [AUTH_PATH]: 'a1' } });
       await activateWatching(h);
       resetCalls(h);
@@ -811,7 +915,7 @@ describe('ProviderFileRefreshController', () => {
       expect(h.postPendingStatus).toHaveBeenCalledWith(true);
       expect(h.server.restart).not.toHaveBeenCalled();
 
-      await h.controller.acknowledgeEmbeddedReauthentication();
+      await h.controller.acknowledgeEmbeddedAuthChange();
 
       expect(h.persistence.remove).toHaveBeenCalledWith(PENDING_STATE_KEY);
       expect(h.postPendingStatus).toHaveBeenCalledWith(false);
@@ -825,7 +929,23 @@ describe('ProviderFileRefreshController', () => {
       expect(h.server.request).not.toHaveBeenCalledWith('POST', '/instance/dispose');
     });
 
-    it('preserves a concurrent config change across reauthentication', async () => {
+    it('ignores a late auth watcher event after embedded acknowledgement', async () => {
+      const h = createHarness({ files: { [AUTH_PATH]: 'a1' } });
+      await activateWatching(h);
+      h.fileSystem.files.set(AUTH_PATH, 'a2');
+
+      await h.controller.acknowledgeEmbeddedAuthChange();
+      resetCalls(h);
+      fireWatcherEvent(3);
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+
+      expect(h.persistence.set).not.toHaveBeenCalled();
+      expect(h.server.request).not.toHaveBeenCalled();
+      expect(h.server.restart).not.toHaveBeenCalled();
+      expect(h.postRefresh).not.toHaveBeenCalled();
+    });
+
+    it('preserves a concurrent config change across embedded acknowledgement', async () => {
       const h = createHarness({ files: { [AUTH_PATH]: 'a1', [CONFIG_PATHS[0]]: 'c1' } });
       await activateWatching(h);
       resetCalls(h);
@@ -834,9 +954,10 @@ describe('ProviderFileRefreshController', () => {
       fireWatcherEvent(3);
       fireWatcherEvent(0);
 
-      await h.controller.acknowledgeEmbeddedReauthentication();
+      await h.controller.acknowledgeEmbeddedAuthChange();
 
-      expect(h.server.restart).toHaveBeenCalledOnce();
+      expect(h.server.request).toHaveBeenCalledWith('POST', '/global/dispose');
+      expect(h.server.restart).not.toHaveBeenCalled();
       expect(h.persistence.set).toHaveBeenCalledWith(
         PENDING_STATE_KEY,
         expect.objectContaining({ scope: 'global' })
@@ -1016,7 +1137,8 @@ describe('ProviderFileRefreshController', () => {
       h.controller.setActive(true);
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(h.server.restart).toHaveBeenCalledOnce();
+      expect(h.server.request).toHaveBeenCalledWith('POST', '/global/dispose');
+      expect(h.server.restart).not.toHaveBeenCalled();
       expect(h.persistence.set).toHaveBeenCalledWith(
         PENDING_STATE_KEY,
         expect.objectContaining({ scope: 'global' })

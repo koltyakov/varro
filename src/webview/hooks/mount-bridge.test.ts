@@ -344,6 +344,60 @@ describe('mount bridge helpers', () => {
     expect(ensureConnectionInitialized).toHaveBeenCalledTimes(1);
   });
 
+  it('marks only a running-to-starting transition as a reconnect', () => {
+    const setServerReconnecting = vi.fn();
+    let serverState: Extract<ExtensionMessage, { type: 'server/status' }>['payload']['state'] =
+      'running';
+    const deps = {
+      setServerStatus: (
+        payload: Extract<ExtensionMessage, { type: 'server/status' }>['payload']
+      ) => {
+        serverState = payload.state;
+      },
+      setServerReconnecting,
+      clearError: vi.fn(),
+      ensureConnectionInitialized: vi.fn(),
+      getServerState: () => serverState,
+      invalidateConnection: vi.fn(),
+      clearProvidersState: vi.fn(),
+      setTheme: vi.fn(),
+      setConfig: vi.fn(),
+      getPreviousActiveFilePath: () => null,
+      getCurrentWorkspacePath: () => null,
+      setCurrentWorkspacePath: vi.fn(),
+      setEditorContext: vi.fn(),
+      rememberCurrentDocumentNavigation: vi.fn(),
+      syncWorkspaceState: vi.fn(),
+      resetWorkspaceForChange: vi.fn(),
+      reloadWorkspaceAfterChange: vi.fn(),
+      isInitialized: () => false,
+      setTerminalSelection: vi.fn(),
+      addContextFiles: vi.fn(),
+      removeContextFile: vi.fn(),
+      createSession: vi.fn(),
+      requestComposerFocus: vi.fn(),
+      requestOpenAttentionSessions: vi.fn(),
+      requestOpenCompletedSessions: vi.fn(),
+      abortSession: vi.fn(),
+      refreshMcps: vi.fn(),
+      refreshProviders: vi.fn(),
+      setWorkspaceStatusSummary: vi.fn(),
+      setWorkspaceStatuses: vi.fn(),
+    };
+
+    handleExtensionMessageWithDependencies(deps, {
+      type: 'server/status',
+      payload: { state: 'starting' },
+    });
+    expect(setServerReconnecting).toHaveBeenCalledWith(true);
+
+    handleExtensionMessageWithDependencies(deps, {
+      type: 'server/status',
+      payload: { state: 'error', message: 'restart failed' },
+    });
+    expect(setServerReconnecting).toHaveBeenLastCalledWith(false);
+  });
+
   it('resets workspace state before reconciling a context workspace change', () => {
     const setCurrentWorkspacePath = vi.fn();
     const setEditorContext = vi.fn();
