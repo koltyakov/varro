@@ -147,11 +147,13 @@ export function Chat() {
     }
     for (const session of state.sessions) {
       const previousKind = publishedUnreadKinds.get(session.id);
-      const kind = indicators.planReadyIds.has(session.id)
-        ? 'plan-ready'
-        : indicators.newlyCompletedIds.has(session.id)
-          ? 'completed'
-          : undefined;
+      const kind = isPrimarySession(session)
+        ? indicators.planReadyIds.has(session.id)
+          ? 'plan-ready'
+          : indicators.newlyCompletedIds.has(session.id)
+            ? 'completed'
+            : undefined
+        : undefined;
       if (previousKind === kind) continue;
       if (previousKind) {
         postMessage({

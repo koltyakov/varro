@@ -1332,6 +1332,39 @@ describe('header status badges', () => {
     }
   });
 
+  it('publishes unread completion state only for primary sessions', () => {
+    const sent: WebviewMessage[] = [];
+    // SAFETY: The fixture installs the protocol bridge callback owned by the webview host.
+    const bridgeWindow = window as {
+      __sendToExtension?: (message: WebviewMessage) => void;
+    };
+    const originalSend = bridgeWindow.__sendToExtension;
+    const originalWorkspacePath = state.editorContext.workspacePath;
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
+    setState('editorContext', 'workspacePath', '/repo');
+    setState('sessions', [
+      session('primary-1', 500),
+      session('child-1', 400, { parentID: 'primary-1' }),
+    ]);
+    setState('lastSeenSessions', { 'primary-1': 0, 'child-1': 0 });
+    setState('completedSessionResponses', { 'primary-1': 500, 'child-1': 400 });
+
+    try {
+      cleanup = render(() => Chat(), container!);
+
+      expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([
+        {
+          type: 'session-unread-state/update',
+          payload: { sessionId: 'primary-1', kind: 'completed', unread: true },
+        },
+      ]);
+    } finally {
+      setState('editorContext', 'workspacePath', originalWorkspacePath);
+      if (originalSend) bridgeWindow.__sendToExtension = originalSend;
+      else delete bridgeWindow.__sendToExtension;
+    }
+  });
+
   it('reconciles a restored editor route before reporting a new-chat route', () => {
     hostWindow.__initialWebviewState = {
       webviewContext: {

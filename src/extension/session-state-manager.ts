@@ -268,6 +268,10 @@ export class SessionStateManager {
       return;
     }
     if (directory) this.setSessionDirectory(sessionID, directory);
+    if (this.isIgnoredBackgroundSession(sessionID)) {
+      if (this.completedSessions.delete(sessionID)) this.listener.onStatusChange();
+      return;
+    }
     if (kind === 'plan-ready') this.setSessionMetadata(this.sessionAgents, sessionID, 'plan');
     else this.sessionAgents.delete(sessionID);
     if (this.completedSessions.has(sessionID)) return;
@@ -538,6 +542,9 @@ export class SessionStateManager {
         const mode = getString(info?.mode);
         if (mode) {
           this.setSessionMetadata(this.sessionModes, sessionID, mode);
+          if (this.isIgnoredBackgroundSession(sessionID)) {
+            changed = this.completedSessions.delete(sessionID) || changed;
+          }
         }
 
         if (getString(info?.role) !== 'assistant') {
@@ -1037,7 +1044,7 @@ export class SessionStateManager {
     const sessionID = getString(info?.id) || fallbackSessionID;
     if (sessionID) this.touchSessionMetadata(sessionID);
     const agent = getString(info?.agent);
-    const alertChanged = !!sessionID && !!agent && this.rememberSessionAgent(sessionID, agent);
+    let alertChanged = !!sessionID && !!agent && this.rememberSessionAgent(sessionID, agent);
     const title = normalizeSessionTitle(getString(info?.title));
     if (sessionID && title) {
       this.setSessionMetadata(this.sessionTitles, sessionID, title);
@@ -1051,6 +1058,9 @@ export class SessionStateManager {
     const parentID = getString(info?.parentID);
     if (sessionID && parentID) {
       this.setSessionMetadata(this.sessionParentIDs, sessionID, parentID);
+    }
+    if (sessionID && this.isIgnoredBackgroundSession(sessionID)) {
+      alertChanged = this.completedSessions.delete(sessionID) || alertChanged;
     }
     return alertChanged;
   }

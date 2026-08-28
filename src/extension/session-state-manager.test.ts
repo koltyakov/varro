@@ -703,6 +703,41 @@ describe('SessionStateManager notifications', () => {
     expect(manager.getSiblingAlertCandidates()).toEqual([]);
   });
 
+  it.each(['completed', 'plan-ready'] as const)(
+    'does not synchronize %s state for child sessions',
+    (kind) => {
+      const manager = createManager();
+      manager.handleServerEvent({
+        type: 'session.created',
+        properties: {
+          info: { id: 'child-1', parentID: 'session-1', directory: '/repo' },
+        },
+      });
+
+      manager.setSessionUnreadState('child-1', kind, true, '/repo');
+
+      expect(manager.completed.has('child-1')).toBe(false);
+      expect(manager.getSiblingAlertCandidates()).toEqual([]);
+    }
+  );
+
+  it('removes a synchronized completion when later metadata identifies a child session', () => {
+    const manager = createManager();
+    manager.setSessionUnreadState('child-1', 'completed', true, '/repo');
+
+    expect(manager.completed.has('child-1')).toBe(true);
+
+    manager.handleServerEvent({
+      type: 'session.updated',
+      properties: {
+        info: { id: 'child-1', parentID: 'session-1', directory: '/repo' },
+      },
+    });
+
+    expect(manager.completed.has('child-1')).toBe(false);
+    expect(manager.getSiblingAlertCandidates()).toEqual([]);
+  });
+
   it('remembers sync session metadata when id is only on the event properties', () => {
     const manager = createManager(() => false);
 
