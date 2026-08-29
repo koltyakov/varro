@@ -146,7 +146,7 @@ Commands offered in slash-command completion include:
 - `/connect` opens the provider connection dialog
 - `/settings` opens VS Code Settings filtered to Varro
 - `/export` opens a JSON export of the current session in the editor
-- `/stats` opens a Markdown usage report for the last 30 days across all OpenCode projects; `/stats all` also includes retained all-time usage
+- `/stats` opens a Markdown token and assistant-duration report for the last 30 days across all OpenCode projects; `/stats all` also includes retained all-time usage
 - `/thinking` or `/reasoning` toggles thinking block visibility
 - `/compact` or `/summarize` compacts conversation context
 - `/fork` forks the current session
@@ -156,7 +156,7 @@ Commands offered in slash-command completion include:
 
 Custom OpenCode commands loaded from your local config also appear in the same completion list. Skill-sourced commands are browsed through `/skills` instead of being mixed into the main slash-command list.
 
-`/stats` scans the last 30 days of retained OpenCode history across projects and opens an untitled Markdown report. Use `/stats all` when you need the slower all-time scan. Deleted OpenCode history cannot be included.
+`/stats` scans the last 30 days of retained OpenCode history across projects and opens an untitled Markdown report. It groups token use and total completed assistant duration by provider and model. Use `/stats all` when you need the slower all-time scan. Deleted OpenCode history cannot be included.
 
 Some commands only appear when they apply. `/ralph` appears before a session exists, `/export` appears after one exists, and `/init` appears when the workspace can be initialized.
 

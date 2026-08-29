@@ -112,7 +112,7 @@ MCP servers come from OpenCode configuration and can be connected or disconnecte
 
 The composer shows context-window fill, and session rows show token use. The context popup separates input, output, reasoning, cache reads, cache writes, and sub-agent tokens. It also shows session cost when OpenCode reports it.
 
-Run `/stats` or `Varro: Usage Stats` for a Markdown report from retained OpenCode history across all projects. It covers today, 7 days, and 30 days, grouped by provider and model. `/stats all` adds all retained history.
+Run `/stats` or `Varro: Usage Stats` for a Markdown report from retained OpenCode history across all projects. It covers token use and total assistant duration for today, 7 days, and 30 days, grouped by provider and model. `/stats all` adds all retained history.
 
 ![Context window and session token breakdown](https://raw.githubusercontent.com/koltyakov/varro/main/assets/context.png)
 

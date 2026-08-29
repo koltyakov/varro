@@ -74,7 +74,7 @@ function assistant(id: string, created: number, overrides: Record<string, unknow
       parentID: `prompt-${id}`,
       providerID: 'provider-a',
       modelID: 'model-a',
-      time: { created },
+      time: { created, completed: created + 2_500 },
       tokens: {
         input: 100,
         output: 50,
@@ -149,6 +149,7 @@ describe('UsageReportService', () => {
           modelID: 'model-local',
           promptID: 'session-1\u0000prompt-1',
           created: NOW.getTime(),
+          durationMs: 25 * 60 * 60 * 1_000,
           tokens: {
             total: 100,
             input: 70,
@@ -172,7 +173,7 @@ describe('UsageReportService', () => {
     expect(request).not.toHaveBeenCalled();
     expect(reportContent()).toContain('from 2 sessions scanned');
     expect(reportSection(reportContent(), 'Today')).toContain(
-      '| provider-local | model-local | 1 | 100 |'
+      '| provider-local | model-local | 1 | 100 | 25h | 70 | 20 | 10 | 0 | 0 |'
     );
   });
 
@@ -248,7 +249,7 @@ describe('UsageReportService', () => {
       }
     );
     expect(reportSection(reportContent(), 'Today')).toContain(
-      '| provider-a | model-a | 1 | 190 | 100 | 50 | 25 | 10 | 5 |'
+      '| provider-a | model-a | 1 | 190 | 3s | 100 | 50 | 25 | 10 | 5 |'
     );
     expect(reportSection(reportContent(), 'Last 7 rolling days')).toContain(
       '| provider-a | model-a | 1 | 190 |'
@@ -257,6 +258,7 @@ describe('UsageReportService', () => {
       '| provider-a | model-a | 2 | 380 |'
     );
     expect(reportContent()).toContain('| Provider | Model | Prompts |');
+    expect(reportContent()).toContain('| Total | Duration | Input |');
     expect(reportContent()).not.toContain('## All time');
     expect(reportContent()).toContain(
       '- Could not read messages for session session-2: history unavailable.'
@@ -373,6 +375,41 @@ describe('UsageReportService', () => {
 
     expect(reportContent()).not.toContain('malformed token details');
     expect(reportSection(reportContent(), 'Today')).toContain('_No token usage._');
+  });
+
+  it('ignores missing or reversed assistant timing', async () => {
+    const request = vi.fn<Request>(async (method, path) => {
+      if (method === 'GET' && path.startsWith('/experimental/session')) {
+        return { data: [session('session-1', '/repo', 10)] };
+      }
+      if (method === 'GET' && path.startsWith('/session/session-1/message')) {
+        return [
+          assistant('valid', NOW.getTime(), {
+            modelID: 'valid',
+            time: { created: NOW.getTime(), completed: NOW.getTime() + 500 },
+          }),
+          assistant('missing', NOW.getTime(), {
+            modelID: 'invalid',
+            time: { created: NOW.getTime() },
+          }),
+          assistant('reversed', NOW.getTime(), {
+            modelID: 'invalid',
+            time: { created: NOW.getTime(), completed: NOW.getTime() - 1_000 },
+          }),
+        ];
+      }
+      throw new Error(`Unexpected request ${method} ${path}`);
+    });
+    const { service } = createService(request);
+
+    await service.openReport();
+
+    expect(reportSection(reportContent(), 'Today')).toContain(
+      '| provider-a | valid | 1 | 190 | <1s | 100 | 50 | 25 | 10 | 5 |'
+    );
+    expect(reportSection(reportContent(), 'Today')).toContain(
+      '| provider-a | invalid | 2 | 380 | - | 200 | 100 | 50 | 20 | 10 |'
+    );
   });
 
   it('detects repeated global cursors', async () => {

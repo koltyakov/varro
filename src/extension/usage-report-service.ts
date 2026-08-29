@@ -30,11 +30,14 @@ type Usage = {
   modelID: string;
   promptID: string | null;
   created: number;
+  durationMs: number | null;
   tokens: Tokens;
 };
 
 type Aggregate = Tokens & {
   promptIDs: Set<string>;
+  durationMs: number;
+  durationCount: number;
 };
 
 type ReportWindow = {
@@ -273,6 +276,8 @@ try {
     "json_extract(m.data, '$.modelID') AS modelID,",
     "json_extract(m.data, '$.model.modelID') AS nestedModelID,",
     "json_extract(m.data, '$.parentID') AS parentID,",
+    "json_extract(m.data, '$.time.created') AS timeCreated,",
+    "json_extract(m.data, '$.time.completed') AS timeCompleted,",
     "coalesce(json_extract(m.data, '$.time.completed'), json_extract(m.data, '$.time.created')) AS created,",
     "json_extract(m.data, '$.tokens.total') AS total,",
     "json_extract(m.data, '$.tokens.input') AS input,",
@@ -316,6 +321,7 @@ function normalizeLocalUsageSnapshot(value: unknown): LocalUsageSnapshot | null 
       modelID,
       promptID: parentID ? `${sessionID}\u0000${parentID}` : null,
       created,
+      durationMs: assistantDuration(row?.timeCreated, row?.timeCompleted),
       tokens: {
         input,
         output,
@@ -367,6 +373,7 @@ function normalizeUsage(
       modelID,
       promptID: parentID ? `${session.id}\u0000${parentID}` : null,
       created,
+      durationMs: assistantDuration(time?.created, time?.completed),
       tokens: {
         input,
         output,
@@ -425,8 +432,8 @@ function renderReport(
 
 function renderAggregateTable(lines: string[], groups: Map<string, Aggregate>): void {
   lines.push(
-    '| Provider | Model | Prompts | Total | Input | Output | Reasoning | Cache read | Cache write |',
-    '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |'
+    '| Provider | Model | Prompts | Total | Duration | Input | Output | Reasoning | Cache read | Cache write |',
+    '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |'
   );
   for (const [route, aggregate] of [...groups].toSorted(
     ([leftRoute, left], [rightRoute, right]) =>
@@ -446,6 +453,10 @@ function aggregateUsage(usage: Usage[], keyFor: (entry: Usage) => string): Map<s
     const key = keyFor(entry);
     const aggregate = groups.get(key) || emptyAggregate();
     if (entry.promptID) aggregate.promptIDs.add(entry.promptID);
+    if (entry.durationMs !== null) {
+      aggregate.durationMs += entry.durationMs;
+      aggregate.durationCount += 1;
+    }
     addTokens(aggregate, entry.tokens);
     groups.set(key, aggregate);
   }
@@ -456,6 +467,8 @@ function sumAggregates(values: Iterable<Aggregate>): Aggregate {
   const total = emptyAggregate();
   for (const value of values) {
     for (const promptID of value.promptIDs) total.promptIDs.add(promptID);
+    total.durationMs += value.durationMs;
+    total.durationCount += value.durationCount;
     addTokens(total, value);
   }
   return total;
@@ -464,6 +477,8 @@ function sumAggregates(values: Iterable<Aggregate>): Aggregate {
 function emptyAggregate(): Aggregate {
   return {
     promptIDs: new Set(),
+    durationMs: 0,
+    durationCount: 0,
     total: 0,
     input: 0,
     output: 0,
@@ -483,7 +498,7 @@ function addTokens(target: Tokens, tokens: Tokens): void {
 }
 
 function renderAggregateRow(providerID: string, modelID: string, aggregate: Aggregate): string {
-  return `| ${escapeMarkdown(providerID)} | ${escapeMarkdown(modelID)} | ${integer(aggregate.promptIDs.size)} | ${integer(aggregate.total)} | ${integer(aggregate.input)} | ${integer(aggregate.output)} | ${integer(aggregate.reasoning)} | ${integer(aggregate.cacheRead)} | ${integer(aggregate.cacheWrite)} |`;
+  return `| ${escapeMarkdown(providerID)} | ${escapeMarkdown(modelID)} | ${integer(aggregate.promptIDs.size)} | ${integer(aggregate.total)} | ${formatAggregateDuration(aggregate)} | ${integer(aggregate.input)} | ${integer(aggregate.output)} | ${integer(aggregate.reasoning)} | ${integer(aggregate.cacheRead)} | ${integer(aggregate.cacheWrite)} |`;
 }
 
 interface ResponsePage {
@@ -546,6 +561,28 @@ function optionalNonnegativeNumber(value: unknown): number | null {
 
 function nonnegativeNumber(value: unknown): number {
   return optionalNonnegativeNumber(value) ?? 0;
+}
+
+function assistantDuration(created: unknown, completed: unknown): number | null {
+  const start = numberValue(created);
+  const end = numberValue(completed);
+  return start !== null && end !== null && end >= start ? end - start : null;
+}
+
+function formatAggregateDuration(aggregate: Aggregate): string {
+  if (aggregate.durationCount === 0) return '-';
+  if (aggregate.durationMs < 1_000) return '<1s';
+
+  const totalSeconds = Math.round(aggregate.durationMs / 1_000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+
+  const seconds = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  if (totalMinutes < 60) return seconds > 0 ? `${totalMinutes}m ${seconds}s` : `${totalMinutes}m`;
+
+  const minutes = totalMinutes % 60;
+  const totalHours = Math.floor(totalMinutes / 60);
+  return minutes > 0 ? `${totalHours}h ${minutes}m` : `${totalHours}h`;
 }
 
 function integer(value: number): string {
