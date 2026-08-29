@@ -32,6 +32,7 @@ const { loggerMock, spawnMock, vscodeMock, waitForProcessExitMock } = vi.hoisted
       showWarningMessage: vi.fn(() => Promise.resolve<string | undefined>(undefined)),
     },
     workspace: {
+      workspaceFolders: undefined as { uri: { fsPath: string } }[] | undefined,
       getConfiguration: vi.fn(() => ({
         get: <T>(_key: string, fallback: T) => fallback,
       })),
@@ -61,6 +62,7 @@ import {
 const originalPlatform = process.platform;
 const originalOpenCodeConfig = process.env.OPENCODE_CONFIG;
 const originalOpenCodeConfigContent = process.env.OPENCODE_CONFIG_CONTENT;
+const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
 const originalPath = process.env.PATH;
 // Keep fake identities outside the real PID range and unique across concurrent test processes.
 const MOCK_LINUX_PID = 1_073_000_000 + process.pid;
@@ -69,6 +71,8 @@ const MOCK_WINDOWS_PID = 100_000 + process.pid;
 beforeEach(() => {
   delete process.env.OPENCODE_CONFIG;
   delete process.env.OPENCODE_CONFIG_CONTENT;
+  delete process.env.XDG_CONFIG_HOME;
+  vscodeMock.workspace.workspaceFolders = undefined;
 });
 
 afterEach(() => {
@@ -80,6 +84,8 @@ afterEach(() => {
   else process.env.OPENCODE_CONFIG = originalOpenCodeConfig;
   if (originalOpenCodeConfigContent === undefined) delete process.env.OPENCODE_CONFIG_CONTENT;
   else process.env.OPENCODE_CONFIG_CONTENT = originalOpenCodeConfigContent;
+  if (originalXdgConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+  else process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
   if (originalPath === undefined) delete process.env.PATH;
   else process.env.PATH = originalPath;
 });
@@ -1923,6 +1929,106 @@ describe('OpenCodeProcess config ownership', () => {
       'C:\\Users\\Andrew\\.config\\opencode\\opencode.json',
       'C:\\Users\\Andrew\\.config\\opencode\\opencode.jsonc',
     ]);
+  });
+
+  it('injects the optional Ask agent only into the temporary runtime config', async () => {
+    const configHome = await mkdtemp(join(tmpdir(), 'varro-empty-config-'));
+    process.env.XDG_CONFIG_HOME = configHome;
+    const manager = new OpenCodeProcess(
+      4096,
+      true,
+      'opencode',
+      false,
+      undefined,
+      undefined,
+      undefined,
+      true
+    );
+
+    const config = JSON.parse(await manager.serializeInjectedConfig()) as {
+      agent?: Record<string, Record<string, unknown>>;
+    };
+
+    expect(config.agent?.ask).toMatchObject({
+      description: 'Answers questions and investigates the codebase without modifying anything',
+      mode: 'primary',
+      prompt: expect.stringContaining('Suggest switching to the Build agent.'),
+      permission: {
+        '*': 'deny',
+        read: 'allow',
+        glob: 'allow',
+        grep: 'allow',
+      },
+    });
+    await rm(configHome, { recursive: true, force: true });
+  });
+
+  it('prefers a case-conflicting Ask agent from inherited OpenCode config', async () => {
+    process.env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
+      agent: { Ask: { description: 'User-defined agent', mode: 'primary' } },
+    });
+    const manager = new OpenCodeProcess(
+      4096,
+      true,
+      'opencode',
+      false,
+      undefined,
+      undefined,
+      undefined,
+      true
+    );
+
+    expect(JSON.parse(await manager.serializeInjectedConfig())).toEqual({});
+  });
+
+  it('prefers an Ask agent from project OpenCode config', async () => {
+    const project = await mkdtemp(join(tmpdir(), 'varro-project-config-'));
+    await mkdir(join(project, '.git'));
+    await writeFile(
+      join(project, 'opencode.jsonc'),
+      '{ "agent": { "ask": { "description": "Project agent" } } }',
+      'utf-8'
+    );
+    const configHome = await mkdtemp(join(tmpdir(), 'varro-empty-config-'));
+    process.env.XDG_CONFIG_HOME = configHome;
+    vscodeMock.workspace.workspaceFolders = [{ uri: { fsPath: project } }];
+    const manager = new OpenCodeProcess(
+      4096,
+      true,
+      'opencode',
+      false,
+      undefined,
+      undefined,
+      undefined,
+      true
+    );
+
+    expect(JSON.parse(await manager.serializeInjectedConfig())).toEqual({});
+
+    await Promise.all([
+      rm(project, { recursive: true, force: true }),
+      rm(configHome, { recursive: true, force: true }),
+    ]);
+  });
+
+  it('does not inject the Ask agent when the setting is disabled', async () => {
+    const manager = new OpenCodeProcess(4096, true, 'opencode');
+
+    expect(JSON.parse(await manager.serializeInjectedConfig())).toEqual({});
+  });
+
+  it('restarts a managed server when enabling Ask requires a new runtime config', async () => {
+    const manager = new OpenCodeProcess(4096, true, 'opencode');
+    manager.managedProcess = true;
+    const restart = vi.fn().mockResolvedValue(undefined);
+
+    await manager.updateAskAgentEnabled(true, {
+      status: { state: 'running', url: 'http://localhost:4096' },
+      request: vi.fn(),
+      restartManagedServerForCompactionSettings: restart,
+    });
+
+    expect(restart).toHaveBeenCalledOnce();
   });
 
   it('binds exit cleanup to the config owned by that process', async () => {

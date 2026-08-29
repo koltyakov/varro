@@ -4,6 +4,7 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 
 ## 0.27.x - August 2026
 
+- Added a built-in read-only Ask agent for safely exploring code and answering questions without modifying files, while honoring an existing configured `ask` agent.
 - Added multi-root workspace support with independent sidebar and editor chat selection, workspace controls, and session routing across activation, sends, summaries, Ralph runs, forks, and reopened chats.
 - Added sibling-workspace notifications with quick switching for sessions needing attention, failed sessions, and completed plans.
 - Added automatic provider authorization without a browser URL, plus Azure and Amazon provider icons.

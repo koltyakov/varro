@@ -22,6 +22,7 @@ import { isFunction } from '../../lib/runtime-values';
 
 const CONTEXT_USAGE_WARNING_PERCENT = 70;
 const CONTEXT_USAGE_ERROR_PERCENT = 90;
+const CONTEXT_COMPACT_ACTION_PERCENT = 30;
 const CACHE_READ_TOOLTIP =
   "Tokens reused from the provider's prompt cache. They count toward the context window but are excluded from session totals.";
 
@@ -359,5 +360,5 @@ export function formatContextUsageTitle(percent: number, available = true) {
 }
 
 function shouldShowContextCompact(percent: number) {
-  return percent >= CONTEXT_USAGE_WARNING_PERCENT;
+  return percent >= CONTEXT_COMPACT_ACTION_PERCENT;
 }

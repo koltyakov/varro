@@ -226,6 +226,8 @@ The Models view also shows whether a model exposes tools, variants, vision suppo
 
 Define primary agents in OpenCode configuration. Varro lists them in the agent picker and uses the selected agent for the main conversation.
 
+Alternatively, enable `varro.chat.enableAskAgent` to add Varro's read-only `Ask` primary agent only to the managed OpenCode runtime. The setting does not modify `opencode.json`; if inherited, global, or project OpenCode configuration already defines an agent named `ask` (case-insensitive), Varro uses that definition instead.
+
 Choose the config scope based on where you want the agent to appear:
 
 - Global: `~/.config/opencode/opencode.json`. The agent is available in every workspace that uses this OpenCode installation.
@@ -242,7 +244,7 @@ This example adds `ask`, a primary agent that can inspect local code and search 
     "ask": {
       "description": "Answers questions and investigates the codebase without modifying anything",
       "mode": "primary",
-      "prompt": "Answer questions about the codebase using read-only investigation. Explain findings directly and cite relevant files and lines. If the user asks for implementation, describe the necessary changes without applying them.",
+      "prompt": "Answer questions about the codebase using read-only investigation. Explain findings directly and cite relevant files and lines. Do not modify files, run shell commands, delegate work, or perform external side effects. If the user asks you to edit or implement something, do not make changes. Suggest switching to the Build agent.",
       "permission": {
         "*": "deny",
         "read": "allow",

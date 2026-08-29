@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: OpenCode Workbench",
-  "version": "0.27.5",
+  "version": "0.27.6",
   "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
@@ -431,6 +431,11 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "Let Varro generate a fallback title when OpenCode leaves a session untitled. Disable this to rely only on OpenCode's native session naming."
+        },
+        "varro.chat.enableAskAgent": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Add Varro's read-only `Ask` primary agent at runtime. Varro does not write this agent to OpenCode configuration and uses an existing `ask` agent instead when one is configured."
         },
         "varro.chat.autoCompact": {
           "type": "boolean",

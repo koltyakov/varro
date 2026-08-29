@@ -5991,6 +5991,7 @@ export function MessageList() {
         // SAFETY: The surrounding shape or discriminator check establishes the AssistantMessage contract used below.
         const cur = msg.info as AssistantMessage;
         if (cur.mode === 'subagent') continue;
+        if (msg.parts.some((part) => part.type === 'compaction')) continue;
         if (previous) {
           const previousProvider = providerMap.get(previous.providerID);
           const currentProvider = providerMap.get(cur.providerID);

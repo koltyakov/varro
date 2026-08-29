@@ -2903,6 +2903,56 @@ describe('MessageList session scoping', () => {
     ]);
   });
 
+  it('does not treat manual compaction as a reasoning-level change', async () => {
+    setState('activeSessionId', 'session-1');
+    setState('providers', [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          'gpt-5.4': {
+            id: 'gpt-5.4',
+            name: 'GPT-5.4',
+            capabilities: { reasoning: true, toolcall: true, attachment: true },
+            cost: { input: 0, output: 0 },
+            variants: { xhigh: {} },
+          },
+        },
+      },
+    ]);
+    replaceMessages([
+      {
+        info: assistantMessage('assistant-1', { modelID: 'gpt-5.4', variant: 'xhigh' }),
+        parts: [textPart('text-1', 'Response before compaction')],
+      },
+      {
+        info: assistantMessage('assistant-compaction', { modelID: 'gpt-5.4' }),
+        parts: [
+          {
+            id: 'compaction-1',
+            sessionID: 'session-1',
+            messageID: 'assistant-compaction',
+            type: 'compaction',
+            auto: false,
+          },
+        ],
+      },
+      {
+        info: assistantMessage('assistant-2', { modelID: 'gpt-5.4', variant: 'xhigh' }),
+        parts: [textPart('text-2', 'Response after compaction')],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.textContent).toContain('Context compacted (manual)');
+    expect(
+      container?.querySelector('.model-change-indicator:not(.assistant-dialog-summary)')
+    ).toBeNull();
+  });
+
   it('shows both provider names when only the provider changes', async () => {
     setState('activeSessionId', 'session-1');
     setState('providers', [

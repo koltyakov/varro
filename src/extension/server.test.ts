@@ -786,7 +786,7 @@ describe('OpenCodeServer compaction config injection', () => {
 
       expect(processManager.buildServerEnv().OPENCODE_CONFIG).toBe('/caller/opencode.jsonc');
       expect(loggerMock.warn).toHaveBeenCalledWith(
-        'Preserving caller-provided OPENCODE_CONFIG; Varro compaction settings are not injected for this managed server'
+        'Preserving caller-provided OPENCODE_CONFIG; Varro runtime settings are not injected for this managed server'
       );
     } finally {
       if (previous === undefined) delete process.env.OPENCODE_CONFIG;

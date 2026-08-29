@@ -151,9 +151,18 @@ export async function activate(context: vscode.ExtensionContext) {
   const simulateMissingCli = config.get<boolean>('debug.simulateMissingCli', false);
   const simulateNoProviders = config.get<boolean>('debug.simulateNoProviders', false);
   const compactionSettings = readCompactionSettings(config);
+  const askAgentEnabled = config.get<boolean>('chat.enableAskAgent', false);
   syncShowFileDiffsContext(config);
 
-  server = new OpenCodeServer(port, autoStart, command, simulateMissingCli, compactionSettings);
+  server = new OpenCodeServer(
+    port,
+    autoStart,
+    command,
+    simulateMissingCli,
+    compactionSettings,
+    undefined,
+    askAgentEnabled
+  );
   let scopedWorkspacePath: string | null | undefined;
   contextProvider = new ContextProvider((ctx) => {
     if (scopedWorkspacePath === ctx.workspacePath) {
@@ -225,11 +234,19 @@ export async function activate(context: vscode.ExtensionContext) {
       const compactionChanged =
         event.affectsConfiguration('varro.chat.autoCompact') ||
         event.affectsConfiguration('varro.chat.autoCompactionReservedTokens');
+      const askAgentChanged = event.affectsConfiguration('varro.chat.enableAskAgent');
       const launchSettingsChanged =
         event.affectsConfiguration('varro.server.autoStart') ||
         event.affectsConfiguration('varro.server.command');
       const fileDiffsChanged = event.affectsConfiguration('varro.chat.showFileDiffs');
-      if (!portChanged && !compactionChanged && !launchSettingsChanged && !fileDiffsChanged) return;
+      if (
+        !portChanged &&
+        !compactionChanged &&
+        !askAgentChanged &&
+        !launchSettingsChanged &&
+        !fileDiffsChanged
+      )
+        return;
 
       if (portChanged) {
         void vscode.window
@@ -250,6 +267,9 @@ export async function activate(context: vscode.ExtensionContext) {
       }
       if (compactionChanged) {
         void server?.updateCompactionSettings(readCompactionSettings(nextConfig));
+      }
+      if (askAgentChanged) {
+        void server?.updateAskAgentEnabled(nextConfig.get<boolean>('chat.enableAskAgent', false));
       }
       if (launchSettingsChanged) {
         server?.updateLaunchSettings({

@@ -20,7 +20,8 @@ import {
   writeFile,
 } from 'fs/promises';
 import { homedir, tmpdir } from 'os';
-import { basename, dirname, isAbsolute, join, resolve as resolvePath, win32 } from 'path';
+import { basename, dirname, isAbsolute, join, posix, resolve as resolvePath, win32 } from 'path';
+import { parse, type ParseError } from 'jsonc-parser';
 import * as vscode from 'vscode';
 import {
   classifyUpgradeFailure,
@@ -73,6 +74,51 @@ export function getOpenCodeConfigPaths(
 export interface OpenCodeCompactionSettings {
   auto: boolean | null;
   reserved: number | null;
+}
+
+const ASK_AGENT = {
+  description: 'Answers questions and investigates the codebase without modifying anything',
+  mode: 'primary',
+  prompt:
+    'Answer questions about the codebase using read-only investigation. Explain findings directly and cite relevant files and lines. Do not modify files, run shell commands, delegate work, or perform external side effects. If the user asks you to edit or implement something, do not make changes. Suggest switching to the Build agent.',
+  permission: {
+    '*': 'deny',
+    read: 'allow',
+    glob: 'allow',
+    grep: 'allow',
+    list: 'allow',
+    lsp: 'allow',
+    skill: 'allow',
+    webfetch: 'allow',
+    websearch: 'allow',
+    question: 'allow',
+  },
+} as const;
+
+function resolveProjectConfigPaths(directory: string): string[] {
+  const pathApi = /^[a-z]:[\\/]/i.test(directory) || directory.startsWith('\\\\') ? win32 : posix;
+  const files: string[] = [];
+  let current = pathApi.resolve(directory);
+  while (true) {
+    for (const name of ['opencode.jsonc', 'opencode.json']) {
+      const candidate = pathApi.join(current, name);
+      if (existsSync(candidate)) files.push(candidate);
+    }
+    if (existsSync(pathApi.join(current, '.git'))) break;
+    const parent = pathApi.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return files;
+}
+
+function containsAskAgent(raw: string): boolean {
+  const errors: ParseError[] = [];
+  const value: unknown = parse(raw, errors, { allowTrailingComma: true });
+  if (errors.length > 0 || !value || typeof value !== 'object' || Array.isArray(value)) return true;
+  const agent = (value as Record<string, unknown>).agent;
+  if (!agent || typeof agent !== 'object' || Array.isArray(agent)) return false;
+  return Object.keys(agent).some((name) => name.toLowerCase() === 'ask');
 }
 
 export function normalizeCompactionSettings(
@@ -833,6 +879,7 @@ export class OpenCodeProcess {
   private readonly processCleanupOperations = new WeakMap<ChildProcess, Promise<void>>();
   private readonly processResourceCleanupOperations = new WeakMap<ChildProcess, Promise<void>>();
   private compactionSettings: OpenCodeCompactionSettings;
+  private askAgentEnabled: boolean;
   private injectedConfigPath: string | null = null;
   private injectedConfigOwnerPid: number | null = null;
   private injectedConfigOperation: Promise<void> = Promise.resolve();
@@ -852,7 +899,8 @@ export class OpenCodeProcess {
     simulateMissingCli = false,
     compactionSettings?: Partial<OpenCodeCompactionSettings>,
     ownershipLeasePath = getManagedServerOwnershipLeasePath(port),
-    private readonly linuxProcRoot = '/proc'
+    private readonly linuxProcRoot = '/proc',
+    askAgentEnabled = false
   ) {
     const validatedPort = validateServerPort(port);
     this._port = validatedPort;
@@ -861,6 +909,7 @@ export class OpenCodeProcess {
     this.command = command?.trim() || '';
     this.simulateMissingCli = simulateMissingCli;
     this.compactionSettings = normalizeCompactionSettings(compactionSettings);
+    this.askAgentEnabled = askAgentEnabled;
     this.ownershipLeasePath = ownershipLeasePath;
     this.ownershipMarkerPath = `${ownershipLeasePath}.managed`;
     try {
@@ -1404,14 +1453,14 @@ export class OpenCodeProcess {
   async syncInjectedConfigFile() {
     await this.runInjectedConfigOperation(async () => {
       await sweepStaleInjectedConfigDirectories();
-      if (!this.hasInjectedCompactionOverride()) {
+      if (!this.hasInjectedConfigOverride()) {
         await this.removeInjectedConfigFile(this.injectedConfigPath);
         return;
       }
       if (getEnvironmentValue(process.env, 'OPENCODE_CONFIG')?.trim()) {
         await this.removeInjectedConfigFile(this.injectedConfigPath);
         logger.warn(
-          'Preserving caller-provided OPENCODE_CONFIG; Varro compaction settings are not injected for this managed server'
+          'Preserving caller-provided OPENCODE_CONFIG; Varro runtime settings are not injected for this managed server'
         );
         return;
       }
@@ -1438,8 +1487,35 @@ export class OpenCodeProcess {
     if (this.compactionSettings.reserved !== null) {
       compaction.reserved = this.compactionSettings.reserved;
     }
-    const config = Object.keys(compaction).length > 0 ? { compaction } : {};
+    const config: Record<string, unknown> = {};
+    if (Object.keys(compaction).length > 0) config.compaction = compaction;
+    if (this.askAgentEnabled && !(await this.hasConfiguredAskAgent())) {
+      config.agent = { ask: ASK_AGENT };
+    }
     return `${JSON.stringify(config, null, 2)}\n`;
+  }
+
+  private async hasConfiguredAskAgent(): Promise<boolean> {
+    const inherited = getEnvironmentValue(process.env, 'OPENCODE_CONFIG_CONTENT');
+    if (inherited?.trim() && containsAskAgent(inherited)) return true;
+
+    const workspaceCwd = this.getWorkspaceCwd();
+    const paths = [
+      ...getOpenCodeConfigPaths(),
+      ...(workspaceCwd ? resolveProjectConfigPaths(workspaceCwd) : []),
+    ];
+    for (const path of paths) {
+      try {
+        if (containsAskAgent(await readFile(path, 'utf-8'))) return true;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        logger.warn(
+          `Could not inspect OpenCode config for an existing Ask agent: ${err instanceof Error ? err.message : String(err)}`
+        );
+        return true;
+      }
+    }
+    return false;
   }
 
   async cleanupPreparedInjectedConfigFile() {
@@ -1490,6 +1566,45 @@ export class OpenCodeProcess {
 
   hasInjectedCompactionOverride() {
     return this.compactionSettings.auto !== null || this.compactionSettings.reserved !== null;
+  }
+
+  hasInjectedConfigOverride() {
+    return this.hasInjectedCompactionOverride() || this.askAgentEnabled;
+  }
+
+  async updateAskAgentEnabled(enabled: boolean, callbacks: UpdateCompactionSettingsCallbacks) {
+    const changed = this.askAgentEnabled !== enabled;
+    this.askAgentEnabled = enabled;
+    await this.rewriteInjectedConfigFile();
+    if (!changed || callbacks.status.state !== 'running') return;
+    if (this.foreignActiveOwnership) await this.refreshManagedServerOwnership();
+    if (!this._managedProcess) {
+      logger.warn(
+        'Varro Ask agent changes can only be reapplied automatically for a Varro-managed OpenCode server'
+      );
+      return;
+    }
+    if (!this.injectedConfigPath) {
+      if (getEnvironmentValue(process.env, 'OPENCODE_CONFIG')?.trim()) {
+        logger.warn(
+          'Preserving caller-provided OPENCODE_CONFIG; the Varro Ask agent cannot be injected for this managed server'
+        );
+        return;
+      }
+      if (enabled) {
+        await callbacks.restartManagedServerForCompactionSettings();
+      }
+      return;
+    }
+    try {
+      await callbacks.request('POST', '/global/dispose');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn(
+        `Failed to dispose OpenCode instances after Ask agent setting change: ${message}`
+      );
+      await callbacks.restartManagedServerForCompactionSettings();
+    }
   }
 
   async updateCompactionSettings(

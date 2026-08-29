@@ -1412,6 +1412,25 @@ describe('ChatInput', () => {
     expect(button?.getAttribute('aria-label')).toBe('Context usage (50%)');
   });
 
+  it('shows the compact action starting at 30% context usage', async () => {
+    setupModelState();
+    setState('activeSessionId', 'session-1');
+    setState('messages', [assistantMessageEntry({ input: 290, output: 0 })]);
+
+    cleanup = render(() => ChatInput(), container!);
+    container
+      ?.querySelector<HTMLButtonElement>('.chat-context-usage')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    expect(container?.querySelector('.context-popup-action')).toBeNull();
+
+    setState('messages', [assistantMessageEntry({ input: 300, output: 0 })]);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.context-popup-action')?.textContent).toBe('Compact session');
+  });
+
   it('includes descendant session snapshots in the session token total', async () => {
     setupModelState();
     setState('activeSessionId', 'session-1');
