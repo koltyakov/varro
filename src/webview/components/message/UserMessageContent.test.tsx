@@ -750,6 +750,7 @@ describe('UserMessageContent', () => {
     expect(strip?.classList.contains('message-attachments-leading')).toBe(true);
     const chip = strip?.querySelector('.message-attachment-chip');
     expect(chip?.textContent).toContain('Vision');
+    expect(chip?.classList.contains('agent-attachment-chip')).toBe(true);
     expect(chip?.getAttribute('title')).toBe('Agent: Vision');
     expect(chip?.getAttribute('data-copy-marker')).toBe('@vision');
     expect(chip?.querySelector('.material-chip-icon')).toBeInstanceOf(HTMLImageElement);

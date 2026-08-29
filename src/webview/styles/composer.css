@@ -2387,6 +2387,10 @@
     border-color 0.1s;
 }
 
+.agent-attachment-chip {
+  padding-right: 7px;
+}
+
 .interactive-session .chat-input-container .chat-attachment-chip {
   background: color-mix(in srgb, var(--color-vscode-fg) 5.5%, var(--color-vscode-input-bg));
 }

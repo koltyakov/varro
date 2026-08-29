@@ -1869,7 +1869,9 @@ function MessageAttachmentRail(props: {
       >
         <For each={props.attachments}>
           {(attachment) => (
-            <span class="message-attachment-measure-item">
+            <span
+              class={`message-attachment-measure-item${attachment.type === 'agent' ? ' agent-attachment-chip' : ''}`}
+            >
               <Show
                 when={attachment.type === 'agent'}
                 fallback={<FileTypeIcon path={getDisplayMessageAttachmentPath(attachment)} />}

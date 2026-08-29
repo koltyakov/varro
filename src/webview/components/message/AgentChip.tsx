@@ -7,7 +7,11 @@ export function AgentChip(props: { part: AgentPart; inline?: boolean; marker?: s
   const marker = () => props.marker || props.part.source?.value || `@${props.part.name}`;
   return (
     <span
-      class={props.inline ? 'inline-chip' : 'chat-attachment-chip message-attachment-chip'}
+      class={
+        props.inline
+          ? 'inline-chip'
+          : 'chat-attachment-chip message-attachment-chip agent-attachment-chip'
+      }
       data-copy-marker={marker()}
       title={`Agent: ${label()}`}
     >
