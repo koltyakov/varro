@@ -1589,13 +1589,15 @@ export function MessageList() {
     previousCompactActivityLayoutSignatures = new Map(current);
   });
 
-  createEffect(() => {
-    messageStructureVersion();
-    const currentStreamingPartId = state.streamingPartId;
-    const currentStreamingText = state.streamingText;
-
+  function invalidateChangedZeroHeightRows(
+    candidateMessageIds: Iterable<string>,
+    currentStreamingPartId: string | null,
+    currentStreamingText: string
+  ) {
     let changed = false;
-    for (const [messageId, previousSignature] of zeroHeightRenderContentSignatures) {
+    for (const messageId of candidateMessageIds) {
+      const previousSignature = zeroHeightRenderContentSignatures.get(messageId);
+      if (previousSignature === undefined) continue;
       const currentSignature = getMessageRenderContentSignature(
         messageId,
         currentStreamingPartId,
@@ -1609,6 +1611,37 @@ export function MessageList() {
       changed = true;
     }
     if (changed) publishMeasurementVersion();
+  }
+
+  createEffect(() => {
+    messageStructureVersion();
+    messageInfoVersion();
+    untrack(() =>
+      invalidateChangedZeroHeightRows(
+        zeroHeightRenderContentSignatures.keys(),
+        state.streamingPartId,
+        state.streamingText
+      )
+    );
+  });
+
+  let previousStreamingMessageId: string | null = null;
+  createEffect(() => {
+    const currentStreamingPartId = state.streamingPartId;
+    const currentStreamingText = state.streamingText;
+    const currentStreamingMessageId = streamingPart()?.messageID ?? null;
+    const candidateMessageIds = new Set<string>();
+    if (previousStreamingMessageId) candidateMessageIds.add(previousStreamingMessageId);
+    if (currentStreamingMessageId) candidateMessageIds.add(currentStreamingMessageId);
+    previousStreamingMessageId = currentStreamingMessageId;
+
+    untrack(() =>
+      invalidateChangedZeroHeightRows(
+        candidateMessageIds,
+        currentStreamingPartId,
+        currentStreamingText
+      )
+    );
   });
 
   const hasIncompleteLatestVisibleAssistantReply = createMemo(() => {

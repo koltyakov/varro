@@ -1726,6 +1726,55 @@ describe('registerSessionEventHandlers', () => {
     );
   });
 
+  it('uses indexed reads for part deltas instead of scanning the transcript', () => {
+    const handlers = installHandlers();
+    const message = createAssistantEntry({ id: 'assistant-1', sessionID: 'session-1' });
+    const part: Part = {
+      id: 'part-1',
+      sessionID: 'session-1',
+      messageID: 'assistant-1',
+      type: 'text',
+      text: '',
+    };
+    message.parts.push(part);
+    const getMessages = vi.fn(() =>
+      Array.from({ length: 10_000 }, (_, index) =>
+        createAssistantEntry({ id: `unrelated-${index}`, sessionID: 'session-1' })
+      )
+    );
+    const findMessageById = vi.fn((messageId: string) =>
+      messageId === message.info.id ? message : null
+    );
+    const findMessagePart = vi.fn((messageId: string, partId: string) =>
+      messageId === message.info.id && partId === part.id ? part : null
+    );
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages,
+        findMessageById,
+        findMessagePart,
+      })
+    );
+
+    applyMessagePartDelta.mockClear();
+    handlers.get('message.part.delta')?.({
+      properties: {
+        sessionID: 'session-1',
+        messageID: 'assistant-1',
+        partID: 'part-1',
+        delta: 'A',
+        field: 'text',
+      },
+    });
+
+    expect(findMessageById).toHaveBeenCalledWith('assistant-1');
+    expect(findMessagePart).toHaveBeenCalledWith('assistant-1', 'part-1');
+    expect(getMessages).not.toHaveBeenCalled();
+    expect(applyMessagePartDelta).toHaveBeenCalledTimes(1);
+  });
+
   it('treats synchronized message parts as canonical when a delta targets a missing part', async () => {
     const handlers = installHandlers();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);

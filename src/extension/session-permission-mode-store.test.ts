@@ -42,6 +42,20 @@ describe('SessionPermissionModeStore', () => {
     });
   });
 
+  it('removes the persisted mode for a deleted session', async () => {
+    const persistence: Persistence = {
+      get: vi.fn(),
+      set: vi.fn(() => Promise.resolve()),
+      remove: vi.fn(() => Promise.resolve()),
+    };
+    const store = new SessionPermissionModeStore(persistence);
+    await store.set('session-1', 'full');
+
+    await store.removeSession('session-1');
+
+    expect(store.list()).toEqual({});
+  });
+
   it('drops unsafe persisted session IDs and rejects new ones', async () => {
     const overlong = 'x'.repeat(513);
     const stored = JSON.parse(

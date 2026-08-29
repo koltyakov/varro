@@ -54,6 +54,10 @@ export class SessionPermissionModeStore {
     });
   }
 
+  removeSession(sessionId: string): Promise<void> {
+    return this.set(sessionId, null).then(() => undefined);
+  }
+
   stageSafeFallback(sessionId: string): Promise<void> {
     if (!isSafePersistedSessionId(sessionId)) {
       return Promise.reject(new Error('Invalid persisted session ID'));

@@ -233,6 +233,7 @@ export function setWorkspaceStatusSummary(summary: WorkspaceStatusEventSummary) 
 }
 
 export function setSessions(nextSessions: Session[]) {
+  sessionTreeIndex.invalidate();
   setState('sessions', reconcile(nextSessions, { key: 'id' }));
   const sessionIds = new Set(nextSessions.map((session) => session.id));
   const nextMarkers = pruneSkippedPlanSessions(state.skippedPlanSessions, sessionIds);
@@ -259,7 +260,6 @@ export function setSessions(nextSessions: Session[]) {
     );
     writeOpenWorkspaceMarkerState(STORAGE_KEYS.completedSessionResponses, nextCompletedMarkers);
   }
-  sessionTreeIndex.invalidate();
 }
 
 export function syncSessionMarkersForWorkspace(
@@ -348,6 +348,10 @@ export function getSessionTreeIds(rootId: string | null | undefined, sessions = 
 
 export function getSessionTreeRootId(sessionId: string | null | undefined) {
   return sessionTreeIndex.getRootId(sessionId, state.sessions, state.sessionUsageLimits);
+}
+
+export function getSessionTreeUpdated(sessionId: string | null | undefined) {
+  return sessionTreeIndex.getTreeUpdated(sessionId, state.sessions, state.sessionUsageLimits);
 }
 
 export function getActiveUsageLimitNotice(sessionId: string | null | undefined) {

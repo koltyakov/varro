@@ -5,6 +5,7 @@ import type { InitialWebviewState } from '../shared/protocol';
 export type WebviewAssetUris = {
   scriptUri: string;
   cssUri: string;
+  version: string;
 };
 
 const LOADING_STYLES = `
@@ -85,10 +86,9 @@ export function renderWebviewHtml(
   assets: WebviewAssetUris
 ) {
   const nonce = randomNonce();
-  const cacheKey = randomNonce();
   const serializedInitialState = serializeForInlineScript(initialState);
-  const scriptUri = appendCacheKey(assets.scriptUri, cacheKey);
-  const cssUri = appendCacheKey(assets.cssUri, cacheKey);
+  const scriptUri = appendCacheKey(assets.scriptUri, assets.version);
+  const cssUri = appendCacheKey(assets.cssUri, assets.version);
   const htmlClass =
     initialState.webviewContext?.surface === 'editor'
       ? ' class="varro-editor-surface varro-editor-layout-pending"'

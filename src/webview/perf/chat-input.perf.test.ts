@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   getMessageEntriesForSession,
+  groupMessageEntriesBySession,
   getLatestAssistantMessageInfo,
   getLatestAssistantMessageInfoWithTokens,
   sumAssistantTokensFromMessageEntries,
@@ -145,6 +146,27 @@ describe('ChatInput perf helpers', () => {
       input: 20,
       output: 10,
     });
+  });
+
+  it('partitions messages for nested context in one pass', () => {
+    let readCount = 0;
+    const entries = Array.from({ length: 10_000 }, (_, index) =>
+      countedEntry(
+        {
+          ...assistantMessage(`assistant-${index}`),
+          sessionID: `session-${index % 100}`,
+        },
+        () => {
+          readCount += 1;
+        }
+      )
+    );
+
+    const grouped = groupMessageEntriesBySession(entries);
+
+    expect(grouped.size).toBe(100);
+    expect(grouped.get('session-42')).toHaveLength(100);
+    expect(readCount).toBe(10_000);
   });
 
   it('sums assistant tokens directly from message entries', () => {

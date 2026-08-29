@@ -111,6 +111,8 @@ type EventHandlerDependencies = {
   isSessionTreeStatusWorking(sessionId: string): boolean;
   isSessionInActiveTree?(sessionId: string): boolean;
   getMessages(): MessageEntry[];
+  findMessageById?(messageId: string): MessageEntry | null;
+  findMessagePart?(messageId: string, partId: string): Part | null;
   isMessageRemovalDeferred?(sessionId: string, messageId: string): boolean;
   handoffTodosToMessages(messages?: MessageEntry[]): boolean;
   upsertSession(info: Session): void;
@@ -228,6 +230,8 @@ export class SessionEventHandlerOperations {
         );
       },
       getMessages: () => appStore.state.messages,
+      findMessageById: sessionStore.getMessageById,
+      findMessagePart: sessionStore.getMessagePartById,
       isMessageRemovalDeferred: this.deps.isMessageRemovalDeferred,
       handoffTodosToMessages: this.deps.todoSyncOperations.handoffTodosToMessages,
       upsertSession: this.deps.sessionLifecycleOperations.upsertSession,
@@ -375,6 +379,14 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     if (deps.isSessionInActiveTree) return deps.isSessionInActiveTree(sessionId);
     return sessionId === deps.getActiveSessionId();
   };
+  const findMessageById = (messageId: string) =>
+    deps.findMessageById?.(messageId) ??
+    deps.getMessages().find((entry) => entry.info.id === messageId) ??
+    null;
+  const findMessagePart = (messageId: string, partId: string) =>
+    deps.findMessagePart?.(messageId, partId) ??
+    findMessageById(messageId)?.parts.find((part) => part.id === partId) ??
+    null;
   const invalidateMessageLoads = (sessionId: string, resetHistory = false) => {
     deps.invalidateMessageSync?.(sessionId);
     if (resetHistory) resetSessionMessageWindowForRefetch(sessionId);
@@ -578,7 +590,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   };
   const ignoreStaleProgressForCompletedMessage = (sessionId: string, messageId: string) => {
     if (!isSessionInActiveTree(sessionId)) return false;
-    const message = deps.getMessages().find((entry) => entry.info.id === messageId)?.info;
+    const message = findMessageById(messageId)?.info;
     if (!message || message.sessionID !== sessionId || message.role !== 'assistant') return false;
     const finishedAt = message.time.completed ?? (message.error ? message.time.created : null);
     if (finishedAt === null) return false;
@@ -818,16 +830,8 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   };
   const findAssistantMessage = (sessionId: string, assistantMessageID?: string) => {
     if (!assistantMessageID) return null;
-    return (
-      deps
-        .getMessages()
-        .find(
-          (entry) =>
-            entry.info.id === assistantMessageID &&
-            entry.info.sessionID === sessionId &&
-            entry.info.role === 'assistant'
-        ) || null
-    );
+    const entry = findMessageById(assistantMessageID);
+    return entry?.info.sessionID === sessionId && entry.info.role === 'assistant' ? entry : null;
   };
   const findLatestStepAssistantMessage = (sessionId: string) => {
     const messages = deps.getMessages();
@@ -922,7 +926,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     );
     if (!messageId) return null;
 
-    const local = deps.getMessages().find((entry) => entry.info.id === messageId);
+    const local = findMessageById(messageId);
     if (local?.info.role === 'assistant') {
       const completed = partialMessage.time?.completed;
       sessionStore.upsertMessageInfo({
@@ -961,23 +965,19 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     isSessionInActiveTree,
     getMessages: () => deps.getMessages(),
     findAssistantMessage,
+    findPart: findMessagePart,
     scheduleActiveMessageSync: scheduleMessageSync,
     syncTodosFromMessages: () => deps.syncTodosFromMessages(),
   });
 
   const syncMessagePartsIfMissing = (message: AssistantMessage) => {
-    const localMessage = deps.getMessages().find((entry) => entry.info.id === message.id);
+    const localMessage = findMessageById(message.id);
     if (localMessage && localMessage.parts.length > 0) return;
 
     scheduleMessageSync(message.sessionID);
   };
   const hasMessagePart = (messageID: string, partID: string) =>
-    deps
-      .getMessages()
-      .some(
-        (message) =>
-          message.info.id === messageID && message.parts.some((part) => part.id === partID)
-      );
+    findMessagePart(messageID, partID) !== null;
   const recoverMissingPartDeltas = (
     key: string,
     pending: {
@@ -1375,7 +1375,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         }
       };
 
-      if (!deps.getMessages().some((message) => message.info.id === rawPart.messageID)) {
+      if (!findMessageById(rawPart.messageID)) {
         if (seqStatus === 'gap') return;
         void deps
           .syncSessionMessages(rawPart.sessionID)

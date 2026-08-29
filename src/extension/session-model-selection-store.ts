@@ -48,6 +48,10 @@ export class SessionModelSelectionStore {
     });
   }
 
+  removeSession(sessionId: string): Promise<void> {
+    return this.set(sessionId, null).then(() => undefined);
+  }
+
   needsMigration() {
     return !this.migrationComplete;
   }

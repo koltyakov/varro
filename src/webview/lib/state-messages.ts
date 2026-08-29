@@ -329,6 +329,14 @@ export function getMessageById(id: string) {
   return index === -1 ? null : state.messages[index] || null;
 }
 
+export function getMessagePartById(messageId: string, partId: string) {
+  const location = messageIndex.findPartLocation(state.messages, partId);
+  if (!location) return null;
+  const message = state.messages[location.msgIdx];
+  if (message?.info.id !== messageId) return null;
+  return message.parts[location.partIdx] || null;
+}
+
 export function applyMessagePartDelta(
   messageId: string,
   partId: string,

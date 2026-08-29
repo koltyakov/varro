@@ -22,6 +22,7 @@ import {
   setInputText,
   setNextPastedImageIndex,
   setState,
+  syncClipboardImages,
   syncCurrentDocumentForWorkspace,
   toggleCurrentDocumentEnabled,
 } from '../state';
@@ -41,6 +42,7 @@ export const composerStore = {
     removeClipboardImage(id, false);
   },
   clearClipboardImages,
+  syncClipboardImages,
   addNativePdf,
   removeNativePdf,
   clearNativePdfs,

@@ -25,6 +25,21 @@ export class DraftImageStore {
     return this.imagesByView.get(viewId) ?? [];
   }
 
+  setContextFile(
+    id: string,
+    contextFile: NonNullable<ClipboardImageSnapshot['contextFile']>,
+    viewId = 'sidebar'
+  ): boolean {
+    const images = this.imagesByView.get(viewId);
+    const index = images?.findIndex((image) => image.id === id) ?? -1;
+    if (!images || index < 0) return false;
+    const image = images[index]!;
+    const updated = [...images];
+    updated[index] = { ...image, contextFile: { ...contextFile } };
+    this.imagesByView.set(viewId, updated);
+    return true;
+  }
+
   update(images: ClipboardImageSnapshot[], viewId = 'sidebar'): Promise<void> {
     const memoryImages = images.map((image) => ({
       ...image,

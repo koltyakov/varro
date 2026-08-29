@@ -405,7 +405,7 @@ export class WebviewSession {
       editorContext,
       terminalSelection: this.contextFilesState.getTerminalSelection(),
       droppedFiles: this.contextFilesState.getContextFiles(),
-      clipboardImages: this.deps.draftImages(),
+      clipboardImages: [],
       emptyStateLogoUri: this.bridge.emptyStateLogoUri() || '',
       remoteExtensionHost: Boolean(vscode.env?.remoteName),
       showFileDiffs: config.showFileDiffs,
@@ -451,6 +451,10 @@ export class WebviewSession {
 
   private postBootMessages(status: ServerStatus, options?: { clearResolvedEmbedded?: boolean }) {
     const editorContext = this.getEditorContext();
+    this.bridge.post({
+      type: 'composer/images-sync',
+      payload: { images: this.deps.draftImages() ?? [] },
+    });
     this.bridge.post({ type: 'context/update', payload: editorContext });
     this.bridge.post({
       type: 'terminal-selection/update',

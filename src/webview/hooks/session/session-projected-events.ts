@@ -18,15 +18,12 @@ type ProjectedSessionEventContext = {
   isSessionInActiveTree(sessionId: string | null | undefined): boolean;
   getMessages(): MessageEntry[];
   findAssistantMessage(sessionId: string, assistantMessageID?: string): MessageEntry | null;
+  findPart(messageID: string, partID: string): Part | null;
   scheduleActiveMessageSync(sessionId: string): void;
   syncTodosFromMessages(): void;
 };
 
 export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventContext) {
-  const findPart = (messageID: string, partID: string): Part | null => {
-    const message = ctx.getMessages().find((entry) => entry.info.id === messageID);
-    return message?.parts.find((part) => part.id === partID) || null;
-  };
   const applyProjectedPart = (
     sessionId: string,
     assistantMessageID: string | undefined,
@@ -51,7 +48,7 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
       ctx.scheduleActiveMessageSync(sessionId);
       return null;
     }
-    const existing = message.parts.find((part) => part.id === partID);
+    const existing = ctx.findPart(message.info.id, partID);
     if (!existing) {
       // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
       sessionStore.upsertPart({
@@ -99,7 +96,7 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
       return false;
     }
     const messageID = message.info.id;
-    const existing = findPart(messageID, callID);
+    const existing = ctx.findPart(messageID, callID);
     const existingTool = existing?.type === 'tool' ? existing : null;
     const timestamp = getEventTimestamp(props);
     const toolName =

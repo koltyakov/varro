@@ -694,20 +694,31 @@ describe('WebviewSession', () => {
   });
 
   it('replays boot state and clears interrupted sessions when the webview becomes ready', async () => {
-    const { session, bridge, sessionState, sessionTrash, hiddenSessions, contextFilesState } =
+    const { session, bridge, sessionState, sessionTrash, hiddenSessions, contextFilesState, deps } =
       createSession();
     const view = createWebviewView(true);
     const hiddenSessionIds = new Set(['session-hidden']);
     const hiddenJudgeSessionIds = new Set(['session-judge']);
+    const draftImage = {
+      id: 'image-1',
+      url: 'data:image/png;base64,AA==',
+      mime: 'image/png',
+      filename: 'image.png',
+      size: 1,
+    };
 
     contextFilesState.postContextFiles.mockImplementation((post) => {
       post({ type: 'files/update', payload: [] });
     });
+    deps.draftImages.mockReturnValue([draftImage]);
     sessionTrash.hiddenSessionIds.mockReturnValue(hiddenSessionIds);
     hiddenSessions.hiddenSessionIds.mockReturnValue(hiddenJudgeSessionIds);
 
     await session.resolve(view as never);
     await flushMicrotasks();
+    expect(bridge.renderHtml).toHaveBeenCalledWith(
+      expect.objectContaining({ clipboardImages: [] })
+    );
 
     session.interruptedSessionsForWebview = [{ id: 'session-1', title: 'Needs attention' }];
     session.blockingRequestsForWebview = [
@@ -737,6 +748,10 @@ describe('WebviewSession', () => {
       ([message]) => (message as { type: string }).type
     );
     expect(postedTypes).toContain('context/update');
+    expect(bridge.post).toHaveBeenCalledWith({
+      type: 'composer/images-sync',
+      payload: { images: [draftImage] },
+    });
     expect(postedTypes).toContain('terminal-selection/update');
     expect(postedTypes).toContain('files/update');
     expect(postedTypes).toContain('config/update');

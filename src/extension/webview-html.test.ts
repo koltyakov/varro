@@ -35,24 +35,23 @@ const initialState: InitialWebviewState = {
 describe('renderWebviewHtml', () => {
   beforeEach(() => {
     randomBytesMock.mockReset();
-    randomBytesMock
-      .mockReturnValueOnce(Buffer.from('fixed-nonce'))
-      .mockReturnValueOnce(Buffer.from('fixed-cache-key'));
+    randomBytesMock.mockReturnValueOnce(Buffer.from('fixed-nonce'));
   });
 
   it('escapes inline state and injects the webview bootstrap assets', () => {
     const html = renderWebviewHtml('vscode-webview-resource:', initialState, {
       scriptUri: 'webview://assets/webview.js',
       cssUri: 'webview://assets/webview.css',
+      version: 'fixed-cache-key',
     });
 
     expect(html).toContain(
-      '<link rel="stylesheet" href="webview://assets/webview.css?v=Zml4ZWQtY2FjaGUta2V5" />'
+      '<link rel="stylesheet" href="webview://assets/webview.css?v=fixed-cache-key" />'
     );
     expect(html).toContain('role="status" aria-label="Loading workspace"');
     expect(html).not.toContain('Loading workspace...');
     expect(html).toContain(
-      '<script type="module" nonce="Zml4ZWQtbm9uY2U" src="webview://assets/webview.js?v=Zml4ZWQtY2FjaGUta2V5"></script>'
+      '<script type="module" nonce="Zml4ZWQtbm9uY2U" src="webview://assets/webview.js?v=fixed-cache-key"></script>'
     );
     expect(html).toContain('window.__initialTheme = window.__initialWebviewState.theme;');
     expect(html).toContain(
@@ -70,10 +69,10 @@ describe('renderWebviewHtml', () => {
     expect(html).toContain('window.__clearVarroBootstrapFailureHandlers = clearHandlers;');
     expect(html).toContain("typeof window.__cleanupVarroBridge === 'function'");
     expect(html.indexOf('window.__clearVarroBootstrapFailureHandlers')).toBeLessThan(
-      html.indexOf('src="webview://assets/webview.js?v=Zml4ZWQtY2FjaGUta2V5"')
+      html.indexOf('src="webview://assets/webview.js?v=fixed-cache-key"')
     );
     expect(html.indexOf('role="status" aria-label="Loading workspace"')).toBeLessThan(
-      html.indexOf('src="webview://assets/webview.js?v=Zml4ZWQtY2FjaGUta2V5"')
+      html.indexOf('src="webview://assets/webview.js?v=fixed-cache-key"')
     );
   });
 
@@ -88,7 +87,7 @@ describe('renderWebviewHtml', () => {
           initialRoute: { type: 'new-session' },
         },
       },
-      { scriptUri: 'webview.js', cssUri: 'webview.css' }
+      { scriptUri: 'webview.js', cssUri: 'webview.css', version: 'fixed-cache-key' }
     );
 
     expect(html).toContain(
@@ -107,7 +106,7 @@ describe('renderWebviewHtml', () => {
           initialRoute: { type: 'new-session' },
         },
       },
-      { scriptUri: 'webview.js', cssUri: 'webview.css' }
+      { scriptUri: 'webview.js', cssUri: 'webview.css', version: 'fixed-cache-key' }
     );
 
     expect(html).toContain('<html lang="en">');
@@ -138,6 +137,7 @@ describe('renderWebviewHtml', () => {
     const html = renderWebviewHtml('vscode-webview-resource:', initialState, {
       scriptUri: 'webview.js',
       cssUri: 'webview.css',
+      version: 'fixed-cache-key',
     });
     const imgSrc = html.match(/img-src ([^;]+);/)?.[1];
 
@@ -148,39 +148,37 @@ describe('renderWebviewHtml', () => {
     const html = renderWebviewHtml('vscode-webview-resource:', initialState, {
       scriptUri: 'webview.js',
       cssUri: 'webview.css',
+      version: 'fixed-cache-key',
     });
     const scriptSrc = html.match(/script-src ([^;]+);/)?.[1];
 
     expect(scriptSrc).toBe("'nonce-Zml4ZWQtbm9uY2U' vscode-webview-resource:");
   });
 
-  it('keeps the CSP nonce out of asset URLs', () => {
+  it('uses the build content version instead of the CSP nonce in asset URLs', () => {
     const html = renderWebviewHtml('vscode-webview-resource:', initialState, {
       scriptUri: 'webview.js',
       cssUri: 'webview.css',
+      version: 'fixed-cache-key',
     });
     const nonce = html.match(/script-src 'nonce-([^']+)'/)?.[1];
 
-    expect(randomBytesMock).toHaveBeenCalledTimes(2);
+    expect(randomBytesMock).toHaveBeenCalledTimes(1);
     expect(randomBytesMock).toHaveBeenNthCalledWith(1, 24);
-    expect(randomBytesMock).toHaveBeenNthCalledWith(2, 24);
     expect(nonce).toBe('Zml4ZWQtbm9uY2U');
     expect(html.split(`nonce="${nonce}"`).length - 1).toBe(2);
     expect(html).not.toContain(`?v=${nonce}`);
-    expect(html).toContain('?v=Zml4ZWQtY2FjaGUta2V5');
+    expect(html).toContain('?v=fixed-cache-key');
   });
 
   it('escapes webview asset URIs used in attributes', () => {
     const html = renderWebviewHtml('vscode-webview-resource:', initialState, {
       scriptUri: 'webview.js?value="<unsafe>&',
       cssUri: 'webview.css?value="<unsafe>&',
+      version: 'fixed-cache-key',
     });
 
-    expect(html).toContain(
-      'src="webview.js?value=&quot;&lt;unsafe>&amp;&amp;v=Zml4ZWQtY2FjaGUta2V5"'
-    );
-    expect(html).toContain(
-      'href="webview.css?value=&quot;&lt;unsafe>&amp;&amp;v=Zml4ZWQtY2FjaGUta2V5"'
-    );
+    expect(html).toContain('src="webview.js?value=&quot;&lt;unsafe>&amp;&amp;v=fixed-cache-key"');
+    expect(html).toContain('href="webview.css?value=&quot;&lt;unsafe>&amp;&amp;v=fixed-cache-key"');
   });
 });

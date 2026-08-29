@@ -1517,12 +1517,9 @@ describe('RestProxy handleRequest', () => {
       permissionAutomationLease: 7,
     });
 
-    expect(serverRequest).toHaveBeenCalledWith(
-      'GET',
-      '/session/status',
-      undefined,
-      withSignal({ directory: '/repo' })
-    );
+    expect(serverRequest).toHaveBeenCalledWith('GET', '/session/status', undefined, {
+      directory: '/repo',
+    });
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 88,
       data: { 'session-1': { type: 'idle' } },
@@ -2490,12 +2487,9 @@ describe('RestProxy handleRequest', () => {
     );
     await proxy.handleRequest(makePayload(1513, 'GET', '/session/status'));
 
-    expect(serverRequest).toHaveBeenCalledWith(
-      'GET',
-      '/session?limit=1000000',
-      undefined,
-      withSignal({ directory: '/repo' })
-    );
+    expect(serverRequest).toHaveBeenCalledWith('GET', '/session?limit=1000000', undefined, {
+      directory: '/repo',
+    });
     expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
       id: 1513,
       data: {},
@@ -2555,12 +2549,9 @@ describe('RestProxy handleRequest', () => {
     });
     await proxy.handleRequest(makePayload(154, 'GET', '/session/status'));
 
-    expect(serverRequest).toHaveBeenCalledWith(
-      'GET',
-      '/session?limit=1000000',
-      undefined,
-      withSignal({ directory: '/repo' })
-    );
+    expect(serverRequest).toHaveBeenCalledWith('GET', '/session?limit=1000000', undefined, {
+      directory: '/repo',
+    });
     expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
       id: 154,
       data: {},

@@ -85,6 +85,26 @@ export class SessionPlanStateStore {
     });
   }
 
+  removeSession(sessionId: string): Promise<void> {
+    if (!isSafePersistedSessionId(sessionId)) {
+      return Promise.reject(new Error('Invalid persisted session ID'));
+    }
+    return this.mutate(async () => {
+      if (Object.hasOwn(this.state, sessionId)) {
+        const next = { ...this.state };
+        delete next[sessionId];
+        this.state = next;
+        await this.persistence.set(SESSION_PLAN_STATE_KEY, next);
+      }
+      if (Object.hasOwn(this.agents, sessionId)) {
+        const next = { ...this.agents };
+        delete next[sessionId];
+        this.agents = next;
+        await this.persistence.set(SESSION_PLAN_AGENT_STATE_KEY, next);
+      }
+    });
+  }
+
   dispose(): Promise<void> {
     return this.mutationQueue;
   }

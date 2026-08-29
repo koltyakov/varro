@@ -39,6 +39,7 @@ export function createSessionTreeIndex() {
   let sessionTreeSpanById: Map<string, { order: string[]; start: number; end: number }> = new Map();
   let nearestPrimarySessionById: Map<string, string> = new Map();
   let activeUsageLimitByRoot: Map<string, UsageLimitNotice | null> = new Map();
+  let treeUpdatedById: Map<string, number> = new Map();
   let indexedSessionsRef: Session[] | null = null;
   let indexedUsageLimitsRef: SessionUsageLimitMap | null = null;
 
@@ -59,8 +60,10 @@ export function createSessionTreeIndex() {
     const childrenByParent = new Map<string, string[]>();
     nearestPrimarySessionById = new Map();
     sessionTreeSpanById = new Map();
+    treeUpdatedById = new Map();
 
     const sessionIds = new Set(sessions.map((session) => session.id));
+    const sessionsById = new Map(sessions.map((session) => [session.id, session]));
     const parentById = new Map<string, string>();
     for (const session of sessions) {
       if (!session.parentID) continue;
@@ -109,10 +112,13 @@ export function createSessionTreeIndex() {
       for (let index = preOrder.length - 1; index >= 0; index -= 1) {
         const sessionId = preOrder[index]!;
         let size = 1;
+        let updated = sessionsById.get(sessionId)?.time.updated ?? 0;
         for (const childId of ownedChildren.get(sessionId) || []) {
           size += sizeById.get(childId) ?? 1;
+          updated = Math.max(updated, treeUpdatedById.get(childId) ?? 0);
         }
         sizeById.set(sessionId, size);
+        treeUpdatedById.set(sessionId, updated);
         sessionTreeSpanById.set(sessionId, { order: preOrder, start: index, end: index + size });
       }
     };
@@ -178,6 +184,16 @@ export function createSessionTreeIndex() {
       if (!sessionId) return null;
       ensureIndex(sessions, usageLimits);
       return nearestPrimarySessionById.get(sessionId) || sessionId;
+    },
+
+    getTreeUpdated(
+      sessionId: string | null | undefined,
+      sessions: Session[],
+      usageLimits: SessionUsageLimitMap
+    ) {
+      if (!sessionId) return 0;
+      ensureIndex(sessions, usageLimits);
+      return treeUpdatedById.get(sessionId) ?? 0;
     },
 
     getActiveUsageLimitNotice(

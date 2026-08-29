@@ -54,6 +54,20 @@ describe('SessionModelSelectionStore', () => {
     });
   });
 
+  it('removes the persisted selection for a deleted session', async () => {
+    const persistence: Persistence = {
+      get: vi.fn(),
+      set: vi.fn(() => Promise.resolve()),
+      remove: vi.fn(() => Promise.resolve()),
+    };
+    const store = new SessionModelSelectionStore(persistence);
+    await store.set('session-1', { providerID: 'openai', modelID: 'gpt-5.6-sol' });
+
+    await store.removeSession('session-1');
+
+    expect(store.list()).toEqual({});
+  });
+
   it('does not replace a persisted selection when opening an editor', async () => {
     const persisted = { providerID: 'anthropic', modelID: 'claude-sonnet', variant: 'high' };
     const persistence: Persistence = {

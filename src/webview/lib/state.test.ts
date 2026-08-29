@@ -23,11 +23,13 @@ import {
   removePermission,
   removeMessage,
   removeClipboardImage,
+  setClipboardImageContextFile,
   setSessionFailed,
   setInputText,
   setSessionUsageLimit,
   setState,
   state,
+  syncClipboardImages,
   syncFailedSessionsFromMessages,
   setMessagesIncremental,
   upsertMessage,
@@ -966,6 +968,54 @@ describe('clipboard image placeholders', () => {
       payload: { images: [] },
     });
 
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    delete (window as { __sendToExtension?: unknown }).__sendToExtension;
+  });
+
+  it('does not resend base64 images when the host supplies a temporary file path', () => {
+    const send = vi.fn<(message: WebviewMessage) => void>();
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    (window as { __sendToExtension?: typeof send }).__sendToExtension = send;
+    addClipboardImage({
+      id: 'img-stored',
+      url: 'data:image/png;base64,AA==',
+      mime: 'image/png',
+      filename: 'image.png',
+      size: 1,
+    });
+    send.mockClear();
+
+    expect(
+      setClipboardImageContextFile('img-stored', {
+        path: '/tmp/image.png',
+        relativePath: 'image.png',
+        type: 'file',
+      })
+    ).toBe(true);
+
+    expect(state.clipboardImages[0]?.contextFile?.path).toBe('/tmp/image.png');
+    expect(send).not.toHaveBeenCalled();
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    delete (window as { __sendToExtension?: unknown }).__sendToExtension;
+  });
+
+  it('applies host image snapshots without posting them back', () => {
+    const send = vi.fn<(message: WebviewMessage) => void>();
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    (window as { __sendToExtension?: typeof send }).__sendToExtension = send;
+
+    syncClipboardImages([
+      {
+        id: 'img-restored',
+        url: 'data:image/png;base64,AA==',
+        mime: 'image/png',
+        filename: 'image.png',
+        size: 1,
+      },
+    ]);
+
+    expect(state.clipboardImages.map((image) => image.id)).toEqual(['img-restored']);
+    expect(send).not.toHaveBeenCalled();
     // SAFETY: The fixture provides the unknown fields read by this statement.
     delete (window as { __sendToExtension?: unknown }).__sendToExtension;
   });

@@ -128,6 +128,7 @@ function createMessageDependencies(
     reloadWorkspaceAfterChange: vi.fn(),
     isInitialized: () => false,
     setTerminalSelection: vi.fn(),
+    syncClipboardImages: vi.fn(),
     addContextFiles: vi.fn(),
     removeContextFile: vi.fn(),
     createSession: vi.fn(),
@@ -144,6 +145,26 @@ function createMessageDependencies(
 }
 
 describe('mount bridge helpers', () => {
+  it('applies host clipboard image snapshots', () => {
+    const syncClipboardImages = vi.fn();
+    const images = [
+      {
+        id: 'image-1',
+        url: 'data:image/png;base64,AA==',
+        mime: 'image/png',
+        filename: 'image.png',
+        size: 1,
+      },
+    ];
+
+    handleExtensionMessageWithDependencies(createMessageDependencies({ syncClipboardImages }), {
+      type: 'composer/images-sync',
+      payload: { images },
+    });
+
+    expect(syncClipboardImages).toHaveBeenCalledWith(images);
+  });
+
   it('applies sibling workspace alert snapshots', () => {
     const setSiblingWorkspaceAlerts = vi.fn();
     const alerts = [{ name: 'Repo B', path: '/repo-b', kinds: ['attention' as const], count: 1 }];

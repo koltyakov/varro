@@ -3,7 +3,7 @@ import type { Session } from '../types';
 import type { UsageLimitNotice } from './usage-limit';
 import { collectSessionTreeIds, createSessionTreeIndex } from './session-tree-index';
 
-function makeSession(id: string, opts?: { parentID?: string }): Session {
+function makeSession(id: string, opts?: { parentID?: string; updated?: number }): Session {
   return {
     id,
     projectID: 'proj',
@@ -11,7 +11,7 @@ function makeSession(id: string, opts?: { parentID?: string }): Session {
     parentID: opts?.parentID,
     title: id,
     version: '1',
-    time: { created: 0, updated: 0 },
+    time: { created: 0, updated: opts?.updated ?? 0 },
   };
 }
 
@@ -109,6 +109,21 @@ describe('createSessionTreeIndex', () => {
     expect(idx.getRootId('gc1', sessions, emptyLimits)).toBe('root');
     expect(idx.getRootId('c1', sessions, emptyLimits)).toBe('root');
     expect(idx.getRootId('root', sessions, emptyLimits)).toBe('root');
+  });
+
+  it('returns the latest update in each subtree', () => {
+    const idx = createSessionTreeIndex();
+    const sessions = [
+      makeSession('root', { updated: 1 }),
+      makeSession('child', { parentID: 'root', updated: 4 }),
+      makeSession('grandchild', { parentID: 'child', updated: 9 }),
+      makeSession('sibling', { parentID: 'root', updated: 6 }),
+    ];
+
+    expect(idx.getTreeUpdated('root', sessions, emptyLimits)).toBe(9);
+    expect(idx.getTreeUpdated('child', sessions, emptyLimits)).toBe(9);
+    expect(idx.getTreeUpdated('sibling', sessions, emptyLimits)).toBe(6);
+    expect(idx.getTreeUpdated('unknown', sessions, emptyLimits)).toBe(0);
   });
 
   it('getRootId returns null for null sessionId', () => {

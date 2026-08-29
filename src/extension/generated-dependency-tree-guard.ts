@@ -18,8 +18,21 @@ const GENERATED_DEPENDENCY_SEGMENT =
 
 export class GeneratedDependencyTreeGuard {
   private readonly approvedFingerprintByWorkspace = new Map<string, string>();
+  private readonly admissionRequests = new Map<string, Promise<boolean>>();
 
-  async confirmPromptAdmission(workspacePath: string): Promise<boolean> {
+  confirmPromptAdmission(workspacePath: string): Promise<boolean> {
+    const pending = this.admissionRequests.get(workspacePath);
+    if (pending) return pending;
+    const request = this.runPromptAdmission(workspacePath);
+    this.admissionRequests.set(workspacePath, request);
+    void request.then(
+      () => this.clearAdmissionRequest(workspacePath, request),
+      () => this.clearAdmissionRequest(workspacePath, request)
+    );
+    return request;
+  }
+
+  private async runPromptAdmission(workspacePath: string): Promise<boolean> {
     const trees = await findUnignoredGeneratedDependencyTrees(workspacePath);
     if (trees.length === 0) return true;
 
@@ -45,6 +58,12 @@ export class GeneratedDependencyTreeGuard {
       await vscode.commands.executeCommand('workbench.view.scm');
     }
     return false;
+  }
+
+  private clearAdmissionRequest(workspacePath: string, request: Promise<boolean>) {
+    if (this.admissionRequests.get(workspacePath) === request) {
+      this.admissionRequests.delete(workspacePath);
+    }
   }
 }
 

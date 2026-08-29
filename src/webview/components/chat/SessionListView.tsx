@@ -3,6 +3,7 @@ import {
   getSelectedModelForSession,
   getSessionTreeIds,
   getSessionTreeRootId,
+  getSessionTreeUpdated,
   hasActiveUsageLimit,
   isLoading,
   isSessionAwaitingInput,
@@ -245,15 +246,6 @@ const SESSION_DIFF_SUMMARY_CACHE_LIMIT = 200;
 
 function getDiffSummaryKey(sessionId: string, updated: number): string {
   return `${sessionId}:${updated}`;
-}
-
-function getSessionTreeUpdated(sessionId: string): number {
-  const treeIds = new Set(getSessionTreeIds(sessionId));
-  let updated = 0;
-  for (const session of state.sessions) {
-    if (treeIds.has(session.id)) updated = Math.max(updated, session.time.updated);
-  }
-  return updated;
 }
 
 function getSessionTreeFailedUpdated(sessionId: string): number | undefined {
@@ -1058,7 +1050,7 @@ export function SessionListView(props: {
         setAllSessionsForSubagent(page.items);
         if (!page.hasMore) return;
 
-        const nextLimit = Math.min(limit + SUBAGENT_SESSION_PAGE_SIZE, MAX_SUBAGENT_SESSION_LIMIT);
+        const nextLimit = Math.min(limit * 2, MAX_SUBAGENT_SESSION_LIMIT);
         if (nextLimit === limit) throw new Error('Session lookup exceeded the supported limit');
         limit = nextLimit;
       }

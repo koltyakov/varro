@@ -3,6 +3,7 @@ import {
   isSafePersistedSessionId,
   parseServerEvent,
   type ChatModelSelection,
+  type ClipboardImageSnapshot,
   type ContextLineRange,
   type DesktopSessionPaneSide,
   type DroppedFile,
@@ -31,6 +32,7 @@ const KNOWN_TYPES = new Set<string>([
   'pdfs/picked',
   'pdfs/stored',
   'images/stored',
+  'composer/images-sync',
   'files/removed',
   'files/search-results',
   'config/update',
@@ -175,6 +177,14 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
       const payload = asRecord(record.payload);
       if (!isString(payload?.id) || !isDroppedFile(payload.contextFile)) return null;
       return { type, payload: { id: payload.id, contextFile: payload.contextFile } };
+    }
+
+    case 'composer/images-sync': {
+      const payload = asRecord(record.payload);
+      if (!payload || !Array.isArray(payload.images) || !payload.images.every(isClipboardImage)) {
+        return null;
+      }
+      return { type, payload: { images: payload.images } };
     }
 
     case 'files/removed': {
@@ -713,6 +723,23 @@ function isDroppedFile<T>(value: T): value is T & DroppedFile {
   }
   if (record.lineRanges === undefined) return true;
   return Array.isArray(record.lineRanges) && record.lineRanges.every(isLineRange);
+}
+
+function isClipboardImage<T>(value: T): value is T & ClipboardImageSnapshot {
+  const record = asRecord(value);
+  return (
+    !!record &&
+    isString(record.id) &&
+    isString(record.url) &&
+    isString(record.mime) &&
+    isString(record.filename) &&
+    isNumber(record.size) &&
+    Number.isFinite(record.size) &&
+    (record.contentKey === undefined || isString(record.contentKey)) &&
+    (record.attachmentSequence === undefined ||
+      (isNumber(record.attachmentSequence) && Number.isSafeInteger(record.attachmentSequence))) &&
+    (record.contextFile === undefined || isDroppedFile(record.contextFile))
+  );
 }
 
 function isKnownExtensionMessageType<T>(value: T): value is T & ExtensionMessage['type'] {

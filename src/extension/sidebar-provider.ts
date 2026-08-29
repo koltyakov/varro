@@ -43,6 +43,11 @@ const WORKSPACE_INDEPENDENT_EVENT_TYPES = new Set<ServerEvent['type']>([
   'workspace.failed',
   'workspace.status',
 ]);
+const EDITOR_TITLE_EVENT_TYPES = new Set<ServerEvent['type']>([
+  'session.created',
+  'session.updated',
+  'session.deleted',
+]);
 import { AutoApproveJudge } from './auto-approve-judge';
 import { CommitMessageService } from './commit-message-service';
 import type { ContextProvider } from './context-provider';
@@ -84,6 +89,7 @@ import { SidebarProviderBridge } from './sidebar-provider-bridge';
 import { SidebarProviderContextFiles } from './sidebar-provider-context-files';
 import { SidebarProviderRuntime } from './sidebar-provider-runtime';
 import { WebviewSession } from './webview-session';
+import { WorkspaceSessionStatusCoordinator } from './workspace-session-status-coordinator';
 import { UsageReportService } from './usage-report-service';
 import { getWorkspaceSessionIdsForEvent } from './sidebar-provider-utils';
 import { resolveServerLaunch } from './util/server-launch';
@@ -179,6 +185,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private mermaidPreviewLayoutQueue: Promise<void> = Promise.resolve();
   private readonly contextProvider: ContextProvider;
   private readonly generatedDependencyTreeGuard: GeneratedDependencyTreeGuard;
+  private readonly workspaceSessionStatusCoordinator = new WorkspaceSessionStatusCoordinator();
   private readonly endpoints = new Set<WebviewEndpoint>();
   private readonly editorPanels = new Map<string, EditorEndpoint>();
   private lastFocusedContextViewId: string | null = null;
@@ -196,6 +203,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   } | null = null;
   private readonly deferredInterruptedRecoveryOwners = new Map<string, string>();
   private sessionDirectoryReconciliationScheduled = false;
+  private lastWorkspaceStructureKey: string | null = null;
   private nextInterruptedRecoveryClaimId = 0;
   private nextEditorId = 0;
   private disposing = false;
@@ -498,6 +506,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     };
     const restProxy = new RestProxy({
       server: endpointServer,
+      workspaceSessionStatusCoordinator: this.workspaceSessionStatusCoordinator,
       contextProvider: this.contextProvider,
       providerLimitService: this.providerLimitService,
       sessionState: this.sessionState,
@@ -703,8 +712,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         },
         storeImage: (payload) => {
           const generation = webviewSession.getRequestGeneration();
-          return this.storeImage(payload, post, () =>
-            this.isEndpointGenerationAvailable(endpointRef.endpoint, generation)
+          return this.storeImage(
+            payload,
+            post,
+            () => this.isEndpointGenerationAvailable(endpointRef.endpoint, generation),
+            (contextFile) =>
+              this.draftImages.setContextFile(payload.id, contextFile, webviewContext.viewId)
           );
         },
         releaseImages: (payload) => this.releaseImages(payload),
@@ -1193,22 +1206,46 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   post(msg: ExtensionMessage) {
+    let workspaceStructureChanged = false;
     if (msg.type === 'server/event') this.postQueuedSessionStatus(msg.payload);
     if (msg.type === 'server/event') this.releaseDeletedEditorRestorations(msg.payload);
+    if (msg.type === 'server/event') this.removeDeletedSessionPersistence(msg.payload);
     if (msg.type === 'server/event' && this.shouldDeferWorkspaceEvent(msg.payload)) {
       this.deferredWorkspaceEvents.push(msg.payload);
       if (this.deferredWorkspaceEvents.length > SidebarProvider.MAX_DEFERRED_WORKSPACE_EVENTS) {
         this.deferredWorkspaceEvents.shift();
         logger.warn('Dropped oldest deferred workspace event after reaching the queue limit');
       }
-      this.updateEditorPanelTitles();
+      if (EDITOR_TITLE_EVENT_TYPES.has(msg.payload.type)) this.updateEditorPanelTitles();
       return;
     }
     if (msg.type === 'server/event') this.flushDeferredWorkspaceEvents();
-    if (msg.type === 'context/update') this.reconcileWorkspaceMembership(msg.payload);
+    if (msg.type === 'context/update') {
+      const structureKey = this.workspaceStructureKey(msg.payload);
+      workspaceStructureChanged = structureKey !== this.lastWorkspaceStructureKey;
+      if (workspaceStructureChanged) {
+        this.lastWorkspaceStructureKey = structureKey;
+        this.reconcileWorkspaceMembership(msg.payload);
+      }
+    }
     this.postToEndpoints(msg);
-    if (msg.type === 'server/event') this.updateEditorPanelTitles();
-    if (msg.type === 'context/update') this.postSiblingWorkspaceAlerts();
+    if (msg.type === 'server/event' && EDITOR_TITLE_EVENT_TYPES.has(msg.payload.type)) {
+      this.updateEditorPanelTitles();
+    }
+    if (msg.type === 'context/update' && workspaceStructureChanged) {
+      this.postSiblingWorkspaceAlerts();
+    }
+  }
+
+  private workspaceStructureKey(context: EditorContext) {
+    return JSON.stringify([
+      normalizeWorkspaceIdentity(context.workspacePath),
+      normalizeWorkspaceIdentity(context.workspaceDirectory),
+      (context.workspaceFolders ?? []).map((folder) => [
+        folder.name,
+        normalizeWorkspaceIdentity(folder.path),
+      ]),
+    ]);
   }
 
   private reconcileWorkspaceMembership(context: EditorContext) {
@@ -1245,6 +1282,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private postToEndpoints(msg: ExtensionMessage) {
     for (const endpoint of this.endpoints) {
+      if (
+        endpoint.surface === 'editor' &&
+        !endpoint.ready &&
+        !endpoint.bridge.isVisible() &&
+        (msg.type === 'server/event' || msg.type === 'context/update')
+      ) {
+        continue;
+      }
       const endpointMessage =
         msg.type === 'server/event'
           ? this.projectEventForEndpoint(msg, endpoint)
@@ -1296,6 +1341,25 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         endpoint.restoringSessionId = undefined;
       }
     }
+  }
+
+  private removeDeletedSessionPersistence(event: ServerEvent) {
+    if (event.type !== 'session.deleted') return;
+    const sessionId = event.properties?.info?.id || event.properties?.sessionID;
+    if (!sessionId) return;
+    const cleanup = Promise.all([
+      this.sessionPermissionModes.removeSession(sessionId),
+      this.sessionSelectedModels.removeSession(sessionId),
+      this.sessionPlanState.removeSession(sessionId),
+    ]);
+    void cleanup.catch(
+      // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Promise rejection reasons are normalized for logging at this boundary.
+      (error: unknown) => {
+        logger.warn(
+          `Failed to remove persisted state for deleted session ${sessionId}: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    );
   }
 
   private postQueuedSessionStatus(event: ServerEvent) {
@@ -1356,7 +1420,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.deferredWorkspaceEvents.splice(0, this.deferredWorkspaceEvents.length, ...pending);
     for (const event of ready) {
       this.postToEndpoints({ type: 'server/event', payload: event });
-      this.updateEditorPanelTitles();
+      if (EDITOR_TITLE_EVENT_TYPES.has(event.type)) this.updateEditorPanelTitles();
     }
   }
 
@@ -1677,8 +1741,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     for (const endpoint of this.editorPanels.values()) {
       if (endpoint.route.type !== 'session') continue;
       const title = this.editorSessionTitle(endpoint.route);
-      endpoint.route = { ...endpoint.route, title };
-      endpoint.panel.title = this.editorTitle(endpoint.route);
+      if (endpoint.route.title !== title) endpoint.route = { ...endpoint.route, title };
+      const panelTitle = this.editorTitle(endpoint.route);
+      if (endpoint.panel.title !== panelTitle) endpoint.panel.title = panelTitle;
     }
   }
 
@@ -2120,7 +2185,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private async storeImage(
     payload: Extract<WebviewMessage, { type: 'images/store' }>['payload'],
     post: (message: ExtensionMessage) => void = (message) => this.post(message),
-    isAvailable: () => boolean = () => true
+    isAvailable: () => boolean = () => true,
+    onStored: (contextFile: DroppedFile) => void = () => {}
   ) {
     const [contextFile] = await this.droppedFilesService.fromContent([
       { name: payload.name, content: payload.content, size: payload.size },
@@ -2130,6 +2196,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         await this.droppedFilesService.removeOwnedFile(contextFile.path);
         return;
       }
+      onStored(contextFile);
       post({ type: 'images/stored', payload: { id: payload.id, contextFile } });
     }
   }

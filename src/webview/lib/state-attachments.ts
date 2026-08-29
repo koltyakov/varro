@@ -197,6 +197,16 @@ function persistContextFiles() {
  * reconcile their `[filename]` markers in whatever text it is about to apply.
  */
 export function replaceClipboardImages(images: ClipboardImage[]): ClipboardImage[] {
+  const dropped = applyClipboardImages(images);
+  persistClipboardImages();
+  return dropped;
+}
+
+export function syncClipboardImages(images: ClipboardImage[]) {
+  applyClipboardImages(images);
+}
+
+function applyClipboardImages(images: ClipboardImage[]): ClipboardImage[] {
   const capped = images.slice(-MAX_CLIPBOARD_IMAGES);
   const dropped = images.slice(0, images.length - capped.length);
   clearClipboardImageAttachmentSequences();
@@ -205,7 +215,6 @@ export function replaceClipboardImages(images: ClipboardImage[]): ClipboardImage
     'clipboardImages',
     capped.map((image) => ({ ...image }))
   );
-  persistClipboardImages();
   return dropped;
 }
 
@@ -261,7 +270,6 @@ export function setClipboardImageContextFile(id: string, contextFile: DroppedFil
       if (image) image.contextFile = { ...contextFile };
     })
   );
-  persistClipboardImages();
   return true;
 }
 

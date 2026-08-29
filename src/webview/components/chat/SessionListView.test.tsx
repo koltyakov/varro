@@ -2113,6 +2113,14 @@ describe('SessionListView load errors', () => {
         hasMore: true,
       })
       .mockResolvedValueOnce({
+        items: [...loadedSessions, unrelatedArchiveSession],
+        hasMore: true,
+      })
+      .mockResolvedValueOnce({
+        items: [...loadedSessions, unrelatedArchiveSession],
+        hasMore: true,
+      })
+      .mockResolvedValueOnce({
         items: [...loadedSessions, unrelatedArchiveSession, paginatedChild],
         hasMore: false,
       });
@@ -2148,6 +2156,8 @@ describe('SessionListView load errors', () => {
     ).toEqual(['paginated-child']);
     expect(client.session.list).toHaveBeenNthCalledWith(1, { limit: 100 });
     expect(client.session.list).toHaveBeenNthCalledWith(2, { limit: 200 });
+    expect(client.session.list).toHaveBeenNthCalledWith(3, { limit: 400 });
+    expect(client.session.list).toHaveBeenNthCalledWith(4, { limit: 800 });
     expect(loadMoreSessionsMock).not.toHaveBeenCalled();
     expect(container.querySelector('.session-list-continuation')).toBeNull();
     expect(container.textContent).not.toContain('unrelated-archive');

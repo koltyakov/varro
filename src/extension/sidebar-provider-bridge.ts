@@ -1,5 +1,7 @@
 /* oxlint-disable anti-slop/no-unknown-parameters -- Webview messages are untrusted until parsed by the bridge. */
 import * as vscode from 'vscode';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { ExtensionMessage, InitialWebviewState } from '../shared/protocol';
 import { logger } from './logger';
 import { renderWebviewHtml, type WebviewAssetUris } from './webview-html';
@@ -91,9 +93,20 @@ export class SidebarProviderBridge {
     const webview = this.view?.webview;
     if (!webview) throw new Error('Cannot render webview assets before the view is available');
     const distUri = vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview');
+    const version = this.readWebviewAssetVersion(distUri.fsPath);
     return {
       scriptUri: webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'webview.mjs')).toString(),
       cssUri: webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'webview.css')).toString(),
+      version,
     };
+  }
+
+  private readWebviewAssetVersion(distPath: string) {
+    try {
+      const version = readFileSync(join(distPath, 'webview.version'), 'utf8').trim();
+      return /^[a-f0-9]{16}$/.test(version) ? version : 'development';
+    } catch {
+      return 'development';
+    }
   }
 }

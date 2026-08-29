@@ -112,6 +112,7 @@ export function createMountBridgeOperations(deps: {
         reloadWorkspaceAfterChange: deps.reloadWorkspaceAfterChange,
         isInitialized: deps.isInitialized,
         setTerminalSelection: composerStore.setTerminalSelection,
+        syncClipboardImages: composerStore.syncClipboardImages,
         addContextFiles: composerStore.addContextFiles,
         removeContextFile: composerStore.removeContextFile,
         createSession: deps.createSession,
@@ -188,6 +189,9 @@ export function handleExtensionMessageWithDependencies(
     isInitialized(): boolean;
     setTerminalSelection(
       payload: Extract<ExtensionMessage, { type: 'terminal-selection/update' }>['payload']
+    ): void;
+    syncClipboardImages?(
+      images: Extract<ExtensionMessage, { type: 'composer/images-sync' }>['payload']['images']
     ): void;
     addContextFiles(payload: Extract<ExtensionMessage, { type: 'files/dropped' }>['payload']): void;
     removeContextFile(path: string): void;
@@ -290,6 +294,9 @@ export function handleExtensionMessageWithDependencies(
     }
     case 'terminal-selection/update':
       deps.setTerminalSelection(msg.payload);
+      break;
+    case 'composer/images-sync':
+      deps.syncClipboardImages?.(msg.payload.images);
       break;
     case 'files/dropped':
       deps.addContextFiles(msg.payload);

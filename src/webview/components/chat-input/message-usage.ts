@@ -19,6 +19,17 @@ export function getMessageEntriesForSession<T extends MessageInfoEntry>(
   return messages.filter((entry) => entry.info.sessionID === sessionId);
 }
 
+export function groupMessageEntriesBySession<T extends MessageInfoEntry>(messages: readonly T[]) {
+  const messagesBySession = new Map<string, T[]>();
+  for (const entry of messages) {
+    const sessionId = entry.info.sessionID;
+    const entries = messagesBySession.get(sessionId);
+    if (entries) entries.push(entry);
+    else messagesBySession.set(sessionId, [entry]);
+  }
+  return messagesBySession;
+}
+
 export function getLatestAssistantMessageInfo(
   messages: readonly MessageInfoEntry[]
 ): AssistantMessage | null {

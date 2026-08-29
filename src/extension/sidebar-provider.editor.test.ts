@@ -2254,13 +2254,29 @@ describe('SidebarProvider editor panels', () => {
     await provider.deserializeWebviewPanel(editor.panel as never, {
       'varro.editorViewId': 'editor-draft',
     });
+    editor.receive({ type: 'ready' });
+    await vi.waitFor(() =>
+      expect(editor.panel.webview.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'context/update' })
+      )
+    );
     const internals = provider as unknown as {
       draftImages: {
         list(viewId: string): Array<{ contextFile?: DroppedFile }>;
         update(images: unknown[], viewId: string): Promise<void>;
       };
-      droppedFilesService: { removeOwnedFiles(paths: Iterable<string>): Promise<void> };
+      droppedFilesService: {
+        fromContent(...args: unknown[]): Promise<DroppedFile[]>;
+        removeOwnedFiles(paths: Iterable<string>): Promise<void>;
+      };
     };
+    vi.spyOn(internals.droppedFilesService, 'fromContent').mockResolvedValue([
+      {
+        path: '/tmp/varro/image.png',
+        relativePath: 'image.png',
+        type: 'file',
+      },
+    ]);
     const removeOwnedFiles = vi
       .spyOn(internals.droppedFilesService, 'removeOwnedFiles')
       .mockResolvedValue();
@@ -2274,14 +2290,14 @@ describe('SidebarProvider editor panels', () => {
             mime: 'image/png',
             filename: 'image.png',
             size: 1,
-            contextFile: {
-              path: '/tmp/varro/image.png',
-              relativePath: 'image.png',
-              type: 'file',
-            },
           },
         ],
       },
+    });
+    await vi.waitFor(() => expect(internals.draftImages.list('editor-draft')).toHaveLength(1));
+    editor.receive({
+      type: 'images/store',
+      payload: { id: 'image-1', name: 'image.png', content: 'AA==', size: 1 },
     });
     await vi.waitFor(() =>
       expect(internals.draftImages.list('editor-draft')[0]?.contextFile?.path).toBe(

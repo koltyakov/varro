@@ -740,6 +740,7 @@ export type ExtensionMessage =
   | { type: 'pdfs/picked'; payload: NativePdfAttachment[] }
   | { type: 'pdfs/stored'; payload: { id: string; contextFile: DroppedFile } }
   | { type: 'images/stored'; payload: { id: string; contextFile: DroppedFile } }
+  | { type: 'composer/images-sync'; payload: { images: ClipboardImageSnapshot[] } }
   | { type: 'files/removed'; payload: { path: string } }
   | {
       type: 'files/search-results';

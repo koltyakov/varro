@@ -62,6 +62,10 @@ function createHarness(options: { inActiveTree?: boolean; messages?: MessageEntr
           message.info.sessionID === sessionId &&
           (!assistantMessageID || message.info.id === assistantMessageID)
       ) ?? null,
+    findPart: (messageID, partID) =>
+      messages
+        .find((message) => message.info.id === messageID)
+        ?.parts.find((part) => part.id === partID) ?? null,
     scheduleActiveMessageSync,
     syncTodosFromMessages,
   });

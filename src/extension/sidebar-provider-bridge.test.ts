@@ -5,12 +5,17 @@ import type { InitialWebviewState } from '../shared/protocol';
 const mocks = vi.hoisted(() => ({
   logger: { warn: vi.fn() },
   renderWebviewHtml: vi.fn(() => '<html />'),
+  readFileSync: vi.fn(() => '0123456789abcdef'),
   joinPath: vi.fn((base: { fsPath: string }, ...parts: string[]) => ({
     fsPath: [base.fsPath, ...parts].join('/'),
   })),
 }));
 
 vi.mock('./logger', () => ({ logger: mocks.logger }));
+vi.mock('node:fs', () => ({
+  default: { readFileSync: mocks.readFileSync },
+  readFileSync: mocks.readFileSync,
+}));
 
 vi.mock('vscode', () => ({
   Uri: {
@@ -180,10 +185,12 @@ describe('SidebarProviderBridge', () => {
     expect(mocks.renderWebviewHtml).toHaveBeenNthCalledWith(1, 'csp-source', initialState, {
       scriptUri: 'webview:/extension/dist/webview/webview.mjs',
       cssUri: 'webview:/extension/dist/webview/webview.css',
+      version: '0123456789abcdef',
     });
     expect(mocks.renderWebviewHtml).toHaveBeenNthCalledWith(2, 'csp-source', nextState, {
       scriptUri: 'webview:/extension/dist/webview/webview.mjs',
       cssUri: 'webview:/extension/dist/webview/webview.css',
+      version: '0123456789abcdef',
     });
     expect(view.webview.asWebviewUri).toHaveBeenCalledTimes(4);
     expect(mocks.joinPath).toHaveBeenCalledWith(extensionUri, 'dist', 'webview');

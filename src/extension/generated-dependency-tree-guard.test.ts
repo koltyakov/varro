@@ -104,6 +104,19 @@ describe('generated dependency tree guard', () => {
     expect(mocks.showWarningMessage).toHaveBeenCalledOnce();
   });
 
+  it('shares concurrent admission checks for one workspace', async () => {
+    const root = repository();
+    dependency(root);
+    mocks.showWarningMessage.mockResolvedValue('Send Anyway');
+    const guard = new GeneratedDependencyTreeGuard();
+
+    await expect(
+      Promise.all([guard.confirmPromptAdmission(root), guard.confirmPromptAdmission(root)])
+    ).resolves.toEqual([true, true]);
+
+    expect(mocks.showWarningMessage).toHaveBeenCalledOnce();
+  });
+
   it('cancels admission and opens Source Control on request', async () => {
     const root = repository();
     dependency(root);

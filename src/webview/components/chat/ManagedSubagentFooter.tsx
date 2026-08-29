@@ -34,7 +34,7 @@ import { ProviderLimitPopup } from '../chat-input/ProviderLimitPopup';
 import { ProviderLimitChip } from '../chat-input/ToolbarPickers';
 import {
   getLatestAssistantMessageInfoWithTokens,
-  getMessageEntriesForSession,
+  groupMessageEntriesBySession,
   getSessionCost,
   getSessionTreeTokenBreakdown,
 } from '../chat-input/message-usage';
@@ -85,8 +85,9 @@ export function ManagedSubagentFooter(props: {
     }
     return availableVariants().length > 0 ? 'Default' : null;
   });
+  const messagesBySession = createMemo(() => groupMessageEntriesBySession(state.messages));
   const currentSessionMessages = createMemo(() =>
-    getMessageEntriesForSession(state.messages, state.activeSessionId)
+    state.activeSessionId ? messagesBySession().get(state.activeSessionId) || [] : []
   );
   const contextUsage = createMemo(() => {
     const latest = getLatestAssistantMessageInfoWithTokens(currentSessionMessages(), {
@@ -108,7 +109,7 @@ export function ManagedSubagentFooter(props: {
   const nestedContextBreakdown = createMemo(() => {
     const sessionIds = new Set(getSessionTreeIds(state.activeSessionId));
     return estimateNestedContextBreakdown(
-      [...sessionIds].map((id) => getMessageEntriesForSession(state.messages, id))
+      [...sessionIds].map((id) => messagesBySession().get(id) || [])
     );
   });
   const tokenBreakdown = createMemo(() => {

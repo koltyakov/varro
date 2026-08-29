@@ -60,6 +60,7 @@ import {
 } from './util/plan-file';
 import { getRelativePath } from './util/path';
 import { FULL_SESSION_LIST_LIMIT, FULL_SESSION_LIST_PATH } from './util/session-list';
+import { WorkspaceSessionStatusCoordinator } from './workspace-session-status-coordinator';
 import {
   isGeneratedDependencyPath,
   projectFileDiffs,
@@ -159,6 +160,7 @@ export interface RestProxyCallbacks {
   getStatus(): ServerStatus;
   getWorkspacePath?(): string | null | undefined;
   ensureServerStarted(): Promise<string | undefined>;
+  workspaceSessionStatusCoordinator?: WorkspaceSessionStatusCoordinator;
   confirmPromptAdmission(workspacePath: string): Promise<boolean>;
   refreshOpenCodeConfig?(
     previousRouting: OpenCodeModelRouting,
@@ -213,6 +215,7 @@ export class RestProxy {
     string,
     { loadedAt: number; sessions: WorkspaceSession[] }
   >();
+  private readonly workspaceSessionStatusCoordinator: WorkspaceSessionStatusCoordinator;
   private hasSessionDirectorySnapshot = false;
   private sessionDirectoryBootstrapPromise: Promise<ReadonlyMap<string, string>> | null = null;
   private readonly permissionJudgeCleanupRequests = new Set<string>();
@@ -233,7 +236,10 @@ export class RestProxy {
   }>();
   private disposed = false;
 
-  constructor(private readonly callbacks: RestProxyCallbacks) {}
+  constructor(private readonly callbacks: RestProxyCallbacks) {
+    this.workspaceSessionStatusCoordinator =
+      callbacks.workspaceSessionStatusCoordinator ?? new WorkspaceSessionStatusCoordinator();
+  }
 
   cancelRequest(payload: ApiCancelPayload) {
     const request = this.activeRequests.get(payload.cancelKey);
@@ -1206,7 +1212,12 @@ export class RestProxy {
       return this.filterApiResponse('GET', '/session/status', response);
     }
 
-    const openRootIdentities = new Set(roots.map(normalizeWorkspaceIdentity).filter(Boolean));
+    const openRootIdentities = new Set(
+      roots
+        .map(normalizeWorkspaceIdentity)
+        .filter((identity): identity is string => identity !== null)
+    );
+    this.workspaceSessionStatusCoordinator.clearCatalogsOutside(openRootIdentities);
     for (const identity of this.workspaceStatusSessionCatalogs.keys()) {
       if (!openRootIdentities.has(identity)) this.workspaceStatusSessionCatalogs.delete(identity);
     }
@@ -1218,12 +1229,13 @@ export class RestProxy {
         const cachedCatalog = identity
           ? this.workspaceStatusSessionCatalogs.get(identity)
           : undefined;
-        const statusRequest = this.requestServer(
-          'GET',
-          '/session/status',
-          undefined,
-          requestOptions
-        );
+        const statusRequest = identity
+          ? this.workspaceSessionStatusCoordinator.requestStatus(
+              identity,
+              () => this.requestServer('GET', '/session/status', undefined, { directory: root }),
+              signal
+            )
+          : this.requestServer('GET', '/session/status', undefined, requestOptions);
         const [statusValue, initialCatalog] = cachedCatalog
           ? [await statusRequest, cachedCatalog]
           : await Promise.all([
@@ -1240,7 +1252,7 @@ export class RestProxy {
         const catalog =
           hasUnknownStatus &&
           Date.now() - initialCatalog.loadedAt >= STATUS_SESSION_CATALOG_REFRESH_MS
-            ? await this.loadWorkspaceStatusSessionCatalog(root, signal)
+            ? await this.loadWorkspaceStatusSessionCatalog(root, signal, true)
             : initialCatalog;
         const sessions = catalog.sessions;
         const catalogSessionIDs = new Set(sessions.map((session) => session.id));
@@ -1293,24 +1305,36 @@ export class RestProxy {
     return Object.assign({}, ...results.map((result) => result.statuses));
   }
 
-  private async loadWorkspaceStatusSessionCatalog(root: string, signal?: AbortSignal) {
-    const requestOptions = signal ? { signal, directory: root } : { directory: root };
-    const sessionValue = await this.requestServer(
-      'GET',
-      FULL_SESSION_LIST_PATH,
-      undefined,
-      requestOptions
-    );
-    if (!Array.isArray(sessionValue)) throw new Error('Malformed session list response');
-    const sessions = sessionValue
+  private async loadWorkspaceStatusSessionCatalog(
+    root: string,
+    signal?: AbortSignal,
+    force = false
+  ) {
+    const identity = normalizeWorkspaceIdentity(root);
+    const sharedCatalog = identity
+      ? await this.workspaceSessionStatusCoordinator.requestCatalog(
+          identity,
+          () => this.requestServer('GET', FULL_SESSION_LIST_PATH, undefined, { directory: root }),
+          { force, signal }
+        )
+      : {
+          loadedAt: Date.now(),
+          sessions: await this.requestServer(
+            'GET',
+            FULL_SESSION_LIST_PATH,
+            undefined,
+            signal ? { signal, directory: root } : { directory: root }
+          ),
+        };
+    if (!Array.isArray(sharedCatalog.sessions)) throw new Error('Malformed session list response');
+    const sessions = sharedCatalog.sessions
       .map((session) => this.validateWorkspaceSession(session, root))
       .filter(
         (session) =>
           !this.isDedicatedWorkspaceDirectory(root) ||
           this.getSessionWorkspaceScope(session.id) === 'workspace'
       );
-    const catalog = { loadedAt: Date.now(), sessions };
-    const identity = normalizeWorkspaceIdentity(root);
+    const catalog = { loadedAt: sharedCatalog.loadedAt, sessions };
     if (identity) this.workspaceStatusSessionCatalogs.set(identity, catalog);
     return catalog;
   }

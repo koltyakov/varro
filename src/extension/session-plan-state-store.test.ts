@@ -51,6 +51,23 @@ describe('SessionPlanStateStore', () => {
     expect(store.listAgents()).toEqual({ 'session-1': 'build' });
   });
 
+  it('removes all persisted state for a deleted session', async () => {
+    const persistence: Persistence = {
+      get: vi.fn(),
+      set: vi.fn(() => Promise.resolve()),
+      remove: vi.fn(),
+    };
+    const store = new SessionPlanStateStore(persistence);
+    await store.update('session-1', { skippedAt: 100, agent: 'build' });
+
+    await store.removeSession('session-1');
+
+    expect(store.list()).toEqual({});
+    expect(store.listAgents()).toEqual({});
+    expect(persistence.set).toHaveBeenCalledWith('varro.sessionPlanState', {});
+    expect(persistence.set).toHaveBeenCalledWith('varro.sessionPlanAgentState', {});
+  });
+
   it('drops invalid persisted entries', () => {
     const persistence: Persistence = {
       get<T>() {

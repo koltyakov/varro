@@ -188,6 +188,31 @@ describe('parseExtensionMessage', () => {
     expect(parseExtensionMessage({ type: 'api/response', payload: { id: 'x' } })).toBeNull();
   });
 
+  it('parses host clipboard image snapshots without decoding their data URLs', () => {
+    const message = {
+      type: 'composer/images-sync',
+      payload: {
+        images: [
+          {
+            id: 'image-1',
+            url: 'data:image/png;base64,AA==',
+            mime: 'image/png',
+            filename: 'image.png',
+            size: 1,
+          },
+        ],
+      },
+    } as const;
+
+    expect(parseExtensionMessage(message)).toEqual(message);
+    expect(
+      parseExtensionMessage({
+        type: 'composer/images-sync',
+        payload: { images: [{ ...message.payload.images[0], size: '1' }] },
+      })
+    ).toBeNull();
+  });
+
   it('parses host queue synchronization snapshots', () => {
     const message = {
       type: 'queued-messages/sync',

@@ -78,4 +78,30 @@ describe('DraftImageStore', () => {
     expect(restored.list()).toEqual([sidebarImage]);
     expect(restored.list('editor-1')).toEqual([editorImage]);
   });
+
+  it('keeps temporary image paths in memory without rewriting the base64 snapshot', async () => {
+    const { persistence } = createPersistence();
+    const store = new DraftImageStore(persistence);
+    await store.update([
+      {
+        id: 'image-1',
+        url: 'data:image/png;base64,AA==',
+        mime: 'image/png',
+        filename: 'image.png',
+        size: 1,
+      },
+    ]);
+    vi.mocked(persistence.set).mockClear();
+
+    expect(
+      store.setContextFile('image-1', {
+        path: '/tmp/current-host/image.png',
+        relativePath: 'image.png',
+        type: 'file',
+      })
+    ).toBe(true);
+
+    expect(store.list()[0]?.contextFile?.path).toBe('/tmp/current-host/image.png');
+    expect(persistence.set).not.toHaveBeenCalled();
+  });
 });

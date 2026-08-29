@@ -198,6 +198,7 @@ import {
 import {
   getLatestAssistantMessageInfo,
   getLatestAssistantMessageInfoWithTokens,
+  groupMessageEntriesBySession,
   getMessageEntriesForSession,
   getSessionCost,
   getSessionTreeTokenBreakdown,
@@ -3377,8 +3378,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   const clipboardImagesNeedVision = () =>
     composerClipboardImages().length > 0 && !currentPromptCanHandleImages();
+  const messagesBySession = createMemo(() => groupMessageEntriesBySession(state.messages));
+  const sessionsById = createMemo(
+    () => new Map(state.sessions.map((session) => [session.id, session]))
+  );
   const currentSessionMessageEntries = createMemo(() =>
-    getMessageEntriesForSession(state.messages, composerSessionId())
+    composerSessionId() ? messagesBySession().get(composerSessionId()!) || [] : []
   );
 
   const contextUsage = createMemo(() => {
@@ -3413,7 +3418,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       return complete.nestedBreakdown;
     }
     return estimateNestedContextBreakdown(
-      [...sessionIds].map((id) => getMessageEntriesForSession(state.messages, id))
+      [...sessionIds].map((id) => messagesBySession().get(id) || [])
     );
   });
 
@@ -3445,10 +3450,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const sessionId = composerSessionId();
     if (!sessionId) return null;
     const rootId = getSessionTreeRootId(sessionId) || sessionId;
-    return getSessionCost(
-      getMessageEntriesForSession(state.messages, rootId),
-      state.sessions.find((session) => session.id === rootId)
-    );
+    return getSessionCost(messagesBySession().get(rootId) || [], sessionsById().get(rootId));
   });
 
   let tokenBreakdownRequestId = 0;
@@ -3459,7 +3461,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const rootId = getSessionTreeRootId(sessionId) || sessionId;
     const requestId = ++tokenBreakdownRequestId;
     try {
-      const directory = state.sessions.find((session) => session.id === rootId)?.directory;
+      const directory = sessionsById().get(rootId)?.directory;
       const summary = await client.varro.session.diffSummary(rootId, undefined, { directory });
       if (
         requestId !== tokenBreakdownRequestId ||
@@ -3592,9 +3594,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const sessionId = composerSessionId();
     if (!sessionId || state.messagesLoading || isComposerBusy() || composerEditingMessage())
       return null;
-    const previous = deriveSelectedModelFromMessages(
-      getMessageEntriesForSession(state.messages, sessionId)
-    );
+    const previous = deriveSelectedModelFromMessages(messagesBySession().get(sessionId) || []);
     const current = currentModel();
     if (!previous || !current.providerID || !current.modelID) return null;
     const changed =
