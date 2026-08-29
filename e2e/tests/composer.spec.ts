@@ -12,7 +12,11 @@ async function delayPromptRequest(page: Page, delayMs: number) {
     const originalSend = harness.__sendToExtension;
     harness.__sendToExtension = async (message) => {
       const request = message as { type?: string; payload?: { path?: string } };
-      if (request.type === 'api/request' && request.payload?.path?.endsWith('/prompt_async')) {
+      if (
+        request.type === 'api/request' &&
+        request.payload?.path &&
+        new URL(request.payload.path, 'http://varro.test').pathname.endsWith('/prompt_async')
+      ) {
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
       await originalSend?.(message);
@@ -42,7 +46,9 @@ test('creates a session and sends a prompt through the mocked bridge', async ({ 
           }
         ).__varroE2E;
         return (
-          value?.requests.filter((request) => request.path.endsWith('/prompt_async')).length || 0
+          value?.requests.filter((request) =>
+            new URL(request.path, 'http://varro.test').pathname.endsWith('/prompt_async')
+          ).length || 0
         );
       })
     )

@@ -238,13 +238,17 @@ export class FileSearchService {
     if (this.workspaceFileCachePromise) return this.workspaceFileCachePromise;
 
     const cacheGeneration = this.workspaceFileCacheGeneration;
+    const perFolderLimit = Math.max(
+      1,
+      Math.floor(FileSearchService.MAX_CANDIDATES / Math.max(1, workspaceFolders.length))
+    );
     const promise = Promise.all(
       workspaceFolders.map((workspaceFolder) =>
         Promise.resolve(
           vscode.workspace.findFiles(
             new vscode.RelativePattern(workspaceFolder, WORKSPACE_FILE_GLOB),
             WORKSPACE_FILE_EXCLUDE_GLOB,
-            FileSearchService.MAX_CANDIDATES
+            perFolderLimit
           )
         ).then((files) => files.map((uri) => ({ uri, workspaceFolder })))
       )
@@ -259,6 +263,7 @@ export class FileSearchService {
         }));
         const seen = new Set<string>();
         const entries = fileGroups.flat().flatMap(({ uri, workspaceFolder }) => {
+          if (seen.size >= FileSearchService.MAX_CANDIDATES) return [];
           const identity = normalizeWorkspaceIdentity(uri.fsPath) ?? uri.fsPath;
           if (seen.has(identity)) return [];
           seen.add(identity);

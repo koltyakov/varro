@@ -278,7 +278,7 @@ export function RalphForm() {
           logError('ralph-form:sendAsync', err);
         });
 
-      await selectSession(session.id);
+      await selectSession(session.id, { directory: workspaceDirectory });
       if (previousSessionId && shouldDeletePreviousSession && previousSessionId !== session.id) {
         await deleteSession(previousSessionId).catch((err) => {
           logError('ralph-form:deletePrevious', err);

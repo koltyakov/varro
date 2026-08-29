@@ -639,6 +639,47 @@ describe('SidebarProvider editor panels', () => {
     });
   });
 
+  it('does not broadcast folder events when the workspace file is inside that folder', async () => {
+    const contextProvider = createContextProvider();
+    contextProvider.context.workspacePath = '/repo-a';
+    contextProvider.context.workspaceDirectory = '/repo-a';
+    const { provider } = await createSidebarProviderInstance({ contextProvider });
+    const { posted } = attachTestView(provider);
+    const editor = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+    await provider.openNewEditor();
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    await vi.waitFor(() =>
+      expect(
+        lastEditorContext(editor.panel.webview.postMessage.mock.calls.map(([message]) => message))
+          ?.workspacePath
+      ).toBe('/repo-b')
+    );
+    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
+      .sessionState;
+    sessionState.handleServerEvent({
+      type: 'session.created',
+      properties: { info: { id: 'session-a', directory: '/repo-a' } },
+    });
+    posted.length = 0;
+    editor.panel.webview.postMessage.mockClear();
+    const event = {
+      type: 'message.updated' as const,
+      workspaceDirectory: '/repo-a',
+      properties: {
+        info: { id: 'message-a', sessionID: 'session-a', role: 'assistant' as const },
+      },
+    };
+
+    provider.post({ type: 'server/event', payload: event });
+
+    expect(posted).toContainEqual({ type: 'server/event', payload: event });
+    expect(editor.panel.webview.postMessage).not.toHaveBeenCalledWith({
+      type: 'server/event',
+      payload: event,
+    });
+  });
+
   it('does not defer message updates because their info id is a message id', async () => {
     const contextProvider = createContextProvider();
     contextProvider.context.workspacePath = '/repo-a';

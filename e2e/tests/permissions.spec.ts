@@ -137,9 +137,7 @@ test('restores a linked permission to full flow after its tool starts compacting
   await page.waitForTimeout(2_100);
   await page.getByRole('button', { name: 'Allow once' }).click();
   await expect(page.locator('.permission-prompt-text')).toHaveText('Run command');
-  await expect(page.locator('.permission-meta-value')).toHaveText(
-    'rm -rf /tmp/varro-sandbox'
-  );
+  await expect(page.locator('.permission-meta-value')).toHaveText('rm -rf /tmp/varro-sandbox');
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
 
   const geometry = await page.locator('.permission-prompt').evaluate((prompt) => {
@@ -213,9 +211,7 @@ test('recovers a permission prompt when the live permission event is missed', as
   await expect(page.locator('.tool-call-wait-icon.tool-status-pending')).toBeVisible();
 });
 
-test('default permissions defer to OpenCode and surface its bash request', async ({
-  page,
-}) => {
+test('default permissions defer to OpenCode and surface its bash request', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
 
   await expect(page.getByRole('button', { name: 'Default permissions' })).toBeVisible();
@@ -248,7 +244,9 @@ test('default permissions defer to OpenCode and surface its bash request', async
           }
         ).__varroE2E;
         const createRequest = value?.requests.find(
-          (request) => request.method === 'POST' && request.path === '/session'
+          (request) =>
+            request.method === 'POST' &&
+            new URL(request.path, 'http://varro.test').pathname === '/session'
         );
         return createRequest?.body || null;
       })
@@ -262,7 +260,9 @@ test('default permissions defer to OpenCode and surface its bash request', async
       }
     ).__varroE2E;
     return value?.requests.find(
-      (request) => request.method === 'POST' && request.path === '/session'
+      (request) =>
+        request.method === 'POST' &&
+        new URL(request.path, 'http://varro.test').pathname === '/session'
     )?.body as
       | { permission?: Array<{ permission: string; action: string; pattern: string }> }
       | undefined;
@@ -276,9 +276,9 @@ test('default permissions defer to OpenCode and surface its bash request', async
         __varroE2E?: { requests: Array<{ path: string; body?: unknown }> };
       }
     ).__varroE2E;
-    return value?.requests.find((request) => request.path.endsWith('/prompt_async'))?.body as
-      | { agent?: string; model?: { providerID: string; modelID: string } }
-      | undefined;
+    return value?.requests.find((request) =>
+      new URL(request.path, 'http://varro.test').pathname.endsWith('/prompt_async')
+    )?.body as { agent?: string; model?: { providerID: string; modelID: string } } | undefined;
   });
 
   expect(promptBody).toMatchObject({

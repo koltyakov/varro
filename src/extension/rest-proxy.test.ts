@@ -1101,6 +1101,33 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
+  it('remembers workspace scope from an activated session', async () => {
+    const metadata = { varro: { workspaceScope: 'workspace', schemaVersion: 1 } };
+    const activateSession = vi.fn(() =>
+      Promise.resolve({ id: 'session-workspace', directory: '/workspace', metadata })
+    );
+    const callbacks = createCallbacks({ activateSession });
+    callbacks.contextProvider.context.workspaceDirectory = '/workspace';
+    callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn(() => null);
+    const { proxy } = createProxy(callbacks);
+
+    await proxy.handleRequest(
+      makePayload(98, 'POST', '/varro/session/session-workspace/activate', {
+        directory: '/workspace',
+      })
+    );
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 98,
+      data: {
+        id: 'session-workspace',
+        directory: '/workspace',
+        metadata,
+        workspaceScope: 'workspace',
+      },
+    });
+  });
+
   it('routes recycle bin list request', async () => {
     const trashList = [recycleBinEntry('abc', '/repo')];
     const { proxy, callbacks } = createProxy({
@@ -3074,6 +3101,119 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 223,
       data: { 'local-0': { type: 'busy' } },
+    });
+  });
+
+  it('reuses the validated session catalog across status polls', async () => {
+    const serverRequest = vi.fn(async (_method: string, path: string) => {
+      if (path === '/session?limit=1000000') return [{ id: 'session-1', directory: '/repo' }];
+      if (path === '/session/status') return { 'session-1': { type: 'busy' } };
+      throw new Error(`Unexpected path: ${path}`);
+    });
+    const { proxy } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(makePayload(226, 'GET', '/session/status'));
+    await proxy.handleRequest(makePayload(227, 'GET', '/session/status'));
+
+    expect(
+      serverRequest.mock.calls.filter(([, path]) => path === '/session?limit=1000000')
+    ).toHaveLength(1);
+    expect(serverRequest.mock.calls.filter(([, path]) => path === '/session/status')).toHaveLength(
+      2
+    );
+  });
+
+  it('refreshes a stale status catalog when a new session appears', async () => {
+    let now = 1_000;
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    let catalogRequestCount = 0;
+    let statusRequestCount = 0;
+    const serverRequest = vi.fn(async (_method: string, path: string) => {
+      if (path === '/session?limit=1000000') {
+        catalogRequestCount += 1;
+        return catalogRequestCount === 1
+          ? [{ id: 'session-1', directory: '/repo' }]
+          : [
+              { id: 'session-1', directory: '/repo' },
+              { id: 'session-2', directory: '/repo' },
+            ];
+      }
+      if (path === '/session/status') {
+        statusRequestCount += 1;
+        return statusRequestCount === 1
+          ? { 'session-1': { type: 'busy' } }
+          : { 'session-1': { type: 'busy' }, 'session-2': { type: 'busy' } };
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(makePayload(228, 'GET', '/session/status'));
+    now += 5_000;
+    await proxy.handleRequest(makePayload(229, 'GET', '/session/status'));
+
+    expect(catalogRequestCount).toBe(2);
+    expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+      id: 229,
+      data: {
+        'session-1': { type: 'busy' },
+        'session-2': { type: 'busy' },
+      },
+    });
+    nowSpy.mockRestore();
+  });
+
+  it('keeps healthy session roots when one workspace root fails', async () => {
+    const serverRequest = vi.fn(
+      async (_method: string, _path: string, _body: unknown, options?: { directory?: string }) => {
+        if (options?.directory === '/repo-b') throw new Error('repo-b unavailable');
+        return [{ id: 'session-a', directory: '/repo-a' }];
+      }
+    );
+    const callbacks = createCallbacks({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+    callbacks.contextProvider.context.workspaceFolders = [
+      { name: 'repo-a', path: '/repo-a' },
+      { name: 'repo-b', path: '/repo-b' },
+    ];
+    const { proxy } = createProxy(callbacks);
+
+    await proxy.handleRequest(makePayload(224, 'GET', '/session'));
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 224,
+      data: [{ id: 'session-a', directory: '/repo-a' }],
+    });
+  });
+
+  it('keeps healthy status roots when one workspace root fails', async () => {
+    const serverRequest = vi.fn(
+      async (_method: string, path: string, _body: unknown, options?: { directory?: string }) => {
+        if (options?.directory === '/repo-b') throw new Error('repo-b unavailable');
+        return path === '/session/status'
+          ? { 'session-a': { type: 'busy' } }
+          : [{ id: 'session-a', directory: '/repo-a' }];
+      }
+    );
+    const callbacks = createCallbacks({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+    callbacks.contextProvider.context.workspaceFolders = [
+      { name: 'repo-a', path: '/repo-a' },
+      { name: 'repo-b', path: '/repo-b' },
+    ];
+    const { proxy } = createProxy(callbacks);
+
+    await proxy.handleRequest(makePayload(225, 'GET', '/session/status'));
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 225,
+      data: { 'session-a': { type: 'busy' } },
     });
   });
 

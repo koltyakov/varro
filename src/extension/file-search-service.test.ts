@@ -502,7 +502,7 @@ describe('FileSearchService', () => {
         pattern: '**/*',
       }),
       expect.any(String),
-      4_000
+      2_000
     );
   });
 

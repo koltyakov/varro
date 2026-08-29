@@ -3459,7 +3459,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const rootId = getSessionTreeRootId(sessionId) || sessionId;
     const requestId = ++tokenBreakdownRequestId;
     try {
-      const summary = await client.varro.session.diffSummary(rootId);
+      const directory = state.sessions.find((session) => session.id === rootId)?.directory;
+      const summary = await client.varro.session.diffSummary(rootId, undefined, { directory });
       if (
         requestId !== tokenBreakdownRequestId ||
         (getSessionTreeRootId(composerSessionId()) || composerSessionId()) !== rootId ||

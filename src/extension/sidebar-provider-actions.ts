@@ -18,6 +18,7 @@ import type {
   TerminalSelection,
   WebviewRoute,
 } from '../shared/protocol';
+import { isSameWorkspacePath } from '../shared/workspace-path';
 
 type ConfigPayload = Extract<
   Parameters<MessageRouterCallbacks['updateConfig']>[0],
@@ -148,7 +149,7 @@ export function createSidebarProviderActions(
     runInTerminal: (command, title) => deps.runInTerminal(command, title),
     openSessionInOpenCode: async (sessionId, requestedDirectory) => {
       const directory = requestedDirectory
-        ? deps.contextProvider.getOpenWorkspaceRoot(requestedDirectory)
+        ? getOpenSessionDirectory(deps.contextProvider, requestedDirectory)
         : undefined;
       if (requestedDirectory && !directory) throw new Error('Session workspace folder is not open');
       await assertSessionInCurrentWorkspace(
@@ -162,7 +163,7 @@ export function createSidebarProviderActions(
     },
     openSessionInEditor: async (sessionId, title, model, rootSessionId, requestedDirectory) => {
       const directory = requestedDirectory
-        ? deps.contextProvider.getOpenWorkspaceRoot(requestedDirectory)
+        ? getOpenSessionDirectory(deps.contextProvider, requestedDirectory)
         : undefined;
       if (requestedDirectory && !directory) throw new Error('Session workspace folder is not open');
       const validatedDirectory = await assertSessionInCurrentWorkspace(
@@ -174,7 +175,7 @@ export function createSidebarProviderActions(
     },
     openSessionInSidebar: async (sessionId, requestedDirectory) => {
       const directory = requestedDirectory
-        ? deps.contextProvider.getOpenWorkspaceRoot(requestedDirectory)
+        ? getOpenSessionDirectory(deps.contextProvider, requestedDirectory)
         : undefined;
       if (requestedDirectory && !directory) throw new Error('Session workspace folder is not open');
       const validatedDirectory = await assertSessionInCurrentWorkspace(
@@ -314,4 +315,13 @@ export function createSidebarProviderActions(
       else logger.info(line);
     },
   };
+}
+
+function getOpenSessionDirectory(contextProvider: ContextProvider, directory: string) {
+  const workspaceRoot = contextProvider.getOpenWorkspaceRoot(directory);
+  if (workspaceRoot) return workspaceRoot;
+  const workspaceDirectory = contextProvider.context.workspaceDirectory;
+  return workspaceDirectory && isSameWorkspacePath(directory, workspaceDirectory)
+    ? workspaceDirectory
+    : null;
 }

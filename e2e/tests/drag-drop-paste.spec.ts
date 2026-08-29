@@ -554,14 +554,15 @@ test('reloads and inline-edits an image prompt without losing its attachment', a
       .filter(
         (request) =>
           (request.method === 'DELETE' && request.path.includes('/message/')) ||
-          (request.method === 'POST' && request.path.endsWith('/prompt_async'))
+          (request.method === 'POST' &&
+            new URL(request.path, 'http://varro.test').pathname.endsWith('/prompt_async'))
       )
       .map((request) => `${request.method} ${request.path}`);
   });
   expect(editRequests).toEqual([
     `DELETE /session/${sessionId}/message/${initialAssistant!.info.id}?directory=%2Fworkspace%2Fvarro`,
     `DELETE /session/${sessionId}/message/${initialUser!.info.id}?directory=%2Fworkspace%2Fvarro`,
-    `POST /session/${sessionId}/prompt_async`,
+    `POST /session/${sessionId}/prompt_async?directory=%2Fworkspace%2Fvarro`,
   ]);
 
   const editedMessages = await readHarnessMessages();

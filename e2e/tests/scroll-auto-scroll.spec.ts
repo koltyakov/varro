@@ -292,13 +292,17 @@ test.describe('auto-scroll', () => {
         if (
           request.type === 'api/request' &&
           request.payload?.method === 'POST' &&
-          request.payload.path?.endsWith('/prompt_async')
+          request.payload.path &&
+          new URL(request.payload.path, 'http://varro.test').pathname.endsWith('/prompt_async')
         ) {
           replacementMessageId = request.payload.body?.messageID ?? null;
         }
         await originalSend?.(message);
         if (isMessageDelete) {
-          const match = request.payload?.path?.match(/^\/session\/([^/]+)\/message\/([^/]+)$/);
+          const path = request.payload?.path
+            ? new URL(request.payload.path, 'http://varro.test').pathname
+            : '';
+          const match = path.match(/^\/session\/([^/]+)\/message\/([^/]+)$/);
           if (!match) throw new Error('Edited-message delete path is invalid');
           window.postMessage(
             {
@@ -781,7 +785,11 @@ test.describe('auto-scroll', () => {
       const originalSend = harness.__sendToExtension;
       harness.__sendToExtension = async (message) => {
         const request = message as { type?: string; payload?: { path?: string } };
-        if (request.type === 'api/request' && request.payload?.path?.endsWith('/prompt_async')) {
+        if (
+          request.type === 'api/request' &&
+          request.payload?.path &&
+          new URL(request.payload.path, 'http://varro.test').pathname.endsWith('/prompt_async')
+        ) {
           await new Promise((resolve) => setTimeout(resolve, 500));
         }
         await originalSend?.(message);
@@ -1538,7 +1546,10 @@ test.describe('auto-scroll', () => {
           type?: string;
           payload?: { path?: string; body?: Record<string, unknown> };
         };
-        const match = request.payload?.path?.match(/^\/session\/([^/]+)\/prompt_async$/);
+        const path = request.payload?.path
+          ? new URL(request.payload.path, 'http://varro.test').pathname
+          : '';
+        const match = path.match(/^\/session\/([^/]+)\/prompt_async$/);
         if (request.type !== 'api/request' || !match) {
           await originalSend?.(message);
           return;

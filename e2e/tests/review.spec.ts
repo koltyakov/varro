@@ -16,13 +16,17 @@ test('review slash command sends the review prompt', async ({ page }) => {
   );
 
   const promptBody = await getE2EState(page, () => {
-    const value = (window as Window & {
-      __varroE2E?: { requests: Array<{ path: string; body?: unknown }> };
-    }).__varroE2E;
-    return value?.requests.find((request) => request.path.endsWith('/prompt_async'))?.body as
-      | { parts?: Array<{ text?: string }> }
-      | undefined;
+    const value = (
+      window as Window & {
+        __varroE2E?: { requests: Array<{ path: string; body?: unknown }> };
+      }
+    ).__varroE2E;
+    return value?.requests.find((request) =>
+      new URL(request.path, 'http://varro.test').pathname.endsWith('/prompt_async')
+    )?.body as { parts?: Array<{ text?: string }> } | undefined;
   });
 
-  expect(JSON.stringify(promptBody)).toContain('review the current changes in my code and provide feedback');
+  expect(JSON.stringify(promptBody)).toContain(
+    'review the current changes in my code and provide feedback'
+  );
 });

@@ -68,8 +68,11 @@ test('implementing a plan sends the build prompt', async ({ page }) => {
         __varroE2E?: { requests: Array<{ path: string; body?: unknown }> };
       }
     ).__varroE2E;
-    return value?.requests.filter((request) => request.path.endsWith('/prompt_async')).at(-1)
-      ?.body as { agent?: string } | undefined;
+    return value?.requests
+      .filter((request) =>
+        new URL(request.path, 'http://varro.test').pathname.endsWith('/prompt_async')
+      )
+      .at(-1)?.body as { agent?: string } | undefined;
   });
 
   expect(promptBody).toMatchObject({ agent: 'build' });

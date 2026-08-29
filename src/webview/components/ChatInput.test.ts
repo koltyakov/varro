@@ -1648,7 +1648,9 @@ describe('ChatInput', () => {
         'Agents (1)850'
       );
     });
-    expect(client.varro.session.diffSummary).toHaveBeenCalledWith('session-1');
+    expect(client.varro.session.diffSummary).toHaveBeenCalledWith('session-1', undefined, {
+      directory: '/repo',
+    });
 
     const nested = container?.querySelector<HTMLInputElement>('.context-breakdown-nested input');
     expect(nested?.checked).toBe(true);

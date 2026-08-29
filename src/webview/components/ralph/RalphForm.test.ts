@@ -316,6 +316,9 @@ describe('RalphForm', () => {
     expect(clientMocks.create).toHaveBeenCalledWith(expect.anything(), {
       directory: '/repo-b',
     });
+    expect(openCodeMocks.selectSession).toHaveBeenCalledWith('ralph-session', {
+      directory: '/repo-b',
+    });
   });
 
   it('preselects the current context document when the form opens', () => {

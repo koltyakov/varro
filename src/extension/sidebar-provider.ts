@@ -589,7 +589,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           directory ?? endpointServer.getWorkspaceCwd()
         ),
       activateSession: async (sessionID, directory, signal) => {
-        const workspacePath = this.contextProvider.getOpenWorkspaceRoot(directory);
+        const workspacePath = this.getOpenSessionDirectory(directory);
         if (!workspacePath) throw new Error('Session workspace folder is not open');
         const session = asRecord(
           await this.server.request('GET', `/session/${encodeURIComponent(sessionID)}`, undefined, {
@@ -598,7 +598,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           })
         );
         signal?.throwIfAborted();
-        const currentWorkspacePath = this.contextProvider.getOpenWorkspaceRoot(workspacePath);
+        const currentWorkspacePath = this.getOpenSessionDirectory(workspacePath);
         if (!currentWorkspacePath) throw new Error('Session workspace folder is not open');
         if (
           session?.id !== sessionID ||
@@ -612,7 +612,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.setEndpointWorkspace(endpointRef.endpoint, currentWorkspacePath);
         }
         this.reconcilePermissionAutomationOwners();
-        if (webviewContext.surface === 'sidebar') {
+        if (
+          webviewContext.surface === 'sidebar' &&
+          this.contextProvider.getOpenWorkspaceRoot(currentWorkspacePath)
+        ) {
           await this.contextProvider.selectWorkspace(currentWorkspacePath);
         }
         post({ type: 'context/update', payload: getEndpointContext() });
@@ -1143,7 +1146,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       rootSessionId: this.sessionState.rootSessionIdFor(route.sessionId),
     };
     if (typeof route.directory === 'string') {
-      const directory = this.contextProvider.getOpenWorkspaceRoot(route.directory);
+      const directory = this.getOpenSessionDirectory(route.directory);
       if (directory) restoredRoute.directory = directory;
     }
     return restoredRoute;
@@ -1156,7 +1159,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private readPersistedEditorWorkspacePath(state: PersistedEditorState) {
     const value = state?.['varro.workspacePath'];
-    return typeof value === 'string' ? this.contextProvider.getOpenWorkspaceRoot(value) : null;
+    return typeof value === 'string' ? this.getOpenSessionDirectory(value) : null;
   }
 
   async initializeProviderFileSignature() {
@@ -1204,10 +1207,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       : workspaceDirectories[0];
 
     for (const endpoint of this.endpoints) {
-      if (
-        !endpoint.workspacePath ||
-        this.contextProvider.getOpenWorkspaceRoot(endpoint.workspacePath)
-      ) {
+      if (!endpoint.workspacePath || this.getOpenSessionDirectory(endpoint.workspacePath)) {
         continue;
       }
       endpoint.restProxy.cancelAllRequests('Workspace folder was removed');
@@ -1357,7 +1357,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (!endpoint.workspacePath) return true;
     const workspaceDirectory = this.contextProvider.context.workspaceDirectory;
     if (event.workspaceDirectory) {
-      if (workspaceDirectory && isSameWorkspacePath(event.workspaceDirectory, workspaceDirectory)) {
+      if (
+        workspaceDirectory &&
+        !this.contextProvider.getOpenWorkspaceRoot(workspaceDirectory) &&
+        isSameWorkspacePath(event.workspaceDirectory, workspaceDirectory)
+      ) {
         return true;
       }
       return isSameWorkspacePath(event.workspaceDirectory, endpoint.workspacePath);
@@ -1367,7 +1371,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     let knownMatch = false;
     for (const sessionID of sessionIDs) {
       const directory = this.sessionState.directoryFor(sessionID);
-      if (workspaceDirectory && isSameWorkspacePath(directory, workspaceDirectory)) {
+      if (
+        workspaceDirectory &&
+        !this.contextProvider.getOpenWorkspaceRoot(workspaceDirectory) &&
+        isSameWorkspacePath(directory, workspaceDirectory)
+      ) {
         knownMatch = true;
         continue;
       }
@@ -1379,9 +1387,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private isOpenSessionDirectory(directory: string) {
-    if (this.contextProvider.getOpenWorkspaceRoot(directory)) return true;
+    return Boolean(this.getOpenSessionDirectory(directory));
+  }
+
+  private getOpenSessionDirectory(directory: string): string | null {
+    const workspaceRoot = this.contextProvider.getOpenWorkspaceRoot(directory);
+    if (workspaceRoot) return workspaceRoot;
     const workspaceDirectory = this.contextProvider.context.workspaceDirectory;
-    return Boolean(workspaceDirectory && isSameWorkspacePath(directory, workspaceDirectory));
+    return workspaceDirectory && isSameWorkspacePath(directory, workspaceDirectory)
+      ? workspaceDirectory
+      : null;
   }
 
   private permissionAutomationFor(viewId: string) {

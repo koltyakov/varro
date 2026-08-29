@@ -511,8 +511,9 @@ export function ActiveChatHeader(props: {
     }
     isActiveSessionRunning();
     let cancelled = false;
+    const directory = state.sessions.find((session) => session.id === sessionId)?.directory;
     client.varro.session
-      .diffSummary(sessionId)
+      .diffSummary(sessionId, undefined, { directory })
       .then((summary) => {
         if (cancelled) return;
         setWorkNow(Date.now());

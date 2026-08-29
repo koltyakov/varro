@@ -1958,6 +1958,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     executionDirectoryChanged?: boolean;
   }) {
     if (options?.workspaceMembershipChanged && !options.executionDirectoryChanged) {
+      sessionActivationGeneration += 1;
+      sessionActivationController?.abort();
+      sessionActivationController = null;
+      sessionActivationDirectory = null;
       invalidateClientWorkspaceState();
       workspaceGeneration += 1;
       appStore.setState('workspaceCatalogReloadPending', true);
@@ -2062,7 +2066,12 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       ),
     resolveAgent: (id) =>
       routingStore.getSelectedAgentForSession(id) || getDefaultPrimaryAgentNameFromState(),
-    sendAsync: (id, body) => client.session.sendAsync(id, body),
+    sendAsync: (id, body) => {
+      const directory = getSessionDirectory(id);
+      return directory
+        ? client.session.sendAsync(id, body, { directory })
+        : client.session.sendAsync(id, body);
+    },
     syncSession,
     recheckSessionStatus,
   });
@@ -2090,8 +2099,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     resetTodoSync,
     syncSessionMcps,
     sendAsync: async (sessionId, body, options) => {
-      const response = options
-        ? await client.session.sendAsync(sessionId, body, options)
+      const directory = options?.directory ?? getSessionDirectory(sessionId);
+      const response = directory
+        ? await client.session.sendAsync(sessionId, body, { ...options, directory })
         : await client.session.sendAsync(sessionId, body);
       void repairSessionTitle(sessionId).catch((err) => logError('repairSessionTitle', err));
       return response;

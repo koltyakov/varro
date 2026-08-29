@@ -675,7 +675,8 @@ describe('sendMessage', () => {
     expect(stateModule.getSelectedAgentForSession('session-2')).toBe('plan');
     expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
       'session-2',
-      expect.objectContaining({ agent: 'plan' })
+      expect.objectContaining({ agent: 'plan' }),
+      { directory: '/repo' }
     );
   });
 
@@ -753,12 +754,16 @@ describe('sendMessage', () => {
       providerID: 'openai',
       modelID: 'selected-model',
     });
-    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-created', {
-      agent: 'plan',
-      messageID: expect.stringMatching(OPEN_CODE_MESSAGE_ID),
-      model: { providerID: 'openai', modelID: 'draft-model' },
-      parts: [{ type: 'text', text: 'Captured draft' }],
-    });
+    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
+      'session-created',
+      {
+        agent: 'plan',
+        messageID: expect.stringMatching(OPEN_CODE_MESSAGE_ID),
+        model: { providerID: 'openai', modelID: 'draft-model' },
+        parts: [{ type: 'text', text: 'Captured draft' }],
+      },
+      { directory: '/repo' }
+    );
   });
 
   it('detaches pending lazy creation when the production workspace resets', async () => {

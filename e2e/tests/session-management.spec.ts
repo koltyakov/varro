@@ -2,16 +2,25 @@
 import { expect, test } from '@playwright/test';
 import { getE2EState } from './helpers';
 
-test('host new-session command opens a draft chat and creates the session on first send', async ({ page }) => {
+test('host new-session command opens a draft chat and creates the session on first send', async ({
+  page,
+}) => {
   await page.goto('/e2e/harness/index.html?scenario=new-session-command');
 
   const countSessionCreates = () =>
     getE2EState(page, () => {
-      const value = (window as Window & {
-        __varroE2E?: { requests: Array<{ method: string; path: string }> };
-      }).__varroE2E;
-      return value?.requests.filter((request) => request.method === 'POST' && request.path === '/session')
-        .length || 0;
+      const value = (
+        window as Window & {
+          __varroE2E?: { requests: Array<{ method: string; path: string }> };
+        }
+      ).__varroE2E;
+      return (
+        value?.requests.filter(
+          (request) =>
+            request.method === 'POST' &&
+            new URL(request.path, 'http://varro.test').pathname === '/session'
+        ).length || 0
+      );
     });
 
   await expect(page.locator('.chat-header-title-text').first()).toHaveText('New Chat');

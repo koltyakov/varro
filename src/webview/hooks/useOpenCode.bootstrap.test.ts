@@ -402,15 +402,19 @@ describe('useOpenCode initialization', () => {
       });
 
       await vi.waitFor(() => {
-        expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
-          agent: 'build',
-          parts: [
-            {
-              type: 'text',
-              text: 'Continue from where you were interrupted by the server restart or extension reload. Review the existing conversation, do not repeat completed work, and proceed with the next unfinished step.',
-            },
-          ],
-        });
+        expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
+          'session-1',
+          {
+            agent: 'build',
+            parts: [
+              {
+                type: 'text',
+                text: 'Continue from where you were interrupted by the server restart or extension reload. Review the existing conversation, do not repeat completed work, and proceed with the next unfinished step.',
+              },
+            ],
+          },
+          { directory: '/repo' }
+        );
       });
     } finally {
       dispose();

@@ -32,7 +32,11 @@ test('busy send menu supports stop-and-send for follow-up instructions', async (
       );
     })
   ).toHaveLength(1);
-  expect(requests.filter((request) => request.path.endsWith('/prompt_async'))).toHaveLength(1);
+  expect(
+    requests.filter((request) =>
+      new URL(request.path, 'http://varro.test').pathname.endsWith('/prompt_async')
+    )
+  ).toHaveLength(1);
 });
 
 test('restores the active busy session after webview reload', async ({ page }) => {
@@ -78,5 +82,9 @@ test('restores the active busy session after webview reload', async ({ page }) =
       );
     })
   ).toHaveLength(1);
-  expect(requests.filter((request) => request.path.endsWith('/prompt_async'))).toHaveLength(1);
+  expect(
+    requests.filter((request) =>
+      new URL(request.path, 'http://varro.test').pathname.endsWith('/prompt_async')
+    )
+  ).toHaveLength(1);
 });
