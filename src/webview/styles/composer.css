@@ -1151,6 +1151,30 @@
   max-width: 192px;
 }
 
+.agent-picker-value-icon,
+.agent-picker-option-icon {
+  flex: 0 0 auto;
+}
+
+.agent-picker-option-icon {
+  display: block;
+  transform: translateY(-1px);
+}
+
+.agent-picker-option-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 14px;
+  line-height: 14px;
+  min-width: 0;
+}
+
+.agent-picker-option-label > .truncate {
+  display: block;
+  line-height: 14px;
+}
+
 .agent-picker-details {
   position: fixed;
   z-index: var(--z-topmost);

@@ -8,12 +8,14 @@ import brainIcon from 'iconoir/icons/brain.svg';
 import brainWarningIcon from 'iconoir/icons/brain-warning.svg';
 import cableTagIcon from 'iconoir/icons/cable-tag.svg';
 import calendarIcon from 'iconoir/icons/calendar.svg';
+import calendarCheckIcon from 'iconoir/icons/calendar-check.svg';
 import cardShieldIcon from 'iconoir/icons/card-shield.svg';
 import chatBubbleQuestionIcon from 'iconoir/icons/chat-bubble-question.svg';
 import checkIcon from 'iconoir/icons/check.svg';
 import checkCircleIcon from 'iconoir/icons/check-circle.svg';
 import checkSquareIcon from 'iconoir/icons/check-square.svg';
 import clockIcon from 'iconoir/icons/clock.svg';
+import codeBracketsSquareIcon from 'iconoir/icons/code-brackets-square.svg';
 import copyIcon from 'iconoir/icons/copy.svg';
 import databaseBackupIcon from 'iconoir/icons/database-backup.svg';
 import downloadIcon from 'iconoir/icons/download.svg';
@@ -75,12 +77,14 @@ export {
   brainWarningIcon,
   cableTagIcon,
   calendarIcon,
+  calendarCheckIcon,
   cardShieldIcon,
   chatBubbleQuestionIcon,
   checkCircleIcon,
   checkIcon,
   checkSquareIcon,
   clockIcon,
+  codeBracketsSquareIcon,
   copyIcon,
   databaseBackupIcon,
   downloadIcon,

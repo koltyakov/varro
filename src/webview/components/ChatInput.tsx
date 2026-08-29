@@ -4206,6 +4206,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             agents={state.agents}
             selectedAgent={state.selectedAgent}
             selectedAgentLabel={selectedAgentLabel() ?? ''}
+            agentCompacted={isToolbarControlCompacted(toolbarCompactMode(), 'agent')}
             agentFocusIndex={agentFocusIndex()}
             showAgentPicker={showAgentPicker()}
             showAgentControl={isToolbarControlVisible('agent')}

@@ -66,6 +66,7 @@ type ToolbarSharedProps = {
   agents: Agent[];
   selectedAgent: string | null;
   selectedAgentLabel: string;
+  agentCompacted?: boolean;
   agentFocusIndex: number;
   showAgentPicker: boolean;
   showAgentControl: boolean;
@@ -241,6 +242,7 @@ export function ChatInputMainToolbar(props: ChatInputMainToolbarProps) {
             agents={props.agents}
             selectedAgent={props.selectedAgent}
             selectedLabel={props.selectedAgentLabel}
+            compact={props.agentCompacted}
             focusIndex={props.agentFocusIndex}
             showPicker={props.showAgentPicker}
             getLabel={props.getAgentLabel}

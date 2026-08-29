@@ -2493,6 +2493,10 @@ body.vscode-light .interactive-session .chat-input-toolbars.toolbar-meta {
 }
 
 @container (max-width: 500px) {
+  .interactive-session .chat-input-toolbars.toolbar-main .toolbar-picker .codicon-chevron {
+    display: none;
+  }
+
   .interactive-session
     .chat-input-toolbars.toolbar-meta
     .workspace-picker-button

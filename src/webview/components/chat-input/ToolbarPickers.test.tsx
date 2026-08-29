@@ -760,6 +760,99 @@ describe('ToolbarPickers', () => {
     expect(toggleButton?.classList.contains('plan-agent-selected')).toBe(true);
   });
 
+  it('uses built-in agent icons in options and compact values', () => {
+    const agents = [
+      createAgent({ name: 'build', mode: 'primary' }),
+      createAgent({ name: 'ask', mode: 'primary', builtIn: false }),
+      createAgent({ name: 'plan', mode: 'primary' }),
+      createAgent({ name: 'reviewer', mode: 'primary', builtIn: false }),
+    ];
+
+    cleanup = render(
+      () => (
+        <AgentPicker
+          agents={agents}
+          selectedAgent="ask"
+          selectedLabel="A"
+          compact={true}
+          focusIndex={0}
+          showPicker={true}
+          getLabel={(agent) => agent.name}
+          getDetail={(agent) => agent.description ?? 'No description'}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+          onFocusIndex={vi.fn()}
+        />
+      ),
+      container!
+    );
+
+    const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
+    const options = container?.querySelectorAll('.agent-popover .toolbar-popover-item') ?? [];
+
+    expect(toggleButton?.querySelector('.agent-picker-value-icon')).not.toBeNull();
+    expect(toggleButton?.querySelector('.toolbar-picker-label')).toBeNull();
+    expect(options[0]?.querySelector('.agent-picker-option-icon')).not.toBeNull();
+    expect(options[1]?.querySelector('.agent-picker-option-icon')).not.toBeNull();
+    expect(options[2]?.querySelector('.agent-picker-option-icon')).not.toBeNull();
+    expect(options[3]?.querySelector('.agent-picker-option-icon')).toBeNull();
+    expect(
+      options[0]
+        ?.querySelector('.agent-picker-option-label')
+        ?.lastElementChild?.classList.contains('agent-picker-option-icon')
+    ).toBe(true);
+  });
+
+  it('keeps built-in agent icons out of full-size values', () => {
+    cleanup = render(
+      () => (
+        <AgentPicker
+          agents={[createAgent({ name: 'build', mode: 'primary' })]}
+          selectedAgent="build"
+          selectedLabel="Build"
+          compact={false}
+          focusIndex={0}
+          showPicker={false}
+          getLabel={(agent) => agent.name}
+          getDetail={(agent) => agent.description ?? 'No description'}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+          onFocusIndex={vi.fn()}
+        />
+      ),
+      container!
+    );
+
+    const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
+    expect(toggleButton?.querySelector('.agent-picker-value-icon')).toBeNull();
+    expect(toggleButton?.querySelector('.toolbar-picker-label')?.textContent).toBe('Build');
+  });
+
+  it('keeps a custom agent initial in compact values', () => {
+    cleanup = render(
+      () => (
+        <AgentPicker
+          agents={[createAgent({ name: 'reviewer', mode: 'primary', builtIn: false })]}
+          selectedAgent="reviewer"
+          selectedLabel="R"
+          compact={true}
+          focusIndex={0}
+          showPicker={false}
+          getLabel={(agent) => agent.name}
+          getDetail={(agent) => agent.description ?? 'No description'}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+          onFocusIndex={vi.fn()}
+        />
+      ),
+      container!
+    );
+
+    const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
+    expect(toggleButton?.querySelector('.agent-picker-value-icon')).toBeNull();
+    expect(toggleButton?.querySelector('.toolbar-picker-label')?.textContent).toBe('R');
+  });
+
   it('shows the selected agent description below its name in the tooltip', async () => {
     vi.useFakeTimers();
     cleanup = render(

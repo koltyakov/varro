@@ -8,7 +8,14 @@ import type {
 } from '../../../shared/protocol';
 import { isSameWorkspacePath } from '../../../shared/workspace-path';
 import { getProviderIcon } from '../../lib/provider-icons';
-import { checkIcon, folderSettingsIcon, navArrowDownIcon } from '../../lib/ui-icons';
+import {
+  calendarCheckIcon,
+  chatBubbleQuestionIcon,
+  checkIcon,
+  codeBracketsSquareIcon,
+  folderSettingsIcon,
+  navArrowDownIcon,
+} from '../../lib/ui-icons';
 import { formatModelName } from '../../lib/format';
 import { FolderIcon } from '../FolderIcon';
 import { Tooltip } from '../Tooltip';
@@ -33,6 +40,13 @@ function PickerChevron() {
 }
 
 const selectedIconStyle = { '--toolbar-selected-icon': toCssUrl(checkIcon) };
+
+function getPrimaryAgentIcon(name: string) {
+  if (name.toLowerCase() === 'build') return codeBracketsSquareIcon;
+  if (name.toLowerCase() === 'ask') return chatBubbleQuestionIcon;
+  if (name.toLowerCase() === 'plan') return calendarCheckIcon;
+  return null;
+}
 
 function getAutoApproveActivityTitle(activity: AutoApproveActivity) {
   const label = {
@@ -462,6 +476,7 @@ export function AgentPicker(props: {
   agents: Agent[];
   selectedAgent: string | null;
   selectedLabel: string;
+  compact?: boolean;
   focusIndex: number;
   showPicker: boolean;
   getLabel: (agent: Agent) => string;
@@ -476,6 +491,7 @@ export function AgentPicker(props: {
     style: Record<string, string>;
   } | null>(null);
   const selectedAgent = () => props.agents.find((agent) => agent.name === props.selectedAgent);
+  const selectedIcon = () => getPrimaryAgentIcon(props.selectedAgent ?? '');
   const tooltipContent = () => {
     const agent = selectedAgent();
     if (!agent) return 'Select agent';
@@ -590,7 +606,14 @@ export function AgentPicker(props: {
           aria-label="Select agent"
           aria-expanded={props.showPicker}
         >
-          <span class="toolbar-picker-label">{props.selectedLabel}</span>
+          <Show
+            when={props.compact && selectedIcon()}
+            fallback={<span class="toolbar-picker-label">{props.selectedLabel}</span>}
+          >
+            {(icon) => (
+              <UiIcon source={icon()} class="agent-picker-value-icon" width={14} height={14} />
+            )}
+          </Show>
           <PickerChevron />
         </button>
       </Tooltip>
@@ -607,6 +630,7 @@ export function AgentPicker(props: {
               <AgentPickerOption
                 label={props.getLabel(agent)}
                 detail={props.getDetail(agent)}
+                icon={getPrimaryAgentIcon(agent.name)}
                 selected={props.selectedAgent === agent.name}
                 focused={props.focusIndex === index()}
                 onSelect={() => props.onSelect(agent)}
@@ -638,6 +662,7 @@ export function AgentPicker(props: {
 function AgentPickerOption(props: {
   label: string;
   detail: string;
+  icon: string | null;
   selected: boolean;
   focused: boolean;
   onSelect: () => void;
@@ -667,7 +692,14 @@ function AgentPickerOption(props: {
       onBlur={props.onHideDetails}
     >
       <span class="min-w-0">
-        <span class="block truncate">{props.label}</span>
+        <span class="agent-picker-option-label">
+          <span class="truncate">{props.label}</span>
+          <Show when={props.icon}>
+            {(icon) => (
+              <UiIcon source={icon()} class="agent-picker-option-icon" width={12} height={12} />
+            )}
+          </Show>
+        </span>
         <span
           ref={(element) => (detailElement = element)}
           class="block truncate text-[10px] font-normal text-vscode-muted"
