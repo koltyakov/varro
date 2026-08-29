@@ -1371,6 +1371,67 @@ describe('header status badges', () => {
     }
   });
 
+  it('publishes plan attention only while the plan is unread', () => {
+    const sent: WebviewMessage[] = [];
+    // SAFETY: The fixture installs the protocol bridge callback owned by the webview host.
+    const bridgeWindow = window as {
+      __sendToExtension?: (message: WebviewMessage) => void;
+    };
+    const originalSend = bridgeWindow.__sendToExtension;
+    const originalWorkspacePath = state.editorContext.workspacePath;
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
+    setState('editorContext', 'workspacePath', '/repo');
+    setState('sessions', [session('plan-read', 500), session('plan-unread', 400)]);
+    setState('sessionSelectedAgents', { 'plan-read': 'plan', 'plan-unread': 'plan' });
+    setState('lastSeenSessions', { 'plan-read': 500, 'plan-unread': 0 });
+
+    try {
+      cleanup = render(() => Chat(), container!);
+
+      expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([
+        {
+          type: 'session-unread-state/update',
+          payload: {
+            sessionId: 'plan-read',
+            directory: '/repo',
+            kind: 'plan-ready',
+            markerAt: 500,
+            unread: false,
+          },
+        },
+        {
+          type: 'session-unread-state/update',
+          payload: {
+            sessionId: 'plan-unread',
+            directory: '/repo',
+            kind: 'plan-ready',
+            markerAt: 400,
+            unread: true,
+          },
+        },
+      ]);
+
+      setState('sessions', [session('plan-read', 501), session('plan-unread', 400)]);
+
+      expect(
+        sent.filter((message) => message.type === 'session-unread-state/update').at(-1)
+      ).toEqual({
+        type: 'session-unread-state/update',
+        payload: {
+          sessionId: 'plan-read',
+          directory: '/repo',
+          kind: 'plan-ready',
+          markerAt: 501,
+          unread: true,
+        },
+      });
+    } finally {
+      setState('editorContext', 'workspacePath', originalWorkspacePath);
+      if (originalSend) bridgeWindow.__sendToExtension = originalSend;
+      else delete bridgeWindow.__sendToExtension;
+    }
+  });
+
   it('does not publish a read completion until its seen marker covers the response', () => {
     const sent: WebviewMessage[] = [];
     // SAFETY: The fixture installs the protocol bridge callback owned by the webview host.

@@ -168,7 +168,12 @@ export function Chat() {
           if (completedAt === undefined) continue;
           next = { kind, unread: true, markerAt: completedAt };
         } else {
-          next = { kind, unread: true, markerAt: session.time.updated };
+          const unread = isSessionUnread(session.id, session.time.updated);
+          next = {
+            kind,
+            unread,
+            markerAt: unread ? session.time.updated : (seenAt ?? session.time.updated),
+          };
         }
       } else if (
         seenAt !== undefined &&

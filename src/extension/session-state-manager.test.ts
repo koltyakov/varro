@@ -918,26 +918,40 @@ describe('SessionStateManager notifications', () => {
     expect(manager.getSiblingAlertCandidates()).toEqual([]);
   });
 
-  it('keeps completion updates ordered across stale webview reports', () => {
+  it.each(['completed', 'plan-ready'] as const)(
+    'keeps %s updates ordered across stale webview reports',
+    (kind) => {
+      const manager = createManager();
+      manager.setSessionUnreadState('session-1', kind, true, '/repo', 100);
+      manager.setSessionUnreadState('session-1', kind, false, '/repo', 150);
+      manager.setSessionUnreadState('session-1', kind, true, '/repo', 200);
+
+      expect(manager.completed.has('session-1')).toBe(true);
+
+      manager.setSessionUnreadState('session-1', kind, false, '/repo', 150);
+
+      expect(manager.completed.has('session-1')).toBe(true);
+
+      manager.setSessionUnreadState('session-1', kind, false, '/repo', 250);
+      manager.setSessionUnreadState('session-1', kind, true, '/repo', 200);
+
+      expect(manager.completed.has('session-1')).toBe(false);
+
+      manager.setSessionUnreadState('session-1', kind, true, '/repo', 300);
+
+      expect(manager.completed.has('session-1')).toBe(true);
+    }
+  );
+
+  it('does not let a stale plan report reclassify a newer completion', () => {
     const manager = createManager();
-    manager.setSessionUnreadState('session-1', 'completed', true, '/repo', 100);
-    manager.setSessionUnreadState('session-1', 'completed', false, '/repo', 150);
-    manager.setSessionUnreadState('session-1', 'completed', true, '/repo', 200);
-
-    expect(manager.completed.has('session-1')).toBe(true);
-
-    manager.setSessionUnreadState('session-1', 'completed', false, '/repo', 150);
-
-    expect(manager.completed.has('session-1')).toBe(true);
-
-    manager.setSessionUnreadState('session-1', 'completed', false, '/repo', 250);
-    manager.setSessionUnreadState('session-1', 'completed', true, '/repo', 200);
-
-    expect(manager.completed.has('session-1')).toBe(false);
-
+    manager.setSessionUnreadState('session-1', 'plan-ready', false, '/repo', 200);
     manager.setSessionUnreadState('session-1', 'completed', true, '/repo', 300);
 
+    manager.setSessionUnreadState('session-1', 'plan-ready', true, '/repo', 100);
+
     expect(manager.completed.has('session-1')).toBe(true);
+    expect(manager.isPlanSession('session-1')).toBe(false);
   });
 
   it('lets a persisted seen marker clear a timestamp-less host completion', () => {
@@ -992,38 +1006,41 @@ describe('SessionStateManager notifications', () => {
     expect(manager.completed.has('session-1')).toBe(false);
   });
 
-  it('keeps completion acknowledgements across extension-host restarts', async () => {
-    const values = new Map<string, unknown>();
-    const workspaceState = {
-      get: vi.fn((key: string) => values.get(key)),
-      set: vi.fn((key: string, value: unknown) => {
-        values.set(key, value);
-        return Promise.resolve();
-      }),
-      remove: vi.fn(() => Promise.resolve()),
-    };
-    const create = () =>
-      new SessionStateManager(
-        workspaceState as never,
-        { onStatusChange: vi.fn() },
-        { shouldShow: () => false }
-      );
-    const manager = create();
-    manager.setSessionUnreadState('session-1', 'completed', true, '/repo', 100);
-    manager.setSessionUnreadState('session-1', 'completed', false, '/repo', 200);
-    await manager.flush();
+  it.each(['completed', 'plan-ready'] as const)(
+    'keeps %s acknowledgements across extension-host restarts',
+    async (kind) => {
+      const values = new Map<string, unknown>();
+      const workspaceState = {
+        get: vi.fn((key: string) => values.get(key)),
+        set: vi.fn((key: string, value: unknown) => {
+          values.set(key, value);
+          return Promise.resolve();
+        }),
+        remove: vi.fn(() => Promise.resolve()),
+      };
+      const create = () =>
+        new SessionStateManager(
+          workspaceState as never,
+          { onStatusChange: vi.fn() },
+          { shouldShow: () => false }
+        );
+      const manager = create();
+      manager.setSessionUnreadState('session-1', kind, true, '/repo', 100);
+      manager.setSessionUnreadState('session-1', kind, false, '/repo', 200);
+      await manager.flush();
 
-    const recovered = create();
-    recovered.setSessionUnreadState('session-1', 'completed', true, '/repo', 100);
-    expect(recovered.completed.has('session-1')).toBe(false);
+      const recovered = create();
+      recovered.setSessionUnreadState('session-1', kind, true, '/repo', 100);
+      expect(recovered.completed.has('session-1')).toBe(false);
 
-    recovered.setSessionUnreadState('session-1', 'completed', true, '/repo', 201);
-    expect(recovered.completed.has('session-1')).toBe(true);
+      recovered.setSessionUnreadState('session-1', kind, true, '/repo', 201);
+      expect(recovered.completed.has('session-1')).toBe(true);
 
-    const secondRecovery = create();
-    secondRecovery.setSessionUnreadState('session-1', 'completed', true, '/repo', 100);
-    expect(secondRecovery.completed.has('session-1')).toBe(false);
-  });
+      const secondRecovery = create();
+      secondRecovery.setSessionUnreadState('session-1', kind, true, '/repo', 100);
+      expect(secondRecovery.completed.has('session-1')).toBe(false);
+    }
+  );
 
   it.each(['completed', 'plan-ready'] as const)(
     'does not synchronize %s state for child sessions',

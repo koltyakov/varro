@@ -293,7 +293,7 @@ export class SessionStateManager {
     markerAt?: number
   ): void {
     if (!unread) {
-      if (kind === 'plan-ready') this.acknowledgePlanSession(sessionID);
+      if (kind === 'plan-ready') this.acknowledgePlanSession(sessionID, markerAt);
       else this.acknowledgeCompletedSession(sessionID, markerAt);
       return;
     }
@@ -302,26 +302,20 @@ export class SessionStateManager {
       if (this.deleteCompletedSession(sessionID)) this.listener.onStatusChange();
       return;
     }
+    const rootSessionID = this.rootSessionIdFor(sessionID);
+    const acknowledgedAt = this.acknowledgedCompletedRoots.get(rootSessionID);
+    if (acknowledgedAt !== undefined && (markerAt === undefined || markerAt <= acknowledgedAt)) {
+      return;
+    }
+    if (this.busySessions.has(sessionID)) return;
+    const completedAt = this.completedSessionMarkers.get(sessionID);
+    if (completedAt !== undefined && markerAt !== undefined && markerAt < completedAt) return;
     if (kind === 'plan-ready') {
       this.setSessionMetadata(this.sessionAgents, sessionID, 'plan');
-      this.completedSessionMarkers.delete(sessionID);
     } else {
       this.sessionAgents.delete(sessionID);
     }
-    if (kind === 'completed') {
-      const rootSessionID = this.rootSessionIdFor(sessionID);
-      const acknowledgedAt = this.acknowledgedCompletedRoots.get(rootSessionID);
-      if (acknowledgedAt !== undefined && (markerAt === undefined || markerAt <= acknowledgedAt)) {
-        return;
-      }
-      if (this.busySessions.has(sessionID)) return;
-      const completedAt = this.completedSessionMarkers.get(sessionID);
-      if (completedAt !== undefined && markerAt !== undefined && markerAt < completedAt) return;
-    }
-    const changed = this.addCompletedSession(
-      sessionID,
-      kind === 'completed' ? markerAt : undefined
-    );
+    const changed = this.addCompletedSession(sessionID, markerAt);
     if (changed) this.listener.onStatusChange();
   }
 
@@ -449,12 +443,15 @@ export class SessionStateManager {
     if (changed) this.listener.onStatusChange();
   }
 
-  acknowledgePlanSession(sessionID: string): void {
+  acknowledgePlanSession(sessionID: string, acknowledgedAt = Date.now()): void {
     const rootSessionID = this.rootSessionIdFor(sessionID);
+    this.acknowledgeCompletedRoot(rootSessionID, acknowledgedAt);
     let changed = false;
     for (const completedSessionID of this.completedSessions) {
       if (this.rootSessionIdFor(completedSessionID) !== rootSessionID) continue;
       if (!this.isPlanSession(completedSessionID)) continue;
+      const completedAt = this.completedSessionMarkers.get(completedSessionID);
+      if (completedAt !== undefined && completedAt > acknowledgedAt) continue;
       this.deleteCompletedSession(completedSessionID);
       changed = true;
     }
@@ -1205,7 +1202,6 @@ export class SessionStateManager {
   private rememberSessionAgent(sessionID: string, agent: string): boolean {
     const changed = this.sessionAgents.get(sessionID) !== agent;
     this.setSessionMetadata(this.sessionAgents, sessionID, agent);
-    if (agent === 'plan') this.completedSessionMarkers.delete(sessionID);
     return changed && this.completedSessions.has(sessionID);
   }
 

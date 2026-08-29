@@ -168,14 +168,14 @@ function WorkspaceLoading() {
       role="status"
       aria-label="Loading workspace"
     >
-      <div class="flex items-center gap-2" aria-hidden="true">
-        <span class="h-2 w-2 rounded-full bg-vscode-accent animate-pulse-soft" />
+      <div class="flex items-center gap-[8px]" aria-hidden="true">
+        <span class="h-[8px] w-[8px] rounded-full bg-vscode-accent animate-pulse-soft" />
         <span
-          class="h-2 w-2 rounded-full bg-vscode-accent animate-pulse-soft"
+          class="h-[8px] w-[8px] rounded-full bg-vscode-accent animate-pulse-soft"
           style={{ 'animation-delay': '0.3s' }}
         />
         <span
-          class="h-2 w-2 rounded-full bg-vscode-accent animate-pulse-soft"
+          class="h-[8px] w-[8px] rounded-full bg-vscode-accent animate-pulse-soft"
           style={{ 'animation-delay': '0.6s' }}
         />
       </div>
