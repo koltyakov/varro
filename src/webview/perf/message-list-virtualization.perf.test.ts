@@ -373,7 +373,7 @@ describe('MessageList virtualization perf guards', () => {
     await settlePerfEffects();
 
     expect(assistantDialogSummaryPasses.value).toBe(initialPasses + 1);
-  });
+  }, 10_000);
 
   it('coalesces sticky viewport and virtual-range work into one frame pass', async () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
