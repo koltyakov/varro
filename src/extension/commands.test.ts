@@ -91,9 +91,7 @@ function register(
     requestInputFocus: vi.fn(),
     searchSessions: vi.fn(),
     switchSession: vi.fn(),
-    getStatusBarClickAction: vi.fn<() => 'focus' | 'attention' | 'completed' | 'sibling'>(
-      () => 'focus'
-    ),
+    getStatusBarClickAction: vi.fn<() => 'focus' | 'attention' | 'sibling'>(() => 'focus'),
     openAttentionSessions: vi.fn(),
     openCompletedSessions: vi.fn(),
     openSiblingWorkspaceSessions: vi.fn(() => Promise.resolve()),
@@ -641,21 +639,6 @@ describe('sidebar navigation commands', () => {
     await runCommand('varro.chat.statusBarClick');
 
     expect(sidebar.openAttentionSessions).toHaveBeenCalledOnce();
-    expect(sidebar.requestInputFocus).not.toHaveBeenCalled();
-  });
-
-  it('opens completed sessions from the completed status item', async () => {
-    let action: 'completed' | 'focus' = 'completed';
-    const { sidebar } = register('/repo', {}, () => {
-      action = 'focus';
-      return Promise.resolve();
-    });
-    sidebar.getStatusBarClickAction.mockImplementation(() => action);
-
-    await runCommand('varro.chat.statusBarClick');
-
-    expect(sidebar.openCompletedSessions).toHaveBeenCalledOnce();
-    expect(sidebar.openAttentionSessions).not.toHaveBeenCalled();
     expect(sidebar.requestInputFocus).not.toHaveBeenCalled();
   });
 

@@ -2,7 +2,7 @@ import type { SelectedModel } from './app-state-types';
 import { setShowSessionPicker, showSessionPicker, state } from './app-state';
 import { getSelectedModelForSession, setSelectedModel } from './state-model-selection';
 import { STORAGE_KEYS, readStored, writeStored } from './state-storage';
-import { readStoredSelectedModel, readStoredString } from './state-stored-values';
+import { readStoredSelectedModelForWorkspace, readStoredString } from './state-stored-values';
 import { isNumber, isString, type UnknownRecord, isObject } from './runtime-values';
 
 export type LastOpenedView =
@@ -75,7 +75,7 @@ export function getPersistedLastOpenedView(): LastOpenedView | null {
 }
 
 export function getPersistedSelectedModel(): SelectedModel | null {
-  return readStoredSelectedModel(STORAGE_KEYS.selectedModel);
+  return readStoredSelectedModelForWorkspace(state.editorContext.workspacePath);
 }
 
 export function getPersistedSelectedAgent(): string | null {

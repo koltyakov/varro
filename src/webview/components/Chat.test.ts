@@ -1371,7 +1371,7 @@ describe('header status badges', () => {
     }
   });
 
-  it('publishes a read completion when an editor suppresses the unread indicator', () => {
+  it('does not publish a read completion until its seen marker covers the response', () => {
     const sent: WebviewMessage[] = [];
     // SAFETY: The fixture installs the protocol bridge callback owned by the webview host.
     const bridgeWindow = window as {
@@ -1383,8 +1383,48 @@ describe('header status badges', () => {
     setState('editorContext', 'workspacePath', '/repo');
     setState('sessions', [session('session-1', 500)]);
     setState('completedSessionResponses', { 'session-1': 500 });
+    setState('lastSeenSessions', { 'session-1': 400 });
     setState('editorTabsOpen', true);
     setState('editorSessionIds', ['session-1']);
+
+    try {
+      cleanup = render(() => Chat(), container!);
+
+      expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([]);
+
+      setState('lastSeenSessions', 'session-1', 500);
+
+      expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([
+        {
+          type: 'session-unread-state/update',
+          payload: {
+            sessionId: 'session-1',
+            directory: '/repo',
+            kind: 'completed',
+            markerAt: 500,
+            unread: false,
+          },
+        },
+      ]);
+    } finally {
+      setState('editorContext', 'workspacePath', originalWorkspacePath);
+      if (originalSend) bridgeWindow.__sendToExtension = originalSend;
+      else delete bridgeWindow.__sendToExtension;
+    }
+  });
+
+  it('publishes persisted seen state without a completion marker', () => {
+    const sent: WebviewMessage[] = [];
+    // SAFETY: The fixture installs the protocol bridge callback owned by the webview host.
+    const bridgeWindow = window as {
+      __sendToExtension?: (message: WebviewMessage) => void;
+    };
+    const originalSend = bridgeWindow.__sendToExtension;
+    const originalWorkspacePath = state.editorContext.workspacePath;
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
+    setState('editorContext', 'workspacePath', '/repo');
+    setState('sessions', [session('session-1', 400)]);
+    setState('lastSeenSessions', { 'session-1': 500 });
 
     try {
       cleanup = render(() => Chat(), container!);
@@ -1398,6 +1438,103 @@ describe('header status badges', () => {
             kind: 'completed',
             markerAt: 500,
             unread: false,
+          },
+        },
+      ]);
+    } finally {
+      setState('editorContext', 'workspacePath', originalWorkspacePath);
+      if (originalSend) bridgeWindow.__sendToExtension = originalSend;
+      else delete bridgeWindow.__sendToExtension;
+    }
+  });
+
+  it('does not acknowledge a completion hidden by the running settle delay', () => {
+    const sent: WebviewMessage[] = [];
+    // SAFETY: The fixture installs the protocol bridge callback owned by the webview host.
+    const bridgeWindow = window as {
+      __sendToExtension?: (message: WebviewMessage) => void;
+    };
+    const originalSend = bridgeWindow.__sendToExtension;
+    const originalWorkspacePath = state.editorContext.workspacePath;
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
+    setState('editorContext', 'workspacePath', '/repo');
+    setState('sessions', [session('session-1', 500)]);
+    setState('sessionStatus', { 'session-1': { type: 'busy' } });
+    setState('lastSeenSessions', { 'session-1': 0 });
+    setState('completedSessionResponses', { 'session-1': 500 });
+
+    try {
+      cleanup = render(() => Chat(), container!);
+
+      expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([]);
+
+      setState('sessionStatus', 'session-1', { type: 'idle' });
+
+      expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([
+        {
+          type: 'session-unread-state/update',
+          payload: {
+            sessionId: 'session-1',
+            directory: '/repo',
+            kind: 'completed',
+            markerAt: 500,
+            unread: true,
+          },
+        },
+      ]);
+
+      vi.advanceTimersByTime(1_200);
+
+      expect(
+        sent.filter(
+          (message) =>
+            message.type === 'session-unread-state/update' && message.payload.unread === false
+        )
+      ).toEqual([]);
+    } finally {
+      setState('editorContext', 'workspacePath', originalWorkspacePath);
+      if (originalSend) bridgeWindow.__sendToExtension = originalSend;
+      else delete bridgeWindow.__sendToExtension;
+    }
+  });
+
+  it('publishes a newer completion marker when the unread kind is unchanged', () => {
+    const sent: WebviewMessage[] = [];
+    // SAFETY: The fixture installs the protocol bridge callback owned by the webview host.
+    const bridgeWindow = window as {
+      __sendToExtension?: (message: WebviewMessage) => void;
+    };
+    const originalSend = bridgeWindow.__sendToExtension;
+    const originalWorkspacePath = state.editorContext.workspacePath;
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
+    setState('editorContext', 'workspacePath', '/repo');
+    setState('sessions', [session('session-1', 500)]);
+    setState('lastSeenSessions', { 'session-1': 0 });
+    setState('completedSessionResponses', { 'session-1': 500 });
+
+    try {
+      cleanup = render(() => Chat(), container!);
+      setState('completedSessionResponses', 'session-1', 600);
+
+      expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([
+        {
+          type: 'session-unread-state/update',
+          payload: {
+            sessionId: 'session-1',
+            directory: '/repo',
+            kind: 'completed',
+            markerAt: 500,
+            unread: true,
+          },
+        },
+        {
+          type: 'session-unread-state/update',
+          payload: {
+            sessionId: 'session-1',
+            directory: '/repo',
+            kind: 'completed',
+            markerAt: 600,
+            unread: true,
           },
         },
       ]);
@@ -2299,6 +2436,25 @@ describe('header status badges', () => {
     await Promise.resolve();
 
     expect(selectSessionSpy).toHaveBeenCalledWith('attention-target');
+    expect(container?.querySelector('.chat-header-filter-chip')).toBeNull();
+  });
+
+  it('opens a failed session when the attention command has no pending prompts', async () => {
+    // SAFETY: The fixture provides the never fields read by this statement.
+    const selectSessionSpy = vi
+      .spyOn(openCodeModule, 'selectSession')
+      .mockResolvedValue(undefined as never);
+
+    setState('sessions', [session('active', 500), session('failed-target', 400)]);
+    setState('activeSessionId', 'active');
+    setState('failedSessionIds', ['failed-target']);
+
+    cleanup = render(() => Chat(), container!);
+
+    requestOpenAttentionSessions();
+    await Promise.resolve();
+
+    expect(selectSessionSpy).toHaveBeenCalledWith('failed-target');
     expect(container?.querySelector('.chat-header-filter-chip')).toBeNull();
   });
 

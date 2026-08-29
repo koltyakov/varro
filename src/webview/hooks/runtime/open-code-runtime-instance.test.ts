@@ -166,16 +166,16 @@ describe('open code runtime synchronization', () => {
     };
     const globalModel = { providerID: 'openai', modelID: 'global' };
     const sessionModel = { providerID: 'openai', modelID: 'session' };
-    setSelectedAgent('global-agent');
-    setSelectedModel(globalModel);
-    setSelectedAgent('session-agent', { sessionId: oldSession.id, persistGlobal: false });
-    setSelectedModel(sessionModel, { sessionId: oldSession.id, persistGlobal: false });
     setState('editorContext', {
       workspacePath: '/repo-next',
       activeFile: null,
       selection: null,
       diagnostics: [],
     });
+    setSelectedAgent('global-agent');
+    setSelectedModel(globalModel);
+    setSelectedAgent('session-agent', { sessionId: oldSession.id, persistGlobal: false });
+    setSelectedModel(sessionModel, { sessionId: oldSession.id, persistGlobal: false });
     setState('sessions', [oldSession]);
     setState('activeSessionId', oldSession.id);
     setState('sessionStatus', oldSession.id, { type: 'busy' });

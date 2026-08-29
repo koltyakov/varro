@@ -119,6 +119,34 @@ export function shouldRetryAi08WithFreshStream(actionFailure, attempt, maxPrompt
   return actionFailure?.reason === 'model stream settled' && attempt < maxPrompts;
 }
 
+export function beginLivePreparationRun(manifest, scenario) {
+  manifest.livePreparation ??= {};
+  const previous = manifest.livePreparation[scenario];
+  const promptRun = Number(previous?.promptRun ?? 0) + 1;
+  const { runs: previousRuns = [], ...previousResult } = previous ?? {};
+  const hasCompletedResult =
+    previousResult.prepared !== undefined ||
+    previousResult.recordedAt !== undefined ||
+    previousResult.controllerFailure !== undefined;
+  const runs = hasCompletedResult ? [...previousRuns, previousResult] : previousRuns;
+  const current = { promptRun };
+  if (runs.length > 0) current.runs = runs;
+  manifest.livePreparation[scenario] = current;
+  return promptRun;
+}
+
+export function recordLivePreparationResult(manifest, scenario, result) {
+  manifest.livePreparation ??= {};
+  const runs = manifest.livePreparation[scenario]?.runs;
+  const record = {
+    ...result,
+    recordedAt: new Date().toISOString(),
+  };
+  if (runs?.length > 0) record.runs = runs;
+  manifest.livePreparation[scenario] = record;
+  return record;
+}
+
 export function buildLivePrompt({ seed, scenario = 'AI-07', promptRun = 1, attempt, missing = [] }) {
   const marker = `[VFZ:${seed}:${scenario}:R${String(promptRun)}:TOOLS-A${String(attempt)}]`;
   const missingEmphasis =
@@ -1495,8 +1523,18 @@ async function openRunSession(cdp, sessionId, title) {
   throw new Error(`Could not open run session ${title}`);
 }
 
-async function restoreSidebarSessionFromPicker(cdp, sessionId, title) {
+export async function restoreSidebarSessionFromPicker(cdp, sessionId, title) {
   if (sessionSnapshotMatches(await cdp.snapshot(), sessionId, title)) return true;
+  const returnedToParent =
+    (await cdp.clickText('Return to parent')) ||
+    (await cdp.click('[aria-label^="Back to parent session"]'));
+  if (returnedToParent) {
+    const parentDeadline = Date.now() + 5_000;
+    while (Date.now() < parentDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      if (sessionSnapshotMatches(await cdp.snapshot(), sessionId, title)) return true;
+    }
+  }
   await new Promise((resolve) => setTimeout(resolve, 250));
   if (!(await cdp.key('.session-list-view', 'Escape'))) return false;
   const deadline = Date.now() + 5_000;
@@ -1737,6 +1775,10 @@ async function clickWithRetry(cdp, selector, scope = null) {
   return false;
 }
 
+export function clickOpenInEditor(cdp) {
+  return cdp.clickText('Open in Editor');
+}
+
 export async function sendComposerPromptWithRetry(
   cdp,
   prompt,
@@ -1768,12 +1810,15 @@ function transcriptMovementDirection(before, after) {
   const afterRows = new Map(
     (after.transcript.visibleRows ?? []).map((row) => [row.messageId, row.top])
   );
+  let hasSharedPaintedRow = false;
   for (const row of before.transcript.visibleRows ?? []) {
     const afterTop = afterRows.get(row.messageId);
     if (!Number.isFinite(row.top) || !Number.isFinite(afterTop)) continue;
+    hasSharedPaintedRow = true;
     const delta = row.top - afterTop;
     if (Math.abs(delta) > 1.5) return Math.sign(delta);
   }
+  if (hasSharedPaintedRow) return 0;
   const scrollDelta = after.transcript.scrollTop - before.transcript.scrollTop;
   return Math.abs(scrollDelta) > 1.5 ? Math.sign(scrollDelta) : 0;
 }
@@ -2421,7 +2466,7 @@ async function openSessionEditorWithRetry(
         throw new Error(`Could not open the ${title} session actions`);
       }
       await new Promise((resolve) => setTimeout(resolve, 100));
-      if (!(await sidebar.clickText('Open as Editor'))) {
+      if (!(await clickOpenInEditor(sidebar))) {
         throw new Error(`Could not open ${title} in an editor`);
       }
       return await waitForTarget(port, { surface: 'editor', sessionId }, timeoutMs);
@@ -3061,8 +3106,7 @@ async function runMultiWebviewScenario({
       failures,
       fixtureAfterPreparation,
     };
-    manifest.livePreparation ??= {};
-    manifest.livePreparation['AI-18'] = { ...result, recordedAt: new Date().toISOString() };
+    recordLivePreparationResult(manifest, 'AI-18', result);
     await writeJsonAtomic(manifestPath, manifest);
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     if (failures.length > 0) throw new Error(`AI-18 failed: ${failures.join('; ')}`);
@@ -3287,7 +3331,7 @@ async function runLifecycleScenario({
       throw new Error('AI-19 could not reopen the root session actions');
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
-    if (!(await sidebar.clickText('Open as Editor'))) {
+    if (!(await clickOpenInEditor(sidebar))) {
       throw new Error('AI-19 could not reveal the root editor');
     }
     const visible = await waitForObservation(
@@ -3361,8 +3405,7 @@ async function runLifecycleScenario({
       failures,
       fixtureAfterPreparation,
     };
-    manifest.livePreparation ??= {};
-    manifest.livePreparation['AI-19'] = { ...result, recordedAt: new Date().toISOString() };
+    recordLivePreparationResult(manifest, 'AI-19', result);
     await writeJsonAtomic(manifestPath, manifest);
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     if (failures.length > 0) throw new Error(`AI-19 failed: ${failures.join('; ')}`);
@@ -3448,12 +3491,7 @@ async function runLive(options) {
     allowSessionNavigation: targetSurface === 'sidebar',
   };
   const cdp = await CdpController.connect(launch.remoteDebuggingPort, requestedTarget);
-  const promptRun = Number(manifest.livePreparation?.[scenario]?.promptRun ?? 0) + 1;
-  manifest.livePreparation ??= {};
-  manifest.livePreparation[scenario] = {
-    ...manifest.livePreparation[scenario],
-    promptRun,
-  };
+  const promptRun = beginLivePreparationRun(manifest, scenario);
   const attempts = [];
   let best = null;
   let modelMayEdit = false;
@@ -3594,8 +3632,7 @@ async function runLive(options) {
         failures,
         fixtureAfterPreparation,
       };
-      manifest.livePreparation ??= {};
-      manifest.livePreparation[scenario] = { ...result, recordedAt: new Date().toISOString() };
+      recordLivePreparationResult(manifest, scenario, result);
       await writeJsonAtomic(manifestPath, manifest);
       process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
       if (failures.length > 0) {
@@ -3792,8 +3829,7 @@ async function runLive(options) {
       settled,
       fixtureAfterPreparation,
     };
-    manifest.livePreparation ??= {};
-    manifest.livePreparation[scenario] = { ...result, recordedAt: new Date().toISOString() };
+    recordLivePreparationResult(manifest, scenario, result);
     await writeJsonAtomic(manifestPath, manifest);
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     if (!result.prepared) {

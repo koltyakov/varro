@@ -212,15 +212,15 @@ describe('SidebarProvider editor panels', () => {
     });
 
     expect(lastSiblingWorkspaceAlerts(posted)).toEqual([
-      { name: 'Repo B', path: '/repo-b', kinds: ['attention', 'completed'], count: 2 },
+      { name: 'Repo B', path: '/repo-b', kinds: ['attention'], count: 1 },
     ]);
     const statusItemIndex = getVscodeMock().window.createStatusBarItem.mock.calls.findIndex(
       ([id]) => id === 'varro.session-status'
     );
     const statusItem =
       getVscodeMock().window.createStatusBarItem.mock.results[statusItemIndex]?.value;
-    expect(statusItem?.text).toBe('$(bell-dot) Varro: 2 workspace events');
-    expect(statusItem?.tooltip).toContain('Repo B: 2');
+    expect(statusItem?.text).toBe('$(bell-dot) Varro: 1 workspace event');
+    expect(statusItem?.tooltip).toContain('Repo B: 1');
     expect(statusItem?.show).toHaveBeenCalled();
 
     await provider.openSiblingWorkspaceSessions();
@@ -1529,6 +1529,45 @@ describe('SidebarProvider editor panels', () => {
     });
 
     expect(editor.panel.title).toBe('Authoritative title');
+  });
+
+  it('does not replace a known editor title with placeholder updates', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const editor = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
+      .sessionState;
+
+    await provider.openSessionInEditor('session-1');
+    sessionState.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'session-1', title: 'Stable title' } },
+    });
+    provider.post({
+      type: 'server/event',
+      payload: {
+        type: 'session.updated',
+        properties: { info: { id: 'session-1', title: 'Stable title' } },
+      },
+    });
+
+    editor.receive({
+      type: 'editor/route-changed',
+      payload: { route: { type: 'session', sessionId: 'session-1', title: 'New Chat' } },
+    });
+    sessionState.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'session-1', title: 'New Chat' } },
+    });
+    provider.post({
+      type: 'server/event',
+      payload: {
+        type: 'session.updated',
+        properties: { info: { id: 'session-1', title: 'New Chat' } },
+      },
+    });
+
+    expect(editor.panel.title).toBe('Stable title');
   });
 
   it('treats only the ready sidebar active route as visible attention', async () => {

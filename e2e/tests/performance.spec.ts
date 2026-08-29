@@ -581,16 +581,18 @@ test('viewport narrowing preserves the first fully visible row after a clipped w
       userTop: user.getBoundingClientRect().top - bounds.top,
       userHeight: user.getBoundingClientRect().height,
       assistantTop: assistant.getBoundingClientRect().top - bounds.top,
+      width: element.clientWidth,
     };
   }, target!);
   const samplesPromise = list.evaluate(async (element, assistantId) => {
-    const values: Array<number | null> = [];
+    const values: Array<{ top: number | null; width: number }> = [];
     for (let frame = 0; frame < 16; frame += 1) {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       const row = element.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(assistantId)}"]`);
-      values.push(
-        row ? row.getBoundingClientRect().top - element.getBoundingClientRect().top : null
-      );
+      values.push({
+        top: row ? row.getBoundingClientRect().top - element.getBoundingClientRect().top : null,
+        width: element.clientWidth,
+      });
     }
     return values;
   }, target!.assistantId);
@@ -608,16 +610,20 @@ test('viewport narrowing preserves the first fully visible row after a clipped w
     };
   }, target!);
   const diagnostic = { before, after, samples };
+  const firstResizedSample = samples.findIndex((sample) => sample.width < before.width - 1);
+  const correctedSamples = samples.slice(firstResizedSample + 1);
 
   expect(after.userHeight, JSON.stringify(diagnostic)).toBeGreaterThan(before.userHeight);
+  expect(firstResizedSample, JSON.stringify(diagnostic)).toBeGreaterThanOrEqual(0);
+  expect(correctedSamples.length, JSON.stringify(diagnostic)).toBeGreaterThan(0);
   expect(
-    samples.every((top) => top !== null),
+    samples.every((sample) => sample.top !== null),
     JSON.stringify(diagnostic)
   ).toBe(true);
   expect(
-    // The first test RAF can force layout before ResizeObserver runs in the same
-    // rendering update. It is not painted; subsequent callbacks are corrected frames.
-    Math.max(...samples.slice(1).map((top) => Math.abs(top! - before.assistantTop))),
+    // The sampler can begin before the width mutation. Exclude the first callback that observes the
+    // new width because it can force layout before ResizeObserver corrects the same pre-paint update.
+    Math.max(...correctedSamples.map((sample) => Math.abs(sample.top! - before.assistantTop))),
     JSON.stringify(diagnostic)
   ).toBeLessThanOrEqual(3);
   expect(await getRenderedMessageRowCount(page)).toBeLessThan(90);

@@ -7,6 +7,7 @@ import { setState, showSessionPicker, state } from './app-state';
 import { postMessage } from './bridge';
 import { providerRequiresReconnection } from './provider-connection-state';
 import { STORAGE_KEYS, writeStored } from './state-storage';
+import { writeStoredSelectedModelForWorkspace } from './state-stored-values';
 
 export const LARGE_MODEL_CATALOG_THRESHOLD = 50;
 const MANAGED_MODEL_CATALOG_MARKER = '*';
@@ -62,7 +63,9 @@ export function setSelectedModel(
   if (!modelsEqual(state.selectedModel, model)) {
     setState('selectedModel', reconcile(model));
   }
-  if (persistGlobal) writeStored(STORAGE_KEYS.selectedModel, model);
+  if (persistGlobal) {
+    writeStoredSelectedModelForWorkspace(state.editorContext.workspacePath, model);
+  }
 
   const rememberedVariant =
     options && 'rememberVariant' in options ? options.rememberVariant : model?.variant;

@@ -75,6 +75,12 @@ type HeaderSessionCounts = {
   sidebarCompleted: number;
 };
 
+type PublishedUnreadState = {
+  kind: 'completed' | 'plan-ready';
+  unread: boolean;
+  markerAt: number;
+};
+
 const DESKTOP_SESSION_LAYOUT_MEDIA_QUERY = '(min-width: 1400px)';
 const RECONNECT_BANNER_SHOW_DELAY_MS = 10_000;
 const RECONNECT_BANNER_MIN_VISIBLE_MS = 2000;
@@ -137,68 +143,65 @@ export function Chat() {
   const rawSessionIndicators = createMemo(() => deriveSessionIndicators(state.sessions));
   const sessionIndicators = createStableSessionIndicators(rawSessionIndicators);
   let publishedUnreadWorkspace: string | null = null;
-  const publishedUnreadKinds = new Map<string, 'completed' | 'plan-ready' | null>();
+  const publishedUnreadStates = new Map<string, PublishedUnreadState>();
   createEffect(() => {
     const workspacePath = state.editorContext.workspacePath;
-    const indicators = sessionIndicators();
+    const indicators = rawSessionIndicators();
     if (!workspacePath) return;
     if (publishedUnreadWorkspace !== workspacePath) {
       publishedUnreadWorkspace = workspacePath;
-      publishedUnreadKinds.clear();
+      publishedUnreadStates.clear();
     }
     for (const session of state.sessions) {
       if (!isPrimarySession(session)) continue;
-      const hasPublishedKind = publishedUnreadKinds.has(session.id);
-      const previousKind = publishedUnreadKinds.get(session.id);
+      const previous = publishedUnreadStates.get(session.id);
+      const completedAt = state.completedSessionResponses[session.id];
+      const seenAt = state.lastSeenSessions[session.id];
       const kind = indicators.planReadyIds.has(session.id)
         ? 'plan-ready'
         : indicators.newlyCompletedIds.has(session.id)
           ? 'completed'
           : undefined;
-      if (hasPublishedKind && previousKind === (kind ?? null)) continue;
-      if (previousKind) {
-        postMessage({
-          type: 'session-unread-state/update',
-          payload: {
-            sessionId: session.id,
-            directory: session.directory,
-            kind: previousKind,
-            unread: false,
-            markerAt: state.lastSeenSessions[session.id],
-          },
-        });
-      }
+      let next: PublishedUnreadState | undefined;
       if (kind) {
-        publishedUnreadKinds.set(session.id, kind);
-        postMessage({
-          type: 'session-unread-state/update',
-          payload: {
-            sessionId: session.id,
-            directory: session.directory,
-            kind,
-            unread: true,
-            markerAt:
-              kind === 'completed'
-                ? state.completedSessionResponses[session.id]
-                : session.time.updated,
-          },
-        });
-      } else if (state.completedSessionResponses[session.id] !== undefined) {
-        publishedUnreadKinds.set(session.id, null);
-        postMessage({
-          type: 'session-unread-state/update',
-          payload: {
-            sessionId: session.id,
-            directory: session.directory,
-            kind: getSelectedAgentForSession(session.id) === 'plan' ? 'plan-ready' : 'completed',
-            unread: false,
-            markerAt:
-              state.lastSeenSessions[session.id] ?? state.completedSessionResponses[session.id],
-          },
-        });
-      } else {
-        publishedUnreadKinds.delete(session.id);
+        if (kind === 'completed') {
+          if (completedAt === undefined) continue;
+          next = { kind, unread: true, markerAt: completedAt };
+        } else {
+          next = { kind, unread: true, markerAt: session.time.updated };
+        }
+      } else if (
+        seenAt !== undefined &&
+        (completedAt === undefined || seenAt >= completedAt) &&
+        getSelectedAgentForSession(session.id) !== 'plan'
+      ) {
+        next = {
+          kind: 'completed',
+          unread: false,
+          markerAt: seenAt,
+        };
+      } else if (completedAt !== undefined && seenAt !== undefined && seenAt >= completedAt) {
+        next = { kind: 'plan-ready', unread: false, markerAt: seenAt };
+      } else if (previous?.kind === 'plan-ready') {
+        next = { kind: 'plan-ready', unread: false, markerAt: session.time.updated };
       }
+      if (!next) continue;
+      if (
+        previous?.kind === next.kind &&
+        previous.unread === next.unread &&
+        previous.markerAt === next.markerAt
+      ) {
+        continue;
+      }
+      publishedUnreadStates.set(session.id, next);
+      postMessage({
+        type: 'session-unread-state/update',
+        payload: {
+          sessionId: session.id,
+          directory: session.directory,
+          ...next,
+        },
+      });
     }
   });
   const recycleBinSessionIds = createMemo(() => getRecycleBinSessionIds(state.recycleBinEntries));
@@ -651,15 +654,22 @@ export function Chat() {
   };
 
   const openAttentionSessionsFromCommand = () => {
-    void openSessionFilter(
-      'attention',
-      getHeaderAttentionCount(
-        recentSessions(),
-        (sessionId) => sessionIndicators().attentionIds.has(sessionId),
-        state.activeSessionId,
-        false
-      )
+    const attentionCount = getHeaderAttentionCount(
+      recentSessions(),
+      (sessionId) => sessionIndicators().attentionIds.has(sessionId),
+      state.activeSessionId,
+      false
     );
+    if (attentionCount > 0) {
+      void openSessionFilter('attention', attentionCount);
+      return;
+    }
+    const failedCount = failedSessionsCount();
+    if (failedCount > 0) {
+      void openSessionFilter('failed', failedCount);
+      return;
+    }
+    void openSessionFilter('plan-ready', planReadySessionsCount());
   };
 
   const openFailedSessions = () => {

@@ -66,6 +66,28 @@ describe('composer draft persistence', () => {
     expect(appState.state.pinnedModels).toEqual(['openai:gpt-5.6-sol']);
   });
 
+  it('does not restore a selected model from another project', () => {
+    window.localStorage.setItem(
+      `${STORAGE_KEYS.selectedModel}:/repo-a`,
+      JSON.stringify({ providerID: 'openai', modelID: 'repo-a-model' })
+    );
+    window.localStorage.setItem(
+      STORAGE_KEYS.selectedModel,
+      JSON.stringify({ providerID: 'openai', modelID: 'legacy-global-model' })
+    );
+    // SAFETY: The fixture provides the host-owned initial webview state.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      editorContext: {
+        workspacePath: '/repo-b',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+    };
+
+    expect(createAppState().state.selectedModel).toBeNull();
+  });
+
   it('restores draft text when app state is recreated', () => {
     const first = createAppState();
     first.setInputText('Keep this draft');

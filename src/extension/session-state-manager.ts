@@ -133,6 +133,7 @@ export class SessionStateManager {
   private readonly busySessions = new Set<string>();
   private readonly serverBusySessions = new Set<string>();
   private readonly completedSessions = new Set<string>();
+  private readonly completedSessionMarkers = new Map<string, number>();
   private readonly acknowledgedCompletedRoots: Map<string, number>;
   private readonly failedSessions = new Set<string>();
   private readonly sessionAgents = new Map<string, string>();
@@ -145,6 +146,7 @@ export class SessionStateManager {
   private readonly deferredPermissionAttention = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly trailingBusyAfterCompletion = new Set<string>();
   private readonly trailingTerminalsWhileBusy = new Map<string, TerminalWave>();
+  private readonly serverBusyTerminalEvidence = new Map<string, TerminalEvidence>();
   private readonly blockingRequestMutations = new Set<string>();
   private readonly pendingAttentionRevisions: Record<PendingAttentionKind, number> = {
     permission: 0,
@@ -297,25 +299,30 @@ export class SessionStateManager {
     }
     if (directory) this.setSessionDirectory(sessionID, directory);
     if (this.isIgnoredBackgroundSession(sessionID)) {
-      if (this.completedSessions.delete(sessionID)) this.listener.onStatusChange();
+      if (this.deleteCompletedSession(sessionID)) this.listener.onStatusChange();
       return;
     }
-    if (kind === 'plan-ready') this.setSessionMetadata(this.sessionAgents, sessionID, 'plan');
-    else this.sessionAgents.delete(sessionID);
+    if (kind === 'plan-ready') {
+      this.setSessionMetadata(this.sessionAgents, sessionID, 'plan');
+      this.completedSessionMarkers.delete(sessionID);
+    } else {
+      this.sessionAgents.delete(sessionID);
+    }
     if (kind === 'completed') {
       const rootSessionID = this.rootSessionIdFor(sessionID);
       const acknowledgedAt = this.acknowledgedCompletedRoots.get(rootSessionID);
       if (acknowledgedAt !== undefined && (markerAt === undefined || markerAt <= acknowledgedAt)) {
         return;
       }
-      if (acknowledgedAt !== undefined) {
-        this.acknowledgedCompletedRoots.delete(rootSessionID);
-        void this.persistAcknowledgedCompletions();
-      }
+      if (this.busySessions.has(sessionID)) return;
+      const completedAt = this.completedSessionMarkers.get(sessionID);
+      if (completedAt !== undefined && markerAt !== undefined && markerAt < completedAt) return;
     }
-    if (this.completedSessions.has(sessionID)) return;
-    this.completedSessions.add(sessionID);
-    this.listener.onStatusChange();
+    const changed = this.addCompletedSession(
+      sessionID,
+      kind === 'completed' ? markerAt : undefined
+    );
+    if (changed) this.listener.onStatusChange();
   }
 
   directoryFor(sessionID: string): string | undefined {
@@ -409,6 +416,7 @@ export class SessionStateManager {
   clearCompleted(): void {
     if (this.completedSessions.size === 0) return;
     this.completedSessions.clear();
+    this.completedSessionMarkers.clear();
     this.listener.onStatusChange();
   }
 
@@ -418,8 +426,9 @@ export class SessionStateManager {
       if (this.isPlanSession(sessionID) || !this.isSessionInWorkspace(sessionID, workspacePath)) {
         continue;
       }
-      this.completedSessions.delete(sessionID);
-      this.acknowledgeCompletedRoot(this.rootSessionIdFor(sessionID), Date.now());
+      const acknowledgedAt = Math.max(Date.now(), this.completedSessionMarkers.get(sessionID) ?? 0);
+      this.deleteCompletedSession(sessionID);
+      this.acknowledgeCompletedRoot(this.rootSessionIdFor(sessionID), acknowledgedAt);
       changed = true;
     }
     if (changed) this.listener.onStatusChange();
@@ -432,7 +441,9 @@ export class SessionStateManager {
     for (const completedSessionID of this.completedSessions) {
       if (this.rootSessionIdFor(completedSessionID) !== rootSessionID) continue;
       if (this.isPlanSession(completedSessionID)) continue;
-      this.completedSessions.delete(completedSessionID);
+      const completedAt = this.completedSessionMarkers.get(completedSessionID);
+      if (completedAt !== undefined && completedAt > acknowledgedAt) continue;
+      this.deleteCompletedSession(completedSessionID);
       changed = true;
     }
     if (changed) this.listener.onStatusChange();
@@ -444,7 +455,7 @@ export class SessionStateManager {
     for (const completedSessionID of this.completedSessions) {
       if (this.rootSessionIdFor(completedSessionID) !== rootSessionID) continue;
       if (!this.isPlanSession(completedSessionID)) continue;
-      this.completedSessions.delete(completedSessionID);
+      this.deleteCompletedSession(completedSessionID);
       changed = true;
     }
     if (changed) this.listener.onStatusChange();
@@ -557,7 +568,13 @@ export class SessionStateManager {
           // primary completion path so a fast turn whose step.ended/message
           // events lag or are missed still settles immediately.
           this.serverBusySessions.delete(sessionID);
-          changed = this.finishBusySession(sessionID, {}) || changed;
+          changed =
+            this.finishBusySession(
+              sessionID,
+              this.takeServerBusyTerminalEvidence(sessionID),
+              false,
+              true
+            ) || changed;
         }
         break;
       }
@@ -568,7 +585,13 @@ export class SessionStateManager {
         const sessionID = getString(props?.sessionID);
         if (!sessionID) break;
         this.serverBusySessions.delete(sessionID);
-        changed = this.finishBusySession(sessionID, {}) || changed;
+        changed =
+          this.finishBusySession(
+            sessionID,
+            this.takeServerBusyTerminalEvidence(sessionID),
+            false,
+            true
+          ) || changed;
         break;
       }
       case 'session.next.step.ended': {
@@ -587,7 +610,10 @@ export class SessionStateManager {
       }
       case 'session.next.prompt.admitted': {
         const sessionID = getString(props?.sessionID);
-        if (sessionID) this.trailingBusyAfterCompletion.delete(sessionID);
+        if (sessionID) {
+          this.trailingBusyAfterCompletion.delete(sessionID);
+          this.serverBusyTerminalEvidence.delete(sessionID);
+        }
         break;
       }
       case 'session.next.agent.switched': {
@@ -624,7 +650,7 @@ export class SessionStateManager {
         if (mode) {
           this.setSessionMetadata(this.sessionModes, sessionID, mode);
           if (this.isIgnoredBackgroundSession(sessionID)) {
-            changed = this.completedSessions.delete(sessionID) || changed;
+            changed = this.deleteCompletedSession(sessionID) || changed;
           }
         }
 
@@ -1171,7 +1197,7 @@ export class SessionStateManager {
       this.setSessionMetadata(this.sessionParentIDs, sessionID, parentID);
     }
     if (sessionID && this.isIgnoredBackgroundSession(sessionID)) {
-      alertChanged = this.completedSessions.delete(sessionID) || alertChanged;
+      alertChanged = this.deleteCompletedSession(sessionID) || alertChanged;
     }
     return alertChanged;
   }
@@ -1179,6 +1205,7 @@ export class SessionStateManager {
   private rememberSessionAgent(sessionID: string, agent: string): boolean {
     const changed = this.sessionAgents.get(sessionID) !== agent;
     this.setSessionMetadata(this.sessionAgents, sessionID, agent);
+    if (agent === 'plan') this.completedSessionMarkers.delete(sessionID);
     return changed && this.completedSessions.has(sessionID);
   }
 
@@ -1220,6 +1247,23 @@ export class SessionStateManager {
     map.delete(sessionID);
     map.set(sessionID, value);
     this.evictOldestSessionMetadata(map);
+  }
+
+  private addCompletedSession(sessionID: string, markerAt?: number): boolean {
+    const changed = !this.completedSessions.has(sessionID);
+    this.completedSessions.add(sessionID);
+    if (markerAt !== undefined && Number.isFinite(markerAt)) {
+      this.completedSessionMarkers.set(
+        sessionID,
+        Math.max(this.completedSessionMarkers.get(sessionID) ?? markerAt, markerAt)
+      );
+    }
+    return changed;
+  }
+
+  private deleteCompletedSession(sessionID: string): boolean {
+    this.completedSessionMarkers.delete(sessionID);
+    return this.completedSessions.delete(sessionID);
   }
 
   private acknowledgeCompletedRoot(rootSessionID: string, acknowledgedAt: number) {
@@ -1283,14 +1327,13 @@ export class SessionStateManager {
     };
     if (eventType) pending.eventType = eventType;
     this.pendingAttention.set(requestID, pending);
-    this.completedSessions.delete(sessionID);
+    this.deleteCompletedSession(sessionID);
     if (kind === 'permission') this.deferPermissionAttention(requestID);
     else this.showBlockingNotification(kind, sessionID, label);
     return true;
   }
 
   private removeSession(sessionID: string) {
-    const rootSessionID = this.rootSessionIdFor(sessionID);
     this.recordPendingAttentionSessionDeletion(sessionID);
     if (this.recoverySnapshotPromise || this.blockingRecoveryCleanupPending) {
       this.recoveryDeletedSessionIDs.add(sessionID);
@@ -1298,7 +1341,7 @@ export class SessionStateManager {
     let changed = false;
     changed = this.busySessions.delete(sessionID) || changed;
     this.serverBusySessions.delete(sessionID);
-    changed = this.completedSessions.delete(sessionID) || changed;
+    changed = this.deleteCompletedSession(sessionID) || changed;
     changed = this.failedSessions.delete(sessionID) || changed;
     changed = this.sessionAgents.delete(sessionID) || changed;
     changed = this.sessionTitles.delete(sessionID) || changed;
@@ -1310,9 +1353,7 @@ export class SessionStateManager {
     this.busyEvidenceRevisions.delete(sessionID);
     this.trailingBusyAfterCompletion.delete(sessionID);
     this.trailingTerminalsWhileBusy.delete(sessionID);
-    if (rootSessionID === sessionID && this.acknowledgedCompletedRoots.delete(rootSessionID)) {
-      void this.persistAcknowledgedCompletions();
-    }
+    this.serverBusyTerminalEvidence.delete(sessionID);
     this.clearBusyAttempts(sessionID);
     for (const [requestID, request] of this.pendingAttention.entries()) {
       if (request.sessionID !== sessionID) continue;
@@ -1403,6 +1444,7 @@ export class SessionStateManager {
     this.clearBusyAttempts(sessionID);
     if (wasBusy) this.busyStartedAt.delete(sessionID);
     this.trailingTerminalsWhileBusy.delete(sessionID);
+    this.serverBusyTerminalEvidence.delete(sessionID);
     return wasBusy;
   }
 
@@ -1453,12 +1495,10 @@ export class SessionStateManager {
     let changed = !this.busySessions.has(sessionID);
     if (!this.busySessions.has(sessionID)) {
       this.busyStartedAt.set(sessionID, Date.now());
+      this.serverBusyTerminalEvidence.delete(sessionID);
     }
     this.busySessions.add(sessionID);
-    if (this.acknowledgedCompletedRoots.delete(this.rootSessionIdFor(sessionID))) {
-      void this.persistAcknowledgedCompletions();
-    }
-    changed = this.completedSessions.delete(sessionID) || changed;
+    changed = this.deleteCompletedSession(sessionID) || changed;
     changed = this.failedSessions.delete(sessionID) || changed;
     return changed;
   }
@@ -1466,7 +1506,8 @@ export class SessionStateManager {
   private finishBusySession(
     sessionID: string,
     evidence: TerminalEvidence,
-    waitForServerIdle = false
+    waitForServerIdle = false,
+    clearStale = false
   ): boolean {
     if (!this.busySessions.has(sessionID)) return false;
     if (this.isDuplicateTrailingTerminal(sessionID, evidence)) return false;
@@ -1476,11 +1517,12 @@ export class SessionStateManager {
       this.serverBusySessions.has(sessionID) &&
       (this.busyGenerations.get(sessionID)?.length ?? 0) <= 1
     ) {
+      this.rememberServerBusyTerminalEvidence(sessionID, evidence);
       return false;
     }
 
     const completion = this.consumeBusyGeneration(sessionID, evidence.completedAt);
-    if (completion === 'stale') return false;
+    if (completion === 'stale') return clearStale ? this.clearBusy(sessionID) : false;
     if (completion === 'pending') {
       this.trailingTerminalsWhileBusy.set(sessionID, terminalWaveFromEvidence(evidence));
       return false;
@@ -1495,10 +1537,32 @@ export class SessionStateManager {
     }
 
     this.clearBusy(sessionID);
-    this.completedSessions.add(sessionID);
+    this.addCompletedSession(sessionID, evidence.completedAt);
     this.trailingBusyAfterCompletion.add(sessionID);
     this.showCompletionNotification(sessionID);
     return true;
+  }
+
+  private rememberServerBusyTerminalEvidence(sessionID: string, evidence: TerminalEvidence): void {
+    const current = this.serverBusyTerminalEvidence.get(sessionID);
+    if (!current) {
+      this.serverBusyTerminalEvidence.set(sessionID, evidence);
+      return;
+    }
+    this.serverBusyTerminalEvidence.set(sessionID, {
+      messageID: evidence.messageID ?? current.messageID,
+      completedAt:
+        evidence.completedAt === undefined
+          ? current.completedAt
+          : Math.max(current.completedAt ?? evidence.completedAt, evidence.completedAt),
+      failureKey: evidence.failureKey ?? current.failureKey,
+    });
+  }
+
+  private takeServerBusyTerminalEvidence(sessionID: string): TerminalEvidence {
+    const evidence = this.serverBusyTerminalEvidence.get(sessionID) ?? {};
+    this.serverBusyTerminalEvidence.delete(sessionID);
+    return evidence;
   }
 
   private isIgnoredBackgroundSession(sessionID: string): boolean {
@@ -1643,7 +1707,7 @@ export class SessionStateManager {
 
     const wasFailed = this.failedSessions.has(sessionID);
     this.failedSessions.add(sessionID);
-    this.completedSessions.delete(sessionID);
+    this.deleteCompletedSession(sessionID);
     if (!wasFailed && !this.isIgnoredBackgroundSession(sessionID)) {
       this.showFailureNotification(sessionID, error ? describeFailure(error) : undefined);
     }
@@ -1671,7 +1735,7 @@ export class SessionStateManager {
   private clearAbortedSession(sessionID: string): boolean {
     let changed = this.clearBusy(sessionID);
     changed = this.failedSessions.delete(sessionID) || changed;
-    changed = this.completedSessions.delete(sessionID) || changed;
+    changed = this.deleteCompletedSession(sessionID) || changed;
     return changed;
   }
 

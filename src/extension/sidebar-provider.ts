@@ -19,6 +19,7 @@ import type {
   SiblingWorkspaceAlert,
   TerminalSelection,
 } from '../shared/protocol';
+import { isPlaceholderSessionTitle } from '../shared/session-title';
 import { asRecord } from '../shared/type-utils';
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
 
@@ -1084,6 +1085,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         return;
       }
     }
+    if (
+      route.type === 'session' &&
+      endpoint.route.type === 'session' &&
+      route.sessionId === endpoint.route.sessionId &&
+      isPlaceholderSessionTitle(route.title) &&
+      !isPlaceholderSessionTitle(endpoint.route.title)
+    ) {
+      route = { ...route, title: endpoint.route.title };
+    }
     const nextKey = this.editorKey(route, viewId);
     if (nextKey !== endpoint.key) {
       if (this.editorPanels.get(endpoint.key) === endpoint) this.editorPanels.delete(endpoint.key);
@@ -1124,7 +1134,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private editorTitle(route: WebviewRoute) {
     if (route.type === 'new-session') return 'Varro: New Session';
-    return route.title?.trim() || this.sessionState.titleFor(route.sessionId) || 'Varro: Session';
+    return this.editorSessionTitle(route) || 'Varro: Session';
+  }
+
+  private editorSessionTitle(route: Extract<WebviewRoute, { type: 'session' }>) {
+    const routeTitle = route.title?.trim();
+    const stateTitle = this.sessionState.titleFor(route.sessionId)?.trim();
+    if (stateTitle && !isPlaceholderSessionTitle(stateTitle)) return stateTitle;
+    if (routeTitle && !isPlaceholderSessionTitle(routeTitle)) return routeTitle;
+    return stateTitle || routeTitle;
   }
 
   private readPersistedEditorRoute(state: PersistedEditorState): WebviewRoute {
@@ -1658,7 +1676,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private updateEditorPanelTitles() {
     for (const endpoint of this.editorPanels.values()) {
       if (endpoint.route.type !== 'session') continue;
-      const title = this.sessionState.titleFor(endpoint.route.sessionId) ?? endpoint.route.title;
+      const title = this.editorSessionTitle(endpoint.route);
       endpoint.route = { ...endpoint.route, title };
       endpoint.panel.title = this.editorTitle(endpoint.route);
     }
@@ -1710,6 +1728,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     >();
 
     for (const candidate of this.sessionState.getSiblingAlertCandidates()) {
+      const kinds = candidate.kinds.filter((kind) => kind !== 'completed');
+      if (kinds.length === 0) continue;
       if (
         this.isSessionOpen(candidate.rootSessionID, candidate.directory) ||
         this.sessionTrash.isHidden(candidate.sessionID) ||
@@ -1723,14 +1743,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       if (!folder || isSameWorkspacePath(folder.path, endpoint.workspacePath)) continue;
       const existing = alerts.get(folder.path);
       if (existing) {
-        existing.count += candidate.kinds.length;
-        for (const kind of candidate.kinds) existing.kinds.add(kind);
+        existing.count += kinds.length;
+        for (const kind of kinds) existing.kinds.add(kind);
       } else {
         alerts.set(folder.path, {
           name: folder.name,
           path: folder.path,
-          kinds: new Set(candidate.kinds),
-          count: candidate.kinds.length,
+          kinds: new Set(kinds),
+          count: kinds.length,
         });
       }
     }
@@ -2409,7 +2429,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     | { visible: false; action: 'focus' }
     | {
         visible: true;
-        action: 'focus' | 'attention' | 'completed' | 'sibling';
+        action: 'focus' | 'attention' | 'sibling';
         text: string;
         tooltip: string;
         backgroundColor?: vscode.ThemeColor;
@@ -2447,6 +2467,42 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       };
     }
 
+    const actionableSessions = new Map<string, 'Error' | 'Plan ready'>();
+    for (const sessionID of this.sessionState.failed) actionableSessions.set(sessionID, 'Error');
+    for (const sessionID of this.sessionState.completed) {
+      if (this.sessionState.isPlanSession(sessionID) && !actionableSessions.has(sessionID)) {
+        actionableSessions.set(sessionID, 'Plan ready');
+      }
+    }
+    const localAlerts = [...actionableSessions].filter(
+      ([sessionID]) =>
+        !this.isSessionAttentionVisible(sessionID) &&
+        !this.sessionTrash.isHidden(sessionID) &&
+        !this.hiddenSessions.isHidden(sessionID) &&
+        this.sessionState.isSessionInWorkspace(
+          sessionID,
+          this.contextProvider.context.workspacePath
+        )
+    );
+    if (localAlerts.length > 0) {
+      return {
+        visible: true,
+        action: 'attention',
+        text: `$(bell-dot) Varro: ${localAlerts.length} ${localAlerts.length === 1 ? 'needs' : 'need'} attention`,
+        backgroundColor: new vscode.ThemeColor('statusBarItem.warningBackground'),
+        tooltip: [
+          'Varro needs your attention.',
+          ...localAlerts.slice(0, 3).map(([sessionID, kind]) => {
+            const title = this.sessionState.titleFor(sessionID) || sessionID;
+            return `${title}: ${kind}`;
+          }),
+          ...(localAlerts.length > 3 ? [`+${localAlerts.length - 3} more`] : []),
+          '',
+          'Click to open chat.',
+        ].join('\n'),
+      };
+    }
+
     const sidebarEndpoint = [...this.endpoints].find((endpoint) => endpoint.surface === 'sidebar');
     const siblingAlerts = sidebarEndpoint ? this.siblingWorkspaceAlertsFor(sidebarEndpoint) : [];
     const siblingAlertCount = siblingAlerts.reduce((count, alert) => count + alert.count, 0);
@@ -2462,33 +2518,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           ...(siblingAlerts.length > 3 ? [`+${siblingAlerts.length - 3} more workspaces`] : []),
           '',
           'Click to open the first workspace session list.',
-        ].join('\n'),
-      };
-    }
-
-    const completedSessions = [...this.sessionState.completed].filter(
-      (sessionID) =>
-        !this.isSessionAttentionVisible(sessionID) &&
-        !this.sessionTrash.isHidden(sessionID) &&
-        !this.hiddenSessions.isHidden(sessionID) &&
-        this.sessionState.isSessionInWorkspace(
-          sessionID,
-          this.contextProvider.context.workspacePath
-        )
-    );
-    if (completedSessions.length > 0) {
-      return {
-        visible: true,
-        action: 'completed',
-        text: `$(check-all) Varro: ${completedSessions.length} completed`,
-        tooltip: [
-          'Varro finished background work.',
-          ...completedSessions
-            .slice(0, 3)
-            .map((sessionID) => this.sessionState.titleFor(sessionID) || sessionID),
-          ...(completedSessions.length > 3 ? [`+${completedSessions.length - 3} more`] : []),
-          '',
-          'Click to open chat.',
         ].join('\n'),
       };
     }

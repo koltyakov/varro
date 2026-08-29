@@ -1100,6 +1100,31 @@ describe('state helpers', () => {
     expect(stateModule.getSelectedModelForSession('session-1')).toBeNull();
   });
 
+  it('persists selected models independently per project', async () => {
+    window.localStorage.clear();
+    const stateModule = await loadState();
+    const repoAModel = { providerID: 'openai', modelID: 'repo-a-model' };
+    const repoBModel = { providerID: 'anthropic', modelID: 'repo-b-model' };
+
+    stateModule.setState('editorContext', 'workspacePath', '/repo-a');
+    stateModule.setSelectedModel({ ...repoAModel });
+    stateModule.setState('editorContext', 'workspacePath', '/repo-b');
+
+    expect(stateModule.getPersistedSelectedModel()).toBeNull();
+
+    stateModule.setSelectedModel({ ...repoBModel });
+    stateModule.setState('editorContext', 'workspacePath', '/repo-a');
+
+    expect(stateModule.getPersistedSelectedModel()).toEqual(repoAModel);
+    expect(JSON.parse(window.localStorage.getItem('varro.selectedModel:/repo-a')!)).toEqual(
+      repoAModel
+    );
+    expect(JSON.parse(window.localStorage.getItem('varro.selectedModel:/repo-b')!)).toEqual(
+      repoBModel
+    );
+    expect(window.localStorage.getItem('varro.selectedModel')).toBeNull();
+  });
+
   it('does not promote a temporary session model or reasoning to global defaults', async () => {
     const stateModule = await loadState();
     const defaultModel = {

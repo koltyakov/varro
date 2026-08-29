@@ -15,6 +15,7 @@ import type {
 import { isPermissionMode } from '../../shared/protocol';
 import { isEditorContext } from '../../shared/extension-message';
 import { MAX_NATIVE_PDF_TOTAL_BYTES, isNativePdfAttachment } from '../../shared/native-pdf';
+import { normalizeWorkspaceIdentity } from '../../shared/workspace-path';
 import { STORAGE_KEYS, readStored, writeStored } from './state-storage';
 import {
   asRecord,
@@ -96,6 +97,26 @@ export function readStoredNullableStringRecord(key: string): Record<string, stri
 
 export function readStoredSelectedModel(key: string): SelectedModel | null {
   return normalizeStoredSelectedModel(readStored<unknown>(key));
+}
+
+function getSelectedModelStorageKey(workspacePath: string | null | undefined): string {
+  const workspaceIdentity = normalizeWorkspaceIdentity(workspacePath);
+  return workspaceIdentity
+    ? `${STORAGE_KEYS.selectedModel}:${workspaceIdentity}`
+    : STORAGE_KEYS.selectedModel;
+}
+
+export function readStoredSelectedModelForWorkspace(
+  workspacePath: string | null | undefined
+): SelectedModel | null {
+  return readStoredSelectedModel(getSelectedModelStorageKey(workspacePath));
+}
+
+export function writeStoredSelectedModelForWorkspace(
+  workspacePath: string | null | undefined,
+  model: SelectedModel | null
+) {
+  writeStored(getSelectedModelStorageKey(workspacePath), model);
 }
 
 export function readStoredSelectedModels(key: string): SessionSelectedModels {

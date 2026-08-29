@@ -4,14 +4,11 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 
 ## 0.27.x - August 2026
 
-- Added independent workspace selection for sidebar and editor chats in multi-root workspaces, with workspace choices preserved when editor chats reopen.
-- Added workspace controls to the session list and composer, with new prompts following the active editor's workspace until a folder is chosen manually.
-- Added sibling-workspace notifications for sessions that need attention, failed sessions, and completed plans, with quick switching to the relevant workspace and child sessions excluded from unread alerts.
-- Scoped chat context, OpenCode requests, session events, permissions, and recovery state to each view's selected workspace.
-- Improved session continuity and cleanup across managed restarts, provider authentication refreshes, restored editor chats, reconnected streams, overlapping requests, failed Ralph runs, and workspace changes.
-- Stabilized long-conversation scrolling during history loading, content expansion, image rendering, and resize reflow, preserving the visible position across layout changes.
-- Hardened native Windows integration, Markdown and Mermaid rendering, queued-message restoration, local usage reporting, auto-approval command checks, provider usage discovery, session path validation, and stale webview event handling.
-- Fixed links followed by punctuation, session token totals that included cache reads, hidden-model persistence across workspaces, transcript rail overflow, and chat action colors.
+- Added multi-root workspace support with independent sidebar and editor chat selection, workspace controls, and session routing across activation, sends, summaries, Ralph runs, forks, and reopened chats.
+- Added sibling-workspace notifications with quick switching for sessions needing attention, failed sessions, and completed plans.
+- Added automatic provider authorization without a browser URL, plus Azure and Amazon provider icons.
+- Improved workspace-scoped state, session recovery, provider authentication, long-conversation scrolling, composer isolation, and editor context handling.
+- Fixed link punctuation, token totals, hidden-model persistence, transcript overflow, chat action colors, queued-message restoration, local usage reporting, and stale webview events.
 
 ## 0.26.x - August 2026
 

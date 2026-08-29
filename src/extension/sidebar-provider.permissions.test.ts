@@ -296,7 +296,7 @@ describe('SidebarProvider permission replay', () => {
     );
   });
 
-  it('uses completed-session navigation for a completed status item', async () => {
+  it('does not show a status item for an ordinary completion', async () => {
     const { provider } = await createSidebarProviderInstance();
     const providerState = provider as unknown as {
       sessionState: { handleServerEvent(event: unknown): void };
@@ -314,6 +314,55 @@ describe('SidebarProvider permission replay', () => {
       properties: { sessionID: 'session-1', status: { type: 'idle' } },
     });
 
-    expect(provider.getStatusBarClickAction()).toBe('completed');
+    expect(provider.getStatusBarClickAction()).toBe('focus');
+  });
+
+  it('shows plan-ready sessions as actionable status items', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const providerState = provider as unknown as {
+      sessionState: { handleServerEvent(event: unknown): void };
+    };
+    providerState.sessionState.handleServerEvent({
+      type: 'session.updated',
+      properties: {
+        info: { id: 'session-1', title: 'Review plan', directory: '/repo', agent: 'plan' },
+      },
+    });
+    providerState.sessionState.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+    });
+    providerState.sessionState.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    });
+
+    expect(provider.getStatusBarClickAction()).toBe('attention');
+    const statusItem = getVscodeMock().window.createStatusBarItem.mock.results.find(
+      (result) => result.value.name === 'Varro Attention'
+    )?.value;
+    expect(statusItem?.text).toBe('$(bell-dot) Varro: 1 needs attention');
+    expect(statusItem?.tooltip).toContain('Review plan: Plan ready');
+  });
+
+  it('shows failed sessions as actionable status items', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const providerState = provider as unknown as {
+      sessionState: { handleServerEvent(event: unknown): void };
+    };
+    providerState.sessionState.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'session-1', title: 'Failed work', directory: '/repo' } },
+    });
+    providerState.sessionState.handleServerEvent({
+      type: 'session.error',
+      properties: { sessionID: 'session-1', error: { name: 'UnknownError' } },
+    });
+
+    expect(provider.getStatusBarClickAction()).toBe('attention');
+    const statusItem = getVscodeMock().window.createStatusBarItem.mock.results.find(
+      (result) => result.value.name === 'Varro Attention'
+    )?.value;
+    expect(statusItem?.tooltip).toContain('Failed work: Error');
   });
 });

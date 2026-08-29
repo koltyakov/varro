@@ -3,12 +3,14 @@ import test from 'node:test';
 import vm from 'node:vm';
 
 import {
+  beginLivePreparationRun,
   buildDuplicateDeliveryObserverExpression,
   buildDuplicateDeliveryPrompt,
   buildLivePrompt,
   buildMultiWebviewScenarioPlan,
   canonicalDeliveryFailures,
   classifyPromptDisposition,
+  clickOpenInEditor,
   duplicateDeliveryFailures,
   executeActionPlan,
   findSessionDescendants,
@@ -23,6 +25,8 @@ import {
   persistFixtureExitEvidence,
   promptModelFailures,
   queueHandoffMatches,
+  recordLivePreparationResult,
+  restoreSidebarSessionFromPicker,
   selectVarroTargetDescriptor,
   sendComposerPromptWithRetry,
   sessionSnapshotMatches,
@@ -812,6 +816,106 @@ test('rejects opposite wheel movement and a delayed reversal', () => {
     ),
     { verified: false, reason: 'transcript movement reversed after the input' }
   );
+});
+
+test('uses painted rows instead of raw scroll coordinates for delayed reversal checks', () => {
+  const before = {
+    focusOwner: 'transcript',
+    transcript: {
+      scrollTop: 100,
+      scrollHeight: 1_000,
+      clientHeight: 400,
+      visibleRows: [{ messageId: 'message-1', top: 100 }],
+    },
+  };
+  const after = {
+    focusOwner: 'transcript',
+    transcript: {
+      scrollTop: 200,
+      scrollHeight: 1_100,
+      clientHeight: 400,
+      visibleRows: [{ messageId: 'message-1', top: 0 }],
+    },
+  };
+  const settledAfter = {
+    focusOwner: 'transcript',
+    transcript: {
+      scrollTop: 150,
+      scrollHeight: 1_050,
+      clientHeight: 400,
+      visibleRows: [{ messageId: 'message-1', top: 0 }],
+    },
+  };
+
+  assert.deepEqual(
+    verifyActionEffect({ action: 'key on transcript', key: 'End' }, before, after, {
+      dispatched: true,
+      settledAfter,
+    }),
+    { verified: true }
+  );
+});
+
+test('uses the current editor action label', async () => {
+  let clickedText = null;
+  const clicked = await clickOpenInEditor({
+    clickText: async (text) => {
+      clickedText = text;
+      return true;
+    },
+  });
+
+  assert.equal(clicked, true);
+  assert.equal(clickedText, 'Open in Editor');
+});
+
+test('returns the sidebar from a managed child before using the session picker fallback', async () => {
+  const root = { routeSessionId: 'root', title: 'Root' };
+  let active = { routeSessionId: 'child', title: 'Child' };
+  let escaped = false;
+  const restored = await restoreSidebarSessionFromPicker(
+    {
+      snapshot: async () => active,
+      clickText: async (text) => {
+        assert.equal(text, 'Return to parent');
+        active = root;
+        return true;
+      },
+      click: async () => false,
+      key: async () => {
+        escaped = true;
+        return true;
+      },
+    },
+    'root',
+    'Root'
+  );
+
+  assert.equal(restored, true);
+  assert.equal(escaped, false);
+});
+
+test('retains a failed live run when recording its replay', () => {
+  const failedRun = {
+    scenario: 'AI-08',
+    promptRun: 1,
+    prepared: false,
+    actionFailure: { step: 45, reason: 'transcript movement reversed after the input' },
+    recordedAt: '2026-08-29T00:00:00.000Z',
+  };
+  const manifest = { livePreparation: { 'AI-08': failedRun } };
+
+  assert.equal(beginLivePreparationRun(manifest, 'AI-08'), 2);
+  recordLivePreparationResult(manifest, 'AI-08', {
+    scenario: 'AI-08',
+    promptRun: 2,
+    prepared: true,
+    actionFailure: null,
+  });
+
+  assert.equal(manifest.livePreparation['AI-08'].prepared, true);
+  assert.equal(manifest.livePreparation['AI-08'].runs.length, 1);
+  assert.deepEqual(manifest.livePreparation['AI-08'].runs[0], failedRun);
 });
 
 test('scopes AI-08 disclosure actions to current-turn message identities', async () => {

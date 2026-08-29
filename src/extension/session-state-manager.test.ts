@@ -702,8 +702,12 @@ describe('SessionStateManager notifications', () => {
           },
         },
       });
+      manager.handleServerEvent({
+        type: 'session.status',
+        properties: { sessionID: 'session-1', status: { type: 'idle' } },
+      });
 
-      expect(manager.busy.has('session-1')).toBe(true);
+      expect(manager.busy.has('session-1')).toBe(false);
       expect(manager.completed.has('session-1')).toBe(false);
       expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
     } finally {
@@ -914,26 +918,76 @@ describe('SessionStateManager notifications', () => {
     expect(manager.getSiblingAlertCandidates()).toEqual([]);
   });
 
-  it('accepts a synchronized completion again after the session starts new work', () => {
+  it('keeps completion updates ordered across stale webview reports', () => {
     const manager = createManager();
-    manager.setSessionUnreadState('session-1', 'completed', true, '/repo');
-    manager.setSessionUnreadState('session-1', 'completed', false, '/repo');
+    manager.setSessionUnreadState('session-1', 'completed', true, '/repo', 100);
+    manager.setSessionUnreadState('session-1', 'completed', false, '/repo', 150);
+    manager.setSessionUnreadState('session-1', 'completed', true, '/repo', 200);
+
+    expect(manager.completed.has('session-1')).toBe(true);
+
+    manager.setSessionUnreadState('session-1', 'completed', false, '/repo', 150);
+
+    expect(manager.completed.has('session-1')).toBe(true);
+
+    manager.setSessionUnreadState('session-1', 'completed', false, '/repo', 250);
+    manager.setSessionUnreadState('session-1', 'completed', true, '/repo', 200);
+
+    expect(manager.completed.has('session-1')).toBe(false);
+
+    manager.setSessionUnreadState('session-1', 'completed', true, '/repo', 300);
+
+    expect(manager.completed.has('session-1')).toBe(true);
+  });
+
+  it('lets a persisted seen marker clear a timestamp-less host completion', () => {
+    const manager = createManager();
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+    });
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    });
+
+    expect(manager.completed.has('session-1')).toBe(true);
+
+    manager.setSessionUnreadState('session-1', 'completed', false, '/repo', 100);
+
+    expect(manager.completed.has('session-1')).toBe(false);
+  });
+
+  it('rejects synchronized completions while the session is busy', () => {
+    const manager = createManager();
+    manager.setSessionUnreadState('session-1', 'completed', true, '/repo', 100);
+    manager.setSessionUnreadState('session-1', 'completed', false, '/repo', 150);
 
     manager.handleServerEvent({
       type: 'session.status',
       properties: { sessionID: 'session-1', status: { type: 'busy' } },
     });
-    manager.setSessionUnreadState('session-1', 'completed', true, '/repo');
+    manager.setSessionUnreadState('session-1', 'completed', true, '/repo', 100);
+    manager.setSessionUnreadState('session-1', 'completed', true, '/repo', 200);
+
+    expect(manager.completed.has('session-1')).toBe(false);
+
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    });
 
     expect(manager.completed.has('session-1')).toBe(true);
   });
 
   it('does not restore workspace completions cleared when the chat becomes visible', () => {
     const manager = createManager();
-    manager.setSessionUnreadState('session-1', 'completed', true, '/repo');
+    const dateNow = vi.spyOn(Date, 'now').mockReturnValue(100);
+    manager.setSessionUnreadState('session-1', 'completed', true, '/repo', 200);
 
     manager.clearCompletedInWorkspace('/repo');
-    manager.setSessionUnreadState('session-1', 'completed', true, '/repo');
+    manager.setSessionUnreadState('session-1', 'completed', true, '/repo', 200);
+    dateNow.mockRestore();
 
     expect(manager.completed.has('session-1')).toBe(false);
   });
@@ -965,6 +1019,10 @@ describe('SessionStateManager notifications', () => {
 
     recovered.setSessionUnreadState('session-1', 'completed', true, '/repo', 201);
     expect(recovered.completed.has('session-1')).toBe(true);
+
+    const secondRecovery = create();
+    secondRecovery.setSessionUnreadState('session-1', 'completed', true, '/repo', 100);
+    expect(secondRecovery.completed.has('session-1')).toBe(false);
   });
 
   it.each(['completed', 'plan-ready'] as const)(

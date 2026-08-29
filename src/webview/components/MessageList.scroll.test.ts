@@ -16,6 +16,7 @@ import {
 import { MessageList } from './MessageList';
 import { setSessionHistoryCursor } from '../lib/message-window';
 import { setExpandedDiffOverlay } from '../lib/diff-overlay-state';
+import { onBeforeShowThinkingPreferenceChange } from '../lib/state-ui-preferences';
 import {
   assistantMessage,
   hasAssistantModelChangeBetween,
@@ -1797,6 +1798,155 @@ describe('MessageList auto-scroll', () => {
 
     expect(anchor.isConnected).toBe(true);
     expect(anchor.getBoundingClientRect().top).toBe(anchorTopBefore);
+    animationFrames.restore();
+  });
+
+  it('preserves the first fully painted user card when hiding thinking shrinks a clipped row', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+    let clientHeight = 100;
+    let thinkingVisible = true;
+    let hostWidth = 500;
+    let paragraphOffset = 6;
+    vi.spyOn(window, 'innerWidth', 'get').mockImplementation(() => hostWidth);
+
+    const rowHeight = (index: number) => {
+      if (index !== 20) return 100;
+      return thinkingVisible ? 76 : 65;
+    };
+    const rowTop = (index: number) => {
+      let top = -scrollTopValue;
+      for (let rowIndex = 0; rowIndex < index; rowIndex += 1) top += rowHeight(rowIndex);
+      return top;
+    };
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 0, hostWidth, 400);
+        }
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(
+            0,
+            0,
+            hostWidth,
+            Array.from({ length: 50 }, (_, index) => rowHeight(index)).reduce(
+              (sum, height) => sum + height,
+              0
+            )
+          );
+        }
+        const row = this.dataset.msgId ? this : this.closest<HTMLElement>('[data-msg-id]');
+        const messageId = row?.dataset.msgId;
+        if (!row || !messageId) return new DOMRect(0, 0, hostWidth, 40);
+        const index =
+          messageId === 'assistant-anchor'
+            ? 20
+            : messageId === 'user-anchor'
+              ? 21
+              : Number(messageId.replace('assistant-', ''));
+        const top = rowTop(index);
+        if (this === row) return new DOMRect(0, top, hostWidth, rowHeight(index));
+        if (this.classList.contains('user-message-card')) {
+          return new DOMRect(0, top + 6, hostWidth, 69);
+        }
+        if (this.tagName === 'P') return new DOMRect(0, top + paragraphOffset, hostWidth, 39);
+        return new DOMRect(0, top, hostWidth, rowHeight(index));
+      }
+    );
+
+    setShowThinkingPreference(true);
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 50 }, (_, index) => {
+        if (index === 20) {
+          return {
+            info: assistantMessage('assistant-anchor'),
+            parts: [
+              reasoningPart('reasoning-anchor', 'Thinking above the visible prompt'),
+              textPart('text-anchor', 'Response above the visible prompt'),
+            ],
+          };
+        }
+        if (index === 21) {
+          return {
+            info: userMessage('user-anchor'),
+            parts: [textPart('user-text-anchor', 'Keep this prompt fixed')],
+          };
+        }
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts: [textPart(`text-${index}`, `Response ${index}`)],
+        };
+      })
+    );
+
+    cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', {
+      configurable: true,
+      get: () => clientHeight,
+    });
+    Object.defineProperty(list, 'clientWidth', {
+      configurable: true,
+      get: () => hostWidth,
+    });
+    Object.defineProperty(list, 'offsetWidth', {
+      configurable: true,
+      get: () => hostWidth,
+    });
+    Object.defineProperty(list, 'scrollHeight', {
+      configurable: true,
+      get: () =>
+        Array.from({ length: 50 }, (_, index) => rowHeight(index)).reduce(
+          (sum, height) => sum + height,
+          0
+        ),
+    });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    scrollTopValue = 1998;
+    list.dispatchEvent(new Event('scroll'));
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+
+    const anchor = container?.querySelector<HTMLElement>(
+      '[data-msg-id="user-anchor"] .user-message-card'
+    );
+    expect(anchor?.getBoundingClientRect().top).toBe(84);
+
+    hostWidth = 360;
+    window.dispatchEvent(new Event('resize'));
+    paragraphOffset = -21;
+    clientHeight = 400;
+    expect(anchor?.getBoundingClientRect().top).toBe(84);
+    const stopUpdatingFixtureGeometry = onBeforeShowThinkingPreferenceChange(() => {
+      thinkingVisible = false;
+    });
+    setShowThinkingPreference(false);
+    stopUpdatingFixtureGeometry();
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+
+    expect(anchor?.getBoundingClientRect().top).toBe(84);
     animationFrames.restore();
   });
 

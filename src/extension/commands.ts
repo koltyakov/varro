@@ -54,10 +54,6 @@ export function registerCommands(
           sidebar.openAttentionSessions();
           return;
         }
-        if (action === 'completed') {
-          sidebar.openCompletedSessions();
-          return;
-        }
         if (action === 'sibling') {
           await sidebar.openSiblingWorkspaceSessions();
           return;

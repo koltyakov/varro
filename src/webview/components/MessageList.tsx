@@ -5358,13 +5358,13 @@ export function MessageList() {
         ) <= 1
       );
       const anchor = canPreserveAnchor
-        ? ((widthAnchorElement && !widthAnchorElement.closest('.chat-thinking-box')
+        ? (captureThinkingVisibleScrollAnchor() ??
+          (widthAnchorElement && !widthAnchorElement.closest('.chat-thinking-box')
             ? widthResizeAnchor
             : null) ??
           (detachedAnchorIsCurrent && !detachedAnchorElement.closest('.chat-thinking-box')
             ? lastDetachedVisibleAnchor
             : null) ??
-          captureThinkingVisibleScrollAnchor() ??
           captureMountedVisibleScrollAnchorWithTopPad(0, true, {
             maxRenderItemTopClip: WIDTH_RESIZE_ANCHOR_INSET_PX,
             restrictToFirstVisibleRow: true,
