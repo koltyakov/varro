@@ -376,7 +376,10 @@ export function handleExtensionMessageWithDependencies(
       applyQueuedMessageClaimResult(msg.payload);
       break;
     case 'permission-modes/sync':
-      applySessionPermissionModesSnapshot(msg.payload.modes);
+      applySessionPermissionModesSnapshot(
+        msg.payload.modes,
+        msg.payload.recoveringSessionIds ?? []
+      );
       deps.permissionModesSynced?.();
       break;
     case 'session-models/sync':

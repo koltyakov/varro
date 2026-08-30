@@ -1048,6 +1048,40 @@ describe('data loaders', () => {
     expect(clearQueuedMessagesForSession).toHaveBeenCalledWith('stale');
   });
 
+  it('retains failed-root sessions without requesting a nonexistent continuation page', async () => {
+    const failedRootSession = { ...session('failed-root'), directory: '/repo-b' };
+    const staleHealthySession = { ...session('stale-healthy'), directory: '/repo-a' };
+    const healthy = { ...session('healthy'), directory: '/repo-a' };
+    let currentSessions = [failedRootSession, staleHealthySession];
+    const clearQueuedMessagesForSession = vi.fn();
+    const setSessionsHasMore = vi.fn();
+    const setSessionsLoadError = vi.fn();
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listSessions: async () => ({
+          items: [healthy],
+          hasMore: false,
+          incomplete: true,
+          unavailableDirectories: ['/repo-b'],
+        }),
+        getSessions: () => currentSessions,
+        applySessions: (sessions) => {
+          currentSessions = sessions;
+        },
+        clearQueuedMessagesForSession,
+        setSessionsHasMore,
+        setSessionsLoadError,
+      })
+    );
+
+    await operations.loadSessions();
+
+    expect(currentSessions).toEqual([healthy, failedRootSession]);
+    expect(setSessionsHasMore).toHaveBeenLastCalledWith(false);
+    expect(clearQueuedMessagesForSession).toHaveBeenCalledWith('stale-healthy');
+    expect(setSessionsLoadError).toHaveBeenLastCalledWith('Could not load sessions from: /repo-b');
+  });
+
   it('clears pagination loading state when workspace work is invalidated', async () => {
     const response = deferred<{ items: Session[]; hasMore: boolean }>();
     const setSessionsLoadingMore = vi.fn();

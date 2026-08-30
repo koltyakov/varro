@@ -45,7 +45,12 @@ import { CURRENT_OPENCODE_ENDPOINTS } from '../../shared/opencode-endpoints';
 import { isBoolean, isNumber, isString, isObject } from './runtime-values';
 
 export type SessionMessagePage = MessageEntry[] & { nextCursor?: string };
-export type SessionListPage = { items: Session[]; hasMore: boolean };
+export type SessionListPage = {
+  items: Session[];
+  hasMore: boolean;
+  incomplete?: boolean;
+  unavailableDirectories?: string[];
+};
 export type McpAuthStart = { authorizationUrl: string; oauthState: string };
 
 export const client = {
@@ -80,10 +85,25 @@ export const client = {
       if (!isBoolean(page.hasMore)) {
         throw malformedResponse(path, 'a session page with a boolean hasMore value');
       }
-      return {
+      if (page.incomplete !== undefined && !isBoolean(page.incomplete)) {
+        throw malformedResponse(path, 'a session page with a boolean incomplete value');
+      }
+      if (
+        page.unavailableDirectories !== undefined &&
+        (!Array.isArray(page.unavailableDirectories) ||
+          !page.unavailableDirectories.every(isString))
+      ) {
+        throw malformedResponse(path, 'a session page with string unavailableDirectories');
+      }
+      const result: SessionListPage = {
         items: requireArray<Session>(page.items, path).map(applySessionShareOverride),
         hasMore: page.hasMore,
       };
+      if (page.incomplete === true) result.incomplete = true;
+      if (Array.isArray(page.unavailableDirectories)) {
+        result.unavailableDirectories = page.unavailableDirectories;
+      }
+      return result;
     },
     async get(id: string, options?: { directory?: string }): Promise<Session> {
       return apiCall<Session>('GET', withDirectory(`/session/${id}`, options?.directory)).then(

@@ -77,8 +77,10 @@ export async function deleteSession(id: string) {
   await getCurrentOpenCodeRuntime().deleteSession(id);
 }
 
-export async function deleteSessionImmediately(id: string) {
-  await getCurrentOpenCodeRuntime().deleteSessionImmediately(id);
+export async function deleteSessionImmediately(id: string, options?: { directory?: string }) {
+  const runtime = getCurrentOpenCodeRuntime();
+  if (options) await runtime.deleteSessionImmediately(id, options);
+  else await runtime.deleteSessionImmediately(id);
 }
 
 export async function restoreSession(rootID: string) {

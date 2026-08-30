@@ -257,15 +257,18 @@ export class SessionEventHandlerOperations {
       shouldAutoApprovePermissions: (sessionId) =>
         this.deps.isPermissionAutomationOwner?.() !== false &&
         !permissionsStore.isSessionPermissionModePending(sessionId) &&
+        !permissionsStore.isPermissionModeRecoveryPending(sessionId) &&
         permissionsStore.getPermissionModeForSession(sessionId) === 'full',
       shouldAutoApproveEdit: (permission) =>
         this.deps.isPermissionAutomationOwner?.() !== false &&
         !permissionsStore.isSessionPermissionModePending(permission.sessionID) &&
+        !permissionsStore.isPermissionModeRecoveryPending(permission.sessionID) &&
         permissionsStore.getPermissionModeForSession(permission.sessionID) === 'edits' &&
         isEditPermission(permission.type),
       shouldAutoJudgePermissions: (sessionId) =>
         this.deps.isPermissionAutomationOwner?.() !== false &&
         !permissionsStore.isSessionPermissionModePending(sessionId) &&
+        !permissionsStore.isPermissionModeRecoveryPending(sessionId) &&
         permissionsStore.getPermissionModeForSession(sessionId) === 'auto',
       isPermissionSessionKnown: this.deps.sessionApprovalOperations.isPermissionSessionKnown,
       syncPermissionSession: this.deps.sessionApprovalOperations.syncPermissionSession,

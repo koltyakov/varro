@@ -9,6 +9,7 @@ import type { RalphSelectedModel } from '../../../shared/ralph';
 
 const openCodeMocks = vi.hoisted(() => ({
   deleteSession: vi.fn(),
+  deleteSessionImmediately: vi.fn(),
   selectSession: vi.fn(),
 }));
 
@@ -82,6 +83,7 @@ vi.mock('../../lib/state', () => ({
 
 vi.mock('../../hooks/useOpenCode', () => ({
   deleteSession: openCodeMocks.deleteSession,
+  deleteSessionImmediately: openCodeMocks.deleteSessionImmediately,
   selectSession: openCodeMocks.selectSession,
 }));
 
@@ -109,6 +111,14 @@ async function flushMicrotasks(count = 4) {
   }
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((promiseResolve) => {
+    resolve = promiseResolve;
+  });
+  return { promise, resolve };
+}
+
 beforeEach(() => {
   vi.mocked(ralphRunner.start).mockReset();
   clientMocks.create.mockReset();
@@ -116,6 +126,7 @@ beforeEach(() => {
   clientMocks.pickWorkspaceFile.mockReset();
   clientMocks.readWorkspaceFile.mockReset();
   openCodeMocks.deleteSession.mockReset();
+  openCodeMocks.deleteSessionImmediately.mockReset();
   openCodeMocks.selectSession.mockReset();
   stateMock.activeSessionId = null;
   stateMock.selectedModel = null;
@@ -260,6 +271,121 @@ describe('RalphForm', () => {
 
     expect(document.body.querySelector('.ralph-form-overlay')).toBeNull();
     expect(ralphStore.showRalphForm()).toBe(false);
+  });
+
+  it('does not start a full-permission run when closed during session creation', async () => {
+    const creation = createDeferred<{ id: string }>();
+    stateMock.activeSessionId = 'existing-session';
+    stateMock.editorContext.activeFile = {
+      path: '/repo/docs/RALPH.md',
+      relativePath: 'docs/RALPH.md',
+      language: 'markdown',
+    };
+    stateMock.editorContext.workspacePath = '/repo';
+    clientMocks.create.mockReturnValue(creation.promise);
+    openCodeMocks.deleteSessionImmediately
+      .mockRejectedValueOnce(new Error('transient delete failure'))
+      .mockResolvedValue(undefined);
+    cleanup = render(() => RalphForm(), container!);
+
+    const startButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Start loop'
+    );
+    startButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await vi.waitFor(() => expect(clientMocks.create).toHaveBeenCalledTimes(1));
+
+    const cancelButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Cancel'
+    );
+    cancelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    creation.resolve({ id: 'orphaned-ralph-session' });
+
+    await vi.waitFor(() => {
+      expect(openCodeMocks.deleteSessionImmediately).toHaveBeenCalledWith(
+        'orphaned-ralph-session',
+        {
+          directory: '/repo',
+        }
+      );
+    });
+    expect(openCodeMocks.deleteSessionImmediately).toHaveBeenCalledTimes(2);
+    expect(clientMocks.sendAsync).not.toHaveBeenCalled();
+    expect(openCodeMocks.selectSession).not.toHaveBeenCalled();
+    expect(openCodeMocks.deleteSession).not.toHaveBeenCalledWith('orphaned-ralph-session');
+    expect(openCodeMocks.deleteSession).not.toHaveBeenCalledWith('existing-session');
+    expect(ralphRunner.start).not.toHaveBeenCalled();
+  });
+
+  it('cleans up after a session selection that finishes after cancellation', async () => {
+    const selection = createDeferred<void>();
+    stateMock.editorContext.activeFile = {
+      path: '/repo/docs/RALPH.md',
+      relativePath: 'docs/RALPH.md',
+      language: 'markdown',
+    };
+    stateMock.editorContext.workspacePath = '/repo';
+    clientMocks.create.mockResolvedValue({ id: 'orphaned-ralph-session' });
+    clientMocks.sendAsync.mockResolvedValue(undefined);
+    openCodeMocks.selectSession.mockImplementation(async () => {
+      await selection.promise;
+      stateMock.activeSessionId = 'orphaned-ralph-session';
+    });
+    cleanup = render(() => RalphForm(), container!);
+
+    const startButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Start loop'
+    );
+    startButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await vi.waitFor(() => expect(openCodeMocks.selectSession).toHaveBeenCalledTimes(1));
+
+    const cancelButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Cancel'
+    );
+    cancelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    selection.resolve();
+
+    await vi.waitFor(() =>
+      expect(openCodeMocks.deleteSessionImmediately).toHaveBeenCalledWith(
+        'orphaned-ralph-session',
+        { directory: '/repo' }
+      )
+    );
+    expect(ralphRunner.start).not.toHaveBeenCalled();
+  });
+
+  it('starts orphan cleanup immediately when canceled during anchor submission', async () => {
+    const anchor = createDeferred<void>();
+    stateMock.editorContext.activeFile = {
+      path: '/repo/docs/RALPH.md',
+      relativePath: 'docs/RALPH.md',
+      language: 'markdown',
+    };
+    stateMock.editorContext.workspacePath = '/repo';
+    clientMocks.create.mockResolvedValue({ id: 'orphaned-ralph-session' });
+    clientMocks.sendAsync.mockReturnValue(anchor.promise);
+    cleanup = render(() => RalphForm(), container!);
+
+    const startButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Start loop'
+    );
+    startButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await vi.waitFor(() => expect(clientMocks.sendAsync).toHaveBeenCalledTimes(1));
+
+    const cancelButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Cancel'
+    );
+    cancelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    await vi.waitFor(() => {
+      expect(openCodeMocks.deleteSessionImmediately).toHaveBeenCalledWith(
+        'orphaned-ralph-session',
+        { directory: '/repo' }
+      );
+    });
+    anchor.resolve();
+    await flushMicrotasks();
+    expect(openCodeMocks.selectSession).not.toHaveBeenCalled();
+    expect(ralphRunner.start).not.toHaveBeenCalled();
   });
 
   it('fills the plan path from the picker button', async () => {

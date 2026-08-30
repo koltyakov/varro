@@ -93,7 +93,7 @@ describe('SessionPermissionModeStore', () => {
     expect(store.list()).toEqual({ 'session-1': 'full' });
   });
 
-  it('restores the safe default when a confirmed downgrade is not durable', async () => {
+  it('keeps a staged fallback conservative until remote recovery is durable', async () => {
     const values = new Map<string, unknown>([
       ['varro.sessionPermissionModes', { 'session-1': 'full' }],
     ]);
@@ -111,6 +111,12 @@ describe('SessionPermissionModeStore', () => {
     await expect(store.set('session-1', 'default')).rejects.toThrow('disk full');
 
     expect(store.list()).toEqual({ 'session-1': 'default' });
-    expect(new SessionPermissionModeStore(persistence).list()).toEqual({ 'session-1': 'default' });
+    expect(store.pendingSafeFallbackSessionIds()).toEqual(['session-1']);
+
+    const restored = new SessionPermissionModeStore(persistence);
+    const pending = restored.pendingSafeFallbackSessionIds();
+    pending.length = 0;
+    expect(restored.list()).toEqual({ 'session-1': 'default' });
+    expect(restored.pendingSafeFallbackSessionIds()).toEqual(['session-1']);
   });
 });

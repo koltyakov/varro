@@ -79,6 +79,24 @@ describe('client', () => {
     expect(bridgeMocks.apiCall).toHaveBeenCalledWith('GET', '/session?limit=100');
   });
 
+  it('preserves incomplete session-page metadata', async () => {
+    const { client } = await loadClient();
+    const sessions = [{ id: 'session-1' }];
+    bridgeMocks.apiCall.mockResolvedValue({
+      items: sessions,
+      hasMore: false,
+      incomplete: true,
+      unavailableDirectories: ['/repo-b'],
+    });
+
+    await expect(client.session.list({ limit: 100 })).resolves.toEqual({
+      items: sessions,
+      hasMore: false,
+      incomplete: true,
+      unavailableDirectories: ['/repo-b'],
+    });
+  });
+
   it('uses OpenCode native session search with encoded query parameters', async () => {
     const { client } = await loadClient();
     const controller = new AbortController();
@@ -107,6 +125,20 @@ describe('client', () => {
 
     await expect(client.session.list({ limit: 100 })).rejects.toThrow(
       'a session page with a boolean hasMore value'
+    );
+
+    bridgeMocks.apiCall.mockResolvedValue({ items: [], hasMore: false, incomplete: 'yes' });
+    await expect(client.session.list({ limit: 100 })).rejects.toThrow(
+      'a session page with a boolean incomplete value'
+    );
+
+    bridgeMocks.apiCall.mockResolvedValue({
+      items: [],
+      hasMore: false,
+      unavailableDirectories: [1],
+    });
+    await expect(client.session.list({ limit: 100 })).rejects.toThrow(
+      'a session page with string unavailableDirectories'
     );
   });
 

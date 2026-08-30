@@ -567,6 +567,27 @@ describe('ToolbarPickers', () => {
     );
   });
 
+  it('labels an unresolved permission mode as recovering', () => {
+    cleanup = render(
+      () => (
+        <PermissionModePicker
+          mode="default"
+          recovering={true}
+          showPicker={false}
+          showLabel={true}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+        />
+      ),
+      container!
+    );
+
+    const toggleButton = container?.querySelector<HTMLButtonElement>('.permission-mode-button');
+    expect(toggleButton?.getAttribute('aria-label')).toBe('Recovering permission mode');
+    expect(toggleButton?.textContent).toContain('Recovering');
+    expect(toggleButton?.textContent).not.toContain('Default');
+  });
+
   it('renders a labeled permission button when requested', () => {
     cleanup = render(
       () => (

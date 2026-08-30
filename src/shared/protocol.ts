@@ -693,6 +693,7 @@ export type InitialWebviewState = {
   chatEditorFontSize: number;
   chatFontFamily: string;
   sessionPermissionModes?: Record<string, PermissionMode>;
+  permissionModeRecoverySessionIds?: string[];
   sessionSelectedModels?: Record<string, ChatModelSelection>;
   sessionPlanState?: Record<string, number | null>;
   sessionModelMigrationPending?: boolean;
@@ -771,7 +772,10 @@ export type ExtensionMessage =
         lease?: number;
       };
     }
-  | { type: 'permission-modes/sync'; payload: { modes: Record<string, PermissionMode> } }
+  | {
+      type: 'permission-modes/sync';
+      payload: { modes: Record<string, PermissionMode>; recoveringSessionIds?: string[] };
+    }
   | {
       type: 'session-models/sync';
       payload: { models: Record<string, ChatModelSelection> };

@@ -244,6 +244,18 @@ export class SessionStateManager {
     return sessionID;
   }
 
+  sessionLineageFor(sessionID: string): string[] {
+    const lineage: string[] = [];
+    const visited = new Set<string>();
+    let current: string | undefined = sessionID;
+    while (current && !visited.has(current)) {
+      lineage.push(current);
+      visited.add(current);
+      current = this.sessionParentIDs.get(current);
+    }
+    return lineage;
+  }
+
   claimInterruptedSessions(): InterruptedSessionSnapshot[] {
     return [...this.unclaimedInterruptedSessions.values()];
   }
@@ -516,6 +528,10 @@ export class SessionStateManager {
       attempt,
       remainingReconciliations: MAX_DEFERRED_PROMPT_RECONCILIATIONS,
     });
+    this.busyEvidenceRevisions.set(
+      attempt.sessionID,
+      (this.busyEvidenceRevisions.get(attempt.sessionID) ?? 0) + 1
+    );
     while (this.deferredPromptFailures.size > MAX_DEFERRED_PROMPT_FAILURES) {
       const oldest = this.deferredPromptFailures.values().next().value?.attempt;
       if (!oldest) break;

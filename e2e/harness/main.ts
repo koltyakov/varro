@@ -2,6 +2,7 @@
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Harness assertions bridge controlled scenario fixtures and browser globals to their protocol-owned shapes. */
 import type {
   InitialWebviewState,
+  PermissionMode,
   RecycleBinEntry,
   ServerStatus,
   WebviewMessage,
@@ -4639,6 +4640,7 @@ function persistHarnessMessageState(state: ScenarioState) {
       scenarioName: state.scenarioName,
       messagesBySessionId: state.messagesBySessionId,
       nextSequence: state.nextSequence,
+      sessionPermissionModes: state.storedState.sessionPermissionModes,
     })
   );
 }
@@ -4663,6 +4665,14 @@ function restoreHarnessMessageState(state: ScenarioState) {
       Number.isSafeInteger(persisted.nextSequence)
     ) {
       state.nextSequence = persisted.nextSequence;
+    }
+    const sessionPermissionModes = asRecord(persisted.sessionPermissionModes);
+    if (sessionPermissionModes) {
+      state.storedState.sessionPermissionModes = Object.fromEntries(
+        Object.entries(sessionPermissionModes).filter((entry): entry is [string, PermissionMode] =>
+          isPermissionMode(entry[1])
+        )
+      );
     }
   } catch {
     window.sessionStorage.removeItem(PERSISTED_MESSAGE_STATE_KEY);
@@ -5133,6 +5143,7 @@ async function handleApiRequest(
     session.time.updated = nextTimestamp(state);
     const modes = { ...state.storedState.sessionPermissionModes, [sessionId]: mode };
     state.storedState.sessionPermissionModes = modes;
+    persistHarnessMessageState(state);
     dispatchToWebview({ type: 'permission-modes/sync', payload: { modes } });
     return session;
   }

@@ -8,6 +8,7 @@ import type { SessionStatusSnapshotOptions } from '../lib/stores/session-store';
 import { clearQueuedMessagesForSession } from '../lib/state-queued-messages';
 import { getEffectiveComposerSessionId } from '../lib/state-view-persistence';
 import type { McpStatus, ProviderLimitStatus, RecycleBinEntry } from '../../shared/protocol';
+import { isSameWorkspacePath } from '../../shared/workspace-path';
 import type {
   Agent,
   Command,
@@ -387,23 +388,43 @@ export function createDataLoaderOperations(deps: {
     const workspace = workspaceGeneration;
     const generation = ++sessionLoadGeneration;
     const mutationBaseline = sessionSnapshots.captureBaseline();
+    let partialLoadError: string | null = null;
     const loaded = await loadSessionsWithDependencies(
       {
         listSessions: () => deps.listSessions(requestedSessionLimit),
-        shouldApplySessionsSnapshot: (sessions, hasMore) =>
-          hasMore || shouldApplySessionsSnapshot(sessions),
-        applySessions: (sessions, hasMore) => {
+        shouldApplySessionsSnapshot: (sessions, hasMore, incomplete) =>
+          incomplete || hasMore || shouldApplySessionsSnapshot(sessions),
+        applySessions: (sessions, hasMore, incomplete, unavailableDirectories) => {
+          partialLoadError = incomplete
+            ? unavailableDirectories.length > 0
+              ? `Could not load sessions from: ${unavailableDirectories.join(', ')}`
+              : 'Some workspace folders could not be loaded'
+            : null;
           const reconciled = sessionSnapshots.reconcile(sessions, mutationBaseline);
           const retainedIds = new Set(reconciled.map((session) => session.id));
-          const nextSessions = hasMore
-            ? [
-                ...reconciled,
-                ...deps.getSessions().filter((session) => !retainedIds.has(session.id)),
-              ]
-            : reconciled;
+          const shouldRetainPreviousSession = (session: Session) =>
+            hasMore ||
+            (unavailableDirectories.length > 0
+              ? unavailableDirectories.some((directory) =>
+                  isSameWorkspacePath(session.directory, directory)
+                )
+              : incomplete);
+          const nextSessions =
+            hasMore || incomplete
+              ? [
+                  ...reconciled,
+                  ...deps
+                    .getSessions()
+                    .filter(
+                      (session) =>
+                        !retainedIds.has(session.id) && shouldRetainPreviousSession(session)
+                    ),
+                ]
+              : reconciled;
           if (!hasMore) {
+            const nextSessionIds = new Set(nextSessions.map((session) => session.id));
             for (const current of deps.getSessions()) {
-              if (!retainedIds.has(current.id)) deps.clearQueuedMessagesForSession(current.id);
+              if (!nextSessionIds.has(current.id)) deps.clearQueuedMessagesForSession(current.id);
             }
           }
           for (const session of nextSessions) {
@@ -424,10 +445,11 @@ export function createDataLoaderOperations(deps: {
       () => workspace === workspaceGeneration && generation === sessionLoadGeneration
     );
     if (workspace !== workspaceGeneration || generation !== sessionLoadGeneration) return;
+    if (loaded) deps.setSessionsLoadError?.(partialLoadError);
     if (pagination) {
       deps.setSessionsPaginationError?.(loaded ? null : 'Failed to load more sessions');
     } else {
-      deps.setSessionsLoadError?.(loaded ? null : 'Failed to load sessions');
+      if (!loaded) deps.setSessionsLoadError?.('Failed to load sessions');
       if (loaded) deps.setSessionsPaginationError?.(null);
     }
     return loaded;
@@ -823,8 +845,18 @@ export async function refreshProviderLimitWithDependencies(
 export async function loadSessionsWithDependencies(
   deps: {
     listSessions(): Promise<Session[] | SessionListPage>;
-    shouldApplySessionsSnapshot?(sessions: Session[], hasMore: boolean): boolean;
-    applySessions(sessions: Session[], hasMore: boolean): void;
+    shouldApplySessionsSnapshot?(
+      sessions: Session[],
+      hasMore: boolean,
+      incomplete: boolean,
+      unavailableDirectories: string[]
+    ): boolean;
+    applySessions(
+      sessions: Session[],
+      hasMore: boolean,
+      incomplete: boolean,
+      unavailableDirectories: string[]
+    ): void;
   },
   logError: Logger,
   isCurrent: () => boolean = () => true
@@ -834,11 +866,20 @@ export async function loadSessionsWithDependencies(
     if (!isCurrent()) return true;
     const sessions = Array.isArray(result) ? result : result.items;
     const hasMore = Array.isArray(result) ? false : result.hasMore;
+    const incomplete = Array.isArray(result) ? false : result.incomplete === true;
+    const unavailableDirectories = Array.isArray(result)
+      ? []
+      : (result.unavailableDirectories ?? []);
     // Session reads are intentionally broad. Workspace filtering belongs in
     // applySessions(), not the transport/backend layer, to avoid platform-
     // specific path formatting mismatches from hiding valid sessions.
-    if (deps.shouldApplySessionsSnapshot?.(sessions, hasMore) === false) return true;
-    deps.applySessions(sessions, hasMore);
+    if (
+      deps.shouldApplySessionsSnapshot?.(sessions, hasMore, incomplete, unavailableDirectories) ===
+      false
+    ) {
+      return true;
+    }
+    deps.applySessions(sessions, hasMore, incomplete, unavailableDirectories);
     return true;
   } catch (err) {
     if (isCurrent()) logError('loadSessions', err);

@@ -20,6 +20,9 @@ import {
 } from './state-stored-values';
 
 const pendingSessionPermissionModes = new Map<string, PermissionMode>();
+let confirmedSessionPermissionModes = {
+  ...readInitialWebviewState().sessionPermissionModes,
+};
 
 export function getPermissionModeForSession(sessionId: string | null | undefined): PermissionMode {
   if (!sessionId) return draftPermissionMode();
@@ -34,6 +37,19 @@ export function getPermissionModeForSession(sessionId: string | null | undefined
   }
 
   return 'default';
+}
+
+export function isPermissionModeRecoveryPending(sessionId: string | null | undefined): boolean {
+  if (!sessionId) return false;
+  const recovering = new Set(state.permissionModeRecoverySessionIds);
+  const visited = new Set<string>();
+  let currentSessionId: string | undefined = sessionId;
+  while (currentSessionId && !visited.has(currentSessionId)) {
+    if (recovering.has(currentSessionId)) return true;
+    visited.add(currentSessionId);
+    currentSessionId = state.sessions.find((session) => session.id === currentSessionId)?.parentID;
+  }
+  return false;
 }
 
 function resolveProjectDraftModeForCurrentWorkspace(fallbackMode = defaultPermissionMode()) {
@@ -66,6 +82,9 @@ export function setPermissionModeForSession(
   }
 
   if (state.sessionPermissionModes[sessionId] === mode) return;
+  if (!pendingSessionPermissionModes.has(sessionId)) {
+    confirmedSessionPermissionModes[sessionId] = mode;
+  }
 
   const nextModes = { ...state.sessionPermissionModes, [sessionId]: mode };
 
@@ -79,6 +98,9 @@ export function persistConfirmedPermissionModeForSession(sessionId: string, mode
 
 export function removePermissionModeForSession(sessionId: string) {
   if (!state.sessionPermissionModes[sessionId]) return;
+  if (!pendingSessionPermissionModes.has(sessionId)) {
+    delete confirmedSessionPermissionModes[sessionId];
+  }
   const nextModes = Object.fromEntries(
     Object.entries(state.sessionPermissionModes).filter(([id]) => id !== sessionId)
   );
@@ -92,18 +114,32 @@ export function removePermissionModeForSession(sessionId: string) {
   postMessage({ type: 'permission-mode/update', payload: { sessionId, mode: null } });
 }
 
-export function applySessionPermissionModesSnapshot(modes: Record<string, PermissionMode>) {
+export function applySessionPermissionModesSnapshot(
+  modes: Record<string, PermissionMode>,
+  recoveringSessionIds: string[] = []
+) {
+  confirmedSessionPermissionModes = { ...modes };
   const effectiveModes = { ...modes };
   for (const [sessionId, mode] of pendingSessionPermissionModes) {
     effectiveModes[sessionId] = mode;
   }
   setState('sessionPermissionModes', reconcile(effectiveModes));
+  setState('permissionModeRecoverySessionIds', recoveringSessionIds);
   writeStored(STORAGE_KEYS.sessionPermissionModes, effectiveModes);
 }
 
 export function setPendingSessionPermissionMode(sessionId: string, mode: PermissionMode | null) {
-  if (mode === null) pendingSessionPermissionModes.delete(sessionId);
-  else pendingSessionPermissionModes.set(sessionId, mode);
+  if (mode !== null) {
+    pendingSessionPermissionModes.set(sessionId, mode);
+    return;
+  }
+  pendingSessionPermissionModes.delete(sessionId);
+  const nextModes = { ...state.sessionPermissionModes };
+  const confirmedMode = confirmedSessionPermissionModes[sessionId];
+  if (confirmedMode) nextModes[sessionId] = confirmedMode;
+  else delete nextModes[sessionId];
+  setState('sessionPermissionModes', reconcile(nextModes));
+  writeStored(STORAGE_KEYS.sessionPermissionModes, nextModes);
 }
 
 export function isSessionPermissionModePending(sessionId: string): boolean {
@@ -121,7 +157,7 @@ export function syncSessionPermissionModesToHost() {
   if (readWebviewInstanceContext()?.surface !== 'sidebar') return;
   const hostModes = readInitialWebviewState().sessionPermissionModes ?? {};
   const modes = Object.fromEntries(
-    Object.entries(state.sessionPermissionModes).filter(
+    Object.entries(readStoredPermissionModes(STORAGE_KEYS.sessionPermissionModes)).filter(
       ([sessionId]) => !Object.hasOwn(hostModes, sessionId)
     )
   );

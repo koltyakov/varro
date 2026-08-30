@@ -156,7 +156,7 @@ export interface OpenCodeRuntime {
   renameSession(id: string, title: string): Promise<boolean>;
   forkSession(id: string, messageID?: string): Promise<string | null>;
   deleteSession(id: string): Promise<void>;
-  deleteSessionImmediately(id: string): Promise<void>;
+  deleteSessionImmediately(id: string, options?: { directory?: string }): Promise<void>;
   restoreSession(rootID: string): Promise<void>;
   deleteSessionPermanently(rootID: string): Promise<void>;
   emptyRecycleBin(): Promise<void>;
@@ -867,12 +867,6 @@ function resolvePermissionJudgeModel(sessionId: string) {
   );
 }
 
-async function deleteSessionImmediately(id: string) {
-  await client.varro.session.deleteImmediately(id, { directory: getSessionDirectory(id) });
-  clearQueuedMessagesForSession(id);
-  clearSessionMessageWindowState(id);
-}
-
 export function resetWorkspaceDerivedState(options?: { preserveWorkspaceCatalog?: boolean }) {
   const preserveWorkspaceCatalog = options?.preserveWorkspaceCatalog === true;
   const queuedTreeSessionIds = new Set(
@@ -1060,6 +1054,15 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   const { applySessions, clearDeletedSessionState, hideDeletedSessionTree, upsertSession } =
     sessionLifecycleOperations;
+
+  async function deleteSessionImmediately(id: string, options?: { directory?: string }) {
+    await client.varro.session.deleteImmediately(id, {
+      directory: options?.directory ?? getSessionDirectory(id),
+    });
+    hideDeletedSessionTree(id);
+    clearQueuedMessagesForSession(id);
+    clearSessionMessageWindowState(id);
+  }
   const sessionTitleFallbackAttempts = new Map<string, number>();
   const sessionTitleFallbacks = new Map<string, Promise<void>>();
   const deferredMessageRemovals = new DeferredMessageRemovals();
@@ -1472,7 +1475,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         if (!isCurrent()) return;
         const mode = permissionsStore.getPermissionModeForSession(permission.sessionID);
         const modePending = permissionsStore.isSessionPermissionModePending(permission.sessionID);
-        if (permissionAutomationOwner && !modePending && mode === 'full') {
+        const modeRecovering = permissionsStore.isPermissionModeRecoveryPending(
+          permission.sessionID
+        );
+        if (permissionAutomationOwner && !modePending && !modeRecovering && mode === 'full') {
           pendingPermissionHandlers.push(
             sessionApprovalOperations
               .respondPermission(permission.sessionID, permission.id, 'always', {
@@ -1495,7 +1501,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           );
           continue;
         }
-        if (permissionAutomationOwner && !modePending && mode === 'auto') {
+        if (permissionAutomationOwner && !modePending && !modeRecovering && mode === 'auto') {
           const attempt = permissionJudgeAttempts.get(permission.id);
           if (attempt?.status === 'visible') visiblePermissions.push(attempt.permission);
           else pendingPermissionHandlers.push(judgeAndRespondPermission(permission));
@@ -1504,6 +1510,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         if (
           permissionAutomationOwner &&
           !modePending &&
+          !modeRecovering &&
           mode === 'edits' &&
           isEditPermission(permission.type)
         ) {
@@ -2384,6 +2391,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     forkRemoteSession: (sessionId, messageID) =>
       client.session.fork(sessionId, messageID, { directory: getSessionDirectory(sessionId) }),
     getPermissionModeForSession: permissionsStore.getPermissionModeForSession,
+    isPermissionModeStable: (sessionId) =>
+      !permissionsStore.isSessionPermissionModePending(sessionId) &&
+      !permissionsStore.isPermissionModeRecoveryPending(sessionId),
     buildCreatePermission: (mode) => getSessionPermissionRulesForMode(mode, 'create'),
     upsertSession,
     resetToolCallExpansionState,

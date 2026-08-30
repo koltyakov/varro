@@ -8,7 +8,7 @@ import {
 } from './sidebar-provider.test-support';
 
 describe('SidebarProvider session message responses', () => {
-  it('keeps a server-confirmed permission mode when persistence fails', async () => {
+  it('blocks automation when a server-confirmed permission mode is not durable', async () => {
     const workspaceState = {
       get: vi.fn(() => undefined),
       update: vi.fn((key: string) =>
@@ -26,15 +26,89 @@ describe('SidebarProvider session message responses', () => {
     });
     const { posted } = attachTestView(provider);
 
-    await (
-      provider as unknown as {
-        updateConfirmedPermissionMode(sessionId: string, mode: 'full'): Promise<void>;
-      }
-    ).updateConfirmedPermissionMode('session-1', 'full');
+    await expect(
+      (
+        provider as unknown as {
+          updateConfirmedPermissionMode(sessionId: string, mode: 'full'): Promise<void>;
+        }
+      ).updateConfirmedPermissionMode('session-1', 'full')
+    ).rejects.toThrow('Permission mode was not saved');
 
     expect(posted).toContainEqual({
       type: 'permission-modes/sync',
-      payload: { modes: { 'session-1': 'full' } },
+      payload: {
+        modes: { 'session-1': 'default' },
+        recoveringSessionIds: ['session-1'],
+      },
+    });
+    expect(server.request).toHaveBeenCalledTimes(2);
+  });
+
+  it('resets a staged fallback remotely before publishing default after restart', async () => {
+    const values = new Map<string, unknown>([
+      ['varro.sessionPermissionModes', { 'session-1': 'full' }],
+      ['varro.sessionPermissionModeFallbacks', ['session-1']],
+    ]);
+    const workspaceState = {
+      get: vi.fn((key: string, fallback?: unknown) => values.get(key) ?? fallback),
+      update: vi.fn((key: string, value: unknown) => {
+        values.set(key, value);
+        return Promise.resolve();
+      }),
+    };
+    let serverMode = 'full';
+    let patchAttempts = 0;
+    const server = createServer({
+      request: vi.fn(async (method: string, path: string, body?: unknown) => {
+        if (method === 'GET' && path === '/session?limit=1000000') return [];
+        if (method === 'PATCH' && path === '/session/session-1') {
+          patchAttempts += 1;
+          expect(serverMode).toBe('full');
+          expect(body).toEqual({ permission: [] });
+          if (patchAttempts === 1) throw new Error('server unavailable');
+          serverMode = 'default';
+          return { id: 'session-1', directory: '/repo' };
+        }
+        return undefined;
+      }),
+    });
+    const { provider } = await createSidebarProviderInstance({
+      server,
+      workspaceState: workspaceState as never,
+    });
+    const { posted } = attachTestView(provider);
+
+    await provider.handleMessage({ type: 'ready' });
+
+    expect(posted).toContainEqual({
+      type: 'permission-modes/sync',
+      payload: {
+        modes: { 'session-1': 'default' },
+        recoveringSessionIds: ['session-1'],
+      },
+    });
+    const eventHandler = server.on.mock.calls.find(([event]) => event === 'event')?.[1];
+    eventHandler?.({
+      type: 'session.created',
+      properties: { info: { id: 'session-1', directory: '/repo' } },
+    });
+    const internals = provider as unknown as {
+      permissionModeFallbackReconciliation: Promise<void> | null;
+      recoverPendingPermissionModeFallbacks(): Promise<void>;
+    };
+    await vi.waitFor(() => {
+      expect(patchAttempts).toBe(1);
+      expect(internals.permissionModeFallbackReconciliation).toBeNull();
+    });
+
+    expect(values.get('varro.sessionPermissionModeFallbacks')).toEqual(['session-1']);
+    await internals.recoverPendingPermissionModeFallbacks();
+    await vi.waitFor(() => expect(serverMode).toBe('default'));
+
+    expect(values.get('varro.sessionPermissionModeFallbacks')).toEqual([]);
+    expect(posted).toContainEqual({
+      type: 'permission-modes/sync',
+      payload: { modes: { 'session-1': 'default' } },
     });
   });
 

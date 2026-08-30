@@ -182,6 +182,7 @@ function createSession(options?: {
     resetStatusBarCache: vi.fn(),
     queuedMessages: vi.fn<() => InitialWebviewState['queuedMessages']>(() => undefined),
     sessionPermissionModes: vi.fn<() => InitialWebviewState['sessionPermissionModes']>(() => ({})),
+    permissionModeRecoverySessionIds: vi.fn(() => []),
     sessionSelectedModels: vi.fn<() => InitialWebviewState['sessionSelectedModels']>(() => ({})),
     sessionPlanState: vi.fn<() => InitialWebviewState['sessionPlanState']>(() => ({})),
     sessionPlanAgents: vi.fn(() => ({})),

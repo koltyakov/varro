@@ -257,7 +257,28 @@ describe('parseExtensionMessage', () => {
     expect(
       parseExtensionMessage({
         type: 'permission-modes/sync',
+        payload: {
+          modes: { 'session-1': 'default' },
+          recoveringSessionIds: ['session-1'],
+        },
+      })
+    ).toEqual({
+      type: 'permission-modes/sync',
+      payload: {
+        modes: { 'session-1': 'default' },
+        recoveringSessionIds: ['session-1'],
+      },
+    });
+    expect(
+      parseExtensionMessage({
+        type: 'permission-modes/sync',
         payload: { modes: { 'session-1': 'invalid' } },
+      })
+    ).toBeNull();
+    expect(
+      parseExtensionMessage({
+        type: 'permission-modes/sync',
+        payload: { modes: {}, recoveringSessionIds: ['constructor'] },
       })
     ).toBeNull();
   });

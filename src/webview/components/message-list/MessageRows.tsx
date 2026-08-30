@@ -500,7 +500,6 @@ function AssistantDialogSummary(props: {
               type="button"
               class="assistant-dialog-summary-turn-action assistant-dialog-summary-fork"
               aria-label="Fork chat from here"
-              disabled={isLoading()}
               onClick={() => props.onFork()}
             >
               <ForkIcon />

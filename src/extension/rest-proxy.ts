@@ -2,7 +2,7 @@
 /* oxlint-disable anti-slop/no-known-value-widening, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Endpoint assertions follow route-specific runtime validation. */
 import * as vscode from 'vscode';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { existsSync } from 'fs';
+import { existsSync, realpathSync } from 'fs';
 import { posix, win32 } from 'path';
 import { applyEdits, modify, parse, printParseErrorCode, type ParseError } from 'jsonc-parser';
 import {
@@ -78,6 +78,8 @@ const STATUS_SESSION_CATALOG_REFRESH_MS = 5_000;
 const SESSION_MESSAGE_RESPONSE_MAX_BYTES = 16 * 1024 * 1024;
 const SESSION_MESSAGE_FALLBACK_MAX_BYTES = 256 * 1024 * 1024;
 const SESSION_MESSAGE_RECOVERY_PAGE_SIZE = 20;
+const PERMANENT_DELETION_TOMBSTONE_LIMIT = 256;
+const openCodeConfigUpdateLocks = new Map<string, Promise<void>>();
 
 type RecycleBinRequest =
   | { kind: 'list' }
@@ -97,6 +99,20 @@ type OpenCodeConfigRequest =
       agentName?: string;
       unset: boolean;
     };
+
+type OpenCodeConfigFile = {
+  path: string;
+  uri: vscode.Uri;
+  raw: string;
+  config: Record<string, unknown>;
+};
+
+type OpenCodeConfigSnapshot = {
+  workspacePath: string;
+  files: OpenCodeConfigFile[];
+  config: Record<string, unknown>;
+  target: OpenCodeConfigFile;
+};
 
 type SessionSummaryCacheEntry = {
   expiresAt: number;
@@ -219,6 +235,7 @@ export class RestProxy {
   private hasSessionDirectorySnapshot = false;
   private sessionDirectoryBootstrapPromise: Promise<ReadonlyMap<string, string>> | null = null;
   private readonly permissionJudgeCleanupRequests = new Set<string>();
+  private readonly permanentlyDeletedSessionIds = new Set<string>();
   private sessionSummaryListRequests = new Map<
     string,
     { expiresAt: number; request: Promise<unknown> }
@@ -1161,6 +1178,9 @@ export class RestProxy {
       const rootResults = settledRootResults.flatMap((result) =>
         result.status === 'fulfilled' ? [result.value] : []
       );
+      const unavailableDirectories = settledRootResults.flatMap((result, index) =>
+        result.status === 'rejected' && roots[index] ? [roots[index]] : []
+      );
       if (rootResults.length === 0) {
         throw settledRootResults.find(
           (result): result is PromiseRejectedResult => result.status === 'rejected'
@@ -1176,16 +1196,33 @@ export class RestProxy {
       const sessions = this.mergeWorkspaceSessions(
         rootResults.flatMap((result) => result.sessions)
       );
-      const hasUnfetchedSessions =
-        settledRootResults.some((result) => result.status === 'rejected') ||
-        rootResults.some((result) => result.hasMore);
-      this.rememberSessionPage(
-        sessions,
-        !hasUnfetchedSessions && !this.isConstrainedSessionListRequest('GET', path),
-        this.isConstrainedSessionListRequest('GET', path)
+      const catalogSessions = sessions.map((session) =>
+        this.projectWorkspaceCatalogSession(session)
       );
-      const visible = this.filterWorkspaceVisibleSessions(sessions);
-      if (requestedLimit === null) return visible;
+      const hasUnavailableRoot = unavailableDirectories.length > 0;
+      const hasUnfetchedSessions =
+        hasUnavailableRoot || rootResults.some((result) => result.hasMore);
+      this.rememberSessionPage(
+        catalogSessions,
+        !hasUnfetchedSessions && !this.isConstrainedSessionListRequest('GET', path),
+        this.isConstrainedSessionListRequest('GET', path),
+        sessions
+      );
+      const visible = this.filterWorkspaceVisibleSessions(catalogSessions);
+      if (requestedLimit === null) {
+        if (hasUnavailableRoot) {
+          throw new Error(`Could not load sessions from: ${unavailableDirectories.join(', ')}`);
+        }
+        return visible;
+      }
+      if (hasUnavailableRoot) {
+        return {
+          items: visible.slice(0, requestedLimit),
+          hasMore: visible.length > requestedLimit || rootResults.some((result) => result.hasMore),
+          incomplete: true,
+          unavailableDirectories,
+        };
+      }
       if (
         visible.length > requestedLimit ||
         !hasUnfetchedSessions ||
@@ -1285,22 +1322,21 @@ export class RestProxy {
     const results = settledResults.flatMap((result) =>
       result.status === 'fulfilled' ? [result.value] : []
     );
-    if (results.length === 0) {
-      throw settledResults.find(
-        (result): result is PromiseRejectedResult => result.status === 'rejected'
-      )?.reason;
-    }
-    for (const result of settledResults) {
-      if (result.status === 'rejected') {
+    const unavailableDirectories = settledResults.flatMap((result, index) =>
+      result.status === 'rejected' && roots[index] ? [roots[index]] : []
+    );
+    if (unavailableDirectories.length > 0) {
+      for (const result of settledResults) {
+        if (result.status !== 'rejected') continue;
         logger.warn(
           `Could not load session statuses from one workspace root: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`
         );
       }
+      throw new Error(`Could not load session statuses from: ${unavailableDirectories.join(', ')}`);
     }
     this.rememberSessionPage(
       this.mergeWorkspaceSessions(results.flatMap((result) => result.sessions)),
-      settledResults.every((result) => result.status === 'fulfilled') &&
-        results.every((result) => result.catalogComplete)
+      results.every((result) => result.catalogComplete)
     );
     return Object.assign({}, ...results.map((result) => result.statuses));
   }
@@ -1386,13 +1422,18 @@ export class RestProxy {
       },
       this.readAndRememberSessionWorkspaceScope(session)
     );
+    return projected;
+  }
+
+  private projectWorkspaceCatalogSession<T extends WorkspaceSession>(session: T): T {
     const endpointWorkspaceDirectory =
       this.callbacks.getWorkspacePath?.() ??
       this.callbacks.contextProvider.context.workspacePath ??
       this.callbacks.server.getWorkspaceCwd();
-    return endpointWorkspaceDirectory && !isSameWorkspacePath(root, endpointWorkspaceDirectory)
-      ? projectWorkspaceCatalogSession(projected)
-      : projected;
+    return endpointWorkspaceDirectory &&
+      !isSameWorkspacePath(session.directory, endpointWorkspaceDirectory)
+      ? projectWorkspaceCatalogSession(session)
+      : session;
   }
 
   private mergeWorkspaceSessions(
@@ -1775,10 +1816,11 @@ export class RestProxy {
   private rememberSessionPage(
     sessions: unknown[],
     complete: boolean,
-    preserveCompleteSnapshot = false
+    preserveCompleteSnapshot = false,
+    hiddenSessionSnapshots: unknown[] = sessions
   ) {
     this.recordSessionDirectories(sessions, complete, preserveCompleteSnapshot);
-    this.observePermissionJudgeSessions(sessions);
+    this.observePermissionJudgeSessions(hiddenSessionSnapshots);
     for (const session of sessions) {
       const info = asRecord(session);
       if (!info) continue;
@@ -2264,6 +2306,7 @@ export class RestProxy {
   }
 
   private async deleteSessionPermanently(sessionID: string, requestedDirectory?: string) {
+    if (this.permanentlyDeletedSessionIds.has(sessionID)) return true;
     const foundDirectory = await this.lookupSessionDirectory(sessionID, requestedDirectory);
     if (!foundDirectory) throw new Error('404 Session not found');
     const sessionDirectory = this.requireOpenWorkspaceRoot(foundDirectory);
@@ -2272,6 +2315,12 @@ export class RestProxy {
     }
     await this.deleteSessionForDirectory({ id: sessionID, directory: sessionDirectory });
     this.callbacks.sessionState.removeSessions([sessionID]);
+    while (this.permanentlyDeletedSessionIds.size >= PERMANENT_DELETION_TOMBSTONE_LIMIT) {
+      const oldest = this.permanentlyDeletedSessionIds.values().next().value;
+      if (!oldest) break;
+      this.permanentlyDeletedSessionIds.delete(oldest);
+    }
+    this.permanentlyDeletedSessionIds.add(sessionID);
     return true;
   }
 
@@ -2279,6 +2328,9 @@ export class RestProxy {
     const path = this.buildScopedSessionPath(session.id, session.directory);
     try {
       const result = await this.requestServer('DELETE', path);
+      if (result !== true && (await this.sessionExistsOnServer(session.id, session.directory))) {
+        throw new Error('OpenCode did not confirm session deletion');
+      }
       await this.callbacks.removeSessionImages([session.id]);
       this.sessionWorkspaceScopes.delete(session.id);
       return result;
@@ -2513,14 +2565,9 @@ export class RestProxy {
     return getOpenCodePathApi(workspacePath).resolve(workspacePath);
   }
 
-  private async readOpenCodeConfigObject() {
+  private async readOpenCodeConfigObject(): Promise<OpenCodeConfigSnapshot> {
     const workspacePath = this.getOpenCodeWorkspacePath();
-    const files: Array<{
-      path: string;
-      uri: vscode.Uri;
-      raw: string;
-      config: Record<string, unknown>;
-    }> = [];
+    const files: OpenCodeConfigFile[] = [];
     const pathApi = getOpenCodePathApi(workspacePath);
     const candidates = resolveOpenCodeProjectConfigPaths(workspacePath, (path) =>
       pathApi.basename(path) === '.git' ? existsSync(path) : true
@@ -2648,93 +2695,124 @@ export class RestProxy {
     if (request.target !== 'small_model' && request.target !== 'agent') {
       throw new Error('Unsupported OpenCode model routing target');
     }
-    const {
-      workspacePath,
-      files,
-      config,
-      target: defaultTarget,
-    } = await this.readOpenCodeConfigObject();
-    const target = request.unset
-      ? files.toReversed().find((file) => {
-          const route =
-            request.target === 'small_model'
-              ? parseModelRoute(file.config.small_model)
-              : parseModelRoute(
-                  asRecord(asRecord(file.config.agent)?.[request.agentName || ''])?.model
-                );
-          return route?.providerID === request.providerID && route.modelID === request.modelID;
-        })
-      : defaultTarget;
-    if (!target) return this.normalizeOpenCodeModelRouting(config);
-    const { uri } = target;
-    const dirtyDocument = vscode.workspace.textDocuments.find(
-      (document) =>
-        document.isDirty &&
-        (document.uri.toString() === uri.toString() ||
-          isSameWorkspacePath(document.uri.fsPath, uri.fsPath))
-    );
-    if (dirtyDocument) {
-      throw new Error(
-        `Project ${target.path.endsWith('.jsonc') ? 'opencode.jsonc' : 'opencode.json'} has unsaved changes; save or revert the document before updating model routing`
-      );
-    }
-    const initialStat = await this.readConfigStat(uri);
-    let nextRaw = target.raw.trim() ? target.raw : '{}\n';
-    if (
-      !request.unset &&
-      (typeof target.config.$schema !== 'string' || !target.config.$schema.trim())
-    ) {
-      nextRaw = applyJsoncChange(nextRaw, ['$schema'], 'https://opencode.ai/config.json');
-    }
+    let snapshot = await this.readOpenCodeConfigObject();
+    while (true) {
+      const candidate = this.selectOpenCodeModelRoutingTarget(request, snapshot);
+      if (!candidate) return this.normalizeOpenCodeModelRouting(snapshot.config);
+      const lockPath = getCanonicalOpenCodeConfigPath(candidate.path);
+      const result = await withOpenCodeConfigUpdateLock(lockPath, async () => {
+        const currentSnapshot = await this.readOpenCodeConfigObject();
+        const target = this.selectOpenCodeModelRoutingTarget(request, currentSnapshot);
+        if (!target) {
+          return {
+            kind: 'complete' as const,
+            routing: this.normalizeOpenCodeModelRouting(currentSnapshot.config),
+          };
+        }
+        if (getCanonicalOpenCodeConfigPath(target.path) !== lockPath) {
+          return { kind: 'retry' as const, snapshot: currentSnapshot };
+        }
 
-    const modelRef = `${request.providerID}/${request.modelID}`;
-    if (request.target === 'small_model') {
-      nextRaw = applyJsoncChange(nextRaw, ['small_model'], request.unset ? undefined : modelRef);
-    } else {
-      const agentName = request.agentName;
-      if (!agentName) {
-        throw new Error('Agent name is required');
-      }
-      nextRaw = applyJsoncChange(
-        nextRaw,
-        ['agent', agentName, 'model'],
-        request.unset ? undefined : modelRef
-      );
-      if (request.unset) {
-        let nextConfig = parseOpenCodeConfig(nextRaw, target.path);
-        const agentConfig = asRecord(asRecord(nextConfig.agent)?.[agentName]);
-        if (agentConfig && Object.keys(agentConfig).length === 0) {
-          nextRaw = applyJsoncChange(nextRaw, ['agent', agentName], undefined);
-          nextConfig = parseOpenCodeConfig(nextRaw, target.path);
-          const agents = asRecord(nextConfig.agent);
-          if (agents && Object.keys(agents).length === 0) {
-            nextRaw = applyJsoncChange(nextRaw, ['agent'], undefined);
+        const { workspacePath, files, config } = currentSnapshot;
+        const { uri } = target;
+        const dirtyDocument = vscode.workspace.textDocuments.find(
+          (document) =>
+            document.isDirty &&
+            (document.uri.toString() === uri.toString() ||
+              isSameWorkspacePath(document.uri.fsPath, uri.fsPath))
+        );
+        if (dirtyDocument) {
+          throw new Error(
+            `Project ${target.path.endsWith('.jsonc') ? 'opencode.jsonc' : 'opencode.json'} has unsaved changes; save or revert the document before updating model routing`
+          );
+        }
+        const initialStat = await this.readConfigStat(uri);
+        let nextRaw = target.raw.trim() ? target.raw : '{}\n';
+        if (
+          !request.unset &&
+          (typeof target.config.$schema !== 'string' || !target.config.$schema.trim())
+        ) {
+          nextRaw = applyJsoncChange(nextRaw, ['$schema'], 'https://opencode.ai/config.json');
+        }
+
+        const modelRef = `${request.providerID}/${request.modelID}`;
+        if (request.target === 'small_model') {
+          nextRaw = applyJsoncChange(
+            nextRaw,
+            ['small_model'],
+            request.unset ? undefined : modelRef
+          );
+        } else {
+          const agentName = request.agentName;
+          if (!agentName) {
+            throw new Error('Agent name is required');
+          }
+          nextRaw = applyJsoncChange(
+            nextRaw,
+            ['agent', agentName, 'model'],
+            request.unset ? undefined : modelRef
+          );
+          if (request.unset) {
+            let nextConfig = parseOpenCodeConfig(nextRaw, target.path);
+            const agentConfig = asRecord(asRecord(nextConfig.agent)?.[agentName]);
+            if (agentConfig && Object.keys(agentConfig).length === 0) {
+              nextRaw = applyJsoncChange(nextRaw, ['agent', agentName], undefined);
+              nextConfig = parseOpenCodeConfig(nextRaw, target.path);
+              const agents = asRecord(nextConfig.agent);
+              if (agents && Object.keys(agents).length === 0) {
+                nextRaw = applyJsoncChange(nextRaw, ['agent'], undefined);
+              }
+            }
           }
         }
-      }
-    }
 
-    const nextTargetConfig = parseOpenCodeConfig(nextRaw, target.path);
-    const encoded = new TextEncoder().encode(nextRaw.endsWith('\n') ? nextRaw : `${nextRaw}\n`);
-    const latestStat = await this.readConfigStat(uri);
-    if (!this.areConfigStatsEqual(initialStat, latestStat)) {
-      throw new Error(
-        `Project ${target.path.endsWith('.jsonc') ? 'opencode.jsonc' : 'opencode.json'} changed while updating model routing; please retry`
-      );
+        const nextTargetConfig = parseOpenCodeConfig(nextRaw, target.path);
+        const encoded = new TextEncoder().encode(nextRaw.endsWith('\n') ? nextRaw : `${nextRaw}\n`);
+        const latestStat = await this.readConfigStat(uri);
+        if (!this.areConfigStatsEqual(initialStat, latestStat)) {
+          throw new Error(
+            `Project ${target.path.endsWith('.jsonc') ? 'opencode.jsonc' : 'opencode.json'} changed while updating model routing; please retry`
+          );
+        }
+        const previousRouting = this.normalizeOpenCodeModelRouting(config);
+        await vscode.workspace.fs.writeFile(uri, encoded);
+        let effectiveConfig = files.reduce<Record<string, unknown>>(
+          (merged, file) =>
+            mergeOpenCodeConfig(merged, file.path === target.path ? nextTargetConfig : file.config),
+          {}
+        );
+        if (!files.some((file) => file.path === target.path)) {
+          effectiveConfig = mergeOpenCodeConfig(effectiveConfig, nextTargetConfig);
+        }
+        const currentRouting = this.normalizeOpenCodeModelRouting(effectiveConfig);
+        await this.callbacks.refreshOpenCodeConfig?.(
+          previousRouting,
+          currentRouting,
+          workspacePath
+        );
+        return { kind: 'complete' as const, routing: currentRouting };
+      });
+      if (result.kind === 'complete') return result.routing;
+      snapshot = result.snapshot;
     }
-    const previousRouting = this.normalizeOpenCodeModelRouting(config);
-    await vscode.workspace.fs.writeFile(uri, encoded);
-    let effectiveConfig = files.reduce<Record<string, unknown>>(
-      (merged, file) =>
-        mergeOpenCodeConfig(merged, file.path === target.path ? nextTargetConfig : file.config),
-      {}
+  }
+
+  private selectOpenCodeModelRoutingTarget(
+    request: Extract<OpenCodeConfigRequest, { kind: 'update' }>,
+    snapshot: OpenCodeConfigSnapshot
+  ): OpenCodeConfigFile | null {
+    if (!request.unset) return snapshot.target;
+    return (
+      snapshot.files.toReversed().find((file) => {
+        const route =
+          request.target === 'small_model'
+            ? parseModelRoute(file.config.small_model)
+            : parseModelRoute(
+                asRecord(asRecord(file.config.agent)?.[request.agentName || ''])?.model
+              );
+        return route?.providerID === request.providerID && route.modelID === request.modelID;
+      }) ?? null
     );
-    if (!files.some((file) => file.path === target.path)) {
-      effectiveConfig = mergeOpenCodeConfig(effectiveConfig, nextTargetConfig);
-    }
-    const currentRouting = this.normalizeOpenCodeModelRouting(effectiveConfig);
-    await this.callbacks.refreshOpenCodeConfig?.(previousRouting, currentRouting, workspacePath);
-    return currentRouting;
   }
 
   private async readConfigStat(uri: vscode.Uri) {
@@ -2808,6 +2886,43 @@ export function resolveOpenCodeProjectConfigPaths(
 function getOpenCodePathApi(path: string) {
   // VS Code can expose POSIX paths from remote workspaces even on Windows.
   return /^[a-z]:[\\/]/i.test(path) || path.startsWith('\\\\') ? win32 : posix;
+}
+
+function getCanonicalOpenCodeConfigPath(path: string) {
+  const pathApi = getOpenCodePathApi(path);
+  let resolved = pathApi.resolve(path);
+  try {
+    resolved = realpathSync.native(resolved);
+  } catch {
+    try {
+      resolved = pathApi.join(
+        realpathSync.native(pathApi.dirname(resolved)),
+        pathApi.basename(resolved)
+      );
+    } catch {
+      // The target and its parent can both be absent before the first config write.
+    }
+  }
+  return normalizeWorkspaceIdentity(resolved) ?? resolved;
+}
+
+async function withOpenCodeConfigUpdateLock<T>(
+  path: string,
+  operation: () => Promise<T>
+): Promise<T> {
+  const previous = openCodeConfigUpdateLocks.get(path);
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  openCodeConfigUpdateLocks.set(path, current);
+  if (previous) await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (openCodeConfigUpdateLocks.get(path) === current) openCodeConfigUpdateLocks.delete(path);
+  }
 }
 
 function parseOpenCodeConfig(raw: string, path: string): Record<string, unknown> {

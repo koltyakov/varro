@@ -11,6 +11,7 @@ type SessionManagementDependencies = {
   updateRemoteSession(sessionId: string, body: { title: string }): Promise<Session>;
   forkRemoteSession(sessionId: string, messageID?: string): Promise<Session>;
   getPermissionModeForSession(sessionId: string): PermissionMode;
+  isPermissionModeStable?(sessionId: string): boolean;
   buildCreatePermission(mode: PermissionMode): PermissionRule[];
   upsertSession(session: Session): void;
   resetToolCallExpansionState(): void;
@@ -120,6 +121,7 @@ export class SessionManagementOperations {
         setSelectedModel: this.deps.setSelectedModel,
         publishSessionModel: this.deps.publishSessionModel,
         getPermissionModeForSession: this.deps.getPermissionModeForSession,
+        isPermissionModeStable: this.deps.isPermissionModeStable,
         setPermissionModeForSession: this.deps.setPermissionModeForSession,
         persistConfirmedPermissionModeForSession:
           this.deps.persistConfirmedPermissionModeForSession,
@@ -267,7 +269,6 @@ export async function createSessionWithDependencies(
     deps.setSessionUsageLimit(session.id, null);
     deps.setSelectedMcpsForSession(session.id, initialMcpNames);
     if (initialPermissionMode !== 'default') {
-      deps.setPermissionModeForSession(session.id, initialPermissionMode);
       deps.persistConfirmedPermissionModeForSession?.(session.id, initialPermissionMode);
     }
     deps.publishSessionModel(session.id, defaultModel);
@@ -330,6 +331,7 @@ export async function forkSessionWithDependencies(
     ): void;
     publishSessionModel(sessionId: string, model: SelectedModel | null): void;
     getPermissionModeForSession(sessionId: string): PermissionMode;
+    isPermissionModeStable?(sessionId: string): boolean;
     setPermissionModeForSession(sessionId: string, mode: PermissionMode): void;
     persistConfirmedPermissionModeForSession?(sessionId: string, mode: PermissionMode): void;
     upsertSession(session: Session): void;
@@ -346,6 +348,10 @@ export async function forkSessionWithDependencies(
   const workspaceGeneration = deps.getWorkspaceGeneration?.() ?? 0;
   const selectionGeneration = deps.getSessionSelectionGeneration?.() ?? 0;
   const draftGeneration = deps.getNewChatDraftGeneration();
+  if (deps.isPermissionModeStable?.(id) === false) {
+    deps.setError('Wait for the permission mode update to finish before forking');
+    return null;
+  }
   try {
     // Forks are independent roots, so the source session's permission mode
     // must be copied over explicitly or the fork silently resets to default.
@@ -355,7 +361,6 @@ export async function forkSessionWithDependencies(
     if ((deps.getWorkspaceGeneration?.() ?? 0) !== workspaceGeneration) return null;
     deps.upsertSession(session);
     if (permissionMode !== 'default') {
-      deps.setPermissionModeForSession(session.id, permissionMode);
       deps.persistConfirmedPermissionModeForSession?.(session.id, permissionMode);
     }
     if (sourceModel) {

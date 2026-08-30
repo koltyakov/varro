@@ -89,6 +89,7 @@ export class WebviewSession {
       resetStatusBarCache(): void;
       queuedMessages(): InitialWebviewState['queuedMessages'];
       sessionPermissionModes(): InitialWebviewState['sessionPermissionModes'];
+      permissionModeRecoverySessionIds(): string[];
       sessionSelectedModels(): InitialWebviewState['sessionSelectedModels'];
       sessionPlanState(): InitialWebviewState['sessionPlanState'];
       sessionPlanAgents(): Record<string, string>;
@@ -417,6 +418,7 @@ export class WebviewSession {
       chatEditorFontSize: config.chatEditorFontSize,
       chatFontFamily: config.chatFontFamily,
       sessionPermissionModes: this.deps.sessionPermissionModes(),
+      permissionModeRecoverySessionIds: this.deps.permissionModeRecoverySessionIds(),
       sessionSelectedModels: this.deps.sessionSelectedModels(),
       sessionPlanState: this.deps.sessionPlanState(),
       sessionModelMigrationPending: this.deps.sessionModelMigrationPending(),
@@ -471,9 +473,19 @@ export class WebviewSession {
       type: 'queued-messages/sync',
       payload: { messages: this.deps.queuedMessages() ?? [] },
     });
+    const permissionModeRecoverySessionIds = this.deps.permissionModeRecoverySessionIds();
+    const permissionModePayload: Extract<
+      ExtensionMessage,
+      { type: 'permission-modes/sync' }
+    >['payload'] = {
+      modes: this.deps.sessionPermissionModes() ?? {},
+    };
+    if (permissionModeRecoverySessionIds.length > 0) {
+      permissionModePayload.recoveringSessionIds = permissionModeRecoverySessionIds;
+    }
     this.bridge.post({
       type: 'permission-modes/sync',
-      payload: { modes: this.deps.sessionPermissionModes() ?? {} },
+      payload: permissionModePayload,
     });
     if (!this.deps.sessionModelMigrationPending()) {
       this.bridge.post({

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   attachTestView,
   createContextProvider,
+  createServer,
   createSidebarProviderInstance,
   getVscodeMock,
 } from './sidebar-provider.test-support';
@@ -13,6 +14,14 @@ import type {
   SiblingWorkspaceAlert,
 } from '../shared/protocol';
 import type { SessionStateManager } from './session-state-manager';
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((accept) => {
+    resolve = accept;
+  });
+  return { promise, resolve };
+}
 
 function lastEditorContext(messages: unknown[]) {
   return (messages as Array<{ type?: string; payload?: EditorContext }>)
@@ -702,6 +711,87 @@ describe('SidebarProvider editor panels', () => {
     provider.post({ type: 'server/event', payload: event });
 
     expect(posted).toContainEqual({ type: 'server/event', payload: event });
+  });
+
+  it('reconciles healthy roots without marking failed-root sessions idle', async () => {
+    const server = createServer({
+      request: vi.fn(
+        async (
+          _method: string,
+          _path: string,
+          _body?: unknown,
+          options?: { directory?: string }
+        ) => {
+          if (options?.directory === '/repo-b') throw new Error('repo-b unavailable');
+          return {};
+        }
+      ),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const { posted } = attachTestView(provider);
+    const internals = provider as unknown as {
+      sessionState: SessionStateManager;
+      runSessionReconcile(): Promise<void>;
+    };
+    for (const [sessionID, directory] of [
+      ['session-a', '/repo-a'],
+      ['session-b', '/repo-b'],
+    ] as const) {
+      internals.sessionState.handleServerEvent({
+        type: 'session.created',
+        properties: { info: { id: sessionID, directory } },
+      });
+    }
+    internals.sessionState.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-a', status: { type: 'busy' } },
+    });
+    const failedPromptAttempt = internals.sessionState.markSessionBusy('session-b');
+    if (!failedPromptAttempt) throw new Error('Expected a busy attempt');
+    internals.sessionState.deferPromptFailure(failedPromptAttempt);
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000);
+
+    await internals.runSessionReconcile();
+    now.mockReturnValue(11_001);
+    await internals.runSessionReconcile();
+    now.mockRestore();
+
+    expect(internals.sessionState.busy.has('session-a')).toBe(false);
+    expect(internals.sessionState.busy.has('session-b')).toBe(true);
+    expect(posted).toContainEqual({
+      type: 'server/event',
+      payload: { type: 'session.idle', properties: { sessionID: 'session-a' } },
+    });
+    expect(posted).not.toContainEqual({
+      type: 'server/event',
+      payload: { type: 'session.idle', properties: { sessionID: 'session-b' } },
+    });
+  });
+
+  it('preserves a deferred prompt added while status reconciliation is in flight', async () => {
+    const status = deferred<unknown>();
+    const server = createServer({
+      request: vi.fn(() => status.promise),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const internals = provider as unknown as {
+      sessionState: SessionStateManager;
+      runSessionReconcile(): Promise<void>;
+    };
+    internals.sessionState.handleServerEvent({
+      type: 'session.created',
+      properties: { info: { id: 'session-a', directory: '/repo-a' } },
+    });
+    const failedPromptAttempt = internals.sessionState.markSessionBusy('session-a');
+    if (!failedPromptAttempt) throw new Error('Expected a busy attempt');
+
+    const reconciliation = internals.runSessionReconcile();
+    await vi.waitFor(() => expect(server.request).toHaveBeenCalledOnce());
+    internals.sessionState.deferPromptFailure(failedPromptAttempt);
+    status.resolve({});
+    await reconciliation;
+
+    expect(internals.sessionState.busy.has('session-a')).toBe(true);
   });
 
   it('routes sibling session lifecycle events to the endpoint that owns its queue', async () => {

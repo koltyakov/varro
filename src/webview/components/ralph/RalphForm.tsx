@@ -9,7 +9,7 @@ import {
   isSessionAwaitingInput,
   state,
 } from '../../lib/state';
-import { deleteSession, selectSession } from '../../hooks/useOpenCode';
+import { deleteSession, deleteSessionImmediately, selectSession } from '../../hooks/useOpenCode';
 import { getSessionPermissionRulesForMode } from '../../hooks/permission-rules';
 import type { RalphConfig, RalphSelectedModel } from '../../../shared/ralph';
 import { normalizeRalphWorkspaceDirectory } from '../../../shared/ralph';
@@ -62,6 +62,48 @@ type PreviousSessionCleanupState = {
   sessionStatus: Record<string, { type?: string } | undefined>;
 };
 
+type RalphSubmission = {
+  generation: number;
+  sessionId: string | null;
+  workspaceDirectory: string;
+  cleanupTask: Promise<void> | null;
+  cleanupRetryRound: number;
+  cleanupRetryTimer: ReturnType<typeof setTimeout> | null;
+};
+
+async function cleanupOwnedSession(submission: RalphSubmission): Promise<void> {
+  if (!submission.sessionId) return;
+  if (submission.cleanupTask) return submission.cleanupTask;
+  const sessionId = submission.sessionId;
+  const cleanup = (async () => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        await deleteSessionImmediately(sessionId, {
+          directory: submission.workspaceDirectory,
+        });
+        if (submission.cleanupRetryTimer) clearTimeout(submission.cleanupRetryTimer);
+        submission.cleanupRetryTimer = null;
+        return;
+      } catch (err) {
+        logError('ralph-form:deleteOrphan', err);
+      }
+    }
+    if (submission.cleanupRetryRound >= 8 || submission.cleanupRetryTimer) return;
+    const delay = Math.min(1_000 * 2 ** submission.cleanupRetryRound, 30_000);
+    submission.cleanupRetryRound += 1;
+    submission.cleanupRetryTimer = setTimeout(() => {
+      submission.cleanupRetryTimer = null;
+      void cleanupOwnedSession(submission);
+    }, delay);
+  })();
+  submission.cleanupTask = cleanup;
+  try {
+    await cleanup;
+  } finally {
+    if (submission.cleanupTask === cleanup) submission.cleanupTask = null;
+  }
+}
+
 export function shouldDeletePreviousBlankSession(
   previousSessionId: string | null,
   sessionState: PreviousSessionCleanupState,
@@ -99,12 +141,29 @@ export function RalphForm() {
   const [errorMessage, setErrorMessage] = createSignal<string | null>(null);
   const [modelPickerBoundaryRef, setModelPickerBoundaryRef] = createSignal<HTMLDivElement>();
   const [modelPickerPortalRef, setModelPickerPortalRef] = createSignal<HTMLDivElement>();
+  let submissionGeneration = 0;
+  let activeSubmission: RalphSubmission | null = null;
+
+  function isCurrentSubmission(submission: RalphSubmission): boolean {
+    return activeSubmission === submission && submission.generation === submissionGeneration;
+  }
+
+  function invalidateSubmission() {
+    submissionGeneration += 1;
+    const submission = activeSubmission;
+    activeSubmission = null;
+    if (submission) void cleanupOwnedSession(submission);
+  }
 
   function close() {
+    invalidateSubmission();
+    setIsSubmitting(false);
     setShowModelPicker(false);
     setShowVariantPicker(false);
     ralphStore.setShowRalphForm(false);
   }
+
+  onCleanup(invalidateSubmission);
 
   const currentModelInfo = createMemo(() => {
     const sel = model();
@@ -163,6 +222,10 @@ export function RalphForm() {
       if (event.key !== 'Escape') return;
       event.preventDefault();
       event.stopPropagation();
+      if (isSubmitting()) {
+        close();
+        return;
+      }
       if (showModelPicker()) {
         setShowModelPicker(false);
         return;
@@ -201,11 +264,15 @@ export function RalphForm() {
   async function submit() {
     if (isSubmitting()) return;
     const path = planPath().trim();
+    const iterationCount = iterations();
+    const selectedModel = model();
+    const reasoningLevel = effectiveVariant();
+    const capturedPromptTemplate = promptTemplate();
     if (!path) {
       setErrorMessage('Plan document path is required');
       return;
     }
-    if (iterations() < 1) {
+    if (iterationCount < 1) {
       setErrorMessage('Iterations must be at least 1');
       return;
     }
@@ -216,18 +283,34 @@ export function RalphForm() {
       setErrorMessage('Open the plan from a workspace folder before starting Ralph');
       return;
     }
+    const configModel = selectedModel
+      ? {
+          providerID: selectedModel.providerID,
+          modelID: selectedModel.modelID,
+          variant: reasoningLevel ? reasoningLevel : undefined,
+        }
+      : null;
+    const planLabel = getLeafPathName(path);
+    const permissionMode: RalphConfig['permissionMode'] = 'full';
+    const previousSessionId = state.activeSessionId;
+    const shouldDeletePreviousSession = shouldDeletePreviousBlankSession(
+      previousSessionId,
+      state,
+      previousSessionId ? isSessionAwaitingInput(previousSessionId) : false
+    );
+    const submission: RalphSubmission = {
+      generation: ++submissionGeneration,
+      sessionId: null,
+      workspaceDirectory,
+      cleanupTask: null,
+      cleanupRetryRound: 0,
+      cleanupRetryTimer: null,
+    };
+    activeSubmission = submission;
     setErrorMessage(null);
     setIsSubmitting(true);
 
     try {
-      const planLabel = getLeafPathName(path);
-      const permissionMode: RalphConfig['permissionMode'] = 'full';
-      const previousSessionId = state.activeSessionId;
-      const shouldDeletePreviousSession = shouldDeletePreviousBlankSession(
-        previousSessionId,
-        state,
-        previousSessionId ? isSessionAwaitingInput(previousSessionId) : false
-      );
       const session = await client.session.create(
         {
           title: `Ralph: ${planLabel}`,
@@ -235,23 +318,18 @@ export function RalphForm() {
         },
         { directory: workspaceDirectory }
       );
-
-      const selectedModel = model();
-      const reasoningLevel = effectiveVariant();
-      const configModel = selectedModel
-        ? {
-            providerID: selectedModel.providerID,
-            modelID: selectedModel.modelID,
-            variant: reasoningLevel ? reasoningLevel : undefined,
-          }
-        : null;
+      submission.sessionId = session.id;
+      if (!isCurrentSubmission(submission)) {
+        await cleanupOwnedSession(submission);
+        return;
+      }
 
       const config: RalphConfig = {
         managerSessionId: session.id,
         workspaceDirectory,
         planDocPath: path,
-        iterations: iterations(),
-        promptTemplate: promptTemplate(),
+        iterations: iterationCount,
+        promptTemplate: capturedPromptTemplate,
         permissionMode,
         model: configModel,
         agent: null,
@@ -277,22 +355,42 @@ export function RalphForm() {
         .catch((err) => {
           logError('ralph-form:sendAsync', err);
         });
+      if (!isCurrentSubmission(submission)) {
+        await cleanupOwnedSession(submission);
+        return;
+      }
 
       await selectSession(session.id, { directory: workspaceDirectory });
+      if (!isCurrentSubmission(submission)) {
+        await cleanupOwnedSession(submission);
+        return;
+      }
       if (previousSessionId && shouldDeletePreviousSession && previousSessionId !== session.id) {
         await deleteSession(previousSessionId).catch((err) => {
           logError('ralph-form:deletePrevious', err);
         });
       }
+      if (!isCurrentSubmission(submission)) {
+        await cleanupOwnedSession(submission);
+        return;
+      }
+      submission.sessionId = null;
+      activeSubmission = null;
       void ralphRunner.start(config).catch((err) => {
         logError('ralph-form:start', err);
       });
 
       close();
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'Failed to start Ralph loop');
+      await cleanupOwnedSession(submission);
+      if (isCurrentSubmission(submission)) {
+        setErrorMessage(err instanceof Error ? err.message : 'Failed to start Ralph loop');
+      }
     } finally {
-      setIsSubmitting(false);
+      if (activeSubmission === submission) {
+        activeSubmission = null;
+        setIsSubmitting(false);
+      }
     }
   }
 

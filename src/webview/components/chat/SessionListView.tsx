@@ -42,7 +42,7 @@ import { isSameWorkspacePath } from '../../../shared/workspace-path';
 import type { RecycleBinEntry, SessionDiffSummary } from '../../../shared/protocol';
 import type { SelectedModel } from '../../lib/app-state-types';
 import type { Session } from '../../types';
-import { client } from '../../lib/client';
+import { client, type SessionListPage } from '../../lib/client';
 import { postMessage } from '../../lib/bridge';
 import { setManualWorkspaceSelection } from '../../lib/app-state';
 import { ralphStore } from '../../lib/stores/ralph-store';
@@ -240,9 +240,29 @@ const SESSION_ARCHIVE_PRELOAD_TARGET = 50;
 const SUBAGENT_SESSION_PAGE_SIZE = 100;
 const MAX_SUBAGENT_SESSION_LIMIT = 1_000_000;
 const SESSION_SEARCH_LIMIT = 30;
+const PARTIAL_SESSION_LIST_ATTEMPTS = 2;
 const SESSION_DIFF_SUMMARY_CONCURRENCY = 4;
 const SESSION_DIFF_SUMMARY_QUEUE_LIMIT = 100;
 const SESSION_DIFF_SUMMARY_CACHE_LIMIT = 200;
+
+async function listCompleteSessionPage(
+  options: NonNullable<Parameters<typeof client.session.list>[0]>
+): Promise<SessionListPage> {
+  for (let attempt = 0; attempt < PARTIAL_SESSION_LIST_ATTEMPTS; attempt += 1) {
+    const page = await client.session.list(options);
+    if (Array.isArray(page)) throw new Error('Expected a paginated session list');
+    if (!page.incomplete) return page;
+    if (attempt === PARTIAL_SESSION_LIST_ATTEMPTS - 1) {
+      const directories = page.unavailableDirectories?.join(', ');
+      throw new Error(
+        directories
+          ? `Could not load sessions from: ${directories}`
+          : 'Some workspace folders could not be loaded'
+      );
+    }
+  }
+  throw new Error('Some workspace folders could not be loaded');
+}
 
 function getDiffSummaryKey(sessionId: string, updated: number): string {
   return `${sessionId}:${updated}`;
@@ -1044,9 +1064,8 @@ export function SessionListView(props: {
       let limit = SUBAGENT_SESSION_PAGE_SIZE;
       while (true) {
         if (requestKey !== resolutionRequestKey) return;
-        const page = await client.session.list({ limit });
+        const page = await listCompleteSessionPage({ limit });
         if (requestKey !== resolutionRequestKey) return;
-        if (Array.isArray(page)) throw new Error('Expected a paginated session list');
         setAllSessionsForSubagent(page.items);
         if (!page.hasMore) return;
 
@@ -1082,17 +1101,15 @@ export function SessionListView(props: {
     const controller = new AbortController();
     searchAbortController = controller;
     setIsSearchingAllSessions(true);
-    void client.session
-      .list({
-        limit: SESSION_SEARCH_LIMIT,
-        search: query,
-        roots: true,
-        directory: folderFilter() ?? undefined,
-        signal: controller.signal,
-      })
+    void listCompleteSessionPage({
+      limit: SESSION_SEARCH_LIMIT,
+      search: query,
+      roots: true,
+      directory: folderFilter() ?? undefined,
+      signal: controller.signal,
+    })
       .then((page) => {
         if (requestKey !== searchRequestKey || controller.signal.aborted) return;
-        if (Array.isArray(page)) throw new Error('Expected a paginated session search');
         setNativeSearchResults(page.items);
       })
       .catch((error) => {

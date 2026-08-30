@@ -93,6 +93,7 @@ import { WorkspaceSessionStatusCoordinator } from './workspace-session-status-co
 import { UsageReportService } from './usage-report-service';
 import { getWorkspaceSessionIdsForEvent } from './sidebar-provider-utils';
 import { resolveServerLaunch } from './util/server-launch';
+import { FULL_SESSION_LIST_PATH } from './util/session-list';
 
 const maximumTestedOpenCodeVersion = readMaximumTestedOpenCodeVersion();
 
@@ -139,6 +140,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private static readonly SESSION_RECONCILE_INTERVAL_MS = 10_000;
   private static readonly QUEUE_RECONCILE_INTERVAL_MS = 1_000;
   private static readonly SESSION_RECONCILE_GRACE_MS = 10_000;
+  private static readonly PERMISSION_MODE_FALLBACK_RETRY_MS = 5_000;
   private static readonly MAX_DEFERRED_WORKSPACE_EVENTS = 1_000;
 
   private lastStatusBarStateKey = '';
@@ -190,6 +192,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly editorPanels = new Map<string, EditorEndpoint>();
   private lastFocusedContextViewId: string | null = null;
   private readonly permissionModeQueues = new Map<string, Promise<unknown>>();
+  private permissionModeFallbackReconciliation: Promise<void> | null = null;
+  private permissionModeFallbackReconciliationRequested = false;
+  private permissionModeFallbackRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly deferredWorkspaceEvents: ServerEvent[] = [];
   private readonly permissionAutomationOwnerViewIds = new Set<string>();
   private readonly permissionAutomationOwnerWorkspaces = new Map<string, string>();
@@ -462,6 +467,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         },
         queuedMessages: () => this.queuedMessagesFor(webviewContext.viewId),
         sessionPermissionModes: () => this.sessionPermissionModes.list(),
+        permissionModeRecoverySessionIds: () =>
+          this.sessionPermissionModes.pendingSafeFallbackSessionIds(),
         sessionSelectedModels: () => this.sessionSelectedModels.list(),
         sessionPlanState: () => this.sessionPlanState.list(),
         sessionPlanAgents: () => this.sessionPlanState.listAgents(),
@@ -544,6 +551,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           (request.permissionID
             ? this.sessionState.pending.get(request.permissionID)?.sessionID
             : undefined);
+        const recoveringSessionIDs = new Set(
+          this.sessionPermissionModes.pendingSafeFallbackSessionIds()
+        );
+        if (
+          sessionID &&
+          this.sessionState
+            .sessionLineageFor(sessionID)
+            .some((candidate) => recoveringSessionIDs.has(candidate))
+        ) {
+          return false;
+        }
         const directory = sessionID ? this.sessionState.directoryFor(sessionID) : undefined;
         return isSameWorkspacePath(
           directory,
@@ -692,6 +710,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         postConfigState: () => this.postConfigState(),
         handleReadyMessage: async () => {
           try {
+            await this.recoverPendingPermissionModeFallbacks();
             await webviewSession.handleReady();
             if (endpointRef.endpoint) this.setEndpointReady(endpointRef.endpoint, true);
           } catch (err) {
@@ -767,12 +786,28 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         acknowledgeInterruptedSessions: ({ claimId, consumedSessionIds }) =>
           this.acknowledgeInterruptedSessions(webviewContext.viewId, claimId, consumedSessionIds),
         updatePermissionMode: async ({ sessionId, mode }) => {
-          const modes = await this.sessionPermissionModes.set(sessionId, mode);
-          this.post({ type: 'permission-modes/sync', payload: { modes } });
+          if (mode === null) {
+            const modes = await this.sessionPermissionModes.set(sessionId, null);
+            this.postPermissionModes(modes);
+            return;
+          }
+          await this.persistPreconfiguredPermissionMode(
+            sessionId,
+            mode,
+            this.sessionState.directoryFor(sessionId) ?? endpointServer.getWorkspaceCwd()
+          );
         },
         migratePermissionModes: async ({ modes: legacyModes }) => {
-          const modes = await this.sessionPermissionModes.setIfAbsent(legacyModes);
-          this.post({ type: 'permission-modes/sync', payload: { modes } });
+          await Promise.all(
+            Object.entries(legacyModes).map(([sessionId, mode]) =>
+              this.persistPreconfiguredPermissionMode(
+                sessionId,
+                mode,
+                this.sessionState.directoryFor(sessionId) ?? endpointServer.getWorkspaceCwd(),
+                true
+              )
+            )
+          );
         },
         updateSessionModel: async ({ sessionId, model }) => {
           const models = await this.sessionSelectedModels.set(sessionId, model);
@@ -1207,6 +1242,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   post(msg: ExtensionMessage) {
     let workspaceStructureChanged = false;
+    if (msg.type === 'server/status' && msg.payload.state === 'running') {
+      void this.recoverPendingPermissionModeFallbacks();
+    }
     if (msg.type === 'server/event') this.postQueuedSessionStatus(msg.payload);
     if (msg.type === 'server/event') this.releaseDeletedEditorRestorations(msg.payload);
     if (msg.type === 'server/event') this.removeDeletedSessionPersistence(msg.payload);
@@ -1432,6 +1470,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       if (this.disposing) return;
       this.flushDeferredWorkspaceEvents();
       this.reconcilePermissionAutomationOwners(true);
+      void this.recoverPendingPermissionModeFallbacks();
     });
   }
 
@@ -1693,16 +1732,162 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     owner?.bridge.post({ type: 'permission/actionable', payload: { permissionId } });
   }
 
+  private postPermissionModes(modes = this.sessionPermissionModes.list()) {
+    const recoveringSessionIds = this.sessionPermissionModes.pendingSafeFallbackSessionIds();
+    const payload: Extract<ExtensionMessage, { type: 'permission-modes/sync' }>['payload'] = {
+      modes,
+    };
+    if (recoveringSessionIds.length > 0) payload.recoveringSessionIds = recoveringSessionIds;
+    this.post({
+      type: 'permission-modes/sync',
+      payload,
+    });
+  }
+
+  private recoverPendingPermissionModeFallbacks(): Promise<void> {
+    if (this.permissionModeFallbackRetryTimer) {
+      clearTimeout(this.permissionModeFallbackRetryTimer);
+      this.permissionModeFallbackRetryTimer = null;
+    }
+    if (this.permissionModeFallbackReconciliation) {
+      this.permissionModeFallbackReconciliationRequested = true;
+      return this.permissionModeFallbackReconciliation;
+    }
+    this.permissionModeFallbackReconciliationRequested = false;
+    const operation = this.runPermissionModeFallbackRecovery();
+    this.permissionModeFallbackReconciliation = operation;
+    const clear = () => {
+      if (this.permissionModeFallbackReconciliation === operation) {
+        this.permissionModeFallbackReconciliation = null;
+        if (this.permissionModeFallbackReconciliationRequested && !this.disposing) {
+          this.permissionModeFallbackReconciliationRequested = false;
+          void this.recoverPendingPermissionModeFallbacks();
+        } else if (this.sessionPermissionModes.pendingSafeFallbackSessionIds().length > 0) {
+          this.schedulePermissionModeFallbackRecovery();
+        } else if (this.permissionModeFallbackRetryTimer) {
+          clearTimeout(this.permissionModeFallbackRetryTimer);
+          this.permissionModeFallbackRetryTimer = null;
+        }
+      }
+    };
+    void operation.then(clear, clear);
+    return operation;
+  }
+
+  private schedulePermissionModeFallbackRecovery() {
+    if (this.disposing || this.permissionModeFallbackRetryTimer) return;
+    this.permissionModeFallbackRetryTimer = setTimeout(() => {
+      this.permissionModeFallbackRetryTimer = null;
+      void this.recoverPendingPermissionModeFallbacks();
+    }, SidebarProvider.PERMISSION_MODE_FALLBACK_RETRY_MS);
+  }
+
+  private async runPermissionModeFallbackRecovery() {
+    const pendingSessionIDs = this.sessionPermissionModes.pendingSafeFallbackSessionIds();
+    if (pendingSessionIDs.length === 0) return;
+    try {
+      await this.runtime.ensureServerStarted();
+    } catch (err) {
+      logger.warn(
+        `Could not recover pending permission modes: ${err instanceof Error ? err.message : String(err)}`
+      );
+      return;
+    }
+
+    const recover = async (directoriesBySessionID: ReadonlyMap<string, string>) => {
+      const sessionIDs = [...directoriesBySessionID.keys()];
+      const results = await Promise.allSettled(
+        sessionIDs.map((sessionID) =>
+          this.updateConfirmedPermissionMode(
+            sessionID,
+            'default',
+            directoriesBySessionID.get(sessionID),
+            true
+          )
+        )
+      );
+      for (let index = 0; index < results.length; index += 1) {
+        const result = results[index];
+        if (result?.status !== 'rejected') continue;
+        logger.warn(
+          `Could not recover pending permission mode for ${sessionIDs[index]}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`
+        );
+      }
+    };
+
+    const knownDirectories = new Map<string, string>();
+    for (const sessionID of pendingSessionIDs) {
+      const directory = this.sessionState.directoryFor(sessionID);
+      if (directory) knownDirectories.set(sessionID, directory);
+    }
+    await recover(knownDirectories);
+
+    const unresolvedSessionIDs = new Set(
+      this.sessionPermissionModes
+        .pendingSafeFallbackSessionIds()
+        .filter((sessionID) => !this.sessionState.directoryFor(sessionID))
+    );
+    if (unresolvedSessionIDs.size === 0) return;
+    const context = this.contextProvider.context;
+    const directories = [
+      ...(context.workspaceFolders ?? []).map((folder) => folder.path),
+      context.workspaceDirectory,
+      context.workspacePath,
+      ...[...this.endpoints].map((endpoint) => endpoint.workspacePath),
+      this.server.getWorkspaceCwd(),
+    ]
+      .filter((directory): directory is string => Boolean(directory))
+      .filter((directory, index, values) => values.indexOf(directory) === index);
+    const listings = await Promise.allSettled(
+      directories.map(async (directory) => ({
+        directory,
+        sessions: await this.server.request('GET', FULL_SESSION_LIST_PATH, undefined, {
+          directory,
+        }),
+      }))
+    );
+    const discoveredDirectories = new Map<string, string>();
+    for (const listing of listings) {
+      if (listing.status !== 'fulfilled' || !Array.isArray(listing.value.sessions)) continue;
+      for (const value of listing.value.sessions) {
+        const session = asRecord(value);
+        if (typeof session?.id !== 'string' || !unresolvedSessionIDs.has(session.id)) continue;
+        if (
+          typeof session.directory !== 'string' ||
+          !isSameWorkspacePath(session.directory, listing.value.directory)
+        ) {
+          continue;
+        }
+        discoveredDirectories.set(session.id, listing.value.directory);
+      }
+    }
+    await recover(discoveredDirectories);
+  }
+
   private updateConfirmedPermissionMode(
     sessionID: string,
     mode: PermissionMode,
-    directory?: string
+    directory?: string,
+    recoverFallback = false
   ) {
     const previous = this.permissionModeQueues.get(sessionID) ?? Promise.resolve();
     const operation = previous
       .catch(() => undefined)
       .then(async () => {
-        await this.sessionPermissionModes.stageSafeFallback(sessionID);
+        if (
+          recoverFallback &&
+          !this.sessionPermissionModes.pendingSafeFallbackSessionIds().includes(sessionID)
+        ) {
+          return;
+        }
+        try {
+          await this.sessionPermissionModes.stageSafeFallback(sessionID);
+        } catch (err) {
+          this.postPermissionModes();
+          this.schedulePermissionModeFallbackRecovery();
+          throw err;
+        }
+        this.postPermissionModes();
         let session: unknown;
         try {
           session = await this.server.request(
@@ -1712,20 +1897,90 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             { directory }
           );
         } catch (err) {
-          await this.sessionPermissionModes.clearSafeFallback(sessionID).catch(() => undefined);
+          this.postPermissionModes();
+          this.schedulePermissionModeFallbackRecovery();
           throw err;
         }
-        let modes: Record<string, PermissionMode>;
         try {
-          modes = await this.sessionPermissionModes.set(sessionID, mode);
+          const modes = await this.sessionPermissionModes.set(sessionID, mode);
+          this.postPermissionModes(modes);
         } catch (err) {
-          modes = this.sessionPermissionModes.list();
           logger.warn(
             `Failed to persist confirmed permission mode: ${err instanceof Error ? err.message : String(err)}`
           );
+          this.postPermissionModes();
+          try {
+            await this.server.request(
+              'PATCH',
+              `/session/${encodeURIComponent(sessionID)}`,
+              { permission: getSessionPermissionRulesForMode('default', 'update') },
+              { directory }
+            );
+            await this.sessionPermissionModes.set(sessionID, 'default');
+            this.postPermissionModes();
+          } catch (recoveryError) {
+            logger.warn(
+              `Could not immediately restore safe permission rules: ${recoveryError instanceof Error ? recoveryError.message : String(recoveryError)}`
+            );
+            this.schedulePermissionModeFallbackRecovery();
+          }
+          throw new Error('Permission mode was not saved; safe default recovery is in progress', {
+            cause: err,
+          });
         }
-        this.post({ type: 'permission-modes/sync', payload: { modes } });
         return session;
+      });
+    this.permissionModeQueues.set(sessionID, operation);
+    const clearQueue = () => {
+      if (this.permissionModeQueues.get(sessionID) === operation) {
+        this.permissionModeQueues.delete(sessionID);
+      }
+    };
+    void operation.then(clearQueue, clearQueue);
+    return operation;
+  }
+
+  private persistPreconfiguredPermissionMode(
+    sessionID: string,
+    mode: PermissionMode,
+    directory?: string,
+    ifAbsent = false
+  ): Promise<void> {
+    const previous = this.permissionModeQueues.get(sessionID) ?? Promise.resolve();
+    const operation = previous
+      .catch(() => undefined)
+      .then(async () => {
+        if (ifAbsent && Object.hasOwn(this.sessionPermissionModes.list(), sessionID)) return;
+        try {
+          await this.sessionPermissionModes.stageSafeFallback(sessionID);
+        } catch (err) {
+          this.postPermissionModes();
+          try {
+            await this.server.request(
+              'PATCH',
+              `/session/${encodeURIComponent(sessionID)}`,
+              { permission: getSessionPermissionRulesForMode('default', 'update') },
+              { directory }
+            );
+          } catch (recoveryError) {
+            logger.warn(
+              `Could not restore safe rules after fallback persistence failed: ${recoveryError instanceof Error ? recoveryError.message : String(recoveryError)}`
+            );
+          }
+          this.schedulePermissionModeFallbackRecovery();
+          throw err;
+        }
+        this.postPermissionModes();
+        try {
+          const modes = await this.sessionPermissionModes.set(sessionID, mode);
+          this.postPermissionModes(modes);
+        } catch (err) {
+          this.postPermissionModes();
+          this.schedulePermissionModeFallbackRecovery();
+          throw new Error('Permission mode was not saved; safe default recovery is in progress', {
+            cause: err,
+          });
+        }
       });
     this.permissionModeQueues.set(sessionID, operation);
     const clearQueue = () => {
@@ -1982,6 +2237,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (this.sessionReconcileTimer) {
       clearInterval(this.sessionReconcileTimer);
       this.sessionReconcileTimer = null;
+    }
+    if (this.permissionModeFallbackRetryTimer) {
+      clearTimeout(this.permissionModeFallbackRetryTimer);
+      this.permissionModeFallbackRetryTimer = null;
     }
     await this.webviewSession.dispose();
     await this.ralphHost.dispose();
@@ -2448,27 +2707,47 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.sessionState.busyEvidenceRevisionFor(sessionID),
       ])
     );
-    let serverStatuses: Record<string, unknown>;
-    try {
-      const directories = new Set<string | undefined>();
-      for (const sessionID of trackedSessionIDs) {
-        directories.add(this.sessionState.directoryFor(sessionID));
+    const directoriesBySessionID = new Map(
+      [...trackedSessionIDs].map((sessionID) => [
+        sessionID,
+        this.sessionState.directoryFor(sessionID),
+      ])
+    );
+    const directories = [...new Set(directoriesBySessionID.values())];
+    const results = await Promise.allSettled(
+      directories.map((directory) =>
+        this.server.request('GET', '/session/status', undefined, { directory })
+      )
+    );
+    const successfulDirectories = new Set<string | undefined>();
+    const serverStatuses: Record<string, unknown> = {};
+    for (let index = 0; index < results.length; index += 1) {
+      const result = results[index];
+      if (result?.status !== 'fulfilled') continue;
+      successfulDirectories.add(directories[index]);
+      if (result.value && typeof result.value === 'object') {
+        Object.assign(serverStatuses, result.value);
       }
-      const results = await Promise.all(
-        [...directories].map((directory) =>
-          this.server.request('GET', '/session/status', undefined, { directory })
-        )
-      );
-      serverStatuses = Object.assign(
-        {},
-        ...results.filter(
-          (result): result is Record<string, unknown> => !!result && typeof result === 'object'
-        )
-      );
-    } catch {
-      return;
+    }
+    if (successfulDirectories.size === 0) return;
+    // The state manager checks deferred prompt failures before its revision guard.
+    // Preserve failed-root busy state until that directory has an authoritative result.
+    for (const sessionID of observedBusyRevisions.keys()) {
+      if (!successfulDirectories.has(directoriesBySessionID.get(sessionID))) {
+        serverStatuses[sessionID] = { type: 'busy' };
+      }
+    }
+    for (const sessionID of this.sessionState.busy) {
+      const observedRevision = observedBusyRevisions.get(sessionID);
+      if (
+        observedRevision === undefined ||
+        this.sessionState.busyEvidenceRevisionFor(sessionID) !== observedRevision
+      ) {
+        serverStatuses[sessionID] = { type: 'busy' };
+      }
     }
     for (const sessionID of queuedSessionIDs) {
+      if (!successfulDirectories.has(directoriesBySessionID.get(sessionID))) continue;
       const statusType = asRecord(serverStatuses[sessionID])?.type;
       this.postQueuedSessionStatusFor(
         sessionID,

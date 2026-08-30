@@ -11,10 +11,11 @@ const mocks = vi.hoisted(() => ({
     workspace: {
       textDocuments: [],
       getWorkspaceFolder: vi.fn(() => undefined),
+      getConfiguration: vi.fn(() => ({ get: vi.fn(() => undefined) })),
       asRelativePath: vi.fn((uri: { fsPath: string }) => uri.fsPath),
       fs: {
         readFile: vi.fn(),
-        writeFile: vi.fn(() => Promise.resolve()),
+        writeFile: vi.fn((_uri: { fsPath: string }, _encoded: Uint8Array) => Promise.resolve()),
         stat: vi.fn(),
         createDirectory: vi.fn(() => Promise.resolve()),
       },
@@ -2271,6 +2272,7 @@ describe('RestProxy handleRequest', () => {
     });
 
     await proxy.handleRequest(makePayload(111, 'DELETE', '/varro/session/some-id/delete'));
+    await proxy.handleRequest(makePayload(112, 'DELETE', '/varro/session/some-id/delete'));
 
     expect(serverRequest.mock.calls).toEqual([
       ['GET', '/session/some-id'],
@@ -2280,6 +2282,28 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.removeSessionImages).toHaveBeenCalledWith(['some-id']);
     expect(callbacks.sessionState.removeSessions).toHaveBeenCalledWith(['some-id']);
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 111, data: true });
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 112, data: true });
+  });
+
+  it('does not confirm permanent deletion while the session still exists', async () => {
+    const serverRequest = vi.fn((method: string) =>
+      Promise.resolve(method === 'DELETE' ? false : { id: 'some-id', directory: '/repo' })
+    );
+    const { proxy, callbacks } = createProxy({
+      server: {
+        ...createCallbacks().server,
+        request: serverRequest,
+      } as never,
+    });
+
+    await proxy.handleRequest(makePayload(113, 'DELETE', '/varro/session/some-id/delete'));
+
+    expect(callbacks.removeSessionImages).not.toHaveBeenCalled();
+    expect(callbacks.sessionState.removeSessions).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 113,
+      error: 'OpenCode did not confirm session deletion',
+    });
   });
 
   it('ignores workspace-specific directory scoping when looking up a session tree for soft delete', async () => {
@@ -2514,6 +2538,62 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
+  it('bounds paginated multi-root requests when one root is unavailable', async () => {
+    const healthySessions = [{ id: 'healthy', directory: '/repo-a' }];
+    const serverRequest = vi.fn(
+      (_method: string, _path: string, _body: unknown, options?: { directory?: string }) =>
+        options?.directory === '/repo-b'
+          ? Promise.reject(new Error('repo-b unavailable'))
+          : Promise.resolve(healthySessions)
+    );
+    const { proxy, callbacks } = createProxy({
+      contextProvider: {
+        ...createCallbacks().contextProvider,
+        context: {
+          workspacePath: '/repo-a',
+          workspaceFolders: [
+            { name: 'repo-a', path: '/repo-a' },
+            { name: 'repo-b', path: '/repo-b' },
+          ],
+          activeFile: null,
+          selection: null,
+          diagnostics: [],
+        },
+        getOpenWorkspaceRoot: vi.fn((path: string) => path),
+      } as never,
+      server: {
+        ...createCallbacks().server,
+        getWorkspaceCwd: vi.fn(() => '/repo-a'),
+        request: serverRequest,
+      } as never,
+    });
+
+    await proxy.handleRequest(makePayload(1521, 'GET', '/session?limit=100'));
+
+    expect(serverRequest).toHaveBeenCalledTimes(2);
+    expect(serverRequest).toHaveBeenCalledWith(
+      'GET',
+      '/session?limit=101',
+      undefined,
+      withSignal({ directory: '/repo-a' })
+    );
+    expect(serverRequest).toHaveBeenCalledWith(
+      'GET',
+      '/session?limit=101',
+      undefined,
+      withSignal({ directory: '/repo-b' })
+    );
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 1521,
+      data: {
+        items: healthySessions,
+        hasMore: false,
+        incomplete: true,
+        unavailableDirectories: ['/repo-b'],
+      },
+    });
+  });
+
   it('does not treat a partial session page as an authoritative directory snapshot', async () => {
     const partialPage = deferred<Array<{ id: string; directory: string }>>();
     const serverRequest = vi.fn((_method: string, path: string) => {
@@ -2584,12 +2664,24 @@ describe('RestProxy handleRequest', () => {
   });
 
   it('hides and deletes orphaned permission judges discovered in session lists', async () => {
+    const legacyJudgePermission = [
+      { permission: '*', pattern: '*', action: 'deny' },
+      { permission: 'StructuredOutput', pattern: '*', action: 'allow' },
+    ];
     const sessions = [
       { id: 'visible', directory: '/repo', title: 'Visible session' },
+      {
+        id: 'renamed-session',
+        directory: '/repo',
+        title: 'Varro permission judge: ordinary-session',
+        permission: [{ permission: '*', pattern: '*', action: 'ask' }],
+        time: { updated: Date.now() - 180_000 },
+      },
       {
         id: 'legacy-judge',
         directory: '/repo',
         title: 'Varro permission judge: per_legacy',
+        permission: legacyJudgePermission,
         time: { updated: Date.now() - 180_000 },
       },
       {
@@ -2609,11 +2701,11 @@ describe('RestProxy handleRequest', () => {
       hiddenSessions,
     });
 
-    await proxy.handleRequest(makePayload(161, 'GET', '/session?limit=3'));
+    await proxy.handleRequest(makePayload(161, 'GET', '/session?limit=4'));
 
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 161,
-      data: { items: [sessions[0]], hasMore: false },
+      data: { items: [sessions[1], sessions[0]], hasMore: false },
     });
     await vi.waitFor(() => {
       expect(serverRequest).toHaveBeenCalledWith('DELETE', '/session/legacy-judge', undefined, {
@@ -2621,6 +2713,52 @@ describe('RestProxy handleRequest', () => {
       });
       expect(serverRequest).toHaveBeenCalledWith('DELETE', '/session/marked-judge', undefined, {
         directory: '/repo',
+      });
+    });
+    expect(serverRequest).not.toHaveBeenCalledWith(
+      'DELETE',
+      '/session/renamed-session',
+      undefined,
+      expect.anything()
+    );
+  });
+
+  it('hides restarted permission judges from sibling workspace catalogs', async () => {
+    const visible = { id: 'visible', directory: '/repo-a', title: 'Visible session' };
+    const siblingJudge = {
+      id: 'sibling-judge',
+      directory: '/repo-b',
+      title: 'Internal helper',
+      metadata: { varroInternal: 'permission-judge' },
+      time: { updated: Date.now() - 180_000 },
+    };
+    const serverRequest = vi.fn(
+      (method: string, _path: string, _body: unknown, options?: { directory?: string }) => {
+        if (method === 'DELETE') return Promise.resolve(true);
+        return Promise.resolve(options?.directory === '/repo-b' ? [siblingJudge] : [visible]);
+      }
+    );
+    const hiddenSessions = new HiddenSessionManager();
+    const callbacks = createCallbacks({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      hiddenSessions,
+    });
+    callbacks.contextProvider.context.workspacePath = '/repo-a';
+    callbacks.contextProvider.context.workspaceFolders = [
+      { name: 'repo-a', path: '/repo-a' },
+      { name: 'repo-b', path: '/repo-b' },
+    ];
+    const { proxy } = createProxy(callbacks);
+
+    await proxy.handleRequest(makePayload(162, 'GET', '/session?limit=2'));
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 162,
+      data: { items: [visible], hasMore: false },
+    });
+    await vi.waitFor(() => {
+      expect(serverRequest).toHaveBeenCalledWith('DELETE', '/session/sibling-judge', undefined, {
+        directory: '/repo-b',
       });
     });
   });
@@ -3158,7 +3296,7 @@ describe('RestProxy handleRequest', () => {
     nowSpy.mockRestore();
   });
 
-  it('keeps healthy session roots when one workspace root fails', async () => {
+  it('marks a paginated session list with its unavailable workspace roots', async () => {
     const serverRequest = vi.fn(
       async (_method: string, _path: string, _body: unknown, options?: { directory?: string }) => {
         if (options?.directory === '/repo-b') throw new Error('repo-b unavailable');
@@ -3174,15 +3312,20 @@ describe('RestProxy handleRequest', () => {
     ];
     const { proxy } = createProxy(callbacks);
 
-    await proxy.handleRequest(makePayload(224, 'GET', '/session'));
+    await proxy.handleRequest(makePayload(224, 'GET', '/session?limit=100'));
 
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 224,
-      data: [{ id: 'session-a', directory: '/repo-a' }],
+      data: {
+        items: [{ id: 'session-a', directory: '/repo-a' }],
+        hasMore: false,
+        incomplete: true,
+        unavailableDirectories: ['/repo-b'],
+      },
     });
   });
 
-  it('keeps healthy status roots when one workspace root fails', async () => {
+  it('rejects partial status snapshots when one workspace root fails', async () => {
     const serverRequest = vi.fn(
       async (_method: string, path: string, _body: unknown, options?: { directory?: string }) => {
         if (options?.directory === '/repo-b') throw new Error('repo-b unavailable');
@@ -3204,7 +3347,7 @@ describe('RestProxy handleRequest', () => {
 
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 225,
-      data: { 'session-a': { type: 'busy' } },
+      error: 'Could not load session statuses from: /repo-b',
     });
   });
 
@@ -3964,5 +4107,67 @@ describe('RestProxy handleRequest', () => {
     await proxy.handleRequest(makePayload(35, 'POST', '/session/session-1/abort'));
 
     expect(markSessionBusy).not.toHaveBeenCalled();
+  });
+
+  it('serializes concurrent project model routing updates across proxy instances', async () => {
+    let raw = '{}\n';
+    let synchronizedReads = 0;
+    const initialReads = deferred<void>();
+    mocks.vscode.workspace.fs.readFile.mockImplementation(async (uri: { fsPath: string }) => {
+      if (uri.fsPath !== '/repo/opencode.json') throw { code: 'FileNotFound' };
+      const snapshot = raw;
+      if (synchronizedReads < 2) {
+        synchronizedReads += 1;
+        if (synchronizedReads === 2) initialReads.resolve();
+        await initialReads.promise;
+      }
+      return new TextEncoder().encode(snapshot);
+    });
+    mocks.vscode.workspace.fs.stat.mockResolvedValue({
+      mtime: 1,
+      size: 3,
+      type: 0,
+      ctime: 1,
+    });
+    mocks.vscode.workspace.fs.writeFile.mockImplementation(
+      async (_uri: { fsPath: string }, encoded: Uint8Array) => {
+        raw = new TextDecoder().decode(encoded);
+      }
+    );
+    const first = createProxy();
+    const second = createProxy();
+
+    await Promise.all([
+      first.proxy.handleRequest(
+        makePayload(401, 'POST', '/varro/opencode-config/model-routing', {
+          target: 'small_model',
+          providerID: 'openai',
+          modelID: 'gpt-5-mini',
+        })
+      ),
+      second.proxy.handleRequest(
+        makePayload(402, 'POST', '/varro/opencode-config/model-routing', {
+          target: 'agent',
+          agentName: 'review',
+          providerID: 'anthropic',
+          modelID: 'claude-sonnet-4',
+        })
+      ),
+    ]);
+
+    expect(JSON.parse(raw)).toEqual({
+      $schema: 'https://opencode.ai/config.json',
+      small_model: 'openai/gpt-5-mini',
+      agent: { review: { model: 'anthropic/claude-sonnet-4' } },
+    });
+    expect(mocks.vscode.workspace.fs.writeFile).toHaveBeenCalledTimes(2);
+    expect(first.callbacks.postApiResponse).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ id: 401, data: expect.any(Object) })
+    );
+    expect(second.callbacks.postApiResponse).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ id: 402, data: expect.any(Object) })
+    );
   });
 });

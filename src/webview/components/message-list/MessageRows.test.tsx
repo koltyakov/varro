@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import type * as UseOpenCodeModule from '../../hooks/useOpenCode';
 import { formatClockTime } from '../../lib/message-time';
-import { setState } from '../../lib/state';
+import { setState, startLoading, stopLoading } from '../../lib/state';
 import { copyIcon, gitForkIcon } from '../../lib/ui-icons';
 import { assistantMessage, textPart } from '../MessageList.test-utils';
 import { toCssUrl } from '../UiIcon';
@@ -29,6 +29,7 @@ afterEach(() => {
   cleanup?.();
   cleanup = undefined;
   vi.useRealTimers();
+  stopLoading();
   setState('messages', []);
   container.remove();
 });
@@ -205,6 +206,30 @@ describe('AssistantDialogSummaryForMessage', () => {
     expect(icon).toBeInstanceOf(HTMLSpanElement);
     expect(icon?.style.getPropertyValue('--ui-icon-width')).toBe('16px');
     expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(gitForkIcon));
+
+    button?.click();
+
+    expect(forkSessionMock).toHaveBeenCalledWith('session-1');
+  });
+
+  it('forks a completed response while a later turn is active', () => {
+    startLoading();
+    cleanup = render(
+      () => (
+        <AssistantDialogSummaryForMessage
+          summary={{ durationMs: 1_000, inputTokens: 0, outputTokens: 0, agentCount: 0 }}
+          msg={{ info: assistantMessage('assistant-1', { sessionID: 'session-1' }), parts: [] }}
+          hasBuildAgent={false}
+          latestPlanImplementationMessageId={null}
+        />
+      ),
+      container
+    );
+
+    const button = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Fork chat from here"]'
+    );
+    expect(button?.disabled).toBe(false);
 
     button?.click();
 

@@ -353,7 +353,23 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
         if (!isSafePersistedSessionId(sessionId) || !isPermissionMode(mode)) return null;
         entries.push([sessionId, mode]);
       }
-      return { type, payload: { modes: Object.fromEntries(entries) } };
+      const recoveringSessionIds = payload?.recoveringSessionIds;
+      if (
+        recoveringSessionIds !== undefined &&
+        (!Array.isArray(recoveringSessionIds) ||
+          !recoveringSessionIds.every(isSafePersistedSessionId))
+      ) {
+        return null;
+      }
+      const parsedPayload: Extract<ExtensionMessage, { type: 'permission-modes/sync' }>['payload'] =
+        {
+          modes: Object.fromEntries(entries),
+        };
+      if (recoveringSessionIds) parsedPayload.recoveringSessionIds = recoveringSessionIds;
+      return {
+        type,
+        payload: parsedPayload,
+      };
     }
 
     case 'session-models/sync': {

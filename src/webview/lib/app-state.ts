@@ -85,7 +85,6 @@ import {
   readStoredBooleanRecord,
   normalizeStoredClipboardImage,
   readStoredDroppedFiles,
-  readStoredPermissionModes,
   readStoredQueuedMessageEdit,
   readStoredQueuedMessages,
   readStoredNullableStringRecord,
@@ -150,6 +149,7 @@ export interface AppState {
   lspStatus: LspStatus[];
   providerDefaults: Record<string, string>;
   sessionPermissionModes: Record<string, PermissionMode>;
+  permissionModeRecoverySessionIds: string[];
   sessionAutoPermissionCounts: Record<
     string,
     { inFlight: number; approved: number; rejected: number }
@@ -384,13 +384,8 @@ export function createAppState(): AppStateInstance {
     mcpStatus: {},
     lspStatus: [],
     providerDefaults: {},
-    sessionPermissionModes:
-      initialWebviewState.webviewContext?.surface === 'editor'
-        ? (initialWebviewState.sessionPermissionModes ?? {})
-        : {
-            ...readStoredPermissionModes(STORAGE_KEYS.sessionPermissionModes),
-            ...initialWebviewState.sessionPermissionModes,
-          },
+    sessionPermissionModes: initialWebviewState.sessionPermissionModes ?? {},
+    permissionModeRecoverySessionIds: initialWebviewState.permissionModeRecoverySessionIds ?? [],
     sessionAutoPermissionCounts: {},
     sessionAutoPermissionActivity: {},
     autoPermissionCountsSince: Date.now(),

@@ -30,11 +30,17 @@ export class SessionPermissionModeStore {
         ? storedFallbacks.filter((value): value is string => isSafePersistedSessionId(value))
         : []
     );
-    for (const sessionId of this.fallbackSessionIds) this.modes[sessionId] = 'default';
   }
 
   list() {
-    return { ...this.modes };
+    const modes = { ...this.modes };
+    // Suppress automatic approvals until recovery confirms the remote rules.
+    for (const sessionId of this.fallbackSessionIds) modes[sessionId] = 'default';
+    return modes;
+  }
+
+  pendingSafeFallbackSessionIds(): string[] {
+    return [...this.fallbackSessionIds];
   }
 
   set(sessionId: string, mode: PermissionMode | null): Promise<Record<string, PermissionMode>> {
@@ -47,8 +53,13 @@ export class SessionPermissionModeStore {
       else next[sessionId] = mode;
       this.modes = next;
       await this.persistence.set(SESSION_PERMISSION_MODES_KEY, next);
-      if (this.fallbackSessionIds.delete(sessionId)) {
-        await this.persistFallbacks();
+      if (this.fallbackSessionIds.has(sessionId)) {
+        await this.persistFallbacks(
+          [...this.fallbackSessionIds].filter(
+            (fallbackSessionId) => fallbackSessionId !== sessionId
+          )
+        );
+        this.fallbackSessionIds.delete(sessionId);
       }
       return this.list();
     });
@@ -58,31 +69,25 @@ export class SessionPermissionModeStore {
     return this.set(sessionId, null).then(() => undefined);
   }
 
-  stageSafeFallback(sessionId: string): Promise<void> {
+  stageSafeFallback(sessionId: string): Promise<boolean> {
     if (!isSafePersistedSessionId(sessionId)) {
       return Promise.reject(new Error('Invalid persisted session ID'));
     }
     return this.mutate(async () => {
-      if (this.fallbackSessionIds.has(sessionId)) return;
+      if (this.fallbackSessionIds.has(sessionId)) return false;
       this.fallbackSessionIds.add(sessionId);
-      try {
-        await this.persistFallbacks();
-      } catch (err) {
-        this.fallbackSessionIds.delete(sessionId);
-        throw err;
-      }
+      await this.persistFallbacks();
+      return true;
     });
   }
 
   clearSafeFallback(sessionId: string): Promise<void> {
     return this.mutate(async () => {
-      if (!this.fallbackSessionIds.delete(sessionId)) return;
-      try {
-        await this.persistFallbacks();
-      } catch (err) {
-        this.fallbackSessionIds.add(sessionId);
-        throw err;
-      }
+      if (!this.fallbackSessionIds.has(sessionId)) return;
+      await this.persistFallbacks(
+        [...this.fallbackSessionIds].filter((fallbackSessionId) => fallbackSessionId !== sessionId)
+      );
+      this.fallbackSessionIds.delete(sessionId);
     });
   }
 
@@ -96,8 +101,8 @@ export class SessionPermissionModeStore {
         changed = true;
       }
       if (changed) {
-        this.modes = next;
         await this.persistence.set(SESSION_PERMISSION_MODES_KEY, next);
+        this.modes = next;
       }
       return this.list();
     });
@@ -116,9 +121,7 @@ export class SessionPermissionModeStore {
     return result;
   }
 
-  private persistFallbacks() {
-    return this.persistence.set(SESSION_PERMISSION_MODE_FALLBACKS_KEY, [
-      ...this.fallbackSessionIds,
-    ]);
+  private persistFallbacks(sessionIds: readonly string[] = [...this.fallbackSessionIds]) {
+    return this.persistence.set(SESSION_PERMISSION_MODE_FALLBACKS_KEY, sessionIds);
   }
 }

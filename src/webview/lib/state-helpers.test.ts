@@ -712,7 +712,6 @@ describe('state helpers', () => {
     expect(stateModule.getPermissionModeForSession('session-1')).toBe('full');
 
     stateModule.setPendingSessionPermissionMode('session-1', null);
-    stateModule.applySessionPermissionModesSnapshot({ 'session-1': 'auto' });
 
     expect(stateModule.getPermissionModeForSession('session-1')).toBe('auto');
   });
@@ -1240,7 +1239,7 @@ describe('state helpers', () => {
     expect(stateModule.state.sessionSelectedMcps).toEqual({
       'session-1': ['docs', 'browser-bridge'],
     });
-    expect(stateModule.state.sessionPermissionModes).toEqual({ 'session-1': 'full' });
+    expect(stateModule.state.sessionPermissionModes).toEqual({});
     expect(stateModule.getPersistedSelectedAgent()).toBeNull();
     expect(stateModule.getPersistedSelectedModel()).toEqual({
       providerID: 'openai',

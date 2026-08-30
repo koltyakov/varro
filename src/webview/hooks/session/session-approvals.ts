@@ -344,9 +344,9 @@ export class SessionApprovalOperations {
       : null;
     if (sessionId && queue) this.permissionModeQueues.set(sessionId, queue);
 
+    if (sessionId && queue) this.deps.setPendingSessionPermissionMode?.(sessionId, mode);
     applyPermissionModeSelection(this.deps, sessionId, mode);
     if (!sessionId || !queue) return;
-    this.deps.setPendingSessionPermissionMode?.(sessionId, mode);
 
     queue.pending += 1;
     let pendingCleared = false;
@@ -378,6 +378,7 @@ export class SessionApprovalOperations {
             queue.confirmedMode = mode;
             if (this.permissionModeGenerationBySession.get(sessionKey) === generation) {
               this.deps.setPendingSessionPermissionMode?.(sessionId, null);
+              this.deps.setPermissionModeForSession(sessionId, mode);
               pendingCleared = true;
             }
           },

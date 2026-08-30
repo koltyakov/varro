@@ -14,8 +14,33 @@ type SessionSnapshot = {
   id: string;
   title?: unknown;
   metadata?: unknown;
+  permission?: unknown;
   time?: unknown;
 };
+
+function hasLegacyPermissionJudgeRules(session: SessionSnapshot) {
+  const permission = session.permission;
+  if (!Array.isArray(permission) || permission.length < 2) return false;
+  const rules = permission.map((rule) =>
+    rule && typeof rule === 'object' ? (rule as Record<string, unknown>) : null
+  );
+  const structuredOutput = rules.at(-1);
+  if (
+    structuredOutput?.permission !== 'StructuredOutput' ||
+    structuredOutput.pattern !== '*' ||
+    structuredOutput.action !== 'allow'
+  ) {
+    return false;
+  }
+  const deniedRules = rules.slice(0, -1);
+  return (
+    deniedRules.some((rule) => rule?.permission === '*') &&
+    deniedRules.every(
+      (rule) =>
+        typeof rule?.permission === 'string' && rule.pattern === '*' && rule.action === 'deny'
+    )
+  );
+}
 
 function isPermissionJudgeSession(session: SessionSnapshot) {
   const metadata =
@@ -25,13 +50,16 @@ function isPermissionJudgeSession(session: SessionSnapshot) {
   return (
     metadata?.varroInternal === PERMISSION_JUDGE_SESSION_METADATA.varroInternal ||
     (typeof session.title === 'string' &&
-      session.title.startsWith(PERMISSION_JUDGE_SESSION_TITLE_PREFIX))
+      session.title.startsWith(PERMISSION_JUDGE_SESSION_TITLE_PREFIX) &&
+      hasLegacyPermissionJudgeRules(session))
   );
 }
 
 export class HiddenSessionManager {
   private readonly hiddenIds = new Set<string>();
+  private readonly confirmedHiddenIds = new Set<string>();
   private readonly pendingTitles = new Set<string>();
+  private readonly provisionalIdsByTitle = new Map<string, Set<string>>();
   private readonly deletionTombstones = new Map<string, ReturnType<typeof setTimeout>>();
 
   registerPendingTitle(title: string) {
@@ -40,15 +68,34 @@ export class HiddenSessionManager {
 
   forgetPendingTitle(title: string) {
     this.pendingTitles.delete(title);
+    const provisionalIds = this.provisionalIdsByTitle.get(title);
+    this.provisionalIdsByTitle.delete(title);
+    for (const sessionID of provisionalIds ?? []) {
+      const stillProvisional = [...this.provisionalIdsByTitle.values()].some((ids) =>
+        ids.has(sessionID)
+      );
+      if (!stillProvisional) this.hiddenIds.delete(sessionID);
+    }
   }
 
   hide(sessionID: string | null | undefined) {
-    if (sessionID) this.hiddenIds.add(sessionID);
+    if (!sessionID) return;
+    for (const [title, ids] of this.provisionalIdsByTitle) {
+      ids.delete(sessionID);
+      if (ids.size === 0) this.provisionalIdsByTitle.delete(title);
+    }
+    this.confirmedHiddenIds.add(sessionID);
+    this.hiddenIds.add(sessionID);
   }
 
   unhide(sessionID: string | null | undefined) {
     if (!sessionID) return;
     this.hiddenIds.delete(sessionID);
+    this.confirmedHiddenIds.delete(sessionID);
+    for (const [title, ids] of this.provisionalIdsByTitle) {
+      ids.delete(sessionID);
+      if (ids.size === 0) this.provisionalIdsByTitle.delete(title);
+    }
     this.clearDeletionTombstone(sessionID);
   }
 
@@ -65,6 +112,7 @@ export class HiddenSessionManager {
       if (this.deletionTombstones.get(sessionID) !== timeout) return;
       this.deletionTombstones.delete(sessionID);
       this.hiddenIds.delete(sessionID);
+      this.confirmedHiddenIds.delete(sessionID);
     }, DELETION_TOMBSTONE_TTL_MS);
     this.deletionTombstones.set(sessionID, timeout);
   }
@@ -80,8 +128,12 @@ export class HiddenSessionManager {
   observeSessionList(sessions: SessionSnapshot[], now = Date.now()) {
     const stalePermissionJudgeIds: string[] = [];
     for (const session of sessions) {
-      if (!isPermissionJudgeSession(session)) continue;
-      this.hide(session.id);
+      const hasPendingTitle =
+        typeof session.title === 'string' && this.pendingTitles.has(session.title);
+      const isJudge = isPermissionJudgeSession(session);
+      if (!isJudge && !hasPendingTitle) continue;
+      if (isJudge) this.hide(session.id);
+      else if (typeof session.title === 'string') this.hideProvisionally(session.title, session.id);
       const time =
         session.time && typeof session.time === 'object'
           ? (session.time as Record<string, unknown>)
@@ -93,7 +145,7 @@ export class HiddenSessionManager {
             ? time.created
             : null;
       if (
-        (typeof session.title !== 'string' || !this.pendingTitles.has(session.title)) &&
+        !hasPendingTitle &&
         updatedAt !== null &&
         now - updatedAt >= PERMISSION_JUDGE_STALE_AFTER_MS
       ) {
@@ -113,14 +165,17 @@ export class HiddenSessionManager {
     const info = event.properties?.info;
     const id = typeof info?.id === 'string' ? info.id : event.properties?.sessionID;
     const title = typeof info?.title === 'string' ? info.title : null;
-    if (
-      !id ||
-      (!isPermissionJudgeSession({ id, title, metadata: info?.metadata }) &&
-        (!title || !this.pendingTitles.has(title)))
-    ) {
+    if (!id) {
       return;
     }
-    this.hide(id);
+    const isJudge = isPermissionJudgeSession({
+      id,
+      title,
+      metadata: info?.metadata,
+      permission: info?.permission,
+    });
+    if (isJudge) this.hide(id);
+    else if (title && this.pendingTitles.has(title)) this.hideProvisionally(title, id);
   }
 
   filterVisibleSessions<T extends SessionSnapshot>(sessions: T[]) {
@@ -144,5 +199,13 @@ export class HiddenSessionManager {
     const timeout = this.deletionTombstones.get(sessionID);
     if (timeout !== undefined) clearTimeout(timeout);
     this.deletionTombstones.delete(sessionID);
+  }
+
+  private hideProvisionally(title: string, sessionID: string) {
+    if (this.confirmedHiddenIds.has(sessionID)) return;
+    this.hiddenIds.add(sessionID);
+    const ids = this.provisionalIdsByTitle.get(title) ?? new Set<string>();
+    ids.add(sessionID);
+    this.provisionalIdsByTitle.set(title, ids);
   }
 }
