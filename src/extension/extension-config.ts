@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { ExtensionConfigState } from '../shared/provider-limit-config';
+import type { SessionHistoryScope } from '../shared/protocol';
 import { isPermissionMode } from '../shared/protocol';
 import { isNumber, isString } from '../shared/type-utils';
 
@@ -24,6 +25,14 @@ export function readExtensionConfigState(
     ),
     chatFontFamily: readChatFontFamily(chatConfig),
   };
+}
+
+export function readSessionHistoryScope(
+  resource?: vscode.Uri,
+  config: vscode.WorkspaceConfiguration = vscode.workspace.getConfiguration('varro', resource)
+): SessionHistoryScope {
+  const value = config.get<unknown>('chat.sessionHistoryScope');
+  return value === 'descendants' || value === 'project' ? value : 'directory';
 }
 
 function readDefaultPermissionMode(config: vscode.WorkspaceConfiguration) {

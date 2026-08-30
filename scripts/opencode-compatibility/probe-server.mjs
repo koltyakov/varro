@@ -417,6 +417,12 @@ async function runProbe() {
       isRecord(value) && value.healthy === true && typeof value.version === 'string',
   });
   await request('GET /session', 'GET', '/session', { validate: Array.isArray });
+  await request('GET /project/current', 'GET', '/project/current', {
+    validate: (value) => {
+      // oxlint-disable-next-line anti-slop/no-runtime-typeof -- The project response is external JSON and both fields must be validated.
+      return isRecord(value) && typeof value.id === 'string' && typeof value.worktree === 'string';
+    },
+  });
   await request('GET /session/status', 'GET', '/session/status', { validate: isRecord });
   await request('GET /question', 'GET', '/question', { validate: Array.isArray });
   await request('GET /permission', 'GET', '/permission', { validate: Array.isArray });
@@ -463,6 +469,12 @@ async function runProbe() {
     sessionID = isRecord(session) && typeof session.id === 'string' ? session.id : undefined;
     if (sessionID) {
       const encodedID = encodeURIComponent(sessionID);
+      await request('GET /session with project scope', 'GET', '/session?scope=project', {
+        validate: (value) => Array.isArray(value) && value.some((item) => item?.id === sessionID),
+      });
+      await request('GET /session with descendant path', 'GET', '/session?path=missing-subtree', {
+        validate: (value) => Array.isArray(value) && value.length === 0,
+      });
       await request('GET /session/:id', 'GET', `/session/${encodedID}`, {
         validate: (value) => isRecord(value) && value.id === sessionID,
       });

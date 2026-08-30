@@ -36,6 +36,7 @@ const KNOWN_TYPES = new Set<string>([
   'files/removed',
   'files/search-results',
   'config/update',
+  'session/catalog-invalidated',
   'theme/update',
   'vscode/open-result',
   'api/response',
@@ -240,6 +241,9 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
       if (isBoolean(payload.showChangedFiles)) config.showChangedFiles = payload.showChangedFiles;
       return { type, payload: config };
     }
+
+    case 'session/catalog-invalidated':
+      return { type };
 
     case 'theme/update': {
       const payload = asRecord(record.payload);

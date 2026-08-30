@@ -597,6 +597,7 @@ function getVersionedServerEventName<T>(value: T): ServerEventName | null {
 export type WebviewThemeKind = 'light' | 'dark' | 'high-contrast' | 'high-contrast-light';
 
 export type DesktopSessionPaneSide = 'left' | 'right';
+export type SessionHistoryScope = 'directory' | 'descendants' | 'project';
 
 export type WebviewRoute =
   | {
@@ -751,6 +752,7 @@ export type ExtensionMessage =
       type: 'config/update';
       payload: ExtensionConfigSnapshot;
     }
+  | { type: 'session/catalog-invalidated' }
   | { type: 'theme/update'; payload: { theme: WebviewThemeKind } }
   | {
       type: 'vscode/open-result';

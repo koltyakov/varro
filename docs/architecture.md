@@ -63,7 +63,7 @@ The implementation is split across focused components: `open-code-process.ts` ow
 
 Important behavior:
 
-- Workspace-sensitive requests carry an authoritative directory through both the request bridge and OpenCode transport. `RestProxy` aggregates session lists and statuses across exact open VS Code roots, filters hidden and recycled sessions before global sorting and pagination, and validates direct session operations against the requested root. Permissions, questions, messages, tools, and diffs remain directory-owned.
+- Workspace-sensitive requests carry an authoritative directory through both the request bridge and OpenCode transport. `RestProxy` resolves the resource-scoped session-history setting independently for each open VS Code root, aggregates lists and statuses using exact-directory, descendant-path, or full-Git-project scope, filters hidden and recycled sessions before global sorting and pagination, and authorizes direct session operations from the validated catalog. Full-project scope falls back to descendant-path scope for OpenCode's global non-Git project. Permissions, questions, messages, tools, and diffs remain directory-owned.
 - If the SSE stream drops while the server is running, Varro retries with exponential backoff.
 - If the event stream drops but REST still works, Varro marks the event stream as degraded so the UI can show a reconnecting banner.
 - If the child process exits after startup, Varro attempts a limited restart sequence.
@@ -233,7 +233,7 @@ Responsibilities:
 - synchronize per-session MCP selections with OpenCode
 - recover interrupted sessions after reload when the previous run still looks incomplete
 
-The runtime keeps a workspace-wide session catalog separate from the active execution directory, atomically activates a session's recorded directory before loading it, and handles stale loading recovery and model/provider limit refreshes.
+The runtime keeps a workspace-wide session catalog separate from the active execution directory, atomically activates a session's recorded directory before loading it, and handles stale loading recovery and model/provider limit refreshes. A session-history scope change invalidates extension-host catalogs and asks every webview runtime to reload session and recycle-bin state.
 
 #### UI composition
 

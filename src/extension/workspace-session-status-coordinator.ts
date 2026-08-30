@@ -63,6 +63,10 @@ export class WorkspaceSessionStatusCoordinator {
     }
   }
 
+  clearCatalogs() {
+    this.catalogs.clear();
+  }
+
   private deleteCurrent<T>(requests: Map<string, Promise<T>>, key: string, request: Promise<T>) {
     if (requests.get(key) === request) requests.delete(key);
   }

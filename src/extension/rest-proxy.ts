@@ -24,13 +24,18 @@ import type {
   PermissionMode,
   ServerStatus,
   SessionDiffSummary,
+  SessionHistoryScope,
   SessionTokenBreakdown,
   SessionTokenUsage,
   SessionWorkspaceScope,
   WebviewMessage,
   WorkspaceFilePick,
 } from '../shared/protocol';
-import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
+import {
+  getRelativePathWithinWorkspace,
+  isSameWorkspacePath,
+  normalizeWorkspaceIdentity,
+} from '../shared/workspace-path';
 import type { AutoApproveJudge } from './auto-approve-judge';
 import type { HiddenSessionManager } from './hidden-session-manager';
 import { isAllowedApiRequest } from './util/webview-message';
@@ -124,6 +129,13 @@ type WorkspaceSession = Record<string, unknown> & {
   directory: string;
 };
 
+type ResolvedSessionCatalogScope = {
+  mode: SessionHistoryScope;
+  root: string;
+  projectID?: string;
+  path?: string;
+};
+
 export { scopeOpenCodeRequest, getOpenCodeDirectoryHeaders } from './util/opencode-request';
 
 export interface RestProxyCallbacks {
@@ -174,6 +186,7 @@ export interface RestProxyCallbacks {
   simulateNoProviders: boolean;
   getRequestGeneration(): number;
   getStatus(): ServerStatus;
+  getSessionHistoryScope?(root: string): SessionHistoryScope;
   getWorkspacePath?(): string | null | undefined;
   ensureServerStarted(): Promise<string | undefined>;
   workspaceSessionStatusCoordinator?: WorkspaceSessionStatusCoordinator;
@@ -226,6 +239,7 @@ export interface RestProxyCallbacks {
 export class RestProxy {
   private readonly requestWorkspaceDirectory = new AsyncLocalStorage<string | undefined>();
   private sessionDirectories = new Map<string, string>();
+  private authorizedSessionDirectories = new Map<string, string>();
   private sessionWorkspaceScopes = new Map<string, SessionWorkspaceScope>();
   private workspaceStatusSessionCatalogs = new Map<
     string,
@@ -282,6 +296,12 @@ export class RestProxy {
     }
     this.workspaceRequests.clear();
     this.activeRequests.clear();
+  }
+
+  invalidateSessionCatalog() {
+    this.workspaceStatusSessionCatalogs.clear();
+    this.authorizedSessionDirectories.clear();
+    this.hasSessionDirectorySnapshot = false;
   }
 
   cancelRequestsOutsideDirectories(
@@ -535,7 +555,10 @@ export class RestProxy {
       await this.callbacks.cleanupExpiredRecycleBin();
 
       if (activationRequest) {
-        const directory = this.requireOpenWorkspaceRoot(activationRequest.directory);
+        const directory = this.requireAuthorizedSessionDirectory(
+          activationRequest.sessionID,
+          activationRequest.directory
+        );
         const value = await this.callbacks.activateSession(
           activationRequest.sessionID,
           directory,
@@ -1144,11 +1167,16 @@ export class RestProxy {
     }
 
     let perRootLimit = requestedLimit === null ? FULL_SESSION_LIST_LIMIT : requestedLimit;
+    const scopeRequests = new Map(
+      roots.map((root) => [root, this.resolveSessionCatalogScope(root, signal)] as const)
+    );
     while (true) {
       signal?.throwIfAborted();
       const settledRootResults = await Promise.allSettled(
         roots.map(async (root) => {
           const rootUrl = new URL(url.toString());
+          const scope = await scopeRequests.get(root)!;
+          this.applySessionCatalogScope(rootUrl, scope);
           rootUrl.searchParams.set(
             'limit',
             String(Math.min(perRootLimit + 1, FULL_SESSION_LIST_LIMIT))
@@ -1165,7 +1193,7 @@ export class RestProxy {
             hasMore,
             sessions: response
               .slice(0, perRootLimit)
-              .map((session) => this.validateWorkspaceSession(session, root))
+              .map((session) => this.validateWorkspaceSession(session, scope))
               .filter(
                 (session) =>
                   !this.isDedicatedWorkspaceDirectory(root) ||
@@ -1196,10 +1224,16 @@ export class RestProxy {
       const sessions = this.mergeWorkspaceSessions(
         rootResults.flatMap((result) => result.sessions)
       );
+      const hasUnavailableRoot = unavailableDirectories.length > 0;
+      this.rememberAuthorizedSessions(
+        sessions,
+        !hasUnavailableRoot &&
+          !rootResults.some((result) => result.hasMore) &&
+          !this.isConstrainedSessionListRequest('GET', path)
+      );
       const catalogSessions = sessions.map((session) =>
         this.projectWorkspaceCatalogSession(session)
       );
-      const hasUnavailableRoot = unavailableDirectories.length > 0;
       const hasUnfetchedSessions =
         hasUnavailableRoot || rootResults.some((result) => result.hasMore);
       this.rememberSessionPage(
@@ -1251,7 +1285,7 @@ export class RestProxy {
 
     const openRootIdentities = new Set(
       roots
-        .map(normalizeWorkspaceIdentity)
+        .map((root) => this.getSessionCatalogIdentity(root))
         .filter((identity): identity is string => identity !== null)
     );
     this.workspaceSessionStatusCoordinator.clearCatalogsOutside(openRootIdentities);
@@ -1262,7 +1296,7 @@ export class RestProxy {
     const settledResults = await Promise.allSettled(
       roots.map(async (root) => {
         const requestOptions = signal ? { signal, directory: root } : { directory: root };
-        const identity = normalizeWorkspaceIdentity(root);
+        const identity = this.getSessionCatalogIdentity(root);
         const cachedCatalog = identity
           ? this.workspaceStatusSessionCatalogs.get(identity)
           : undefined;
@@ -1338,6 +1372,10 @@ export class RestProxy {
       this.mergeWorkspaceSessions(results.flatMap((result) => result.sessions)),
       results.every((result) => result.catalogComplete)
     );
+    this.rememberAuthorizedSessions(
+      this.mergeWorkspaceSessions(results.flatMap((result) => result.sessions)),
+      results.every((result) => result.catalogComplete)
+    );
     return Object.assign({}, ...results.map((result) => result.statuses));
   }
 
@@ -1346,31 +1384,34 @@ export class RestProxy {
     signal?: AbortSignal,
     force = false
   ) {
-    const identity = normalizeWorkspaceIdentity(root);
+    const scope = await this.resolveSessionCatalogScope(root, signal);
+    const identity = this.getSessionCatalogIdentity(root);
+    const scopedListPath = this.getScopedSessionListPath(FULL_SESSION_LIST_PATH, scope);
     const sharedCatalog = identity
       ? await this.workspaceSessionStatusCoordinator.requestCatalog(
           identity,
-          () => this.requestServer('GET', FULL_SESSION_LIST_PATH, undefined, { directory: root }),
+          () => this.requestServer('GET', scopedListPath, undefined, { directory: root }),
           { force, signal }
         )
       : {
           loadedAt: Date.now(),
           sessions: await this.requestServer(
             'GET',
-            FULL_SESSION_LIST_PATH,
+            scopedListPath,
             undefined,
             signal ? { signal, directory: root } : { directory: root }
           ),
         };
     if (!Array.isArray(sharedCatalog.sessions)) throw new Error('Malformed session list response');
     const sessions = sharedCatalog.sessions
-      .map((session) => this.validateWorkspaceSession(session, root))
+      .map((session) => this.validateWorkspaceSession(session, scope))
       .filter(
         (session) =>
           !this.isDedicatedWorkspaceDirectory(root) ||
           this.getSessionWorkspaceScope(session.id) === 'workspace'
       );
     const catalog = { loadedAt: sharedCatalog.loadedAt, sessions };
+    this.rememberAuthorizedSessions(sessions, false);
     if (identity) this.workspaceStatusSessionCatalogs.set(identity, catalog);
     return catalog;
   }
@@ -1403,16 +1444,31 @@ export class RestProxy {
     );
   }
 
-  private validateWorkspaceSession(value: unknown, root: string): WorkspaceSession {
+  private validateWorkspaceSession(
+    value: unknown,
+    scope: ResolvedSessionCatalogScope
+  ): WorkspaceSession {
     const session = asRecord(value);
+    const directoryAllowed =
+      scope.mode === 'directory'
+        ? isSameWorkspacePath(session?.directory as string | undefined, scope.root)
+        : scope.mode === 'descendants'
+          ? getRelativePathWithinWorkspace(session?.directory as string | undefined, scope.root) !==
+            null
+          : true;
     if (
       !session ||
       typeof session.id !== 'string' ||
       !session.id ||
       typeof session.directory !== 'string' ||
-      !isSameWorkspacePath(session.directory, root)
+      !directoryAllowed ||
+      (scope.projectID !== undefined && session.projectID !== scope.projectID)
     ) {
-      throw new Error(`OpenCode returned a session outside workspace root ${root}`);
+      throw new Error(
+        scope.mode === 'directory'
+          ? `OpenCode returned a session outside workspace root ${scope.root}`
+          : `OpenCode returned a session outside the configured scope for ${scope.root}`
+      );
     }
     const projected = this.withSessionWorkspaceScope(
       {
@@ -1423,6 +1479,65 @@ export class RestProxy {
       this.readAndRememberSessionWorkspaceScope(session)
     );
     return projected;
+  }
+
+  private async resolveSessionCatalogScope(
+    root: string,
+    signal?: AbortSignal
+  ): Promise<ResolvedSessionCatalogScope> {
+    const mode = this.callbacks.getSessionHistoryScope?.(root) ?? 'directory';
+    if (mode === 'directory') return { mode, root };
+
+    const options: OpenCodeRequestOptions = { directory: root };
+    if (signal) options.signal = signal;
+    const projectValue = await this.requestServer('GET', '/project/current', undefined, options);
+    const project = asRecord(projectValue);
+    if (typeof project?.id !== 'string' || typeof project.worktree !== 'string') {
+      throw new Error('Malformed current project response');
+    }
+    if (mode === 'project' && project.vcs === 'git') {
+      return { mode, root, projectID: project.id };
+    }
+
+    const relativePath = getRelativePathWithinWorkspace(root, project.worktree);
+    if (relativePath === null) {
+      throw new Error(`Workspace folder ${root} is outside its OpenCode project`);
+    }
+    return {
+      mode: 'descendants',
+      root,
+      projectID: project.id,
+      path: relativePath === '.' ? undefined : relativePath,
+    };
+  }
+
+  private applySessionCatalogScope(url: URL, scope: ResolvedSessionCatalogScope) {
+    if (scope.mode === 'project' || (scope.mode === 'descendants' && scope.path === undefined)) {
+      url.searchParams.set('scope', 'project');
+      return;
+    }
+    if (scope.path !== undefined) url.searchParams.set('path', scope.path);
+  }
+
+  private getScopedSessionListPath(path: string, scope: ResolvedSessionCatalogScope) {
+    const url = new URL(path, 'http://localhost');
+    this.applySessionCatalogScope(url, scope);
+    return `${url.pathname}${url.search}`;
+  }
+
+  private getSessionCatalogIdentity(root: string) {
+    const identity = normalizeWorkspaceIdentity(root);
+    return identity
+      ? `${identity}\0${this.callbacks.getSessionHistoryScope?.(root) ?? 'directory'}`
+      : null;
+  }
+
+  private rememberAuthorizedSessions(sessions: WorkspaceSession[], complete: boolean) {
+    const directories = complete
+      ? new Map<string, string>()
+      : new Map(this.authorizedSessionDirectories);
+    for (const session of sessions) directories.set(session.id, session.directory);
+    this.authorizedSessionDirectories = directories;
   }
 
   private projectWorkspaceCatalogSession<T extends WorkspaceSession>(session: T): T {
@@ -2030,6 +2145,7 @@ export class RestProxy {
     lookupDirectory?: string
   ) {
     if (!normalizeWorkspaceIdentity(workspacePath)) return;
+    if (this.isAuthorizedSessionDirectory(sessionID)) return;
     if (this.callbacks.sessionState.isSessionInWorkspace(sessionID, workspacePath)) return;
 
     if (this.callbacks.getStatus().state !== 'running') {
@@ -2049,6 +2165,22 @@ export class RestProxy {
     if (workspaceRoot && isSameWorkspacePath(workspaceDirectory, workspaceRoot))
       return workspaceRoot;
     throw new Error('Workspace directory is not an open workspace folder');
+  }
+
+  private requireAuthorizedSessionDirectory(sessionID: string, directory: string): string {
+    try {
+      return this.requireOpenWorkspaceRoot(directory);
+    } catch (error) {
+      if (this.isAuthorizedSessionDirectory(sessionID, directory)) return directory;
+      throw error;
+    }
+  }
+
+  private isAuthorizedSessionDirectory(sessionID: string, directory?: string) {
+    const authorizedDirectory = this.authorizedSessionDirectories.get(sessionID);
+    return Boolean(
+      authorizedDirectory && (!directory || isSameWorkspacePath(authorizedDirectory, directory))
+    );
   }
 
   private withSessionWorkspaceScope<T extends Record<string, unknown>>(
@@ -2287,8 +2419,14 @@ export class RestProxy {
   }
 
   private async moveSessionToRecycleBin(sessionID: string) {
+    const directory = this.authorizedSessionDirectories.get(sessionID);
     const sessions = (
-      (await this.requestServer('GET', FULL_SESSION_LIST_PATH)) as Array<Record<string, unknown>>
+      (await this.requestServer(
+        'GET',
+        FULL_SESSION_LIST_PATH,
+        undefined,
+        directory ? { directory } : undefined
+      )) as Array<Record<string, unknown>>
     ).map((session) => {
       return this.withSessionWorkspaceScope(
         session,
@@ -2309,7 +2447,7 @@ export class RestProxy {
     if (this.permanentlyDeletedSessionIds.has(sessionID)) return true;
     const foundDirectory = await this.lookupSessionDirectory(sessionID, requestedDirectory);
     if (!foundDirectory) throw new Error('404 Session not found');
-    const sessionDirectory = this.requireOpenWorkspaceRoot(foundDirectory);
+    const sessionDirectory = this.requireAuthorizedSessionDirectory(sessionID, foundDirectory);
     if (requestedDirectory && !isSameWorkspacePath(sessionDirectory, requestedDirectory)) {
       throw new Error('404 Session not found');
     }
@@ -2366,14 +2504,22 @@ export class RestProxy {
     const currentWorkspace = this.getCurrentWorkspaceResolutionRoot();
     const cachedDirectory = this.sessionDirectories.get(sessionID);
     if (cachedDirectory) {
-      if (currentWorkspace && !isSameWorkspacePath(cachedDirectory, currentWorkspace)) {
+      if (
+        currentWorkspace &&
+        !isSameWorkspacePath(cachedDirectory, currentWorkspace) &&
+        !this.isAuthorizedSessionDirectory(sessionID, cachedDirectory)
+      ) {
         throw new Error('404 Session not found');
       }
       return cachedDirectory;
     }
 
     const directory = await this.lookupSessionDirectory(sessionID, currentWorkspace);
-    if (currentWorkspace && !isSameWorkspacePath(directory, currentWorkspace)) {
+    if (
+      currentWorkspace &&
+      !isSameWorkspacePath(directory, currentWorkspace) &&
+      !this.isAuthorizedSessionDirectory(sessionID, directory)
+    ) {
       throw new Error('404 Session not found');
     }
     return directory;

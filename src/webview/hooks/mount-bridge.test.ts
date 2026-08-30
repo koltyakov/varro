@@ -145,6 +145,16 @@ function createMessageDependencies(
 }
 
 describe('mount bridge helpers', () => {
+  it('reloads sessions when the host invalidates the catalog', () => {
+    const reloadSessionCatalog = vi.fn(() => Promise.resolve());
+
+    handleExtensionMessageWithDependencies(createMessageDependencies({ reloadSessionCatalog }), {
+      type: 'session/catalog-invalidated',
+    });
+
+    expect(reloadSessionCatalog).toHaveBeenCalledOnce();
+  });
+
   it('applies host clipboard image snapshots', () => {
     const syncClipboardImages = vi.fn();
     const images = [

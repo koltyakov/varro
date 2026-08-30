@@ -32,6 +32,7 @@ import { normalizeProjectPath } from './session/session-lifecycle';
 
 export function createMountBridgeOperations(deps: {
   ensureConnectionInitialized(): void;
+  reloadSessionCatalog?(): Promise<void>;
   getServerState(): Extract<ExtensionMessage, { type: 'server/status' }>['payload']['state'];
   invalidateConnection(): void;
   getCurrentWorkspacePath(): string | null | undefined;
@@ -69,6 +70,7 @@ export function createMountBridgeOperations(deps: {
         },
         clearError: () => uiStore.setError(null),
         ensureConnectionInitialized: deps.ensureConnectionInitialized,
+        reloadSessionCatalog: deps.reloadSessionCatalog,
         getServerState: deps.getServerState,
         invalidateConnection: deps.invalidateConnection,
         clearProvidersState: () => {
@@ -165,6 +167,7 @@ export function handleExtensionMessageWithDependencies(
     ): void;
     clearError(): void;
     ensureConnectionInitialized(): void;
+    reloadSessionCatalog?(): Promise<void>;
     getServerState(): Extract<ExtensionMessage, { type: 'server/status' }>['payload']['state'];
     invalidateConnection(): void;
     clearProvidersState(): void;
@@ -256,6 +259,9 @@ export function handleExtensionMessageWithDependencies(
       break;
     case 'config/update':
       deps.setConfig(msg.payload);
+      break;
+    case 'session/catalog-invalidated':
+      void deps.reloadSessionCatalog?.();
       break;
     case 'context/update': {
       const previousActiveFilePath = deps.getPreviousActiveFilePath();

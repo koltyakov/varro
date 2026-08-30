@@ -1157,6 +1157,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
       const mountBridgeOperations = createMountBridgeOperations({
         ensureConnectionInitialized,
+        reloadSessionCatalog: reloadSessions,
         getServerState: () => appStore.state.serverStatus.state,
         invalidateConnection,
         getCurrentWorkspacePath: () => currentWorkspacePath,

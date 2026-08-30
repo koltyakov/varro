@@ -53,7 +53,7 @@ import { CommitMessageService } from './commit-message-service';
 import type { ContextProvider } from './context-provider';
 import { DroppedFilesService } from './dropped-files-service';
 import { DraftImageStore } from './draft-image-store';
-import { readExtensionConfigState } from './extension-config';
+import { readExtensionConfigState, readSessionHistoryScope } from './extension-config';
 import { readMaximumTestedOpenCodeVersion } from './extension-manifest';
 import { FileSearchService } from './file-search-service';
 import { GeneratedDependencyTreeGuard } from './generated-dependency-tree-guard';
@@ -405,6 +405,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       ) {
         this.postConfigState();
       }
+      if (event.affectsConfiguration('varro.chat.sessionHistoryScope')) {
+        this.workspaceSessionStatusCoordinator.clearCatalogs();
+        for (const endpoint of this.endpoints) endpoint.restProxy.invalidateSessionCatalog();
+        this.post({ type: 'session/catalog-invalidated' });
+      }
     });
 
     this.serverEventBridge.attach();
@@ -525,6 +530,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       simulateNoProviders: this.simulateNoProviders,
       getRequestGeneration: () => webviewSession.getRequestGeneration(),
       getStatus: () => this.serverEventBridge.getStatus(),
+      getSessionHistoryScope: (root) => readSessionHistoryScope(vscode.Uri.file(root)),
       getWorkspacePath: () => endpointRef.endpoint?.workspacePath ?? initialWorkspacePath,
       ensureServerStarted: () => this.runtime.ensureServerStarted(),
       confirmPromptAdmission: (workspacePath) =>

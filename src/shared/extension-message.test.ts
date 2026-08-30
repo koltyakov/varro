@@ -869,6 +869,12 @@ describe('parseExtensionMessage', () => {
       },
     });
   });
+
+  it('parses session catalog invalidation', () => {
+    expect(parseExtensionMessage({ type: 'session/catalog-invalidated' })).toEqual({
+      type: 'session/catalog-invalidated',
+    });
+  });
 });
 
 describe('parseExtensionMessage queued message claim results', () => {
