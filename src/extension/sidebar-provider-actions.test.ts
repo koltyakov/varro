@@ -58,6 +58,8 @@ const createSidebarProviderActionsForTest =
 
 function createActionFixture() {
   const contextProvider = {
+    context: { workspaceDirectory: '/repo' },
+    getOpenWorkspaceRoot: vi.fn((directory: string) => (directory === '/repo' ? '/repo' : null)),
     terminalSelection: { text: 'npm test', terminalName: 'Terminal 1' } as {
       text: string;
       terminalName: string;
@@ -414,6 +416,17 @@ describe('createSidebarProviderActions', () => {
       },
       '/repo'
     );
+  });
+
+  it('exports from a dedicated workspace directory that is not an open folder', async () => {
+    const { actions, contextProvider, server, sessionExportService } = createActionFixture();
+    contextProvider.getOpenWorkspaceRoot.mockReturnValue(null);
+    contextProvider.context.workspaceDirectory = '/dedicated';
+    server.request.mockResolvedValue({ id: 'session-1', directory: '/dedicated' });
+
+    await actions.exportSession('session-1', '/dedicated');
+
+    expect(sessionExportService.exportSession).toHaveBeenCalledWith('session-1', '/dedicated');
   });
 
   it('opens settings with explicit and default extension queries', async () => {

@@ -264,7 +264,7 @@ export const client = {
       }
     },
     async respondPermission(
-      _sessionId: string,
+      sessionId: string,
       permissionId: string,
       response: 'once' | 'always' | 'reject',
       options?: { permissionAutomationLease?: number }
@@ -275,6 +275,7 @@ export const client = {
         ? apiCall('POST', path, body)
         : apiCall('POST', path, body, {
             permissionAutomationLease: options.permissionAutomationLease,
+            permissionAutomationSessionID: sessionId,
           });
     },
     async revert(
@@ -493,7 +494,7 @@ export const client = {
       async updatePermissionMode(
         sessionID: string,
         mode: PermissionMode,
-        options?: { directory?: string }
+        options?: { directory?: string; preconfigured?: boolean }
       ): Promise<Session> {
         return apiCall(
           'POST',
@@ -501,7 +502,7 @@ export const client = {
             buildVarroSessionEndpoint(sessionID, 'permission-mode'),
             options?.directory
           ),
-          { mode }
+          options?.preconfigured ? { mode, preconfigured: true } : { mode }
         );
       },
     },

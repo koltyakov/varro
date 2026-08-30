@@ -49,6 +49,7 @@ import pinIcon from 'iconoir/icons/pin.svg';
 import playIcon from 'iconoir/icons/play.svg';
 import playSolidIcon from 'iconoir/icons/play-solid.svg';
 import priorityHighIcon from 'iconoir/icons/priority-high.svg';
+import runningIcon from 'iconoir/icons/running.svg';
 import searchIcon from 'iconoir/icons/search.svg';
 import shareAndroidIcon from 'iconoir/icons/share-android.svg';
 import shareIosIcon from 'iconoir/icons/share-ios.svg';
@@ -120,6 +121,7 @@ export {
   playIcon,
   playSolidIcon,
   priorityHighIcon,
+  runningIcon,
   searchIcon,
   shareAndroidIcon,
   shareIosIcon,

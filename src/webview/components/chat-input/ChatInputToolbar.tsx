@@ -1,4 +1,4 @@
-import { Show } from 'solid-js';
+import { Show, createSignal, onCleanup } from 'solid-js';
 import packageJson from '../../../../package.json';
 import type { Agent } from '../../types';
 import type { ContextBreakdownSegment } from '../../../shared/context-breakdown';
@@ -9,7 +9,8 @@ import type {
   WorkspaceFolderContext,
 } from '../../../shared/protocol';
 import { postMessage } from '../../lib/bridge';
-import { warningTriangleIcon } from '../../lib/ui-icons';
+import { formatTurnDuration } from '../../lib/time-format';
+import { runningIcon, warningTriangleIcon } from '../../lib/ui-icons';
 import { Tooltip } from '../Tooltip';
 import { UiIcon } from '../UiIcon';
 import { AttachButton } from './AttachButton';
@@ -219,6 +220,8 @@ type ChatInputMetaToolbarProps = ToolbarSharedProps & {
   enabledMcpCount: number;
   availableMcpCount: number;
   activeLspNames: string[];
+  activeTurnStartedAt: number | null;
+  activeTurnLastActivityAt: number | null;
   showLspPicker: boolean;
   lspButtonRef?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
   onToggleLsps: () => void;
@@ -328,6 +331,7 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
     props.allowRepositoryLink &&
     !props.showMcpControl &&
     props.activeLspNames.length === 0 &&
+    props.activeTurnStartedAt === null &&
     !hasContextControl() &&
     props.providerLimitBadges.length === 0;
   const showMetaRow = () =>
@@ -335,6 +339,7 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
     (props.showWorkspaceControl && props.workspaceFolders.length > 1) ||
     props.showMcpControl ||
     props.activeLspNames.length > 0 ||
+    props.activeTurnStartedAt !== null ||
     hasContextControl() ||
     props.providerLimitBadges.length > 0 ||
     showRepositoryLink();
@@ -384,6 +389,13 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
         <div class="toolbar-meta-right">
           <Show when={showRepositoryLink()}>
             <VarroRepositoryLink />
+          </Show>
+
+          <Show when={props.activeTurnStartedAt !== null}>
+            <ActiveTurnTimer
+              startedAt={props.activeTurnStartedAt!}
+              lastActivityAt={props.activeTurnLastActivityAt}
+            />
           </Show>
 
           <Show when={props.activeLspNames.length > 0}>
@@ -497,6 +509,34 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
           </Show>
         </div>
       </div>
+    </Show>
+  );
+}
+
+const STALE_TURN_INACTIVITY_MS = 5 * 60_000;
+
+function ActiveTurnTimer(props: { startedAt: number; lastActivityAt: number | null }) {
+  const [now, setNow] = createSignal(Date.now());
+  const timer = setInterval(() => setNow(Date.now()), 1000);
+  onCleanup(() => clearInterval(timer));
+
+  const elapsedMs = () => Math.max(0, now() - props.startedAt);
+  const duration = () => formatTurnDuration(elapsedMs());
+  const isStale = () =>
+    now() - Math.max(props.lastActivityAt ?? props.startedAt, props.startedAt) >
+    STALE_TURN_INACTIVITY_MS;
+
+  return (
+    <Show when={elapsedMs() >= 1000}>
+      <span class="toolbar-turn-timer" aria-label={`Active turn duration: ${duration()}`}>
+        <UiIcon
+          class={`toolbar-turn-timer-icon${isStale() ? ' is-stale' : ''}`}
+          source={runningIcon}
+          width={13}
+          height={13}
+        />
+        <span class="toolbar-turn-timer-value">{duration()}</span>
+      </span>
     </Show>
   );
 }

@@ -360,7 +360,11 @@ describe('session-approvals helpers', () => {
     const upsertSession = vi.fn();
     const autoApprovePermissionsForSession = vi.fn(async () => {});
     const syncPendingPermissions = vi.fn(async () => {});
-    const setPendingSessionPermissionMode = vi.fn();
+    let nextPendingGeneration = 0;
+    const setPendingSessionPermissionMode = vi.fn(
+      (_sessionId: string, mode: PermissionMode | null, generation?: number) =>
+        mode === null ? (generation ?? null) : ++nextPendingGeneration
+    );
     const updateSessionPermission = vi
       .fn()
       .mockReturnValueOnce(fullUpdate.promise)
@@ -427,7 +431,7 @@ describe('session-approvals helpers', () => {
     expect(setPendingSessionPermissionMode.mock.calls).toEqual([
       ['session-1', 'full'],
       ['session-1', 'auto'],
-      ['session-1', null],
+      ['session-1', null, 2],
     ]);
   });
 

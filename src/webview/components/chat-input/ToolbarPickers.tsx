@@ -336,7 +336,7 @@ export function PermissionModePicker(props: {
   };
   const tooltipContent = () => {
     if (props.recovering) {
-      return 'Recovering permission mode: restoring safe default rules before automation resumes.';
+      return 'Recovering permission mode: restoring safe default rules before automation resumes. Select Default to retry now.';
     }
     const option = options.find((candidate) => candidate.mode === props.mode)!;
     const configNote =
@@ -358,6 +358,7 @@ export function PermissionModePicker(props: {
 
   createEffect(() => {
     if (!props.showPicker || !popupEl) return;
+    const alignToTriggerWhenPossible = props.alignToTriggerWhenPossible;
 
     const reposition = () => {
       if (!popupEl) return;
@@ -381,14 +382,14 @@ export function PermissionModePicker(props: {
             : popupEl.parentElement;
         const ancestorBox = positionedAncestor?.getBoundingClientRect();
         const fitsAtTrigger =
-          props.alignToTriggerWhenPossible &&
+          alignToTriggerWhenPossible &&
           ancestorBox &&
           ancestorBox.left >= boundaryLeft &&
           ancestorBox.left + popupWidth <= boundaryRight;
         if (fitsAtTrigger) {
           popupEl.style.right = 'auto';
           popupEl.style.left = '0px';
-        } else if (props.alignToTriggerWhenPossible && ancestorBox) {
+        } else if (alignToTriggerWhenPossible && ancestorBox) {
           popupEl.style.right = 'auto';
           popupEl.style.left = `${Math.round(boundaryLeft + (boundaryWidth - popupWidth) / 2 - ancestorBox.left)}px`;
         } else {

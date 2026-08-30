@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: OpenCode Workbench",
-  "version": "0.27.10",
+  "version": "0.27.11",
   "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
@@ -398,6 +398,11 @@
           "type": "boolean",
           "default": false,
           "description": "Show the changed-files panel above the chat input."
+        },
+        "varro.chat.showTurnTimer": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show the elapsed duration of the active turn beside the chat input status controls."
         },
         "varro.chat.desktopSessionPaneSide": {
           "type": "string",

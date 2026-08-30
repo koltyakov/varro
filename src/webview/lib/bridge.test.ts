@@ -160,6 +160,40 @@ describe('bridge', () => {
     expect(message.payload.body).toBe(body);
   });
 
+  it('sends permission automation ownership as request metadata', async () => {
+    const bridge = await loadBridge();
+    const send = vi.fn();
+    window.__sendToExtension = send;
+
+    const request = bridge.apiCall(
+      'POST',
+      '/permission/permission-1/reply',
+      { reply: 'once' },
+      {
+        permissionAutomationLease: 4,
+        permissionAutomationSessionID: 'session-1',
+      }
+    );
+    // SAFETY: apiCall always posts an api/request payload with a numeric request ID.
+    const message = send.mock.calls[0]?.[0] as { payload: { id: number } };
+
+    expect(message).toMatchObject({
+      type: 'api/request',
+      payload: {
+        permissionAutomationLease: 4,
+        permissionAutomationSessionID: 'session-1',
+        body: { reply: 'once' },
+      },
+    });
+
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'api/response', payload: { id: message.payload.id, data: true } },
+      })
+    );
+    await expect(request).resolves.toBe(true);
+  });
+
   it('reports sanitized requests that remain pending for 15 seconds', async () => {
     vi.useFakeTimers();
     const bridge = await loadBridge();

@@ -412,6 +412,7 @@ export class WebviewSession {
       showFileDiffs: config.showFileDiffs,
       expandThinking: config.expandThinking,
       showChangedFiles: config.showChangedFiles,
+      showTurnTimer: config.showTurnTimer,
       desktopSessionPaneSide: config.desktopSessionPaneSide,
       defaultPermissionMode: config.defaultPermissionMode,
       chatFontSize: config.chatFontSize,

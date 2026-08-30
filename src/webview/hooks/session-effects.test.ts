@@ -353,21 +353,29 @@ describe('session effect helpers', () => {
     }
   });
 
-  it('uses the running-session sync as a low-frequency safety net for a healthy stream', async () => {
+  it('polls state without refetching parent or child transcripts while the stream is healthy', async () => {
     vi.useFakeTimers();
     const hydrateSessionStatuses = vi.fn(async () => {});
+    const loadSessions = vi.fn(async () => {});
+    const loadQuestions = vi.fn(async () => {});
+    const loadPendingPermissions = vi.fn(async () => {});
+    const syncSessionMessages = vi.fn(async () => {});
 
     const dispose = createRoot((cleanup) => {
       registerVisibleRunningSessionSyncEffect({
         getServerState: () => 'running',
         isDocumentVisible: () => true,
         getEventStreamState: () => 'healthy',
-        getActiveSessionId: () => 'session-1',
-        getSessionStatuses: () => ({ 'session-1': { type: 'busy' } }),
-        loadSessions: vi.fn(async () => {}),
+        getActiveSessionId: () => 'parent-session',
+        getSessionStatuses: () => ({
+          'parent-session': { type: 'busy' },
+          'child-session': { type: 'busy' },
+        }),
+        loadSessions,
         hydrateSessionStatuses,
-        loadQuestions: vi.fn(async () => {}),
-        syncSessionMessages: vi.fn(async () => {}),
+        loadQuestions,
+        loadPendingPermissions,
+        syncSessionMessages,
         logError: vi.fn(),
       });
       return cleanup;
@@ -379,6 +387,92 @@ describe('session effect helpers', () => {
 
       await vi.advanceTimersByTimeAsync(1);
       expect(hydrateSessionStatuses).toHaveBeenCalledTimes(1);
+      expect(loadSessions).toHaveBeenCalledTimes(1);
+      expect(loadQuestions).toHaveBeenCalledTimes(1);
+      expect(loadPendingPermissions).toHaveBeenCalledTimes(1);
+      expect(syncSessionMessages).not.toHaveBeenCalled();
+    } finally {
+      dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('recovers parent and child transcripts when a healthy status poll discovers missed work', async () => {
+    vi.useFakeTimers();
+    const [statuses, setStatuses] = createSignal<Record<string, { type: 'busy' }>>({});
+    const syncSessionMessages = vi.fn(async () => {});
+
+    const dispose = createRoot((cleanup) => {
+      registerVisibleRunningSessionSyncEffect({
+        getServerState: () => 'running',
+        isDocumentVisible: () => true,
+        getEventStreamState: () => 'healthy',
+        getActiveSessionId: () => 'parent-session',
+        getSessionStatuses: statuses,
+        loadSessions: vi.fn(async () => {}),
+        hydrateSessionStatuses: vi.fn(async () => {
+          setStatuses({
+            'parent-session': { type: 'busy' },
+            'child-session': { type: 'busy' },
+          });
+        }),
+        loadQuestions: vi.fn(async () => {}),
+        syncSessionMessages,
+        logError: vi.fn(),
+      });
+      return cleanup;
+    });
+
+    try {
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(syncSessionMessages).toHaveBeenNthCalledWith(1, 'parent-session');
+      expect(syncSessionMessages).toHaveBeenNthCalledWith(2, 'child-session');
+    } finally {
+      dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('syncs only a newly discovered child when its parent was already busy on a healthy stream', async () => {
+    vi.useFakeTimers();
+    const [statuses, setStatuses] = createSignal<Record<string, { type: 'busy' }>>({
+      'parent-session': { type: 'busy' },
+    });
+    const syncSessionMessages = vi.fn(async () => {});
+    let discoveredChild = false;
+
+    const dispose = createRoot((cleanup) => {
+      registerVisibleRunningSessionSyncEffect({
+        getServerState: () => 'running',
+        isDocumentVisible: () => true,
+        getEventStreamState: () => 'healthy',
+        getActiveSessionId: () => 'parent-session',
+        getSessionStatuses: statuses,
+        loadSessions: vi.fn(async () => {}),
+        hydrateSessionStatuses: vi.fn(async () => {
+          if (discoveredChild) return;
+          discoveredChild = true;
+          setStatuses({
+            'parent-session': { type: 'busy' },
+            'child-session': { type: 'busy' },
+          });
+        }),
+        loadQuestions: vi.fn(async () => {}),
+        syncSessionMessages,
+        logError: vi.fn(),
+      });
+      return cleanup;
+    });
+
+    try {
+      await vi.advanceTimersByTimeAsync(16_000);
+
+      expect(syncSessionMessages).toHaveBeenCalledOnce();
+      expect(syncSessionMessages).toHaveBeenCalledWith('child-session');
+
+      await vi.advanceTimersByTimeAsync(16_000);
+      expect(syncSessionMessages).toHaveBeenCalledOnce();
     } finally {
       dispose();
       vi.useRealTimers();

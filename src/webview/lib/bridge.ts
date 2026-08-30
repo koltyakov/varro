@@ -17,6 +17,7 @@ type ApiCallOptions = {
   signal?: AbortSignal;
   retries?: number;
   permissionAutomationLease?: number;
+  permissionAutomationSessionID?: string;
   queuedMessageDispatch?: { itemId: string; lease: number };
 };
 
@@ -188,6 +189,7 @@ export function apiCall<T = unknown>(
     signal: options?.signal,
     retries: options?.retries ?? 1,
     permissionAutomationLease: options?.permissionAutomationLease,
+    permissionAutomationSessionID: options?.permissionAutomationSessionID,
     queuedMessageDispatch: options?.queuedMessageDispatch,
   });
 }
@@ -201,6 +203,7 @@ function sendApiCall<T>(
     signal?: AbortSignal;
     retries: number;
     permissionAutomationLease?: number;
+    permissionAutomationSessionID?: string;
     queuedMessageDispatch?: { itemId: string; lease: number };
   }
 ): Promise<T> {
@@ -288,6 +291,9 @@ function sendApiCall<T>(
     };
     if (options.permissionAutomationLease !== undefined) {
       payload.permissionAutomationLease = options.permissionAutomationLease;
+    }
+    if (options.permissionAutomationSessionID !== undefined) {
+      payload.permissionAutomationSessionID = options.permissionAutomationSessionID;
     }
     if (options.queuedMessageDispatch) {
       payload.queuedMessageDispatch = options.queuedMessageDispatch;

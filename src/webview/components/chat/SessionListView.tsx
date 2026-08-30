@@ -122,6 +122,7 @@ function getDirectoryName(directory: string) {
 
 function SessionHistoryScopePicker(props: {
   directory: string;
+  hidden: boolean;
   onScopeChange: (scope: SessionHistoryScope) => void;
 }) {
   const [scope, setScope] = createSignal<SessionHistoryScope>('directory');
@@ -143,19 +144,28 @@ function SessionHistoryScopePicker(props: {
   createEffect(() => {
     const directory = props.directory;
     const key = ++requestKey;
+    saveKey += 1;
     setOpen(false);
+    setScope('directory');
+    props.onScopeChange('directory');
     void (async () => {
       try {
         const result = await client.varro.sessionHistoryScope.get(directory);
-        if (key !== requestKey) return;
+        if (key !== requestKey || directory !== props.directory) return;
         setScope(result.scope);
         props.onScopeChange(result.scope);
         setIsGit(result.git);
         if (result.scope !== 'directory') await reloadSessions();
       } catch (error: unknown) {
-        if (key === requestKey) setError(error instanceof Error ? error.message : String(error));
+        if (key === requestKey && directory === props.directory) {
+          setError(error instanceof Error ? error.message : String(error));
+        }
       }
     })();
+  });
+
+  createEffect(() => {
+    if (props.hidden) setOpen(false);
   });
 
   const dismiss = (event: PointerEvent) => {
@@ -164,6 +174,7 @@ function SessionHistoryScopePicker(props: {
   document.addEventListener('pointerdown', dismiss);
   onCleanup(() => {
     requestKey += 1;
+    saveKey += 1;
     document.removeEventListener('pointerdown', dismiss);
   });
 
@@ -173,19 +184,21 @@ function SessionHistoryScopePicker(props: {
       return;
     }
     const previous = scope();
+    const directory = props.directory;
     const key = ++saveKey;
+    requestKey += 1;
     setScope(next);
     props.onScopeChange(next);
     setOpen(false);
     try {
-      const result = await client.varro.sessionHistoryScope.set(props.directory, next);
-      if (key !== saveKey) return;
+      const result = await client.varro.sessionHistoryScope.set(directory, next);
+      if (key !== saveKey || directory !== props.directory) return;
       setScope(result.scope);
       props.onScopeChange(result.scope);
       setIsGit(result.git);
       void reloadSessions();
     } catch (error: unknown) {
-      if (key !== saveKey) return;
+      if (key !== saveKey || directory !== props.directory) return;
       setScope(previous);
       props.onScopeChange(previous);
       setError(error instanceof Error ? error.message : String(error));
@@ -193,50 +206,52 @@ function SessionHistoryScopePicker(props: {
   };
 
   return (
-    <div
-      ref={(element) => {
-        root = element;
-      }}
-      class="session-history-scope-picker"
-      onKeyDown={(event) => {
-        if (event.key === 'Escape') setOpen(false);
-      }}
-    >
-      <Tooltip content={selected().description} placement="left" disabled={open()}>
-        <button
-          type="button"
-          class="session-history-scope-trigger"
-          aria-label={`Session history: ${selected().label}`}
-          aria-haspopup="menu"
-          aria-expanded={open()}
-          onClick={() => setOpen((value) => !value)}
-        >
-          <UiIcon source={selected().icon} width={14} height={14} />
-          <span>{selected().label}</span>
-          <UiIcon source={navArrowDownIcon} width={10} height={10} />
-        </button>
-      </Tooltip>
-      <Show when={open()}>
-        <div class="session-history-scope-menu" role="menu">
-          <For each={options()}>
-            {(option) => (
-              <Tooltip content={option.description} placement="left" delay={500}>
-                <button
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={scope() === option.scope}
-                  class="session-history-scope-option"
-                  onClick={() => void selectScope(option.scope)}
-                >
-                  <UiIcon source={option.icon} width={14} height={14} />
-                  <span>{option.label}</span>
-                </button>
-              </Tooltip>
-            )}
-          </For>
-        </div>
-      </Show>
-    </div>
+    <Show when={!props.hidden}>
+      <div
+        ref={(element) => {
+          root = element;
+        }}
+        class="session-history-scope-picker"
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') setOpen(false);
+        }}
+      >
+        <Tooltip content={selected().description} placement="left" disabled={open()}>
+          <button
+            type="button"
+            class="session-history-scope-trigger"
+            aria-label={`Session history: ${selected().label}`}
+            aria-haspopup="menu"
+            aria-expanded={open()}
+            onClick={() => setOpen((value) => !value)}
+          >
+            <UiIcon source={selected().icon} width={14} height={14} />
+            <span>{selected().label}</span>
+            <UiIcon source={navArrowDownIcon} width={10} height={10} />
+          </button>
+        </Tooltip>
+        <Show when={open()}>
+          <div class="session-history-scope-menu" role="menu">
+            <For each={options()}>
+              {(option) => (
+                <Tooltip content={option.description} placement="left" delay={500}>
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={scope() === option.scope}
+                    class="session-history-scope-option"
+                    onClick={() => void selectScope(option.scope)}
+                  >
+                    <UiIcon source={option.icon} width={14} height={14} />
+                    <span>{option.label}</span>
+                  </button>
+                </Tooltip>
+              )}
+            </For>
+          </div>
+        </Show>
+      </div>
+    </Show>
   );
 }
 
@@ -396,6 +411,7 @@ const SESSION_ARCHIVE_PRELOAD_TARGET = 50;
 const SUBAGENT_SESSION_PAGE_SIZE = 100;
 const MAX_SUBAGENT_SESSION_LIMIT = 1_000_000;
 const SESSION_SEARCH_LIMIT = 30;
+const SESSION_SEARCH_DEBOUNCE_MS = 200;
 const PARTIAL_SESSION_LIST_ATTEMPTS = 2;
 const SESSION_DIFF_SUMMARY_CONCURRENCY = 4;
 const SESSION_DIFF_SUMMARY_QUEUE_LIMIT = 100;
@@ -1201,13 +1217,14 @@ export function SessionListView(props: {
 
   const trimmedSearchQuery = createMemo(() => searchQuery().trim());
   const shouldShowSearch = createMemo(() => !props.subagentParentId && !props.sessionFilter);
-  const sessionHistoryDirectory = createMemo(
-    () =>
-      folderFilter() ??
-      state.editorContext.workspacePath ??
-      state.editorContext.workspaceFolders?.[0]?.path ??
-      null
-  );
+  const sessionHistoryDirectory = createMemo(() => {
+    const selectedFolder = folderFilter();
+    if (selectedFolder) return selectedFolder;
+    if ((state.editorContext.workspaceFolders?.length ?? 0) > 1) return null;
+    return (
+      state.editorContext.workspacePath ?? state.editorContext.workspaceFolders?.[0]?.path ?? null
+    );
+  });
   const sessionDirectoryFolders = createMemo<WorkspaceFolderContext[]>(() => {
     const folders = new Map<string, WorkspaceFolderContext>();
     for (const session of state.sessions) {
@@ -1277,9 +1294,13 @@ export function SessionListView(props: {
 
   let searchRequestKey = 0;
   let searchAbortController: AbortController | undefined;
+  let searchDebounceTimer: ReturnType<typeof setTimeout> | undefined;
   createEffect(() => {
     const query = trimmedSearchQuery();
     const searchActive = shouldShowSearch() && query.length > 0;
+    const directory = folderFilter() ?? undefined;
+    if (searchDebounceTimer !== undefined) clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = undefined;
     searchAbortController?.abort();
     searchAbortController = undefined;
     searchRequestKey += 1;
@@ -1293,28 +1314,32 @@ export function SessionListView(props: {
     const controller = new AbortController();
     searchAbortController = controller;
     setIsSearchingAllSessions(true);
-    void listCompleteSessionPage({
-      limit: SESSION_SEARCH_LIMIT,
-      search: query,
-      roots: true,
-      directory: folderFilter() ?? undefined,
-      signal: controller.signal,
-    })
-      .then((page) => {
-        if (requestKey !== searchRequestKey || controller.signal.aborted) return;
-        setNativeSearchResults(page.items);
+    searchDebounceTimer = setTimeout(() => {
+      searchDebounceTimer = undefined;
+      void listCompleteSessionPage({
+        limit: SESSION_SEARCH_LIMIT,
+        search: query,
+        roots: true,
+        directory,
+        signal: controller.signal,
       })
-      .catch((error) => {
-        if (requestKey !== searchRequestKey || controller.signal.aborted) return;
-        setError(error instanceof Error ? error.message : String(error));
-      })
-      .finally(() => {
-        if (requestKey === searchRequestKey) setIsSearchingAllSessions(false);
-      });
+        .then((page) => {
+          if (requestKey !== searchRequestKey || controller.signal.aborted) return;
+          setNativeSearchResults(page.items);
+        })
+        .catch((error) => {
+          if (requestKey !== searchRequestKey || controller.signal.aborted) return;
+          setError(error instanceof Error ? error.message : String(error));
+        })
+        .finally(() => {
+          if (requestKey === searchRequestKey) setIsSearchingAllSessions(false);
+        });
+    }, SESSION_SEARCH_DEBOUNCE_MS);
   });
   onCleanup(() => {
     resolutionRequestKey += 1;
     searchRequestKey += 1;
+    if (searchDebounceTimer !== undefined) clearTimeout(searchDebounceTimer);
     searchAbortController?.abort();
   });
 
@@ -1925,10 +1950,11 @@ export function SessionListView(props: {
             aria-label="Search sessions"
             spellcheck={false}
           />
-          <Show when={searchQuery().length === 0 && sessionHistoryDirectory()} keyed>
+          <Show when={sessionHistoryDirectory()} keyed>
             {(directory) => (
               <SessionHistoryScopePicker
                 directory={directory}
+                hidden={searchQuery().length > 0}
                 onScopeChange={setSessionHistoryScope}
               />
             )}

@@ -220,7 +220,9 @@ export async function loadModules() {
 beforeEach(() => {
   vi.resetModules();
   // SAFETY: The fixture provides the unknown fields read by this statement.
-  delete (window as { __initialWebviewState?: unknown }).__initialWebviewState;
+  (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
+    permissionAutomation: { owner: true, lease: 1 },
+  };
   clientMocks.health.mockReset();
   clientMocks.commandList.mockReset();
   clientMocks.sessionList.mockReset();

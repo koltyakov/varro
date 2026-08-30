@@ -248,7 +248,14 @@ export class SessionEventHandlerOperations {
       updateUsageLimitState: this.deps.sessionStatusOperations.updateUsageLimitState,
       syncSession: this.deps.sessionSyncOperations.syncSession,
       repairSessionTitle: this.deps.repairSessionTitle,
-      shouldResyncSessionAfterIdle: (sessionId) => appStore.state.activeSessionId === sessionId,
+      shouldResyncSessionAfterIdle: (sessionId) => {
+        const activeSessionId = appStore.state.activeSessionId;
+        if (!activeSessionId) return false;
+        return (
+          (sessionStore.getSessionTreeRootId(sessionId) || sessionId) ===
+          (sessionStore.getSessionTreeRootId(activeSessionId) || activeSessionId)
+        );
+      },
       syncSessionMessages: this.deps.sessionSyncOperations.syncSessionMessages,
       recheckSessionStatus: this.deps.sessionStatusOperations.recheckSessionStatus,
       applyUsageLimitNotice: this.deps.sessionStatusOperations.applyUsageLimitNotice,
@@ -678,6 +685,8 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
           .syncSessionMessages(sessionId)
           .catch((err) => deps.logError('syncSessionMessages', err));
       }
+    } else if (isSessionInActiveTree(sessionId) && deps.shouldResyncSessionAfterIdle(sessionId)) {
+      deps.syncSessionMessages(sessionId).catch((err) => deps.logError('syncSessionMessages', err));
     }
   };
   const recordToolExecutionTime = (eventName: string, props: UnknownRecord) => {

@@ -903,7 +903,7 @@ describe('SessionStateManager notifications', () => {
     expect(manager.getSiblingAlertCandidates()).toEqual([]);
   });
 
-  it('synchronizes ordinary unread completions until the session is seen', () => {
+  it('does not let a marker-less acknowledgement permanently suppress completions', () => {
     const manager = createManager();
     manager.setSessionUnreadState('session-1', 'completed', true, '/repo');
 
@@ -915,7 +915,17 @@ describe('SessionStateManager notifications', () => {
 
     manager.setSessionUnreadState('session-1', 'completed', true, '/repo');
 
-    expect(manager.getSiblingAlertCandidates()).toEqual([]);
+    expect(manager.getSiblingAlertCandidates()[0]?.kinds).toEqual(['completed']);
+  });
+
+  it('does not let a plan acknowledgement suppress a later skewed ordinary completion', () => {
+    const manager = createManager();
+    manager.setSessionUnreadState('session-1', 'plan-ready', true, '/repo', 500);
+    manager.setSessionUnreadState('session-1', 'plan-ready', false, '/repo', 600);
+
+    manager.setSessionUnreadState('session-1', 'completed', true, '/repo', 100);
+
+    expect(manager.getSiblingAlertCandidates()[0]?.kinds).toEqual(['completed']);
   });
 
   it.each(['completed', 'plan-ready'] as const)(
@@ -1028,6 +1038,9 @@ describe('SessionStateManager notifications', () => {
       manager.setSessionUnreadState('session-1', kind, true, '/repo', 100);
       manager.setSessionUnreadState('session-1', kind, false, '/repo', 200);
       await manager.flush();
+      expect(values.get('varro.acknowledgedCompletions')).toEqual({
+        'session-1': { [kind]: 200 },
+      });
 
       const recovered = create();
       recovered.setSessionUnreadState('session-1', kind, true, '/repo', 100);
@@ -1041,6 +1054,63 @@ describe('SessionStateManager notifications', () => {
       expect(secondRecovery.completed.has('session-1')).toBe(false);
     }
   );
+
+  it('keeps plan and ordinary acknowledgements separate across restarts', async () => {
+    const values = new Map<string, unknown>();
+    const workspaceState = {
+      get: vi.fn((key: string) => values.get(key)),
+      set: vi.fn((key: string, value: unknown) => {
+        values.set(key, value);
+        return Promise.resolve();
+      }),
+      remove: vi.fn(() => Promise.resolve()),
+    };
+    const create = () =>
+      new SessionStateManager(
+        workspaceState as never,
+        { onStatusChange: vi.fn() },
+        { shouldShow: () => false }
+      );
+    const manager = create();
+    manager.setSessionUnreadState('session-1', 'plan-ready', false, '/repo', 600);
+    manager.setSessionUnreadState('session-1', 'completed', false, '/repo', 150);
+    await manager.flush();
+
+    expect(values.get('varro.acknowledgedCompletions')).toEqual({
+      'session-1': { completed: 150, 'plan-ready': 600 },
+    });
+
+    const recovered = create();
+    recovered.setSessionUnreadState('session-1', 'plan-ready', true, '/repo', 500);
+    recovered.setSessionUnreadState('session-1', 'completed', true, '/repo', 100);
+    expect(recovered.getSiblingAlertCandidates()).toEqual([]);
+
+    recovered.setSessionUnreadState('session-1', 'completed', true, '/repo', 151);
+    expect(recovered.getSiblingAlertCandidates()[0]?.kinds).toEqual(['completed']);
+  });
+
+  it('does not trust the kind of legacy mixed acknowledgement markers', () => {
+    const workspaceState = {
+      get: vi.fn((key: string) =>
+        key === 'varro.acknowledgedCompletions' ? { 'ordinary-1': 500, 'plan-1': 500 } : undefined
+      ),
+      set: vi.fn(() => Promise.resolve()),
+      remove: vi.fn(() => Promise.resolve()),
+    };
+    const manager = new SessionStateManager(
+      workspaceState as never,
+      { onStatusChange: vi.fn() },
+      { shouldShow: () => false }
+    );
+
+    manager.setSessionUnreadState('ordinary-1', 'completed', true, '/repo', 100);
+    manager.setSessionUnreadState('plan-1', 'plan-ready', true, '/repo', 100);
+
+    expect(manager.getSiblingAlertCandidates().map((candidate) => candidate.kinds)).toEqual([
+      ['completed'],
+      ['plan-ready'],
+    ]);
+  });
 
   it.each(['completed', 'plan-ready'] as const)(
     'does not synchronize %s state for child sessions',

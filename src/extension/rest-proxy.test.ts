@@ -1095,7 +1095,12 @@ describe('RestProxy handleRequest', () => {
       })
     );
 
-    expect(activateSession).toHaveBeenCalledWith('session-b', '/repo-b', expect.any(AbortSignal));
+    expect(activateSession).toHaveBeenCalledWith(
+      'session-b',
+      '/repo-b',
+      '/repo-b',
+      expect.any(AbortSignal)
+    );
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 97,
       data: { id: 'session-b', directory: '/repo-b' },
@@ -1163,6 +1168,51 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 21, data: [nested] });
   });
 
+  it('authorizes project worktree recycle-bin operations by project ID', async () => {
+    const sibling = recycleBinEntry('sibling', '/worktrees/feature');
+    const foreign = recycleBinEntry('foreign', '/other-project');
+    foreign.root.projectID = 'project-2';
+    for (const session of foreign.sessions) session.projectID = 'project-2';
+    const restore = vi.fn(() => Promise.resolve({ rootID: 'sibling', sessions: sibling.sessions }));
+    const deletePermanently = vi.fn(() => Promise.resolve({ sessions: sibling.sessions }));
+    const empty = vi.fn(() => Promise.resolve([]));
+    const serverRequest = vi.fn((_method: string, path: string) => {
+      if (path === '/project/current') {
+        return Promise.resolve({ id: 'project-1', worktree: '/repo', vcs: 'git' });
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    });
+    const { proxy, callbacks } = createProxy({
+      getSessionHistoryScope: () => 'project',
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      sessionTrash: {
+        ...createCallbacks().sessionTrash,
+        list: vi.fn(() => [sibling, foreign]),
+        restore,
+        deletePermanently,
+        empty,
+      } as never,
+    });
+
+    await proxy.handleRequest(makePayload(211, 'GET', '/varro/session-trash'));
+    await proxy.handleRequest(makePayload(212, 'POST', '/varro/session-trash/sibling/restore'));
+    await proxy.handleRequest(makePayload(213, 'DELETE', '/varro/session-trash/sibling/delete'));
+    await proxy.handleRequest(makePayload(214, 'DELETE', '/varro/session-trash'));
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 211, data: [sibling] });
+    expect(restore).toHaveBeenCalledWith('sibling', '/worktrees/feature');
+    expect(deletePermanently).toHaveBeenCalledWith(
+      'sibling',
+      expect.any(Function),
+      '/worktrees/feature'
+    );
+    expect(empty).toHaveBeenCalledOnce();
+    expect(empty).toHaveBeenCalledWith(expect.any(Function), '/worktrees/feature');
+    expect(serverRequest.mock.calls.filter(([, path]) => path === '/project/current')).toHaveLength(
+      1
+    );
+  });
+
   it('routes recycle bin empty request', async () => {
     const empty = vi.fn(
       async (
@@ -1176,6 +1226,7 @@ describe('RestProxy handleRequest', () => {
     );
     const serverRequest = vi.fn(() => Promise.resolve(true));
     const { proxy, callbacks } = createProxy({
+      getSessionHistoryScope: () => 'descendants',
       server: {
         ...createCallbacks().server,
         request: serverRequest,
@@ -1405,7 +1456,7 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 8, data: limitStatus });
   });
 
-  it('routes auto-approve judge requests after server startup', async () => {
+  it('routes leased auto-approve judge requests after server startup', async () => {
     const judgeResult = { decision: 'allow' as const, reason: 'safe' };
     const serverRequest = vi.fn((method: string, path: string) => {
       if (method === 'GET' && path === '/session/session-1?directory=%2Frepo') {
@@ -1422,13 +1473,14 @@ describe('RestProxy handleRequest', () => {
       },
     });
 
-    await proxy.handleRequest(
-      makePayload(81, 'POST', '/varro/permission/judge', {
+    await proxy.handleRequest({
+      ...makePayload(81, 'POST', '/varro/permission/judge', {
         permission: { id: 'perm-1', type: 'bash', sessionID: 'session-1' },
         model: { providerID: 'openai', modelID: 'gpt-4.1' },
         approvedReferences: [{ type: 'bash', title: 'bash npm publish', response: 'reject' }],
-      })
-    );
+      }),
+      permissionAutomationLease: 0,
+    });
 
     expect(callbacks.ensureServerStarted).toHaveBeenCalledOnce();
     expect(callbacks.autoApproveJudge.judge).toHaveBeenCalledWith(
@@ -1440,6 +1492,42 @@ describe('RestProxy handleRequest', () => {
       '/repo'
     );
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 81, data: judgeResult });
+  });
+
+  it('rejects auto-approve judge requests without an ownership lease', async () => {
+    const { proxy, callbacks } = createProxy();
+
+    await proxy.handleRequest(
+      makePayload(82, 'POST', '/varro/permission/judge', {
+        permission: { id: 'perm-1', type: 'bash', sessionID: 'session-1' },
+      })
+    );
+
+    expect(callbacks.ensureServerStarted).not.toHaveBeenCalled();
+    expect(callbacks.autoApproveJudge.judge).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 82,
+      error: 'Permission automation lease is required',
+    });
+  });
+
+  it('keeps manual permission replies lease-free', async () => {
+    const serverRequest = vi.fn(() => Promise.resolve(true));
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(
+      makePayload(83, 'POST', '/permission/perm-1/reply', { reply: 'once' })
+    );
+
+    expect(callbacks.isPermissionAutomationLeaseCurrent).not.toHaveBeenCalled();
+    expect(serverRequest).toHaveBeenCalledWith(
+      'POST',
+      '/permission/perm-1/reply',
+      { reply: 'once' },
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
   });
 
   it('rejects automatic requests after their ownership lease changes', async () => {
@@ -1565,6 +1653,21 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 85, data: session });
   });
 
+  it('correlates preconfigured permission mode persistence without requesting another rule patch', async () => {
+    const updatePermissionMode = vi.fn(() => Promise.resolve(undefined));
+    const { proxy, callbacks } = createProxy({ updatePermissionMode });
+
+    await proxy.handleRequest(
+      makePayload(851, 'POST', '/varro/session/session-1/permission-mode', {
+        mode: 'full',
+        preconfigured: true,
+      })
+    );
+
+    expect(updatePermissionMode).toHaveBeenCalledWith('session-1', 'full', '/repo', true);
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 851, data: undefined });
+  });
+
   it('does not judge a permission whose owning session belongs to another workspace', async () => {
     const serverRequest = vi.fn((method: string, path: string) => {
       if (method === 'GET' && path === '/session/session-foreign?directory=%2Frepo') {
@@ -1576,11 +1679,12 @@ describe('RestProxy handleRequest', () => {
       server: { ...createCallbacks().server, request: serverRequest } as never,
     });
 
-    await proxy.handleRequest(
-      makePayload(83, 'POST', '/varro/permission/judge', {
+    await proxy.handleRequest({
+      ...makePayload(83, 'POST', '/varro/permission/judge', {
         permission: { id: 'perm-foreign', type: 'edit', sessionID: 'session-foreign' },
-      })
-    );
+      }),
+      permissionAutomationLease: 0,
+    });
 
     expect(callbacks.autoApproveJudge.judge).not.toHaveBeenCalled();
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
@@ -2838,6 +2942,23 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
+  it('skips malformed catalog rows while retaining exact-root sessions', async () => {
+    const valid = { id: 'valid', directory: '/repo' };
+    const { proxy, callbacks } = createProxy({
+      server: {
+        ...createCallbacks().server,
+        request: vi.fn(() => Promise.resolve([{ directory: '/repo' }, valid, null])),
+      } as never,
+    });
+
+    await proxy.handleRequest(makePayload(1161, 'GET', '/session'));
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 1161, data: [valid] });
+    expect(mocks.logger.warn).toHaveBeenCalledWith(
+      'Skipped 2 malformed session catalog rows for /repo'
+    );
+  });
+
   it('filters UNC sessions using case-insensitive Windows identity', async () => {
     const sessions = [{ id: 'same', directory: '//buildserver/PROJECTS/varro/' }];
     const { proxy, callbacks } = createProxy({
@@ -3398,6 +3519,56 @@ describe('RestProxy handleRequest', () => {
     );
   });
 
+  it('applies descendants scope before slicing a machine-wide page', async () => {
+    const rows = [
+      { id: 'foreign', directory: '/other' },
+      { id: 'nested-new', directory: '/repo/new', time: { updated: 3 } },
+      { id: 'nested-old', directory: '/repo/old', time: { updated: 2 } },
+    ];
+    const serverRequest = vi.fn(() => Promise.resolve(rows));
+    const { proxy, callbacks } = createProxy({
+      getSessionHistoryScope: () => 'descendants',
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(makePayload(22411, 'GET', '/session?limit=1'));
+
+    expect(serverRequest).toHaveBeenCalledOnce();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 22411,
+      data: {
+        items: [expect.objectContaining({ id: 'nested-new' })],
+        hasMore: true,
+      },
+    });
+  });
+
+  it('reports a machine-wide descendants page as incomplete at the hard cap', async () => {
+    const serverRequest = vi.fn((_method: string, path: string) => {
+      const limit = Number(new URL(path, 'http://localhost').searchParams.get('limit'));
+      const rows: unknown[] = [];
+      rows.length = limit;
+      return Promise.resolve(rows);
+    });
+    const { proxy, callbacks } = createProxy({
+      getSessionHistoryScope: () => 'descendants',
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(makePayload(22412, 'GET', '/session?limit=1'));
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 22412,
+      data: { items: [], hasMore: true, incomplete: true },
+    });
+    expect(serverRequest).toHaveBeenLastCalledWith(
+      'GET',
+      '/experimental/session?limit=1000000',
+      undefined,
+      expect.objectContaining({ unscoped: true })
+    );
+  });
+
   it('reads and updates the persisted scope by OpenCode project', async () => {
     let persisted: 'directory' | 'descendants' | 'project' = 'directory';
     const getSessionHistoryScope = vi.fn(() => persisted);
@@ -3430,6 +3601,69 @@ describe('RestProxy handleRequest', () => {
       id: 2247,
       data: { scope: 'project', git: true },
     });
+  });
+
+  it('deduplicates normalized current-project requests and invalidates the cache safely', async () => {
+    const currentProject = deferred<{ id: string; worktree: string; vcs: string }>();
+    const serverRequest = vi.fn(() => currentProject.promise);
+    const callbacks = createCallbacks({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      associateSessionHistoryScope: vi.fn(() => Promise.resolve()),
+    });
+    const { proxy } = createProxy(callbacks);
+
+    const first = proxy.handleRequest(
+      makePayload(22471, 'GET', '/varro/session-history-scope?directory=%2Frepo')
+    );
+    const second = proxy.handleRequest(
+      makePayload(22472, 'GET', '/varro/session-history-scope?directory=%2Frepo%2F')
+    );
+    await vi.waitFor(() => expect(serverRequest).toHaveBeenCalledOnce());
+    currentProject.resolve({ id: 'project-1', worktree: '/repo', vcs: 'git' });
+    await Promise.all([first, second]);
+
+    proxy.invalidateSessionCatalog();
+    await proxy.handleRequest(
+      makePayload(22473, 'GET', '/varro/session-history-scope?directory=%2Frepo')
+    );
+
+    expect(serverRequest).toHaveBeenCalledTimes(2);
+  });
+
+  it('scopes status catalogs and skips malformed rows', async () => {
+    const serverRequest = vi.fn(async (_method: string, path: string) => {
+      if (path === '/project/current') {
+        return { id: 'project-1', worktree: '/repo', vcs: 'git' };
+      }
+      if (path === '/session?limit=1000000&scope=project') {
+        return [
+          { directory: '/missing-id', projectID: 'project-1' },
+          { id: 'foreign', directory: '/foreign', projectID: 'project-2' },
+          { id: 'visible', directory: '/worktrees/feature', projectID: 'project-1' },
+        ];
+      }
+      if (path === '/session/status') {
+        return {
+          foreign: { type: 'busy' },
+          visible: { type: 'busy' },
+        };
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    });
+    const { proxy, callbacks } = createProxy({
+      getSessionHistoryScope: () => 'project',
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(makePayload(22474, 'GET', '/session/status'));
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 22474,
+      data: { visible: { type: 'busy' } },
+    });
+    expect(mocks.logger.warn).toHaveBeenCalledWith(
+      'Skipped 1 malformed session catalog row for /repo'
+    );
   });
 
   it('loads and activates sessions from the entire OpenCode project', async () => {
@@ -3475,12 +3709,227 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.activateSession).toHaveBeenCalledWith(
       'project-session',
       '/repo/packages/other',
+      '/repo',
       expect.any(AbortSignal)
     );
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 2244,
       data: { 'project-session': { type: 'busy' } },
     });
+  });
+
+  it('replaces stale project catalog authorization after a complete refresh', async () => {
+    let catalog = [{ id: 'stale', projectID: 'project-1', directory: '/worktrees/stale' }];
+    const serverRequest = vi.fn(async (_method: string, path: string) => {
+      if (path === '/project/current') {
+        return { id: 'project-1', worktree: '/repo', vcs: 'git' };
+      }
+      const url = new URL(path, 'http://localhost');
+      if (url.pathname === '/session' && url.searchParams.get('scope') === 'project') {
+        return catalog;
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    });
+    const callbacks = createCallbacks({
+      getSessionHistoryScope: () => 'project',
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+    callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((path: string) =>
+      path === '/repo' ? '/repo' : null
+    );
+    const { proxy } = createProxy(callbacks);
+
+    await proxy.handleRequest(makePayload(22431, 'GET', '/session'));
+    catalog = [{ id: 'current', projectID: 'project-1', directory: '/worktrees/current' }];
+    await proxy.refreshSessionCatalogEventAuthorization(['current']);
+    await proxy.handleRequest(
+      makePayload(22432, 'POST', '/varro/session/stale/activate', {
+        directory: '/worktrees/stale',
+      })
+    );
+    await proxy.handleRequest(
+      makePayload(22433, 'POST', '/varro/session/current/activate', {
+        directory: '/worktrees/current',
+      })
+    );
+
+    expect(callbacks.activateSession).toHaveBeenCalledOnce();
+    expect(callbacks.activateSession).toHaveBeenCalledWith(
+      'current',
+      '/worktrees/current',
+      '/repo',
+      expect.any(AbortSignal)
+    );
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 22432,
+      error: 'Workspace directory is not an open workspace folder',
+    });
+  });
+
+  it('refreshes project authorization when a known session event changes directory', async () => {
+    let catalog = [
+      { id: 'moved-session', projectID: 'project-1', directory: '/worktrees/original' },
+    ];
+    const serverRequest = vi.fn(async (_method: string, path: string) => {
+      if (path === '/project/current') {
+        return { id: 'project-1', worktree: '/repo', vcs: 'git' };
+      }
+      if (path === '/session?limit=1000000&scope=project') return catalog;
+      throw new Error(`Unexpected path: ${path}`);
+    });
+    const callbacks = createCallbacks({
+      getSessionHistoryScope: () => 'project',
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+    callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((path: string) =>
+      path === '/repo' ? '/repo' : null
+    );
+    const { proxy } = createProxy(callbacks);
+
+    await proxy.handleRequest(makePayload(22434, 'GET', '/session'));
+    expect(proxy.isSessionCatalogEventAuthorized('moved-session', '/outside')).toBe(false);
+    catalog = [];
+
+    await expect(
+      proxy.refreshSessionCatalogEventAuthorization(['moved-session'], '/outside')
+    ).resolves.toBe(false);
+    expect(serverRequest).toHaveBeenCalledWith(
+      'GET',
+      '/session?limit=1000000&scope=project',
+      undefined,
+      { directory: '/repo' }
+    );
+    expect(
+      serverRequest.mock.calls.filter(([, path]) => {
+        const url = new URL(path, 'http://localhost');
+        return url.pathname === '/session' && url.searchParams.get('scope') === 'project';
+      })
+    ).toHaveLength(2);
+  });
+
+  it('refreshes descendant authorization after directory drift and activates the moved session', async () => {
+    let catalog = [{ id: 'moved-session', directory: '/repo/packages/old' }];
+    const serverRequest = vi.fn(async (_method: string, path: string) => {
+      if (path === '/experimental/session?limit=1000000') return catalog;
+      throw new Error(`Unexpected path: ${path}`);
+    });
+    const callbacks = createCallbacks({
+      getSessionHistoryScope: () => 'descendants',
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+    callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((path: string) =>
+      path === '/repo' ? '/repo' : null
+    );
+    const { proxy } = createProxy(callbacks);
+
+    await proxy.handleRequest(makePayload(22437, 'GET', '/session'));
+    catalog = [{ id: 'moved-session', directory: '/repo/packages/new' }];
+
+    await expect(
+      proxy.refreshSessionCatalogEventAuthorization(['moved-session'], '/repo/packages/new')
+    ).resolves.toBe(true);
+    await proxy.handleRequest(
+      makePayload(22438, 'POST', '/varro/session/moved-session/activate', {
+        directory: '/repo/packages/new',
+      })
+    );
+
+    expect(serverRequest).toHaveBeenCalledTimes(2);
+    expect(callbacks.activateSession).toHaveBeenCalledWith(
+      'moved-session',
+      '/repo/packages/new',
+      '/repo',
+      expect.any(AbortSignal)
+    );
+  });
+
+  it('rejects descendant authorization after a known session moves outside the root', async () => {
+    let catalog = [{ id: 'moved-session', directory: '/repo/packages/old' }];
+    const serverRequest = vi.fn(async (_method: string, path: string) => {
+      if (path === '/experimental/session?limit=1000000') return catalog;
+      throw new Error(`Unexpected path: ${path}`);
+    });
+    const callbacks = createCallbacks({
+      getSessionHistoryScope: () => 'descendants',
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+    callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((path: string) =>
+      path === '/repo' ? '/repo' : null
+    );
+    const { proxy } = createProxy(callbacks);
+
+    await proxy.handleRequest(makePayload(22439, 'GET', '/session'));
+    catalog = [{ id: 'moved-session', directory: '/outside' }];
+
+    await expect(
+      proxy.refreshSessionCatalogEventAuthorization(['moved-session'], '/outside')
+    ).resolves.toBe(false);
+    await proxy.handleRequest(
+      makePayload(22440, 'POST', '/varro/session/moved-session/activate', {
+        directory: '/outside',
+      })
+    );
+
+    expect(serverRequest).toHaveBeenCalledTimes(2);
+    expect(callbacks.activateSession).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 22440,
+      error: 'Workspace directory is not an open workspace folder',
+    });
+  });
+
+  it('drops authorization from a previous project identity', async () => {
+    let now = 1_000;
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    let projectID = 'project-1';
+    const serverRequest = vi.fn(async (_method: string, path: string) => {
+      if (path === '/project/current') {
+        return { id: projectID, worktree: '/repo', vcs: 'git' };
+      }
+      const url = new URL(path, 'http://localhost');
+      if (url.pathname === '/session' && url.searchParams.get('scope') === 'project') {
+        return projectID === 'project-1'
+          ? [{ id: 'old-project-session', projectID, directory: '/worktrees/old' }]
+          : [{ id: 'new-project-session', projectID, directory: '/worktrees/new' }];
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    });
+    const callbacks = createCallbacks({
+      getSessionHistoryScope: () => 'project',
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+    callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((path: string) =>
+      path === '/repo' ? '/repo' : null
+    );
+    const { proxy } = createProxy(callbacks);
+
+    await proxy.handleRequest(makePayload(22434, 'GET', '/session'));
+    now += 2_001;
+    projectID = 'project-2';
+    await proxy.loadPermissionModeRecoveryCatalog();
+    await proxy.handleRequest(
+      makePayload(22435, 'POST', '/varro/session/old-project-session/activate', {
+        directory: '/worktrees/old',
+      })
+    );
+    await proxy.handleRequest(
+      makePayload(22436, 'POST', '/varro/session/new-project-session/activate', {
+        directory: '/worktrees/new',
+      })
+    );
+
+    expect(callbacks.activateSession).toHaveBeenCalledOnce();
+    expect(callbacks.activateSession).toHaveBeenCalledWith(
+      'new-project-session',
+      '/worktrees/new',
+      '/repo',
+      expect.any(AbortSignal)
+    );
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 22435,
+      error: 'Workspace directory is not an open workspace folder',
+    });
+    nowSpy.mockRestore();
   });
 
   it('limits project scope to descendants for a non-Git folder', async () => {

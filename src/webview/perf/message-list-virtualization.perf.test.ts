@@ -1,16 +1,56 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import type * as AssistantDialogModule from '../components/message-list/assistant-dialog';
+import type * as MessageRowsModule from '../components/message-list/MessageRows';
 import type * as StickyPreviewModule from '../components/message-list/sticky-preview';
+import type * as AssistantActivityModule from '../lib/assistant-activity';
 
-const { assistantDialogSummaryPasses, stickyPreviewMessageReads, stickyPreviewSelectionPasses } =
-  vi.hoisted(() => ({
-    assistantDialogSummaryPasses: { value: 0 },
-    stickyPreviewMessageReads: { value: 0 },
-    stickyPreviewSelectionPasses: { value: 0 },
-  }));
+const {
+  activityGroupingPasses,
+  assistantDialogSummaryPasses,
+  messageRowMounts,
+  stickyPreviewMessageReads,
+  stickyPreviewSelectionPasses,
+} = vi.hoisted(() => ({
+  activityGroupingPasses: { value: 0 },
+  assistantDialogSummaryPasses: { value: 0 },
+  messageRowMounts: { current: 0, peak: 0 },
+  stickyPreviewMessageReads: { value: 0 },
+  stickyPreviewSelectionPasses: { value: 0 },
+}));
 
 /* oxlint-disable anti-slop/no-module-mocking -- This benchmark isolates MessageList module integration from unrelated render work. */
+vi.mock('../components/message-list/MessageRows', async (importOriginal) => {
+  const actual = await importOriginal<typeof MessageRowsModule>();
+  const { onCleanup, onMount } = await import('solid-js');
+  return {
+    ...actual,
+    MessageRow: (props: Parameters<typeof actual.MessageRow>[0]) => {
+      onMount(() => {
+        messageRowMounts.current += 1;
+        messageRowMounts.peak = Math.max(messageRowMounts.peak, messageRowMounts.current);
+      });
+      onCleanup(() => {
+        messageRowMounts.current -= 1;
+      });
+      return actual.MessageRow(props);
+    },
+  };
+});
+
+vi.mock('../lib/assistant-activity', async (importOriginal) => {
+  const actual = await importOriginal<typeof AssistantActivityModule>();
+  return {
+    ...actual,
+    getAssistantActivityGroupMap: (
+      ...args: Parameters<typeof actual.getAssistantActivityGroupMap>
+    ) => {
+      activityGroupingPasses.value += 1;
+      return actual.getAssistantActivityGroupMap(...args);
+    },
+  };
+});
+
 vi.mock('../components/message-list/assistant-dialog', async (importOriginal) => {
   const actual = await importOriginal<typeof AssistantDialogModule>();
   return {
@@ -156,7 +196,10 @@ function resizeObserverEntry(
 describe('MessageList virtualization perf guards', () => {
   beforeEach(() => {
     resetDefaultAppState();
+    activityGroupingPasses.value = 0;
     assistantDialogSummaryPasses.value = 0;
+    messageRowMounts.current = 0;
+    messageRowMounts.peak = 0;
     stickyPreviewMessageReads.value = 0;
     stickyPreviewSelectionPasses.value = 0;
     container = document.createElement('div');
@@ -283,9 +326,62 @@ describe('MessageList virtualization perf guards', () => {
     cleanup = render(() => MessageList(), container!);
     await settlePerfEffects();
 
+    expect(messageRowMounts.peak).toBe(200);
+    expect(messageRowMounts.current).toBe(container?.querySelectorAll('[data-msg-id]').length);
     expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(80);
     expect(container?.querySelector('.interactive-item-off-core')).toBeTruthy();
     expect(container?.querySelector('.virtual-spacer-bottom')).toBeTruthy();
+  });
+
+  it('does not regroup the transcript as visible streaming text grows', async () => {
+    const requestAnimationFrameStub = vi.fn(() => 1);
+    Object.defineProperty(globalThis, 'requestAnimationFrame', {
+      configurable: true,
+      writable: true,
+      value: requestAnimationFrameStub,
+    });
+    Object.defineProperty(window, 'requestAnimationFrame', {
+      configurable: true,
+      writable: true,
+      value: requestAnimationFrameStub,
+    });
+    const messageId = 'message-1';
+    replaceMessages([
+      entry(createUserMessage('prompt-1'), [createTextPart('prompt-text', 'prompt-1', 'Inspect')]),
+      entry(createAssistantMessage(messageId), [
+        {
+          id: 'tool-1',
+          sessionID: 'session-1',
+          messageID: messageId,
+          callID: 'call-1',
+          type: 'tool',
+          tool: 'read',
+          state: {
+            status: 'completed',
+            input: { filePath: 'src/app.ts' },
+            output: 'source',
+            title: 'src/app.ts',
+            metadata: {},
+            time: { start: 1, end: 2 },
+          },
+        },
+        createTextPart('streaming-text', messageId, ''),
+      ]),
+    ]);
+    setState('activeSessionId', 'session-1');
+    setState('streamingPartId', 'streaming-text');
+    setState('streamingText', 'First visible token');
+
+    cleanup = render(() => MessageList(), container!);
+    await settlePerfEffects();
+    const initialGroupingPasses = activityGroupingPasses.value;
+
+    for (let index = 0; index < 20; index += 1) {
+      setState('streamingText', `First visible token ${'x'.repeat(index + 1)}`);
+      await settlePerfEffects();
+    }
+
+    expect(activityGroupingPasses.value).toBe(initialGroupingPasses);
   });
 
   it('keeps the rendered row window bounded while inline editing', async () => {

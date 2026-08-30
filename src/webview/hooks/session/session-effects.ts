@@ -248,6 +248,8 @@ export function registerVisibleRunningSessionSyncEffect(deps: {
             ...runningSessionIds.filter((sessionId) => sessionId !== activeRunningSessionId),
           ]
         : runningSessionIds;
+      const hasRunningSessions = messageSyncSessionIds.length > 0;
+      const runningSessionIdSet = new Set(runningSessionIds);
 
       let cancelled = false;
       const refresh = (): Promise<void> => {
@@ -281,7 +283,15 @@ export function registerVisibleRunningSessionSyncEffect(deps: {
                   ...latestRunningIds.filter((sessionId) => sessionId !== latestActiveSessionId),
                 ]
               : latestRunningIds;
-          for (const sessionId of latestMessageSyncSessionIds) {
+          // Healthy SSE owns transcript delivery. Hydration only recovers transcripts for running
+          // sessions that SSE failed to reveal; degraded polling continues to reconcile every one.
+          const transcriptSyncSessionIds =
+            eventStreamState === 'healthy'
+              ? latestMessageSyncSessionIds.filter(
+                  (sessionId) => !runningSessionIdSet.has(sessionId)
+                )
+              : latestMessageSyncSessionIds;
+          for (const sessionId of transcriptSyncSessionIds) {
             results.push(await settleVoid(deps.syncSessionMessages(sessionId)));
           }
           for (const result of results) {
@@ -296,7 +306,6 @@ export function registerVisibleRunningSessionSyncEffect(deps: {
         return tracked;
       };
 
-      const hasRunningSessions = messageSyncSessionIds.length > 0;
       const timer = window.setInterval(
         () => {
           void refresh().catch((err) => deps.logError('runningSessionSync', err));

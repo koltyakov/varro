@@ -765,11 +765,12 @@ describe('session-selection helpers', () => {
       {
         getActiveSessionId: () => 'session-1',
         getSessionStatus: () => ({ type: 'idle' }) satisfies SessionStatus,
+        isSessionInActiveTree: () => true,
         loadingStartedAt: () => null,
         loadSessionMessages: vi.fn(async () => messages),
         updateUsageLimitState: vi.fn(),
         setSessionStatusEntry: vi.fn(),
-        setMessagesIncremental,
+        setSessionMessagesIncremental: setMessagesIncremental,
         stopLoading,
         syncFailedSessionsFromMessages: vi.fn(),
         handoffTodosToMessages: vi.fn(),
@@ -781,7 +782,9 @@ describe('session-selection helpers', () => {
       'session-1'
     );
 
-    expect(setMessagesIncremental).toHaveBeenCalledWith(messages, { preserveExtraParts: true });
+    expect(setMessagesIncremental).toHaveBeenCalledWith('session-1', messages, {
+      preserveExtraParts: true,
+    });
     expect(stopLoading).not.toHaveBeenCalled();
   });
 
@@ -795,11 +798,12 @@ describe('session-selection helpers', () => {
       {
         getActiveSessionId: () => 'session-1',
         getSessionStatus: () => ({ type: 'busy' }) satisfies SessionStatus,
+        isSessionInActiveTree: () => true,
         loadingStartedAt: () => null,
         loadSessionMessages: vi.fn(async () => [{ info: completed, parts: [] }]),
         updateUsageLimitState: vi.fn(),
         setSessionStatusEntry: vi.fn(),
-        setMessagesIncremental,
+        setSessionMessagesIncremental: setMessagesIncremental,
         stopLoading,
         syncFailedSessionsFromMessages: vi.fn(),
         handoffTodosToMessages: vi.fn(),
@@ -811,9 +815,11 @@ describe('session-selection helpers', () => {
       'session-1'
     );
 
-    expect(setMessagesIncremental).toHaveBeenCalledWith([{ info: completed, parts: [] }], {
-      preserveExtraParts: false,
-    });
+    expect(setMessagesIncremental).toHaveBeenCalledWith(
+      'session-1',
+      [{ info: completed, parts: [] }],
+      { preserveExtraParts: false }
+    );
     expect(stopLoading).not.toHaveBeenCalled();
   });
 
@@ -827,11 +833,12 @@ describe('session-selection helpers', () => {
       {
         getActiveSessionId: () => 'session-1',
         getSessionStatus: () => ({ type: 'idle' }) satisfies SessionStatus,
+        isSessionInActiveTree: () => true,
         loadingStartedAt: () => null,
         loadSessionMessages: vi.fn(async () => [{ info: completed, parts: [] }]),
         updateUsageLimitState: vi.fn(),
         setSessionStatusEntry: vi.fn(),
-        setMessagesIncremental,
+        setSessionMessagesIncremental: setMessagesIncremental,
         stopLoading,
         syncFailedSessionsFromMessages: vi.fn(),
         handoffTodosToMessages: vi.fn(),
@@ -843,9 +850,11 @@ describe('session-selection helpers', () => {
       'session-1'
     );
 
-    expect(setMessagesIncremental).toHaveBeenCalledWith([{ info: completed, parts: [] }], {
-      preserveExtraParts: false,
-    });
+    expect(setMessagesIncremental).toHaveBeenCalledWith(
+      'session-1',
+      [{ info: completed, parts: [] }],
+      { preserveExtraParts: false }
+    );
     expect(stopLoading).toHaveBeenCalledTimes(1);
   });
 
@@ -933,11 +942,12 @@ describe('session-selection helpers', () => {
       {
         getActiveSessionId: () => 'session-2',
         getSessionStatus: () => ({ type: 'busy' }) satisfies SessionStatus,
+        isSessionInActiveTree: () => false,
         loadingStartedAt: () => null,
         loadSessionMessages: vi.fn(async () => [{ info: completed, parts: [] }]),
         updateUsageLimitState: vi.fn(),
         setSessionStatusEntry,
-        setMessagesIncremental: vi.fn(),
+        setSessionMessagesIncremental: vi.fn(),
         stopLoading: vi.fn(),
         syncFailedSessionsFromMessages,
         handoffTodosToMessages: vi.fn(),
@@ -953,6 +963,39 @@ describe('session-selection helpers', () => {
     expect(setSessionStatusEntry).not.toHaveBeenCalled();
   });
 
+  it('applies watchdog-style syncs to a child in the active session tree', async () => {
+    const setSessionMessagesIncremental = vi.fn();
+    const childMessage = assistantMessage('child-assistant');
+    childMessage.sessionID = 'child-1';
+
+    await syncSessionMessagesWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getSessionStatus: () => ({ type: 'busy' }) satisfies SessionStatus,
+        isSessionInActiveTree: (sessionId) => sessionId === 'child-1',
+        loadingStartedAt: () => null,
+        loadSessionMessages: vi.fn(async () => [{ info: childMessage, parts: [] }]),
+        updateUsageLimitState: vi.fn(),
+        setSessionStatusEntry: vi.fn(),
+        setSessionMessagesIncremental,
+        stopLoading: vi.fn(),
+        syncFailedSessionsFromMessages: vi.fn(),
+        handoffTodosToMessages: vi.fn(),
+      },
+      {
+        next: () => 1,
+        isCurrent: () => true,
+      },
+      'child-1'
+    );
+
+    expect(setSessionMessagesIncremental).toHaveBeenCalledWith(
+      'child-1',
+      [{ info: childMessage, parts: [] }],
+      { preserveExtraParts: true }
+    );
+  });
+
   it('reconciles stale failures for completed inactive idle sessions', async () => {
     const setSessionStatusEntry = vi.fn();
     const syncFailedSessionsFromMessages = vi.fn();
@@ -964,11 +1007,12 @@ describe('session-selection helpers', () => {
       {
         getActiveSessionId: () => 'session-2',
         getSessionStatus: () => ({ type: 'idle' }) satisfies SessionStatus,
+        isSessionInActiveTree: () => false,
         loadingStartedAt: () => null,
         loadSessionMessages: vi.fn(async () => messages),
         updateUsageLimitState: vi.fn(),
         setSessionStatusEntry,
-        setMessagesIncremental: vi.fn(),
+        setSessionMessagesIncremental: vi.fn(),
         stopLoading: vi.fn(),
         syncFailedSessionsFromMessages,
         handoffTodosToMessages: vi.fn(),
@@ -993,11 +1037,12 @@ describe('session-selection helpers', () => {
       {
         getActiveSessionId: () => 'session-1',
         getSessionStatus: () => ({ type: 'busy' }) satisfies SessionStatus,
+        isSessionInActiveTree: () => true,
         loadingStartedAt: () => 3,
         loadSessionMessages: vi.fn(async () => [{ info: completed, parts: [] }]),
         updateUsageLimitState: vi.fn(),
         setSessionStatusEntry: vi.fn(),
-        setMessagesIncremental: vi.fn(),
+        setSessionMessagesIncremental: vi.fn(),
         stopLoading,
         syncFailedSessionsFromMessages: vi.fn(),
         handoffTodosToMessages: vi.fn(),

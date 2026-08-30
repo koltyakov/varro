@@ -270,21 +270,17 @@ export function removeDeletedSessionTree(
 
 export function upsertSession(deps: LifecycleDependencies, session: Session) {
   const { activeSessionId, sessions, showSessionPicker } = deps.getState();
+  const existing = sessions.find((item) => item.id === session.id);
   if (isNumber(session.time.archived)) {
-    if (sessions.some((item) => item.id === session.id)) {
+    if (existing) {
       removeDeletedSessionTree(deps, session.id, sessions);
     }
     return;
   }
   if (
+    !existing &&
     !isSessionInOpenWorkspace(session, deps.getOpenWorkspacePaths(), deps.getCurrentWorkspacePath())
   ) {
-    if (sessions.some((item) => item.id === session.id)) {
-      applySessions(
-        deps,
-        sessions.filter((item) => item.id !== session.id)
-      );
-    }
     return;
   }
 

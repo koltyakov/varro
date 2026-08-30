@@ -515,16 +515,90 @@ export function pruneMessagesFrom(sessionId: string, messageId: string): (() => 
   );
   if (targetIndex === -1) return null;
 
-  const retainedMessages = currentMessages.slice(0, targetIndex);
-  streamingDeltaQueue.reset();
+  const removedMessages = currentMessages.filter(
+    (entry, index) => entry.info.sessionID === sessionId && index >= targetIndex
+  );
+  const removedMessageKeys = new Set(removedMessages.map(getMessageEntryKey));
+  const removedMessageIds = new Set(removedMessages.map((entry) => entry.info.id));
+  const retainedMessages = currentMessages.filter(
+    (entry) => entry.info.sessionID !== sessionId || !removedMessageIds.has(entry.info.id)
+  );
+  const removedStreamingPart = removedMessages.some((entry) =>
+    entry.parts.some((part) => part.id === state.streamingPartId)
+  );
+  if (removedStreamingPart) streamingDeltaQueue.reset();
   batch(() => {
     setState('messages', retainedMessages);
-    if (state.streamingPartId !== null) setState('streamingPartId', null);
-    if (state.streamingText !== '') setState('streamingText', '');
+    if (removedStreamingPart) {
+      setState('streamingPartId', null);
+      setState('streamingText', '');
+    }
   });
   messageIndex.invalidate();
   recordSettledAssistantMarkers(retainedMessages);
-  return () => replaceMessages(previousMessages);
+  return () => restorePrunedSessionMessages(previousMessages, removedMessageKeys);
+}
+
+function restorePrunedSessionMessages(
+  previousMessages: MessageEntry[],
+  removedMessageKeys: ReadonlySet<string>
+) {
+  flushPendingStreamingDeltas();
+  const currentByKey = new Map(
+    state.messages.map((entry) => [getMessageEntryKey(entry), entry] as const)
+  );
+  const restored: MessageEntry[] = [];
+  const consumed = new Set<string>();
+
+  for (const previous of previousMessages) {
+    const key = getMessageEntryKey(previous);
+    const current = currentByKey.get(key);
+    if (current) {
+      restored.push(current);
+      consumed.add(key);
+    } else if (removedMessageKeys.has(key)) {
+      restored.push(previous);
+      consumed.add(key);
+    }
+  }
+  for (const current of state.messages) {
+    if (!consumed.has(getMessageEntryKey(current))) restored.push(current);
+  }
+
+  setState('messages', restored);
+  messageIndex.invalidate();
+  recordSettledAssistantMarkers(restored);
+}
+
+export function removeMessagesForSessions(sessionIds: Iterable<string>) {
+  flushPendingStreamingDeltas();
+  const removedSessionIds = new Set(sessionIds);
+  if (removedSessionIds.size === 0) return;
+
+  const removedMessages = state.messages.filter((entry) =>
+    removedSessionIds.has(entry.info.sessionID)
+  );
+  if (removedMessages.length === 0) return;
+  const removedStreamingPart = removedMessages.some((entry) =>
+    entry.parts.some((part) => part.id === state.streamingPartId)
+  );
+  if (removedStreamingPart) streamingDeltaQueue.reset();
+  const retainedMessages = state.messages.filter(
+    (entry) => !removedSessionIds.has(entry.info.sessionID)
+  );
+  batch(() => {
+    setState('messages', retainedMessages);
+    if (removedStreamingPart) {
+      setState('streamingPartId', null);
+      setState('streamingText', '');
+    }
+  });
+  messageIndex.invalidate();
+  recordSettledAssistantMarkers(retainedMessages);
+}
+
+function getMessageEntryKey(entry: MessageEntry) {
+  return `${entry.info.sessionID}\0${entry.info.id}`;
 }
 
 export function setMessagesIncremental(
@@ -551,7 +625,8 @@ export function setMessagesIncremental(
   const sharedPrefixLength = getSharedMessagePrefixLength(current, incoming);
 
   if (sharedPrefixLength === 0) {
-    replaceMessages(incoming);
+    reconcileMessagesByIdentity(incoming, options, streamingSnapshot);
+    recordSettledAssistantMarkers(incoming);
     return;
   }
 
@@ -609,6 +684,36 @@ export function setMessagesIncremental(
     );
   });
   recordSettledAssistantMarkers(incoming);
+}
+
+function reconcileMessagesByIdentity(
+  incoming: MessageEntry[],
+  options: { preserveExtraParts?: boolean } | undefined,
+  streamingSnapshot: StreamingTextSnapshot
+) {
+  const currentByKey = new Map(
+    state.messages.map((entry) => [getMessageEntryKey(entry), entry] as const)
+  );
+  const nextMessages = incoming.map((next) => {
+    const current = currentByKey.get(getMessageEntryKey(next));
+    if (
+      current &&
+      areMessageEntriesEquivalent(current, next) &&
+      !hasExtraMessagePartsToPreserve(current, next, options) &&
+      !hasStreamingTextToMaterialize(current, next, options, streamingSnapshot)
+    ) {
+      return current;
+    }
+    return mergeMessageEntry(current, next, options, streamingSnapshot);
+  });
+
+  streamingDeltaQueue.reset();
+  batch(() => {
+    if (state.streamingPartId !== null) setState('streamingPartId', null);
+    if (state.streamingText !== '') setState('streamingText', '');
+    setState('messages', nextMessages);
+  });
+  messageIndex.invalidate();
 }
 
 function getMessageInsertion(current: MessageEntry[], incoming: MessageEntry[]) {

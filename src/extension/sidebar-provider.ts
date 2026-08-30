@@ -94,7 +94,6 @@ import { WorkspaceSessionStatusCoordinator } from './workspace-session-status-co
 import { UsageReportService } from './usage-report-service';
 import { getWorkspaceSessionIdsForEvent } from './sidebar-provider-utils';
 import { resolveServerLaunch } from './util/server-launch';
-import { FULL_SESSION_LIST_PATH } from './util/session-list';
 
 const maximumTestedOpenCodeVersion = readMaximumTestedOpenCodeVersion();
 
@@ -141,7 +140,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private static readonly SESSION_RECONCILE_INTERVAL_MS = 10_000;
   private static readonly QUEUE_RECONCILE_INTERVAL_MS = 1_000;
   private static readonly SESSION_RECONCILE_GRACE_MS = 10_000;
-  private static readonly PERMISSION_MODE_FALLBACK_RETRY_MS = 5_000;
+  private static readonly PERMISSION_MODE_FALLBACK_RETRY_INITIAL_MS = 5_000;
+  private static readonly PERMISSION_MODE_FALLBACK_RETRY_MAX_MS = 5 * 60_000;
   private static readonly MAX_DEFERRED_WORKSPACE_EVENTS = 1_000;
 
   private lastStatusBarStateKey = '';
@@ -197,6 +197,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private permissionModeFallbackReconciliation: Promise<void> | null = null;
   private permissionModeFallbackReconciliationRequested = false;
   private permissionModeFallbackRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private permissionModeFallbackRetryMs = SidebarProvider.PERMISSION_MODE_FALLBACK_RETRY_INITIAL_MS;
   private readonly deferredWorkspaceEvents: ServerEvent[] = [];
   private readonly permissionAutomationOwnerViewIds = new Set<string>();
   private readonly permissionAutomationOwnerWorkspaces = new Map<string, string>();
@@ -400,6 +401,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         event.affectsConfiguration('varro.chat.expandThinking') ||
         event.affectsConfiguration('varro.chat.fontSize') ||
         event.affectsConfiguration('varro.chat.showChangedFiles') ||
+        event.affectsConfiguration('varro.chat.showTurnTimer') ||
         event.affectsConfiguration('varro.chat.desktopSessionPaneSide') ||
         event.affectsConfiguration('varro.chat.defaultPermissionMode') ||
         event.affectsConfiguration('chat.fontSize') ||
@@ -549,20 +551,21 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       postApiResponse: (requestGeneration, payload) =>
         webviewSession.postApiResponse(payload, requestGeneration),
       isPermissionAutomationLeaseCurrent: (lease, request) => {
-        const workspace =
-          normalizeWorkspaceIdentity(endpointRef.endpoint?.workspacePath ?? initialWorkspacePath) ??
-          '*';
+        const workspace = this.permissionAutomationOwnerWorkspaces.get(webviewContext.viewId);
         if (
+          !workspace ||
           !this.permissionAutomationOwnerViewIds.has(webviewContext.viewId) ||
           this.permissionAutomationLeases.get(workspace) !== lease
         ) {
           return false;
         }
-        const sessionID =
-          request.sessionID ||
-          (request.permissionID
-            ? this.sessionState.pending.get(request.permissionID)?.sessionID
-            : undefined);
+        const pendingSessionID = request.permissionID
+          ? this.sessionState.pending.get(request.permissionID)?.sessionID
+          : undefined;
+        if (request.sessionID && pendingSessionID && request.sessionID !== pendingSessionID) {
+          return false;
+        }
+        const sessionID = pendingSessionID ?? request.sessionID;
         const recoveringSessionIDs = new Set(
           this.sessionPermissionModes.pendingSafeFallbackSessionIds()
         );
@@ -575,10 +578,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           return false;
         }
         const directory = sessionID ? this.sessionState.directoryFor(sessionID) : undefined;
-        return isSameWorkspacePath(
-          directory,
-          endpointRef.endpoint?.workspacePath ?? initialWorkspacePath
-        );
+        const permissionWorkspace =
+          request.workspaceDirectory ??
+          (directory ? (this.getOpenSessionDirectory(directory) ?? undefined) : undefined);
+        return normalizeWorkspaceIdentity(permissionWorkspace) === workspace;
       },
       beginQueuedMessageDispatchClaim: async (sessionId, itemId, lease, requestId, messageId) =>
         endpointRef.endpoint?.ready === true &&
@@ -622,18 +625,25 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           lease,
           requestId
         ),
-      updatePermissionMode: (sessionID, mode, directory) =>
-        this.updateConfirmedPermissionMode(
-          sessionID,
-          mode,
-          directory ?? endpointServer.getWorkspaceCwd()
-        ),
-      activateSession: async (sessionID, directory, signal) => {
-        const workspacePath = this.getOpenSessionDirectory(directory);
+      updatePermissionMode: (sessionID, mode, directory, preconfigured) =>
+        preconfigured
+          ? this.persistPreconfiguredPermissionMode(
+              sessionID,
+              mode,
+              directory ?? endpointServer.getWorkspaceCwd(),
+              true
+            )
+          : this.updateConfirmedPermissionMode(
+              sessionID,
+              mode,
+              directory ?? endpointServer.getWorkspaceCwd()
+            ),
+      activateSession: async (sessionID, directory, catalogRoot, signal) => {
+        const workspacePath = this.getOpenSessionDirectory(catalogRoot);
         if (!workspacePath) throw new Error('Session workspace folder is not open');
         const session = asRecord(
           await this.server.request('GET', `/session/${encodeURIComponent(sessionID)}`, undefined, {
-            directory: workspacePath,
+            directory,
             signal,
           })
         );
@@ -643,7 +653,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         if (
           session?.id !== sessionID ||
           typeof session.directory !== 'string' ||
-          !isSameWorkspacePath(session.directory, currentWorkspacePath)
+          !isSameWorkspacePath(session.directory, directory)
         ) {
           throw new Error('404 Session not found');
         }
@@ -1347,6 +1357,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             ? { ...msg, payload: this.withWorkspacePath(msg.payload, endpoint.workspacePath) }
             : msg;
       if (endpointMessage) endpoint.bridge.post(endpointMessage);
+      else if (msg.type === 'server/event') this.refreshCatalogEventForEndpoint(msg, endpoint);
     }
   }
 
@@ -1355,9 +1366,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     endpoint: WebviewEndpoint
   ): Extract<ExtensionMessage, { type: 'server/event' }> | null {
     if (this.isEventInEndpointWorkspace(msg.payload, endpoint)) return msg;
+    const sessionIDs = getWorkspaceSessionIdsForEvent(msg.payload);
+    const directory = this.getEventDirectory(msg.payload, sessionIDs);
     if (
       !WORKSPACE_CATALOG_EVENT_TYPES.has(msg.payload.type) ||
-      !this.isEventInOpenWorkspace(msg.payload)
+      (!this.isEventInOpenWorkspace(msg.payload) &&
+        !(
+          sessionIDs.length > 0 &&
+          sessionIDs.every((sessionID) =>
+            endpoint.restProxy.isSessionCatalogEventAuthorized(sessionID, directory)
+          )
+        ))
     ) {
       return null;
     }
@@ -1365,6 +1384,37 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const projected = projectWorkspaceCatalogEvent(msg.payload);
     const { seq: _seq, sequenceOnly: _sequenceOnly, ...event } = projected;
     return { type: 'server/event', payload: event as ServerEvent };
+  }
+
+  private refreshCatalogEventForEndpoint(
+    msg: Extract<ExtensionMessage, { type: 'server/event' }>,
+    endpoint: WebviewEndpoint
+  ) {
+    if (!WORKSPACE_CATALOG_EVENT_TYPES.has(msg.payload.type)) return;
+    const sessionIDs = getWorkspaceSessionIdsForEvent(msg.payload);
+    if (sessionIDs.length === 0) return;
+    const directory = this.getEventDirectory(msg.payload, sessionIDs);
+    void endpoint.restProxy
+      .refreshSessionCatalogEventAuthorization(sessionIDs, directory)
+      .then((authorized) => {
+        if (!authorized || !this.endpoints.has(endpoint)) return;
+        const projected = this.projectEventForEndpoint(msg, endpoint);
+        if (projected) endpoint.bridge.post(projected);
+      })
+      .catch(() => undefined);
+  }
+
+  private getEventDirectory(event: ServerEvent, sessionIDs: readonly string[]) {
+    if (event.workspaceDirectory) return event.workspaceDirectory;
+    if (event.type === 'session.created' || event.type === 'session.updated') {
+      const info = asRecord(event.properties?.info);
+      if (typeof info?.directory === 'string') return info.directory;
+    }
+    for (const sessionID of sessionIDs) {
+      const directory = this.sessionState.directoryFor(sessionID);
+      if (directory) return directory;
+    }
+    return undefined;
   }
 
   private isEventInOpenWorkspace(event: ServerEvent) {
@@ -1456,6 +1506,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private shouldDeferWorkspaceEvent(event: ServerEvent) {
     if (event.workspaceDirectory) return false;
+    if (WORKSPACE_CATALOG_EVENT_TYPES.has(event.type)) return false;
     const sessionIDs = getWorkspaceSessionIdsForEvent(event);
     return sessionIDs.some((sessionID) => !this.sessionState.directoryFor(sessionID));
   }
@@ -1779,6 +1830,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         } else if (this.permissionModeFallbackRetryTimer) {
           clearTimeout(this.permissionModeFallbackRetryTimer);
           this.permissionModeFallbackRetryTimer = null;
+          this.resetPermissionModeFallbackBackoff();
+        } else {
+          this.resetPermissionModeFallbackBackoff();
         }
       }
     };
@@ -1788,15 +1842,27 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private schedulePermissionModeFallbackRecovery() {
     if (this.disposing || this.permissionModeFallbackRetryTimer) return;
+    const delay = this.permissionModeFallbackRetryMs;
+    this.permissionModeFallbackRetryMs = Math.min(
+      delay * 2,
+      SidebarProvider.PERMISSION_MODE_FALLBACK_RETRY_MAX_MS
+    );
     this.permissionModeFallbackRetryTimer = setTimeout(() => {
       this.permissionModeFallbackRetryTimer = null;
       void this.recoverPendingPermissionModeFallbacks();
-    }, SidebarProvider.PERMISSION_MODE_FALLBACK_RETRY_MS);
+    }, delay);
+  }
+
+  private resetPermissionModeFallbackBackoff() {
+    this.permissionModeFallbackRetryMs = SidebarProvider.PERMISSION_MODE_FALLBACK_RETRY_INITIAL_MS;
   }
 
   private async runPermissionModeFallbackRecovery() {
     const pendingSessionIDs = this.sessionPermissionModes.pendingSafeFallbackSessionIds();
-    if (pendingSessionIDs.length === 0) return;
+    if (pendingSessionIDs.length === 0) {
+      this.resetPermissionModeFallbackBackoff();
+      return;
+    }
     try {
       await this.runtime.ensureServerStarted();
     } catch (err) {
@@ -1834,46 +1900,50 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
     await recover(knownDirectories);
 
+    if (this.sessionPermissionModes.pendingSafeFallbackSessionIds().length === 0) {
+      this.resetPermissionModeFallbackBackoff();
+      return;
+    }
+
     const unresolvedSessionIDs = new Set(
       this.sessionPermissionModes
         .pendingSafeFallbackSessionIds()
         .filter((sessionID) => !this.sessionState.directoryFor(sessionID))
     );
     if (unresolvedSessionIDs.size === 0) return;
-    const context = this.contextProvider.context;
-    const directories = [
-      ...(context.workspaceFolders ?? []).map((folder) => folder.path),
-      context.workspaceDirectory,
-      context.workspacePath,
-      ...[...this.endpoints].map((endpoint) => endpoint.workspacePath),
-      this.server.getWorkspaceCwd(),
-    ]
-      .filter((directory): directory is string => Boolean(directory))
-      .filter((directory, index, values) => values.indexOf(directory) === index);
-    const listings = await Promise.allSettled(
-      directories.map(async (directory) => ({
-        directory,
-        sessions: await this.server.request('GET', FULL_SESSION_LIST_PATH, undefined, {
-          directory,
-        }),
-      }))
-    );
+    const catalog = await this.restProxy.loadPermissionModeRecoveryCatalog();
     const discoveredDirectories = new Map<string, string>();
-    for (const listing of listings) {
-      if (listing.status !== 'fulfilled' || !Array.isArray(listing.value.sessions)) continue;
-      for (const value of listing.value.sessions) {
-        const session = asRecord(value);
-        if (typeof session?.id !== 'string' || !unresolvedSessionIDs.has(session.id)) continue;
-        if (
-          typeof session.directory !== 'string' ||
-          !isSameWorkspacePath(session.directory, listing.value.directory)
-        ) {
-          continue;
-        }
-        discoveredDirectories.set(session.id, listing.value.directory);
+    const catalogSessionIDs = new Set<string>();
+    for (const session of catalog.sessions) {
+      catalogSessionIDs.add(session.id);
+      if (unresolvedSessionIDs.has(session.id)) {
+        discoveredDirectories.set(session.id, session.directory);
       }
     }
     await recover(discoveredDirectories);
+
+    if (catalog.complete) {
+      const absentSessionIDs = this.sessionPermissionModes
+        .pendingSafeFallbackSessionIds()
+        .filter(
+          (sessionID) => unresolvedSessionIDs.has(sessionID) && !catalogSessionIDs.has(sessionID)
+        );
+      const removals = await Promise.allSettled(
+        absentSessionIDs.map((sessionID) => this.sessionPermissionModes.removeSession(sessionID))
+      );
+      for (let index = 0; index < removals.length; index += 1) {
+        const result = removals[index];
+        if (result?.status !== 'rejected') continue;
+        logger.warn(
+          `Could not clear absent permission mode ${absentSessionIDs[index]}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`
+        );
+      }
+      if (absentSessionIDs.length > 0) this.postPermissionModes();
+    }
+
+    if (this.sessionPermissionModes.pendingSafeFallbackSessionIds().length === 0) {
+      this.resetPermissionModeFallbackBackoff();
+    }
   }
 
   private updateConfirmedPermissionMode(

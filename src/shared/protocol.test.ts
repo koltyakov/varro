@@ -8,6 +8,7 @@ import {
   isSessionWorkspaceScope,
   parseServerEvent,
   type ExtensionMessage,
+  type WebviewMessage,
 } from './protocol';
 
 describe('protocol parsers', () => {
@@ -22,6 +23,26 @@ describe('protocol parsers', () => {
     expect(
       ['', '__proto__', 'constructor', 'prototype', 'x'.repeat(513)].some(isSafePersistedSessionId)
     ).toBe(false);
+  });
+
+  it('keeps permission automation session ownership outside the OpenCode body', () => {
+    const message: WebviewMessage = {
+      type: 'api/request',
+      payload: {
+        id: 1,
+        method: 'POST',
+        path: '/permission/permission-1/reply',
+        body: { reply: 'once' },
+        permissionAutomationLease: 4,
+        permissionAutomationSessionID: 'session-1',
+      },
+    };
+
+    expect(message.payload).toMatchObject({
+      permissionAutomationLease: 4,
+      permissionAutomationSessionID: 'session-1',
+      body: { reply: 'once' },
+    });
   });
 
   it('recognizes only supported session workspace scopes', () => {

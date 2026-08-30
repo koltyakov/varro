@@ -17,6 +17,8 @@ import { logger } from './logger';
 
 export type PendingAttentionKind = 'permission' | 'question';
 export type SiblingSessionAlertKind = 'attention' | 'completed' | 'error' | 'plan-ready';
+type CompletionAlertKind = 'completed' | 'plan-ready';
+type AcknowledgedCompletionMarkers = Partial<Record<CompletionAlertKind, number>>;
 export type SiblingSessionAlertCandidate = {
   sessionID: string;
   rootSessionID: string;
@@ -134,7 +136,7 @@ export class SessionStateManager {
   private readonly serverBusySessions = new Set<string>();
   private readonly completedSessions = new Set<string>();
   private readonly completedSessionMarkers = new Map<string, number>();
-  private readonly acknowledgedCompletedRoots: Map<string, number>;
+  private readonly acknowledgedCompletedRoots: Map<string, AcknowledgedCompletionMarkers>;
   private readonly failedSessions = new Set<string>();
   private readonly sessionAgents = new Map<string, string>();
   private readonly sessionTitles = new Map<string, string>();
@@ -299,7 +301,7 @@ export class SessionStateManager {
 
   setSessionUnreadState(
     sessionID: string,
-    kind: 'completed' | 'plan-ready',
+    kind: CompletionAlertKind,
     unread: boolean,
     directory?: string,
     markerAt?: number
@@ -315,8 +317,8 @@ export class SessionStateManager {
       return;
     }
     const rootSessionID = this.rootSessionIdFor(sessionID);
-    const acknowledgedAt = this.acknowledgedCompletedRoots.get(rootSessionID);
-    if (acknowledgedAt !== undefined && (markerAt === undefined || markerAt <= acknowledgedAt)) {
+    const acknowledgedAt = this.acknowledgedCompletedRoots.get(rootSessionID)?.[kind];
+    if (acknowledgedAt !== undefined && markerAt !== undefined && markerAt <= acknowledgedAt) {
       return;
     }
     if (this.busySessions.has(sessionID)) return;
@@ -432,38 +434,46 @@ export class SessionStateManager {
       if (this.isPlanSession(sessionID) || !this.isSessionInWorkspace(sessionID, workspacePath)) {
         continue;
       }
-      const acknowledgedAt = Math.max(Date.now(), this.completedSessionMarkers.get(sessionID) ?? 0);
+      const acknowledgedAt = this.completedSessionMarkers.get(sessionID);
       this.deleteCompletedSession(sessionID);
-      this.acknowledgeCompletedRoot(this.rootSessionIdFor(sessionID), acknowledgedAt);
+      this.acknowledgeCompletedRoot(this.rootSessionIdFor(sessionID), 'completed', acknowledgedAt);
       changed = true;
     }
     if (changed) this.listener.onStatusChange();
   }
 
-  acknowledgeCompletedSession(sessionID: string, acknowledgedAt = Date.now()): void {
-    const rootSessionID = this.rootSessionIdFor(sessionID);
-    this.acknowledgeCompletedRoot(rootSessionID, acknowledgedAt);
-    let changed = false;
-    for (const completedSessionID of this.completedSessions) {
-      if (this.rootSessionIdFor(completedSessionID) !== rootSessionID) continue;
-      if (this.isPlanSession(completedSessionID)) continue;
-      const completedAt = this.completedSessionMarkers.get(completedSessionID);
-      if (completedAt !== undefined && completedAt > acknowledgedAt) continue;
-      this.deleteCompletedSession(completedSessionID);
-      changed = true;
-    }
-    if (changed) this.listener.onStatusChange();
+  acknowledgeCompletedSession(sessionID: string, acknowledgedAt?: number): void {
+    this.acknowledgeSessionCompletion(sessionID, 'completed', acknowledgedAt);
   }
 
-  acknowledgePlanSession(sessionID: string, acknowledgedAt = Date.now()): void {
+  acknowledgePlanSession(sessionID: string, acknowledgedAt?: number): void {
+    this.acknowledgeSessionCompletion(sessionID, 'plan-ready', acknowledgedAt);
+  }
+
+  private acknowledgeSessionCompletion(
+    sessionID: string,
+    kind: CompletionAlertKind,
+    acknowledgedAt: number | undefined
+  ): void {
     const rootSessionID = this.rootSessionIdFor(sessionID);
-    this.acknowledgeCompletedRoot(rootSessionID, acknowledgedAt);
+    let markerAt = getNumber(acknowledgedAt);
+    if (markerAt === undefined) {
+      for (const completedSessionID of this.completedSessions) {
+        if (this.rootSessionIdFor(completedSessionID) !== rootSessionID) continue;
+        const completedKind = this.isPlanSession(completedSessionID) ? 'plan-ready' : 'completed';
+        if (completedKind !== kind) continue;
+        const completedAt = this.completedSessionMarkers.get(completedSessionID);
+        if (completedAt !== undefined) markerAt = Math.max(markerAt ?? completedAt, completedAt);
+      }
+    }
+    this.acknowledgeCompletedRoot(rootSessionID, kind, markerAt);
     let changed = false;
     for (const completedSessionID of this.completedSessions) {
       if (this.rootSessionIdFor(completedSessionID) !== rootSessionID) continue;
-      if (!this.isPlanSession(completedSessionID)) continue;
+      const completedKind = this.isPlanSession(completedSessionID) ? 'plan-ready' : 'completed';
+      if (completedKind !== kind) continue;
       const completedAt = this.completedSessionMarkers.get(completedSessionID);
-      if (completedAt !== undefined && completedAt > acknowledgedAt) continue;
+      if (markerAt !== undefined && completedAt !== undefined && completedAt > markerAt) continue;
       this.deleteCompletedSession(completedSessionID);
       changed = true;
     }
@@ -762,7 +772,12 @@ export class SessionStateManager {
   persist(): Promise<void> {
     const interruptedSessions = this.getInterruptedSessionSnapshots();
     const blockingRequests = this.getBlockingRequestSnapshots();
-    const acknowledgedCompletions = Object.fromEntries(this.acknowledgedCompletedRoots);
+    const acknowledgedCompletions = Object.fromEntries(
+      [...this.acknowledgedCompletedRoots].map(([rootSessionID, markers]) => [
+        rootSessionID,
+        { ...markers },
+      ])
+    );
     return this.enqueuePersistence(async () => {
       const results = await Promise.allSettled([
         Promise.resolve().then(() =>
@@ -972,7 +987,12 @@ export class SessionStateManager {
   }
 
   private persistAcknowledgedCompletions(): Promise<void> {
-    const snapshot = Object.fromEntries(this.acknowledgedCompletedRoots);
+    const snapshot = Object.fromEntries(
+      [...this.acknowledgedCompletedRoots].map(([rootSessionID, markers]) => [
+        rootSessionID,
+        { ...markers },
+      ])
+    );
     return this.enqueuePersistence(async () => {
       try {
         await this.persistence.set(ACKNOWLEDGED_COMPLETIONS_KEY, snapshot);
@@ -1278,10 +1298,18 @@ export class SessionStateManager {
     return this.completedSessions.delete(sessionID);
   }
 
-  private acknowledgeCompletedRoot(rootSessionID: string, acknowledgedAt: number) {
-    const current = this.acknowledgedCompletedRoots.get(rootSessionID) ?? 0;
+  private acknowledgeCompletedRoot(
+    rootSessionID: string,
+    kind: CompletionAlertKind,
+    acknowledgedAt: number | undefined
+  ) {
+    if (acknowledgedAt === undefined) return;
+    const current = this.acknowledgedCompletedRoots.get(rootSessionID) ?? {};
     this.acknowledgedCompletedRoots.delete(rootSessionID);
-    this.acknowledgedCompletedRoots.set(rootSessionID, Math.max(current, acknowledgedAt));
+    this.acknowledgedCompletedRoots.set(rootSessionID, {
+      ...current,
+      [kind]: Math.max(current[kind] ?? acknowledgedAt, acknowledgedAt),
+    });
     while (this.acknowledgedCompletedRoots.size > MAX_SESSION_METADATA_ENTRIES) {
       const oldest = this.acknowledgedCompletedRoots.keys().next().value;
       if (oldest === undefined) break;
@@ -2016,18 +2044,29 @@ function terminalFailureKey(error: Record<string, unknown> | undefined): string 
   ]);
 }
 
-function validateAcknowledgedCompletions(value: unknown): Map<string, number> {
+function validateAcknowledgedCompletions(
+  value: unknown
+): Map<string, AcknowledgedCompletionMarkers> {
   const record = asRecord(value);
   if (!record) return new Map();
   return new Map(
     Object.entries(record)
-      .filter(
-        (entry): entry is [string, number] =>
-          entry[0].length > 0 &&
-          entry[0].length <= MAX_PERSISTED_STRING_LENGTH &&
-          typeof entry[1] === 'number' &&
-          Number.isFinite(entry[1])
-      )
+      .map(([rootSessionID, persistedValue]) => {
+        if (rootSessionID.length === 0 || rootSessionID.length > MAX_PERSISTED_STRING_LENGTH) {
+          return undefined;
+        }
+        const persistedMarkers = asRecord(persistedValue);
+        if (!persistedMarkers) return undefined;
+        const markers: AcknowledgedCompletionMarkers = {};
+        const completedAt = getNumber(persistedMarkers.completed);
+        const planReadyAt = getNumber(persistedMarkers['plan-ready']);
+        if (completedAt !== undefined) markers.completed = completedAt;
+        if (planReadyAt !== undefined) markers['plan-ready'] = planReadyAt;
+        return completedAt !== undefined || planReadyAt !== undefined
+          ? ([rootSessionID, markers] as const)
+          : undefined;
+      })
+      .filter((entry): entry is readonly [string, AcknowledgedCompletionMarkers] => !!entry)
       .slice(-MAX_SESSION_METADATA_ENTRIES)
   );
 }

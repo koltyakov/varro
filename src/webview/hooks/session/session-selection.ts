@@ -205,6 +205,7 @@ export async function syncSessionMessagesWithDependencies(
   deps: {
     getActiveSessionId(): string | null;
     getSessionStatus(sessionId: string): SessionStatus | null | undefined;
+    isSessionInActiveTree(sessionId: string): boolean;
     loadingStartedAt(): number | null;
     loadSessionMessages(sessionId: string, isCurrent?: () => boolean): Promise<MessageEntry[]>;
     updateUsageLimitState(
@@ -213,7 +214,8 @@ export async function syncSessionMessagesWithDependencies(
       messages: MessageEntry[]
     ): void;
     setSessionStatusEntry(sessionId: string, status: SessionStatus): void;
-    setMessagesIncremental(
+    setSessionMessagesIncremental(
+      sessionId: string,
       messages: MessageEntry[],
       options?: { preserveExtraParts?: boolean }
     ): void;
@@ -234,10 +236,18 @@ export async function syncSessionMessagesWithDependencies(
   deps.updateUsageLimitState(sessionId, status, messages);
   if (sessionId === deps.getActiveSessionId()) {
     const latestFinished = latestAssistantFinishedBeforeLoading(messages, deps.loadingStartedAt());
-    deps.setMessagesIncremental(messages, { preserveExtraParts: !latestFinished });
+    deps.setSessionMessagesIncremental(sessionId, messages, {
+      preserveExtraParts: !latestFinished,
+    });
     if (latestFinished && status?.type !== 'busy' && status?.type !== 'retry') deps.stopLoading();
     deps.syncFailedSessionsFromMessages(messages);
     deps.handoffTodosToMessages(messages);
+  } else if (deps.isSessionInActiveTree(sessionId)) {
+    const latestFinished = latestAssistantFinished(messages);
+    deps.setSessionMessagesIncremental(sessionId, messages, {
+      preserveExtraParts: !latestFinished,
+    });
+    deps.syncFailedSessionsFromMessages(messages);
   } else if (latestAssistantFinished(messages)) {
     deps.syncFailedSessionsFromMessages(messages);
   }

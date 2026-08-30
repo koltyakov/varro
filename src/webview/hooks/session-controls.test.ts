@@ -61,6 +61,25 @@ function session(id = 'session-1', overrides?: Partial<Session>): Session {
   };
 }
 
+function completedTaskPart(id: string, sessionId = id) {
+  return {
+    id: `task-part-${id}`,
+    sessionID: 'session-1',
+    messageID: 'assistant-1',
+    type: 'tool' as const,
+    callID: `task-call-${id}`,
+    tool: 'task',
+    state: {
+      status: 'completed' as const,
+      input: { description: `Task ${id}` },
+      output: 'Done',
+      title: `Task ${id}`,
+      metadata: { sessionId },
+      time: { start: 1, end: 2 },
+    },
+  };
+}
+
 describe('session-controls helpers', () => {
   it('sends the review prompt so the send path can create a session', async () => {
     const sendMessage = vi.fn(async () => {});
@@ -239,6 +258,603 @@ describe('session-controls helpers', () => {
       'release-removals',
       'send',
     ]);
+  });
+
+  it('deletes only parent message ids when child rows are interleaved in the edited tail', async () => {
+    const deleteMessage = vi.fn(async () => {});
+    const child = { info: assistantMessage('child-assistant', 'child-1') };
+
+    await editMessageWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [
+          { info: userMessage('user-1') },
+          child,
+          { info: assistantMessage('assistant-1') },
+        ],
+        isSessionWorking: () => false,
+        abortSession: vi.fn(async () => {}),
+        startLoading: vi.fn(),
+        deferMessageRemovals: vi.fn(() => vi.fn()),
+        pruneMessagesFrom: vi.fn(),
+        deleteMessage,
+        syncSessionMessages: vi.fn(async () => {}),
+        sendEditedMessage: vi.fn(async () => true),
+        stopLoading: vi.fn(),
+        setError: vi.fn(),
+      },
+      'user-1',
+      'updated prompt'
+    );
+
+    expect(deleteMessage.mock.calls).toEqual([
+      ['session-1', 'assistant-1'],
+      ['session-1', 'user-1'],
+    ]);
+  });
+
+  it('aborts and recycles task child trees before deleting their launch history', async () => {
+    const order: string[] = [];
+    const taskPart = {
+      id: 'task-part',
+      sessionID: 'session-1',
+      messageID: 'assistant-1',
+      type: 'tool' as const,
+      callID: 'task-call',
+      tool: 'task',
+      state: {
+        status: 'completed' as const,
+        input: { description: 'Inspect the repo' },
+        output: 'Done',
+        title: 'Inspect the repo',
+        metadata: { sessionId: 'child-1' },
+        time: { start: 1, end: 2 },
+      },
+    };
+
+    const result = await editMessageWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [
+          { info: userMessage('user-1'), parts: [] },
+          { info: assistantMessage('assistant-1'), parts: [taskPart] },
+        ],
+        getSessions: () => [
+          session('session-1'),
+          session('child-1', { parentID: 'session-1', time: { created: 1, updated: 1 } }),
+          session('grandchild-1', {
+            parentID: 'child-1',
+            time: { created: 2, updated: 2 },
+          }),
+        ],
+        getSessionTreeIds: (id) => (id === 'child-1' ? ['child-1', 'grandchild-1'] : [id]),
+        isSessionWorking: () => false,
+        abortSession: vi.fn(async () => {}),
+        abortActiveSessionTree: vi.fn(async (id) => {
+          order.push(`abort:${id}`);
+        }),
+        moveSessionTreeToRecycleBin: vi.fn(async (id) => {
+          order.push(`recycle:${id}`);
+        }),
+        restoreSessionTreeFromRecycleBin: vi.fn(async () => {}),
+        startLoading: vi.fn(),
+        deleteMessage: vi.fn(async (_sessionId, id) => {
+          order.push(`delete:${id}`);
+        }),
+        syncSessionMessages: vi.fn(async () => {}),
+        sendEditedMessage: vi.fn(async () => {
+          order.push('send');
+          return true;
+        }),
+        stopLoading: vi.fn(),
+        setError: vi.fn(),
+      },
+      'user-1',
+      'updated prompt'
+    );
+
+    expect(result).toBe(true);
+    expect(order).toEqual([
+      'abort:child-1',
+      'recycle:child-1',
+      'delete:assistant-1',
+      'delete:user-1',
+      'send',
+    ]);
+  });
+
+  it('keeps launch history and reports a failed child recycle operation', async () => {
+    const deleteMessage = vi.fn(async () => {});
+    const setError = vi.fn();
+    const restore = vi.fn(async () => false);
+    const sync = vi.fn(async () => {});
+    const taskPart = {
+      id: 'task-part',
+      sessionID: 'session-1',
+      messageID: 'assistant-1',
+      type: 'tool' as const,
+      callID: 'task-call',
+      tool: 'task',
+      state: {
+        status: 'running' as const,
+        input: { description: 'Inspect the repo' },
+        title: 'Inspect the repo',
+        metadata: { sessionId: 'child-1' },
+        time: { start: 1 },
+      },
+    };
+
+    const result = await editMessageWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [
+          { info: userMessage('user-1'), parts: [] },
+          { info: assistantMessage('assistant-1'), parts: [taskPart] },
+        ],
+        getSessions: () => [session('session-1'), session('child-1', { parentID: 'session-1' })],
+        isSessionWorking: () => false,
+        abortSession: vi.fn(async () => {}),
+        abortActiveSessionTree: vi.fn(async () => {}),
+        moveSessionTreeToRecycleBin: vi.fn(async () => {
+          throw new Error('recycle failed');
+        }),
+        restoreSessionTreeFromRecycleBin: restore,
+        startLoading: vi.fn(),
+        deleteMessage,
+        syncSessionMessages: sync,
+        sendEditedMessage: vi.fn(async () => true),
+        stopLoading: vi.fn(),
+        setError,
+      },
+      'user-1',
+      'updated prompt'
+    );
+
+    expect(result).toBe(false);
+    expect(deleteMessage).not.toHaveBeenCalled();
+    expect(restore).toHaveBeenCalledWith('child-1');
+    expect(sync.mock.calls).toEqual([['session-1']]);
+    expect(setError).toHaveBeenCalledWith('recycle failed');
+  });
+
+  it('restores a child tree after the recycle request loses its response', async () => {
+    const restore = vi.fn(async () => true);
+    const sync = vi.fn(async () => {});
+    const setError = vi.fn();
+
+    const result = await editMessageWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [
+          { info: userMessage('user-1'), parts: [] },
+          {
+            info: assistantMessage('assistant-1'),
+            parts: [completedTaskPart('child-1')],
+          },
+        ],
+        getSessions: () => [session('session-1'), session('child-1', { parentID: 'session-1' })],
+        getSessionTreeIds: (id) => [id],
+        isSessionWorking: () => false,
+        abortSession: vi.fn(async () => {}),
+        abortActiveSessionTree: vi.fn(async () => {}),
+        moveSessionTreeToRecycleBin: vi.fn(async () => {
+          throw new Error('recycle response lost');
+        }),
+        restoreSessionTreeFromRecycleBin: restore,
+        startLoading: vi.fn(),
+        deleteMessage: vi.fn(async () => {}),
+        syncSessionMessages: sync,
+        sendEditedMessage: vi.fn(async () => true),
+        stopLoading: vi.fn(),
+        setError,
+      },
+      'user-1',
+      'updated prompt'
+    );
+
+    expect(result).toBe(false);
+    expect(restore).toHaveBeenCalledWith('child-1');
+    expect(sync.mock.calls).toEqual([['session-1'], ['child-1']]);
+    expect(setError).toHaveBeenCalledWith('recycle response lost');
+  });
+
+  it('ignores unknown and unrelated task session ids from metadata', async () => {
+    const recycle = vi.fn(async () => {});
+
+    const result = await editMessageWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [
+          { info: userMessage('user-1'), parts: [] },
+          {
+            info: assistantMessage('assistant-1'),
+            parts: [
+              completedTaskPart('unknown', 'missing-child'),
+              completedTaskPart('sibling', 'sibling-child'),
+            ],
+          },
+        ],
+        getSessions: () => [
+          session('session-1'),
+          session('other-parent'),
+          session('sibling-child', { parentID: 'other-parent' }),
+        ],
+        isSessionWorking: () => false,
+        abortSession: vi.fn(async () => {}),
+        abortActiveSessionTree: vi.fn(async () => {}),
+        moveSessionTreeToRecycleBin: recycle,
+        restoreSessionTreeFromRecycleBin: vi.fn(async () => {}),
+        startLoading: vi.fn(),
+        deleteMessage: vi.fn(async () => {}),
+        syncSessionMessages: vi.fn(async () => {}),
+        sendEditedMessage: vi.fn(async () => true),
+        stopLoading: vi.fn(),
+        setError: vi.fn(),
+      },
+      'user-1',
+      'updated prompt'
+    );
+
+    expect(result).toBe(true);
+    expect(recycle).not.toHaveBeenCalled();
+  });
+
+  it('restores confirmed and ambiguous child recycle attempts when a later recycle fails', async () => {
+    const restore = vi.fn(async () => {});
+    const sync = vi.fn(async () => {});
+
+    const result = await editMessageWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [
+          { info: userMessage('user-1'), parts: [] },
+          {
+            info: assistantMessage('assistant-1'),
+            parts: [completedTaskPart('child-1'), completedTaskPart('child-2')],
+          },
+        ],
+        getSessions: () => [
+          session('session-1'),
+          session('child-1', { parentID: 'session-1' }),
+          session('child-2', { parentID: 'session-1' }),
+        ],
+        getSessionTreeIds: (id) => [id],
+        isSessionWorking: () => false,
+        abortSession: vi.fn(async () => {}),
+        abortActiveSessionTree: vi.fn(async () => {}),
+        moveSessionTreeToRecycleBin: vi.fn(async (id) => {
+          if (id === 'child-2') throw new Error('second recycle failed');
+        }),
+        restoreSessionTreeFromRecycleBin: restore,
+        startLoading: vi.fn(),
+        deleteMessage: vi.fn(async () => {}),
+        syncSessionMessages: sync,
+        sendEditedMessage: vi.fn(async () => true),
+        stopLoading: vi.fn(),
+        setError: vi.fn(),
+      },
+      'user-1',
+      'updated prompt'
+    );
+
+    expect(result).toBe(false);
+    expect(restore.mock.calls).toEqual([['child-2'], ['child-1']]);
+    expect(sync).toHaveBeenCalledWith('session-1');
+    expect(sync).toHaveBeenCalledWith('child-1');
+    expect(sync).toHaveBeenCalledWith('child-2');
+  });
+
+  it('reports a false restore response for a confirmed recycle as a rollback failure', async () => {
+    const setError = vi.fn();
+    const stopLoading = vi.fn();
+    const sync = vi.fn(async () => {});
+
+    const result = await editMessageWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [
+          { info: userMessage('user-1'), parts: [] },
+          {
+            info: assistantMessage('assistant-1'),
+            parts: [completedTaskPart('child-1')],
+          },
+        ],
+        getSessions: () => [session('session-1'), session('child-1', { parentID: 'session-1' })],
+        getSessionTreeIds: (id) => [id],
+        isSessionWorking: () => false,
+        abortSession: vi.fn(async () => {}),
+        abortActiveSessionTree: vi.fn(async () => {}),
+        moveSessionTreeToRecycleBin: vi.fn(async () => {}),
+        restoreSessionTreeFromRecycleBin: vi.fn(async () => false),
+        startLoading: vi.fn(),
+        deleteMessage: vi.fn(async () => {
+          throw new Error('delete failed');
+        }),
+        syncSessionMessages: sync,
+        sendEditedMessage: vi.fn(async () => true),
+        stopLoading,
+        setError,
+      },
+      'user-1',
+      'updated prompt'
+    );
+
+    expect(result).toBe(false);
+    expect(stopLoading).toHaveBeenCalledOnce();
+    expect(sync.mock.calls).toEqual([['session-1']]);
+    expect(setError).toHaveBeenCalledWith(
+      'delete failed. Rollback also failed: Rollback failed for recycled child sessions (restore child-1: restore returned false). Check the recycle bin and reload the affected sessions.'
+    );
+  });
+
+  it('surfaces a thrown child restore failure with the original edit failure', async () => {
+    const setError = vi.fn();
+    const stopLoading = vi.fn();
+
+    const result = await editMessageWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [
+          { info: userMessage('user-1'), parts: [] },
+          {
+            info: assistantMessage('assistant-1'),
+            parts: [completedTaskPart('child-1')],
+          },
+        ],
+        getSessions: () => [session('session-1'), session('child-1', { parentID: 'session-1' })],
+        getSessionTreeIds: (id) => [id],
+        isSessionWorking: () => false,
+        abortSession: vi.fn(async () => {}),
+        abortActiveSessionTree: vi.fn(async () => {}),
+        moveSessionTreeToRecycleBin: vi.fn(async () => {}),
+        restoreSessionTreeFromRecycleBin: vi.fn(async () => {
+          throw new Error('restore request failed');
+        }),
+        startLoading: vi.fn(),
+        deleteMessage: vi.fn(async () => {
+          throw new Error('delete failed');
+        }),
+        syncSessionMessages: vi.fn(async () => {}),
+        sendEditedMessage: vi.fn(async () => true),
+        stopLoading,
+        setError,
+      },
+      'user-1',
+      'updated prompt'
+    );
+
+    expect(result).toBe(false);
+    expect(stopLoading).toHaveBeenCalledOnce();
+    expect(setError).toHaveBeenCalledWith(
+      'delete failed. Rollback also failed: Rollback failed for recycled child sessions (restore child-1: restore request failed). Check the recycle bin and reload the affected sessions.'
+    );
+  });
+
+  it('attempts every child rollback and syncs the restored trees when one restore fails', async () => {
+    const restore = vi.fn(async (id: string) => {
+      if (id === 'child-2') throw new Error('restore unavailable');
+    });
+    const sync = vi.fn(async () => {});
+    const setError = vi.fn();
+
+    const result = await editMessageWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [
+          { info: userMessage('user-1'), parts: [] },
+          {
+            info: assistantMessage('assistant-1'),
+            parts: [completedTaskPart('child-1'), completedTaskPart('child-2')],
+          },
+        ],
+        getSessions: () => [
+          session('session-1'),
+          session('child-1', { parentID: 'session-1' }),
+          session('grandchild-1', { parentID: 'child-1' }),
+          session('child-2', { parentID: 'session-1' }),
+        ],
+        getSessionTreeIds: (id) => (id === 'child-1' ? ['child-1', 'grandchild-1'] : [id]),
+        isSessionWorking: () => false,
+        abortSession: vi.fn(async () => {}),
+        abortActiveSessionTree: vi.fn(async () => {}),
+        moveSessionTreeToRecycleBin: vi.fn(async () => {}),
+        restoreSessionTreeFromRecycleBin: restore,
+        startLoading: vi.fn(),
+        deleteMessage: vi.fn(async () => {
+          throw new Error('delete failed');
+        }),
+        syncSessionMessages: sync,
+        sendEditedMessage: vi.fn(async () => true),
+        stopLoading: vi.fn(),
+        setError,
+      },
+      'user-1',
+      'updated prompt'
+    );
+
+    expect(result).toBe(false);
+    expect(restore.mock.calls).toEqual([['child-2'], ['child-1']]);
+    expect(sync.mock.calls).toEqual([['session-1'], ['child-1'], ['grandchild-1']]);
+    expect(setError).toHaveBeenCalledWith(
+      'delete failed. Rollback also failed: Rollback failed for recycled child sessions (restore child-2: restore unavailable). Check the recycle bin and reload the affected sessions.'
+    );
+  });
+
+  it('keeps recycled child trees trashed when the replacement send fails', async () => {
+    const restore = vi.fn(async () => {});
+    const sync = vi.fn(async () => {});
+
+    const result = await editMessageWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [
+          { info: userMessage('user-1'), parts: [] },
+          {
+            info: assistantMessage('assistant-1'),
+            parts: [completedTaskPart('child-1')],
+          },
+        ],
+        getSessions: () => [session('session-1'), session('child-1', { parentID: 'session-1' })],
+        getSessionTreeIds: (id) => [id],
+        isSessionWorking: () => false,
+        abortSession: vi.fn(async () => {}),
+        abortActiveSessionTree: vi.fn(async () => {}),
+        moveSessionTreeToRecycleBin: vi.fn(async () => {}),
+        restoreSessionTreeFromRecycleBin: restore,
+        startLoading: vi.fn(),
+        deleteMessage: vi.fn(async () => {}),
+        syncSessionMessages: sync,
+        sendEditedMessage: vi.fn(async () => false),
+        stopLoading: vi.fn(),
+        setError: vi.fn(),
+      },
+      'user-1',
+      'updated prompt'
+    );
+
+    expect(result).toBe(false);
+    expect(restore).not.toHaveBeenCalled();
+    expect(sync.mock.calls).toEqual([['session-1']]);
+  });
+
+  it('restores a child tree and syncs every descendant when the first parent delete fails', async () => {
+    const restore = vi.fn(async () => {});
+    const sync = vi.fn(async () => {});
+
+    const result = await editMessageWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [
+          { info: userMessage('user-1'), parts: [] },
+          {
+            info: assistantMessage('assistant-1'),
+            parts: [completedTaskPart('child-1')],
+          },
+        ],
+        getSessions: () => [
+          session('session-1'),
+          session('child-1', { parentID: 'session-1' }),
+          session('grandchild-1', { parentID: 'child-1' }),
+        ],
+        getSessionTreeIds: (id) => (id === 'child-1' ? ['child-1', 'grandchild-1'] : [id]),
+        isSessionWorking: () => false,
+        abortSession: vi.fn(async () => {}),
+        abortActiveSessionTree: vi.fn(async () => {}),
+        moveSessionTreeToRecycleBin: vi.fn(async () => {}),
+        restoreSessionTreeFromRecycleBin: restore,
+        startLoading: vi.fn(),
+        deleteMessage: vi.fn(async () => {
+          throw new Error('delete failed');
+        }),
+        syncSessionMessages: sync,
+        sendEditedMessage: vi.fn(async () => true),
+        stopLoading: vi.fn(),
+        setError: vi.fn(),
+      },
+      'user-1',
+      'updated prompt'
+    );
+
+    expect(result).toBe(false);
+    expect(restore).toHaveBeenCalledWith('child-1');
+    expect(sync.mock.calls).toEqual([['session-1'], ['child-1'], ['grandchild-1']]);
+  });
+
+  it('leaves child trees trashed and resyncs the parent after a partial parent deletion', async () => {
+    const restore = vi.fn(async () => {});
+    const sync = vi.fn(async () => {});
+    let messages = [
+      { info: userMessage('user-1'), parts: [] },
+      {
+        info: assistantMessage('assistant-1'),
+        parts: [completedTaskPart('child-1')],
+      },
+    ];
+    const deleteMessage = vi.fn(async (_sessionId: string, messageId: string) => {
+      if (messageId === 'user-1') throw new Error('delete failed');
+      messages = messages.filter((message) => message.info.id !== messageId);
+    });
+
+    const result = await editMessageWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => messages,
+        getSessions: () => [session('session-1'), session('child-1', { parentID: 'session-1' })],
+        getSessionTreeIds: (id) => [id],
+        isSessionWorking: () => false,
+        abortSession: vi.fn(async () => {}),
+        abortActiveSessionTree: vi.fn(async () => {}),
+        moveSessionTreeToRecycleBin: vi.fn(async () => {}),
+        restoreSessionTreeFromRecycleBin: restore,
+        startLoading: vi.fn(),
+        deleteMessage,
+        syncSessionMessages: sync,
+        sendEditedMessage: vi.fn(async () => true),
+        stopLoading: vi.fn(),
+        setError: vi.fn(),
+      },
+      'user-1',
+      'updated prompt'
+    );
+
+    expect(result).toBe(false);
+    expect(deleteMessage.mock.calls).toEqual([
+      ['session-1', 'assistant-1'],
+      ['session-1', 'user-1'],
+    ]);
+    expect(restore).not.toHaveBeenCalled();
+    expect(sync.mock.calls).toEqual([['session-1']]);
+  });
+
+  it('restores a child when a later deletion succeeded but its launch message remains', async () => {
+    const restore = vi.fn(async () => true);
+    const sync = vi.fn(async () => {});
+    let messages = [
+      { info: userMessage('user-1'), parts: [] },
+      {
+        info: assistantMessage('assistant-1'),
+        parts: [completedTaskPart('child-1')],
+      },
+      { info: { ...userMessage('user-2'), time: { created: 2 } }, parts: [] },
+      {
+        info: { ...assistantMessage('assistant-2'), time: { created: 3 } },
+        parts: [],
+      },
+    ];
+    const deleteMessage = vi.fn(async (_sessionId: string, messageId: string) => {
+      if (messageId === 'user-2') throw new Error('delete failed');
+      messages = messages.filter((message) => message.info.id !== messageId);
+    });
+
+    const result = await editMessageWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => messages,
+        getSessions: () => [session('session-1'), session('child-1', { parentID: 'session-1' })],
+        getSessionTreeIds: (id) => [id],
+        isSessionWorking: () => false,
+        abortSession: vi.fn(async () => {}),
+        abortActiveSessionTree: vi.fn(async () => {}),
+        moveSessionTreeToRecycleBin: vi.fn(async () => {}),
+        restoreSessionTreeFromRecycleBin: restore,
+        startLoading: vi.fn(),
+        deleteMessage,
+        syncSessionMessages: sync,
+        sendEditedMessage: vi.fn(async () => true),
+        stopLoading: vi.fn(),
+        setError: vi.fn(),
+      },
+      'user-1',
+      'updated prompt'
+    );
+
+    expect(result).toBe(false);
+    expect(deleteMessage.mock.calls).toEqual([
+      ['session-1', 'assistant-2'],
+      ['session-1', 'user-2'],
+    ]);
+    expect(restore).toHaveBeenCalledWith('child-1');
+    expect(sync.mock.calls).toEqual([['session-1'], ['child-1']]);
   });
 
   it('keeps the edited history truncated when the replacement send fails', async () => {

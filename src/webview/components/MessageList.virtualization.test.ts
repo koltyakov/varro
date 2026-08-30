@@ -6,6 +6,7 @@ import {
   setMessagesIncremental,
   setState,
   state,
+  upsertMessageInfo,
   upsertPart,
 } from '../lib/state';
 import type { MessageEntry, Part } from '../types';
@@ -503,6 +504,229 @@ describe('virtualized editing', () => {
     expect(editedRow?.classList).not.toContain('interactive-item-virtual-placeholder');
     expect(editedRow?.querySelector('.inline-edit-composer-slot')).not.toBeNull();
     expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(30);
+  });
+
+  it.each(['empty', 'rejected'] as const)(
+    'releases a forced zero-height diff row when its %s request settles',
+    async (outcome) => {
+      const animationFrames = installQueuedAnimationFrameMocks();
+      let resolveDiff!: (value: Awaited<ReturnType<typeof client.session.diff>>) => void;
+      let rejectDiff!: (reason: Error) => void;
+      const pendingDiff = new Promise<Awaited<ReturnType<typeof client.session.diff>>>(
+        (resolve, reject) => {
+          resolveDiff = resolve;
+          rejectDiff = reject;
+        }
+      );
+      vi.spyOn(client.session, 'diff').mockReturnValue(pendingDiff);
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+        function (this: HTMLElement) {
+          if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 400);
+          if (this.classList.contains('interactive-list-track')) {
+            const targetHasContent = state.messages
+              .find((message) => message.info.id === 'message-30')
+              ?.parts.some((part) => part.type === 'text' && part.text.trim());
+            return new DOMRect(0, 0, 500, targetHasContent ? 6000 : 5900);
+          }
+          if (this.dataset.msgId) {
+            const targetHasContent = state.messages
+              .find((message) => message.info.id === 'message-30')
+              ?.parts.some((part) => part.type === 'text' && part.text.trim());
+            return new DOMRect(
+              0,
+              0,
+              500,
+              this.dataset.msgId === 'message-30' && !targetHasContent ? 0 : 100
+            );
+          }
+          return new DOMRect(0, 0, 500, 0);
+        }
+      );
+      setState('activeSessionId', 'session-1');
+      replaceMessages(
+        Array.from({ length: 60 }, (_, index) => {
+          const messageId = `message-${index}`;
+          if (index === 30) {
+            return {
+              info: assistantMessage(messageId, {
+                mode: 'subagent',
+                time: { created: 1 },
+              }),
+              parts: [],
+            };
+          }
+          return {
+            info: userMessage(messageId),
+            parts: [textPart(`text-${index}`, `Prompt ${index}`)],
+          };
+        })
+      );
+      cleanup = render(() => MessageList(), container!);
+      for (let frame = 0; frame < 4; frame += 1) {
+        await Promise.resolve();
+        animationFrames.flush();
+      }
+
+      expect(container?.querySelector('[data-msg-id="message-30"]')).toBeNull();
+      startEditingMessage('message-59', 'session-1', 'Prompt 59');
+      await Promise.resolve();
+      expect(container?.querySelector('[data-msg-id="message-59"]')).not.toBeNull();
+
+      replaceMessages(
+        state.messages.map((message) =>
+          message.info.id === 'message-30'
+            ? {
+                ...message,
+                info: assistantMessage('message-30', {
+                  mode: 'subagent',
+                  time: { created: 1, completed: 2 },
+                }),
+              }
+            : message
+        )
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(client.session.diff).toHaveBeenCalledWith('session-1', 'message-30', {
+        directory: undefined,
+      });
+      expect(container?.querySelector('[data-msg-id="message-30"]')).not.toBeNull();
+      expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(30);
+
+      if (outcome === 'empty') resolveDiff([]);
+      else rejectDiff(new Error('Diff unavailable'));
+      for (let frame = 0; frame < 4; frame += 1) {
+        await Promise.resolve();
+        animationFrames.flush();
+      }
+
+      expect(container?.querySelector('[data-msg-id="message-30"]')).toBeNull();
+      expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(30);
+
+      const track = container!.querySelector('.interactive-list-track')!;
+      let futureContentMounted = false;
+      const mutationObserver = new MutationObserver((records) => {
+        for (const record of records) {
+          for (const node of record.addedNodes) {
+            if (!(node instanceof HTMLElement)) continue;
+            const row =
+              node.dataset.msgId === 'message-30'
+                ? node
+                : node.querySelector('[data-msg-id="message-30"]');
+            if (row?.textContent?.includes('Content appeared after the diff request settled')) {
+              futureContentMounted = true;
+            }
+          }
+        }
+      });
+      mutationObserver.observe(track, { childList: true, subtree: true });
+      upsertPart({
+        ...textPart('text-30', 'Content appeared after the diff request settled'),
+        messageID: 'message-30',
+      });
+      for (let frame = 0; frame < 4; frame += 1) {
+        await Promise.resolve();
+        animationFrames.flush();
+      }
+
+      expect(container?.querySelector('[data-msg-id="message-59"]')).not.toBeNull();
+      expect(futureContentMounted).toBe(true);
+      expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(30);
+      mutationObserver.disconnect();
+      animationFrames.restore();
+    }
+  );
+
+  it('keeps an older zero-height assistant unmounted when a newer assistant owns diff eligibility', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const pendingDiff = new Promise<Awaited<ReturnType<typeof client.session.diff>>>(() => {});
+    const diffSpy = vi.spyOn(client.session, 'diff').mockReturnValue(pendingDiff);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 400);
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(0, 0, 500, 5900);
+        }
+        if (this.dataset.msgId) {
+          return new DOMRect(0, 0, 500, this.dataset.msgId === 'message-30' ? 0 : 100);
+        }
+        return new DOMRect(0, 0, 500, 0);
+      }
+    );
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 60 }, (_, index) => {
+        const messageId = `message-${index}`;
+        if (index === 30) {
+          return {
+            info: assistantMessage(messageId, {
+              mode: 'subagent',
+              time: { created: 1 },
+            }),
+            parts: [],
+          };
+        }
+        if (index === 58) {
+          return {
+            info: assistantMessage(messageId, { time: { created: 3, completed: 4 } }),
+            parts: [textPart(`text-${index}`, 'Newest response')],
+          };
+        }
+        return {
+          info: userMessage(messageId),
+          parts: [textPart(`text-${index}`, `Prompt ${index}`)],
+        };
+      })
+    );
+    cleanup = render(() => MessageList(), container!);
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+
+    expect(diffSpy).toHaveBeenCalledTimes(1);
+    expect(diffSpy).toHaveBeenCalledWith('session-1', 'message-58', { directory: undefined });
+    expect(container?.querySelector('[data-msg-id="message-30"]')).toBeNull();
+    startEditingMessage('message-59', 'session-1', 'Prompt 59');
+    await Promise.resolve();
+    expect(container?.querySelector('[data-msg-id="message-59"]')).not.toBeNull();
+
+    let olderAssistantMounted = false;
+    const mutationObserver = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (!(node instanceof HTMLElement)) continue;
+          if (
+            node.dataset.msgId === 'message-30' ||
+            node.querySelector('[data-msg-id="message-30"]')
+          ) {
+            olderAssistantMounted = true;
+          }
+        }
+      }
+    });
+    mutationObserver.observe(container!.querySelector('.interactive-list-track')!, {
+      childList: true,
+      subtree: true,
+    });
+    upsertMessageInfo(
+      assistantMessage('message-30', {
+        mode: 'subagent',
+        time: { created: 1, completed: 2 },
+      })
+    );
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+
+    expect(diffSpy).toHaveBeenCalledTimes(1);
+    expect(olderAssistantMounted).toBe(false);
+    expect(container?.querySelector('[data-msg-id="message-30"]')).toBeNull();
+    expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(30);
+    mutationObserver.disconnect();
+    animationFrames.restore();
   });
 });
 

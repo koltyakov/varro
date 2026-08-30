@@ -75,7 +75,11 @@ import {
   stripClipboardImagePlaceholders,
   replaceContextFiles,
   connectionInitialized,
+  isLoading,
   setErrorRetry,
+  loadingLastActivityAt,
+  loadingStartedAt,
+  showTurnTimer,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
 import { readWebviewInstanceContext } from '../lib/state-stored-values';
@@ -118,7 +122,11 @@ import {
   hasProviderLimitWindowWithinThreshold,
 } from '../lib/format';
 import { getVariantsForModel } from '../lib/model-variants';
-import { getContextWindow } from '../lib/message-metrics';
+import {
+  getContextWindow,
+  isAssistantMessage,
+  isContinuationAssistantFinish,
+} from '../lib/message-metrics';
 import { getPromptTextForClipboardImages } from '../lib/clipboard-images';
 import {
   modelSupportsPdf,
@@ -262,6 +270,7 @@ import { ModelPicker } from './ModelPicker';
 
 const COMPOSER_BUSY_DISPLAY_SETTLE_DELAY_MS = 700;
 const AUTHORITATIVE_QUEUED_STATUS_MAX_AGE_MS = 5_000;
+const QUEUED_STATUS_RECONCILIATION_DELAY_MS = 1_000;
 
 interface CurrentComposerModel {
   providerID: string | null;
@@ -347,10 +356,17 @@ function failedQueuedMessageIds() {
   return new Set(state.failedQueuedMessageIds);
 }
 
-const queuedSessionDispatchPhases = new Map<
-  string,
-  { itemId: string; phase: 'awaiting-busy' | 'running' }
->();
+type QueuedSessionDispatchPhase = {
+  itemId: string;
+  phase: 'dispatching' | 'admitted' | 'running';
+  admittedAt?: number;
+  completedBeforeAdmission?: boolean;
+  statusCheckAfter?: number;
+  statusCheckInFlight?: boolean;
+  statusCheckOwner?: symbol;
+};
+
+const queuedSessionDispatchPhases = new Map<string, QueuedSessionDispatchPhase>();
 
 function canEditQueuedMessage() {
   return (
@@ -646,10 +662,6 @@ function getFileSearchScopeKey() {
 }
 
 export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => void } = {}) {
-  const queuedSessionIds = new Set(state.queuedMessages.map((message) => message.sessionId));
-  for (const sessionId of queuedSessionDispatchPhases.keys()) {
-    if (!queuedSessionIds.has(sessionId)) queuedSessionDispatchPhases.delete(sessionId);
-  }
   const queueOwnerViewId = readWebviewInstanceContext()?.viewId ?? 'sidebar';
   const ownsQueuedMessage = (item: (typeof state.queuedMessages)[number]) =>
     (item.ownerViewId ?? 'sidebar') === queueOwnerViewId;
@@ -700,8 +712,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const [workspaceSendPending, setWorkspaceSendPending] = createSignal(false);
   const authoritativeQueuedSessionStatuses = new Map<
     string,
-    { status: 'busy' | 'idle'; observedAt: number }
+    { status: 'busy' | 'idle'; observedAt: number; revision: number }
   >();
+  let authoritativeQueuedStatusRevision = 0;
+  const queuedStatusReconciliationOwner = Symbol();
   const composerSessionId = () => (props.newSession ? null : state.activeSessionId);
   const composerEditingMessage = () => (props.newSession ? null : editingMessage());
   const composerHasActiveQuestion = () => !props.newSession && hasActiveQuestion();
@@ -2194,9 +2208,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       if (dispatchLease === null) return;
       if (isQueuedSessionHydrating(item.sessionId)) return;
       if (isForeignWorkspace || item.sessionId !== state.activeSessionId) {
+        authoritativeQueuedSessionStatuses.delete(item.sessionId);
         queuedSessionDispatchPhases.set(item.sessionId, {
           itemId: item.id,
-          phase: 'awaiting-busy',
+          phase: 'dispatching',
         });
       }
       sent = await sendWithQueuedModelSnapshot(item, (selectedModel) => {
@@ -2242,6 +2257,18 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       setDispatchingQueuedMessageId(null);
     }
     if (sent) {
+      let completedBeforeAdmission = false;
+      const dispatch = queuedSessionDispatchPhases.get(item.sessionId);
+      if (dispatch?.itemId === item.id) {
+        dispatch.admittedAt = Date.now();
+        if (dispatch.completedBeforeAdmission) {
+          queuedSessionDispatchPhases.delete(item.sessionId);
+          completedBeforeAdmission = true;
+        } else if (dispatch.phase !== 'running') {
+          dispatch.phase = 'admitted';
+          dispatch.statusCheckAfter = dispatch.admittedAt + QUEUED_STATUS_RECONCILIATION_DELAY_MS;
+        }
+      }
       const hasNextForSession = state.queuedMessages.some(
         (queued) => queued.id !== item.id && queued.sessionId === item.sessionId
       );
@@ -2251,6 +2278,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         queuedSessionDispatchPhases.get(item.sessionId)?.itemId === item.id
       ) {
         queuedSessionDispatchPhases.delete(item.sessionId);
+      }
+      if (hasNextForSession && completedBeforeAdmission) {
+        dispatchAfterAuthoritativeIdle(item.sessionId);
+      } else {
+        scheduleQueuedStatusReconciliation();
       }
     } else if (state.queuedMessages.some((queued) => queued.id === item.id)) {
       setQueuedMessageFailed(item.id, true);
@@ -2279,13 +2311,19 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   createEffect(() => {
     const queuedStatusSessionIds = new Set(
-      state.queuedMessages.map((message) => message.sessionId)
+      state.queuedMessages.filter(ownsQueuedMessage).map((message) => message.sessionId)
     );
     for (const sessionId of authoritativeQueuedSessionStatuses.keys()) {
       if (!queuedStatusSessionIds.has(sessionId)) {
         authoritativeQueuedSessionStatuses.delete(sessionId);
       }
     }
+    for (const sessionId of queuedSessionDispatchPhases.keys()) {
+      if (!queuedStatusSessionIds.has(sessionId)) {
+        queuedSessionDispatchPhases.delete(sessionId);
+      }
+    }
+    scheduleQueuedStatusReconciliation();
   });
 
   function findNextQueuedMessageForDispatch() {
@@ -2347,6 +2385,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   }
 
   let queueDispatchTimer: ReturnType<typeof setTimeout> | 0 = 0;
+  let queuedStatusReconciliationTimer: ReturnType<typeof setTimeout> | 0 = 0;
+  let queueDispatchDisposed = false;
   createEffect(() => {
     const initialized = connectionInitialized();
     const dispatchingId = dispatchingQueuedMessageId();
@@ -2365,10 +2405,17 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       void dispatchQueuedMessage(nextQueued);
     }, 250);
   });
-  let queueDispatchDisposed = false;
-  const observeQueuedSessionStatus = (sessionId: string, status: 'busy' | 'idle') => {
+  const observeQueuedSessionStatus = (
+    sessionId: string,
+    status: 'busy' | 'idle',
+    source: 'event' | 'reconciliation' = 'event'
+  ) => {
     if (state.queuedMessages.some((message) => message.sessionId === sessionId)) {
-      authoritativeQueuedSessionStatuses.set(sessionId, { status, observedAt: Date.now() });
+      authoritativeQueuedSessionStatuses.set(sessionId, {
+        status,
+        observedAt: Date.now(),
+        revision: ++authoritativeQueuedStatusRevision,
+      });
     } else {
       authoritativeQueuedSessionStatuses.delete(sessionId);
     }
@@ -2376,13 +2423,23 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (!dispatch) return true;
     if (status === 'busy') {
       dispatch.phase = 'running';
+      dispatch.completedBeforeAdmission = false;
+      scheduleQueuedStatusReconciliation();
       return false;
     }
-    if (dispatch.phase !== 'running') return false;
+    if (dispatch.admittedAt === undefined) {
+      if (dispatch.phase === 'running') dispatch.completedBeforeAdmission = true;
+      return false;
+    }
+    if (dispatch.phase !== 'running' && source !== 'reconciliation') {
+      scheduleQueuedStatusReconciliation();
+      return false;
+    }
     queuedSessionDispatchPhases.delete(sessionId);
+    scheduleQueuedStatusReconciliation();
     return true;
   };
-  const dispatchAfterAuthoritativeIdle = (sessionId: string) => {
+  function dispatchAfterAuthoritativeIdle(sessionId: string) {
     queueMicrotask(() => {
       if (queueDispatchDisposed || !connectionInitialized() || dispatchingQueuedMessageId()) return;
       const next = findNextQueuedMessageForDispatch();
@@ -2392,7 +2449,82 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       if (completedRootId !== queuedRootId) return;
       void dispatchQueuedMessage(next);
     });
-  };
+  }
+  function scheduleQueuedStatusReconciliation() {
+    if (queuedStatusReconciliationTimer) {
+      clearTimeout(queuedStatusReconciliationTimer);
+      queuedStatusReconciliationTimer = 0;
+    }
+    if (queueDispatchDisposed) return;
+
+    const now = Date.now();
+    let candidate: { sessionId: string; dispatch: QueuedSessionDispatchPhase } | undefined;
+    let reconcileAt = Number.POSITIVE_INFINITY;
+    for (const [sessionId, dispatch] of queuedSessionDispatchPhases) {
+      if (dispatch.phase !== 'admitted' || dispatch.statusCheckInFlight) continue;
+      const nextCheckAt = dispatch.statusCheckAfter ?? now;
+      if (nextCheckAt >= reconcileAt) continue;
+      candidate = { sessionId, dispatch };
+      reconcileAt = nextCheckAt;
+    }
+    if (!candidate) return;
+
+    queuedStatusReconciliationTimer = setTimeout(
+      () => {
+        queuedStatusReconciliationTimer = 0;
+        void reconcileQueuedSessionStatus(candidate.sessionId, candidate.dispatch);
+      },
+      Math.max(0, reconcileAt - now)
+    );
+  }
+  async function reconcileQueuedSessionStatus(
+    sessionId: string,
+    dispatch: QueuedSessionDispatchPhase
+  ) {
+    if (queueDispatchDisposed || queuedSessionDispatchPhases.get(sessionId) !== dispatch) return;
+    if (dispatch.admittedAt === undefined) return;
+    const statusRevision = authoritativeQueuedSessionStatuses.get(sessionId)?.revision ?? 0;
+    dispatch.statusCheckInFlight = true;
+    dispatch.statusCheckOwner = queuedStatusReconciliationOwner;
+    try {
+      const statuses = await client.session.status();
+      if (
+        queueDispatchDisposed ||
+        queuedSessionDispatchPhases.get(sessionId) !== dispatch ||
+        dispatch.statusCheckOwner !== queuedStatusReconciliationOwner
+      ) {
+        return;
+      }
+      const latestStatus = authoritativeQueuedSessionStatuses.get(sessionId);
+      if (latestStatus && latestStatus.revision > statusRevision) {
+        dispatch.statusCheckInFlight = false;
+        dispatch.statusCheckOwner = undefined;
+        return;
+      }
+      const status = statuses[sessionId];
+      if (status?.type === 'busy' || status?.type === 'retry') {
+        dispatch.statusCheckInFlight = false;
+        dispatch.statusCheckOwner = undefined;
+        observeQueuedSessionStatus(sessionId, 'busy', 'reconciliation');
+        return;
+      }
+      if (observeQueuedSessionStatus(sessionId, 'idle', 'reconciliation')) {
+        dispatchAfterAuthoritativeIdle(sessionId);
+      }
+    } catch {
+      if (
+        !queueDispatchDisposed &&
+        queuedSessionDispatchPhases.get(sessionId) === dispatch &&
+        dispatch.statusCheckOwner === queuedStatusReconciliationOwner
+      ) {
+        dispatch.statusCheckInFlight = false;
+        dispatch.statusCheckAfter = Date.now() + QUEUED_STATUS_RECONCILIATION_DELAY_MS;
+        dispatch.statusCheckOwner = undefined;
+      }
+    } finally {
+      scheduleQueuedStatusReconciliation();
+    }
+  }
   const queuedSteerAdmissionCleanups = [
     serverEvents.on('session.status', (event) => {
       const properties = event.properties;
@@ -2425,6 +2557,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   onCleanup(() => {
     queueDispatchDisposed = true;
     if (queueDispatchTimer) clearTimeout(queueDispatchTimer);
+    if (queuedStatusReconciliationTimer) clearTimeout(queuedStatusReconciliationTimer);
+    for (const dispatch of queuedSessionDispatchPhases.values()) {
+      if (dispatch.statusCheckOwner !== queuedStatusReconciliationOwner) continue;
+      dispatch.statusCheckInFlight = false;
+      dispatch.statusCheckAfter = undefined;
+      dispatch.statusCheckOwner = undefined;
+    }
     if (fileSearchTimer) clearTimeout(fileSearchTimer);
     for (const cleanup of queuedSteerAdmissionCleanups) cleanup();
   });
@@ -3386,6 +3525,30 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const currentSessionMessageEntries = createMemo(() =>
     composerSessionId() ? messagesBySession().get(composerSessionId()!) || [] : []
   );
+  const activeTurnStartedAt = createMemo(() => {
+    if (!showTurnTimer()) return null;
+    const entries = currentSessionMessageEntries();
+    let latestAssistant: ReturnType<typeof getLatestAssistantMessageInfo> = null;
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      const entry = entries[index];
+      if (!entry) continue;
+      if (!latestAssistant && isAssistantMessage(entry.info)) latestAssistant = entry.info;
+      if (entry.info.role !== 'user') continue;
+
+      const terminalAssistantSettled =
+        latestAssistant &&
+        (!!latestAssistant.time.completed || !!latestAssistant.error) &&
+        (!isContinuationAssistantFinish(latestAssistant.finish) || !!latestAssistant.error);
+      if (terminalAssistantSettled) return null;
+
+      const incompleteAssistant =
+        latestAssistant && !latestAssistant.time.completed && !latestAssistant.error;
+      return isComposerDisplayBusy() || isLoading() || incompleteAssistant
+        ? entry.info.time.created
+        : null;
+    }
+    return isComposerDisplayBusy() || isLoading() ? loadingStartedAt() : null;
+  });
 
   const contextUsage = createMemo(() => {
     if (!composerSessionId()) return null;
@@ -4384,6 +4547,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           enabledMcpCount={enabledMcpCount()}
           availableMcpCount={availableMcpNames().length}
           activeLspNames={composerEditingMessage() ? [] : activeLspNames()}
+          activeTurnStartedAt={composerEditingMessage() ? null : activeTurnStartedAt()}
+          activeTurnLastActivityAt={loadingLastActivityAt()}
           showLspPicker={showLspPicker()}
           lspButtonRef={(el) => {
             lspPickerRef = el;

@@ -4,14 +4,16 @@ import { reconcile } from 'solid-js/store';
 import packageJson from '../../../package.json';
 import type * as UseOpenCodeModule from '../hooks/useOpenCode';
 import type { ProviderLimitStatus, WebviewMessage } from '../../shared/protocol';
-import type { Session, TextPart, UserMessage } from '../types';
+import type { MessageEntry, Session, TextPart, UserMessage } from '../types';
 import { ChatInput, sendDroppedContent } from './ChatInput';
 import {
   state,
   inputText,
   setConnectionInitialized,
   setIsLoading,
+  setLoadingLastActivityAt,
   setShowChangedFiles,
+  setShowTurnTimer,
   showModelPicker,
   setShowModelPicker,
   setState,
@@ -44,7 +46,7 @@ import {
   syncQueuedMessages,
 } from '../lib/state-queued-messages';
 import { sendQueuedAsSteer } from './chat-input/queued-steer';
-import { databaseBackupIcon } from '../lib/ui-icons';
+import { databaseBackupIcon, runningIcon } from '../lib/ui-icons';
 import { toCssUrl } from './UiIcon';
 
 interface SessionEventProperties extends UnknownRecord {
@@ -124,6 +126,7 @@ vi.mock('../lib/client', () => ({
       }),
       list: vi.fn(async () => ({ items: [], hasMore: false })),
       messages: vi.fn(async () => []),
+      status: vi.fn(async () => ({})),
     },
     varro: {
       session: {
@@ -204,7 +207,9 @@ afterEach(() => {
   setInputText('');
   setConnectionInitialized(false);
   setIsLoading(false);
+  setLoadingLastActivityAt(null);
   setShowChangedFiles(false);
+  setShowTurnTimer(false);
   setShowModelPicker(false);
   setManualWorkspaceSelection(false);
   setState('pendingWorkspaceSelectionPath', null);
@@ -302,6 +307,8 @@ afterEach(() => {
   vi.mocked(client.session.get).mockRejectedValue(new Error('Session not found'));
   vi.mocked(client.session.messages).mockReset();
   vi.mocked(client.session.messages).mockResolvedValue([]);
+  vi.mocked(client.session.status).mockReset();
+  vi.mocked(client.session.status).mockResolvedValue({});
   setExpandedDiffOverlay(testDiffOverlayOwner, false);
 });
 
@@ -966,6 +973,80 @@ describe('ChatInput', () => {
     });
     const disconnectedCount = container?.querySelector<HTMLButtonElement>('.toolbar-mcp-count');
     expect(disconnectedCount?.textContent).toContain('0/4');
+  });
+
+  it('shows cumulative active-turn duration only while the turn is working', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(70_000);
+    setShowTurnTimer(true);
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session('session-1', 70_000)]);
+    const userMessage = {
+      info: {
+        id: 'user-1',
+        sessionID: 'session-1',
+        role: 'user',
+        time: { created: 70_000 },
+        agent: 'build',
+        model: { providerID: 'openai', modelID: 'gpt-4o' },
+      },
+      parts: [],
+    } satisfies MessageEntry<UserMessage>;
+    const assistantMessage = assistantMessageEntry({ input: 0, output: 0 });
+    assistantMessage.info.time.created = 70_000;
+    setState('messages', [userMessage, assistantMessage]);
+    setState('sessionStatus', 'session-1', { type: 'busy' });
+    setLoadingLastActivityAt(70_000);
+
+    cleanup = render(() => ChatInput(), container!);
+
+    expect(container?.querySelector('.toolbar-turn-timer')).toBeNull();
+    await vi.advanceTimersByTimeAsync(999);
+    expect(container?.querySelector('.toolbar-turn-timer')).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(1);
+    const timer = container?.querySelector('.toolbar-turn-timer');
+    expect(timer?.textContent).toBe('1s');
+    expect(timer?.getAttribute('aria-label')).toBe('Active turn duration: 1s');
+    await vi.advanceTimersByTimeAsync(9_000);
+    expect(timer?.textContent).toBe('10s');
+    expect(timer?.getAttribute('aria-label')).toBe('Active turn duration: 10s');
+    expect(
+      timer
+        ?.querySelector<HTMLElement>('.toolbar-turn-timer-icon')
+        ?.style.getPropertyValue('--ui-icon-mask')
+    ).toBe(toCssUrl(runningIcon));
+
+    expect(container?.querySelector('.toolbar-turn-timer-icon.is-stale')).toBeNull();
+
+    setLoadingLastActivityAt(Date.now());
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(container?.querySelector('.toolbar-turn-timer-icon.is-stale')).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(container?.querySelector('.toolbar-turn-timer-icon.is-stale')).not.toBeNull();
+
+    setLoadingLastActivityAt(Date.now());
+    await Promise.resolve();
+    expect(container?.querySelector('.toolbar-turn-timer-icon.is-stale')).toBeNull();
+
+    setState('sessionStatus', 'session-1', { type: 'idle' });
+    await Promise.resolve();
+    expect(container?.querySelector('.toolbar-turn-timer')).not.toBeNull();
+
+    setState('messages', [
+      userMessage,
+      {
+        ...assistantMessage,
+        info: {
+          ...assistantMessage.info,
+          finish: 'stop',
+          time: { ...assistantMessage.info.time, completed: Date.now() },
+        },
+      },
+    ]);
+    await Promise.resolve();
+    expect(container?.querySelector('.toolbar-turn-timer')).toBeNull();
   });
 
   it('hides the MCP control while editing a message', async () => {
@@ -3021,7 +3102,7 @@ describe('ChatInput', () => {
     expect(state.providers[0]?.models.shared?.variants).toBeUndefined();
   });
 
-  it('dispatches sibling workspace queue items one at a time after each idle event', async () => {
+  it('dispatches two background queue items after busy then idle events', async () => {
     vi.useFakeTimers();
     setState('activeSessionId', 'session-2');
     setState('editorContext', 'workspacePath', '/repo-b');
@@ -3056,10 +3137,6 @@ describe('ChatInput', () => {
     expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual(['First sibling prompt']);
     expect(state.queuedMessages.map((message) => message.id)).toEqual(['q2']);
 
-    postQueuedSessionStatus('session-1', 'idle');
-    await vi.advanceTimersByTimeAsync(1_000);
-    expect(sendMessageMock).toHaveBeenCalledTimes(1);
-
     postQueuedSessionStatus('session-1', 'busy');
     postQueuedSessionStatus('session-1', 'idle');
     await flushAsyncWork();
@@ -3069,6 +3146,270 @@ describe('ChatInput', () => {
       'Second sibling prompt',
     ]);
     expect(state.queuedMessages).toEqual([]);
+  });
+
+  it('waits for busy then idle after a background send is admitted', async () => {
+    vi.useFakeTimers();
+    setState('activeSessionId', 'session-2');
+    setState('sessionStatus', { 'session-1': { type: 'idle' }, 'session-2': { type: 'idle' } });
+    setState('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'First prompt' },
+      { id: 'q2', sessionId: 'session-1', text: 'Second prompt' },
+    ]);
+    let resolveFirstSend: ((sent: boolean) => void) | undefined;
+    sendMessageMock
+      .mockImplementationOnce(
+        () =>
+          new Promise<boolean>((resolve) => {
+            resolveFirstSend = resolve;
+          })
+      )
+      .mockResolvedValueOnce(true);
+
+    cleanup = render(() => ChatInput(), container!);
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+    expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual(['First prompt']);
+
+    postQueuedSessionStatus('session-1', 'idle');
+    resolveFirstSend?.(true);
+    await flushAsyncWork();
+
+    expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual(['First prompt']);
+    expect(state.queuedMessages.map((message) => message.id)).toEqual(['q2']);
+
+    postQueuedSessionStatus('session-1', 'busy');
+    postQueuedSessionStatus('session-1', 'idle');
+    await flushAsyncWork();
+
+    expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual([
+      'First prompt',
+      'Second prompt',
+    ]);
+    expect(state.queuedMessages).toEqual([]);
+  });
+
+  it('dispatches the next background item when busy then idle complete before admission', async () => {
+    vi.useFakeTimers();
+    setState('activeSessionId', 'session-2');
+    setState('sessionStatus', { 'session-1': { type: 'idle' }, 'session-2': { type: 'idle' } });
+    setState('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'Pending admission' },
+      { id: 'q2', sessionId: 'session-1', text: 'Dispatch exactly once' },
+    ]);
+    let resolveFirstSend: ((sent: boolean) => void) | undefined;
+    sendMessageMock
+      .mockImplementationOnce(
+        () =>
+          new Promise<boolean>((resolve) => {
+            resolveFirstSend = resolve;
+          })
+      )
+      .mockResolvedValueOnce(true);
+
+    cleanup = render(() => ChatInput(), container!);
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+    expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual(['Pending admission']);
+
+    postQueuedSessionStatus('session-1', 'busy');
+    postQueuedSessionStatus('session-1', 'idle');
+    await vi.advanceTimersByTimeAsync(1_000);
+    await flushAsyncWork();
+
+    expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual(['Pending admission']);
+    expect(state.queuedMessages.map((message) => message.id)).toEqual(['q1', 'q2']);
+
+    resolveFirstSend?.(true);
+    await flushAsyncWork();
+
+    expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual([
+      'Pending admission',
+      'Dispatch exactly once',
+    ]);
+    expect(state.queuedMessages).toEqual([]);
+
+    postQueuedSessionStatus('session-1', 'idle');
+    await vi.advanceTimersByTimeAsync(1_000);
+    await flushAsyncWork();
+    expect(sendMessageMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores a delayed prior-turn idle until a fresh status snapshot is idle', async () => {
+    vi.useFakeTimers();
+    setState('activeSessionId', 'session-2');
+    setState('sessionStatus', { 'session-1': { type: 'idle' }, 'session-2': { type: 'idle' } });
+    setState('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'First prompt' },
+      { id: 'q2', sessionId: 'session-1', text: 'After fresh snapshot' },
+    ]);
+    sendMessageMock.mockResolvedValue(true);
+    vi.mocked(client.session.status).mockResolvedValue({ 'session-1': { type: 'idle' } });
+
+    cleanup = render(() => ChatInput(), container!);
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+    expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual(['First prompt']);
+
+    postQueuedSessionStatus('session-1', 'idle');
+    await flushAsyncWork();
+
+    expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual(['First prompt']);
+    expect(state.queuedMessages.map((message) => message.id)).toEqual(['q2']);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await flushAsyncWork();
+
+    expect(client.session.status).toHaveBeenCalledOnce();
+    expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual([
+      'First prompt',
+      'After fresh snapshot',
+    ]);
+    expect(state.queuedMessages).toEqual([]);
+  });
+
+  it('reconciles authoritative status when the background busy event was missed', async () => {
+    vi.useFakeTimers();
+    setState('activeSessionId', 'session-2');
+    setState('sessionStatus', { 'session-1': { type: 'idle' }, 'session-2': { type: 'idle' } });
+    setState('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'First prompt' },
+      { id: 'q2', sessionId: 'session-1', text: 'Recovered prompt' },
+    ]);
+    sendMessageMock.mockResolvedValue(true);
+    vi.mocked(client.session.status).mockResolvedValue({});
+
+    cleanup = render(() => ChatInput(), container!);
+    postQueuedSessionStatus('session-1', 'idle');
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+    expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual(['First prompt']);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await flushAsyncWork();
+
+    expect(client.session.status).toHaveBeenCalledOnce();
+    expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual([
+      'First prompt',
+      'Recovered prompt',
+    ]);
+  });
+
+  it('retries an unresolved status reconciliation after remounting', async () => {
+    vi.useFakeTimers();
+    setState('activeSessionId', 'session-2');
+    setState('sessionStatus', { 'session-1': { type: 'idle' }, 'session-2': { type: 'idle' } });
+    setState('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'First prompt' },
+      { id: 'q2', sessionId: 'session-1', text: 'After remount' },
+    ]);
+    sendMessageMock.mockResolvedValue(true);
+    let resolveOldStatus: ((statuses: Record<string, { type: 'idle' }>) => void) | undefined;
+    let resolveNewStatus: ((statuses: Record<string, { type: 'idle' }>) => void) | undefined;
+    vi.mocked(client.session.status)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOldStatus = resolve;
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveNewStatus = resolve;
+          })
+      );
+
+    cleanup = render(() => ChatInput(), container!);
+    await vi.advanceTimersByTimeAsync(1_300);
+    await flushAsyncWork();
+    expect(sendMessageMock).toHaveBeenCalledOnce();
+    expect(client.session.status).toHaveBeenCalledOnce();
+
+    cleanup();
+    cleanup = render(() => ChatInput(), container!);
+    await vi.advanceTimersByTimeAsync(0);
+    await flushAsyncWork();
+
+    expect(client.session.status).toHaveBeenCalledTimes(2);
+    resolveOldStatus?.({ 'session-1': { type: 'idle' } });
+    await flushAsyncWork();
+    expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual(['First prompt']);
+
+    resolveNewStatus?.({ 'session-1': { type: 'idle' } });
+    await flushAsyncWork();
+    expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual([
+      'First prompt',
+      'After remount',
+    ]);
+  });
+
+  it('does not duplicate a prompt when status reconciliation races an idle event', async () => {
+    vi.useFakeTimers();
+    setState('activeSessionId', 'session-2');
+    setState('sessionStatus', { 'session-1': { type: 'idle' }, 'session-2': { type: 'idle' } });
+    setState('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'First prompt' },
+      { id: 'q2', sessionId: 'session-1', text: 'Exactly once' },
+    ]);
+    let resolveStatus: ((statuses: Record<string, { type: 'idle' }>) => void) | undefined;
+    vi.mocked(client.session.status).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveStatus = resolve;
+        })
+    );
+    sendMessageMock.mockResolvedValue(true);
+
+    cleanup = render(() => ChatInput(), container!);
+    await vi.advanceTimersByTimeAsync(1_300);
+    await flushAsyncWork();
+    expect(client.session.status).toHaveBeenCalledOnce();
+
+    postQueuedSessionStatus('session-1', 'busy');
+    resolveStatus?.({ 'session-1': { type: 'idle' } });
+    await flushAsyncWork();
+    expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual(['First prompt']);
+
+    postQueuedSessionStatus('session-1', 'idle');
+    postQueuedSessionStatus('session-1', 'idle');
+    await vi.advanceTimersByTimeAsync(1_000);
+    await flushAsyncWork();
+
+    expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual([
+      'First prompt',
+      'Exactly once',
+    ]);
+    expect(state.queuedMessages).toEqual([]);
+  });
+
+  it('prunes admitted phases when queued-message ownership changes', async () => {
+    vi.useFakeTimers();
+    setState('activeSessionId', 'session-2');
+    setState('sessionStatus', { 'session-1': { type: 'idle' }, 'session-2': { type: 'idle' } });
+    setState('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'First prompt' },
+      { id: 'q2', sessionId: 'session-1', text: 'Transferred prompt' },
+    ]);
+    sendMessageMock.mockResolvedValue(true);
+
+    cleanup = render(() => ChatInput(), container!);
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+    expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual(['First prompt']);
+
+    setState('queuedMessages', 0, 'ownerViewId', 'editor');
+    await flushAsyncWork();
+    setState('queuedMessages', [
+      { id: 'q3', sessionId: 'session-1', text: 'New owned prompt', ownerViewId: 'sidebar' },
+    ]);
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+
+    expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual([
+      'First prompt',
+      'New owned prompt',
+    ]);
   });
 
   it('expires a stale authoritative idle status before dispatching a queued message', async () => {

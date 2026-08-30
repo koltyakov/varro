@@ -108,11 +108,12 @@ describe('session sync helpers', () => {
       {
         getActiveSessionId: () => 'session-1',
         getSessionStatus: () => ({ type: 'idle' }),
+        isSessionInActiveTree: () => true,
         loadingStartedAt: () => null,
         loadSessionMessages: vi.fn(async () => messages),
         updateUsageLimitState: vi.fn(),
         setSessionStatusEntry: vi.fn(),
-        setMessagesIncremental,
+        setSessionMessagesIncremental: setMessagesIncremental,
         stopLoading: vi.fn(),
         syncFailedSessionsFromMessages: vi.fn(),
         handoffTodosToMessages: vi.fn(),
@@ -124,7 +125,9 @@ describe('session sync helpers', () => {
       'session-1'
     );
 
-    expect(setMessagesIncremental).toHaveBeenCalledWith(messages, { preserveExtraParts: true });
+    expect(setMessagesIncremental).toHaveBeenCalledWith('session-1', messages, {
+      preserveExtraParts: true,
+    });
   });
 
   it('syncs session metadata through the state dependency wrapper', async () => {

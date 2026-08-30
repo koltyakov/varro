@@ -41,6 +41,7 @@ describe('readExtensionConfigState', () => {
   it('uses VS Code typography defaults when settings are absent', () => {
     expect(readExtensionConfigState()).toMatchObject({
       expandThinking: false,
+      showTurnTimer: false,
       chatFontSize: 13,
       chatEditorFontSize: 12,
       chatFontFamily: 'default',
@@ -51,6 +52,12 @@ describe('readExtensionConfigState', () => {
     mocks.values.set('varro.chat.expandThinking', true);
 
     expect(readExtensionConfigState().expandThinking).toBe(true);
+  });
+
+  it('reads the turn-timer setting', () => {
+    mocks.values.set('varro.chat.showTurnTimer', true);
+
+    expect(readExtensionConfigState().showTurnTimer).toBe(true);
   });
 
   it('prefers the Varro chat font size override', () => {

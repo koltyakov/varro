@@ -693,6 +693,7 @@ export type InitialWebviewState = {
   showFileDiffs?: boolean;
   expandThinking?: boolean;
   showChangedFiles?: boolean;
+  showTurnTimer?: boolean;
   desktopSessionPaneSide?: DesktopSessionPaneSide;
   defaultPermissionMode?: PermissionMode;
   chatFontSize: number;
@@ -966,6 +967,7 @@ export type WebviewMessage =
         path: string;
         body?: unknown;
         permissionAutomationLease?: number;
+        permissionAutomationSessionID?: string;
         queuedMessageDispatch?: { itemId: string; lease: number };
       };
     }

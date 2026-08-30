@@ -483,6 +483,7 @@ test('keeps streamed response text fixed when it follows Explored', async ({ pag
       type: 'text',
       text: '',
     };
+    const streamedText = 'Streamed response after Explored.';
     harnessWindow.__varroE2E?.updateMessageInfo?.(info);
     harnessWindow.__varroE2E?.updateMessagePart?.(part);
     window.postMessage(
@@ -503,12 +504,13 @@ test('keeps streamed response text fixed when it follows Explored', async ({ pag
             messageID: part.messageID,
             partID: part.id,
             field: 'text',
-            delta: 'Streamed response after Explored.',
+            delta: streamedText,
           },
         },
       },
       '*'
     );
+    harnessWindow.__varroE2E?.updateMessagePart?.({ ...part, text: streamedText });
     return info;
   });
 
@@ -550,6 +552,7 @@ test('keeps streamed response text fixed when it follows Explored', async ({ pag
       type: 'text',
       text: '',
     };
+    const streamedText = 'Following streamed block.';
     const harnessWindow = window as typeof window & {
       __varroE2E?: { updateMessagePart?: (part: Record<string, unknown>) => void };
     };
@@ -568,12 +571,13 @@ test('keeps streamed response text fixed when it follows Explored', async ({ pag
             messageID: part.messageID,
             partID: part.id,
             field: 'text',
-            delta: 'Following streamed block.',
+            delta: streamedText,
           },
         },
       },
       '*'
     );
+    harnessWindow.__varroE2E?.updateMessagePart?.({ ...part, text: streamedText });
     for (let frame = 0; frame < 30; frame += 1) {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       collectedSamples.push(measure());

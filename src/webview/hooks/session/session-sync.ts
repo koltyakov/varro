@@ -75,6 +75,7 @@ export async function syncSessionMessagesWithStateDependencies(
   deps: {
     getActiveSessionId(): string | null;
     getSessionStatus(sessionId: string): SessionStatus | null | undefined;
+    isSessionInActiveTree(sessionId: string): boolean;
     loadingStartedAt(): number | null;
     loadSessionMessages(sessionId: string, isCurrent?: () => boolean): Promise<MessageEntry[]>;
     updateUsageLimitState(
@@ -83,7 +84,8 @@ export async function syncSessionMessagesWithStateDependencies(
       messages: MessageEntry[]
     ): void;
     setSessionStatusEntry(sessionId: string, status: SessionStatus): void;
-    setMessagesIncremental(
+    setSessionMessagesIncremental(
+      sessionId: string,
       messages: MessageEntry[],
       options?: { preserveExtraParts?: boolean }
     ): void;
@@ -164,8 +166,14 @@ type SessionSyncDependencies = {
   stopLoading(): void;
   setError(message: string): void;
   getSessionStatus(sessionId: string): SessionStatus | null | undefined;
+  isSessionInActiveTree(sessionId: string): boolean;
   loadingStartedAt(): number | null;
   loadSessionMessages(sessionId: string, isCurrent?: () => boolean): Promise<MessageEntry[]>;
+  setSessionMessagesIncremental(
+    sessionId: string,
+    messages: MessageEntry[],
+    options?: { preserveExtraParts?: boolean }
+  ): void;
   handoffTodosToMessages(messages: MessageEntry[]): void;
   loadSessionMetadata(sessionId: string): Promise<Session>;
 };
@@ -233,11 +241,12 @@ export class SessionSyncOperations {
       {
         getActiveSessionId: this.deps.getActiveSessionId,
         getSessionStatus: this.deps.getSessionStatus,
+        isSessionInActiveTree: this.deps.isSessionInActiveTree,
         loadingStartedAt: this.deps.loadingStartedAt,
         loadSessionMessages: this.deps.loadSessionMessages,
         updateUsageLimitState: this.deps.updateUsageLimitState,
         setSessionStatusEntry: this.deps.setSessionStatusEntry,
-        setMessagesIncremental: this.deps.setMessagesIncremental,
+        setSessionMessagesIncremental: this.deps.setSessionMessagesIncremental,
         stopLoading: this.deps.stopLoading,
         syncFailedSessionsFromMessages: this.deps.syncFailedSessionsFromMessages,
         handoffTodosToMessages: this.deps.handoffTodosToMessages,

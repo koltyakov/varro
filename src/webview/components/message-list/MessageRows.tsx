@@ -58,6 +58,7 @@ export type MessageRowSharedProps = {
   observeMeasuredRow?: (element: HTMLDivElement, messageId: string, active: boolean) => void;
   questionRequestForTool: (part: ToolPart) => QuestionRequest | null;
   permissionMatchForTool: (part: ToolPart) => ToolCallPermissionMatch | null;
+  onAssistantDiffSettledEmpty?: (messageId: string) => void;
   onWorkedSummaryHoverChange?: (promptMessageId: string, hovering: boolean) => void;
   onUserMessageHoverChange?: (messageId: string, hovering: boolean) => void;
 };
@@ -228,6 +229,7 @@ export function MessageRow(
             showSentTimestamp={
               props.showSentTimestamps || props.revealedSentTimestampMessageId === props.msg.info.id
             }
+            onAssistantDiffSettledEmpty={props.onAssistantDiffSettledEmpty}
             onUserMessageHoverChange={props.onUserMessageHoverChange}
             suppressTimestampAnimation={props.suppressTimestampAnimations}
             isLastAssistant={props.msg.info.id === props.lastAssistantID}

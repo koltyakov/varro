@@ -19,7 +19,13 @@ import {
   readWebviewInstanceContext,
 } from './state-stored-values';
 
-const pendingSessionPermissionModes = new Map<string, PermissionMode>();
+type PendingSessionPermissionMode = {
+  generation: number;
+  mode: PermissionMode;
+};
+
+const pendingSessionPermissionModes = new Map<string, PendingSessionPermissionMode>();
+let nextPendingSessionPermissionModeGeneration = 0;
 let confirmedSessionPermissionModes = {
   ...readInitialWebviewState().sessionPermissionModes,
 };
@@ -92,10 +98,6 @@ export function setPermissionModeForSession(
   writeStored(STORAGE_KEYS.sessionPermissionModes, nextModes);
 }
 
-export function persistConfirmedPermissionModeForSession(sessionId: string, mode: PermissionMode) {
-  postMessage({ type: 'permission-mode/update', payload: { sessionId, mode } });
-}
-
 export function removePermissionModeForSession(sessionId: string) {
   if (!state.sessionPermissionModes[sessionId]) return;
   if (!pendingSessionPermissionModes.has(sessionId)) {
@@ -120,19 +122,26 @@ export function applySessionPermissionModesSnapshot(
 ) {
   confirmedSessionPermissionModes = { ...modes };
   const effectiveModes = { ...modes };
-  for (const [sessionId, mode] of pendingSessionPermissionModes) {
-    effectiveModes[sessionId] = mode;
+  for (const [sessionId, pending] of pendingSessionPermissionModes) {
+    effectiveModes[sessionId] = pending.mode;
   }
   setState('sessionPermissionModes', reconcile(effectiveModes));
   setState('permissionModeRecoverySessionIds', recoveringSessionIds);
   writeStored(STORAGE_KEYS.sessionPermissionModes, effectiveModes);
 }
 
-export function setPendingSessionPermissionMode(sessionId: string, mode: PermissionMode | null) {
+export function setPendingSessionPermissionMode(
+  sessionId: string,
+  mode: PermissionMode | null,
+  generation?: number
+): number | null {
   if (mode !== null) {
-    pendingSessionPermissionModes.set(sessionId, mode);
-    return;
+    const nextGeneration = ++nextPendingSessionPermissionModeGeneration;
+    pendingSessionPermissionModes.set(sessionId, { generation: nextGeneration, mode });
+    return nextGeneration;
   }
+  const pending = pendingSessionPermissionModes.get(sessionId);
+  if (generation !== undefined && pending?.generation !== generation) return null;
   pendingSessionPermissionModes.delete(sessionId);
   const nextModes = { ...state.sessionPermissionModes };
   const confirmedMode = confirmedSessionPermissionModes[sessionId];
@@ -140,6 +149,7 @@ export function setPendingSessionPermissionMode(sessionId: string, mode: Permiss
   else delete nextModes[sessionId];
   setState('sessionPermissionModes', reconcile(nextModes));
   writeStored(STORAGE_KEYS.sessionPermissionModes, nextModes);
+  return pending?.generation ?? null;
 }
 
 export function isSessionPermissionModePending(sessionId: string): boolean {

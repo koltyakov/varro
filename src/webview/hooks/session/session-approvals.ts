@@ -239,7 +239,11 @@ type SessionApprovalDependencies = {
   upsertSession(session: Session): void;
   getPermissionsForSession(sessionId: string): Permission[];
   syncPendingPermissions?(): Promise<void | boolean | object>;
-  setPendingSessionPermissionMode?(sessionId: string, mode: PermissionMode | null): void;
+  setPendingSessionPermissionMode?(
+    sessionId: string,
+    mode: PermissionMode | null,
+    generation?: number
+  ): number | null;
 };
 
 type PermissionModeQueue = {
@@ -344,7 +348,8 @@ export class SessionApprovalOperations {
       : null;
     if (sessionId && queue) this.permissionModeQueues.set(sessionId, queue);
 
-    if (sessionId && queue) this.deps.setPendingSessionPermissionMode?.(sessionId, mode);
+    const pendingGeneration =
+      sessionId && queue ? this.deps.setPendingSessionPermissionMode?.(sessionId, mode) : undefined;
     applyPermissionModeSelection(this.deps, sessionId, mode);
     if (!sessionId || !queue) return;
 
@@ -377,7 +382,11 @@ export class SessionApprovalOperations {
           onConfirmed: () => {
             queue.confirmedMode = mode;
             if (this.permissionModeGenerationBySession.get(sessionKey) === generation) {
-              this.deps.setPendingSessionPermissionMode?.(sessionId, null);
+              this.deps.setPendingSessionPermissionMode?.(
+                sessionId,
+                null,
+                pendingGeneration ?? undefined
+              );
               this.deps.setPermissionModeForSession(sessionId, mode);
               pendingCleared = true;
             }
@@ -394,7 +403,11 @@ export class SessionApprovalOperations {
         !pendingCleared &&
         this.permissionModeGenerationBySession.get(sessionKey) === generation
       ) {
-        this.deps.setPendingSessionPermissionMode?.(sessionId, null);
+        this.deps.setPendingSessionPermissionMode?.(
+          sessionId,
+          null,
+          pendingGeneration ?? undefined
+        );
       }
       if (queue.pending === 0 && this.permissionModeQueues.get(sessionId) === queue) {
         this.permissionModeQueues.delete(sessionId);

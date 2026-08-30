@@ -508,6 +508,7 @@ Chat view:
 - `varro.chat.expandThinking` - expand thinking details after two seconds while reasoning is active, collapse finished thinking into rows, and return it to `Explored` when the turn finishes; defaults to `false`
 - `varro.chat.fontSize` - chat text size from `6` through `100`; defaults to `null`, which uses VS Code's `chat.fontSize`. Tool and diff editor content follows `chat.editor.fontSize`
 - `varro.chat.showChangedFiles` - show the changed-files panel above the composer; defaults to `false`
+- `varro.chat.showTurnTimer` - show the elapsed duration of the active turn beside the composer status controls; defaults to `false`
 - `varro.chat.desktopSessionPaneSide` - on large screens, show the sessions pane on the `left` or `right`; defaults to `right`
 - Use the scope picker inside the session search field to choose which OpenCode sessions appear. **Folder** shows exact working-directory matches, **Nested** includes folders beneath it in the same OpenCode project, and **Project** shows the entire containing Git project. Varro remembers the choice for each project; non-Git folders offer Folder and Nested independently.
 - `varro.chat.autoRenameUntitledSessions` - generate a fallback title when OpenCode leaves a session untitled; defaults to `false`

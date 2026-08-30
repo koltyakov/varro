@@ -2,7 +2,7 @@ import { createComputed, createRoot } from 'solid-js';
 import { describe, expect, it, vi } from 'vitest';
 import type { ServerEventName } from '../../shared/protocol';
 import type { onMessage } from '../lib/bridge';
-import type { Part } from '../types';
+import type { MessageEntry, Part } from '../types';
 import {
   assistantMessage,
   getBridgeMocks,
@@ -40,6 +40,34 @@ function userEntry(id: string, sessionId = 'session-1') {
   const info = userMessage(id);
   info.sessionID = sessionId;
   return { info, parts: [] };
+}
+
+function taskAnchorEntry(
+  childSessionId: string,
+  ownerSessionId = 'session-1',
+  messageId = 'parent-task',
+  parentMessageId = 'parent-user'
+): MessageEntry {
+  const info = assistantMessage(messageId, parentMessageId);
+  info.sessionID = ownerSessionId;
+  info.time = { created: 2, completed: 3 };
+  const part: Part = {
+    id: `${messageId}-part`,
+    sessionID: ownerSessionId,
+    messageID: info.id,
+    type: 'tool',
+    callID: `${messageId}-call`,
+    tool: 'task',
+    state: {
+      status: 'completed',
+      input: { description: 'Inspect the repo' },
+      output: 'Done',
+      title: 'Inspect the repo',
+      metadata: { sessionId: childSessionId },
+      time: { start: 2, end: 3 },
+    },
+  };
+  return { info, parts: [part] };
 }
 
 function installServerEventHandlers() {
@@ -1600,6 +1628,346 @@ describe('useOpenCode session state flows', () => {
         'parent-message',
         'child-message',
       ]);
+    } finally {
+      dispose();
+    }
+  });
+
+  it('inserts a child idle sync after its parent task anchor', async () => {
+    const handlers = installServerEventHandlers();
+    mockRuntimeBootstrap();
+    const childMessage = userEntry('child-message', 'child-1');
+    clientMocks.sessionGet.mockImplementation(async (id) =>
+      id === 'child-1'
+        ? { ...session('child-1'), parentID: 'session-1', time: { created: 2, updated: 2 } }
+        : session(String(id))
+    );
+    clientMocks.sessionMessages.mockResolvedValue([childMessage]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await vi.waitFor(() => expect(handlers.has('session.idle')).toBe(true));
+      stateModule.setState('sessions', [
+        session('session-1'),
+        { ...session('child-1'), parentID: 'session-1', time: { created: 2, updated: 2 } },
+      ]);
+      stateModule.setState('activeSessionId', 'session-1');
+      const parentAnchor = taskAnchorEntry('child-1');
+      parentAnchor.parts.push({
+        id: 'parent-stream',
+        sessionID: 'session-1',
+        messageID: 'parent-task',
+        type: 'text',
+        text: '',
+      });
+      stateModule.setState('messages', [
+        userEntry('parent-before'),
+        parentAnchor,
+        userEntry('parent-after'),
+      ]);
+      stateModule.setState('streamingPartId', 'parent-stream');
+      stateModule.setState('streamingText', 'Parent still streaming');
+
+      handlers.get('session.idle')?.({ properties: { sessionID: 'child-1' } });
+
+      await vi.waitFor(() => {
+        expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
+          'parent-before',
+          'parent-task',
+          'child-message',
+          'parent-after',
+        ]);
+      });
+      expect(stateModule.state.streamingPartId).toBe('parent-stream');
+      expect(stateModule.state.streamingText).toBe('Parent still streaming');
+    } finally {
+      dispose();
+    }
+  });
+
+  it('clears child streaming state when the child snapshot completes that stream', async () => {
+    const handlers = installServerEventHandlers();
+    mockRuntimeBootstrap();
+    const childInfo = assistantMessage('child-assistant', 'child-user');
+    childInfo.sessionID = 'child-1';
+    childInfo.time = { created: 2, completed: 4 };
+    const childPart: Part = {
+      id: 'child-text',
+      sessionID: 'child-1',
+      messageID: childInfo.id,
+      type: 'text',
+      text: 'Final child response',
+    };
+    clientMocks.sessionGet.mockImplementation(async (id) =>
+      id === 'child-1'
+        ? { ...session('child-1'), parentID: 'session-1', time: { created: 2, updated: 4 } }
+        : session(String(id))
+    );
+    clientMocks.sessionMessages.mockResolvedValue([{ info: childInfo, parts: [childPart] }]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await vi.waitFor(() => expect(handlers.has('session.idle')).toBe(true));
+      stateModule.setState('sessions', [
+        session('session-1'),
+        { ...session('child-1'), parentID: 'session-1', time: { created: 2, updated: 4 } },
+      ]);
+      stateModule.setState('activeSessionId', 'session-1');
+      stateModule.setState('messages', [
+        taskAnchorEntry('child-1'),
+        {
+          info: { ...childInfo, time: { created: 2 } },
+          parts: [{ ...childPart, text: '' }],
+        },
+      ]);
+      stateModule.setState('streamingPartId', childPart.id);
+      stateModule.setState('streamingText', 'Stale child stream');
+
+      handlers.get('session.idle')?.({ properties: { sessionID: 'child-1' } });
+
+      await vi.waitFor(() => {
+        expect(stateModule.state.streamingPartId).toBeNull();
+        expect(stateModule.state.streamingText).toBe('');
+        const child = stateModule.state.messages.find((entry) => entry.info.id === childInfo.id);
+        expect(child?.parts[0]).toMatchObject({ text: 'Final child response' });
+      });
+    } finally {
+      dispose();
+    }
+  });
+
+  it('reorders an early child recovery after its anchor when the parent snapshot arrives', async () => {
+    const handlers = installServerEventHandlers();
+    mockRuntimeBootstrap();
+    const parentSnapshot = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
+    const childMessage = userEntry('child-message', 'child-1');
+    clientMocks.sessionGet.mockImplementation(async (id) =>
+      id === 'child-1'
+        ? { ...session('child-1'), parentID: 'session-1', time: { created: 2, updated: 2 } }
+        : session(String(id))
+    );
+    clientMocks.sessionMessages.mockImplementation(async (id) =>
+      id === 'session-1' ? parentSnapshot.promise : [childMessage]
+    );
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await vi.waitFor(() => expect(handlers.has('session.idle')).toBe(true));
+      stateModule.setState('sessions', [
+        session('session-1'),
+        { ...session('child-1'), parentID: 'session-1', time: { created: 2, updated: 2 } },
+      ]);
+      const selection = hookModule.selectSession('session-1');
+      await vi.waitFor(() => expect(stateModule.state.activeSessionId).toBe('session-1'));
+
+      handlers.get('session.idle')?.({ properties: { sessionID: 'child-1' } });
+      await vi.waitFor(() => {
+        expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual(['child-message']);
+      });
+      const recoveredChild = stateModule.state.messages[0];
+
+      parentSnapshot.resolve([
+        userEntry('parent-before'),
+        taskAnchorEntry('child-1'),
+        userEntry('parent-after'),
+      ]);
+      await selection;
+
+      expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
+        'parent-before',
+        'parent-task',
+        'child-message',
+        'parent-after',
+      ]);
+      expect(stateModule.state.messages[2]).toBe(recoveredChild);
+    } finally {
+      dispose();
+    }
+  });
+
+  it('orders a grandchild recovered before its child when the parent snapshot arrives', async () => {
+    const handlers = installServerEventHandlers();
+    mockRuntimeBootstrap();
+    const parentSnapshot = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
+    const grandchildMessage = userEntry('grandchild-message', 'grandchild-1');
+    const childMessages = [
+      userEntry('child-before', 'child-1'),
+      taskAnchorEntry('grandchild-1', 'child-1', 'child-task', 'child-before'),
+      userEntry('child-after', 'child-1'),
+    ];
+    clientMocks.sessionGet.mockImplementation(async (id) => {
+      if (id === 'child-1') {
+        return { ...session('child-1'), parentID: 'session-1', time: { created: 2, updated: 2 } };
+      }
+      if (id === 'grandchild-1') {
+        return {
+          ...session('grandchild-1'),
+          parentID: 'child-1',
+          time: { created: 3, updated: 3 },
+        };
+      }
+      return session(String(id));
+    });
+    clientMocks.sessionMessages.mockImplementation(async (id) => {
+      if (id === 'session-1') return parentSnapshot.promise;
+      if (id === 'grandchild-1') return [grandchildMessage];
+      return childMessages;
+    });
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await vi.waitFor(() => expect(handlers.has('session.idle')).toBe(true));
+      stateModule.setState('sessions', [
+        session('session-1'),
+        { ...session('child-1'), parentID: 'session-1', time: { created: 2, updated: 2 } },
+        {
+          ...session('grandchild-1'),
+          parentID: 'child-1',
+          time: { created: 3, updated: 3 },
+        },
+      ]);
+      const selection = hookModule.selectSession('session-1');
+      await vi.waitFor(() => expect(stateModule.state.activeSessionId).toBe('session-1'));
+
+      handlers.get('session.idle')?.({ properties: { sessionID: 'grandchild-1' } });
+      await vi.waitFor(() => {
+        expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
+          'grandchild-message',
+        ]);
+      });
+      const recoveredGrandchild = stateModule.state.messages[0];
+
+      handlers.get('session.idle')?.({ properties: { sessionID: 'child-1' } });
+      await vi.waitFor(() => {
+        expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
+          'grandchild-message',
+          'child-before',
+          'child-task',
+          'child-after',
+        ]);
+      });
+      const recoveredChild = stateModule.state.messages.slice(1);
+
+      parentSnapshot.resolve([
+        userEntry('parent-before'),
+        taskAnchorEntry('child-1'),
+        userEntry('parent-after'),
+      ]);
+      await selection;
+
+      expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
+        'parent-before',
+        'parent-task',
+        'child-before',
+        'child-task',
+        'grandchild-message',
+        'child-after',
+        'parent-after',
+      ]);
+      expect(stateModule.state.messages[2]).toBe(recoveredChild[0]);
+      expect(stateModule.state.messages[3]).toBe(recoveredChild[1]);
+      expect(stateModule.state.messages[4]).toBe(recoveredGrandchild);
+      expect(stateModule.state.messages[5]).toBe(recoveredChild[2]);
+    } finally {
+      dispose();
+    }
+  });
+
+  it('rejects a stale child snapshot after a newer child mutation', async () => {
+    const handlers = installServerEventHandlers();
+    mockRuntimeBootstrap();
+    const childSnapshot = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
+    clientMocks.sessionGet.mockImplementation(async (id) =>
+      id === 'child-1'
+        ? { ...session('child-1'), parentID: 'session-1', time: { created: 2, updated: 2 } }
+        : session(String(id))
+    );
+    clientMocks.sessionMessages.mockReturnValue(childSnapshot.promise);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await vi.waitFor(() => expect(handlers.has('session.idle')).toBe(true));
+      const childInfo = assistantMessage('child-assistant', 'child-user');
+      childInfo.sessionID = 'child-1';
+      const initialPart: Part = {
+        id: 'child-text',
+        sessionID: 'child-1',
+        messageID: 'child-assistant',
+        type: 'text',
+        text: 'Initial',
+      };
+      stateModule.setState('sessions', [
+        session('session-1'),
+        { ...session('child-1'), parentID: 'session-1', time: { created: 2, updated: 2 } },
+      ]);
+      stateModule.setState('activeSessionId', 'session-1');
+      stateModule.setState('messages', [
+        taskAnchorEntry('child-1'),
+        { info: childInfo, parts: [initialPart] },
+      ]);
+      stateModule.setState('streamingPartId', 'child-text');
+      stateModule.setState('streamingText', 'Live child text');
+
+      handlers.get('message.part.updated')?.({
+        properties: {
+          part: {
+            id: 'missing-child-part',
+            sessionID: 'child-1',
+            messageID: 'missing-child-message',
+            type: 'text',
+            text: 'Starts child recovery',
+          },
+        },
+      });
+      await vi.waitFor(() =>
+        expect(clientMocks.sessionMessages).toHaveBeenCalledWith('child-1', {
+          limit: 200,
+          directory: '/repo',
+        })
+      );
+      handlers.get('message.updated')?.({
+        properties: {
+          info: { ...childInfo, cost: 1 },
+        },
+      });
+      childSnapshot.resolve([
+        { info: childInfo, parts: [{ ...initialPart, text: 'Stale child text' }] },
+      ]);
+
+      await vi.waitFor(() => {
+        const child = stateModule.state.messages.find(
+          (entry) => entry.info.id === 'child-assistant'
+        );
+        expect(child?.info).toMatchObject({ cost: 1 });
+        expect(child?.parts[0]).toMatchObject({ text: 'Initial' });
+      });
+      expect(stateModule.state.streamingPartId).toBe('child-text');
+      expect(stateModule.state.streamingText).toBe('Live child text');
     } finally {
       dispose();
     }

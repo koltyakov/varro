@@ -4,7 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../../types';
 import { client } from '../../lib/client';
 import {
+  error,
   setSessions,
+  setError,
   setShowSessionPicker,
   setState,
   showSessionPicker,
@@ -78,10 +80,12 @@ function session(id: string, updated: number, overrides: Partial<Session> = {}):
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((res) => {
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<T>((res, rej) => {
     resolve = res;
+    reject = rej;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 function openSessionActions(row: HTMLElement, x = 40, y = 50) {
@@ -121,6 +125,7 @@ beforeEach(() => {
   setState('sessionsLoadingMore', false);
   setState('sessionsPaginationError', null);
   setState('recycleBinLoadError', null);
+  setError(null);
   renameSessionMock.mockReset();
   renameSessionMock.mockResolvedValue(true);
   reloadSessionsMock.mockReset();
@@ -147,6 +152,7 @@ afterEach(() => {
   setState('sessionsLoadingMore', false);
   setState('sessionsPaginationError', null);
   setState('recycleBinLoadError', null);
+  setError(null);
   // SAFETY: The fixture provides the unknown fields read by this statement.
   delete (window as { __sendToExtension?: (message: TestRuntimeValue) => void }).__sendToExtension;
   vi.restoreAllMocks();
@@ -228,6 +234,13 @@ describe('SessionListView model details', () => {
     search.value = 'active';
     search.dispatchEvent(new InputEvent('input', { bubbles: true }));
     expect(container.querySelector('.session-history-scope-picker')).toBeNull();
+
+    container.querySelector<HTMLButtonElement>('.session-list-search-clear')!.click();
+    expect(container.querySelector('.session-history-scope-trigger')?.textContent).toContain(
+      'Nested'
+    );
+    expect(getScope).toHaveBeenCalledOnce();
+    expect(reloadSessionsMock).toHaveBeenCalledOnce();
   });
 
   it('updates the scope picker immediately while persistence remains pending', async () => {
@@ -269,6 +282,102 @@ describe('SessionListView model details', () => {
     await vi.waitFor(() => expect(reloadSessionsMock).toHaveBeenCalledOnce());
   });
 
+  it('ignores a scope save that completes after the directory changes', async () => {
+    const save = deferred<{ scope: 'directory'; git: true }>();
+    vi.spyOn(client.varro.sessionHistoryScope, 'get').mockImplementation(async (directory) => ({
+      scope: directory === '/repo-b' ? 'project' : 'directory',
+      git: true,
+    }));
+    const setScope = vi
+      .spyOn(client.varro.sessionHistoryScope, 'set')
+      .mockReturnValue(save.promise);
+    setState('editorContext', {
+      workspacePath: '/repo-a',
+      workspaceFolders: [{ name: 'Repo A', path: '/repo-a' }],
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    setState('sessions', [session('nested-session', 1, { directory: '/repo-b/nested' })]);
+
+    cleanup = render(() => <SessionListView />, container);
+    await vi.waitFor(() => {
+      expect(container.querySelector('.session-history-scope-trigger')?.textContent).toContain(
+        'Folder'
+      );
+    });
+    container.querySelector<HTMLButtonElement>('.session-history-scope-trigger')!.click();
+    Array.from(container.querySelectorAll<HTMLButtonElement>('.session-history-scope-option'))
+      .find((option) => option.textContent?.includes('Nested'))!
+      .click();
+    expect(setScope).toHaveBeenCalledWith('/repo-a', 'descendants');
+
+    setState('editorContext', {
+      workspacePath: '/repo-b',
+      workspaceFolders: [{ name: 'Repo B', path: '/repo-b' }],
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    await vi.waitFor(() => {
+      expect(container.querySelector('.session-history-scope-trigger')?.textContent).toContain(
+        'Project'
+      );
+      expect(container.querySelector('.session-item-folder')?.getAttribute('title')).toBe(
+        '/repo-b/nested'
+      );
+    });
+    expect(reloadSessionsMock).toHaveBeenCalledOnce();
+
+    save.resolve({ scope: 'directory', git: true });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(container.querySelector('.session-history-scope-trigger')?.textContent).toContain(
+      'Project'
+    );
+    expect(container.querySelector('.session-item-folder')?.getAttribute('title')).toBe(
+      '/repo-b/nested'
+    );
+    expect(reloadSessionsMock).toHaveBeenCalledOnce();
+  });
+
+  it('ignores a scope save error after unmount', async () => {
+    const save = deferred<{ scope: 'descendants'; git: true }>();
+    vi.spyOn(client.varro.sessionHistoryScope, 'get').mockResolvedValue({
+      scope: 'directory',
+      git: true,
+    });
+    vi.spyOn(client.varro.sessionHistoryScope, 'set').mockReturnValue(save.promise);
+    setState('editorContext', {
+      workspacePath: '/repo',
+      workspaceFolders: [{ name: 'Repo', path: '/repo' }],
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(() => <SessionListView />, container);
+    await vi.waitFor(() => {
+      expect(container.querySelector('.session-history-scope-trigger')?.textContent).toContain(
+        'Folder'
+      );
+    });
+    container.querySelector<HTMLButtonElement>('.session-history-scope-trigger')!.click();
+    Array.from(container.querySelectorAll<HTMLButtonElement>('.session-history-scope-option'))
+      .find((option) => option.textContent?.includes('Nested'))!
+      .click();
+
+    cleanup();
+    cleanup = undefined;
+    save.reject(new Error('stale save failure'));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(error()).toBeNull();
+    expect(reloadSessionsMock).not.toHaveBeenCalled();
+  });
+
   it.each(['descendants', 'project'] as const)(
     'shows compact folder names for sessions outside the current folder in %s scope',
     async (scope) => {
@@ -302,8 +411,12 @@ describe('SessionListView model details', () => {
     }
   );
 
-  it('shows a workspace selector above search for multi-root workspaces', () => {
+  it('shows folder scope only after selecting a folder in a multi-root workspace', async () => {
     const onPrimarySessionsCountChange = vi.fn();
+    const getScope = vi.spyOn(client.varro.sessionHistoryScope, 'get').mockResolvedValue({
+      scope: 'project',
+      git: true,
+    });
     const send = vi.fn((message: TestRuntimeValue) => {
       structuredClone(message);
     });
@@ -337,6 +450,8 @@ describe('SessionListView model details', () => {
     expect(selector?.textContent).toContain('Folder:');
     expect(selector?.textContent).toContain('Workspace');
     expect(selector?.querySelector('.workspace-picker-folder-icon')).toBeNull();
+    expect(container.querySelector('.session-history-scope-picker')).toBeNull();
+    expect(getScope).not.toHaveBeenCalled();
     expect(container.querySelectorAll('.session-item-folder-meta-icon')).toHaveLength(2);
     expect(onPrimarySessionsCountChange).toHaveBeenLastCalledWith(2);
     expect(
@@ -347,6 +462,7 @@ describe('SessionListView model details', () => {
 
     selector?.querySelector<HTMLButtonElement>('.workspace-picker-button')?.click();
     selector?.querySelector<HTMLButtonElement>('[data-workspace-path="/repo-b"]')?.click();
+    await vi.waitFor(() => expect(getScope).toHaveBeenCalledWith('/repo-b'));
     expect(send).toHaveBeenCalledWith({
       type: 'workspace/select',
       payload: { path: '/repo-b' },
@@ -360,12 +476,17 @@ describe('SessionListView model details', () => {
     ).toEqual(['session-2']);
     expect(container.querySelectorAll('.session-item-folder-meta-icon')).toHaveLength(0);
     expect(container.querySelector('.session-item-meta')?.textContent).not.toContain('Repo B');
+    expect(container.querySelector('.session-history-scope-trigger')?.textContent).toContain(
+      'Project'
+    );
     expect(onPrimarySessionsCountChange).toHaveBeenLastCalledWith(1);
 
     selector?.querySelector<HTMLButtonElement>('.workspace-picker-button')?.click();
     selector?.querySelector<HTMLButtonElement>('.workspace-popover-all')?.click();
     setState('editorContext', 'workspacePath', '/repo-b');
     expect(selector?.textContent).toContain('Workspace');
+    expect(container.querySelector('.session-history-scope-picker')).toBeNull();
+    expect(getScope).toHaveBeenCalledOnce();
     expect(container.querySelectorAll('.session-item-title-text')).toHaveLength(2);
     expect(onPrimarySessionsCountChange).toHaveBeenLastCalledWith(2);
 
@@ -2205,6 +2326,65 @@ describe('SessionListView load errors', () => {
     expect(container.textContent).not.toContain('Flick through old notes');
     expect(getArchive().textContent).toContain('1+');
     expect(appState.sessions).toEqual(loadedSessions);
+  });
+
+  it('debounces search, aborts immediately, and ignores stale responses', async () => {
+    vi.useFakeTimers();
+    const first = deferred<{ items: Session[]; hasMore: false }>();
+    const second = deferred<{ items: Session[]; hasMore: false }>();
+    const list = vi
+      .spyOn(client.session, 'list')
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+
+    try {
+      cleanup = render(() => <SessionListView />, container);
+      const search = container.querySelector<HTMLInputElement>('.session-list-search-input')!;
+      search.value = 'first';
+      search.dispatchEvent(new InputEvent('input', { bubbles: true }));
+
+      await vi.advanceTimersByTimeAsync(199);
+      expect(list).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(list).toHaveBeenCalledOnce();
+      const firstSignal = list.mock.calls[0]![0]!.signal!;
+
+      search.value = 'second';
+      search.dispatchEvent(new InputEvent('input', { bubbles: true }));
+      expect(firstSignal.aborted).toBe(true);
+      await vi.advanceTimersByTimeAsync(199);
+      expect(list).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(list).toHaveBeenCalledTimes(2);
+
+      second.resolve({
+        items: [session('current-result', 2, { title: 'Current result' })],
+        hasMore: false,
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(container.querySelector('.session-item-title-text')?.textContent).toBe(
+        'Current result'
+      );
+
+      first.resolve({
+        items: [session('stale-result', 1, { title: 'Stale result' })],
+        hasMore: false,
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(container.querySelector('.session-item-title-text')?.textContent).toBe(
+        'Current result'
+      );
+
+      search.value = 'cancelled';
+      search.dispatchEvent(new InputEvent('input', { bubbles: true }));
+      container.querySelector<HTMLButtonElement>('.session-list-search-clear')!.click();
+      await vi.advanceTimersByTimeAsync(200);
+      expect(list).toHaveBeenCalledTimes(2);
+    } finally {
+      cleanup?.();
+      cleanup = undefined;
+      vi.useRealTimers();
+    }
   });
 
   it('resolves paginated sub-agents without adding archive sessions to loaded state', async () => {

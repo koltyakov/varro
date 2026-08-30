@@ -24,6 +24,7 @@ const {
   setShowFileDiffs,
   setExpandThinking,
   setShowChangedFiles,
+  setShowTurnTimer,
   setDesktopSessionPaneSide,
   setDefaultPermissionModePreference,
   setWorkspaceStatusSummary,
@@ -47,6 +48,7 @@ const {
   setShowFileDiffs: vi.fn(),
   setExpandThinking: vi.fn(),
   setShowChangedFiles: vi.fn(),
+  setShowTurnTimer: vi.fn(),
   setDesktopSessionPaneSide: vi.fn(),
   setDefaultPermissionModePreference: vi.fn(),
   setWorkspaceStatusSummary: vi.fn(),
@@ -81,6 +83,7 @@ vi.mock('../lib/state', async () => {
     setShowFileDiffs,
     setExpandThinking,
     setShowChangedFiles,
+    setShowTurnTimer,
     setDesktopSessionPaneSide,
     setDefaultPermissionModePreference,
     applyModelPreferencesSnapshot,
@@ -821,6 +824,7 @@ describe('mount bridge helpers', () => {
         showFileDiffs: true,
         expandThinking: true,
         showChangedFiles: true,
+        showTurnTimer: true,
         desktopSessionPaneSide: 'right',
         defaultPermissionMode: 'full',
         chatFontSize: 16,
@@ -841,6 +845,7 @@ describe('mount bridge helpers', () => {
     expect(setShowFileDiffs).toHaveBeenCalledWith(true);
     expect(setExpandThinking).toHaveBeenCalledWith(true);
     expect(setShowChangedFiles).toHaveBeenCalledWith(true);
+    expect(setShowTurnTimer).toHaveBeenCalledWith(true);
     expect(document.documentElement.style.getPropertyValue('--varro-chat-font-size')).toBe('16px');
     expect(document.documentElement.style.getPropertyValue('--varro-chat-editor-font-size')).toBe(
       '15px'

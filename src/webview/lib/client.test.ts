@@ -67,6 +67,29 @@ afterEach(() => {
 });
 
 describe('client', () => {
+  it('adds the owning session only to automatic permission reply metadata', async () => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockResolvedValue(true);
+
+    await client.session.respondPermission('session-auto', 'permission-auto', 'once', {
+      permissionAutomationLease: 7,
+    });
+    await client.session.respondPermission('session-manual', 'permission-manual', 'reject');
+
+    expect(bridgeMocks.apiCall.mock.calls).toEqual([
+      [
+        'POST',
+        '/permission/permission-auto/reply',
+        { reply: 'once' },
+        {
+          permissionAutomationLease: 7,
+          permissionAutomationSessionID: 'session-auto',
+        },
+      ],
+      ['POST', '/permission/permission-manual/reply', { reply: 'reject' }],
+    ]);
+  });
+
   it('loads a bounded session page with continuation metadata', async () => {
     const { client } = await loadClient();
     const sessions = [{ id: 'session-1' }];

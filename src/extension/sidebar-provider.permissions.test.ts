@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { readMaximumTestedOpenCodeVersion } from './extension-manifest';
 import {
   attachTestView,
+  createContextProvider,
   createServer,
   createSidebarProviderInstance,
   getVscodeMock,
@@ -210,6 +211,250 @@ describe('SidebarProvider permission replay', () => {
     expect(statusBarItem.text).toBe('$(bell-dot) Varro: 1 waiting');
     expect(statusBarItem.tooltip).toContain('Current repo: Run Bash command');
     expect(provider.getStatusBarClickAction()).toBe('attention');
+  });
+
+  it('accepts an automatic reply with a known session when host pending state is missing', async () => {
+    const server = createServer({ request: vi.fn(() => Promise.resolve(true)) });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const { posted } = attachTestView(provider);
+    await provider.handleMessage({ type: 'ready' });
+    const lease = posted
+      .filter(
+        (
+          message
+        ): message is { type: 'permission-automation/update'; payload: { lease: number } } =>
+          (message as { type?: string }).type === 'permission-automation/update'
+      )
+      .at(-1)?.payload.lease;
+    expect(lease).toBeTypeOf('number');
+    const providerState = provider as unknown as {
+      sessionState: { handleServerEvent(event: unknown): void };
+    };
+    providerState.sessionState.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'restored-session', directory: '/repo' } },
+    });
+    server.request.mockClear();
+
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: {
+        id: 199,
+        method: 'POST',
+        path: '/permission/restored-permission/reply',
+        body: { reply: 'once' },
+        permissionAutomationLease: lease!,
+        permissionAutomationSessionID: 'restored-session',
+      },
+    });
+
+    expect(server.request).toHaveBeenCalledWith(
+      'POST',
+      '/permission/restored-permission/reply',
+      { reply: 'once' },
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: { id: 199, data: true },
+    });
+  });
+
+  it('accepts a project-catalog permission reply through the catalog root workspace', async () => {
+    const values = new Map<string, unknown>([
+      ['varro.sessionHistoryScopes', { 'project:project-1': 'project' }],
+      ['varro.sessionHistoryScopeProjects', { '/repo': 'project:project-1' }],
+    ]);
+    const workspaceState = {
+      get: vi.fn((key: string, fallback?: unknown) => values.get(key) ?? fallback),
+      update: vi.fn(() => Promise.resolve()),
+    };
+    const contextProvider = createContextProvider();
+    contextProvider.getOpenWorkspaceRoot = vi.fn((path: string) =>
+      path === '/repo' ? '/repo' : null
+    );
+    const server = createServer({
+      request: vi.fn(async (method: string, path: string) => {
+        if (path === '/project/current') {
+          return { id: 'project-1', worktree: '/repo', vcs: 'git' };
+        }
+        const url = new URL(path, 'http://localhost');
+        if (
+          url.pathname === '/session' &&
+          url.searchParams.get('limit') === '1000000' &&
+          url.searchParams.get('scope') === 'project'
+        ) {
+          return [
+            {
+              id: 'project-session',
+              projectID: 'project-1',
+              directory: '/worktrees/feature',
+            },
+          ];
+        }
+        if (method === 'POST' && path === '/permission/project-permission/reply') return true;
+        throw new Error(`Unexpected request: ${method} ${path}`);
+      }),
+    });
+    const { provider } = await createSidebarProviderInstance({
+      contextProvider,
+      server,
+      workspaceState: workspaceState as never,
+    });
+    const { posted } = attachTestView(provider);
+    await provider.handleMessage({ type: 'ready' });
+    const lease = posted
+      .filter(
+        (
+          message
+        ): message is { type: 'permission-automation/update'; payload: { lease: number } } =>
+          (message as { type?: string }).type === 'permission-automation/update'
+      )
+      .at(-1)?.payload.lease;
+    expect(lease).toBeTypeOf('number');
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: { id: 198, method: 'GET', path: '/session' },
+    });
+    server.request.mockClear();
+
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: {
+        id: 197,
+        method: 'POST',
+        path: '/permission/project-permission/reply',
+        body: { reply: 'once' },
+        permissionAutomationLease: lease!,
+        permissionAutomationSessionID: 'project-session',
+      },
+    });
+
+    expect(server.request).toHaveBeenCalledWith(
+      'POST',
+      '/permission/project-permission/reply',
+      { reply: 'once' },
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: { id: 197, data: true },
+    });
+  });
+
+  it('rejects automatic reply metadata that conflicts with host pending ownership', async () => {
+    const server = createServer({ request: vi.fn(() => Promise.resolve(true)) });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const { posted } = attachTestView(provider);
+    await provider.handleMessage({ type: 'ready' });
+    const lease = posted
+      .filter(
+        (
+          message
+        ): message is { type: 'permission-automation/update'; payload: { lease: number } } =>
+          (message as { type?: string }).type === 'permission-automation/update'
+      )
+      .at(-1)?.payload.lease;
+    expect(lease).toBeTypeOf('number');
+    const providerState = provider as unknown as {
+      sessionState: { handleServerEvent(event: unknown): void };
+    };
+    for (const sessionID of ['session-a', 'session-b']) {
+      providerState.sessionState.handleServerEvent({
+        type: 'session.updated',
+        properties: { info: { id: sessionID, directory: '/repo' } },
+      });
+    }
+    providerState.sessionState.handleServerEvent({
+      type: 'permission.asked',
+      properties: { id: 'permission-a', sessionID: 'session-a', permission: 'bash' },
+    });
+    server.request.mockClear();
+
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: {
+        id: 200,
+        method: 'POST',
+        path: '/permission/permission-a/reply',
+        body: { reply: 'once' },
+        permissionAutomationLease: lease!,
+        permissionAutomationSessionID: 'session-b',
+      },
+    });
+
+    expect(server.request).not.toHaveBeenCalled();
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: { id: 200, error: 'Permission automation ownership changed' },
+    });
+  });
+
+  it('rejects automatic judge and reply requests for another workspace before OpenCode', async () => {
+    const server = createServer({ request: vi.fn() });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const { posted } = attachTestView(provider);
+    await provider.handleMessage({ type: 'ready' });
+    const lease = posted
+      .filter(
+        (
+          message
+        ): message is { type: 'permission-automation/update'; payload: { lease: number } } =>
+          (message as { type?: string }).type === 'permission-automation/update'
+      )
+      .at(-1)?.payload.lease;
+    expect(lease).toBeTypeOf('number');
+    const providerState = provider as unknown as {
+      sessionState: { handleServerEvent(event: unknown): void };
+    };
+    providerState.sessionState.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'session-b', directory: '/repo-b' } },
+    });
+    providerState.sessionState.handleServerEvent({
+      type: 'permission.asked',
+      properties: {
+        id: 'permission-b',
+        sessionID: 'session-b',
+        permission: 'bash',
+        title: 'Run command',
+      },
+    });
+    server.request.mockClear();
+
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: {
+        id: 201,
+        method: 'POST',
+        path: '/varro/permission/judge',
+        body: {
+          permission: { id: 'permission-b', sessionID: 'session-b', type: 'bash' },
+        },
+        permissionAutomationLease: lease!,
+      },
+    });
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: {
+        id: 202,
+        method: 'POST',
+        path: '/permission/permission-b/reply',
+        body: { reply: 'once' },
+        permissionAutomationLease: lease!,
+        permissionAutomationSessionID: 'session-b',
+      },
+    });
+
+    expect(server.request).not.toHaveBeenCalled();
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: { id: 201, error: 'Permission automation ownership changed' },
+    });
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: { id: 202, error: 'Permission automation ownership changed' },
+    });
   });
 
   it('marks the OpenCode version when the running server trails the installed CLI', async () => {

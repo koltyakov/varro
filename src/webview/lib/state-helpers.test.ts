@@ -716,6 +716,26 @@ describe('state helpers', () => {
     expect(stateModule.getPermissionModeForSession('session-1')).toBe('auto');
   });
 
+  it('does not let an old permission-mode acknowledgement clear a newer selection', async () => {
+    const stateModule = await loadState();
+
+    const firstGeneration = stateModule.setPendingSessionPermissionMode('session-1', 'auto');
+    stateModule.setPermissionModeForSession('session-1', 'auto');
+    const secondGeneration = stateModule.setPendingSessionPermissionMode('session-1', 'full');
+    stateModule.setPermissionModeForSession('session-1', 'full');
+
+    expect(
+      stateModule.setPendingSessionPermissionMode('session-1', null, firstGeneration ?? undefined)
+    ).toBeNull();
+    expect(stateModule.getPermissionModeForSession('session-1')).toBe('full');
+    expect(stateModule.isSessionPermissionModePending('session-1')).toBe(true);
+
+    expect(
+      stateModule.setPendingSessionPermissionMode('session-1', null, secondGeneration ?? undefined)
+    ).toBe(secondGeneration);
+    expect(stateModule.isSessionPermissionModePending('session-1')).toBe(false);
+  });
+
   it('treats a pending ancestor permission mode as pending for descendants', async () => {
     const stateModule = await loadState();
     stateModule.setSessions([
@@ -1945,34 +1965,92 @@ describe('state helpers', () => {
     ]);
   });
 
-  it('prunes an edited user message and later messages with restore support', async () => {
+  it('prunes and restores only one session subsequence across interleaved child rows', async () => {
     const stateModule = await loadState();
+    const childBefore = { info: userMessage('child-before', 'child-1', 2), parts: [] };
+    const childAfter = { info: userMessage('child-after', 'child-1', 4), parts: [] };
     const messages = [
       { info: userMessage('user-1', 'session-1', 1), parts: [] },
-      { info: assistantMessage('assistant-1', 'session-1', 2, 'default', 'user-1'), parts: [] },
+      childBefore,
+      { info: assistantMessage('assistant-1', 'session-1', 3, 'default', 'user-1'), parts: [] },
+      childAfter,
       { info: userMessage('user-2', 'session-1', 3), parts: [] },
-      { info: assistantMessage('assistant-2', 'session-1', 4, 'default', 'user-2'), parts: [] },
+      { info: assistantMessage('assistant-2', 'session-1', 5, 'default', 'user-2'), parts: [] },
     ];
     stateModule.setMessagesIncremental(messages);
-    const retainedEntries = stateModule.state.messages.slice(0, 2);
+    const retainedEntries = new Map(
+      stateModule.state.messages.map((entry) => [entry.info.id, entry] as const)
+    );
 
     const restore = stateModule.pruneMessagesFrom('session-1', 'user-2');
 
     expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
       'user-1',
+      'child-before',
       'assistant-1',
+      'child-after',
     ]);
-    expect(stateModule.state.messages[0]).toBe(retainedEntries[0]);
-    expect(stateModule.state.messages[1]).toBe(retainedEntries[1]);
+    expect(stateModule.state.messages[1]).toBe(retainedEntries.get('child-before'));
+    expect(stateModule.state.messages[3]).toBe(retainedEntries.get('child-after'));
+
+    const updatedChildAfter = {
+      ...stateModule.state.messages[3]!,
+      parts: [
+        {
+          id: 'child-live-part',
+          sessionID: 'child-1',
+          messageID: 'child-after',
+          type: 'text' as const,
+          text: 'Still live',
+        },
+      ],
+    };
+    stateModule.upsertMessage(updatedChildAfter);
+    const liveChildAfter = stateModule.state.messages[3];
+    stateModule.removeMessage('session-1', 'user-1');
 
     restore?.();
 
     expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
-      'user-1',
+      'child-before',
       'assistant-1',
+      'child-after',
       'user-2',
       'assistant-2',
     ]);
+    expect(stateModule.state.messages[2]).toBe(liveChildAfter);
+  });
+
+  it('removes one recycled child tree without disturbing unrelated rows or streaming', async () => {
+    const stateModule = await loadState();
+    const unrelatedPart: Part = {
+      id: 'unrelated-stream',
+      sessionID: 'child-keep',
+      messageID: 'child-keep-message',
+      type: 'text',
+      text: '',
+    };
+    stateModule.setMessagesIncremental([
+      { info: userMessage('parent-message', 'session-1', 1), parts: [] },
+      { info: userMessage('child-remove-message', 'child-remove', 2), parts: [] },
+      { info: userMessage('child-keep-message', 'child-keep', 3), parts: [unrelatedPart] },
+    ]);
+    const retained = new Map(
+      stateModule.state.messages.map((entry) => [entry.info.id, entry] as const)
+    );
+    stateModule.setState('streamingPartId', unrelatedPart.id);
+    stateModule.setState('streamingText', 'Unrelated child is still streaming');
+
+    stateModule.removeMessagesForSessions(['child-remove', 'grandchild-remove']);
+
+    expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
+      'parent-message',
+      'child-keep-message',
+    ]);
+    expect(stateModule.state.messages[0]).toBe(retained.get('parent-message'));
+    expect(stateModule.state.messages[1]).toBe(retained.get('child-keep-message'));
+    expect(stateModule.state.streamingPartId).toBe('unrelated-stream');
+    expect(stateModule.state.streamingText).toBe('Unrelated child is still streaming');
   });
 
   it('toggles local ui helpers and persists ui display preferences', async () => {
@@ -1984,6 +2062,7 @@ describe('state helpers', () => {
     expect(stateModule.messageListScrollRequestKey()).toBe(0);
     expect(stateModule.showThinking()).toBe(true);
     expect(stateModule.showChangedFiles()).toBe(false);
+    expect(stateModule.showTurnTimer()).toBe(false);
 
     stateModule.requestComposerFocus();
     stateModule.requestOpenAttentionSessions();

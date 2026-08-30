@@ -208,6 +208,8 @@ export interface AppStateInstance {
   setExpandThinking: Setter<boolean>;
   showChangedFiles: Accessor<boolean>;
   setShowChangedFiles: Setter<boolean>;
+  showTurnTimer: Accessor<boolean>;
+  setShowTurnTimer: Setter<boolean>;
   desktopSessionPaneSide: Accessor<DesktopSessionPaneSide>;
   setDesktopSessionPaneSide: Setter<DesktopSessionPaneSide>;
   inputText: Accessor<string>;
@@ -443,6 +445,9 @@ export function createAppState(): AppStateInstance {
   const [showChangedFiles, setShowChangedFiles] = createSignal(
     initialWebviewState.showChangedFiles ?? false
   );
+  const [showTurnTimer, setShowTurnTimer] = createSignal(
+    initialWebviewState.showTurnTimer ?? false
+  );
   const [desktopSessionPaneSide, setDesktopSessionPaneSide] = createSignal<DesktopSessionPaneSide>(
     readDesktopSessionPaneSide(initialWebviewState)
   );
@@ -537,6 +542,8 @@ export function createAppState(): AppStateInstance {
     setExpandThinking,
     showChangedFiles,
     setShowChangedFiles,
+    showTurnTimer,
+    setShowTurnTimer,
     desktopSessionPaneSide,
     setDesktopSessionPaneSide,
     inputText,
@@ -626,6 +633,8 @@ export const expandThinking = defaultAppState.expandThinking;
 export const setExpandThinking = defaultAppState.setExpandThinking;
 export const showChangedFiles = defaultAppState.showChangedFiles;
 export const setShowChangedFiles = defaultAppState.setShowChangedFiles;
+export const showTurnTimer = defaultAppState.showTurnTimer;
+export const setShowTurnTimer = defaultAppState.setShowTurnTimer;
 export const desktopSessionPaneSide = defaultAppState.desktopSessionPaneSide;
 export const setDesktopSessionPaneSide = defaultAppState.setDesktopSessionPaneSide;
 export const inputText = defaultAppState.inputText;
@@ -694,6 +703,7 @@ export function resetDefaultAppState() {
   setShowFileDiffs(next.showFileDiffs());
   setExpandThinking(next.expandThinking());
   setShowChangedFiles(next.showChangedFiles());
+  setShowTurnTimer(next.showTurnTimer());
   setDesktopSessionPaneSide(next.desktopSessionPaneSide());
   setInputText(next.inputText());
   setNextPastedImageIndex(next.nextPastedImageIndex());

@@ -166,6 +166,7 @@ function createSession(options?: {
     readConfig: vi.fn(() => ({
       showFileDiffs: true,
       showChangedFiles: true,
+      showTurnTimer: true,
       desktopSessionPaneSide: 'left' as const,
       defaultPermissionMode: 'default' as const,
       chatFontSize: 13,
@@ -498,6 +499,17 @@ describe('WebviewSession', () => {
       expect.objectContaining({
         pinnedSessionIds: ['pinned-session'],
       })
+    );
+  });
+
+  it('includes turn-timer configuration in the initial webview state', async () => {
+    const { session, bridge } = createSession();
+
+    await session.resolve(createWebviewView(true) as never);
+    await flushMicrotasks();
+
+    expect(bridge.renderHtml).toHaveBeenCalledWith(
+      expect.objectContaining({ showTurnTimer: true })
     );
   });
 

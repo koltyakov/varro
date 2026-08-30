@@ -51,7 +51,11 @@ import {
   type AssistantActivityGroupInfo,
   type AssistantActivityPart,
 } from '../lib/assistant-activity';
-import { isAssistantMessage, isContinuationAssistantFinish } from '../lib/message-metrics';
+import {
+  getAssistantDiffRequest,
+  isAssistantMessage,
+  isContinuationAssistantFinish,
+} from '../lib/message-metrics';
 import { registerQueuedMessageRemovalHandler } from '../lib/message-list-layout';
 import {
   getFinalAssistantTextPartId,
@@ -505,6 +509,8 @@ export function MessageList() {
     }
     return null;
   });
+  const isAssistantDiffEligible = (message: MessageEntry) =>
+    getAssistantDiffRequest(message.info, message.info.id === lastAssistantID()) !== null;
   let expectedScrollTop = -1;
   let ignoreScrollUntil = 0;
   let lastObservedScrollTop = 0;
@@ -801,6 +807,26 @@ export function MessageList() {
     return untrack(() => findStreamingPart(messages(), streamingPartId));
   });
   const streamingTextLength = createMemo(() => state.streamingText.length);
+  const hasStreamingText = createMemo(() => state.streamingText.length > 0);
+  const hasNonWhitespaceStreamingText = createMemo(() => state.streamingText.trim().length > 0);
+  const streamingLayoutProjection = createMemo<{ partId: string | null; text: string }>(
+    () => {
+      const partId = state.streamingPartId;
+      const text = state.streamingText;
+      const projectedText =
+        text.trim().length === 0
+          ? ''
+          : isWorkspaceDirectoryText(text)
+            ? '[Working directory:'
+            : 'x';
+      return { partId, text: projectedText };
+    },
+    { partId: null, text: '' },
+    {
+      equals: (previous, current) =>
+        previous.partId === current.partId && previous.text === current.text,
+    }
+  );
   const visibleBlockingStreamingPart = createMemo(() => {
     const streamingText = state.streamingText;
     return hasVisibleBlockingStreamingPart(streamingPart(), streamingText);
@@ -1182,7 +1208,8 @@ export function MessageList() {
   const [knownZeroHeightMessageIds, setKnownZeroHeightMessageIds] = createSignal<
     ReadonlySet<string>
   >(new Set());
-  const zeroHeightRenderContentSignatures = new Map<string, string>();
+  const zeroHeightRenderGeometrySignatures = new Map<string, string>();
+  const assistantDiffContentMessageIds = new Set<string>();
   const forcedVirtualContentMessageIds = new Set<string>();
   const viewportForcedVirtualContentMessageIds = new Set<string>();
   const measuredRowInlineSizes = new WeakMap<HTMLElement, number>();
@@ -1460,10 +1487,13 @@ export function MessageList() {
       setMeasurementVersion((version) => version + 1);
     }
     const currentMessageIdSet = new Set(currentMessageIds);
-    for (const messageId of zeroHeightRenderContentSignatures.keys()) {
+    for (const messageId of zeroHeightRenderGeometrySignatures.keys()) {
       if (!currentMessageIdSet.has(messageId)) {
-        zeroHeightRenderContentSignatures.delete(messageId);
+        zeroHeightRenderGeometrySignatures.delete(messageId);
       }
+    }
+    for (const messageId of assistantDiffContentMessageIds) {
+      if (!currentMessageIdSet.has(messageId)) assistantDiffContentMessageIds.delete(messageId);
     }
     for (const messageId of forcedVirtualContentMessageIds) {
       if (!currentMessageIdSet.has(messageId)) forcedVirtualContentMessageIds.delete(messageId);
@@ -1526,7 +1556,7 @@ export function MessageList() {
         : null;
     for (const messageId of unmountedMessageIds) {
       if (!measuredHeights.delete(messageId)) continue;
-      zeroHeightRenderContentSignatures.delete(messageId);
+      zeroHeightRenderGeometrySignatures.delete(messageId);
       markVirtualMetricsDirty(messageId);
     }
 
@@ -1591,21 +1621,16 @@ export function MessageList() {
 
   function invalidateChangedZeroHeightRows(
     candidateMessageIds: Iterable<string>,
-    currentStreamingPartId: string | null,
-    currentStreamingText: string
+    streaming: { partId: string | null; text: string }
   ) {
     let changed = false;
     for (const messageId of candidateMessageIds) {
-      const previousSignature = zeroHeightRenderContentSignatures.get(messageId);
+      const previousSignature = zeroHeightRenderGeometrySignatures.get(messageId);
       if (previousSignature === undefined) continue;
-      const currentSignature = getMessageRenderContentSignature(
-        messageId,
-        currentStreamingPartId,
-        currentStreamingText
-      );
+      const currentSignature = getMessageRenderGeometrySignature(messageId, streaming);
       if (currentSignature === previousSignature) continue;
       measuredHeights.delete(messageId);
-      zeroHeightRenderContentSignatures.delete(messageId);
+      zeroHeightRenderGeometrySignatures.delete(messageId);
       forcedVirtualContentMessageIds.add(messageId);
       markVirtualMetricsDirty(messageId);
       changed = true;
@@ -1618,30 +1643,22 @@ export function MessageList() {
     messageInfoVersion();
     untrack(() =>
       invalidateChangedZeroHeightRows(
-        zeroHeightRenderContentSignatures.keys(),
-        state.streamingPartId,
-        state.streamingText
+        zeroHeightRenderGeometrySignatures.keys(),
+        streamingLayoutProjection()
       )
     );
   });
 
   let previousStreamingMessageId: string | null = null;
   createEffect(() => {
-    const currentStreamingPartId = state.streamingPartId;
-    const currentStreamingText = state.streamingText;
+    const streaming = streamingLayoutProjection();
     const currentStreamingMessageId = streamingPart()?.messageID ?? null;
     const candidateMessageIds = new Set<string>();
     if (previousStreamingMessageId) candidateMessageIds.add(previousStreamingMessageId);
     if (currentStreamingMessageId) candidateMessageIds.add(currentStreamingMessageId);
     previousStreamingMessageId = currentStreamingMessageId;
 
-    untrack(() =>
-      invalidateChangedZeroHeightRows(
-        candidateMessageIds,
-        currentStreamingPartId,
-        currentStreamingText
-      )
-    );
+    untrack(() => invalidateChangedZeroHeightRows(candidateMessageIds, streaming));
   });
 
   const hasIncompleteLatestVisibleAssistantReply = createMemo(() => {
@@ -2199,18 +2216,50 @@ export function MessageList() {
     return shouldShow ? preview : null;
   });
 
-  function getMessageRenderContentSignature(
+  function getMessageRenderGeometrySignature(
     messageId: string,
-    currentStreamingPartId = state.streamingPartId,
-    currentStreamingText = state.streamingText
+    streaming = streamingLayoutProjection()
   ) {
     const index = messageIndexById().get(messageId);
     const message = index === undefined ? undefined : messages()[index];
     if (!message) return null;
-    const streamingText = message.parts.some((part) => part.id === currentStreamingPartId)
-      ? currentStreamingText
-      : null;
-    return JSON.stringify([message.info, message.parts, streamingText]);
+    const summaryHasOmittedDiffs =
+      message.info.role === 'user' &&
+      !!message.info.summary &&
+      message.info.summary.diffsOmitted === true;
+    const errorProjection =
+      isAssistantMessage(message.info) && message.info.error
+        ? isAbortedAssistantError(message.info.error)
+          ? 'aborted'
+          : 'error'
+        : 'ok';
+    const infoProjection = `${message.info.role}:${summaryHasOmittedDiffs ? 1 : 0}:${errorProjection}:${isAssistantDiffEligible(message) ? 1 : 0}`;
+    const partProjection = message.parts
+      .map((part) => {
+        if (part.type === 'text') {
+          return `${part.id}:text:${hasVisibleProjectedText(part, streaming) ? 1 : 0}`;
+        }
+        const visible = shouldShowAssistantPartInline(part);
+        if (!isAssistantActivityPart(part)) return `${part.id}:${part.type}:${visible ? 1 : 0}`;
+        return `${part.id}:${part.type}:${visible ? 1 : 0}:${canCompactActivityPart(part) ? 1 : 0}:${isAssistantActivityPartRunning(part) ? 1 : 0}`;
+      })
+      .join('|');
+    return `${infoProjection}|${partProjection}`;
+  }
+
+  function handleAssistantDiffSettledEmpty(messageId: string) {
+    if (
+      !forcedVirtualContentMessageIds.has(messageId) ||
+      !knownZeroHeightMessageIds().has(messageId)
+    ) {
+      return;
+    }
+    const row = mountedMessageRows.get(messageId);
+    if (!row || !shouldAcceptRowHeight(row, messageId, 0)) return;
+
+    forcedVirtualContentMessageIds.delete(messageId);
+    markVirtualMetricsDirty(messageId);
+    publishMeasurementVersion({ preserveVisibleAnchor: false });
   }
 
   function shouldAcceptRowHeight(element: HTMLElement, messageId: string, height: number) {
@@ -2218,15 +2267,28 @@ export function MessageList() {
     // promote a provisional estimate to an exact content height.
     if (element.classList.contains('interactive-item-virtual-placeholder')) return false;
     if (height !== 0) {
-      zeroHeightRenderContentSignatures.delete(messageId);
+      if (knownZeroHeightMessageIds().has(messageId) && element.querySelector('.diff-summary')) {
+        const index = messageIndexById().get(messageId);
+        const message = index === undefined ? undefined : messages()[index];
+        if (message && isAssistantDiffEligible(message)) {
+          assistantDiffContentMessageIds.add(messageId);
+          setKnownZeroHeightMessageIds((current) => {
+            const next = new Set(current);
+            next.delete(messageId);
+            return next;
+          });
+          markVirtualMetricsDirty(messageId);
+        }
+      }
+      zeroHeightRenderGeometrySignatures.delete(messageId);
       forcedVirtualContentMessageIds.delete(messageId);
       return true;
     }
     if (element.childElementCount > 0 || element.textContent?.trim()) return false;
 
-    const signature = getMessageRenderContentSignature(messageId);
+    const signature = getMessageRenderGeometrySignature(messageId);
     if (signature === null) return false;
-    zeroHeightRenderContentSignatures.set(messageId, signature);
+    zeroHeightRenderGeometrySignatures.set(messageId, signature);
     return true;
   }
 
@@ -2334,7 +2396,7 @@ export function MessageList() {
       if ((previousHeight ?? -1) === height) continue;
 
       if (height > 0) {
-        zeroHeightRenderContentSignatures.delete(messageId);
+        zeroHeightRenderGeometrySignatures.delete(messageId);
       }
 
       if (firstVisibleIndex !== null) {
@@ -5795,7 +5857,8 @@ export function MessageList() {
     directMovementAnchor = null;
     pendingWheelResizeAnchor = null;
     measuredHeights.clear();
-    zeroHeightRenderContentSignatures.clear();
+    zeroHeightRenderGeometrySignatures.clear();
+    assistantDiffContentMessageIds.clear();
     forcedVirtualContentMessageIds.clear();
     viewportForcedVirtualContentMessageIds.clear();
     setMeasurementVersion((version) => version + 1);
@@ -6341,11 +6404,7 @@ export function MessageList() {
           : new Set<string>();
       const trailingMessageIds = trailingAssistantTurn()?.assistantMessageIds;
       const streamingPartId = state.streamingPartId;
-      if (
-        !trailingMessageIds?.size ||
-        !streamingPartId ||
-        state.streamingText.trim().length === 0
-      ) {
+      if (!trailingMessageIds?.size || !streamingPartId || !hasNonWhitespaceStreamingText()) {
         return { sessionId, userMessageId, keys: retainedKeys };
       }
       const precedingActivityPartKeys = new Set<string>();
@@ -6411,7 +6470,7 @@ export function MessageList() {
 
   const getTrailingVisibleAssistantPartKey = () => {
     let result: string | null = null;
-    const streaming = { partId: state.streamingPartId, text: state.streamingText };
+    const streaming = streamingLayoutProjection();
     for (const message of compactActivityMessages()) {
       if (!isAssistantMessage(message.info)) continue;
       for (const part of message.parts) {
@@ -6605,7 +6664,7 @@ export function MessageList() {
       }
 
       const holdMs =
-        state.streamingPartId && state.streamingText.length > 0
+        state.streamingPartId && hasStreamingText()
           ? 0
           : Math.max(0, firstSeenAt + ACTIVITY_MIN_VISIBLE_MS - now);
       setSetMembership(setRetainedActivityPartKeys, key, true);
@@ -6652,7 +6711,7 @@ export function MessageList() {
       trackMessageBlockExpansionState();
       const activeMessageIds = activeActivityMessageIds();
       const activityMessages = compactActivityMessages();
-      const streaming = { partId: state.streamingPartId, text: state.streamingText };
+      const streaming = streamingLayoutProjection();
       const isBoundaryPart = (part: Part) =>
         part.type === 'text'
           ? hasVisibleProjectedText(part, streaming)
@@ -6796,13 +6855,23 @@ export function MessageList() {
         retained: renderedRetainedActivityPartKeys(),
         exiting: renderedExitingActivityPartKeys(),
       },
-      { partId: state.streamingPartId, text: state.streamingText }
+      streamingLayoutProjection()
     );
     const modelChanges = modelChangeMap();
     const dialogSummaries = rowAssistantDialogSummaryMap();
+    for (const messageId of assistantDiffContentMessageIds) {
+      const index = messageIndexById().get(messageId);
+      const message = index === undefined ? undefined : messages()[index];
+      if (!message || !isAssistantDiffEligible(message)) {
+        assistantDiffContentMessageIds.delete(messageId);
+      }
+    }
     const next = new Set(
       [...candidates].filter(
-        (messageId) => !modelChanges.has(messageId) && !dialogSummaries.has(messageId)
+        (messageId) =>
+          !modelChanges.has(messageId) &&
+          !dialogSummaries.has(messageId) &&
+          !assistantDiffContentMessageIds.has(messageId)
       )
     );
     if (previous.size === next.size && [...next].every((messageId) => previous.has(messageId))) {
@@ -6814,7 +6883,7 @@ export function MessageList() {
       if (previous.has(messageId) === next.has(messageId)) continue;
       if (previous.has(messageId) && currentMessageIds.has(messageId)) {
         measuredHeights.delete(messageId);
-        zeroHeightRenderContentSignatures.delete(messageId);
+        zeroHeightRenderGeometrySignatures.delete(messageId);
         forcedVirtualContentMessageIds.add(messageId);
       }
       markVirtualMetricsDirty(messageId);
@@ -6842,7 +6911,7 @@ export function MessageList() {
       expandedActivityGroup: (key) => getMessageBlockExpanded(key) ?? false,
       renderEmptyMessageIds: knownZeroHeightMessageIds(),
       showThinking: showThinking(),
-      streaming: { partId: state.streamingPartId, text: state.streamingText },
+      streaming: streamingLayoutProjection(),
       visibleActiveActivityPartKeys: renderedVisibleActiveActivityPartKeys(),
       retainedActivityPartKeys: renderedRetainedActivityPartKeys(),
       trailingPermissionMessageIds,
@@ -7676,6 +7745,7 @@ export function MessageList() {
               observeMeasuredRow={observeMeasuredRow}
               questionRequestForTool={getQuestionRequestForTool}
               permissionMatchForTool={getPermissionMatchForTool}
+              onAssistantDiffSettledEmpty={handleAssistantDiffSettledEmpty}
               onWorkedSummaryHoverChange={handleWorkedSummaryHoverChange}
               onUserMessageHoverChange={handleWorkedSummaryHoverChange}
             />

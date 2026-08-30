@@ -268,6 +268,7 @@ export function VirtualizedContent(
         observeMeasuredRow={props.observeMeasuredRow}
         questionRequestForTool={props.questionRequestForTool}
         permissionMatchForTool={props.permissionMatchForTool}
+        onAssistantDiffSettledEmpty={props.onAssistantDiffSettledEmpty}
         onWorkedSummaryHoverChange={props.onWorkedSummaryHoverChange}
         onUserMessageHoverChange={props.onUserMessageHoverChange}
       />

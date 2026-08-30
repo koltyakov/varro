@@ -32,6 +32,7 @@ import { uiStore } from '../../lib/stores/ui-store';
 import { toApprovedPermissionReference, toPlainJudgeModel } from '../../lib/judge-request';
 import { resetMessageEditState } from '../../lib/message-edit-state';
 import { isWorkspaceDirectoryText } from '../../lib/part-utils';
+import { resolveTaskSessionId } from '../../lib/task-session';
 import { normalizePermissionEvent } from '../../lib/session-event-reducer';
 import { flushPendingStreamingDeltasFor } from '../../lib/streaming-deltas';
 import { resetToolCallExpansionState } from '../../lib/tool-call-expansion-state';
@@ -513,7 +514,8 @@ function isNotFoundError<T>(err: T) {
 function mergeSessionMessages(
   current: MessageEntry[],
   sessionId: string,
-  incoming: MessageEntry[]
+  incoming: MessageEntry[],
+  sessions: Session[] = appStore.state.sessions
 ): MessageEntry[] {
   const sessionMessages = incoming.filter((entry) => entry.info.sessionID === sessionId);
   if (!current.some((entry) => entry.info.sessionID !== sessionId)) return incoming;
@@ -526,7 +528,14 @@ function mergeSessionMessages(
   );
   if (!hasOverlap) {
     const firstSessionIndex = current.findIndex((entry) => entry.info.sessionID === sessionId);
-    const insertionIndex = firstSessionIndex < 0 ? 0 : firstSessionIndex;
+    const session = sessions.find((candidate) => candidate.id === sessionId);
+    if (firstSessionIndex < 0 && !session?.parentID) {
+      return mergeParentSnapshotWithRecoveredSessions(sessionMessages, current, sessions);
+    }
+    const insertionIndex =
+      firstSessionIndex < 0
+        ? getNewSessionMessageInsertionIndex(current, sessionId, sessions)
+        : firstSessionIndex;
     return [
       ...current.slice(0, insertionIndex).filter((entry) => entry.info.sessionID !== sessionId),
       ...sessionMessages,
@@ -550,24 +559,100 @@ function mergeSessionMessages(
   return merged;
 }
 
+function mergeParentSnapshotWithRecoveredSessions(
+  parentMessages: MessageEntry[],
+  recoveredMessages: MessageEntry[],
+  sessions: Session[]
+) {
+  const recoveredBySession = new Map<string, MessageEntry[]>();
+  for (const entry of recoveredMessages) {
+    const entries = recoveredBySession.get(entry.info.sessionID);
+    if (entries) entries.push(entry);
+    else recoveredBySession.set(entry.info.sessionID, [entry]);
+  }
+
+  const merged = [...parentMessages];
+  const orderedSessionIds: string[] = [];
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (sessionId: string) => {
+    if (visited.has(sessionId)) return;
+    if (visiting.has(sessionId)) return;
+    visiting.add(sessionId);
+    const parentId = sessions.find((candidate) => candidate.id === sessionId)?.parentID;
+    if (parentId && recoveredBySession.has(parentId)) visit(parentId);
+    visiting.delete(sessionId);
+    visited.add(sessionId);
+    orderedSessionIds.push(sessionId);
+  };
+  for (const sessionId of recoveredBySession.keys()) visit(sessionId);
+
+  for (const sessionId of orderedSessionIds) {
+    const entries = recoveredBySession.get(sessionId);
+    if (!entries) continue;
+    const insertionIndex = getNewSessionMessageInsertionIndex(merged, sessionId, sessions);
+    merged.splice(insertionIndex, 0, ...entries);
+  }
+  return merged;
+}
+
+function getNewSessionMessageInsertionIndex(
+  current: MessageEntry[],
+  sessionId: string,
+  sessions: Session[]
+) {
+  const session = sessions.find((candidate) => candidate.id === sessionId);
+  if (!session?.parentID) return current.length;
+
+  let anchorIndex = current.findIndex((entry) => entry.info.id === session.parentID);
+  if (anchorIndex < 0) {
+    anchorIndex = current.findIndex((entry) =>
+      entry.parts.some(
+        (part) =>
+          part.type === 'tool' && resolveTaskSessionId(part, current, sessions) === sessionId
+      )
+    );
+  }
+  if (anchorIndex < 0) return current.length;
+
+  const parentSessionId = current[anchorIndex]!.info.sessionID;
+  const nextParentIndex = current.findIndex(
+    (entry, index) => index > anchorIndex && entry.info.sessionID === parentSessionId
+  );
+  return nextParentIndex < 0 ? current.length : nextParentIndex;
+}
+
 function setSessionMessagesIncremental(
   sessionId: string,
   messages: MessageEntry[],
   options?: { preserveExtraParts?: boolean },
-  behavior?: { preserveSessionStreaming?: boolean }
+  behavior?: { preserveSessionStreaming?: boolean; authoritativeSessionSnapshot?: boolean }
 ) {
   flushPendingStreamingDeltasFor(appStore.defaultAppState);
   const current = appStore.state.messages;
   const streamingPartId = appStore.state.streamingPartId;
   const streamingText = appStore.state.streamingText;
+  const streamingBelongsToSession =
+    !!streamingPartId &&
+    current.some(
+      (entry) =>
+        entry.info.sessionID === sessionId &&
+        entry.parts.some((part) => part.id === streamingPartId)
+    );
   const preserveStreamingState =
     !!streamingPartId &&
     current.some(
       (entry) =>
-        (behavior?.preserveSessionStreaming || entry.info.sessionID !== sessionId) &&
+        (entry.info.sessionID !== sessionId ||
+          (behavior?.preserveSessionStreaming &&
+            (!behavior.authoritativeSessionSnapshot || options?.preserveExtraParts))) &&
         entry.parts.some((part) => part.id === streamingPartId)
     );
   batch(() => {
+    if (streamingBelongsToSession && !preserveStreamingState) {
+      appStore.setState('streamingPartId', null);
+      appStore.setState('streamingText', '');
+    }
     sessionStore.setMessagesIncremental(
       mergeSessionMessages(current, sessionId, messages),
       options
@@ -951,7 +1036,8 @@ export function resetWorkspaceDerivedState(options?: { preserveWorkspaceCatalog?
 export function createOpenCodeRuntime(): OpenCodeRuntime {
   const initialWebviewState = readInitialWebviewState();
   const initialPermissionAutomation = initialWebviewState.permissionAutomation;
-  let permissionAutomationOwner = initialPermissionAutomation?.owner ?? true;
+  let permissionAutomationOwner =
+    initialPermissionAutomation?.owner === true && initialPermissionAutomation.lease !== undefined;
   let permissionAutomationLease = initialPermissionAutomation?.lease;
   let initialized = false;
   let initializationAttemptGeneration = 0;
@@ -1192,8 +1278,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         revalidateProviderAuth: sessionSendOperations.revalidateProviderAuth,
         applyTheme,
         setPermissionAutomation: (owner, lease) => {
-          const becameOwner = owner && !permissionAutomationOwner;
-          permissionAutomationOwner = owner;
+          const nextOwner = owner && lease !== undefined;
+          const becameOwner = nextOwner && !permissionAutomationOwner;
+          permissionAutomationOwner = nextOwner;
           permissionAutomationLease = lease;
           if (owner) hideAutomaticallyHandledRestoredPermissions();
           if (becameOwner) {
@@ -1744,7 +1831,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     permission: Permission,
     preserveVisible = false
   ): Promise<void> {
-    if (!permissionAutomationOwner) {
+    if (!permissionAutomationOwner || permissionAutomationLease === undefined) {
       permissionsStore.addPermission(permission);
       postMessage({ type: 'permission/reveal', payload: { permissionId: permission.id } });
       return Promise.resolve();
@@ -1778,12 +1865,12 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
             ) || [],
           model: model || undefined,
         };
-        const response =
-          attempt.automationLease === undefined
-            ? await client.varro.judgePermission(request)
-            : await client.varro.judgePermission(request, {
-                permissionAutomationLease: attempt.automationLease,
-              });
+        if (attempt.automationLease === undefined) {
+          throw new Error('Permission automation lease is unavailable');
+        }
+        const response = await client.varro.judgePermission(request, {
+          permissionAutomationLease: attempt.automationLease,
+        });
         return { type: 'decision', response };
       })
       .catch((error): PermissionJudgeOutcome => ({ type: 'error', error }));
@@ -2220,6 +2307,14 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       stopLoading: uiStore.stopLoading,
       setError: uiStore.setError,
       getSessionStatus: (id) => appStore.state.sessionStatus[id],
+      isSessionInActiveTree: (sessionId) => {
+        const activeSessionId = appStore.state.activeSessionId;
+        if (!activeSessionId) return false;
+        return (
+          (getSessionTreeRootId(sessionId) || sessionId) ===
+          (getSessionTreeRootId(activeSessionId) || activeSessionId)
+        );
+      },
       loadingStartedAt: uiStore.loadingStartedAt,
       loadSessionMessages: (sessionId, isCurrentSync = () => true) => {
         const generation = workspaceGeneration;
@@ -2228,6 +2323,11 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           () => generation === workspaceGeneration && isCurrentSync()
         );
       },
+      setSessionMessagesIncremental: (sessionId, messages, options) =>
+        setSessionMessagesIncremental(sessionId, messages, options, {
+          preserveSessionStreaming: sessionId !== appStore.state.activeSessionId,
+          authoritativeSessionSnapshot: true,
+        }),
       handoffTodosToMessages,
       loadSessionMetadata: (id) => client.session.get(id, { directory: getSessionDirectory(id) }),
     },
@@ -2259,6 +2359,21 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     invalidateMessageSync: (sessionId) => messageSyncGenerations.invalidate(sessionId),
     deferMessageRemovals,
     pruneMessagesFrom: sessionStore.pruneMessagesFrom,
+    getSessions: () => appStore.state.sessions,
+    moveSessionTreeToRecycleBin: async (sessionId) => {
+      const sessionIds = getSessionTreeIds(sessionId);
+      await client.session.delete(sessionId, { directory: getSessionDirectory(sessionId) });
+      hideDeletedSessionTree(sessionId);
+      sessionStore.removeMessagesForSessions(sessionIds);
+      await loadRecycleBin();
+    },
+    restoreSessionTreeFromRecycleBin: async (sessionId) => {
+      const restored = await client.varro.recycleBin.restore(sessionId);
+      if (restored) {
+        await Promise.all([loadSessions(), loadRecycleBin(), hydrateSessionStatuses()]);
+      }
+      return restored;
+    },
     deleteMessage: (sessionId, messageId) =>
       client.session.deleteMessage(sessionId, messageId, {
         directory: getSessionDirectory(sessionId),
@@ -2331,7 +2446,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     respondAutomaticPermission: (sessionId, permissionId, response, lease) => {
       const currentLease = lease ?? permissionAutomationLease;
       return currentLease === undefined
-        ? client.session.respondPermission(sessionId, permissionId, response)
+        ? Promise.reject(new Error('Permission automation lease is required'))
         : client.session.respondPermission(sessionId, permissionId, response, {
             permissionAutomationLease: currentLease,
           });
@@ -2423,8 +2538,14 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     setSelectedMcpsForSession: routingStore.setSelectedMcpsForSession,
     resetDraftSelectedMcps: routingStore.resetDraftSelectedMcps,
     setPermissionModeForSession: permissionsStore.setPermissionModeForSession,
-    persistConfirmedPermissionModeForSession:
-      permissionsStore.persistConfirmedPermissionModeForSession,
+    setPendingSessionPermissionMode: permissionsStore.setPendingSessionPermissionMode,
+    persistConfirmedPermissionModeForSession: (sessionId, mode, directory) =>
+      client.varro.session
+        .updatePermissionMode(sessionId, mode, {
+          directory,
+          preconfigured: true,
+        })
+        .then(() => undefined),
     resetDraftPermissionMode: permissionsStore.resetDraftPermissionMode,
     resetTodoSync,
     clearMessages: sessionStore.clearMessages,

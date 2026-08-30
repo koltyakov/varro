@@ -31,6 +31,7 @@ import {
 import { fixture } from '../test-fixtures';
 import { navArrowDownIcon } from '../lib/ui-icons';
 import { toCssUrl } from './UiIcon';
+import { client } from '../lib/client';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -2401,6 +2402,110 @@ describe('MessageList auto-scroll', () => {
     const remountedRow = container?.querySelector('[data-msg-id="assistant-30"]');
     expect(remountedRow).toBeInstanceOf(HTMLDivElement);
     expect(remountedRow?.textContent).toContain('The existing part is now visible');
+    animationFrames.restore();
+  });
+
+  it('remounts an offscreen zero-height row when completion makes diffs eligible', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+    let diffRequested = false;
+    vi.spyOn(client.session, 'diff').mockImplementation(async () => {
+      diffRequested = true;
+      return [
+        {
+          file: 'src/completed.ts',
+          before: 'old',
+          after: 'new',
+          additions: 1,
+          deletions: 1,
+        },
+      ];
+    });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 0, 500, 400);
+        }
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(0, 0, 500, diffRequested ? 5000 : 4900);
+        }
+        if (this.dataset.msgId) {
+          const index = Number(this.dataset.msgId.replace('message-', ''));
+          const height = index === 30 && !diffRequested ? 0 : 100;
+          const documentTop = index <= 30 ? index * 100 : index * 100 - (diffRequested ? 0 : 100);
+          return new DOMRect(0, documentTop - scrollTopValue, 500, height);
+        }
+        return new DOMRect(0, 0, 500, 40);
+      }
+    );
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 50 }, (_, index) => {
+        const messageId = `message-${index}`;
+        if (index === 30) {
+          return {
+            info: assistantMessage(messageId, { time: { created: 1 } }),
+            parts: [],
+          };
+        }
+        return {
+          info: userMessage(messageId),
+          parts: [{ ...textPart(`text-${index}`, `Prompt ${index}`), messageID: messageId }],
+        };
+      })
+    );
+
+    cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'scrollHeight', {
+      configurable: true,
+      get: () => (diffRequested ? 5000 : 4900),
+    });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -50 }));
+    scrollTopValue = 4450;
+    list.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+    expect(container?.querySelector('[data-msg-id="message-30"]')).toBeNull();
+    expect(client.session.diff).not.toHaveBeenCalled();
+
+    replaceMessages(
+      state.messages.map((message) =>
+        message.info.id === 'message-30'
+          ? {
+              ...message,
+              info: assistantMessage('message-30', { time: { created: 1, completed: 2 } }),
+            }
+          : message
+      )
+    );
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+
+    expect(client.session.diff).toHaveBeenCalledWith('session-1', 'message-30', {
+      directory: undefined,
+    });
+    const remountedRow = container?.querySelector('[data-msg-id="message-30"]');
+    expect(remountedRow).toBeInstanceOf(HTMLDivElement);
+    expect(remountedRow?.querySelector('.diff-summary')).toBeInstanceOf(HTMLDivElement);
     animationFrames.restore();
   });
 

@@ -38,6 +38,23 @@ describe('SidebarProvider local config routing', () => {
     }
   );
 
+  it('broadcasts turn-timer configuration changes', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const { posted } = attachTestView(provider);
+    const listener = vscodeMock.workspace.onDidChangeConfiguration.mock.calls.at(-1)?.[0];
+    expect(listener).toBeTypeOf('function');
+
+    await vscodeMock.workspace.getConfiguration('varro').update('chat.showTurnTimer', true);
+    listener?.({
+      affectsConfiguration: (key: string) => key === 'varro.chat.showTurnTimer',
+    });
+
+    expect(posted).toContainEqual({
+      type: 'config/update',
+      payload: expect.objectContaining({ showTurnTimer: true }),
+    });
+  });
+
   it('reads model routing from project opencode.json', async () => {
     vscodeMock.workspace.fs.readFile.mockImplementation((uri: { fsPath: string }) =>
       uri.fsPath === '/repo/opencode.json'

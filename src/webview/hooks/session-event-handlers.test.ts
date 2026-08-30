@@ -1203,6 +1203,45 @@ describe('registerSessionEventHandlers', () => {
     });
   });
 
+  it('recovers a missing child message before applying its part update', async () => {
+    const handlers = installHandlers();
+    const childEntry = createAssistantEntry({ id: 'child-assistant', sessionID: 'child-1' });
+    let messages: MessageEntry[] = [createUserEntry({ id: 'parent-user', sessionID: 'session-1' })];
+    const syncSessionMessages = vi.fn(async (sessionId: string) => {
+      expect(sessionId).toBe('child-1');
+      messages = [...messages, childEntry];
+    });
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        isSessionInActiveTree: (sessionId) => sessionId === 'session-1' || sessionId === 'child-1',
+        getMessages: () => messages,
+        syncSessionMessages,
+      })
+    );
+
+    upsertPart.mockClear();
+    handlers.get('message.part.updated')?.({
+      properties: {
+        part: {
+          id: 'child-text',
+          sessionID: 'child-1',
+          messageID: 'child-assistant',
+          type: 'text',
+          text: 'Recovered child response',
+        },
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(upsertPart).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'child-text', sessionID: 'child-1' })
+      );
+    });
+    expect(syncSessionMessages).toHaveBeenCalledWith('child-1');
+  });
+
   it('uses tool execution event timestamps when applying completed tool parts', () => {
     const handlers = installHandlers();
     const assistantEntry = createAssistantEntry();
@@ -1366,6 +1405,25 @@ describe('registerSessionEventHandlers', () => {
     );
     expect(finishMessageStreaming).toHaveBeenCalledWith('assistant-child-1');
     expect(handoffTodosToMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it('resyncs a child transcript when that child becomes idle under the active parent', async () => {
+    const handlers = installHandlers();
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-parent',
+        isSessionInActiveTree: (sessionId) =>
+          sessionId === 'session-parent' || sessionId === 'session-child',
+        shouldResyncSessionAfterIdle: () => true,
+        syncSessionMessages,
+      })
+    );
+
+    handlers.get('session.idle')?.({ properties: { sessionID: 'session-child' } });
+
+    await vi.waitFor(() => expect(syncSessionMessages).toHaveBeenCalledWith('session-child'));
   });
 
   it('keeps completed inactive assistant messages running until session idle', () => {

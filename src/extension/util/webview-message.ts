@@ -784,6 +784,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       const method = getBoundedString(payload?.method, 16)?.toUpperCase() || null;
       const path = getBoundedString(payload?.path, MAX_PATH_LENGTH + MAX_QUERY_LENGTH);
       const permissionAutomationLease = getSafeInteger(payload?.permissionAutomationLease);
+      const permissionAutomationSessionID = payload?.permissionAutomationSessionID;
       const queuedMessageDispatch = asRecord(payload?.queuedMessageDispatch);
       const queuedMessageItemId = getBoundedString(queuedMessageDispatch?.itemId, 512);
       const queuedMessageLease = getSafeInteger(queuedMessageDispatch?.lease);
@@ -791,6 +792,9 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
         id === null ||
         (payload?.cancelKey !== undefined && !cancelKey) ||
         (payload?.permissionAutomationLease !== undefined && permissionAutomationLease === null) ||
+        (permissionAutomationSessionID !== undefined &&
+          (permissionAutomationLease === null ||
+            !isSafePersistedSessionId(permissionAutomationSessionID))) ||
         (payload?.queuedMessageDispatch !== undefined &&
           (!queuedMessageDispatch ||
             !queuedMessageItemId ||
@@ -810,6 +814,9 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       if (cancelKey) requestPayload.cancelKey = cancelKey;
       if (permissionAutomationLease !== null) {
         requestPayload.permissionAutomationLease = permissionAutomationLease;
+      }
+      if (isSafePersistedSessionId(permissionAutomationSessionID)) {
+        requestPayload.permissionAutomationSessionID = permissionAutomationSessionID;
       }
       if (queuedMessageItemId && queuedMessageLease !== null) {
         requestPayload.queuedMessageDispatch = {

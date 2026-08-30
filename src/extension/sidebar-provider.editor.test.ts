@@ -605,6 +605,180 @@ describe('SidebarProvider editor panels', () => {
     ]);
   });
 
+  it.each(['session.created', 'session.updated'] as const)(
+    'provisionally authorizes an unknown nested %s event for immediate activation',
+    async (eventType) => {
+      const contextProvider = createContextProvider();
+      contextProvider.getOpenWorkspaceRoot.mockImplementation((path: string) =>
+        path === '/repo' ? '/repo' : null
+      );
+      const server = createServer({
+        request: vi.fn(async (method: string, path: string) => {
+          if (method === 'GET' && path === '/session/nested') {
+            return { id: 'nested', directory: '/repo/packages/app' };
+          }
+          throw new Error(`Unexpected request: ${method} ${path}`);
+        }),
+      });
+      const { provider } = await createSidebarProviderInstance({ contextProvider, server });
+      const { posted } = attachTestView(provider);
+      const scopeStore = (
+        provider as unknown as {
+          sessionHistoryScopes: {
+            associate(root: string, key: string): Promise<void>;
+            set(key: string, scope: 'descendants'): Promise<void>;
+          };
+        }
+      ).sessionHistoryScopes;
+      await scopeStore.associate('/repo', 'directory:/repo');
+      await scopeStore.set('directory:/repo', 'descendants');
+      const event = {
+        type: eventType,
+        properties: {
+          info: {
+            id: 'nested',
+            directory: '/repo/packages/app',
+            title: 'Nested',
+            permission: { edit: 'allow' },
+          },
+        },
+      };
+
+      provider.post({ type: 'server/event', payload: event as never });
+      await provider.handleMessage({
+        type: 'api/request',
+        payload: {
+          id: 301,
+          method: 'POST',
+          path: '/varro/session/nested/activate',
+          body: { directory: '/repo/packages/app' },
+        },
+      });
+      const outsideEvent = {
+        type: eventType,
+        properties: { info: { id: 'outside', directory: '/outside' } },
+      };
+      provider.post({ type: 'server/event', payload: outsideEvent as never });
+      await provider.handleMessage({
+        type: 'api/request',
+        payload: {
+          id: 302,
+          method: 'POST',
+          path: '/varro/session/outside/activate',
+          body: { directory: '/outside' },
+        },
+      });
+
+      expect(posted).toContainEqual({
+        type: 'server/event',
+        payload: {
+          type: eventType,
+          properties: {
+            info: { id: 'nested', directory: '/repo/packages/app', title: 'Nested' },
+          },
+        },
+      });
+      expect(server.request).toHaveBeenCalledOnce();
+      expect(server.request).toHaveBeenCalledWith(
+        'GET',
+        '/session/nested',
+        undefined,
+        expect.objectContaining({
+          directory: '/repo/packages/app',
+          signal: expect.any(AbortSignal),
+        })
+      );
+      expect(posted).toContainEqual({
+        type: 'api/response',
+        payload: {
+          id: 301,
+          data: { id: 'nested', directory: '/repo/packages/app' },
+        },
+      });
+      expect(posted).not.toContainEqual({
+        type: 'server/event',
+        payload: expect.objectContaining({
+          properties: expect.objectContaining({
+            info: expect.objectContaining({ id: 'outside' }),
+          }),
+        }),
+      });
+      expect(posted).toContainEqual({
+        type: 'api/response',
+        payload: {
+          id: 302,
+          error: 'Workspace directory is not an open workspace folder',
+        },
+      });
+    }
+  );
+
+  it('refreshes Project scope once before routing an unknown project session', async () => {
+    const contextProvider = createContextProvider();
+    contextProvider.getOpenWorkspaceRoot.mockImplementation((path: string) =>
+      path === '/repo' ? '/repo' : null
+    );
+    const server = createServer({
+      request: vi.fn(async (_method: string, path: string) => {
+        if (path === '/project/current') {
+          return { id: 'project-1', worktree: '/repo', vcs: 'git' };
+        }
+        if (path === '/session?limit=1000000&scope=project') {
+          return [
+            {
+              id: 'project-session',
+              projectID: 'project-1',
+              directory: '/worktrees/feature',
+            },
+          ];
+        }
+        throw new Error(`Unexpected path: ${path}`);
+      }),
+    });
+    const { provider } = await createSidebarProviderInstance({ contextProvider, server });
+    const { posted } = attachTestView(provider);
+    const scopeStore = (
+      provider as unknown as {
+        sessionHistoryScopes: {
+          associate(root: string, key: string): Promise<void>;
+          set(key: string, scope: 'project'): Promise<void>;
+        };
+      }
+    ).sessionHistoryScopes;
+    await scopeStore.associate('/repo', 'project:project-1');
+    await scopeStore.set('project:project-1', 'project');
+    const authorized = {
+      type: 'session.status' as const,
+      properties: { sessionID: 'project-session', status: { type: 'busy' as const } },
+    };
+
+    provider.post({ type: 'server/event', payload: authorized });
+    await vi.waitFor(() =>
+      expect(posted).toContainEqual({ type: 'server/event', payload: authorized })
+    );
+    provider.post({
+      type: 'server/event',
+      payload: {
+        type: 'session.status',
+        properties: { sessionID: 'unrelated', status: { type: 'busy' } },
+      },
+    });
+    await Promise.resolve();
+
+    expect(
+      server.request.mock.calls.filter(
+        ([, path]) => path === '/session?limit=1000000&scope=project'
+      )
+    ).toHaveLength(1);
+    expect(posted).not.toContainEqual(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          properties: expect.objectContaining({ sessionID: 'unrelated' }),
+        }),
+      })
+    );
+  });
+
   it('drops detailed events that have no provable workspace owner', async () => {
     const contextProvider = createContextProvider();
     contextProvider.context.workspacePath = '/repo-a';

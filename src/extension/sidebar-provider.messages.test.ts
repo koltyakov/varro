@@ -2,6 +2,7 @@
 import { describe, expect, it, vi, type Mock } from 'vitest';
 import {
   attachTestView,
+  createContextProvider,
   createServer,
   createSidebarProviderInstance,
   getVscodeMock,
@@ -60,7 +61,9 @@ describe('SidebarProvider session message responses', () => {
     let patchAttempts = 0;
     const server = createServer({
       request: vi.fn(async (method: string, path: string, body?: unknown) => {
-        if (method === 'GET' && path === '/session?limit=1000000') return [];
+        if (method === 'GET' && path === '/session?limit=1000000') {
+          return [{ id: 'session-1', directory: '/repo' }];
+        }
         if (method === 'PATCH' && path === '/session/session-1') {
           patchAttempts += 1;
           expect(serverMode).toBe('full');
@@ -87,11 +90,6 @@ describe('SidebarProvider session message responses', () => {
         recoveringSessionIds: ['session-1'],
       },
     });
-    const eventHandler = server.on.mock.calls.find(([event]) => event === 'event')?.[1];
-    eventHandler?.({
-      type: 'session.created',
-      properties: { info: { id: 'session-1', directory: '/repo' } },
-    });
     const internals = provider as unknown as {
       permissionModeFallbackReconciliation: Promise<void> | null;
       recoverPendingPermissionModeFallbacks(): Promise<void>;
@@ -110,6 +108,272 @@ describe('SidebarProvider session message responses', () => {
       type: 'permission-modes/sync',
       payload: { modes: { 'session-1': 'default' } },
     });
+  });
+
+  it('persists a preconfigured mode without sending a second OpenCode rule update', async () => {
+    const values = new Map<string, unknown>();
+    const workspaceState = {
+      get: vi.fn((key: string, fallback?: unknown) => values.get(key) ?? fallback),
+      update: vi.fn((key: string, value: unknown) => {
+        values.set(key, value);
+        return Promise.resolve();
+      }),
+    };
+    const server = createServer();
+    const { provider } = await createSidebarProviderInstance({
+      server,
+      workspaceState: workspaceState as never,
+    });
+    const { posted } = attachTestView(provider);
+
+    await (
+      provider as unknown as {
+        persistPreconfiguredPermissionMode(
+          sessionId: string,
+          mode: 'full',
+          directory: string
+        ): Promise<void>;
+      }
+    ).persistPreconfiguredPermissionMode('fork-1', 'full', '/repo');
+
+    expect(server.request).not.toHaveBeenCalled();
+    expect(values.get('varro.sessionPermissionModes')).toEqual({ 'fork-1': 'full' });
+    expect(values.get('varro.sessionPermissionModeFallbacks')).toEqual([]);
+    expect(posted).toContainEqual({
+      type: 'permission-modes/sync',
+      payload: { modes: { 'fork-1': 'full' } },
+    });
+  });
+
+  it('ignores a stale preconfigured acknowledgement behind a newer mode update', async () => {
+    const values = new Map<string, unknown>();
+    const workspaceState = {
+      get: vi.fn((key: string, fallback?: unknown) => values.get(key) ?? fallback),
+      update: vi.fn((key: string, value: unknown) => {
+        values.set(key, value);
+        return Promise.resolve();
+      }),
+    };
+    let releasePatch!: () => void;
+    const patchPending = new Promise<void>((resolve) => {
+      releasePatch = resolve;
+    });
+    const server = createServer({
+      request: vi.fn(async (method: string, path: string) => {
+        if (method === 'PATCH' && path === '/session/fork-1') {
+          await patchPending;
+          return { id: 'fork-1', directory: '/repo' };
+        }
+        throw new Error(`Unexpected request: ${method} ${path}`);
+      }),
+    });
+    const { provider } = await createSidebarProviderInstance({
+      server,
+      workspaceState: workspaceState as never,
+    });
+    attachTestView(provider);
+    const internals = provider as unknown as {
+      updateConfirmedPermissionMode(
+        sessionId: string,
+        mode: 'auto',
+        directory: string
+      ): Promise<void>;
+      persistPreconfiguredPermissionMode(
+        sessionId: string,
+        mode: 'full',
+        directory: string,
+        ifAbsent: boolean
+      ): Promise<void>;
+    };
+
+    const newerUpdate = internals.updateConfirmedPermissionMode('fork-1', 'auto', '/repo');
+    await vi.waitFor(() => expect(server.request).toHaveBeenCalledOnce());
+    const staleAcknowledgement = internals.persistPreconfiguredPermissionMode(
+      'fork-1',
+      'full',
+      '/repo',
+      true
+    );
+    releasePatch();
+    await Promise.all([newerUpdate, staleAcknowledgement]);
+
+    expect(values.get('varro.sessionPermissionModes')).toEqual({ 'fork-1': 'auto' });
+    expect(server.request).toHaveBeenCalledOnce();
+  });
+
+  it('clears fallback IDs only after every session catalog is authoritative', async () => {
+    const values = new Map<string, unknown>([
+      ['varro.sessionPermissionModes', { missing: 'full' }],
+      ['varro.sessionPermissionModeFallbacks', ['missing']],
+    ]);
+    const workspaceState = {
+      get: vi.fn((key: string, fallback?: unknown) => values.get(key) ?? fallback),
+      update: vi.fn((key: string, value: unknown) => {
+        values.set(key, value);
+        return Promise.resolve();
+      }),
+    };
+    let catalogState: 'unavailable' | 'malformed' | 'complete' = 'unavailable';
+    const server = createServer({
+      request: vi.fn(async (method: string, path: string) => {
+        if (method === 'GET' && path === '/session?limit=1000000') {
+          if (catalogState === 'unavailable') throw new Error('catalog unavailable');
+          if (catalogState === 'malformed') return [{ id: 'possibly-missing' }];
+          return [];
+        }
+        return undefined;
+      }),
+    });
+    const { provider } = await createSidebarProviderInstance({
+      server,
+      workspaceState: workspaceState as never,
+    });
+    attachTestView(provider);
+    const internals = provider as unknown as {
+      recoverPendingPermissionModeFallbacks(): Promise<void>;
+    };
+
+    await internals.recoverPendingPermissionModeFallbacks();
+    expect(values.get('varro.sessionPermissionModeFallbacks')).toEqual(['missing']);
+    expect(values.get('varro.sessionPermissionModes')).toEqual({ missing: 'full' });
+
+    catalogState = 'malformed';
+    await internals.recoverPendingPermissionModeFallbacks();
+    expect(values.get('varro.sessionPermissionModeFallbacks')).toEqual(['missing']);
+    expect(values.get('varro.sessionPermissionModes')).toEqual({ missing: 'full' });
+
+    catalogState = 'complete';
+    await internals.recoverPendingPermissionModeFallbacks();
+
+    expect(values.get('varro.sessionPermissionModeFallbacks')).toEqual([]);
+    expect(values.get('varro.sessionPermissionModes')).toEqual({});
+  });
+
+  it.each([
+    {
+      name: 'Project',
+      scope: 'project',
+      scopeKey: 'project:project-1',
+      catalogPath: '/session?limit=1000000&scope=project',
+      directory: '/worktrees/feature',
+    },
+    {
+      name: 'Nested',
+      scope: 'descendants',
+      scopeKey: 'directory:/repo',
+      catalogPath: '/experimental/session?limit=1000000',
+      directory: '/repo/packages/app',
+    },
+  ] as const)(
+    'recovers an extant $name session from its resolved catalog scope',
+    async ({ scope, scopeKey, catalogPath, directory }) => {
+      const values = new Map<string, unknown>([
+        ['varro.sessionPermissionModes', { extant: 'full' }],
+        ['varro.sessionPermissionModeFallbacks', ['extant']],
+        ['varro.sessionHistoryScopes', { [scopeKey]: scope }],
+        ['varro.sessionHistoryScopeProjects', { '/repo': scopeKey }],
+      ]);
+      const workspaceState = {
+        get: vi.fn((key: string, fallback?: unknown) => values.get(key) ?? fallback),
+        update: vi.fn((key: string, value: unknown) => {
+          values.set(key, value);
+          return Promise.resolve();
+        }),
+      };
+      const server = createServer({
+        request: vi.fn(async (method: string, path: string, body?: unknown, options?: unknown) => {
+          if (path === '/project/current') {
+            return { id: 'project-1', worktree: '/repo', vcs: 'git' };
+          }
+          if (method === 'GET' && path === catalogPath) {
+            return [{ id: 'extant', projectID: 'project-1', directory }];
+          }
+          if (method === 'PATCH' && path === '/session/extant') {
+            expect(body).toEqual({ permission: [] });
+            expect(options).toEqual({ directory });
+            return { id: 'extant', directory };
+          }
+          throw new Error(`Unexpected request: ${method} ${path}`);
+        }),
+      });
+      const { provider } = await createSidebarProviderInstance({
+        server,
+        workspaceState: workspaceState as never,
+      });
+      attachTestView(provider);
+      const internals = provider as unknown as {
+        recoverPendingPermissionModeFallbacks(): Promise<void>;
+      };
+
+      await internals.recoverPendingPermissionModeFallbacks();
+
+      expect(values.get('varro.sessionPermissionModeFallbacks')).toEqual([]);
+      expect(values.get('varro.sessionPermissionModes')).toEqual({ extant: 'default' });
+      expect(server.request).toHaveBeenCalledWith(
+        'PATCH',
+        '/session/extant',
+        { permission: [] },
+        { directory }
+      );
+    }
+  );
+
+  it('backs automatic fallback recovery off exponentially and resets after success', async () => {
+    vi.useFakeTimers();
+    try {
+      const values = new Map<string, unknown>([
+        ['varro.sessionPermissionModes', { missing: 'full' }],
+        ['varro.sessionPermissionModeFallbacks', ['missing']],
+      ]);
+      const workspaceState = {
+        get: vi.fn((key: string, fallback?: unknown) => values.get(key) ?? fallback),
+        update: vi.fn((key: string, value: unknown) => {
+          values.set(key, value);
+          return Promise.resolve();
+        }),
+      };
+      let catalogAvailable = false;
+      const server = createServer({
+        request: vi.fn(async (method: string, path: string) => {
+          if (method === 'GET' && path === '/session?limit=1000000') {
+            if (!catalogAvailable) throw new Error('catalog unavailable');
+            return [];
+          }
+          return undefined;
+        }),
+      });
+      const { provider } = await createSidebarProviderInstance({
+        server,
+        workspaceState: workspaceState as never,
+      });
+      const internals = provider as unknown as {
+        permissionModeFallbackReconciliation: Promise<void> | null;
+        permissionModeFallbackRetryMs: number;
+        permissionModeFallbackRetryTimer: ReturnType<typeof setTimeout> | null;
+        schedulePermissionModeFallbackRecovery(): void;
+      };
+
+      internals.schedulePermissionModeFallbackRecovery();
+      expect(internals.permissionModeFallbackRetryMs).toBe(10_000);
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      await internals.permissionModeFallbackReconciliation;
+      await Promise.resolve();
+
+      expect(internals.permissionModeFallbackRetryMs).toBe(20_000);
+      expect(internals.permissionModeFallbackRetryTimer).not.toBeNull();
+
+      catalogAvailable = true;
+      await vi.advanceTimersByTimeAsync(10_000);
+      await internals.permissionModeFallbackReconciliation;
+      await Promise.resolve();
+
+      expect(internals.permissionModeFallbackRetryMs).toBe(5_000);
+      expect(internals.permissionModeFallbackRetryTimer).toBeNull();
+      expect(values.get('varro.sessionPermissionModeFallbacks')).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('migrates sidebar permission modes without overwriting newer host state', async () => {
@@ -274,6 +538,83 @@ describe('SidebarProvider session message responses', () => {
             parts: [],
           },
         ],
+      },
+    });
+  });
+
+  it('activates a Project catalog session through its authorized directory', async () => {
+    const values = new Map<string, unknown>([
+      ['varro.sessionHistoryScopes', { 'project:project-1': 'project' }],
+      ['varro.sessionHistoryScopeProjects', { '/repo': 'project:project-1' }],
+    ]);
+    const workspaceState = {
+      get: vi.fn((key: string, fallback?: unknown) => values.get(key) ?? fallback),
+      update: vi.fn(() => Promise.resolve()),
+    };
+    const contextProvider = createContextProvider();
+    contextProvider.getOpenWorkspaceRoot = vi.fn((path: string) =>
+      path === '/repo' ? '/repo' : null
+    );
+    const server = createServer({
+      request: vi.fn(async (method: string, path: string) => {
+        if (path === '/project/current') {
+          return { id: 'project-1', worktree: '/repo', vcs: 'git' };
+        }
+        const url = new URL(path, 'http://localhost');
+        if (
+          url.pathname === '/session' &&
+          url.searchParams.get('limit') === '1000000' &&
+          url.searchParams.get('scope') === 'project'
+        ) {
+          return [
+            {
+              id: 'project-session',
+              projectID: 'project-1',
+              directory: '/worktrees/feature',
+            },
+          ];
+        }
+        if (method === 'GET' && path === '/session/project-session') {
+          return { id: 'project-session', directory: '/worktrees/feature' };
+        }
+        throw new Error(`Unexpected request: ${method} ${path}`);
+      }),
+    });
+    const { provider } = await createSidebarProviderInstance({
+      contextProvider,
+      server,
+      workspaceState: workspaceState as never,
+    });
+    const { posted } = attachTestView(provider);
+
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: { id: 301, method: 'GET', path: '/session' },
+    });
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: {
+        id: 302,
+        method: 'POST',
+        path: '/varro/session/project-session/activate',
+        body: { directory: '/worktrees/feature' },
+      },
+    });
+
+    expect(server.request).toHaveBeenCalledWith(
+      'GET',
+      '/session/project-session',
+      undefined,
+      expect.objectContaining({
+        directory: '/worktrees/feature',
+        signal: expect.any(AbortSignal),
+      })
+    );
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: {
+        id: 302,
+        data: { id: 'project-session', directory: '/worktrees/feature' },
       },
     });
   });

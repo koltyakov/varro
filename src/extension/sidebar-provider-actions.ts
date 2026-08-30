@@ -203,7 +203,7 @@ export function createSidebarProviderActions(
     updateDraftImages: (payload) => deps.updateDraftImages(payload),
     exportSession: async (sessionId, requestedDirectory) => {
       const directory = requestedDirectory
-        ? deps.contextProvider.getOpenWorkspaceRoot(requestedDirectory)
+        ? getOpenSessionDirectory(deps.contextProvider, requestedDirectory)
         : undefined;
       if (requestedDirectory && !directory) throw new Error('Session workspace folder is not open');
       const validatedDirectory = await assertSessionInCurrentWorkspace(

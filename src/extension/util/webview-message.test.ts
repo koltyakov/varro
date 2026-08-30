@@ -496,7 +496,7 @@ describe('webview message validation', () => {
     ).toEqual({ type: 'api/request', payload: { id: 1, method: 'GET', path: '/session' } });
   });
 
-  it('validates permission automation leases on API requests', () => {
+  it('validates permission automation lease metadata on API requests', () => {
     expect(
       parseWebviewMessage({
         type: 'api/request',
@@ -505,6 +505,7 @@ describe('webview message validation', () => {
           method: 'POST',
           path: '/permission/perm-1/reply',
           permissionAutomationLease: 4,
+          permissionAutomationSessionID: 'session-1',
         },
       })
     ).toEqual({
@@ -514,6 +515,7 @@ describe('webview message validation', () => {
         method: 'POST',
         path: '/permission/perm-1/reply',
         permissionAutomationLease: 4,
+        permissionAutomationSessionID: 'session-1',
       },
     });
     expect(
@@ -527,6 +529,31 @@ describe('webview message validation', () => {
         },
       })
     ).toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'api/request',
+        payload: {
+          id: 1,
+          method: 'POST',
+          path: '/permission/perm-1/reply',
+          permissionAutomationSessionID: 'session-1',
+        },
+      })
+    ).toBeNull();
+    for (const sessionID of ['', '__proto__', 'x'.repeat(513)]) {
+      expect(
+        parseWebviewMessage({
+          type: 'api/request',
+          payload: {
+            id: 1,
+            method: 'POST',
+            path: '/permission/perm-1/reply',
+            permissionAutomationLease: 4,
+            permissionAutomationSessionID: sessionID,
+          },
+        })
+      ).toBeNull();
+    }
   });
 
   it('validates API cancellation keys', () => {

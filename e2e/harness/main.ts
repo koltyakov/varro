@@ -4832,6 +4832,7 @@ function buildInitialState(state: ScenarioState): InitialWebviewState {
     chatEditorFontSize: 12,
     chatFontSize: 13,
     chatFontFamily: 'default',
+    permissionAutomation: { owner: true, lease: 1 },
     sessionPermissionModes: state.storedState.sessionPermissionModes,
     pendingPermissions: state.initialPendingPermissions ?? state.pendingPermissions,
     pendingQuestions: [],

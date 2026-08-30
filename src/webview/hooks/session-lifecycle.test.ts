@@ -451,17 +451,17 @@ describe('session-lifecycle helpers', () => {
     expect(isSessionInWorkspace(session('s1', '/any/path'), null)).toBe(true);
   });
 
-  it('upsertSession filters out a session outside workspace that already exists in list', () => {
+  it('upsertSession keeps an authorized projected session outside the exact workspace root', () => {
     const setup = createDeps({
       activeSessionId: null,
       sessions: [session('session-1', '/repo', 1), session('session-2', '/other', 2)],
       workspace: '/repo',
     });
 
-    // session-2 is outside workspace and exists in the list - should be filtered out
     upsertSession(setup.deps, session('session-2', '/other', 3));
 
-    expect(setup.current.sessions.map((item) => item.id)).toEqual(['session-1']);
+    expect(setup.current.sessions.map((item) => item.id)).toEqual(['session-2', 'session-1']);
+    expect(setup.current.sessions[0]?.time.updated).toBe(3);
   });
 
   it('upsertSession is a no-op for a session outside workspace that does not exist in list', () => {

@@ -1,6 +1,7 @@
-import type { Message, Session, SessionStatus } from '../../types';
+import type { Message, Part, Session, SessionStatus } from '../../types';
 import type { QueuedAttachmentSnapshot } from './session-send';
 import type { UsageLimitNotice } from '../../lib/usage-limit';
+import { resolveTaskSessionId } from '../../lib/task-session';
 
 type ResolvedModel = { providerID: string; modelID: string; variant?: string };
 type SessionUsageLimitSnapshot =
@@ -111,13 +112,18 @@ export async function undoSessionWithDependencies(deps: {
 export async function editMessageWithDependencies(
   deps: {
     getActiveSessionId(): string | null;
-    getMessages(): Array<{ info: Message }>;
+    getMessages(): Array<{ info: Message; parts?: Part[] }>;
     isSessionWorking(sessionId: string): boolean;
     abortSession(sessionId: string): Promise<void | boolean | object>;
     startLoading(): void;
     invalidateMessageSync?(sessionId: string): void;
     deferMessageRemovals?(sessionId: string, messageIds: string[]): () => void;
     pruneMessagesFrom?(sessionId: string, messageId: string): (() => void) | null;
+    getSessions?(): Session[];
+    getSessionTreeIds?(sessionId: string): string[];
+    abortActiveSessionTree?(sessionId: string): Promise<void>;
+    moveSessionTreeToRecycleBin?(sessionId: string): Promise<void>;
+    restoreSessionTreeFromRecycleBin?(sessionId: string): Promise<void | boolean>;
     deleteMessage(sessionId: string, messageId: string): Promise<void | boolean | object>;
     syncSessionMessages(sessionId: string): Promise<void | boolean | object>;
     sendEditedMessage(
@@ -153,7 +159,17 @@ export async function editMessageWithDependencies(
   const target = messages[targetIndex];
   if (!target || target.info.role !== 'user' || target.info.sessionID !== sessionId) return false;
 
-  const messagesToDelete = messages.slice(targetIndex).toReversed();
+  const messagesToDelete = messages
+    .slice(targetIndex)
+    .filter((entry) => entry.info.sessionID === sessionId)
+    .toReversed();
+  const childSessions = getDiscardedTaskSessions(
+    messagesToDelete,
+    messages,
+    deps.getSessions?.() ?? [],
+    sessionId,
+    deps.getSessionTreeIds
+  );
   const selectedModel = options?.selectedModel ?? target.info.model;
   const sendEditedMessage = deps.prepareEditedMessageSend
     ? deps.prepareEditedMessageSend(text, sessionId, options?.queuedAttachments, selectedModel)
@@ -175,6 +191,41 @@ export async function editMessageWithDependencies(
     releaseDeferredRemovals?.();
   };
   let replacementPublished = false;
+  let successfulParentDeletions = 0;
+  let parentDeletionStarted = false;
+  const recycleAttempts: Array<{
+    sessionId: string;
+    launchMessageId: string;
+    confirmed: boolean;
+  }> = [];
+  const recoverRecycledChildren = async (attempts: typeof recycleAttempts, failures: string[]) => {
+    const restoredSessionIds = new Set<string>();
+    for (const attempt of attempts.toReversed()) {
+      try {
+        const restored = await deps.restoreSessionTreeFromRecycleBin?.(attempt.sessionId);
+        if (restored === false && attempt.confirmed) {
+          throw new Error('restore returned false');
+        }
+        if (restored === false) continue;
+        restoredSessionIds.add(attempt.sessionId);
+        for (const restoredSessionId of deps.getSessionTreeIds?.(attempt.sessionId) ?? []) {
+          restoredSessionIds.add(restoredSessionId);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'unknown restore error';
+        failures.push(`restore ${attempt.sessionId}: ${message}`);
+      }
+    }
+    const sessionIdsToSync = [...restoredSessionIds];
+    const syncResults = await Promise.allSettled(
+      sessionIdsToSync.map((sessionIdToSync) => deps.syncSessionMessages(sessionIdToSync))
+    );
+    for (const [index, result] of syncResults.entries()) {
+      if (result.status === 'fulfilled') continue;
+      const message = result.reason instanceof Error ? result.reason.message : 'unknown sync error';
+      failures.push(`sync ${sessionIdsToSync[index]}: ${message}`);
+    }
+  };
   const publishReplacement = () => {
     if (replacementPublished) return;
     replacementPublished = true;
@@ -188,20 +239,70 @@ export async function editMessageWithDependencies(
     if (deps.isSessionWorking(sessionId)) {
       await deps.abortSession(sessionId);
     }
+    if (childSessions.length > 0) {
+      if (
+        !deps.abortActiveSessionTree ||
+        !deps.moveSessionTreeToRecycleBin ||
+        !deps.restoreSessionTreeFromRecycleBin
+      ) {
+        throw new Error('Cannot safely remove child sessions launched by this message');
+      }
+      for (const childSession of childSessions) {
+        await deps.abortActiveSessionTree(childSession.sessionId);
+        const attempt = { ...childSession, confirmed: false };
+        recycleAttempts.push(attempt);
+        await deps.moveSessionTreeToRecycleBin(childSession.sessionId);
+        attempt.confirmed = true;
+      }
+    }
     releaseDeferredRemovals = deps.deferMessageRemovals?.(
       sessionId,
       messagesToDelete.map((message) => message.info.id)
     );
     // Session revert also restores filesystem snapshots; direct history deletion does not.
     for (const message of messagesToDelete) {
+      parentDeletionStarted = true;
       await deps.deleteMessage(sessionId, message.info.id);
+      successfulParentDeletions += 1;
     }
   } catch (err) {
     releaseRemovals();
-    await deps.syncSessionMessages(sessionId).catch(() => {});
+    const recoveryFailures: string[] = [];
+    let parentSyncSucceeded = false;
+    try {
+      await deps.syncSessionMessages(sessionId);
+      parentSyncSucceeded = true;
+    } catch (syncErr) {
+      const message = syncErr instanceof Error ? syncErr.message : 'unknown sync error';
+      recoveryFailures.push(`sync ${sessionId}: ${message}`);
+    }
+    let attemptsToRestore = recycleAttempts;
+    if (parentDeletionStarted && successfulParentDeletions > 0 && parentSyncSucceeded) {
+      const remainingMessageIds = new Set(
+        deps
+          .getMessages()
+          .filter((entry) => entry.info.sessionID === sessionId)
+          .map((entry) => entry.info.id)
+      );
+      attemptsToRestore = recycleAttempts.filter((attempt) =>
+        remainingMessageIds.has(attempt.launchMessageId)
+      );
+    }
+    await recoverRecycledChildren(attemptsToRestore, recoveryFailures);
+    const recoveryError =
+      recoveryFailures.length > 0
+        ? new Error(
+            `Rollback failed for recycled child sessions (${recoveryFailures.join('; ')}). Check the recycle bin and reload the affected sessions.`
+          )
+        : undefined;
     if (deps.getActiveSessionId() === sessionId) {
       deps.stopLoading();
-      deps.setError(err instanceof Error ? err.message : 'Failed to edit message');
+      const editError = err instanceof Error ? err.message : 'Failed to edit message';
+      const recoveryMessage =
+        recoveryError instanceof Error ? recoveryError.message : 'Rollback failed';
+      deps.setError(
+        recoveryError ? `${editError}. Rollback also failed: ${recoveryMessage}` : editError
+      );
     }
     return false;
   }
@@ -218,7 +319,73 @@ export async function editMessageWithDependencies(
   }
   pruneHistory();
   releaseRemovals();
+  await Promise.allSettled([deps.syncSessionMessages(sessionId)]);
   if (deps.getActiveSessionId() === sessionId) deps.stopLoading();
+  return false;
+}
+
+function getDiscardedTaskSessions(
+  discardedMessages: Array<{ info: Message; parts?: Part[] }>,
+  allMessages: Array<{ info: Message; parts?: Part[] }>,
+  sessions: Session[],
+  parentSessionId: string,
+  getSessionTreeIds?: (sessionId: string) => string[]
+) {
+  const normalizedMessages = allMessages.map((entry) => ({
+    info: entry.info,
+    parts: entry.parts ?? [],
+  }));
+  const discardedKeys = new Set(
+    discardedMessages.map((entry) => `${entry.info.sessionID}\0${entry.info.id}`)
+  );
+  const resolved = new Map<string, { sessionId: string; launchMessageId: string }>();
+
+  for (const entry of normalizedMessages) {
+    if (!discardedKeys.has(`${entry.info.sessionID}\0${entry.info.id}`)) continue;
+    const nextUserCreated = normalizedMessages.find(
+      (candidate) =>
+        candidate.info.sessionID === entry.info.sessionID &&
+        candidate.info.role === 'user' &&
+        candidate.info.time.created > entry.info.time.created
+    )?.info.time.created;
+    for (const part of entry.parts) {
+      if (part.type !== 'tool') continue;
+      const childSessionId = resolveTaskSessionId(
+        part,
+        normalizedMessages,
+        sessions,
+        nextUserCreated
+      );
+      if (childSessionId && isSessionDescendantOf(childSessionId, parentSessionId, sessions)) {
+        resolved.set(childSessionId, {
+          sessionId: childSessionId,
+          launchMessageId: entry.info.id,
+        });
+      }
+    }
+  }
+
+  const branches = [...resolved.values()];
+  if (!getSessionTreeIds || branches.length < 2) return branches;
+  return branches.filter(
+    (branch) =>
+      !branches.some(
+        (other) =>
+          other.sessionId !== branch.sessionId &&
+          getSessionTreeIds(other.sessionId).includes(branch.sessionId)
+      )
+  );
+}
+
+function isSessionDescendantOf(sessionId: string, parentSessionId: string, sessions: Session[]) {
+  const sessionById = new Map(sessions.map((session) => [session.id, session] as const));
+  const visited = new Set<string>();
+  let current = sessionById.get(sessionId);
+  while (current?.parentID && !visited.has(current.id)) {
+    if (current.parentID === parentSessionId) return true;
+    visited.add(current.id);
+    current = sessionById.get(current.parentID);
+  }
   return false;
 }
 
@@ -309,7 +476,7 @@ type SessionControlDependencies = {
   clearPendingAbortTree(sessionIds: string[]): void;
   setSessionUsageLimit(sessionId: string, notice: SessionUsageLimitSnapshot): void;
   logError(context: string, cause: unknown): void;
-  getMessages(): Array<{ info: Message }>;
+  getMessages(): Array<{ info: Message; parts?: Part[] }>;
   startLoading(): void;
   revertSession(sessionId: string, messageId: string): Promise<void | boolean | object>;
   syncSession(sessionId: string): Promise<void | boolean | object>;
@@ -330,6 +497,9 @@ type SessionControlDependencies = {
   invalidateMessageSync(sessionId: string): void;
   deferMessageRemovals(sessionId: string, messageIds: string[]): () => void;
   pruneMessagesFrom(sessionId: string, messageId: string): (() => void) | null;
+  getSessions(): Session[];
+  moveSessionTreeToRecycleBin(sessionId: string): Promise<void>;
+  restoreSessionTreeFromRecycleBin(sessionId: string): Promise<void | boolean>;
   deleteMessage(sessionId: string, messageId: string): Promise<void | boolean | object>;
   unrevertSession(sessionId: string): Promise<Session>;
   upsertSession(session: Session): void;
@@ -376,6 +546,32 @@ export class SessionControlOperations {
     );
   };
 
+  private readonly abortActiveSessionTree = async (sessionId: string) => {
+    const activeSessionIds = this.deps.getSessionTreeIds(sessionId).filter((id) => {
+      const status = this.deps.getSessionStatus(id);
+      return status?.type === 'busy' || status?.type === 'retry';
+    });
+    if (activeSessionIds.length === 0) return;
+
+    const previousStatuses = new Map(
+      activeSessionIds.map((id) => [id, this.deps.getSessionStatus(id)] as const)
+    );
+    this.deps.markPendingAbortTree(activeSessionIds);
+    for (const id of activeSessionIds) {
+      this.deps.setSessionStatusEntry(id, { type: 'idle' });
+    }
+    try {
+      await Promise.all(activeSessionIds.map((id) => this.deps.abortRemoteSession(id)));
+    } catch (err) {
+      this.deps.clearPendingAbortTree(activeSessionIds);
+      for (const id of activeSessionIds) {
+        const previousStatus = previousStatuses.get(id);
+        if (previousStatus) this.deps.setSessionStatusEntry(id, previousStatus);
+      }
+      throw err;
+    }
+  };
+
   readonly undoSession = async () => {
     await undoSessionWithDependencies({
       getActiveSessionId: this.deps.getActiveSessionId,
@@ -409,6 +605,11 @@ export class SessionControlOperations {
         invalidateMessageSync: this.deps.invalidateMessageSync,
         deferMessageRemovals: this.deps.deferMessageRemovals,
         pruneMessagesFrom: this.deps.pruneMessagesFrom,
+        getSessions: this.deps.getSessions,
+        getSessionTreeIds: this.deps.getSessionTreeIds,
+        abortActiveSessionTree: this.abortActiveSessionTree,
+        moveSessionTreeToRecycleBin: this.deps.moveSessionTreeToRecycleBin,
+        restoreSessionTreeFromRecycleBin: this.deps.restoreSessionTreeFromRecycleBin,
         deleteMessage: this.deps.deleteMessage,
         syncSessionMessages: this.deps.syncSessionMessages,
         sendEditedMessage: this.deps.sendEditedMessage,

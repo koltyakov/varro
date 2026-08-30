@@ -92,6 +92,9 @@ export function createMountBridgeOperations(deps: {
           if (payload.showChangedFiles !== undefined) {
             uiStore.setShowChangedFiles(payload.showChangedFiles);
           }
+          if (payload.showTurnTimer !== undefined) {
+            uiStore.setShowTurnTimer(payload.showTurnTimer);
+          }
           uiStore.setDesktopSessionPaneSide(payload.desktopSessionPaneSide);
           permissionsStore.setDefaultPermissionModePreference(payload.defaultPermissionMode);
         },

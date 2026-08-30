@@ -1077,4 +1077,16 @@ describe('extension manifest', () => {
       default: true,
     });
   });
+
+  it('contributes the opt-in active turn timer setting', () => {
+    const properties = packageJson.contributes.configuration.properties as Record<
+      string,
+      Record<string, unknown>
+    >;
+
+    expect(properties['varro.chat.showTurnTimer']).toMatchObject({
+      type: 'boolean',
+      default: false,
+    });
+  });
 });

@@ -818,6 +818,32 @@
   font-weight: 400;
 }
 
+.toolbar-turn-timer {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 24px;
+  margin-right: 4px;
+  color: color-mix(in srgb, var(--color-vscode-fg-soft) 56%, transparent);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.toolbar-turn-timer-icon {
+  color: color-mix(in srgb, var(--color-vscode-fg-soft) 34%, transparent);
+}
+
+.toolbar-turn-timer-icon.is-stale {
+  color: color-mix(in srgb, var(--color-vscode-error) 64%, transparent);
+}
+
+.toolbar-turn-timer-value {
+  color: currentColor;
+}
+
 .toolbar-lsp-count {
   display: inline-flex;
   align-items: center;

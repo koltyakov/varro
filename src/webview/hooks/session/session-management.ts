@@ -38,7 +38,16 @@ type SessionManagementDependencies = {
   setSelectedMcpsForSession(sessionId: string, names: string[]): void;
   resetDraftSelectedMcps(): void;
   setPermissionModeForSession(sessionId: string, mode: PermissionMode): void;
-  persistConfirmedPermissionModeForSession?(sessionId: string, mode: PermissionMode): void;
+  setPendingSessionPermissionMode?(
+    sessionId: string,
+    mode: PermissionMode | null,
+    generation?: number
+  ): number | null;
+  persistConfirmedPermissionModeForSession?(
+    sessionId: string,
+    mode: PermissionMode,
+    directory?: string
+  ): Promise<void>;
   resetDraftPermissionMode(): void;
   resetTodoSync(): void;
   clearMessages(): void;
@@ -96,6 +105,7 @@ export class SessionManagementOperations {
         setSelectedMcpsForSession: this.deps.setSelectedMcpsForSession,
         resetDraftSelectedMcps: this.deps.resetDraftSelectedMcps,
         setPermissionModeForSession: this.deps.setPermissionModeForSession,
+        setPendingSessionPermissionMode: this.deps.setPendingSessionPermissionMode,
         persistConfirmedPermissionModeForSession:
           this.deps.persistConfirmedPermissionModeForSession,
         resetDraftPermissionMode: this.deps.resetDraftPermissionMode,
@@ -123,6 +133,7 @@ export class SessionManagementOperations {
         getPermissionModeForSession: this.deps.getPermissionModeForSession,
         isPermissionModeStable: this.deps.isPermissionModeStable,
         setPermissionModeForSession: this.deps.setPermissionModeForSession,
+        setPendingSessionPermissionMode: this.deps.setPendingSessionPermissionMode,
         persistConfirmedPermissionModeForSession:
           this.deps.persistConfirmedPermissionModeForSession,
         upsertSession: this.deps.upsertSession,
@@ -239,7 +250,16 @@ export async function createSessionWithDependencies(
     setSelectedMcpsForSession(sessionId: string, names: string[]): void;
     resetDraftSelectedMcps(): void;
     setPermissionModeForSession(sessionId: string, mode: PermissionMode): void;
-    persistConfirmedPermissionModeForSession?(sessionId: string, mode: PermissionMode): void;
+    setPendingSessionPermissionMode?(
+      sessionId: string,
+      mode: PermissionMode | null,
+      generation?: number
+    ): number | null;
+    persistConfirmedPermissionModeForSession?(
+      sessionId: string,
+      mode: PermissionMode,
+      directory?: string
+    ): Promise<void>;
     resetDraftPermissionMode(): void;
     resetTodoSync(): void;
     clearMessages(): void;
@@ -262,15 +282,50 @@ export async function createSessionWithDependencies(
       permission: permission.length > 0 ? permission : undefined,
     });
 
-    if ((deps.getWorkspaceGeneration?.() ?? 0) !== workspaceGeneration) return null;
+    if ((deps.getWorkspaceGeneration?.() ?? 0) !== workspaceGeneration) {
+      if (initialPermissionMode !== 'default') {
+        await deps.persistConfirmedPermissionModeForSession?.(
+          session.id,
+          initialPermissionMode,
+          session.directory
+        );
+      }
+      return null;
+    }
 
     deps.upsertSession(session);
     deps.setSessionStatusEntry(session.id, { type: 'idle' });
     deps.setSessionUsageLimit(session.id, null);
     deps.setSelectedMcpsForSession(session.id, initialMcpNames);
     if (initialPermissionMode !== 'default') {
-      deps.persistConfirmedPermissionModeForSession?.(session.id, initialPermissionMode);
+      const pendingGeneration = deps.setPendingSessionPermissionMode?.(
+        session.id,
+        initialPermissionMode
+      );
+      deps.setPermissionModeForSession(session.id, initialPermissionMode);
+      try {
+        await deps.persistConfirmedPermissionModeForSession?.(
+          session.id,
+          initialPermissionMode,
+          session.directory
+        );
+        deps.setPendingSessionPermissionMode?.(session.id, null, pendingGeneration ?? undefined);
+      } catch (err) {
+        const clearedGeneration = deps.setPendingSessionPermissionMode?.(
+          session.id,
+          null,
+          pendingGeneration ?? undefined
+        );
+        if (pendingGeneration === undefined || clearedGeneration === pendingGeneration) {
+          deps.setError(
+            err instanceof Error
+              ? err.message
+              : 'Permission mode was not saved; select a mode to retry'
+          );
+        }
+      }
     }
+    if ((deps.getWorkspaceGeneration?.() ?? 0) !== workspaceGeneration) return null;
     deps.publishSessionModel(session.id, defaultModel);
 
     if (
@@ -333,7 +388,16 @@ export async function forkSessionWithDependencies(
     getPermissionModeForSession(sessionId: string): PermissionMode;
     isPermissionModeStable?(sessionId: string): boolean;
     setPermissionModeForSession(sessionId: string, mode: PermissionMode): void;
-    persistConfirmedPermissionModeForSession?(sessionId: string, mode: PermissionMode): void;
+    setPendingSessionPermissionMode?(
+      sessionId: string,
+      mode: PermissionMode | null,
+      generation?: number
+    ): number | null;
+    persistConfirmedPermissionModeForSession?(
+      sessionId: string,
+      mode: PermissionMode,
+      directory?: string
+    ): Promise<void>;
     upsertSession(session: Session): void;
     selectSession(
       sessionId: string,
@@ -358,11 +422,43 @@ export async function forkSessionWithDependencies(
     const permissionMode = deps.getPermissionModeForSession(id);
     const sourceModel = deps.getEffectiveSessionModel(id);
     const session = await deps.forkRemoteSession(id, messageID);
-    if ((deps.getWorkspaceGeneration?.() ?? 0) !== workspaceGeneration) return null;
+    if ((deps.getWorkspaceGeneration?.() ?? 0) !== workspaceGeneration) {
+      if (permissionMode !== 'default') {
+        await deps.persistConfirmedPermissionModeForSession?.(
+          session.id,
+          permissionMode,
+          session.directory
+        );
+      }
+      return null;
+    }
     deps.upsertSession(session);
     if (permissionMode !== 'default') {
-      deps.persistConfirmedPermissionModeForSession?.(session.id, permissionMode);
+      const pendingGeneration = deps.setPendingSessionPermissionMode?.(session.id, permissionMode);
+      deps.setPermissionModeForSession(session.id, permissionMode);
+      try {
+        await deps.persistConfirmedPermissionModeForSession?.(
+          session.id,
+          permissionMode,
+          session.directory
+        );
+        deps.setPendingSessionPermissionMode?.(session.id, null, pendingGeneration ?? undefined);
+      } catch (err) {
+        const clearedGeneration = deps.setPendingSessionPermissionMode?.(
+          session.id,
+          null,
+          pendingGeneration ?? undefined
+        );
+        if (pendingGeneration === undefined || clearedGeneration === pendingGeneration) {
+          deps.setError(
+            err instanceof Error
+              ? err.message
+              : 'Permission mode was not saved; select a mode to retry'
+          );
+        }
+      }
     }
+    if ((deps.getWorkspaceGeneration?.() ?? 0) !== workspaceGeneration) return null;
     if (sourceModel) {
       deps.setSelectedModel(sourceModel, { sessionId: session.id, persistGlobal: false });
     }

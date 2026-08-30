@@ -6,6 +6,7 @@ export type ExtensionConfigState = {
   showFileDiffs?: boolean;
   expandThinking?: boolean;
   showChangedFiles?: boolean;
+  showTurnTimer?: boolean;
   desktopSessionPaneSide: DesktopSessionPaneSide;
   defaultPermissionMode: PermissionMode;
   chatFontSize: number;
@@ -18,6 +19,7 @@ export type WebviewConfigUpdatePayload = Pick<
   | 'showFileDiffs'
   | 'expandThinking'
   | 'showChangedFiles'
+  | 'showTurnTimer'
   | 'desktopSessionPaneSide'
   | 'defaultPermissionMode'
 >;

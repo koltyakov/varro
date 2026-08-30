@@ -92,9 +92,68 @@ describe('session management helpers', () => {
     expect(resetDraftSelectedMcps).toHaveBeenCalledTimes(1);
   });
 
-  it('waits for host confirmation before publishing a new session permission mode', async () => {
+  it('publishes a new session mode as pending until the host confirms it', async () => {
     const setPermissionModeForSession = vi.fn();
-    const persistConfirmedPermissionModeForSession = vi.fn();
+    const setPendingSessionPermissionMode = vi.fn(() => 7);
+    const confirmation = deferred<void>();
+    const persistConfirmedPermissionModeForSession = vi.fn(() => confirmation.promise);
+
+    const pending = createSessionWithDependencies(
+      {
+        getActiveSessionId: () => null,
+        getNewChatDraftGeneration: () => 0,
+        createRemoteSession: vi.fn(async () => session('session-auto')),
+        buildCreatePermission: () => [{ permission: 'bash', pattern: '*', action: 'ask' }],
+        upsertSession: vi.fn(),
+        resetToolCallExpansionState: vi.fn(),
+        setActiveSessionId: vi.fn(),
+        clearDraftCurrentDocumentState: vi.fn(),
+        adoptDraftCurrentDocumentState: vi.fn(),
+        setSessionStatusEntry: vi.fn(),
+        setSessionUsageLimit: vi.fn(),
+        persistActiveSessionId: vi.fn(),
+        markSessionSeen: vi.fn(),
+        getDefaultSelectedModel: () => null,
+        setSelectedModel: vi.fn(),
+        publishSessionModel: vi.fn(),
+        resolveDefaultAgent: () => null,
+        setSelectedAgent: vi.fn(),
+        getInitialMcpNames: () => [],
+        setSelectedMcpsForSession: vi.fn(),
+        resetDraftSelectedMcps: vi.fn(),
+        setPermissionModeForSession,
+        setPendingSessionPermissionMode,
+        persistConfirmedPermissionModeForSession,
+        resetDraftPermissionMode: vi.fn(),
+        resetTodoSync: vi.fn(),
+        clearMessages: vi.fn(),
+        stopLoading: vi.fn(),
+        setError: vi.fn(),
+      },
+      undefined,
+      'auto'
+    );
+
+    await vi.waitFor(() =>
+      expect(setPermissionModeForSession).toHaveBeenCalledWith('session-auto', 'auto')
+    );
+    expect(setPendingSessionPermissionMode).toHaveBeenCalledWith('session-auto', 'auto');
+    expect(persistConfirmedPermissionModeForSession).toHaveBeenCalledWith(
+      'session-auto',
+      'auto',
+      '/repo'
+    );
+
+    confirmation.resolve();
+    const result = await pending;
+
+    expect(result).toBe('session-auto');
+    expect(setPendingSessionPermissionMode).toHaveBeenLastCalledWith('session-auto', null, 7);
+  });
+
+  it('rolls back and reports a failed new-session confirmation', async () => {
+    const setError = vi.fn();
+    const setPendingSessionPermissionMode = vi.fn().mockReturnValueOnce(4).mockReturnValueOnce(4);
 
     const result = await createSessionWithDependencies(
       {
@@ -119,21 +178,26 @@ describe('session management helpers', () => {
         getInitialMcpNames: () => [],
         setSelectedMcpsForSession: vi.fn(),
         resetDraftSelectedMcps: vi.fn(),
-        setPermissionModeForSession,
-        persistConfirmedPermissionModeForSession,
+        setPermissionModeForSession: vi.fn(),
+        setPendingSessionPermissionMode,
+        persistConfirmedPermissionModeForSession: vi.fn(async () => {
+          throw new Error('Permission mode was not saved; safe default recovery is in progress');
+        }),
         resetDraftPermissionMode: vi.fn(),
         resetTodoSync: vi.fn(),
         clearMessages: vi.fn(),
         stopLoading: vi.fn(),
-        setError: vi.fn(),
+        setError,
       },
       undefined,
       'auto'
     );
 
     expect(result).toBe('session-auto');
-    expect(setPermissionModeForSession).not.toHaveBeenCalled();
-    expect(persistConfirmedPermissionModeForSession).toHaveBeenCalledWith('session-auto', 'auto');
+    expect(setPendingSessionPermissionMode).toHaveBeenLastCalledWith('session-auto', null, 4);
+    expect(setError).toHaveBeenCalledWith(
+      'Permission mode was not saved; safe default recovery is in progress'
+    );
   });
 
   it('omits session permission overrides in default mode', async () => {
@@ -564,7 +628,8 @@ describe('session management helpers', () => {
     const upsertSession = vi.fn();
     const selectSession = vi.fn(async () => {});
     const setPermissionModeForSession = vi.fn();
-    const persistConfirmedPermissionModeForSession = vi.fn();
+    const setPendingSessionPermissionMode = vi.fn(() => 9);
+    const persistConfirmedPermissionModeForSession = vi.fn(async () => {});
     const setSelectedModel = vi.fn();
     const publishSessionModel = vi.fn();
     const sourceModel = { providerID: 'openai', modelID: 'gpt-5', variant: 'high' };
@@ -583,6 +648,7 @@ describe('session management helpers', () => {
         publishSessionModel,
         getPermissionModeForSession: () => 'full',
         setPermissionModeForSession,
+        setPendingSessionPermissionMode,
         persistConfirmedPermissionModeForSession,
         upsertSession,
         selectSession,
@@ -597,8 +663,16 @@ describe('session management helpers', () => {
     expect(upsertSession).toHaveBeenCalledWith(
       session('session-3', { title: 'Session (fork #1)' })
     );
-    expect(setPermissionModeForSession).not.toHaveBeenCalled();
-    expect(persistConfirmedPermissionModeForSession).toHaveBeenCalledWith('session-3', 'full');
+    expect(setPermissionModeForSession).toHaveBeenCalledWith('session-3', 'full');
+    expect(setPendingSessionPermissionMode.mock.calls).toEqual([
+      ['session-3', 'full'],
+      ['session-3', null, 9],
+    ]);
+    expect(persistConfirmedPermissionModeForSession).toHaveBeenCalledWith(
+      'session-3',
+      'full',
+      '/repo'
+    );
     expect(setSelectedModel).toHaveBeenCalledWith(sourceModel, {
       sessionId: 'session-3',
       persistGlobal: false,

@@ -1,4 +1,12 @@
-import { Show, createEffect, createMemo, createResource, createSignal, onCleanup } from 'solid-js';
+import {
+  Show,
+  createEffect,
+  createMemo,
+  createResource,
+  createSignal,
+  onCleanup,
+  untrack,
+} from 'solid-js';
 import {
   friendlyErrorName,
   isAbortedAssistantError,
@@ -108,6 +116,7 @@ export function Message(props: {
   showSentTimestamp?: boolean;
   suppressTimestampAnimation?: boolean;
   onUserMessageHoverChange?: (messageId: string, hovering: boolean) => void;
+  onAssistantDiffSettledEmpty?: (messageId: string) => void;
   isLastAssistant?: boolean;
   nearViewport?: boolean;
   outerListVirtualized?: boolean;
@@ -379,6 +388,7 @@ export function Message(props: {
       .catch(() => [] as FileDiff[]);
   });
   const visibleDiffs = createMemo(() => (diffRequest() ? diffs() || [] : []));
+  let emptyDiffSettlementEpoch = 0;
   const compactionDivider = createMemo<CompactionPart | null>(() => {
     const parts = normalizedParts();
     const compactions = parts.filter((part): part is CompactionPart => part.type === 'compaction');
@@ -396,6 +406,28 @@ export function Message(props: {
     if (isUser()) return hasUserContent() || hasOmittedDiffs();
     return !!assistantErrorMessage() || hasVisibleAssistantOutput() || visibleDiffs().length > 0;
   };
+  createEffect(() => {
+    const requestKey = diffRequest();
+    const epoch = ++emptyDiffSettlementEpoch;
+    if (!requestKey || diffs.loading) return;
+    const settledDiffs = diffs();
+    if (!settledDiffs || settledDiffs.length > 0 || shouldRender()) return;
+    queueMicrotask(() => {
+      if (
+        epoch !== emptyDiffSettlementEpoch ||
+        diffRequest() !== requestKey ||
+        diffs.loading ||
+        diffs()?.length !== 0 ||
+        shouldRender()
+      ) {
+        return;
+      }
+      untrack(() => props.onAssistantDiffSettledEmpty?.(props.info.id));
+    });
+  });
+  onCleanup(() => {
+    emptyDiffSettlementEpoch += 1;
+  });
   const hasStructuredAssistantParts = () =>
     assistant()
       ? visibleAssistantParts().some((part) => part.type !== 'text' && part.type !== 'file')

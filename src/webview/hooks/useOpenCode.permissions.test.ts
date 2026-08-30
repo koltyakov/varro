@@ -185,6 +185,41 @@ describe('useOpenCode permission and config flows', () => {
     }
   });
 
+  it('keeps prompts visible and sends no automatic work without initial ownership', async () => {
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    // SAFETY: This fixture intentionally omits permissionAutomation to verify fail-closed startup.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      sessionPermissionModes: { 'session-1': 'auto' },
+    };
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      serverEventHandlers.get('permission.asked')?.({
+        properties: permissionListItem('perm-unowned'),
+      });
+
+      await vi.waitFor(() =>
+        expect(stateModule.state.permissions).toEqual([
+          expect.objectContaining({ id: 'perm-unowned' }),
+        ])
+      );
+      expect(clientMocks.varroJudgePermission).not.toHaveBeenCalled();
+      expect(clientMocks.sessionRespondPermission).not.toHaveBeenCalled();
+      expect(bridgeMocks.postMessage).toHaveBeenCalledWith({
+        type: 'permission/reveal',
+        payload: { permissionId: 'perm-unowned' },
+      });
+    } finally {
+      dispose();
+    }
+  });
+
   it('reconciles visible prompts once when a non-owner acquires automation', async () => {
     let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
     bridgeOnMessage.mockImplementation((handler) => {
@@ -275,7 +310,8 @@ describe('useOpenCode permission and config flows', () => {
         expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
           'session-1',
           'perm-rejected',
-          'reject'
+          'reject',
+          { permissionAutomationLease: 1 }
         )
       );
       expect(stateModule.state.sessionAutoPermissionCounts).toEqual({
@@ -672,6 +708,7 @@ describe('useOpenCode permission and config flows', () => {
         diagnostics: [],
       },
       sessionPermissionModes: { 'session-1': 'auto' },
+      permissionAutomation: { owner: true, lease: 1 },
       pendingPermissions: [permissionListItem('perm-restored-a')],
     };
 
@@ -795,7 +832,8 @@ describe('useOpenCode permission and config flows', () => {
         expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
           'session-1',
           'perm-timeout',
-          'once'
+          'once',
+          { permissionAutomationLease: 1 }
         )
       );
       expect(stateModule.state.sessionAutoPermissionCounts).toEqual({
@@ -899,7 +937,8 @@ describe('useOpenCode permission and config flows', () => {
         expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
           'session-1',
           'perm-timeout-response',
-          'once'
+          'once',
+          { permissionAutomationLease: 1 }
         )
       );
       expect(stateModule.state.permissions).toEqual([
@@ -1086,7 +1125,8 @@ describe('useOpenCode permission and config flows', () => {
         expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
           'child-1',
           'perm-child',
-          'once'
+          'once',
+          { permissionAutomationLease: 1 }
         )
       );
       expect(stateModule.state.permissions).toEqual([]);
@@ -1292,7 +1332,8 @@ describe('useOpenCode permission and config flows', () => {
         expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
           'grandchild-1',
           'perm-grandchild',
-          'once'
+          'once',
+          { permissionAutomationLease: 1 }
         )
       );
       expect(stateModule.state.permissions).toEqual([]);
@@ -1367,7 +1408,8 @@ describe('useOpenCode permission and config flows', () => {
           expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
             'child-1',
             'perm-similar',
-            autoResponse
+            autoResponse,
+            { permissionAutomationLease: 1 }
           )
         );
         expect(stateModule.state.permissions).not.toContainEqual(
@@ -1471,7 +1513,8 @@ describe('useOpenCode permission and config flows', () => {
         expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
           'session-1',
           'perm-second',
-          'once'
+          'once',
+          { permissionAutomationLease: 1 }
         )
       );
       expect(stateModule.state.permissions).not.toContainEqual(
@@ -1537,7 +1580,8 @@ describe('useOpenCode permission and config flows', () => {
         expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
           'session-1',
           'perm-1',
-          'always'
+          'always',
+          { permissionAutomationLease: 1 }
         )
       );
       expect(stateModule.state.permissions).toEqual([]);
@@ -1584,7 +1628,8 @@ describe('useOpenCode permission and config flows', () => {
       expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
         'session-1',
         'perm-during-patch',
-        'always'
+        'always',
+        { permissionAutomationLease: 1 }
       );
     } finally {
       dispose();
@@ -1628,7 +1673,8 @@ describe('useOpenCode permission and config flows', () => {
       expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
         'session-1',
         'edit-during-patch',
-        'once'
+        'once',
+        { permissionAutomationLease: 1 }
       );
     } finally {
       dispose();
@@ -1669,7 +1715,7 @@ describe('useOpenCode permission and config flows', () => {
       await hookModule.updatePermissionModeForSession('full', 'child-1');
 
       expect(clientMocks.sessionRespondPermission.mock.calls).toEqual([
-        ['child-1', 'perm-child', 'always'],
+        ['child-1', 'perm-child', 'always', { permissionAutomationLease: 1 }],
       ]);
     } finally {
       dispose();
