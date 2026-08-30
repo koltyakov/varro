@@ -63,7 +63,7 @@ The implementation is split across focused components: `open-code-process.ts` ow
 
 Important behavior:
 
-- Workspace-sensitive requests carry an authoritative directory through both the request bridge and OpenCode transport. `RestProxy` resolves the resource-scoped session-history setting independently for each open VS Code root, aggregates lists and statuses using exact-directory, descendant-path, or full-Git-project scope, filters hidden and recycled sessions before global sorting and pagination, and authorizes direct session operations from the validated catalog. Full-project scope falls back to descendant-path scope for OpenCode's global non-Git project. Permissions, questions, messages, tools, and diffs remain directory-owned.
+- Workspace-sensitive requests carry an authoritative directory through both the request bridge and OpenCode transport. `RestProxy` resolves the persisted session-history preference, aggregates lists and statuses using exact-directory, project, or cross-project catalogs, and filters cross-project catalogs to the selected directory for Nested scope. This includes sessions from nested Git projects without exposing sibling directories. It filters hidden and recycled sessions before global sorting and pagination, then authorizes direct session operations from the validated catalog. Permissions, questions, messages, tools, and diffs remain directory-owned.
 - If the SSE stream drops while the server is running, Varro retries with exponential backoff.
 - If the event stream drops but REST still works, Varro marks the event stream as degraded so the UI can show a reconnecting banner.
 - If the child process exits after startup, Varro attempts a limited restart sequence.

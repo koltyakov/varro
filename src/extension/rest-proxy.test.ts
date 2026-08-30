@@ -1142,6 +1142,27 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 2, data: trashList });
   });
 
+  it('lists descendant recycle-bin entries in Nested scope', async () => {
+    const nested = recycleBinEntry('nested', '/repo/packages/app');
+    const sibling = recycleBinEntry('sibling', '/repo-assets');
+    const callbacks = createCallbacks({
+      getSessionHistoryScope: () => 'descendants',
+      contextProvider: {
+        ...createCallbacks().contextProvider,
+        getOpenWorkspaceRoot: vi.fn((path: string) => (path === '/repo' ? '/repo' : null)),
+      } as never,
+      sessionTrash: {
+        ...createCallbacks().sessionTrash,
+        list: vi.fn(() => [nested, sibling]),
+      } as never,
+    });
+    const { proxy } = createProxy(callbacks);
+
+    await proxy.handleRequest(makePayload(21, 'GET', '/varro/session-trash'));
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 21, data: [nested] });
+  });
+
   it('routes recycle bin empty request', async () => {
     const empty = vi.fn(
       async (
@@ -2259,6 +2280,40 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 11, data: true });
   });
 
+  it('soft deletes a descendant session authorized by the Nested catalog', async () => {
+    const descendant = {
+      id: 'nested-session',
+      directory: '/repo/packages/app',
+      projectID: 'nested-project',
+      title: 'Nested session',
+    };
+    const entry = { sessions: [descendant] };
+    const serverRequest = vi.fn(async (_method: string, path: string) => {
+      if (path.startsWith('/experimental/session')) return [descendant];
+      if (path === '/session?limit=1000000') return [descendant];
+      throw new Error(`Unexpected path: ${path}`);
+    });
+    const callbacks = createCallbacks({
+      getSessionHistoryScope: () => 'descendants',
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      sessionTrash: {
+        ...createCallbacks().sessionTrash,
+        moveToTrash: vi.fn(() => Promise.resolve(entry)),
+      } as never,
+    });
+    const { proxy } = createProxy(callbacks);
+
+    await proxy.handleRequest(makePayload(114, 'GET', '/session'));
+    await proxy.handleRequest(
+      makePayload(115, 'DELETE', '/session/nested-session?directory=%2Frepo%2Fpackages%2Fapp')
+    );
+
+    expect(callbacks.sessionTrash.moveToTrash).toHaveBeenCalledWith('nested-session', [
+      expect.objectContaining({ id: 'nested-session', directory: '/repo/packages/app' }),
+    ]);
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 115, data: true });
+  });
+
   it('routes varro permanent delete directly to the server without recycle bin', async () => {
     const serverRequest = vi
       .fn()
@@ -3298,14 +3353,19 @@ describe('RestProxy handleRequest', () => {
 
   it('loads sessions from a workspace folder and its descendants', async () => {
     const serverRequest = vi.fn(async (_method: string, path: string) => {
-      if (path === '/project/current') return { id: 'project-1', worktree: '/repo', vcs: 'git' };
-      if (path === '/session?path=packages%2Fapp&limit=1000000') {
+      if (path === '/experimental/session?limit=1000000') {
         return [
           {
             id: 'nested',
-            projectID: 'project-1',
+            projectID: 'nested-project',
             directory: '/repo/packages/app/src',
             title: 'Nested session',
+          },
+          {
+            id: 'sibling',
+            projectID: 'project-1',
+            directory: '/repo/packages/other',
+            title: 'Sibling session',
           },
         ];
       }
@@ -3329,6 +3389,46 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 2241,
       data: [expect.objectContaining({ id: 'nested', directory: '/repo/packages/app/src' })],
+    });
+    expect(serverRequest).toHaveBeenCalledWith(
+      'GET',
+      '/experimental/session?limit=1000000',
+      undefined,
+      expect.objectContaining({ unscoped: true })
+    );
+  });
+
+  it('reads and updates the persisted scope by OpenCode project', async () => {
+    let persisted: 'directory' | 'descendants' | 'project' = 'directory';
+    const getSessionHistoryScope = vi.fn(() => persisted);
+    const updateSessionHistoryScope = vi.fn(
+      (_key: string, scope: 'directory' | 'descendants' | 'project') => {
+        persisted = scope;
+        return Promise.resolve();
+      }
+    );
+    const callbacks = createCallbacks({
+      server: {
+        ...createCallbacks().server,
+        request: vi.fn(() => Promise.resolve({ id: 'project-1', worktree: '/repo', vcs: 'git' })),
+      } as never,
+      getSessionHistoryScope,
+      getSessionHistoryScopeByKey: getSessionHistoryScope,
+      associateSessionHistoryScope: vi.fn(() => Promise.resolve()),
+      updateSessionHistoryScope,
+    });
+    const { proxy } = createProxy(callbacks);
+
+    await proxy.handleRequest(
+      makePayload(2247, 'POST', '/varro/session-history-scope?directory=%2Frepo', {
+        scope: 'project',
+      })
+    );
+
+    expect(updateSessionHistoryScope).toHaveBeenCalledWith('project:project-1', 'project');
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 2247,
+      data: { scope: 'project', git: true },
     });
   });
 
@@ -3386,7 +3486,7 @@ describe('RestProxy handleRequest', () => {
   it('limits project scope to descendants for a non-Git folder', async () => {
     const serverRequest = vi.fn(async (_method: string, path: string) => {
       if (path === '/project/current') return { id: 'global', worktree: '/' };
-      if (path === '/session?path=repo&limit=1000000') {
+      if (path === '/experimental/session?limit=1000000') {
         return [
           {
             id: 'nested',
@@ -3410,12 +3510,6 @@ describe('RestProxy handleRequest', () => {
       id: 2245,
       data: [expect.objectContaining({ id: 'nested', directory: '/repo/nested' })],
     });
-    expect(serverRequest).not.toHaveBeenCalledWith(
-      'GET',
-      expect.stringContaining('scope=project'),
-      expect.anything(),
-      expect.anything()
-    );
   });
 
   it('resolves a different session scope for each open workspace root', async () => {
@@ -3430,11 +3524,11 @@ describe('RestProxy handleRequest', () => {
             : { id: 'project-b', worktree: '/repo-b', vcs: 'git' };
         }
         const url = new URL(path, 'http://localhost');
+        if (url.pathname === '/experimental/session') {
+          return [{ id: 'b', projectID: 'nested-project', directory: '/repo-b/nested/child' }];
+        }
         if (url.searchParams.get('scope') === 'project') {
           return [{ id: 'a', projectID: 'project-a', directory: '/repo-a' }];
-        }
-        if (url.searchParams.get('path') === 'nested') {
-          return [{ id: 'b', projectID: 'project-b', directory: '/repo-b/nested/child' }];
         }
         throw new Error(`Unexpected path: ${path}`);
       }

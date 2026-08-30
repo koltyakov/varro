@@ -1720,6 +1720,13 @@ const API_ROUTES: ApiRoute[] = [
     ({ method, url }) => method === 'GET' && onlyQuery(url, 'path') && requiredQuery(url, 'path')
   ),
   route(VARRO_API_ENDPOINTS.workspaceFilePick, methodsNoQuery('GET')),
+  route(
+    VARRO_API_ENDPOINTS.sessionHistoryScope,
+    ({ method, url }) =>
+      (method === 'GET' || method === 'POST') &&
+      onlyQuery(url, 'directory') &&
+      requiredQuery(url, 'directory')
+  ),
   route(VARRO_API_ENDPOINTS.openCodeConfig, methodsNoQuery('GET')),
   route(VARRO_API_ENDPOINTS.openCodeConfigModelRouting, methodsNoQuery('POST')),
   route(VARRO_API_ENDPOINTS.permissionJudge, methodsNoQuery('POST')),

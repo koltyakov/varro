@@ -188,15 +188,7 @@ export function applySessions(deps: LifecycleDependencies, sessions: Session[]) 
   const existingById = new Map(deps.getState().sessions.map((session) => [session.id, session]));
   const nextSessions = sortSessions(
     sessions
-      .filter(
-        (session) =>
-          !isNumber(session.time.archived) &&
-          isSessionInOpenWorkspace(
-            session,
-            deps.getOpenWorkspacePaths(),
-            deps.getCurrentWorkspacePath()
-          )
-      )
+      .filter((session) => !isNumber(session.time.archived))
       .map((session) => mergeFreshSession(existingById.get(session.id), session))
   );
   batch(() => {

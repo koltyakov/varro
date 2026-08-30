@@ -5001,6 +5001,10 @@ async function handleApiRequest(
     return state.recycleBinEntries;
   }
 
+  if (method === 'GET' && path === '/varro/session-history-scope') {
+    return { scope: 'directory', git: true };
+  }
+
   if (method === 'GET' && path === '/session/status') {
     return state.sessionStatuses;
   }

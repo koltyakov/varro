@@ -18,7 +18,7 @@ vi.mock('vscode', () => ({
   workspace: { getConfiguration: mocks.getConfiguration },
 }));
 
-import { readExtensionConfigState, readSessionHistoryScope } from './extension-config';
+import { readExtensionConfigState } from './extension-config';
 
 describe('readExtensionConfigState', () => {
   beforeEach(() => {
@@ -98,34 +98,5 @@ describe('readExtensionConfigState', () => {
   it('uses the default for a non-string chat.fontFamily', () => {
     mocks.values.set('chat.fontFamily', 42);
     expect(readExtensionConfigState().chatFontFamily).toBe('default');
-  });
-});
-
-describe('readSessionHistoryScope', () => {
-  beforeEach(() => {
-    mocks.values.clear();
-    vi.clearAllMocks();
-  });
-
-  it.each(['directory', 'descendants', 'project'] as const)('reads %s scope', (scope) => {
-    mocks.values.set('varro.chat.sessionHistoryScope', scope);
-    expect(readSessionHistoryScope()).toBe(scope);
-  });
-
-  it.each([undefined, null, '', 'workspace', 1])(
-    'defaults invalid value %s to directory',
-    (value) => {
-      mocks.values.set('varro.chat.sessionHistoryScope', value);
-      expect(readSessionHistoryScope()).toBe('directory');
-    }
-  );
-
-  it('reads the setting for a specific workspace folder resource', () => {
-    // SAFETY: The reader only forwards this controlled URI-shaped test value to the VS Code mock.
-    const resource = { fsPath: '/repo-b' } as never;
-    mocks.values.set('varro.chat.sessionHistoryScope', 'project');
-
-    expect(readSessionHistoryScope(resource)).toBe('project');
-    expect(mocks.getConfiguration).toHaveBeenCalledWith('varro', resource);
   });
 });

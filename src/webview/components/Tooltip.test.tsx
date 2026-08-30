@@ -66,6 +66,22 @@ describe('Tooltip', () => {
     expect(document.querySelector('[role="tooltip"]')).toBeNull();
   });
 
+  it('supports tooltips to the left of their trigger', async () => {
+    cleanup = render(
+      () => (
+        <Tooltip content="Side detail" placement="left" delay={0}>
+          <button>Run</button>
+        </Tooltip>
+      ),
+      container
+    );
+
+    container.querySelector('button')?.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(document.querySelector('[role="tooltip"]')?.classList.contains('left')).toBe(true);
+  });
+
   it('does not show when disabled', async () => {
     cleanup = render(
       () => (

@@ -170,7 +170,7 @@ function createDeps(overrides?: {
 }
 
 describe('session-lifecycle helpers', () => {
-  it('normalizes workspace paths and filters sessions to the active workspace', () => {
+  it('normalizes workspace paths and trusts the scoped session catalog', () => {
     expect(normalizeProjectPath('/repo///')).toBe('/repo');
     expect(normalizeProjectPath('C:\\repo\\')).toBe('C:/repo');
 
@@ -182,8 +182,8 @@ describe('session-lifecycle helpers', () => {
 
     applySessions(setup.deps, setup.current.sessions);
 
-    expect(setup.current.sessions.map((item) => item.id)).toEqual(['session-1']);
-    expect(setup.deps.clearActiveSessionState).toHaveBeenCalledTimes(1);
+    expect(setup.current.sessions.map((item) => item.id)).toEqual(['session-2', 'session-1']);
+    expect(setup.deps.clearActiveSessionState).not.toHaveBeenCalled();
   });
 
   it('keeps sessions from every open workspace root', () => {
@@ -200,7 +200,11 @@ describe('session-lifecycle helpers', () => {
 
     applySessions(setup.deps, setup.current.sessions);
 
-    expect(setup.current.sessions.map((item) => item.id)).toEqual(['session-b', 'session-a']);
+    expect(setup.current.sessions.map((item) => item.id)).toEqual([
+      'session-closed',
+      'session-b',
+      'session-a',
+    ]);
     expect(setup.current.activeSessionId).toBe('session-b');
     expect(setup.deps.clearActiveSessionState).not.toHaveBeenCalled();
   });
@@ -219,7 +223,7 @@ describe('session-lifecycle helpers', () => {
     expect(setup.deps.clearActiveSessionState).toHaveBeenCalledOnce();
   });
 
-  it('treats Windows workspace paths as case-insensitive when filtering sessions', () => {
+  it('keeps a scoped catalog with Windows path variants', () => {
     const setup = createDeps({
       sessions: [
         session('session-1', 'C:\\Users\\Andrew\\Projects\\Varro', 2),
@@ -230,11 +234,11 @@ describe('session-lifecycle helpers', () => {
 
     applySessions(setup.deps, setup.current.sessions);
 
-    expect(setup.current.sessions.map((item) => item.id)).toEqual(['session-1']);
+    expect(setup.current.sessions.map((item) => item.id)).toEqual(['session-1', 'session-2']);
     expect(setup.deps.clearActiveSessionState).not.toHaveBeenCalled();
   });
 
-  it('filters nested Windows sessions when workspace casing differs', () => {
+  it('keeps nested Windows sessions from the scoped catalog', () => {
     const setup = createDeps({
       sessions: [
         session('session-1', 'C:\\Users\\Andrew\\Projects\\Varro\\packages\\cli', 2),
@@ -245,10 +249,10 @@ describe('session-lifecycle helpers', () => {
 
     applySessions(setup.deps, setup.current.sessions);
 
-    expect(setup.current.sessions.map((item) => item.id)).toEqual([]);
+    expect(setup.current.sessions.map((item) => item.id)).toEqual(['session-1', 'session-2']);
   });
 
-  it('filters sessions whose directory is nested under the active workspace', () => {
+  it('keeps descendant sessions from the scoped catalog', () => {
     const setup = createDeps({
       sessions: [
         session('session-1', '/repo/project-a', 2),
@@ -259,7 +263,7 @@ describe('session-lifecycle helpers', () => {
 
     applySessions(setup.deps, setup.current.sessions);
 
-    expect(setup.current.sessions.map((item) => item.id)).toEqual([]);
+    expect(setup.current.sessions.map((item) => item.id)).toEqual(['session-1', 'session-2']);
     expect(setup.deps.clearActiveSessionState).not.toHaveBeenCalled();
   });
 
@@ -561,14 +565,15 @@ describe('session-lifecycle helpers', () => {
 
     operations.applySessions(state.sessions);
 
-    expect(setSessionsState).toHaveBeenCalledWith([session('session-1', '/repo-a', 1)]);
-    expect(resetTodoSync).toHaveBeenCalledTimes(1);
-    expect(resetToolCallExpansionState).toHaveBeenCalledTimes(1);
-    expect(setState).toHaveBeenCalledWith('activeSessionId', null);
-    expect(persistActiveSessionId).toHaveBeenCalledWith(null);
-    expect(clearMessages).toHaveBeenCalledTimes(1);
-    expect(setState).toHaveBeenCalledWith('messagesLoading', false);
-    expect(stopLoading).toHaveBeenCalledTimes(1);
+    expect(setSessionsState).toHaveBeenCalledWith([
+      session('session-2', '/repo-b', 2),
+      session('session-1', '/repo-a', 1),
+    ]);
+    expect(resetTodoSync).not.toHaveBeenCalled();
+    expect(resetToolCallExpansionState).not.toHaveBeenCalled();
+    expect(persistActiveSessionId).not.toHaveBeenCalled();
+    expect(clearMessages).not.toHaveBeenCalled();
+    expect(stopLoading).not.toHaveBeenCalled();
 
     state.activeSessionId = 'session-1';
     operations.clearDeletedSessionState('session-1');

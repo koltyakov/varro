@@ -4,11 +4,13 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 
 ## 0.27.x - August 2026
 
-- Added a built-in read-only Ask agent for safely exploring code and answering questions without modifying files, while honoring an existing configured `ask` agent.
+- Added a built-in read-only Ask agent for exploring code and answering questions without modifying files, while honoring an existing configured `ask` agent. Built-in agents now have distinct icons in the agent picker.
 - Added multi-root workspace support with independent sidebar and editor chat selection, workspace controls, and session routing across activation, sends, summaries, Ralph runs, forks, and reopened chats.
 - Added sibling-workspace notifications with quick switching for sessions needing attention, failed sessions, and completed plans.
-- Added automatic provider authorization without a browser URL, plus Azure and Amazon provider icons.
-- Improved workspace-scoped state, session recovery, provider authentication, long-conversation scrolling, composer isolation, and editor context handling.
+- Added a session-history scope picker for showing sessions from the current folder, nested folders, or the entire Git project, with the choice remembered per project.
+- Added automatic provider authorization without a browser URL, provider deletion from model menus, Azure and Amazon icons, and usage limits for OpenCode Go, xAI, and Ollama Cloud.
+- Added assistant duration to local usage reports.
+- Improved workspace-scoped state, session recovery and lifecycle coordination, provider authentication, long-conversation scrolling, composer isolation, and editor context handling.
 - Fixed link punctuation, token totals, hidden-model persistence, transcript overflow, chat action colors, queued-message restoration, local usage reporting, and stale webview events.
 
 ## 0.26.x - August 2026

@@ -27,11 +27,16 @@ import type {
   ServerEvent,
   ServerEventName,
   SessionDiffSummary,
+  SessionHistoryScope,
   SessionTitleFallbackResponse,
   WorkspaceStatusEventSummary,
   WorkspaceFilePick,
 } from '../../shared/protocol';
-import { buildVarroSessionEndpoint, VARRO_API_ENDPOINTS } from '../../shared/protocol';
+import {
+  buildVarroSessionEndpoint,
+  isSessionHistoryScope,
+  VARRO_API_ENDPOINTS,
+} from '../../shared/protocol';
 import { parseHealthResponse, type HealthResponse } from '../../shared/health';
 import { normalizeRecycleBinEntries } from '../../shared/recycle-bin';
 import { asRecord, type UnknownRecord } from '../../shared/type-utils';
@@ -420,6 +425,29 @@ export const client = {
   },
 
   varro: {
+    sessionHistoryScope: {
+      async get(directory: string): Promise<{ scope: SessionHistoryScope; git: boolean }> {
+        const params = new URLSearchParams({ directory });
+        const path = `${VARRO_API_ENDPOINTS.sessionHistoryScope}?${params.toString()}`;
+        const value = asRecord(await apiCall('GET', path));
+        if (!isSessionHistoryScope(value?.scope) || !isBoolean(value.git)) {
+          throw new Error(`Malformed response from ${path}`);
+        }
+        return { scope: value.scope, git: value.git };
+      },
+      async set(
+        directory: string,
+        scope: SessionHistoryScope
+      ): Promise<{ scope: SessionHistoryScope; git: boolean }> {
+        const params = new URLSearchParams({ directory });
+        const path = `${VARRO_API_ENDPOINTS.sessionHistoryScope}?${params.toString()}`;
+        const value = asRecord(await apiCall('POST', path, { scope }));
+        if (!isSessionHistoryScope(value?.scope) || !isBoolean(value.git)) {
+          throw new Error(`Malformed response from ${path}`);
+        }
+        return { scope: value.scope, git: value.git };
+      },
+    },
     session: {
       async deleteImmediately(
         sessionID: string,

@@ -191,6 +191,117 @@ describe('SessionListSectionHeader icons', () => {
 });
 
 describe('SessionListView model details', () => {
+  it('persists project scope from the search-row picker and hides it while searching', async () => {
+    const getScope = vi
+      .spyOn(client.varro.sessionHistoryScope, 'get')
+      .mockResolvedValue({ scope: 'project', git: true });
+    const setScope = vi
+      .spyOn(client.varro.sessionHistoryScope, 'set')
+      .mockResolvedValue({ scope: 'descendants', git: true });
+    setState('editorContext', {
+      workspacePath: '/repo',
+      workspaceFolders: [{ name: 'Repo', path: '/repo' }],
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(() => <SessionListView onPrimarySessionsCountChange={vi.fn()} />, container);
+    await Promise.resolve();
+
+    const trigger = container.querySelector<HTMLButtonElement>('.session-history-scope-trigger')!;
+    expect(getScope).toHaveBeenCalledWith('/repo');
+    expect(trigger.textContent).toContain('Project');
+    reloadSessionsMock.mockClear();
+    trigger.click();
+    const below = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('.session-history-scope-option')
+    ).find((option) => option.textContent?.includes('Nested'))!;
+    below.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(setScope).toHaveBeenCalledWith('/repo', 'descendants');
+    expect(reloadSessionsMock).toHaveBeenCalledOnce();
+
+    const search = container.querySelector<HTMLInputElement>('.session-list-search-input')!;
+    search.value = 'active';
+    search.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    expect(container.querySelector('.session-history-scope-picker')).toBeNull();
+  });
+
+  it('updates the scope picker immediately while persistence remains pending', async () => {
+    vi.spyOn(client.varro.sessionHistoryScope, 'get').mockResolvedValue({
+      scope: 'directory',
+      git: true,
+    });
+    let resolveSet!: (result: { scope: 'descendants'; git: true }) => void;
+    const setRequest = new Promise<{ scope: 'descendants'; git: true }>((resolve) => {
+      resolveSet = resolve;
+    });
+    vi.spyOn(client.varro.sessionHistoryScope, 'set').mockReturnValue(setRequest);
+    setState('editorContext', {
+      workspacePath: '/repo',
+      workspaceFolders: [{ name: 'Repo', path: '/repo' }],
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(() => <SessionListView />, container);
+    await vi.waitFor(() => {
+      expect(container.querySelector('.session-history-scope-trigger')?.textContent).toContain(
+        'Folder'
+      );
+    });
+    const trigger = container.querySelector<HTMLButtonElement>('.session-history-scope-trigger')!;
+    trigger.click();
+    const nested = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('.session-history-scope-option')
+    ).find((option) => option.textContent?.includes('Nested'))!;
+    nested.click();
+
+    expect(trigger.textContent).toContain('Nested');
+    expect(container.querySelector('.session-history-scope-menu')).toBeNull();
+    expect(reloadSessionsMock).not.toHaveBeenCalled();
+
+    resolveSet({ scope: 'descendants', git: true });
+    await vi.waitFor(() => expect(reloadSessionsMock).toHaveBeenCalledOnce());
+  });
+
+  it.each(['descendants', 'project'] as const)(
+    'shows compact folder names for sessions outside the current folder in %s scope',
+    async (scope) => {
+      vi.spyOn(client.varro.sessionHistoryScope, 'get').mockResolvedValue({ scope, git: true });
+      setState('editorContext', {
+        workspacePath: '/repo',
+        workspaceFolders: [{ name: 'Repo', path: '/repo' }],
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      });
+      setState('sessions', [
+        session('root-session', 2, { directory: '/repo' }),
+        session('nested-session', 1, { directory: '/repo/src/qil-frontend-web' }),
+      ]);
+
+      cleanup = render(() => <SessionListView />, container);
+      await vi.waitFor(() => {
+        expect(container.querySelectorAll('.session-item-folder')).toHaveLength(1);
+      });
+
+      const folder = container.querySelector<HTMLElement>('.session-item-folder');
+      expect(folder?.textContent).toBe('qfw');
+      expect(folder?.title).toBe('/repo/src/qil-frontend-web');
+      expect(
+        container
+          .querySelector('.session-item-folder')
+          ?.closest('.session-item')
+          ?.querySelector('.session-item-title-text')?.textContent
+      ).toBe('nested-session');
+    }
+  );
+
   it('shows a workspace selector above search for multi-root workspaces', () => {
     const onPrimarySessionsCountChange = vi.fn();
     const send = vi.fn((message: TestRuntimeValue) => {

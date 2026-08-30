@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: OpenCode Workbench",
-  "version": "0.27.9",
+  "version": "0.27.10",
   "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
@@ -407,22 +407,6 @@
           ],
           "default": "right",
           "markdownDescription": "Choose which side shows the sessions pane on large screens in the Varro chat view."
-        },
-        "varro.chat.sessionHistoryScope": {
-          "type": "string",
-          "scope": "resource",
-          "enum": [
-            "directory",
-            "descendants",
-            "project"
-          ],
-          "enumDescriptions": [
-            "Show sessions whose working directory exactly matches an open VS Code workspace folder.",
-            "Show sessions in each open VS Code workspace folder and its descendants within the same OpenCode project.",
-            "Show all sessions in the containing Git project. For non-Git folders, use the folder and its descendants."
-          ],
-          "default": "directory",
-          "markdownDescription": "Choose how broadly Varro loads OpenCode session history for this VS Code workspace folder. In a multi-root workspace, configure the setting per folder to use different scopes."
         },
         "varro.chat.defaultPermissionMode": {
           "type": "string",

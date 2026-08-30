@@ -46,6 +46,12 @@
   border-left: 1px solid color-mix(in srgb, var(--color-vscode-border-strong) 82%, transparent);
 }
 
+.themed-tooltip.left .themed-tooltip-arrow {
+  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border-strong) 82%, transparent);
+  border-right: 1px solid color-mix(in srgb, var(--color-vscode-border-strong) 82%, transparent);
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
 .dropdown-menu {
   display: flex;
   flex-direction: column;

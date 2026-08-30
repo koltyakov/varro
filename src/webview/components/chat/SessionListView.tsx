@@ -39,7 +39,12 @@ import {
 } from '../../hooks/useOpenCode';
 import { normalizeSessionTitle } from '../../../shared/session-title';
 import { isSameWorkspacePath } from '../../../shared/workspace-path';
-import type { RecycleBinEntry, SessionDiffSummary } from '../../../shared/protocol';
+import type {
+  RecycleBinEntry,
+  SessionDiffSummary,
+  SessionHistoryScope,
+  WorkspaceFolderContext,
+} from '../../../shared/protocol';
 import type { SelectedModel } from '../../lib/app-state-types';
 import type { Session } from '../../types';
 import { client, type SessionListPage } from '../../lib/client';
@@ -56,7 +61,11 @@ import {
   forwardMessageIcon,
   navArrowRightIcon,
   cableTagIcon,
+  folderIcon,
+  folderPlusIcon,
   folderSettingsIcon,
+  gitIcon,
+  navArrowDownIcon,
   pinIcon,
   trashIcon,
   xmarkIcon,
@@ -71,6 +80,7 @@ import { isNumber, isString, type UnknownRecord, isObject } from '../../lib/runt
 import { UiIcon } from '../UiIcon';
 import { FolderIcon } from '../FolderIcon';
 import { getWorkspaceCompactLabel, WorkspacePicker } from '../chat-input/ToolbarPickers';
+import { Tooltip } from '../Tooltip';
 
 type SessionGroups = {
   pinned: (typeof state.sessions)[number][];
@@ -83,6 +93,152 @@ type SessionGroups = {
   overflowOther: (typeof state.sessions)[number][];
   subagents: (typeof state.sessions)[number][];
 };
+
+const SESSION_HISTORY_SCOPE_OPTIONS = [
+  {
+    scope: 'directory',
+    label: 'Folder',
+    description: 'Sessions in this folder only',
+    icon: folderIcon,
+  },
+  {
+    scope: 'descendants',
+    label: 'Nested',
+    description: 'Sessions in this folder and folders below it',
+    icon: folderPlusIcon,
+  },
+  {
+    scope: 'project',
+    label: 'Project',
+    description: 'All sessions in this Git project',
+    icon: gitIcon,
+  },
+] as const;
+
+function getDirectoryName(directory: string) {
+  const normalized = directory.replace(/\\/g, '/').replace(/\/+$/, '');
+  return normalized.slice(normalized.lastIndexOf('/') + 1) || normalized || directory;
+}
+
+function SessionHistoryScopePicker(props: {
+  directory: string;
+  onScopeChange: (scope: SessionHistoryScope) => void;
+}) {
+  const [scope, setScope] = createSignal<SessionHistoryScope>('directory');
+  const [isGit, setIsGit] = createSignal(false);
+  const [open, setOpen] = createSignal(false);
+  let root: HTMLDivElement | undefined;
+  let requestKey = 0;
+  let saveKey = 0;
+
+  const options = createMemo(() =>
+    isGit()
+      ? SESSION_HISTORY_SCOPE_OPTIONS
+      : SESSION_HISTORY_SCOPE_OPTIONS.filter((option) => option.scope !== 'project')
+  );
+  const selected = createMemo(() =>
+    SESSION_HISTORY_SCOPE_OPTIONS.find((option) => option.scope === scope())!
+  );
+
+  createEffect(() => {
+    const directory = props.directory;
+    const key = ++requestKey;
+    setOpen(false);
+    void (async () => {
+      try {
+        const result = await client.varro.sessionHistoryScope.get(directory);
+        if (key !== requestKey) return;
+        setScope(result.scope);
+        props.onScopeChange(result.scope);
+        setIsGit(result.git);
+        if (result.scope !== 'directory') await reloadSessions();
+      } catch (error: unknown) {
+        if (key === requestKey) setError(error instanceof Error ? error.message : String(error));
+      }
+    })();
+  });
+
+  const dismiss = (event: PointerEvent) => {
+    if (!(event.target instanceof Node) || !root?.contains(event.target)) setOpen(false);
+  };
+  document.addEventListener('pointerdown', dismiss);
+  onCleanup(() => {
+    requestKey += 1;
+    document.removeEventListener('pointerdown', dismiss);
+  });
+
+  const selectScope = async (next: SessionHistoryScope) => {
+    if (next === scope()) {
+      setOpen(false);
+      return;
+    }
+    const previous = scope();
+    const key = ++saveKey;
+    setScope(next);
+    props.onScopeChange(next);
+    setOpen(false);
+    try {
+      const result = await client.varro.sessionHistoryScope.set(props.directory, next);
+      if (key !== saveKey) return;
+      setScope(result.scope);
+      props.onScopeChange(result.scope);
+      setIsGit(result.git);
+      void reloadSessions();
+    } catch (error: unknown) {
+      if (key !== saveKey) return;
+      setScope(previous);
+      props.onScopeChange(previous);
+      setError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  return (
+    <div
+      ref={(element) => {
+        root = element;
+      }}
+      class="session-history-scope-picker"
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') setOpen(false);
+      }}
+    >
+      <Tooltip content={selected().description} placement="left" disabled={open()}>
+        <button
+          type="button"
+          class="session-history-scope-trigger"
+          aria-label={`Session history: ${selected().label}`}
+          aria-haspopup="menu"
+          aria-expanded={open()}
+          onClick={() => setOpen((value) => !value)}
+        >
+          <UiIcon source={selected().icon} width={14} height={14} />
+          <span>{selected().label}</span>
+          <UiIcon source={navArrowDownIcon} width={10} height={10} />
+        </button>
+      </Tooltip>
+      <Show when={open()}>
+        <div class="session-history-scope-menu" role="menu">
+          <For each={options()}>
+            {(option) => (
+              <Tooltip content={option.description} placement="left" delay={500}>
+                <button
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={scope() === option.scope}
+                  class="session-history-scope-option"
+                  onClick={() => void selectScope(option.scope)}
+                >
+                  <UiIcon source={option.icon} width={14} height={14} />
+                  <span>{option.label}</span>
+                </button>
+              </Tooltip>
+            )}
+          </For>
+        </div>
+      </Show>
+    </div>
+  );
+}
 
 export type SessionIndicatorSets = {
   subagentCounts: Map<string, number>;
@@ -1004,6 +1160,8 @@ export function SessionListView(props: {
     createSignal<SessionListGroupedSection | null>(null);
   const [searchQuery, setSearchQuery] = createSignal('');
   const [folderFilter, setFolderFilter] = createSignal<string | null>(null);
+  const [sessionHistoryScope, setSessionHistoryScope] =
+    createSignal<SessionHistoryScope>('directory');
   const [allSessionsForSubagent, setAllSessionsForSubagent] = createSignal<Session[] | null>(null);
   const [isResolvingSubagents, setIsResolvingSubagents] = createSignal(false);
   const [nativeSearchResults, setNativeSearchResults] = createSignal<Session[] | null>(null);
@@ -1043,6 +1201,40 @@ export function SessionListView(props: {
 
   const trimmedSearchQuery = createMemo(() => searchQuery().trim());
   const shouldShowSearch = createMemo(() => !props.subagentParentId && !props.sessionFilter);
+  const sessionHistoryDirectory = createMemo(
+    () =>
+      folderFilter() ??
+      state.editorContext.workspacePath ??
+      state.editorContext.workspaceFolders?.[0]?.path ??
+      null
+  );
+  const sessionDirectoryFolders = createMemo<WorkspaceFolderContext[]>(() => {
+    const folders = new Map<string, WorkspaceFolderContext>();
+    for (const session of state.sessions) {
+      if (folders.has(session.directory)) continue;
+      folders.set(session.directory, {
+        name: getDirectoryName(session.directory),
+        path: session.directory,
+      });
+    }
+    return [...folders.values()];
+  });
+  const getSessionFolderLabel = (session: Session): string | null => {
+    const currentDirectory = sessionHistoryDirectory();
+    const showWorkspaceFolder =
+      !folderFilter() && (state.editorContext.workspaceFolders?.length ?? 0) > 1;
+    const showScopedFolder =
+      sessionHistoryScope() !== 'directory' &&
+      Boolean(currentDirectory) &&
+      !isSameWorkspacePath(session.directory, currentDirectory);
+    if (!showWorkspaceFolder && !showScopedFolder) return null;
+    if (session.workspaceScope === 'workspace') return 'Workspace';
+    return (
+      getWorkspaceCompactLabel(session.directory, state.editorContext.workspaceFolders ?? []) ??
+      getWorkspaceCompactLabel(session.directory, sessionDirectoryFolders()) ??
+      getDirectoryName(session.directory)
+    );
+  };
 
   let resolutionRequestKey = 0;
   let resolutionRequestActive = false;
@@ -1472,9 +1664,7 @@ export function SessionListView(props: {
               isCompletedPlanSession={sessionIndicators().planReadyIds.has(sessionId)}
               isPinned={state.pinnedSessionIds.includes(sessionId)}
               startsUnpinnedGroup={startsUnpinnedGroup()}
-              showFolder={
-                !folderFilter() && (state.editorContext.workspaceFolders?.length ?? 0) > 1
-              }
+              folderLabel={getSessionFolderLabel(session())}
               onTogglePinned={async () => {
                 try {
                   const pinnedSessionIds = await client.varro.session.setPinned(
@@ -1724,6 +1914,10 @@ export function SessionListView(props: {
             }}
             type="text"
             class="session-list-search-input"
+            classList={{
+              'session-list-search-input-with-scope':
+                searchQuery().length === 0 && Boolean(sessionHistoryDirectory()),
+            }}
             value={searchQuery()}
             onInput={(e) => setSearchQuery(e.currentTarget.value)}
             onFocus={() => setFocusedIndex(-1)}
@@ -1731,6 +1925,14 @@ export function SessionListView(props: {
             aria-label="Search sessions"
             spellcheck={false}
           />
+          <Show when={searchQuery().length === 0 && sessionHistoryDirectory()} keyed>
+            {(directory) => (
+              <SessionHistoryScopePicker
+                directory={directory}
+                onScopeChange={setSessionHistoryScope}
+              />
+            )}
+          </Show>
           <Show when={searchQuery().length > 0}>
             <button
               type="button"
@@ -1927,7 +2129,7 @@ function SessionListItem(props: {
   isCompletedPlanSession: boolean;
   isPinned: boolean;
   startsUnpinnedGroup: boolean;
-  showFolder: boolean;
+  folderLabel: string | null;
   onTogglePinned: () => Promise<void>;
   onOpenSubagents?: (parentSessionId: string) => void;
   onActiveSessionReselect?: () => void;
@@ -2246,7 +2448,7 @@ function SessionListItem(props: {
             </Show>
           </span>
           <span class="session-item-meta session-item-stats-meta">
-            <Show when={props.showFolder}>
+            <Show when={props.folderLabel}>
               <span class="session-item-folder" title={props.session.directory}>
                 <Show
                   when={props.session.workspaceScope === 'workspace'}
@@ -2261,14 +2463,7 @@ function SessionListItem(props: {
                     height={10}
                   />
                 </Show>
-                <span>
-                  {props.session.workspaceScope === 'workspace'
-                    ? 'Workspace'
-                    : getWorkspaceCompactLabel(
-                        props.session.directory,
-                        state.editorContext.workspaceFolders ?? []
-                      )}
-                </span>
+                <span>{props.folderLabel}</span>
               </span>
               {' · '}
             </Show>

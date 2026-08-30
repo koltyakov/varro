@@ -103,6 +103,10 @@ export function isPermissionMode<T>(value: T): value is T & PermissionMode {
   return value === 'default' || value === 'edits' || value === 'auto' || value === 'full';
 }
 
+export function isSessionHistoryScope<T>(value: T): value is T & SessionHistoryScope {
+  return value === 'directory' || value === 'descendants' || value === 'project';
+}
+
 export function isSessionWorkspaceScope<T>(value: T): value is T & SessionWorkspaceScope {
   return value === 'workspace' || value === 'folder';
 }
@@ -338,6 +342,7 @@ export const VARRO_API_ENDPOINTS = {
   openCodeConfigModelRouting: `${VARRO_API_NAMESPACE}/opencode-config/model-routing`,
   session: `${VARRO_API_NAMESPACE}/session`,
   sessionTrash: `${VARRO_API_NAMESPACE}/session-trash`,
+  sessionHistoryScope: `${VARRO_API_NAMESPACE}/session-history-scope`,
   workspaceFile: `${VARRO_API_NAMESPACE}/workspace-file`,
   workspaceFilePick: `${VARRO_API_NAMESPACE}/workspace-file/pick`,
   workspacePathResolve: `${VARRO_API_NAMESPACE}/workspace-path/resolve`,

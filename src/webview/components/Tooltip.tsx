@@ -17,13 +17,14 @@ type TooltipPosition = {
   left: number;
   top: number;
   arrowLeft: number;
-  placement: 'top' | 'bottom';
+  arrowTop?: number;
+  placement: 'top' | 'bottom' | 'left';
 };
 
 export function Tooltip(props: {
   content: JSX.Element;
   children: JSX.Element;
-  placement?: 'top' | 'bottom';
+  placement?: 'top' | 'bottom' | 'left';
   delay?: number;
   disabled?: boolean;
 }) {
@@ -49,6 +50,21 @@ export function Tooltip(props: {
     const tooltipBox = tooltip.getBoundingClientRect();
     const viewportMargin = 8;
     const gap = 6;
+    if (props.placement === 'left') {
+      const left = Math.max(viewportMargin, triggerBox.left - tooltipBox.width - gap);
+      const top = Math.min(
+        Math.max(viewportMargin, window.innerHeight - tooltipBox.height - viewportMargin),
+        Math.max(viewportMargin, triggerBox.top + (triggerBox.height - tooltipBox.height) / 2)
+      );
+      setPosition({
+        left: Math.round(left),
+        top: Math.round(top),
+        arrowLeft: tooltipBox.width,
+        arrowTop: Math.round(triggerBox.top + triggerBox.height / 2 - top),
+        placement: 'left',
+      });
+      return;
+    }
     const left = Math.min(
       Math.max(viewportMargin, window.innerWidth - tooltipBox.width - viewportMargin),
       Math.max(viewportMargin, triggerBox.left + (triggerBox.width - tooltipBox.width) / 2)
@@ -173,6 +189,7 @@ export function Tooltip(props: {
               visible: position() !== null,
               top: position()?.placement === 'top',
               bottom: position()?.placement === 'bottom',
+              left: position()?.placement === 'left',
             }}
             role="tooltip"
             style={{ left: `${position()?.left ?? 0}px`, top: `${position()?.top ?? 0}px` }}
@@ -180,7 +197,11 @@ export function Tooltip(props: {
             {props.content}
             <span
               class="themed-tooltip-arrow"
-              style={{ left: `${position()?.arrowLeft ?? 0}px` }}
+              style={{
+                left: `${position()?.arrowLeft ?? 0}px`,
+                top:
+                  position()?.arrowTop === undefined ? undefined : `${position()?.arrowTop ?? 0}px`,
+              }}
               aria-hidden="true"
             />
           </div>

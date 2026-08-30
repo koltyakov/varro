@@ -53,7 +53,7 @@ import { CommitMessageService } from './commit-message-service';
 import type { ContextProvider } from './context-provider';
 import { DroppedFilesService } from './dropped-files-service';
 import { DraftImageStore } from './draft-image-store';
-import { readExtensionConfigState, readSessionHistoryScope } from './extension-config';
+import { readExtensionConfigState } from './extension-config';
 import { readMaximumTestedOpenCodeVersion } from './extension-manifest';
 import { FileSearchService } from './file-search-service';
 import { GeneratedDependencyTreeGuard } from './generated-dependency-tree-guard';
@@ -82,6 +82,7 @@ import { SessionStateManager } from './session-state-manager';
 import { SessionPermissionModeStore } from './session-permission-mode-store';
 import { SessionModelSelectionStore } from './session-model-selection-store';
 import { SessionPlanStateStore } from './session-plan-state-store';
+import { SessionHistoryScopeStore } from './session-history-scope-store';
 import { SessionTitleFallback } from './session-title-fallback';
 import { SessionTrashManager } from './session-trash-manager';
 import { createSidebarProviderActions } from './sidebar-provider-actions';
@@ -158,6 +159,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly sessionPermissionModes: SessionPermissionModeStore;
   private readonly sessionSelectedModels: SessionModelSelectionStore;
   private readonly sessionPlanState: SessionPlanStateStore;
+  private readonly sessionHistoryScopes: SessionHistoryScopeStore;
   private readonly modelPreferences: ModelPreferencesStore;
   private readonly draftImages: DraftImageStore;
   private readonly hiddenSessions: HiddenSessionManager;
@@ -269,6 +271,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.sessionPermissionModes = new SessionPermissionModeStore(persistence);
     this.sessionSelectedModels = new SessionModelSelectionStore(persistence);
     this.sessionPlanState = new SessionPlanStateStore(persistence);
+    this.sessionHistoryScopes = new SessionHistoryScopeStore(persistence);
     this.modelPreferences = new ModelPreferencesStore(persistence);
     this.draftImages = new DraftImageStore(persistence);
     this.hiddenSessions = new HiddenSessionManager();
@@ -405,11 +408,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       ) {
         this.postConfigState();
       }
-      if (event.affectsConfiguration('varro.chat.sessionHistoryScope')) {
-        this.workspaceSessionStatusCoordinator.clearCatalogs();
-        for (const endpoint of this.endpoints) endpoint.restProxy.invalidateSessionCatalog();
-        this.post({ type: 'session/catalog-invalidated' });
-      }
     });
 
     this.serverEventBridge.attach();
@@ -530,7 +528,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       simulateNoProviders: this.simulateNoProviders,
       getRequestGeneration: () => webviewSession.getRequestGeneration(),
       getStatus: () => this.serverEventBridge.getStatus(),
-      getSessionHistoryScope: (root) => readSessionHistoryScope(vscode.Uri.file(root)),
+      getSessionHistoryScope: (root) => this.sessionHistoryScopes.getForRoot(root),
+      getSessionHistoryScopeByKey: (key) => this.sessionHistoryScopes.get(key),
+      associateSessionHistoryScope: (root, key) => this.sessionHistoryScopes.associate(root, key),
+      updateSessionHistoryScope: async (key, scope) => {
+        await this.sessionHistoryScopes.set(key, scope);
+        this.workspaceSessionStatusCoordinator.clearCatalogs();
+        for (const endpoint of this.endpoints) endpoint.restProxy.invalidateSessionCatalog();
+        this.post({ type: 'session/catalog-invalidated' });
+      },
       getWorkspacePath: () => endpointRef.endpoint?.workspacePath ?? initialWorkspacePath,
       ensureServerStarted: () => this.runtime.ensureServerStarted(),
       confirmPromptAdmission: (workspacePath) =>

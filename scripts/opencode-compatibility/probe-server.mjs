@@ -472,6 +472,9 @@ async function runProbe() {
       await request('GET /session with project scope', 'GET', '/session?scope=project', {
         validate: (value) => Array.isArray(value) && value.some((item) => item?.id === sessionID),
       });
+      await request('GET /experimental/session global catalog', 'GET', '/experimental/session', {
+        validate: Array.isArray,
+      });
       await request('GET /session with descendant path', 'GET', '/session?path=missing-subtree', {
         validate: (value) => Array.isArray(value) && value.length === 0,
       });
