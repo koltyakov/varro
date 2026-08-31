@@ -4,6 +4,7 @@ import { startNewChatDraft } from './new-chat-draft';
 import {
   getPersistedSelectedModel,
   getSelectedModelForSession,
+  composerFocusKey,
   inputText,
   resetDefaultAppState,
   setInputText,
@@ -118,6 +119,46 @@ describe('startNewChatDraft', () => {
 
     expect(state.activeSessionId).toBeNull();
     expect(state.messagesLoading).toBe(false);
+  });
+
+  it('does not reuse a blank-looking session while its messages are loading', () => {
+    setState('sessions', [
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'New session',
+        version: '1',
+        time: { created: 1, updated: 1 },
+      },
+    ]);
+    setState('activeSessionId', 'session-1');
+    setState('messagesLoading', true);
+
+    startNewChatDraft();
+
+    expect(state.activeSessionId).toBeNull();
+    expect(state.messagesLoading).toBe(false);
+  });
+
+  it('focuses the composer when reusing an untouched blank session', () => {
+    setState('sessions', [
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'New session',
+        version: '1',
+        time: { created: 1, updated: 1 },
+      },
+    ]);
+    setState('activeSessionId', 'session-1');
+    const previousFocusKey = composerFocusKey();
+
+    startNewChatDraft();
+
+    expect(state.activeSessionId).toBe('session-1');
+    expect(composerFocusKey()).toBe(previousFocusKey + 1);
   });
 
   it('restores global model and reasoning defaults for a new chat', () => {

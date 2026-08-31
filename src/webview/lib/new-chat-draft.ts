@@ -4,6 +4,7 @@ import {
   inputText,
   isSessionAwaitingInput,
   persistActiveSessionId,
+  requestComposerFocus,
   restoreSelectedModelForComposer,
   setError,
   setInputText,
@@ -26,7 +27,7 @@ export function getNewChatDraftGeneration() {
 
 export function getDiscardableActiveBlankSessionId(): string | false {
   const sessionId = state.activeSessionId;
-  if (!sessionId || state.messages.length > 0) return false;
+  if (!sessionId || state.messagesLoading || state.messages.length > 0) return false;
   const session = state.sessions.find((item) => item.id === sessionId);
   if (!session || !isEmptySession(session)) return false;
   if (state.queuedMessages.some((item) => item.sessionId === sessionId)) return false;
@@ -72,5 +73,6 @@ export function startNewChatDraft() {
     stopLoading();
     setPersistentShowSessionPicker(false);
     restoreSelectedModelForComposer(null);
+    requestComposerFocus();
   });
 }
