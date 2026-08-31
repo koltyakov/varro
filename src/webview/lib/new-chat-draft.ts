@@ -35,6 +35,18 @@ export function getDiscardableActiveBlankSessionId(): string | false {
   return statusType !== 'busy' && statusType !== 'retry' ? sessionId : false;
 }
 
+export function detachDiscardableActiveBlankSession(): string | false {
+  const sessionId = getDiscardableActiveBlankSessionId();
+  if (!sessionId) return false;
+
+  newChatDraftGeneration += 1;
+  batch(() => {
+    setState('activeSessionId', null);
+    persistActiveSessionId(null);
+  });
+  return sessionId;
+}
+
 /**
  * Switches the UI to a blank "New Chat" draft without creating a session on
  * the server; the session is created lazily when the first message is sent.

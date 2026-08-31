@@ -78,6 +78,10 @@ export interface WorkspaceFilePick {
 
 export type PermissionMode = 'default' | 'edits' | 'auto' | 'full';
 export type SessionWorkspaceScope = 'workspace' | 'folder';
+export interface SessionWorkspaceTarget {
+  scope: SessionWorkspaceScope;
+  directory: string | null;
+}
 export const VARRO_SESSION_METADATA_VERSION = 1;
 
 export const MAX_PERSISTED_SESSION_ID_LENGTH = 512;

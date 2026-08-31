@@ -5,6 +5,7 @@ import type {
   ExtensionMessage,
   PermissionMode,
   QueuedContextSnapshot,
+  SessionWorkspaceTarget,
   WebviewThemeKind,
 } from '../../../shared/protocol';
 import {
@@ -174,6 +175,7 @@ export interface OpenCodeRuntime {
       queuedContext?: QueuedContextSnapshot;
       preserveComposer?: boolean;
       targetSessionId?: string;
+      newSessionWorkspace?: SessionWorkspaceTarget;
       queuedMessageDispatch?: { itemId: string; lease: number };
     }
   ): Promise<boolean>;
@@ -2177,7 +2179,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   const sessionSendOperations = new SessionSendOperations({
     getWorkspaceGeneration: () => workspaceGeneration,
-    createSession: (initialPermissionMode) => createSession(undefined, initialPermissionMode),
+    createSession: (initialPermissionMode, workspaceTarget) =>
+      createSession(undefined, initialPermissionMode, workspaceTarget),
     ensureSessionPermission: (sessionId, options) =>
       ensureSessionPermissionWithDependencies(
         {
@@ -2485,14 +2488,16 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     getWorkspaceGeneration: () => workspaceGeneration,
     getSessionSelectionGeneration: () => sessionSelectionGeneration,
     getNewChatDraftGeneration,
-    createRemoteSession: (body) => {
+    createRemoteSession: (body, workspaceTarget) => {
       const workspaceScope =
-        !manualWorkspaceSelection() &&
+        workspaceTarget?.scope ??
+        (!manualWorkspaceSelection() &&
         (appStore.state.editorContext.workspaceFolders?.length ?? 0) > 1
           ? 'workspace'
-          : 'folder';
-      const directory =
-        workspaceScope === 'workspace'
+          : 'folder');
+      const directory = workspaceTarget
+        ? (workspaceTarget.directory ?? undefined)
+        : workspaceScope === 'workspace'
           ? (appStore.state.editorContext.workspaceDirectory ??
             appStore.state.editorContext.workspaceFolders?.[0]?.path ??
             undefined)
@@ -2638,9 +2643,14 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   async function createSession(
     title?: string,
-    initialPermissionMode = permissionsStore.getPermissionModeForSession(null)
+    initialPermissionMode = permissionsStore.getPermissionModeForSession(null),
+    workspaceTarget?: SessionWorkspaceTarget
   ): Promise<string | null> {
-    const sessionId = await sessionManagementOperations.createSession(title, initialPermissionMode);
+    const sessionId = await sessionManagementOperations.createSession(
+      title,
+      initialPermissionMode,
+      workspaceTarget
+    );
     if (sessionId) {
       const directory = getSessionDirectory(sessionId);
       sessionStore.persistLastOpenedView(
@@ -2813,6 +2823,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       preserveComposer?: boolean;
       targetSessionId?: string;
       workspaceDirectory?: string;
+      newSessionWorkspace?: SessionWorkspaceTarget;
       queuedMessageDispatch?: { itemId: string; lease: number };
     }
   ): Promise<boolean> {

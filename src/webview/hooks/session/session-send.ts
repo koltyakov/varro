@@ -4,6 +4,7 @@ import type {
   EditorContext,
   PermissionMode,
   QueuedContextSnapshot,
+  SessionWorkspaceTarget,
 } from '../../../shared/protocol';
 import { isProviderAuthFailure } from '../../../shared/error-classification';
 import {
@@ -114,6 +115,7 @@ type SessionSendOptions = SendFlowOptions & {
   preserveComposer?: boolean;
   targetSessionId?: string;
   workspaceDirectory?: string;
+  newSessionWorkspace?: SessionWorkspaceTarget;
   queuedMessageDispatch?: { itemId: string; lease: number };
 };
 
@@ -142,7 +144,10 @@ type ClearedComposerAttachments = {
 
 type StateBoundSendDependencies = {
   getWorkspaceGeneration?(): number;
-  createSession(initialPermissionMode: PermissionMode): Promise<string | null>;
+  createSession(
+    initialPermissionMode: PermissionMode,
+    workspaceTarget?: SessionWorkspaceTarget
+  ): Promise<string | null>;
   ensureSessionPermission?(sessionId: string, options?: { directory?: string }): Promise<boolean>;
   clearPendingAbort(sessionId: string): void;
   resetTodoSync(): void;
@@ -730,10 +735,23 @@ function areAttachedDiagnosticsEqual(
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+function areWorkspaceTargetsEqual(
+  left: SessionWorkspaceTarget | undefined,
+  right: SessionWorkspaceTarget | undefined
+) {
+  if (!left || !right) return left === right;
+  return (
+    left.scope === right.scope &&
+    ((left.directory === null && right.directory === null) ||
+      isSameWorkspacePath(left.directory, right.directory))
+  );
+}
+
 export class SessionSendOperations {
   private pendingLazySessionCreation: {
     draftGeneration: number;
     workspaceGeneration: number;
+    workspaceTarget?: SessionWorkspaceTarget;
     promise: Promise<string | null>;
   } | null = null;
   constructor(private readonly deps: StateBoundSendDependencies) {}
@@ -741,17 +759,19 @@ export class SessionSendOperations {
   private readonly createSessionForSend = (
     initialPermissionMode: PermissionMode,
     draftGeneration: number,
-    workspaceGeneration: number
+    workspaceGeneration: number,
+    workspaceTarget?: SessionWorkspaceTarget
   ) => {
     if (
       this.pendingLazySessionCreation?.draftGeneration === draftGeneration &&
-      this.pendingLazySessionCreation.workspaceGeneration === workspaceGeneration
+      this.pendingLazySessionCreation.workspaceGeneration === workspaceGeneration &&
+      areWorkspaceTargetsEqual(this.pendingLazySessionCreation.workspaceTarget, workspaceTarget)
     ) {
       return this.pendingLazySessionCreation.promise;
     }
 
-    const creation = this.deps.createSession(initialPermissionMode);
-    const pending = { draftGeneration, workspaceGeneration, promise: creation };
+    const creation = this.deps.createSession(initialPermissionMode, workspaceTarget);
+    const pending = { draftGeneration, workspaceGeneration, workspaceTarget, promise: creation };
     this.pendingLazySessionCreation = pending;
     void creation.then(
       () => {
@@ -826,6 +846,9 @@ export class SessionSendOperations {
     const ensureSessionPermission = this.deps.ensureSessionPermission;
     const draftGeneration = getNewChatDraftGeneration();
     const workspaceGeneration = this.deps.getWorkspaceGeneration?.() ?? 0;
+    const newSessionWorkspace = options?.newSessionWorkspace
+      ? { ...options.newSessionWorkspace }
+      : undefined;
     let clearedAttachments: ClearedComposerAttachments | null = null;
     return (beforeOptimisticPublish?: () => void) =>
       sendMessageWithDependencies(
@@ -836,7 +859,12 @@ export class SessionSendOperations {
           applySelectedAgentForSession: (agent, sessionId) =>
             routingStore.setSelectedAgent(agent, { sessionId, persistGlobal: false }),
           createSession: (initialPermissionMode) =>
-            this.createSessionForSend(initialPermissionMode, draftGeneration, workspaceGeneration),
+            this.createSessionForSend(
+              initialPermissionMode,
+              draftGeneration,
+              workspaceGeneration,
+              newSessionWorkspace
+            ),
           ensureSessionPermission,
           clearPendingAbort: this.deps.clearPendingAbort,
           syncSessionMcps: this.deps.syncSessionMcps,

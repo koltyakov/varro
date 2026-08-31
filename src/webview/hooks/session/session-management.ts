@@ -1,4 +1,8 @@
-import type { PermissionMode, RecycleBinEntry } from '../../../shared/protocol';
+import type {
+  PermissionMode,
+  RecycleBinEntry,
+  SessionWorkspaceTarget,
+} from '../../../shared/protocol';
 import type { SelectedModel } from '../../lib/app-state-types';
 import type { PermissionRule, Session, SessionStatus } from '../../types';
 
@@ -7,7 +11,10 @@ type SessionManagementDependencies = {
   getWorkspaceGeneration?(): number;
   getSessionSelectionGeneration?(): number;
   getNewChatDraftGeneration(): number;
-  createRemoteSession(body: { title?: string; permission?: PermissionRule[] }): Promise<Session>;
+  createRemoteSession(
+    body: { title?: string; permission?: PermissionRule[] },
+    workspaceTarget?: SessionWorkspaceTarget
+  ): Promise<Session>;
   updateRemoteSession(sessionId: string, body: { title: string }): Promise<Session>;
   forkRemoteSession(sessionId: string, messageID?: string): Promise<Session>;
   getPermissionModeForSession(sessionId: string): PermissionMode;
@@ -78,7 +85,8 @@ export class SessionManagementOperations {
 
   readonly createSession = async (
     title?: string,
-    initialPermissionMode: PermissionMode = 'default'
+    initialPermissionMode: PermissionMode = 'default',
+    workspaceTarget?: SessionWorkspaceTarget
   ) => {
     return createSessionWithDependencies(
       {
@@ -115,7 +123,8 @@ export class SessionManagementOperations {
         setError: this.deps.setError,
       },
       title,
-      initialPermissionMode
+      initialPermissionMode,
+      workspaceTarget
     );
   };
 
@@ -224,7 +233,10 @@ export async function createSessionWithDependencies(
     getActiveSessionId(): string | null;
     getWorkspaceGeneration?(): number;
     getNewChatDraftGeneration(): number;
-    createRemoteSession(body: { title?: string; permission?: PermissionRule[] }): Promise<Session>;
+    createRemoteSession(
+      body: { title?: string; permission?: PermissionRule[] },
+      workspaceTarget?: SessionWorkspaceTarget
+    ): Promise<Session>;
     buildCreatePermission(mode: PermissionMode): PermissionRule[];
     upsertSession(session: Session): void;
     resetToolCallExpansionState(): void;
@@ -267,7 +279,8 @@ export async function createSessionWithDependencies(
     setError(message: string): void;
   },
   title?: string,
-  initialPermissionMode: PermissionMode = 'default'
+  initialPermissionMode: PermissionMode = 'default',
+  workspaceTarget?: SessionWorkspaceTarget
 ): Promise<string | null> {
   const previousActiveSessionId = deps.getActiveSessionId();
   const workspaceGeneration = deps.getWorkspaceGeneration?.() ?? 0;
@@ -277,10 +290,13 @@ export async function createSessionWithDependencies(
     const defaultAgent = deps.resolveDefaultAgent();
     const initialMcpNames = [...deps.getInitialMcpNames()];
     const permission = deps.buildCreatePermission(initialPermissionMode);
-    const session = await deps.createRemoteSession({
+    const body = {
       title: title || undefined,
       permission: permission.length > 0 ? permission : undefined,
-    });
+    };
+    const session = workspaceTarget
+      ? await deps.createRemoteSession(body, workspaceTarget)
+      : await deps.createRemoteSession(body);
 
     if ((deps.getWorkspaceGeneration?.() ?? 0) !== workspaceGeneration) {
       if (initialPermissionMode !== 'default') {

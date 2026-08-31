@@ -1948,7 +1948,9 @@ describe('ChatInput', () => {
         clipboardImages: [],
         nativePdfs: [],
         terminalSelection: null,
+        attachedDiagnostics: undefined,
       },
+      newSessionWorkspace: { scope: 'folder', directory: null },
     });
   });
 
@@ -5047,8 +5049,20 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.workspace-popover')).not.toBeNull();
   });
 
-  it('allows workspace switching in an active new chat with no messages', () => {
+  it('switches an active blank workspace chat to a folder-scoped lazy chat', async () => {
+    const messages: WebviewMessage[] = [];
+    fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension = (
+      message
+    ) => messages.push(message);
     setState('activeSessionId', 'session-1');
+    setState('sessions', [
+      session('session-1', 1_000, {
+        directory: '/repo-a',
+        title: 'New Chat',
+        workspaceScope: 'workspace',
+        time: { created: 1_000, updated: 1_000 },
+      }),
+    ]);
     setState('editorContext', {
       workspacePath: '/repo-a',
       workspaceFolders: [
@@ -5070,6 +5084,70 @@ describe('ChatInput', () => {
     expect(option?.disabled).toBe(false);
     option?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(container?.querySelector('.workspace-popover')).toBeNull();
+    expect(state.activeSessionId).toBeNull();
+    expect(manualWorkspaceSelection()).toBe(true);
+    expect(
+      container
+        ?.querySelector<HTMLButtonElement>('.workspace-picker-button')
+        ?.getAttribute('aria-label')
+    ).toContain('Repo B');
+    expect(messages).toContainEqual({
+      type: 'workspace/select',
+      payload: { path: '/repo-b' },
+    });
+
+    setState('editorContext', 'workspacePath', '/repo-b');
+    setInputText('Send from Repo B');
+    sendMessageMock.mockResolvedValue(true);
+    await flushAsyncWork();
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    expect(sendMessageMock).toHaveBeenCalledWith('Send from Repo B', {
+      noReply: false,
+      queuedAttachments: undefined,
+      newSessionWorkspace: { scope: 'folder', directory: '/repo-b' },
+    });
+  });
+
+  it('switches an active blank folder chat back to workspace scope', () => {
+    setManualWorkspaceSelection(true);
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [
+      session('session-1', 1_000, {
+        directory: '/repo-a',
+        title: 'New Chat',
+        time: { created: 1_000, updated: 1_000 },
+      }),
+    ]);
+    setState('editorContext', {
+      workspacePath: '/repo-a',
+      workspaceFolders: [
+        { name: 'Repo A', path: '/repo-a' },
+        { name: 'Repo B', path: '/repo-b' },
+      ],
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+    container
+      ?.querySelector<HTMLButtonElement>('.workspace-picker-button')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    container
+      ?.querySelector<HTMLButtonElement>('.workspace-popover-all')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(state.activeSessionId).toBeNull();
+    expect(manualWorkspaceSelection()).toBe(false);
+    expect(
+      container
+        ?.querySelector<HTMLButtonElement>('.workspace-picker-button')
+        ?.getAttribute('aria-label')
+    ).toContain('Workspace');
   });
 
   it('selects the active file workspace for an empty new chat', async () => {
@@ -5296,6 +5374,51 @@ describe('ChatInput', () => {
     await flushAsyncWork();
 
     expect(sequence).toEqual(['select:/repo-b', 'send', 'select:/repo-a']);
+  });
+
+  it('captures the selected folder before the new-chat composer is replaced', async () => {
+    setState('editorContext', {
+      workspacePath: '/repo-a',
+      workspaceDirectory: '/workspace',
+      workspaceFolders: [
+        { name: 'Repo A', path: '/repo-a' },
+        { name: 'Repo B', path: '/repo-b' },
+      ],
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    cleanup = render(
+      () =>
+        ChatInput({
+          newSession: true,
+          onBeforeSend: () => setManualWorkspaceSelection(false),
+        }),
+      container!
+    );
+
+    container
+      ?.querySelector<HTMLButtonElement>('.workspace-picker-button')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    container
+      ?.querySelector<HTMLButtonElement>('button[data-workspace-path="/repo-b"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    setState('editorContext', 'workspacePath', '/repo-b');
+    setInputText('Stay in Repo B');
+    sendMessageMock.mockResolvedValue(true);
+    await flushAsyncWork();
+
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    expect(manualWorkspaceSelection()).toBe(false);
+    expect(sendMessageMock).toHaveBeenCalledWith('Stay in Repo B', {
+      noReply: false,
+      queuedAttachments: expect.any(Object),
+      newSessionWorkspace: { scope: 'folder', directory: '/repo-b' },
+    });
   });
 
   it('restores a failed send before releasing its manual workspace selection', async () => {
@@ -5912,9 +6035,7 @@ describe('ChatInput', () => {
 
     expect(sendMessageMock).toHaveBeenCalledWith(
       "/not-a-real-command and /redo commands doesn't work",
-      {
-        noReply: false,
-      }
+      expect.objectContaining({ noReply: false })
     );
     expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
   });

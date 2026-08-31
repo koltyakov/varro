@@ -1,5 +1,9 @@
 import { createOpenCodeRuntime, type OpenCodeRuntime } from './open-code-runtime-instance';
-import type { PermissionMode, QueuedContextSnapshot } from '../../../shared/protocol';
+import type {
+  PermissionMode,
+  QueuedContextSnapshot,
+  SessionWorkspaceTarget,
+} from '../../../shared/protocol';
 import type { SelectedModel, SessionSelectionOptions } from '../../lib/app-state-types';
 import type { QueuedAttachmentSnapshot } from '../session/session-send';
 
@@ -115,6 +119,7 @@ export async function sendMessage(
     preserveComposer?: boolean;
     targetSessionId?: string;
     workspaceDirectory?: string;
+    newSessionWorkspace?: SessionWorkspaceTarget;
     queuedMessageDispatch?: { itemId: string; lease: number };
   }
 ): Promise<boolean> {

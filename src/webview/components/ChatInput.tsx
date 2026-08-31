@@ -159,6 +159,10 @@ import {
   type ComposerSnapshot,
 } from '../lib/composer-history';
 import { getSessionHistoryPrompts } from '../lib/message-window';
+import {
+  detachDiscardableActiveBlankSession,
+  getDiscardableActiveBlankSessionId,
+} from '../lib/new-chat-draft';
 import { collapseExpandedDiffOverlays, hasExpandedDiffOverlay } from '../lib/diff-overlay-state';
 import { TodoList } from './TodoList';
 import { ChangedFilesList } from './ChangedFilesList';
@@ -191,6 +195,7 @@ import type {
   ExtensionMessage,
   InitialWebviewState,
   SessionTokenBreakdown,
+  SessionWorkspaceTarget,
 } from '../../shared/protocol';
 import {
   MAX_DROPPED_CONTENT_FILES,
@@ -651,6 +656,18 @@ const pendingWorkspacePath = () => state.pendingWorkspaceSelectionPath;
 const setPendingWorkspacePath = (path: string | null) =>
   setState('pendingWorkspaceSelectionPath', path);
 
+function detachBlankSessionForWorkspace(path: string | null) {
+  const blankSessionId = getDiscardableActiveBlankSessionId();
+  if (!blankSessionId) return;
+  const session = state.sessions.find((item) => item.id === blankSessionId);
+  if (!session) return;
+  const matchesTarget =
+    path === null
+      ? session.workspaceScope === 'workspace'
+      : session.workspaceScope !== 'workspace' && isSameWorkspacePath(session.directory, path);
+  if (!matchesTarget) detachDiscardableActiveBlankSession();
+}
+
 function getFileSearchScopeKey() {
   return JSON.stringify({
     primary: normalizeWorkspaceIdentity(state.editorContext.workspacePath),
@@ -727,14 +744,19 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         getMessageEntriesForSession(state.messages, composerSessionId()).length === 0)
   );
   const selectedWorkspacePath = createMemo(() => {
-    if (props.newSession) {
+    const session = state.sessions.find((item) => item.id === state.activeSessionId);
+    if (
+      props.newSession ||
+      !session ||
+      (getDiscardableActiveBlankSessionId() && manualWorkspaceSelection())
+    ) {
       return manualWorkspaceSelection()
         ? (pendingWorkspacePath() ?? state.editorContext.workspacePath)
         : null;
     }
-    const session = state.sessions.find((item) => item.id === state.activeSessionId);
     return session?.workspaceScope === 'workspace' ? null : (session?.directory ?? null);
   });
+
   let previousDraftNonempty = untrack(
     () =>
       inputText().trim().length > 0 ||
@@ -1926,6 +1948,19 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       terminalSelection: state.terminalSelection,
       attachedDiagnostics: state.attachedDiagnostics,
     });
+    const selectedPath = selectedWorkspacePath();
+    const workspaceFolders = state.editorContext.workspaceFolders ?? [];
+    const newSessionWorkspace: SessionWorkspaceTarget | undefined = !sendSessionId
+      ? selectedPath || workspaceFolders.length <= 1
+        ? {
+            scope: 'folder',
+            directory: selectedPath ?? state.editorContext.workspacePath,
+          }
+        : {
+            scope: 'workspace',
+            directory: state.editorContext.workspaceDirectory ?? workspaceFolders[0]?.path ?? null,
+          }
+      : undefined;
 
     if (props.newSession) props.onBeforeSend?.();
 
@@ -2124,6 +2159,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           : {
               noReply: false,
               queuedAttachments: props.newSession ? queuedAttachments : undefined,
+              newSessionWorkspace,
             }
       );
       sent = await pendingSend;
@@ -4531,6 +4567,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           }}
           onSelectWorkspace={(path) => {
             if (!canSelectWorkspace()) return;
+            detachBlankSessionForWorkspace(path);
             setManualWorkspaceSelection(true);
             setPendingWorkspacePath(path);
             setShowWorkspacePicker(false);
@@ -4538,6 +4575,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           }}
           onSelectWorkspaceScope={() => {
             if (!canSelectWorkspace()) return;
+            detachBlankSessionForWorkspace(null);
             setManualWorkspaceSelection(false);
             setPendingWorkspacePath(null);
             setShowWorkspacePicker(false);

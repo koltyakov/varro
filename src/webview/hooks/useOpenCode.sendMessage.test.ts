@@ -680,6 +680,51 @@ describe('sendMessage', () => {
     );
   });
 
+  it('creates the first session in the manually selected workspace folder', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('editorContext', {
+      workspacePath: '/repo-b',
+      workspaceDirectory: '/workspace',
+      workspaceFolders: [
+        { name: 'Repo A', path: '/repo-a' },
+        { name: 'Repo B', path: '/repo-b' },
+      ],
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    stateModule.setManualWorkspaceSelection(false);
+    clientMocks.sessionCreate.mockResolvedValue({
+      ...session('session-2'),
+      directory: '/repo-b',
+    });
+    clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+    clientMocks.sessionGet.mockResolvedValue({
+      ...session('session-2'),
+      directory: '/repo-b',
+    });
+    clientMocks.sessionMessages.mockResolvedValue([]);
+
+    await hookModule.sendMessage('Work in Repo B', {
+      newSessionWorkspace: { scope: 'folder', directory: '/repo-b' },
+    });
+
+    expect(clientMocks.sessionCreate).toHaveBeenCalledWith(
+      {
+        metadata: {
+          varro: { workspaceScope: 'folder', schemaVersion: 1 },
+        },
+      },
+      { directory: '/repo-b' }
+    );
+    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
+      'session-2',
+      expect.objectContaining({ parts: [{ type: 'text', text: 'Work in Repo B' }] }),
+      { directory: '/repo-b' }
+    );
+  });
+
   it('keeps a newer selection while sending the captured draft to a delayed new session', async () => {
     const { stateModule, hookModule } = await loadModules();
     const created = deferred<ReturnType<typeof session>>();
