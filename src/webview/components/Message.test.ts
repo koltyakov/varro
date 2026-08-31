@@ -1997,6 +1997,42 @@ describe('Message streamed assistant text rendering', () => {
     expect(container?.querySelectorAll('hr')).toHaveLength(0);
   });
 
+  it('keeps a completed compact summary streaming buffer in pending Markdown mode', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: assistantSummaryMessage('message-stream-pending-summary'),
+          parts: [textPart('text-1', '')],
+          streamingPartId: 'text-1',
+          streamingText: 'Files: `src/webview/components/MarkdownRenderer',
+        }),
+      container!
+    );
+
+    expect(container?.querySelector('.streaming-markdown-pending')?.textContent).toContain(
+      'MarkdownRenderer'
+    );
+    expect(container?.querySelector('a.file-path-link')).toBeNull();
+  });
+
+  it('preserves a compact stream boundary that completes a bare URL', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: { ...assistantSummaryMessage('message-stream-url-summary'), time: { created: 0 } },
+          parts: [textPart('text-1', '')],
+          streamingPartId: 'text-1',
+          streamingText: 'Docs: https://example.test/summary ',
+        }),
+      container!
+    );
+
+    expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
+    expect(
+      container?.querySelector<HTMLAnchorElement>('a[href="https://example.test/summary"]')
+    ).not.toBeNull();
+  });
+
   it('hides compaction boundary hr markers for assistant summary messages', () => {
     cleanup = render(
       () =>

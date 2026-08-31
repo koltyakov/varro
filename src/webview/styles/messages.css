@@ -1544,6 +1544,12 @@ body.vscode-light
   color: var(--color-vscode-prose-fg);
 }
 
+.rendered-markdown .streaming-markdown-pending {
+  visibility: hidden;
+  white-space: pre-wrap;
+  pointer-events: none;
+}
+
 .rendered-markdown p {
   margin: 0 0 14px 0;
   text-wrap: pretty;

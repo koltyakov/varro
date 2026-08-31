@@ -23,6 +23,7 @@ export function MessagePart(props: {
   part: Part;
   messageInfo?: AssistantMessage;
   streamedText?: string | null;
+  streaming?: boolean;
   questionRequest?: (typeof state.questions)[number] | null;
   permissionMatch?: ToolCallPermissionMatch | null;
   renderPermissionPrompt?: boolean;
@@ -40,7 +41,8 @@ export function MessagePart(props: {
           <MarkdownRenderer
             // SAFETY: The surrounding shape or discriminator check establishes the TextPart contract used below.
             content={props.streamedText ?? (part as TextPart).text}
-            cacheByContent={!!props.messageInfo?.time.completed}
+            cacheByContent={!!props.messageInfo?.time.completed && !props.streaming}
+            forceStreaming={props.streaming}
             lightweight={props.lightweight}
           />
         );
@@ -62,6 +64,7 @@ export function MessagePart(props: {
               part={part}
               messageInfo={props.messageInfo}
               streamedText={props.streamedText}
+              streaming={props.streaming}
               expandedByDefault={props.expandReasoning}
             />
           </Show>
@@ -121,13 +124,14 @@ function ReasoningBlock(props: {
   part: ReasoningPart;
   messageInfo?: AssistantMessage;
   streamedText?: string | null;
+  streaming?: boolean;
   expandedByDefault?: boolean;
 }) {
   const scrollBottomThreshold = 8;
   const streamingScrollSpeed = 42;
   const expansionKey = () =>
     `reasoning\u0000${props.part.sessionID}\u0000${props.part.messageID}\u0000${props.part.id}`;
-  const isStreaming = () => props.part.time.end === undefined;
+  const isStreaming = () => !!props.streaming || props.part.time.end === undefined;
   const isAutoExpansionRequested = () => !!props.expandedByDefault && isStreaming();
   let currentExpansionKey = expansionKey();
   let contentElement: HTMLDivElement | undefined;
@@ -316,6 +320,7 @@ function ReasoningBlock(props: {
             <MarkdownRenderer
               content={bodyText()}
               cacheByContent={!isStreaming()}
+              forceStreaming={isStreaming()}
               class="thinking-text"
             />
           </div>

@@ -1179,7 +1179,7 @@ describe('MessageList compact activity', () => {
       messageID: 'assistant-2',
     };
     setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'idle' } }));
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Search the code')] },
       {
@@ -1199,9 +1199,11 @@ describe('MessageList compact activity', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
     await vi.advanceTimersByTimeAsync(500);
-    expect(
-      container?.querySelector('[data-activity-part-id="search-before-stream"]')
-    ).not.toBeNull();
+    const runningSearch = container?.querySelector(
+      '[data-activity-part-id="search-before-stream"]'
+    );
+    expect(runningSearch).not.toBeNull();
+    expect(runningSearch?.closest('.assistant-activity-details')).toBeNull();
 
     batch(() => {
       setState('streamingPartId', response.id);
@@ -1282,7 +1284,7 @@ describe('MessageList compact activity', () => {
       messageID: 'assistant-2',
     };
     setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'idle' } }));
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Update the file')] },
       {

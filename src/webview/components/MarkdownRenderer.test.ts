@@ -1220,7 +1220,7 @@ describe('MarkdownRenderer', () => {
     expect(tailSegment?.innerHTML).toContain('<p>Second paragraph</p>');
   });
 
-  it('keeps an incomplete streaming table painted as text until its delimiter row is complete', async () => {
+  it('reserves an incomplete streaming table until its delimiter row is complete', async () => {
     const [content, setContent] = createSignal('Status follows.\n\n| No.');
     cleanup = render(
       () =>
@@ -1235,11 +1235,15 @@ describe('MarkdownRenderer', () => {
 
     expect(container?.textContent).toContain('Status follows.');
     expect(container?.textContent).toContain('No.');
+    expect(
+      container?.querySelector('.streaming-markdown-pending')?.getAttribute('aria-hidden')
+    ).toBe('true');
     expect(container?.querySelector('table')).toBeNull();
 
     setContent('Status follows.\n\n| No. | Area | State | Lead | Action |\n|---|---|---|---');
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     expect(container?.textContent).toContain('Action');
+    expect(container?.querySelector('.streaming-markdown-pending')).not.toBeNull();
     expect(container?.querySelector('table')).toBeNull();
 
     setContent('Status follows.\n\n| No. | Area | State | Lead | Action |\n|---|---|---|---|---|');
@@ -1247,6 +1251,36 @@ describe('MarkdownRenderer', () => {
 
     expect(container?.querySelector('table')).not.toBeNull();
     expect(container?.querySelector('thead')?.textContent).toContain('Action');
+    expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
+  });
+
+  it('holds the active streaming table body row until its line completes', async () => {
+    const [content, setContent] = createSignal(
+      'Status follows.\n\n| Name | State |\n| --- | --- |\n| Renderer | Act'
+    );
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+        }),
+      container!
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(container?.querySelector('table')).not.toBeNull();
+    const pendingRow = container?.querySelector('.streaming-markdown-pending');
+    expect(pendingRow?.textContent).toContain('Renderer | Act');
+    expect(pendingRow?.getAttribute('aria-hidden')).toBe('true');
+    expect(pendingRow?.closest('tbody')).not.toBeNull();
+
+    setContent('Status follows.\n\n| Name | State |\n| --- | --- |\n| Renderer | Active |\n');
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(container?.querySelector('tbody')?.textContent).toContain('Renderer');
+    expect(container?.querySelector('tbody')?.textContent).toContain('Active');
+    expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
   });
 
   it('renders a complete streaming table without trailing pipes', async () => {
@@ -1297,13 +1331,14 @@ describe('MarkdownRenderer', () => {
       container!
     );
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
-    expect(container?.textContent?.trim()).toBe('Stable text.');
+    expect(container?.querySelector('h2')).toBeNull();
+    expect(container?.querySelector('.streaming-markdown-pending')?.textContent.trim()).toBe('##');
 
     setContent('Stable text.\n\n## 40. Delivery\n\n```ts\nconst ready = true;\n``');
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     expect(container?.querySelector('h2')?.textContent).toBe('40. Delivery');
     expect(container?.querySelector('code')?.textContent?.trim()).toBe('const ready = true;');
-    expect(container?.textContent).not.toContain('``');
+    expect(container?.querySelector('.streaming-markdown-pending')?.textContent).toBe('``');
 
     setContent('Stable text.\n\n## 40. Delivery\n\n```ts\nconst ready = true;\n```');
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
@@ -1365,7 +1400,7 @@ describe('MarkdownRenderer', () => {
     expect(tailLinks?.[0]?.getAttribute('title')).toBe('/repo/src/webview/App.tsx');
   });
 
-  it('keeps an unclosed inline-code suffix painted without linking it', async () => {
+  it('reserves an unclosed inline-code suffix without linking it', async () => {
     const [content, setContent] = createSignal(
       'The related tests are in `src/webview/components/Markdown'
     );
@@ -1389,11 +1424,15 @@ describe('MarkdownRenderer', () => {
 
     const paragraph = container?.querySelector('[data-markdown-segment="tail"] p');
     expect(paragraph?.textContent).toContain('src/webview/components/Markdown');
+    expect(container?.querySelector('.streaming-markdown-pending')?.textContent).toContain(
+      'src/webview/components/Markdown'
+    );
     expect(container?.querySelectorAll('a.file-path-link')).toHaveLength(0);
 
     setContent('The related tests are in `src/webview/components/MarkdownRenderer.test.ts');
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     expect(container?.textContent).toContain('MarkdownRenderer.test.ts');
+    expect(container?.querySelector('.streaming-markdown-pending')).not.toBeNull();
 
     setContent('The related tests are in `src/webview/components/MarkdownRenderer.test.ts`');
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
@@ -1402,9 +1441,10 @@ describe('MarkdownRenderer', () => {
     expect(link?.textContent).toBe('MarkdownRenderer.test.ts');
     expect(link?.title).toBe('/repo/src/webview/components/MarkdownRenderer.test.ts');
     expect(container?.textContent).not.toContain('src/webview/components/');
+    expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
   });
 
-  it('keeps an unfinished Markdown link painted until its destination closes', async () => {
+  it('reserves an unfinished Markdown link until its destination closes', async () => {
     const [content, setContent] = createSignal(
       'Explicit local links use standard Markdown syntax. Open [the renderer implementation'
     );
@@ -1427,6 +1467,9 @@ describe('MarkdownRenderer', () => {
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
     expect(container?.textContent).toContain('the renderer implementation');
+    expect(container?.querySelector('.streaming-markdown-pending')?.textContent).toContain(
+      'the renderer implementation'
+    );
     expect(container?.querySelectorAll('a.file-path-link')).toHaveLength(0);
 
     setContent(
@@ -1460,7 +1503,7 @@ describe('MarkdownRenderer', () => {
     expect(links?.[1]?.title).toBe('/repo/src/webview/components/MarkdownRenderer.test.ts');
   });
 
-  it('keeps trailing bare paths painted and linkifies them when complete', async () => {
+  it('reserves trailing bare paths and linkifies them when complete', async () => {
     setState('editorContext', {
       workspacePath: '/repo',
       activeFile: null,
@@ -1509,13 +1552,18 @@ describe('MarkdownRenderer', () => {
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
       expect(container?.textContent).toContain(testCase.partial);
+      expect(container?.querySelector('.streaming-markdown-pending')?.textContent).toContain(
+        testCase.partial
+      );
+      expect(container?.querySelector('a.file-path-link')).toBeNull();
 
-      setContent(`Bare path: ${testCase.complete}`);
+      setContent(`Bare path: ${testCase.complete} `);
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
       const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
       expect(link?.textContent).toBe('FileTypeIcon.tsx');
       expect(link?.title).toBe(testCase.title);
+      expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
 
       cleanup();
       cleanup = undefined;
@@ -1523,7 +1571,59 @@ describe('MarkdownRenderer', () => {
     }
   });
 
-  it('links Windows paths in inline code without withholding URLs', async () => {
+  it('holds a trailing bare URL until a streaming boundary arrives', async () => {
+    const [content, setContent] = createSignal('Docs: https://example.test/reference/Mark');
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+        }),
+      container!
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(container?.querySelector('.streaming-markdown-pending')?.textContent).toBe(
+      'https://example.test/reference/Mark'
+    );
+    expect(container?.querySelector('a[href^="https://example.test"]')).toBeNull();
+
+    setContent('Docs: https://example.test/reference/Markdown ');
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
+    expect(
+      container?.querySelector<HTMLAnchorElement>('a[href^="https://example.test"]')?.href
+    ).toBe('https://example.test/reference/Markdown');
+  });
+
+  it('holds a trailing bare filename once its extension starts', async () => {
+    const [content, setContent] = createSignal('File: MarkdownRenderer.t');
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+        }),
+      container!
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(container?.querySelector('.streaming-markdown-pending')?.textContent).toBe(
+      'MarkdownRenderer.t'
+    );
+    expect(container?.querySelector('a.file-path-link')).toBeNull();
+
+    setContent('File: MarkdownRenderer.tsx ');
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
+    expect(container?.querySelector('a.file-path-link')?.textContent).toBe('MarkdownRenderer.tsx');
+  });
+
+  it('links Windows paths while reserving a trailing URL', async () => {
     setState('editorContext', {
       workspacePath: '/repo',
       activeFile: null,
@@ -1543,6 +1643,9 @@ describe('MarkdownRenderer', () => {
     expect(links?.[1]?.textContent).toBe('open it');
     expect(links?.[1]?.title).toBe('C:/work/project/App.tsx');
     expect(container?.textContent).toContain('https://example.test/folder/App');
+    expect(container?.querySelector('.streaming-markdown-pending')?.textContent).toBe(
+      'https://example.test/folder/App'
+    );
   });
 
   it('does not hold escaped backticks or content inside a streaming fence', async () => {
@@ -1684,6 +1787,35 @@ describe('MarkdownRenderer', () => {
     setCompleted(true);
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     expect(container?.querySelector('a.file-path-link')).toBe(finalLink);
+  });
+
+  it('returns to pending rendering when an explicit live buffer follows finalization', async () => {
+    const [content, setContent] = createSignal('Final response.');
+    const [forceStreaming, setForceStreaming] = createSignal(false);
+
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+          cacheByContent: true,
+          get forceStreaming() {
+            return forceStreaming();
+          },
+        }),
+      container!
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    setForceStreaming(true);
+    setContent('Files: `src/webview/components/MarkdownRenderer');
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(container?.querySelector('.streaming-markdown-pending')?.textContent).toContain(
+      'MarkdownRenderer'
+    );
+    expect(container?.querySelector('a.file-path-link')).toBeNull();
   });
 
   it('canonicalizes explicit path labels containing inline-code backticks', () => {

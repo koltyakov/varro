@@ -128,8 +128,9 @@ function retainReadModeAltListener() {
   };
 }
 
-export function stripCompactionBoundaryMarkdown(text: string) {
-  return text.replace(COMPACTION_BOUNDARY_RE, '').trim();
+export function stripCompactionBoundaryMarkdown(text: string, preserveTrailingWhitespace = false) {
+  const stripped = text.replace(COMPACTION_BOUNDARY_RE, '');
+  return preserveTrailingWhitespace ? stripped : stripped.trim();
 }
 
 export function getAssistantContainerVariant(params: {
@@ -385,6 +386,7 @@ export function AssistantMessageContent(props: {
   nearViewport?: boolean;
   outerListVirtualized?: boolean;
   textForPart: (part: Part) => string | null;
+  isPartStreaming?: (part: Part) => boolean;
   allowInitialItemReveal?: boolean;
   claimItemReveal?: (messageId: string, renderKey: string) => boolean;
   questionRequestForTool?: (part: ToolPart) => QuestionRequest | null;
@@ -765,6 +767,7 @@ export function AssistantMessageContent(props: {
                     expansionKey={active().group.key}
                     showSummary={true}
                     textForPart={props.textForPart}
+                    isPartStreaming={props.isPartStreaming}
                     lightweight={!!isLightweight()}
                     questionRequestForTool={props.questionRequestForTool}
                     permissionMatchForTool={props.permissionMatchForTool}
@@ -805,6 +808,7 @@ export function AssistantMessageContent(props: {
                         part={part}
                         messageInfo={props.info}
                         streamedText={props.textForPart(part)}
+                        streaming={props.isPartStreaming?.(part)}
                         expandReasoning={props.expandReasoning}
                         lightweight={isLightweight()}
                         questionRequest={
@@ -868,6 +872,7 @@ export function AssistantMessageContent(props: {
             expansionKey={activityGroup().key}
             showSummary={showSummary()}
             textForPart={props.textForPart}
+            isPartStreaming={props.isPartStreaming}
             lightweight={!!isLightweight()}
             questionRequestForTool={props.questionRequestForTool}
             permissionMatchForTool={props.permissionMatchForTool}
@@ -902,6 +907,7 @@ export function AssistantMessageContent(props: {
                   part={part}
                   messageInfo={props.info}
                   streamedText={props.textForPart(part)}
+                  streaming={props.isPartStreaming?.(part)}
                   lightweight={isLightweight()}
                   questionRequest={props.questionRequestForTool?.(part)}
                   permissionMatch={props.permissionMatchForTool?.(part)}
@@ -960,6 +966,7 @@ export function AssistantMessageContent(props: {
           part={item().part}
           messageInfo={props.info}
           streamedText={props.textForPart(item().part)}
+          streaming={props.isPartStreaming?.(item().part)}
           expandReasoning={props.expandReasoning}
           lightweight={isLightweight()}
           questionRequest={
@@ -1039,7 +1046,13 @@ export function AssistantMessageContent(props: {
                 <div class="assistant-read-mode-content">
                   <MarkdownRenderer
                     content={finalTextContent()}
-                    cacheByContent={!!props.info.time.completed}
+                    cacheByContent={
+                      !!props.info.time.completed &&
+                      !(finalTextPart() && props.isPartStreaming?.(finalTextPart()!))
+                    }
+                    forceStreaming={
+                      !!finalTextPart() && !!props.isPartStreaming?.(finalTextPart()!)
+                    }
                   />
                 </div>
               </div>
@@ -1066,6 +1079,7 @@ function AssistantActivityGroup(props: {
   expansionKey: string;
   showSummary: boolean;
   textForPart: (part: Part) => string | null;
+  isPartStreaming?: (part: Part) => boolean;
   lightweight: boolean;
   questionRequestForTool?: (part: ToolPart) => QuestionRequest | null;
   permissionMatchForTool?: (part: ToolPart) => ToolCallPermissionMatch | null;
@@ -1124,6 +1138,7 @@ function AssistantActivityGroup(props: {
                   part={part}
                   messageInfo={props.info}
                   streamedText={props.textForPart(part)}
+                  streaming={props.isPartStreaming?.(part)}
                   lightweight={props.lightweight}
                   questionRequest={
                     part.type === 'tool' ? props.questionRequestForTool?.(part) : undefined

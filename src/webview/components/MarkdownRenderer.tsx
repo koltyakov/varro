@@ -33,6 +33,7 @@ import { showSessionActionFeedback } from './chat/SessionActionFeedback';
 interface MarkdownProps {
   content: string;
   cacheByContent?: boolean;
+  forceStreaming?: boolean;
   lightweight?: boolean;
   class?: string;
   inlineSlots?: MarkdownInlineSlot[];
@@ -75,6 +76,12 @@ type StreamingMarkdownScanState = {
 type MarkdownRenderSegments = StreamingMarkdownSegments & {
   scanState: StreamingMarkdownScanState | null;
   hasUnclosedFence: boolean;
+};
+
+type IncompleteStreamingMarkdown = {
+  content: string;
+  marker: string | null;
+  pendingText: string | null;
 };
 
 type MarkdownHydrationFlags = {
@@ -649,6 +656,10 @@ const FILE_PATH_REFERENCE_RE = new RegExp(`^${FILE_PATH_REFERENCE_SOURCE}$`, 'i'
 const FILE_PATH_CANDIDATE_RE = /\.[A-Za-z0-9]+(?::\d+(?:-\d+)?)?/;
 const TRAILING_PATH_SOURCE = String.raw`(?:${PATH_ROOT_SOURCE}(?:${PATH_SEGMENT_SOURCE}${PATH_SEPARATOR_SOURCE})*${PATH_SEGMENT_CHARS_SOURCE}*|(?:${PATH_SEGMENT_SOURCE}${PATH_SEPARATOR_SOURCE})+${PATH_SEGMENT_CHARS_SOURCE}*)(?::\d*)?`;
 const TRAILING_BARE_PATH_CANDIDATE_RE = new RegExp(`(?:^|[\\s(])(${TRAILING_PATH_SOURCE})$`);
+const TRAILING_BARE_FILE_CANDIDATE_RE = /(?:^|[\s(])((?:[\w@+-]+\.)+[A-Za-z0-9]+)$/;
+const TRAILING_BARE_URL_CANDIDATE_RE = /(?:^|[\s(])((?:https?:\/\/|www\.)[^\s<]*)$/i;
+const TRAILING_ANGLE_URL_CANDIDATE_RE = /(?:^|\s)(<https?:\/\/[^>\s]*)$/i;
+const STREAMING_MARKDOWN_PENDING_MARKER = 'VARROPENDINGMARKDOWNPLACEHOLDER';
 const SPECIAL_FILE_NAMES = new Set([
   '.gitignore',
   '.npmrc',
@@ -1091,7 +1102,7 @@ function isEscapedMarkdownDelimiter(content: string, index: number, lineStart: n
   return backslashCount % 2 === 1;
 }
 
-function renderIncompleteStreamingMarkdown(content: string) {
+function renderIncompleteStreamingMarkdown(content: string): IncompleteStreamingMarkdown {
   let index = 0;
   let openFence: MarkdownFenceState | null = null;
   let inlineStart: number | null = null;
@@ -1195,22 +1206,98 @@ function renderIncompleteStreamingMarkdown(content: string) {
   const visibleContent = content.slice(0, pendingStart);
   const blockSafeContent = hideIncompleteStreamingBlock(visibleContent);
   pendingStart = Math.min(pendingStart, blockSafeContent.length);
-  const trailingHeading = content.slice(pendingStart).match(/^[ \t]{0,3}#{1,6}[ \t]*$/);
-  if (trailingHeading || suppressedFenceSuffixStart === pendingStart) {
-    return content.slice(0, pendingStart);
-  }
   const trailingPath = blockSafeContent.match(TRAILING_BARE_PATH_CANDIDATE_RE);
-  if (trailingPath && !isLikelyFilePathReference(trailingPath[1]!)) {
+  if (trailingPath) {
     const candidateStart = trailingPath.index! + trailingPath[0].length - trailingPath[1]!.length;
     pendingStart = Math.min(pendingStart, candidateStart);
   }
-  if (pendingStart >= content.length) return content;
+  const trailingFile = blockSafeContent.match(TRAILING_BARE_FILE_CANDIDATE_RE);
+  if (trailingFile) {
+    const candidateStart = trailingFile.index! + trailingFile[0].length - trailingFile[1]!.length;
+    pendingStart = Math.min(pendingStart, candidateStart);
+  }
+  const trailingUrl = blockSafeContent.match(TRAILING_BARE_URL_CANDIDATE_RE);
+  if (trailingUrl && !hasCompletedBareUrlPunctuation(trailingUrl[1]!)) {
+    const candidateStart = trailingUrl.index! + trailingUrl[0].length - trailingUrl[1]!.length;
+    pendingStart = Math.min(pendingStart, candidateStart);
+  }
+  const trailingAngleUrl = blockSafeContent.match(TRAILING_ANGLE_URL_CANDIDATE_RE);
+  if (trailingAngleUrl) {
+    const candidateStart =
+      trailingAngleUrl.index! + trailingAngleUrl[0].length - trailingAngleUrl[1]!.length;
+    pendingStart = Math.min(pendingStart, candidateStart);
+  }
+  pendingStart = Math.min(pendingStart, hideIncompleteStreamingTableRow(blockSafeContent).length);
+  if (pendingStart >= content.length) {
+    return { content, marker: null, pendingText: null };
+  }
 
-  return `${content.slice(0, pendingStart)}${escapeIncompleteMarkdown(content.slice(pendingStart))}`;
+  let marker = STREAMING_MARKDOWN_PENDING_MARKER;
+  while (content.includes(marker)) marker += 'X';
+  const syntheticFenceCloser =
+    openFence && suppressedFenceSuffixStart === pendingStart
+      ? `${openFence.char.repeat(openFence.length)}\n\n`
+      : '';
+
+  return {
+    content: `${content.slice(0, pendingStart)}${syntheticFenceCloser}${marker}`,
+    marker,
+    pendingText: content.slice(pendingStart),
+  };
 }
 
-function escapeIncompleteMarkdown(content: string) {
-  return content.replace(/([\\`*_[\]{}()#+.!|<>~-])/g, '\\$1').replace(/(?<!  )\r?\n/g, '  \n');
+function hasCompletedBareUrlPunctuation(candidate: string) {
+  const punctuationMatch = candidate.match(/^(.+?)([),.;!?])$/);
+  if (!punctuationMatch) return false;
+
+  const rawUrl = punctuationMatch[1]!;
+  try {
+    const url = new URL(rawUrl.startsWith('www.') ? `https://${rawUrl}` : rawUrl);
+    return (
+      url.hostname.length > 0 &&
+      (punctuationMatch[2] !== '.' || url.hostname.includes('.') || url.hostname === 'localhost')
+    );
+  } catch {
+    return false;
+  }
+}
+
+function hideIncompleteStreamingTableRow(content: string) {
+  if (/\r?\n$/.test(content)) return content;
+
+  const lines = content.split(/\r?\n/);
+  const trailingLineIndex = lines.length - 1;
+  const trailingLine = lines[trailingLineIndex]?.trim() ?? '';
+  if (
+    !trailingLine ||
+    (!trailingLine.startsWith('|') && splitStreamingTableRow(trailingLine).length < 2)
+  ) {
+    return content;
+  }
+
+  let activeDelimiterIndex = -1;
+  for (let index = 1; index < trailingLineIndex; index += 1) {
+    const headerCells = splitStreamingTableRow(lines[index - 1] ?? '');
+    const delimiterCells = splitStreamingTableRow(lines[index] ?? '');
+    if (
+      headerCells.length >= 2 &&
+      delimiterCells.length === headerCells.length &&
+      delimiterCells.every((cell) => /^\s*:?-{3,}:?\s*$/.test(cell))
+    ) {
+      activeDelimiterIndex = index;
+      continue;
+    }
+    if (
+      activeDelimiterIndex >= 0 &&
+      index > activeDelimiterIndex &&
+      (lines[index]!.trim().length === 0 || splitStreamingTableRow(lines[index]!).length < 2)
+    ) {
+      activeDelimiterIndex = -1;
+    }
+  }
+  if (activeDelimiterIndex < 0) return content;
+
+  return content.slice(0, Math.max(content.lastIndexOf('\n') + 1, 0));
 }
 
 function hideIncompleteStreamingBlock(content: string) {
@@ -1242,18 +1329,21 @@ function hideIncompleteStreamingBlock(content: string) {
 }
 
 function splitStreamingTableRow(row: string) {
+  const normalizedRow = row.trim();
+  if (!normalizedRow.includes('|')) return [normalizedRow];
   const cells: string[] = [];
   let cell = '';
-  for (let index = 1; index < row.length; index += 1) {
-    const character = row[index]!;
-    if (character === '|' && !isEscapedTablePipe(row, index)) {
+  const start = normalizedRow.startsWith('|') ? 1 : 0;
+  for (let index = start; index < normalizedRow.length; index += 1) {
+    const character = normalizedRow[index]!;
+    if (character === '|' && !isEscapedTablePipe(normalizedRow, index)) {
       cells.push(cell);
       cell = '';
     } else {
       cell += character;
     }
   }
-  if (cell || !row.endsWith('|')) cells.push(cell);
+  if (cell || !normalizedRow.endsWith('|')) cells.push(cell);
   return cells;
 }
 
@@ -1271,6 +1361,17 @@ function isAppendOnlySafeMarkdown(content: string) {
     if (/^(?:#{1,6}(?:\s|$)|>|[-+]\s|\d+[.)]\s|(?:=+|-+)\s*$)/.test(line)) return false;
   }
   return true;
+}
+
+function parseIncompleteStreamingMarkdown(content: string, options: ParseMarkdownOptions) {
+  const prepared = renderIncompleteStreamingMarkdown(content);
+  const html = parseMarkdown(prepared.content, options);
+  if (!prepared.marker || prepared.pendingText === null) return html;
+
+  return html.replace(
+    prepared.marker,
+    `<span class="streaming-markdown-pending" aria-hidden="true">${escapeHtml(prepared.pendingText)}</span>`
+  );
 }
 
 function getAppendOnlyStableDelta(
@@ -1801,9 +1902,10 @@ export function MarkdownRenderer(props: MarkdownProps) {
   let rafId: number | null = null;
   let idleHighlightId: IdleWorkHandle | null = null;
   let hasProcessedStreamingUpdate = false;
-  const initialSegments = getMarkdownRenderSegments(props.content || '', !!props.cacheByContent);
+  const initialCacheByContent = !!props.cacheByContent && !props.forceStreaming;
+  const initialSegments = getMarkdownRenderSegments(props.content || '', initialCacheByContent);
   let lastAppliedScanState = initialSegments.scanState;
-  let lastAppliedCacheByContent = !!props.cacheByContent;
+  let lastAppliedCacheByContent = initialCacheByContent;
   let lastAppliedLightweight = lw();
   let lastAppliedDisablePathLinkify = !!props.disablePathLinkify;
   let lastAppliedEscapeHtml = !!props.escapeHtml;
@@ -1821,16 +1923,16 @@ export function MarkdownRenderer(props: MarkdownProps) {
         escapeHtml: !!props.escapeHtml,
       })
     : '';
-  const initialTailRenderContent = props.cacheByContent
-    ? initialSegments.tailContent
-    : renderIncompleteStreamingMarkdown(initialSegments.tailContent);
-  let lastAppliedTailHtml = parseMarkdown(initialTailRenderContent, {
-    cacheByContent: initialSegments.stableContent.length === 0 && !!props.cacheByContent,
+  const initialTailParseOptions = {
+    cacheByContent: initialSegments.stableContent.length === 0 && initialCacheByContent,
     disablePathLinkify: lw() || !!props.disablePathLinkify,
     disableCodeHighlighting: initialSegments.hasUnclosedFence || lw(),
     allowMermaidHydration: lw() && !initialSegments.hasUnclosedFence,
     escapeHtml: !!props.escapeHtml,
-  });
+  };
+  let lastAppliedTailHtml = initialCacheByContent
+    ? parseMarkdown(initialSegments.tailContent, initialTailParseOptions)
+    : parseIncompleteStreamingMarkdown(initialSegments.tailContent, initialTailParseOptions);
   let lastAppliedStableHydrationFlags = getMarkdownHydrationFlags(lastAppliedStableHtml);
   let lastAppliedTailHydrationFlags = getMarkdownHydrationFlags(lastAppliedTailHtml);
   let lastAppliedStableContentWasAppendOnlySafe = isAppendOnlySafeMarkdown(
@@ -1927,7 +2029,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
       if (sessionContextKey !== lastAppliedSessionContextKey) return;
       if (content !== lastAppliedTailContent) return;
 
-      const highlightedTailHtml = parseMarkdown(renderIncompleteStreamingMarkdown(content), {
+      const highlightedTailHtml = parseIncompleteStreamingMarkdown(content, {
         cacheByContent: false,
         disablePathLinkify: !!props.disablePathLinkify,
         escapeHtml: !!props.escapeHtml,
@@ -1955,7 +2057,9 @@ export function MarkdownRenderer(props: MarkdownProps) {
       const escapeRawHtml = !!props.escapeHtml;
       // Completion can briefly regress while the final message events reconcile.
       // Keep final rendering enabled once observed so links and highlighting do not flicker.
-      const cacheByContent = lastAppliedCacheByContent || !!props.cacheByContent;
+      const cacheByContent = props.forceStreaming
+        ? false
+        : lastAppliedCacheByContent || !!props.cacheByContent;
       const renderModeChanged =
         cacheByContent !== lastAppliedCacheByContent ||
         isLightweight !== lastAppliedLightweight ||
@@ -2019,20 +2123,18 @@ export function MarkdownRenderer(props: MarkdownProps) {
         !cacheByContent &&
         !segments.hasUnclosedFence &&
         hasCompletedHighlightableFence(segments.tailContent);
+      const tailParseOptions = {
+        cacheByContent: segments.stableContent.length === 0 && cacheByContent,
+        disablePathLinkify,
+        disableCodeHighlighting:
+          segments.hasUnclosedFence || shouldDeferTailHighlight || isLightweight,
+        allowMermaidHydration: isLightweight && !segments.hasUnclosedFence,
+        escapeHtml: escapeRawHtml,
+      };
       const nextTailHtml = tailContentChanged
-        ? parseMarkdown(
-            cacheByContent
-              ? segments.tailContent
-              : renderIncompleteStreamingMarkdown(segments.tailContent),
-            {
-              cacheByContent: segments.stableContent.length === 0 && cacheByContent,
-              disablePathLinkify,
-              disableCodeHighlighting:
-                segments.hasUnclosedFence || shouldDeferTailHighlight || isLightweight,
-              allowMermaidHydration: isLightweight && !segments.hasUnclosedFence,
-              escapeHtml: escapeRawHtml,
-            }
-          )
+        ? cacheByContent
+          ? parseMarkdown(segments.tailContent, tailParseOptions)
+          : parseIncompleteStreamingMarkdown(segments.tailContent, tailParseOptions)
         : lastAppliedTailHtml;
 
       const stableChanged = nextStableHtml !== lastAppliedStableHtml;
@@ -2089,6 +2191,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
   createEffect(() => {
     const content = props.content || '';
     const cacheByContent = !!props.cacheByContent;
+    const forceStreaming = !!props.forceStreaming;
     const isLightweight = lw();
     const disablePathLinkify = !!props.disablePathLinkify;
     const escapeRawHtml = !!props.escapeHtml;
@@ -2105,6 +2208,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
     void sessionContextKey;
     void highlighterVersion;
     void cacheByContent;
+    void forceStreaming;
     void isLightweight;
     void disablePathLinkify;
     void escapeRawHtml;

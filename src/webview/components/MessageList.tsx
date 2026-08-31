@@ -6474,7 +6474,6 @@ export function MessageList() {
     filterActivityPartKeysBehindStream(exitingActivityPartKeys())
   );
   const activeActivityMessageIds = createMemo<ReadonlySet<string>>(() => {
-    if (!activeSessionWorking()) return new Set<string>();
     return trailingAssistantTurn()?.assistantMessageIds ?? new Set<string>();
   });
   createEffect(() => {

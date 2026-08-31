@@ -315,11 +315,14 @@ export function Message(props: {
   const isCompactedSummaryMessage = createMemo(
     () => !!assistant()?.summary || normalizedParts().some((part) => part.type === 'compaction')
   );
+  const isPartStreaming = (part: Part) => part.id === props.streamingPartId;
   const getEffectivePartText = (part: Part) => {
     if (part.type !== 'text' && part.type !== 'reasoning') return null;
 
     const text = part.id === props.streamingPartId ? props.streamingText || part.text : part.text;
-    return isCompactedSummaryMessage() ? stripCompactionBoundaryMarkdown(text) : text;
+    return isCompactedSummaryMessage()
+      ? stripCompactionBoundaryMarkdown(text, isPartStreaming(part))
+      : text;
   };
   const visibleAssistantParts = createMemo(() =>
     assistant()
@@ -573,6 +576,7 @@ export function Message(props: {
                 nearViewport={props.nearViewport}
                 outerListVirtualized={props.outerListVirtualized}
                 textForPart={getEffectivePartText}
+                isPartStreaming={isPartStreaming}
                 allowInitialItemReveal={props.allowInitialAssistantItemReveal}
                 claimItemReveal={props.claimAssistantItemReveal}
                 questionRequestForTool={props.questionRequestForTool}
