@@ -57,15 +57,6 @@ import {
 import { createMessageIndex } from './message-index';
 import { asRecord, isString } from './runtime-values';
 
-function isWebviewThemeKind<T>(value: T): value is T & WebviewThemeKind {
-  return (
-    isString(value) &&
-    (value === 'light' ||
-      value === 'dark' ||
-      value === 'high-contrast' ||
-      value === 'high-contrast-light')
-  );
-}
 import {
   activePermissionReconciliations,
   finishPermissionReconciliation,
@@ -97,6 +88,16 @@ import {
   resolveInitialDraftMode,
 } from './state-stored-values';
 import { createStreamingDeltaQueue, flushPendingStreamingDeltasFor } from './streaming-deltas';
+
+function isWebviewThemeKind<T>(value: T): value is T & WebviewThemeKind {
+  return (
+    isString(value) &&
+    (value === 'light' ||
+      value === 'dark' ||
+      value === 'high-contrast' ||
+      value === 'high-contrast-light')
+  );
+}
 
 export interface AppState {
   serverStatus: ServerStatus;

@@ -105,6 +105,34 @@ describe('QuestionPrompt draft retention', () => {
     expect(container?.querySelector<HTMLTextAreaElement>('.question-custom-input')?.value).toBe('');
   });
 
+  it('evicts the oldest draft after retaining 100 pending questions', async () => {
+    const activeRequests = Array.from({ length: 101 }, (_, index) =>
+      request(`bounded-draft-${index}`)
+    );
+    setState('questions', activeRequests);
+
+    for (const [index, activeRequest] of activeRequests.entries()) {
+      renderQuestionPrompt(activeRequest);
+      const input = container?.querySelector<HTMLTextAreaElement>('.question-custom-input');
+      input!.value = `Draft ${index}`;
+      input!.dispatchEvent(new Event('input', { bubbles: true }));
+      cleanup?.();
+      cleanup = undefined;
+      await Promise.resolve();
+    }
+
+    renderQuestionPrompt(activeRequests[0]!);
+    expect(container?.querySelector<HTMLTextAreaElement>('.question-custom-input')?.value).toBe('');
+
+    cleanup?.();
+    cleanup = undefined;
+    await Promise.resolve();
+    renderQuestionPrompt(activeRequests.at(-1)!);
+    expect(container?.querySelector<HTMLTextAreaElement>('.question-custom-input')?.value).toBe(
+      'Draft 100'
+    );
+  });
+
   it('keeps the answer draft and restores controls when answering fails', async () => {
     const activeRequest = request('failed-answer');
     setState('questions', [activeRequest]);

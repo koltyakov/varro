@@ -7,6 +7,7 @@ import crossSpawn from 'cross-spawn';
 import type { Dirent } from 'fs';
 import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs';
 import {
+  access,
   lstat,
   mkdtemp,
   open as openFile,
@@ -95,16 +96,31 @@ const ASK_AGENT = {
   },
 } as const;
 
-function resolveProjectConfigPaths(directory: string): string[] {
+function isMissingPathError(error: unknown): boolean {
+  if (!error || typeof error !== 'object' || !('code' in error)) return false;
+  return error.code === 'ENOENT' || error.code === 'ENOTDIR';
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch (error) {
+    if (isMissingPathError(error)) return false;
+    throw error;
+  }
+}
+
+async function resolveProjectConfigPaths(directory: string): Promise<string[]> {
   const pathApi = /^[a-z]:[\\/]/i.test(directory) || directory.startsWith('\\\\') ? win32 : posix;
   const files: string[] = [];
   let current = pathApi.resolve(directory);
   while (true) {
     for (const name of ['opencode.jsonc', 'opencode.json']) {
       const candidate = pathApi.join(current, name);
-      if (existsSync(candidate)) files.push(candidate);
+      if (await pathExists(candidate)) files.push(candidate);
     }
-    if (existsSync(pathApi.join(current, '.git'))) break;
+    if (await pathExists(pathApi.join(current, '.git'))) break;
     const parent = pathApi.dirname(current);
     if (parent === current) break;
     current = parent;
@@ -1502,7 +1518,7 @@ export class OpenCodeProcess {
     const workspaceCwd = this.getWorkspaceCwd();
     const paths = [
       ...getOpenCodeConfigPaths(),
-      ...(workspaceCwd ? resolveProjectConfigPaths(workspaceCwd) : []),
+      ...(workspaceCwd ? await resolveProjectConfigPaths(workspaceCwd) : []),
     ];
     for (const path of paths) {
       try {

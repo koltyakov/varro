@@ -291,6 +291,61 @@ describe('UsageReportService', () => {
     ).toHaveLength(2);
   });
 
+  it('prunes cached usage when a session is deleted or ages out of a recent listing', async () => {
+    let listingCount = 0;
+    const request = vi.fn<Request>(async (method, path) => {
+      if (method === 'GET' && path.startsWith('/experimental/session')) {
+        listingCount += 1;
+        return {
+          data: listingCount === 2 ? [] : [session('session-1', '/repo', 10)],
+        };
+      }
+      if (method === 'GET' && path === '/session/session-1/message?directory=%2Frepo') {
+        return [assistant('assistant-1', NOW.getTime())];
+      }
+      throw new Error(`Unexpected request ${method} ${path}`);
+    });
+    const { service } = createService(request);
+
+    await service.openReport();
+    await service.openReport();
+    await service.openReport();
+
+    expect(
+      request.mock.calls.filter(([, path]) => path.startsWith('/session/session-1/message'))
+    ).toHaveLength(2);
+  });
+
+  it('clears server fallback usage when the local database recovers', async () => {
+    let localReadCount = 0;
+    const readLocalUsage = vi.fn(async () => {
+      localReadCount += 1;
+      return localReadCount === 2 ? { sessionCount: 0, usage: [] } : null;
+    });
+    const request = vi.fn<Request>(async (method, path) => {
+      if (method === 'GET' && path.startsWith('/experimental/session')) {
+        return { data: [session('session-1', '/repo', 10)] };
+      }
+      if (method === 'GET' && path === '/session/session-1/message?directory=%2Frepo') {
+        return [assistant('assistant-1', NOW.getTime())];
+      }
+      throw new Error(`Unexpected request ${method} ${path}`);
+    });
+    const service = new UsageReportService(
+      { request },
+      vi.fn(async () => undefined),
+      readLocalUsage
+    );
+
+    await service.openReport();
+    await service.openReport();
+    await service.openReport();
+
+    expect(
+      request.mock.calls.filter(([, path]) => path.startsWith('/session/session-1/message'))
+    ).toHaveLength(2);
+  });
+
   it('sorts by prompts then total tokens descending and omits zero-token models', async () => {
     const usage = [
       assistant('large', NOW.getTime(), {

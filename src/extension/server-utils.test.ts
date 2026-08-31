@@ -62,10 +62,20 @@ describe('server utils', () => {
     expect(findSseChunkBoundary('data: one', 0)).toBeNull();
 
     expect(extractVersion('opencode 1.2.3')).toBe('1.2.3');
+    expect(extractVersion('opencode version 1.2.3-beta.1+cli.42\n')).toBe('1.2.3-beta.1+cli.42');
     expect(extractVersion('missing')).toBeNull();
     expect(compareVersions('1.2.3', '1.2.2')).toBeGreaterThan(0);
     expect(compareVersions('1.2.0', '1.2')).toBe(0);
     expect(compareVersions('1.2.0', '1.3.0')).toBeLessThan(0);
+    expect(compareVersions('1.2.3-beta', '1.2.3-beta.1')).toBeLessThan(0);
+    expect(compareVersions('1.2.3-beta.1', '1.2.3-rc.2')).toBeLessThan(0);
+    expect(compareVersions('1.2.3-rc.2', '1.2.3')).toBeLessThan(0);
+    expect(compareVersions('1.2.3', '1.2.3+build.7')).toBe(0);
+    expect(compareVersions('1.2.3-beta.1+build.1', '1.2.3-beta.1+build.2')).toBe(0);
+    expect(compareVersions('1.2.9007199254740993', '1.2.9007199254740992')).toBeGreaterThan(0);
+    expect(
+      compareVersions('1.2.3-beta.9007199254740993', '1.2.3-beta.9007199254740992')
+    ).toBeGreaterThan(0);
   });
 
   it('coerces records and strings', () => {

@@ -53,6 +53,7 @@ interface OpenCodeTransportOptions {
 export class OpenCodeTransport {
   private static readonly HEALTH_TIMEOUT_MS = 2000;
   private static readonly REQUEST_TIMEOUT_MS = 30_000;
+  private static readonly ASYNC_REQUEST_TIMEOUT_MS = 35_000;
   private static readonly RESPONSE_MAX_BYTES = 16 * 1024 * 1024;
   private static readonly MCP_AUTH_TIMEOUT_MS = 5 * 60_000 + 10_000;
   private static readonly EVENT_CONNECT_TIMEOUT_MS = 10_000;
@@ -151,9 +152,20 @@ export class OpenCodeTransport {
   }
 
   private getRequestTimeoutMs(method: string, path: string): number {
+    const normalizedMethod = method.toUpperCase();
     const pathname = new URL(path, 'http://localhost').pathname;
-    if (method.toUpperCase() === 'POST' && /^\/mcp\/[^/]+\/auth\/authenticate$/.test(pathname)) {
+    if (
+      normalizedMethod === 'POST' &&
+      (/^\/mcp\/[^/]+\/auth\/authenticate$/.test(pathname) ||
+        /^\/provider\/[^/]+\/oauth\/callback$/.test(pathname))
+    ) {
       return OpenCodeTransport.MCP_AUTH_TIMEOUT_MS;
+    }
+    if (
+      normalizedMethod === 'POST' &&
+      /^\/session\/[^/]+\/(?:prompt_async|summarize)$/.test(pathname)
+    ) {
+      return OpenCodeTransport.ASYNC_REQUEST_TIMEOUT_MS;
     }
     return OpenCodeTransport.REQUEST_TIMEOUT_MS;
   }
@@ -455,6 +467,7 @@ export class OpenCodeTransport {
     ) {
       return;
     }
+    // Advance before parsing so a malformed poison event is not replayed on every reconnect.
     if (eventId !== undefined) this.lastEventId = eventId;
     let parsed: unknown;
     try {
@@ -561,14 +574,14 @@ async function readResponseText(
   }
   if (!response.body) {
     const text = await response.text();
-    if (new TextEncoder().encode(text).byteLength > maxBytes) {
+    if (Buffer.byteLength(text, 'utf8') > maxBytes) {
       throw new OpenCodeResponseTooLargeError(maxBytes);
     }
     const projected =
       stripSummaryDiffs || stripMessageParts
         ? stripLargeArrays(text, stripSummaryDiffs, stripMessageParts)
         : text;
-    if (maxProjectedBytes && new TextEncoder().encode(projected).byteLength > maxProjectedBytes) {
+    if (maxProjectedBytes && Buffer.byteLength(projected, 'utf8') > maxProjectedBytes) {
       throw new OpenCodeResponseTooLargeError(maxProjectedBytes);
     }
     return projected;
@@ -595,7 +608,7 @@ async function readResponseText(
       const chunk = projector
         ? projector.write(decoder.decode(value, { stream: true }))
         : decoder.decode(value, { stream: true });
-      projectedBytes += new TextEncoder().encode(chunk).byteLength;
+      projectedBytes += Buffer.byteLength(chunk, 'utf8');
       if (maxProjectedBytes && projectedBytes > maxProjectedBytes) {
         await reader.cancel();
         throw new OpenCodeResponseTooLargeError(maxProjectedBytes);
@@ -605,7 +618,7 @@ async function readResponseText(
     const finalChunk = projector
       ? projector.write(decoder.decode()) + projector.finish()
       : decoder.decode();
-    projectedBytes += new TextEncoder().encode(finalChunk).byteLength;
+    projectedBytes += Buffer.byteLength(finalChunk, 'utf8');
     if (maxProjectedBytes && projectedBytes > maxProjectedBytes) {
       throw new OpenCodeResponseTooLargeError(maxProjectedBytes);
     }

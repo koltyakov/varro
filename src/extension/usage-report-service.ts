@@ -104,15 +104,14 @@ export class UsageReportService {
     const start = includeAllTime ? undefined : now - 30 * DAY_MS;
     const local = await this.readLocalUsage?.(start);
     if (local) {
+      this.sessionUsageCache.clear();
       return renderReport(local.usage, local.sessionCount, warnings, now, includeAllTime);
     }
 
     const sessions = await this.listSessions(warnings, start);
-    if (includeAllTime) {
-      const sessionIDs = new Set(sessions.map((session) => session.id));
-      for (const id of this.sessionUsageCache.keys()) {
-        if (!sessionIDs.has(id)) this.sessionUsageCache.delete(id);
-      }
+    const sessionIDs = new Set(sessions.map((session) => session.id));
+    for (const id of this.sessionUsageCache.keys()) {
+      if (!sessionIDs.has(id)) this.sessionUsageCache.delete(id);
     }
 
     const usage = (

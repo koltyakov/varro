@@ -185,6 +185,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly windowStateDisposable: vscode.Disposable;
   private sessionReconcileTimer: ReturnType<typeof setInterval> | null = null;
   private sessionReconcileIntervalMs = 0;
+  private sessionReconcileInFlight: Promise<void> | null = null;
+  private sessionReconcileRerunRequested = false;
   private mermaidPreviewMaximized = false;
   private mermaidPreviewLayoutQueue: Promise<void> = Promise.resolve();
   private readonly contextProvider: ContextProvider;
@@ -2301,6 +2303,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   async dispose() {
     this.disposing = true;
+    this.sessionReconcileRerunRequested = false;
+    if (this.sessionReconcileTimer) {
+      clearInterval(this.sessionReconcileTimer);
+      this.sessionReconcileTimer = null;
+      this.sessionReconcileIntervalMs = 0;
+    }
     this.sessionState.dispose();
     this.providerFileRefresh.beginDispose();
     for (const endpoint of this.endpoints) this.setEndpointReady(endpoint, false);
@@ -2316,10 +2324,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.editorPanels.clear();
     this.restProxy.dispose();
     await this.setMermaidPreviewOpen(false);
-    if (this.sessionReconcileTimer) {
-      clearInterval(this.sessionReconcileTimer);
-      this.sessionReconcileTimer = null;
-    }
     if (this.permissionModeFallbackRetryTimer) {
       clearTimeout(this.permissionModeFallbackRetryTimer);
       this.permissionModeFallbackRetryTimer = null;
@@ -2777,7 +2781,30 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async runSessionReconcile() {
+  private runSessionReconcile(): Promise<void> {
+    if (this.disposing) return this.sessionReconcileInFlight ?? Promise.resolve();
+    if (this.sessionReconcileInFlight) {
+      this.sessionReconcileRerunRequested = true;
+      return this.sessionReconcileInFlight;
+    }
+    const reconciliation = this.runSessionReconcileLoop();
+    this.sessionReconcileInFlight = reconciliation;
+    return reconciliation;
+  }
+
+  private async runSessionReconcileLoop() {
+    try {
+      do {
+        this.sessionReconcileRerunRequested = false;
+        await this.runSessionReconcilePass();
+      } while (this.sessionReconcileRerunRequested && !this.disposing);
+    } finally {
+      this.sessionReconcileInFlight = null;
+    }
+  }
+
+  private async runSessionReconcilePass() {
+    if (this.disposing) return;
     const queuedSessionIDs = new Set(
       (this.queuedMessages.list() ?? []).map((message) => message.sessionId)
     );
@@ -2801,6 +2828,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.server.request('GET', '/session/status', undefined, { directory })
       )
     );
+    if (this.disposing) return;
     const successfulDirectories = new Set<string | undefined>();
     const serverStatuses: Record<string, unknown> = {};
     for (let index = 0; index < results.length; index += 1) {

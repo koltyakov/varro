@@ -750,11 +750,6 @@ export function MessageList() {
   const messages = createMemo(() => {
     messageStructureVersion();
     const sessionId = state.activeSessionId;
-    const canCaptureAnchor =
-      previousVisibleStructureMessageIds !== null &&
-      previousVisibleStructureSessionId === sessionId &&
-      untrack(() => genericStructuralAnchorCanOwnScroll(sessionId));
-    const visibleAnchor = canCaptureAnchor ? captureMountedVisibleScrollAnchor() : null;
     const visibleMessages = getVisibleThreadMessages(state.messages, sessionId, state.sessions);
     const currentIds = visibleMessages.map((entry) => entry.info.id);
     const previousIds = previousVisibleStructureMessageIds;
@@ -766,13 +761,20 @@ export function MessageList() {
       previousIds !== null &&
       currentIds.length >= previousIds.length &&
       previousIds.every((id, index) => currentIds[index] === id);
+    const nonAppendStructuralChange = structureChanged && !pureAppend;
+    const canCaptureAnchor =
+      nonAppendStructuralChange &&
+      previousVisibleStructureMessageIds !== null &&
+      previousVisibleStructureSessionId === sessionId &&
+      untrack(() => genericStructuralAnchorCanOwnScroll(sessionId));
+    // Capture before rendering publishes the changed rows, while the old geometry is still mounted.
+    const visibleAnchor = canCaptureAnchor ? captureMountedVisibleScrollAnchor() : null;
     previousVisibleStructureSessionId = sessionId;
     previousVisibleStructureMessageIds = currentIds;
 
-    const structuralAnchor =
-      structureChanged && !pureAppend
-        ? (captureLastRetainedVisibleScrollAnchor(previousIds, currentIds) ?? visibleAnchor)
-        : null;
+    const structuralAnchor = nonAppendStructuralChange
+      ? (captureLastRetainedVisibleScrollAnchor(previousIds, currentIds) ?? visibleAnchor)
+      : null;
     if (structuralAnchor && !pendingStructuralScrollAnchor) {
       const preserveBottom = !!containerRef && getDistanceFromBottom(containerRef) <= 2;
       scheduleStructuralScrollAnchorRestore(structuralAnchor, sessionId, preserveBottom);

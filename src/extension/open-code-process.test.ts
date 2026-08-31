@@ -1981,8 +1981,10 @@ describe('OpenCodeProcess config ownership', () => {
     expect(JSON.parse(await manager.serializeInjectedConfig())).toEqual({});
   });
 
-  it('prefers an Ask agent from project OpenCode config', async () => {
+  it('prefers an Ask agent from an ancestor project OpenCode config', async () => {
     const project = await mkdtemp(join(tmpdir(), 'varro-project-config-'));
+    const workspace = join(project, 'packages', 'app');
+    await mkdir(workspace, { recursive: true });
     await mkdir(join(project, '.git'));
     await writeFile(
       join(project, 'opencode.jsonc'),
@@ -1991,7 +1993,7 @@ describe('OpenCodeProcess config ownership', () => {
     );
     const configHome = await mkdtemp(join(tmpdir(), 'varro-empty-config-'));
     process.env.XDG_CONFIG_HOME = configHome;
-    vscodeMock.workspace.workspaceFolders = [{ uri: { fsPath: project } }];
+    vscodeMock.workspace.workspaceFolders = [{ uri: { fsPath: workspace } }];
     const manager = new OpenCodeProcess(
       4096,
       true,
@@ -2007,6 +2009,79 @@ describe('OpenCodeProcess config ownership', () => {
 
     await Promise.all([
       rm(project, { recursive: true, force: true }),
+      rm(configHome, { recursive: true, force: true }),
+    ]);
+  });
+
+  it('checks nearer JSONC configs before JSON and ancestor configs', async () => {
+    const project = await mkdtemp(join(tmpdir(), 'varro-project-config-'));
+    const workspace = join(project, 'packages', 'app');
+    await mkdir(workspace, { recursive: true });
+    await mkdir(join(project, '.git'));
+    await Promise.all([
+      writeFile(
+        join(workspace, 'opencode.jsonc'),
+        '{ "agent": { "ask": { "description": "Nearest agent" } } }',
+        'utf-8'
+      ),
+      mkdir(join(workspace, 'opencode.json')),
+      mkdir(join(project, 'opencode.jsonc')),
+    ]);
+    const configHome = await mkdtemp(join(tmpdir(), 'varro-empty-config-'));
+    process.env.XDG_CONFIG_HOME = configHome;
+    vscodeMock.workspace.workspaceFolders = [{ uri: { fsPath: workspace } }];
+    const manager = new OpenCodeProcess(
+      4096,
+      true,
+      'opencode',
+      false,
+      undefined,
+      undefined,
+      undefined,
+      true
+    );
+
+    expect(JSON.parse(await manager.serializeInjectedConfig())).toEqual({});
+    expect(loggerMock.warn).not.toHaveBeenCalled();
+
+    await Promise.all([
+      rm(project, { recursive: true, force: true }),
+      rm(configHome, { recursive: true, force: true }),
+    ]);
+  });
+
+  it('does not discover project configs above the git boundary', async () => {
+    const parent = await mkdtemp(join(tmpdir(), 'varro-project-config-'));
+    const project = join(parent, 'repo');
+    const workspace = join(project, 'packages', 'app');
+    await mkdir(workspace, { recursive: true });
+    await mkdir(join(project, '.git'));
+    await writeFile(
+      join(parent, 'opencode.jsonc'),
+      '{ "agent": { "ask": { "description": "Outer agent" } } }',
+      'utf-8'
+    );
+    const configHome = await mkdtemp(join(tmpdir(), 'varro-empty-config-'));
+    process.env.XDG_CONFIG_HOME = configHome;
+    vscodeMock.workspace.workspaceFolders = [{ uri: { fsPath: workspace } }];
+    const manager = new OpenCodeProcess(
+      4096,
+      true,
+      'opencode',
+      false,
+      undefined,
+      undefined,
+      undefined,
+      true
+    );
+
+    const config = JSON.parse(await manager.serializeInjectedConfig()) as {
+      agent?: Record<string, unknown>;
+    };
+    expect(config.agent?.ask).toBeDefined();
+
+    await Promise.all([
+      rm(parent, { recursive: true, force: true }),
       rm(configHome, { recursive: true, force: true }),
     ]);
   });

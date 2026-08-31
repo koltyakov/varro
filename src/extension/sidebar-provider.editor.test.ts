@@ -968,6 +968,82 @@ describe('SidebarProvider editor panels', () => {
     expect(internals.sessionState.busy.has('session-a')).toBe(true);
   });
 
+  it('coalesces concurrent session reconciliation into one follow-up pass', async () => {
+    const requests: Array<ReturnType<typeof deferred<unknown>>> = [];
+    let activePasses = 0;
+    let maximumActivePasses = 0;
+    const server = createServer({
+      request: vi.fn(() => {
+        activePasses += 1;
+        maximumActivePasses = Math.max(maximumActivePasses, activePasses);
+        const request = deferred<unknown>();
+        requests.push(request);
+        return request.promise.finally(() => {
+          activePasses -= 1;
+        });
+      }),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const internals = provider as unknown as {
+      sessionState: SessionStateManager;
+      runSessionReconcile(): Promise<void>;
+    };
+    internals.sessionState.handleServerEvent({
+      type: 'session.created',
+      properties: { info: { id: 'session-a', directory: '/repo-a' } },
+    });
+    internals.sessionState.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-a', status: { type: 'busy' } },
+    });
+
+    const first = internals.runSessionReconcile();
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    const second = internals.runSessionReconcile();
+    const third = internals.runSessionReconcile();
+
+    expect(second).toBe(first);
+    expect(third).toBe(first);
+    expect(activePasses).toBe(1);
+    requests[0]?.resolve({ 'session-a': { type: 'busy' } });
+    await vi.waitFor(() => expect(requests).toHaveLength(2));
+    expect(activePasses).toBe(1);
+    requests[1]?.resolve({ 'session-a': { type: 'busy' } });
+    await Promise.all([first, second, third]);
+
+    expect(server.request).toHaveBeenCalledTimes(2);
+    expect(maximumActivePasses).toBe(1);
+  });
+
+  it('does not rerun session reconciliation after disposal starts', async () => {
+    const status = deferred<unknown>();
+    const server = createServer({ request: vi.fn(() => status.promise) });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const internals = provider as unknown as {
+      disposing: boolean;
+      sessionState: SessionStateManager;
+      runSessionReconcile(): Promise<void>;
+    };
+    internals.sessionState.handleServerEvent({
+      type: 'session.created',
+      properties: { info: { id: 'session-a', directory: '/repo-a' } },
+    });
+    internals.sessionState.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-a', status: { type: 'busy' } },
+    });
+
+    const reconciliation = internals.runSessionReconcile();
+    await vi.waitFor(() => expect(server.request).toHaveBeenCalledOnce());
+    void internals.runSessionReconcile();
+    internals.disposing = true;
+    status.resolve({});
+    await reconciliation;
+
+    expect(server.request).toHaveBeenCalledOnce();
+    expect(internals.sessionState.busy.has('session-a')).toBe(true);
+  });
+
   it('routes sibling session lifecycle events to the endpoint that owns its queue', async () => {
     const contextProvider = createContextProvider();
     contextProvider.context.workspacePath = '/repo-a';

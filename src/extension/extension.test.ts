@@ -229,7 +229,7 @@ describe('extension activation', () => {
         reserved: 7777,
       },
       undefined,
-      false
+      true
     );
   });
 
@@ -392,7 +392,7 @@ describe('extension activation', () => {
         reserved: 4096,
       },
       undefined,
-      false
+      true
     );
   });
 

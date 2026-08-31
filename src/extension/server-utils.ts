@@ -1,5 +1,4 @@
 /* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters -- These helpers validate JavaScript and network boundary values. */
-/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Record assertions follow object and array exclusion checks. */
 import type { ChildProcess } from 'child_process';
 import type { ServerStatus } from '../shared/protocol';
 
@@ -57,43 +56,80 @@ export function waitForProcessExit(proc: ChildProcess, timeoutMs: number): Promi
 }
 
 export function anySignal(...signals: AbortSignal[]): AbortSignal {
-  if (typeof AbortSignal.any === 'function') {
-    return AbortSignal.any(signals);
-  }
-  const controller = new AbortController();
-  const onAbort = (event: Event) => {
-    controller.abort((event.target as AbortSignal | null)?.reason);
-    for (const signal of signals) {
-      signal.removeEventListener('abort', onAbort);
-    }
-  };
-
-  for (const signal of signals) {
-    if (signal.aborted) {
-      controller.abort(signal.reason);
-      return controller.signal;
-    }
-    signal.addEventListener('abort', onAbort, { once: true });
-  }
-
-  return controller.signal;
+  return AbortSignal.any(signals);
 }
 
 export function extractVersion(value: string): string | null {
-  const match = value.trim().match(/\d+(?:\.\d+)+/);
+  const match = value
+    .trim()
+    .match(
+      /\d+(?:\.\d+)+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?/
+    );
   return match ? match[0] : null;
 }
 
+function compareNumericIdentifiers(left: string, right: string): number {
+  const normalizedLeft = left.replace(/^0+(?=\d)/, '');
+  const normalizedRight = right.replace(/^0+(?=\d)/, '');
+  if (normalizedLeft.length !== normalizedRight.length) {
+    return normalizedLeft.length < normalizedRight.length ? -1 : 1;
+  }
+  if (normalizedLeft === normalizedRight) return 0;
+  return normalizedLeft < normalizedRight ? -1 : 1;
+}
+
 export function compareVersions(left: string, right: string): number {
-  const leftParts = left.split('.').map((part) => Number.parseInt(part, 10) || 0);
-  const rightParts = right.split('.').map((part) => Number.parseInt(part, 10) || 0);
+  const leftBuildIndex = left.indexOf('+');
+  const rightBuildIndex = right.indexOf('+');
+  const leftWithoutBuild = leftBuildIndex === -1 ? left : left.slice(0, leftBuildIndex);
+  const rightWithoutBuild = rightBuildIndex === -1 ? right : right.slice(0, rightBuildIndex);
+  const leftPrereleaseIndex = leftWithoutBuild.indexOf('-');
+  const rightPrereleaseIndex = rightWithoutBuild.indexOf('-');
+  const leftRelease =
+    leftPrereleaseIndex === -1 ? leftWithoutBuild : leftWithoutBuild.slice(0, leftPrereleaseIndex);
+  const rightRelease =
+    rightPrereleaseIndex === -1
+      ? rightWithoutBuild
+      : rightWithoutBuild.slice(0, rightPrereleaseIndex);
+  const leftPrerelease =
+    leftPrereleaseIndex === -1 ? undefined : leftWithoutBuild.slice(leftPrereleaseIndex + 1);
+  const rightPrerelease =
+    rightPrereleaseIndex === -1 ? undefined : rightWithoutBuild.slice(rightPrereleaseIndex + 1);
+  const leftParts = leftRelease.split('.');
+  const rightParts = rightRelease.split('.');
   const length = Math.max(leftParts.length, rightParts.length);
   for (let index = 0; index < length; index += 1) {
-    const difference = (leftParts[index] || 0) - (rightParts[index] || 0);
+    const difference = compareNumericIdentifiers(leftParts[index] ?? '0', rightParts[index] ?? '0');
     if (difference !== 0) {
       return difference;
     }
   }
+
+  if (leftPrerelease === undefined || rightPrerelease === undefined) {
+    if (leftPrerelease === rightPrerelease) return 0;
+    return leftPrerelease === undefined ? 1 : -1;
+  }
+
+  const leftIdentifiers = leftPrerelease.split('.');
+  const rightIdentifiers = rightPrerelease.split('.');
+  const prereleaseLength = Math.max(leftIdentifiers.length, rightIdentifiers.length);
+  for (let index = 0; index < prereleaseLength; index += 1) {
+    const leftIdentifier = leftIdentifiers[index];
+    const rightIdentifier = rightIdentifiers[index];
+    if (leftIdentifier === undefined || rightIdentifier === undefined) {
+      return leftIdentifier === undefined ? -1 : 1;
+    }
+    if (leftIdentifier === rightIdentifier) continue;
+
+    const leftNumeric = /^\d+$/.test(leftIdentifier);
+    const rightNumeric = /^\d+$/.test(rightIdentifier);
+    if (leftNumeric && rightNumeric) {
+      return compareNumericIdentifiers(leftIdentifier, rightIdentifier);
+    }
+    if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1;
+    return leftIdentifier < rightIdentifier ? -1 : 1;
+  }
+
   return 0;
 }
 

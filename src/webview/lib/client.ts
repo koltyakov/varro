@@ -111,9 +111,10 @@ export const client = {
       return result;
     },
     async get(id: string, options?: { directory?: string }): Promise<Session> {
-      return apiCall<Session>('GET', withDirectory(`/session/${id}`, options?.directory)).then(
-        applySessionShareOverride
-      );
+      return apiCall<Session>(
+        'GET',
+        withDirectory(`/session/${encodeURIComponent(id)}`, options?.directory)
+      ).then(applySessionShareOverride);
     },
     async activate(
       id: string,
@@ -143,43 +144,66 @@ export const client = {
       body: { title?: string; permission?: PermissionRule[] },
       options?: { directory?: string }
     ): Promise<Session> {
-      return apiCall('PATCH', withDirectory(`/session/${id}`, options?.directory), body);
+      return apiCall(
+        'PATCH',
+        withDirectory(`/session/${encodeURIComponent(id)}`, options?.directory),
+        body
+      );
     },
     async fork(id: string, messageID?: string, options?: { directory?: string }): Promise<Session> {
       return apiCall(
         'POST',
-        withDirectory(`/session/${id}/fork`, options?.directory),
+        withDirectory(`/session/${encodeURIComponent(id)}/fork`, options?.directory),
         messageID ? { messageID } : undefined
       );
     },
     async delete(id: string, options?: { directory?: string }): Promise<boolean> {
-      return apiCall('DELETE', withDirectory(`/session/${id}`, options?.directory));
+      return apiCall(
+        'DELETE',
+        withDirectory(`/session/${encodeURIComponent(id)}`, options?.directory)
+      );
     },
     async abort(id: string, options?: { directory?: string }): Promise<boolean> {
-      return apiCall('POST', withDirectory(`/session/${id}/abort`, options?.directory));
+      return apiCall(
+        'POST',
+        withDirectory(`/session/${encodeURIComponent(id)}/abort`, options?.directory)
+      );
     },
     async share(id: string, options?: { directory?: string }): Promise<Session> {
-      return apiCall('POST', withDirectory(`/session/${id}/share`, options?.directory));
+      return apiCall(
+        'POST',
+        withDirectory(`/session/${encodeURIComponent(id)}/share`, options?.directory)
+      );
     },
     async unshare(id: string, options?: { directory?: string }): Promise<Session> {
-      return apiCall('DELETE', withDirectory(`/session/${id}/share`, options?.directory));
+      return apiCall(
+        'DELETE',
+        withDirectory(`/session/${encodeURIComponent(id)}/share`, options?.directory)
+      );
     },
     async init(
       id: string,
       body: { messageID: string; providerID: string; modelID: string },
       options?: { directory?: string }
     ): Promise<boolean> {
-      return apiCall('POST', withDirectory(`/session/${id}/init`, options?.directory), body);
+      return apiCall(
+        'POST',
+        withDirectory(`/session/${encodeURIComponent(id)}/init`, options?.directory),
+        body
+      );
     },
     async diff(
       id: string,
       messageID?: string,
       options?: { directory?: string }
     ): Promise<FileDiff[]> {
-      const query = messageID ? `?messageID=${messageID}` : '';
-      return apiCall('GET', withDirectory(`/session/${id}/diff${query}`, options?.directory)).then(
-        validateFileDiffs
-      );
+      const params = new URLSearchParams();
+      if (messageID) params.set('messageID', messageID);
+      const query = params.size > 0 ? `?${params.toString()}` : '';
+      return apiCall(
+        'GET',
+        withDirectory(`/session/${encodeURIComponent(id)}/diff${query}`, options?.directory)
+      ).then(validateFileDiffs);
     },
     async status(): Promise<Record<string, SessionStatus>> {
       return getSharedSessionStatus();
@@ -193,7 +217,7 @@ export const client = {
       if (options?.before) params.set('before', options.before);
       if (options?.directory) params.set('directory', options.directory);
       const query = params.size > 0 ? `?${params.toString()}` : '';
-      const path = `/session/${id}/message${query}`;
+      const path = `/session/${encodeURIComponent(id)}/message${query}`;
       const response = await apiCall('GET', path);
       if (Array.isArray(response)) {
         // SAFETY: The message endpoint's array form is the legacy SessionMessagePage wire format.
@@ -222,7 +246,10 @@ export const client = {
       );
     },
     async todos(id: string, options?: { directory?: string }): Promise<Todo[]> {
-      return apiCall('GET', withDirectory(`/session/${id}/todo`, options?.directory));
+      return apiCall(
+        'GET',
+        withDirectory(`/session/${encodeURIComponent(id)}/todo`, options?.directory)
+      );
     },
     async sendAsync(
       id: string,
@@ -269,7 +296,7 @@ export const client = {
       response: 'once' | 'always' | 'reject',
       options?: { permissionAutomationLease?: number }
     ): Promise<boolean> {
-      const path = `/permission/${permissionId}/reply`;
+      const path = `/permission/${encodeURIComponent(permissionId)}/reply`;
       const body = { reply: response };
       return options?.permissionAutomationLease === undefined
         ? apiCall('POST', path, body)
@@ -283,19 +310,28 @@ export const client = {
       messageID: string,
       options?: { directory?: string }
     ): Promise<Session> {
-      return apiCall('POST', withDirectory(`/session/${id}/revert`, options?.directory), {
-        messageID,
-      });
+      return apiCall(
+        'POST',
+        withDirectory(`/session/${encodeURIComponent(id)}/revert`, options?.directory),
+        { messageID }
+      );
     },
     async unrevert(id: string, options?: { directory?: string }): Promise<Session> {
-      return apiCall('POST', withDirectory(`/session/${id}/unrevert`, options?.directory));
+      return apiCall(
+        'POST',
+        withDirectory(`/session/${encodeURIComponent(id)}/unrevert`, options?.directory)
+      );
     },
     async compact(
       id: string,
       model: { providerID: string; modelID: string },
       options?: { directory?: string }
     ): Promise<boolean> {
-      return apiCall('POST', withDirectory(`/session/${id}/summarize`, options?.directory), model);
+      return apiCall(
+        'POST',
+        withDirectory(`/session/${encodeURIComponent(id)}/summarize`, options?.directory),
+        model
+      );
     },
     async command(
       id: string,
@@ -308,7 +344,11 @@ export const client = {
       },
       options?: { directory?: string }
     ): Promise<MessageEntry> {
-      return apiCall('POST', withDirectory(`/session/${id}/command`, options?.directory), body);
+      return apiCall(
+        'POST',
+        withDirectory(`/session/${encodeURIComponent(id)}/command`, options?.directory),
+        body
+      );
     },
   },
 
@@ -640,10 +680,10 @@ export const client = {
       return getSharedQuestionList();
     },
     async reply(requestID: string, answers: Array<Array<string>>): Promise<boolean> {
-      return apiCall('POST', `/question/${requestID}/reply`, { answers });
+      return apiCall('POST', `/question/${encodeURIComponent(requestID)}/reply`, { answers });
     },
     async reject(requestID: string): Promise<boolean> {
-      return apiCall('POST', `/question/${requestID}/reject`);
+      return apiCall('POST', `/question/${encodeURIComponent(requestID)}/reject`);
     },
   },
 
@@ -783,7 +823,7 @@ type ServerEventsApi = {
 };
 
 const eventListeners = new Map<string, Set<EventHandler>>();
-const observedEventIds = new Set<string>();
+const observedEventMetadata = new Map<string, { hasSequence: boolean }>();
 const MAX_OBSERVED_EVENT_IDS = 1_024;
 let workspaceStatusSummary: WorkspaceStatusEventSummary = { entries: [] };
 
@@ -792,21 +832,26 @@ export function invalidateClientWorkspaceCaches(): void {
   sessionStatusSlot.current = null;
   questionListSlot.current = null;
   permissionListSlot.current = null;
-  observedEventIds.clear();
+  observedEventMetadata.clear();
   workspaceStatusSummary = { entries: [] };
 }
 
 onMessage((msg) => {
   if (msg.type !== 'server/event') return;
   const evt = msg.payload;
-  const applyEvent = !evt.id || !observedEventIds.has(evt.id);
-  if (evt.id && applyEvent) {
-    observedEventIds.add(evt.id);
-    while (observedEventIds.size > MAX_OBSERVED_EVENT_IDS) {
-      const oldestId = observedEventIds.values().next().value;
+  const observed = evt.id ? observedEventMetadata.get(evt.id) : undefined;
+  const applyEvent = !evt.id || !observed;
+  let dispatchWildcard = applyEvent;
+  if (evt.id && !observed) {
+    observedEventMetadata.set(evt.id, { hasSequence: evt.seq !== undefined });
+    while (observedEventMetadata.size > MAX_OBSERVED_EVENT_IDS) {
+      const oldestId = observedEventMetadata.keys().next().value;
       if (oldestId === undefined) break;
-      observedEventIds.delete(oldestId);
+      observedEventMetadata.delete(oldestId);
     }
+  } else if (observed && !observed.hasSequence && evt.seq !== undefined) {
+    observed.hasSequence = true;
+    dispatchWildcard = true;
   }
   if (applyEvent && evt.type === 'workspace.status') {
     const entry = normalizeWorkspaceStatusEntry(evt.properties);
@@ -855,7 +900,7 @@ onMessage((msg) => {
   }
   // SAFETY: The surrounding shape or discriminator check establishes the Set<EventHandler> contract used below.
   const wildcard = eventListeners.get('*') as Set<EventHandler> | undefined;
-  if (wildcard) {
+  if (dispatchWildcard && wildcard) {
     for (const h of wildcard) {
       try {
         h(evt);

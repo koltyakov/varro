@@ -11,7 +11,17 @@ type QuestionDraft = {
   currentStep: number;
 };
 
+const QUESTION_DRAFT_LIMIT = 100;
 const questionDrafts = new Map<string, QuestionDraft>();
+
+function saveQuestionDraft(id: string, draft: QuestionDraft): void {
+  questionDrafts.delete(id);
+  questionDrafts.set(id, draft);
+  if (questionDrafts.size <= QUESTION_DRAFT_LIMIT) return;
+
+  const oldestID = questionDrafts.keys().next().value;
+  if (oldestID !== undefined) questionDrafts.delete(oldestID);
+}
 
 export function QuestionPrompt(props: { request: QuestionRequest }) {
   const questions = () => props.request.questions || [];
@@ -37,7 +47,7 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
   });
 
   createEffect(() => {
-    questionDrafts.set(props.request.id, {
+    saveQuestionDraft(props.request.id, {
       selected: selected().map((entry) => [...entry]),
       customValues: [...customValues()],
       currentStep: currentStep(),

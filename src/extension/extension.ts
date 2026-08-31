@@ -151,7 +151,7 @@ export async function activate(context: vscode.ExtensionContext) {
   const simulateMissingCli = config.get<boolean>('debug.simulateMissingCli', false);
   const simulateNoProviders = config.get<boolean>('debug.simulateNoProviders', false);
   const compactionSettings = readCompactionSettings(config);
-  const askAgentEnabled = config.get<boolean>('chat.enableAskAgent', false);
+  const askAgentEnabled = config.get<boolean>('chat.enableAskAgent', true);
   syncShowFileDiffsContext(config);
 
   server = new OpenCodeServer(
@@ -269,7 +269,7 @@ export async function activate(context: vscode.ExtensionContext) {
         void server?.updateCompactionSettings(readCompactionSettings(nextConfig));
       }
       if (askAgentChanged) {
-        void server?.updateAskAgentEnabled(nextConfig.get<boolean>('chat.enableAskAgent', false));
+        void server?.updateAskAgentEnabled(nextConfig.get<boolean>('chat.enableAskAgent', true));
       }
       if (launchSettingsChanged) {
         server?.updateLaunchSettings({
@@ -293,7 +293,7 @@ export async function activate(context: vscode.ExtensionContext) {
   );
   await revealSidebarOnFirstActivation(context, sidebarDestination);
 
-  vscode.commands.executeCommand('setContext', 'varro:activated', true);
+  void vscode.commands.executeCommand('setContext', 'varro:activated', true);
   sidebarProvider.startProviderFileObservation();
   void (async () => {
     try {

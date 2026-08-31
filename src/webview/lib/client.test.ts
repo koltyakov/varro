@@ -5,8 +5,11 @@ import { fixture } from '../test-fixtures';
 interface TestServerEventEnvelope {
   type: 'server/event';
   payload: {
+    id?: string;
     type: string;
-    properties?: Record<string, string>;
+    seq?: number;
+    sequenceOnly?: true;
+    properties?: object;
   };
 }
 
@@ -572,6 +575,151 @@ describe('client', () => {
     );
   });
 
+  it.each([
+    {
+      name: 'session get',
+      method: 'GET',
+      path: '/session/segment%20%2F%5C%3F%23%25%26%3D',
+      request: (client: ClientApi, value: string) => client.session.get(value),
+    },
+    {
+      name: 'session update',
+      method: 'PATCH',
+      path: '/session/segment%20%2F%5C%3F%23%25%26%3D',
+      request: (client: ClientApi, value: string) => client.session.update(value, {}),
+    },
+    {
+      name: 'session fork',
+      method: 'POST',
+      path: '/session/segment%20%2F%5C%3F%23%25%26%3D/fork',
+      request: (client: ClientApi, value: string) => client.session.fork(value),
+    },
+    {
+      name: 'session delete',
+      method: 'DELETE',
+      path: '/session/segment%20%2F%5C%3F%23%25%26%3D',
+      request: (client: ClientApi, value: string) => client.session.delete(value),
+    },
+    {
+      name: 'session abort',
+      method: 'POST',
+      path: '/session/segment%20%2F%5C%3F%23%25%26%3D/abort',
+      request: (client: ClientApi, value: string) => client.session.abort(value),
+    },
+    {
+      name: 'session share',
+      method: 'POST',
+      path: '/session/segment%20%2F%5C%3F%23%25%26%3D/share',
+      request: (client: ClientApi, value: string) => client.session.share(value),
+    },
+    {
+      name: 'session unshare',
+      method: 'DELETE',
+      path: '/session/segment%20%2F%5C%3F%23%25%26%3D/share',
+      request: (client: ClientApi, value: string) => client.session.unshare(value),
+    },
+    {
+      name: 'session init',
+      method: 'POST',
+      path: '/session/segment%20%2F%5C%3F%23%25%26%3D/init',
+      request: (client: ClientApi, value: string) =>
+        client.session.init(value, {
+          messageID: 'message-1',
+          providerID: 'openai',
+          modelID: 'gpt',
+        }),
+    },
+    {
+      name: 'session diff',
+      method: 'GET',
+      path: '/session/segment%20%2F%5C%3F%23%25%26%3D/diff',
+      request: (client: ClientApi, value: string) => client.session.diff(value),
+    },
+    {
+      name: 'session messages',
+      method: 'GET',
+      path: '/session/segment%20%2F%5C%3F%23%25%26%3D/message',
+      request: (client: ClientApi, value: string) => client.session.messages(value),
+    },
+    {
+      name: 'session message delete',
+      method: 'DELETE',
+      path: '/session/segment%20%2F%5C%3F%23%25%26%3D/message/segment%20%2F%5C%3F%23%25%26%3D',
+      request: (client: ClientApi, value: string) => client.session.deleteMessage(value, value),
+    },
+    {
+      name: 'session todos',
+      method: 'GET',
+      path: '/session/segment%20%2F%5C%3F%23%25%26%3D/todo',
+      request: (client: ClientApi, value: string) => client.session.todos(value),
+    },
+    {
+      name: 'session revert',
+      method: 'POST',
+      path: '/session/segment%20%2F%5C%3F%23%25%26%3D/revert',
+      request: (client: ClientApi, value: string) => client.session.revert(value, 'message-1'),
+    },
+    {
+      name: 'session unrevert',
+      method: 'POST',
+      path: '/session/segment%20%2F%5C%3F%23%25%26%3D/unrevert',
+      request: (client: ClientApi, value: string) => client.session.unrevert(value),
+    },
+    {
+      name: 'session compact',
+      method: 'POST',
+      path: '/session/segment%20%2F%5C%3F%23%25%26%3D/summarize',
+      request: (client: ClientApi, value: string) =>
+        client.session.compact(value, { providerID: 'openai', modelID: 'gpt' }),
+    },
+    {
+      name: 'session command',
+      method: 'POST',
+      path: '/session/segment%20%2F%5C%3F%23%25%26%3D/command',
+      request: (client: ClientApi, value: string) =>
+        client.session.command(value, { command: 'test', arguments: '' }),
+    },
+    {
+      name: 'permission reply',
+      method: 'POST',
+      path: '/permission/segment%20%2F%5C%3F%23%25%26%3D/reply',
+      request: (client: ClientApi, value: string) =>
+        client.session.respondPermission('session-1', value, 'once'),
+    },
+    {
+      name: 'question reply',
+      method: 'POST',
+      path: '/question/segment%20%2F%5C%3F%23%25%26%3D/reply',
+      request: (client: ClientApi, value: string) => client.question.reply(value, []),
+    },
+    {
+      name: 'question reject',
+      method: 'POST',
+      path: '/question/segment%20%2F%5C%3F%23%25%26%3D/reject',
+      request: (client: ClientApi, value: string) => client.question.reject(value),
+    },
+  ])('encodes reserved characters in the $name path', async ({ method, path, request }) => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockResolvedValue([]);
+
+    await request(client, 'segment /\\?#%&=');
+
+    expect(bridgeMocks.apiCall).toHaveBeenCalledOnce();
+    expect(bridgeMocks.apiCall.mock.calls[0]?.slice(0, 2)).toEqual([method, path]);
+  });
+
+  it('encodes the session diff message ID as a query parameter', async () => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockResolvedValue([]);
+
+    await client.session.diff('session /\\?#%', 'message /\\?#%&=');
+
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
+      'GET',
+      '/session/session%20%2F%5C%3F%23%25/diff?messageID=message+%2F%5C%3F%23%25%26%3D'
+    );
+  });
+
   it('builds provider limit query parameters only when a model is selected', async () => {
     const { client } = await loadClient();
     bridgeMocks.apiCall.mockResolvedValue({ status: 'available' });
@@ -819,49 +967,75 @@ describe('client', () => {
     expect(wildcard).toHaveBeenNthCalledWith(2, message.payload);
   });
 
-  it('delivers a sequence-only event semantically when its direct twin was not received', async () => {
+  it.each([
+    {
+      name: 'delivers a new sequence-only event',
+      events: [
+        { id: 'sequence-only', type: 'session.updated', seq: 2, sequenceOnly: true },
+      ] as const,
+      wildcardIndexes: [0],
+    },
+    {
+      name: 'delivers the first sequenced twin as an upgrade',
+      events: [
+        { id: 'sequence-upgrade', type: 'session.updated' },
+        { id: 'sequence-upgrade', type: 'session.updated', seq: 3, sequenceOnly: true },
+        { id: 'sequence-upgrade', type: 'session.updated', seq: 2, sequenceOnly: true },
+      ] as const,
+      wildcardIndexes: [0, 1],
+    },
+    {
+      name: 'suppresses an older duplicate after a sequenced first occurrence',
+      events: [
+        { id: 'sequenced-first', type: 'session.updated', seq: 3, sequenceOnly: true },
+        { id: 'sequenced-first', type: 'session.updated', seq: 2, sequenceOnly: true },
+      ] as const,
+      wildcardIndexes: [0],
+    },
+  ])('$name', async ({ events, wildcardIndexes }) => {
     const { serverEvents } = await loadClient();
     const specific = vi.fn();
     const wildcard = vi.fn();
     serverEvents.on('session.updated', specific);
     serverEvents.on('*', wildcard);
-    const event = {
-      id: 'event-1',
-      type: 'session.updated',
-      seq: 2,
-      sequenceOnly: true,
-      properties: { sessionID: 'session-1', info: { id: 'session-1' } },
-    } as const;
 
-    emitMessage({ type: 'server/event', payload: event });
+    for (const event of events) emitMessage({ type: 'server/event', payload: event });
 
-    expect(specific).toHaveBeenCalledOnce();
-    expect(specific).toHaveBeenCalledWith(event);
-    expect(wildcard).toHaveBeenCalledOnce();
-    expect(wildcard).toHaveBeenCalledWith(event);
+    expect(specific.mock.calls.map((call) => call[0])).toEqual([events[0]]);
+    expect(wildcard.mock.calls.map((call) => call[0])).toEqual(
+      wildcardIndexes.map((index) => events[index])
+    );
   });
 
-  it('applies direct and sequence-only event twins only once', async () => {
+  it('reapplies an event after its bounded observation metadata is evicted', async () => {
     const { serverEvents } = await loadClient();
     const specific = vi.fn();
     const wildcard = vi.fn();
     serverEvents.on('session.updated', specific);
     serverEvents.on('*', wildcard);
-    const direct = {
-      id: 'event-twin',
+
+    emitMessage({
+      type: 'server/event',
+      payload: { id: 'event-evicted', type: 'session.updated' },
+    });
+    for (let index = 0; index < 1_024; index += 1) {
+      emitMessage({
+        type: 'server/event',
+        payload: { id: `event-${index}`, type: 'session.updated', seq: index },
+      });
+    }
+    const replay = {
+      id: 'event-evicted',
       type: 'session.updated',
-      properties: { sessionID: 'session-1', info: { id: 'session-1' } },
+      seq: 1_025,
+      sequenceOnly: true,
     } as const;
-    const sequenced = { ...direct, seq: 3, sequenceOnly: true } as const;
+    emitMessage({ type: 'server/event', payload: replay });
 
-    emitMessage({ type: 'server/event', payload: direct });
-    emitMessage({ type: 'server/event', payload: sequenced });
-
-    expect(specific).toHaveBeenCalledOnce();
-    expect(specific).toHaveBeenCalledWith(direct);
-    expect(wildcard).toHaveBeenCalledTimes(2);
-    expect(wildcard).toHaveBeenNthCalledWith(1, direct);
-    expect(wildcard).toHaveBeenNthCalledWith(2, sequenced);
+    expect(specific).toHaveBeenCalledTimes(1_026);
+    expect(specific).toHaveBeenLastCalledWith(replay);
+    expect(wildcard).toHaveBeenCalledTimes(1_026);
+    expect(wildcard).toHaveBeenLastCalledWith(replay);
   });
 
   it('logs errors from server event handlers without aborting other listeners', async () => {

@@ -121,17 +121,27 @@ function stubPlatform(platform: NodeJS.Platform) {
   });
 }
 
-describe('OpenCodeTransport reconnect delay', () => {
-  it('allows MCP OAuth authentication to use the server callback window', () => {
+describe('OpenCodeTransport request timeouts', () => {
+  it.each([
+    { method: 'POST', path: '/mcp/demo/auth/authenticate', expected: 310_000 },
+    { method: 'post', path: '/provider/openai/oauth/callback?directory=/repo', expected: 310_000 },
+    { method: 'POST', path: '/session/demo/prompt_async?directory=/repo', expected: 35_000 },
+    { method: 'POST', path: '/session/demo/summarize', expected: 35_000 },
+    { method: 'GET', path: '/mcp/demo/auth/authenticate', expected: 30_000 },
+    { method: 'GET', path: '/provider/openai/oauth/callback', expected: 30_000 },
+    { method: 'GET', path: '/session/demo/prompt_async', expected: 30_000 },
+    { method: 'PATCH', path: '/session/demo/summarize', expected: 30_000 },
+    { method: 'POST', path: '/session/demo/abort', expected: 30_000 },
+  ])('uses $expected ms for $method $path', ({ method, path, expected }) => {
     const transport = createTransport() as unknown as {
       getRequestTimeoutMs(method: string, path: string): number;
     };
 
-    expect(transport.getRequestTimeoutMs('POST', '/mcp/demo/auth/authenticate')).toBe(310_000);
-    expect(transport.getRequestTimeoutMs('GET', '/mcp/demo/auth/authenticate')).toBe(30_000);
-    expect(transport.getRequestTimeoutMs('POST', '/session/demo/abort')).toBe(30_000);
+    expect(transport.getRequestTimeoutMs(method, path)).toBe(expected);
   });
+});
 
+describe('OpenCodeTransport reconnect delay', () => {
   it('keeps lower-bound jitter after reaching the max reconnect delay', () => {
     const transport = createTransport() as unknown as {
       eventReconnectDelay: number;
@@ -297,6 +307,19 @@ describe('OpenCodeTransport event stream path', () => {
     expect(requestHeaders[0]).not.toHaveProperty('Last-Event-ID');
     expect(requestHeaders[1]).toMatchObject({ 'Last-Event-ID': 'event-42' });
     transport.stopEventStream();
+  });
+
+  it('advances the SSE event ID for a malformed payload', () => {
+    const transport = createTransport() as unknown as {
+      processSseChunk(chunk: string): void;
+      lastEventId: string;
+    };
+
+    transport.processSseChunk('id: poison-42\ndata: {malformed');
+
+    expect(transport.lastEventId).toBe('poison-42');
+    expect(emitEventMock).not.toHaveBeenCalled();
+    expect(warnMock).toHaveBeenCalledWith(expect.stringContaining('Ignoring malformed'));
   });
 
   it('subscribes to the global event stream', async () => {
@@ -956,6 +979,69 @@ describe('OpenCodeTransport requests', () => {
         parts: [],
       },
     ]);
+  });
+
+  it('counts multibyte projected responses in UTF-8 bytes', async () => {
+    const payload = [
+      {
+        info: {
+          id: 'message-1',
+          summary: {
+            title: 'Keep this 🙂 title',
+            diffs: [{ before: 'x'.repeat(2_000) }],
+          },
+        },
+      },
+    ];
+    const projected = [
+      {
+        info: {
+          id: 'message-1',
+          summary: {
+            title: 'Keep this 🙂 title',
+            diffs: [],
+            diffsOmitted: true,
+            diffsTruncated: true,
+          },
+        },
+      },
+    ];
+    const sourceBytes = new TextEncoder().encode(JSON.stringify(payload));
+    const emojiBytes = new TextEncoder().encode('🙂');
+    const emojiStart = sourceBytes.findIndex((_, index) =>
+      emojiBytes.every((emojiByte, offset) => sourceBytes[index + offset] === emojiByte)
+    );
+    const splitAt = emojiStart + 2;
+    const createResponse = () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(sourceBytes.slice(0, splitAt));
+            controller.enqueue(sourceBytes.slice(splitAt));
+            controller.close();
+          },
+        })
+      );
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => createResponse())
+    );
+    const projectedBytes = Buffer.byteLength(JSON.stringify(projected), 'utf8');
+    const options = {
+      maxResponseBytes: sourceBytes.byteLength,
+      maxProjectedResponseBytes: projectedBytes,
+      stripSummaryDiffs: true,
+    };
+
+    await expect(
+      createTransport().request('GET', '/session/session-1/message', undefined, options)
+    ).resolves.toEqual(projected);
+    await expect(
+      createTransport().request('GET', '/session/session-1/message', undefined, {
+        ...options,
+        maxProjectedResponseBytes: projectedBytes - 1,
+      })
+    ).rejects.toThrow(`OpenCode response exceeded the ${projectedBytes - 1}-byte safety limit`);
   });
 });
 
