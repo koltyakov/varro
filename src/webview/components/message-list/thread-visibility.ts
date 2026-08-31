@@ -1,7 +1,7 @@
 import { state } from '../../lib/state';
 import { collectSessionTreeIds } from '../../lib/session-tree-index';
 import { shouldShowAssistantPartInline } from '../../lib/part-utils';
-import type { MessageEntry, Part, Session } from '../../types';
+import type { MessageEntry, Part } from '../../types';
 
 export function getRenderedMessages(
   messages: MessageEntry[],
@@ -34,17 +34,13 @@ export function getRenderedMessages(
 
 function shouldHideThreadMessage(
   entry: MessageEntry,
-  activeSessionId: string | null,
+  activeSessionId: string,
   activeTreeIds: ReadonlySet<string>,
-  sessions: Session[]
+  childSessionIds: ReadonlySet<string>
 ) {
-  if (!activeSessionId) return false;
-
   if (!activeTreeIds.has(entry.info.sessionID)) return true;
   if (entry.info.sessionID === activeSessionId) return false;
-
-  const session = sessions.find((item) => item.id === entry.info.sessionID);
-  return !!session?.parentID;
+  return childSessionIds.has(entry.info.sessionID);
 }
 
 export function getVisibleThreadMessages(
@@ -52,9 +48,13 @@ export function getVisibleThreadMessages(
   activeSessionId = state.activeSessionId,
   sessions = state.sessions
 ) {
+  if (!activeSessionId) return [];
   const activeTreeIds = new Set(collectSessionTreeIds(activeSessionId, sessions));
+  const childSessionIds = new Set(
+    sessions.filter((session) => session.parentID).map((session) => session.id)
+  );
   return messages.filter(
-    (entry) => !shouldHideThreadMessage(entry, activeSessionId, activeTreeIds, sessions)
+    (entry) => !shouldHideThreadMessage(entry, activeSessionId, activeTreeIds, childSessionIds)
   );
 }
 

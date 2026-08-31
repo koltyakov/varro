@@ -977,6 +977,7 @@ export type WebviewMessage =
         permissionAutomationLease?: number;
         permissionAutomationSessionID?: string;
         queuedMessageDispatch?: { itemId: string; lease: number };
+        interruptedRecovery?: true;
       };
     }
   | { type: 'api/cancel'; payload: { id: number; cancelKey: string } }

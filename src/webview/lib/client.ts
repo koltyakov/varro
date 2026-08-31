@@ -269,7 +269,7 @@ export const client = {
         variant?: string;
         queuedMessageDispatch?: { itemId: string; lease: number };
       },
-      options?: { directory?: string }
+      options?: { directory?: string; interruptedRecovery?: true }
     ): Promise<void> {
       // `delivery` is a client-side timing concern, not a server one. "Steer" means
       // inject this prompt into the turn that is already running: opencode's active
@@ -286,6 +286,8 @@ export const client = {
       );
       if (queuedMessageDispatch) {
         await apiCall('POST', path, rest, { queuedMessageDispatch });
+      } else if (options?.interruptedRecovery) {
+        await apiCall('POST', path, rest, { interruptedRecovery: true });
       } else {
         await apiCall('POST', path, rest);
       }

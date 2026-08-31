@@ -4356,6 +4356,127 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
+  it('revalidates interrupted recovery immediately before prompt admission', async () => {
+    const order: string[] = [];
+    const serverRequest = vi.fn((method: string, path: string) => {
+      order.push(path);
+      if (method === 'GET' && path === '/session/status') {
+        return Promise.resolve({ 'session-1': { type: 'idle' } });
+      }
+      if (method === 'GET' && (path === '/permission' || path === '/question')) {
+        return Promise.resolve([]);
+      }
+      return Promise.resolve({ ok: true });
+    });
+    const markSessionBusy = vi.fn(() => {
+      order.push('markBusy');
+    });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      sessionState: { ...createCallbacks().sessionState, markSessionBusy } as never,
+    });
+
+    await proxy.handleRequest({
+      ...makePayload(310, 'POST', '/session/session-1/prompt_async?directory=%2Frepo', {
+        messageID: 'msg_recovery',
+        parts: [],
+      }),
+      interruptedRecovery: true,
+    });
+
+    expect(serverRequest.mock.calls.slice(0, 3)).toEqual([
+      ['GET', '/session/status', undefined, withSignal({ directory: '/repo' })],
+      ['GET', '/permission', undefined, withSignal({ directory: '/repo' })],
+      ['GET', '/question', undefined, withSignal({ directory: '/repo' })],
+    ]);
+    expect(order).toEqual([
+      '/session/status',
+      '/permission',
+      '/question',
+      'markBusy',
+      '/session/session-1/prompt_async?directory=%2Frepo',
+    ]);
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 310,
+      data: { ok: true },
+    });
+  });
+
+  it.each([
+    [
+      'busy status',
+      { statuses: { 'session-1': { type: 'busy' } }, permissions: [], questions: [] },
+    ],
+    [
+      'pending permission',
+      {
+        statuses: { 'session-1': { type: 'idle' } },
+        permissions: [{ id: 'permission-1', sessionID: 'session-1' }],
+        questions: [],
+      },
+    ],
+    [
+      'pending question',
+      {
+        statuses: { 'session-1': { type: 'idle' } },
+        permissions: [],
+        questions: [{ id: 'question-1', sessionID: 'session-1' }],
+      },
+    ],
+  ])('skips interrupted recovery after detecting %s', async (_label, state) => {
+    const serverRequest = vi.fn((method: string, path: string) => {
+      if (method !== 'GET') return Promise.resolve({ ok: true });
+      if (path === '/session/status') return Promise.resolve(state.statuses);
+      if (path === '/permission') return Promise.resolve(state.permissions);
+      if (path === '/question') return Promise.resolve(state.questions);
+      throw new Error(`Unexpected request ${method} ${path}`);
+    });
+    const markSessionBusy = vi.fn();
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      sessionState: { ...createCallbacks().sessionState, markSessionBusy } as never,
+    });
+
+    await proxy.handleRequest({
+      ...makePayload(311, 'POST', '/session/session-1/prompt_async', {
+        messageID: 'msg_recovery',
+        parts: [],
+      }),
+      interruptedRecovery: true,
+    });
+
+    expect(markSessionBusy).not.toHaveBeenCalled();
+    expect(serverRequest).toHaveBeenCalledTimes(3);
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 311,
+      data: { skipped: true },
+    });
+  });
+
+  it('fails closed when interrupted recovery state is malformed', async () => {
+    const serverRequest = vi.fn((method: string, path: string) => {
+      if (method !== 'GET') return Promise.resolve({ ok: true });
+      if (path === '/session/status') return Promise.resolve([]);
+      return Promise.resolve([]);
+    });
+    const markSessionBusy = vi.fn();
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      sessionState: { ...createCallbacks().sessionState, markSessionBusy } as never,
+    });
+
+    await proxy.handleRequest({
+      ...makePayload(312, 'POST', '/session/session-1/prompt_async', { parts: [] }),
+      interruptedRecovery: true,
+    });
+
+    expect(markSessionBusy).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 312,
+      error: 'Cannot safely resume interrupted session: malformed server state',
+    });
+  });
+
   it('authorizes a queued history check for its open session workspace', async () => {
     const serverRequest = vi.fn(async (method: string, path: string) => {
       if (method === 'GET' && path === '/session/session-1?directory=%2Frepo-a') {

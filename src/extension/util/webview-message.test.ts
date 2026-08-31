@@ -601,6 +601,41 @@ describe('webview message validation', () => {
     }
   });
 
+  it('accepts only the true interrupted recovery marker', () => {
+    expect(
+      parseWebviewMessage({
+        type: 'api/request',
+        payload: {
+          id: 1,
+          method: 'POST',
+          path: '/session/session-1/prompt_async',
+          interruptedRecovery: true,
+          body: { parts: [] },
+        },
+      })
+    ).toEqual({
+      type: 'api/request',
+      payload: {
+        id: 1,
+        method: 'POST',
+        path: '/session/session-1/prompt_async',
+        interruptedRecovery: true,
+        body: { parts: [] },
+      },
+    });
+    expect(
+      parseWebviewMessage({
+        type: 'api/request',
+        payload: {
+          id: 2,
+          method: 'POST',
+          path: '/session/session-1/prompt_async',
+          interruptedRecovery: false,
+        },
+      })
+    ).toBeNull();
+  });
+
   it('accepts only structurally valid native PDF prompt and queue payloads', () => {
     const pdf = {
       id: 'pdf-1',

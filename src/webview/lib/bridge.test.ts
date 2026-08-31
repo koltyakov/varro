@@ -194,6 +194,36 @@ describe('bridge', () => {
     await expect(request).resolves.toBe(true);
   });
 
+  it('sends interrupted recovery as host-only request metadata', async () => {
+    const bridge = await loadBridge();
+    const send = vi.fn();
+    window.__sendToExtension = send;
+
+    const request = bridge.apiCall(
+      'POST',
+      '/session/session-1/prompt_async',
+      { messageID: 'msg_recovery', parts: [] },
+      { interruptedRecovery: true }
+    );
+    // SAFETY: apiCall always posts an api/request payload with a numeric request ID.
+    const message = send.mock.calls[0]?.[0] as { payload: { id: number } };
+
+    expect(message).toMatchObject({
+      type: 'api/request',
+      payload: {
+        interruptedRecovery: true,
+        body: { messageID: 'msg_recovery', parts: [] },
+      },
+    });
+
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'api/response', payload: { id: message.payload.id } },
+      })
+    );
+    await expect(request).resolves.toBeUndefined();
+  });
+
   it('reports sanitized requests that remain pending for 15 seconds', async () => {
     vi.useFakeTimers();
     const bridge = await loadBridge();

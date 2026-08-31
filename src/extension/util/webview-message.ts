@@ -788,6 +788,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       const queuedMessageDispatch = asRecord(payload?.queuedMessageDispatch);
       const queuedMessageItemId = getBoundedString(queuedMessageDispatch?.itemId, 512);
       const queuedMessageLease = getSafeInteger(queuedMessageDispatch?.lease);
+      const interruptedRecovery = payload?.interruptedRecovery;
       if (
         id === null ||
         (payload?.cancelKey !== undefined && !cancelKey) ||
@@ -800,6 +801,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
             !queuedMessageItemId ||
             queuedMessageLease === null ||
             queuedMessageLease <= 0)) ||
+        (interruptedRecovery !== undefined && interruptedRecovery !== true) ||
         !method ||
         !path ||
         !isAllowedApiRequest(method, path)
@@ -824,6 +826,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
           lease: queuedMessageLease,
         };
       }
+      if (interruptedRecovery === true) requestPayload.interruptedRecovery = true;
       if (payload?.body === undefined) {
         return { type, payload: requestPayload };
       }

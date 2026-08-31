@@ -13,6 +13,7 @@ type LastOpenedView =
 export const STARTUP_VIEW_RESTORE_WINDOW_MS = 10 * 60 * 1000;
 
 export type InterruptedSessionContinueBody = {
+  messageID?: string;
   parts: Array<{ type: 'text'; text: string }>;
   model?: { providerID: string; modelID: string };
   agent?: string;
@@ -25,10 +26,13 @@ export const INTERRUPTED_SESSION_CONTINUE_PROMPT =
 export function buildInterruptedSessionContinueBody(args: {
   agent: string | null;
   model: ResolvedModel | null;
+  messageID?: string;
 }): InterruptedSessionContinueBody {
   const body: InterruptedSessionContinueBody = {
     parts: [{ type: 'text', text: INTERRUPTED_SESSION_CONTINUE_PROMPT }],
   };
+
+  if (args.messageID) body.messageID = args.messageID;
 
   if (args.agent) {
     body.agent = args.agent;
@@ -48,10 +52,40 @@ export function buildInterruptedSessionContinueBody(args: {
 }
 
 export function shouldContinueInterruptedSession(messages: MessageEntry[]) {
-  const lastInfo = messages.at(-1)?.info;
+  const lastMessage = messages.at(-1);
+  const lastInfo = lastMessage?.info;
   if (!lastInfo) return false;
-  if (lastInfo.role === 'user') return true;
+  if (lastInfo.role === 'user') {
+    return !lastMessage.parts.some(
+      (part) => part.type === 'text' && part.text === INTERRUPTED_SESSION_CONTINUE_PROMPT
+    );
+  }
   return !lastInfo.error && !lastInfo.time.completed;
+}
+
+export function buildInterruptedSessionMessageID(sessionId: string, message: MessageEntry): string {
+  const sourceID = message.info.id;
+  const sourceMatch = sourceID.match(/^msg_([0-9a-f]{12})([0-9A-Za-z]{14})$/);
+  if (sourceMatch) {
+    const encoded = BigInt(`0x${sourceMatch[1]}`) + 1n;
+    if (encoded < 1n << 48n) {
+      return `msg_${encoded.toString(16).padStart(12, '0')}${sourceMatch[2]}`;
+    }
+  }
+
+  const timestamp = BigInt(Math.max(0, Math.floor(message.info.time.created))) % (1n << 36n);
+  let hash = 0xcbf29ce484222325n;
+  for (const character of `${sessionId}:${sourceID}`) {
+    hash ^= BigInt(character.codePointAt(0) ?? 0);
+    hash = BigInt.asUintN(64, hash * 0x100000001b3n);
+  }
+  const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+  let suffix = '';
+  for (let index = 0; index < 14; index += 1) {
+    suffix += alphabet[Number(hash % 62n)];
+    hash = BigInt.asUintN(64, hash / 62n + 0x9e3779b97f4a7c15n);
+  }
+  return `msg_${(timestamp * 0x1000n + 1n).toString(16).padStart(12, '0')}${suffix}`;
 }
 
 export async function continueInterruptedSessionWithDependencies(
@@ -61,21 +95,26 @@ export async function continueInterruptedSessionWithDependencies(
     resolveAgent(sessionId: string): string | null;
     sendAsync(
       sessionId: string,
-      body: InterruptedSessionContinueBody
+      body: InterruptedSessionContinueBody,
+      options?: { interruptedRecovery?: true }
     ): Promise<void | boolean | object>;
     syncSession(sessionId: string): Promise<void | boolean | object>;
     recheckSessionStatus(sessionId: string): Promise<void | boolean | object>;
   },
-  sessionId: string
+  sessionId: string,
+  options?: { messageID?: string; interruptedRecovery?: true }
 ) {
   await deps.syncSessionMcps(sessionId);
-  await deps.sendAsync(
-    sessionId,
-    buildInterruptedSessionContinueBody({
-      agent: deps.resolveAgent(sessionId),
-      model: deps.resolveModel(sessionId),
-    })
-  );
+  const body = buildInterruptedSessionContinueBody({
+    agent: deps.resolveAgent(sessionId),
+    model: deps.resolveModel(sessionId),
+    messageID: options?.messageID,
+  });
+  if (options?.interruptedRecovery) {
+    await deps.sendAsync(sessionId, body, { interruptedRecovery: true });
+  } else {
+    await deps.sendAsync(sessionId, body);
+  }
   await Promise.all([deps.syncSession(sessionId), deps.recheckSessionStatus(sessionId)]).catch(
     () => {}
   );
@@ -90,7 +129,10 @@ export async function recoverInterruptedSessionsWithDependencies(
     hasPendingQuestion(sessionId: string): boolean;
     hasPendingPermission(sessionId: string): boolean;
     loadSessionMessages(sessionId: string): Promise<MessageEntry[]>;
-    continueInterruptedSession(sessionId: string): Promise<void | boolean | object>;
+    continueInterruptedSession(
+      sessionId: string,
+      sourceMessage: MessageEntry
+    ): Promise<void | boolean | object>;
     logError(context: string, cause: unknown): void;
   },
   generation: number,
@@ -124,7 +166,7 @@ export async function recoverInterruptedSessionsWithDependencies(
         consumedSessionIds.push(sessionId);
         continue;
       }
-      await deps.continueInterruptedSession(sessionId);
+      await deps.continueInterruptedSession(sessionId, messages.at(-1)!);
       consumedSessionIds.push(sessionId);
     } catch (err) {
       if (!deps.isCurrentGeneration(generation)) break;
@@ -322,7 +364,8 @@ export function createConnectionBootstrapOperations(deps: {
   resolveAgent(sessionId: string): string | null;
   sendAsync(
     sessionId: string,
-    body: InterruptedSessionContinueBody
+    body: InterruptedSessionContinueBody,
+    options?: { interruptedRecovery?: true }
   ): Promise<void | boolean | object>;
   syncSession(sessionId: string): Promise<void | boolean | object>;
   recheckSessionStatus(sessionId: string): Promise<void | boolean | object>;
@@ -343,7 +386,11 @@ export function createConnectionBootstrapOperations(deps: {
         hasPendingQuestion: deps.hasPendingQuestion,
         hasPendingPermission: deps.hasPendingPermission,
         loadSessionMessages: deps.loadSessionMessages,
-        continueInterruptedSession,
+        continueInterruptedSession: (sessionId, sourceMessage) =>
+          continueInterruptedSession(sessionId, {
+            messageID: buildInterruptedSessionMessageID(sessionId, sourceMessage),
+            interruptedRecovery: true,
+          }),
         logError: deps.logError,
       },
       generation,
@@ -351,7 +398,10 @@ export function createConnectionBootstrapOperations(deps: {
     );
   };
 
-  const continueInterruptedSession = (sessionId: string) => {
+  const continueInterruptedSession = (
+    sessionId: string,
+    options?: { messageID?: string; interruptedRecovery?: true }
+  ) => {
     return continueInterruptedSessionWithDependencies(
       {
         syncSessionMcps: deps.syncSessionMcps,
@@ -361,7 +411,8 @@ export function createConnectionBootstrapOperations(deps: {
         syncSession: deps.syncSession,
         recheckSessionStatus: deps.recheckSessionStatus,
       },
-      sessionId
+      sessionId,
+      options
     );
   };
 

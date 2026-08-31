@@ -70,6 +70,24 @@ afterEach(() => {
 });
 
 describe('client', () => {
+  it('marks only interrupted recovery prompts for host admission checks', async () => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockResolvedValue(undefined);
+
+    await client.session.sendAsync(
+      'session-1',
+      { messageID: 'msg_recovery', parts: [{ type: 'text', text: 'Continue' }] },
+      { directory: '/repo', interruptedRecovery: true }
+    );
+
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
+      'POST',
+      '/session/session-1/prompt_async?directory=%2Frepo',
+      { messageID: 'msg_recovery', parts: [{ type: 'text', text: 'Continue' }] },
+      { interruptedRecovery: true }
+    );
+  });
+
   it('adds the owning session only to automatic permission reply metadata', async () => {
     const { client } = await loadClient();
     bridgeMocks.apiCall.mockResolvedValue(true);

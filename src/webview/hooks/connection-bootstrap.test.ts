@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Message, SessionStatus } from '../types';
 import {
   buildInterruptedSessionContinueBody,
+  buildInterruptedSessionMessageID,
   continueInterruptedSessionWithDependencies,
   createConnectionBootstrapOperations,
   ensureConnectionInitializedWithDependencies,
@@ -129,6 +130,42 @@ describe('connection-bootstrap helpers', () => {
     expect(
       shouldContinueInterruptedSession([{ info: assistantMessage('assistant-2'), parts: [] }])
     ).toBe(true);
+    expect(
+      shouldContinueInterruptedSession([
+        {
+          info: userMessage('user-recovery'),
+          parts: [
+            {
+              id: 'part-1',
+              sessionID: 'session-1',
+              messageID: 'user-recovery',
+              type: 'text',
+              text: INTERRUPTED_SESSION_CONTINUE_PROMPT,
+            },
+          ],
+        },
+      ])
+    ).toBe(false);
+  });
+
+  it('derives a stable continuation message ID from the interrupted message', () => {
+    const source = {
+      info: userMessage('msg_000000001000AbCdEf01234567'),
+      parts: [],
+    };
+
+    expect(buildInterruptedSessionMessageID('session-1', source)).toBe(
+      'msg_000000001001AbCdEf01234567'
+    );
+    expect(buildInterruptedSessionMessageID('session-1', source)).toBe(
+      buildInterruptedSessionMessageID('session-1', source)
+    );
+    expect(
+      buildInterruptedSessionMessageID('session-1', {
+        info: userMessage('msg_000000001001AbCdEf01234567'),
+        parts: [],
+      })
+    ).not.toBe(buildInterruptedSessionMessageID('session-1', source));
   });
 
   it('continues interrupted sessions and swallows sync follow-up failures', async () => {
@@ -205,7 +242,10 @@ describe('connection-bootstrap helpers', () => {
     );
 
     expect(continueInterruptedSession).toHaveBeenCalledTimes(1);
-    expect(continueInterruptedSession).toHaveBeenCalledWith('session-idle');
+    expect(continueInterruptedSession).toHaveBeenCalledWith(
+      'session-idle',
+      expect.objectContaining({ info: expect.objectContaining({ id: 'user-1' }) })
+    );
     expect(logError).not.toHaveBeenCalled();
   });
 

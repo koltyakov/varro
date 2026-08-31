@@ -19,6 +19,7 @@ type ApiCallOptions = {
   permissionAutomationLease?: number;
   permissionAutomationSessionID?: string;
   queuedMessageDispatch?: { itemId: string; lease: number };
+  interruptedRecovery?: true;
 };
 
 const handlers = new Set<MessageHandler>();
@@ -191,6 +192,7 @@ export function apiCall<T = unknown>(
     permissionAutomationLease: options?.permissionAutomationLease,
     permissionAutomationSessionID: options?.permissionAutomationSessionID,
     queuedMessageDispatch: options?.queuedMessageDispatch,
+    interruptedRecovery: options?.interruptedRecovery,
   });
 }
 
@@ -205,6 +207,7 @@ function sendApiCall<T>(
     permissionAutomationLease?: number;
     permissionAutomationSessionID?: string;
     queuedMessageDispatch?: { itemId: string; lease: number };
+    interruptedRecovery?: true;
   }
 ): Promise<T> {
   if (disposed) return Promise.reject(new Error('Bridge cleaned up'));
@@ -298,6 +301,7 @@ function sendApiCall<T>(
     if (options.queuedMessageDispatch) {
       payload.queuedMessageDispatch = options.queuedMessageDispatch;
     }
+    if (options.interruptedRecovery) payload.interruptedRecovery = true;
     const sendResult = sendToExtension({
       type: 'api/request',
       payload,

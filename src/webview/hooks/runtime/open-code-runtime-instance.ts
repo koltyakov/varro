@@ -2164,11 +2164,14 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       ),
     resolveAgent: (id) =>
       routingStore.getSelectedAgentForSession(id) || getDefaultPrimaryAgentNameFromState(),
-    sendAsync: (id, body) => {
+    sendAsync: (id, body, options) => {
       const directory = getSessionDirectory(id);
       return directory
-        ? client.session.sendAsync(id, body, { directory })
-        : client.session.sendAsync(id, body);
+        ? client.session.sendAsync(id, body, {
+            directory,
+            interruptedRecovery: options?.interruptedRecovery,
+          })
+        : client.session.sendAsync(id, body, options);
     },
     syncSession,
     recheckSessionStatus,

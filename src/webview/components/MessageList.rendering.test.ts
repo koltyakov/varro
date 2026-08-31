@@ -2621,6 +2621,38 @@ describe('MessageList session scoping', () => {
     ).toEqual(['user-child-1']);
   });
 
+  it('does not expose a detached session transcript in a new-chat draft', () => {
+    const messages: MessageEntry[] = [
+      { info: userMessage('user-root-1'), parts: [textPart('text-root-1', 'Root prompt')] },
+    ];
+
+    expect(getVisibleThreadMessages(messages, null)).toEqual([]);
+  });
+
+  it('indexes child sessions once when filtering a large transcript', () => {
+    let parentIdReads = 0;
+    const sessions = Array.from({ length: 100 }, (_, index) => ({
+      id: `session-${index}`,
+      projectID: 'project-1',
+      directory: '/workspace',
+      title: `Session ${index}`,
+      version: '1',
+      get parentID() {
+        parentIdReads += 1;
+        return index === 0 ? undefined : 'session-0';
+      },
+      time: { created: index, updated: index },
+    }));
+    const messages = Array.from({ length: 1_000 }, (_, index) => ({
+      info: userMessage(`user-${index}`),
+      parts: [],
+    }));
+
+    getVisibleThreadMessages(messages, 'session-0', sessions);
+
+    expect(parentIdReads).toBeLessThan(500);
+  });
+
   it('hides child-session assistant output in the parent thread filter', () => {
     setSessions([
       {

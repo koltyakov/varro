@@ -498,6 +498,9 @@ export class RestProxy {
         throw new Error('Unsupported API request');
       }
       const promptSessionID = this.parsePromptSessionID(method, payload.path);
+      if (payload.interruptedRecovery && !promptSessionID) {
+        throw new Error('Interrupted recovery marker is only valid for session prompts');
+      }
       const sessionCreationScope = this.parseSessionCreationScope(
         method,
         payload.path,
@@ -891,6 +894,20 @@ export class RestProxy {
         ) {
           throw new Error('Queued message dispatch lease is no longer current');
         }
+        if (
+          payload.interruptedRecovery &&
+          !(await this.shouldAdmitInterruptedRecovery(
+            promptSessionID,
+            promptWorkspaceDirectory,
+            requestSignal
+          ))
+        ) {
+          this.callbacks.postApiResponse(requestGeneration, {
+            id: payload.id,
+            data: { skipped: true },
+          });
+          return;
+        }
       }
       if (promptSessionID && promptWorkspaceDirectory) {
         forwardedBody = this.withWorkspaceScopeSystemPrompt(
@@ -1158,6 +1175,43 @@ export class RestProxy {
         }
       );
     });
+  }
+
+  private async shouldAdmitInterruptedRecovery(
+    sessionID: string,
+    directory: string | undefined,
+    signal?: AbortSignal
+  ): Promise<boolean> {
+    const options = { directory, signal };
+    const [rawStatuses, rawPermissions, rawQuestions] = await Promise.all([
+      this.requestServer('GET', '/session/status', undefined, options),
+      this.requestServer('GET', '/permission', undefined, options),
+      this.requestServer('GET', '/question', undefined, options),
+    ]);
+    const statuses = asRecord(rawStatuses);
+    if (!statuses || !Array.isArray(rawPermissions) || !Array.isArray(rawQuestions)) {
+      throw new Error('Cannot safely resume interrupted session: malformed server state');
+    }
+
+    const rawStatus = statuses[sessionID];
+    if (rawStatus !== undefined) {
+      const statusValue = asRecord(rawStatus)?.type;
+      const statusType = typeof statusValue === 'string' ? statusValue : undefined;
+      if (statusType !== 'idle' && statusType !== 'busy' && statusType !== 'retry') {
+        throw new Error('Cannot safely resume interrupted session: malformed session status');
+      }
+      if (statusType === 'busy' || statusType === 'retry') return false;
+    }
+
+    for (const pending of [...rawPermissions, ...rawQuestions]) {
+      const pendingValue = asRecord(pending)?.sessionID;
+      const pendingSessionID = typeof pendingValue === 'string' ? pendingValue : undefined;
+      if (!pendingSessionID) {
+        throw new Error('Cannot safely resume interrupted session: malformed pending request');
+      }
+      if (pendingSessionID === sessionID) return false;
+    }
+    return true;
   }
 
   private async requestDefaultModel(

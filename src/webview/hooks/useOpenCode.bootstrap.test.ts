@@ -406,6 +406,7 @@ describe('useOpenCode initialization', () => {
           'session-1',
           {
             agent: 'build',
+            messageID: expect.stringMatching(/^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/),
             parts: [
               {
                 type: 'text',
@@ -413,7 +414,7 @@ describe('useOpenCode initialization', () => {
               },
             ],
           },
-          { directory: '/repo' }
+          { directory: '/repo', interruptedRecovery: true }
         );
       });
     } finally {
