@@ -3119,7 +3119,7 @@ kbd {
 .message-attachment-visible {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 5px;
   min-width: 0;
   overflow: hidden;
 }
@@ -3130,7 +3130,7 @@ kbd {
   left: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 5px;
   visibility: hidden;
   pointer-events: none;
   white-space: nowrap;

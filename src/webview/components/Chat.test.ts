@@ -1531,6 +1531,11 @@ describe('header status badges', () => {
 
       setState('sessionStatus', 'session-1', { type: 'idle' });
 
+      // Still inside the running settle window - nothing is published yet.
+      expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([]);
+
+      vi.advanceTimersByTime(1_200);
+
       expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([
         {
           type: 'session-unread-state/update',
@@ -1543,15 +1548,73 @@ describe('header status badges', () => {
           },
         },
       ]);
+    } finally {
+      setState('editorContext', 'workspacePath', originalWorkspacePath);
+      if (originalSend) bridgeWindow.__sendToExtension = originalSend;
+      else delete bridgeWindow.__sendToExtension;
+    }
+  });
 
+  it('does not publish attention flaps while a stepping turn settles', () => {
+    const sent: WebviewMessage[] = [];
+    // SAFETY: The fixture installs the protocol bridge callback owned by the webview host.
+    const bridgeWindow = window as {
+      __sendToExtension?: (message: WebviewMessage) => void;
+    };
+    const originalSend = bridgeWindow.__sendToExtension;
+    const originalWorkspacePath = state.editorContext.workspacePath;
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
+    setState('editorContext', 'workspacePath', '/repo');
+    setState('sessions', [session('plan-1', 500)]);
+    setState('sessionSelectedAgents', { 'plan-1': 'plan' });
+    setState('lastSeenSessions', { 'plan-1': 0 });
+
+    try {
+      cleanup = render(() => Chat(), container!);
+
+      expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([
+        {
+          type: 'session-unread-state/update',
+          payload: {
+            sessionId: 'plan-1',
+            directory: '/repo',
+            kind: 'plan-ready',
+            markerAt: 500,
+            unread: true,
+          },
+        },
+      ]);
+      sent.length = 0;
+
+      // A stepping turn: busy, a momentary idle gap between steps, busy again.
+      setState('sessionStatus', { 'plan-1': { type: 'busy' } });
+      setState('sessionStatus', 'plan-1', { type: 'idle' });
+      setState('sessionStatus', 'plan-1', { type: 'busy' });
+
+      expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([]);
+
+      // The turn ends and the running state settles; the already-published
+      // state is unchanged, so nothing is re-sent.
+      setState('sessionStatus', 'plan-1', { type: 'idle' });
       vi.advanceTimersByTime(1_200);
 
-      expect(
-        sent.filter(
-          (message) =>
-            message.type === 'session-unread-state/update' && message.payload.unread === false
-        )
-      ).toEqual([]);
+      expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([]);
+
+      // A real update after the turn publishes exactly once.
+      setState('sessions', [session('plan-1', 600)]);
+
+      expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([
+        {
+          type: 'session-unread-state/update',
+          payload: {
+            sessionId: 'plan-1',
+            directory: '/repo',
+            kind: 'plan-ready',
+            markerAt: 600,
+            unread: true,
+          },
+        },
+      ]);
     } finally {
       setState('editorContext', 'workspacePath', originalWorkspacePath);
       if (originalSend) bridgeWindow.__sendToExtension = originalSend;

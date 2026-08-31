@@ -146,7 +146,12 @@ export function Chat() {
   const publishedUnreadStates = new Map<string, PublishedUnreadState>();
   createEffect(() => {
     const workspacePath = state.editorContext.workspacePath;
-    const indicators = rawSessionIndicators();
+    // Publish from the settled indicators, and never while a session's turn is
+    // still running (including the settle window between steps). Raw indicators
+    // drop in and out of plan-ready/completed in the idle gaps of a stepping
+    // turn, and mirroring those flaps to the host makes its attention state -
+    // and the status bar item - flicker for the whole turn.
+    const indicators = sessionIndicators();
     if (!workspacePath) return;
     if (publishedUnreadWorkspace !== workspacePath) {
       publishedUnreadWorkspace = workspacePath;
@@ -154,6 +159,7 @@ export function Chat() {
     }
     for (const session of state.sessions) {
       if (!isPrimarySession(session)) continue;
+      if (indicators.runningIds.has(session.id)) continue;
       const previous = publishedUnreadStates.get(session.id);
       const completedAt = state.completedSessionResponses[session.id];
       const seenAt = state.lastSeenSessions[session.id];

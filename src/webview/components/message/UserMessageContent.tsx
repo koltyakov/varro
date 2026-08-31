@@ -1729,7 +1729,7 @@ function MessageAttachmentRail(props: {
       return;
     }
 
-    const gap = 10;
+    const gap = 5;
     const totalWidth = itemWidths.reduce(
       (total, width, index) => total + width + (index > 0 ? gap : 0),
       0
