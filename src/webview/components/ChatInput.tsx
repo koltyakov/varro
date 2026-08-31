@@ -295,6 +295,14 @@ const EMPTY_CURRENT_COMPOSER_MODEL: CurrentComposerModel = {
   contextLimit: null,
 };
 
+function equalStringSets(previous: Set<string>, next: Set<string>) {
+  if (previous.size !== next.size) return false;
+  for (const value of previous) {
+    if (!next.has(value)) return false;
+  }
+  return true;
+}
+
 function isRemoteExtensionHost() {
   return (
     // SAFETY: The surrounding shape or discriminator check establishes the typeof contract used below.
@@ -1217,11 +1225,21 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     return chips;
   });
 
-  const inlineChipIds = createMemo(() => new Set(inlineChips().map((c) => c.id)));
+  const inlineAttachmentChipIds = createMemo(
+    () => {
+      const ids = new Set<string>();
+      for (const chip of inlineChips()) {
+        if (chip.type === 'mention-file' || chip.type === 'image') ids.add(chip.id);
+      }
+      return ids;
+    },
+    new Set<string>(),
+    { equals: equalStringSets }
+  );
 
   const visibleFiles = createMemo(() =>
     composerFiles()
-      .filter((f) => !inlineChipIds().has(`file:${f.path}`))
+      .filter((f) => !inlineAttachmentChipIds().has(`file:${f.path}`))
       .map((file) => ({
         ...file,
         attachmentSequence: file.attachmentSequence ?? getContextFileAttachmentSequence(file.path),
@@ -1229,7 +1247,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   );
   const visibleClipboardImages = createMemo(() =>
     composerClipboardImages()
-      .filter((img) => !inlineChipIds().has(`img:${img.id}`))
+      .filter((img) => !inlineAttachmentChipIds().has(`img:${img.id}`))
       .map((image) => ({
         ...image,
         attachmentSequence:
@@ -1360,6 +1378,36 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       },
       customCommands: state.commands,
     })
+  );
+  const skillSlashCompletionEntries = createMemo(() =>
+    skillCommands().map((command) => ({
+      item: {
+        name: command.name,
+        aliases: [],
+        description: command.description || command.template,
+        acceptsArguments: true,
+        action: () => {},
+        key: `skill:${command.name}`,
+        type: 'slash' as const,
+      },
+      name: command.name.toLowerCase(),
+      description: (command.description || command.template).toLowerCase(),
+      hints: (command.hints || []).map((hint) => hint.toLowerCase()),
+    }))
+  );
+  const slashCompletionEntries = createMemo(() =>
+    slashCommands()
+      .filter((command) => command.source !== 'skill')
+      .map((command) => ({
+        item: {
+          ...command,
+          key: `slash:${command.name}`,
+          type: 'slash' as const,
+        },
+        name: command.name,
+        aliases: command.aliases,
+        description: command.description.toLowerCase(),
+      }))
   );
 
   const activeCompletion = createMemo(() => {
@@ -1506,42 +1554,29 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const query = completion.query.toLowerCase();
     if (query.startsWith(`${SKILLS_COMMAND_NAME} `)) {
       const skillQuery = query.slice(SKILLS_COMMAND_NAME.length + 1).trim();
-      return skillCommands()
-        .filter((command) => {
+      return skillSlashCompletionEntries()
+        .filter((entry) => {
           if (!skillQuery) return true;
           return (
-            command.name.toLowerCase().includes(skillQuery) ||
-            (command.description || command.template).toLowerCase().includes(skillQuery) ||
-            (command.hints || []).some((hint) => hint.toLowerCase().includes(skillQuery))
+            entry.name.includes(skillQuery) ||
+            entry.description.includes(skillQuery) ||
+            entry.hints.some((hint) => hint.includes(skillQuery))
           );
         })
-        .map((command) => ({
-          name: command.name,
-          aliases: [],
-          description: command.description || command.template,
-          acceptsArguments: true,
-          action: () => {},
-          key: `skill:${command.name}`,
-          type: 'slash' as const,
-        }));
+        .map((entry) => entry.item);
     }
 
-    return slashCommands()
-      .filter((command) => command.source !== 'skill')
-      .filter((command) => completion.start === 0 || command.name === SKILLS_COMMAND_NAME)
-      .filter((command) => {
+    return slashCompletionEntries()
+      .filter((entry) => completion.start === 0 || entry.name === SKILLS_COMMAND_NAME)
+      .filter((entry) => {
         if (!query) return true;
         return (
-          command.name.includes(query) ||
-          command.aliases.some((alias) => alias.includes(query)) ||
-          command.description.toLowerCase().includes(query)
+          entry.name.includes(query) ||
+          entry.aliases.some((alias) => alias.includes(query)) ||
+          entry.description.includes(query)
         );
       })
-      .map((command) => ({
-        ...command,
-        key: `slash:${command.name}`,
-        type: 'slash' as const,
-      }));
+      .map((entry) => entry.item);
   });
 
   const composerCompletions = createMemo(() => {
@@ -3440,25 +3475,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     return modelSupportsVision(current.providerID, current.modelID, state.providers);
   }
 
-  function canDelegateCurrentImages(text = inputText()) {
-    const sessionId = composerSessionId();
-    const sessionPromptTexts = sessionId
-      ? state.messages.flatMap((entry) =>
-          entry.info.sessionID === sessionId && entry.info.role === 'user'
-            ? entry.parts.flatMap((part) => (part.type === 'text' ? [part.text] : []))
-            : []
-        )
-      : [];
-    return canDelegateVision([text, ...sessionPromptTexts], state.allAgents, state.providers);
-  }
-
-  function currentPromptCanHandleImages(text = inputText()) {
-    return (
-      currentModelSupportsVision() ||
-      (currentModelSupportsTools() && canDelegateCurrentImages(text))
-    );
-  }
-
   function currentModelSupportsPdf() {
     const current = currentModel();
     if (!current.providerID || !current.modelID) return false;
@@ -3471,11 +3487,40 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     return modelSupportsTools(current.providerID, current.modelID, state.providers);
   }
 
+  const historicalPromptCanDelegateImages = createMemo(() => {
+    if (composerClipboardImages().length === 0) return false;
+    if (currentModelSupportsVision() || !currentModelSupportsTools()) return false;
+    const sessionId = composerSessionId();
+    if (!sessionId) return false;
+    const sessionPromptTexts: string[] = [];
+    for (const entry of state.messages) {
+      if (entry.info.sessionID !== sessionId || entry.info.role !== 'user') continue;
+      for (const part of entry.parts) {
+        if (part.type === 'text') sessionPromptTexts.push(part.text);
+      }
+    }
+    return canDelegateVision(sessionPromptTexts, state.allAgents, state.providers);
+  });
+
+  function canDelegateCurrentImages(text = inputText()) {
+    return (
+      canDelegateVision(text, state.allAgents, state.providers) ||
+      historicalPromptCanDelegateImages()
+    );
+  }
+
+  function currentPromptCanHandleImages(text = inputText()) {
+    return (
+      currentModelSupportsVision() ||
+      (currentModelSupportsTools() && canDelegateCurrentImages(text))
+    );
+  }
+
   const hasPendingPdfFallback = () =>
     !currentModelSupportsPdf() && state.nativePdfs.some((pdf) => !pdf.contextFile);
 
   function hasSendableClipboardImages() {
-    return currentPromptCanHandleImages() && state.clipboardImages.length > 0;
+    return state.clipboardImages.length > 0 && currentPromptCanHandleImages();
   }
 
   function hasSendableComposerContent() {
@@ -3490,6 +3535,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   }
 
   function getSendableInputText(text = inputText()) {
+    if (state.clipboardImages.length === 0) return text;
     return getPromptTextForClipboardImages(
       text,
       state.clipboardImages,
@@ -3498,15 +3544,17 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   }
 
   const hasPendingDelegatedImages = () =>
+    state.clipboardImages.some((image) => !image.contextFile) &&
     !currentModelSupportsVision() &&
     currentModelSupportsTools() &&
-    canDelegateCurrentImages() &&
-    state.clipboardImages.some((image) => !image.contextFile);
+    canDelegateCurrentImages();
 
   createEffect(() => {
+    const images = composerClipboardImages();
+    if (!images.some((image) => !image.contextFile)) return;
     if (currentModelSupportsVision() || !currentModelSupportsTools()) return;
     if (!canDelegateCurrentImages()) return;
-    for (const image of composerClipboardImages()) {
+    for (const image of images) {
       if (image.contextFile || pendingImageStores.has(image.id)) continue;
       pendingImageStores.add(image.id);
       postMessage({

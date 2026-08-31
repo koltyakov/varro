@@ -335,6 +335,73 @@ function setupModelState() {
   setState('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
 }
 
+function setupVisionDelegationModelState() {
+  setState('providers', [
+    {
+      id: 'zai',
+      name: 'Z.AI',
+      source: 'api',
+      models: {
+        'glm-4.7': {
+          id: 'glm-4.7',
+          name: 'GLM 4.7',
+          capabilities: { vision: false, toolcall: true },
+          cost: { input: 0, output: 0 },
+        },
+      },
+    },
+    {
+      id: 'vision-provider',
+      name: 'Vision Provider',
+      source: 'api',
+      models: {
+        viewer: {
+          id: 'viewer',
+          name: 'Viewer',
+          capabilities: { vision: true, toolcall: true },
+          cost: { input: 0, output: 0 },
+        },
+      },
+    },
+  ]);
+  setState('providerDefaults', { zai: 'glm-4.7', 'vision-provider': 'viewer' });
+  setState('selectedModel', { providerID: 'zai', modelID: 'glm-4.7' });
+  setState('allAgents', [
+    {
+      name: 'vision',
+      mode: 'subagent',
+      permission: [],
+      model: { providerID: 'vision-provider', modelID: 'viewer' },
+    },
+  ]);
+}
+
+function countedUserMessageEntry(text: string, onPartsRead: () => void): MessageEntry<UserMessage> {
+  const parts: TextPart[] = [
+    {
+      id: 'history-text',
+      sessionID: 'session-1',
+      messageID: 'history-user',
+      type: 'text',
+      text,
+    },
+  ];
+  return {
+    info: {
+      id: 'history-user',
+      sessionID: 'session-1',
+      role: 'user',
+      time: { created: 1 },
+      agent: 'build',
+      model: { providerID: 'zai', modelID: 'glm-4.7' },
+    },
+    get parts() {
+      onPartsRead();
+      return parts;
+    },
+  };
+}
+
 function setupRetryingProviderSwitchState() {
   setupModelState();
   setState('activeSessionId', 'session-1');
@@ -549,6 +616,19 @@ function setCollapsedSelection(target: Node, offset: number) {
   range.collapse(true);
   selection?.removeAllRanges();
   selection?.addRange(range);
+}
+
+function enterComposerText(editor: HTMLDivElement, text: string) {
+  editor.focus();
+  editor.textContent = text;
+  setCollapsedSelection(editor.firstChild ?? editor, text.length);
+  editor.dispatchEvent(
+    new InputEvent('input', {
+      bubbles: true,
+      inputType: 'insertText',
+      data: text.at(-1) ?? null,
+    })
+  );
 }
 
 function availableProviderLimit(
@@ -2309,49 +2389,54 @@ describe('ChatInput', () => {
     { trigger: '@', initial: '@hel', shortened: '@he' },
     { trigger: '&', initial: '&aut', shortened: '&au' },
     { trigger: '/', initial: '/zzv', shortened: '/zz' },
-  ])('keeps the $trigger completion menu mounted on backspace', async ({ initial, shortened }) => {
-    setState('allAgents', [
-      {
-        name: 'helper',
-        description: 'Help with the task',
-        mode: 'subagent',
-        builtIn: false,
-        permission: [],
-      },
-    ]);
-    setState('sessions', [session('session-auth', 2_000, { title: 'Authentication' })]);
-    setState('commands', [
-      {
-        name: 'zzvarrotest',
-        description: 'Run tests',
-        template: 'Run tests',
-      },
-    ]);
-    setInputText(initial);
+  ])(
+    'keeps the $trigger completion menu mounted on backspace',
+    async ({ trigger, initial, shortened }) => {
+      setState('allAgents', [
+        {
+          name: 'helper',
+          description: 'Help with the task',
+          mode: 'subagent',
+          builtIn: false,
+          permission: [],
+        },
+      ]);
+      setState('sessions', [session('session-auth', 2_000, { title: 'Authentication' })]);
+      setState('commands', [
+        {
+          name: 'zzvarrotest',
+          description: 'Run tests',
+          template: 'Run tests',
+        },
+      ]);
+      setInputText(initial);
 
-    cleanup = render(() => ChatInput(), container!);
+      cleanup = render(() => ChatInput(), container!);
 
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
-    editor.focus();
-    setCollapsedSelection(editor.firstChild, initial.length);
-    editor.dispatchEvent(new KeyboardEvent('keyup', { key: initial.at(-1), bubbles: true }));
-    await flushAsyncWork();
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor?.firstChild) throw new Error('Expected populated composer editor');
+      editor.focus();
+      setCollapsedSelection(editor.firstChild, initial.length);
+      editor.dispatchEvent(new KeyboardEvent('keyup', { key: initial.at(-1), bubbles: true }));
+      await flushAsyncWork();
 
-    const menu = container?.querySelector('.composer-completion-menu');
-    expect(menu).not.toBeNull();
+      const menu = container?.querySelector('.composer-completion-menu');
+      const slashItem = trigger === '/' ? menu?.querySelector('.completion-slash') : null;
+      expect(menu).not.toBeNull();
 
-    editor.textContent = shortened;
-    if (!editor.firstChild) throw new Error('Expected updated composer editor');
-    setCollapsedSelection(editor.firstChild, shortened.length);
-    editor.dispatchEvent(
-      new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' })
-    );
-    await flushAsyncWork();
+      editor.textContent = shortened;
+      if (!editor.firstChild) throw new Error('Expected updated composer editor');
+      setCollapsedSelection(editor.firstChild, shortened.length);
+      editor.dispatchEvent(
+        new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' })
+      );
+      await flushAsyncWork();
 
-    expect(inputText()).toBe(shortened);
-    expect(container?.querySelector('.composer-completion-menu')).toBe(menu);
-  });
+      expect(inputText()).toBe(shortened);
+      expect(container?.querySelector('.composer-completion-menu')).toBe(menu);
+      if (slashItem) expect(container?.querySelector('.completion-slash')).toBe(slashItem);
+    }
+  );
 
   it.each(['&session-auth', '&sessions:session-auth'])(
     'looks up session titles from %s and inserts a session reference',
@@ -6500,46 +6585,109 @@ describe('ChatInput', () => {
     }
   });
 
+  it('does not inspect historical prompts while typing without images', async () => {
+    setupVisionDelegationModelState();
+    setState('activeSessionId', 'session-1');
+    let partsReadCount = 0;
+    setState('messages', [
+      countedUserMessageEntry('@vision inspect the previous image', () => {
+        partsReadCount += 1;
+      }),
+    ]);
+    cleanup = render(() => ChatInput(), container!);
+    await flushAsyncWork();
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor) throw new Error('Expected composer editor');
+    const readsAfterMount = partsReadCount;
+
+    enterComposerText(editor, 'a');
+    enterComposerText(editor, 'ab');
+    await flushAsyncWork();
+
+    expect(inputText()).toBe('ab');
+    expect(state.clipboardImages).toEqual([]);
+    expect(partsReadCount).toBe(readsAfterMount);
+  });
+
+  it('reuses historical vision delegation while the current draft changes', async () => {
+    setupVisionDelegationModelState();
+    setState('activeSessionId', 'session-1');
+    let partsReadCount = 0;
+    setState('messages', [
+      countedUserMessageEntry('Inspect the previous image', () => {
+        partsReadCount += 1;
+      }),
+    ]);
+    addClipboardImage({
+      id: 'image-1',
+      url: 'data:image/png;base64,aW1hZ2U=',
+      mime: 'image/png',
+      filename: 'Image 1',
+      size: 5,
+      contextFile: { path: '/tmp/Image 1.png', relativePath: 'Image 1.png', type: 'file' },
+    });
+    cleanup = render(() => ChatInput(), container!);
+    await flushAsyncWork();
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    const imageChip = container?.querySelector<HTMLElement>('.chat-attachment-chip');
+    if (!editor || !imageChip) throw new Error('Expected composer editor and image chip');
+    expect(imageChip.classList).toContain('disabled');
+    const readsAfterMount = partsReadCount;
+
+    enterComposerText(editor, 'Inspect this image');
+    await flushAsyncWork();
+    expect(partsReadCount).toBe(readsAfterMount);
+    expect(container?.querySelector('.chat-attachment-chip')).toBe(imageChip);
+    expect(imageChip.classList).toContain('disabled');
+
+    enterComposerText(editor, '@vision inspect this image');
+    await flushAsyncWork();
+    expect(partsReadCount).toBe(readsAfterMount);
+    expect(container?.querySelector('.chat-attachment-chip')).toBe(imageChip);
+    expect(imageChip.classList).not.toContain('disabled');
+
+    enterComposerText(editor, 'Inspect this image again');
+    await flushAsyncWork();
+    expect(partsReadCount).toBe(readsAfterMount);
+    expect(container?.querySelector('.chat-attachment-chip')).toBe(imageChip);
+    expect(imageChip.classList).toContain('disabled');
+  });
+
+  it('keeps unchanged attachment chips mounted while typing', async () => {
+    setupModelState();
+    addContextFile({ path: '/repo/src/app.ts', relativePath: 'src/app.ts', type: 'file' });
+    addClipboardImage({
+      id: 'image-1',
+      url: 'data:image/png;base64,aW1hZ2U=',
+      mime: 'image/png',
+      filename: 'Image 1',
+      size: 5,
+    });
+    cleanup = render(() => ChatInput(), container!);
+    await flushAsyncWork();
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor) throw new Error('Expected composer editor');
+    const before = Array.from(
+      container!.querySelectorAll<HTMLElement>('.chat-attachments-container .chat-attachment-chip')
+    );
+    expect(before).toHaveLength(2);
+
+    enterComposerText(editor, 'plain typing');
+    await flushAsyncWork();
+
+    const after = Array.from(
+      container!.querySelectorAll<HTMLElement>('.chat-attachments-container .chat-attachment-chip')
+    );
+    expect(after).toHaveLength(before.length);
+    expect(after.every((chip, index) => chip === before[index])).toBe(true);
+  });
+
   it('enables a non-vision image chip after an exact @vision mention', async () => {
     const fileReader = installControllableFileReader();
-    setState('providers', [
-      {
-        id: 'zai',
-        name: 'Z.AI',
-        source: 'api',
-        models: {
-          'glm-4.7': {
-            id: 'glm-4.7',
-            name: 'GLM 4.7',
-            capabilities: { vision: false, toolcall: true },
-            cost: { input: 0, output: 0 },
-          },
-        },
-      },
-      {
-        id: 'vision-provider',
-        name: 'Vision Provider',
-        source: 'api',
-        models: {
-          viewer: {
-            id: 'viewer',
-            name: 'Viewer',
-            capabilities: { vision: true, toolcall: true },
-            cost: { input: 0, output: 0 },
-          },
-        },
-      },
-    ]);
-    setState('providerDefaults', { zai: 'glm-4.7', 'vision-provider': 'viewer' });
-    setState('selectedModel', { providerID: 'zai', modelID: 'glm-4.7' });
-    setState('allAgents', [
-      {
-        name: 'vision',
-        mode: 'subagent',
-        permission: [],
-        model: { providerID: 'vision-provider', modelID: 'viewer' },
-      },
-    ]);
+    setupVisionDelegationModelState();
     cleanup = render(() => ChatInput(), container!);
     await flushAsyncWork();
 

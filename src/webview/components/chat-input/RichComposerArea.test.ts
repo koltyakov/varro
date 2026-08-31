@@ -164,6 +164,58 @@ describe('RichComposerArea', () => {
     expect(onInput).toHaveBeenCalledWith('before X after', 'before X'.length);
   });
 
+  it('does not clone a collapsed selection during ordinary beforeinput', () => {
+    const onInput = vi.fn();
+    renderComposer({ value: 'plain text', cursorOffset: 5, chips: [], onInput });
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor?.firstChild) throw new Error('Expected composer text');
+    setCollapsedSelection(editor.firstChild, 5);
+    const cloneContents = vi.spyOn(Range.prototype, 'cloneContents');
+
+    try {
+      const event = new InputEvent('beforeinput', {
+        bubbles: true,
+        cancelable: true,
+        inputType: 'insertText',
+        data: 'X',
+      });
+      editor.dispatchEvent(event);
+
+      expect(event.defaultPrevented).toBe(false);
+      expect(onInput).not.toHaveBeenCalled();
+      expect(cloneContents).not.toHaveBeenCalled();
+    } finally {
+      cloneContents.mockRestore();
+    }
+  });
+
+  it('does not inspect a plain-text selection before native Backspace', () => {
+    renderComposer({ value: '/review', cursorOffset: 7, chips: [] });
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor?.firstChild) throw new Error('Expected composer text');
+    setCollapsedSelection(editor.firstChild, 7);
+    const cloneContents = vi.spyOn(Range.prototype, 'cloneContents');
+
+    try {
+      editor.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true })
+      );
+      editor.dispatchEvent(
+        new InputEvent('beforeinput', {
+          bubbles: true,
+          cancelable: true,
+          inputType: 'deleteContentBackward',
+        })
+      );
+
+      expect(cloneContents).not.toHaveBeenCalled();
+    } finally {
+      cloneContents.mockRestore();
+    }
+  });
+
   it('deletes a selected session title through the underlying marker', () => {
     const onInput = vi.fn();
     const marker = 'session:ses_auth';

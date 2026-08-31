@@ -64,3 +64,27 @@ test('closes slash command suggestions with escape', async ({ page }) => {
   await expect(page.locator('.composer-completion-menu')).toHaveCount(0);
   await expect(composer).toHaveText('');
 });
+
+test('keeps matching slash suggestion rows mounted through Backspace', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=slash-commands');
+
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+  await composer.click();
+  await composer.fill('/connec');
+  const connectItem = page.locator('.composer-completion-item', {
+    hasText: 'Connect a provider',
+  });
+  await expect(connectItem).toBeVisible();
+  await connectItem.evaluate((element) => {
+    element.setAttribute('data-backspace-identity', 'retained');
+  });
+
+  await composer.press('Backspace');
+
+  await expect(composer).toHaveText('/conne');
+  await expect(
+    page.locator('.composer-completion-item[data-backspace-identity="retained"]', {
+      hasText: 'Connect a provider',
+    })
+  ).toBeVisible();
+});

@@ -217,6 +217,7 @@ export function RichComposerArea(props: {
     ) {
       return false;
     }
+    if (!props.chips.some((chip) => chip.type !== 'external-link')) return false;
 
     const selection = getSelectionOffsets();
     if (!selection || selection.start !== selection.end) return false;
@@ -289,13 +290,9 @@ export function RichComposerArea(props: {
   }
 
   function removeTrailingLineBreak(): boolean {
+    if (!props.value.endsWith('\n')) return false;
     const selection = getSelectionOffsets();
-    if (
-      !selection ||
-      selection.start !== selection.end ||
-      selection.start !== props.value.length ||
-      !props.value.endsWith('\n')
-    ) {
+    if (!selection || selection.start !== selection.end || selection.start !== props.value.length) {
       return false;
     }
 
@@ -379,6 +376,7 @@ export function RichComposerArea(props: {
   }
 
   function removeSessionReferenceAtSelection(insertedText = ''): boolean {
+    if (!props.chips.some((chip) => chip.type === 'mention-session')) return false;
     const reference = getSessionReferenceAtSelection();
     const marker = reference?.dataset.chipMarker;
     if (!reference || !marker || !editorEl) return false;
@@ -399,8 +397,11 @@ export function RichComposerArea(props: {
   }
 
   function replaceSelectionContainingSession(insertedText = ''): boolean {
-    const selection = getSelectionOffsets();
-    if (!selection || selection.start === selection.end) return false;
+    if (!props.chips.some((chip) => chip.type === 'mention-session')) return false;
+    const range = getSelectionRange();
+    if (!range || range.collapsed) return false;
+    const selection = getSelectionOffsets(range);
+    if (!selection) return false;
 
     const selectedSessionIds = new Set<string>();
     for (const chip of props.chips) {
@@ -451,21 +452,22 @@ export function RichComposerArea(props: {
     return offsets?.start ?? 0;
   }
 
-  function getSelectionOffsets(): { start: number; end: number } | null {
+  function getSelectionOffsets(selectionRange?: Range): { start: number; end: number } | null {
     if (!editorEl) return null;
-    const range = getSelectionRange();
+    const range = selectionRange ?? getSelectionRange();
     if (!range) return null;
 
     const preRange = document.createRange();
-    const postRange = document.createRange();
     preRange.selectNodeContents(editorEl);
     preRange.setEnd(range.startContainer, range.startOffset);
-    postRange.selectNodeContents(editorEl);
-    postRange.setEnd(range.endContainer, range.endOffset);
 
     let start = extractRangeTextLength(preRange);
-    let end = extractRangeTextLength(postRange);
+    let end = start;
     if (!range.collapsed) {
+      const postRange = document.createRange();
+      postRange.selectNodeContents(editorEl);
+      postRange.setEnd(range.endContainer, range.endOffset);
+      end = extractRangeTextLength(postRange);
       const startBoundary = getSessionReferenceBoundary(range.startContainer);
       const endBoundary = getSessionReferenceBoundary(range.endContainer);
       if (startBoundary) start = startBoundary.start;
@@ -676,10 +678,10 @@ export function RichComposerArea(props: {
       setCursorOffset(Math.min(props.cursorOffset ?? props.value.length, props.value.length));
       return;
     }
-    syncEmptyState();
     const offset = getCursorOffset();
     if (normalizeEditableExternalLinks(editorEl)) setCursorOffset(offset);
     const text = extractText(editorEl);
+    editorEl.dataset.empty = text.length === 0 ? 'true' : 'false';
     const previousValue = props.value;
     const previousChips = props.chips.slice();
     lastSyncedValue = text;

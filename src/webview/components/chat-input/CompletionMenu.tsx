@@ -59,7 +59,7 @@ export function CompletionMenu(props: {
 }) {
   // oxlint-disable-next-line no-unassigned-vars
   let menuRef: HTMLDivElement | undefined;
-  const itemRefs = new Map<number, HTMLButtonElement>();
+  const itemRefs = new Map<string, HTMLButtonElement>();
 
   function updateScrollbarInset() {
     if (!menuRef) return;
@@ -70,9 +70,9 @@ export function CompletionMenu(props: {
 
   createEffect(() => {
     const items = props.items;
-    const activeIndices = new Set(items.map((_, i) => i));
+    const activeKeys = new Set(items.map((item) => item.key));
     for (const key of itemRefs.keys()) {
-      if (!activeIndices.has(key)) itemRefs.delete(key);
+      if (!activeKeys.has(key)) itemRefs.delete(key);
     }
   });
 
@@ -83,7 +83,8 @@ export function CompletionMenu(props: {
 
   createEffect(() => {
     const idx = props.selectedIndex;
-    const el = itemRefs.get(idx);
+    const selectedItem = props.items[idx];
+    const el = selectedItem ? itemRefs.get(selectedItem.key) : undefined;
     if (!el || !menuRef) return;
     const elTop = el.offsetTop;
     const elBottom = elTop + el.offsetHeight;
@@ -126,7 +127,7 @@ export function CompletionMenu(props: {
                 : item.detail;
           return (
             <button
-              ref={(el) => itemRefs.set(index(), el)}
+              ref={(el) => itemRefs.set(item.key, el)}
               class={`composer-completion-item completion-${item.type} ${props.selectedIndex === index() ? 'selected' : ''}`}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => props.onSelect(item)}
