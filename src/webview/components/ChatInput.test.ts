@@ -12,6 +12,7 @@ import {
   setConnectionInitialized,
   setIsLoading,
   setLoadingLastActivityAt,
+  setLoadingStartedAt,
   setShowChangedFiles,
   setShowTurnTimer,
   showModelPicker,
@@ -208,6 +209,7 @@ afterEach(() => {
   setConnectionInitialized(false);
   setIsLoading(false);
   setLoadingLastActivityAt(null);
+  setLoadingStartedAt(null);
   setShowChangedFiles(false);
   setShowTurnTimer(false);
   setShowModelPicker(false);
@@ -1046,6 +1048,20 @@ describe('ChatInput', () => {
       },
     ]);
     await Promise.resolve();
+    expect(container?.querySelector('.toolbar-turn-timer')).toBeNull();
+  });
+
+  it('hides the active-turn timer in the new-session composer', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(80_000);
+    setShowTurnTimer(true);
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', 'session-1', { type: 'busy' });
+    setIsLoading(true);
+    setLoadingStartedAt(70_000);
+
+    cleanup = render(() => ChatInput({ newSession: true }), container!);
+
     expect(container?.querySelector('.toolbar-turn-timer')).toBeNull();
   });
 

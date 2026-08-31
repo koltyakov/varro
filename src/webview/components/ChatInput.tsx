@@ -3526,7 +3526,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     composerSessionId() ? messagesBySession().get(composerSessionId()!) || [] : []
   );
   const activeTurnStartedAt = createMemo(() => {
-    if (!showTurnTimer()) return null;
+    if (props.newSession || !showTurnTimer()) return null;
     const entries = currentSessionMessageEntries();
     let latestAssistant: ReturnType<typeof getLatestAssistantMessageInfo> = null;
     for (let index = entries.length - 1; index >= 0; index -= 1) {
