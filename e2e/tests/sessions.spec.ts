@@ -79,6 +79,28 @@ test('shows queued message counts in the desktop session list', async ({ page })
   await expect(sessionRow.locator('.session-item-queued-counter')).toHaveCount(0);
 });
 
+test('centers the session history scope in the desktop search field', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/e2e/harness/index.html?scenario=todo-queue');
+
+  const sessionsPane = page.getByRole('complementary', { name: 'Sessions' });
+  const search = sessionsPane.getByLabel('Search sessions');
+  const scope = sessionsPane.getByLabel('Session history: Folder');
+  await expect(scope).toBeVisible();
+
+  const centers = await Promise.all([
+    search.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      return box.top + box.height / 2;
+    }),
+    scope.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      return box.top + box.height / 2;
+    }),
+  ]);
+  expect(Math.abs(centers[0] - centers[1])).toBeLessThanOrEqual(1);
+});
+
 test('filters sessions by running, failed, attention, and plan ready status', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=status-filters');
 

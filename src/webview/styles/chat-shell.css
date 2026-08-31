@@ -260,6 +260,7 @@ input:focus-visible {
     padding: 12px;
   }
 
+  .session-list-view-sidebar .session-history-scope-picker,
   .session-list-view-sidebar .session-list-search-clear {
     top: calc(12px + (30px / 2));
   }
