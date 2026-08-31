@@ -16,6 +16,7 @@ import { normalizeSessionTitle } from '../../shared/session-title';
 import { retryMessage } from '../hooks/useOpenCode';
 import {
   getAssistantActivityPartKey,
+  isAssistantActiveInlineToolPart,
   isAssistantActivityPart,
   isAssistantActivityPartRunning,
   type AssistantActivityGroupInfo,
@@ -352,6 +353,7 @@ export function Message(props: {
         !props.visibleActiveActivityPartKeys ||
         !isAssistantActivityPart(part) ||
         !isAssistantActivityPartRunning(part) ||
+        isAssistantActiveInlineToolPart(part) ||
         (part.type === 'tool' &&
           (props.questionRequestForTool?.(part) || props.permissionMatchForTool?.(part)))
       ) {

@@ -2283,6 +2283,36 @@ describe('MessageList compact activity', () => {
     expect(container?.querySelector('.tool-invocation-title')?.textContent).toBe('apply_patch');
   });
 
+  it('renders an isolated pending apply_patch row immediately', async () => {
+    const patch = toolPart('patch-pending', 'assistant-2', 'call-patch-pending');
+    patch.tool = 'apply_patch';
+    patch.state = { status: 'pending', input: {}, raw: '' };
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Update the files')] },
+      {
+        info: assistantMessage('assistant-1', { parentID: 'user-1' }),
+        parts: [textPart('commentary-1', 'I will update the recovery path.')],
+      },
+      {
+        info: assistantMessage('assistant-2', {
+          parentID: 'user-1',
+          time: { created: 2 },
+        }),
+        parts: [patch],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const patchRow = container?.querySelector('[data-msg-id="assistant-2"]');
+    expect(patchRow?.classList).not.toContain('interactive-item-render-empty');
+    expect(patchRow?.querySelector('.tool-invocation-title')?.textContent).toBe('apply_patch');
+    expect(patchRow?.querySelector('.tool-status-running')).not.toBeNull();
+  });
+
   it('removes a pending tool from Explored when it is identified as apply_patch', async () => {
     const patch = toolPart('patch-pending', 'assistant-1', 'call-patch-pending');
     patch.tool = '';
@@ -3374,6 +3404,53 @@ describe('MessageList loading row', () => {
     expect(row).toBeInstanceOf(HTMLDivElement);
     expect(row?.classList.contains('is-reserved')).toBe(true);
     expect(row?.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('re-shows the loading label when committed commentary remains genuinely busy', async () => {
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    replaceMessages([
+      {
+        info: assistantMessage('message-1'),
+        parts: [textPart('text-1', 'I will update the recovery path.')],
+      },
+    ]);
+    startLoading(1);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const row = container?.querySelector('.interactive-loading-row');
+    expect(row).toBeInstanceOf(HTMLDivElement);
+    expect(row?.classList).toContain('is-reserved');
+
+    await vi.advanceTimersByTimeAsync(599);
+    expect(row?.classList).toContain('is-reserved');
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(container?.querySelector('.interactive-loading-row')).toBe(row);
+    expect(row?.classList).not.toContain('is-reserved');
+    expect(row?.getAttribute('aria-hidden')).toBeNull();
+  });
+
+  it('does not re-show the loading label when committed commentary settles during grace', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      {
+        info: assistantMessage('message-1'),
+        parts: [textPart('text-1', 'The update is complete.')],
+      },
+    ]);
+    startLoading(1);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(599);
+
+    stopLoading();
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(container?.querySelector('.loading-indicator')).toBeNull();
   });
 
   it('hides the loading label when final text streams after a stale running tool', async () => {

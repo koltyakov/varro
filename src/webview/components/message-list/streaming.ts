@@ -34,25 +34,27 @@ export function findStreamingPart(messages: MessageEntry[], streamingPartId: str
   return null;
 }
 
-export function hasCommittedVisibleTextAsLastPart(
+export function getCommittedVisibleTextLastPartKey(
   messages: MessageEntry[],
   streamingPartId: string | null,
   loadingStartedAt: number | null
-): boolean {
+): string | null {
   const entry = messages.at(-1);
-  if (!entry || entry.info.role !== 'assistant' || entry.info.error) return false;
+  if (!entry || entry.info.role !== 'assistant' || entry.info.error) return null;
   const completedAt = entry.info.time.completed;
   if (isNumber(completedAt) && loadingStartedAt !== null && loadingStartedAt > completedAt) {
-    return false;
+    return null;
   }
 
   for (let index = entry.parts.length - 1; index >= 0; index -= 1) {
     const part = entry.parts[index]!;
     if (!shouldShowAssistantPartInline(part)) continue;
-    if (part.id === streamingPartId || part.type !== 'text') return false;
+    if (part.id === streamingPartId || part.type !== 'text') return null;
     const text = part.text.trim();
-    return text.length > 0 && !isWorkspaceDirectoryText(text);
+    return text.length > 0 && !isWorkspaceDirectoryText(text)
+      ? `${entry.info.id}\u0000${part.id}`
+      : null;
   }
 
-  return false;
+  return null;
 }

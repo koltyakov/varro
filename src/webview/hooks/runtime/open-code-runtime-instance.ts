@@ -2581,6 +2581,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   });
 
   async function selectSession(id: string, options?: SessionSelectionOptions) {
+    const draftGeneration = getNewChatDraftGeneration();
     const activation = ++sessionActivationGeneration;
     sessionActivationController?.abort();
     const activationController = new AbortController();
@@ -2594,11 +2595,21 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         const activatedSession = await client.session.activate(id, targetDirectory, {
           signal: activationController.signal,
         });
-        if (activation !== sessionActivationGeneration) return false;
+        if (
+          activation !== sessionActivationGeneration ||
+          getNewChatDraftGeneration() !== draftGeneration
+        ) {
+          if (sessionActivationController === activationController) {
+            sessionActivationController = null;
+            sessionActivationDirectory = null;
+          }
+          return false;
+        }
         upsertSession(activatedSession);
       } catch (err) {
         if (
           activation === sessionActivationGeneration &&
+          getNewChatDraftGeneration() === draftGeneration &&
           !activationController.signal.aborted &&
           options?.reportActivationError !== false
         ) {

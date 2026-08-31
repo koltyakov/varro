@@ -115,7 +115,7 @@ import {
 } from './message-list/sticky-preview';
 import {
   findStreamingPart,
-  hasCommittedVisibleTextAsLastPart,
+  getCommittedVisibleTextLastPartKey,
   hasVisibleBlockingStreamingPart,
 } from './message-list/streaming';
 import {
@@ -702,6 +702,9 @@ export function MessageList() {
   const [stickyPreviewViewportHeight, setStickyPreviewViewportHeight] = createSignal(0);
   const [reserveLoadingRow, setReserveLoadingRow] = createSignal(false);
   const [showLoadingRow, setShowLoadingRow] = createSignal(false);
+  const [loadingRowCommittedTextKey, setLoadingRowCommittedTextKey] = createSignal<string | null>(
+    null
+  );
   const [trailingSummarySettled, setTrailingSummarySettled] = createSignal(true);
   const [trailingSummaryOwner, setTrailingSummaryOwner] = createSignal<{
     sessionId: string;
@@ -855,13 +858,21 @@ export function MessageList() {
       )
     );
   });
-  const committedTextBlocksReappear = createMemo(() => {
+  const committedTextBlockKey = createMemo(() => {
     messageStructureVersion();
     const currentStreamingPartId = state.streamingPartId;
     const currentLoadingStartedAt = loadingStartedAt();
     return untrack(() =>
-      hasCommittedVisibleTextAsLastPart(messages(), currentStreamingPartId, currentLoadingStartedAt)
+      getCommittedVisibleTextLastPartKey(
+        messages(),
+        currentStreamingPartId,
+        currentLoadingStartedAt
+      )
     );
+  });
+  const committedTextBlocksReappear = createMemo(() => {
+    const key = committedTextBlockKey();
+    return key !== null && loadingRowCommittedTextKey() !== key;
   });
   const messageIndexById = createMemo(() => {
     const result = new Map<string, number>();
@@ -1226,6 +1237,8 @@ export function MessageList() {
   let lastVirtualContentOrigin = 0;
   let previousResizeMessageIds: readonly string[] | null = null;
   let loadingRowReappearTimer: ReturnType<typeof setTimeout> | 0 = 0;
+  let loadingRowCommittedTextTimer: ReturnType<typeof setTimeout> | 0 = 0;
+  let loadingRowCommittedTextTimerKey: string | null = null;
   let loadingRowReserveReleaseTimer: ReturnType<typeof setTimeout> | 0 = 0;
   let loadingRowHiddenByVisibleStream = false;
   let loadingRowReservedForMessageHydration = false;
@@ -1311,6 +1324,12 @@ export function MessageList() {
     if (!loadingRowReappearTimer) return;
     clearTimeout(loadingRowReappearTimer);
     loadingRowReappearTimer = 0;
+  }
+
+  function clearLoadingRowCommittedTextTimer() {
+    if (loadingRowCommittedTextTimer) clearTimeout(loadingRowCommittedTextTimer);
+    loadingRowCommittedTextTimer = 0;
+    loadingRowCommittedTextTimerKey = null;
   }
 
   function clearLoadingRowReserveReleaseTimer() {
@@ -1801,6 +1820,7 @@ export function MessageList() {
 
   createEffect(() => {
     const eligible = loadingRowEligible();
+    const committedTextKey = committedTextBlockKey();
     const blockedByVisibleStream = eligible && visibleBlockingStreamingPart();
     const blockedByCommittedText = eligible && committedTextBlocksReappear();
     const blockedByVisibleInlineFileEdit = eligible && visibleRunningInlineFileEdit();
@@ -1811,7 +1831,9 @@ export function MessageList() {
 
     if (!eligible) {
       clearLoadingRowReappearTimer();
+      clearLoadingRowCommittedTextTimer();
       loadingRowHiddenByVisibleStream = false;
+      if (loadingRowCommittedTextKey() !== null) setLoadingRowCommittedTextKey(null);
       if (isShowing) setShowLoadingRow(false);
       if (!trailingSummarySettled()) {
         clearLoadingRowReserveReleaseTimer();
@@ -1828,16 +1850,54 @@ export function MessageList() {
     clearLoadingRowReserveReleaseTimer();
     if (!isReserved) setReserveLoadingRow(true);
 
-    if (
-      blockedByVisibleStream ||
-      blockedByCommittedText ||
-      blockedByVisibleInlineFileEdit ||
-      blockedByVisibleActivity
-    ) {
+    if (blockedByVisibleStream || blockedByVisibleInlineFileEdit || blockedByVisibleActivity) {
       clearLoadingRowReappearTimer();
+      clearLoadingRowCommittedTextTimer();
       loadingRowHiddenByVisibleStream = blockedByVisibleStream;
+      if (blockedByVisibleStream && loadingRowCommittedTextKey() !== null) {
+        setLoadingRowCommittedTextKey(null);
+      }
       if (isShowing) setShowLoadingRow(false);
       return;
+    }
+
+    if (blockedByCommittedText) {
+      clearLoadingRowReappearTimer();
+      loadingRowHiddenByVisibleStream = false;
+      const activeSessionId = state.activeSessionId;
+      const committedTextSessionBusy =
+        isLoading() && !!activeSessionId && isSessionTreeStatusWorking(activeSessionId);
+      if (committedTextSessionBusy && committedTextKey) {
+        if (loadingRowCommittedTextTimerKey !== committedTextKey) {
+          clearLoadingRowCommittedTextTimer();
+          loadingRowCommittedTextTimerKey = committedTextKey;
+          loadingRowCommittedTextTimer = setTimeout(() => {
+            loadingRowCommittedTextTimer = 0;
+            loadingRowCommittedTextTimerKey = null;
+            if (
+              committedTextBlockKey() === committedTextKey &&
+              loadingRowEligible() &&
+              isLoading() &&
+              !!state.activeSessionId &&
+              isSessionTreeStatusWorking(state.activeSessionId) &&
+              !visibleBlockingStreamingPart() &&
+              !visibleRunningInlineFileEdit() &&
+              !hasVisibleActivityTrayRows()
+            ) {
+              setLoadingRowCommittedTextKey(committedTextKey);
+            }
+          }, LOADING_ROW_REAPPEAR_DELAY_MS);
+        }
+      } else {
+        clearLoadingRowCommittedTextTimer();
+      }
+      if (isShowing) setShowLoadingRow(false);
+      return;
+    }
+
+    clearLoadingRowCommittedTextTimer();
+    if (!committedTextKey && loadingRowCommittedTextKey() !== null) {
+      setLoadingRowCommittedTextKey(null);
     }
 
     if (!shouldShow || isShowing || loadingRowReappearTimer) return;
@@ -5680,6 +5740,7 @@ export function MessageList() {
       if (stickyPreviewDebounceTimer) clearTimeout(stickyPreviewDebounceTimer);
       clearUpwardStickyHandoff();
       clearLoadingRowReappearTimer();
+      clearLoadingRowCommittedTextTimer();
       clearLoadingRowReserveReleaseTimer();
       if (initialScrollRafId) cancelAnimationFrame(initialScrollRafId);
       if (detachedAnchorRefreshRafId) cancelAnimationFrame(detachedAnchorRefreshRafId);

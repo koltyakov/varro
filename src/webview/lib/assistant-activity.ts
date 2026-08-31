@@ -112,10 +112,14 @@ export function isAssistantActivityPartRunning(part: AssistantActivityPart) {
   return part.state.status === 'pending' || part.state.status === 'running';
 }
 
-function isActiveApplyPatchPart(part: AssistantActivityPart) {
+export function isAssistantActiveInlineToolPart(part: AssistantActivityPart) {
   if (part.type !== 'tool' || !isAssistantActivityPartRunning(part)) return false;
   const title = 'title' in part.state ? part.state.title : undefined;
-  return isApplyPatchTool(part.tool) || (title !== undefined && isApplyPatchTool(title));
+  return (
+    !part.tool.trim() ||
+    isApplyPatchTool(part.tool) ||
+    (title !== undefined && isApplyPatchTool(title))
+  );
 }
 
 export function shouldCompactAssistantActivityPart(
@@ -126,7 +130,7 @@ export function shouldCompactAssistantActivityPart(
   if (
     part.type === 'tool' &&
     isAssistantActivityPartRunning(part) &&
-    (!part.tool.trim() || isActiveApplyPatchPart(part))
+    isAssistantActiveInlineToolPart(part)
   ) {
     return false;
   }

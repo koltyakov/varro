@@ -193,6 +193,43 @@ describe('useOpenCode session state flows', () => {
     }
   });
 
+  it('keeps a new-chat draft when a pending cross-root activation finishes', async () => {
+    mockRuntimeBootstrap();
+    const siblingSession = { ...session('session-b'), directory: '/repo-b' };
+    const activation = deferred<typeof siblingSession>();
+    clientMocks.sessionActivate.mockReturnValue(activation.promise);
+    clientMocks.sessionGet.mockResolvedValue(siblingSession);
+    clientMocks.sessionMessages.mockResolvedValue([userEntry('message-b', 'session-b')]);
+    // SAFETY: The fixture provides the initial context snapshot read by the runtime.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      editorContext: {
+        workspacePath: '/repo-a',
+        workspaceFolders: [
+          { name: 'Repo A', path: '/repo-a' },
+          { name: 'Repo B', path: '/repo-b' },
+        ],
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+    };
+
+    const { stateModule, hookModule } = await loadModules();
+    const { startNewChatDraft } = await import('../lib/new-chat-draft');
+    stateModule.setState('sessions', [siblingSession]);
+
+    const selection = hookModule.selectSession('session-b', { directory: '/repo-b' });
+    await vi.waitFor(() => expect(clientMocks.sessionActivate).toHaveBeenCalledOnce());
+
+    startNewChatDraft();
+    activation.resolve(siblingSession);
+    await selection;
+
+    expect(stateModule.state.activeSessionId).toBeNull();
+    expect(stateModule.state.messages).toEqual([]);
+    expect(clientMocks.sessionGet).not.toHaveBeenCalled();
+  });
+
   it('does not surface a best-effort restoration activation failure', async () => {
     const siblingSession = { ...session('session-b'), directory: '/repo-b' };
     clientMocks.sessionActivate.mockRejectedValue(
