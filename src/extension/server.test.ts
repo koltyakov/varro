@@ -1278,6 +1278,29 @@ describe('OpenCodeServer maintenance', () => {
     );
   });
 
+  it('retries a failed CLI registry check after the short failure cadence', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-30T12:00:00Z'));
+    const server = new OpenCodeServer(4096, false);
+    const readLatestCliVersion = vi
+      .fn<() => Promise<string | null>>()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue('1.14.22');
+    const api = server as unknown as {
+      readLatestCliVersion: () => Promise<string | null>;
+    };
+    api.readLatestCliVersion = readLatestCliVersion;
+
+    await maybeSuggestCliUpdate(server, '1.14.20');
+    await vi.advanceTimersByTimeAsync(4 * 60_000);
+    await maybeSuggestCliUpdate(server, '1.14.20');
+    expect(readLatestCliVersion).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    await maybeSuggestCliUpdate(server, '1.14.20');
+    expect(readLatestCliVersion).toHaveBeenCalledTimes(2);
+  });
+
   it('runs the upgrade command in an integrated terminal when the notification action is selected', async () => {
     stubPlatform('linux');
 

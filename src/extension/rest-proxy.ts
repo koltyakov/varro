@@ -78,6 +78,7 @@ type ApiRequestPayload = Extract<WebviewMessage, { type: 'api/request' }>['paylo
 type ApiCancelPayload = Extract<WebviewMessage, { type: 'api/cancel' }>['payload'];
 type ApiResponsePayload = { id: number; data?: unknown; error?: string };
 const SESSION_SUMMARY_DESCENDANT_CONCURRENCY = 4;
+const SESSION_VISIBILITY_LOOKUP_CONCURRENCY = 4;
 const SESSION_SUMMARY_CACHE_TTL_MS = 2_000;
 const SESSION_SUMMARY_CACHE_LIMIT = 200;
 const STATUS_SESSION_CATALOG_REFRESH_MS = 5_000;
@@ -2166,8 +2167,11 @@ export class RestProxy {
     const cacheKey = directory ? (normalizeWorkspaceIdentity(directory) ?? directory) : '';
     const cached = this.sessionSummaryListRequests.get(cacheKey);
     if (cached && cached.expiresAt > now) {
+      this.sessionSummaryListRequests.delete(cacheKey);
+      this.sessionSummaryListRequests.set(cacheKey, cached);
       return cached.request;
     }
+    if (cached) this.sessionSummaryListRequests.delete(cacheKey);
     const request = this.requestServer('GET', FULL_SESSION_LIST_PATH).then((sessions) => {
       if (!Array.isArray(sessions)) return sessions;
       const projectedSessions = sessions.map(projectSummaryDiffs);
@@ -2183,6 +2187,11 @@ export class RestProxy {
       request,
     };
     this.sessionSummaryListRequests.set(cacheKey, entry);
+    while (this.sessionSummaryListRequests.size > SESSION_SUMMARY_CACHE_LIMIT) {
+      const oldestKey = this.sessionSummaryListRequests.keys().next().value;
+      if (typeof oldestKey !== 'string') break;
+      this.sessionSummaryListRequests.delete(oldestKey);
+    }
     void request.catch(() => {
       if (this.sessionSummaryListRequests.get(cacheKey) === entry) {
         this.sessionSummaryListRequests.delete(cacheKey);
@@ -2415,21 +2424,19 @@ export class RestProxy {
     if (unknown.length === 0) return visible;
 
     const directories = await this.loadSessionDirectorySnapshot();
-    await Promise.all(
-      unknown.map(async (sessionID) => {
-        const knownDirectory = directories.get(sessionID);
-        if (knownDirectory) {
-          if (isSameWorkspacePath(knownDirectory, workspacePath)) visible.add(sessionID);
-          return;
-        }
-        try {
-          const directory = await this.lookupSessionDirectory(sessionID, workspacePath);
-          if (isSameWorkspacePath(directory, workspacePath)) visible.add(sessionID);
-        } catch {
-          // An unresolved session cannot be assigned to this workspace safely.
-        }
-      })
-    );
+    await mapWithConcurrency(unknown, SESSION_VISIBILITY_LOOKUP_CONCURRENCY, async (sessionID) => {
+      const knownDirectory = directories.get(sessionID);
+      if (knownDirectory) {
+        if (isSameWorkspacePath(knownDirectory, workspacePath)) visible.add(sessionID);
+        return;
+      }
+      try {
+        const directory = await this.lookupSessionDirectory(sessionID, workspacePath);
+        if (isSameWorkspacePath(directory, workspacePath)) visible.add(sessionID);
+      } catch {
+        // An unresolved session cannot be assigned to this workspace safely.
+      }
+    });
     return visible;
   }
 

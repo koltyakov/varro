@@ -1091,7 +1091,7 @@ function isEscapedMarkdownDelimiter(content: string, index: number, lineStart: n
   return backslashCount % 2 === 1;
 }
 
-function hideUnclosedStreamingMarkdown(content: string) {
+function renderIncompleteStreamingMarkdown(content: string) {
   let index = 0;
   let openFence: MarkdownFenceState | null = null;
   let inlineStart: number | null = null;
@@ -1178,6 +1178,7 @@ function hideUnclosedStreamingMarkdown(content: string) {
   const hiddenStarts = [inlineStart, linkDestinationStart, ...linkLabelStarts].filter(
     (start): start is number => start !== null
   );
+  let suppressedFenceSuffixStart: number | null = null;
   if (openFence) {
     const trailingLineStart = Math.max(content.lastIndexOf('\n') + 1, 0);
     const trailingLine = content.slice(trailingLineStart).trim();
@@ -1187,16 +1188,29 @@ function hideUnclosedStreamingMarkdown(content: string) {
       [...trailingLine].every((character) => character === openFence.char)
     ) {
       hiddenStarts.push(trailingLineStart);
+      suppressedFenceSuffixStart = trailingLineStart;
     }
   }
-  const visibleContent =
-    hiddenStarts.length === 0 ? content : content.slice(0, Math.min(...hiddenStarts));
+  let pendingStart = hiddenStarts.length === 0 ? content.length : Math.min(...hiddenStarts);
+  const visibleContent = content.slice(0, pendingStart);
   const blockSafeContent = hideIncompleteStreamingBlock(visibleContent);
+  pendingStart = Math.min(pendingStart, blockSafeContent.length);
+  const trailingHeading = content.slice(pendingStart).match(/^[ \t]{0,3}#{1,6}[ \t]*$/);
+  if (trailingHeading || suppressedFenceSuffixStart === pendingStart) {
+    return content.slice(0, pendingStart);
+  }
   const trailingPath = blockSafeContent.match(TRAILING_BARE_PATH_CANDIDATE_RE);
-  if (!trailingPath || isLikelyFilePathReference(trailingPath[1]!)) return blockSafeContent;
+  if (trailingPath && !isLikelyFilePathReference(trailingPath[1]!)) {
+    const candidateStart = trailingPath.index! + trailingPath[0].length - trailingPath[1]!.length;
+    pendingStart = Math.min(pendingStart, candidateStart);
+  }
+  if (pendingStart >= content.length) return content;
 
-  const candidateStart = trailingPath.index! + trailingPath[0].length - trailingPath[1]!.length;
-  return blockSafeContent.slice(0, candidateStart);
+  return `${content.slice(0, pendingStart)}${escapeIncompleteMarkdown(content.slice(pendingStart))}`;
+}
+
+function escapeIncompleteMarkdown(content: string) {
+  return content.replace(/([\\`*_[\]{}()#+.!|<>~-])/g, '\\$1').replace(/(?<!  )\r?\n/g, '  \n');
 }
 
 function hideIncompleteStreamingBlock(content: string) {
@@ -1809,7 +1823,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
     : '';
   const initialTailRenderContent = props.cacheByContent
     ? initialSegments.tailContent
-    : hideUnclosedStreamingMarkdown(initialSegments.tailContent);
+    : renderIncompleteStreamingMarkdown(initialSegments.tailContent);
   let lastAppliedTailHtml = parseMarkdown(initialTailRenderContent, {
     cacheByContent: initialSegments.stableContent.length === 0 && !!props.cacheByContent,
     disablePathLinkify: lw() || !!props.disablePathLinkify,
@@ -1913,7 +1927,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
       if (sessionContextKey !== lastAppliedSessionContextKey) return;
       if (content !== lastAppliedTailContent) return;
 
-      const highlightedTailHtml = parseMarkdown(hideUnclosedStreamingMarkdown(content), {
+      const highlightedTailHtml = parseMarkdown(renderIncompleteStreamingMarkdown(content), {
         cacheByContent: false,
         disablePathLinkify: !!props.disablePathLinkify,
         escapeHtml: !!props.escapeHtml,
@@ -2009,7 +2023,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
         ? parseMarkdown(
             cacheByContent
               ? segments.tailContent
-              : hideUnclosedStreamingMarkdown(segments.tailContent),
+              : renderIncompleteStreamingMarkdown(segments.tailContent),
             {
               cacheByContent: segments.stableContent.length === 0 && cacheByContent,
               disablePathLinkify,

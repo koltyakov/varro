@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess, type SpawnOptions } from 'child_process';
 import crossSpawn from 'cross-spawn';
-import { mkdtemp, open, readFile, rm } from 'fs/promises';
+import { mkdtemp, open, readFile, rm, stat } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import * as vscode from 'vscode';
@@ -12,6 +12,8 @@ import { buildServerEnv } from './util/server-path';
 
 const EXPORT_TERMINATION_GRACE_MS = 1_000;
 const WINDOWS_TASKKILL_TIMEOUT_MS = 500;
+const MAX_EXPORT_BYTES = 64 * 1024 * 1024;
+const MAX_EXPORT_STDERR_BYTES = 64 * 1024;
 
 export class SessionExportService {
   constructor(
@@ -65,6 +67,12 @@ export class SessionExportService {
         workspacePath,
         enforceWorkspaceStability
       );
+      const outputInfo = await stat(tempFile);
+      if (outputInfo.size > MAX_EXPORT_BYTES) {
+        throw new Error(
+          `OpenCode export exceeds the ${MAX_EXPORT_BYTES / (1024 * 1024)} MB safety limit`
+        );
+      }
       return normalizeCliOutput(await readFile(tempFile, 'utf-8'));
     } finally {
       await rm(tempDir, { recursive: true, force: true });
@@ -80,7 +88,8 @@ export class SessionExportService {
     const fileHandle = await open(outputPath, 'w');
 
     return new Promise((resolveOutput, reject) => {
-      let stderr = '';
+      let stderr: Buffer = Buffer.alloc(0);
+      let stderrTruncated = false;
       let settled = false;
       let timedOut = false;
       let hardTerminationStarted = false;
@@ -160,7 +169,19 @@ export class SessionExportService {
         proc = crossSpawn(command, args, spawnOptions);
 
         proc.stderr?.on('data', (data: Buffer) => {
-          stderr += data.toString();
+          const chunk = Buffer.isBuffer(data) ? data : Buffer.from(data);
+          if (chunk.length >= MAX_EXPORT_STDERR_BYTES) {
+            stderr = chunk.subarray(chunk.length - MAX_EXPORT_STDERR_BYTES);
+            stderrTruncated = true;
+            return;
+          }
+          const combined = Buffer.concat([stderr, chunk]);
+          if (combined.length > MAX_EXPORT_STDERR_BYTES) {
+            stderr = combined.subarray(combined.length - MAX_EXPORT_STDERR_BYTES);
+            stderrTruncated = true;
+          } else {
+            stderr = combined;
+          }
         });
         proc.once('error', (err) => {
           if (timedOut) settleTimedOutProcess();
@@ -177,7 +198,7 @@ export class SessionExportService {
           }
           finish(
             new Error(
-              stderr.trim() ||
+              formatExportStderr(stderr, stderrTruncated) ||
                 `OpenCode CLI command failed${signal ? ` (${signal})` : code !== null ? ` (code ${code})` : ''}`
             )
           );
@@ -196,6 +217,12 @@ export class SessionExportService {
       throw new Error('Workspace changed during session export');
     }
   }
+}
+
+function formatExportStderr(stderr: Buffer, truncated: boolean) {
+  const message = stderr.toString('utf8').trim();
+  if (!message) return '';
+  return truncated ? `[Earlier OpenCode CLI output omitted]\n${message}` : message;
 }
 
 async function terminateProcessTree(proc: ChildProcess, force: boolean): Promise<void> {

@@ -81,6 +81,7 @@ const MAX_TRACKED_SESSION_SEQUENCES = 512;
 const MAX_EVICTED_SESSION_SEQUENCES = 512;
 const MAX_DIRTY_GAP_SESSIONS = 256;
 const MAX_OVERFLOW_GAP_RECOVERIES = 16;
+const MAX_TOOL_EXECUTION_TIMES = 1_024;
 const DIRTY_GAP_RETRY_MIN_MS = 100;
 const DIRTY_GAP_RETRY_MAX_MS = 30_000;
 const TRANSIENT_CONNECTION_RETRY_DELAY_MS = 5_000;
@@ -697,8 +698,21 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     const key = getToolExecutionKey(sessionId, callId);
     const existing = toolExecutionTimes.get(key) || {};
     const timestamp = getEventTimestamp(props);
+    const remember = (timing: ToolExecutionTime) => {
+      toolExecutionTimes.delete(key);
+      toolExecutionTimes.set(key, timing);
+      while (toolExecutionTimes.size > MAX_TOOL_EXECUTION_TIMES) {
+        const oldestKey = toolExecutionTimes.keys().next().value;
+        if (oldestKey === undefined) break;
+        toolExecutionTimes.delete(oldestKey);
+      }
+    };
     if (eventName === 'session.next.tool.called' || eventName === 'session.next.shell.started') {
-      toolExecutionTimes.set(key, { ...existing, start: timestamp });
+      remember(
+        existing.end !== undefined && existing.start === undefined
+          ? { ...existing, start: timestamp }
+          : { start: timestamp }
+      );
       return { sessionId, callId, ended: false };
     }
     if (
@@ -706,7 +720,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       eventName === 'session.next.tool.failed' ||
       eventName === 'session.next.shell.ended'
     ) {
-      toolExecutionTimes.set(key, { ...existing, end: timestamp });
+      remember({ ...existing, end: timestamp });
       return { sessionId, callId, ended: true };
     }
 
@@ -1066,6 +1080,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     messageSyncs.clear();
     pendingTranscriptMessageSyncs.clear();
     pendingTerminalStepSettles.clear();
+    toolExecutionTimes.clear();
     for (const pending of pendingMissingPartDeltas.values()) {
       if (pending.retryTimer !== undefined) clearTimeout(pending.retryTimer);
     }

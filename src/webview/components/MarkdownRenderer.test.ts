@@ -1220,7 +1220,7 @@ describe('MarkdownRenderer', () => {
     expect(tailSegment?.innerHTML).toContain('<p>Second paragraph</p>');
   });
 
-  it('holds a streaming table until its delimiter row is complete', async () => {
+  it('keeps an incomplete streaming table painted as text until its delimiter row is complete', async () => {
     const [content, setContent] = createSignal('Status follows.\n\n| No.');
     cleanup = render(
       () =>
@@ -1234,12 +1234,13 @@ describe('MarkdownRenderer', () => {
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
     expect(container?.textContent).toContain('Status follows.');
-    expect(container?.textContent).not.toContain('No.');
+    expect(container?.textContent).toContain('No.');
     expect(container?.querySelector('table')).toBeNull();
 
     setContent('Status follows.\n\n| No. | Area | State | Lead | Action |\n|---|---|---|---');
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
-    expect(container?.textContent).not.toContain('No.');
+    expect(container?.textContent).toContain('Action');
+    expect(container?.querySelector('table')).toBeNull();
 
     setContent('Status follows.\n\n| No. | Area | State | Lead | Action |\n|---|---|---|---|---|');
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
@@ -1364,7 +1365,7 @@ describe('MarkdownRenderer', () => {
     expect(tailLinks?.[0]?.getAttribute('title')).toBe('/repo/src/webview/App.tsx');
   });
 
-  it('holds an unclosed inline-code suffix until its delimiter arrives', async () => {
+  it('keeps an unclosed inline-code suffix painted without linking it', async () => {
     const [content, setContent] = createSignal(
       'The related tests are in `src/webview/components/Markdown'
     );
@@ -1387,13 +1388,12 @@ describe('MarkdownRenderer', () => {
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
     const paragraph = container?.querySelector('[data-markdown-segment="tail"] p');
-    expect(paragraph?.textContent).toBe('The related tests are in ');
-    expect(container?.textContent).not.toContain('src/webview/components/Markdown');
+    expect(paragraph?.textContent).toContain('src/webview/components/Markdown');
+    expect(container?.querySelectorAll('a.file-path-link')).toHaveLength(0);
 
     setContent('The related tests are in `src/webview/components/MarkdownRenderer.test.ts');
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
-    expect(container?.querySelector('[data-markdown-segment="tail"] p')).toBe(paragraph);
-    expect(container?.textContent).not.toContain('MarkdownRenderer.test.ts');
+    expect(container?.textContent).toContain('MarkdownRenderer.test.ts');
 
     setContent('The related tests are in `src/webview/components/MarkdownRenderer.test.ts`');
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
@@ -1404,7 +1404,7 @@ describe('MarkdownRenderer', () => {
     expect(container?.textContent).not.toContain('src/webview/components/');
   });
 
-  it('holds an unfinished Markdown link until its destination closes', async () => {
+  it('keeps an unfinished Markdown link painted until its destination closes', async () => {
     const [content, setContent] = createSignal(
       'Explicit local links use standard Markdown syntax. Open [the renderer implementation'
     );
@@ -1426,34 +1426,27 @@ describe('MarkdownRenderer', () => {
     );
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
-    expect(container?.textContent?.trimEnd()).toBe(
-      'Explicit local links use standard Markdown syntax. Open'
-    );
+    expect(container?.textContent).toContain('the renderer implementation');
     expect(container?.querySelectorAll('a.file-path-link')).toHaveLength(0);
 
     setContent(
       'Explicit local links use standard Markdown syntax. Open [the renderer implementation]'
     );
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
-    expect(container?.textContent?.trimEnd()).toBe(
-      'Explicit local links use standard Markdown syntax. Open'
-    );
+    expect(container?.textContent).toContain('the renderer implementation');
 
     setContent(
       'Explicit local links use standard Markdown syntax. Open [the renderer implementation](src/webview/components/'
     );
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
-    expect(container?.textContent?.trimEnd()).toBe(
-      'Explicit local links use standard Markdown syntax. Open'
-    );
+    expect(container?.textContent).toContain('src/webview/components/');
 
     setContent(
       'Explicit local links use standard Markdown syntax. Open [the renderer implementation](src/webview/components/MarkdownRenderer.tsx) or [its test'
     );
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
-    expect(container?.textContent?.trimEnd()).toBe(
-      'Explicit local links use standard Markdown syntax. Open the renderer implementation or'
-    );
+    expect(container?.textContent).toContain('the renderer implementation');
+    expect(container?.textContent).toContain('its test');
     expect(container?.querySelectorAll('a.file-path-link')).toHaveLength(1);
 
     setContent(
@@ -1467,7 +1460,7 @@ describe('MarkdownRenderer', () => {
     expect(links?.[1]?.title).toBe('/repo/src/webview/components/MarkdownRenderer.test.ts');
   });
 
-  it('holds and linkifies trailing bare paths across path styles', async () => {
+  it('keeps trailing bare paths painted and linkifies them when complete', async () => {
     setState('editorContext', {
       workspacePath: '/repo',
       activeFile: null,
@@ -1515,7 +1508,7 @@ describe('MarkdownRenderer', () => {
       );
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
-      expect(container?.textContent?.trimEnd()).toBe('Bare path:');
+      expect(container?.textContent).toContain(testCase.partial);
 
       setContent(`Bare path: ${testCase.complete}`);
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));

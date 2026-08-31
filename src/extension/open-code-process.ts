@@ -767,13 +767,18 @@ async function isSafeInjectedConfigPath(configPath: string) {
 }
 
 function getEnvironmentValue(env: NodeJS.ProcessEnv, name: string) {
-  const key = Object.keys(env).find((candidate) => candidate.toLowerCase() === name.toLowerCase());
+  const key =
+    process.platform === 'win32'
+      ? Object.keys(env).find((candidate) => candidate.toLowerCase() === name.toLowerCase())
+      : name;
   return key ? env[key] : undefined;
 }
 
 function setEnvironmentValue(env: NodeJS.ProcessEnv, name: string, value: string) {
-  for (const key of Object.keys(env)) {
-    if (key !== name && key.toLowerCase() === name.toLowerCase()) delete env[key];
+  if (process.platform === 'win32') {
+    for (const key of Object.keys(env)) {
+      if (key !== name && key.toLowerCase() === name.toLowerCase()) delete env[key];
+    }
   }
   env[name] = value;
 }
@@ -860,6 +865,7 @@ export class OpenCodeProcess {
   private static readonly CLI_BACKGROUND_UPGRADE_TIMEOUT_MS = 5 * 60_000;
   private static readonly VERSION_CHECK_INTERVAL_MS = 5 * 60_000;
   private static readonly CLI_UPDATE_CHECK_INTERVAL_MS = 12 * 60 * 60_000;
+  private static readonly CLI_UPDATE_CHECK_FAILURE_RETRY_MS = 5 * 60_000;
   private static readonly CLI_REGISTRY_TIMEOUT_MS = 10_000;
   private static readonly PORT_FALLBACK_MAX_OFFSET = 10;
 
@@ -2597,10 +2603,16 @@ export class OpenCodeProcess {
     if (now - this.lastCliUpdateCheckAt < OpenCodeProcess.CLI_UPDATE_CHECK_INTERVAL_MS) {
       return null;
     }
-    this.lastCliUpdateCheckAt = now;
-
     const latestCliVersion = await callbacks.readLatestCliVersion();
-    if (!latestCliVersion || compareVersions(latestCliVersion, installedCliVersion) <= 0) {
+    if (!latestCliVersion) {
+      this.lastCliUpdateCheckAt =
+        now -
+        OpenCodeProcess.CLI_UPDATE_CHECK_INTERVAL_MS +
+        OpenCodeProcess.CLI_UPDATE_CHECK_FAILURE_RETRY_MS;
+      return null;
+    }
+    this.lastCliUpdateCheckAt = now;
+    if (compareVersions(latestCliVersion, installedCliVersion) <= 0) {
       return null;
     }
 

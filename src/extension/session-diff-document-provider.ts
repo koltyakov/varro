@@ -1,10 +1,14 @@
 /* oxlint-disable anti-slop/no-runtime-typeof -- URI and response values are validated before rendering virtual documents. */
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Parsed URI JSON is shape-checked before use. */
 import { randomUUID } from 'node:crypto';
-import { basename } from 'node:path';
+import { basename, posix } from 'node:path';
 import * as vscode from 'vscode';
 import type { FileDiff } from '../shared/opencode-types';
-import { normalizeWorkspaceIdentity } from '../shared/workspace-path';
+import {
+  getRelativePathWithinWorkspace,
+  isAbsoluteWorkspacePath,
+  normalizeWorkspaceIdentity,
+} from '../shared/workspace-path';
 import type { OpenCodeServer } from './server';
 import { assertSessionInCurrentWorkspace } from './session-workspace';
 
@@ -35,7 +39,8 @@ export class SessionDiffDocumentProvider implements vscode.TextDocumentContentPr
     server: Pick<OpenCodeServer, 'getWorkspaceCwd' | 'request'> = this.server
   ): Promise<SessionDiffOpenResult> {
     if (this.disposed) return 'unavailable';
-    const workspaceIdentity = normalizeWorkspaceIdentity(server.getWorkspaceCwd());
+    const workspacePath = server.getWorkspaceCwd();
+    const workspaceIdentity = normalizeWorkspaceIdentity(workspacePath);
     const workspaceChanged = () =>
       Boolean(
         workspaceIdentity &&
@@ -50,7 +55,7 @@ export class SessionDiffDocumentProvider implements vscode.TextDocumentContentPr
       const value = await server.request('GET', `/session/${encodeURIComponent(sessionID)}/diff`);
       if (workspaceChanged()) return 'forbidden';
       if (this.disposed || !Array.isArray(value)) return 'unavailable';
-      const diff = findFileDiff(value, requestedPath);
+      const diff = findFileDiff(value, requestedPath, workspacePath);
       if (!diff || typeof diff.before !== 'string' || typeof diff.after !== 'string') {
         return 'unavailable';
       }
@@ -87,22 +92,42 @@ export class SessionDiffDocumentProvider implements vscode.TextDocumentContentPr
   }
 }
 
-function findFileDiff(value: unknown[], requestedPath: string): FileDiff | null {
-  const normalizedRequested = normalizePath(requestedPath);
+function findFileDiff(
+  value: unknown[],
+  requestedPath: string,
+  workspacePath: string | undefined
+): FileDiff | null {
+  const normalizedRequested = normalizeDiffPath(requestedPath, workspacePath);
+  if (!normalizedRequested) return null;
   const matches = value.filter((item): item is FileDiff => {
     if (!item || typeof item !== 'object') return false;
     const file = (item as FileDiff).file;
     if (typeof file !== 'string') return false;
-    const normalizedFile = normalizePath(file);
-    return (
-      normalizedFile === normalizedRequested ||
-      normalizedRequested.endsWith(`/${normalizedFile}`) ||
-      normalizedFile.endsWith(`/${normalizedRequested}`)
-    );
+    const normalizedFile = normalizeDiffPath(file, workspacePath);
+    return normalizedFile === normalizedRequested;
   });
   return matches.length === 1 ? matches[0]! : null;
 }
 
-function normalizePath(value: string) {
-  return value.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '').toLowerCase();
+function normalizeDiffPath(value: string, workspacePath: string | undefined) {
+  let relativePath = value;
+  if (isAbsoluteWorkspacePath(value)) {
+    const relative = getRelativePathWithinWorkspace(value, workspacePath);
+    if (!relative || relative === '.') return null;
+    relativePath = relative;
+  }
+  const normalized = posix.normalize(relativePath.replace(/\\/g, '/'));
+  if (
+    normalized === '.' ||
+    normalized === '..' ||
+    normalized.startsWith('../') ||
+    normalized.startsWith('/')
+  ) {
+    return null;
+  }
+  return isWindowsWorkspacePath(workspacePath) ? normalized.toLowerCase() : normalized;
+}
+
+function isWindowsWorkspacePath(value: string | undefined) {
+  return !!value && (/^[A-Za-z]:[\\/]/.test(value) || /^(?:\\\\|\/\/)/.test(value));
 }

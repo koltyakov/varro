@@ -3359,6 +3359,43 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 223, data: [] });
   });
 
+  it('bounds concurrent lookups for unknown permission sessions', async () => {
+    const lookupGate = deferred<void>();
+    const permissions = Array.from({ length: 12 }, (_, index) => ({
+      id: `permission-${index}`,
+      sessionID: `unknown-${index}`,
+    }));
+    let activeLookups = 0;
+    let peakLookups = 0;
+    const serverRequest = vi.fn(async (_method: string, path: string) => {
+      if (path === '/permission') return permissions;
+      if (path === '/session') return [];
+      if (path.startsWith('/session/unknown-')) {
+        activeLookups += 1;
+        peakLookups = Math.max(peakLookups, activeLookups);
+        await lookupGate.promise;
+        activeLookups -= 1;
+        return { id: path.split(/[/?]/)[2], directory: '/repo' };
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    });
+    const { proxy } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      sessionState: {
+        ...createCallbacks().sessionState,
+        getSessionWorkspaceMatch: vi.fn(() => undefined),
+      } as never,
+    });
+
+    const request = proxy.handleRequest(makePayload(224, 'GET', '/permission'));
+    await vi.waitFor(() => expect(peakLookups).toBe(4));
+    expect(activeLookups).toBe(4);
+    lookupGate.resolve();
+    await request;
+
+    expect(peakLookups).toBe(4);
+  });
+
   it('uses each root session snapshot to filter aggregate statuses', async () => {
     const manager = new SessionStateManager(
       {

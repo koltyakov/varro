@@ -306,10 +306,8 @@ export class OpenCodeTransport {
         if (!isCurrentStream()) return;
         if (done) {
           buffer += decoder.decode();
-          const finalChunk = buffer.slice(cursor).trim();
-          if (finalChunk.length > 0) {
-            this.processSseChunk(finalChunk, controller, generation);
-          }
+          // SSE dispatches only records terminated by a blank line. Replaying an
+          // unterminated tail is safer than acknowledging a partially received ID.
           logger.warn('Event stream closed; reconnecting');
           shouldReconnect = true;
           break;
@@ -454,12 +452,6 @@ export class OpenCodeTransport {
       }
     }
     if (data.length === 0) return;
-    if (data.length > OpenCodeTransport.EVENT_MAX_PAYLOAD_CHARS) {
-      logger.warn(
-        `Ignoring oversized event stream payload (${data.length} chars > ${OpenCodeTransport.EVENT_MAX_PAYLOAD_CHARS})`
-      );
-      return;
-    }
     if (
       controller &&
       generation !== undefined &&
@@ -469,6 +461,12 @@ export class OpenCodeTransport {
     }
     // Advance before parsing so a malformed poison event is not replayed on every reconnect.
     if (eventId !== undefined) this.lastEventId = eventId;
+    if (data.length > OpenCodeTransport.EVENT_MAX_PAYLOAD_CHARS) {
+      logger.warn(
+        `Ignoring oversized event stream payload (${data.length} chars > ${OpenCodeTransport.EVENT_MAX_PAYLOAD_CHARS})`
+      );
+      return;
+    }
     let parsed: unknown;
     try {
       parsed = JSON.parse(data);

@@ -110,6 +110,49 @@ describe('SessionDiffDocumentProvider', () => {
     }
   });
 
+  it.each([
+    ['case-distinct path', '/repo/src/Foo.ts', 'src/foo.ts'],
+    ['common suffix', '/repo/src/app.ts', 'archive/src/app.ts'],
+    ['outside workspace', '/other/src/app.ts', 'src/app.ts'],
+  ])('does not conflate a %s', async (_case, requestedPath, diffPath) => {
+    const provider = new SessionDiffDocumentProvider({
+      getWorkspaceCwd: () => '/repo',
+      request: vi.fn((_method: string, path: string) =>
+        Promise.resolve(
+          path === '/session/session-1'
+            ? { id: 'session-1', directory: '/repo' }
+            : [{ file: diffPath, before: 'old', after: 'new', additions: 1, deletions: 1 }]
+        )
+      ),
+    } as never);
+
+    try {
+      await expect(provider.open('session-1', requestedPath)).resolves.toBe('unavailable');
+      expect(vscodeMock.commands.executeCommand).not.toHaveBeenCalled();
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('matches Windows paths case-insensitively within the workspace', async () => {
+    const provider = new SessionDiffDocumentProvider({
+      getWorkspaceCwd: () => 'C:\\repo',
+      request: vi.fn((_method: string, path: string) =>
+        Promise.resolve(
+          path === '/session/session-1'
+            ? { id: 'session-1', directory: 'C:\\repo' }
+            : [{ file: 'SRC\\App.ts', before: 'old', after: 'new', additions: 1, deletions: 1 }]
+        )
+      ),
+    } as never);
+
+    try {
+      await expect(provider.open('session-1', 'c:\\REPO\\src\\app.ts')).resolves.toBe('opened');
+    } finally {
+      provider.dispose();
+    }
+  });
+
   it('refuses to open snapshots from a session in another workspace', async () => {
     const request = vi.fn(async (_method: string, path: string) => {
       if (path === '/session/session-foreign') {

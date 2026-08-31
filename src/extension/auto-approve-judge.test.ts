@@ -862,8 +862,7 @@ describe('AutoApproveJudge', () => {
       'node --version',
       'python3 -V',
       'go version',
-      'git remote -v',
-      'git config --get remote.origin.url',
+      'git remote',
       'git tag --list',
       'git stash list',
       'git ls-tree HEAD -- src',
@@ -891,6 +890,77 @@ describe('AutoApproveJudge', () => {
   });
 
   it.each([
+    'git config --list',
+    'git config --show-origin --list',
+    'git config --get remote.origin.url',
+    'git config --get-urlmatch http https://github.com',
+    'git remote -v',
+    'git remote --verbose',
+    'git remote get-url origin',
+  ])('requires manual approval for host Git metadata: %s', async (command) => {
+    const { workspace } = createTemporaryWorkspace();
+    const request = vi.fn();
+    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+
+    await expect(
+      judge.judge(
+        {
+          permission: {
+            id: `perm-sensitive-git-${command}`,
+            type: 'bash',
+            sessionID: 'session-1',
+            title: `bash ${command}`,
+          },
+        },
+        workspace
+      )
+    ).resolves.toEqual({
+      decision: 'ask',
+      reason: 'Command may expose data outside the workspace.',
+    });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('requires manual approval for cmd environment expansion on Windows', async () => {
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    try {
+      const { workspace } = createTemporaryWorkspace();
+      const request = vi.fn();
+      const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+
+      for (const command of [
+        'cat %USERPROFILE%\\.ssh\\id_rsa',
+        'cat %TEMP%\\outside.txt',
+        'cat !USERPROFILE!\\.ssh\\id_rsa',
+      ]) {
+        await expect(
+          judge.judge(
+            {
+              permission: {
+                id: `perm-windows-expansion-${command}`,
+                type: 'bash',
+                sessionID: 'session-1',
+                title: `bash ${command}`,
+              },
+            },
+            workspace
+          )
+        ).resolves.toEqual({
+          decision: 'ask',
+          reason: 'Command may expose data outside the workspace.',
+        });
+      }
+      expect(request).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(process, 'platform', {
+        value: originalPlatform,
+        configurable: true,
+      });
+    }
+  });
+
+  it.each([
     ['unverified command wrapper', 'rtk git status --short'],
     ['outside read', 'cat /etc/hosts'],
     ['recursive symlink traversal', 'ls -RL src'],
@@ -902,7 +972,6 @@ describe('AutoApproveJudge', () => {
     ['package mutation', 'npm version patch'],
     ['Git text conversion', 'git diff --textconv'],
     ['Git remote mutation', 'git remote add origin https://example.com/repo.git'],
-    ['Git global config', 'git config --global user.name'],
     ['Git tag mutation', 'git tag v1.0.0'],
     ['Git stash mutation', 'git stash pop'],
     ['Git branch mutation', 'git branch new-branch'],
@@ -1340,7 +1409,7 @@ describe('AutoApproveJudge', () => {
       if (method === 'POST' && path === '/session/judge-session-1/message') {
         judgeMessageBody = body as { system?: string };
         return {
-          info: { structured_output: { decision: 'allow', reason: 'Read-only git remote.' } },
+          info: { structured_output: { decision: 'allow', reason: 'Model-reviewed command.' } },
           parts: [],
           body,
         };
@@ -1360,13 +1429,13 @@ describe('AutoApproveJudge', () => {
         id: 'perm-1',
         type: 'bash',
         sessionID: 'session-1',
-        title: 'Run command: git remote -v',
+        title: 'Run command: npm version patch',
       },
       model: { providerID: 'openai', modelID: 'gpt-5' },
       approvedReferences: [{ type: 'bash', title: 'bash git status --short', response: 'once' }],
     });
 
-    expect(result).toEqual({ decision: 'allow', reason: 'Read-only git remote.' });
+    expect(result).toEqual({ decision: 'allow', reason: 'Model-reviewed command.' });
     expect(hiddenSessions.isHidden('judge-session-1')).toBe(true);
     hiddenSessions.observeEvent({
       type: 'session.updated',

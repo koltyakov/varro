@@ -309,6 +309,47 @@ describe('OpenCodeTransport event stream path', () => {
     transport.stopEventStream();
   });
 
+  it('does not acknowledge an unterminated SSE tail before reconnecting', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    const requestHeaders: Array<Record<string, string>> = [];
+    let requestCount = 0;
+    const fetchMock = vi.fn((_input: string | URL | Request, init?: RequestInit) => {
+      requestHeaders.push(init?.headers as Record<string, string>);
+      requestCount += 1;
+      if (requestCount === 1) {
+        let delivered = false;
+        return Promise.resolve({
+          ok: true,
+          body: {
+            getReader: () => ({
+              read: () => {
+                if (delivered) return Promise.resolve({ value: undefined, done: true });
+                delivered = true;
+                return Promise.resolve({
+                  value: new TextEncoder().encode(
+                    'id: event-41\ndata: {"type":"server.connected","properties":{}}\n\n' +
+                      'id: event-42\ndata: {"type":"message.part.upd'
+                  ),
+                  done: false,
+                });
+              },
+            }),
+          },
+        } as unknown as Response);
+      }
+      return Promise.resolve(createPendingEventResponse(init?.signal as AbortSignal));
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const transport = createTransport();
+
+    await transport.startEventStream();
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(requestHeaders[1]).toMatchObject({ 'Last-Event-ID': 'event-41' });
+    transport.stopEventStream();
+  });
+
   it('advances the SSE event ID for a malformed payload', () => {
     const transport = createTransport() as unknown as {
       processSseChunk(chunk: string): void;

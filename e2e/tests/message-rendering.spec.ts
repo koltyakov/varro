@@ -112,6 +112,33 @@ test('keeps final-answer rails visible in virtualized transcripts', async ({ pag
   expect(rail.left).toBeGreaterThanOrEqual(listLeft + 1);
 });
 
+test('expands prompt number badges for three-digit turns', async ({ page }) => {
+  await page.setViewportSize({ width: 600, height: 720 });
+  await page.goto('/e2e/harness/index.html?scenario=large-transcript');
+
+  const finalUserRow = page.locator('[data-msg-id="message-large-user-239"]');
+  await finalUserRow.locator('.user-message-card').evaluate((card) => {
+    const element = document.createElement('span');
+    element.className = 'prompt-number-badge';
+    element.textContent = '240';
+    card.prepend(element);
+  });
+  const badge = finalUserRow.locator('.prompt-number-badge');
+  await expect(badge).toHaveText('240');
+
+  const geometry = await badge.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    return {
+      width: box.width,
+      height: box.height,
+      contentFits: element.scrollWidth <= element.clientWidth,
+    };
+  });
+
+  expect(geometry.width).toBeGreaterThan(geometry.height);
+  expect(geometry.contentFits).toBe(true);
+});
+
 test('routes safe external markdown links through the extension bridge', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=message-rendering');
 

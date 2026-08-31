@@ -1335,6 +1335,56 @@ describe('registerSessionEventHandlers', () => {
     );
   });
 
+  it('does not reuse a settled execution end timestamp when a call ID starts again', () => {
+    const handlers = installHandlers();
+    const assistantEntry = createAssistantEntry();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [assistantEntry],
+      })
+    );
+
+    handlers.get('session.next.shell.started')?.({
+      properties: { sessionID: 'session-1', callID: 'call-1', timestamp: 1_000 },
+    });
+    handlers.get('session.next.shell.ended')?.({
+      properties: { sessionID: 'session-1', callID: 'call-1', timestamp: 2_000 },
+    });
+    handlers.get('session.next.shell.started')?.({
+      properties: { sessionID: 'session-1', callID: 'call-1', timestamp: 3_000 },
+    });
+    upsertPart.mockClear();
+    handlers.get('message.part.updated')?.({
+      properties: {
+        part: {
+          id: 'tool-reused',
+          sessionID: 'session-1',
+          messageID: 'assistant-1',
+          type: 'tool',
+          callID: 'call-1',
+          tool: 'bash',
+          state: {
+            status: 'completed',
+            input: {},
+            output: '',
+            title: 'Reused call',
+            metadata: {},
+            time: { start: 30_000, end: 30_001 },
+          },
+        },
+      },
+    });
+
+    expect(upsertPart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'tool-reused',
+        state: expect.objectContaining({ time: { start: 30_000, end: 30_001 } }),
+      })
+    );
+  });
+
   it('applies child-session message updates when they belong to the active session tree', () => {
     const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
     serverEventsOn.mockImplementation((event, handler) => {

@@ -324,6 +324,9 @@ export class AutoApproveJudge {
     ) {
       return { decision: 'allow', reason: 'Git-backed workspace file edit.' };
     }
+    if (requiresManualLocalBashPermission(permission)) {
+      return { decision: 'ask', reason: 'Command may expose data outside the workspace.' };
+    }
     if (isSafeLocalBashPermission(permission, workspacePath)) {
       return { decision: 'allow', reason: 'Safe local command.' };
     }
@@ -764,6 +767,31 @@ function isSafeLocalBashPermission(
   return commands.every((item) => isSafeLocalCommandSegment(item, workspacePath));
 }
 
+function requiresManualLocalBashPermission(permission: NormalizedJudgePermission) {
+  const type = permission.type.toLowerCase();
+  if (type !== 'bash' && type !== 'shell') return false;
+  const command = extractUnambiguousCommand(permission);
+  if (!command) return false;
+  if (process.platform === 'win32' && /[%!]/.test(command)) return true;
+  const commands = splitSafeCommandSequence(command);
+  if (!commands) return false;
+  return commands.some((segment) => {
+    const args = parseLiteralShellArguments(segment);
+    if (!args || args[0] !== 'git') return false;
+    let index = 1;
+    if (args[index] === '-C') index += 2;
+    const subcommand = args[index];
+    const commandArgs = args.slice(index + 1);
+    return (
+      subcommand === 'config' ||
+      (subcommand === 'remote' &&
+        (commandArgs.includes('-v') ||
+          commandArgs.includes('--verbose') ||
+          commandArgs[0] === 'get-url'))
+    );
+  });
+}
+
 function splitSafeCommandSequence(command: string) {
   const commands = command
     .split(/\s+&&\s+/)
@@ -1104,8 +1132,7 @@ function isSafeGitInspectionCommand(args: string[], workspacePath: string | unde
         )
     );
   }
-  if (subcommand === 'remote') return isSafeGitRemote(commandArgs);
-  if (subcommand === 'config') return isSafeGitConfig(commandArgs);
+  if (subcommand === 'remote') return commandArgs.length === 0;
   if (subcommand === 'tag') {
     return commandArgs.every((arg) => arg === '--list' || arg === '-l');
   }
@@ -1224,30 +1251,6 @@ function isSafeGitRevParse(args: string[]) {
     '--short',
   ]);
   return args.length > 0 && args.every((arg) => safeQueries.has(arg) || isSafeGitRevision(arg));
-}
-
-function isSafeGitRemote(args: string[]) {
-  if (args.length === 0) return true;
-  if (args.length === 1) return args[0] === '-v' || args[0] === '--verbose';
-  if (args[0] !== 'get-url') return false;
-  const values = args.slice(1);
-  const names = values.filter((arg) => arg !== '--all' && arg !== '--push');
-  return names.length === 1 && isSafeGitRevision(names[0]);
-}
-
-function isSafeGitConfig(args: string[]) {
-  const modifiers = new Set(['--show-origin', '--show-scope', '--fixed-value']);
-  const values = args.filter((arg) => !modifiers.has(arg));
-  const action = values[0];
-  if (action === '--list' || action === '-l') return values.length === 1;
-  if (!['--get', '--get-all', '--get-regexp', '--get-urlmatch'].includes(action || '')) {
-    return false;
-  }
-  return values.length >= 2 && values.length <= 3 && values.slice(1).every(isSafeGitConfigValue);
-}
-
-function isSafeGitConfigValue(value: string) {
-  return /^[A-Za-z0-9][A-Za-z0-9.^$/:_-]*$/.test(value);
 }
 
 function parseLiteralShellArguments(value: string): string[] | null {

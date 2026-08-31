@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   open: vi.fn(),
   readFile: vi.fn(),
   rm: vi.fn(),
+  stat: vi.fn(),
   openTextDocument: vi.fn(),
   showTextDocument: vi.fn(),
   showErrorMessage: vi.fn(),
@@ -33,11 +34,13 @@ vi.mock('fs/promises', () => ({
   open: mocks.open,
   readFile: mocks.readFile,
   rm: mocks.rm,
+  stat: mocks.stat,
   default: {
     mkdtemp: mocks.mkdtemp,
     open: mocks.open,
     readFile: mocks.readFile,
     rm: mocks.rm,
+    stat: mocks.stat,
   },
 }));
 
@@ -46,11 +49,13 @@ vi.mock('node:fs/promises', () => ({
   open: mocks.open,
   readFile: mocks.readFile,
   rm: mocks.rm,
+  stat: mocks.stat,
   default: {
     mkdtemp: mocks.mkdtemp,
     open: mocks.open,
     readFile: mocks.readFile,
     rm: mocks.rm,
+    stat: mocks.stat,
   },
 }));
 
@@ -127,6 +132,7 @@ describe('SessionExportService', () => {
     mocks.mkdtemp.mockResolvedValue('/tmp/varro-opencode-export-123');
     mocks.open.mockResolvedValue({ fd: 17, close: vi.fn().mockResolvedValue(undefined) });
     mocks.readFile.mockResolvedValue('{"id":"session-1"}\n');
+    mocks.stat.mockResolvedValue({ size: 19 });
     mocks.rm.mockResolvedValue(undefined);
     mocks.openTextDocument.mockResolvedValue({ uri: 'untitled:session-export.json' });
     mocks.showTextDocument.mockResolvedValue(undefined);
@@ -239,6 +245,20 @@ describe('SessionExportService', () => {
     });
   });
 
+  it('rejects oversized exports before reading them', async () => {
+    const spawnResult = createSpawnResult();
+    const service = new SessionExportService(createServer(), 1000);
+    mocks.stat.mockResolvedValue({ size: 64 * 1024 * 1024 + 1 });
+
+    const exportPromise = service.exportSession('session-1');
+    await vi.waitFor(() => expect(mocks.spawn).toHaveBeenCalledOnce());
+    spawnResult.handlers.close(0, null);
+
+    await expect(exportPromise).rejects.toThrow('OpenCode export exceeds the 64 MB safety limit');
+    expect(mocks.readFile).not.toHaveBeenCalled();
+    expect(mocks.rm).toHaveBeenCalled();
+  });
+
   it('surfaces CLI stderr failures and still removes the temp directory', async () => {
     const spawnResult = createSpawnResult();
     const service = new SessionExportService(createServer(), 1000);
@@ -259,6 +279,21 @@ describe('SessionExportService', () => {
       recursive: true,
       force: true,
     });
+  });
+
+  it('retains only a bounded tail of CLI stderr', async () => {
+    const spawnResult = createSpawnResult();
+    const service = new SessionExportService(createServer(), 1000);
+
+    const exportPromise = service.exportSession('session-1');
+    await vi.waitFor(() => expect(mocks.spawn).toHaveBeenCalledOnce());
+    spawnResult.handlers.stderr?.(Buffer.from(`discarded-prefix\n${'x'.repeat(70 * 1024)}`));
+    spawnResult.handlers.stderr?.(Buffer.from('\nactionable-tail\n'));
+    spawnResult.handlers.close(1, null);
+
+    await expect(exportPromise).rejects.toThrow(
+      /^\[Earlier OpenCode CLI output omitted\]\n.*actionable-tail$/s
+    );
   });
 
   it('rejects a session from another workspace before spawning the CLI', async () => {

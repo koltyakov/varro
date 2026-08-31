@@ -87,6 +87,10 @@ export function isSafePersistedSessionId<T>(value: T): value is T & string {
     isString(value) &&
     value.length > 0 &&
     value.length <= MAX_PERSISTED_SESSION_ID_LENGTH &&
+    ![...value].some((character) => {
+      const codePoint = character.codePointAt(0);
+      return codePoint !== undefined && (codePoint <= 0x1f || codePoint === 0x7f);
+    }) &&
     value !== '__proto__' &&
     value !== 'constructor' &&
     value !== 'prototype'

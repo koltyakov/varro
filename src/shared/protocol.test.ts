@@ -17,11 +17,22 @@ describe('protocol parsers', () => {
     expect(['', 'Default', 'ask', null, undefined].some(isPermissionMode)).toBe(false);
   });
 
-  it('accepts only bounded prototype-safe persisted session IDs', () => {
+  it('accepts only bounded control-free prototype-safe persisted session IDs', () => {
     expect(isSafePersistedSessionId('session-1')).toBe(true);
     expect(isSafePersistedSessionId('x'.repeat(512))).toBe(true);
     expect(
-      ['', '__proto__', 'constructor', 'prototype', 'x'.repeat(513)].some(isSafePersistedSessionId)
+      [
+        '',
+        '__proto__',
+        'constructor',
+        'prototype',
+        'x'.repeat(513),
+        'session\0other',
+        'session\nother',
+        'session\rother',
+        'session\tother',
+        'session\u007fother',
+      ].some(isSafePersistedSessionId)
     ).toBe(false);
   });
 

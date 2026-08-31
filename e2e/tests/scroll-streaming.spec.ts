@@ -275,6 +275,36 @@ test.describe('rapid streaming bottom follow', () => {
       .toBeLessThan(15);
   });
 
+  test('reserves painted height for incomplete streaming markdown', async ({ page }) => {
+    await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
+    const list = page.locator('.interactive-list');
+    const row = page.locator('[data-msg-id="message-rapid-assistant-streaming"]');
+    await expect(list).toBeVisible();
+    await expect
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+      .toBeLessThan(15);
+
+    await appendDeltaToRapidStreaming(
+      page,
+      `\n\nPending inline \`${'VFZ-PENDING-MARKDOWN '.repeat(24)}`
+    );
+    await waitForAnimationFrames(page, 2);
+
+    await expect(row).toContainText('VFZ-PENDING-MARKDOWN');
+    expect(
+      (await getScrollMetrics(page, '.interactive-list')).distanceFromBottom
+    ).toBeLessThanOrEqual(1);
+
+    await appendDeltaToRapidStreaming(page, '`');
+    for (let frame = 0; frame < 4; frame += 1) {
+      await waitForAnimationFrame(page);
+      expect(
+        (await getScrollMetrics(page, '.interactive-list')).distanceFromBottom,
+        `frame ${frame}`
+      ).toBeLessThanOrEqual(1);
+    }
+  });
+
   test('auto-scroll follows rapid sequential streaming deltas', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
     const list = page.locator('.interactive-list');
