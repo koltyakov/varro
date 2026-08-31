@@ -10,8 +10,9 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 - Added a session-history scope picker for showing sessions from the current folder, nested folders, or the entire Git project, with the choice remembered per project.
 - Added automatic provider authorization without a browser URL, provider deletion from model menus, Azure and Amazon icons, and usage limits for OpenCode Go, xAI, and Ollama Cloud.
 - Added assistant duration to local usage reports.
-- Improved workspace-scoped state, session recovery and lifecycle coordination, provider authentication, long-conversation scrolling, composer isolation, and editor context handling.
-- Fixed link punctuation, token totals, hidden-model persistence, transcript overflow, chat action colors, queued-message restoration, local usage reporting, and stale webview events.
+- Added an elapsed timer beside the composer for active turns, with a warning when a turn stops producing activity.
+- Improved workspace-scoped state, session recovery and lifecycle coordination, session transport and streaming recovery, provider authentication, long-conversation scrolling, composer isolation, and editor context handling.
+- Fixed link punctuation, token totals, hidden-model persistence, transcript overflow, chat action colors, queued-message restoration, local usage reporting, unread attention flicker, workspace selection for new chats, and stale webview events.
 
 ## 0.26.x - August 2026
 

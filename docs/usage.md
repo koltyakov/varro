@@ -394,6 +394,16 @@ parent conversation while keeping the request owned by the child session.
 agent determine which actions are allowed, denied, or sent to Varro for manual approval. Varro does
 not add session-level permission rules in this mode.
 
+Without custom OpenCode rules, most permissions are allowed. OpenCode asks before repeated identical
+tool calls (`doom_loop`) or access outside the working directory (`external_directory`), and its
+default read rules deny `.env` files and variants while allowing `.env.example`. These are OpenCode
+defaults, not additional Varro rules.
+
+See [OpenCode permissions](https://opencode.ai/docs/permissions/) for the full list of permission keys
+and configuration examples for global and per-agent `allow`, `ask`, and `deny` rules. Rules can match
+tools, commands, paths, subagents, skills, URLs, and external directories. When multiple patterns
+match, the last matching rule wins.
+
 `Auto-accept edits` allows file edits, known read-only permissions, and subagent launches. Commands,
 external access, interactive tools, and unknown permissions continue to ask for approval.
 

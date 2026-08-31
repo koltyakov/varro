@@ -4094,6 +4094,20 @@ export function MessageList() {
     );
   }
 
+  function hideStickyPreviewAfterProgrammaticDownwardScroll(previousScrollTop: number) {
+    if (!containerRef || containerRef.scrollTop <= previousScrollTop + 0.5) return;
+
+    const currentStickyPreview = untrack(stickyUserMessagePreview);
+    if (
+      currentStickyPreview &&
+      !shouldDeferStickyDuringUpwardHandoff() &&
+      shouldHideStickyUserMessagePreviewImmediately(currentStickyPreview)
+    ) {
+      setStickyUserMessagePreview(null);
+      previousStickyPreviewId = currentStickyPreview.id;
+    }
+  }
+
   function performScroll(options?: { force?: boolean }) {
     if (stickyNavigationOwnsScroll() || activityExitBottomTarget !== null) return;
     if (appendScrollRafId) return;
@@ -4101,6 +4115,7 @@ export function MessageList() {
 
     reconcileAppendBottomReserve();
     const now = performance.now();
+    const previousScrollTop = containerRef?.scrollTop ?? 0;
     suppressSyncScrollTop = true;
     const result = performScrollToBottom({
       container: containerRef,
@@ -4120,6 +4135,7 @@ export function MessageList() {
       setScrollTop(result.nextScrollTop);
       if (containerRef) setViewportHeight(containerRef.clientHeight);
     });
+    hideStickyPreviewAfterProgrammaticDownwardScroll(previousScrollTop);
   }
 
   function cancelAppendScrollTransition() {
@@ -4246,6 +4262,7 @@ export function MessageList() {
       const interpolatedTop = startTop + (target - startTop) * progress;
       const nextTop =
         target >= startTop ? Math.max(container.scrollTop, interpolatedTop) : interpolatedTop;
+      const previousTop = container.scrollTop;
       suppressSyncScrollTop = true;
       container.scrollTop = nextTop;
       suppressSyncScrollTop = false;
@@ -4256,6 +4273,7 @@ export function MessageList() {
         setScrollTop(container.scrollTop);
         setViewportHeight(container.clientHeight);
       });
+      hideStickyPreviewAfterProgrammaticDownwardScroll(previousTop);
       scheduleStickyPreviewViewportState(container.scrollTop, container.clientHeight);
 
       if (progress < 1) {

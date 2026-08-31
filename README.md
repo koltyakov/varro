@@ -92,6 +92,8 @@ Permission requests provide `Reject`, `Once`, and `Always` actions. Each session
 
 Child sessions inherit the nearest selected mode in their session tree. Manual child requests appear in the parent conversation while remaining owned by the child session.
 
+Varro initially selects `Auto` unless `varro.chat.defaultPermissionMode` or a saved project/global selection says otherwise. `Default` does not mean that every action requires approval. Without custom rules, OpenCode allows most permissions, asks for `doom_loop` and `external_directory`, and blocks reading `.env` files and variants while allowing `.env.example`. See [OpenCode permissions](https://opencode.ai/docs/permissions/) to configure global or per-agent `allow`, `ask`, and `deny` rules, including rules matched by tool, command, path, subagent, URL, and external directory.
+
 ![Per-session permission modes in Varro](https://raw.githubusercontent.com/koltyakov/varro/main/assets/permissions.png)
 
 ## Models, providers, and MCP

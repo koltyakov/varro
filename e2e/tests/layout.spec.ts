@@ -10,6 +10,20 @@ import {
   sampleMessageTopAcrossFrames,
 } from './helpers';
 
+type StickyAppendObservation = {
+  frames: number;
+  sawSource: boolean;
+  intrusions: Array<{
+    frame: number;
+    stickyId: string | null;
+    sourceId: string | null;
+    overlayBottom: number;
+    sourceTop: number;
+    sourceBottom: number;
+  }>;
+  done: boolean;
+};
+
 test('resets padding injected by legacy webview hosts', async ({ page }) => {
   await page.setViewportSize({ width: 480, height: 800 });
   await page.goto('/e2e/harness/index.html?scenario=blank&legacy-host-padding');
@@ -2468,6 +2482,168 @@ test('virtualized sticky preview remains visible through active tool layout chan
     JSON.stringify(samples)
   ).toBe(true);
   await expect(sticky).toBeVisible();
+});
+
+test('virtualized append hides the sticky before its source enters the overlay', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 486, height: 800 });
+  await page.goto(
+    '/e2e/harness/index.html?scenario=sticky-preview-large-transcript&longActiveTurn=1'
+  );
+
+  const sticky = page.locator('.latest-user-message-sticky-overlay');
+  await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+  await expect(sticky).toBeVisible();
+
+  const prompt =
+    'Keep this appended prompt clear of its sticky copy while a long virtualized assistant response begins streaming below it and moves the viewport.';
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+  await composer.fill(prompt);
+  await page.evaluate(() => {
+    const bridgeWindow = window as Window & {
+      __sendToExtension?: (message: unknown) => void | Promise<void>;
+    };
+    const sendToExtension = bridgeWindow.__sendToExtension;
+    if (!sendToExtension) throw new Error('Extension bridge is missing');
+    bridgeWindow.__sendToExtension = (message) => {
+      const request = message as { type?: string; payload?: { path?: string } };
+      if (request.type === 'api/request' && request.payload?.path?.includes('/prompt_async')) {
+        return;
+      }
+      return sendToExtension(message);
+    };
+  });
+  await page.evaluate((expectedPrompt) => {
+    const result: StickyAppendObservation = {
+      frames: 0,
+      sawSource: false,
+      intrusions: [],
+      done: false,
+    };
+    const sample = () => {
+      result.frames += 1;
+      const source = [...document.querySelectorAll<HTMLElement>('.user-message-card')].find(
+        (element) => element.textContent?.includes(expectedPrompt)
+      );
+      result.sawSource ||= !!source;
+      const overlay = document.querySelector<HTMLElement>('.latest-user-message-sticky-overlay');
+      if (source && overlay) {
+        const sourceRect = source.getBoundingClientRect();
+        const overlayBottom = overlay.getBoundingClientRect().bottom;
+        if (sourceRect.top < overlayBottom && sourceRect.bottom > overlayBottom) {
+          result.intrusions.push({
+            frame: result.frames,
+            stickyId: overlay.getAttribute('data-sticky-msg-id'),
+            sourceId: source.closest('[data-msg-id]')?.getAttribute('data-msg-id') ?? null,
+            overlayBottom,
+            sourceTop: sourceRect.top,
+            sourceBottom: sourceRect.bottom,
+          });
+        }
+      }
+      if (result.frames >= 360) {
+        result.done = true;
+        return;
+      }
+      requestAnimationFrame(sample);
+    };
+    Object.assign(window, { stickyAppendObservation: result });
+    requestAnimationFrame(sample);
+  }, prompt);
+
+  await page.keyboard.press('Enter');
+  const source = page.locator('.user-message-card').filter({ hasText: prompt });
+  await expect(source).toBeAttached();
+  await source.evaluate((element) => {
+    const sessionID = 'session-sticky-preview-large';
+    const parentID = element.closest('[data-msg-id]')?.getAttribute('data-msg-id');
+    if (!parentID) throw new Error('Optimistic prompt message ID is missing');
+    const messageID = 'sticky-append-live-assistant';
+    // oxlint-disable-next-line unicorn/consistent-function-scoping
+    const postEvent = (type: string, properties: Record<string, unknown>) => {
+      window.postMessage({ type: 'server/event', payload: { type, properties } }, '*');
+    };
+    postEvent('session.status', { sessionID, status: { type: 'busy' } });
+    postEvent('message.updated', {
+      info: {
+        id: messageID,
+        sessionID,
+        role: 'assistant',
+        parentID,
+        time: { created: Date.now() },
+        modelID: 'model-test',
+        providerID: 'provider-test',
+        mode: 'primary',
+        path: { cwd: '/workspace', root: '/workspace' },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+    });
+    postEvent('message.part.updated', {
+      part: {
+        id: `${messageID}-text`,
+        sessionID,
+        messageID,
+        type: 'text',
+        text: '1. Streaming content starts extending the response.',
+      },
+    });
+  });
+  await page.waitForTimeout(300);
+  await expect(sticky).toBeVisible();
+  await page.evaluate(async () => {
+    const sessionID = 'session-sticky-preview-large';
+    const messageID = 'sticky-append-live-assistant';
+    for (let sectionCount = 2; sectionCount <= 60; sectionCount += 1) {
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: {
+            type: 'message.part.updated',
+            properties: {
+              part: {
+                id: `${messageID}-text`,
+                sessionID,
+                messageID,
+                type: 'text',
+                text: Array.from(
+                  { length: sectionCount },
+                  (_, index) =>
+                    `${String(index + 1)}. Streaming content keeps extending the response.`
+                ).join('\n'),
+              },
+            },
+          },
+        },
+        '*'
+      );
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as Window & {
+              stickyAppendObservation?: StickyAppendObservation;
+            }
+          ).stickyAppendObservation?.done ?? false
+      )
+    )
+    .toBe(true);
+  const observation = await page.evaluate(
+    () =>
+      (
+        window as Window & {
+          stickyAppendObservation?: StickyAppendObservation;
+        }
+      ).stickyAppendObservation
+  );
+
+  expect(observation?.sawSource, JSON.stringify(observation)).toBe(true);
+  expect(observation?.intrusions, JSON.stringify(observation)).toEqual([]);
 });
 
 test('first image prompt keeps its sticky preview until the source clears the overlay', async ({

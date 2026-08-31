@@ -115,12 +115,21 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install VS Code
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'vscode.zip'
+          $installDirectory = Join-Path $env:RUNNER_TEMP 'vscode'
+          Invoke-WebRequest 'https://update.code.visualstudio.com/1.120.0/win32-x64-archive/stable' -OutFile $archive
+          Expand-Archive $archive -DestinationPath $installDirectory
+
       - name: Run Windows VS Code sandbox smoke tests
         id: sandbox
         env:
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
           VARRO_KEEP_VSCODE_SANDBOX: 1
+          VARRO_VSCODE_EXECUTABLE: ${{ runner.temp }}\vscode\Code.exe
         run: npm run test:vscode-sandbox -- clean-install-missing-cli invalid-cli-path healthy-first-run
 
       - name: Upload failed sandbox profiles
