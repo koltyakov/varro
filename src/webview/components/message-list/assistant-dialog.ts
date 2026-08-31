@@ -10,7 +10,7 @@ import {
   sumAssistantTokens,
 } from '../../lib/message-metrics';
 import { resolveTaskSessionId } from '../../lib/task-session';
-import type { TaskSessionInfo } from '../../lib/task-session';
+import type { TaskSessionInfo, TaskSessionLookup } from '../../lib/task-session';
 import type { AssistantMessage, MessageEntry } from '../../types';
 
 export type AssistantDialogSummaryInfo = {
@@ -44,6 +44,21 @@ export function getAssistantDialogSummaryMap(
     // Preserve Array.find's first-match behavior if malformed history contains duplicate IDs.
     if (!entriesById.has(entry.info.id)) entriesById.set(entry.info.id, entry);
   }
+  const sessions = options?.sessions || [];
+  const sessionsById = new Map(sessions.map((session) => [session.id, session]));
+  const sessionsByParentId = new Map<string, TaskSessionInfo[]>();
+  for (const session of sessions) {
+    const parentId = session.parentID;
+    if (!parentId) continue;
+    const children = sessionsByParentId.get(parentId);
+    if (children) children.push(session);
+    else sessionsByParentId.set(parentId, [session]);
+  }
+  const taskSessionLookup: TaskSessionLookup = {
+    messagesById: entriesById,
+    sessionsById,
+    sessionsByParentId,
+  };
   let childRunsByParentId: Map<string, Array<MessageEntry<AssistantMessage>>> | null = null;
   let currentMessages: AssistantMessage[] = [];
   let currentPrimaryMessageIds: string[] = [];
@@ -126,7 +141,10 @@ export function getAssistantDialogSummaryMap(
       currentPrimaryMessageIds,
       messages,
       entriesById,
-      options?.sessions || [],
+      sessions,
+      sessionsById,
+      sessionsByParentId,
+      taskSessionLookup,
       dialogStartedAt,
       args?.nextUserRequestCreated
     );
@@ -199,6 +217,9 @@ function sumAssistantDialogTokens(
   allMessages: MessageEntry[],
   entriesById: ReadonlyMap<string, MessageEntry>,
   sessions: readonly TaskSessionInfo[],
+  sessionsById: ReadonlyMap<string, TaskSessionInfo>,
+  sessionsByParentId: ReadonlyMap<string, readonly TaskSessionInfo[]>,
+  taskSessionLookup: TaskSessionLookup,
   dialogStartedAt: number,
   nextUserRequestCreated?: number
 ) {
@@ -210,13 +231,14 @@ function sumAssistantDialogTokens(
   );
 
   const directSessionParents = new Set([...primarySessionIds, ...primaryMessageIds]);
-  for (const session of sessions) {
-    if (!session.parentID || !directSessionParents.has(session.parentID)) continue;
-    if (session.time.created < dialogStartedAt) continue;
-    if (nextUserRequestCreated !== undefined && session.time.created >= nextUserRequestCreated) {
-      continue;
+  for (const parentId of directSessionParents) {
+    for (const session of sessionsByParentId.get(parentId) || []) {
+      if (session.time.created < dialogStartedAt) continue;
+      if (nextUserRequestCreated !== undefined && session.time.created >= nextUserRequestCreated) {
+        continue;
+      }
+      childSessionIds.add(session.id);
     }
-    childSessionIds.add(session.id);
   }
 
   for (const messageId of primaryMessageIds) {
@@ -224,17 +246,15 @@ function sumAssistantDialogTokens(
     if (!entry) continue;
     for (const part of entry.parts) {
       if (part.type !== 'tool') continue;
-      const sessionId = resolveTaskSessionId(part, allMessages, sessions, nextUserRequestCreated);
+      const sessionId = resolveTaskSessionId(
+        part,
+        allMessages,
+        sessions,
+        nextUserRequestCreated,
+        taskSessionLookup
+      );
       if (sessionId) childSessionIds.add(sessionId);
     }
-  }
-
-  const sessionsByParentId = new Map<string, TaskSessionInfo[]>();
-  for (const session of sessions) {
-    if (!session.parentID) continue;
-    const children = sessionsByParentId.get(session.parentID);
-    if (children) children.push(session);
-    else sessionsByParentId.set(session.parentID, [session]);
   }
 
   const pending = [...childSessionIds];
@@ -251,16 +271,17 @@ function sumAssistantDialogTokens(
     }
   }
 
-  const snapshotSessionIds = new Set(
-    sessions
-      .filter((session) => childSessionIds.has(session.id) && session.tokens)
-      .map((session) => session.id)
-  );
+  const snapshotSessions: TaskSessionInfo[] = [];
+  for (const sessionId of childSessionIds) {
+    const session = sessionsById.get(sessionId);
+    if (session?.tokens) snapshotSessions.push(session);
+  }
+  const snapshotSessionIds = new Set(snapshotSessions.map((session) => session.id));
   const tokens = sumAssistantTokens(
     aggregateMessages.filter((message) => !snapshotSessionIds.has(message.sessionID))
   );
-  for (const session of sessions) {
-    if (!snapshotSessionIds.has(session.id) || !session.tokens) continue;
+  for (const session of snapshotSessions) {
+    if (!session.tokens) continue;
     tokens.input += session.tokens.input || 0;
     tokens.output += session.tokens.output || 0;
     tokens.reasoning += session.tokens.reasoning || 0;

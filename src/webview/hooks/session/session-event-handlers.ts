@@ -78,6 +78,7 @@ import {
 const MISSING_PART_RECOVERY_RETRY_MIN_MS = 100;
 const MISSING_PART_RECOVERY_RETRY_MAX_MS = 1_000;
 const MAX_TRACKED_SESSION_SEQUENCES = 512;
+const MAX_TRACKED_IDLE_SETTLEMENTS = 512;
 const MAX_EVICTED_SESSION_SEQUENCES = 512;
 const MAX_DIRTY_GAP_SESSIONS = 256;
 const MAX_OVERFLOW_GAP_RECOVERIES = 16;
@@ -314,6 +315,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   const transientConnectionRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   // Per-session debounce timers for the optimistic streamed-completion settle.
   const streamedCompletionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const settledIdleSessions = new Set<string>();
   const pendingTerminalStepSettles = new Map<string, number>();
   // Per-session durable sequence cursor, advanced by synchronized events (ephemeral
   // delta fragments carry no `seq`). Lets us resync only when a durable event was
@@ -614,6 +616,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     // not done and a previous non-limit error is no longer terminal. Cancel a
     // pending recheck so it can't fire mid-turn.
     clearStreamedCompletionTimer(sessionId);
+    settledIdleSessions.delete(sessionId);
     deps.setSessionStatusEntry(sessionId, { type: 'busy' });
     sessionStore.setSessionFailed(sessionId, false);
     deps.clearUsageLimitOnResumedProgress(sessionId, { type: 'busy' });
@@ -651,8 +654,17 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   };
   const handleSessionIdle = (sessionId: string, abortedRetry: boolean) => {
     if (disposed) return;
+    const alreadySettled = settledIdleSessions.has(sessionId);
+    if (!alreadySettled) {
+      while (settledIdleSessions.size >= MAX_TRACKED_IDLE_SETTLEMENTS) {
+        const oldestSessionId = settledIdleSessions.values().next().value;
+        if (oldestSessionId === undefined) break;
+        settledIdleSessions.delete(oldestSessionId);
+      }
+    }
+    settledIdleSessions.add(sessionId);
     const hadActiveAssistantReply = hasActiveAssistantReply(deps.getMessages());
-    settleLatestAssistantOnIdle(sessionId, Date.now());
+    if (!alreadySettled) settleLatestAssistantOnIdle(sessionId, Date.now());
     deps.clearPendingAbort(sessionId);
     sessionStore.setSessionCompacting(sessionId, false);
     deps.setSessionStatusEntry(sessionId, { type: 'idle' });
@@ -663,6 +675,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     } else if (isSessionInActiveTree(sessionId) && !isActiveTreeWorking()) {
       uiStore.stopLoading();
     }
+    if (alreadySettled) return;
     deps
       .syncSession(sessionId)
       .catch((err) => logWarn('session-event syncSession after session.idle', err));
@@ -1095,6 +1108,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     overflowGapRecoveries.clear();
     for (const timer of streamedCompletionTimers.values()) clearTimeout(timer);
     streamedCompletionTimers.clear();
+    settledIdleSessions.clear();
     pendingPermissionSync = false;
     serverReconciliation = null;
   });
@@ -1168,6 +1182,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
       const id = (data.properties?.info as { id: string } | undefined)?.id;
       if (id) {
+        settledIdleSessions.delete(id);
         cancelTransientConnectionRetry(id);
         deps.removeDeletedSessionTree(id);
       }
@@ -1207,6 +1222,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         return;
       }
       if (status.type === 'busy') cancelTransientConnectionRetry(sessionID);
+      settledIdleSessions.delete(sessionID);
       deps.setSessionStatusEntry(sessionID, status);
       if (status.type === 'busy') {
         deps.clearUsageLimitOnResumedProgress(sessionID, status);

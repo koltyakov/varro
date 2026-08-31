@@ -15,6 +15,12 @@ export type TaskSessionInfo = {
   };
 };
 
+export type TaskSessionLookup = {
+  messagesById: ReadonlyMap<string, MessageEntry>;
+  sessionsById: ReadonlyMap<string, TaskSessionInfo>;
+  sessionsByParentId: ReadonlyMap<string, readonly TaskSessionInfo[]>;
+};
+
 function getTaskSessionIdFromMetadata(metadata: UnknownRecord | undefined) {
   if (isString(metadata?.sessionId)) return metadata.sessionId;
   if (isString(metadata?.sessionID)) return metadata.sessionID;
@@ -35,7 +41,8 @@ export function resolveTaskSessionId(
   tool: ToolPart,
   messages: MessageEntry[],
   sessions: readonly TaskSessionInfo[],
-  createdBefore?: number
+  createdBefore?: number,
+  lookup?: TaskSessionLookup
 ) {
   if (getToolKind(tool.tool) !== 'task' || tool.state.status === 'pending') return null;
 
@@ -43,7 +50,9 @@ export function resolveTaskSessionId(
   const metadata = tool.state.metadata as UnknownRecord | undefined;
   const metadataSessionId = getTaskSessionIdFromMetadata(metadata);
   if (metadataSessionId) {
-    const metadataSession = sessions.find((session) => session.id === metadataSessionId);
+    const metadataSession =
+      lookup?.sessionsById.get(metadataSessionId) ??
+      sessions.find((session) => session.id === metadataSessionId);
     if (
       metadataSession &&
       createdBefore !== undefined &&
@@ -54,9 +63,19 @@ export function resolveTaskSessionId(
     return metadataSessionId;
   }
 
-  const parent = messages.find((entry) => entry.info.id === tool.messageID);
+  const parent =
+    lookup?.messagesById.get(tool.messageID) ??
+    messages.find((entry) => entry.info.id === tool.messageID);
   const parentCreated = parent?.info.time.created || 0;
-  const candidates = sessions
+  const candidateSessions = lookup
+    ? [
+        ...(lookup.sessionsByParentId.get(tool.sessionID) || []),
+        ...(tool.messageID === tool.sessionID
+          ? []
+          : lookup.sessionsByParentId.get(tool.messageID) || []),
+      ]
+    : sessions;
+  const candidates = candidateSessions
     .filter((session) => {
       if (session.parentID !== tool.sessionID && session.parentID !== tool.messageID) return false;
       if (parentCreated > 0 && session.time.created < parentCreated) return false;

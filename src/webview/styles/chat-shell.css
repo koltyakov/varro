@@ -597,7 +597,7 @@ input:focus-visible {
 
 .jump-to-latest-activity {
   position: absolute;
-  top: 50%;
+  top: calc(50% - 1px);
   left: 50%;
   display: flex;
   align-items: center;

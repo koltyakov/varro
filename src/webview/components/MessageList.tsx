@@ -7044,7 +7044,13 @@ export function MessageList() {
       const containerBounds = container.getBoundingClientRect();
       const visibleTop = containerBounds.top + getMessageJumpTopInset();
       const containerBottom = containerBounds.bottom;
-      for (const [index, entry] of visibleMessages.entries()) {
+      const range = visibleRange();
+      const scanStart = shouldVirtualize() ? Math.max(0, range.coreStart - 1) : 0;
+      const scanEnd = shouldVirtualize()
+        ? Math.min(visibleMessages.length, range.coreEnd + 1)
+        : visibleMessages.length;
+      for (let index = scanStart; index < scanEnd; index += 1) {
+        const entry = visibleMessages[index]!;
         const row = mountedMessageRows.get(entry.info.id);
         if (!row) continue;
         const bubble = row.querySelector<HTMLElement>('.chat-turn-content');

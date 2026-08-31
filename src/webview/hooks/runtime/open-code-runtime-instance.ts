@@ -111,6 +111,7 @@ import {
   reconcileStuckSessionsWithDependencies,
   registerStuckSessionWatchdogEffect,
   selectUnsettledLatestAssistant,
+  shouldRunStuckSessionWatchdog,
 } from '../session/session-watchdog';
 import { SessionEventHandlerOperations } from '../session/session-event-handlers';
 import {
@@ -1434,9 +1435,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       getServerState: () => appStore.state.serverStatus.state,
       isDocumentVisible: documentVisible,
       hasBusySession: () =>
-        uiStore.isLoading() ||
-        Object.values(appStore.state.sessionStatus).some(
-          (status) => status?.type === 'busy' || status?.type === 'retry'
+        shouldRunStuckSessionWatchdog(
+          uiStore.isLoading(),
+          appStore.state.activeSessionId,
+          isSessionTreeStatusWorking
         ),
       runReconcile: () => reconcileStuckSessions(),
     });

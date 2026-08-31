@@ -4067,6 +4067,36 @@ describe('registerSessionEventHandlers', () => {
     expect(syncTodosForSession).toHaveBeenCalledWith('session-1', messages);
   });
 
+  it('settles the status idle and legacy idle completion wave once', () => {
+    const handlers = installHandlers();
+    const syncSession = vi.fn().mockResolvedValue(undefined);
+    const repairSessionTitle = vi.fn().mockResolvedValue(undefined);
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+    const handoffTodosToMessages = vi.fn().mockReturnValue(true);
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [createAssistantEntry()],
+        syncSession,
+        repairSessionTitle,
+        shouldResyncSessionAfterIdle: () => true,
+        syncSessionMessages,
+        handoffTodosToMessages,
+      })
+    );
+
+    handlers.get('session.status')?.({
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    });
+    handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+
+    expect(syncSession).toHaveBeenCalledOnce();
+    expect(repairSessionTitle).toHaveBeenCalledOnce();
+    expect(syncSessionMessages).toHaveBeenCalledOnce();
+    expect(handoffTodosToMessages).toHaveBeenCalledOnce();
+  });
+
   it('settles the latest active assistant message when the session becomes idle', () => {
     const handlers = installHandlers();
 

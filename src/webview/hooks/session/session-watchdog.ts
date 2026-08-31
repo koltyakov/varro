@@ -294,3 +294,11 @@ export function registerStuckSessionWatchdogEffect(deps: {
     )
   );
 }
+
+export function shouldRunStuckSessionWatchdog(
+  isLoading: boolean,
+  activeSessionId: string | null | undefined,
+  isSessionTreeWorking: (sessionId: string) => boolean
+) {
+  return isLoading || (!!activeSessionId && isSessionTreeWorking(activeSessionId));
+}

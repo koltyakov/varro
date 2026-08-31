@@ -2357,6 +2357,49 @@ describe('header status badges', () => {
     );
   });
 
+  it('removes a busy streaming transcript when the new-chat button receives a pointer click', async () => {
+    const streamingMessage = assistantMessageEntry('assistant-streaming');
+    streamingMessage.info.time = { created: 1 };
+    streamingMessage.parts = [
+      {
+        id: 'text-streaming',
+        sessionID: 'session-1',
+        messageID: 'assistant-streaming',
+        type: 'text',
+        text: '',
+      },
+    ];
+    setState('sessions', [session('session-1', 500, { title: 'Streaming session' })]);
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', { 'session-1': { type: 'busy' } });
+    setState('messages', [streamingMessage]);
+    setState('streamingPartId', 'text-streaming');
+    setState('streamingText', 'Old streaming transcript');
+    startLoading();
+
+    cleanup = render(() => Chat(), container!);
+    await Promise.resolve();
+    expect(container?.querySelector('[data-msg-id="assistant-streaming"]')).not.toBeNull();
+
+    const newChatButton = container?.querySelector<HTMLButtonElement>(
+      '.chat-header .chat-header-btn[aria-label="New chat"]'
+    );
+    expect(newChatButton).toBeInstanceOf(HTMLButtonElement);
+    newChatButton?.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+    newChatButton?.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0 }));
+    newChatButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    await Promise.resolve();
+
+    expect(state.activeSessionId).toBeNull();
+    expect(state.messages).toEqual([]);
+    expect(state.streamingPartId).toBeNull();
+    expect(state.streamingText).toBe('');
+    expect(container?.querySelector('[data-msg-id="assistant-streaming"]')).toBeNull();
+    expect(container?.querySelector('.chat-header .chat-header-title-text')?.textContent).toBe(
+      'New Chat'
+    );
+  });
+
   it('reuses an untouched active session instead of creating another from chat view', async () => {
     const createSessionSpy = vi
       .spyOn(openCodeModule, 'createSession')

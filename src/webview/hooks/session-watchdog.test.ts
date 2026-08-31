@@ -7,6 +7,7 @@ import {
   hasStreamedFinalResponse,
   reconcileStuckSessionsWithDependencies,
   registerStuckSessionWatchdogEffect,
+  shouldRunStuckSessionWatchdog,
   selectUnsettledLatestAssistant,
   STUCK_SESSION_GRACE_MS,
   STUCK_SESSION_WATCHDOG_INTERVAL_MS,
@@ -494,5 +495,21 @@ describe('registerStuckSessionWatchdogEffect', () => {
       dispose();
       vi.useRealTimers();
     }
+  });
+});
+
+describe('shouldRunStuckSessionWatchdog', () => {
+  it('ignores busy background sessions when the active tree is idle', () => {
+    const isSessionTreeWorking = vi.fn(() => false);
+
+    expect(shouldRunStuckSessionWatchdog(false, 'active-session', isSessionTreeWorking)).toBe(
+      false
+    );
+    expect(isSessionTreeWorking).toHaveBeenCalledWith('active-session');
+  });
+
+  it('runs for active loading or a working active tree', () => {
+    expect(shouldRunStuckSessionWatchdog(true, null, () => false)).toBe(true);
+    expect(shouldRunStuckSessionWatchdog(false, 'active-session', () => true)).toBe(true);
   });
 });

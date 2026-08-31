@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { TaskSessionInfo } from '../../lib/task-session';
 import type { AssistantMessage, MessageEntry, UserMessage } from '../../types';
 import { getAssistantDialogSummaryMap } from './assistant-dialog';
 
@@ -178,5 +179,39 @@ describe('getAssistantDialogSummaryMap', () => {
         { primarySessionId: 'session-parent' }
       ).get('assistant-interrupted')
     ).toMatchObject({ interrupted: true });
+  });
+
+  it('indexes a large session catalog once across many dialog summaries', () => {
+    let parentIdReads = 0;
+    const sessions: TaskSessionInfo[] = Array.from({ length: 200 }, (_, index) => ({
+      id: `session-${index}`,
+      get parentID() {
+        parentIdReads += 1;
+        return index === 0 ? undefined : 'session-parent';
+      },
+      title: `Session ${index}`,
+      time: { created: index + 1 },
+    }));
+    const messages: MessageEntry[] = [];
+    for (let index = 0; index < 50; index += 1) {
+      messages.push(
+        userMessage(`user-${index}`, 'session-parent', index * 10 + 1),
+        assistantMessage(
+          `assistant-${index}`,
+          'session-parent',
+          `user-${index}`,
+          index * 10 + 2,
+          index * 10 + 3
+        )
+      );
+    }
+
+    const summaries = getAssistantDialogSummaryMap(messages, undefined, {
+      primarySessionId: 'session-parent',
+      sessions,
+    });
+
+    expect(summaries.size).toBe(50);
+    expect(parentIdReads).toBeLessThan(400);
   });
 });
