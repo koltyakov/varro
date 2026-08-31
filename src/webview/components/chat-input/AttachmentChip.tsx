@@ -1,4 +1,4 @@
-import { Show, createSignal } from 'solid-js';
+import { Show, createEffect, createSignal, onCleanup } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { xmarkIcon } from '../../lib/ui-icons';
 import { AttachmentLabel } from '../AttachmentLabel';
@@ -7,7 +7,7 @@ import { FolderIcon } from '../FolderIcon';
 import { MaterialChipIcon } from '../MaterialChipIcon';
 import { WarningIcon } from '../WarningIcon';
 import { UiIcon } from '../UiIcon';
-import { onComposerOverlayDismiss } from './composer-overlay-dismiss';
+import { registerComposerOverlayDismiss } from './composer-overlay-dismiss';
 
 export function AttachmentChip(props: {
   label: string;
@@ -28,6 +28,7 @@ export function AttachmentChip(props: {
     props.icon === undefined ||
     (props.icon === 'image' && /\.[^./]+$/.test(props.path || props.label));
   let labelElement: HTMLSpanElement | undefined;
+  let unregisterComposerDismiss: (() => void) | undefined;
 
   const updateTitleVisibility = () => {
     if (props.title !== props.label) return;
@@ -38,13 +39,21 @@ export function AttachmentChip(props: {
     setShowTitle(isTruncated);
   };
 
-  const hidePreview = () => setPreviewStyle(null);
+  const hidePreview = () => {
+    unregisterComposerDismiss?.();
+    unregisterComposerDismiss = undefined;
+    setPreviewStyle(null);
+  };
 
-  onComposerOverlayDismiss(hidePreview);
+  createEffect(() => {
+    if (!props.previewImage) hidePreview();
+  });
+  onCleanup(hidePreview);
 
   const showPreview = (element: HTMLElement) => {
     updateTitleVisibility();
     if (!props.previewImage) return;
+    unregisterComposerDismiss ??= registerComposerOverlayDismiss(hidePreview);
 
     const rect = element.getBoundingClientRect();
     const chatRect = element.closest<HTMLElement>('.chat-input-shell')?.getBoundingClientRect();

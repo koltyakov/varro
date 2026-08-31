@@ -55,6 +55,7 @@ import {
   seedContextFileAttachmentSequences,
 } from './attachment-order';
 import { createMessageIndex } from './message-index';
+import { readInputDraft, writeInputDraft } from './input-draft-persistence';
 import { asRecord, isString } from './runtime-values';
 
 import {
@@ -131,6 +132,8 @@ export interface AppState {
   editorTabsOpen: boolean;
   /** Root session ids currently visible in editor tabs. */
   editorSessionIds: string[];
+  /** Root session ids open in editor tabs, including hidden tabs. */
+  openEditorSessionIds: string[];
   siblingWorkspaceAlerts: SiblingWorkspaceAlert[];
   currentDocumentEnabledBySession: Record<string, boolean>;
   sessionStatus: Record<string, SessionStatus>;
@@ -282,7 +285,7 @@ export function createAppState(): AppStateInstance {
   const discardQueuedEditDraft = storedQueuedMessageEdit !== null && !initialQueuedMessageEdit;
   if (discardQueuedEditDraft) {
     writeStored(STORAGE_KEYS.queuedMessageEdit, null);
-    writeStored(STORAGE_KEYS.inputDraft, null);
+    writeInputDraft('');
     writeStored(STORAGE_KEYS.inputDraftFiles, null);
   }
   const initialDroppedFiles = discardQueuedEditDraft
@@ -370,6 +373,7 @@ export function createAppState(): AppStateInstance {
     activeSessionId: null,
     editorTabsOpen: initialWebviewState.editorTabsOpen ?? false,
     editorSessionIds: initialWebviewState.editorSessionIds ?? [],
+    openEditorSessionIds: initialWebviewState.openEditorSessionIds ?? [],
     siblingWorkspaceAlerts: initialWebviewState.siblingWorkspaceAlerts ?? [],
     currentDocumentEnabledBySession: {},
     sessionStatus: {},
@@ -454,14 +458,12 @@ export function createAppState(): AppStateInstance {
   const [desktopSessionPaneSide, setDesktopSessionPaneSide] = createSignal<DesktopSessionPaneSide>(
     readDesktopSessionPaneSide(initialWebviewState)
   );
-  const [inputText, setInputTextValue] = createSignal(
-    readStoredString(STORAGE_KEYS.inputDraft) ?? ''
-  );
+  const [inputText, setInputTextValue] = createSignal(readInputDraft() ?? '');
   const [inputTextMutationVersion, setInputTextMutationVersion] = createSignal(0);
   const setInputText: Setter<string> = (value) => {
     setInputTextMutationVersion((version) => version + 1);
     const nextValue = setInputTextValue(value);
-    writeStored(STORAGE_KEYS.inputDraft, nextValue || null);
+    writeInputDraft(nextValue);
     return nextValue;
   };
   const [nextPastedImageIndex, setNextPastedImageIndex] = createSignal(1);

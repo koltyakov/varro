@@ -1,12 +1,10 @@
-import { onCleanup } from 'solid-js';
-
-const COMPOSER_OVERLAY_DISMISS_EVENT = 'varro:composer-overlay-dismiss';
+const dismissListeners = new Set<() => void>();
 
 export function dismissComposerOverlays() {
-  window.dispatchEvent(new Event(COMPOSER_OVERLAY_DISMISS_EVENT));
+  for (const listener of Array.from(dismissListeners)) listener();
 }
 
-export function onComposerOverlayDismiss(listener: () => void) {
-  window.addEventListener(COMPOSER_OVERLAY_DISMISS_EVENT, listener);
-  onCleanup(() => window.removeEventListener(COMPOSER_OVERLAY_DISMISS_EVENT, listener));
+export function registerComposerOverlayDismiss(listener: () => void): () => void {
+  dismissListeners.add(listener);
+  return () => dismissListeners.delete(listener);
 }

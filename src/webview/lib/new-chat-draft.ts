@@ -55,15 +55,13 @@ export function detachDiscardableActiveBlankSession(): string | false {
  */
 export function startNewChatDraft() {
   newChatDraftGeneration += 1;
-  const draftGeneration = newChatDraftGeneration;
   const blankSessionId = getDiscardableActiveBlankSessionId();
-  const deferTranscriptClear = !blankSessionId && state.messages.length > 0;
   const craftedText = inputText();
   batch(() => {
     resetMessageEditState();
     setInputText(craftedText);
     resetToolCallExpansionState();
-    if (!deferTranscriptClear) clearMessages();
+    clearMessages();
     setState('messagesLoading', false);
     if (!blankSessionId) {
       setState('activeSessionId', null);
@@ -77,13 +75,4 @@ export function startNewChatDraft() {
     restoreSelectedModelForComposer(null);
     requestComposerFocus();
   });
-
-  if (deferTranscriptClear) {
-    requestAnimationFrame(() => {
-      setTimeout(() => {
-        if (newChatDraftGeneration !== draftGeneration || state.activeSessionId) return;
-        clearMessages();
-      }, 0);
-    });
-  }
 }

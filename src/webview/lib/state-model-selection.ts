@@ -59,6 +59,10 @@ export function setSelectedModel(
 ) {
   const persistGlobal = options?.persistGlobal ?? true;
   const sessionId = options?.sessionId;
+  const currentSessionModel = sessionId ? state.sessionSelectedModels[sessionId] : undefined;
+  const previousSessionModel: SelectedModel | null = currentSessionModel
+    ? { ...currentSessionModel }
+    : null;
 
   if (!modelsEqual(state.selectedModel, model)) {
     setState('selectedModel', reconcile(model));
@@ -81,17 +85,19 @@ export function setSelectedModel(
   }
 
   if (sessionId) {
-    if (model) {
-      setState('sessionSelectedModels', sessionId, reconcile(model));
-    } else {
-      setState(
-        'sessionSelectedModels',
-        produce((draft) => {
-          delete draft[sessionId];
-        })
-      );
+    if (!modelsEqual(previousSessionModel, model)) {
+      if (model) {
+        setState('sessionSelectedModels', sessionId, reconcile(model));
+      } else {
+        setState(
+          'sessionSelectedModels',
+          produce((draft) => {
+            delete draft[sessionId];
+          })
+        );
+      }
+      writeStored(STORAGE_KEYS.sessionSelectedModels, { ...state.sessionSelectedModels });
     }
-    writeStored(STORAGE_KEYS.sessionSelectedModels, { ...state.sessionSelectedModels });
   }
 }
 
@@ -107,8 +113,10 @@ export function clearSelectedModelForSession(sessionId: string) {
 }
 
 export function applySessionSelectedModelsSnapshot(models: Record<string, SelectedModel>) {
-  setState('sessionSelectedModels', reconcile(models));
-  writeStored(STORAGE_KEYS.sessionSelectedModels, models);
+  if (!selectedModelRecordsEqual(state.sessionSelectedModels, models)) {
+    setState('sessionSelectedModels', reconcile(models));
+    writeStored(STORAGE_KEYS.sessionSelectedModels, models);
+  }
   const sessionId = showSessionPicker() ? null : state.activeSessionId;
   const activeModel = sessionId ? models[sessionId] : undefined;
   if (sessionId && activeModel) {
@@ -126,6 +134,7 @@ export function getAvailableMcpNames() {
 
 export function setSelectedMcpsForSession(sessionId: string, names: string[]) {
   const nextNames = [...new Set(names)].toSorted((a, b) => a.localeCompare(b));
+  if (stringArraysEqual(state.sessionSelectedMcps[sessionId], nextNames)) return;
   setState('sessionSelectedMcps', sessionId, nextNames);
   writeStored(STORAGE_KEYS.sessionSelectedMcps, { ...state.sessionSelectedMcps });
 }
@@ -179,24 +188,43 @@ export function setSelectedAgent(
   if (persistGlobal) writeStored(STORAGE_KEYS.selectedAgent, agent);
 
   if (sessionId) {
-    if (agent) {
-      setState('sessionSelectedAgents', sessionId, agent);
-    } else {
-      setState(
-        'sessionSelectedAgents',
-        produce((draft) => {
-          delete draft[sessionId];
-        })
-      );
+    const sessionAgentChanged = agent
+      ? previousSessionAgent !== agent
+      : previousSessionAgent !== undefined;
+    if (sessionAgentChanged) {
+      if (agent) {
+        setState('sessionSelectedAgents', sessionId, agent);
+      } else {
+        setState(
+          'sessionSelectedAgents',
+          produce((draft) => {
+            delete draft[sessionId];
+          })
+        );
+      }
+      writeStored(STORAGE_KEYS.sessionSelectedAgents, { ...state.sessionSelectedAgents });
     }
-    writeStored(STORAGE_KEYS.sessionSelectedAgents, { ...state.sessionSelectedAgents });
-    if (agent && previousSessionAgent !== agent && options?.publishHost !== false) {
+    if (agent && sessionAgentChanged && options?.publishHost !== false) {
       postMessage({
         type: 'session-plan-state/update',
         payload: { sessionId, agent },
       });
     }
   }
+}
+
+export function hydrateSessionSelectedAgents(agents: Record<string, string>) {
+  const nextAgents = { ...state.sessionSelectedAgents };
+  let changed = false;
+  for (const [sessionId, agent] of Object.entries(agents)) {
+    if (nextAgents[sessionId] === agent) continue;
+    nextAgents[sessionId] = agent;
+    changed = true;
+  }
+  if (!changed) return;
+
+  setState('sessionSelectedAgents', reconcile(nextAgents));
+  writeStored(STORAGE_KEYS.sessionSelectedAgents, nextAgents);
 }
 
 export function applySessionSelectedAgentUpdate(sessionId: string, agent: string) {
@@ -536,4 +564,20 @@ function modelsEqual(a: SelectedModel | null, b: SelectedModel | null) {
     a?.modelID === b?.modelID &&
     (a?.variant || null) === (b?.variant || null)
   );
+}
+
+function selectedModelRecordsEqual(
+  a: Record<string, SelectedModel>,
+  b: Record<string, SelectedModel>
+) {
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  return (
+    aKeys.length === bKeys.length &&
+    aKeys.every((key) => Object.hasOwn(b, key) && modelsEqual(a[key] ?? null, b[key] ?? null))
+  );
+}
+
+function stringArraysEqual(a: readonly string[] | undefined, b: readonly string[]) {
+  return !!a && a.length === b.length && a.every((value, index) => value === b[index]);
 }

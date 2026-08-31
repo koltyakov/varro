@@ -460,8 +460,17 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
       return payload &&
         isBoolean(payload.open) &&
         Array.isArray(payload.sessionIds) &&
-        payload.sessionIds.every(isString)
-        ? { type, payload: { open: payload.open, sessionIds: payload.sessionIds } }
+        payload.sessionIds.every(isString) &&
+        Array.isArray(payload.openSessionIds) &&
+        payload.openSessionIds.every(isString)
+        ? {
+            type,
+            payload: {
+              open: payload.open,
+              sessionIds: payload.sessionIds,
+              openSessionIds: payload.openSessionIds,
+            },
+          }
         : null;
     }
 

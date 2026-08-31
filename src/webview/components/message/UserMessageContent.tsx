@@ -523,6 +523,7 @@ export function getUserMessagePreviewText(parts: Part[]): string {
 export function UserMessageContent(props: {
   parts: Part[];
   leadingAgent?: string;
+  promptNumber?: number;
   onMessageHoverChange?: (hovering: boolean) => void;
 }) {
   const parsed = createMemo(() => parseUserMessageContent(props.parts));
@@ -753,6 +754,13 @@ export function UserMessageContent(props: {
             class="user-message-image-text-bubble"
             on:mouseenter={() => props.onMessageHoverChange?.(true)}
           >
+            <Show when={props.promptNumber}>
+              {(promptNumber) => (
+                <span class="prompt-number-badge" aria-hidden="true">
+                  {promptNumber()}
+                </span>
+              )}
+            </Show>
             <UserMessageTextList
               messageTexts={parsed().messageTexts}
               attachments={indexedAttachments()}

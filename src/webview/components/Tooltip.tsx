@@ -9,7 +9,7 @@ import {
 } from 'solid-js';
 import type { JSX } from 'solid-js';
 import { Portal } from 'solid-js/web';
-import { onComposerOverlayDismiss } from './chat-input/composer-overlay-dismiss';
+import { registerComposerOverlayDismiss } from './chat-input/composer-overlay-dismiss';
 
 export const DEFAULT_TOOLTIP_DELAY = 1000;
 
@@ -35,10 +35,13 @@ export function Tooltip(props: {
   let trigger: HTMLElement | undefined;
   let tooltip: HTMLDivElement | undefined;
   let showTimer: ReturnType<typeof setTimeout> | undefined;
+  let unregisterComposerDismiss: (() => void) | undefined;
 
   const hide = () => {
     if (showTimer) clearTimeout(showTimer);
     showTimer = undefined;
+    unregisterComposerDismiss?.();
+    unregisterComposerDismiss = undefined;
     setVisible(false);
     setPosition(null);
   };
@@ -100,14 +103,13 @@ export function Tooltip(props: {
   const show = () => {
     if (props.disabled || trigger?.getAttribute('aria-expanded') === 'true') return;
     if (showTimer) clearTimeout(showTimer);
+    unregisterComposerDismiss ??= registerComposerOverlayDismiss(hide);
     showTimer = setTimeout(() => {
       showTimer = undefined;
       setVisible(true);
       queueMicrotask(updatePosition);
     }, props.delay ?? DEFAULT_TOOLTIP_DELAY);
   };
-
-  onComposerOverlayDismiss(hide);
 
   createEffect(() => {
     if (props.disabled) {

@@ -70,6 +70,7 @@ export function createStateBoundDataLoaderOperations(deps: {
     getSelectedAgent: () => appStore.state.selectedAgent,
     getSelectedAgentForSession: routingStore.getSelectedAgentForSession,
     getPersistedSelectedAgent: routingStore.getPersistedSelectedAgent,
+    hydrateSessionSelectedAgents: routingStore.hydrateSessionSelectedAgents,
     setAllAgents: routingStore.setAllAgents,
     setPrimaryAgents: routingStore.setPrimaryAgents,
     setSelectedAgent: routingStore.setSelectedAgent,
@@ -121,6 +122,7 @@ export function createDataLoaderOperations(deps: {
   getSelectedAgent(): string | null;
   getSelectedAgentForSession(sessionId: string): string | null;
   getPersistedSelectedAgent(): string | null;
+  hydrateSessionSelectedAgents(agents: Record<string, string>): void;
   setAllAgents(agents: Agent[]): void;
   setPrimaryAgents(agents: Agent[]): void;
   setSelectedAgent(
@@ -427,16 +429,13 @@ export function createDataLoaderOperations(deps: {
               if (!nextSessionIds.has(current.id)) deps.clearQueuedMessagesForSession(current.id);
             }
           }
-          for (const session of nextSessions) {
-            if (session.agent) {
-              deps.setSelectedAgent(session.agent, {
-                sessionId: session.id,
-                persistGlobal: false,
-                updateSelection: false,
-                publishHost: false,
-              });
-            }
-          }
+          deps.hydrateSessionSelectedAgents(
+            Object.fromEntries(
+              nextSessions.flatMap((session) =>
+                session.agent ? [[session.id, session.agent] as const] : []
+              )
+            )
+          );
           deps.applySessions(nextSessions);
           deps.setSessionsHasMore?.(hasMore);
         },

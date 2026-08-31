@@ -1906,6 +1906,31 @@ async function revealMixedImageTileRow(page: Page): Promise<Locator> {
   return row;
 }
 
+test('anchors prompt numbers to the text bubble below image attachments', async ({ page }) => {
+  await page.setViewportSize({ width: 486, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=mixed-image-tiles');
+
+  const row = await revealMixedImageTileRow(page);
+  await page.keyboard.down('Alt');
+  const badge = row.locator('.prompt-number-badge');
+  await expect(badge).toBeVisible();
+
+  const geometry = await badge.evaluate((element) => {
+    const bubble = element.closest('.user-message-image-text-bubble');
+    if (!bubble) throw new Error('Prompt number is not anchored to the image message text bubble');
+    const badgeBox = element.getBoundingClientRect();
+    const bubbleBox = bubble.getBoundingClientRect();
+    return {
+      leftOffset: badgeBox.left - bubbleBox.left,
+      topOffset: badgeBox.top - bubbleBox.top,
+    };
+  });
+  await page.keyboard.up('Alt');
+
+  expect(geometry.leftOffset).toBeCloseTo(1, 0);
+  expect(geometry.topOffset).toBeCloseTo(-3, 0);
+});
+
 test('overflowing mixed-message image tiles navigate from controls on the left', async ({
   page,
 }) => {

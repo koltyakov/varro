@@ -1425,6 +1425,59 @@ describe('state helpers', () => {
     expect(stateModule.getPersistedSelectedAgent()).toBe('build');
   });
 
+  it('skips no-op session agent, model, and MCP persistence writes', async () => {
+    const stateModule = await loadState();
+    const sent: unknown[] = [];
+    const bridgeWindow = getTestBridgeWindow();
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
+    const setItem = vi.spyOn(Storage.prototype, 'setItem');
+    const model = { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'high' };
+
+    stateModule.setSelectedAgent('build', { sessionId: 'session-1', persistGlobal: false });
+    stateModule.setSelectedModel(model, { sessionId: 'session-1', persistGlobal: false });
+    stateModule.setSelectedMcpsForSession('session-1', ['browser-bridge', 'docs']);
+    setItem.mockClear();
+    sent.length = 0;
+
+    stateModule.setSelectedAgent('build', { sessionId: 'session-1', persistGlobal: false });
+    stateModule.setSelectedModel({ ...model }, { sessionId: 'session-1', persistGlobal: false });
+    stateModule.setSelectedMcpsForSession('session-1', ['docs', 'browser-bridge', 'docs']);
+    stateModule.applySessionSelectedModelsSnapshot({ 'session-1': { ...model } });
+
+    expect(setItem).not.toHaveBeenCalled();
+    expect(sent).toEqual([]);
+    delete bridgeWindow.__sendToExtension;
+  });
+
+  it('hydrates a session agent catalog with one persisted full-map write', async () => {
+    window.localStorage.removeItem('varro.sessionSelectedAgents');
+    const stateModule = await loadState();
+    const setItem = vi.spyOn(Storage.prototype, 'setItem');
+
+    stateModule.hydrateSessionSelectedAgents({
+      'session-1': 'build',
+      'session-2': 'plan',
+      'session-3': 'build',
+    });
+
+    expect(
+      setItem.mock.calls.filter(([key]) => key === 'varro.sessionSelectedAgents')
+    ).toHaveLength(1);
+    expect(stateModule.state.sessionSelectedAgents).toEqual({
+      'session-1': 'build',
+      'session-2': 'plan',
+      'session-3': 'build',
+    });
+
+    setItem.mockClear();
+    stateModule.hydrateSessionSelectedAgents({
+      'session-1': 'build',
+      'session-2': 'plan',
+      'session-3': 'build',
+    });
+    expect(setItem).not.toHaveBeenCalled();
+  });
+
   it('applies host agent updates to the active session selection', async () => {
     const stateModule = await loadState();
     stateModule.setState('activeSessionId', 'session-1');

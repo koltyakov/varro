@@ -121,15 +121,7 @@ describe('startNewChatDraft', () => {
     expect(state.messagesLoading).toBe(false);
   });
 
-  it('detaches a large transcript before clearing it after the next paint', () => {
-    vi.useFakeTimers();
-    const frameCallbacks: FrameRequestCallback[] = [];
-    const requestAnimationFrameSpy = vi
-      .spyOn(window, 'requestAnimationFrame')
-      .mockImplementation((callback) => {
-        frameCallbacks.push(callback);
-        return frameCallbacks.length;
-      });
+  it('clears the active transcript immediately when opening a new chat', () => {
     setState('activeSessionId', 'session-1');
     setState('messages', [
       {
@@ -145,21 +137,10 @@ describe('startNewChatDraft', () => {
       },
     ]);
 
-    try {
-      startNewChatDraft();
+    startNewChatDraft();
 
-      expect(state.activeSessionId).toBeNull();
-      expect(state.messages).toHaveLength(1);
-      expect(frameCallbacks).toHaveLength(1);
-
-      frameCallbacks[0]!(0);
-      vi.runAllTimers();
-
-      expect(state.messages).toEqual([]);
-    } finally {
-      requestAnimationFrameSpy.mockRestore();
-      vi.useRealTimers();
-    }
+    expect(state.activeSessionId).toBeNull();
+    expect(state.messages).toEqual([]);
   });
 
   it('does not reuse a blank-looking session while its messages are loading', () => {

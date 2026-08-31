@@ -717,6 +717,8 @@ export type InitialWebviewState = {
   editorTabsOpen?: boolean;
   /** Root session ids currently visible in editor tabs. */
   editorSessionIds?: string[];
+  /** Root session ids open in editor tabs, including hidden tabs. */
+  openEditorSessionIds?: string[];
   siblingWorkspaceAlerts?: SiblingWorkspaceAlert[];
   permissionAutomation?: { owner: boolean; lease: number };
   interruptedSessionIds?: string[];
@@ -805,7 +807,10 @@ export type ExtensionMessage =
       payload: { sessionId: string; skippedAt?: number | null; agent?: string };
     }
   | { type: 'model-preferences/sync'; payload: ModelPreferences }
-  | { type: 'editor-tabs/state'; payload: { open: boolean; sessionIds: string[] } }
+  | {
+      type: 'editor-tabs/state';
+      payload: { open: boolean; sessionIds: string[]; openSessionIds: string[] };
+    }
   | { type: 'sibling-workspace-alerts/update'; payload: SiblingWorkspaceAlert[] }
   | { type: 'permission-automation/update'; payload: { owner: boolean; lease: number } }
   | { type: 'permission/actionable'; payload: { permissionId: string } }

@@ -464,6 +464,16 @@ export function Message(props: {
   const parsedUserContent = createMemo(() =>
     isUser() ? parseUserMessageContent(normalizedParts()) : null
   );
+  const hasImageTextBubble = createMemo(() => {
+    const parsed = parsedUserContent();
+    return (
+      !!parsed &&
+      parsed.messageTexts.length > 0 &&
+      parsed.fileParts.some((part) => part.mime.startsWith('image/'))
+    );
+  });
+  const visiblePromptNumber = () =>
+    isUser() && props.showPromptNumber !== false ? props.promptNumber : undefined;
   const hasUserContent = createMemo(() => {
     const parsed = parsedUserContent();
     return parsed ? hasUserMessageContent(parsed) : false;
@@ -546,9 +556,7 @@ export function Message(props: {
             onMouseEnter={() => notifyUserMessageHoverChange(true)}
             onMouseLeave={() => notifyUserMessageHoverChange(false)}
           >
-            <Show
-              when={isUser() && props.showPromptNumber !== false ? props.promptNumber : undefined}
-            >
+            <Show when={!hasImageTextBubble() ? visiblePromptNumber() : undefined}>
               {(promptNumber) => (
                 <span class="prompt-number-badge" aria-hidden="true">
                   {promptNumber()}
@@ -561,6 +569,7 @@ export function Message(props: {
                 leadingAgent={
                   props.info.role === 'user' && props.info.agent === 'plan' ? 'plan' : undefined
                 }
+                promptNumber={hasImageTextBubble() ? visiblePromptNumber() : undefined}
                 onMessageHoverChange={notifyUserMessageHoverChange}
               />
             </Show>

@@ -6,7 +6,7 @@ import { getFileTypeIcon } from '../FileTypeIcon';
 import { createMaterialChipIconElement, type MaterialChipIconKind } from '../MaterialChipIcon';
 import { createUiIconElement } from '../UiIcon';
 import { CompletionMenu, type CompletionItem } from './CompletionMenu';
-import { onComposerOverlayDismiss } from './composer-overlay-dismiss';
+import { registerComposerOverlayDismiss } from './composer-overlay-dismiss';
 
 type ComposerClipboardEvent = ClipboardEvent & {
   __varroPasteText?: string;
@@ -63,17 +63,25 @@ export function RichComposerArea(props: {
   let isComposing = false;
   let historyHandledByKeydown = false;
   let revealCaretAfterControlledInput = false;
+  let nativeInputSync: { value: string; cursorOffset: number } | undefined;
+  let unregisterComposerDismiss: (() => void) | undefined;
   const [preview, setPreview] = createSignal<{
     chipId: string;
     image: { url: string; alt: string };
     style: Record<string, string>;
   } | null>(null);
-  onComposerOverlayDismiss(() => setPreview(null));
+
+  const hidePreview = () => {
+    unregisterComposerDismiss?.();
+    unregisterComposerDismiss = undefined;
+    setPreview(null);
+  };
+  onCleanup(hidePreview);
 
   createEffect(() => {
     const current = preview();
     if (current && !props.chips.some((chip) => chip.id === current.chipId && chip.previewImage)) {
-      setPreview(null);
+      hidePreview();
     }
   });
 
@@ -629,13 +637,27 @@ export function RichComposerArea(props: {
     const textChanged = text !== lastSyncedValue;
     const chipsChanged = chips !== lastSyncedChips;
     const isFocused = props.isFocused || document.activeElement === editorEl;
-    const textNeedsResync = needsResync(editorEl, text);
     const externalLinksOutOfSync = externalLinksNeedResync(editorEl, text, props.chips);
     const hasExpectedExternalLinks = props.chips.some((chip) => chip.type === 'external-link');
     const preserveEditedExternalLinks =
       isFocused &&
       hasExpectedExternalLinks &&
       editorEl.querySelector('.composer-external-link') !== null;
+    const nativeInputAcknowledged =
+      nativeInputSync?.value === text &&
+      (requestedCursor == null || nativeInputSync.cursorOffset === requestedCursor);
+    nativeInputSync = undefined;
+    if (
+      nativeInputAcknowledged &&
+      !chipsChanged &&
+      (!externalLinksOutOfSync || preserveEditedExternalLinks)
+    ) {
+      lastSyncedValue = text;
+      revealCaret();
+      return;
+    }
+
+    const textNeedsResync = needsResync(editorEl, text);
     const domNeedsResync =
       textNeedsResync || (externalLinksOutOfSync && !preserveEditedExternalLinks);
 
@@ -685,7 +707,12 @@ export function RichComposerArea(props: {
     const previousValue = props.value;
     const previousChips = props.chips.slice();
     lastSyncedValue = text;
+    const syncMarker = { value: text, cursorOffset: offset };
+    nativeInputSync = syncMarker;
     props.onInput(text, offset);
+    queueMicrotask(() => {
+      if (nativeInputSync === syncMarker) nativeInputSync = undefined;
+    });
 
     if (!props.onRemoveChip) return;
     for (const chip of previousChips) {
@@ -801,6 +828,7 @@ export function RichComposerArea(props: {
     if (!chipElement?.dataset.chipId) return;
     const chip = props.chips.find((item) => item.id === chipElement.dataset.chipId);
     if (!chip?.previewImage) return;
+    unregisterComposerDismiss ??= registerComposerOverlayDismiss(hidePreview);
 
     const chipRect = chipElement.getBoundingClientRect();
     const frameRect =
@@ -945,7 +973,7 @@ export function RichComposerArea(props: {
               ? event.relatedTarget.closest('[data-preview-image]')
               : null;
           if (sourceChip === relatedChip) return;
-          setPreview(null);
+          hidePreview();
         }}
         onFocus={() => props.onFocus()}
         onBlur={() => props.onBlur()}

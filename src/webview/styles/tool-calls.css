@@ -2616,6 +2616,7 @@ kbd {
 }
 
 .user-message-image-text-bubble {
+  position: relative;
   box-sizing: border-box;
   width: fit-content;
   max-width: 100%;

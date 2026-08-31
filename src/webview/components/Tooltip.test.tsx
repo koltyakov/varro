@@ -21,6 +21,34 @@ afterEach(() => {
 });
 
 describe('Tooltip', () => {
+  it('does not install global composer-dismiss listeners while dormant', () => {
+    const addEventListener = vi.spyOn(window, 'addEventListener');
+    try {
+      cleanup = render(
+        () => (
+          <>
+            <Tooltip content="First detail">
+              <button>First</button>
+            </Tooltip>
+            <Tooltip content="Second detail">
+              <button>Second</button>
+            </Tooltip>
+            <Tooltip content="Third detail">
+              <button>Third</button>
+            </Tooltip>
+          </>
+        ),
+        container
+      );
+
+      expect(
+        addEventListener.mock.calls.filter(([type]) => type === 'varro:composer-overlay-dismiss')
+      ).toHaveLength(0);
+    } finally {
+      addEventListener.mockRestore();
+    }
+  });
+
   it('uses the default delay and associates the tooltip with its trigger', async () => {
     cleanup = render(
       () => (

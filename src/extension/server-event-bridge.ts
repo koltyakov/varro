@@ -48,7 +48,7 @@ export class ServerEventBridge {
   private serverEventHandler: ((event: unknown) => void) | undefined;
   private readonly unknownEventLoggedAt = new Map<string, number>();
   private readonly recentEvents = new Map<string, RecentEventState>();
-  private pendingDelta: PendingDelta | undefined;
+  private readonly pendingDeltas = new Map<string, PendingDelta>();
   private pendingDeltaTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
@@ -94,13 +94,13 @@ export class ServerEventBridge {
   }
 
   flushPendingEvents() {
-    this.flushPendingDelta();
+    this.flushPendingDeltas();
   }
 
   attach() {
     if (this.serverStatusHandler || this.serverEventHandler) return;
     this.serverStatusHandler = (status: ServerStatus) => {
-      this.flushPendingDelta();
+      this.flushPendingDeltas();
       const previousStatus = this.status;
       this.status = status;
       if (this.providerLimitService.shouldClearCache(previousStatus, status)) {
@@ -113,7 +113,7 @@ export class ServerEventBridge {
     this.serverEventHandler = (event: unknown) => {
       const parsed = parseServerEvent(event);
       if (!parsed) {
-        this.flushPendingDelta();
+        this.flushPendingDeltas();
         this.logUnknownEvent(event);
         return;
       }
@@ -130,7 +130,7 @@ export class ServerEventBridge {
     if (this.serverEventHandler) this.server.off('event', this.serverEventHandler);
     this.serverStatusHandler = undefined;
     this.serverEventHandler = undefined;
-    this.flushPendingDelta();
+    this.flushPendingDeltas();
     void this.sessionState.persist();
     await this.sessionState.flush();
     this.unknownEventLoggedAt.clear();
@@ -150,7 +150,7 @@ export class ServerEventBridge {
         if (event.seq !== undefined && !recent.sequenceObserved) {
           recent.sequenceObserved = true;
           if (recent.forwarded) {
-            this.flushPendingDelta();
+            this.flushPendingDeltas();
             this.post({
               type: 'server/event',
               payload: { ...event, sequenceOnly: true } as ServerEvent,
@@ -170,10 +170,10 @@ export class ServerEventBridge {
     }
 
     const delta = getCoalescableDelta(event);
-    if (!delta || this.pendingDelta?.key !== delta.key) this.flushPendingDelta();
+    if (!delta) this.flushPendingDeltas();
     this.hiddenSessions.observeEvent?.(event);
     if (this.shouldSuppress(event)) {
-      this.flushPendingDelta();
+      this.flushPendingDeltas();
       return;
     }
     const routeBeforeStateMutation = event.type === 'session.deleted';
@@ -193,39 +193,42 @@ export class ServerEventBridge {
   }
 
   private enqueueDelta(event: ServerEvent, delta: CoalescableDelta) {
-    const pending = this.pendingDelta;
-    if (pending?.key === delta.key) {
+    if (delta.fragment.length > MAX_BATCHED_DELTA_CHARACTERS) {
+      this.flushPendingDeltas();
+      this.post({ type: 'server/event', payload: event });
+      return;
+    }
+
+    const pending = this.pendingDeltas.get(delta.key);
+    if (pending) {
       if (
         pending.fragmentCount < MAX_BATCHED_DELTA_FRAGMENTS &&
         pending.fragment.length + delta.fragment.length <= MAX_BATCHED_DELTA_CHARACTERS
       ) {
         const fragment = pending.fragment + delta.fragment;
-        this.pendingDelta = {
+        this.pendingDeltas.set(delta.key, {
           ...delta,
           event: mergeDeltaEvent(event, delta.fragmentField, fragment),
           fragment,
           fragmentCount: pending.fragmentCount + 1,
-        };
+        });
         return;
       }
-      this.flushPendingDelta();
+      this.flushPendingDeltas();
     }
 
-    if (delta.fragment.length > MAX_BATCHED_DELTA_CHARACTERS) {
-      this.post({ type: 'server/event', payload: event });
-      return;
+    this.pendingDeltas.set(delta.key, { ...delta, event, fragmentCount: 1 });
+    if (!this.pendingDeltaTimer) {
+      this.pendingDeltaTimer = setTimeout(() => this.flushPendingDeltas(), DELTA_BATCH_INTERVAL_MS);
     }
-
-    this.pendingDelta = { ...delta, event, fragmentCount: 1 };
-    this.pendingDeltaTimer = setTimeout(() => this.flushPendingDelta(), DELTA_BATCH_INTERVAL_MS);
   }
 
-  private flushPendingDelta() {
+  private flushPendingDeltas() {
     if (this.pendingDeltaTimer) clearTimeout(this.pendingDeltaTimer);
     this.pendingDeltaTimer = undefined;
-    const pending = this.pendingDelta;
-    this.pendingDelta = undefined;
-    if (pending) this.post({ type: 'server/event', payload: pending.event });
+    const pending = [...this.pendingDeltas.values()];
+    this.pendingDeltas.clear();
+    for (const delta of pending) this.post({ type: 'server/event', payload: delta.event });
   }
 
   private logUnknownEvent(event: unknown) {

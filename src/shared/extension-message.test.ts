@@ -326,11 +326,19 @@ describe('parseExtensionMessage', () => {
     expect(
       parseExtensionMessage({
         type: 'editor-tabs/state',
-        payload: { open: true, sessionIds: ['session-1'] },
+        payload: {
+          open: true,
+          sessionIds: ['session-1'],
+          openSessionIds: ['session-1', 'session-2'],
+        },
       })
     ).toEqual({
       type: 'editor-tabs/state',
-      payload: { open: true, sessionIds: ['session-1'] },
+      payload: {
+        open: true,
+        sessionIds: ['session-1'],
+        openSessionIds: ['session-1', 'session-2'],
+      },
     });
     expect(
       parseExtensionMessage({ type: 'editor-tabs/state', payload: { open: 'yes' } })

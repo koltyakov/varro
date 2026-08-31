@@ -1,4 +1,4 @@
-import { createSignal } from 'solid-js';
+import { batch, createSignal } from 'solid-js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { emptyPageIcon, folderIcon } from '../../lib/ui-icons';
@@ -1449,6 +1449,116 @@ describe('RichComposerArea', () => {
     await flushAsyncWork();
 
     expect(extractText(editor)).toBe('[Image]ab');
+  });
+
+  it('extracts text and calculates the caret once when controlled props acknowledge native input', async () => {
+    cleanup = render(() => {
+      const [value, setValue] = createSignal('a');
+      const [cursorOffset, setCursorOffset] = createSignal(1);
+
+      return RichComposerArea({
+        editorRef: () => {},
+        placeholder: 'Compose',
+        get value() {
+          return value();
+        },
+        get cursorOffset() {
+          return cursorOffset();
+        },
+        chips: [],
+        isFocused: true,
+        showCompletionMenu: false,
+        completionItems: [],
+        completionSelectedIndex: 0,
+        onInput: (text, nextOffset) => {
+          batch(() => {
+            setValue(text);
+            setCursorOffset(nextOffset);
+          });
+        },
+        onKeyDown: () => {},
+        onPaste: () => {},
+        onFocus: () => {},
+        onBlur: () => {},
+        onClick: () => {},
+        onKeyUp: () => {},
+        onSelect: () => {},
+        onSelectCompletion: () => {},
+      });
+    }, container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor?.firstChild) throw new Error('Expected composer text');
+    editor.firstChild.textContent = 'ab';
+    editor.focus();
+    setCollapsedSelection(editor.firstChild, 2);
+    const childNodes = vi.spyOn(editor, 'childNodes', 'get');
+    const cloneContents = vi.spyOn(Range.prototype, 'cloneContents');
+
+    try {
+      editor.dispatchEvent(
+        new InputEvent('input', { bubbles: true, inputType: 'insertText', data: 'b' })
+      );
+      await flushAsyncWork();
+
+      expect(childNodes).toHaveBeenCalledTimes(1);
+      expect(cloneContents).toHaveBeenCalledTimes(1);
+      expect(window.getSelection()?.focusNode).toBe(editor.firstChild);
+      expect(window.getSelection()?.focusOffset).toBe(2);
+    } finally {
+      childNodes.mockRestore();
+      cloneContents.mockRestore();
+    }
+  });
+
+  it('applies a controlled cursor request that differs from native input', async () => {
+    cleanup = render(() => {
+      const [value, setValue] = createSignal('a');
+      const [cursorOffset, setCursorOffset] = createSignal(1);
+
+      return RichComposerArea({
+        editorRef: () => {},
+        placeholder: 'Compose',
+        get value() {
+          return value();
+        },
+        get cursorOffset() {
+          return cursorOffset();
+        },
+        chips: [],
+        isFocused: true,
+        showCompletionMenu: false,
+        completionItems: [],
+        completionSelectedIndex: 0,
+        onInput: (text) => {
+          batch(() => {
+            setValue(text);
+            setCursorOffset(0);
+          });
+        },
+        onKeyDown: () => {},
+        onPaste: () => {},
+        onFocus: () => {},
+        onBlur: () => {},
+        onClick: () => {},
+        onKeyUp: () => {},
+        onSelect: () => {},
+        onSelectCompletion: () => {},
+      });
+    }, container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor?.firstChild) throw new Error('Expected composer text');
+    editor.firstChild.textContent = 'ab';
+    editor.focus();
+    setCollapsedSelection(editor.firstChild, 2);
+    editor.dispatchEvent(
+      new InputEvent('input', { bubbles: true, inputType: 'insertText', data: 'b' })
+    );
+    await flushAsyncWork();
+
+    expect(window.getSelection()?.focusNode).toBe(editor.firstChild);
+    expect(window.getSelection()?.focusOffset).toBe(0);
   });
 
   it('does not rewrite the selection while typing mid-text after an inline chip', async () => {

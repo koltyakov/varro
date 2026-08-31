@@ -99,6 +99,7 @@ export class WebviewSession {
       modelPreferencesMigrationPending(): boolean;
       editorTabsOpen(): boolean;
       editorSessionIds(): string[];
+      openEditorSessionIds(): string[];
       permissionAutomation(): NonNullable<InitialWebviewState['permissionAutomation']>;
       draftImages(): InitialWebviewState['clipboardImages'];
       flushPendingServerEvents(): void;
@@ -432,6 +433,7 @@ export class WebviewSession {
       modelPreferencesMigrationPending: this.deps.modelPreferencesMigrationPending(),
       editorTabsOpen: this.deps.editorTabsOpen(),
       editorSessionIds: this.deps.editorSessionIds(),
+      openEditorSessionIds: this.deps.openEditorSessionIds(),
       permissionAutomation: this.deps.permissionAutomation(),
       interruptedSessionIds: [],
       pendingPermissions: this.blockingRequestsForWebview
@@ -515,7 +517,11 @@ export class WebviewSession {
     const editorSessionIds = this.deps.editorSessionIds();
     this.bridge.post({
       type: 'editor-tabs/state',
-      payload: { open: this.deps.editorTabsOpen(), sessionIds: editorSessionIds },
+      payload: {
+        open: this.deps.editorTabsOpen(),
+        sessionIds: editorSessionIds,
+        openSessionIds: this.deps.openEditorSessionIds(),
+      },
     });
     this.bridge.post({
       type: 'permission-automation/update',

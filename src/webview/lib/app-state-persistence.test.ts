@@ -1,14 +1,21 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAppState } from './app-state';
+import { flushInputDraft, readInputDraft } from './input-draft-persistence';
 import { STORAGE_KEYS } from './state-storage';
 import type { UnknownRecord } from '../../shared/type-utils';
 
 beforeEach(() => {
+  flushInputDraft();
   window.localStorage.clear();
   // SAFETY: The fixture provides the unknown fields read by this statement.
   delete (window as { __vscodeWebviewState?: unknown }).__vscodeWebviewState;
   // SAFETY: The fixture provides the unknown fields read by this statement.
   delete (window as { __initialWebviewState?: unknown }).__initialWebviewState;
+});
+
+afterEach(() => {
+  flushInputDraft();
+  vi.useRealTimers();
 });
 
 describe('composer draft persistence', () => {
@@ -95,6 +102,7 @@ describe('composer draft persistence', () => {
     const restored = createAppState();
 
     expect(restored.inputText()).toBe('Keep this draft');
+    flushInputDraft();
     expect(window.localStorage.getItem(STORAGE_KEYS.inputDraft)).toBe(
       JSON.stringify('Keep this draft')
     );
@@ -139,6 +147,14 @@ describe('composer draft persistence', () => {
 
   it('restores draft text from VS Code webview state', () => {
     let vscodeState: UnknownRecord = {};
+    // SAFETY: The fixture provides the host-owned initial webview state.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      webviewContext: {
+        viewId: 'sidebar',
+        surface: 'sidebar',
+        initialRoute: { type: 'new-session' },
+      },
+    };
     // SAFETY: The fixture provides the unknown fields read by this statement.
     (
       window as {
@@ -155,12 +171,89 @@ describe('composer draft persistence', () => {
     };
     const first = createAppState();
     first.setInputText('Keep this VS Code draft');
+    flushInputDraft();
     window.localStorage.clear();
 
     const restored = createAppState();
 
     expect(restored.inputText()).toBe('Keep this VS Code draft');
     expect(vscodeState[STORAGE_KEYS.inputDraft]).toBe('Keep this VS Code draft');
+  });
+
+  it('coalesces draft writes, keeps pending reads coherent, and flushes on pagehide', () => {
+    vi.useFakeTimers();
+    let vscodeState: UnknownRecord = {};
+    const setState = vi.fn((state: UnknownRecord) => {
+      vscodeState = state;
+    });
+    // SAFETY: The fixture provides the host-owned initial webview state.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      webviewContext: {
+        viewId: 'sidebar',
+        surface: 'sidebar',
+        initialRoute: { type: 'new-session' },
+      },
+    };
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    (window as { __vscodeWebviewState?: unknown }).__vscodeWebviewState = {
+      getState: () => vscodeState,
+      setState,
+    };
+    const appState = createAppState();
+    setState.mockClear();
+
+    appState.setInputText('a');
+    appState.setInputText('ab');
+    appState.setInputText('abc');
+
+    expect(readInputDraft()).toBe('abc');
+    expect(setState).not.toHaveBeenCalled();
+    expect(createAppState().inputText()).toBe('abc');
+    expect(setState).toHaveBeenCalledOnce();
+    setState.mockClear();
+
+    vi.advanceTimersByTime(99);
+    expect(setState).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(setState).toHaveBeenCalledOnce();
+    expect(vscodeState[STORAGE_KEYS.inputDraft]).toBe('abc');
+
+    appState.setInputText('flush before unload');
+    window.dispatchEvent(new Event('pagehide'));
+
+    expect(setState).toHaveBeenCalledTimes(2);
+    expect(vscodeState[STORAGE_KEYS.inputDraft]).toBe('flush before unload');
+  });
+
+  it('cancels a pending draft write when the draft is cleared', () => {
+    vi.useFakeTimers();
+    let vscodeState: UnknownRecord = {};
+    const setState = vi.fn((state: UnknownRecord) => {
+      vscodeState = state;
+    });
+    // SAFETY: The fixture provides the host-owned initial webview state.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      webviewContext: {
+        viewId: 'sidebar',
+        surface: 'sidebar',
+        initialRoute: { type: 'new-session' },
+      },
+    };
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    (window as { __vscodeWebviewState?: unknown }).__vscodeWebviewState = {
+      getState: () => vscodeState,
+      setState,
+    };
+    const appState = createAppState();
+    setState.mockClear();
+
+    appState.setInputText('do not restore this');
+    appState.setInputText('');
+    vi.runAllTimers();
+
+    expect(readInputDraft()).toBeNull();
+    expect(vscodeState[STORAGE_KEYS.inputDraft]).toBeUndefined();
+    expect(setState).not.toHaveBeenCalled();
   });
 
   it('restores a manual editor workspace selection across path spelling changes', () => {

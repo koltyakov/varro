@@ -85,45 +85,62 @@ describe('BrowserPersistence', () => {
     });
   });
 
-  it('mirrors values into VSCode webview state', () => {
+  it('does not mirror successful shared writes into VS Code webview state', () => {
     const storage = new BrowserPersistence();
     let vscodeState: TestRuntimeRecord = {};
+    const setState = vi.fn((state: TestRuntimeRecord) => {
+      vscodeState = state;
+    });
     window.__vscodeWebviewState = {
       getState: () => vscodeState,
-      setState: (state) => {
-        vscodeState = state;
-      },
+      setState,
     };
 
     storage.set('varro.lastOpenedView', { type: 'session', sessionId: 'session-1' });
+    storage.set('varro.lastOpenedView', { type: 'session', sessionId: 'session-2' });
 
-    expect(vscodeState).toEqual({
-      'varro.lastOpenedView': { type: 'session', sessionId: 'session-1' },
-    });
+    expect(setState).not.toHaveBeenCalled();
+    expect(vscodeState).toEqual({});
     expect(storage.get('varro.lastOpenedView')).toEqual({
       type: 'session',
-      sessionId: 'session-1',
+      sessionId: 'session-2',
     });
 
     storage.remove('varro.lastOpenedView');
 
+    expect(setState).not.toHaveBeenCalled();
     expect(vscodeState).toEqual({});
     expect(storage.get('varro.lastOpenedView')).toBeUndefined();
   });
 
-  it("loads another view's canonical shared write instead of stale private VSCode state", () => {
-    let firstViewState: TestRuntimeRecord = {};
+  it('cleans a stale shared mirror once without recurring VS Code writes', () => {
+    let vscodeState: TestRuntimeRecord = {
+      'varro.selectedAgent': 'stale',
+    };
+    const setState = vi.fn((state: TestRuntimeRecord) => {
+      vscodeState = state;
+    });
     window.__vscodeWebviewState = {
-      getState: () => firstViewState,
-      setState: (state) => {
-        firstViewState = state;
+      getState: () => vscodeState,
+      setState,
+    };
+    const storage = new BrowserPersistence();
+
+    storage.set('varro.selectedAgent', 'build');
+    storage.set('varro.selectedAgent', 'plan');
+
+    expect(setState).toHaveBeenCalledOnce();
+    expect(vscodeState).toEqual({});
+    expect(storage.get('varro.selectedAgent')).toBe('plan');
+  });
+
+  it("loads another view's canonical shared write instead of stale private VSCode state", () => {
+    let firstViewState: TestRuntimeRecord = {
+      'varro.selectedModel': {
+        providerID: 'openai',
+        modelID: 'stale-model',
       },
     };
-    new BrowserPersistence().set('varro.selectedModel', {
-      providerID: 'openai',
-      modelID: 'stale-model',
-    });
-
     let secondViewState: TestRuntimeRecord = {};
     window.__vscodeWebviewState = {
       getState: () => secondViewState,
@@ -308,8 +325,9 @@ describe('BrowserPersistence', () => {
       storage.set('varro.lastOpenedView', { type: 'sessions-list' });
 
       expect(storage.get('varro.lastOpenedView')).toEqual({ type: 'sessions-list' });
-      expect(vscodeState).toEqual({
-        'varro.lastOpenedView': { type: 'sessions-list' },
+      expect(vscodeState['varro.lastOpenedView']).toEqual({ type: 'sessions-list' });
+      expect(vscodeState['__varroLocalStorageFailures']).toEqual({
+        'varro.lastOpenedView': null,
       });
     } finally {
       if (descriptor) Object.defineProperty(window, 'localStorage', descriptor);
@@ -318,11 +336,12 @@ describe('BrowserPersistence', () => {
 
   it('prefers newer VSCode state when a shared localStorage write fails', () => {
     let vscodeState: TestRuntimeRecord = {};
+    const setState = vi.fn((state: TestRuntimeRecord) => {
+      vscodeState = state;
+    });
     window.__vscodeWebviewState = {
       getState: () => vscodeState,
-      setState: (state) => {
-        vscodeState = state;
-      },
+      setState,
     };
     const values = new Map([['varro.selectedModel', JSON.stringify({ modelID: 'old' })]]);
     const failingStorage = fixture<Storage>({
@@ -340,6 +359,28 @@ describe('BrowserPersistence', () => {
     expect(new BrowserPersistence(failingStorage).get('varro.selectedModel')).toEqual({
       modelID: 'new',
     });
+    expect(setState).toHaveBeenCalledOnce();
+    expect(vscodeState['__varroLocalStorageFailures']).toEqual({
+      'varro.selectedModel': JSON.stringify({ modelID: 'old' }),
+    });
+  });
+
+  it('falls back to VS Code state when a shared value cannot be serialized', () => {
+    let vscodeState: TestRuntimeRecord = {};
+    const setState = vi.fn((state: TestRuntimeRecord) => {
+      vscodeState = state;
+    });
+    window.__vscodeWebviewState = {
+      getState: () => vscodeState,
+      setState,
+    };
+    const storage = new BrowserPersistence();
+
+    storage.set('varro.unsupportedValue', 1n);
+
+    expect(setState).toHaveBeenCalledOnce();
+    expect(storage.get('varro.unsupportedValue')).toBe(1n);
+    expect(window.localStorage.getItem('varro.unsupportedValue')).toBeNull();
   });
 
   it('warns once when storage removal keeps failing', () => {
@@ -370,6 +411,13 @@ describe('BrowserPersistence', () => {
   });
 
   it('warns once when writing the VSCode webview state keeps failing', () => {
+    setInitialWebviewState({
+      webviewContext: {
+        viewId: 'editor-1',
+        surface: 'editor',
+        initialRoute: { type: 'new-session' },
+      },
+    });
     const send = vi.fn();
     window.__sendToExtension = send;
     window.__vscodeWebviewState = {
@@ -381,8 +429,8 @@ describe('BrowserPersistence', () => {
     const storage = new BrowserPersistence();
 
     storage.set('varro.lastOpenedView', { type: 'sessions-list' });
-    storage.set('varro.composerDraft', 'a');
-    storage.set('varro.composerDraft', 'ab');
+    storage.set('varro.workspacePath', '/repo-a');
+    storage.set('varro.manualWorkspaceSelection', true);
 
     expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith({
@@ -396,6 +444,13 @@ describe('BrowserPersistence', () => {
   });
 
   it('warns once when removing from the VSCode webview state keeps failing', () => {
+    setInitialWebviewState({
+      webviewContext: {
+        viewId: 'editor-1',
+        surface: 'editor',
+        initialRoute: { type: 'new-session' },
+      },
+    });
     const send = vi.fn();
     window.__sendToExtension = send;
     window.__vscodeWebviewState = {
@@ -407,7 +462,7 @@ describe('BrowserPersistence', () => {
     const storage = new BrowserPersistence();
 
     storage.remove('varro.lastOpenedView');
-    storage.remove('varro.composerDraft');
+    storage.remove('varro.workspacePath');
 
     expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith({

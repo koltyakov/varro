@@ -137,7 +137,7 @@ export function createMountBridgeOperations(deps: {
         setWorkspaceStatusSummary: (summary) =>
           appStore.setState('workspaceStatusSummary', summary),
         setWorkspaceStatuses: (entries) => appStore.setState('workspaceStatuses', entries),
-        setEditorTabsState: (open, sessionIds) => {
+        setEditorTabsState: (open, sessionIds, openSessionIds) => {
           const seenSessionIds = new Set([...visibleEditorSessionIds, ...sessionIds]);
           for (const rootSessionId of seenSessionIds) {
             for (const sessionId of sessionStore.getSessionTreeIds(rootSessionId)) {
@@ -147,6 +147,7 @@ export function createMountBridgeOperations(deps: {
           visibleEditorSessionIds = sessionIds;
           appStore.setState('editorTabsOpen', open);
           appStore.setState('editorSessionIds', sessionIds);
+          appStore.setState('openEditorSessionIds', openSessionIds);
         },
         setSiblingWorkspaceAlerts: (alerts) => appStore.setState('siblingWorkspaceAlerts', alerts),
         setPermissionAutomation: deps.setPermissionAutomation,
@@ -221,7 +222,7 @@ export function handleExtensionMessageWithDependencies(
         status: 'connected' | 'connecting' | 'disconnected' | 'error';
       }[]
     ): void;
-    setEditorTabsState?(open: boolean, sessionIds: string[]): void;
+    setEditorTabsState?(open: boolean, sessionIds: string[], openSessionIds: string[]): void;
     setSiblingWorkspaceAlerts?(
       alerts: Extract<ExtensionMessage, { type: 'sibling-workspace-alerts/update' }>['payload']
     ): void;
@@ -414,7 +415,11 @@ export function handleExtensionMessageWithDependencies(
       applyModelPreferencesSnapshot(msg.payload);
       break;
     case 'editor-tabs/state':
-      deps.setEditorTabsState?.(msg.payload.open, msg.payload.sessionIds);
+      deps.setEditorTabsState?.(
+        msg.payload.open,
+        msg.payload.sessionIds,
+        msg.payload.openSessionIds
+      );
       break;
     case 'sibling-workspace-alerts/update':
       deps.setSiblingWorkspaceAlerts?.(msg.payload);

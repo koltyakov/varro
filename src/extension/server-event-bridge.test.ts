@@ -525,10 +525,10 @@ describe('ServerEventBridge', () => {
     vi.useRealTimers();
   });
 
-  it('preserves order when adjacent delta streams differ', () => {
+  it('coalesces interleaved delta streams in first-seen key order', () => {
     vi.useFakeTimers();
     useParsedEvents();
-    const { bridge, handlers, post } = createMocks();
+    const { bridge, handlers, post, sessionState } = createMocks();
     bridge.attach();
     const first = {
       type: 'message.part.delta',
@@ -552,9 +552,23 @@ describe('ServerEventBridge', () => {
     handlers.event!(first);
     handlers.event!(second);
     handlers.event!(third);
+
+    expect(sessionState.handleServerEvent.mock.calls.map(([event]) => event)).toEqual([
+      first,
+      second,
+      third,
+    ]);
+    expect(post).not.toHaveBeenCalled();
+
     vi.advanceTimersByTime(16);
 
-    expect(post.mock.calls.map(([message]) => message.payload)).toEqual([first, second, third]);
+    expect(post.mock.calls.map(([message]) => message.payload)).toEqual([
+      {
+        ...third,
+        properties: { ...third.properties, delta: 'ac' },
+      },
+      second,
+    ]);
     vi.useRealTimers();
   });
 
@@ -977,7 +991,14 @@ describe('ServerEventBridge streaming bounds', () => {
     bridge.attach();
 
     handlers.event!(createDelta('small'));
-    const oversized = createDelta('a'.repeat(64 * 1024 + 1));
+    const oversized = {
+      ...createDelta('a'.repeat(64 * 1024 + 1)),
+      properties: {
+        ...DELTA_PROPERTIES,
+        partID: 'part-2',
+        delta: 'a'.repeat(64 * 1024 + 1),
+      },
+    } as ServerEvent;
     handlers.event!(oversized);
 
     expect(post).toHaveBeenCalledTimes(2);

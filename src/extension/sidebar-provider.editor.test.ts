@@ -1541,7 +1541,7 @@ describe('SidebarProvider editor panels', () => {
     );
     expect(posted).toContainEqual({
       type: 'editor-tabs/state',
-      payload: { open: true, sessionIds: [] },
+      payload: { open: true, sessionIds: [], openSessionIds: [] },
     });
 
     await vi.waitFor(() => expect(editor.panel.webview.html).toContain('varro-editor-surface'));
@@ -1565,7 +1565,7 @@ describe('SidebarProvider editor panels', () => {
     editor.panel.dispose();
     expect(posted).toContainEqual({
       type: 'editor-tabs/state',
-      payload: { open: false, sessionIds: [] },
+      payload: { open: false, sessionIds: [], openSessionIds: [] },
     });
   });
 
@@ -1578,21 +1578,29 @@ describe('SidebarProvider editor panels', () => {
     await provider.openSessionInEditor('session-1');
     expect(posted).toContainEqual({
       type: 'editor-tabs/state',
-      payload: { open: true, sessionIds: ['session-1'] },
+      payload: {
+        open: true,
+        sessionIds: ['session-1'],
+        openSessionIds: ['session-1'],
+      },
     });
 
     const hiddenMessagesStart = posted.length;
     editor.setVisible(false);
     expect(posted.slice(hiddenMessagesStart)).toContainEqual({
       type: 'editor-tabs/state',
-      payload: { open: true, sessionIds: [] },
+      payload: { open: true, sessionIds: [], openSessionIds: ['session-1'] },
     });
 
     const visibleMessagesStart = posted.length;
     editor.setVisible(true);
     expect(posted.slice(visibleMessagesStart)).toContainEqual({
       type: 'editor-tabs/state',
-      payload: { open: true, sessionIds: ['session-1'] },
+      payload: {
+        open: true,
+        sessionIds: ['session-1'],
+        openSessionIds: ['session-1'],
+      },
     });
   });
 
@@ -1726,6 +1734,134 @@ describe('SidebarProvider editor panels', () => {
     await Promise.resolve();
 
     expect(restored.panel.title).toBe('Restored session');
+  });
+
+  it('releases the restored-session latch when the editor becomes ready', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const restored = createPanel();
+
+    await provider.deserializeWebviewPanel(restored.panel as never, {
+      'varro.lastOpenedView': { type: 'session', sessionId: 'session-1', timestamp: 1 },
+    });
+    restored.receive({ type: 'ready' });
+    await vi.waitFor(() =>
+      expect(
+        lastEditorContext(restored.panel.webview.postMessage.mock.calls.map(([message]) => message))
+      ).toBeDefined()
+    );
+    restored.panel.webview.postMessage.mockClear();
+
+    restored.receive({
+      type: 'editor/route-changed',
+      payload: { route: { type: 'new-session' } },
+    });
+    await Promise.resolve();
+
+    expect(restored.panel.title).toBe('Varro: New Session');
+    expect(restored.panel.webview.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'command/open-session' })
+    );
+  });
+
+  it('does not restore the previous route after a busy session is detached', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const restored = createPanel();
+
+    await provider.deserializeWebviewPanel(restored.panel as never, {
+      'varro.lastOpenedView': { type: 'session', sessionId: 'session-1', timestamp: 1 },
+    });
+    restored.receive({ type: 'ready' });
+    await vi.waitFor(() =>
+      expect(
+        lastEditorContext(restored.panel.webview.postMessage.mock.calls.map(([message]) => message))
+      ).toBeDefined()
+    );
+    restored.receive({
+      type: 'editor/route-changed',
+      payload: { route: { type: 'new-session' } },
+    });
+    await Promise.resolve();
+    restored.panel.webview.postMessage.mockClear();
+
+    restored.receive({
+      type: 'commands/state',
+      payload: {
+        canAbort: true,
+        canSwitchSessions: true,
+        model: null,
+        sessionId: 'session-1',
+      },
+    });
+    await Promise.resolve();
+
+    expect(restored.panel.title).toBe('Varro: New Session');
+    expect(restored.panel.webview.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'command/open-session' })
+    );
+  });
+
+  it('accepts header navigation after command state confirms the restored session', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const restored = createPanel();
+
+    await provider.deserializeWebviewPanel(restored.panel as never, {
+      'varro.lastOpenedView': { type: 'session', sessionId: 'session-1', timestamp: 1 },
+    });
+    restored.receive({
+      type: 'commands/state',
+      payload: {
+        canAbort: true,
+        canSwitchSessions: true,
+        model: null,
+        sessionId: 'session-1',
+      },
+    });
+    await Promise.resolve();
+    restored.panel.webview.postMessage.mockClear();
+
+    restored.receive({
+      type: 'editor/route-changed',
+      payload: { route: { type: 'new-session' } },
+    });
+    await Promise.resolve();
+
+    expect(restored.panel.title).toBe('Varro: New Session');
+    expect(restored.panel.webview.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'command/open-session' })
+    );
+  });
+
+  it('accepts notification navigation after command state confirms the restored session', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const restored = createPanel();
+
+    await provider.deserializeWebviewPanel(restored.panel as never, {
+      'varro.lastOpenedView': { type: 'session', sessionId: 'session-1', timestamp: 1 },
+    });
+    restored.receive({
+      type: 'commands/state',
+      payload: {
+        canAbort: true,
+        canSwitchSessions: true,
+        model: null,
+        sessionId: 'session-1',
+      },
+    });
+    await Promise.resolve();
+    restored.panel.webview.postMessage.mockClear();
+
+    restored.receive({
+      type: 'editor/route-changed',
+      payload: {
+        route: { type: 'session', sessionId: 'session-2', title: 'Notified session' },
+      },
+    });
+    await Promise.resolve();
+
+    expect(restored.panel.title).toBe('Notified session');
+    expect(restored.panel.webview.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'command/open-session' })
+    );
   });
 
   it('releases a restored-session latch after authoritative deletion', async () => {

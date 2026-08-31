@@ -109,6 +109,7 @@ beforeEach(() => {
   setState('activeSessionId', null);
   setState('editorTabsOpen', false);
   setState('editorSessionIds', []);
+  setState('openEditorSessionIds', []);
   setState('sessionStatus', {});
   setState('queuedMessages', []);
   setState('editorContext', {
@@ -555,6 +556,7 @@ describe('SessionListView model details', () => {
       send;
     setState('editorTabsOpen', true);
     setState('editorSessionIds', ['session-1']);
+    setState('openEditorSessionIds', ['session-1']);
     setState('sessions', [session('session-1', Date.now())]);
     setState('sessionSelectedModels', {
       'session-1': { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
@@ -595,13 +597,14 @@ describe('SessionListView model details', () => {
     setState('completedSessionResponses', { 'session-1': 500 });
     setState('editorTabsOpen', true);
     setState('editorSessionIds', []);
+    setState('openEditorSessionIds', ['session-1']);
 
     cleanup = render(() => <SessionListView />, container);
 
     expect(container.querySelector('.session-item-indicator.is-completed')).not.toBeNull();
   });
 
-  it('opens unrelated sidebar sessions in an editor while any chat editor is open', () => {
+  it('reveals a hidden editor when its session is selected from the sidebar', () => {
     const send = vi.fn((message: TestRuntimeValue) => {
       structuredClone(message);
     });
@@ -609,7 +612,8 @@ describe('SessionListView model details', () => {
     (window as { __sendToExtension?: (message: TestRuntimeValue) => void }).__sendToExtension =
       send;
     setState('editorTabsOpen', true);
-    setState('editorSessionIds', ['other-session']);
+    setState('editorSessionIds', []);
+    setState('openEditorSessionIds', ['session-1']);
     setState('sessions', [session('session-1', Date.now())]);
     vi.mocked(selectSession).mockClear();
 
@@ -627,6 +631,28 @@ describe('SessionListView model details', () => {
       },
     });
     expect(selectSession).not.toHaveBeenCalled();
+  });
+
+  it('opens unrelated sessions in the sidebar while another chat editor is open', () => {
+    const send = vi.fn((message: TestRuntimeValue) => {
+      structuredClone(message);
+    });
+    // SAFETY: The fixture provides the bridge callback used by postMessage.
+    (window as { __sendToExtension?: (message: TestRuntimeValue) => void }).__sendToExtension =
+      send;
+    setState('editorTabsOpen', true);
+    setState('editorSessionIds', ['other-session']);
+    setState('openEditorSessionIds', ['other-session']);
+    setState('sessions', [session('session-1', Date.now())]);
+    vi.mocked(selectSession).mockClear();
+
+    cleanup = render(() => <SessionListView />, container);
+    container.querySelector<HTMLButtonElement>('.session-item-main')!.click();
+
+    expect(send).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'session/open-in-editor' })
+    );
+    expect(selectSession).toHaveBeenCalledWith('session-1', { directory: '/repo' });
   });
 
   it('renders hover-only model details and the provider icon in the row', async () => {

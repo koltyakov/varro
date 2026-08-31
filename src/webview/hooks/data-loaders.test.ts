@@ -53,6 +53,7 @@ function createLoaderDeps(overrides: Partial<DataLoaderDependencies> = {}): Data
     getSelectedAgent: () => null,
     getSelectedAgentForSession: () => null,
     getPersistedSelectedAgent: () => null,
+    hydrateSessionSelectedAgents: vi.fn(),
     setAllAgents: vi.fn(),
     setPrimaryAgents: vi.fn(),
     setSelectedAgent: vi.fn(),
@@ -986,23 +987,26 @@ describe('data loaders', () => {
     expect(clearQueuedMessagesForSession).toHaveBeenCalledWith('removed');
   });
 
-  it('reconciles stale selected agents from loaded session metadata', async () => {
-    const loaded = { ...session('session-1'), agent: 'build' };
-    const setSelectedAgent = vi.fn();
+  it('reconciles loaded session agent metadata in one bulk operation', async () => {
+    const loaded = [
+      { ...session('session-1'), agent: 'build' },
+      { ...session('session-2'), agent: 'plan' },
+      session('session-3'),
+    ];
+    const hydrateSessionSelectedAgents = vi.fn();
     const operations = createDataLoaderOperations(
       createLoaderDeps({
-        listSessions: async () => [loaded],
-        setSelectedAgent,
+        listSessions: async () => loaded,
+        hydrateSessionSelectedAgents,
       })
     );
 
     await operations.loadSessions();
 
-    expect(setSelectedAgent).toHaveBeenCalledWith('build', {
-      sessionId: 'session-1',
-      persistGlobal: false,
-      updateSelection: false,
-      publishHost: false,
+    expect(hydrateSessionSelectedAgents).toHaveBeenCalledOnce();
+    expect(hydrateSessionSelectedAgents).toHaveBeenCalledWith({
+      'session-1': 'build',
+      'session-2': 'plan',
     });
   });
 

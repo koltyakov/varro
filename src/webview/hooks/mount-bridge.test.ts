@@ -896,7 +896,11 @@ describe('mount bridge helpers', () => {
 
     operations.handleExtensionMessage({
       type: 'editor-tabs/state',
-      payload: { open: true, sessionIds: ['session-1'] },
+      payload: {
+        open: true,
+        sessionIds: ['session-1'],
+        openSessionIds: ['session-1', 'session-2'],
+      },
     });
     expect(markSessionSeen).toHaveBeenCalledWith('session-1');
     expect(markSessionSeen).toHaveBeenCalledWith('child-1');
@@ -904,7 +908,7 @@ describe('mount bridge helpers', () => {
     markSessionSeen.mockClear();
     operations.handleExtensionMessage({
       type: 'editor-tabs/state',
-      payload: { open: false, sessionIds: [] },
+      payload: { open: false, sessionIds: [], openSessionIds: [] },
     });
     expect(markSessionSeen).toHaveBeenCalledWith('session-1');
     expect(markSessionSeen).toHaveBeenCalledWith('child-1');

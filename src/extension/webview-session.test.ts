@@ -199,6 +199,7 @@ function createSession(options?: {
     modelPreferencesMigrationPending: vi.fn(() => false),
     editorTabsOpen: vi.fn(() => false),
     editorSessionIds: vi.fn(() => []),
+    openEditorSessionIds: vi.fn(() => []),
     permissionAutomation: vi.fn(() => ({ owner: true, lease: 1 })),
     draftImages: vi.fn<() => InitialWebviewState['clipboardImages']>(() => []),
     flushPendingServerEvents: vi.fn(),

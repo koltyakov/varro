@@ -496,6 +496,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         modelPreferencesMigrationPending: () => this.modelPreferences.needsMigration(),
         editorTabsOpen: () => this.editorPanels.size > 0,
         editorSessionIds: () => this.visibleEditorSessionIds(),
+        openEditorSessionIds: () => this.openEditorSessionIds(),
         permissionAutomation: () => this.permissionAutomationFor(webviewContext.viewId),
         draftImages: () => this.draftImages.list(webviewContext.viewId),
         flushPendingServerEvents: () => this.serverEventBridge.flushPendingEvents(),
@@ -747,7 +748,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           try {
             await this.recoverPendingPermissionModeFallbacks();
             await webviewSession.handleReady();
-            if (endpointRef.endpoint) this.setEndpointReady(endpointRef.endpoint, true);
+            if (endpointRef.endpoint) {
+              this.setEndpointReady(endpointRef.endpoint, true);
+              if (endpointRef.endpoint.surface === 'editor') {
+                const editorEndpoint = endpointRef.endpoint as EditorEndpoint;
+                editorEndpoint.restoringSessionId = undefined;
+              }
+            }
           } catch (err) {
             if (endpointRef.endpoint) this.setEndpointReady(endpointRef.endpoint, false);
             throw err;
@@ -904,7 +911,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         setMermaidPreviewOpen: (open) => this.setMermaidPreviewOpen(open),
         setActiveRoute: (sessionId) => {
           const endpoint = endpointRef.endpoint;
-          if (!endpoint || endpoint.surface !== 'sidebar' || sessionId === undefined) return;
+          if (!endpoint || sessionId === undefined) return;
+          if (endpoint.surface === 'editor') {
+            const editorEndpoint = endpoint as EditorEndpoint;
+            if (sessionId && editorEndpoint?.restoringSessionId === sessionId) {
+              editorEndpoint.restoringSessionId = undefined;
+            }
+            return;
+          }
           if (
             (sessionId === null && endpoint.route.type === 'new-session') ||
             (sessionId !== null &&
@@ -1106,14 +1120,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       new SidebarProviderContextFiles(this.droppedFilesService),
       restoredWorkspacePath
     );
-    const editorEndpoint: EditorEndpoint = {
-      ...endpoint,
+    const editorEndpoint: EditorEndpoint = Object.assign(endpoint, {
       key,
       panel,
       route,
       restoringSessionId: route.type === 'session' ? route.sessionId : undefined,
-      panelDisposables: [],
-    };
+      panelDisposables: [] as vscode.Disposable[],
+    });
     this.editorPanels.set(key, editorEndpoint);
     this.postEditorTabsState();
     let wasVisible = panel.visible;
@@ -1209,7 +1222,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const sessionIds = this.visibleEditorSessionIds();
     this.post({
       type: 'editor-tabs/state',
-      payload: { open: this.editorPanels.size > 0, sessionIds },
+      payload: {
+        open: this.editorPanels.size > 0,
+        sessionIds,
+        openSessionIds: this.openEditorSessionIds(),
+      },
     });
   }
 
@@ -2203,6 +2220,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       ...new Set(
         [...this.editorPanels.values()].flatMap((endpoint) =>
           endpoint.panel.visible && endpoint.route.type === 'session'
+            ? [endpoint.route.rootSessionId || endpoint.route.sessionId]
+            : []
+        )
+      ),
+    ];
+  }
+
+  private openEditorSessionIds() {
+    return [
+      ...new Set(
+        [...this.editorPanels.values()].flatMap((endpoint) =>
+          endpoint.route.type === 'session'
             ? [endpoint.route.rootSessionId || endpoint.route.sessionId]
             : []
         )

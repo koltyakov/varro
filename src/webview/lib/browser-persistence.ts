@@ -34,25 +34,37 @@ export class BrowserPersistence implements Persistence {
   }
 
   set<T>(key: string, value: T) {
-    const vscodeStateFailure = writeVsCodeWebviewStateValue(key, value);
-    if (vscodeStateFailure && !this.warnedVsCodeStateWriteFailure) {
-      this.warnedVsCodeStateWriteFailure = true;
-      logWarn(`browser-persistence:vscode-state-write:${key}`, vscodeStateFailure.error);
+    if (!shouldUseLocalStorage(key)) {
+      const vscodeStateFailure = writeVsCodeWebviewStateValue(key, value);
+      if (vscodeStateFailure && !this.warnedVsCodeStateWriteFailure) {
+        this.warnedVsCodeStateWriteFailure = true;
+        logWarn(`browser-persistence:vscode-state-write:${key}`, vscodeStateFailure.error);
+      }
+      return;
     }
 
-    if (!shouldUseLocalStorage(key)) return;
     try {
+      if (!this.storage) throw new Error('localStorage is unavailable');
       const serialized = JSON.stringify(value);
       if (serialized === undefined) {
-        this.storage?.removeItem(key);
-        clearLocalStorageFailureMarker(key);
-        return;
+        throw new Error('Value could not be serialized for localStorage');
       }
-      if (this.storage?.getItem(key) === serialized) return;
-      this.storage?.setItem(key, serialized);
-      clearLocalStorageFailureMarker(key);
+      if (this.storage.getItem(key) !== serialized) this.storage.setItem(key, serialized);
+      const cleanupFailure = clearSharedVsCodeWebviewStateValue(key);
+      if (cleanupFailure && !this.warnedVsCodeStateRemoveFailure) {
+        this.warnedVsCodeStateRemoveFailure = true;
+        logWarn(`browser-persistence:vscode-state-remove:${key}`, cleanupFailure.error);
+      }
     } catch (err) {
-      markLocalStorageFailure(key, this.readLocalStorageValue(key));
+      const vscodeStateFailure = writeVsCodeWebviewStateFallback(
+        key,
+        value,
+        this.readLocalStorageValue(key)
+      );
+      if (vscodeStateFailure && !this.warnedVsCodeStateWriteFailure) {
+        this.warnedVsCodeStateWriteFailure = true;
+        logWarn(`browser-persistence:vscode-state-write:${key}`, vscodeStateFailure.error);
+      }
       if (!this.warnedSetFailure) {
         this.warnedSetFailure = true;
         postMessage({
@@ -68,18 +80,32 @@ export class BrowserPersistence implements Persistence {
   }
 
   remove(key: string) {
-    const vscodeStateFailure = removeVsCodeWebviewStateValue(key);
-    if (vscodeStateFailure && !this.warnedVsCodeStateRemoveFailure) {
-      this.warnedVsCodeStateRemoveFailure = true;
-      logWarn(`browser-persistence:vscode-state-remove:${key}`, vscodeStateFailure.error);
+    if (!shouldUseLocalStorage(key)) {
+      const vscodeStateFailure = removeVsCodeWebviewStateValue(key);
+      if (vscodeStateFailure && !this.warnedVsCodeStateRemoveFailure) {
+        this.warnedVsCodeStateRemoveFailure = true;
+        logWarn(`browser-persistence:vscode-state-remove:${key}`, vscodeStateFailure.error);
+      }
+      return;
     }
 
-    if (!shouldUseLocalStorage(key)) return;
     try {
-      this.storage?.removeItem(key);
-      clearLocalStorageFailureMarker(key);
+      if (!this.storage) throw new Error('localStorage is unavailable');
+      this.storage.removeItem(key);
+      const cleanupFailure = clearSharedVsCodeWebviewStateValue(key);
+      if (cleanupFailure && !this.warnedVsCodeStateRemoveFailure) {
+        this.warnedVsCodeStateRemoveFailure = true;
+        logWarn(`browser-persistence:vscode-state-remove:${key}`, cleanupFailure.error);
+      }
     } catch (err) {
-      markLocalStorageFailure(key, this.readLocalStorageValue(key));
+      const vscodeStateFailure = removeVsCodeWebviewStateFallback(
+        key,
+        this.readLocalStorageValue(key)
+      );
+      if (vscodeStateFailure && !this.warnedVsCodeStateRemoveFailure) {
+        this.warnedVsCodeStateRemoveFailure = true;
+        logWarn(`browser-persistence:vscode-state-remove:${key}`, vscodeStateFailure.error);
+      }
       if (!this.warnedRemoveFailure) {
         this.warnedRemoveFailure = true;
         logWarn(`browser-persistence:remove:${key}`, err);
@@ -169,7 +195,9 @@ function removeVsCodeWebviewStateValue(key: string): { error: unknown } | undefi
   try {
     const api = getVsCodeWebviewStateApi();
     if (!api) return;
-    const next = { ...api.getState() };
+    const state = api.getState();
+    if (!Object.hasOwn(state, key)) return;
+    const next = { ...state };
     delete next[key];
     api.setState(next);
     return undefined;
@@ -184,7 +212,11 @@ function readLocalStorageFailureMarker(key: string): string | null | undefined {
   return isString(value) || value === null ? value : undefined;
 }
 
-function markLocalStorageFailure(key: string, staleValue: string | null) {
+function writeVsCodeWebviewStateFallback<T>(
+  key: string,
+  value: T,
+  staleValue: string | null
+): { error: unknown } | undefined {
   try {
     const api = getVsCodeWebviewStateApi();
     if (!api) return;
@@ -192,26 +224,61 @@ function markLocalStorageFailure(key: string, staleValue: string | null) {
     const failures = asRecord(state[LOCAL_STORAGE_FAILURES_STATE_KEY]) ?? {};
     api.setState({
       ...state,
+      [key]: value,
       [LOCAL_STORAGE_FAILURES_STATE_KEY]: { ...failures, [key]: staleValue },
     });
-  } catch {}
+    return undefined;
+  } catch (err) {
+    return { error: err };
+  }
 }
 
-function clearLocalStorageFailureMarker(key: string) {
+function removeVsCodeWebviewStateFallback(
+  key: string,
+  staleValue: string | null
+): { error: unknown } | undefined {
+  try {
+    const api = getVsCodeWebviewStateApi();
+    if (!api) return;
+    const state = api.getState();
+    const failures = asRecord(state[LOCAL_STORAGE_FAILURES_STATE_KEY]) ?? {};
+    const next: UnknownRecord = {
+      ...state,
+      [LOCAL_STORAGE_FAILURES_STATE_KEY]: { ...failures, [key]: staleValue },
+    };
+    delete next[key];
+    api.setState(next);
+    return undefined;
+  } catch (err) {
+    return { error: err };
+  }
+}
+
+function clearSharedVsCodeWebviewStateValue(key: string): { error: unknown } | undefined {
   try {
     const api = getVsCodeWebviewStateApi();
     if (!api) return;
     const state = api.getState();
     const failures = asRecord(state[LOCAL_STORAGE_FAILURES_STATE_KEY]);
-    if (!failures || !Object.hasOwn(failures, key)) return;
+    if (!Object.hasOwn(state, key) && (!failures || !Object.hasOwn(failures, key))) return;
+
+    const next = { ...state };
+    delete next[key];
+    if (!failures || !Object.hasOwn(failures, key)) {
+      api.setState(next);
+      return undefined;
+    }
+
     const nextFailures = { ...failures };
     delete nextFailures[key];
-    const next = { ...state };
     if (Object.keys(nextFailures).length > 0) {
       next[LOCAL_STORAGE_FAILURES_STATE_KEY] = nextFailures;
     } else {
       delete next[LOCAL_STORAGE_FAILURES_STATE_KEY];
     }
     api.setState(next);
-  } catch {}
+    return undefined;
+  } catch (err) {
+    return { error: err };
+  }
 }
