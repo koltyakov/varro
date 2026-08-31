@@ -877,7 +877,7 @@ describe('mount bridge helpers', () => {
       );
     const markSessionSeen = vi
       .spyOn(sessionStore, 'markSessionSeen')
-      .mockImplementation(() => undefined);
+      .mockImplementation(() => false);
     const operations = createMountBridgeOperations({
       ensureConnectionInitialized: vi.fn(),
       getServerState: () => 'stopped',

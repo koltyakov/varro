@@ -51,8 +51,9 @@ function createWebviewSide() {
   vi.spyOn(permissionsStore, 'upsertQuestion').mockImplementation((question: QuestionRequest) => {
     webviewAttention.set(question.id, { sessionID: question.sessionID, kind: 'question' });
   });
-  vi.spyOn(permissionsStore, 'removeQuestion').mockImplementation((id: string) => {
+  vi.spyOn(permissionsStore, 'removeResolvedQuestion').mockImplementation((id: string) => {
     webviewAttention.delete(id);
+    return true;
   });
   vi.spyOn(serverEvents, 'on').mockImplementation((event, handler) => {
     // SAFETY: Each captured handler is invoked only with an event carrying its registered name.

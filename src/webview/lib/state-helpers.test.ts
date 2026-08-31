@@ -490,8 +490,12 @@ describe('state helpers', () => {
     expect(stateModule.isSessionUnread('session-2', 999)).toBe(false);
     expect(stateModule.isSessionUnread('session-2', 1_001)).toBe(true);
 
-    stateModule.markSessionSeen('session-1', 1_500);
+    sent.length = 0;
+    for (let index = 0; index < 100; index += 1) {
+      stateModule.markSessionSeen('session-1', 1_500);
+    }
     expect(stateModule.state.lastSeenSessions['session-1']).toBe(1_500);
+    expect(sent).toEqual([{ type: 'session/seen', payload: { sessionId: 'session-1' } }]);
     expect(stateModule.isSessionUnread('session-1', 1_500)).toBe(false);
     expect(window.localStorage.getItem('varro.lastSeenSessions')).toBe(
       JSON.stringify({
@@ -1522,6 +1526,135 @@ describe('state helpers', () => {
 
     stateModule.resetModelVisibility();
     expect(stateModule.isModelVisible('anthropic', 'claude')).toBe(true);
+  });
+
+  it('keeps an answered question resolved until a new ask event arrives', async () => {
+    const stateModule = await loadState();
+    const question = { id: 'answered', sessionID: 'session-1', questions: [] };
+    stateModule.resetQuestionResolutionState();
+    stateModule.upsertQuestion(question);
+
+    stateModule.removeResolvedQuestion(question.id);
+
+    expect(stateModule.state.questions).toEqual([]);
+    expect(stateModule.state.questionResponsePendingSessionIds).toEqual(['session-1']);
+
+    stateModule.setQuestions([question]);
+    stateModule.setQuestions([]);
+    stateModule.setQuestions([question]);
+
+    expect(stateModule.state.questions).toEqual([]);
+
+    stateModule.upsertQuestion(question);
+
+    expect(stateModule.state.questions).toEqual([question]);
+    expect(stateModule.state.questionResponsePendingSessionIds).toEqual([]);
+
+    stateModule.removeQuestion(question.id);
+    stateModule.removeResolvedQuestion(question.id);
+
+    expect(stateModule.state.questionResponsePendingSessionIds).toEqual(['session-1']);
+    stateModule.resetQuestionResolutionState();
+  });
+
+  it('treats a question omitted by an authoritative snapshot as resolved', async () => {
+    const stateModule = await loadState();
+    const question = { id: 'snapshot-resolved', sessionID: 'session-1', questions: [] };
+    stateModule.resetQuestionResolutionState();
+    stateModule.upsertQuestion(question);
+
+    stateModule.setQuestions([]);
+
+    expect(stateModule.state.questions).toEqual([]);
+    expect(stateModule.state.questionResponsePendingSessionIds).toEqual(['session-1']);
+
+    stateModule.setQuestions([question]);
+    expect(stateModule.state.questions).toEqual([]);
+    stateModule.resetQuestionResolutionState();
+  });
+
+  it('does not reopen a cleared transition for duplicate resolution evidence', async () => {
+    const stateModule = await loadState();
+    const question = { id: 'duplicate', sessionID: 'session-1', questions: [] };
+    stateModule.resetQuestionResolutionState();
+    stateModule.upsertQuestion(question);
+    stateModule.removeResolvedQuestion(question.id);
+    stateModule.clearQuestionResponsePending(question.sessionID);
+
+    stateModule.removeResolvedQuestion(question.id);
+
+    expect(stateModule.state.questionResponsePendingSessionIds).toEqual([]);
+    stateModule.resetQuestionResolutionState();
+  });
+
+  it('keeps status evidence that arrives while a question response is in flight', async () => {
+    const stateModule = await loadState();
+    const question = { id: 'in-flight', sessionID: 'session-1', questions: [] };
+    stateModule.resetQuestionResolutionState();
+    stateModule.upsertQuestion(question);
+
+    stateModule.beginQuestionResponse(question.id);
+    expect(stateModule.state.questionResponsePendingSessionIds).toEqual(['session-1']);
+
+    stateModule.clearQuestionResponsePending(question.sessionID);
+    stateModule.removeResolvedQuestion(question.id);
+
+    expect(stateModule.state.questions).toEqual([]);
+    expect(stateModule.state.questionResponsePendingSessionIds).toEqual([]);
+    stateModule.resetQuestionResolutionState();
+  });
+
+  it('rolls back the transition when a question response fails', async () => {
+    const stateModule = await loadState();
+    const question = { id: 'failed-response', sessionID: 'session-1', questions: [] };
+    stateModule.resetQuestionResolutionState();
+    stateModule.upsertQuestion(question);
+
+    stateModule.beginQuestionResponse(question.id);
+    stateModule.cancelQuestionResponse(question.id);
+
+    expect(stateModule.state.questions).toEqual([question]);
+    expect(stateModule.state.questionResponsePendingSessionIds).toEqual([]);
+    stateModule.resetQuestionResolutionState();
+  });
+
+  it('ignores late response callbacks after an explicit ask reuses the request ID', async () => {
+    const stateModule = await loadState();
+    const first = { id: 'reused', sessionID: 'session-1', questions: [] };
+    const second = {
+      ...first,
+      questions: [{ question: 'Again?', header: 'Retry', options: [] }],
+    };
+    stateModule.resetQuestionResolutionState();
+    stateModule.upsertQuestion(first);
+    const firstGeneration = stateModule.beginQuestionResponse(first.id);
+    stateModule.removeResolvedQuestion(first.id);
+    stateModule.clearQuestionResponsePending(first.sessionID);
+
+    stateModule.upsertQuestion(second);
+    const secondGeneration = stateModule.beginQuestionResponse(second.id);
+
+    expect(stateModule.removeResolvedQuestion(first.id, firstGeneration)).toBe(false);
+    expect(stateModule.cancelQuestionResponse(first.id, firstGeneration)).toBe(false);
+    expect(secondGeneration).not.toBe(firstGeneration);
+    expect(stateModule.state.questions).toEqual([second]);
+    expect(stateModule.state.questionResponsePendingSessionIds).toEqual(['session-1']);
+    stateModule.resetQuestionResolutionState();
+  });
+
+  it('keeps the response generation stable for a duplicate ask delivery', async () => {
+    const stateModule = await loadState();
+    const question = { id: 'duplicate-ask', sessionID: 'session-1', questions: [] };
+    stateModule.resetQuestionResolutionState();
+    stateModule.upsertQuestion(question);
+    const generation = stateModule.beginQuestionResponse(question.id);
+
+    stateModule.upsertQuestion(question);
+
+    expect(stateModule.beginQuestionResponse(question.id)).toBe(generation);
+    expect(stateModule.removeResolvedQuestion(question.id, generation)).toBe(true);
+    expect(stateModule.state.questions).toEqual([]);
+    stateModule.resetQuestionResolutionState();
   });
 
   it('lists only explicitly added models from large provider catalogs', async () => {

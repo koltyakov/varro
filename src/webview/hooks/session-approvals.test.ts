@@ -176,12 +176,16 @@ describe('session-approvals helpers', () => {
   });
 
   it('answers and rejects questions through the question API', async () => {
-    const removeQuestion = vi.fn();
+    const beginQuestionResponse = vi.fn(() => 1);
+    const cancelQuestionResponse = vi.fn(() => true);
+    const removeResolvedQuestion = vi.fn(() => true);
 
     await respondQuestionWithDependencies(
       {
         replyQuestion: vi.fn(async () => {}),
-        removeQuestion,
+        beginQuestionResponse,
+        cancelQuestionResponse,
+        removeResolvedQuestion,
         setError: vi.fn(),
       },
       'question-1',
@@ -191,18 +195,25 @@ describe('session-approvals helpers', () => {
     await rejectQuestionWithDependencies(
       {
         rejectQuestion: vi.fn(async () => {}),
-        removeQuestion,
+        beginQuestionResponse,
+        cancelQuestionResponse,
+        removeResolvedQuestion,
         setError: vi.fn(),
       },
       'question-2'
     );
 
-    expect(removeQuestion).toHaveBeenCalledWith('question-1');
-    expect(removeQuestion).toHaveBeenCalledWith('question-2');
+    expect(removeResolvedQuestion).toHaveBeenCalledWith('question-1', 1);
+    expect(removeResolvedQuestion).toHaveBeenCalledWith('question-2', 1);
+    expect(beginQuestionResponse).toHaveBeenCalledWith('question-1');
+    expect(beginQuestionResponse).toHaveBeenCalledWith('question-2');
+    expect(cancelQuestionResponse).not.toHaveBeenCalled();
   });
 
   it('surfaces question reply and rejection failures without removing the request', async () => {
-    const removeQuestion = vi.fn();
+    const beginQuestionResponse = vi.fn(() => 1);
+    const cancelQuestionResponse = vi.fn(() => true);
+    const removeResolvedQuestion = vi.fn(() => true);
     const setReplyError = vi.fn();
     const setRejectError = vi.fn();
 
@@ -211,7 +222,9 @@ describe('session-approvals helpers', () => {
         replyQuestion: vi.fn(async () => {
           throw 'reply failed';
         }),
-        removeQuestion,
+        beginQuestionResponse,
+        cancelQuestionResponse,
+        removeResolvedQuestion,
         setError: setReplyError,
       },
       'question-1',
@@ -223,15 +236,41 @@ describe('session-approvals helpers', () => {
         rejectQuestion: vi.fn(async () => {
           throw new Error('reject failed');
         }),
-        removeQuestion,
+        beginQuestionResponse,
+        cancelQuestionResponse,
+        removeResolvedQuestion,
         setError: setRejectError,
       },
       'question-2'
     );
 
-    expect(removeQuestion).not.toHaveBeenCalled();
+    expect(removeResolvedQuestion).not.toHaveBeenCalled();
+    expect(cancelQuestionResponse).toHaveBeenCalledWith('question-1', 1);
+    expect(cancelQuestionResponse).toHaveBeenCalledWith('question-2', 1);
     expect(setReplyError).toHaveBeenCalledWith('Failed to answer question');
     expect(setRejectError).toHaveBeenCalledWith('reject failed');
+  });
+
+  it('ignores an HTTP failure after authoritative resolution evidence', async () => {
+    const setError = vi.fn();
+
+    await expect(
+      respondQuestionWithDependencies(
+        {
+          replyQuestion: vi.fn(async () => {
+            throw new Error('late transport failure');
+          }),
+          beginQuestionResponse: vi.fn(() => 1),
+          cancelQuestionResponse: vi.fn(() => false),
+          removeResolvedQuestion: vi.fn(() => true),
+          setError,
+        },
+        'question-1',
+        [['yes']],
+        { rethrow: true }
+      )
+    ).resolves.toBeUndefined();
+    expect(setError).not.toHaveBeenCalled();
   });
 
   it('rethrows question failures when the caller requests an actionable result', async () => {
@@ -244,7 +283,9 @@ describe('session-approvals helpers', () => {
           replyQuestion: vi.fn(async () => {
             throw replyFailure;
           }),
-          removeQuestion: vi.fn(),
+          beginQuestionResponse: vi.fn(() => 1),
+          cancelQuestionResponse: vi.fn(() => true),
+          removeResolvedQuestion: vi.fn(() => true),
           setError: vi.fn(),
         },
         'question-1',
@@ -259,7 +300,9 @@ describe('session-approvals helpers', () => {
           rejectQuestion: vi.fn(async () => {
             throw rejectFailure;
           }),
-          removeQuestion: vi.fn(),
+          beginQuestionResponse: vi.fn(() => 1),
+          cancelQuestionResponse: vi.fn(() => true),
+          removeResolvedQuestion: vi.fn(() => true),
           setError: vi.fn(),
         },
         'question-2',
@@ -374,7 +417,9 @@ describe('session-approvals helpers', () => {
       removePermission: vi.fn(),
       setError: vi.fn(),
       replyQuestion: vi.fn(async () => {}),
-      removeQuestion: vi.fn(),
+      beginQuestionResponse: vi.fn(() => 1),
+      cancelQuestionResponse: vi.fn(() => true),
+      removeResolvedQuestion: vi.fn(() => true),
       rejectRemoteQuestion: vi.fn(async () => {}),
       getPermissionModeForSession: () => sessionMode,
       getDraftPermissionMode: () => draftMode,
@@ -457,7 +502,9 @@ describe('session-approvals helpers', () => {
       removePermission: vi.fn(),
       setError,
       replyQuestion: vi.fn(async () => {}),
-      removeQuestion: vi.fn(),
+      beginQuestionResponse: vi.fn(() => 1),
+      cancelQuestionResponse: vi.fn(() => true),
+      removeResolvedQuestion: vi.fn(() => true),
       rejectRemoteQuestion: vi.fn(async () => {}),
       getPermissionModeForSession: () => sessionMode,
       getDraftPermissionMode: () => draftMode,
@@ -521,7 +568,9 @@ describe('session-approvals helpers', () => {
       removePermission: vi.fn(),
       setError: vi.fn(),
       replyQuestion: vi.fn(async () => {}),
-      removeQuestion: vi.fn(),
+      beginQuestionResponse: vi.fn(() => 1),
+      cancelQuestionResponse: vi.fn(() => true),
+      removeResolvedQuestion: vi.fn(() => true),
       rejectRemoteQuestion: vi.fn(async () => {}),
       getPermissionModeForSession: () => sessionMode,
       getDraftPermissionMode: () => draftMode,

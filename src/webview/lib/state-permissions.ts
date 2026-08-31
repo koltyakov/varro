@@ -1,3 +1,4 @@
+import { batch } from 'solid-js';
 import { produce, reconcile } from 'solid-js/store';
 import type { Permission, QuestionRequest } from '../types';
 import { setState, state } from './app-state';
@@ -10,23 +11,64 @@ import {
   groupPermissions,
   markPermissionMutations,
 } from './permission-grouping';
+import { captureSessionStateTime } from './session-state-clock';
+
+const resolvedQuestionIds = new Set<string>();
+const transitionedQuestionIds = new Set<string>();
+const resolvedQuestionSessions = new Map<string, string>();
+const questionGenerations = new Map<string, number>();
+const questionResponsePendingRequests = new Map<string, { sessionID: string; updatedAt: number }>();
 
 export function setQuestions(questions: QuestionRequest[]) {
-  setState('questions', reconcile(questions, { key: 'id' }));
+  const nextQuestions = questions.filter((question) => !resolvedQuestionIds.has(question.id));
+  for (const question of nextQuestions) {
+    if (!questionGenerations.has(question.id)) questionGenerations.set(question.id, 1);
+  }
+  const nextQuestionIds = new Set(nextQuestions.map((question) => question.id));
+  batch(() => {
+    for (const question of state.questions) {
+      if (nextQuestionIds.has(question.id) || resolvedQuestionIds.has(question.id)) continue;
+      const wasTransitioned = transitionedQuestionIds.has(question.id);
+      rememberResolvedQuestion(question.id, question.sessionID);
+      transitionedQuestionIds.add(question.id);
+      if (!wasTransitioned) markQuestionResponsePending(question.id, question.sessionID);
+    }
+    setState('questions', reconcile(nextQuestions, { key: 'id' }));
+  });
 }
 
 export function upsertQuestion(question: QuestionRequest) {
-  setState(
-    'questions',
-    produce((questions) => {
-      const idx = questions.findIndex((item) => item.id === question.id);
-      if (idx !== -1) questions[idx] = question;
-      else questions.push(question);
-    })
-  );
+  const hasCurrentQuestion = state.questions.some((item) => item.id === question.id);
+  const reusesResolvedID = resolvedQuestionIds.has(question.id);
+  if (!questionGenerations.has(question.id)) questionGenerations.set(question.id, 1);
+  else if (reusesResolvedID) {
+    questionGenerations.set(question.id, questionGenerations.get(question.id)! + 1);
+  }
+  batch(() => {
+    if (!hasCurrentQuestion || reusesResolvedID) {
+      resolvedQuestionIds.delete(question.id);
+      transitionedQuestionIds.delete(question.id);
+      resolvedQuestionSessions.delete(question.id);
+      clearQuestionResponsePendingRequest(question.id);
+    }
+    setState(
+      'questions',
+      produce((questions) => {
+        const idx = questions.findIndex((item) => item.id === question.id);
+        if (idx !== -1) questions[idx] = question;
+        else questions.push(question);
+      })
+    );
+  });
 }
 
 export function removeQuestion(requestID: string) {
+  const sessionID = state.questions.find((question) => question.id === requestID)?.sessionID;
+  rememberResolvedQuestion(requestID, sessionID);
+  removeQuestionEntry(requestID);
+}
+
+function removeQuestionEntry(requestID: string) {
   setState(
     'questions',
     produce((questions) => {
@@ -34,6 +76,106 @@ export function removeQuestion(requestID: string) {
       if (idx !== -1) questions.splice(idx, 1);
     })
   );
+}
+
+export function removeResolvedQuestion(requestID: string, expectedGeneration?: number) {
+  if (
+    expectedGeneration !== undefined &&
+    questionGenerations.get(requestID) !== expectedGeneration
+  ) {
+    return false;
+  }
+  const wasTransitioned = transitionedQuestionIds.has(requestID);
+  const sessionID =
+    state.questions.find((question) => question.id === requestID)?.sessionID ??
+    resolvedQuestionSessions.get(requestID);
+  batch(() => {
+    if (sessionID && !wasTransitioned) markQuestionResponsePending(requestID, sessionID);
+    rememberResolvedQuestion(requestID, sessionID);
+    transitionedQuestionIds.add(requestID);
+    removeQuestionEntry(requestID);
+  });
+  return true;
+}
+
+export function beginQuestionResponse(requestID: string) {
+  const sessionID =
+    state.questions.find((question) => question.id === requestID)?.sessionID ??
+    resolvedQuestionSessions.get(requestID);
+  if (!sessionID) return undefined;
+  const generation = questionGenerations.get(requestID) ?? 1;
+  questionGenerations.set(requestID, generation);
+  if (transitionedQuestionIds.has(requestID)) return generation;
+  transitionedQuestionIds.add(requestID);
+  markQuestionResponsePending(requestID, sessionID);
+  return generation;
+}
+
+export function cancelQuestionResponse(requestID: string, expectedGeneration?: number) {
+  if (
+    (expectedGeneration !== undefined &&
+      questionGenerations.get(requestID) !== expectedGeneration) ||
+    resolvedQuestionIds.has(requestID)
+  ) {
+    return false;
+  }
+  transitionedQuestionIds.delete(requestID);
+  clearQuestionResponsePendingRequest(requestID);
+  return true;
+}
+
+export function resetQuestionResolutionState() {
+  resolvedQuestionIds.clear();
+  transitionedQuestionIds.clear();
+  resolvedQuestionSessions.clear();
+  questionGenerations.clear();
+  questionResponsePendingRequests.clear();
+  setState('questionResponsePendingSessionIds', []);
+}
+
+function rememberResolvedQuestion(requestID: string, sessionID?: string) {
+  resolvedQuestionIds.delete(requestID);
+  resolvedQuestionIds.add(requestID);
+  if (sessionID) resolvedQuestionSessions.set(requestID, sessionID);
+}
+
+function markQuestionResponsePending(requestID: string, sessionID: string) {
+  questionResponsePendingRequests.set(requestID, {
+    sessionID,
+    updatedAt: captureSessionStateTime(),
+  });
+  syncQuestionResponsePendingSessions();
+}
+
+function clearQuestionResponsePendingRequest(requestID: string) {
+  if (!questionResponsePendingRequests.delete(requestID)) return;
+  syncQuestionResponsePendingSessions();
+}
+
+function syncQuestionResponsePendingSessions() {
+  const nextSessionIDs = [
+    ...new Set([...questionResponsePendingRequests.values()].map((entry) => entry.sessionID)),
+  ];
+  if (
+    nextSessionIDs.length === state.questionResponsePendingSessionIds.length &&
+    nextSessionIDs.every(
+      (sessionID, index) => state.questionResponsePendingSessionIds[index] === sessionID
+    )
+  ) {
+    return;
+  }
+  setState('questionResponsePendingSessionIds', nextSessionIDs);
+}
+
+export function clearQuestionResponsePending(sessionID: string, authoritativeAt?: number) {
+  let changed = false;
+  for (const [requestID, pending] of questionResponsePendingRequests) {
+    if (pending.sessionID !== sessionID) continue;
+    if (authoritativeAt !== undefined && pending.updatedAt > authoritativeAt) continue;
+    questionResponsePendingRequests.delete(requestID);
+    changed = true;
+  }
+  if (changed) syncQuestionResponsePendingSessions();
 }
 
 export function addPermission(permission: Permission) {

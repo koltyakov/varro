@@ -894,6 +894,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         setActiveRoute: (sessionId) => {
           const endpoint = endpointRef.endpoint;
           if (!endpoint || endpoint.surface !== 'sidebar' || sessionId === undefined) return;
+          if (
+            (sessionId === null && endpoint.route.type === 'new-session') ||
+            (sessionId !== null &&
+              endpoint.route.type === 'session' &&
+              endpoint.route.sessionId === sessionId)
+          ) {
+            return;
+          }
           endpoint.route = sessionId
             ? {
                 type: 'session',

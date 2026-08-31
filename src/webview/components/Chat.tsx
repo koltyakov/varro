@@ -144,6 +144,7 @@ export function Chat() {
   const sessionIndicators = createStableSessionIndicators(rawSessionIndicators);
   let publishedUnreadWorkspace: string | null = null;
   const publishedUnreadStates = new Map<string, PublishedUnreadState>();
+  let publishedCommandState = '';
   createEffect(() => {
     const workspacePath = state.editorContext.workspacePath;
     // Publish from the settled indicators, and never while a session's turn is
@@ -269,15 +270,16 @@ export function Chat() {
       Boolean(
         activeSessionId && primarySessions().some((session) => session.id === activeSessionId)
       );
-    postMessage({
-      type: 'commands/state',
-      payload: {
-        canAbort: Boolean(activeSessionId) && isActiveSessionWorking(),
-        canSwitchSessions,
-        model: modelPayload,
-        sessionId: activeSessionId,
-      },
-    });
+    const payload = {
+      canAbort: Boolean(activeSessionId) && isActiveSessionWorking(),
+      canSwitchSessions,
+      model: modelPayload,
+      sessionId: activeSessionId,
+    };
+    const key = JSON.stringify(payload);
+    if (key === publishedCommandState) return;
+    publishedCommandState = key;
+    postMessage({ type: 'commands/state', payload });
   });
 
   let initialEditorRouteReconciled = false;
@@ -317,7 +319,7 @@ export function Chat() {
   onCleanup(() => {
     postMessage({
       type: 'commands/state',
-      payload: { canAbort: false, canSwitchSessions: false, model: null, sessionId: null },
+      payload: { canAbort: false, canSwitchSessions: false, model: null },
     });
   });
 

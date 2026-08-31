@@ -284,9 +284,11 @@ export function upsertSession(deps: LifecycleDependencies, session: Session) {
     return;
   }
 
-  applySessions(deps, [session, ...sessions.filter((item) => item.id !== session.id)]);
+  batch(() => {
+    applySessions(deps, [session, ...sessions.filter((item) => item.id !== session.id)]);
 
-  if (session.id === activeSessionId && !showSessionPicker) {
-    deps.markSessionSeen(session.id, session.time.updated);
-  }
+    if (session.id === activeSessionId && !showSessionPicker) {
+      deps.markSessionSeen(session.id, session.time.updated);
+    }
+  });
 }

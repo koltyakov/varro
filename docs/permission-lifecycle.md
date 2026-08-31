@@ -104,6 +104,13 @@ The normal lifecycle is:
 7. `permission.replied` or `permission.v2.replied` clears host attention and any remaining webview
    state.
 
+Questions use the same acknowledgement rule. Submitting an answer or rejection immediately puts the
+owning conversation in a non-terminal transition state. A failed request rolls that state back; an
+accepted request keeps it until an authoritative busy, idle, or error update arrives.
+The gap between removing the question and receiving continuation status must not be classified as a
+completed or plan-ready turn. Resolved request IDs remain tombstoned for the current workspace so a
+stale pending snapshot cannot restore the prompt; only a new explicit ask event may reuse the ID.
+
 Initial webview state includes persisted pending requests so reload does not strand a session.
 `GET /permission` reconciles event state after connection, reload, and mode changes. Both snapshot
 reconcilers use generations and mutation tracking so an older request cannot overwrite an ask or

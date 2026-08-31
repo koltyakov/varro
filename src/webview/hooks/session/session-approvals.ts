@@ -82,17 +82,21 @@ export async function respondQuestionWithDependencies(
       requestId: string,
       answers: Array<Array<string>>
     ): Promise<void | boolean | object>;
-    removeQuestion(requestId: string): void;
+    beginQuestionResponse(requestId: string): number | undefined;
+    cancelQuestionResponse(requestId: string, expectedGeneration?: number): boolean;
+    removeResolvedQuestion(requestId: string, expectedGeneration?: number): boolean;
     setError(message: string): void;
   },
   requestId: string,
   answers: Array<Array<string>>,
   options?: { rethrow?: boolean }
 ) {
+  const responseGeneration = deps.beginQuestionResponse(requestId);
   try {
     await deps.replyQuestion(requestId, answers);
-    deps.removeQuestion(requestId);
+    deps.removeResolvedQuestion(requestId, responseGeneration);
   } catch (err) {
+    if (!deps.cancelQuestionResponse(requestId, responseGeneration)) return;
     deps.setError(err instanceof Error ? err.message : 'Failed to answer question');
     if (options?.rethrow) throw err;
   }
@@ -101,16 +105,20 @@ export async function respondQuestionWithDependencies(
 export async function rejectQuestionWithDependencies(
   deps: {
     rejectQuestion(requestId: string): Promise<void | boolean | object>;
-    removeQuestion(requestId: string): void;
+    beginQuestionResponse(requestId: string): number | undefined;
+    cancelQuestionResponse(requestId: string, expectedGeneration?: number): boolean;
+    removeResolvedQuestion(requestId: string, expectedGeneration?: number): boolean;
     setError(message: string): void;
   },
   requestId: string,
   options?: { rethrow?: boolean }
 ) {
+  const responseGeneration = deps.beginQuestionResponse(requestId);
   try {
     await deps.rejectQuestion(requestId);
-    deps.removeQuestion(requestId);
+    deps.removeResolvedQuestion(requestId, responseGeneration);
   } catch (err) {
+    if (!deps.cancelQuestionResponse(requestId, responseGeneration)) return;
     deps.setError(err instanceof Error ? err.message : 'Failed to reject question');
     if (options?.rethrow) throw err;
   }
@@ -224,7 +232,9 @@ type SessionApprovalDependencies = {
   removePermission(permissionId: string, options?: { removeGroup?: boolean }): void;
   setError(message: string): void;
   replyQuestion(requestId: string, answers: Array<Array<string>>): Promise<void | boolean | object>;
-  removeQuestion(requestId: string): void;
+  beginQuestionResponse(requestId: string): number | undefined;
+  cancelQuestionResponse(requestId: string, expectedGeneration?: number): boolean;
+  removeResolvedQuestion(requestId: string, expectedGeneration?: number): boolean;
   rejectRemoteQuestion(requestId: string): Promise<void | boolean | object>;
   getPermissionModeForSession(sessionId: string | null | undefined): PermissionMode;
   getDraftPermissionMode(): PermissionMode;
@@ -295,7 +305,9 @@ export class SessionApprovalOperations {
     await respondQuestionWithDependencies(
       {
         replyQuestion: this.deps.replyQuestion,
-        removeQuestion: this.deps.removeQuestion,
+        beginQuestionResponse: this.deps.beginQuestionResponse,
+        cancelQuestionResponse: this.deps.cancelQuestionResponse,
+        removeResolvedQuestion: this.deps.removeResolvedQuestion,
         setError: this.deps.setError,
       },
       requestId,
@@ -308,7 +320,9 @@ export class SessionApprovalOperations {
     await rejectQuestionWithDependencies(
       {
         rejectQuestion: this.deps.rejectRemoteQuestion,
-        removeQuestion: this.deps.removeQuestion,
+        beginQuestionResponse: this.deps.beginQuestionResponse,
+        cancelQuestionResponse: this.deps.cancelQuestionResponse,
+        removeResolvedQuestion: this.deps.removeResolvedQuestion,
         setError: this.deps.setError,
       },
       requestId,

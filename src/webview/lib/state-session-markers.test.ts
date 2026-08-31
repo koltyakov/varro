@@ -134,6 +134,7 @@ describe('state session markers', () => {
       'session-1': 150,
     });
     expect(nextSeenSessions({ 'session-1': 150 }, 'session-1', 150, 120)).toBeNull();
+    expect(nextSeenSessions({ 'session-1': 150 }, 'session-1', 150, 999)).toBeNull();
     expect(nextCompletedSessionResponses({ 'session-1': 100 }, 'session-1', 150, 120)).toEqual({
       'session-1': 150,
     });

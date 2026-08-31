@@ -1940,9 +1940,92 @@ describe('SidebarProvider editor panels', () => {
 
     sidebar.receive({
       type: 'commands/state',
+      payload: { canAbort: false, canSwitchSessions: false, model: null },
+    });
+    await vi.waitFor(() => expect(isVisible('session-1')).toBe(true));
+
+    sidebar.receive({
+      type: 'commands/state',
       payload: { canAbort: false, canSwitchSessions: false, model: null, sessionId: null },
     });
     await vi.waitFor(() => expect(isVisible('session-1')).toBe(false));
+  });
+
+  it('does not pulse plan attention while the visible chat resumes from a question', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const sidebar = createPanel();
+    await provider.resolveWebviewView(sidebar.panel as never, {} as never, {} as never);
+    await vi.waitFor(() => expect(sidebar.panel.webview.html).toContain('__initialWebviewState'));
+    sidebar.receive({ type: 'ready' });
+    sidebar.receive({
+      type: 'commands/state',
+      payload: {
+        canAbort: false,
+        canSwitchSessions: false,
+        model: null,
+        sessionId: 'plan-1',
+      },
+    });
+    await vi.waitFor(() =>
+      expect(
+        (
+          provider as unknown as {
+            isSessionAttentionVisible(sessionId: string): boolean;
+          }
+        ).isSessionAttentionVisible('plan-1')
+      ).toBe(true)
+    );
+    const sessionState = (
+      provider as unknown as {
+        sessionState: {
+          handleServerEvent(event: unknown): void;
+          setSessionUnreadState(
+            sessionId: string,
+            kind: 'plan-ready',
+            unread: boolean,
+            directory: string,
+            markerAt: number
+          ): void;
+          completed: ReadonlySet<string>;
+        };
+      }
+    ).sessionState;
+    sessionState.handleServerEvent({
+      type: 'session.updated',
+      properties: {
+        info: { id: 'plan-1', title: 'Visible plan', directory: '/repo', agent: 'plan' },
+      },
+    });
+    sessionState.handleServerEvent({
+      type: 'question.asked',
+      properties: { id: 'question-1', sessionID: 'plan-1', questions: [] },
+    });
+    sessionState.handleServerEvent({
+      type: 'question.replied',
+      properties: { requestID: 'question-1', sessionID: 'plan-1' },
+    });
+    const statusItem = getVscodeMock().window.createStatusBarItem.mock.results.find(
+      (result) => result.value.name === 'Varro Attention'
+    )?.value;
+    statusItem?.show.mockClear();
+    statusItem?.hide.mockClear();
+
+    sessionState.setSessionUnreadState('plan-1', 'plan-ready', true, '/repo', 500);
+
+    expect(sessionState.completed.has('plan-1')).toBe(false);
+    expect(statusItem?.show).not.toHaveBeenCalled();
+
+    sessionState.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'plan-1', status: { type: 'busy' } },
+    });
+    sessionState.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'plan-1', status: { type: 'idle' } },
+    });
+
+    expect(sessionState.completed.has('plan-1')).toBe(true);
+    expect(statusItem?.show).not.toHaveBeenCalled();
   });
 
   it('shows plan notifications only when no Varro chat is visible', async () => {

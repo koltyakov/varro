@@ -138,6 +138,7 @@ export interface AppState {
   todos: NormalizedTodo[];
   permissions: Permission[];
   questions: QuestionRequest[];
+  questionResponsePendingSessionIds: string[];
   diffs: FileDiff[];
   streamingPartId: string | null;
   streamingText: string;
@@ -376,6 +377,7 @@ export function createAppState(): AppStateInstance {
     todos: [],
     permissions: normalizeInitialPermissions(initialWebviewState.pendingPermissions),
     questions: normalizeInitialQuestions(initialWebviewState.pendingQuestions),
+    questionResponsePendingSessionIds: [],
     diffs: [],
     streamingPartId: null,
     streamingText: '',

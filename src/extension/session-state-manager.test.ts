@@ -1089,6 +1089,36 @@ describe('SessionStateManager notifications', () => {
     expect(recovered.getSiblingAlertCandidates()[0]?.kinds).toEqual(['completed']);
   });
 
+  it('retries an unchanged acknowledgement after persistence fails', async () => {
+    const values = new Map<string, unknown>();
+    let attempts = 0;
+    const workspaceState = {
+      get: vi.fn((key: string) => values.get(key)),
+      set: vi.fn((key: string, value: unknown) => {
+        if (key === 'varro.acknowledgedCompletions' && attempts++ === 0) {
+          return Promise.reject(new Error('write failed'));
+        }
+        values.set(key, value);
+        return Promise.resolve();
+      }),
+      remove: vi.fn(() => Promise.resolve()),
+    };
+    const manager = new SessionStateManager(
+      workspaceState as never,
+      { onStatusChange: vi.fn() },
+      { shouldShow: () => false }
+    );
+
+    manager.setSessionUnreadState('session-1', 'plan-ready', false, '/repo', 200);
+    await manager.flush();
+    manager.setSessionUnreadState('session-1', 'plan-ready', false, '/repo', 200);
+    await manager.flush();
+
+    expect(values.get('varro.acknowledgedCompletions')).toEqual({
+      'session-1': { 'plan-ready': 200 },
+    });
+  });
+
   it('does not trust the kind of legacy mixed acknowledgement markers', () => {
     const workspaceState = {
       get: vi.fn((key: string) =>
@@ -1947,6 +1977,151 @@ describe('SessionStateManager notifications', () => {
 
     manager.reconcilePendingAttention('question', []);
     expect([...manager.pending.keys()]).toEqual(['permission-live']);
+
+    manager.setSessionUnreadState('session-2', 'plan-ready', true, '/repo', 100);
+    expect(manager.completed.has('session-2')).toBe(false);
+    manager.reconcilePendingAttention('question', [
+      { id: 'question-live', sessionID: 'session-2', questions: [] },
+    ]);
+    expect(manager.pending.has('question-live')).toBe(false);
+
+    manager.handleServerEvent({ type: 'session.idle', properties: { sessionID: 'session-2' } });
+    manager.setSessionUnreadState('session-2', 'plan-ready', true, '/repo', 100);
+    expect(manager.completed.has('session-2')).toBe(true);
+  });
+
+  it('keeps sibling question transitions pending until each child receives status evidence', () => {
+    const manager = createManager(() => false);
+    manager.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'child-1', parentID: 'root-1' } },
+    });
+    manager.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'child-2', parentID: 'root-1' } },
+    });
+    manager.handleServerEvent({
+      type: 'question.asked',
+      properties: { id: 'question-1', sessionID: 'child-1', questions: [] },
+    });
+    manager.handleServerEvent({
+      type: 'question.asked',
+      properties: { id: 'question-2', sessionID: 'child-2', questions: [] },
+    });
+    manager.handleServerEvent({
+      type: 'question.replied',
+      properties: { requestID: 'question-1', sessionID: 'child-1' },
+    });
+    manager.handleServerEvent({
+      type: 'question.replied',
+      properties: { requestID: 'question-2', sessionID: 'child-2' },
+    });
+
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'child-1', status: { type: 'busy' } },
+    });
+    manager.setSessionUnreadState('root-1', 'plan-ready', true, '/repo', 100);
+    expect(manager.completed.has('root-1')).toBe(false);
+
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'child-2', status: { type: 'busy' } },
+    });
+    manager.setSessionUnreadState('root-1', 'plan-ready', true, '/repo', 100);
+    expect(manager.completed.has('root-1')).toBe(true);
+  });
+
+  it('does not restore a resolved question from later stale snapshots', () => {
+    const manager = createManager(() => false);
+    const question = { id: 'question-1', sessionID: 'session-1', questions: [] };
+    manager.handleServerEvent({ type: 'question.asked', properties: question });
+    manager.handleServerEvent({
+      type: 'question.replied',
+      properties: { requestID: question.id, sessionID: question.sessionID },
+    });
+
+    manager.reconcilePendingAttention('question', [question]);
+    manager.reconcilePendingAttention('question', []);
+    manager.reconcilePendingAttention('question', [question]);
+
+    expect(manager.pending.has(question.id)).toBe(false);
+
+    manager.handleServerEvent({ type: 'question.asked', properties: question });
+
+    expect(manager.pending.has(question.id)).toBe(true);
+  });
+
+  it('suppresses plan-ready reports while an answered question resumes', () => {
+    const manager = createManager(() => false);
+    manager.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'plan-1', directory: '/repo', agent: 'plan' } },
+    });
+    manager.handleServerEvent({
+      type: 'question.asked',
+      properties: { id: 'question-1', sessionID: 'plan-1', questions: [] },
+    });
+    manager.handleServerEvent({
+      type: 'question.replied',
+      properties: { requestID: 'question-1', sessionID: 'plan-1' },
+    });
+
+    manager.setSessionUnreadState('plan-1', 'plan-ready', true, '/repo', 500);
+
+    expect(manager.completed.has('plan-1')).toBe(false);
+
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'plan-1', status: { type: 'busy' } },
+    });
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'plan-1', status: { type: 'idle' } },
+    });
+
+    expect(manager.completed.has('plan-1')).toBe(true);
+  });
+
+  it('suppresses plan-ready after a reply whose ask was missed', () => {
+    const manager = createManager(() => false);
+    manager.handleServerEvent({
+      type: 'question.replied',
+      properties: { requestID: 'question-1', sessionID: 'plan-1' },
+    });
+
+    manager.setSessionUnreadState('plan-1', 'plan-ready', true, '/repo', 500);
+    expect(manager.completed.has('plan-1')).toBe(false);
+
+    manager.handleServerEvent({ type: 'session.idle', properties: { sessionID: 'plan-1' } });
+    manager.handleServerEvent({
+      type: 'question.replied',
+      properties: { requestID: 'question-1', sessionID: 'plan-1' },
+    });
+    manager.setSessionUnreadState('plan-1', 'plan-ready', true, '/repo', 500);
+
+    expect(manager.completed.has('plan-1')).toBe(true);
+  });
+
+  it('does not complete a busy root while a child question needs attention', () => {
+    const manager = createManager(() => false);
+    manager.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'child-1', parentID: 'root-1' } },
+    });
+    manager.markSessionBusy('root-1');
+    manager.handleServerEvent({
+      type: 'question.asked',
+      properties: { id: 'question-1', sessionID: 'child-1', questions: [] },
+    });
+
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'root-1', status: { type: 'idle' } },
+    });
+
+    expect(manager.completed.has('root-1')).toBe(false);
+    expect(manager.busy.has('root-1')).toBe(false);
   });
 
   it('does not clear pending requests from another workspace during scoped reconciliation', () => {

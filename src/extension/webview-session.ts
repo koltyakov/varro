@@ -48,6 +48,7 @@ export class WebviewSession {
     >
   > = [];
   private commandStateReady = false;
+  private commandState: { canAbort: boolean; canSwitchSessions: boolean } | undefined;
   private webviewLoadGeneration = 0;
   private webviewRenderGeneration = 0;
   private recoverySnapshotLoad?: Promise<RecoverySnapshot>;
@@ -181,7 +182,11 @@ export class WebviewSession {
 
   updateCommandState(canAbort: boolean, canSwitchSessions: boolean) {
     this.commandStateReady = true;
-    if (this.manageCommandContext) {
+    const changed =
+      this.commandState?.canAbort !== canAbort ||
+      this.commandState.canSwitchSessions !== canSwitchSessions;
+    this.commandState = { canAbort, canSwitchSessions };
+    if (this.manageCommandContext && changed) {
       void vscode.commands.executeCommand('setContext', 'varro:canAbortSession', canAbort);
       void vscode.commands.executeCommand(
         'setContext',
@@ -576,6 +581,7 @@ export class WebviewSession {
 
   private resetCommandState() {
     this.commandStateReady = false;
+    this.commandState = undefined;
     if (!this.manageCommandContext) return;
     void vscode.commands.executeCommand('setContext', 'varro:canAbortSession', false);
     void vscode.commands.executeCommand('setContext', 'varro:canSwitchSessions', false);

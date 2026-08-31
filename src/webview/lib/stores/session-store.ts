@@ -1,7 +1,10 @@
 import type { FileDiff, SessionStatus } from '../../types';
 import { isRunningSessionStatus } from '../session-event-reducer';
+import { batch } from 'solid-js';
 import { produce } from 'solid-js/store';
 import { readWebviewInstanceContext } from '../state-stored-values';
+import { captureSessionStateTime, resetSessionStateClock } from '../session-state-clock';
+import { clearQuestionResponsePending } from '../state-permissions';
 import {
   applyMessagePartDelta,
   clearMessages,
@@ -57,17 +60,15 @@ export type SessionStatusSnapshotOptions = {
 const sessionStatusLocalUpdatedAt = new Map<string, number>();
 // Once a snapshot acknowledges local markers, older snapshots must not apply after they are pruned.
 let latestAppliedSessionStatusSnapshotStartedAt = Number.NEGATIVE_INFINITY;
-let sessionStatusLogicalTime = 0;
 
 export function captureSessionStatusSnapshotTime() {
-  sessionStatusLogicalTime = Math.max(sessionStatusLogicalTime + 1, Date.now());
-  return sessionStatusLogicalTime;
+  return captureSessionStateTime();
 }
 
 export function resetSessionStatusSnapshotTracking() {
   sessionStatusLocalUpdatedAt.clear();
   latestAppliedSessionStatusSnapshotStartedAt = Number.NEGATIVE_INFINITY;
-  sessionStatusLogicalTime = 0;
+  resetSessionStateClock();
 }
 
 export const sessionStore = {
@@ -135,57 +136,71 @@ export const sessionStore = {
       latestAppliedSessionStatusSnapshotStartedAt = snapshotStartedAt;
     }
 
-    setState('sessionStatus', (current) => {
-      if (snapshotStartedAt === undefined) {
-        return areEqualSessionStatusRecords(current, statuses) ? current : statuses;
-      }
-
-      const next = { ...statuses };
-      for (const [sessionId, updatedAt] of sessionStatusLocalUpdatedAt) {
-        if (updatedAt <= snapshotStartedAt) {
-          sessionStatusLocalUpdatedAt.delete(sessionId);
-          continue;
+    batch(() => {
+      setState('sessionStatus', (current) => {
+        if (snapshotStartedAt === undefined) {
+          return areEqualSessionStatusRecords(current, statuses) ? current : statuses;
         }
 
-        const currentStatus = current[sessionId];
-        if (currentStatus) next[sessionId] = currentStatus;
-        else delete next[sessionId];
-      }
+        const next = { ...statuses };
+        for (const [sessionId, updatedAt] of sessionStatusLocalUpdatedAt) {
+          if (updatedAt <= snapshotStartedAt) {
+            sessionStatusLocalUpdatedAt.delete(sessionId);
+            continue;
+          }
 
-      const activeRootId = getSessionTreeRootId(state.activeSessionId) || state.activeSessionId;
-      for (const sessionId of getSessionTreeIds(activeRootId)) {
-        const currentStatus = current[sessionId];
-        const incomingStatus = next[sessionId];
-        if (
-          currentStatus &&
-          isRunningSessionStatus(currentStatus) &&
-          (!incomingStatus || incomingStatus.type === 'idle') &&
-          !hasSettledLatestAssistantMessage(sessionId)
-        ) {
-          next[sessionId] = currentStatus;
+          const currentStatus = current[sessionId];
+          if (currentStatus) next[sessionId] = currentStatus;
+          else delete next[sessionId];
         }
+
+        const activeRootId = getSessionTreeRootId(state.activeSessionId) || state.activeSessionId;
+        for (const sessionId of getSessionTreeIds(activeRootId)) {
+          const currentStatus = current[sessionId];
+          const incomingStatus = next[sessionId];
+          if (
+            currentStatus &&
+            isRunningSessionStatus(currentStatus) &&
+            (!incomingStatus || incomingStatus.type === 'idle') &&
+            !hasSettledLatestAssistantMessage(sessionId)
+          ) {
+            next[sessionId] = currentStatus;
+          }
+        }
+        return areEqualSessionStatusRecords(current, next) ? current : next;
+      });
+      for (let index = state.questionResponsePendingSessionIds.length - 1; index >= 0; index -= 1) {
+        clearQuestionResponsePending(
+          state.questionResponsePendingSessionIds[index]!,
+          snapshotStartedAt
+        );
       }
-      return areEqualSessionStatusRecords(current, next) ? current : next;
     });
   },
   setSessionStatusEntry(sessionId: string, status: SessionStatus) {
     const prev = state.sessionStatus[sessionId];
     sessionStatusLocalUpdatedAt.set(sessionId, captureSessionStatusSnapshotTime());
     recordStatusCompletionTransition(sessionId, prev, status);
-    setState('sessionStatus', (current) => {
-      const currentStatus = current[sessionId];
-      if (currentStatus && isEqualSessionStatus(currentStatus, status)) return current;
-      return { ...current, [sessionId]: status };
+    batch(() => {
+      setState('sessionStatus', (current) => {
+        const currentStatus = current[sessionId];
+        if (currentStatus && isEqualSessionStatus(currentStatus, status)) return current;
+        return { ...current, [sessionId]: status };
+      });
+      clearQuestionResponsePending(sessionId);
     });
   },
   clearSessionStatusEntry(sessionId: string) {
     sessionStatusLocalUpdatedAt.set(sessionId, captureSessionStatusSnapshotTime());
-    setState(
-      'sessionStatus',
-      produce((statuses) => {
-        delete statuses[sessionId];
-      })
-    );
+    batch(() => {
+      setState(
+        'sessionStatus',
+        produce((statuses) => {
+          delete statuses[sessionId];
+        })
+      );
+      clearQuestionResponsePending(sessionId);
+    });
   },
 };
 

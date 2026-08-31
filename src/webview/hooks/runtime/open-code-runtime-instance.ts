@@ -968,6 +968,7 @@ export function resetWorkspaceDerivedState(options?: { preserveWorkspaceCatalog?
         queuedTreeSessionIds.has(sessionId) && (status?.type === 'busy' || status?.type === 'retry')
     )
   );
+  permissionsStore.resetQuestionResolutionState();
   batch(() => {
     sessionStore.setActiveSessionId(null);
     sessionStore.persistActiveSessionId(null);
@@ -2458,7 +2459,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     removePermission: permissionsStore.removePermission,
     setError: uiStore.setError,
     replyQuestion: (requestId, answers) => client.question.reply(requestId, answers),
-    removeQuestion: permissionsStore.removeQuestion,
+    beginQuestionResponse: permissionsStore.beginQuestionResponse,
+    cancelQuestionResponse: permissionsStore.cancelQuestionResponse,
+    removeResolvedQuestion: permissionsStore.removeResolvedQuestion,
     rejectRemoteQuestion: (requestId) => client.question.reject(requestId),
     getPermissionModeForSession: permissionsStore.getPermissionModeForSession,
     getDraftPermissionMode: permissionsStore.draftPermissionMode,

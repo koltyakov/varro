@@ -48,11 +48,13 @@ import {
   setShowSessionPicker,
   setSessionUsageLimit,
   setMessagesIncremental,
+  removeResolvedQuestion,
   setConnectionInitialized,
   setState,
   skipPlanSession,
 } from '../lib/state';
 import { ralphStore } from '../lib/stores/ralph-store';
+import { sessionStore } from '../lib/stores/session-store';
 import { clearDirectSessionReturn, rememberDirectSessionReturn } from '../lib/session-navigation';
 import {
   requestProviderConnection,
@@ -142,6 +144,7 @@ afterEach(() => {
   setState('failedSessionUpdatedAt', {});
   setState('recycleBinEntries', []);
   setState('questions', []);
+  setState('questionResponsePendingSessionIds', []);
   setState('permissions', []);
   setState('lastSeenSessions', reconcile({}));
   setState('completedSessionResponses', reconcile({}));
@@ -1622,6 +1625,111 @@ describe('header status badges', () => {
     }
   });
 
+  it('does not publish plan attention between a question answer and continuation', () => {
+    const sent: WebviewMessage[] = [];
+    // SAFETY: The fixture installs the protocol bridge callback owned by the webview host.
+    const bridgeWindow = window as {
+      __sendToExtension?: (message: WebviewMessage) => void;
+    };
+    const originalSend = bridgeWindow.__sendToExtension;
+    const originalWorkspacePath = state.editorContext.workspacePath;
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
+    setState('editorContext', 'workspacePath', '/repo');
+    setState('sessions', [session('plan-1', 500)]);
+    setState('sessionSelectedAgents', { 'plan-1': 'plan' });
+    setState('lastSeenSessions', { 'plan-1': 0 });
+    setState('questions', [{ id: 'question-1', sessionID: 'plan-1', questions: [] }]);
+
+    try {
+      cleanup = render(() => Chat(), container!);
+      sent.length = 0;
+
+      removeResolvedQuestion('question-1');
+      setState('sessions', [session('plan-1', 600)]);
+      vi.advanceTimersByTime(1_200);
+
+      expect(state.questionResponsePendingSessionIds).toEqual(['plan-1']);
+      expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([]);
+
+      sessionStore.setSessionStatusEntry('plan-1', { type: 'busy' });
+      sessionStore.setSessionStatusEntry('plan-1', { type: 'idle' });
+      vi.advanceTimersByTime(1_200);
+
+      expect(state.questionResponsePendingSessionIds).toEqual([]);
+      expect(sent.filter((message) => message.type === 'session-unread-state/update')).toEqual([
+        {
+          type: 'session-unread-state/update',
+          payload: {
+            sessionId: 'plan-1',
+            directory: '/repo',
+            kind: 'plan-ready',
+            markerAt: 600,
+            unread: true,
+          },
+        },
+      ]);
+    } finally {
+      setState('editorContext', 'workspacePath', originalWorkspacePath);
+      if (originalSend) bridgeWindow.__sendToExtension = originalSend;
+      else delete bridgeWindow.__sendToExtension;
+    }
+  });
+
+  it('does not republish command state for metadata-only session updates', () => {
+    const sent: WebviewMessage[] = [];
+    // SAFETY: The fixture installs the protocol bridge callback owned by the webview host.
+    const bridgeWindow = window as {
+      __sendToExtension?: (message: WebviewMessage) => void;
+    };
+    const originalSend = bridgeWindow.__sendToExtension;
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
+    setState('sessions', [session('session-1', 1)]);
+    setState('activeSessionId', 'session-1');
+
+    try {
+      cleanup = render(() => Chat(), container!);
+      sent.length = 0;
+
+      for (let updated = 2; updated <= 101; updated += 1) {
+        setState('sessions', [session('session-1', updated)]);
+      }
+
+      expect(sent.filter((message) => message.type === 'commands/state')).toEqual([]);
+    } finally {
+      if (originalSend) bridgeWindow.__sendToExtension = originalSend;
+      else delete bridgeWindow.__sendToExtension;
+    }
+  });
+
+  it('does not report new-chat navigation when Chat is disposed', () => {
+    const sent: WebviewMessage[] = [];
+    // SAFETY: The fixture installs the protocol bridge callback owned by the webview host.
+    const bridgeWindow = window as {
+      __sendToExtension?: (message: WebviewMessage) => void;
+    };
+    const originalSend = bridgeWindow.__sendToExtension;
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
+    setState('sessions', [session('session-1', 1)]);
+    setState('activeSessionId', 'session-1');
+
+    try {
+      cleanup = render(() => Chat(), container!);
+      sent.length = 0;
+      cleanup();
+      cleanup = undefined;
+
+      const cleanupState = sent.findLast((message) => message.type === 'commands/state');
+      expect(cleanupState).toEqual({
+        type: 'commands/state',
+        payload: { canAbort: false, canSwitchSessions: false, model: null },
+      });
+      expect(cleanupState?.payload).not.toHaveProperty('sessionId');
+    } finally {
+      if (originalSend) bridgeWindow.__sendToExtension = originalSend;
+      else delete bridgeWindow.__sendToExtension;
+    }
+  });
+
   it('publishes a newer completion marker when the unread kind is unchanged', () => {
     const sent: WebviewMessage[] = [];
     // SAFETY: The fixture installs the protocol bridge callback owned by the webview host.
@@ -2662,6 +2770,17 @@ describe('header status badges', () => {
     const indicators = deriveSessionIndicators(state.sessions);
     expect(indicators.planReadyIds.has('plan-blank')).toBe(false);
     expect(indicators.planReadyIds.has('plan-done')).toBe(true);
+  });
+
+  it('does not mark a plan root ready when a child session failed', () => {
+    setState('sessions', [session('plan-1', 200), session('child-1', 100, { parentID: 'plan-1' })]);
+    setState('sessionSelectedAgents', { 'plan-1': 'plan' });
+    setState('failedSessionIds', ['child-1']);
+
+    const indicators = deriveSessionIndicators(state.sessions);
+
+    expect(indicators.failedIds.has('plan-1')).toBe(true);
+    expect(indicators.planReadyIds.has('plan-1')).toBe(false);
   });
 
   it('keeps seen plan sessions in the plan-ready session group', () => {

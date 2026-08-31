@@ -145,6 +145,11 @@ export class SessionStateManager {
   private readonly sessionModes = new Map<string, string>();
   private readonly busyStartedAt = new Map<string, number>();
   private readonly pendingAttention = new Map<string, PendingAttentionEntry>();
+  private readonly resolvedPendingAttention: Record<PendingAttentionKind, Set<string>> = {
+    permission: new Set(),
+    question: new Set(),
+  };
+  private readonly questionResponsePendingRequests = new Map<string, string>();
   private readonly deferredPermissionAttention = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly trailingBusyAfterCompletion = new Set<string>();
   private readonly trailingTerminalsWhileBusy = new Map<string, TerminalWave>();
@@ -196,6 +201,9 @@ export class SessionStateManager {
   >();
   private readonly reconcileIdleSince = new Map<string, number>();
   private persistenceQueue: Promise<void> = Promise.resolve();
+  private acknowledgedCompletionRevision = 0;
+  private acknowledgedCompletionPersistedRevision = 0;
+  private readonly acknowledgedCompletionPendingRevisions = new Set<number>();
   private recoverySnapshotPromise: Promise<RecoverySnapshot> | undefined;
   private interruptedRecoveryLoaded = false;
   private blockingRecoveryCleanupPending = false;
@@ -314,6 +322,12 @@ export class SessionStateManager {
     if (directory) this.setSessionDirectory(sessionID, directory);
     if (this.isIgnoredBackgroundSession(sessionID)) {
       if (this.deleteCompletedSession(sessionID)) this.listener.onStatusChange();
+      return;
+    }
+    if (
+      this.hasPendingAttentionForSessionTree(sessionID) ||
+      this.isQuestionResponsePending(sessionID)
+    ) {
       return;
     }
     const rootSessionID = this.rootSessionIdFor(sessionID);
@@ -579,6 +593,7 @@ export class SessionStateManager {
         const sessionID = getString(props?.sessionID);
         const statusType = getString(asRecord(props?.status)?.type);
         if (!sessionID || !statusType) break;
+        this.clearQuestionResponsePending(sessionID);
         if (statusType === 'busy' && this.trailingBusyAfterCompletion.delete(sessionID)) break;
         if (statusType === 'busy' || statusType === 'retry') {
           this.trailingBusyAfterCompletion.delete(sessionID);
@@ -607,6 +622,7 @@ export class SessionStateManager {
         // the same meaning; finish on it too so either signal recovers the UI.
         const sessionID = getString(props?.sessionID);
         if (!sessionID) break;
+        this.clearQuestionResponsePending(sessionID);
         this.serverBusySessions.delete(sessionID);
         changed =
           this.finishBusySession(
@@ -648,6 +664,7 @@ export class SessionStateManager {
       case 'session.error': {
         const sessionID = getString(props?.sessionID);
         if (!sessionID) break;
+        this.clearQuestionResponsePending(sessionID);
         this.trailingBusyAfterCompletion.delete(sessionID);
         const error = asRecord(props?.error);
         changed =
@@ -741,7 +758,8 @@ export class SessionStateManager {
             'permission',
             getString(requestProps?.id) ||
               getString(requestProps?.permissionID) ||
-              getString(requestProps?.requestID)
+              getString(requestProps?.requestID),
+            getString(requestProps?.sessionID)
           ) || changed;
         break;
       }
@@ -757,7 +775,8 @@ export class SessionStateManager {
         changed =
           this.clearBlockingRequest(
             'question',
-            getString(props?.requestID) || getString(props?.id)
+            getString(props?.requestID) || getString(props?.id),
+            getString(props?.sessionID)
           ) || changed;
         break;
       }
@@ -921,7 +940,7 @@ export class SessionStateManager {
     startedAtRevision: number,
     workspacePath?: string
   ): void {
-    const snapshots = requests
+    const snapshotCandidates = requests
       .map((value) => {
         const props = asRecord(asRecord(value)?.info) || asRecord(value);
         if (!props) return undefined;
@@ -933,6 +952,9 @@ export class SessionStateManager {
         (item): item is { id: string; sessionID: string; props: Record<string, unknown> } =>
           item !== undefined
       );
+    const snapshots = snapshotCandidates.filter(
+      (snapshot) => !this.resolvedPendingAttention[kind].has(snapshot.id)
+    );
     const snapshotIDs = new Set(snapshots.map((item) => item.id));
     let changed = false;
 
@@ -949,6 +971,8 @@ export class SessionStateManager {
       }
       this.blockingRequestMutations.add(id);
       this.clearDeferredPermissionAttention(id);
+      this.rememberResolvedPendingAttention(kind, id);
+      if (kind === 'question') this.rememberQuestionResponsePending(id, request.sessionID);
       this.pendingAttention.delete(id);
       changed = true;
     }
@@ -986,21 +1010,36 @@ export class SessionStateManager {
     return result;
   }
 
-  private persistAcknowledgedCompletions(): Promise<void> {
+  private persistAcknowledgedCompletions(): void {
+    if (
+      this.acknowledgedCompletionPendingRevisions.has(this.acknowledgedCompletionRevision) ||
+      this.acknowledgedCompletionPersistedRevision >= this.acknowledgedCompletionRevision
+    ) {
+      return;
+    }
+    const revision = this.acknowledgedCompletionRevision;
     const snapshot = Object.fromEntries(
       [...this.acknowledgedCompletedRoots].map(([rootSessionID, markers]) => [
         rootSessionID,
         { ...markers },
       ])
     );
-    return this.enqueuePersistence(async () => {
+    this.acknowledgedCompletionPendingRevisions.add(revision);
+    const operation = this.enqueuePersistence(async () => {
       try {
         await this.persistence.set(ACKNOWLEDGED_COMPLETIONS_KEY, snapshot);
+        this.acknowledgedCompletionPersistedRevision = Math.max(
+          this.acknowledgedCompletionPersistedRevision,
+          revision
+        );
       } catch (err) {
         logger.warn(
           `Failed to persist completed-session acknowledgements: ${err instanceof Error ? err.message : String(err)}`
         );
       }
+    });
+    void operation.finally(() => {
+      this.acknowledgedCompletionPendingRevisions.delete(revision);
     });
   }
 
@@ -1305,17 +1344,23 @@ export class SessionStateManager {
   ) {
     if (acknowledgedAt === undefined) return;
     const current = this.acknowledgedCompletedRoots.get(rootSessionID) ?? {};
+    const nextMarker = Math.max(current[kind] ?? acknowledgedAt, acknowledgedAt);
+    if (current[kind] === nextMarker) {
+      this.persistAcknowledgedCompletions();
+      return;
+    }
     this.acknowledgedCompletedRoots.delete(rootSessionID);
     this.acknowledgedCompletedRoots.set(rootSessionID, {
       ...current,
-      [kind]: Math.max(current[kind] ?? acknowledgedAt, acknowledgedAt),
+      [kind]: nextMarker,
     });
     while (this.acknowledgedCompletedRoots.size > MAX_SESSION_METADATA_ENTRIES) {
       const oldest = this.acknowledgedCompletedRoots.keys().next().value;
       if (oldest === undefined) break;
       this.acknowledgedCompletedRoots.delete(oldest);
     }
-    void this.persistAcknowledgedCompletions();
+    this.acknowledgedCompletionRevision += 1;
+    this.persistAcknowledgedCompletions();
   }
 
   private setSessionDirectory(sessionID: string, directory: string) {
@@ -1350,6 +1395,8 @@ export class SessionStateManager {
     const requestID = getBlockingRequestID(props);
     const sessionID = getString(props.sessionID);
     if (!requestID || !sessionID) return false;
+    this.resolvedPendingAttention[kind].delete(requestID);
+    if (kind === 'question') this.questionResponsePendingRequests.delete(requestID);
     if (recordEventMutation) this.recordBlockingRequestMutation(kind, requestID);
     else this.blockingRequestMutations.add(requestID);
     if (this.pendingAttention.has(requestID)) return false;
@@ -1367,7 +1414,7 @@ export class SessionStateManager {
     };
     if (eventType) pending.eventType = eventType;
     this.pendingAttention.set(requestID, pending);
-    this.deleteCompletedSession(sessionID);
+    this.clearCompletedForSessionTree(sessionID);
     if (kind === 'permission') this.deferPermissionAttention(requestID);
     else this.showBlockingNotification(kind, sessionID, label);
     return true;
@@ -1394,6 +1441,7 @@ export class SessionStateManager {
     this.trailingBusyAfterCompletion.delete(sessionID);
     this.trailingTerminalsWhileBusy.delete(sessionID);
     this.serverBusyTerminalEvidence.delete(sessionID);
+    this.clearQuestionResponsePending(sessionID);
     this.clearBusyAttempts(sessionID);
     for (const [requestID, request] of this.pendingAttention.entries()) {
       if (request.sessionID !== sessionID) continue;
@@ -1405,11 +1453,24 @@ export class SessionStateManager {
     return changed;
   }
 
-  private clearBlockingRequest(kind: PendingAttentionKind, requestID: string | undefined): boolean {
+  private clearBlockingRequest(
+    kind: PendingAttentionKind,
+    requestID: string | undefined,
+    fallbackSessionID?: string
+  ): boolean {
     if (!requestID) return false;
+    const sessionID = this.pendingAttention.get(requestID)?.sessionID ?? fallbackSessionID;
+    const wasResolved = this.resolvedPendingAttention[kind].has(requestID);
     this.recordBlockingRequestMutation(kind, requestID);
+    this.rememberResolvedPendingAttention(kind, requestID);
     this.clearDeferredPermissionAttention(requestID);
-    return this.pendingAttention.delete(requestID);
+    let changed = this.pendingAttention.delete(requestID);
+    if (kind === 'question' && sessionID && !wasResolved) {
+      changed = this.questionResponsePendingRequests.get(requestID) !== sessionID || changed;
+      this.rememberQuestionResponsePending(requestID, sessionID);
+      changed = this.clearCompletedForSessionTree(sessionID) || changed;
+    }
+    return changed;
   }
 
   private deferPermissionAttention(requestID: string): void {
@@ -1429,6 +1490,9 @@ export class SessionStateManager {
     this.disposed = true;
     for (const timer of this.deferredPermissionAttention.values()) clearTimeout(timer);
     this.deferredPermissionAttention.clear();
+    this.resolvedPendingAttention.permission.clear();
+    this.resolvedPendingAttention.question.clear();
+    this.questionResponsePendingRequests.clear();
   }
 
   private recordBlockingRequestMutation(kind: PendingAttentionKind, requestID: string): void {
@@ -1474,6 +1538,48 @@ export class SessionStateManager {
   private hasPendingAttentionForSession(sessionID: string): boolean {
     for (const request of this.pendingAttention.values()) {
       if (request.sessionID === sessionID) return true;
+    }
+    return false;
+  }
+
+  private hasPendingAttentionForSessionTree(sessionID: string): boolean {
+    const rootSessionID = this.rootSessionIdFor(sessionID);
+    for (const request of this.pendingAttention.values()) {
+      if (this.rootSessionIdFor(request.sessionID) === rootSessionID) return true;
+    }
+    return false;
+  }
+
+  private clearCompletedForSessionTree(sessionID: string): boolean {
+    const rootSessionID = this.rootSessionIdFor(sessionID);
+    let changed = false;
+    for (const completedSessionID of this.completedSessions) {
+      if (this.rootSessionIdFor(completedSessionID) !== rootSessionID) continue;
+      changed = this.deleteCompletedSession(completedSessionID) || changed;
+    }
+    return changed;
+  }
+
+  private rememberResolvedPendingAttention(kind: PendingAttentionKind, requestID: string): void {
+    const resolved = this.resolvedPendingAttention[kind];
+    resolved.delete(requestID);
+    resolved.add(requestID);
+  }
+
+  private rememberQuestionResponsePending(requestID: string, sessionID: string): void {
+    this.questionResponsePendingRequests.set(requestID, sessionID);
+  }
+
+  private clearQuestionResponsePending(sessionID: string): void {
+    for (const [requestID, pendingSessionID] of this.questionResponsePendingRequests) {
+      if (pendingSessionID === sessionID) this.questionResponsePendingRequests.delete(requestID);
+    }
+  }
+
+  private isQuestionResponsePending(sessionID: string): boolean {
+    const rootSessionID = this.rootSessionIdFor(sessionID);
+    for (const pendingSessionID of this.questionResponsePendingRequests.values()) {
+      if (this.rootSessionIdFor(pendingSessionID) === rootSessionID) return true;
     }
     return false;
   }
@@ -1570,7 +1676,8 @@ export class SessionStateManager {
 
     if (
       this.isIgnoredBackgroundSession(sessionID) ||
-      this.hasPendingAttentionForSession(sessionID) ||
+      this.hasPendingAttentionForSessionTree(sessionID) ||
+      this.isQuestionResponsePending(sessionID) ||
       this.failedSessions.has(sessionID)
     ) {
       return this.clearBusy(sessionID);

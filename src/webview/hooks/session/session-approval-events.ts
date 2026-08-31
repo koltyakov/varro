@@ -179,28 +179,28 @@ export function registerApprovalEventHandlers(deps: ApprovalEventDependencies): 
   cleanups.push(
     serverEvents.on('question.replied', (data) => {
       const requestID = getQuestionReplyId(data.properties);
-      if (requestID) permissionsStore.removeQuestion(requestID);
+      if (requestID) permissionsStore.removeResolvedQuestion(requestID);
     })
   );
 
   cleanups.push(
     serverEvents.on('question.rejected', (data) => {
       const requestID = getQuestionReplyId(data.properties);
-      if (requestID) permissionsStore.removeQuestion(requestID);
+      if (requestID) permissionsStore.removeResolvedQuestion(requestID);
     })
   );
 
   cleanups.push(
     serverEvents.on('question.v2.replied', (data) => {
       const requestID = getQuestionReplyId(data.properties);
-      if (requestID) permissionsStore.removeQuestion(requestID);
+      if (requestID) permissionsStore.removeResolvedQuestion(requestID);
     })
   );
 
   cleanups.push(
     serverEvents.on('question.v2.rejected', (data) => {
       const requestID = getQuestionReplyId(data.properties);
-      if (requestID) permissionsStore.removeQuestion(requestID);
+      if (requestID) permissionsStore.removeResolvedQuestion(requestID);
     })
   );
 

@@ -2663,6 +2663,11 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
     questionIds.add(question.sessionID);
     questionIds.add(rootSessionId(question.sessionID));
   }
+  const questionResponsePendingIds = new Set<string>();
+  for (const sessionId of state.questionResponsePendingSessionIds) {
+    questionResponsePendingIds.add(sessionId);
+    questionResponsePendingIds.add(rootSessionId(sessionId));
+  }
   const runningIds = new Set<string>();
   const failedIds = new Set<string>();
   const attentionIds = new Set<string>();
@@ -2681,6 +2686,7 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
   const isRunning = (sessionId: string) => {
     if (hasActiveUsageLimit(sessionId)) return false;
     if (isAwaitingInput(sessionId)) return false;
+    if (questionResponsePendingIds.has(rootSessionId(sessionId))) return true;
     const ralphRun = ralphStore.getRun(rootSessionId(sessionId));
     if (ralphRun && ralphRun.status !== 'running') return false;
     const type = state.sessionStatus[sessionId]?.type;
@@ -2755,6 +2761,8 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
     }
     newlyCompletedIds.add(sessionId);
   }
+
+  for (const failedId of failedIds) planReadyIds.delete(failedId);
 
   const countDescendants = (sessionId: string): number => {
     const cachedCount = descendantSubagentCountBySession.get(sessionId);

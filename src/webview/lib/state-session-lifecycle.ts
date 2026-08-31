@@ -16,6 +16,7 @@ import {
   state,
 } from './app-state';
 import { postMessage } from './bridge';
+import { clearQuestionResponsePending } from './state-permissions';
 import { collectSessionTreeIds } from './session-tree-index';
 import {
   getSessionMarkerWorkspaceScope,
@@ -71,11 +72,12 @@ export function consumeInterruptedSessionIds() {
 }
 
 export function markSessionSeen(id: string, updatedAt?: number) {
-  postMessage({ type: 'session/seen', payload: { sessionId: id } });
   const nextSessions = nextSeenSessions(state.lastSeenSessions, id, updatedAt);
-  if (!nextSessions) return;
+  if (!nextSessions) return false;
   setState('lastSeenSessions', id, nextSessions[id]!);
   writeMarkerForSession(STORAGE_KEYS.lastSeenSessions, id, nextSessions[id]);
+  postMessage({ type: 'session/seen', payload: { sessionId: id } });
+  return true;
 }
 
 export function markSessionResponseCompleted(id: string, completedAt?: number) {
@@ -315,6 +317,7 @@ export function setSessionFailed(sessionId: string, failed: boolean) {
       if (idx !== -1) ids.splice(idx, 1);
     })
   );
+  if (failed) clearQuestionResponsePending(sessionId);
 }
 
 export function setSessionUsageLimit(sessionId: string, notice: UsageLimitNotice | null) {

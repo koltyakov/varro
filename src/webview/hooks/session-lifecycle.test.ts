@@ -39,6 +39,7 @@ const {
   state: {
     activeSessionId: null as string | null,
     sessions: [] as Session[],
+    questionResponsePendingSessionIds: [] as string[],
   },
   stopLoading: vi.fn(),
 }));

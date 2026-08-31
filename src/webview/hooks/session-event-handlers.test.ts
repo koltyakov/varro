@@ -46,7 +46,7 @@ const {
   removePermission,
   removeMessage,
   removeMessagePart,
-  removeQuestion,
+  removeResolvedQuestion,
   replaceMessages,
   setSessionCompactingStore,
   setSessionFailed,
@@ -86,7 +86,7 @@ const {
     removePermission: vi.fn(),
     removeMessage: vi.fn(),
     removeMessagePart: vi.fn(),
-    removeQuestion: vi.fn(),
+    removeResolvedQuestion: vi.fn(),
     replaceMessages: vi.fn(),
     setSessionCompactingStore: vi.fn(),
     setSessionFailed: vi.fn(),
@@ -125,7 +125,7 @@ vi.mock('../lib/state', async () => {
     markSessionSeen,
     removeMessagePart,
     removeMessage,
-    removeQuestion,
+    removeResolvedQuestion,
     replaceMessages,
     state,
     setSessionCompacting: setSessionCompactingStore,
@@ -662,7 +662,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('handles v2 question ask and completion events', () => {
     upsertQuestion.mockClear();
-    removeQuestion.mockClear();
+    removeResolvedQuestion.mockClear();
     const handlers = installHandlers();
 
     registerSessionEventHandlers(createDefaultDeps());
@@ -687,8 +687,8 @@ describe('registerSessionEventHandlers', () => {
     });
 
     expect(upsertQuestion).toHaveBeenCalledWith(question);
-    expect(removeQuestion).toHaveBeenNthCalledWith(1, 'question-v2');
-    expect(removeQuestion).toHaveBeenNthCalledWith(2, 'question-v3');
+    expect(removeResolvedQuestion).toHaveBeenNthCalledWith(1, 'question-v2');
+    expect(removeResolvedQuestion).toHaveBeenNthCalledWith(2, 'question-v3');
   });
 
   it('syncs pending permissions after shell progress events in case permission events were missed', () => {
@@ -5048,7 +5048,7 @@ describe('registerSessionEventHandlers', () => {
     addPermission.mockClear();
     removePermission.mockClear();
     upsertQuestion.mockClear();
-    removeQuestion.mockClear();
+    removeResolvedQuestion.mockClear();
 
     registerSessionEventHandlers(
       createDefaultDeps({
@@ -5081,8 +5081,8 @@ describe('registerSessionEventHandlers', () => {
     );
     expect(removePermission).toHaveBeenCalledWith('perm-fallback');
     expect(upsertQuestion).toHaveBeenCalledWith(question);
-    expect(removeQuestion).toHaveBeenNthCalledWith(1, 'question-1');
-    expect(removeQuestion).toHaveBeenNthCalledWith(2, 'question-2');
+    expect(removeResolvedQuestion).toHaveBeenNthCalledWith(1, 'question-1');
+    expect(removeResolvedQuestion).toHaveBeenNthCalledWith(2, 'question-2');
   });
 
   it('ignores settled todo updates and filters session diffs to the active tree', () => {

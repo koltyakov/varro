@@ -389,6 +389,7 @@ describe('session status helpers', () => {
       failedSessionIds: [],
       lastSeenSessions: {},
       permissions: [],
+      questionResponsePendingSessionIds: [],
       questions: [],
       sessions: [],
     });

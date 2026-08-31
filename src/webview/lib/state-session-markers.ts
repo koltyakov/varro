@@ -80,7 +80,7 @@ export function nextSeenSessions(
   updatedAt?: number,
   now = Date.now()
 ) {
-  const seenAt = Math.max(current[sessionId] ?? 0, updatedAt ?? 0, now);
+  const seenAt = Math.max(current[sessionId] ?? 0, updatedAt ?? now);
   if (current[sessionId] === seenAt) return null;
   return { ...current, [sessionId]: seenAt };
 }

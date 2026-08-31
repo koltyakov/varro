@@ -361,6 +361,37 @@ describe('WebviewSession', () => {
     expect(vscodeMock.commands.executeCommand).not.toHaveBeenCalled();
   });
 
+  it('does not rewrite unchanged command contexts', () => {
+    const { session } = createSession();
+
+    session.updateCommandState(true, false);
+    vscodeMock.commands.executeCommand.mockClear();
+    session.updateCommandState(true, false);
+
+    expect(vscodeMock.commands.executeCommand).not.toHaveBeenCalled();
+  });
+
+  it('restores command contexts after a webview reload', async () => {
+    const { session } = createSession();
+    const view = createWebviewView(true);
+    session.updateCommandState(true, true);
+
+    await session.resolve(view as never);
+    vscodeMock.commands.executeCommand.mockClear();
+    session.updateCommandState(true, true);
+
+    expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith(
+      'setContext',
+      'varro:canAbortSession',
+      true
+    );
+    expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith(
+      'setContext',
+      'varro:canSwitchSessions',
+      true
+    );
+  });
+
   it('ignores stale renderHtml results from an earlier resolve generation', async () => {
     const firstHtml = createDeferred<string>();
     const secondHtml = createDeferred<string>();

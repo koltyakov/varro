@@ -8,11 +8,14 @@ import {
 } from './session-store';
 import {
   resetDefaultAppState,
+  resetQuestionResolutionState,
+  removeResolvedQuestion,
   setMessagesIncremental,
   setShowSessionPicker,
   startLoading,
   state,
   stopLoading,
+  upsertQuestion,
 } from '../state';
 
 function createSession(id: string, parentID?: string): Session {
@@ -85,6 +88,7 @@ describe('sessionStore', () => {
     delete (window as { __initialWebviewState?: unknown }).__initialWebviewState;
     window.localStorage.clear();
     resetDefaultAppState();
+    resetQuestionResolutionState();
     resetSessionStatusSnapshotTracking();
   });
 
@@ -165,6 +169,33 @@ describe('sessionStore', () => {
 
     expect(state.sessionStatus['session-1']).toEqual({ type: 'busy' });
     nowSpy.mockRestore();
+  });
+
+  it('does not let an older status snapshot clear a newer question transition', () => {
+    const timestamp = Date.now() + 1000;
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(timestamp);
+    const snapshotStartedAt = captureSessionStatusSnapshotTime();
+    upsertQuestion({ id: 'question-1', sessionID: 'session-1', questions: [] });
+    removeResolvedQuestion('question-1');
+
+    sessionStore.setSessionStatuses({}, { snapshotStartedAt });
+
+    expect(state.questionResponsePendingSessionIds).toEqual(['session-1']);
+
+    sessionStore.setSessionStatuses({}, { snapshotStartedAt: captureSessionStatusSnapshotTime() });
+    expect(state.questionResponsePendingSessionIds).toEqual([]);
+    nowSpy.mockRestore();
+  });
+
+  it('clears only the question transition owned by the updated child session', () => {
+    upsertQuestion({ id: 'question-1', sessionID: 'child-1', questions: [] });
+    upsertQuestion({ id: 'question-2', sessionID: 'child-2', questions: [] });
+    removeResolvedQuestion('question-1');
+    removeResolvedQuestion('question-2');
+
+    sessionStore.setSessionStatusEntry('child-1', { type: 'busy' });
+
+    expect(state.questionResponsePendingSessionIds).toEqual(['child-2']);
   });
 
   it('prunes acknowledged local markers and ignores older snapshots afterward', () => {
