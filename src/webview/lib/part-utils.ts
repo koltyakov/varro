@@ -1,7 +1,8 @@
+import { isAbortedToolError } from '../../shared/error-classification';
 import type { Part, ToolPart } from '../types';
 import { getToolFileChange, getToolReadPath } from './tool-file-change';
 import { showThinking } from './state';
-import { isTodoToolName, isTodoToolTitle } from './tool-normalization';
+import { isApplyPatchTool, isTodoToolName, isTodoToolTitle } from './tool-normalization';
 
 export function isWorkspaceDirectoryText(text: string) {
   return text.startsWith('[Working directory:');
@@ -54,7 +55,13 @@ export function isTodoToolPart(part: Extract<Part, { type: 'tool' }>) {
 }
 
 export function shouldShowAssistantPartInline(part: Part, respectThinkingToggle = true) {
-  if (part.type === 'tool') return !isTodoToolPart(part);
+  if (part.type === 'tool') {
+    if (isTodoToolPart(part)) return false;
+    if (isApplyPatchTool(part.tool) && isAbortedToolError(part.state) && !isFileEditPart(part)) {
+      return false;
+    }
+    return true;
+  }
 
   switch (part.type) {
     case 'text':

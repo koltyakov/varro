@@ -521,7 +521,7 @@ describe('AssistantMessageContent', () => {
     );
   });
 
-  it('renders aborted tools with the activity counts', () => {
+  it('hides aborted apply_patch calls without parseable file changes', () => {
     const aborted = toolPart('patch-aborted', 'apply_patch', { patchText: '*** Begin Patch' });
     aborted.state = {
       status: 'error',
@@ -530,13 +530,14 @@ describe('AssistantMessageContent', () => {
       time: { start: 0, end: 1 },
     };
 
-    renderAssistantMessageContent({ parts: [aborted] });
+    renderAssistantMessageContent({ parts: [reasoningPart('reasoning-1'), aborted] });
 
-    const counts = container?.querySelector('.assistant-activity-summary-counts');
-    expect(counts?.textContent).toBe('1 tool aborted');
-    expect(
-      container?.querySelector('.assistant-activity-summary-text')?.getAttribute('aria-label')
-    ).toBe('Explored: 1 tool aborted');
+    const summary = container?.querySelector<HTMLButtonElement>('.assistant-activity-summary');
+    expect(summary?.textContent).toBe('Explored: 1 thought');
+    summary?.click();
+
+    expect(container?.querySelector('[data-part-id="reasoning-1"]')).not.toBeNull();
+    expect(container?.querySelector('[data-part-id="patch-aborted"]')).toBeNull();
   });
 
   it('keeps active activity visible until it moves into Explored', async () => {

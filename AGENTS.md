@@ -8,7 +8,7 @@
 - TypeScript suggestion check: `npm run typecheck:suggestions` (fails on editor suggestion diagnostics that `tsc` does not report).
 - Unit tests: `npm run test`; coverage: `npm run test:coverage`.
 - Run one Vitest file: `npm run test -- src/webview/components/ChatInput.test.ts`.
-- Run one Vitest case: `npm run test -- src/webview/components/ChatInput.test.ts -t "detects slash commands only at the start of the input"`.
+- Run one Vitest case: `npm run test -- src/webview/components/ChatInput.test.ts -t "runs a typed slash command with args on Enter"`.
 - E2E tests: `npm run test:e2e`; run one Playwright spec: `npm run test:e2e -- e2e/tests/layout.spec.ts`.
 - Main code areas: `src/extension`, `src/webview`, and `src/shared`.
 - TypeScript is `strict`; prefer explicit types at module boundaries and shared protocol shapes.

@@ -32,6 +32,7 @@ import {
   getFinalAssistantTextPartId,
   isFileEditPart,
   shouldShowAssistantPartInHighlightedCard,
+  shouldShowAssistantPartInline,
 } from '../../lib/part-utils';
 import {
   getToolFileChangeSignature,
@@ -398,17 +399,20 @@ export function AssistantMessageContent(props: {
 }) {
   const dedupedParts = createMemo(() => deduplicateFileEdits(props.parts));
   const [readModeOpen, setReadModeOpen] = createSignal(false);
-  const displayParts = createMemo(() =>
-    props.suppressHighlightedCardMetaParts
-      ? dedupedParts().filter((part) => {
+  const displayParts = createMemo(() => {
+    const visibleParts = dedupedParts().filter(
+      (part) => part.type !== 'tool' || shouldShowAssistantPartInline(part)
+    );
+    return props.suppressHighlightedCardMetaParts
+      ? visibleParts.filter((part) => {
           if (part.type === 'text') {
             const effectiveText = props.textForPart(part) ?? part.text;
             return shouldShowAssistantPartInHighlightedCard({ ...part, text: effectiveText });
           }
           return shouldShowAssistantPartInHighlightedCard(part);
         })
-      : dedupedParts()
-  );
+      : visibleParts;
+  });
   const orderedDisplayParts = createMemo(() => {
     const parts = displayParts();
     const ordered: Part[] = [];

@@ -27,7 +27,7 @@ function completedState(
   };
 }
 
-function toolPart(tool: string, state: ToolStateCompleted): ToolPart {
+function toolPart(tool: string, state: ToolPart['state']): ToolPart {
   return {
     id: `${tool}-1`,
     sessionID: 'session-1',
@@ -103,6 +103,26 @@ describe('part utils', () => {
     expect(shouldShowAssistantPartInline(commentReasoningPart)).toBe(false);
     expect(shouldShowAssistantPartInline(toolPart('todowrite', completedState({})))).toBe(false);
     expect(shouldShowAssistantPartInline(retryPart)).toBe(true);
+
+    const emptyAbortedPatch = toolPart('functions.apply_patch', {
+      status: 'error',
+      input: { patchText: '*** Begin Patch' },
+      error: 'Tool execution aborted',
+      time: { start: 0, end: 1 },
+    });
+    const parsedAbortedPatch = toolPart('apply_patch', {
+      status: 'error',
+      input: {
+        patchText: `*** Begin Patch
+*** Add File: src/proposed.ts
++export const proposed = true;
+*** End Patch`,
+      },
+      error: 'Aborted',
+      time: { start: 0, end: 1 },
+    });
+    expect(shouldShowAssistantPartInline(emptyAbortedPatch)).toBe(false);
+    expect(shouldShowAssistantPartInline(parsedAbortedPatch)).toBe(true);
 
     setShowThinking(false);
     expect(shouldShowAssistantPartInline(reasoningPart)).toBe(false);
