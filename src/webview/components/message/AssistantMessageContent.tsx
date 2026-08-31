@@ -847,7 +847,14 @@ export function AssistantMessageContent(props: {
         >
           <AssistantActivityGroup
             info={props.info}
-            parts={item().parts}
+            parts={item().parts.filter((part) => {
+              const activePartKeys =
+                props.groupedActiveActivityPartKeys ?? props.visibleActiveActivityPartKeys;
+              return (
+                !isAssistantActivityPartRunning(part) ||
+                !activePartKeys?.has(getAssistantActivityPartKey(part))
+              );
+            })}
             summaryParts={activityGroup().parts.filter((part) => {
               const key = getAssistantActivityPartKey(part);
               const activePartKeys =

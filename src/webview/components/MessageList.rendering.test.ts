@@ -1143,7 +1143,7 @@ describe('MessageList compact activity', () => {
     );
   });
 
-  it('hides active activity behind streamed response text', async () => {
+  it('keeps active activity outside Explored while response text streams', async () => {
     const read = toolPart('read-before-stream', 'assistant-1', 'call-read-before-stream');
     read.tool = 'read';
     read.state = {
@@ -1209,7 +1209,9 @@ describe('MessageList compact activity', () => {
     });
     await Promise.resolve();
 
-    expect(container?.querySelector('[data-activity-part-id="search-before-stream"]')).toBeNull();
+    expect(
+      container?.querySelector('[data-activity-part-id="search-before-stream"]')
+    ).not.toBeNull();
     expect(
       container?.querySelector('[data-activity-part-id="command-after-stream"]')
     ).not.toBeNull();
@@ -1224,9 +1226,14 @@ describe('MessageList compact activity', () => {
     expect(explored).toBeDefined();
     explored?.click();
 
-    expect(container?.querySelector('.assistant-activity-details')?.textContent).toContain(
+    expect(container?.querySelector('.assistant-activity-details')?.textContent).not.toContain(
       'Search: activity'
     );
+    expect(
+      container
+        ?.querySelector('[data-activity-part-id="search-before-stream"]')
+        ?.closest('.assistant-activity-details')
+    ).toBeNull();
 
     batch(() => {
       upsertPart({ ...response, text: 'I found the relevant implementation.' });
@@ -1235,29 +1242,39 @@ describe('MessageList compact activity', () => {
     });
     await Promise.resolve();
 
-    expect(container?.querySelector('[data-activity-part-id="search-before-stream"]')).toBeNull();
+    expect(
+      container?.querySelector('[data-activity-part-id="search-before-stream"]')
+    ).not.toBeNull();
   });
 
-  it('keeps a late-identified apply_patch visible while response text streams', async () => {
-    const read = toolPart('read-before-patch', 'assistant-1', 'call-read-before-patch');
-    read.tool = 'read';
-    read.state = {
+  it('keeps an active patch outside expanded Explored before its identity arrives', async () => {
+    const search = toolPart('search-before-patch', 'assistant-1', 'call-search-before-patch');
+    search.tool = 'grep';
+    search.state = {
       status: 'completed',
-      input: { filePath: 'src/app.ts' },
-      output: 'source',
-      title: 'src/app.ts',
+      input: { pattern: 'contextFile' },
+      output: 'Found matches',
+      title: 'Searching',
       metadata: {},
       time: { start: 0, end: 1 },
     };
+    const thought: Part = {
+      id: 'thought-before-patch',
+      sessionID: 'session-1',
+      messageID: 'assistant-1',
+      type: 'reasoning',
+      text: 'Applying patch tests',
+      time: { start: 1, end: 2 },
+    };
     const patch = toolPart('patch-running', 'assistant-1', 'call-patch-running');
-    patch.tool = '';
+    patch.tool = 'tool';
     patch.state = {
       status: 'running',
       input: {
         patchText: '*** Begin Patch\n*** Update File: src/app.ts\n@@\n-old\n+new\n*** End Patch',
       },
       title: 'apply_patch',
-      time: { start: 1 },
+      time: { start: 2 },
     };
     // SAFETY: The fixture provides the TextPart fields read by this test.
     const response: TextPart = {
@@ -1270,7 +1287,7 @@ describe('MessageList compact activity', () => {
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Update the file')] },
       {
         info: assistantMessage('assistant-1', { parentID: 'user-1' }),
-        parts: [read, patch],
+        parts: [search, thought, patch],
       },
       {
         info: assistantMessage('assistant-2', { parentID: 'user-1' }),
@@ -1294,14 +1311,18 @@ describe('MessageList compact activity', () => {
     expect(
       patchTitle?.closest('.chat-tool-invocation-part')?.querySelector('.tool-status-running')
     ).not.toBeNull();
-    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
-      'Explored: 1 file'
+    const explored = container?.querySelector<HTMLButtonElement>('.assistant-activity-summary');
+    expect(explored?.textContent).toContain('Explored: 1 thought, 1 search');
+    explored?.click();
+    expect(patchTitle?.closest('.assistant-activity-details')).toBeNull();
+    expect(container?.querySelector('.assistant-activity-details')?.textContent).not.toContain(
+      'apply_patch'
     );
 
     upsertPart({
       ...patch,
       tool: 'functions.apply_patch',
-      state: { status: 'pending', input: patch.state.input, raw: '' },
+      state: { ...patch.state, title: 'apply_patch' },
     });
     await Promise.resolve();
 
@@ -1312,13 +1333,14 @@ describe('MessageList compact activity', () => {
       tool: 'functions.apply_patch',
       state: { status: 'running' },
     });
-    const identifiedPatchTitle = [
-      ...container!.querySelectorAll<HTMLElement>('.tool-invocation-title'),
-    ].find((element) => element.textContent === 'apply_patch');
-    expect(identifiedPatchTitle).toBeDefined();
-    expect(identifiedPatchTitle?.closest('.assistant-activity-details')).toBeNull();
+    const identifiedPatch = container?.querySelector<HTMLElement>('.file-change-card');
+    expect(identifiedPatch).not.toBeNull();
+    expect(identifiedPatch?.closest('.assistant-activity-details')).toBeNull();
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).not.toContain(
       'tool call'
+    );
+    expect(container?.querySelector('.assistant-activity-details')?.textContent).not.toContain(
+      'apply_patch'
     );
   });
 

@@ -6438,7 +6438,7 @@ export function MessageList() {
                 : retainedKeys;
             return { sessionId, userMessageId, keys };
           }
-          if (isAssistantActivityPart(part)) {
+          if (isAssistantActivityPart(part) && !isAssistantActivityPartRunning(part)) {
             precedingActivityPartKeys.add(getAssistantActivityPartKey(part));
           }
         }
