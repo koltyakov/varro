@@ -491,10 +491,19 @@ export function Chat() {
     await selectSession(parentSessionId);
   };
 
-  const openSessionFilter = async (filter: SessionListFilter, count: number) => {
-    if (count === 0) return;
-
+  const openSessionFilter = async (filter: SessionListFilter) => {
     const indicators = sessionIndicators();
+    const matchingSessions = getPrimarySessionsForFilter(
+      recentSessions(),
+      filter,
+      (sessionId) => indicators.runningIds.has(sessionId),
+      (sessionId) => indicators.attentionIds.has(sessionId),
+      (sessionId) => indicators.failedIds.has(sessionId),
+      (session) => indicators.planReadyIds.has(session.id),
+      (session) => indicators.newlyCompletedIds.has(session.id)
+    );
+    if (matchingSessions.length === 0) return;
+
     const autoOpenSessionId = getAutoOpenSessionIdForFilter(
       recentSessions(),
       filter,
@@ -659,11 +668,11 @@ export function Chat() {
   };
 
   const openRunningSessions = () => {
-    void openSessionFilter('running', runningSessionsCount());
+    void openSessionFilter('running');
   };
 
   const openAttentionSessions = () => {
-    void openSessionFilter('attention', attentionSessionsCount());
+    void openSessionFilter('attention');
   };
 
   const openAttentionSessionsFromCommand = () => {
@@ -674,27 +683,27 @@ export function Chat() {
       false
     );
     if (attentionCount > 0) {
-      void openSessionFilter('attention', attentionCount);
+      void openSessionFilter('attention');
       return;
     }
     const failedCount = failedSessionsCount();
     if (failedCount > 0) {
-      void openSessionFilter('failed', failedCount);
+      void openSessionFilter('failed');
       return;
     }
-    void openSessionFilter('plan-ready', planReadySessionsCount());
+    void openSessionFilter('plan-ready');
   };
 
   const openFailedSessions = () => {
-    void openSessionFilter('failed', failedSessionsCount());
+    void openSessionFilter('failed');
   };
 
   const openPlanReadySessions = () => {
-    void openSessionFilter('plan-ready', planReadySessionsCount());
+    void openSessionFilter('plan-ready');
   };
 
   const openCompletedSessions = () => {
-    void openSessionFilter('completed', completedSessionsCount());
+    void openSessionFilter('completed');
   };
 
   const openSubagentSessions = (parentSessionId: string) => {

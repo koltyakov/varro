@@ -2511,6 +2511,30 @@ describe('header status badges', () => {
     expect(activeIndicator?.classList.contains('is-completed')).toBe(true);
   });
 
+  it('opens completed sessions when the desktop sidebar badge only counts the active session', async () => {
+    setState('sessions', [session('active-completed', 500), session('other', 400)]);
+    setState('activeSessionId', 'active-completed');
+    setState('lastSeenSessions', { other: 400 });
+    setState('completedSessionResponses', { 'active-completed': 500 });
+
+    cleanup = render(() => Chat(), container!);
+
+    const completedBadge = container?.querySelector<HTMLButtonElement>(
+      '.chat-session-sidebar-header .chat-header-completed-badge'
+    );
+    expect(completedBadge).toBeInstanceOf(HTMLButtonElement);
+
+    completedBadge?.click();
+    await Promise.resolve();
+
+    expect(container?.querySelector('.chat-header-filter-chip-label')?.textContent).toBe(
+      'Completed'
+    );
+    expect(container?.querySelector('.session-item-title')?.textContent?.trim()).toBe(
+      'active-completed'
+    );
+  });
+
   it('keeps the active completed session indicator when its messages are loaded', () => {
     setState('sessions', [session('session-1', 500), session('other', 400)]);
     setState('activeSessionId', 'session-1');
