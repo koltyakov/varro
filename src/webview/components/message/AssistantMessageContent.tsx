@@ -608,7 +608,7 @@ export function AssistantMessageContent(props: {
       }
 
       const canGroupActivityPart = (candidate: Part) => {
-        if (!isAssistantActivityPart(candidate)) return undefined;
+        if (!isLocallyCompactActivityCandidate(candidate)) return undefined;
         return compactActivityGroupByPartKey().get(getAssistantActivityPartKey(candidate));
       };
 

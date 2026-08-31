@@ -581,6 +581,43 @@ describe('AssistantMessageContent', () => {
     expect(container?.querySelector('.assistant-activity-group-settling')).not.toBeNull();
   });
 
+  it('keeps a titled active patch outside Explored without active lifecycle keys', () => {
+    const thought = reasoningPart('reasoning-before-patch');
+    const search = toolPart('search-before-patch', 'grep', { pattern: 'contextFile' });
+    const patch = toolPart('patch-running', 'tool', { patchText: '*** Begin Patch' });
+    patch.state = {
+      status: 'running',
+      input: { patchText: '*** Begin Patch' },
+      title: 'apply_patch',
+      time: { start: 2 },
+    };
+    const groupedPatch: ToolPart = {
+      ...patch,
+      state: { ...patch.state, title: 'tool' },
+    };
+    const group = {
+      key: 'activity-group-before-patch',
+      ownerMessageId: thought.messageID,
+      ownerPartId: thought.id,
+      parts: [thought, search, groupedPatch],
+    };
+
+    renderAssistantMessageContent({
+      parts: [thought, search, patch],
+      compactActivityGroups: [group],
+      visibleActiveActivityPartKeys: new Set(),
+      groupedActiveActivityPartKeys: new Set([getAssistantActivityPartKey(patch)]),
+    });
+
+    const summary = container?.querySelector<HTMLButtonElement>('.assistant-activity-summary');
+    expect(summary?.textContent).toContain('Explored: 1 thought, 1 search');
+    summary?.click();
+
+    const renderedPatch = container?.querySelector('[data-part-id="patch-running"]');
+    expect(renderedPatch).not.toBeNull();
+    expect(renderedPatch?.closest('.assistant-activity-details')).toBeNull();
+  });
+
   it('does not replay the group settle after the tray already shows Explored', () => {
     const command = toolPart('command-handoff', 'bash', { command: 'npm test' });
     const partKey = getAssistantActivityPartKey(command);

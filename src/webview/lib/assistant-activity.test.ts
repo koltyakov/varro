@@ -233,6 +233,20 @@ describe('assistant activity summaries', () => {
       })
     ).toBe(false);
 
+    patch.tool = 'tool';
+    patch.state = {
+      status: 'running',
+      input: {},
+      title: 'apply_patch',
+      time: { start: 1 },
+    };
+    expect(
+      shouldCompactAssistantActivityPart(patch, {
+        keepEditInline: false,
+        keepReasoningInline: false,
+      })
+    ).toBe(false);
+
     patch.state = {
       status: 'completed',
       input: {},
