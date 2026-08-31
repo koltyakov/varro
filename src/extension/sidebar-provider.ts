@@ -131,6 +131,15 @@ interface EndpointRef {
 }
 
 type PersistedEditorState = Record<string, unknown> | null | undefined;
+type StatusBarState =
+  | { visible: false; action: 'focus' }
+  | {
+      visible: true;
+      action: 'focus' | 'attention' | 'sibling';
+      text: string;
+      tooltip: string;
+      backgroundColor?: vscode.ThemeColor;
+    };
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'varro.chat';
@@ -145,6 +154,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private static readonly MAX_DEFERRED_WORKSPACE_EVENTS = 1_000;
 
   private lastStatusBarStateKey = '';
+  private attentionStatusBarItemVisible = false;
+  private hiddenStatusBarState: Extract<StatusBarState, { visible: true }> | null = null;
   private openCodeVersionCheck: 'idle' | 'checking' | 'checked' = 'idle';
   private openCodeUpdateAvailable = false;
   private openCodeCliVersion: string | null = null;
@@ -2668,12 +2679,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     const statusBarItem = this.serverEventBridge.getStatusBarItem();
     if (!next.visible) {
-      statusBarItem.hide();
+      if (this.attentionStatusBarItemVisible) {
+        statusBarItem.hide();
+        this.attentionStatusBarItemVisible = false;
+      }
     } else {
       statusBarItem.text = next.text;
       statusBarItem.backgroundColor = next.backgroundColor;
       statusBarItem.tooltip = next.tooltip;
-      statusBarItem.show();
+      if (!this.attentionStatusBarItemVisible) {
+        statusBarItem.show();
+        this.attentionStatusBarItemVisible = true;
+      }
     }
   }
 
@@ -2889,15 +2906,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private getStatusBarState():
-    | { visible: false; action: 'focus' }
-    | {
-        visible: true;
-        action: 'focus' | 'attention' | 'sibling';
-        text: string;
-        tooltip: string;
-        backgroundColor?: vscode.ThemeColor;
-      } {
+  private getStatusBarState(): StatusBarState {
+    if (this.isAnyChatVisible()) {
+      this.hiddenStatusBarState = null;
+      return { visible: false, action: 'focus' };
+    }
+
+    const current = this.getCurrentStatusBarState();
+    if (current.visible && !this.hiddenStatusBarState) this.hiddenStatusBarState = current;
+    return this.hiddenStatusBarState ?? current;
+  }
+
+  private getCurrentStatusBarState(): StatusBarState {
     const idleState = {
       visible: false as const,
       action: 'focus' as const,

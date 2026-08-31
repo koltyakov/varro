@@ -157,7 +157,7 @@ describe('SidebarProvider permission replay', () => {
     const openCodeStatusBarItem = createStatusBarItem.mock.results[openCodeItemIndex]?.value;
     if (!statusBarItem) throw new Error('Expected status bar item to exist');
     if (!openCodeStatusBarItem) throw new Error('Expected OpenCode status bar item to exist');
-    expect(statusBarItem.hide).toHaveBeenCalled();
+    expect(statusBarItem.hide).not.toHaveBeenCalled();
     expect(openCodeStatusBarItem.show).toHaveBeenCalled();
 
     statusBarItem.show.mockClear();

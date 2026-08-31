@@ -181,7 +181,7 @@ describe('SidebarProvider editor panels', () => {
     expect(lastSiblingWorkspaceAlerts(posted)).toEqual([]);
   });
 
-  it('alerts only for requested sibling events whose chat is not open', async () => {
+  it('alerts only for requested sibling events while Varro is hidden', async () => {
     const contextProvider = createContextProvider();
     contextProvider.context.workspacePath = '/repo-a';
     contextProvider.context.workspaceFolders = [
@@ -190,8 +190,9 @@ describe('SidebarProvider editor panels', () => {
       { name: 'Repo C', path: '/repo-c' },
     ];
     const { provider } = await createSidebarProviderInstance({ contextProvider });
-    const { posted } = attachTestView(provider);
+    const { posted, view } = attachTestView(provider);
     await provider.handleMessage({ type: 'ready' });
+    view.visible = false;
     const sessionState = (provider as unknown as { sessionState: SessionStateManager })
       .sessionState;
 
@@ -232,6 +233,7 @@ describe('SidebarProvider editor panels', () => {
     expect(statusItem?.tooltip).toContain('Repo B: 1');
     expect(statusItem?.show).toHaveBeenCalled();
 
+    view.visible = true;
     await provider.openSiblingWorkspaceSessions();
 
     expect(contextProvider.selectWorkspace).toHaveBeenCalledWith('/repo-b');
@@ -1949,6 +1951,87 @@ describe('SidebarProvider editor panels', () => {
       payload: { canAbort: false, canSwitchSessions: false, model: null, sessionId: null },
     });
     await vi.waitFor(() => expect(isVisible('session-1')).toBe(false));
+  });
+
+  it('shows status attention only while every Varro chat is hidden', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const sidebar = createPanel();
+    await provider.resolveWebviewView(sidebar.panel as never, {} as never, {} as never);
+    await vi.waitFor(() => expect(sidebar.panel.webview.html).toContain('__initialWebviewState'));
+    sidebar.receive({ type: 'ready' });
+    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
+      .sessionState;
+    const statusItem = getVscodeMock().window.createStatusBarItem.mock.results.find(
+      (result) => result.value.name === 'Varro Attention'
+    )?.value;
+
+    sessionState.handleServerEvent({
+      type: 'session.updated',
+      properties: {
+        info: { id: 'session-1', title: 'Blocked work', directory: '/repo' },
+      },
+    });
+    sessionState.handleServerEvent({
+      type: 'question.asked',
+      properties: { id: 'question-1', sessionID: 'session-1', questions: [] },
+    });
+    statusItem?.show.mockClear();
+    statusItem?.hide.mockClear();
+
+    sidebar.receive({
+      type: 'commands/state',
+      payload: {
+        canAbort: false,
+        canSwitchSessions: true,
+        model: null,
+        sessionId: 'session-1',
+      },
+    });
+    sidebar.receive({
+      type: 'commands/state',
+      payload: {
+        canAbort: false,
+        canSwitchSessions: true,
+        model: null,
+        sessionId: 'session-2',
+      },
+    });
+
+    expect(statusItem?.show).not.toHaveBeenCalled();
+    expect(statusItem?.hide).not.toHaveBeenCalled();
+    expect(provider.getStatusBarClickAction()).toBe('focus');
+
+    sidebar.setVisible(false);
+
+    expect(statusItem?.show).toHaveBeenCalledOnce();
+    expect(statusItem?.text).toBe('$(bell-dot) Varro: 1 waiting');
+    expect(provider.getStatusBarClickAction()).toBe('attention');
+
+    statusItem?.show.mockClear();
+    statusItem?.hide.mockClear();
+    sessionState.handleServerEvent({
+      type: 'question.replied',
+      properties: { requestID: 'question-1', sessionID: 'session-1' },
+    });
+    sessionState.handleServerEvent({
+      type: 'session.updated',
+      properties: {
+        info: { id: 'session-1', title: 'Updated blocked work', directory: '/repo' },
+      },
+    });
+    sessionState.handleServerEvent({
+      type: 'question.asked',
+      properties: { id: 'question-2', sessionID: 'session-1', questions: [] },
+    });
+
+    expect(statusItem?.show).not.toHaveBeenCalled();
+    expect(statusItem?.hide).not.toHaveBeenCalled();
+    expect(statusItem?.text).toBe('$(bell-dot) Varro: 1 waiting');
+
+    sidebar.setVisible(true);
+
+    expect(statusItem?.hide).toHaveBeenCalledOnce();
+    expect(provider.getStatusBarClickAction()).toBe('focus');
   });
 
   it('does not pulse plan attention while the visible chat resumes from a question', async () => {
