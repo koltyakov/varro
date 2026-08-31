@@ -7,6 +7,7 @@ import {
   getToolErrorMessage,
   getToolStartTime,
   getToolStateInput,
+  normalizeSessionEventInfo,
   parseToolInput,
   toolOutputToString,
 } from './session-event-utils';
@@ -50,6 +51,21 @@ describe('getEventString', () => {
 
   it('does not read inherited properties as event values', () => {
     expect(getEventString({}, 'toString')).toBeUndefined();
+  });
+});
+
+describe('normalizeSessionEventInfo', () => {
+  it('projects workspace scope from session metadata', () => {
+    expect(
+      normalizeSessionEventInfo({
+        id: 'session-1',
+        metadata: { varro: { workspaceScope: 'workspace', schemaVersion: 1 } },
+      })
+    ).toEqual({
+      id: 'session-1',
+      metadata: { varro: { workspaceScope: 'workspace', schemaVersion: 1 } },
+      workspaceScope: 'workspace',
+    });
   });
 });
 

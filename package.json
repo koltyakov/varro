@@ -401,7 +401,7 @@
         },
         "varro.chat.showTurnTimer": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "Show the elapsed duration of the active turn beside the chat input status controls."
         },
         "varro.chat.desktopSessionPaneSide": {

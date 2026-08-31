@@ -9,6 +9,7 @@ import type {
   Session,
   SessionEventInfo,
 } from '../../types';
+import { getSessionWorkspaceScopeFromMetadata } from '../../../shared/protocol';
 import { asRecord } from '../../../shared/type-utils';
 import type { UnknownRecord } from '../../../shared/type-utils';
 import { isNumber, isString } from '../../lib/runtime-values';
@@ -277,7 +278,11 @@ export function normalizeSessionEventInfo(
   if (!info) return null;
   const normalized = stripNullishSessionInfo(info);
   const id = isString(normalized.id) && normalized.id ? normalized.id : sessionID;
-  return id ? { ...normalized, id } : null;
+  if (!id) return null;
+  const workspaceScope = getSessionWorkspaceScopeFromMetadata(normalized.metadata);
+  return workspaceScope === 'workspace' && normalized.workspaceScope === undefined
+    ? { ...normalized, id, workspaceScope }
+    : { ...normalized, id };
 }
 
 function stripNullishSessionInfo(info: SessionEventInfo): SessionEventInfo {
