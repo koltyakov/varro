@@ -649,7 +649,7 @@ function setSessionMessagesIncremental(
         entry.parts.some((part) => part.id === streamingPartId)
     );
   batch(() => {
-    if (streamingBelongsToSession && !preserveStreamingState) {
+    if (streamingBelongsToSession && !preserveStreamingState && !options?.preserveExtraParts) {
       appStore.setState('streamingPartId', null);
       appStore.setState('streamingText', '');
     }

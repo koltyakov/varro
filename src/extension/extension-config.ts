@@ -15,7 +15,7 @@ export function readExtensionConfigState(
     showFileDiffs: config.get<boolean>('chat.showFileDiffs', false),
     expandThinking: config.get<boolean>('chat.expandThinking', false),
     showChangedFiles: config.get<boolean>('chat.showChangedFiles', false),
-    showTurnTimer: config.get<boolean>('chat.showTurnTimer', false),
+    showTurnTimer: config.get<boolean>('chat.showTurnTimer', true),
     desktopSessionPaneSide: config.get<'left' | 'right'>('chat.desktopSessionPaneSide', 'left'),
     defaultPermissionMode: readDefaultPermissionMode(config),
     chatFontSize: readChatFontSize(config, chatConfig),

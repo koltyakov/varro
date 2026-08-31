@@ -834,6 +834,37 @@ describe('useOpenCode session state flows', () => {
     expect(observedStreamingState).not.toContainEqual([null, '']);
   });
 
+  it('materializes live streaming text before a stale busy-status message sync clears it', async () => {
+    mockRuntimeBootstrap();
+    const info = assistantMessage('assistant-1', 'user-1');
+    info.time = { created: 1 };
+    const stalePart: Part = {
+      id: 'text-1',
+      sessionID: 'session-1',
+      messageID: 'assistant-1',
+      type: 'text',
+      text: '',
+    };
+    clientMocks.sessionStatus.mockResolvedValue({ 'session-1': { type: 'busy' } });
+    clientMocks.sessionMessages.mockResolvedValue([{ info, parts: [stalePart] }]);
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('sessions', [session('session-1')]);
+    stateModule.setState('messages', [{ info, parts: [stalePart] }]);
+    stateModule.setState('streamingPartId', stalePart.id);
+    stateModule.setState('streamingText', 'Partial answer from the live SSE stream');
+
+    await hookModule.recheckSessionStatus('session-1');
+
+    expect(stateModule.state.messages[0]?.parts[0]).toMatchObject({
+      id: 'text-1',
+      text: 'Partial answer from the live SSE stream',
+    });
+    expect(stateModule.state.streamingPartId).toBeNull();
+    expect(stateModule.state.streamingText).toBe('');
+  });
+
   it('preserves a queued active-session delta while prepending older history', async () => {
     const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
     Object.defineProperty(globalThis, 'requestAnimationFrame', {
