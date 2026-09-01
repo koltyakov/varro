@@ -5638,24 +5638,25 @@ describe('ChatInput', () => {
     expect(inputText()).toBe('Preserved draft');
   });
 
-  it('keeps a draft disabled until provider authentication reloads', async () => {
+  it('keeps sending available while a provider refresh waits for active work', async () => {
     setState('providerRefreshPending', true);
-    setInputText('Send with the new provider');
+    setInputText('Send with the loaded provider configuration');
     cleanup = render(() => ChatInput({ newSession: true }), container!);
 
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     const sendButton = container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]');
-    expect(sendButton?.disabled).toBe(true);
-
-    editor?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    await flushAsyncWork();
-
-    expect(sendMessageMock).not.toHaveBeenCalled();
-    expect(inputText()).toBe('Send with the new provider');
-
-    setState('providerRefreshPending', false);
-    await Promise.resolve();
     expect(sendButton?.disabled).toBe(false);
+  });
+
+  it('shows queue controls while a provider refresh waits for the active turn', () => {
+    setState('providerRefreshPending', true);
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setInputText('Queue against the loaded provider configuration');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    expect(container?.querySelector('[aria-label="Stop"]')).toBeNull();
+    expect(container?.querySelector('[aria-label="Add to queue (Enter)"]')).not.toBeNull();
   });
 
   it('keeps the selected model visible while workspace catalogs reload', async () => {

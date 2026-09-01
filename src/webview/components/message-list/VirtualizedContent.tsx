@@ -160,7 +160,20 @@ export function VirtualizedContent(
   onCleanup(cancelRetainedPlaceholderRelease);
 
   const renderMessage = (messageId: string, absoluteIndex: () => number) => {
-    const message = () => props.messages[absoluteIndex()]!;
+    // A row's entry can vanish from props.messages (transcript cleared, message
+    // pruned) before <For> disposes the row, while row-internal computations
+    // invalidated by the same batch still re-run; serve the last seen entry in
+    // that window so nothing dereferences undefined mid-flush.
+    let lastMessage: MessageEntry | undefined;
+    const message = () => {
+      const index = absoluteIndex();
+      const current = index >= 0 ? props.messages[index] : undefined;
+      if (current) {
+        lastMessage = current;
+        return current;
+      }
+      return lastMessage!;
+    };
     const nearViewport = createMemo(() => {
       const index = absoluteIndex();
       return (index >= coreStart() && index < coreEnd()) || index === pinnedIndex();
@@ -169,6 +182,7 @@ export function VirtualizedContent(
       const metrics = props.virtualMetrics;
       if (!metrics) return undefined;
       const index = absoluteIndex();
+      if (index < 0) return undefined;
       return metrics.prefix[index + 1]! - metrics.prefix[index]!;
     });
     const forceVirtualContent = createMemo(
@@ -295,7 +309,7 @@ export function VirtualizedContent(
               aria-hidden="true"
             />
           ) : (
-            renderMessage(item.messageId, () => messageIndexes().get(item.messageId)!)
+            renderMessage(item.messageId, () => messageIndexes().get(item.messageId) ?? -1)
           )
         }
       </For>

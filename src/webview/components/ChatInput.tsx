@@ -1751,7 +1751,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
-      if (!canSend()) return;
+      if (!canSend()) {
+        reportBlockedSend();
+        return;
+      }
       if (
         (e.ctrlKey || e.metaKey) &&
         isComposerBusy() &&
@@ -3574,8 +3577,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     connectionInitialized() &&
     !state.messagesLoading &&
     (isAbortSlashCommand(inputText()) ||
-      (!state.providerRefreshPending &&
-        !state.workspaceCatalogReloadPending &&
+      (!state.workspaceCatalogReloadPending &&
         !pendingWorkspacePath() &&
         !hasPendingPdfFallback() &&
         !hasPendingDelegatedImages() &&
@@ -3586,6 +3588,47 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           state.nativePdfs.length > 0 ||
           !!state.terminalSelection ||
           !!state.attachedDiagnostics)));
+  // A silently disabled send button is undebuggable in the field; when the user
+  // tries to send actual content, name the global gate that is blocking it.
+  const getSendBlockedReason = () => {
+    const hasContent =
+      getSendableInputText().trim().length > 0 ||
+      state.droppedFiles.length > 0 ||
+      hasSendableClipboardImages() ||
+      state.nativePdfs.length > 0 ||
+      !!state.terminalSelection ||
+      !!state.attachedDiagnostics;
+    if (!hasContent) return null;
+    if (!connectionInitialized()) return 'Still connecting to the server';
+    if (state.messagesLoading) return 'Messages are still loading';
+    if (state.workspaceCatalogReloadPending) {
+      return 'Waiting for the workspace catalog to reload';
+    }
+    const pendingWorkspace = pendingWorkspacePath();
+    if (pendingWorkspace) return `Waiting for the workspace to switch to ${pendingWorkspace}`;
+    if (hasPendingPdfFallback() || hasPendingDelegatedImages()) return 'Preparing attachments';
+    return null;
+  };
+  const reportBlockedSend = () => {
+    const blockedReason = getSendBlockedReason();
+    if (!blockedReason) return;
+    showSessionActionFeedback(blockedReason, 'warning');
+    postMessage({
+      type: 'log',
+      payload: {
+        level: 'warn',
+        msg: 'composer send blocked',
+        data: JSON.stringify({
+          reason: blockedReason,
+          connectionInitialized: connectionInitialized(),
+          messagesLoading: state.messagesLoading,
+          providerRefreshPending: state.providerRefreshPending,
+          workspaceCatalogReloadPending: state.workspaceCatalogReloadPending,
+          pendingWorkspaceSelectionPath: state.pendingWorkspaceSelectionPath,
+        }),
+      },
+    });
+  };
   const isBusyWithoutInterruption = createMemo(
     () => isComposerBusy() && !composerHasActiveQuestion() && !composerHasActivePermission()
   );

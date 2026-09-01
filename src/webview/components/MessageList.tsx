@@ -2308,6 +2308,37 @@ export function MessageList() {
       .join('|');
     return `${infoProjection}|${partProjection}`;
   }
+  // Existing placeholders must hydrate when their row projection changes; newly prepended rows stay inert.
+  let previousMessageRenderGeometrySignatures = new Map<string, string | null>();
+  createEffect(() => {
+    messageStructureVersion();
+    const current = untrack(
+      () =>
+        new Map(
+          messages().map((message) => [
+            message.info.id,
+            getMessageRenderGeometrySignature(message.info.id),
+          ])
+        )
+    );
+    let changed = false;
+    for (const [messageId, signature] of current) {
+      if (
+        !previousMessageRenderGeometrySignatures.has(messageId) ||
+        previousMessageRenderGeometrySignatures.get(messageId) === signature
+      ) {
+        continue;
+      }
+      const row = mountedMessageRows.get(messageId);
+      if (!row?.classList.contains('interactive-item-virtual-placeholder')) continue;
+      measuredHeights.delete(messageId);
+      forcedVirtualContentMessageIds.add(messageId);
+      markVirtualMetricsDirty(messageId);
+      changed = true;
+    }
+    previousMessageRenderGeometrySignatures = current;
+    if (changed) publishMeasurementVersion();
+  });
 
   function handleAssistantDiffSettledEmpty(messageId: string) {
     if (
@@ -6541,8 +6572,37 @@ export function MessageList() {
   const renderedExitingActivityPartKeys = createMemo(() =>
     filterActivityPartKeysBehindStream(exitingActivityPartKeys())
   );
+  const trailingActivityTurnState = createMemo<{
+    sessionId: string | null;
+    userMessageId: string | null;
+    hasWorked: boolean;
+    messageIds: ReadonlySet<string>;
+  }>(
+    (previous) => {
+      const sessionId = state.activeSessionId;
+      const turn = trailingAssistantTurn();
+      const userMessageId = turn?.userMessageId ?? null;
+      const working = activeSessionWorking();
+      return {
+        sessionId,
+        userMessageId,
+        hasWorked:
+          working ||
+          (previous.sessionId === sessionId &&
+            previous.userMessageId === userMessageId &&
+            previous.hasWorked),
+        messageIds: turn?.assistantMessageIds ?? new Set<string>(),
+      };
+    },
+    { sessionId: null, userMessageId: null, hasWorked: false, messageIds: new Set<string>() }
+  );
   const activeActivityMessageIds = createMemo<ReadonlySet<string>>(() => {
-    return trailingAssistantTurn()?.assistantMessageIds ?? new Set<string>();
+    if (!activeSessionWorking()) return new Set<string>();
+    return trailingActivityTurnState().messageIds;
+  });
+  const activeToolActivityMessageIds = createMemo<ReadonlySet<string>>(() => {
+    const turn = trailingActivityTurnState();
+    return activeSessionWorking() || !turn.hasWorked ? turn.messageIds : new Set<string>();
   });
   createEffect(() => {
     if (exitingActivityPartKeys().size === 0) preserveActivityExitReserve();
@@ -6657,6 +6717,9 @@ export function MessageList() {
     const now = Date.now();
     const sessionWorking = activeSessionWorking();
     const activeMessageIds = activeActivityMessageIds();
+    const activeToolMessageIds = activeToolActivityMessageIds();
+    const isActiveActivityMessage = (part: AssistantActivityPart) =>
+      (part.type === 'reasoning' ? activeMessageIds : activeToolMessageIds).has(part.messageID);
     const lastVisiblePartKey = getTrailingVisibleAssistantPartKey();
 
     for (const message of activityMessages) {
@@ -6674,7 +6737,7 @@ export function MessageList() {
         .filter(
           (part) =>
             isAssistantActivityPartRunning(part) &&
-            !activeMessageIds.has(part.messageID) &&
+            !isActiveActivityMessage(part) &&
             visibleActiveActivityPartKeys().has(getAssistantActivityPartKey(part))
         )
         .map(getAssistantActivityPartKey)
@@ -6693,7 +6756,7 @@ export function MessageList() {
         setSetMembership(setExitingActivityPartKeys, key, false);
       }
       if (isAssistantActivityPartRunning(part)) {
-        if (!activeMessageIds.has(part.messageID)) {
+        if (!isActiveActivityMessage(part)) {
           clearActivityCompletionTimer(key);
           clearActivityShowTimer(key);
           activityPartFirstSeenAt.delete(key);
@@ -6722,7 +6785,11 @@ export function MessageList() {
             if (
               !currentPart ||
               !isAssistantActivityPartRunning(currentPart) ||
-              !untrack(activeActivityMessageIds).has(currentPart.messageID)
+              !(
+                currentPart.type === 'reasoning'
+                  ? untrack(activeActivityMessageIds)
+                  : untrack(activeToolActivityMessageIds)
+              ).has(currentPart.messageID)
             ) {
               return;
             }
@@ -6927,6 +6994,7 @@ export function MessageList() {
     return rowSummaries;
   });
   createEffect(() => {
+    messageStructureVersion();
     trackMessageBlockExpansionState();
     const previous = knownZeroHeightMessageIds();
     const activityMessages = compactActivityMessages();
@@ -6965,16 +7033,19 @@ export function MessageList() {
     }
 
     const currentMessageIds = new Set(messages().map((message) => message.info.id));
+    let forcedContentChanged = false;
     for (const messageId of new Set([...previous, ...next])) {
       if (previous.has(messageId) === next.has(messageId)) continue;
       if (previous.has(messageId) && currentMessageIds.has(messageId)) {
         measuredHeights.delete(messageId);
         zeroHeightRenderGeometrySignatures.delete(messageId);
         forcedVirtualContentMessageIds.add(messageId);
+        forcedContentChanged = true;
       }
       markVirtualMetricsDirty(messageId);
     }
     setKnownZeroHeightMessageIds(next);
+    if (forcedContentChanged) publishMeasurementVersion();
   });
   const messageBlockBoundaryMap = createMemo(() => {
     trackMessageBlockExpansionState();
