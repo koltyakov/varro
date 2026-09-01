@@ -3848,7 +3848,10 @@ export function MessageList() {
     const delta = currentTop - anchor.top;
     if (Math.abs(delta) <= 0.5) return;
 
-    const nextScrollTop = containerRef.scrollTop + delta;
+    const nextScrollTop =
+      exitingActivityPartKeys().size > 0 && activityExitBottomTarget !== null
+        ? activityExitBottomTarget
+        : containerRef.scrollTop + delta;
     if (delta > 0) setAppendBottomReserve((current) => current + delta);
     appendBottomReserveTarget = nextScrollTop;
     setPreservedScrollTop(nextScrollTop);
@@ -3899,11 +3902,15 @@ export function MessageList() {
       startActivityExitSummaryObserver(activityExitSummaryAnchor);
       startActivityExitSummarySettle(activityExitSummaryAnchor);
     }
-    appendBottomReserveTarget = containerRef.scrollTop;
+    const collapseTarget = Math.max(
+      containerRef.scrollTop,
+      lastObservedScrollTop,
+      lastAutoScrolledBottomScrollTop
+    );
+    appendBottomReserveTarget = collapseTarget;
     setAppendBottomReserve((current) => current + reserve);
-    activityExitBottomTarget = containerRef.scrollTop;
+    activityExitBottomTarget = collapseTarget;
     if (activityCollapseSettleRafId) cancelAnimationFrame(activityCollapseSettleRafId);
-    const collapseTarget = activityExitBottomTarget;
     activityCollapseSettleRafId = requestAnimationFrame(() => {
       activityCollapseSettleRafId = 0;
       if (
@@ -3913,9 +3920,9 @@ export function MessageList() {
       ) {
         return;
       }
+      activityExitBottomTarget = null;
       reconcileAppendBottomReserve();
       setPreservedScrollTop(collapseTarget);
-      activityExitBottomTarget = null;
       lastAutoScrolledBottomScrollTop = collapseTarget;
       const sessionId = state.activeSessionId;
       if (sessionId) startFollowLoop(sessionId);
@@ -6662,7 +6669,6 @@ export function MessageList() {
         candidates.push(part);
       }
     }
-
     const abruptlyGroupedKeys = new Set(
       candidates
         .filter(

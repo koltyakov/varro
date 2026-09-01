@@ -661,8 +661,8 @@
 .assistant-activity-summary-counts {
   color: color-mix(
     in srgb,
-    var(--vscode-descriptionForeground, var(--color-vscode-muted)) 99%,
-    var(--color-vscode-fg)
+    var(--vscode-descriptionForeground, var(--color-vscode-muted)) 72%,
+    transparent
   );
 }
 

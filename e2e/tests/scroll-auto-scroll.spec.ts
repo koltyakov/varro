@@ -553,17 +553,37 @@ test.describe('auto-scroll', () => {
         '*'
       );
 
-      const tops: number[] = [];
+      const frameSamples: Array<{
+        top: number;
+        scrollTop: number;
+        scrollHeight: number;
+        activityReserve: number;
+        appendReserve: number;
+      }> = [];
       for (let frame = 0; frame < 90; frame += 1) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-        tops.push(element.getBoundingClientRect().top - container.getBoundingClientRect().top);
+        frameSamples.push({
+          top: element.getBoundingClientRect().top - container.getBoundingClientRect().top,
+          scrollTop: container.scrollTop,
+          scrollHeight: container.scrollHeight,
+          activityReserve:
+            container.querySelector<HTMLElement>('.activity-exit-bottom-reserve')?.offsetHeight ??
+            0,
+          appendReserve:
+            container.querySelector<HTMLElement>('.append-scroll-bottom-reserve')?.offsetHeight ??
+            0,
+        });
       }
-      return tops;
+      return frameSamples;
     });
 
     expect(
-      samples.every((top) => top - beforeTop <= 1.5),
+      samples.every(({ top }) => top - beforeTop <= 1.5),
       JSON.stringify({ beforeTop, samples })
+    ).toBe(true);
+    expect(
+      samples.every(({ top }, index) => index === 0 || top - samples[index - 1]!.top <= 1.5),
+      JSON.stringify(samples)
     ).toBe(true);
     await expect(activeReasoning).toHaveCount(0);
     await expect(laterCommand).toBeVisible();
