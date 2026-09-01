@@ -1022,6 +1022,71 @@ describe('OpenCodeTransport requests', () => {
     ]);
   });
 
+  it('strips tool attachments while preserving visible message content', async () => {
+    const payload = [
+      {
+        info: { id: 'message-1', role: 'assistant' },
+        parts: [
+          {
+            type: 'tool',
+            state: {
+              status: 'completed',
+              input: { path: 'src/index.ts' },
+              output: 'Tool output',
+              metadata: { count: 1 },
+              attachments: [
+                {
+                  type: 'file',
+                  mime: 'image/png',
+                  url: `data:image/png;base64,${'x'.repeat(10_000)}`,
+                },
+              ],
+            },
+          },
+          {
+            type: 'file',
+            mime: 'image/png',
+            url: 'data:image/png;base64,keep-standalone-file',
+          },
+        ],
+      },
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify(payload)))
+    );
+
+    await expect(
+      createTransport().request('GET', '/session/session-1/message?limit=200', undefined, {
+        maxResponseBytes: 64 * 1024,
+        maxProjectedResponseBytes: 1024,
+        stripSummaryDiffs: true,
+        stripToolAttachments: true,
+      })
+    ).resolves.toEqual([
+      {
+        info: { id: 'message-1', role: 'assistant' },
+        parts: [
+          {
+            type: 'tool',
+            state: {
+              status: 'completed',
+              input: { path: 'src/index.ts' },
+              output: 'Tool output',
+              metadata: { count: 1 },
+              attachments: [],
+            },
+          },
+          {
+            type: 'file',
+            mime: 'image/png',
+            url: 'data:image/png;base64,keep-standalone-file',
+          },
+        ],
+      },
+    ]);
+  });
+
   it('counts multibyte projected responses in UTF-8 bytes', async () => {
     const payload = [
       {

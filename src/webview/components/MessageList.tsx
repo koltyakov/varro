@@ -7292,11 +7292,7 @@ export function MessageList() {
     finishWidthResizeNow();
     resumeAutoScrollAfterDiffFocus = false;
     disengageBottomFollow();
-    const activeHistoryLoad = activeOlderHistoryLoads.get(state.activeSessionId ?? '');
-    if (
-      messages().some((entry) => entry.info.id === preview.id) &&
-      activeHistoryLoad?.generation !== activeSessionGeneration
-    ) {
+    if (messages().some((entry) => entry.info.id === preview.id)) {
       const settleEpoch = ++stickyJumpSettleEpoch;
       setStickyNavigationInProgress(true);
       const clearNavigation = () => {

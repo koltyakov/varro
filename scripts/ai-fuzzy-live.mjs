@@ -791,7 +791,13 @@ class CdpController {
     const route = await this.call('Runtime.evaluate', {
       contextId: this.mainContextId,
       expression: `(() => {
-        const persisted = globalThis.__vscodeWebviewState?.getState?.()?.['varro.lastOpenedView'] ?? null;
+        let persisted = globalThis.__vscodeWebviewState?.getState?.()?.['varro.lastOpenedView'] ?? null;
+        if (!persisted) {
+          try {
+            const raw = localStorage.getItem('varro.lastOpenedView');
+            persisted = raw ? JSON.parse(raw) : null;
+          } catch {}
+        }
         return persisted?.type === 'session' ? persisted.sessionId ?? null : null;
       })()`,
       returnByValue: true,

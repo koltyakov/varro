@@ -2011,8 +2011,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           }
       : undefined;
 
-    if (props.newSession) props.onBeforeSend?.();
-
     const hasQueuedAttachments =
       queuedAttachments.droppedFiles?.length ||
       queuedAttachments.clipboardImages?.length ||
@@ -2103,6 +2101,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         return;
       }
     }
+
+    if (props.newSession) props.onBeforeSend?.();
 
     if (
       mode !== 'steer' &&

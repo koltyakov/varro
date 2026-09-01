@@ -879,6 +879,81 @@ describe('shouldShowStickyUserMessagePreview', () => {
     animationFrames.restore();
   });
 
+  it('navigates to a loaded sticky prompt while older history is still loading', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    let releaseHistory: (() => void) | undefined;
+    const historyPending = new Promise<void>((resolve) => {
+      releaseHistory = resolve;
+    });
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryCursor('session-1', 'cursor-1');
+    markSessionHistoryLoadFailed('session-1', true);
+    setSessionHistoryPrompts('session-1', [
+      { info: userMessage('boundary-user'), parts: [textPart('boundary-text', 'Boundary prompt')] },
+    ]);
+    vi.spyOn(client.session, 'messages').mockImplementation(async () => {
+      await historyPending;
+      return [];
+    });
+    replaceMessages([
+      {
+        info: userMessage('boundary-user'),
+        parts: [textPart('boundary-text', 'Boundary prompt')],
+      },
+      {
+        info: assistantMessage('assistant-1'),
+        parts: [textPart('assistant-text', 'Visible response')],
+      },
+    ]);
+    const rectMap = new Map<Element, DOMRect>();
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        return rectMap.get(this) || new DOMRect(0, 20, 500, 320);
+      }
+    );
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    const sourceCard = container?.querySelector<HTMLElement>(
+      '[data-msg-id="boundary-user"] .user-message-card'
+    );
+    const sourceRow = sourceCard?.closest<HTMLElement>('[data-msg-id="boundary-user"]');
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 1200 });
+    Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 800 });
+    rectMap.set(list, new DOMRect(0, 0, 500, 500));
+    rectMap.set(sourceCard!, new DOMRect(0, -600, 500, 40));
+    rectMap.set(sourceRow!, new DOMRect(0, -600, 500, 40));
+    list.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+
+    const retry = container?.querySelector<HTMLButtonElement>('.message-history-banner-retry');
+    expect(retry).toBeInstanceOf(HTMLButtonElement);
+    retry?.click();
+    await vi.waitFor(() => {
+      expect(client.session.messages).toHaveBeenCalledWith('session-1', {
+        limit: 200,
+        before: 'cursor-1',
+      });
+    });
+
+    const sticky = container?.querySelector<HTMLElement>('.latest-user-message-sticky-clickable');
+    expect(sticky?.textContent).toContain('Boundary prompt');
+    sticky?.click();
+
+    expect(list.scrollTop).not.toBe(800);
+    expect(sticky?.classList.contains('is-loading')).toBe(false);
+
+    releaseHistory?.();
+    animationFrames.flush();
+    await Promise.resolve();
+    animationFrames.restore();
+  });
+
   it('does not show a new sticky preview until the prompt is clearly above the viewport', () => {
     expect(
       shouldShowStickyUserMessagePreview({

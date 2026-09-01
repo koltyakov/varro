@@ -566,8 +566,9 @@ has just started, and this session has not been opened in that host run.
    direct scroll-position mutation are not.
 3. At each history boundary, keep one marked row under observation through loading and insertion.
 4. Continue through every boundary until the real first prompt and history-start state are visible.
-5. Scroll down one viewport, close the session, reopen it, and repeat the first boundary with the same
-   action seed.
+5. Scroll down one viewport, close the session, and reopen it to verify the loaded history remains
+   coherent. To repeat the first cold boundary, use a second fresh host or an untouched prepared fork
+   with the same action seed; the same webview runtime intentionally caches loaded history.
 
 Pass invariants:
 

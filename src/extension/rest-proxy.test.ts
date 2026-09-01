@@ -3096,7 +3096,7 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
-  it('retries oversized message pages with a smaller history window', async () => {
+  it('retries oversized message pages without tool attachments', async () => {
     const messages = [makeSessionMessage('m1', 'p1')];
     const serverRequest = vi
       .fn()
@@ -3111,13 +3111,14 @@ describe('RestProxy handleRequest', () => {
     expect(serverRequest).toHaveBeenNthCalledWith(
       2,
       'GET',
-      '/session/s1/message?limit=20',
+      '/session/s1/message?limit=200',
       undefined,
       withSignal({
         captureNextCursor: true,
         maxResponseBytes: 256 * 1024 * 1024,
         maxProjectedResponseBytes: 16 * 1024 * 1024,
         stripSummaryDiffs: true,
+        stripToolAttachments: true,
       })
     );
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
@@ -3126,7 +3127,7 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
-  it('fails when the smaller projected message window is still oversized', async () => {
+  it('fails when the message page without tool attachments is still oversized', async () => {
     const serverRequest = vi
       .fn()
       .mockRejectedValueOnce(new OpenCodeResponseTooLargeError(16 * 1024 * 1024))
@@ -3142,13 +3143,14 @@ describe('RestProxy handleRequest', () => {
     expect(serverRequest).toHaveBeenNthCalledWith(
       2,
       'GET',
-      '/session/s1/message?limit=20&before=cursor-3',
+      '/session/s1/message?limit=200&before=cursor-3',
       undefined,
       withSignal({
         captureNextCursor: true,
         maxResponseBytes: 256 * 1024 * 1024,
         maxProjectedResponseBytes: 16 * 1024 * 1024,
         stripSummaryDiffs: true,
+        stripToolAttachments: true,
       })
     );
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {

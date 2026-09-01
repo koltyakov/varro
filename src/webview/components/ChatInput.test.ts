@@ -899,33 +899,41 @@ describe('ChatInput', () => {
     }).not.toThrow();
   });
 
-  it('runs /stats without sending a chat message', async () => {
-    // SAFETY: The fixture provides the unknown fields read by this statement.
-    const bridgeWindow = window as {
-      __sendToExtension?: (message: WebviewMessage) => void;
-    };
-    const originalSend = bridgeWindow.__sendToExtension;
-    const sent: WebviewMessage[] = [];
-    bridgeWindow.__sendToExtension = (message) => sent.push(message);
-    setInputText('/stats');
+  it.each([
+    ['/stats', false],
+    ['/stats all', true],
+  ] as const)(
+    'runs %s without opening or sending a chat message',
+    async (command, includeAllTime) => {
+      // SAFETY: The fixture provides the unknown fields read by this statement.
+      const bridgeWindow = window as {
+        __sendToExtension?: (message: WebviewMessage) => void;
+      };
+      const originalSend = bridgeWindow.__sendToExtension;
+      const sent: WebviewMessage[] = [];
+      const onBeforeSend = vi.fn();
+      bridgeWindow.__sendToExtension = (message) => sent.push(message);
+      setInputText(command);
 
-    try {
-      cleanup = render(() => ChatInput(), container!);
-      container
-        ?.querySelector<HTMLDivElement>('.rich-composer')
-        ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-      await flushAsyncWork();
+      try {
+        cleanup = render(() => ChatInput({ newSession: true, onBeforeSend }), container!);
+        container
+          ?.querySelector<HTMLDivElement>('.rich-composer')
+          ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        await flushAsyncWork();
 
-      expect(sent).toContainEqual({
-        type: 'usage/report',
-        payload: { includeAllTime: false },
-      });
-      expect(sendMessageMock).not.toHaveBeenCalled();
-    } finally {
-      if (originalSend) bridgeWindow.__sendToExtension = originalSend;
-      else delete bridgeWindow.__sendToExtension;
+        expect(sent).toContainEqual({
+          type: 'usage/report',
+          payload: { includeAllTime },
+        });
+        expect(onBeforeSend).not.toHaveBeenCalled();
+        expect(sendMessageMock).not.toHaveBeenCalled();
+      } finally {
+        if (originalSend) bridgeWindow.__sendToExtension = originalSend;
+        else delete bridgeWindow.__sendToExtension;
+      }
     }
-  });
+  );
 
   it('shows an active hidden session model without falling back to the first visible model', () => {
     setState('providers', [

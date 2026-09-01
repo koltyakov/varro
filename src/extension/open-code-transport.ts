@@ -20,6 +20,7 @@ export type OpenCodeRequestOptions = {
   maxProjectedResponseBytes?: number;
   stripMessageParts?: boolean;
   stripSummaryDiffs?: boolean;
+  stripToolAttachments?: boolean;
   unscoped?: boolean;
   directory?: string;
   signal?: AbortSignal;
@@ -120,7 +121,8 @@ export class OpenCodeTransport {
         options?.maxResponseBytes ?? OpenCodeTransport.RESPONSE_MAX_BYTES,
         options?.stripSummaryDiffs === true,
         options?.maxProjectedResponseBytes,
-        options?.stripMessageParts === true
+        options?.stripMessageParts === true,
+        options?.stripToolAttachments === true
       );
       let data: unknown = text;
       try {
@@ -559,7 +561,8 @@ async function readResponseText(
   maxBytes?: number,
   stripSummaryDiffs = false,
   maxProjectedBytes = maxBytes,
-  stripMessageParts = false
+  stripMessageParts = false,
+  stripToolAttachments = false
 ): Promise<string> {
   if (!maxBytes) return response.text();
 
@@ -576,8 +579,8 @@ async function readResponseText(
       throw new OpenCodeResponseTooLargeError(maxBytes);
     }
     const projected =
-      stripSummaryDiffs || stripMessageParts
-        ? stripLargeArrays(text, stripSummaryDiffs, stripMessageParts)
+      stripSummaryDiffs || stripMessageParts || stripToolAttachments
+        ? stripLargeArrays(text, stripSummaryDiffs, stripMessageParts, stripToolAttachments)
         : text;
     if (maxProjectedBytes && Buffer.byteLength(projected, 'utf8') > maxProjectedBytes) {
       throw new OpenCodeResponseTooLargeError(maxProjectedBytes);
@@ -588,8 +591,8 @@ async function readResponseText(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   const projector =
-    stripSummaryDiffs || stripMessageParts
-      ? new LargeArrayProjector(stripSummaryDiffs, stripMessageParts)
+    stripSummaryDiffs || stripMessageParts || stripToolAttachments
+      ? new LargeArrayProjector(stripSummaryDiffs, stripMessageParts, stripToolAttachments)
       : null;
   let bytes = 0;
   let projectedBytes = 0;
@@ -629,14 +632,19 @@ async function readResponseText(
 function stripLargeArrays(
   text: string,
   stripSummaryDiffs: boolean,
-  stripMessageParts: boolean
+  stripMessageParts: boolean,
+  stripToolAttachments: boolean
 ): string {
-  const projector = new LargeArrayProjector(stripSummaryDiffs, stripMessageParts);
+  const projector = new LargeArrayProjector(
+    stripSummaryDiffs,
+    stripMessageParts,
+    stripToolAttachments
+  );
   return projector.write(text) + projector.finish();
 }
 
 type JsonContainer = { type: 'array' } | { type: 'object'; expectingKey: boolean };
-type StrippedArrayKey = 'diffs' | 'parts';
+type StrippedArrayKey = 'attachments' | 'diffs' | 'parts';
 
 class LargeArrayProjector {
   private readonly stack: JsonContainer[] = [];
@@ -654,7 +662,8 @@ class LargeArrayProjector {
 
   constructor(
     private readonly stripSummaryDiffs = true,
-    private readonly stripMessageParts = false
+    private readonly stripMessageParts = false,
+    private readonly stripToolAttachments = false
   ) {}
 
   write(chunk: string): string {
@@ -691,6 +700,8 @@ class LargeArrayProjector {
               this.pendingArrayKey = 'diffs';
             } else if (this.stripMessageParts && this.key === 'parts') {
               this.pendingArrayKey = 'parts';
+            } else if (this.stripToolAttachments && this.key === 'attachments') {
+              this.pendingArrayKey = 'attachments';
             } else {
               this.pendingArrayKey = null;
             }

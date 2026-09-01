@@ -3511,3 +3511,57 @@ test('terminal attachment sticky preview navigates to its original message', asy
     )
     .toBeGreaterThanOrEqual(0);
 });
+
+test('loaded sticky navigation takes ownership from a pending history request', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 486, height: 1064 });
+  await page.goto(
+    '/e2e/harness/index.html?scenario=sticky-preview-terminal-attachment&windowed=1&deferHistory=1&messagePageSize=50'
+  );
+
+  const list = page.locator('.interactive-list');
+  const sticky = page.locator('.latest-user-message-sticky-clickable');
+  const terminalCard = page.locator(
+    '[data-msg-id="message-sticky-terminal-user"] .user-message-card'
+  );
+  await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+
+  await list.focus();
+  const box = await list.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  const pendingHistoryRequestCount = () =>
+    page.evaluate(() => {
+      const harness = window as typeof window & {
+        __varroE2E?: { pendingHistoryRequestCount?: () => number };
+      };
+      return harness.__varroE2E?.pendingHistoryRequestCount?.() ?? 0;
+    });
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    await page.mouse.wheel(0, -420);
+    if ((await pendingHistoryRequestCount()) > 0) break;
+  }
+  await expect.poll(pendingHistoryRequestCount).toBe(1);
+
+  await page.keyboard.press('End');
+  await expect(sticky).toContainText('Terminal: zsh');
+  const before = await list.evaluate((element) => element.scrollTop);
+  await sticky.click();
+  const after = await list.evaluate((element) => element.scrollTop);
+
+  expect(after).not.toBe(before);
+  await expect
+    .poll(() =>
+      getStickyMessageAlignment(terminalCard).then((geometry) => Math.abs(geometry.delta))
+    )
+    .toBeLessThanOrEqual(1);
+  await expect(sticky).toHaveCount(0);
+
+  await page.evaluate(() => {
+    const harness = window as typeof window & {
+      __varroE2E?: { releaseHistoryRequests?: () => void };
+    };
+    harness.__varroE2E?.releaseHistoryRequests?.();
+  });
+});

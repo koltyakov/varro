@@ -86,7 +86,6 @@ const CURRENT_PROJECT_CACHE_TTL_MS = 2_000;
 const SESSION_EVENT_CATALOG_REFRESH_MS = 1_000;
 const SESSION_MESSAGE_RESPONSE_MAX_BYTES = 16 * 1024 * 1024;
 const SESSION_MESSAGE_FALLBACK_MAX_BYTES = 256 * 1024 * 1024;
-const SESSION_MESSAGE_RECOVERY_PAGE_SIZE = 20;
 const PERMANENT_DELETION_TOMBSTONE_LIMIT = 256;
 const openCodeConfigUpdateLocks = new Map<string, Promise<void>>();
 
@@ -1355,18 +1354,11 @@ export class RestProxy {
       return await this.requestServer(method, path, body, options);
     } catch (err) {
       if (!(err instanceof OpenCodeResponseTooLargeError)) throw err;
-      const url = new URL(path, 'http://localhost');
-      const requestedLimit = Number(url.searchParams.get('limit'));
-      if (
-        Number.isSafeInteger(requestedLimit) &&
-        requestedLimit > SESSION_MESSAGE_RECOVERY_PAGE_SIZE
-      ) {
-        url.searchParams.set('limit', String(SESSION_MESSAGE_RECOVERY_PAGE_SIZE));
-        const recoveryPath = `${url.pathname}${url.search}`;
-        logger.warn(`Retrying oversized message page with a smaller window: ${recoveryPath}`);
-        return this.requestServer(method, recoveryPath, body, options);
-      }
-      throw err;
+      logger.warn(`Retrying oversized message page without tool attachments: ${path}`);
+      return this.requestServer(method, path, body, {
+        ...options,
+        stripToolAttachments: true,
+      });
     }
   }
 

@@ -11,8 +11,8 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 - Added automatic provider authorization without a browser URL, provider deletion from model menus, Azure and Amazon icons, and usage limits for OpenCode Go, xAI, and Ollama Cloud.
 - Added assistant duration to local usage reports.
 - Added an elapsed timer beside the composer for active turns, with a warning when a turn stops producing activity.
-- Improved workspace-scoped state, session recovery and lifecycle coordination, session transport and streaming recovery, provider authentication, long-conversation scrolling, composer isolation, and editor context handling.
-- Fixed link punctuation, token totals, hidden-model persistence, transcript overflow, chat action colors, queued-message restoration, local usage reporting, unread attention flicker, workspace selection for new chats, and stale webview events.
+- Improved workspace-scoped state, session recovery and lifecycle coordination, session transport and streaming recovery, provider authentication, large-conversation responsiveness and scrolling, composer isolation, activity rendering, and editor context handling.
+- Fixed link punctuation, token totals, hidden-model persistence, transcript overflow, chat action colors, queued-message restoration, interrupted-session recovery, composer and question transitions, unread attention flicker, workspace selection for new chats, local usage reporting, and stale webview events.
 
 ## 0.26.x - August 2026
 

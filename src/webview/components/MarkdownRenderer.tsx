@@ -1309,6 +1309,20 @@ function hideIncompleteStreamingBlock(content: string) {
     );
   }
 
+  if (!/\r?\n$/.test(content)) {
+    const trailingOrderedList = content.match(
+      /(?:^|\r?\n)([ \t]{0,3}\d+(?:[.)](?:[ \t]+[^\r\n]*)?)?)$/
+    );
+    if (trailingOrderedList) {
+      return content.slice(
+        0,
+        (trailingOrderedList.index ?? 0) +
+          trailingOrderedList[0].length -
+          (trailingOrderedList[1]?.length ?? 0)
+      );
+    }
+  }
+
   const blockStartMatch = content.match(/(?:^|\r?\n\s*\r?\n)([^\r\n]*(?:\r?\n[^\r\n]*)?)$/);
   if (!blockStartMatch) return content;
   const block = blockStartMatch[1] ?? '';

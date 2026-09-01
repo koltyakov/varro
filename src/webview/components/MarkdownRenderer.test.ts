@@ -1345,6 +1345,42 @@ describe('MarkdownRenderer', () => {
     expect(container?.querySelector('code')?.textContent?.trim()).toBe('const ready = true;');
   });
 
+  it('does not retract a streamed ordered-list marker while its delimiter completes', async () => {
+    const base = 'Scope protects attention.';
+    const [content, setContent] = createSignal(`${base}\n\n6`);
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+          forceStreaming: true,
+        }),
+      container!
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(container?.querySelector('.streaming-markdown-pending')?.textContent).toBe('6');
+
+    setContent(`${base}\n\n6.`);
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(container?.querySelector('ol')).toBeNull();
+
+    setContent(`${base}\n\n6. A bounded task identifies`);
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(container?.querySelector('ol')).toBeNull();
+    expect(container?.querySelector('.streaming-markdown-pending')?.textContent).toBe(
+      '6. A bounded task identifies'
+    );
+
+    setContent(`${base}\n\n6. A bounded task identifies\n`);
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(container?.querySelector('ol li')?.textContent).toBe('A bounded task identifies');
+  });
+
   it('does not reparse the stable streaming segment when only the tail grows', async () => {
     const [content, setContent] = createSignal('First paragraph\n\nSecond');
     const sanitizeSpy = vi.spyOn(DOMPurify, 'sanitize');
