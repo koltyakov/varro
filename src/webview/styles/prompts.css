@@ -803,13 +803,89 @@ body.vscode-high-contrast-light
 
 .permission-prompt-actions {
   display: grid;
-  grid-template-columns: repeat(3, 96px);
+  grid-template-columns: 96px 120px 96px;
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
   margin-top: 2px;
   padding: 8px 12px 10px;
   border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 12%, transparent);
+}
+
+.permission-always-button-group {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--color-vscode-fg) 12%, var(--permission-surface));
+}
+
+.permission-prompt-actions .permission-always-main {
+  min-width: 0;
+  border: 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  background: transparent;
+}
+
+.permission-always-menu-trigger {
+  display: flex;
+  position: relative;
+  width: 24px;
+  flex: 0 0 24px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid color-mix(in srgb, var(--color-vscode-fg) 12%, transparent);
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  background: color-mix(in srgb, var(--color-vscode-fg) 12%, var(--permission-surface));
+  color: var(--color-vscode-fg);
+}
+
+.permission-always-menu-trigger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-vscode-fg) 18%, var(--permission-surface));
+}
+
+.permission-always-main:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-vscode-fg) 18%, var(--permission-surface));
+}
+
+.permission-always-menu {
+  position: fixed;
+  z-index: var(--z-context-menu);
+  display: flex;
+  width: min(220px, calc(100vw - 16px));
+  flex-direction: column;
+  overflow: hidden;
+  padding: 4px;
+  border: 1px solid var(--color-vscode-border);
+  border-radius: var(--radius-card);
+  background: var(--color-vscode-list-bg);
+  box-shadow: var(--shadow-popover);
+}
+
+.permission-always-menu button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: var(--radius-inset);
+  background: transparent;
+  color: var(--color-vscode-fg);
+  text-align: left;
+}
+
+.permission-always-menu button:hover,
+.permission-always-menu button:focus-visible {
+  background: var(--color-vscode-hover);
+  outline: none;
+}
+
+.permission-always-menu small {
+  color: var(--color-vscode-muted);
+  font-size: 10px;
 }
 
 .permission-prompt-actions .question-btn {
@@ -835,20 +911,21 @@ body.vscode-high-contrast-light
   display: none;
 }
 
-.permission-prompt-actions .question-btn-secondary {
+.permission-prompt-actions .question-btn-secondary:not(.permission-always-main) {
   border: 1px solid color-mix(in srgb, var(--color-vscode-fg) 20%, var(--color-vscode-border));
   background: color-mix(in srgb, var(--color-vscode-fg) 12%, var(--permission-surface));
   color: var(--color-vscode-fg);
 }
 
-.permission-prompt-actions .question-btn-secondary:hover:not(:disabled) {
+.permission-prompt-actions
+  .question-btn-secondary:not(.permission-always-main):hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--color-vscode-fg) 30%, var(--color-vscode-border));
   background: color-mix(in srgb, var(--color-vscode-fg) 18%, var(--permission-surface));
 }
 
 @media (max-width: 420px) {
   .permission-prompt-actions {
-    grid-template-columns: repeat(3, 72px);
+    grid-template-columns: 72px 96px 72px;
   }
 
   .permission-action-label-full {
@@ -862,7 +939,9 @@ body.vscode-high-contrast-light
 
 @media (max-width: 300px) {
   .permission-prompt-actions {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns:
+      calc((100% - 36px) / 3) calc((100% - 36px) / 3 + 24px)
+      calc((100% - 36px) / 3);
     justify-content: stretch;
   }
 }

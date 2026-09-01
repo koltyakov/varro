@@ -188,6 +188,14 @@ export async function respondPermission(
   await getCurrentOpenCodeRuntime().respondPermission(sessionId, permissionId, response, options);
 }
 
+export async function alwaysAllowPermissionForProject(sessionId: string, permissionId: string) {
+  await getCurrentOpenCodeRuntime().alwaysAllowPermissionForProject(sessionId, permissionId);
+}
+
+export async function alwaysAllowPermissionForSession(sessionId: string, permissionId: string) {
+  await getCurrentOpenCodeRuntime().alwaysAllowPermissionForSession(sessionId, permissionId);
+}
+
 export async function respondQuestion(
   requestID: string,
   answers: Array<Array<string>>,

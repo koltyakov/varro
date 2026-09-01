@@ -427,6 +427,7 @@ export type Permission = {
   id: string;
   type: string;
   pattern?: string | string[];
+  always?: string[];
   sessionID: string;
   messageID: string;
   callID?: string;

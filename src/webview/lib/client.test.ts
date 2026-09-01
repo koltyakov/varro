@@ -244,6 +244,12 @@ describe('client', () => {
       delivery: 'steer',
     });
     await client.session.respondPermission('session-1', 'perm-1', 'always');
+    await client.session.persistProjectPermissionAllow('session-1', 'perm-1', {
+      directory: '/repo',
+    });
+    await client.session.allowPermissionForSession('session-1', 'perm-1', {
+      directory: '/repo',
+    });
     await client.session.revert('session-1', 'message-1');
     await client.session.unrevert('session-1');
     await client.session.compact('session-1', { providerID: 'openai', modelID: 'gpt-4.1' });
@@ -322,6 +328,16 @@ describe('client', () => {
         },
       ],
       ['POST', '/permission/perm-1/reply', { reply: 'always' }],
+      [
+        'POST',
+        '/varro/permission/project-allow?directory=%2Frepo',
+        { sessionId: 'session-1', permissionId: 'perm-1' },
+      ],
+      [
+        'POST',
+        '/varro/permission/session-allow?directory=%2Frepo',
+        { sessionId: 'session-1', permissionId: 'perm-1' },
+      ],
       ['POST', '/session/session-1/revert', { messageID: 'message-1' }],
       ['POST', '/session/session-1/unrevert'],
       ['POST', '/session/session-1/summarize', { providerID: 'openai', modelID: 'gpt-4.1' }],

@@ -158,6 +158,7 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
     completeQueuedMessageDispatchClaim: vi.fn(() => Promise.resolve(true)),
     releaseQueuedMessageDispatchClaim: vi.fn(),
     updatePermissionMode: vi.fn(() => Promise.resolve(undefined)),
+    allowPermissionForSession: vi.fn(() => Promise.resolve(undefined)),
     cleanupExpiredRecycleBin: vi.fn(() => Promise.resolve()),
     removeSessionImages: vi.fn(() => Promise.resolve()),
     postApiResponse: vi.fn(),
@@ -1651,6 +1652,123 @@ describe('RestProxy handleRequest', () => {
 
     expect(callbacks.updatePermissionMode).toHaveBeenCalledWith('session-1', 'edits', '/repo');
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 85, data: session });
+  });
+
+  it('persists authoritative always patterns in project config', async () => {
+    const existingConfig = JSON.stringify({
+      permission: { bash: { '*': 'ask', 'git *': 'deny' } },
+    });
+    mocks.vscode.workspace.textDocuments = [];
+    mocks.vscode.workspace.fs.readFile.mockImplementation((uri: { fsPath: string }) => {
+      if (uri.fsPath === '/repo/opencode.json') {
+        return Promise.resolve(new TextEncoder().encode(existingConfig));
+      }
+      return Promise.reject({ code: 'FileNotFound' });
+    });
+    mocks.vscode.workspace.fs.stat.mockResolvedValue({ mtime: 1, size: existingConfig.length });
+    mocks.vscode.workspace.fs.writeFile.mockClear();
+    const serverRequest = vi.fn((method: string, path: string) => {
+      if (method === 'GET' && path === '/permission') {
+        return Promise.resolve([
+          {
+            id: 'perm-1',
+            sessionID: 'session-1',
+            permission: 'bash',
+            always: ['npm test *'],
+          },
+        ]);
+      }
+      return Promise.resolve(undefined);
+    });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(
+      makePayload(852, 'POST', '/varro/permission/project-allow?directory=%2Frepo', {
+        sessionId: 'session-1',
+        permissionId: 'perm-1',
+      })
+    );
+
+    expect(serverRequest).not.toHaveBeenCalledWith('PATCH', '/config', expect.anything());
+    expect(serverRequest).not.toHaveBeenCalledWith('POST', '/instance/dispose', expect.anything());
+    expect(serverRequest).not.toHaveBeenCalledWith('POST', '/global/dispose', expect.anything());
+    expect(mocks.vscode.workspace.fs.writeFile).toHaveBeenCalledOnce();
+    const [uri, encoded] = mocks.vscode.workspace.fs.writeFile.mock.calls[0]!;
+    expect(uri.fsPath).toBe('/repo/opencode.json');
+    expect(JSON.parse(new TextDecoder().decode(encoded))).toMatchObject({
+      permission: {
+        bash: { '*': 'ask', 'git *': 'deny', 'npm test *': 'allow' },
+      },
+    });
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 852,
+      data: { permission: 'bash', patterns: ['npm test *'] },
+    });
+    mocks.vscode.workspace.fs.writeFile.mockClear();
+  });
+
+  it('passes authoritative always patterns to the session permission updater', async () => {
+    const serverRequest = vi.fn((method: string, path: string) =>
+      Promise.resolve(
+        method === 'GET' && path === '/permission'
+          ? [
+              {
+                id: 'perm-1',
+                sessionID: 'session-1',
+                permission: 'bash',
+                always: ['npm test *', 'npm test *'],
+              },
+            ]
+          : undefined
+      )
+    );
+    const allowPermissionForSession = vi.fn(() => Promise.resolve());
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      allowPermissionForSession,
+    });
+
+    await proxy.handleRequest(
+      makePayload(854, 'POST', '/varro/permission/session-allow?directory=%2Frepo', {
+        sessionId: 'session-1',
+        permissionId: 'perm-1',
+      })
+    );
+
+    expect(allowPermissionForSession).toHaveBeenCalledWith(
+      'session-1',
+      'bash',
+      ['npm test *'],
+      '/repo'
+    );
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 854,
+      data: undefined,
+    });
+  });
+
+  it('rejects project permission persistence without a matching pending request', async () => {
+    const serverRequest = vi.fn((method: string, path: string) =>
+      Promise.resolve(method === 'GET' && path === '/permission' ? [] : undefined)
+    );
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(
+      makePayload(853, 'POST', '/varro/permission/project-allow', {
+        sessionId: 'session-1',
+        permissionId: 'perm-missing',
+      })
+    );
+
+    expect(serverRequest).not.toHaveBeenCalledWith('PATCH', '/config', expect.anything());
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 853,
+      error: '404 permission request not found',
+    });
   });
 
   it('correlates preconfigured permission mode persistence without requesting another rule patch', async () => {

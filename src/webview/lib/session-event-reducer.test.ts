@@ -69,6 +69,7 @@ describe('normalizePermissionEvent', () => {
       sessionID: 'session-1',
       permission: 'bash',
       patterns: ['ls', 'pwd'],
+      always: ['ls *'],
       title: 'Allow running ls?',
       tool: { messageID: 'msg-42', callID: 'call-1' },
       metadata: { origin: 'tool' },
@@ -81,6 +82,7 @@ describe('normalizePermissionEvent', () => {
     expect(out?.messageID).toBe('msg-42');
     expect(out?.callID).toBe('call-1');
     expect(out?.pattern).toEqual(['ls', 'pwd']);
+    expect(out?.always).toEqual(['ls *']);
     expect(out?.title).toBe('Allow running ls?');
     expect(out?.metadata).toEqual({ origin: 'tool' });
   });

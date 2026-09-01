@@ -260,6 +260,69 @@ describe('SidebarProvider permission replay', () => {
     });
   });
 
+  it('adds an authoritative allow rule only to the permission-owning session', async () => {
+    const server = createServer({
+      request: vi.fn((method: string, path: string, body?: unknown) => {
+        if (method === 'GET' && path === '/permission') {
+          return Promise.resolve([
+            {
+              id: 'permission-1',
+              sessionID: 'session-1',
+              permission: 'bash',
+              always: ['npm test *'],
+            },
+          ]);
+        }
+        if (method === 'GET' && path === '/session/session-1') {
+          return Promise.resolve({
+            id: 'session-1',
+            permission: [{ permission: '*', pattern: '*', action: 'ask' }],
+          });
+        }
+        if (method === 'PATCH' && path === '/session/session-1') {
+          return Promise.resolve({ id: 'session-1', ...(body as object) });
+        }
+        return Promise.resolve(undefined);
+      }),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const { posted } = attachTestView(provider);
+    const providerState = provider as unknown as {
+      sessionState: { handleServerEvent(event: unknown): void };
+    };
+    providerState.sessionState.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'session-1', directory: '/repo' } },
+    });
+    server.request.mockClear();
+
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: {
+        id: 203,
+        method: 'POST',
+        path: '/varro/permission/session-allow?directory=%2Frepo',
+        body: { sessionId: 'session-1', permissionId: 'permission-1' },
+      },
+    });
+
+    expect(server.request).toHaveBeenCalledWith(
+      'PATCH',
+      '/session/session-1',
+      {
+        permission: [
+          { permission: '*', pattern: '*', action: 'ask' },
+          { permission: 'bash', pattern: 'npm test *', action: 'allow' },
+        ],
+      },
+      { directory: '/repo' }
+    );
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: { id: 203, data: undefined },
+    });
+  });
+
   it('accepts a project-catalog permission reply through the catalog root workspace', async () => {
     const values = new Map<string, unknown>([
       ['varro.sessionHistoryScopes', { 'project:project-1': 'project' }],

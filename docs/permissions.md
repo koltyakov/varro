@@ -22,7 +22,8 @@ Changing modes affects pending requests as well as later actions. Switching to `
 When OpenCode asks for permission, Varro places the request beside the action that needs it. A standalone prompt appears if that action is not currently visible.
 
 - `Once` approves only the current request.
-- `Always` approves the request and asks OpenCode to remember a matching rule for later actions in the conversation.
+- `Always` approves the request and remembers matching actions in OpenCode server memory until the
+  server restarts. Its menu also offers a session-only rule or a persistent project-config rule.
 - `Reject` denies the request.
 
 Read the command, path, URL, or tool details before responding. `Always` can cover later matching actions, so use `Once` when the scope is unclear. Child-session requests appear in the parent conversation, but the permission still belongs to the child.

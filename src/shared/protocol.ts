@@ -356,6 +356,8 @@ export const VARRO_API_ENDPOINTS = {
   workspacePathResolve: `${VARRO_API_NAMESPACE}/workspace-path/resolve`,
   permissionJudge: `${VARRO_API_NAMESPACE}/permission/judge`,
   permissionJudgeModel: `${VARRO_API_NAMESPACE}/permission/judge/model`,
+  permissionSessionAllow: `${VARRO_API_NAMESPACE}/permission/session-allow`,
+  permissionProjectAllow: `${VARRO_API_NAMESPACE}/permission/project-allow`,
 } as const;
 
 export type VarroSessionEndpointAction =

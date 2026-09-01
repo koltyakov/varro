@@ -199,6 +199,12 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('GET', '/varro/opencode-config')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/opencode-config/model-routing')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/permission/judge')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/varro/permission/project-allow?directory=%2Frepo-a')).toBe(
+      true
+    );
+    expect(isAllowedApiRequest('POST', '/varro/permission/session-allow?directory=%2Frepo-a')).toBe(
+      true
+    );
     expect(
       isAllowedApiRequest(
         'GET',

@@ -160,7 +160,7 @@ test('restores a linked permission to full flow after its tool starts compacting
     };
   });
 
-  expect(geometry.actionCount).toBe(3);
+  expect(geometry.actionCount).toBe(4);
   expect(geometry.promptHeight).toBeGreaterThan(100);
   expect(geometry.promptFullyVisible).toBe(true);
   expect(geometry.actionsFullyVisible).toBe(true);
@@ -381,6 +381,29 @@ test('clears every covered grouped permission after allowing always', async ({ p
     });
 });
 
+test('offers always-allow scopes from the split-button menu', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=pending-permission');
+
+  await expect(page.getByRole('button', { name: 'Allow always' })).toBeVisible();
+  await page.getByRole('button', { name: 'Always allow options' }).click();
+
+  const menu = page.getByRole('menu', { name: 'Always allow scope' });
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole('menuitem')).toHaveText([
+    /Always allow for this session/,
+    /Always allow in server memory/,
+    /Always allow for this project/,
+  ]);
+  const projectScope = menu.getByRole('menuitem', { name: /Always allow for this project/ });
+  const restingBackground = await projectScope.evaluate(
+    (element) => getComputedStyle(element).backgroundColor
+  );
+  await projectScope.hover();
+  await expect
+    .poll(() => projectScope.evaluate((element) => getComputedStyle(element).backgroundColor))
+    .not.toBe(restingBackground);
+});
+
 test('shows distinct permission requests one at a time', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=sequential-permissions');
 
@@ -437,15 +460,62 @@ test('keeps permission actions on one responsive row', async ({ page }) => {
     const actionsRect = actions.getBoundingClientRect();
     const buttons = [...actions.querySelectorAll('button')];
     const buttonRects = buttons.map((button) => button.getBoundingClientRect());
+    const allowOnceRect = actions
+      .querySelector('[aria-label="Allow once"]')
+      ?.getBoundingClientRect();
+    const allowAlwaysRect = actions
+      .querySelector('[aria-label="Allow always"]')
+      ?.getBoundingClientRect();
+    const rejectRect = actions.querySelector('[aria-label="Reject"]')?.getBoundingClientRect();
+    const optionsRect = actions
+      .querySelector('[aria-label="Always allow options"]')
+      ?.getBoundingClientRect();
+    const alwaysGroup = actions.querySelector<HTMLElement>('.permission-always-button-group');
+    const allowAlways = actions.querySelector<HTMLElement>('[aria-label="Allow always"]');
+    const options = actions.querySelector<HTMLElement>('[aria-label="Always allow options"]');
+    // oxlint-disable-next-line unicorn/consistent-function-scoping -- Playwright serializes this browser callback independently.
+    const borderWidths = (element: HTMLElement | null) => {
+      if (!element) return null;
+      const style = getComputedStyle(element);
+      return [
+        style.borderTopWidth,
+        style.borderRightWidth,
+        style.borderBottomWidth,
+        style.borderLeftWidth,
+      ];
+    };
     const labels = [...actions.querySelectorAll<HTMLElement>('.permission-action-label-short')];
     return {
       oneRow: buttonRects.every((rect) => Math.abs(rect.top - buttonRects[0]!.top) < 1),
       contained: buttonRects.every(
         (rect) => rect.left >= actionsRect.left - 1 && rect.right <= actionsRect.right + 1
       ),
+      alignedBaseWidths:
+        !!allowOnceRect &&
+        !!allowAlwaysRect &&
+        !!rejectRect &&
+        Math.abs(allowOnceRect.width - allowAlwaysRect.width) < 1 &&
+        Math.abs(allowOnceRect.width - rejectRect.width) < 1,
+      optionsAreExtra: !!optionsRect && Math.abs(optionsRect.width - 24) < 1,
+      splitBorders: {
+        group: borderWidths(alwaysGroup),
+        main: borderWidths(allowAlways),
+        options: borderWidths(options),
+      },
       usesEllipsis: labels.every((label) => getComputedStyle(label).textOverflow === 'ellipsis'),
     };
   });
 
-  expect(layout).toEqual({ oneRow: true, contained: true, usesEllipsis: true });
+  expect(layout).toEqual({
+    oneRow: true,
+    contained: true,
+    alignedBaseWidths: true,
+    optionsAreExtra: true,
+    splitBorders: {
+      group: ['0px', '0px', '0px', '0px'],
+      main: ['0px', '0px', '0px', '0px'],
+      options: ['0px', '0px', '0px', '1px'],
+    },
+    usesEllipsis: true,
+  });
 });

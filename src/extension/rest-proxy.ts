@@ -254,6 +254,12 @@ export interface RestProxyCallbacks {
     directory?: string,
     preconfigured?: boolean
   ): Promise<unknown>;
+  allowPermissionForSession(
+    sessionID: string,
+    permission: string,
+    patterns: string[],
+    directory?: string
+  ): Promise<void>;
   activateSession(
     sessionID: string,
     directory: string,
@@ -789,6 +795,56 @@ export class RestProxy {
               permissionModeRequest.mode,
               directory ?? undefined
             );
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
+
+      const sessionPermissionAllowRequest = this.parsePermissionAllowRequest(
+        VARRO_API_ENDPOINTS.permissionSessionAllow,
+        method,
+        payload.path,
+        payload.body
+      );
+      if (sessionPermissionAllowRequest) {
+        const directory = explicitWorkspaceDirectory ?? this.getCurrentWorkspaceResolutionRoot();
+        await this.assertSessionInWorkspace(
+          sessionPermissionAllowRequest.sessionId,
+          directory,
+          directory
+        );
+        const scope = await this.getPendingPermissionAllowScope(
+          sessionPermissionAllowRequest,
+          directory ?? undefined,
+          requestSignal
+        );
+        const data = await this.callbacks.allowPermissionForSession(
+          sessionPermissionAllowRequest.sessionId,
+          scope.permission,
+          scope.patterns,
+          directory ?? undefined
+        );
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
+
+      const projectPermissionAllowRequest = this.parsePermissionAllowRequest(
+        VARRO_API_ENDPOINTS.permissionProjectAllow,
+        method,
+        payload.path,
+        payload.body
+      );
+      if (projectPermissionAllowRequest) {
+        const directory = explicitWorkspaceDirectory ?? this.getCurrentWorkspaceResolutionRoot();
+        await this.assertSessionInWorkspace(
+          projectPermissionAllowRequest.sessionId,
+          directory,
+          directory
+        );
+        const data = await this.persistProjectPermissionAllow(
+          projectPermissionAllowRequest,
+          directory ?? undefined,
+          requestSignal
+        );
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
       }
@@ -2083,6 +2139,70 @@ export class RestProxy {
       mode,
       preconfigured: preconfigured === true,
     };
+  }
+
+  private parsePermissionAllowRequest(
+    endpoint: string,
+    method: string,
+    path: string,
+    body: unknown
+  ): { sessionId: string; permissionId: string } | null {
+    if (method !== 'POST') return null;
+    const url = new URL(path, 'http://localhost');
+    if (url.pathname !== endpoint) return null;
+    const record = asRecord(body);
+    const sessionId = typeof record?.sessionId === 'string' ? record.sessionId.trim() : '';
+    const permissionId = typeof record?.permissionId === 'string' ? record.permissionId.trim() : '';
+    if (!sessionId || !permissionId) throw new Error('Invalid permission scope request');
+    return { sessionId, permissionId };
+  }
+
+  private async persistProjectPermissionAllow(
+    request: { sessionId: string; permissionId: string },
+    directory: string | undefined,
+    signal?: AbortSignal
+  ) {
+    const { permission, patterns } = await this.getPendingPermissionAllowScope(
+      request,
+      directory,
+      signal
+    );
+    await this.updateOpenCodeProjectPermission(permission, patterns);
+    return { permission, patterns };
+  }
+
+  private async getPendingPermissionAllowScope(
+    request: { sessionId: string; permissionId: string },
+    directory: string | undefined,
+    signal?: AbortSignal
+  ) {
+    const options = { directory, signal };
+    const pending = await this.requestServer('GET', '/permission', undefined, options);
+    if (!Array.isArray(pending)) throw new Error('Cannot verify the pending permission request');
+    const match = pending
+      .map((value) => asRecord(asRecord(value)?.info) ?? asRecord(value))
+      .find((value) => {
+        const id = value?.id ?? value?.permissionID ?? value?.requestID;
+        return id === request.permissionId && value?.sessionID === request.sessionId;
+      });
+    if (!match) throw new Error('404 permission request not found');
+
+    const permission =
+      typeof match.permission === 'string'
+        ? match.permission.trim()
+        : typeof match.type === 'string'
+          ? match.type.trim()
+          : '';
+    const patterns = Array.isArray(match.always)
+      ? [...new Set(match.always.filter((value): value is string => typeof value === 'string'))]
+          .map((value) => value.trim())
+          .filter(Boolean)
+      : [];
+    if (!permission || patterns.length === 0) {
+      throw new Error('Standing approval scope is unavailable for this request');
+    }
+
+    return { permission, patterns };
   }
 
   private async readSessionDiffSummary(sessionID: string): Promise<SessionDiffSummary> {
@@ -3390,6 +3510,63 @@ export class RestProxy {
         return { kind: 'complete' as const, routing: currentRouting };
       });
       if (result.kind === 'complete') return result.routing;
+      snapshot = result.snapshot;
+    }
+  }
+
+  private async updateOpenCodeProjectPermission(permission: string, patterns: string[]) {
+    let snapshot = await this.readOpenCodeConfigObject();
+    while (true) {
+      const lockPath = getCanonicalOpenCodeConfigPath(snapshot.target.path);
+      const result = await withOpenCodeConfigUpdateLock(lockPath, async () => {
+        const currentSnapshot = await this.readOpenCodeConfigObject();
+        const { target } = currentSnapshot;
+        if (getCanonicalOpenCodeConfigPath(target.path) !== lockPath) {
+          return { kind: 'retry' as const, snapshot: currentSnapshot };
+        }
+
+        const dirtyDocument = vscode.workspace.textDocuments.find(
+          (document) =>
+            document.isDirty &&
+            (document.uri.toString() === target.uri.toString() ||
+              isSameWorkspacePath(document.uri.fsPath, target.uri.fsPath))
+        );
+        if (dirtyDocument) {
+          throw new Error(
+            `Project ${target.path.endsWith('.jsonc') ? 'opencode.jsonc' : 'opencode.json'} has unsaved changes; save or revert the document before updating permissions`
+          );
+        }
+
+        const initialStat = await this.readConfigStat(target.uri);
+        let nextRaw = target.raw.trim() ? target.raw : '{}\n';
+        if (typeof target.config.$schema !== 'string' || !target.config.$schema.trim()) {
+          nextRaw = applyJsoncChange(nextRaw, ['$schema'], 'https://opencode.ai/config.json');
+        }
+
+        const targetPermission = asRecord(target.config.permission)?.[permission];
+        const effectivePermission = asRecord(currentSnapshot.config.permission)?.[permission];
+        const rules: Record<string, unknown> =
+          typeof targetPermission === 'string'
+            ? { '*': targetPermission }
+            : asRecord(targetPermission)
+              ? { ...asRecord(targetPermission) }
+              : typeof effectivePermission === 'string'
+                ? { '*': effectivePermission }
+                : {};
+        for (const pattern of patterns) rules[pattern] = 'allow';
+        nextRaw = applyJsoncChange(nextRaw, ['permission', permission], rules);
+
+        const latestStat = await this.readConfigStat(target.uri);
+        if (!this.areConfigStatsEqual(initialStat, latestStat)) {
+          throw new Error(
+            `Project ${target.path.endsWith('.jsonc') ? 'opencode.jsonc' : 'opencode.json'} changed while updating permissions; please retry`
+          );
+        }
+        const encoded = new TextEncoder().encode(nextRaw.endsWith('\n') ? nextRaw : `${nextRaw}\n`);
+        await vscode.workspace.fs.writeFile(target.uri, encoded);
+        return { kind: 'complete' as const };
+      });
+      if (result.kind === 'complete') return;
       snapshot = result.snapshot;
     }
   }

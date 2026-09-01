@@ -1741,6 +1741,14 @@ const API_ROUTES: ApiRoute[] = [
   route(VARRO_API_ENDPOINTS.openCodeConfigModelRouting, methodsNoQuery('POST')),
   route(VARRO_API_ENDPOINTS.permissionJudge, methodsNoQuery('POST')),
   route(
+    VARRO_API_ENDPOINTS.permissionProjectAllow,
+    ({ method, url }) => method === 'POST' && optionalDirectoryQuery(url)
+  ),
+  route(
+    VARRO_API_ENDPOINTS.permissionSessionAllow,
+    ({ method, url }) => method === 'POST' && optionalDirectoryQuery(url)
+  ),
+  route(
     VARRO_API_ENDPOINTS.permissionJudgeModel,
     ({ method, url }) => method === 'GET' && onlyQuery(url, 'providerID', 'modelID', 'variant')
   ),

@@ -5,12 +5,16 @@ import type { Permission } from '../types';
 // SAFETY: The fixture provides the 'default' | 'edits' | 'auto' | 'full' fields read by this statement.
 const mocks = vi.hoisted(() => ({
   respondPermission: vi.fn(async () => {}),
+  alwaysAllowPermissionForProject: vi.fn(async () => {}),
+  alwaysAllowPermissionForSession: vi.fn(async () => {}),
   permissionMode: 'default' as 'default' | 'edits' | 'auto' | 'full',
 }));
 
 /* oxlint-disable anti-slop/no-module-mocking -- These tests exercise permission prompt integration with hooks and mode state. */
 vi.mock('../hooks/useOpenCode', () => ({
   respondPermission: mocks.respondPermission,
+  alwaysAllowPermissionForProject: mocks.alwaysAllowPermissionForProject,
+  alwaysAllowPermissionForSession: mocks.alwaysAllowPermissionForSession,
 }));
 
 vi.mock('../lib/state-permission-modes', () => ({
@@ -40,6 +44,10 @@ beforeEach(() => {
   document.body.appendChild(container);
   mocks.respondPermission.mockReset();
   mocks.respondPermission.mockResolvedValue(undefined);
+  mocks.alwaysAllowPermissionForProject.mockReset();
+  mocks.alwaysAllowPermissionForProject.mockResolvedValue(undefined);
+  mocks.alwaysAllowPermissionForSession.mockReset();
+  mocks.alwaysAllowPermissionForSession.mockResolvedValue(undefined);
   mocks.permissionMode = 'default';
 });
 
@@ -60,20 +68,21 @@ describe('PermissionPrompt', () => {
     expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual([
       'Allow once',
       'Allow always',
+      'Always allow options',
       'Reject',
     ]);
     expect(
       buttons.map((button) => button.querySelector('.permission-action-label-short')?.textContent)
-    ).toEqual(['Once', 'Always', 'Reject']);
+    ).toEqual(['Once', 'Always', undefined, 'Reject']);
     expect(buttons[0]?.classList).toContain('question-btn-primary');
     expect(buttons[1]?.classList).toContain('question-btn-secondary');
-    expect(buttons[2]?.classList).toContain('question-btn-danger');
+    expect(buttons[2]?.classList).toContain('permission-always-menu-trigger');
+    expect(buttons[3]?.classList).toContain('question-btn-danger');
     expect(container?.querySelector('.permission-prompt')?.classList).not.toContain(
       'animate-fade-in'
     );
-    expect(buttons[1]?.getAttribute('title')).toBe('Allow matching future requests');
     const scopeNote = container?.querySelector('.permission-prompt-scope-note')?.textContent;
-    expect(scopeNote).toContain('"Always allow" covers matching requests.');
+    expect(scopeNote).toContain('matching requests in this session, until OpenCode restarts');
     expect(scopeNote).not.toContain('guides AI review');
   });
 
@@ -92,6 +101,9 @@ describe('PermissionPrompt', () => {
     expect(
       container?.querySelector<HTMLButtonElement>('[aria-label="Allow always"]')?.disabled
     ).toBe(true);
+    expect(
+      container?.querySelector<HTMLButtonElement>('[aria-label="Always allow options"]')?.disabled
+    ).toBe(true);
     expect(container?.querySelector<HTMLButtonElement>('[aria-label="Reject"]')?.disabled).toBe(
       false
     );
@@ -102,9 +114,6 @@ describe('PermissionPrompt', () => {
     mocks.permissionMode = 'auto';
     cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
 
-    expect(
-      container?.querySelector<HTMLButtonElement>('[aria-label="Allow always"]')?.title
-    ).toContain('guide AI review');
     expect(container?.querySelector('.permission-prompt-scope-note')?.textContent).toContain(
       'guides AI review toward similar non-destructive actions'
     );
@@ -219,6 +228,37 @@ describe('PermissionPrompt', () => {
     button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
     expect(mocks.respondPermission).toHaveBeenCalledWith('session-1', 'permission-1', response);
+  });
+
+  it('offers session, server-memory, and project scopes for always allow', async () => {
+    cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
+
+    container?.querySelector<HTMLButtonElement>('[aria-label="Always allow options"]')?.click();
+    await Promise.resolve();
+
+    const menu = document.body.querySelector('[aria-label="Always allow scope"]');
+    expect(menu?.textContent).toContain('Always allow for this session');
+    expect(menu?.textContent).toContain('Always allow in server memory');
+    expect(menu?.textContent).toContain('Always allow for this project');
+
+    menu
+      ?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
+      .item(0)
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(mocks.alwaysAllowPermissionForSession).toHaveBeenCalledWith('session-1', 'permission-1');
+  });
+
+  it('persists project always allow before responding', async () => {
+    cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
+
+    container?.querySelector<HTMLButtonElement>('[aria-label="Always allow options"]')?.click();
+    await Promise.resolve();
+    document.body
+      .querySelectorAll<HTMLButtonElement>('[aria-label="Always allow scope"] [role="menuitem"]')
+      .item(2)
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(mocks.alwaysAllowPermissionForProject).toHaveBeenCalledWith('session-1', 'permission-1');
   });
 
   it('keeps a permission response locked across prompt remounts', async () => {

@@ -206,6 +206,8 @@ export interface OpenCodeRuntime {
     response: 'once' | 'always' | 'reject',
     options?: { rethrow?: boolean }
   ): Promise<void>;
+  alwaysAllowPermissionForProject(sessionId: string, permissionId: string): Promise<void>;
+  alwaysAllowPermissionForSession(sessionId: string, permissionId: string): Promise<void>;
   respondQuestion(
     requestID: string,
     answers: Array<Array<string>>,
@@ -2959,6 +2961,20 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     }
   }
 
+  async function alwaysAllowPermissionForProject(sessionId: string, permissionId: string) {
+    await client.session.persistProjectPermissionAllow(sessionId, permissionId, {
+      directory: getSessionDirectory(sessionId),
+    });
+    await respondPermission(sessionId, permissionId, 'always', { rethrow: true });
+  }
+
+  async function alwaysAllowPermissionForSession(sessionId: string, permissionId: string) {
+    await client.session.allowPermissionForSession(sessionId, permissionId, {
+      directory: getSessionDirectory(sessionId),
+    });
+    await respondPermission(sessionId, permissionId, 'once', { rethrow: true });
+  }
+
   function recordPermissionDecisionReference(
     sessionId: string,
     reference: AutoApproveJudgeReference
@@ -3024,6 +3040,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     reviewSession,
     compactSession,
     respondPermission,
+    alwaysAllowPermissionForProject,
+    alwaysAllowPermissionForSession,
     respondQuestion,
     updatePermissionModeForSession,
     rejectQuestion,

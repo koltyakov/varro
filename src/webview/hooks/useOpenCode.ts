@@ -1,4 +1,6 @@
 export {
+  alwaysAllowPermissionForProject,
+  alwaysAllowPermissionForSession,
   abortSession,
   applySessionMcps,
   compactSession,

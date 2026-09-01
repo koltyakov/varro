@@ -659,6 +659,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
               mode,
               directory ?? endpointServer.getWorkspaceCwd()
             ),
+      allowPermissionForSession: (sessionID, permission, patterns, directory) =>
+        this.allowPermissionForSession(
+          sessionID,
+          permission,
+          patterns,
+          directory ?? endpointServer.getWorkspaceCwd()
+        ),
       activateSession: async (sessionID, directory, catalogRoot, signal) => {
         const workspacePath = this.getOpenSessionDirectory(catalogRoot);
         if (!workspacePath) throw new Error('Session workspace folder is not open');
@@ -2064,6 +2071,53 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           });
         }
         return session;
+      });
+    this.permissionModeQueues.set(sessionID, operation);
+    const clearQueue = () => {
+      if (this.permissionModeQueues.get(sessionID) === operation) {
+        this.permissionModeQueues.delete(sessionID);
+      }
+    };
+    void operation.then(clearQueue, clearQueue);
+    return operation;
+  }
+
+  private allowPermissionForSession(
+    sessionID: string,
+    permission: string,
+    patterns: string[],
+    directory?: string
+  ): Promise<void> {
+    const previous = this.permissionModeQueues.get(sessionID) ?? Promise.resolve();
+    const operation = previous
+      .catch(() => undefined)
+      .then(async () => {
+        const session = asRecord(
+          await this.server.request('GET', `/session/${encodeURIComponent(sessionID)}`, undefined, {
+            directory,
+          })
+        );
+        if (session?.id !== sessionID) throw new Error('404 Session not found');
+        const existing = Array.isArray(session.permission) ? session.permission : [];
+        const additions = patterns
+          .filter(
+            (pattern) =>
+              !existing.some((value) => {
+                const rule = asRecord(value);
+                return (
+                  rule?.permission === permission &&
+                  rule.pattern === pattern &&
+                  rule.action === 'allow'
+                );
+              })
+          )
+          .map((pattern) => ({ permission, pattern, action: 'allow' }));
+        await this.server.request(
+          'PATCH',
+          `/session/${encodeURIComponent(sessionID)}`,
+          { permission: [...existing, ...additions] },
+          { directory }
+        );
       });
     this.permissionModeQueues.set(sessionID, operation);
     const clearQueue = () => {

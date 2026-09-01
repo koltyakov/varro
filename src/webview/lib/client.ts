@@ -307,6 +307,28 @@ export const client = {
             permissionAutomationSessionID: sessionId,
           });
     },
+    async persistProjectPermissionAllow(
+      sessionId: string,
+      permissionId: string,
+      options?: { directory?: string }
+    ): Promise<void> {
+      await apiCall(
+        'POST',
+        withDirectory(VARRO_API_ENDPOINTS.permissionProjectAllow, options?.directory),
+        { sessionId, permissionId }
+      );
+    },
+    async allowPermissionForSession(
+      sessionId: string,
+      permissionId: string,
+      options?: { directory?: string }
+    ): Promise<void> {
+      await apiCall(
+        'POST',
+        withDirectory(VARRO_API_ENDPOINTS.permissionSessionAllow, options?.directory),
+        { sessionId, permissionId }
+      );
+    },
     async revert(
       id: string,
       messageID: string,
