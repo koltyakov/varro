@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { reconcile } from 'solid-js/store';
-import type { AssistantMessage, Session } from '../types';
+import type { AssistantMessage, MessageEntry, Session } from '../types';
 import type { WebviewMessage } from '../../shared/protocol';
 import * as openCodeModule from '../hooks/useOpenCode';
 import {
@@ -195,7 +195,7 @@ function session(id: string, updated: number, overrides: Partial<Session> = {}):
   };
 }
 
-function assistantMessageEntry(id: string) {
+function assistantMessageEntry(id: string): MessageEntry<AssistantMessage> {
   const info: AssistantMessage = {
     id,
     sessionID: 'session-1',

@@ -993,6 +993,7 @@ describe('mount bridge helpers', () => {
     const setDocumentVisible = vi.fn();
     const postFocusState = vi.fn();
     const recheckSessionStatus = vi.fn();
+    const syncSessionMessages = vi.fn();
     const refreshProviders = vi.fn();
 
     const dispose = registerFocusStateTracking({
@@ -1001,6 +1002,7 @@ describe('mount bridge helpers', () => {
       isLoading: () => true,
       getActiveSessionId: () => 'session-1',
       recheckSessionStatus,
+      syncSessionMessages,
       refreshProviders,
     });
 
@@ -1016,7 +1018,42 @@ describe('mount bridge helpers', () => {
       expect(setDocumentVisible).toHaveBeenCalledWith(true);
       expect(postFocusState).toHaveBeenCalledTimes(3);
       expect(recheckSessionStatus).toHaveBeenCalledWith('session-1');
+      expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
       expect(refreshProviders).toHaveBeenCalledTimes(2);
+    } finally {
+      dispose();
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        value: originalVisibility,
+      });
+    }
+  });
+
+  it('syncs the active transcript when an idle webview becomes visible again', () => {
+    const originalVisibility = document.visibilityState;
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+    const syncSessionMessages = vi.fn();
+    const dispose = registerFocusStateTracking({
+      setDocumentVisible: vi.fn(),
+      postFocusState: vi.fn(),
+      isLoading: () => false,
+      getActiveSessionId: () => 'session-1',
+      recheckSessionStatus: vi.fn(),
+      syncSessionMessages,
+      refreshProviders: vi.fn(),
+    });
+
+    try {
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        value: 'visible',
+      });
+      document.dispatchEvent(new Event('visibilitychange'));
+
+      expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
     } finally {
       dispose();
       Object.defineProperty(document, 'visibilityState', {

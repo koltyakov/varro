@@ -28,6 +28,10 @@ for (const theme of ['dark', 'light'] as const) {
             Number.parseInt(digits.slice(4, 6), 16),
           ];
         }
+        const srgb = /^color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/.exec(value);
+        if (srgb) {
+          return [Number(srgb[1]) * 255, Number(srgb[2]) * 255, Number(srgb[3]) * 255];
+        }
         const channels = value
           .match(/[\d.]+/g)
           ?.slice(0, 3)

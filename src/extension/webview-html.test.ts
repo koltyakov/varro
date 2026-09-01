@@ -53,6 +53,12 @@ describe('renderWebviewHtml', () => {
     expect(html).toContain(
       '<script type="module" nonce="Zml4ZWQtbm9uY2U" src="webview://assets/webview.js?v=fixed-cache-key"></script>'
     );
+    expect(html).toContain(
+      '<script type="importmap" nonce="Zml4ZWQtbm9uY2U">{"imports":{"webview://assets/webview.js":"webview://assets/webview.js?v=fixed-cache-key"}}</script>'
+    );
+    expect(html.indexOf('<script type="importmap"')).toBeLessThan(
+      html.indexOf('src="webview://assets/webview.js?v=fixed-cache-key"')
+    );
     expect(html).toContain('window.__initialTheme = window.__initialWebviewState.theme;');
     expect(html).toContain(
       'window.__sendToExtension = function(msg) { vscode.postMessage(msg); };'
@@ -166,19 +172,27 @@ describe('renderWebviewHtml', () => {
     expect(randomBytesMock).toHaveBeenCalledTimes(1);
     expect(randomBytesMock).toHaveBeenNthCalledWith(1, 24);
     expect(nonce).toBe('Zml4ZWQtbm9uY2U');
-    expect(html.split(`nonce="${nonce}"`).length - 1).toBe(2);
+    expect(html.split(`nonce="${nonce}"`).length - 1).toBe(3);
     expect(html).not.toContain(`?v=${nonce}`);
     expect(html).toContain('?v=fixed-cache-key');
   });
 
   it('escapes webview asset URIs used in attributes', () => {
+    const scriptUri = 'webview.js?value="<unsafe>&';
     const html = renderWebviewHtml('vscode-webview-resource:', initialState, {
-      scriptUri: 'webview.js?value="<unsafe>&',
+      scriptUri,
       cssUri: 'webview.css?value="<unsafe>&',
       version: 'fixed-cache-key',
     });
+    const importMap = html.match(/<script type="importmap"[^>]*>(.*?)<\/script>/)?.[1];
 
     expect(html).toContain('src="webview.js?value=&quot;&lt;unsafe>&amp;&amp;v=fixed-cache-key"');
     expect(html).toContain('href="webview.css?value=&quot;&lt;unsafe>&amp;&amp;v=fixed-cache-key"');
+    expect(importMap).not.toContain('<unsafe>');
+    expect(JSON.parse(importMap || '')).toEqual({
+      imports: {
+        [scriptUri]: 'webview.js?value="<unsafe>&&v=fixed-cache-key',
+      },
+    });
   });
 });

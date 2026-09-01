@@ -89,6 +89,9 @@ export function renderWebviewHtml(
   const serializedInitialState = serializeForInlineScript(initialState);
   const scriptUri = appendCacheKey(assets.scriptUri, assets.version);
   const cssUri = appendCacheKey(assets.cssUri, assets.version);
+  const serializedImportMap = serializeForInlineScript({
+    imports: { [assets.scriptUri]: scriptUri },
+  });
   const htmlClass =
     initialState.webviewContext?.surface === 'editor'
       ? ' class="varro-editor-surface varro-editor-layout-pending"'
@@ -160,6 +163,7 @@ export function renderWebviewHtml(
       setState: function(state) { vscode.setState(state); },
     };
   </script>
+  <script type="importmap" nonce="${nonce}">${serializedImportMap}</script>
   <script type="module" nonce="${nonce}" src="${escapeHtmlAttribute(scriptUri)}"></script>
 </body>
 </html>`;

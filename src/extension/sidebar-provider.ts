@@ -48,6 +48,13 @@ const EDITOR_TITLE_EVENT_TYPES = new Set<ServerEvent['type']>([
   'session.updated',
   'session.deleted',
 ]);
+const UNSEQUENCED_TRANSCRIPT_DELTA_EVENT_TYPES = new Set<ServerEvent['type']>([
+  'message.part.delta',
+  'session.next.text.delta',
+  'session.next.reasoning.delta',
+  'session.next.tool.input.delta',
+  'session.next.compaction.delta',
+]);
 import { AutoApproveJudge } from './auto-approve-judge';
 import { CommitMessageService } from './commit-message-service';
 import type { ContextProvider } from './context-provider';
@@ -1380,6 +1387,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private postToEndpoints(msg: ExtensionMessage) {
     for (const endpoint of this.endpoints) {
+      if (
+        msg.type === 'server/event' &&
+        msg.payload.seq === undefined &&
+        UNSEQUENCED_TRANSCRIPT_DELTA_EVENT_TYPES.has(msg.payload.type) &&
+        !endpoint.bridge.isVisible()
+      ) {
+        continue;
+      }
       if (
         endpoint.surface === 'editor' &&
         !endpoint.ready &&

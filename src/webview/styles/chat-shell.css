@@ -597,7 +597,7 @@ input:focus-visible {
 
 .jump-to-latest-activity {
   position: absolute;
-  top: calc(50% - 1px);
+  top: 50%;
   left: 50%;
   display: flex;
   align-items: center;
@@ -640,11 +640,9 @@ input:focus-visible {
   0%,
   60%,
   100% {
-    transform: translateY(1px);
     opacity: 0.55;
   }
   30% {
-    transform: translateY(-2px);
     opacity: 1;
   }
 }

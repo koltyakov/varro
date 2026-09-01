@@ -1359,6 +1359,11 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         recheckSessionStatus: (sessionId) => {
           void recheckSessionStatus(sessionId);
         },
+        syncSessionMessages: (sessionId) => {
+          void syncSessionMessages(sessionId).catch((err) =>
+            logError('visibilitySessionSync', err)
+          );
+        },
         refreshProviders: () => {
           void refreshRoutingState();
         },
@@ -2173,7 +2178,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
             directory,
             interruptedRecovery: options?.interruptedRecovery,
           })
-        : client.session.sendAsync(id, body, options);
+        : options
+          ? client.session.sendAsync(id, body, options)
+          : client.session.sendAsync(id, body);
     },
     syncSession,
     recheckSessionStatus,

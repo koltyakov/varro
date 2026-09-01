@@ -659,7 +659,11 @@
 }
 
 .assistant-activity-summary-counts {
-  color: var(--color-vscode-muted);
+  color: color-mix(
+    in srgb,
+    var(--vscode-descriptionForeground, var(--color-vscode-muted)) 99%,
+    var(--color-vscode-fg)
+  );
 }
 
 .assistant-activity-summary-noun {

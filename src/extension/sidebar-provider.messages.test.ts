@@ -422,7 +422,7 @@ describe('SidebarProvider session message responses', () => {
       ),
     });
     const { provider } = await createSidebarProviderInstance({ server });
-    const { posted } = attachTestView(provider);
+    const { posted, view } = attachTestView(provider);
     const eventHandler = server.on.mock.calls.find(([event]) => event === 'event')?.[1];
 
     eventHandler?.({
@@ -444,6 +444,25 @@ describe('SidebarProvider session message responses', () => {
       'server/event',
       'api/response',
     ]);
+
+    posted.length = 0;
+    view.visible = false;
+    eventHandler?.({
+      type: 'message.part.delta',
+      properties: {
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        partID: 'part-1',
+        field: 'text',
+        delta: 'hidden',
+      },
+    });
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: { id: 2, method: 'GET', path: '/session/session-1/message' },
+    });
+
+    expect(posted.map((message) => (message as { type: string }).type)).toEqual(['api/response']);
   });
 
   it('filters malformed session message entries and parts from API responses', async () => {

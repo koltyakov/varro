@@ -476,6 +476,7 @@ export function registerFocusStateTracking(deps: {
   isLoading(): boolean;
   getActiveSessionId(): string | null;
   recheckSessionStatus(sessionId: string): void;
+  syncSessionMessages(sessionId: string): void;
   refreshProviders(): void;
 }) {
   const handleVisibilityChange = () => {
@@ -485,8 +486,9 @@ export function registerFocusStateTracking(deps: {
     if (visible) deps.refreshProviders();
 
     const sessionId = deps.getActiveSessionId();
-    if (visible && deps.isLoading() && sessionId) {
-      deps.recheckSessionStatus(sessionId);
+    if (visible && sessionId) {
+      if (deps.isLoading()) deps.recheckSessionStatus(sessionId);
+      deps.syncSessionMessages(sessionId);
     }
   };
 
