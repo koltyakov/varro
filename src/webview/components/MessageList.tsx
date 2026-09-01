@@ -4584,8 +4584,6 @@ export function MessageList() {
         performance.now() + PROGRAMMATIC_SCROLL_WINDOW_MS
       );
 
-      if (shouldMeasureRows() && !hasMeasuredAllRows()) measureVisibleItems();
-
       const currentHeight = trackRef.getBoundingClientRect().height;
       const currentBottomScrollTop = Math.max(
         0,

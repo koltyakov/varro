@@ -42,6 +42,7 @@ import navArrowDownIcon from 'iconoir/icons/nav-arrow-down.svg';
 import navArrowLeftIcon from 'iconoir/icons/nav-arrow-left.svg';
 import navArrowRightIcon from 'iconoir/icons/nav-arrow-right.svg';
 import navArrowUpIcon from 'iconoir/icons/nav-arrow-up.svg';
+import openNewWindowIcon from 'iconoir/icons/open-new-window.svg';
 import pageIcon from 'iconoir/icons/page.svg';
 import pauseIcon from 'iconoir/icons/pause.svg';
 import pauseSolidIcon from 'iconoir/icons/pause-solid.svg';
@@ -114,6 +115,7 @@ export {
   navArrowLeftIcon,
   navArrowRightIcon,
   navArrowUpIcon,
+  openNewWindowIcon,
   pageIcon,
   pauseIcon,
   pauseSolidIcon,

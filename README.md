@@ -94,6 +94,8 @@ Child sessions inherit the nearest selected mode in their session tree. Manual c
 
 Varro initially selects `Auto` unless `varro.chat.defaultPermissionMode` or a saved project/global selection says otherwise. `Default` does not mean that every action requires approval. Without custom rules, OpenCode allows most permissions, asks for `doom_loop` and `external_directory`, and blocks reading `.env` files and variants while allowing `.env.example`. See [OpenCode permissions](https://opencode.ai/docs/permissions/) to configure global or per-agent `allow`, `ask`, and `deny` rules, including rules matched by tool, command, path, subagent, URL, and external directory.
 
+See the [Varro permissions guide](https://github.com/koltyakov/varro/blob/main/docs/permissions.md) for mode behavior, manual approvals, and automatic review details.
+
 ![Per-session permission modes in Varro](https://raw.githubusercontent.com/koltyakov/varro/main/assets/permissions.png)
 
 ## Models, providers, and MCP
@@ -146,6 +148,7 @@ Varro reloads global OpenCode configuration when OpenCode is idle. Changes to pr
 ## Documentation
 
 - [Usage guide](https://github.com/koltyakov/varro/blob/main/docs/usage.md)
+- [Permissions guide](https://github.com/koltyakov/varro/blob/main/docs/permissions.md)
 - [Configure primary agents](https://github.com/koltyakov/varro/blob/main/docs/usage.md#configure-primary-agents)
 - [VS Code fork compatibility](https://github.com/koltyakov/varro/blob/main/docs/vscode-forks.md)
 - [Development guide](https://github.com/koltyakov/varro/blob/main/docs/development.md)

@@ -15,8 +15,10 @@ import {
   codeBracketsSquareIcon,
   folderSettingsIcon,
   navArrowDownIcon,
+  openNewWindowIcon,
 } from '../../lib/ui-icons';
 import { formatModelName } from '../../lib/format';
+import { postMessage } from '../../lib/bridge';
 import { FolderIcon } from '../FolderIcon';
 import { Tooltip } from '../Tooltip';
 import { toCssUrl, UiIcon } from '../UiIcon';
@@ -30,6 +32,7 @@ import { PermissionModeIcon } from './PermissionModeIcon';
 import { isFunction } from '../../lib/runtime-values';
 
 const FAST_MODE_COST_WARNING = 'Fast mode may consume usage limits faster and cost more.';
+const PERMISSIONS_DOCS_URL = 'https://github.com/koltyakov/varro/blob/main/docs/permissions.md';
 
 function isFastModelName(name: string) {
   return formatModelName(name).includes('⚡');
@@ -450,7 +453,22 @@ export function PermissionModePicker(props: {
           style={selectedIconStyle}
           onClick={(e) => e.stopPropagation()}
         >
-          <div class="toolbar-popover-header">Permissions</div>
+          <div class="toolbar-popover-header permission-mode-popover-header">
+            <span>Permissions</span>
+            <button
+              type="button"
+              class="permission-mode-learn-more"
+              onClick={() =>
+                postMessage({
+                  type: 'vscode/open-external',
+                  payload: { url: PERMISSIONS_DOCS_URL },
+                })
+              }
+            >
+              Learn More
+              <UiIcon source={openNewWindowIcon} width={11} height={11} aria-hidden="true" />
+            </button>
+          </div>
           <For each={options}>
             {(option) => (
               <button

@@ -1,7 +1,10 @@
 import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { WebviewMessage } from '../../../shared/protocol';
 import type { Agent } from '../../types';
+import { openNewWindowIcon } from '../../lib/ui-icons';
+import { toCssUrl } from '../UiIcon';
 import { DEFAULT_TOOLTIP_DELAY } from '../Tooltip';
 import {
   AgentPicker,
@@ -43,6 +46,7 @@ afterEach(() => {
   cleanup = undefined;
   container?.remove();
   container = null;
+  Reflect.deleteProperty(window, '__sendToExtension');
   vi.restoreAllMocks();
   vi.useRealTimers();
 });
@@ -399,6 +403,37 @@ describe('ToolbarPickers', () => {
     expect(onToggle).toHaveBeenCalledOnce();
     expect(onSelect).toHaveBeenCalledWith('full');
     expect(parentClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the permission guide from the picker header', () => {
+    const send = vi.fn<(message: WebviewMessage) => void>();
+    Reflect.set(window, '__sendToExtension', send);
+
+    cleanup = render(
+      () => (
+        <PermissionModePicker
+          mode="default"
+          showPicker={true}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+        />
+      ),
+      container!
+    );
+
+    const learnMore = container?.querySelector<HTMLButtonElement>('.permission-mode-learn-more');
+    const externalIcon = learnMore?.querySelector<HTMLElement>('.ui-icon');
+    expect(learnMore?.textContent).toContain('Learn More');
+    expect(externalIcon?.style.getPropertyValue('--ui-icon-mask')).toBe(
+      toCssUrl(openNewWindowIcon)
+    );
+
+    learnMore?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open-external',
+      payload: { url: 'https://github.com/koltyakov/varro/blob/main/docs/permissions.md' },
+    });
   });
 
   it('shows auto-accept edits as a distinct permission mode', () => {

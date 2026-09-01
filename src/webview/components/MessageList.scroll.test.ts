@@ -185,6 +185,48 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
+  it('does not rescan an unmeasured transcript on every busy follow frame', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    let rowMeasurementCount = 0;
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this.classList.contains('interactive-item-container')) {
+          rowMeasurementCount += 1;
+          return new DOMRect(0, 0, 500, this.dataset.msgId === 'assistant-0' ? 0 : 120);
+        }
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(0, 0, 500, 7200);
+        }
+        return new DOMRect(0, 0, 500, 400);
+      }
+    );
+
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    replaceMessages(
+      Array.from({ length: 60 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts: [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
+        };
+      })
+    );
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    await Promise.resolve();
+    animationFrames.flush();
+    const measurementsAfterBootstrap = rowMeasurementCount;
+
+    animationFrames.flush();
+    animationFrames.flush();
+
+    expect(rowMeasurementCount).toBe(measurementsAfterBootstrap);
+    animationFrames.restore();
+  });
+
   it.each(['insertion', 'removal'] as const)(
     'preserves a detached visible row across a structural %s during active slow scrolling',
     async (mutation) => {

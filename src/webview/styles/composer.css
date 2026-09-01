@@ -1333,6 +1333,39 @@
   font-weight: 400;
 }
 
+.permission-mode-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.permission-mode-learn-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: color-mix(in srgb, var(--color-vscode-muted) 72%, transparent);
+  font: inherit;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.permission-mode-learn-more:hover {
+  color: var(--color-vscode-muted);
+  text-decoration: underline;
+}
+
+.permission-mode-learn-more:focus-visible {
+  border-radius: 2px;
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+}
+
 .toolbar-popover-header {
   padding: 5px 9px 7px;
   font-size: 10px;
