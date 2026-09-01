@@ -159,20 +159,23 @@ export function VirtualizedContent(
   });
   onCleanup(cancelRetainedPlaceholderRelease);
 
-  const renderMessage = (messageId: string, absoluteIndex: () => number) => {
+  const renderMessage = (
+    messageId: string,
+    initialMessage: MessageEntry,
+    absoluteIndex: () => number
+  ) => {
     // A row's entry can vanish from props.messages (transcript cleared, message
     // pruned) before <For> disposes the row, while row-internal computations
     // invalidated by the same batch still re-run; serve the last seen entry in
     // that window so nothing dereferences undefined mid-flush.
-    let lastMessage: MessageEntry | undefined;
+    let lastMessage = initialMessage;
     const message = () => {
       const index = absoluteIndex();
       const current = index >= 0 ? props.messages[index] : undefined;
-      if (current) {
+      if (current?.info.id === messageId) {
         lastMessage = current;
-        return current;
       }
-      return lastMessage!;
+      return lastMessage;
     };
     const nearViewport = createMemo(() => {
       const index = absoluteIndex();
@@ -299,19 +302,29 @@ export function VirtualizedContent(
         />
       </Show>
       <For each={renderItems()}>
-        {(item) =>
-          item.type === 'gap' ? (
-            <div
-              class="virtual-spacer virtual-pinned-gap"
-              style={{
-                height: `${(props.virtualMetrics?.prefix[item.end] ?? 0) - (props.virtualMetrics?.prefix[item.start] ?? 0)}px`,
-              }}
-              aria-hidden="true"
-            />
-          ) : (
-            renderMessage(item.messageId, () => messageIndexes().get(item.messageId) ?? -1)
-          )
-        }
+        {(item) => {
+          if (item.type === 'gap') {
+            return (
+              <div
+                class="virtual-spacer virtual-pinned-gap"
+                style={{
+                  height: `${(props.virtualMetrics?.prefix[item.end] ?? 0) - (props.virtualMetrics?.prefix[item.start] ?? 0)}px`,
+                }}
+                aria-hidden="true"
+              />
+            );
+          }
+
+          const initialIndex = messageIndexes().get(item.messageId);
+          const initialMessage =
+            initialIndex === undefined ? undefined : props.messages[initialIndex];
+          if (!initialMessage || initialMessage.info.id !== item.messageId) return null;
+          return renderMessage(
+            item.messageId,
+            initialMessage,
+            () => messageIndexes().get(item.messageId) ?? -1
+          );
+        }}
       </For>
       <Show when={visibleRange().bottomPad > 0}>
         <div

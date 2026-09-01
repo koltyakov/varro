@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import {
   replaceMessages,
+  removeMessage,
   requestMessageListScrollToBottom,
   setMessagesIncremental,
   setState,
@@ -469,6 +470,33 @@ describe('width resize ownership', () => {
     for (const owner of strongerOwners) {
       expect(canWidthResizeOwnAnchor({ ...noOwners, [owner]: true }), owner).toBe(false);
     }
+  });
+});
+
+describe('removed virtual rows', () => {
+  it('retains a mounted streaming entry until Solid disposes its removed row', async () => {
+    const messageId = 'assistant-streaming';
+    const part = { ...textPart('text-streaming', 'Initial response'), messageID: messageId };
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', { 'session-1': { type: 'busy' } });
+    replaceMessages([
+      {
+        info: assistantMessage(messageId, { time: { created: 1 } }),
+        parts: [part],
+      },
+    ]);
+    setState('streamingPartId', part.id);
+    setState('streamingText', 'Streaming response');
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelector(`[data-msg-id="${messageId}"]`)).not.toBeNull();
+
+    removeMessage('session-1', messageId);
+    await Promise.resolve();
+
+    expect(state.streamingPartId).toBeNull();
+    expect(container?.querySelector(`[data-msg-id="${messageId}"]`)).toBeNull();
   });
 });
 

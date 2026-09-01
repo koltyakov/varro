@@ -58,6 +58,7 @@ test('new chat during active streaming opens a draft and keeps handlers alive', 
   for (let index = 0; index < 6; index += 1) {
     await postDelta(page, BUSY_TARGET, `\n\nStreaming chunk ${index} with extra prose. `);
   }
+  await expect(page.getByText('Streaming chunk 5', { exact: false })).toBeVisible();
 
   await page.getByRole('button', { name: 'New chat' }).first().click();
 
@@ -65,6 +66,7 @@ test('new chat during active streaming opens a draft and keeps handlers alive', 
   await expect(
     page.getByText('Still working through the requested refactor steps.', { exact: true })
   ).toBeHidden();
+  await expect(page.locator('.chat-header .chat-header-title-text').first()).toHaveText('New Chat');
 
   // Old-session deltas keep arriving after the draft starts.
   for (let index = 0; index < 6; index += 1) {
@@ -93,6 +95,7 @@ test('message typed in the draft after + goes to a new session, not the busy one
   ).toBeVisible();
 
   await postDelta(page, BUSY_TARGET, '\n\nStill going. ');
+  await expect(page.getByText('Still going.', { exact: false })).toBeVisible();
   await page.getByRole('button', { name: 'New chat' }).first().click();
   await postDelta(page, BUSY_TARGET, '\n\nStill going after draft. ');
 
@@ -101,6 +104,25 @@ test('message typed in the draft after + goes to a new session, not the busy one
   await composer.press('Enter');
 
   await expect(page.locator('.chat-turn-user').last()).toContainText('Hello from the draft chat.');
+
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const value = (
+          window as Window & {
+            __varroE2E?: { requests: Array<{ method: string; path: string }> };
+          }
+        ).__varroE2E;
+        return (
+          value?.requests.filter(
+            (request) =>
+              request.method === 'POST' &&
+              new URL(request.path, 'http://varro.test').pathname.endsWith('/prompt_async')
+          ).length ?? 0
+        );
+      })
+    )
+    .toBe(1);
 
   const requests = await page.evaluate(() => {
     const value = (
@@ -111,17 +133,31 @@ test('message typed in the draft after + goes to a new session, not the busy one
     return value?.requests || [];
   });
 
-  // The prompt must not have been sent (or queued) to the busy session.
-  const busySessionPrompts = requests.filter((request) =>
-    request.path.includes('session-busy-stop-send')
+  const promptRequests = requests.filter(
+    (request) =>
+      request.method === 'POST' &&
+      new URL(request.path, 'http://varro.test').pathname.endsWith('/prompt_async')
   );
-  expect(
-    busySessionPrompts.filter(
-      (request) => request.path.includes('prompt') || request.path.includes('queue')
-    )
-  ).toEqual([]);
+  expect(promptRequests).toHaveLength(1);
+  const promptPath = new URL(promptRequests[0]!.path, 'http://varro.test').pathname;
+  const promptSessionId = promptPath.match(/^\/session\/([^/]+)\/prompt_async$/)?.[1];
+  if (!promptSessionId) throw new Error(`Unexpected prompt path: ${promptPath}`);
+  const decodedPromptSessionId = decodeURIComponent(promptSessionId);
+  expect(decodedPromptSessionId).not.toBe(BUSY_TARGET.sessionID);
 
-  // A new session was created for the draft send.
+  const deliveredToPromptSession = await page.evaluate((sessionId) => {
+    const harness = window as Window & {
+      __varroE2E?: {
+        getSessionMessages?: (id: string) => Array<{ parts: Array<{ text?: string }> }>;
+      };
+    };
+    return !!harness.__varroE2E
+      ?.getSessionMessages?.(sessionId)
+      .some((message) => message.parts.some((part) => part.text === 'Hello from the draft chat.'));
+  }, decodedPromptSessionId);
+  expect(deliveredToPromptSession).toBe(true);
+
+  // The prompt route only accepts a session created by the preceding request.
   expect(
     requests.some((request) => request.method === 'POST' && /\/session(\?|$)/.test(request.path))
   ).toBe(true);
