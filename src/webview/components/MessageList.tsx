@@ -385,15 +385,17 @@ export function MessageList() {
       return existing.promise;
     }
 
+    const ownsLoad = () =>
+      !disposed &&
+      generation === promptNumberHoldGeneration &&
+      state.activeSessionId === sessionId &&
+      getSessionMessageWindowStateVersion(sessionId) === windowVersion;
     const pendingLoad = (async () => {
-      while (await loadOlderSessionPrompts(sessionId)) {
+      while (ownsLoad() && (await loadOlderSessionPrompts(sessionId))) {
         // Continue until the prompt cursor reaches the beginning of the session.
       }
       if (
-        disposed ||
-        generation !== promptNumberHoldGeneration ||
-        state.activeSessionId !== sessionId ||
-        getSessionMessageWindowStateVersion(sessionId) !== windowVersion ||
+        !ownsLoad() ||
         isSessionMessageWindowResetPending(sessionId) ||
         getSessionHistoryPromptCursor(sessionId)
       ) {

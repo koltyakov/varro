@@ -59,7 +59,8 @@ export function VirtualizedContent(
     const segments: PinnedSegment[] = [];
     let gapStart = start;
     for (let index = start; index < end; index += 1) {
-      const message = props.messages[index]!;
+      const message = props.messages[index];
+      if (!message) continue;
       const forceContent =
         !!props.forceVirtualContent?.(message.info.id) ||
         !!props.assistantActivityGroupMap?.has(message.info.id);

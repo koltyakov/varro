@@ -2059,6 +2059,7 @@ body.vscode-light
   border-bottom: none;
 }
 .rendered-markdown hr {
+  margin: 14px 0;
   border-color: var(
     --vscode-textSeparator-foreground,
     color-mix(in srgb, var(--color-vscode-border) 26%, transparent)

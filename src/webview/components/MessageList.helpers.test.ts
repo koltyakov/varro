@@ -337,6 +337,38 @@ describe('MessageList prompt numbers', () => {
     }
   });
 
+  it('stops prompt pagination when new chat detaches the active session', async () => {
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
+    const firstPage = [
+      { info: userMessage('user-1'), parts: [textPart('user-text-1', 'Older prompt')] },
+    ] as Awaited<ReturnType<typeof client.session.messages>>;
+    firstPage.nextCursor = 'cursor-even-older';
+    let releaseFirstPage: ((page: typeof firstPage) => void) | undefined;
+    const messagesSpy = vi.spyOn(client.session, 'messages').mockImplementation(
+      () =>
+        new Promise<typeof firstPage>((resolve) => {
+          releaseFirstPage = resolve;
+        })
+    );
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryPromptCursor('session-1', 'cursor-older');
+    replaceMessages([
+      { info: userMessage('user-2'), parts: [textPart('user-text-2', 'Current prompt')] },
+    ]);
+    cleanup = render(() => MessageList(), container!);
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+    await vi.waitFor(() => expect(messagesSpy).toHaveBeenCalledTimes(1));
+    setState('activeSessionId', null);
+    replaceMessages([]);
+    releaseFirstPage?.(firstPage);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(messagesSpy).toHaveBeenCalledTimes(1);
+    expect(container?.querySelector('.prompt-number-badge')).toBeNull();
+  });
+
   it('hides prompt counters when the window loses focus', async () => {
     setState('activeSessionId', 'session-1');
     replaceMessages([

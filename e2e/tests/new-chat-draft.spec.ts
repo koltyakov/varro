@@ -164,3 +164,22 @@ test('message typed in the draft after + goes to a new session, not the busy one
 
   expect(errors).toEqual([]);
 });
+
+test('new chat remains responsive with a large active transcript', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(String(error)));
+  await page.goto('/e2e/harness/index.html?scenario=multi-agent-large-streaming');
+  await expect(page.getByText('Starting streaming response', { exact: false })).toBeVisible();
+
+  const startedAt = Date.now();
+  await page.getByRole('button', { name: 'New chat' }).first().click();
+  await expect(page.locator('.chat-header .chat-header-title-text').first()).toHaveText(
+    'New Chat',
+    {
+      timeout: 5_000,
+    }
+  );
+
+  expect(Date.now() - startedAt).toBeLessThan(5_000);
+  expect(errors).toEqual([]);
+});
