@@ -67,7 +67,12 @@ describe('SidebarProvider session message responses', () => {
         if (method === 'PATCH' && path === '/session/session-1') {
           patchAttempts += 1;
           expect(serverMode).toBe('full');
-          expect(body).toEqual({ permission: [] });
+          expect(body).toEqual({
+            permission: [
+              { permission: 'todowrite', pattern: '*', action: 'allow' },
+              { permission: 'question', pattern: '*', action: 'allow' },
+            ],
+          });
           if (patchAttempts === 1) throw new Error('server unavailable');
           serverMode = 'default';
           return { id: 'session-1', directory: '/repo' };
@@ -289,7 +294,12 @@ describe('SidebarProvider session message responses', () => {
             return [{ id: 'extant', projectID: 'project-1', directory }];
           }
           if (method === 'PATCH' && path === '/session/extant') {
-            expect(body).toEqual({ permission: [] });
+            expect(body).toEqual({
+              permission: [
+                { permission: 'todowrite', pattern: '*', action: 'allow' },
+                { permission: 'question', pattern: '*', action: 'allow' },
+              ],
+            });
             expect(options).toEqual({ directory });
             return { id: 'extant', directory };
           }
@@ -312,7 +322,12 @@ describe('SidebarProvider session message responses', () => {
       expect(server.request).toHaveBeenCalledWith(
         'PATCH',
         '/session/extant',
-        { permission: [] },
+        {
+          permission: [
+            { permission: 'todowrite', pattern: '*', action: 'allow' },
+            { permission: 'question', pattern: '*', action: 'allow' },
+          ],
+        },
         { directory }
       );
     }

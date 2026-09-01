@@ -63,7 +63,8 @@ describe('sendMessage', () => {
 
     expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
       'session-1',
-      expect.objectContaining({ agent: 'build' })
+      expect.objectContaining({ agent: 'build' }),
+      { directory: '/repo' }
     );
   });
 
@@ -140,10 +141,14 @@ describe('sendMessage', () => {
 
     await hookModule.sendMessage('Use the server clock');
 
-    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
-      messageID: expect.stringMatching(OPEN_CODE_MESSAGE_ID),
-      parts: [{ type: 'text', text: 'Use the server clock' }],
-    });
+    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
+      'session-1',
+      {
+        messageID: expect.stringMatching(OPEN_CODE_MESSAGE_ID),
+        parts: [{ type: 'text', text: 'Use the server clock' }],
+      },
+      { directory: '/repo' }
+    );
   });
 
   it('omits pasted images and placeholder tags for non-vision models', async () => {
@@ -176,11 +181,15 @@ describe('sendMessage', () => {
 
     await hookModule.sendMessage('See [img-1.png] later');
 
-    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
-      messageID: expect.stringMatching(OPEN_CODE_MESSAGE_ID),
-      parts: [{ type: 'text', text: 'See later' }],
-      model: { providerID: 'openrouter', modelID: 'qwen3-coder-30b' },
-    });
+    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
+      'session-1',
+      {
+        messageID: expect.stringMatching(OPEN_CODE_MESSAGE_ID),
+        parts: [{ type: 'text', text: 'See later' }],
+        model: { providerID: 'openrouter', modelID: 'qwen3-coder-30b' },
+      },
+      { directory: '/repo' }
+    );
   });
 
   it('keeps pasted images for vision-capable models', async () => {
@@ -213,14 +222,18 @@ describe('sendMessage', () => {
 
     await hookModule.sendMessage('Review this [img-1.png]');
 
-    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
-      messageID: expect.stringMatching(OPEN_CODE_MESSAGE_ID),
-      parts: [
-        { type: 'text', text: 'Review this [img-1.png]' },
-        { type: 'file', mime: 'image/png', filename: 'img-1.png', url: 'blob:1' },
-      ],
-      model: { providerID: 'openai', modelID: 'gpt-4o' },
-    });
+    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
+      'session-1',
+      {
+        messageID: expect.stringMatching(OPEN_CODE_MESSAGE_ID),
+        parts: [
+          { type: 'text', text: 'Review this [img-1.png]' },
+          { type: 'file', mime: 'image/png', filename: 'img-1.png', url: 'blob:1' },
+        ],
+        model: { providerID: 'openai', modelID: 'gpt-4o' },
+      },
+      { directory: '/repo' }
+    );
   });
 
   it('clears sent attachments while keeping current document context', async () => {
@@ -356,14 +369,18 @@ describe('sendMessage', () => {
 
     await hookModule.sendMessage('Review this');
 
-    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
-      messageID: expect.stringMatching(OPEN_CODE_MESSAGE_ID),
-      parts: [
-        { type: 'text', text: 'Review this' },
-        { type: 'text', text: '[Selection from src/a.ts lines 3-4, 8-10]' },
-      ],
-      model: { providerID: 'openai', modelID: 'gpt-4o' },
-    });
+    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
+      'session-1',
+      {
+        messageID: expect.stringMatching(OPEN_CODE_MESSAGE_ID),
+        parts: [
+          { type: 'text', text: 'Review this' },
+          { type: 'text', text: '[Selection from src/a.ts lines 3-4, 8-10]' },
+        ],
+        model: { providerID: 'openai', modelID: 'gpt-4o' },
+      },
+      { directory: '/repo' }
+    );
   });
 
   it('includes only unique live-selection lines alongside explicit same-file context', async () => {
@@ -407,15 +424,19 @@ describe('sendMessage', () => {
 
     await hookModule.sendMessage('Review active file');
 
-    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
-      messageID: expect.stringMatching(OPEN_CODE_MESSAGE_ID),
-      parts: [
-        { type: 'text', text: 'Review active file' },
-        { type: 'text', text: '[Selection from src/a.ts lines 20-24]' },
-        { type: 'text', text: '[Selection from src/a.ts lines 3-4, 8-10]' },
-      ],
-      model: { providerID: 'openai', modelID: 'gpt-4o' },
-    });
+    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
+      'session-1',
+      {
+        messageID: expect.stringMatching(OPEN_CODE_MESSAGE_ID),
+        parts: [
+          { type: 'text', text: 'Review active file' },
+          { type: 'text', text: '[Selection from src/a.ts lines 20-24]' },
+          { type: 'text', text: '[Selection from src/a.ts lines 3-4, 8-10]' },
+        ],
+        model: { providerID: 'openai', modelID: 'gpt-4o' },
+      },
+      { directory: '/repo' }
+    );
   });
 
   it('subtracts overlapping explicit ranges from the live same-file selection payload', async () => {
@@ -465,15 +486,19 @@ describe('sendMessage', () => {
 
     await hookModule.sendMessage('Review overlap');
 
-    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
-      messageID: expect.stringMatching(OPEN_CODE_MESSAGE_ID),
-      parts: [
-        { type: 'text', text: 'Review overlap' },
-        { type: 'text', text: '[Selection from src/a.ts lines 5-7, 11]' },
-        { type: 'text', text: '[Selection from src/a.ts lines 1-4, 8-10, 12-20]' },
-      ],
-      model: { providerID: 'openai', modelID: 'gpt-4o' },
-    });
+    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
+      'session-1',
+      {
+        messageID: expect.stringMatching(OPEN_CODE_MESSAGE_ID),
+        parts: [
+          { type: 'text', text: 'Review overlap' },
+          { type: 'text', text: '[Selection from src/a.ts lines 5-7, 11]' },
+          { type: 'text', text: '[Selection from src/a.ts lines 1-4, 8-10, 12-20]' },
+        ],
+        model: { providerID: 'openai', modelID: 'gpt-4o' },
+      },
+      { directory: '/repo' }
+    );
   });
 
   it('hides the duplicate active file payload when the file is explicitly added without a live selection', async () => {
@@ -510,14 +535,18 @@ describe('sendMessage', () => {
 
     await hookModule.sendMessage('Review active file');
 
-    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
-      messageID: expect.stringMatching(OPEN_CODE_MESSAGE_ID),
-      parts: [
-        { type: 'text', text: 'Review active file' },
-        { type: 'text', text: 'src/a.ts' },
-      ],
-      model: { providerID: 'openai', modelID: 'gpt-4o' },
-    });
+    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
+      'session-1',
+      {
+        messageID: expect.stringMatching(OPEN_CODE_MESSAGE_ID),
+        parts: [
+          { type: 'text', text: 'Review active file' },
+          { type: 'text', text: 'src/a.ts' },
+        ],
+        model: { providerID: 'openai', modelID: 'gpt-4o' },
+      },
+      { directory: '/repo' }
+    );
   });
 
   it('omits a disabled current document while keeping other context attachments', async () => {
@@ -562,15 +591,19 @@ describe('sendMessage', () => {
 
     await hookModule.sendMessage('Review this image');
 
-    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
-      messageID: expect.stringMatching(OPEN_CODE_MESSAGE_ID),
-      parts: [
-        { type: 'text', text: 'Review this image' },
-        { type: 'file', mime: 'image/png', filename: 'img-1.png', url: 'blob:1' },
-        { type: 'text', text: 'src/extra.ts' },
-      ],
-      model: { providerID: 'openai', modelID: 'gpt-4o' },
-    });
+    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
+      'session-1',
+      {
+        messageID: expect.stringMatching(OPEN_CODE_MESSAGE_ID),
+        parts: [
+          { type: 'text', text: 'Review this image' },
+          { type: 'file', mime: 'image/png', filename: 'img-1.png', url: 'blob:1' },
+          { type: 'text', text: 'src/extra.ts' },
+        ],
+        model: { providerID: 'openai', modelID: 'gpt-4o' },
+      },
+      { directory: '/repo' }
+    );
   });
 
   it('uses global defaults instead of temporary session routing for a new session', async () => {
@@ -715,6 +748,11 @@ describe('sendMessage', () => {
         metadata: {
           varro: { workspaceScope: 'folder', schemaVersion: 1 },
         },
+        permission: [
+          { permission: 'todowrite', pattern: '*', action: 'allow' },
+          { permission: 'question', pattern: '*', action: 'allow' },
+        ],
+        title: undefined,
       },
       { directory: '/repo-b' }
     );
@@ -1194,11 +1232,15 @@ describe('sendMessage', () => {
     expect(stateModule.state.selectedAgent).toBe('build');
     expect(stateModule.getSelectedAgentForSession('session-1')).toBe('build');
     expect(stateModule.getPersistedSelectedAgent()).toBe('plan');
-    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
-      messageID: expect.stringMatching(OPEN_CODE_MESSAGE_ID),
-      parts: [{ type: 'text', text: 'Implement the approved plan.' }],
-      agent: 'build',
-    });
+    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
+      'session-1',
+      {
+        messageID: expect.stringMatching(OPEN_CODE_MESSAGE_ID),
+        parts: [{ type: 'text', text: 'Implement the approved plan.' }],
+        agent: 'build',
+      },
+      { directory: '/repo' }
+    );
     expect(stateModule.state.droppedFiles).toEqual([
       { path: '/repo/draft.ts', relativePath: 'draft.ts', type: 'file' },
     ]);
