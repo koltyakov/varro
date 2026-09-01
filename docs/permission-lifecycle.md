@@ -19,15 +19,15 @@ The protocol values are `default`, `edits`, `auto`, and `full`. The UI labels th
 
 | Mode | OpenCode session rules | Varro behavior for an ask |
 | --- | --- | --- |
-| `default` | Use OpenCode configuration and agent rules, with direct `todowrite` and `question` allowances | Show other requests OpenCode asks about as actionable prompts |
+| `default` | No Varro session override; use OpenCode configuration and agent rules | Reply once to `todowrite` and `question` asks; show other asks as actionable prompts |
 | `edits` | Ask by default with edit, known read-only, and subagent-launch allowances | Reply `once` to an edit request already pending during a mode change; show other asks |
 | `auto` | Ask by default with known read-only and subagent-launch allowances | Hide briefly while Varro judges; reply or fall back to a prompt |
 | `full` | Allow every permission, including unknown permission names | Reply `always` to any already-pending request and resync |
 
-`Default` is the OpenCode-managed mode except for Varro's direct `todowrite` and `question`
-allowances. New sessions and sessions switched back to default apply only those two session rules.
-OpenCode's global, project, and agent configuration determines whether every other action is allowed,
-denied, or asked.
+`Default` is the OpenCode-managed mode. New sessions omit a session-level permission override, and
+switching an existing session to default clears Varro's prior mode rules. OpenCode's global, project,
+and agent configuration determines whether an action is allowed, denied, or asked. If OpenCode asks
+about `todowrite` or `question`, Varro replies once without installing a broader session rule.
 
 `Auto` is not a broader OpenCode rule set. OpenCode must still emit an ask so Varro has a
 specific request ID and complete action context to judge. Giving `auto` allow-all rules would bypass
@@ -41,8 +41,8 @@ workflow choice.
 
 OpenCode uses the last matching permission rule.
 
-- Default contributes only direct `todowrite` and `question` allowances; OpenCode configuration and
-  selected-agent rules remain in control for every other permission.
+- Default contributes no Varro session rules; OpenCode configuration and selected-agent rules remain
+  in control. Varro handles `todowrite` and `question` asks directly without replacing that policy.
 - Auto rules start with `* -> ask`, then place known read-only allowances after it.
 - Auto-accept edits rules add the `edit` allowance while retaining auto's read-only and subagent-launch allowances.
 - Current direct allowances are read-only permissions (`read`, `glob`, `grep`, `list`, `codesearch`,
@@ -219,6 +219,13 @@ Default mode presents `Reject`, `Once`, and an `Always` scope menu.
 - In auto mode, a successful `Always` response rechecks other visible requests in the same
   conversation tree so requests that were already judged can use the new preference.
 - `Reject` denies the request.
+
+The Permissions screen must preserve these scopes as independent layers. Project edits write only to
+the workspace config. Session edits patch only `Session.permission` and serialize with permission-mode
+updates; changing mode may replace those rules. Saved server-memory permissions use OpenCode's
+saved-permission list and remove endpoints when the server supports them. Removing one must not alter
+project or session rules. Servers without those endpoints report the layer as unavailable rather than
+blocking the rest of the screen.
 - A failed response must leave the user with an actionable retry.
 - A successful response records a bounded decision reference for later auto-judge context across the
   same root conversation and its child sessions.

@@ -51,6 +51,7 @@ export type OpenCodeModelRouting = {
 export type OpenCodePermissionConfigSource = {
   path: string;
   rules: PermissionRule[];
+  scope?: 'global' | 'project' | 'parent';
 };
 
 export type OpenCodePermissionConfig = {
@@ -59,6 +60,17 @@ export type OpenCodePermissionConfig = {
   inheritedSources: OpenCodePermissionConfigSource[];
   effectiveRules: PermissionRule[];
 };
+
+export type OpenCodeServerMemoryPermission = {
+  id: string;
+  projectID: string;
+  permission: string;
+  pattern: string;
+};
+
+export type OpenCodeServerMemoryPermissions =
+  | { supported: true; rules: OpenCodeServerMemoryPermission[] }
+  | { supported: false; rules: []; reason: string };
 
 export type ProviderAuthError = {
   name: 'ProviderAuthError';

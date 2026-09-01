@@ -3,6 +3,7 @@ import { normalizePermissionEvent } from '../../lib/session-event-reducer';
 import { permissionsStore } from '../../lib/stores/permissions-store';
 import type { Permission, QuestionRequest } from '../../types';
 import { getPermissionReplyId, getQuestionReplyId } from './session-event-utils';
+import { isSharedDirectPermission } from '../../../shared/permission-rules';
 import type { UnknownRecord } from '../../../shared/type-utils';
 
 type ApprovalEventDependencies = {
@@ -48,6 +49,14 @@ export function registerApprovalEventHandlers(deps: ApprovalEventDependencies): 
           permissionsStore.addPermission(permission);
           deps.permissionVisible?.(permission.id);
         }
+      });
+      return;
+    }
+    if (isSharedDirectPermission(permission.type)) {
+      const respond = deps.respondAutomaticPermission ?? deps.respondPermission;
+      void respond(permission.sessionID, permission.id, 'once', { rethrow: true }).catch(() => {
+        permissionsStore.addPermission(permission);
+        deps.permissionVisible?.(permission.id);
       });
       return;
     }

@@ -65,6 +65,7 @@
 }
 
 .permission-config-heading p {
+  grid-column: 1 / -1;
   margin: 4px 0 0;
   color: var(--color-vscode-muted);
   font-size: 10px;
@@ -117,23 +118,40 @@
 }
 
 .permission-config-heading {
-  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0 10px;
   padding: 9px 10px;
+}
+
+.permission-config-heading > div:first-child {
+  display: contents;
 }
 
 .permission-config-heading h2 {
   margin: 0;
-  padding-right: 96px;
   color: var(--color-vscode-fg);
   font-size: 11px;
   font-weight: 600;
 }
 
 .permission-config-heading > .permission-config-level,
-.permission-config-heading > .permission-config-add {
-  position: absolute;
-  top: 9px;
-  right: 10px;
+.permission-config-heading > .permission-config-add,
+.permission-config-heading > .permission-config-actions {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.permission-config-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.permission-config-actions .permission-settings-save {
+  min-height: 25px;
+  padding-block: 3px;
 }
 
 .permission-config-add {
@@ -158,6 +176,7 @@
 .permission-config-source code {
   min-width: 0;
   overflow: hidden;
+  padding-inline: 4px;
   color: color-mix(in srgb, var(--color-vscode-fg) 78%, var(--color-vscode-muted));
   font-size: 9px;
   text-overflow: ellipsis;
@@ -194,6 +213,47 @@
   border-bottom: 0;
 }
 
+.permission-layer-error {
+  padding: 6px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-vscode-error) 35%, transparent);
+  color: var(--color-vscode-error);
+  font-size: 10px;
+}
+
+.permission-memory-list {
+  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 45%, transparent);
+}
+
+.permission-memory-rule {
+  display: grid;
+  grid-template-columns: minmax(72px, 0.8fr) minmax(96px, 1.25fr) 102px;
+  align-items: center;
+  gap: 6px;
+  min-height: 33px;
+  padding: 4px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-vscode-border) 38%, transparent);
+  color: var(--color-vscode-muted);
+  font-size: 10px;
+}
+
+.permission-memory-rule:last-child {
+  border-bottom: 0;
+}
+
+.permission-memory-rule code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-vscode-fg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.permission-memory-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .permission-config-rule input,
 .permission-config-action-button {
   width: 100%;
@@ -203,7 +263,7 @@
   border-radius: 4px;
   outline: none;
   color: var(--color-vscode-input-fg);
-  background: var(--color-vscode-input-bg);
+  background: color-mix(in srgb, var(--color-vscode-input-bg) 55%, var(--color-vscode-widget-bg));
   font: inherit;
 }
 

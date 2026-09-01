@@ -1749,6 +1749,81 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
+  it('updates current-session permission rules without changing project rules', async () => {
+    const rules = [
+      { permission: '*', pattern: '*', action: 'ask' as const },
+      { permission: 'bash', pattern: 'npm test *', action: 'ask' as const },
+      { permission: 'bash', pattern: 'npm test *', action: 'allow' as const },
+    ];
+    const updatePermissionRulesForSession = vi.fn(() => Promise.resolve(rules));
+    const { proxy, callbacks } = createProxy({ updatePermissionRulesForSession });
+
+    await proxy.handleRequest(
+      makePayload(855, 'POST', '/varro/permission/session-rules?directory=%2Frepo', {
+        sessionId: 'session-1',
+        rules,
+      })
+    );
+
+    expect(updatePermissionRulesForSession).toHaveBeenCalledWith('session-1', rules, '/repo');
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 855, data: rules });
+  });
+
+  it('lists and retracts server-memory permissions for the session project', async () => {
+    let saved = [
+      { id: 'saved-1', projectID: 'project-1', action: 'bash', resource: 'git status *' },
+    ];
+    const serverRequest = vi.fn((method: string, path: string) => {
+      if (method === 'GET' && path === '/session/session-1') {
+        return Promise.resolve({ id: 'session-1', projectID: 'project-1', directory: '/repo' });
+      }
+      if (method === 'GET' && path === '/api/permission/saved?projectID=project-1') {
+        return Promise.resolve({ data: saved });
+      }
+      if (method === 'DELETE' && path === '/api/permission/saved/saved-1') {
+        saved = [];
+        return Promise.resolve(undefined);
+      }
+      return Promise.resolve(undefined);
+    });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(
+      makePayload(
+        856,
+        'GET',
+        '/varro/permission/server-memory?sessionId=session-1&directory=%2Frepo'
+      )
+    );
+    await proxy.handleRequest(
+      makePayload(857, 'DELETE', '/varro/permission/server-memory?directory=%2Frepo', {
+        sessionId: 'session-1',
+        id: 'saved-1',
+      })
+    );
+
+    expect(callbacks.postApiResponse).toHaveBeenNthCalledWith(1, 1, {
+      id: 856,
+      data: {
+        supported: true,
+        rules: [
+          {
+            id: 'saved-1',
+            projectID: 'project-1',
+            permission: 'bash',
+            pattern: 'git status *',
+          },
+        ],
+      },
+    });
+    expect(callbacks.postApiResponse).toHaveBeenNthCalledWith(2, 1, {
+      id: 857,
+      data: { supported: true, rules: [] },
+    });
+  });
+
   it('rejects project permission persistence without a matching pending request', async () => {
     const serverRequest = vi.fn((method: string, path: string) =>
       Promise.resolve(method === 'GET' && path === '/permission' ? [] : undefined)

@@ -1749,6 +1749,16 @@ const API_ROUTES: ApiRoute[] = [
     VARRO_API_ENDPOINTS.permissionSessionAllow,
     ({ method, url }) => method === 'POST' && optionalDirectoryQuery(url)
   ),
+  route(VARRO_API_ENDPOINTS.permissionSessionRules, ({ method, url }) =>
+    method === 'GET'
+      ? onlyQuery(url, 'sessionId', 'directory') && requiredQuery(url, 'sessionId')
+      : method === 'POST' && optionalDirectoryQuery(url)
+  ),
+  route(VARRO_API_ENDPOINTS.permissionServerMemory, ({ method, url }) =>
+    method === 'GET'
+      ? onlyQuery(url, 'sessionId', 'directory') && requiredQuery(url, 'sessionId')
+      : method === 'DELETE' && optionalDirectoryQuery(url)
+  ),
   route(
     VARRO_API_ENDPOINTS.permissionJudgeModel,
     ({ method, url }) => method === 'GET' && onlyQuery(url, 'providerID', 'modelID', 'variant')

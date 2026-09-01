@@ -33,10 +33,19 @@ const FULL_ACCESS_PERMISSION_RULES: PermissionRule[] = [
 
 const READ_ONLY_PERMISSIONS = new Set(['read', 'glob', 'grep', 'list', 'codesearch', 'lsp']);
 
-const DEFAULT_PERMISSION_RULES: PermissionRule[] = [
+const SHARED_DIRECT_PERMISSION_RULES: PermissionRule[] = [
   { permission: 'todowrite', pattern: '*', action: 'allow' },
   { permission: 'question', pattern: '*', action: 'allow' },
 ];
+
+export function isSharedDirectPermission(permission: string): boolean {
+  const normalized = permission.toLowerCase();
+  return normalized === 'todowrite' || normalized === 'question';
+}
+
+export function getSharedDirectPermissionRules(): PermissionRule[] {
+  return SHARED_DIRECT_PERMISSION_RULES;
+}
 
 export function isKnownReadOnlyPermission(permission: string): boolean {
   return READ_ONLY_PERMISSIONS.has(permission.toLowerCase());
@@ -89,5 +98,5 @@ export function getSessionPermissionRulesForMode(
   if (mode === 'full') return FULL_ACCESS_PERMISSION_RULES;
   if (mode === 'edits') return AUTO_ACCEPT_EDITS_PERMISSION_RULES;
   if (mode === 'auto') return AUTO_APPROVE_PERMISSION_RULES;
-  return DEFAULT_PERMISSION_RULES;
+  return [];
 }

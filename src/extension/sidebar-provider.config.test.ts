@@ -583,4 +583,56 @@ describe('SidebarProvider local config routing', () => {
     expect(written).toContain('// Keep this permission note.');
     expect(written).toContain('"git status*": "allow"');
   });
+
+  it('attributes global permission config separately from project rules', async () => {
+    vi.stubEnv('XDG_CONFIG_HOME', '/global');
+    try {
+      vscodeMock.workspace.fs.readFile.mockImplementation((uri: { fsPath: string }) => {
+        if (uri.fsPath === '/repo/opencode.jsonc') {
+          return Promise.resolve(new TextEncoder().encode('{ "permission": { "bash": "ask" } }'));
+        }
+        if (uri.fsPath === '/global/opencode/opencode.jsonc') {
+          return Promise.resolve(
+            new TextEncoder().encode('{ "permission": { "webfetch": "allow" } }')
+          );
+        }
+        return Promise.reject({ code: 'FileNotFound' });
+      });
+      const server = createServer({
+        request: vi.fn(async (_method: string, path: string) =>
+          path === '/config'
+            ? { permission: { webfetch: 'allow', bash: 'ask' } }
+            : path === '/session/status'
+              ? {}
+              : []
+        ),
+      });
+      const { provider } = await createSidebarProviderInstance({ server });
+      const { posted } = attachTestView(provider);
+
+      await provider.handleMessage({
+        type: 'api/request',
+        payload: { id: 12, method: 'GET', path: '/varro/opencode-config/permissions' },
+      });
+
+      expect(posted).toContainEqual({
+        type: 'api/response',
+        payload: {
+          id: 12,
+          data: expect.objectContaining({
+            projectRules: [{ permission: 'bash', pattern: '*', action: 'ask' }],
+            inheritedSources: [
+              {
+                path: '/global/opencode/opencode.jsonc',
+                rules: [{ permission: 'webfetch', pattern: '*', action: 'allow' }],
+                scope: 'global',
+              },
+            ],
+          }),
+        },
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 });

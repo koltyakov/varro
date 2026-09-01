@@ -32,6 +32,7 @@ import type {
   WorkspaceStatusEventSummary,
   WorkspaceFilePick,
   OpenCodePermissionConfig,
+  OpenCodeServerMemoryPermissions,
 } from '../../shared/protocol';
 import {
   buildVarroSessionEndpoint,
@@ -330,6 +331,30 @@ export const client = {
         { sessionId, permissionId }
       );
     },
+    async getPermissionRulesForSession(
+      sessionId: string,
+      options?: { directory?: string }
+    ): Promise<PermissionRule[]> {
+      const params = new URLSearchParams({ sessionId });
+      return apiCall(
+        'GET',
+        withDirectory(
+          `${VARRO_API_ENDPOINTS.permissionSessionRules}?${params.toString()}`,
+          options?.directory
+        )
+      );
+    },
+    async savePermissionRulesForSession(
+      sessionId: string,
+      rules: PermissionRule[],
+      options?: { directory?: string }
+    ): Promise<PermissionRule[]> {
+      return apiCall(
+        'POST',
+        withDirectory(VARRO_API_ENDPOINTS.permissionSessionRules, options?.directory),
+        { sessionId, rules }
+      );
+    },
     async revert(
       id: string,
       messageID: string,
@@ -597,6 +622,30 @@ export const client = {
     },
     async saveOpenCodePermissionConfig(rules: PermissionRule[]): Promise<OpenCodePermissionConfig> {
       return apiCall('POST', VARRO_API_ENDPOINTS.openCodeConfigPermissions, { rules });
+    },
+    async serverMemoryPermissions(
+      sessionId: string,
+      options?: { directory?: string }
+    ): Promise<OpenCodeServerMemoryPermissions> {
+      const params = new URLSearchParams({ sessionId });
+      return apiCall(
+        'GET',
+        withDirectory(
+          `${VARRO_API_ENDPOINTS.permissionServerMemory}?${params.toString()}`,
+          options?.directory
+        )
+      );
+    },
+    async removeServerMemoryPermission(
+      sessionId: string,
+      id: string,
+      options?: { directory?: string }
+    ): Promise<OpenCodeServerMemoryPermissions> {
+      return apiCall(
+        'DELETE',
+        withDirectory(VARRO_API_ENDPOINTS.permissionServerMemory, options?.directory),
+        { sessionId, id }
+      );
     },
     async saveModelRouting(body: {
       target: 'small_model' | 'agent' | 'commit_message' | 'auto_approve';

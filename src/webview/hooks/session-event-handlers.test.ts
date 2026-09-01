@@ -433,6 +433,34 @@ describe('registerSessionEventHandlers', () => {
     expect(addPermission).toHaveBeenCalledWith(expect.objectContaining({ id: 'perm-bash' }));
   });
 
+  it.each(['todowrite', 'question'])(
+    'directly allows %s without broadening Default',
+    async (type) => {
+      addPermission.mockClear();
+      const handlers = installHandlers();
+      const respondPermission = vi.fn().mockResolvedValue(undefined);
+
+      registerSessionEventHandlers(createDefaultDeps({ respondPermission }));
+      handlers.get('permission.asked')?.({
+        properties: {
+          id: `perm-${type}`,
+          sessionID: 'session-1',
+          permission: type,
+          title: type,
+        },
+      });
+
+      await vi.waitFor(() => {
+        expect(respondPermission).toHaveBeenCalledWith('session-1', `perm-${type}`, 'once', {
+          rethrow: true,
+        });
+      });
+      expect(addPermission).not.toHaveBeenCalledWith(
+        expect.objectContaining({ id: `perm-${type}` })
+      );
+    }
+  );
+
   it('shows auto-approve permissions when judging fails', async () => {
     addPermission.mockClear();
     const handlers = installHandlers();

@@ -3,7 +3,7 @@
 import * as vscode from 'vscode';
 import { replacesOpenCodeBinary } from '../shared/opencode-install';
 import { MAX_NATIVE_PDF_TOTAL_BYTES } from '../shared/native-pdf';
-import type { OpenCodeModelRouting } from '../shared/opencode-types';
+import type { OpenCodeModelRouting, PermissionRule } from '../shared/opencode-types';
 import { getSessionPermissionRulesForMode } from '../shared/permission-rules';
 import type {
   ChatModelSelection,
@@ -664,6 +664,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           sessionID,
           permission,
           patterns,
+          directory ?? endpointServer.getWorkspaceCwd()
+        ),
+      updatePermissionRulesForSession: (sessionID, rules, directory) =>
+        this.updatePermissionRulesForSession(
+          sessionID,
+          rules,
           directory ?? endpointServer.getWorkspaceCwd()
         ),
       activateSession: async (sessionID, directory, catalogRoot, signal) => {
@@ -2118,6 +2124,33 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           { permission: [...existing, ...additions] },
           { directory }
         );
+      });
+    this.permissionModeQueues.set(sessionID, operation);
+    const clearQueue = () => {
+      if (this.permissionModeQueues.get(sessionID) === operation) {
+        this.permissionModeQueues.delete(sessionID);
+      }
+    };
+    void operation.then(clearQueue, clearQueue);
+    return operation;
+  }
+
+  private updatePermissionRulesForSession(
+    sessionID: string,
+    rules: PermissionRule[],
+    directory?: string
+  ): Promise<PermissionRule[]> {
+    const previous = this.permissionModeQueues.get(sessionID) ?? Promise.resolve();
+    const operation = previous
+      .catch(() => undefined)
+      .then(async () => {
+        await this.server.request(
+          'PATCH',
+          `/session/${encodeURIComponent(sessionID)}`,
+          { permission: rules },
+          { directory }
+        );
+        return rules;
       });
     this.permissionModeQueues.set(sessionID, operation);
     const clearQueue = () => {

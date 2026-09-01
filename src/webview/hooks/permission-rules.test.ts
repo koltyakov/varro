@@ -24,11 +24,8 @@ describe('getSessionPermissionRulesForMode', () => {
     expect(rules.at(-1)).toEqual({ permission: '*', pattern: '*', action: 'allow' });
   });
 
-  it('adds only the shared direct allowances to default mode', () => {
-    expect(getSessionPermissionRulesForMode('default', 'create')).toEqual([
-      { permission: 'todowrite', pattern: '*', action: 'allow' },
-      { permission: 'question', pattern: '*', action: 'allow' },
-    ]);
+  it('leaves default mode to OpenCode configuration', () => {
+    expect(getSessionPermissionRulesForMode('default', 'create')).toEqual([]);
   });
 
   it('returns conservative ask rules for auto mode', () => {

@@ -12,6 +12,8 @@ import {
 import type {
   Message,
   OpenCodePermissionConfig,
+  OpenCodePermissionConfigSource,
+  OpenCodeServerMemoryPermissions,
   Part,
   PermissionRule,
 } from '../shared/opencode-types';
@@ -116,6 +118,14 @@ type OpenCodeConfigRequest =
 type OpenCodePermissionConfigRequest =
   | { kind: 'get' }
   | { kind: 'update'; rules: PermissionRule[] };
+
+type SessionPermissionRulesRequest =
+  | { kind: 'get'; sessionID: string }
+  | { kind: 'update'; sessionID: string; rules: PermissionRule[] };
+
+type ServerMemoryPermissionRequest =
+  | { kind: 'list'; sessionID: string }
+  | { kind: 'remove'; sessionID: string; id: string };
 
 type OpenCodeConfigFile = {
   path: string;
@@ -269,6 +279,11 @@ export interface RestProxyCallbacks {
     patterns: string[],
     directory?: string
   ): Promise<void>;
+  updatePermissionRulesForSession?(
+    sessionID: string,
+    rules: PermissionRule[],
+    directory?: string
+  ): Promise<PermissionRule[]>;
   activateSession(
     sessionID: string,
     directory: string,
@@ -691,6 +706,60 @@ export class RestProxy {
           permissionConfigRequest.kind === 'get'
             ? await this.readOpenCodePermissionConfig()
             : await this.updateOpenCodePermissionConfig(permissionConfigRequest.rules);
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
+
+      const sessionPermissionRulesRequest = this.parseSessionPermissionRulesRequest(
+        method,
+        payload.path,
+        payload.body
+      );
+      if (sessionPermissionRulesRequest) {
+        const directory = explicitWorkspaceDirectory ?? this.getCurrentWorkspaceResolutionRoot();
+        await this.assertSessionInWorkspace(
+          sessionPermissionRulesRequest.sessionID,
+          directory,
+          directory
+        );
+        if (sessionPermissionRulesRequest.kind === 'get') {
+          const session = asRecord(
+            await this.requestServer(
+              'GET',
+              `/session/${encodeURIComponent(sessionPermissionRulesRequest.sessionID)}`,
+              undefined,
+              { directory: directory ?? undefined }
+            )
+          );
+          const data = this.normalizeSessionPermissionRules(session?.permission);
+          this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+          return;
+        }
+        if (!this.callbacks.updatePermissionRulesForSession) {
+          throw new Error('Session permission editing is unavailable');
+        }
+        const data = await this.callbacks.updatePermissionRulesForSession(
+          sessionPermissionRulesRequest.sessionID,
+          sessionPermissionRulesRequest.rules,
+          directory ?? undefined
+        );
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
+
+      const serverMemoryRequest = this.parseServerMemoryPermissionRequest(
+        method,
+        payload.path,
+        payload.body
+      );
+      if (serverMemoryRequest) {
+        const directory = explicitWorkspaceDirectory ?? this.getCurrentWorkspaceResolutionRoot();
+        await this.assertSessionInWorkspace(serverMemoryRequest.sessionID, directory, directory);
+        const data = await this.readServerMemoryPermissions(
+          serverMemoryRequest.sessionID,
+          directory ?? undefined,
+          serverMemoryRequest.kind === 'remove' ? serverMemoryRequest.id : undefined
+        );
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
       }
@@ -3258,7 +3327,49 @@ export class RestProxy {
     if (method === 'GET') return { kind: 'get' };
     if (method !== 'POST') return null;
 
-    const values = asRecord(body)?.rules;
+    return { kind: 'update', rules: this.parsePermissionRules(asRecord(body)?.rules) };
+  }
+
+  private parseSessionPermissionRulesRequest(
+    method: string,
+    path: string,
+    body: unknown
+  ): SessionPermissionRulesRequest | null {
+    const url = new URL(path, 'http://localhost');
+    if (url.pathname !== VARRO_API_ENDPOINTS.permissionSessionRules) return null;
+    if (method === 'GET') {
+      const sessionID = url.searchParams.get('sessionId')?.trim() ?? '';
+      if (!sessionID) throw new Error('Session ID is required');
+      return { kind: 'get', sessionID };
+    }
+    if (method !== 'POST') return null;
+    const record = asRecord(body);
+    const sessionID = typeof record?.sessionId === 'string' ? record.sessionId.trim() : '';
+    if (!sessionID) throw new Error('Session ID is required');
+    return { kind: 'update', sessionID, rules: this.parsePermissionRules(record?.rules, true) };
+  }
+
+  private parseServerMemoryPermissionRequest(
+    method: string,
+    path: string,
+    body: unknown
+  ): ServerMemoryPermissionRequest | null {
+    const url = new URL(path, 'http://localhost');
+    if (url.pathname !== VARRO_API_ENDPOINTS.permissionServerMemory) return null;
+    if (method === 'GET') {
+      const sessionID = url.searchParams.get('sessionId')?.trim() ?? '';
+      if (!sessionID) throw new Error('Session ID is required');
+      return { kind: 'list', sessionID };
+    }
+    if (method !== 'DELETE') return null;
+    const record = asRecord(body);
+    const sessionID = typeof record?.sessionId === 'string' ? record.sessionId.trim() : '';
+    const id = typeof record?.id === 'string' ? record.id.trim() : '';
+    if (!sessionID || !id) throw new Error('Session ID and saved permission ID are required');
+    return { kind: 'remove', sessionID, id };
+  }
+
+  private parsePermissionRules(values: unknown, allowOverrides = false): PermissionRule[] {
     if (!Array.isArray(values) || values.length > 500) {
       throw new Error('Invalid permission configuration');
     }
@@ -3279,11 +3390,13 @@ export class RestProxy {
         throw new Error('Invalid permission rule');
       }
       const key = `${permission}\0${pattern}`;
-      if (keys.has(key)) throw new Error(`Duplicate permission rule: ${permission} / ${pattern}`);
+      if (!allowOverrides && keys.has(key)) {
+        throw new Error(`Duplicate permission rule: ${permission} / ${pattern}`);
+      }
       keys.add(key);
       rules.push({ permission, pattern, action });
     }
-    return { kind: 'update', rules };
+    return rules;
   }
 
   private parseJudgePermissionRequest(
@@ -3651,9 +3764,107 @@ export class RestProxy {
     return rules;
   }
 
+  private normalizeSessionPermissionRules(value: unknown): PermissionRule[] {
+    if (!Array.isArray(value)) return [];
+    const rules: PermissionRule[] = [];
+    for (const item of value) {
+      const rule = asRecord(item);
+      if (
+        typeof rule?.permission !== 'string' ||
+        typeof rule.pattern !== 'string' ||
+        (rule.action !== 'allow' && rule.action !== 'ask' && rule.action !== 'deny')
+      ) {
+        continue;
+      }
+      rules.push({
+        permission: rule.permission,
+        pattern: rule.pattern,
+        action: rule.action,
+      });
+    }
+    return rules;
+  }
+
+  private async readServerMemoryPermissions(
+    sessionID: string,
+    directory?: string,
+    removeID?: string
+  ): Promise<OpenCodeServerMemoryPermissions> {
+    const session = asRecord(
+      await this.requestServer('GET', `/session/${encodeURIComponent(sessionID)}`, undefined, {
+        directory,
+      })
+    );
+    const projectID = typeof session?.projectID === 'string' ? session.projectID : '';
+    if (!projectID) throw new Error('Session project is unavailable');
+
+    const list = async (): Promise<OpenCodeServerMemoryPermissions> => {
+      try {
+        const response = await this.requestServer(
+          'GET',
+          `/api/permission/saved?projectID=${encodeURIComponent(projectID)}`,
+          undefined,
+          { directory }
+        );
+        const record = asRecord(response);
+        const values = Array.isArray(response) ? response : record?.data;
+        if (!Array.isArray(values)) {
+          return {
+            supported: false,
+            rules: [],
+            reason: 'The OpenCode server returned an unsupported saved-permission response.',
+          };
+        }
+        const rules = values.flatMap((value) => {
+          const saved = asRecord(value);
+          if (
+            typeof saved?.id !== 'string' ||
+            typeof saved.projectID !== 'string' ||
+            typeof saved.action !== 'string' ||
+            typeof saved.resource !== 'string'
+          ) {
+            return [];
+          }
+          return [
+            {
+              id: saved.id,
+              projectID: saved.projectID,
+              permission: saved.action,
+              pattern: saved.resource,
+            },
+          ];
+        });
+        return { supported: true, rules };
+      } catch (cause) {
+        return {
+          supported: false,
+          rules: [],
+          reason:
+            cause instanceof Error
+              ? `Saved permissions are unavailable: ${cause.message}`
+              : 'Saved permissions are unavailable on this OpenCode server.',
+        };
+      }
+    };
+
+    const current = await list();
+    if (!removeID || !current.supported) return current;
+    if (!current.rules.some((rule) => rule.id === removeID && rule.projectID === projectID)) {
+      throw new Error('Saved permission not found for this project');
+    }
+    await this.requestServer(
+      'DELETE',
+      `/api/permission/saved/${encodeURIComponent(removeID)}`,
+      undefined,
+      { directory }
+    );
+    return list();
+  }
+
   private async readOpenCodePermissionConfig(): Promise<OpenCodePermissionConfig> {
     const snapshot = await this.readOpenCodeConfigObject();
     const targetPath = getCanonicalOpenCodeConfigPath(snapshot.target.path);
+    const globalSources = await this.readGlobalOpenCodePermissionSources();
     let effectiveConfig = snapshot.config;
     try {
       const serverConfig = asRecord(await this.requestServer('GET', '/config'));
@@ -3664,15 +3875,47 @@ export class RestProxy {
     return {
       targetPath: snapshot.target.path,
       projectRules: this.normalizeOpenCodePermissionRules(snapshot.target.config.permission),
-      inheritedSources: snapshot.files
-        .filter((file) => getCanonicalOpenCodeConfigPath(file.path) !== targetPath)
-        .map((file) => ({
-          path: file.path,
-          rules: this.normalizeOpenCodePermissionRules(file.config.permission),
-        }))
-        .filter((source) => source.rules.length > 0),
+      inheritedSources: [
+        ...globalSources,
+        ...snapshot.files
+          .filter((file) => getCanonicalOpenCodeConfigPath(file.path) !== targetPath)
+          .map<OpenCodePermissionConfigSource>((file) => ({
+            path: file.path,
+            rules: this.normalizeOpenCodePermissionRules(file.config.permission),
+            scope: isSameWorkspacePath(
+              getOpenCodePathApi(file.path).dirname(file.path),
+              snapshot.workspacePath
+            )
+              ? 'project'
+              : 'parent',
+          })),
+      ]
+        .filter((source) => source.rules.length > 0)
+        .toReversed(),
       effectiveRules: this.normalizeOpenCodePermissionRules(effectiveConfig.permission),
     };
+  }
+
+  private async readGlobalOpenCodePermissionSources(): Promise<OpenCodePermissionConfigSource[]> {
+    const configuredPath = process.env.OPENCODE_CONFIG?.trim();
+    const paths = [...getOpenCodeConfigPaths(), ...(configuredPath ? [configuredPath] : [])].filter(
+      (path, index, values) => values.indexOf(path) === index
+    );
+    const sources: OpenCodePermissionConfigSource[] = [];
+    for (const path of paths) {
+      try {
+        const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(path));
+        const config = parseOpenCodeConfig(new TextDecoder().decode(bytes), path);
+        sources.push({
+          path,
+          rules: this.normalizeOpenCodePermissionRules(config.permission),
+          scope: 'global',
+        });
+      } catch {
+        // Missing or unreadable optional global config files do not block project settings.
+      }
+    }
+    return sources;
   }
 
   private async updateOpenCodePermissionConfig(

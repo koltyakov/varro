@@ -8,12 +8,12 @@ Permission checks happen before an action runs. A tool shown as waiting or runni
 
 | Mode | Behavior | Good fit |
 | --- | --- | --- |
-| `Default` | Uses your OpenCode global, project, and agent permission rules. Varro shows any request that OpenCode decides to ask about. | You manage permissions in OpenCode configuration. |
+| `Default` | Uses your OpenCode global, project, and agent permission rules, with direct `todowrite` and `question` allowances. Varro shows other requests that OpenCode decides to ask about. | You manage permissions in OpenCode configuration. |
 | `Auto-accept edits` | Approves file edits, known read-only actions, and subagent launches. Other actions still ask. | You want edits to proceed but prefer to review commands and external access. |
 | `Auto approve` | Approves known safe actions with local rules. Varro can ask a model to review other requests and shows a prompt when it cannot make a safe decision. | You want routine work to continue with a manual fallback. |
 | `Full access` | Allows every permission without prompting, including commands, unknown tools, and MCP tools. This mode overrides restrictive agent rules for the session. | You trust the task, instructions, tools, and workspace. |
 
-Changing modes affects pending requests as well as later actions. Switching to `Default` removes Varro's session override and returns control to OpenCode configuration. Switching to `Full access` approves requests that are already waiting.
+Changing modes affects pending requests as well as later actions. Switching to `Default` removes Varro's mode rules and returns permission evaluation to OpenCode configuration. Varro still answers `todowrite` and `question` asks once without installing session rules. Switching to `Full access` approves requests that are already waiting.
 
 `Full access` removes the permission checkpoint. Review prompts and repository instructions before selecting it, especially when a session can run shell commands or use third-party MCP tools.
 
@@ -47,6 +47,15 @@ Commands, paths, URLs, tool metadata, and prior decisions may be sent to the sel
 ## Default mode and OpenCode rules
 
 `Default` means OpenCode decides. It does not mean every action asks for approval. Without custom rules, OpenCode allows most permissions, asks about `doom_loop` and `external_directory`, and denies reads of `.env` files and related variants while allowing files such as `.env.example`.
+
+The Permissions screen keeps rule sources separate and orders them from highest to lowest
+precedence. Project rules write only to the workspace `opencode.json` or `opencode.jsonc`.
+Current-session rules write only to the selected OpenCode session. The screen hides generated mode
+rules and shows only the latest session override for each permission and pattern. Changing permission
+mode replaces that session list. Server memory lists allowances saved by the running OpenCode server
+and can retract them without changing project or session rules. Parent-project and global
+`opencode.json`, `opencode.jsonc`, and legacy `config.json` sources are shown as read-only cards. Older
+OpenCode servers that do not expose saved permissions show that layer as unavailable.
 
 OpenCode supports `allow`, `ask`, and `deny` rules at global, project, and agent scopes. Rules can match tools, shell commands, paths, subagents, URLs, and external directories. OpenCode uses the last matching rule.
 

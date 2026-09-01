@@ -8,14 +8,19 @@ import {
   createUniqueId,
   onMount,
 } from 'solid-js';
-import type { OpenCodePermissionConfig } from '../../shared/protocol';
+import type {
+  OpenCodePermissionConfig,
+  OpenCodeServerMemoryPermissions,
+  PermissionMode,
+} from '../../shared/protocol';
 import type { PermissionRule } from '../../shared/opencode-types';
 import {
   KNOWN_PERMISSION_NAMES,
+  getSharedDirectPermissionRules,
   getSessionPermissionRulesForMode,
 } from '../../shared/permission-rules';
 import { client } from '../lib/client';
-import { setShowPermissionSettings } from '../lib/state';
+import { getPermissionModeForSession, setShowPermissionSettings, state } from '../lib/state';
 import {
   checkIcon,
   navArrowDownIcon,
@@ -35,6 +40,48 @@ const EMPTY_CONFIG: OpenCodePermissionConfig = {
 
 function getConfigFileName(path: string) {
   return path.split(/[\\/]/).filter(Boolean).at(-1) || 'opencode.json';
+}
+
+function getPermissionSourceTitle(scope: 'global' | 'project' | 'parent' | undefined) {
+  if (scope === 'global') return 'Global rules';
+  if (scope === 'project') return 'Other workspace rules';
+  return 'Parent project rules';
+}
+
+function getServerMemoryUnavailableReason(memory: OpenCodeServerMemoryPermissions) {
+  return memory.supported
+    ? 'Saved permissions are unavailable on this OpenCode server.'
+    : memory.reason;
+}
+
+function mergeLatestPermissionRules(rules: PermissionRule[]) {
+  const latest = new Map<string, PermissionRule>();
+  for (const rule of rules) {
+    const key = `${rule.permission}\0${rule.pattern}`;
+    latest.delete(key);
+    latest.set(key, rule);
+  }
+  return [...latest.values()];
+}
+
+function splitSessionPermissionRules(rules: PermissionRule[], mode: PermissionMode) {
+  const candidateModes: PermissionMode[] = [mode, 'edits', 'auto', 'full'];
+  const baseline = candidateModes
+    .filter((candidate, index, modes) => modes.indexOf(candidate) === index)
+    .map((candidate) => getSessionPermissionRulesForMode(candidate, 'update'))
+    .find(
+      (candidate) =>
+        candidate.length > 0 &&
+        candidate.length <= rules.length &&
+        candidate.every(
+          (rule, index) =>
+            rules[index]?.permission === rule.permission && rules[index]?.pattern === rule.pattern
+        )
+    );
+  return {
+    baseline: baseline ? rules.slice(0, baseline.length) : [],
+    overrides: mergeLatestPermissionRules(baseline ? rules.slice(baseline.length) : rules),
+  };
 }
 
 function formatRuleScope(rule: PermissionRule) {
@@ -462,11 +509,32 @@ export function PermissionSettingsPanel() {
   const [loading, setLoading] = createSignal(true);
   const [saving, setSaving] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+  const [sessionRules, setSessionRules] = createSignal<PermissionRule[]>([]);
+  const [savedSessionRules, setSavedSessionRules] = createSignal<PermissionRule[]>([]);
+  const [sessionBaselineRules, setSessionBaselineRules] = createSignal<PermissionRule[]>([]);
+  const [sessionLoading, setSessionLoading] = createSignal(false);
+  const [sessionSaving, setSessionSaving] = createSignal(false);
+  const [sessionError, setSessionError] = createSignal<string | null>(null);
+  const [serverMemory, setServerMemory] = createSignal<OpenCodeServerMemoryPermissions | null>(
+    null
+  );
+  const [serverMemoryError, setServerMemoryError] = createSignal<string | null>(null);
+  const [removingServerRule, setRemovingServerRule] = createSignal<string | null>(null);
+  let sessionLoadGeneration = 0;
   const editModeAdditions = getSessionPermissionRulesForMode('edits', 'create').filter(
     (rule) => rule.permission === 'edit'
   );
-  const defaultDirectRules = getSessionPermissionRulesForMode('default', 'create');
+  const defaultDirectRules = getSharedDirectPermissionRules();
   const dirty = createMemo(() => JSON.stringify(rules()) !== JSON.stringify(config().projectRules));
+  const sessionDirty = createMemo(
+    () => JSON.stringify(sessionRules()) !== JSON.stringify(savedSessionRules())
+  );
+  const activeSession = createMemo(() =>
+    state.sessions.find((session) => session.id === state.activeSessionId)
+  );
+  const activePermissionMode = createMemo(() =>
+    getPermissionModeForSession(activeSession()?.id ?? null)
+  );
   const effectiveDefaultRules = createMemo(() => [
     ...config().effectiveRules.filter(
       (rule) => !defaultDirectRules.some((direct) => direct.permission === rule.permission)
@@ -517,11 +585,123 @@ export function PermissionSettingsPanel() {
     }
   }
 
+  async function loadSessionLayers() {
+    const session = activeSession();
+    const generation = ++sessionLoadGeneration;
+    if (!session) {
+      setSessionRules([]);
+      setSavedSessionRules([]);
+      setSessionBaselineRules([]);
+      setServerMemory(null);
+      return;
+    }
+    setSessionLoading(true);
+    setSessionError(null);
+    setServerMemoryError(null);
+    const [sessionResult, memoryResult] = await Promise.allSettled([
+      client.session.getPermissionRulesForSession(session.id, { directory: session.directory }),
+      client.varro.serverMemoryPermissions(session.id, { directory: session.directory }),
+    ]);
+    if (generation !== sessionLoadGeneration) return;
+    if (sessionResult.status === 'fulfilled') {
+      const split = splitSessionPermissionRules(sessionResult.value, activePermissionMode());
+      setSessionBaselineRules(split.baseline.map((rule) => ({ ...rule })));
+      setSessionRules(split.overrides.map((rule) => ({ ...rule })));
+      setSavedSessionRules(split.overrides.map((rule) => ({ ...rule })));
+    } else {
+      setSessionError(
+        sessionResult.reason instanceof Error
+          ? sessionResult.reason.message
+          : 'Could not load current-session rules'
+      );
+    }
+    setServerMemory(
+      memoryResult.status === 'fulfilled'
+        ? memoryResult.value
+        : {
+            supported: false,
+            rules: [],
+            reason:
+              memoryResult.reason instanceof Error
+                ? memoryResult.reason.message
+                : 'Could not load saved server permissions',
+          }
+    );
+    setSessionLoading(false);
+  }
+
+  async function saveSessionRules() {
+    const session = activeSession();
+    if (!session) return;
+    const normalized = mergeLatestPermissionRules(
+      sessionRules().map((rule) => ({
+        permission: rule.permission.trim(),
+        pattern: rule.pattern.trim(),
+        action: rule.action,
+      }))
+    );
+    if (normalized.some((rule) => !rule.permission || !rule.pattern)) {
+      setSessionError('Every session rule needs a permission name and pattern.');
+      return;
+    }
+    setSessionSaving(true);
+    setSessionError(null);
+    try {
+      const next = await client.session.savePermissionRulesForSession(
+        session.id,
+        [...sessionBaselineRules(), ...normalized],
+        { directory: session.directory }
+      );
+      const split = splitSessionPermissionRules(next, activePermissionMode());
+      setSessionBaselineRules(split.baseline.map((rule) => ({ ...rule })));
+      setSessionRules(split.overrides.map((rule) => ({ ...rule })));
+      setSavedSessionRules(split.overrides.map((rule) => ({ ...rule })));
+    } catch (cause) {
+      setSessionError(cause instanceof Error ? cause.message : 'Could not save session rules');
+    } finally {
+      setSessionSaving(false);
+    }
+  }
+
+  async function removeServerMemoryPermission(id: string) {
+    const session = activeSession();
+    if (!session || removingServerRule()) return;
+    setRemovingServerRule(id);
+    setServerMemoryError(null);
+    try {
+      setServerMemory(
+        await client.varro.removeServerMemoryPermission(session.id, id, {
+          directory: session.directory,
+        })
+      );
+    } catch (cause) {
+      setServerMemoryError(
+        cause instanceof Error ? cause.message : 'Could not retract the saved server permission'
+      );
+    } finally {
+      setRemovingServerRule(null);
+    }
+  }
+
   function updateRule(index: number, rule: PermissionRule) {
     setRules((current) => current.map((item, itemIndex) => (itemIndex === index ? rule : item)));
   }
 
-  onMount(() => void load());
+  onMount(() => {
+    void load();
+  });
+
+  createEffect(() => {
+    activePermissionMode();
+    if (activeSession()) void loadSessionLayers();
+    else {
+      sessionLoadGeneration += 1;
+      setSessionRules([]);
+      setSavedSessionRules([]);
+      setSessionBaselineRules([]);
+      setServerMemory(null);
+    }
+  });
 
   return (
     <div class="permission-settings-panel">
@@ -540,14 +720,6 @@ export function PermissionSettingsPanel() {
             </Tooltip>
             <span>Permissions</span>
           </div>
-          <button
-            type="button"
-            class="permission-settings-save"
-            disabled={!dirty() || saving() || loading()}
-            onClick={() => void save()}
-          >
-            {saving() ? 'Saving...' : 'Save rules'}
-          </button>
         </div>
       </header>
 
@@ -562,26 +734,176 @@ export function PermissionSettingsPanel() {
             </div>
           </Show>
 
+          <Show when={activeSession()}>
+            <section class="permission-config-section">
+              <div class="permission-config-heading">
+                <div>
+                  <h2>Current session rules</h2>
+                  <p>
+                    Highest precedence. Changing permission mode replaces these session overrides.
+                  </p>
+                </div>
+                <div class="permission-config-actions">
+                  <button
+                    type="button"
+                    class="permission-settings-save"
+                    disabled={!sessionDirty() || sessionSaving() || sessionLoading()}
+                    onClick={() => void saveSessionRules()}
+                  >
+                    {sessionSaving() ? 'Saving...' : 'Save'}
+                  </button>
+                  <button
+                    type="button"
+                    class="permission-config-add"
+                    disabled={sessionSaving() || sessionLoading()}
+                    onClick={() =>
+                      setSessionRules((current) => [
+                        ...current,
+                        { permission: '', pattern: '*', action: 'ask' },
+                      ])
+                    }
+                  >
+                    <UiIcon source={plusIcon} width={14} height={14} />
+                    Add rule
+                  </button>
+                </div>
+              </div>
+              <div class="permission-config-source">
+                <span>Layer</span>
+                <code>Session only</code>
+              </div>
+              <div class="permission-config-column-labels" aria-hidden="true">
+                <span>Permission</span>
+                <span>Pattern</span>
+                <span>Action</span>
+              </div>
+              <Show when={sessionError()}>
+                <div class="permission-layer-error" role="alert">
+                  {sessionError()}
+                </div>
+              </Show>
+              <Show
+                when={!sessionLoading()}
+                fallback={<div class="permission-config-empty">Loading session rules...</div>}
+              >
+                <Show
+                  when={sessionRules().length > 0}
+                  fallback={<div class="permission-config-empty">No session-specific rules.</div>}
+                >
+                  <Index each={sessionRules()}>
+                    {(rule, index) => (
+                      <PermissionRuleRow
+                        rule={rule()}
+                        onChange={(next) =>
+                          setSessionRules((current) =>
+                            current.map((item, itemIndex) => (itemIndex === index ? next : item))
+                          )
+                        }
+                        onRemove={() =>
+                          setSessionRules((current) =>
+                            current.filter((_, itemIndex) => itemIndex !== index)
+                          )
+                        }
+                      />
+                    )}
+                  </Index>
+                </Show>
+              </Show>
+            </section>
+
+            <section class="permission-config-section">
+              <div class="permission-config-heading">
+                <div>
+                  <h2>Server memory</h2>
+                  <p>Saved allowances applied before project and inherited configuration.</p>
+                </div>
+                <span class="permission-config-level">Until restart</span>
+              </div>
+              <Show when={serverMemoryError()}>
+                <div class="permission-layer-error" role="alert">
+                  {serverMemoryError()}
+                </div>
+              </Show>
+              <Show
+                when={serverMemory()}
+                fallback={<div class="permission-config-empty">Loading server memory...</div>}
+              >
+                {(memory) => (
+                  <Show
+                    when={memory().supported}
+                    fallback={
+                      <div class="permission-config-empty">
+                        {getServerMemoryUnavailableReason(memory())}
+                      </div>
+                    }
+                  >
+                    <Show
+                      when={memory().rules.length > 0}
+                      fallback={
+                        <div class="permission-config-empty">No saved server allowances.</div>
+                      }
+                    >
+                      <div class="permission-memory-list">
+                        <For each={memory().rules}>
+                          {(rule) => (
+                            <div class="permission-memory-rule">
+                              <code>{rule.permission}</code>
+                              <code title={rule.pattern}>{rule.pattern}</code>
+                              <span class="permission-memory-actions">
+                                <span>Allow</span>
+                                <Tooltip content="Retract server allowance">
+                                  <button
+                                    type="button"
+                                    class="permission-config-remove"
+                                    aria-label="Retract server allowance"
+                                    disabled={removingServerRule() !== null}
+                                    onClick={() => void removeServerMemoryPermission(rule.id)}
+                                  >
+                                    <UiIcon source={trashIcon} width={14} height={14} />
+                                  </button>
+                                </Tooltip>
+                              </span>
+                            </div>
+                          )}
+                        </For>
+                      </div>
+                    </Show>
+                  </Show>
+                )}
+              </Show>
+            </section>
+          </Show>
+
           <section class="permission-config-section">
             <div class="permission-config-heading">
               <div>
                 <h2>Project rules</h2>
-                <p>Rules for this workspace. Later matching rules win.</p>
+                <p>Highest project-config layer. Later matching rules in this file win.</p>
               </div>
-              <button
-                type="button"
-                class="permission-config-add"
-                disabled={loading() || saving()}
-                onClick={() =>
-                  setRules((current) => [
-                    ...current,
-                    { permission: '', pattern: '*', action: 'ask' },
-                  ])
-                }
-              >
-                <UiIcon source={plusIcon} width={14} height={14} />
-                Add rule
-              </button>
+              <div class="permission-config-actions">
+                <button
+                  type="button"
+                  class="permission-settings-save"
+                  disabled={!dirty() || saving() || loading()}
+                  onClick={() => void save()}
+                >
+                  {saving() ? 'Saving...' : 'Save'}
+                </button>
+                <button
+                  type="button"
+                  class="permission-config-add"
+                  disabled={loading() || saving()}
+                  onClick={() =>
+                    setRules((current) => [
+                      ...current,
+                      { permission: '', pattern: '*', action: 'ask' },
+                    ])
+                  }
+                >
+                  <UiIcon source={plusIcon} width={14} height={14} />
+                  Add rule
+                </button>
+              </div>
             </div>
             <div class="permission-config-source" title={config().targetPath || undefined}>
               <span>Workspace config</span>
@@ -624,7 +946,7 @@ export function PermissionSettingsPanel() {
               <section class="permission-config-section">
                 <div class="permission-config-heading">
                   <div>
-                    <h2>Inherited rules</h2>
+                    <h2>{getPermissionSourceTitle(source.scope)}</h2>
                     <p title={source.path}>{getConfigFileName(source.path)}</p>
                   </div>
                   <span class="permission-config-level">Read only</span>

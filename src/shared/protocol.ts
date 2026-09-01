@@ -358,6 +358,8 @@ export const VARRO_API_ENDPOINTS = {
   permissionJudge: `${VARRO_API_NAMESPACE}/permission/judge`,
   permissionJudgeModel: `${VARRO_API_NAMESPACE}/permission/judge/model`,
   permissionSessionAllow: `${VARRO_API_NAMESPACE}/permission/session-allow`,
+  permissionSessionRules: `${VARRO_API_NAMESPACE}/permission/session-rules`,
+  permissionServerMemory: `${VARRO_API_NAMESPACE}/permission/server-memory`,
   permissionProjectAllow: `${VARRO_API_NAMESPACE}/permission/project-allow`,
 } as const;
 
@@ -381,6 +383,8 @@ export type {
   OpenCodeModelRouting,
   OpenCodePermissionConfig,
   OpenCodePermissionConfigSource,
+  OpenCodeServerMemoryPermission,
+  OpenCodeServerMemoryPermissions,
 } from './opencode-types';
 
 export const SERVER_EVENT_NAMES = [

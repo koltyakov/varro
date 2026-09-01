@@ -200,6 +200,14 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('POST', '/varro/opencode-config/model-routing')).toBe(true);
     expect(isAllowedApiRequest('GET', '/varro/opencode-config/permissions')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/opencode-config/permissions')).toBe(true);
+    expect(isAllowedApiRequest('GET', '/varro/permission/session-rules?sessionId=session-1')).toBe(
+      true
+    );
+    expect(isAllowedApiRequest('POST', '/varro/permission/session-rules')).toBe(true);
+    expect(isAllowedApiRequest('GET', '/varro/permission/server-memory?sessionId=session-1')).toBe(
+      true
+    );
+    expect(isAllowedApiRequest('DELETE', '/varro/permission/server-memory')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/permission/judge')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/permission/project-allow?directory=%2Frepo-a')).toBe(
       true
