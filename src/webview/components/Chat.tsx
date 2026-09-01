@@ -8,6 +8,7 @@ import {
   openAttentionSessionsKey,
   openCompletedSessionsKey,
   sessionSearchFocusKey,
+  isLoading,
   isSessionAwaitingInput,
   isSessionUnread,
   isActiveSessionWorking,
@@ -36,6 +37,7 @@ import {
   getSessionListFilterLabel,
   groupSessions,
   isPrimarySession,
+  isRunningSession,
   isSessionFailureUnread,
   shouldShowSessionHeaderBadge,
 } from './chat/SessionListView';
@@ -89,6 +91,10 @@ const SESSION_LIST_CLOCK_INTERVAL_MS = 60_000;
 
 function isDesktopSessionPaneRight() {
   return desktopSessionPaneSide() === 'right';
+}
+
+function isDirectlyRunningSession(sessionId: string) {
+  return isRunningSession(sessionId) || (sessionId === state.activeSessionId && isLoading());
 }
 
 export function Chat() {
@@ -456,14 +462,13 @@ export function Chat() {
     const session = sessionsById().get(state.activeSessionId);
     return normalizeSessionTitle(session?.title) || 'New Chat';
   };
-
   const headerSessionCounts = createMemo(() => {
     const indicators = sessionIndicators();
     return getHeaderSessionCounts(
       recentSessions(),
       state.activeSessionId,
       isEditorSurface ? false : showSessionPicker(),
-      (sessionId) => indicators.runningIds.has(sessionId),
+      isDirectlyRunningSession,
       (sessionId) => indicators.attentionIds.has(sessionId),
       (sessionId) => indicators.failedIds.has(sessionId) && isSessionFailureUnread(sessionId),
       (session) =>
@@ -496,7 +501,9 @@ export function Chat() {
     const matchingSessions = getPrimarySessionsForFilter(
       recentSessions(),
       filter,
-      (sessionId) => indicators.runningIds.has(sessionId),
+      filter === 'running'
+        ? isDirectlyRunningSession
+        : (sessionId) => indicators.runningIds.has(sessionId),
       (sessionId) => indicators.attentionIds.has(sessionId),
       (sessionId) => indicators.failedIds.has(sessionId),
       (session) => indicators.planReadyIds.has(session.id),
@@ -509,7 +516,9 @@ export function Chat() {
       filter,
       state.activeSessionId,
       showSessionPicker(),
-      (sessionId) => indicators.runningIds.has(sessionId),
+      filter === 'running'
+        ? isDirectlyRunningSession
+        : (sessionId) => indicators.runningIds.has(sessionId),
       (sessionId) => indicators.attentionIds.has(sessionId),
       (sessionId) => indicators.failedIds.has(sessionId),
       (session) => indicators.planReadyIds.has(session.id),

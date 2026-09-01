@@ -1157,6 +1157,26 @@ describe('header status badges', () => {
     expect(container?.querySelector('.chat-header-completed-badge')?.textContent).toBe('');
   });
 
+  it('does not count parent sessions that are only running subagents', () => {
+    setState('sessions', [
+      session('direct-running', 600),
+      session('child-running-parent', 500),
+      session('child-running', 400, { parentID: 'child-running-parent' }),
+      session('other-child-parent', 300),
+      session('other-child-running', 200, { parentID: 'other-child-parent' }),
+    ]);
+    setState('sessionStatus', {
+      'direct-running': { type: 'busy' },
+      'child-running': { type: 'busy' },
+      'other-child-running': { type: 'busy' },
+    });
+    setShowSessionPicker(true);
+
+    cleanup = render(() => Chat(), container!);
+
+    expect(container?.querySelector('.chat-header-running-count')?.textContent).toBe('1');
+  });
+
   it('hides the failed badge after all failed sessions have been read', () => {
     setState('sessions', [session('failed-1', 500), session('failed-2', 400)]);
     setState('failedSessionIds', ['failed-1', 'failed-2']);
