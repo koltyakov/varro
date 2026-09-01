@@ -1,0 +1,540 @@
+.permission-settings-panel {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-popover);
+  display: flex;
+  flex-direction: column;
+  color: var(--color-vscode-fg);
+  background: var(--color-vscode-sidebar);
+}
+
+.permission-settings-header {
+  flex: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-vscode-border) 15%, transparent);
+}
+
+.permission-settings-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: min(100%, var(--chat-content-max-width));
+  height: 36px;
+  margin-inline: auto;
+  padding: 0 var(--chat-horizontal-padding) 0 6px;
+}
+
+.permission-settings-header-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.permission-settings-save,
+.permission-config-add,
+.permission-settings-error button {
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: var(--radius-chip);
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+  font-size: 11px;
+}
+
+.permission-settings-save {
+  min-height: 26px;
+  padding: 4px 10px;
+}
+
+.permission-settings-save:disabled,
+.permission-config-add:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+.permission-settings-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.permission-settings-content {
+  width: min(100%, var(--chat-content-max-width));
+  margin-inline: auto;
+  padding: 14px var(--chat-horizontal-padding) 32px;
+}
+
+.permission-config-heading p {
+  margin: 4px 0 0;
+  color: var(--color-vscode-muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.permission-config-level {
+  color: var(--color-vscode-muted);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.permission-settings-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 7px 9px;
+  border: 1px solid var(--vscode-inputValidation-errorBorder, var(--color-vscode-error));
+  border-radius: var(--radius-inset);
+  color: var(--vscode-inputValidation-errorForeground, var(--color-vscode-fg));
+  background: var(--vscode-inputValidation-errorBackground, transparent);
+  font-size: 11px;
+}
+
+.permission-settings-error button {
+  flex: none;
+  padding: 3px 8px;
+}
+
+.permission-config-section {
+  position: relative;
+  z-index: 1;
+  margin-top: 12px;
+  overflow: visible;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 88%, transparent);
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--color-vscode-widget-bg) 42%, transparent);
+}
+
+.permission-config-section:first-child {
+  margin-top: 0;
+}
+
+.permission-config-section:focus-within {
+  z-index: 3;
+}
+
+.permission-config-heading {
+  position: relative;
+  padding: 9px 10px;
+}
+
+.permission-config-heading h2 {
+  margin: 0;
+  padding-right: 96px;
+  color: var(--color-vscode-fg);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.permission-config-heading > .permission-config-level,
+.permission-config-heading > .permission-config-add {
+  position: absolute;
+  top: 9px;
+  right: 10px;
+}
+
+.permission-config-add {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  min-height: 25px;
+  padding: 3px 8px 3px 5px;
+}
+
+.permission-config-source {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 45%, transparent);
+  color: var(--color-vscode-muted);
+  font-size: 9px;
+}
+
+.permission-config-source code {
+  min-width: 0;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--color-vscode-fg) 78%, var(--color-vscode-muted));
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.permission-config-column-labels,
+.permission-config-rule {
+  display: grid;
+  grid-template-columns: minmax(72px, 0.8fr) minmax(96px, 1.25fr) 102px;
+  align-items: center;
+  gap: 6px;
+}
+
+.permission-config-column-labels {
+  padding: 4px 10px;
+  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 45%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-vscode-border) 45%, transparent);
+  color: var(--color-vscode-muted);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.permission-config-rule {
+  min-height: 33px;
+  padding: 4px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-vscode-border) 38%, transparent);
+  font-size: 10px;
+}
+
+.permission-config-rule:last-child {
+  border-bottom: 0;
+}
+
+.permission-config-rule input,
+.permission-config-action-button {
+  width: 100%;
+  height: 24px;
+  min-width: 0;
+  border: 1px solid var(--color-vscode-input-border, transparent);
+  border-radius: 4px;
+  outline: none;
+  color: var(--color-vscode-input-fg);
+  background: var(--color-vscode-input-bg);
+  font: inherit;
+}
+
+.permission-config-rule input {
+  padding: 3px 6px;
+}
+
+.permission-name-combobox {
+  position: relative;
+  min-width: 0;
+}
+
+.permission-name-combobox > input {
+  padding-right: 20px;
+}
+
+.permission-name-combobox > .ui-icon {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  pointer-events: none;
+  color: var(--color-vscode-muted);
+  transform: translateY(-50%);
+}
+
+.permission-name-options-shell {
+  position: absolute;
+  z-index: var(--z-context-menu);
+  top: calc(100% + 3px);
+  left: 0;
+  width: max(100%, 164px);
+}
+
+.permission-name-options {
+  display: flex;
+  width: 100%;
+  max-height: 210px;
+  flex-direction: column;
+  overflow-y: auto;
+  scrollbar-width: none;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border-strong) 82%, transparent);
+  border-radius: var(--radius-card);
+  background: var(--color-vscode-widget-bg);
+  box-shadow: var(--shadow-popover);
+}
+
+.permission-name-options::-webkit-scrollbar {
+  display: none;
+}
+
+.permission-name-scrollbar {
+  position: absolute;
+  z-index: 2;
+  top: 3px;
+  right: 3px;
+  bottom: 3px;
+  width: 6px;
+  pointer-events: none;
+}
+
+.permission-name-scrollbar-thumb {
+  width: 100%;
+  border-radius: 999px;
+  background: var(--color-vscode-chat-scrollbar-thumb-desktop);
+}
+
+.permission-name-details {
+  display: grid;
+  gap: 5px;
+}
+
+.permission-name-details-title {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.permission-name-details-description {
+  color: var(--color-vscode-muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.permission-name-options button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 25px;
+  padding: 0 14px 0 7px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--color-vscode-fg);
+  background: transparent;
+  font-size: 10px;
+  text-align: left;
+}
+
+.permission-name-options button:hover,
+.permission-name-options button.active {
+  background: var(--color-vscode-hover);
+}
+
+.permission-name-options button[aria-selected='true'] {
+  color: var(--color-vscode-fg);
+  font-weight: 600;
+}
+
+.permission-name-options code {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: inherit;
+  background: transparent;
+  font-size: 10px;
+  line-height: inherit;
+  transform: translateY(1px);
+}
+
+.permission-name-options span {
+  color: var(--color-vscode-muted);
+  font-size: 9px;
+  transform: translateY(1px);
+}
+
+.permission-config-rule input:focus,
+.permission-config-action-button:focus-visible {
+  border-color: var(--vscode-focusBorder);
+}
+
+.permission-config-edit-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24px;
+  gap: 3px;
+}
+
+.permission-config-select {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
+.permission-config-action-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 2px 6px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.permission-config-action-button > span {
+  transform: translateY(1px);
+}
+
+.permission-config-action-button > .ui-icon {
+  flex: none;
+  color: var(--color-vscode-muted);
+}
+
+.permission-action-options {
+  position: absolute;
+  z-index: var(--z-context-menu);
+  top: calc(100% + 3px);
+  left: 0;
+  display: flex;
+  width: 100%;
+  min-width: 86px;
+  flex-direction: column;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border-strong) 82%, transparent);
+  border-radius: var(--radius-card);
+  background: var(--color-vscode-widget-bg);
+  box-shadow: var(--shadow-popover);
+}
+
+.permission-action-options button {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  height: 25px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--color-vscode-fg);
+  background: transparent;
+  font-size: 10px;
+  text-align: left;
+}
+
+.permission-action-options button:hover,
+.permission-action-options button.active {
+  background: var(--color-vscode-hover);
+}
+
+.permission-action-options button > span:last-child {
+  transform: translateY(1px);
+}
+
+.permission-action-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+}
+
+.permission-action-check .ui-icon {
+  color: currentColor;
+}
+
+.permission-config-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: var(--color-vscode-muted);
+  background: transparent;
+}
+
+.permission-config-remove:hover {
+  color: var(--color-vscode-fg);
+  background: var(--color-vscode-hover);
+}
+
+.permission-config-empty {
+  padding: 16px 10px;
+  color: var(--color-vscode-muted);
+  font-size: 10px;
+  text-align: center;
+}
+
+.permission-rule-overview {
+  display: grid;
+  gap: 0;
+  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 45%, transparent);
+}
+
+.permission-rule-group {
+  display: grid;
+  align-items: center;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-vscode-border) 35%, transparent);
+}
+
+.permission-rule-group:last-child {
+  border-bottom: 0;
+}
+
+.permission-rule-group-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 20px;
+  color: var(--color-vscode-muted);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.permission-rule-group-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.permission-rule-group.allow .permission-rule-group-dot {
+  color: var(--vscode-testing-iconPassed, #4caf50);
+}
+
+.permission-rule-group.ask .permission-rule-group-dot {
+  color: var(--color-vscode-warning);
+}
+
+.permission-rule-group.deny .permission-rule-group-dot {
+  color: var(--color-vscode-error);
+}
+
+.permission-rule-group-count {
+  color: color-mix(in srgb, var(--color-vscode-muted) 70%, transparent);
+  font-size: 8px;
+  font-weight: 500;
+}
+
+.permission-rule-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.permission-rule-chips code {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 20px;
+  overflow: hidden;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 55%, transparent);
+  border-radius: var(--radius-chip);
+  color: color-mix(in srgb, var(--color-vscode-fg) 84%, var(--color-vscode-muted));
+  background: color-mix(in srgb, var(--color-vscode-input-bg) 72%, transparent);
+  font-size: 9px;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 390px) {
+  .permission-config-column-labels {
+    display: none;
+  }
+
+  .permission-config-rule {
+    grid-template-columns: minmax(70px, 0.8fr) minmax(82px, 1fr) 94px;
+    padding-inline: 7px;
+  }
+
+  .permission-rule-group {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}

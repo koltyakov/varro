@@ -182,6 +182,40 @@ describe('AutoApproveJudge', () => {
     expect(request).not.toHaveBeenCalled();
   });
 
+  it('allows task-list updates without creating a judge session', async () => {
+    const request = vi.fn();
+    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+
+    await expect(
+      judge.judge({
+        permission: {
+          id: 'perm-todowrite',
+          type: 'todowrite',
+          sessionID: 'session-1',
+          title: 'Update task list',
+        },
+      })
+    ).resolves.toEqual({ decision: 'allow', reason: 'Session task list update.' });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('allows interactive user questions without creating a judge session', async () => {
+    const request = vi.fn();
+    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+
+    await expect(
+      judge.judge({
+        permission: {
+          id: 'perm-question',
+          type: 'question',
+          sessionID: 'session-1',
+          title: 'Ask the user',
+        },
+      })
+    ).resolves.toEqual({ decision: 'allow', reason: 'Interactive user question.' });
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it('allows external directory access contained by prior always-approved scopes', async () => {
     const { root } = createTemporaryWorkspace();
     const approvedOne = join(root, 'external-one');

@@ -1027,6 +1027,34 @@
   max-width: 100%;
 }
 
+.permission-mode-controls {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+.permission-mode-settings-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-chip);
+  color: var(--color-vscode-muted);
+  background: transparent;
+  opacity: 0;
+}
+
+.permission-mode-settings-button:hover,
+.permission-mode-settings-button:focus-visible {
+  color: var(--color-vscode-fg);
+  background: var(--color-vscode-hover);
+  opacity: 0.9;
+}
+
 .permission-activity {
   display: flex;
   justify-content: flex-start;

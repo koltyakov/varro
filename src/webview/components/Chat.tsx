@@ -16,6 +16,8 @@ import {
   getSelectedAgentForSession,
   persistLastOpenedView,
   setShowModels,
+  showPermissionSettings,
+  setShowPermissionSettings,
 } from '../lib/state';
 import { Show, createSignal, onMount, onCleanup, createEffect, createMemo, on } from 'solid-js';
 import { selectSession, deleteSessionImmediately } from '../hooks/useOpenCode';
@@ -654,6 +656,10 @@ export function Chat() {
         ) {
           return;
         }
+        if (showPermissionSettings()) {
+          setShowPermissionSettings(false);
+          return;
+        }
         if (showModels()) {
           setShowModels(false);
           return;
@@ -841,6 +847,7 @@ export function Chat() {
         showSessionHeader={!isEditorSurface}
         showSessionPicker={isEditorSurface ? false : showSessionPicker()}
         showModels={showModels()}
+        showPermissionSettings={showPermissionSettings()}
         showReconnectBanner={showReconnectBanner()}
         slowApiRequests={slowApiRequests()}
         sessionFilter={sessionFilter()}

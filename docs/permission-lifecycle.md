@@ -19,14 +19,15 @@ The protocol values are `default`, `edits`, `auto`, and `full`. The UI labels th
 
 | Mode | OpenCode session rules | Varro behavior for an ask |
 | --- | --- | --- |
-| `default` | No Varro session override; use OpenCode configuration and agent rules | Show requests OpenCode asks about as actionable prompts |
+| `default` | Use OpenCode configuration and agent rules, with direct `todowrite` and `question` allowances | Show other requests OpenCode asks about as actionable prompts |
 | `edits` | Ask by default with edit, known read-only, and subagent-launch allowances | Reply `once` to an edit request already pending during a mode change; show other asks |
 | `auto` | Ask by default with known read-only and subagent-launch allowances | Hide briefly while Varro judges; reply or fall back to a prompt |
 | `full` | Allow every permission, including unknown permission names | Reply `always` to any already-pending request and resync |
 
-`Default` is the OpenCode-managed mode. New sessions omit a session-level permission override, and
-switching an existing session to default clears Varro's prior auto/full override. OpenCode's global,
-project, and agent configuration then determines whether an action is allowed, denied, or asked.
+`Default` is the OpenCode-managed mode except for Varro's direct `todowrite` and `question`
+allowances. New sessions and sessions switched back to default apply only those two session rules.
+OpenCode's global, project, and agent configuration determines whether every other action is allowed,
+denied, or asked.
 
 `Auto` is not a broader OpenCode rule set. OpenCode must still emit an ask so Varro has a
 specific request ID and complete action context to judge. Giving `auto` allow-all rules would bypass
@@ -40,14 +41,16 @@ workflow choice.
 
 OpenCode uses the last matching permission rule.
 
-- Default contributes no Varro rules; OpenCode configuration and selected-agent rules remain in
-  control.
+- Default contributes only direct `todowrite` and `question` allowances; OpenCode configuration and
+  selected-agent rules remain in control for every other permission.
 - Auto rules start with `* -> ask`, then place known read-only allowances after it.
 - Auto-accept edits rules add the `edit` allowance while retaining auto's read-only and subagent-launch allowances.
 - Current direct allowances are read-only permissions (`read`, `glob`, `grep`, `list`, `codesearch`,
-  and `lsp`) plus `task`, which only launches a child whose actions remain permission-checked.
-- Mutating, executable, external, and interactive permissions remain `ask` in auto mode. Default mode
-  continues to use OpenCode configuration and agent rules.
+  and `lsp`), `todowrite`, which only updates the session task list, `question`, which asks the user
+  for input, plus `task`, which only launches a child whose actions remain permission-checked.
+- Mutating, executable, and external permissions remain `ask` in auto mode. Interactive `question`
+  requests are directly allowed because the question itself still requires user input. These two
+  direct allowances also apply in Default mode.
 - Full rules end with `* -> allow`, so they override earlier agent restrictions and cover permission
   names introduced by OpenCode or an MCP tool.
 - Unknown permission names follow OpenCode configuration in default, ask in auto, and allow in full.
@@ -240,6 +243,8 @@ The extension host first applies narrow deterministic rules. The current local p
 
 - Known read-only permissions as a defensive fallback if OpenCode emits an ask despite the session
   rules
+- Session task-list updates through `todowrite`
+- Interactive user prompts through `question`
 - OpenCode `task` subagent launches as the same defensive fallback; delegated actions remain subject
   to the child session's inherited permission mode
 - `websearch`; URL-targeted `webfetch` requests continue to the model judge or manual approval

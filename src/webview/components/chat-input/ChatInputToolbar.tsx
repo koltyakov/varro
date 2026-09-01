@@ -65,6 +65,7 @@ type ToolbarSharedProps = {
   showPermissionPicker: boolean;
   onTogglePermissionPicker: () => void;
   onSelectPermissionMode: (mode: PermissionMode) => void;
+  onOpenPermissionSettings: () => void;
   agents: Agent[];
   selectedAgent: string | null;
   selectedAgentLabel: string;
@@ -382,6 +383,7 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
               showLabel={true}
               onToggle={props.onTogglePermissionPicker}
               onSelect={props.onSelectPermissionMode}
+              onOpenSettings={props.onOpenPermissionSettings}
             />
           </Show>
         </div>

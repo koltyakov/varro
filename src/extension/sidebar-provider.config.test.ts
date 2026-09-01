@@ -545,4 +545,42 @@ describe('SidebarProvider local config routing', () => {
     expect(written).toContain('// Keep this model note.');
     expect(written).toContain('"small_model": "openai/gpt-5"');
   });
+
+  it('updates project permission rules without removing JSONC comments', async () => {
+    vscodeMock.workspace.fs.readFile.mockImplementation((uri: { fsPath: string }) =>
+      uri.fsPath === '/repo/opencode.jsonc'
+        ? Promise.resolve(
+            new TextEncoder().encode(
+              '{\n  // Keep this permission note.\n  "permission": { "bash": "ask" },\n}\n'
+            )
+          )
+        : Promise.reject({ code: 'FileNotFound' })
+    );
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ mtime: 1, size: 10, type: 0, ctime: 0 });
+
+    const { provider } = await createSidebarProviderInstance();
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: {
+        id: 11,
+        method: 'POST',
+        path: '/varro/opencode-config/permissions',
+        body: {
+          rules: [
+            { permission: 'bash', pattern: '*', action: 'ask' },
+            { permission: 'bash', pattern: 'git status*', action: 'allow' },
+          ],
+        },
+      },
+    });
+
+    const [uri, encoded] = vscodeMock.workspace.fs.writeFile.mock.lastCall as unknown as [
+      { fsPath: string },
+      Uint8Array,
+    ];
+    const written = new TextDecoder().decode(encoded);
+    expect(uri.fsPath).toBe('/repo/opencode.jsonc');
+    expect(written).toContain('// Keep this permission note.');
+    expect(written).toContain('"git status*": "allow"');
+  });
 });

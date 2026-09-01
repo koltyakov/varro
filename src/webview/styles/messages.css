@@ -2478,6 +2478,29 @@ body.vscode-light .interactive-session .chat-input-toolbars.toolbar-meta {
   font-weight: 400;
 }
 
+.interactive-session
+  .chat-input-toolbars.toolbar-meta
+  .permission-mode-controls
+  .toolbar-picker.permission-mode-button {
+  padding-right: 0;
+}
+
+.interactive-session .chat-input-toolbars.toolbar-meta:hover .permission-mode-settings-button {
+  opacity: 0.5;
+}
+
+.interactive-session
+  .chat-input-toolbars.toolbar-meta
+  .permission-mode-settings-button:focus-visible {
+  opacity: 0.9;
+}
+
+.interactive-session
+  .chat-input-toolbars.toolbar-meta:hover
+  .permission-mode-settings-button:hover {
+  opacity: 0.9;
+}
+
 .workspace-picker-abbreviation {
   display: none;
 }

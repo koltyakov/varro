@@ -3,6 +3,7 @@ import { Portal } from 'solid-js/web';
 import { MessageList } from '../MessageList';
 import { ChatInput } from '../ChatInput';
 import { ModelsPanel } from '../ModelsPanel';
+import { PermissionSettingsPanel } from '../PermissionSettingsPanel';
 import { ActiveChatHeader, SessionPickerHeader } from './ChatHeader';
 import { SessionListView } from './SessionListView';
 import type { SessionListFilter } from './SessionListView';
@@ -56,6 +57,7 @@ export function ChatWorkspace(props: {
   showSessionHeader: boolean;
   showSessionPicker: boolean;
   showModels: boolean;
+  showPermissionSettings: boolean;
   showReconnectBanner: boolean;
   slowApiRequests: readonly SlowApiRequest[];
   sessionFilter: SessionListFilter | null;
@@ -299,6 +301,9 @@ export function ChatWorkspace(props: {
 
       <Show when={props.showModels}>
         <ModelsPanel />
+      </Show>
+      <Show when={props.showPermissionSettings}>
+        <PermissionSettingsPanel />
       </Show>
 
       <Show

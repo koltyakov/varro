@@ -437,6 +437,7 @@ describe('ToolbarPickers', () => {
   });
 
   it('shows auto-accept edits as a distinct permission mode', () => {
+    const onOpenSettings = vi.fn();
     cleanup = render(
       () => (
         <PermissionModePicker
@@ -445,6 +446,7 @@ describe('ToolbarPickers', () => {
           showLabel={true}
           onToggle={vi.fn()}
           onSelect={vi.fn()}
+          onOpenSettings={onOpenSettings}
         />
       ),
       container!
@@ -456,6 +458,29 @@ describe('ToolbarPickers', () => {
     expect(toggleButton?.textContent).toContain('Auto-accept edits');
     expect(options[1]?.className).toContain('selected');
     expect(options[1]?.textContent).toContain('Auto-approve edits, ask before other actions');
+    const settings = container?.querySelector<HTMLButtonElement>(
+      '.permission-mode-settings-button'
+    );
+    expect(settings?.getAttribute('aria-label')).toBe('Configure permissions');
+    settings?.click();
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+  });
+
+  it.each(['auto', 'full'] as const)('hides permission settings in %s mode', (mode) => {
+    cleanup = render(
+      () => (
+        <PermissionModePicker
+          mode={mode}
+          showPicker={false}
+          showLabel={true}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+        />
+      ),
+      container!
+    );
+
+    expect(container?.querySelector('.permission-mode-settings-button')).toBeNull();
   });
 
   it('uses the auto-approve title when selected', () => {

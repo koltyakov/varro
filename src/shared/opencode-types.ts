@@ -48,6 +48,18 @@ export type OpenCodeModelRouting = {
   providerConfigPaths?: Record<string, string[]>;
 };
 
+export type OpenCodePermissionConfigSource = {
+  path: string;
+  rules: PermissionRule[];
+};
+
+export type OpenCodePermissionConfig = {
+  targetPath: string;
+  projectRules: PermissionRule[];
+  inheritedSources: OpenCodePermissionConfigSource[];
+  effectiveRules: PermissionRule[];
+};
+
 export type ProviderAuthError = {
   name: 'ProviderAuthError';
   data: { providerID: string; message: string };

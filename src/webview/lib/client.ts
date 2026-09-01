@@ -31,6 +31,7 @@ import type {
   SessionTitleFallbackResponse,
   WorkspaceStatusEventSummary,
   WorkspaceFilePick,
+  OpenCodePermissionConfig,
 } from '../../shared/protocol';
 import {
   buildVarroSessionEndpoint,
@@ -590,6 +591,12 @@ export const client = {
     },
     async openCodeConfig(): Promise<OpenCodeModelRouting> {
       return apiCall('GET', VARRO_API_ENDPOINTS.openCodeConfig);
+    },
+    async openCodePermissionConfig(): Promise<OpenCodePermissionConfig> {
+      return apiCall('GET', VARRO_API_ENDPOINTS.openCodeConfigPermissions);
+    },
+    async saveOpenCodePermissionConfig(rules: PermissionRule[]): Promise<OpenCodePermissionConfig> {
+      return apiCall('POST', VARRO_API_ENDPOINTS.openCodeConfigPermissions, { rules });
     },
     async saveModelRouting(body: {
       target: 'small_model' | 'agent' | 'commit_message' | 'auto_approve';

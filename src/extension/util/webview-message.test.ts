@@ -198,6 +198,8 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('GET', '/varro/workspace-file/pick')).toBe(true);
     expect(isAllowedApiRequest('GET', '/varro/opencode-config')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/opencode-config/model-routing')).toBe(true);
+    expect(isAllowedApiRequest('GET', '/varro/opencode-config/permissions')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/varro/opencode-config/permissions')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/permission/judge')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/permission/project-allow?directory=%2Frepo-a')).toBe(
       true

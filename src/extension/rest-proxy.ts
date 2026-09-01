@@ -9,7 +9,12 @@ import {
   estimateNestedContextBreakdown,
   type ContextMessageEntry,
 } from '../shared/context-breakdown';
-import type { Message, Part } from '../shared/opencode-types';
+import type {
+  Message,
+  OpenCodePermissionConfig,
+  Part,
+  PermissionRule,
+} from '../shared/opencode-types';
 import { parseSessionPromptEndpoint } from '../shared/opencode-endpoints';
 import {
   createSessionWorkspaceMetadata,
@@ -107,6 +112,10 @@ type OpenCodeConfigRequest =
       agentName?: string;
       unset: boolean;
     };
+
+type OpenCodePermissionConfigRequest =
+  | { kind: 'get' }
+  | { kind: 'update'; rules: PermissionRule[] };
 
 type OpenCodeConfigFile = {
   path: string;
@@ -668,6 +677,20 @@ export class RestProxy {
           openCodeConfigRequest.kind === 'get'
             ? await this.readOpenCodeModelRouting()
             : await this.updateModelRouting(openCodeConfigRequest);
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
+
+      const permissionConfigRequest = this.parseOpenCodePermissionConfigRequest(
+        method,
+        payload.path,
+        payload.body
+      );
+      if (permissionConfigRequest) {
+        const data =
+          permissionConfigRequest.kind === 'get'
+            ? await this.readOpenCodePermissionConfig()
+            : await this.updateOpenCodePermissionConfig(permissionConfigRequest.rules);
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
       }
@@ -3226,6 +3249,43 @@ export class RestProxy {
     throw new Error('Unsupported model routing target');
   }
 
+  private parseOpenCodePermissionConfigRequest(
+    method: string,
+    path: string,
+    body: unknown
+  ): OpenCodePermissionConfigRequest | null {
+    if (path !== VARRO_API_ENDPOINTS.openCodeConfigPermissions) return null;
+    if (method === 'GET') return { kind: 'get' };
+    if (method !== 'POST') return null;
+
+    const values = asRecord(body)?.rules;
+    if (!Array.isArray(values) || values.length > 500) {
+      throw new Error('Invalid permission configuration');
+    }
+    const rules: PermissionRule[] = [];
+    const keys = new Set<string>();
+    for (const value of values) {
+      const record = asRecord(value);
+      const permission = typeof record?.permission === 'string' ? record.permission.trim() : '';
+      const pattern = typeof record?.pattern === 'string' ? record.pattern.trim() : '';
+      const action = record?.action;
+      if (
+        !permission ||
+        permission.length > 200 ||
+        !pattern ||
+        pattern.length > 2_000 ||
+        (action !== 'allow' && action !== 'ask' && action !== 'deny')
+      ) {
+        throw new Error('Invalid permission rule');
+      }
+      const key = `${permission}\0${pattern}`;
+      if (keys.has(key)) throw new Error(`Duplicate permission rule: ${permission} / ${pattern}`);
+      keys.add(key);
+      rules.push({ permission, pattern, action });
+    }
+    return { kind: 'update', rules };
+  }
+
   private parseJudgePermissionRequest(
     method: string,
     path: string,
@@ -3567,6 +3627,104 @@ export class RestProxy {
         return { kind: 'complete' as const };
       });
       if (result.kind === 'complete') return;
+      snapshot = result.snapshot;
+    }
+  }
+
+  private normalizeOpenCodePermissionRules(value: unknown): PermissionRule[] {
+    const permissions = asRecord(value);
+    if (!permissions) return [];
+    const rules: PermissionRule[] = [];
+    for (const [permission, setting] of Object.entries(permissions)) {
+      if (setting === 'allow' || setting === 'ask' || setting === 'deny') {
+        rules.push({ permission, pattern: '*', action: setting });
+        continue;
+      }
+      const patterns = asRecord(setting);
+      if (!patterns) continue;
+      for (const [pattern, action] of Object.entries(patterns)) {
+        if (action === 'allow' || action === 'ask' || action === 'deny') {
+          rules.push({ permission, pattern, action });
+        }
+      }
+    }
+    return rules;
+  }
+
+  private async readOpenCodePermissionConfig(): Promise<OpenCodePermissionConfig> {
+    const snapshot = await this.readOpenCodeConfigObject();
+    const targetPath = getCanonicalOpenCodeConfigPath(snapshot.target.path);
+    let effectiveConfig = snapshot.config;
+    try {
+      const serverConfig = asRecord(await this.requestServer('GET', '/config'));
+      if (serverConfig) effectiveConfig = serverConfig;
+    } catch {
+      // The project files remain useful when the OpenCode server is not running yet.
+    }
+    return {
+      targetPath: snapshot.target.path,
+      projectRules: this.normalizeOpenCodePermissionRules(snapshot.target.config.permission),
+      inheritedSources: snapshot.files
+        .filter((file) => getCanonicalOpenCodeConfigPath(file.path) !== targetPath)
+        .map((file) => ({
+          path: file.path,
+          rules: this.normalizeOpenCodePermissionRules(file.config.permission),
+        }))
+        .filter((source) => source.rules.length > 0),
+      effectiveRules: this.normalizeOpenCodePermissionRules(effectiveConfig.permission),
+    };
+  }
+
+  private async updateOpenCodePermissionConfig(
+    rules: PermissionRule[]
+  ): Promise<OpenCodePermissionConfig> {
+    let snapshot = await this.readOpenCodeConfigObject();
+    while (true) {
+      const lockPath = getCanonicalOpenCodeConfigPath(snapshot.target.path);
+      const result = await withOpenCodeConfigUpdateLock(lockPath, async () => {
+        const currentSnapshot = await this.readOpenCodeConfigObject();
+        const { target } = currentSnapshot;
+        if (getCanonicalOpenCodeConfigPath(target.path) !== lockPath) {
+          return { kind: 'retry' as const, snapshot: currentSnapshot };
+        }
+        const dirtyDocument = vscode.workspace.textDocuments.find(
+          (document) =>
+            document.isDirty &&
+            (document.uri.toString() === target.uri.toString() ||
+              isSameWorkspacePath(document.uri.fsPath, target.uri.fsPath))
+        );
+        if (dirtyDocument) {
+          throw new Error(
+            `Project ${target.path.endsWith('.jsonc') ? 'opencode.jsonc' : 'opencode.json'} has unsaved changes; save or revert the document before updating permissions`
+          );
+        }
+
+        const initialStat = await this.readConfigStat(target.uri);
+        let nextRaw = target.raw.trim() ? target.raw : '{}\n';
+        if (typeof target.config.$schema !== 'string' || !target.config.$schema.trim()) {
+          nextRaw = applyJsoncChange(nextRaw, ['$schema'], 'https://opencode.ai/config.json');
+        }
+        const permissionConfig: Record<string, Record<string, PermissionRule['action']>> = {};
+        for (const rule of rules) {
+          (permissionConfig[rule.permission] ??= {})[rule.pattern] = rule.action;
+        }
+        nextRaw = applyJsoncChange(
+          nextRaw,
+          ['permission'],
+          rules.length > 0 ? permissionConfig : undefined
+        );
+
+        const latestStat = await this.readConfigStat(target.uri);
+        if (!this.areConfigStatsEqual(initialStat, latestStat)) {
+          throw new Error(
+            `Project ${target.path.endsWith('.jsonc') ? 'opencode.jsonc' : 'opencode.json'} changed while updating permissions; please retry`
+          );
+        }
+        const encoded = new TextEncoder().encode(nextRaw.endsWith('\n') ? nextRaw : `${nextRaw}\n`);
+        await vscode.workspace.fs.writeFile(target.uri, encoded);
+        return { kind: 'complete' as const };
+      });
+      if (result.kind === 'complete') return this.readOpenCodePermissionConfig();
       snapshot = result.snapshot;
     }
   }

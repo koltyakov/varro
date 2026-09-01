@@ -242,6 +242,8 @@ export interface AppStateInstance {
   setShowModelPicker: Setter<boolean>;
   showModels: Accessor<boolean>;
   setShowModels: Setter<boolean>;
+  showPermissionSettings: Accessor<boolean>;
+  setShowPermissionSettings: Setter<boolean>;
   composerFocusKey: Accessor<number>;
   setComposerFocusKey: Setter<number>;
   openAttentionSessionsKey: Accessor<number>;
@@ -496,6 +498,7 @@ export function createAppState(): AppStateInstance {
   };
   const [showModelPicker, setShowModelPicker] = createSignal(false);
   const [showModels, setShowModels] = createSignal(false);
+  const [showPermissionSettings, setShowPermissionSettings] = createSignal(false);
   const [composerFocusKey, setComposerFocusKey] = createSignal(0);
   const [openAttentionSessionsKey, setOpenAttentionSessionsKey] = createSignal(0);
   const [openCompletedSessionsKey, setOpenCompletedSessionsKey] = createSignal(0);
@@ -576,6 +579,8 @@ export function createAppState(): AppStateInstance {
     setShowModelPicker,
     showModels,
     setShowModels,
+    showPermissionSettings,
+    setShowPermissionSettings,
     composerFocusKey,
     setComposerFocusKey,
     openAttentionSessionsKey,
@@ -668,6 +673,8 @@ export const showModelPicker = defaultAppState.showModelPicker;
 export const setShowModelPicker = defaultAppState.setShowModelPicker;
 export const showModels = defaultAppState.showModels;
 export const setShowModels = defaultAppState.setShowModels;
+export const showPermissionSettings = defaultAppState.showPermissionSettings;
+export const setShowPermissionSettings = defaultAppState.setShowPermissionSettings;
 export const composerFocusKey = defaultAppState.composerFocusKey;
 export const setComposerFocusKey = defaultAppState.setComposerFocusKey;
 export const openAttentionSessionsKey = defaultAppState.openAttentionSessionsKey;
@@ -721,6 +728,7 @@ export function resetDefaultAppState() {
   setManualWorkspaceSelection(next.manualWorkspaceSelection());
   setShowModelPicker(next.showModelPicker());
   setShowModels(next.showModels());
+  setShowPermissionSettings(next.showPermissionSettings());
   setComposerFocusKey(next.composerFocusKey());
   setOpenAttentionSessionsKey(next.openAttentionSessionsKey());
   setOpenCompletedSessionsKey(next.openCompletedSessionsKey());

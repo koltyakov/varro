@@ -16,6 +16,7 @@ import {
   folderSettingsIcon,
   navArrowDownIcon,
   openNewWindowIcon,
+  settingsIcon,
 } from '../../lib/ui-icons';
 import { formatModelName } from '../../lib/format';
 import { postMessage } from '../../lib/bridge';
@@ -310,6 +311,7 @@ export function PermissionModePicker(props: {
   showLabel?: boolean;
   onToggle: () => void;
   onSelect: (mode: PermissionMode) => void;
+  onOpenSettings?: () => void;
 }) {
   const options: Array<{ mode: PermissionMode; label: string; detail: string }> = [
     { mode: 'default', label: 'Default', detail: 'Ask before commands and file changes' },
@@ -413,22 +415,36 @@ export function PermissionModePicker(props: {
 
   return (
     <div class="permission-mode-picker">
-      <Tooltip content={tooltipContent()} disabled={props.showPicker}>
-        <button
-          ref={props.buttonRef}
-          class={`toolbar-picker permission-mode-button ${props.showLabel ? '' : 'icon-only'}`}
-          data-permission-mode={props.mode}
-          onClick={props.onToggle}
-          aria-label={title()}
-          aria-expanded={props.showPicker}
-        >
-          <PermissionModeIcon mode={props.mode} />
-          <Show when={props.showLabel}>
-            <span class="toolbar-picker-label">{buttonLabel()}</span>
-            <PickerChevron />
-          </Show>
-        </button>
-      </Tooltip>
+      <div class="permission-mode-controls">
+        <Tooltip content={tooltipContent()} disabled={props.showPicker}>
+          <button
+            ref={props.buttonRef}
+            class={`toolbar-picker permission-mode-button ${props.showLabel ? '' : 'icon-only'}`}
+            data-permission-mode={props.mode}
+            onClick={props.onToggle}
+            aria-label={title()}
+            aria-expanded={props.showPicker}
+          >
+            <PermissionModeIcon mode={props.mode} />
+            <Show when={props.showLabel}>
+              <span class="toolbar-picker-label">{buttonLabel()}</span>
+              <PickerChevron />
+            </Show>
+          </button>
+        </Tooltip>
+        <Show when={props.showLabel && (props.mode === 'default' || props.mode === 'edits')}>
+          <Tooltip content="Configure permissions">
+            <button
+              type="button"
+              class="permission-mode-settings-button"
+              aria-label="Configure permissions"
+              onClick={props.onOpenSettings}
+            >
+              <UiIcon source={settingsIcon} width={13} height={13} />
+            </button>
+          </Tooltip>
+        </Show>
+      </div>
       <Show when={props.showLabel && props.mode === 'auto' && props.activity?.length}>
         <span class="permission-activity" aria-label="Auto-approve activity">
           <span class="permission-activity-strip">

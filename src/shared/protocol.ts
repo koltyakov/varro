@@ -348,6 +348,7 @@ export const VARRO_API_ENDPOINTS = {
   planOpen: `${VARRO_API_NAMESPACE}/plan/open`,
   openCodeConfig: `${VARRO_API_NAMESPACE}/opencode-config`,
   openCodeConfigModelRouting: `${VARRO_API_NAMESPACE}/opencode-config/model-routing`,
+  openCodeConfigPermissions: `${VARRO_API_NAMESPACE}/opencode-config/permissions`,
   session: `${VARRO_API_NAMESPACE}/session`,
   sessionTrash: `${VARRO_API_NAMESPACE}/session-trash`,
   sessionHistoryScope: `${VARRO_API_NAMESPACE}/session-history-scope`,
@@ -375,7 +376,12 @@ export function buildVarroSessionEndpoint(
   return `${VARRO_API_ENDPOINTS.session}/${encodeURIComponent(sessionID)}/${action}`;
 }
 
-export type { OpenCodeModelRoute, OpenCodeModelRouting } from './opencode-types';
+export type {
+  OpenCodeModelRoute,
+  OpenCodeModelRouting,
+  OpenCodePermissionConfig,
+  OpenCodePermissionConfigSource,
+} from './opencode-types';
 
 export const SERVER_EVENT_NAMES = [
   'server.connected',

@@ -313,6 +313,12 @@ export class AutoApproveJudge {
     if (type === 'task') {
       return { decision: 'allow', reason: 'OpenCode subagent launch.' };
     }
+    if (type === 'todowrite') {
+      return { decision: 'allow', reason: 'Session task list update.' };
+    }
+    if (type === 'question') {
+      return { decision: 'allow', reason: 'Interactive user question.' };
+    }
     if (type === 'websearch') {
       return { decision: 'allow', reason: 'Web search.' };
     }

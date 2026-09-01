@@ -34,6 +34,7 @@ import {
   MAX_CLIPBOARD_IMAGE_SIZE,
   showModelPicker,
   setShowModelPicker,
+  setShowPermissionSettings,
   composerFocusKey,
   removeClipboardImage,
   removeNativePdf,
@@ -4512,6 +4513,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               void updatePermissionModeForSession(mode, composerSessionId());
               setShowPermissionModePicker(false);
             }}
+            onOpenPermissionSettings={() => {
+              setShowPermissionModePicker(false);
+              setShowPermissionSettings(true);
+            }}
             agents={state.agents}
             selectedAgent={state.selectedAgent}
             selectedAgentLabel={selectedAgentLabel() ?? ''}
@@ -4729,6 +4734,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           onSelectPermissionMode={(mode) => {
             void updatePermissionModeForSession(mode, composerSessionId());
             setShowPermissionModePicker(false);
+          }}
+          onOpenPermissionSettings={() => {
+            setShowPermissionModePicker(false);
+            setShowPermissionSettings(true);
           }}
           agents={state.agents}
           selectedAgent={state.selectedAgent}

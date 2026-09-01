@@ -24,8 +24,11 @@ describe('getSessionPermissionRulesForMode', () => {
     expect(rules.at(-1)).toEqual({ permission: '*', pattern: '*', action: 'allow' });
   });
 
-  it('leaves default mode to OpenCode configuration', () => {
-    expect(getSessionPermissionRulesForMode('default', 'create')).toEqual([]);
+  it('adds only the shared direct allowances to default mode', () => {
+    expect(getSessionPermissionRulesForMode('default', 'create')).toEqual([
+      { permission: 'todowrite', pattern: '*', action: 'allow' },
+      { permission: 'question', pattern: '*', action: 'allow' },
+    ]);
   });
 
   it('returns conservative ask rules for auto mode', () => {
@@ -43,7 +46,8 @@ describe('getSessionPermissionRulesForMode', () => {
     expect(byPermission.get('shell')).toMatchObject({ pattern: '*', action: 'ask' });
     expect(byPermission.get('edit')).toMatchObject({ pattern: '*', action: 'ask' });
     expect(byPermission.get('task')).toMatchObject({ pattern: '*', action: 'allow' });
-    expect(byPermission.get('question')).toMatchObject({ pattern: '*', action: 'ask' });
+    expect(byPermission.get('todowrite')).toMatchObject({ pattern: '*', action: 'allow' });
+    expect(byPermission.get('question')).toMatchObject({ pattern: '*', action: 'allow' });
     expect(byPermission.get('webfetch')).toMatchObject({ pattern: '*', action: 'ask' });
     expect(byPermission.get('websearch')).toMatchObject({ pattern: '*', action: 'ask' });
   });
@@ -53,6 +57,8 @@ describe('getSessionPermissionRulesForMode', () => {
 
     expect(resolvePermissionAction(rules, 'read')).toBe('allow');
     expect(resolvePermissionAction(rules, 'task')).toBe('allow');
+    expect(resolvePermissionAction(rules, 'todowrite')).toBe('allow');
+    expect(resolvePermissionAction(rules, 'question')).toBe('allow');
     expect(resolvePermissionAction(rules, 'edit')).toBe('allow');
     expect(resolvePermissionAction(rules, 'bash')).toBe('ask');
     expect(resolvePermissionAction(rules, 'external_directory')).toBe('ask');
