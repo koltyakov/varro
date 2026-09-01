@@ -117,7 +117,9 @@ export function getSessionCompletionItems(
     label: normalizeSessionTitle(session.title) || 'Untitled',
     detail:
       workspaceFolders.length > 1
-        ? (getWorkspaceFolderLabel(session.directory, workspaceFolders) ?? '')
+        ? session.workspaceScope === 'workspace'
+          ? 'Workspace'
+          : (getWorkspaceFolderLabel(session.directory, workspaceFolders) ?? '')
         : '',
     value: `session:${session.id} `,
     session,

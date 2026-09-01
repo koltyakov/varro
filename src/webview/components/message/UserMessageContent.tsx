@@ -49,6 +49,15 @@ export type MessageAttachment =
       filename: string;
       lineRanges: Array<{ startLine: number; endLine: number }>;
     }
+  | {
+      type: 'editor-text';
+      filename: string;
+      kind: 'selection' | 'dirty-buffer';
+      language: string;
+      lineRange: { startLine: number; endLine: number };
+      text?: string;
+      truncated: boolean;
+    }
   | { type: 'terminal-selection'; terminalName: string; text?: string }
   | { type: 'file-reference'; path: string; isDirectory: boolean };
 
@@ -339,6 +348,42 @@ function parseUserMessageText(text: string): ParsedUserMessageText {
         continue;
       }
 
+      const editorTextMatch = trimmedLine.match(
+        /^\[(Unsaved selection|Unsaved buffer) from (.+) lines (\d+)-(\d+)(; truncated)?\]$/
+      );
+      if (editorTextMatch) {
+        flushTextBuffer();
+        let language = 'text';
+        let editorText: string | undefined;
+        const openingFence = lines[index + 1]?.trim().match(/^(`{3,})([^`]*)$/);
+
+        if (openingFence) {
+          const fence = openingFence[1]!;
+          language = openingFence[2]!.trim() || 'text';
+          const content: string[] = [];
+          index += 2;
+          while (index < lines.length && lines[index]!.trim() !== fence) {
+            content.push(lines[index]!);
+            index += 1;
+          }
+          editorText = content.join('\n');
+        }
+
+        attachments.push({
+          type: 'editor-text',
+          filename: editorTextMatch[2]!,
+          kind: editorTextMatch[1] === 'Unsaved selection' ? 'selection' : 'dirty-buffer',
+          language,
+          lineRange: {
+            startLine: Number(editorTextMatch[3]),
+            endLine: Number(editorTextMatch[4]),
+          },
+          text: editorText,
+          truncated: Boolean(editorTextMatch[5]),
+        });
+        continue;
+      }
+
       const attachment = parseUserMessageAttachmentLine(
         trimmedLine,
         standaloneReference && trimmedLine === normalized.trim()
@@ -430,7 +475,7 @@ export function getUserMessageEditContext(parts: Part[]): MessageEditContext {
   const parsed = parseUserMessageContent(parts);
   const filesByPath = new Map<string, MessageEditContext['files'][number]>();
   for (const attachment of parsed.attachments) {
-    if (attachment.type === 'terminal-selection') continue;
+    if (attachment.type === 'terminal-selection' || attachment.type === 'editor-text') continue;
 
     const path = attachment.type === 'file-selection' ? attachment.filename : attachment.path;
     const file: MessageEditContext['files'][number] = {
@@ -500,6 +545,8 @@ export function getUserMessagePreviewText(parts: Part[]): string {
     switch (firstAttachment.type) {
       case 'file-selection':
         return `Selection: ${getLeafPathName(firstAttachment.filename)}`;
+      case 'editor-text':
+        return `${firstAttachment.kind === 'selection' ? 'Selection' : 'Buffer'}: ${getLeafPathName(firstAttachment.filename)}`;
       case 'terminal-selection': {
         const lineCount = getTerminalLineCountLabel(firstAttachment.text);
         return `Terminal: ${firstAttachment.terminalName}${lineCount ? ` (${lineCount})` : ''}`;
@@ -1221,6 +1268,7 @@ function getAttachmentTextMarker(attachment: MessageAttachment): string | null {
       return `@${attachment.path}`;
     case 'file-selection':
       return `@${attachment.filename}`;
+    case 'editor-text':
     case 'terminal-selection':
       return null;
   }
@@ -1612,6 +1660,19 @@ function InlineMessageAttachmentChip(props: { attachment: MessageAttachment }) {
 }
 
 function openAttachment(value: MessageAttachment) {
+  if (value.type === 'editor-text') {
+    if (value.text === undefined) return;
+    postMessage({
+      type: 'vscode/open-text',
+      payload: {
+        content: value.text,
+        title: `${getLeafPathName(value.filename)} ${value.kind === 'selection' ? 'unsaved selection' : 'unsaved buffer'}`,
+        language: value.language,
+      },
+    });
+    return;
+  }
+
   if (value.type === 'terminal-selection') {
     if (!value.text) return;
     postMessage({
@@ -1653,7 +1714,9 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
   const isTerminal = () => attachment().type === 'terminal-selection';
   const isOpenable = () => {
     const value = attachment();
-    return value.type !== 'terminal-selection' || Boolean(value.text);
+    if (value.type === 'terminal-selection') return Boolean(value.text);
+    if (value.type === 'editor-text') return value.text !== undefined;
+    return true;
   };
 
   const handleClick = () => openAttachment(attachment());
@@ -1672,6 +1735,10 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
     const value = attachment();
     if (value.type === 'file-selection') {
       return <span class="chip-detail">{formatContextLineRanges(value.lineRanges)}</span>;
+    }
+    if (value.type === 'editor-text') {
+      const range = formatContextLineRanges([value.lineRange]);
+      return <span class="chip-detail">{value.truncated ? `${range}; truncated` : range}</span>;
     }
     if (value.type === 'terminal-selection') {
       return <span class="chip-detail">{getTerminalLineCountLabel(value.text) ?? 'terminal'}</span>;
@@ -1919,6 +1986,10 @@ function getDisplayMessageAttachmentDetail(attachment: DisplayMessageAttachment)
   if (attachment.attachment.type === 'file-selection') {
     return formatContextLineRanges(attachment.attachment.lineRanges);
   }
+  if (attachment.attachment.type === 'editor-text') {
+    const range = formatContextLineRanges([attachment.attachment.lineRange]);
+    return attachment.attachment.truncated ? `${range}; truncated` : range;
+  }
   if (attachment.attachment.type === 'terminal-selection') {
     return getTerminalLineCountLabel(attachment.attachment.text) ?? 'terminal';
   }
@@ -1958,6 +2029,8 @@ function getAttachmentLabel(attachment: MessageAttachment): string {
   switch (attachment.type) {
     case 'file-selection':
       return getLeafPathName(attachment.filename);
+    case 'editor-text':
+      return getLeafPathName(attachment.filename);
     case 'terminal-selection':
       return attachment.terminalName;
     case 'file-reference':
@@ -1967,6 +2040,7 @@ function getAttachmentLabel(attachment: MessageAttachment): string {
 
 function getMessageAttachmentPath(attachment: MessageAttachment): string | undefined {
   if (attachment.type === 'file-selection') return attachment.filename;
+  if (attachment.type === 'editor-text') return attachment.filename;
   if (attachment.type === 'file-reference') return attachment.path;
   return undefined;
 }
@@ -1975,6 +2049,8 @@ function getAttachmentTitle(attachment: MessageAttachment): string {
   switch (attachment.type) {
     case 'file-selection':
       return `${attachment.filename}:${attachment.lineRanges.map((range) => `${range.startLine}-${range.endLine}`).join(',')}`;
+    case 'editor-text':
+      return `${attachment.filename}:${attachment.lineRange.startLine}-${attachment.lineRange.endLine}${attachment.truncated ? ' (truncated)' : ''}`;
     case 'terminal-selection':
       return `Terminal: ${attachment.terminalName}`;
     case 'file-reference':
@@ -1990,6 +2066,11 @@ function getStandaloneAttachmentCopyText(attachment: MessageAttachment): string 
   switch (attachment.type) {
     case 'file-selection':
       return formatSelectionReference(attachment.filename, attachment.lineRanges);
+    case 'editor-text': {
+      const source = attachment.kind === 'selection' ? 'Unsaved selection' : 'Unsaved buffer';
+      const truncation = attachment.truncated ? '; truncated' : '';
+      return `[${source} from ${attachment.filename} lines ${attachment.lineRange.startLine}-${attachment.lineRange.endLine}${truncation}]`;
+    }
     case 'terminal-selection':
       return `[Selection from terminal ${attachment.terminalName}]`;
     case 'file-reference':

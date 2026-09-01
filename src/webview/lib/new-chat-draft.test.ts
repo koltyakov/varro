@@ -121,7 +121,15 @@ describe('startNewChatDraft', () => {
     expect(state.messagesLoading).toBe(false);
   });
 
-  it('clears the active transcript immediately when opening a new chat', () => {
+  it('detaches an active transcript before clearing it after the next paint', () => {
+    vi.useFakeTimers();
+    const frameCallbacks: FrameRequestCallback[] = [];
+    const requestAnimationFrameSpy = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback) => {
+        frameCallbacks.push(callback);
+        return frameCallbacks.length;
+      });
     setState('activeSessionId', 'session-1');
     setState('messages', [
       {
@@ -137,10 +145,72 @@ describe('startNewChatDraft', () => {
       },
     ]);
 
-    startNewChatDraft();
+    try {
+      startNewChatDraft();
 
-    expect(state.activeSessionId).toBeNull();
-    expect(state.messages).toEqual([]);
+      expect(state.activeSessionId).toBeNull();
+      expect(state.messages).toHaveLength(1);
+      expect(frameCallbacks).toHaveLength(1);
+
+      frameCallbacks[0]!(0);
+      vi.runAllTimers();
+
+      expect(state.messages).toEqual([]);
+    } finally {
+      requestAnimationFrameSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not clear a session selected before deferred draft cleanup', () => {
+    vi.useFakeTimers();
+    const frameCallbacks: FrameRequestCallback[] = [];
+    const requestAnimationFrameSpy = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback) => {
+        frameCallbacks.push(callback);
+        return frameCallbacks.length;
+      });
+    setState('activeSessionId', 'session-1');
+    setState('messages', [
+      {
+        info: {
+          id: 'message-1',
+          sessionID: 'session-1',
+          role: 'user',
+          time: { created: 1 },
+          agent: 'build',
+          model: { providerID: 'openai', modelID: 'gpt-5' },
+        },
+        parts: [],
+      },
+    ]);
+
+    try {
+      startNewChatDraft();
+      setState('activeSessionId', 'session-2');
+      setState('messages', [
+        {
+          info: {
+            id: 'message-2',
+            sessionID: 'session-2',
+            role: 'user',
+            time: { created: 2 },
+            agent: 'build',
+            model: { providerID: 'openai', modelID: 'gpt-5' },
+          },
+          parts: [],
+        },
+      ]);
+
+      frameCallbacks[0]!(0);
+      vi.runAllTimers();
+
+      expect(state.messages.map((message) => message.info.id)).toEqual(['message-2']);
+    } finally {
+      requestAnimationFrameSpy.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it('does not reuse a blank-looking session while its messages are loading', () => {

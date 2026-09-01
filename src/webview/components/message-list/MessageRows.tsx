@@ -73,7 +73,27 @@ export type ModelChangeInfo = {
 };
 
 export function MessageRows(props: { messages: MessageEntry[] } & MessageRowSharedProps) {
-  return <For each={props.messages}>{(msg) => <MessageRow msg={msg} {...props} />}</For>;
+  return (
+    <For each={props.messages}>
+      {(msg, index) => (
+        <MessageRow
+          msg={msg}
+          userMessageSeriesEndId={getUserMessageSeriesEndId(props.messages, index())}
+          {...props}
+        />
+      )}
+    </For>
+  );
+}
+
+export function getUserMessageSeriesEndId(
+  messages: readonly MessageEntry[],
+  index: number
+): string | undefined {
+  if (messages[index]?.info.role !== 'user') return undefined;
+  let endIndex = index;
+  while (messages[endIndex + 1]?.info.role === 'user') endIndex += 1;
+  return messages[endIndex]!.info.id;
 }
 
 // Mount point for the relocated composer while this row's message is edited.
@@ -103,6 +123,7 @@ export function MessageRow(
     virtualHeight?: number;
     virtualPlaceholder?: boolean;
     renderEmpty?: boolean;
+    userMessageSeriesEndId?: string;
     followsVisibleUserRequest?: boolean;
     followsVisibleAssistantResponse?: boolean;
     followsBorderedBlock?: boolean;
@@ -229,6 +250,7 @@ export function MessageRow(
             showSentTimestamp={
               props.showSentTimestamps || props.revealedSentTimestampMessageId === props.msg.info.id
             }
+            userMessageSeriesEndId={props.userMessageSeriesEndId}
             onAssistantDiffSettledEmpty={props.onAssistantDiffSettledEmpty}
             onUserMessageHoverChange={props.onUserMessageHoverChange}
             suppressTimestampAnimation={props.suppressTimestampAnimations}

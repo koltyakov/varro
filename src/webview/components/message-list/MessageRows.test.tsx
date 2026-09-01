@@ -6,7 +6,11 @@ import { setState, startLoading, stopLoading } from '../../lib/state';
 import { copyIcon, gitForkIcon } from '../../lib/ui-icons';
 import { assistantMessage, textPart } from '../MessageList.test-utils';
 import { toCssUrl } from '../UiIcon';
-import { AssistantDialogSummaryForMessage, getForkBoundaryMessageId } from './MessageRows';
+import {
+  AssistantDialogSummaryForMessage,
+  getForkBoundaryMessageId,
+  getUserMessageSeriesEndId,
+} from './MessageRows';
 
 const forkSessionMock = vi.hoisted(() => vi.fn(async () => 'forked-session'));
 
@@ -356,5 +360,39 @@ describe('getForkBoundaryMessageId', () => {
     ];
 
     expect(getForkBoundaryMessageId(messages, 'session-1', 'assistant-1')).toBeUndefined();
+  });
+});
+
+describe('getUserMessageSeriesEndId', () => {
+  it('uses the last message in a consecutive user series', () => {
+    const messages = [
+      {
+        info: {
+          id: 'user-1',
+          sessionID: 'session-1',
+          role: 'user' as const,
+          time: { created: 1 },
+          agent: 'build',
+          model: { providerID: 'openai', modelID: 'gpt-5.4' },
+        },
+        parts: [],
+      },
+      {
+        info: {
+          id: 'user-2',
+          sessionID: 'session-1',
+          role: 'user' as const,
+          time: { created: 2 },
+          agent: 'build',
+          model: { providerID: 'openai', modelID: 'gpt-5.4' },
+        },
+        parts: [],
+      },
+      { info: assistantMessage('assistant-1', { sessionID: 'session-1' }), parts: [] },
+    ];
+
+    expect(getUserMessageSeriesEndId(messages, 0)).toBe('user-2');
+    expect(getUserMessageSeriesEndId(messages, 1)).toBe('user-2');
+    expect(getUserMessageSeriesEndId(messages, 2)).toBeUndefined();
   });
 });

@@ -899,7 +899,7 @@ export class ContextProvider implements vscode.Disposable {
         truncated,
       };
     }
-    if (!document.isDirty || !path) return null;
+    if (!document.isDirty) return null;
 
     const halfWindow = Math.floor(ContextProvider.MAX_DIRTY_BUFFER_LINES / 2);
     const startLine = Math.max(0, selection.active.line - halfWindow);

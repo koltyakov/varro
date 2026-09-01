@@ -1009,11 +1009,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   const explicitContextForActiveFile = () =>
     hasExplicitContextForPath(composerFiles(), composerActiveFile()?.path);
-  const hasContext = () =>
-    !!composerActiveFile() ||
-    !!composerSelection() ||
-    !!composerTerminalSelection() ||
-    !!state.attachedDiagnostics;
 
   const currentModel = createMemo<CurrentComposerModel>((previous) => {
     const editing = composerEditingMessage();
@@ -1290,11 +1285,21 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   const activeContext = createMemo(() => {
     const file = composerActiveFile();
-    const selectedLines = getSelectionRangesFromEditorContext(composerSelection());
-    if (!file) return null;
-    if (explicitContextForActiveFile() && (composerEditingMessage() || selectedLines.length === 0))
+    const editorText = state.editorContext.editorText;
+    if (!file && !editorText) return null;
+    const selectedLines = editorText
+      ? [editorText.range]
+      : getSelectionRangesFromEditorContext(composerSelection());
+    if (
+      file &&
+      !editorText &&
+      explicitContextForActiveFile() &&
+      (composerEditingMessage() || selectedLines.length === 0)
+    )
       return null;
-    const displayPath = getLeafPathName(file.relativePath || file.path);
+    const displayPath = getLeafPathName(
+      editorText?.relativePath || file?.relativePath || file?.path || ''
+    );
     const lineRange = formatContextLineRanges(selectedLines);
     return {
       filename: displayPath,
@@ -1311,6 +1316,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         : ' · Current document context is disabled. Click to enable it again'
     }`;
   });
+  const hasAttachmentStripItems = () =>
+    !!activeContext() ||
+    !!composerTerminalSelection() ||
+    !!state.attachedDiagnostics ||
+    hasMentions();
 
   const mentionAgents = createMemo(() =>
     state.allAgents
@@ -1956,6 +1966,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       return;
     }
     const sendSessionId = composerSessionId();
+    const sendSessionWasBusy = isComposerBusy();
     const queuedEdit = queuedMessageEdit();
     const pendingApproval = hasPendingApproval();
     if (
@@ -2096,12 +2107,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (
       mode !== 'steer' &&
       mode !== 'after-stop' &&
-      (shouldQueue || isComposerBusy() || queuedEdit?.sessionId === composerSessionId()) &&
-      composerSessionId() &&
+      (shouldQueue || sendSessionWasBusy || queuedEdit?.sessionId === sendSessionId) &&
+      sendSessionId &&
       (sendableText.trim() || hasQueuedAttachments)
     ) {
       requestMessageListScrollToBottom();
-      const sessionId = composerSessionId()!;
+      const sessionId = sendSessionId;
       const existingQueuedMessage =
         queuedEdit && state.queuedMessages.find((item) => item.id === queuedEdit.id);
       const queuedMessagePaused = existingQueuedMessage?.paused;
@@ -2187,19 +2198,22 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     setInputText('');
     const clearedInputVersion = inputTextMutationVersion();
     resetPastedImageIndex();
-    clearUsageLimitsForSessionTree(composerSessionId());
+    clearUsageLimitsForSessionTree(sendSessionId);
     let sent = false;
     try {
-      const pendingSend = sendMessage(
-        text,
+      // Slash-command detection is async. Keep the send attached to the composer
+      // where Enter was pressed if navigation changes the active session meanwhile.
+      const capturedTarget = composerSessionId() !== sendSessionId ? sendSessionId : undefined;
+      const sendOptions: NonNullable<Parameters<typeof sendMessage>[1]> =
         mode === 'steer'
           ? { delivery: 'steer' }
           : {
               noReply: false,
               queuedAttachments: props.newSession ? queuedAttachments : undefined,
               newSessionWorkspace,
-            }
-      );
+            };
+      if (capturedTarget !== undefined) sendOptions.targetSessionId = capturedTarget;
+      const pendingSend = sendMessage(text, sendOptions);
       sent = await pendingSend;
     } catch {
       sent = false;
@@ -4327,7 +4341,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           }}
           onDrop={handleDrop}
         >
-          <Show when={hasContext() || hasMentions()}>
+          <Show when={hasAttachmentStripItems()}>
             <AttachmentStrip
               activeContext={activeContext()}
               activeContextEnabled={activeContextEnabled(composerSessionId())}

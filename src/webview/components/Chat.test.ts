@@ -2411,13 +2411,16 @@ describe('header status badges', () => {
     await Promise.resolve();
 
     expect(state.activeSessionId).toBeNull();
-    expect(state.messages).toEqual([]);
-    expect(state.streamingPartId).toBeNull();
-    expect(state.streamingText).toBe('');
     expect(container?.querySelector('[data-msg-id="assistant-streaming"]')).toBeNull();
     expect(container?.querySelector('.chat-header .chat-header-title-text')?.textContent).toBe(
       'New Chat'
     );
+
+    await vi.advanceTimersByTimeAsync(17);
+
+    expect(state.messages).toEqual([]);
+    expect(state.streamingPartId).toBeNull();
+    expect(state.streamingText).toBe('');
   });
 
   it('reuses an untouched active session instead of creating another from chat view', async () => {

@@ -475,6 +475,18 @@ describe('SessionSendOperations', () => {
     expect(appStore.state.terminalSelection).toBeNull();
   });
 
+  it('creates a session for an explicitly captured draft despite a later active session', async () => {
+    appStore.setState('activeSessionId', 'session-later');
+    const createSession = vi.fn(async () => 'session-draft');
+    const sendAsync = vi.fn<SendAsync>(async () => {});
+    const operations = createOperations(sendAsync, undefined, { createSession });
+
+    await operations.sendMessage('send captured draft', { targetSessionId: null });
+
+    expect(createSession).toHaveBeenCalledTimes(1);
+    expect(sendAsync).toHaveBeenCalledWith('session-draft', expect.any(Object));
+  });
+
   it('removes only captured attachments after a pending send succeeds', async () => {
     appStore.setState('activeSessionId', 'session-1');
     appStore.setState('editorContext', {

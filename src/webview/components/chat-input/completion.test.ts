@@ -251,6 +251,24 @@ describe('getSessionCompletionItems', () => {
       }),
     ]);
   });
+
+  it('labels workspace-scoped sessions from metadata instead of their directory', () => {
+    const workspaceFolders = [
+      { name: 'Repo A', path: '/repo-a' },
+      { name: 'Repo B', path: '/repo-b' },
+    ];
+    const workspaceSession = {
+      ...session,
+      directory: '/repo-a',
+      workspaceScope: 'workspace' as const,
+    };
+    const folderSession = { ...session, id: 'ses_folder', directory: '/repo-b' };
+
+    expect(getSessionCompletionItems([workspaceSession, folderSession], workspaceFolders)).toEqual([
+      expect.objectContaining({ detail: 'Workspace', session: workspaceSession }),
+      expect.objectContaining({ detail: 'Repo B', session: folderSession }),
+    ]);
+  });
 });
 
 describe('normalizeSessionLookupQuery', () => {

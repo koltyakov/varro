@@ -115,6 +115,7 @@ export function Message(props: {
   promptNumber?: number;
   showPromptNumber?: boolean;
   showSentTimestamp?: boolean;
+  userMessageSeriesEndId?: string;
   suppressTimestampAnimation?: boolean;
   onUserMessageHoverChange?: (messageId: string, hovering: boolean) => void;
   onAssistantDiffSettledEmpty?: (messageId: string) => void;
@@ -193,7 +194,10 @@ export function Message(props: {
   let timestampTransitionTimer: ReturnType<typeof setTimeout> | undefined;
   const [isUserMessageHoverActive, setIsUserMessageHoverActive] = createSignal(false);
   const [timestampTransitionActive, setTimestampTransitionActive] = createSignal(false);
-  const timestampVisible = () => !!props.showSentTimestamp || isUserMessageHoverActive();
+  const hoverTimestampMessageId = () => props.userMessageSeriesEndId ?? props.info.id;
+  const timestampVisible = () =>
+    !!props.showSentTimestamp ||
+    (isUserMessageHoverActive() && hoverTimestampMessageId() === props.info.id);
   const notifyUserMessageHoverChange = (hovering: boolean) => {
     if (hoverIntentTimer) {
       clearTimeout(hoverIntentTimer);
@@ -208,7 +212,7 @@ export function Message(props: {
       return;
     }
     if (!isUser()) return;
-    const messageId = props.info.id;
+    const messageId = hoverTimestampMessageId();
     hoverIntentTimer = setTimeout(() => {
       hoverIntentTimer = undefined;
       hoveredUserMessageId = messageId;

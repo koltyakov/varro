@@ -152,6 +152,46 @@ describe('UserMessageContent', () => {
     expect(container?.querySelector('a.external-link')).toBeNull();
   });
 
+  it('renders unsaved editor text as an attachment and opens its captured content', () => {
+    const send = installSendToExtension();
+    renderUserContent([
+      textPart('text-prompt', 'Fix the session state.'),
+      textPart(
+        'text-unsaved-selection',
+        [
+          '[Unsaved selection from Untitled-1 lines 1-3; truncated]',
+          '```markdown',
+          '# Reproduction',
+          'Click New Chat.',
+          'Return to the session.',
+          '```',
+        ].join('\n')
+      ),
+    ]);
+
+    expect(container?.querySelector('.user-message-text')?.textContent?.trim()).toBe(
+      'Fix the session state.'
+    );
+    expect(container?.querySelector('.user-message-code-block')).toBeNull();
+    expect(container?.textContent).not.toContain('[Unsaved selection from');
+
+    const chip = container?.querySelector<HTMLButtonElement>(
+      '.message-attachment-chip.message-attachment-chip-clickable'
+    );
+    expect(chip?.textContent).toContain('Untitled-1');
+    expect(chip?.textContent).toContain('L1-3; truncated');
+
+    chip?.click();
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open-text',
+      payload: {
+        content: '# Reproduction\nClick New Chat.\nReturn to the session.',
+        title: 'Untitled-1 unsaved selection',
+        language: 'markdown',
+      },
+    });
+  });
+
   it('renders Markdown while preserving attachment chips outside code', () => {
     renderUserContent([
       textPart(

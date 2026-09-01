@@ -2,7 +2,7 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'so
 import type { MessageEntry } from '../../types';
 import type { VirtualMetrics, VisibleRange } from './virtualization';
 import type { MessageBlockBoundary } from './row-layout';
-import { MessageRow, type MessageRowSharedProps } from './MessageRows';
+import { MessageRow, getUserMessageSeriesEndId, type MessageRowSharedProps } from './MessageRows';
 
 export function VirtualizedContent(
   props: {
@@ -255,6 +255,7 @@ export function VirtualizedContent(
         virtualHeight={virtualHeight()}
         virtualPlaceholder={virtualPlaceholder()}
         renderEmpty={props.renderEmptyMessageIds?.has(messageId)}
+        userMessageSeriesEndId={getUserMessageSeriesEndId(props.messages, absoluteIndex())}
         followsVisibleUserRequest={followsVisibleUserRequest()}
         followsVisibleAssistantResponse={followsVisibleAssistantResponse()}
         followsBorderedBlock={followsBorderedBlock()}

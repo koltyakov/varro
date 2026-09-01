@@ -55,13 +55,18 @@ export function detachDiscardableActiveBlankSession(): string | false {
  */
 export function startNewChatDraft() {
   newChatDraftGeneration += 1;
+  const draftGeneration = newChatDraftGeneration;
   const blankSessionId = getDiscardableActiveBlankSessionId();
+  const deferTranscriptClear = !blankSessionId && state.messages.length > 0;
   const craftedText = inputText();
   batch(() => {
     resetMessageEditState();
     setInputText(craftedText);
     resetToolCallExpansionState();
-    clearMessages();
+    // Detach first so a live virtualized transcript can unmount before its
+    // backing entries disappear. Clearing both in one reactive flush can leave
+    // rows and streaming effects reading entries that were just removed.
+    if (!deferTranscriptClear) clearMessages();
     setState('messagesLoading', false);
     if (!blankSessionId) {
       setState('activeSessionId', null);
@@ -75,4 +80,14 @@ export function startNewChatDraft() {
     restoreSelectedModelForComposer(null);
     requestComposerFocus();
   });
+
+  if (deferTranscriptClear) {
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        // A selection, send, or another New Chat now owns the transcript.
+        if (newChatDraftGeneration !== draftGeneration || state.activeSessionId) return;
+        clearMessages();
+      }, 0);
+    });
+  }
 }

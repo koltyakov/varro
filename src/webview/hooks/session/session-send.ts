@@ -113,7 +113,9 @@ type SessionSendOptions = SendFlowOptions & {
   queuedAttachments?: QueuedAttachmentSnapshot;
   queuedContext?: QueuedContextSnapshot;
   preserveComposer?: boolean;
-  targetSessionId?: string;
+  // Explicit null keeps a captured new-chat draft from falling through to a
+  // different active session after an async composer transition.
+  targetSessionId?: string | null;
   workspaceDirectory?: string;
   newSessionWorkspace?: SessionWorkspaceTarget;
   queuedMessageDispatch?: { itemId: string; lease: number };
@@ -786,7 +788,8 @@ export class SessionSendOperations {
 
   readonly prepareSendMessage = (text: string, options?: SessionSendOptions) => {
     const activeSessionId = appStore.state.activeSessionId;
-    const targetSessionId = options?.targetSessionId ?? activeSessionId;
+    const targetSessionId =
+      options?.targetSessionId !== undefined ? options.targetSessionId : activeSessionId;
     const defaultPermissionMode = permissionsStore.getPermissionModeForSession(null);
     const selectedAgent =
       options?.agent ??
@@ -1023,7 +1026,8 @@ export async function sendMessageWithDependencies(
   text: string,
   options?: SessionSendOptions
 ): Promise<boolean> {
-  let sessionId = options?.targetSessionId ?? deps.getActiveSessionId();
+  let sessionId =
+    options?.targetSessionId !== undefined ? options.targetSessionId : deps.getActiveSessionId();
   if (!sessionId) {
     // Creating a session resets the active agent to the session default (e.g. build),
     // so capture the agent the user selected in the composer and re-apply it to the new

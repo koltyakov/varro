@@ -1559,6 +1559,51 @@ describe('ContextProvider', () => {
     }
   });
 
+  it('captures a dirty untitled buffer without a selection', () => {
+    const onChange = vi.fn();
+    const uri = {
+      fsPath: '/Untitled-1',
+      scheme: 'untitled',
+      toString: () => 'untitled:Untitled-1',
+    };
+    const text = '# Reproduction\nClick New Chat.\nReturn to the session.';
+    const lines = text.split('\n');
+    vscodeMock.window.activeTextEditor = {
+      document: {
+        uri,
+        fileName: 'Untitled-1',
+        isUntitled: true,
+        isDirty: true,
+        languageId: 'markdown',
+        lineCount: lines.length,
+        lineAt: vi.fn((line: number) => ({ text: lines[line] })),
+        getText: vi.fn(() => text),
+      },
+      selection: {
+        isEmpty: true,
+        start: { line: 0 },
+        end: { line: 0 },
+        active: { line: 0 },
+      },
+    };
+
+    const provider = new ContextProvider(onChange);
+    try {
+      expect(provider.context.activeFile).toBeNull();
+      expect(provider.context.editorText).toEqual({
+        kind: 'dirty-buffer',
+        path: null,
+        relativePath: 'Untitled-1',
+        language: 'markdown',
+        range: { startLine: 1, endLine: 3 },
+        text,
+        truncated: false,
+      });
+    } finally {
+      provider.dispose();
+    }
+  });
+
   it('persists an explicit workspace root and stops following the active editor root', async () => {
     const workspaceState = { get: vi.fn(), update: vi.fn(() => Promise.resolve()) };
     const first = { name: 'first', uri: { fsPath: '/first' } };

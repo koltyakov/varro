@@ -32,6 +32,9 @@ export function MessagePart(props: {
   expandReasoning?: boolean;
 }) {
   const p = () => props.part;
+  const cacheMarkdownByContent = createMemo(
+    () => !!props.messageInfo?.time.completed && !props.streaming
+  );
 
   const render = () => {
     const part = p();
@@ -41,7 +44,7 @@ export function MessagePart(props: {
           <MarkdownRenderer
             // SAFETY: The surrounding shape or discriminator check establishes the TextPart contract used below.
             content={props.streamedText ?? (part as TextPart).text}
-            cacheByContent={!!props.messageInfo?.time.completed && !props.streaming}
+            cacheByContent={cacheMarkdownByContent()}
             forceStreaming={props.streaming}
             lightweight={props.lightweight}
           />

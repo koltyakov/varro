@@ -84,10 +84,6 @@
   background: var(--color-vscode-button-hover);
 }
 
-.managed-subagent-footer-button:active {
-  transform: translateY(1px);
-}
-
 .interactive-session .managed-subagent-meta {
   padding-right: 2px;
   position: relative;

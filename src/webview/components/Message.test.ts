@@ -1406,6 +1406,29 @@ describe('Message user rendering', () => {
     );
   });
 
+  it('reveals the timestamp on the last message in a consecutive user series', () => {
+    vi.useFakeTimers();
+    const onUserMessageHoverChange = vi.fn();
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-series-first'),
+          parts: [textPart('text-series-first', 'First queued prompt')],
+          userMessageSeriesEndId: 'message-series-last',
+          onUserMessageHoverChange,
+        }),
+      container!
+    );
+
+    container?.querySelector('.user-message-card')?.dispatchEvent(new MouseEvent('mouseenter'));
+    vi.advanceTimersByTime(300);
+
+    expect(onUserMessageHoverChange).toHaveBeenLastCalledWith('message-series-last', true);
+    expect(container?.querySelector('.message-sent-time')?.classList.contains('is-visible')).toBe(
+      false
+    );
+  });
+
   it('does not render empty user message shells with no meaningful content', () => {
     cleanup = render(
       () =>

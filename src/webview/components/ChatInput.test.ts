@@ -731,6 +731,39 @@ describe('ChatInput', () => {
     expect(sendMessageMock).toHaveBeenCalledWith('Continue with this change', { noReply: false });
   });
 
+  it('sends to the composer session when navigation races slash-command detection', async () => {
+    setState('activeSessionId', 'session-1');
+    setInputText('Send to the original chat');
+    cleanup = render(() => ChatInput(), container!);
+
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    setState('activeSessionId', 'session-2');
+    await flushAsyncWork();
+
+    expect(sendMessageMock).toHaveBeenCalledWith(
+      'Send to the original chat',
+      expect.objectContaining({ targetSessionId: 'session-1' })
+    );
+  });
+
+  it('keeps a draft send separate when an existing session opens during detection', async () => {
+    setInputText('Send to a new chat');
+    cleanup = render(() => ChatInput(), container!);
+
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    setState('activeSessionId', 'session-2');
+    await flushAsyncWork();
+
+    expect(sendMessageMock).toHaveBeenCalledWith(
+      'Send to a new chat',
+      expect.objectContaining({ targetSessionId: null })
+    );
+  });
+
   it('keeps sending disabled until initial message hydration completes', async () => {
     setState('activeSessionId', 'session-1');
     setState('messagesLoading', true);
@@ -2967,6 +3000,29 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.chat-queue-meta-item')?.getAttribute('aria-label')).toBe(
       '1 attachment'
     );
+  });
+
+  it('queues under the composer session when navigation races slash-command detection', async () => {
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', {
+      'session-1': { type: 'busy' },
+      'session-2': { type: 'idle' },
+    });
+    setInputText('Queue in the original chat');
+    cleanup = render(() => ChatInput(), container!);
+
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Add to queue (Enter)"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    setState('activeSessionId', 'session-2');
+    setIsLoading(false);
+    await flushAsyncWork();
+
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(state.queuedMessages).toEqual([
+      expect.objectContaining({ sessionId: 'session-1', text: 'Queue in the original chat' }),
+    ]);
   });
 
   it('dispatches a queued message on authoritative idle without waiting for a timer', async () => {
@@ -7534,6 +7590,52 @@ describe('ChatInput', () => {
 
     expect(container?.querySelector('.rich-composer .inline-chip')).not.toBeNull();
     expect(container?.querySelector('.rich-composer .inline-chip-remove')).toBeNull();
+  });
+
+  it('does not reserve an empty attachment row for inline active-file context', async () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: {
+        path: '/repo/src/app.ts',
+        relativePath: 'src/app.ts',
+        language: 'typescript',
+      },
+      selection: null,
+      diagnostics: [],
+    });
+    addContextFile({ path: '/repo/src/app.ts', relativePath: 'src/app.ts', type: 'file' });
+    setInputText('@src/app.ts');
+
+    cleanup = render(() => ChatInput(), container!);
+    await flushAsyncWork();
+
+    expect(container?.querySelector('.rich-composer .inline-chip')).not.toBeNull();
+    expect(container?.querySelector('.chat-attachments-container')).toBeNull();
+  });
+
+  it('shows captured context from an unsaved editor selection', async () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: { startLine: 1, endLine: 3 },
+      editorText: {
+        kind: 'selection',
+        path: null,
+        relativePath: 'Untitled-1',
+        language: 'markdown',
+        range: { startLine: 1, endLine: 3 },
+        text: '# Reproduction\nClick New Chat.\nReturn to the session.',
+        truncated: false,
+      },
+      diagnostics: [],
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+    await flushAsyncWork();
+
+    const chip = container?.querySelector('.chat-attachments-container .chat-attachment-chip');
+    expect(chip?.textContent).toContain('Untitled-1');
+    expect(chip?.textContent).toContain('L1-3');
   });
 
   it('updates the active Ralph run model and interrupts a usage-limit retry when switching models', async () => {
