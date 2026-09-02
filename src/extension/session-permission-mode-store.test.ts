@@ -35,11 +35,34 @@ describe('SessionPermissionModeStore', () => {
 
     await store.set('session-1', 'full');
     await expect(
-      store.setIfAbsent({ 'session-1': 'auto', 'session-legacy': 'edits' })
+      store.setIfAbsent({ 'session-1': 'auto', 'session-legacy': 'default' })
     ).resolves.toEqual({
       'session-1': 'full',
-      'session-legacy': 'edits',
+      'session-legacy': 'default',
     });
+  });
+
+  it('migrates removed edit modes to recoverable defaults', async () => {
+    const values = new Map<string, unknown>([
+      ['varro.sessionPermissionModes', { 'session-legacy': 'edits' }],
+    ]);
+    const persistence: Persistence = {
+      get: <T>(key: string) => values.get(key) as T | undefined,
+      set: vi.fn(async <T>(key: string, value: T) => {
+        values.set(key, value);
+      }),
+      remove: vi.fn(),
+    };
+
+    const store = new SessionPermissionModeStore(persistence);
+    await store.dispose();
+
+    expect(store.list()).toEqual({ 'session-legacy': 'default' });
+    expect(store.pendingSafeFallbackSessionIds()).toEqual(['session-legacy']);
+    expect(values.get('varro.sessionPermissionModes')).toEqual({
+      'session-legacy': 'default',
+    });
+    expect(values.get('varro.sessionPermissionModeFallbacks')).toEqual(['session-legacy']);
   });
 
   it('removes the persisted mode for a deleted session', async () => {
@@ -62,7 +85,7 @@ describe('SessionPermissionModeStore', () => {
       JSON.stringify({
         valid: 'auto',
         constructor: 'full',
-        prototype: 'edits',
+        prototype: 'auto',
         [overlong]: 'auto',
       })
     );

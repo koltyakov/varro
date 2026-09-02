@@ -2,7 +2,6 @@ import {
   isAbortedAssistantError,
   isTransientProviderConnectionError,
 } from '../../../shared/error-classification';
-import { isEditPermission } from '../../../shared/permission-rules';
 import type { ServerEvent } from '../../../shared/protocol';
 import { serverEvents } from '../../lib/client';
 import {
@@ -146,7 +145,6 @@ type EventHandlerDependencies = {
     messages?: MessageEntry[]
   ): Promise<void | boolean | object>;
   shouldAutoApprovePermissions(sessionId: string): boolean;
-  shouldAutoApproveEdit?(permission: Permission): boolean;
   shouldAutoJudgePermissions?(sessionId: string): boolean;
   isPermissionSessionKnown?(sessionId: string): boolean;
   syncPermissionSession?(sessionId: string): Promise<void | boolean | object>;
@@ -268,12 +266,6 @@ export class SessionEventHandlerOperations {
         !permissionsStore.isSessionPermissionModePending(sessionId) &&
         !permissionsStore.isPermissionModeRecoveryPending(sessionId) &&
         permissionsStore.getPermissionModeForSession(sessionId) === 'full',
-      shouldAutoApproveEdit: (permission) =>
-        this.deps.isPermissionAutomationOwner?.() !== false &&
-        !permissionsStore.isSessionPermissionModePending(permission.sessionID) &&
-        !permissionsStore.isPermissionModeRecoveryPending(permission.sessionID) &&
-        permissionsStore.getPermissionModeForSession(permission.sessionID) === 'edits' &&
-        isEditPermission(permission.type),
       shouldAutoJudgePermissions: (sessionId) =>
         this.deps.isPermissionAutomationOwner?.() !== false &&
         !permissionsStore.isSessionPermissionModePending(sessionId) &&

@@ -126,7 +126,7 @@ describe('useOpenCode initialization', () => {
     try {
       expect(bridgeMocks.postMessage).toHaveBeenCalledWith({
         type: 'permission-modes/migrate',
-        payload: { modes: { 'session-legacy': 'edits' } },
+        payload: { modes: { 'session-legacy': 'default' } },
       });
       expect(bridgeMocks.postMessage).not.toHaveBeenCalledWith(
         expect.objectContaining({ type: 'permission-mode/update' })

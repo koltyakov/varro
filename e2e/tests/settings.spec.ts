@@ -184,7 +184,7 @@ test('chat font changes preserve main typography proportions and a detached anch
       window as Window & {
         __initialWebviewState?: {
           desktopSessionPaneSide?: 'left' | 'right';
-          defaultPermissionMode?: 'default' | 'edits' | 'auto' | 'full';
+          defaultPermissionMode?: 'default' | 'auto' | 'full';
           chatEditorFontSize?: number;
         };
       }

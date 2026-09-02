@@ -383,7 +383,7 @@ OpenCode approval flows stay inside the chat UI.
 
 - Permission requests appear inline and can be answered with `Reject`, `Once`, or `Always`.
 - Follow-up questions appear inline with selectable options and optional custom input.
-- Each session can run in `Default`, `Auto-accept edits`, `Auto`, or `Full access` permission mode.
+- Each session can run in `Default`, `Auto`, or `Full access` permission mode.
 - Use the permission control in the composer toolbar to switch the active session between those modes.
 
 Permissions from child and deeper sub-agent sessions inherit the nearest explicitly selected mode in
@@ -403,9 +403,6 @@ See [OpenCode permissions](https://opencode.ai/docs/permissions/) for the full l
 and configuration examples for global and per-agent `allow`, `ask`, and `deny` rules. Rules can match
 tools, commands, paths, subagents, skills, URLs, and external directories. When multiple patterns
 match, the last matching rule wins.
-
-`Auto-accept edits` allows file edits, known read-only permissions, and subagent launches. Commands,
-external access, interactive tools, and unknown permissions continue to ask for approval.
 
 `Auto` is the first-run mode. Its deterministic rules allow known read-only permissions,
 subagent launches, web searches, non-deleting edits whose canonical paths stay inside the

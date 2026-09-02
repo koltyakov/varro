@@ -890,14 +890,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         },
         migratePermissionModes: async ({ modes: legacyModes }) => {
           await Promise.all(
-            Object.entries(legacyModes).map(([sessionId, mode]) =>
-              this.persistPreconfiguredPermissionMode(
+            Object.entries(legacyModes).map(([sessionId, mode]) => {
+              const directory =
+                this.sessionState.directoryFor(sessionId) ?? endpointServer.getWorkspaceCwd();
+              return this.persistPreconfiguredPermissionMode(
                 sessionId,
                 mode,
-                this.sessionState.directoryFor(sessionId) ?? endpointServer.getWorkspaceCwd(),
-                true
-              )
-            )
+                directory,
+                true,
+                mode === 'default'
+              );
+            })
           );
         },
         updateSessionModel: async ({ sessionId, model }) => {
@@ -2198,7 +2201,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     sessionID: string,
     mode: PermissionMode,
     directory?: string,
-    ifAbsent = false
+    ifAbsent = false,
+    resetRemoteRules = false
   ): Promise<void> {
     const previous = this.permissionModeQueues.get(sessionID) ?? Promise.resolve();
     const operation = previous
@@ -2225,6 +2229,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           throw err;
         }
         this.postPermissionModes();
+        if (resetRemoteRules) {
+          try {
+            await this.server.request(
+              'PATCH',
+              `/session/${encodeURIComponent(sessionID)}`,
+              { permission: getSessionPermissionRulesForMode(mode, 'update') },
+              { directory }
+            );
+          } catch (err) {
+            this.postPermissionModes();
+            this.schedulePermissionModeFallbackRecovery();
+            throw err;
+          }
+        }
         try {
           const modes = await this.sessionPermissionModes.set(sessionID, mode);
           this.postPermissionModes(modes);

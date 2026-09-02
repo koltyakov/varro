@@ -317,11 +317,6 @@ export function PermissionModePicker(props: {
   const options: Array<{ mode: PermissionMode; label: string; detail: string }> = [
     { mode: 'default', label: 'Default', detail: 'Ask before commands and file changes' },
     {
-      mode: 'edits',
-      label: 'Auto-accept edits',
-      detail: 'Auto-approve edits, ask before other actions',
-    },
-    {
       mode: 'auto',
       label: 'Auto approve',
       detail: 'AI reviewer approves routine actions; risky ones still ask',
@@ -331,7 +326,6 @@ export function PermissionModePicker(props: {
   const title = () => {
     if (props.recovering) return 'Recovering permission mode';
     if (props.mode === 'full') return 'Full access permissions';
-    if (props.mode === 'edits') return 'Auto-accept edits permissions';
     if (props.mode === 'auto') {
       const model = props.judgeModel;
       return model
@@ -356,7 +350,6 @@ export function PermissionModePicker(props: {
   const buttonLabel = () => {
     if (props.recovering) return 'Recovering';
     if (props.mode === 'full') return 'Full access';
-    if (props.mode === 'edits') return 'Auto-accept edits';
     if (props.mode === 'auto') return 'Auto approve';
     return 'Default';
   };
@@ -446,7 +439,7 @@ export function PermissionModePicker(props: {
             </Show>
           </button>
         </Tooltip>
-        <Show when={props.showLabel && (props.mode === 'default' || props.mode === 'edits')}>
+        <Show when={props.showLabel && props.mode === 'default'}>
           <Tooltip content="Configure permissions">
             <button
               type="button"

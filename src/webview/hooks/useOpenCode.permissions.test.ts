@@ -1636,51 +1636,6 @@ describe('useOpenCode permission and config flows', () => {
     }
   });
 
-  it('keeps an optimistic edits-mode request visible until the PATCH is confirmed', async () => {
-    const serverEventHandlers = captureServerEventHandlers();
-    configureReconciliationMocks();
-    const modeUpdate = deferred<ReturnType<typeof session>>();
-    const editRequest = {
-      ...permissionListItem('edit-during-patch'),
-      permission: 'edit',
-    };
-    clientMocks.varroSessionUpdatePermissionMode.mockReturnValue(modeUpdate.promise);
-    clientMocks.permissionList.mockResolvedValue([editRequest]);
-    clientMocks.sessionRespondPermission.mockResolvedValue(undefined);
-
-    const { stateModule, hookModule } = await loadModules();
-    stateModule.setState('sessions', [session('session-1')]);
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-
-    try {
-      const update = hookModule.updatePermissionModeForSession('edits', 'session-1');
-      await vi.waitFor(() =>
-        expect(clientMocks.varroSessionUpdatePermissionMode).toHaveBeenCalledOnce()
-      );
-      serverEventHandlers.get('permission.asked')?.({ properties: editRequest });
-
-      expect(clientMocks.sessionRespondPermission).not.toHaveBeenCalled();
-      expect(stateModule.state.permissions).toContainEqual(
-        expect.objectContaining({ id: 'edit-during-patch' })
-      );
-
-      modeUpdate.resolve(session('session-1'));
-      await update;
-
-      expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
-        'session-1',
-        'edit-during-patch',
-        'once',
-        { permissionAutomationLease: 1 }
-      );
-    } finally {
-      dispose();
-    }
-  });
-
   it('sweeps only effective-full request owners in the selected child subtree', async () => {
     configureReconciliationMocks();
     clientMocks.sessionRespondPermission.mockResolvedValue(undefined);

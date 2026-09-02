@@ -9,7 +9,6 @@ Permission checks happen before an action runs. A tool shown as waiting or runni
 | Mode | Behavior | Good fit |
 | --- | --- | --- |
 | `Default` | Uses your OpenCode global, project, and agent permission rules, with direct `todowrite` and `question` allowances. Varro shows other requests that OpenCode decides to ask about. | You manage permissions in OpenCode configuration. |
-| `Auto-accept edits` | Approves file edits, known read-only actions, and subagent launches. Other actions still ask. | You want edits to proceed but prefer to review commands and external access. |
 | `Auto approve` | Approves known safe actions with local rules. Varro can ask a model to review other requests and shows a prompt when it cannot make a safe decision. | You want routine work to continue with a manual fallback. |
 | `Full access` | Allows every permission without prompting, including commands, unknown tools, and MCP tools. This mode overrides restrictive agent rules for the session. | You trust the task, instructions, tools, and workspace. |
 

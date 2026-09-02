@@ -2236,7 +2236,7 @@ export class RestProxy {
     if (!match) return null;
     const record = asRecord(body);
     const mode = record?.mode;
-    if (mode !== 'default' && mode !== 'edits' && mode !== 'auto' && mode !== 'full') {
+    if (mode !== 'default' && mode !== 'auto' && mode !== 'full') {
       throw new Error('Invalid permission mode request');
     }
     const preconfigured = record?.preconfigured;

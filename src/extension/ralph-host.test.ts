@@ -206,6 +206,20 @@ describe('HostRalphStore', () => {
     expect(reloaded.getRun(config.managerSessionId)?.status).toBe('paused');
   });
 
+  it('migrates removed edit-mode runs to default', async () => {
+    const { persistence, storage } = createMemoryPersistence();
+    const store = new HostRalphStore(persistence, vi.fn());
+    const config = createConfig();
+    store.startRun(config);
+    await store.flush();
+    const persisted = storage.get(RALPH_RUNS_KEY) as Record<string, RalphRun>;
+    Object.assign(persisted[config.managerSessionId]!.config, { permissionMode: 'edits' });
+
+    const reloaded = new HostRalphStore(persistence, vi.fn());
+
+    expect(reloaded.getRun(config.managerSessionId)?.config.permissionMode).toBe('default');
+  });
+
   it('round-trips every persisted iteration recovery phase', async () => {
     const { persistence } = createMemoryPersistence();
     const store = new HostRalphStore(persistence, vi.fn());

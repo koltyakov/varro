@@ -802,6 +802,12 @@ describe('webview message validation', () => {
     expect(
       parseWebviewMessage({
         type: 'permission-mode/update',
+        payload: { sessionId: 'session-1', mode: 'edits' },
+      })
+    ).toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'permission-mode/update',
         payload: { sessionId: 'session-1', mode: 'invalid' },
       })
     ).toBeNull();

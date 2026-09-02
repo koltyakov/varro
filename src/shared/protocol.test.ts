@@ -13,8 +13,8 @@ import {
 
 describe('protocol parsers', () => {
   it('recognizes only supported permission modes', () => {
-    expect(['default', 'edits', 'auto', 'full'].every(isPermissionMode)).toBe(true);
-    expect(['', 'Default', 'ask', null, undefined].some(isPermissionMode)).toBe(false);
+    expect(['default', 'auto', 'full'].every(isPermissionMode)).toBe(true);
+    expect(['', 'Default', 'edits', 'ask', null, undefined].some(isPermissionMode)).toBe(false);
   });
 
   it('accepts only bounded control-free prototype-safe persisted session IDs', () => {

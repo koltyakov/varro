@@ -272,6 +272,12 @@ describe('parseExtensionMessage', () => {
     expect(
       parseExtensionMessage({
         type: 'permission-modes/sync',
+        payload: { modes: { 'session-1': 'edits' } },
+      })
+    ).toBeNull();
+    expect(
+      parseExtensionMessage({
+        type: 'permission-modes/sync',
         payload: { modes: { 'session-1': 'invalid' } },
       })
     ).toBeNull();

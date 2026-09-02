@@ -87,7 +87,7 @@ import {
   postFocusStateWithDependencies,
   registerFocusStateTracking,
 } from '../mount-bridge';
-import { getSessionPermissionRulesForMode, isEditPermission } from '../permission-rules';
+import { getSessionPermissionRulesForMode } from '../permission-rules';
 import {
   deriveSelectedAgentFromMessages,
   deriveSelectedModelFromMessages,
@@ -1620,32 +1620,6 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           else pendingPermissionHandlers.push(judgeAndRespondPermission(permission));
           continue;
         }
-        if (
-          permissionAutomationOwner &&
-          !modePending &&
-          !modeRecovering &&
-          mode === 'edits' &&
-          isEditPermission(permission.type)
-        ) {
-          pendingPermissionHandlers.push(
-            sessionApprovalOperations
-              .respondPermission(permission.sessionID, permission.id, 'once', {
-                rethrow: true,
-                automatic: true,
-                permissionAutomationLease,
-              })
-              .catch(() => {
-                if (isCurrent()) {
-                  permissionsStore.addPermission(permission);
-                  postMessage({
-                    type: 'permission/reveal',
-                    payload: { permissionId: permission.id },
-                  });
-                }
-              })
-          );
-          continue;
-        }
         visiblePermissions.push(permission);
         postMessage({ type: 'permission/reveal', payload: { permissionId: permission.id } });
       }
@@ -1768,10 +1742,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     const modePending = permissionsStore.isSessionPermissionModePending(permission.sessionID);
     if (modePending || mode !== 'auto') {
       if (!wasVisible) {
-        const shouldShow =
-          modePending ||
-          mode === 'default' ||
-          (mode === 'edits' && !isEditPermission(permission.type));
+        const shouldShow = modePending || mode === 'default';
         attempt.status = shouldShow ? 'visible' : 'responded';
         if (shouldShow) showPermissionAfterJudge(attempt);
       }

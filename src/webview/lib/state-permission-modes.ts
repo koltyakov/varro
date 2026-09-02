@@ -73,7 +73,8 @@ function hasPersistedDraftPermissionMode(permissionWorkspace: string | null): bo
     const modes = readStoredPermissionModes(STORAGE_KEYS.projectPermissionModes);
     if (Object.hasOwn(modes, permissionWorkspace)) return true;
   }
-  return isPermissionMode(readStored<unknown>(STORAGE_KEYS.draftPermissionMode));
+  const storedMode = readStored<unknown>(STORAGE_KEYS.draftPermissionMode);
+  return storedMode === 'edits' || isPermissionMode(storedMode);
 }
 
 export function setPermissionModeForSession(

@@ -5,35 +5,12 @@ export function PermissionModeIcon(props: { mode: PermissionMode }) {
     <span class={`permission-mode-icon ${props.mode}`} aria-hidden="true">
       {props.mode === 'full' ? (
         <FullAccessIcon />
-      ) : props.mode === 'edits' ? (
-        <EditIcon />
       ) : props.mode === 'auto' ? (
         <AutoIcon />
       ) : (
         <DefaultIcon />
       )}
     </span>
-  );
-}
-
-function EditIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" width="14" height="14">
-      <path
-        d="M9.00001 21h-1C6.89544 21 6.00001 20.1057 6.00001 19.0011 6.00001 17.4501 6.00001 15.3443 6 14c0-1-1.5-2-1.5-2s1.50001-1 1.50001-2V4.99914C6.00001 3.89457 6.89544 3 8.00001 3h1"
-        stroke="currentColor"
-        stroke-width="1.6"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      />
-      <path
-        d="M15 21h1c1.1046 0 2-.8943 2-1.9989V14c0-1 1.5-2 1.5-2S18 11 18 10V4.99914C18 3.89457 17.1046 3 16 3h-1"
-        stroke="currentColor"
-        stroke-width="1.6"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      />
-    </svg>
   );
 }
 

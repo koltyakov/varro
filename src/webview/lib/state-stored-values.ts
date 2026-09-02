@@ -134,9 +134,12 @@ export function readStoredBooleanRecord(key: string): Record<string, boolean> {
 }
 
 export function readStoredPermissionModes(key: string): Record<string, PermissionMode> {
-  return normalizeStoredRecord(readStored<unknown>(key), (value) =>
-    isPermissionMode(value) ? value : null
-  );
+  return normalizeStoredRecord(readStored<unknown>(key), normalizeStoredPermissionMode);
+}
+
+function normalizeStoredPermissionMode<T>(value: T): PermissionMode | null {
+  if (value === 'edits') return 'default';
+  return isPermissionMode(value) ? value : null;
 }
 
 export function readStoredQueuedMessageEdit(): { id: string; sessionId: string } | null {
@@ -372,8 +375,10 @@ export function resolveInitialDraftMode(
       return projectMode;
     }
   }
-  const storedMode = readStored<PermissionMode>(STORAGE_KEYS.draftPermissionMode);
-  return isPermissionMode(storedMode) ? storedMode : fallbackMode;
+  const storedMode = normalizeStoredPermissionMode(
+    readStored<unknown>(STORAGE_KEYS.draftPermissionMode)
+  );
+  return storedMode ?? fallbackMode;
 }
 
 export function readInitialWebviewState(): Partial<InitialWebviewState> {

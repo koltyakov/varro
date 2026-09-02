@@ -14,13 +14,12 @@ proof that the command started, and hiding a prompt is not the same as resolving
 
 ## Mode Semantics
 
-The protocol values are `default`, `edits`, `auto`, and `full`. The UI labels them `Default`,
-`Auto-accept edits`, `Auto`, and `Full access`.
+The protocol values are `default`, `auto`, and `full`. The UI labels them `Default`, `Auto`, and
+`Full access`.
 
 | Mode | OpenCode session rules | Varro behavior for an ask |
 | --- | --- | --- |
 | `default` | No Varro session override; use OpenCode configuration and agent rules | Reply once to `todowrite` and `question` asks; show other asks as actionable prompts |
-| `edits` | Ask by default with edit, known read-only, and subagent-launch allowances | Reply `once` to an edit request already pending during a mode change; show other asks |
 | `auto` | Ask by default with known read-only and subagent-launch allowances | Hide briefly while Varro judges; reply or fall back to a prompt |
 | `full` | Allow every permission, including unknown permission names | Reply `always` to any already-pending request and resync |
 
@@ -44,7 +43,6 @@ OpenCode uses the last matching permission rule.
 - Default contributes no Varro session rules; OpenCode configuration and selected-agent rules remain
   in control. Varro handles `todowrite` and `question` asks directly without replacing that policy.
 - Auto rules start with `* -> ask`, then place known read-only allowances after it.
-- Auto-accept edits rules add the `edit` allowance while retaining auto's read-only and subagent-launch allowances.
 - Current direct allowances are read-only permissions (`read`, `glob`, `grep`, `list`, `codesearch`,
   and `lsp`), `todowrite`, which only updates the session task list, `question`, which asks the user
   for input, plus `task`, which only launches a child whose actions remain permission-checked.
@@ -99,8 +97,8 @@ The normal lifecycle is:
    `permission.updated` event.
 2. Both layers normalize the payload and retain the request ID and owning session ID.
 3. The webview resolves the effective mode for the request's session tree.
-4. Default reveals it, auto-accept edits replies `once` to edits and reveals other asks, auto starts
-   a bounded judge attempt, and full starts an automatic `always` response.
+4. Default reveals it, auto starts a bounded judge attempt, and full starts an automatic `always`
+   response.
 5. Varro sends `once`, `always`, or `reject` to OpenCode's permission reply route.
 6. Local UI is removed only after the reply is acknowledged, an authoritative reply event arrives,
    or a race-safe pending snapshot proves that the request no longer exists.
@@ -129,8 +127,8 @@ webview per workspace may run automatic permission work. The extension host elec
 and publishes owner flags with a shared generation lease. A ready sidebar is preferred in its
 workspace; otherwise, the current ready owner or the next ready editor owns automation there.
 
-- Only the elected owner for a workspace may auto-accept edits, run the model judge, answer full-mode
-  requests, or automatically process that workspace's pending-permission snapshot.
+- Only the elected owner for a workspace may run the model judge, answer full-mode requests, or
+  automatically process that workspace's pending-permission snapshot.
 - Automatic judge and reply API requests carry the lease they started under. The host rejects a
   request when that endpoint no longer owns the matching lease.
 - Manual permission replies do not use the automation lease.
@@ -401,8 +399,6 @@ complete confirmed mode snapshot. Stale successes or failures must not overwrite
 selection. A webview may present the selected mode while its request is pending, but failure rolls
 that selection back to the last confirmed snapshot.
 
-- Switching to auto-accept edits installs its edit allowance and syncs pending requests so queued edits
-  are accepted and other requests remain visible.
 - Switching to auto installs Varro's ask-based auto rules, invalidates the authority of older mode
   work, and syncs pending requests into the judge flow.
 - Switching to default clears Varro's session override so OpenCode configuration applies. Any
@@ -411,6 +407,9 @@ that selection back to the last confirmed snapshot.
   then fetches the authoritative pending list to catch hidden or missed requests.
 - A failed mode update rolls back only state still owned by that update. It must not undo a newer
   selection.
+
+Persisted `edits` selections from versions that exposed Auto-accept edits migrate to `default`.
+Session migrations must also clear the removed mode's OpenCode session rules before recovery ends.
 
 Do not optimistically clear permission prompts as part of a mode selection. Full mode may own them
 automatically only after its rule update succeeds, and unresolved requests must remain discoverable

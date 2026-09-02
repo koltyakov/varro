@@ -76,7 +76,7 @@ export interface WorkspaceFilePick {
   workspaceDirectory: string | null;
 }
 
-export type PermissionMode = 'default' | 'edits' | 'auto' | 'full';
+export type PermissionMode = 'default' | 'auto' | 'full';
 export type SessionWorkspaceScope = 'workspace' | 'folder';
 export interface SessionWorkspaceTarget {
   scope: SessionWorkspaceScope;
@@ -108,7 +108,7 @@ export type ChatModelSelection = {
 };
 
 export function isPermissionMode<T>(value: T): value is T & PermissionMode {
-  return value === 'default' || value === 'edits' || value === 'auto' || value === 'full';
+  return value === 'default' || value === 'auto' || value === 'full';
 }
 
 export function isSessionHistoryScope<T>(value: T): value is T & SessionHistoryScope {

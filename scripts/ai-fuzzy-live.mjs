@@ -2583,8 +2583,8 @@ async function runMultiWebviewScenario({
 }) {
   const timeoutMs = Number(options['gate-timeout-ms'] ?? DEFAULT_GATE_TIMEOUT_MS);
   const permissionMode = options['permission-mode'] ?? 'auto';
-  if (!['default', 'edits', 'auto', 'full'].includes(permissionMode)) {
-    throw new Error('--permission-mode must be default, edits, auto, or full');
+  if (!['default', 'auto', 'full'].includes(permissionMode)) {
+    throw new Error('--permission-mode must be default, auto, or full');
   }
   const plan = buildMultiWebviewScenarioPlan(manifest.seed, promptRun);
   const runSessionTitles = manifest.runSessions

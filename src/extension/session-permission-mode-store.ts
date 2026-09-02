@@ -16,20 +16,35 @@ export class SessionPermissionModeStore {
 
   constructor(private readonly persistence: Persistence) {
     const stored = asRecord(persistence.get<unknown>(SESSION_PERMISSION_MODES_KEY));
+    const legacyEditSessionIds: string[] = [];
     this.modes = stored
       ? Object.fromEntries(
-          Object.entries(stored).filter(
-            (entry): entry is [string, PermissionMode] =>
-              isSafePersistedSessionId(entry[0]) && isPermissionMode(entry[1])
-          )
+          Object.entries(stored).flatMap(([sessionId, mode]): Array<[string, PermissionMode]> => {
+            if (!isSafePersistedSessionId(sessionId)) return [];
+            if (isPermissionMode(mode)) return [[sessionId, mode]];
+            if (mode === 'edits') {
+              legacyEditSessionIds.push(sessionId);
+              return [[sessionId, 'default']];
+            }
+            return [];
+          })
         )
       : {};
     const storedFallbacks = persistence.get<unknown>(SESSION_PERMISSION_MODE_FALLBACKS_KEY);
-    this.fallbackSessionIds = new Set(
-      Array.isArray(storedFallbacks)
+    this.fallbackSessionIds = new Set([
+      ...(Array.isArray(storedFallbacks)
         ? storedFallbacks.filter((value): value is string => isSafePersistedSessionId(value))
-        : []
-    );
+        : []),
+      ...legacyEditSessionIds,
+    ]);
+    if (legacyEditSessionIds.length > 0) {
+      this.mutationQueue = Promise.resolve()
+        .then(async () => {
+          await this.persistence.set(SESSION_PERMISSION_MODES_KEY, this.modes);
+          await this.persistFallbacks();
+        })
+        .catch(() => undefined);
+    }
   }
 
   list() {

@@ -157,7 +157,7 @@ export const VALID_WEBVIEW_MESSAGES = {
   },
   'permission-mode/update': {
     type: 'permission-mode/update',
-    payload: { sessionId: 'session-1', mode: 'edits' },
+    payload: { sessionId: 'session-1', mode: 'auto' },
   },
   'permission-modes/migrate': {
     type: 'permission-modes/migrate',

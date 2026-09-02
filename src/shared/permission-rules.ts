@@ -61,16 +61,6 @@ function isAutoApprovedPermission(permission: string): boolean {
   );
 }
 
-export function isEditPermission(permission: string): boolean {
-  const normalized = permission.toLowerCase();
-  return (
-    normalized === 'edit' ||
-    normalized === 'apply_patch' ||
-    normalized === 'patch' ||
-    normalized === 'write'
-  );
-}
-
 const AUTO_APPROVE_PERMISSION_RULES: PermissionRule[] = [
   // Specific safe allowances must follow this catch-all under last-match semantics.
   { permission: '*', pattern: '*', action: 'ask' },
@@ -81,22 +71,11 @@ const AUTO_APPROVE_PERMISSION_RULES: PermissionRule[] = [
   })),
 ];
 
-const AUTO_ACCEPT_EDITS_PERMISSION_RULES: PermissionRule[] = [
-  // Preserve routine read-only work while asking before commands and other actions.
-  { permission: '*', pattern: '*', action: 'ask' },
-  ...KNOWN_PERMISSION_NAMES.map<PermissionRule>((permission) => ({
-    permission,
-    pattern: '*',
-    action: isAutoApprovedPermission(permission) || isEditPermission(permission) ? 'allow' : 'ask',
-  })),
-];
-
 export function getSessionPermissionRulesForMode(
   mode: PermissionMode,
   _target: 'create' | 'update'
 ): PermissionRule[] {
   if (mode === 'full') return FULL_ACCESS_PERMISSION_RULES;
-  if (mode === 'edits') return AUTO_ACCEPT_EDITS_PERMISSION_RULES;
   if (mode === 'auto') return AUTO_APPROVE_PERMISSION_RULES;
   return [];
 }

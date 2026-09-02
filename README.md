@@ -83,10 +83,9 @@ Other chat workflows include rendered Mermaid previews, transcript turn navigati
 
 ## Permissions
 
-Permission requests provide `Reject`, `Once`, and `Always` actions. Each session has one of four modes:
+Permission requests provide `Reject`, `Once`, and `Always` actions. Each session has one of three modes:
 
 - `Default` follows OpenCode and agent permission rules.
-- `Auto-accept edits` approves file edits, known read-only actions, and sub-agent launches, but asks about other actions.
 - `Auto` applies local rules and, when needed, a configured model. Requests it cannot decide remain available for manual approval.
 - `Full access` allows the session to act without confirmation.
 

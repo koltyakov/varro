@@ -80,7 +80,7 @@ afterEach(() => {
 });
 
 describe('PermissionSettingsPanel', () => {
-  it('shows editable, inherited, effective, and auto-accept rules', async () => {
+  it('shows editable, inherited, and effective rules', async () => {
     cleanup = render(() => <PermissionSettingsPanel />, container);
     await flush();
 
@@ -90,28 +90,13 @@ describe('PermissionSettingsPanel', () => {
     );
     expect(container.textContent).toContain('Global rules');
     expect(container.textContent).toContain('Effective Default rules');
-    expect(container.textContent).toContain('Edit-mode addition');
     expect(container.textContent).toContain('todowrite');
     expect(container.textContent).toContain('question');
-    expect(container.querySelectorAll('.permission-rule-overview')).toHaveLength(3);
+    expect(container.querySelectorAll('.permission-rule-overview')).toHaveLength(2);
     expect(container.querySelectorAll('.permission-config-rule')).toHaveLength(1);
     expect(
       container.querySelector<HTMLInputElement>('input[aria-label="Permission name"]')?.value
     ).toBe('bash');
-  });
-
-  it('hides the edit-mode addition when Default already allows all edits', async () => {
-    mocks.load.mockResolvedValue({
-      ...config,
-      effectiveRules: [
-        ...config.effectiveRules,
-        { permission: 'edit', pattern: '*', action: 'allow' },
-      ],
-    });
-    cleanup = render(() => <PermissionSettingsPanel />, container);
-    await flush();
-
-    expect(container.textContent).not.toContain('Edit-mode addition');
   });
 
   it('shows and retracts server-memory rules without an active session', async () => {
@@ -205,7 +190,6 @@ describe('PermissionSettingsPanel', () => {
       'Project rules',
       'Global rules',
       'Effective Default rules',
-      'Edit-mode addition',
     ]);
     const sessionSection = [
       ...container.querySelectorAll<HTMLElement>('.permission-config-section'),
@@ -248,7 +232,7 @@ describe('PermissionSettingsPanel', () => {
     setState('activeSessionId', 'session-1');
     setState('sessionPermissionModes', { 'session-1': 'default' });
     mocks.loadSessionRules.mockResolvedValue([
-      ...getSessionPermissionRulesForMode('edits', 'update'),
+      ...getSessionPermissionRulesForMode('auto', 'update'),
       { permission: 'bash', pattern: 'npm *', action: 'ask' },
       { permission: 'bash', pattern: 'npm *', action: 'allow' },
     ]);
@@ -336,14 +320,14 @@ describe('PermissionSettingsPanel', () => {
     cleanup = render(() => <PermissionSettingsPanel />, container);
     await flush();
 
-    const editChip = [
+    const bashChip = [
       ...container.querySelectorAll<HTMLElement>('.permission-rule-chips code'),
-    ].find((chip) => chip.textContent === 'edit');
-    editChip?.dispatchEvent(new MouseEvent('mouseenter'));
+    ].find((chip) => chip.textContent === 'bash');
+    bashChip?.dispatchEvent(new MouseEvent('mouseenter'));
     await vi.advanceTimersByTimeAsync(1_000);
 
     expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
-      'Creates, updates, or removes files.'
+      'Runs commands in a shell.'
     );
   });
 

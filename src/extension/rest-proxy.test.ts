@@ -1735,10 +1735,10 @@ describe('RestProxy handleRequest', () => {
     });
 
     await proxy.handleRequest(
-      makePayload(85, 'POST', '/varro/session/session-1/permission-mode', { mode: 'edits' })
+      makePayload(85, 'POST', '/varro/session/session-1/permission-mode', { mode: 'auto' })
     );
 
-    expect(callbacks.updatePermissionMode).toHaveBeenCalledWith('session-1', 'edits', '/repo');
+    expect(callbacks.updatePermissionMode).toHaveBeenCalledWith('session-1', 'auto', '/repo');
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 85, data: session });
   });
 

@@ -391,13 +391,13 @@ describe('ToolbarPickers', () => {
     expect(toggleButton?.getAttribute('title')).toBeNull();
     expect(buttonRef).toBe(toggleButton);
     expect(popoverRef).toBe(container?.querySelector('.toolbar-popover'));
-    expect(options).toHaveLength(4);
+    expect(options).toHaveLength(3);
     expect(options[0]?.className).toContain('selected');
     expect(options[0]?.textContent).toContain('Default (OpenCode config-based)');
     expect(options[1]?.className).not.toContain('selected');
 
     toggleButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    options[3]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    options[2]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     popoverRef?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
     expect(onToggle).toHaveBeenCalledOnce();
@@ -434,36 +434,6 @@ describe('ToolbarPickers', () => {
       type: 'vscode/open-external',
       payload: { url: 'https://github.com/koltyakov/varro/blob/main/docs/permissions.md' },
     });
-  });
-
-  it('shows auto-accept edits as a distinct permission mode', () => {
-    const onOpenSettings = vi.fn();
-    cleanup = render(
-      () => (
-        <PermissionModePicker
-          mode="edits"
-          showPicker={true}
-          showLabel={true}
-          onToggle={vi.fn()}
-          onSelect={vi.fn()}
-          onOpenSettings={onOpenSettings}
-        />
-      ),
-      container!
-    );
-
-    const toggleButton = container?.querySelector<HTMLButtonElement>('.permission-mode-button');
-    const options = container?.querySelectorAll<HTMLButtonElement>('.toolbar-popover-item') ?? [];
-    expect(toggleButton?.getAttribute('aria-label')).toBe('Auto-accept edits permissions');
-    expect(toggleButton?.textContent).toContain('Auto-accept edits');
-    expect(options[1]?.className).toContain('selected');
-    expect(options[1]?.textContent).toContain('Auto-approve edits, ask before other actions');
-    const settings = container?.querySelector<HTMLButtonElement>(
-      '.permission-mode-settings-button'
-    );
-    expect(settings?.getAttribute('aria-label')).toBe('Configure permissions');
-    settings?.click();
-    expect(onOpenSettings).toHaveBeenCalledOnce();
   });
 
   it.each(['auto', 'full'] as const)('hides permission settings in %s mode', (mode) => {

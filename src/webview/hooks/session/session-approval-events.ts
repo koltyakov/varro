@@ -8,7 +8,6 @@ import type { UnknownRecord } from '../../../shared/type-utils';
 
 type ApprovalEventDependencies = {
   shouldAutoApprovePermissions(sessionId: string): boolean;
-  shouldAutoApproveEdit?(permission: Permission): boolean;
   shouldAutoJudgePermissions?(sessionId: string): boolean;
   isPermissionSessionKnown?(sessionId: string): boolean;
   syncPermissionSession?(sessionId: string): Promise<void | boolean | object>;
@@ -53,14 +52,6 @@ export function registerApprovalEventHandlers(deps: ApprovalEventDependencies): 
       return;
     }
     if (isSharedDirectPermission(permission.type)) {
-      const respond = deps.respondAutomaticPermission ?? deps.respondPermission;
-      void respond(permission.sessionID, permission.id, 'once', { rethrow: true }).catch(() => {
-        permissionsStore.addPermission(permission);
-        deps.permissionVisible?.(permission.id);
-      });
-      return;
-    }
-    if (deps.shouldAutoApproveEdit?.(permission)) {
       const respond = deps.respondAutomaticPermission ?? deps.respondPermission;
       void respond(permission.sessionID, permission.id, 'once', { rethrow: true }).catch(() => {
         permissionsStore.addPermission(permission);

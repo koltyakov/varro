@@ -935,6 +935,7 @@ function normalizePersistedRalphRun(
 function normalizePersistedRalphConfig(value: unknown): RalphConfig | null {
   const record = asRecord(value);
   if (!record) return null;
+  const permissionMode = record.permissionMode === 'edits' ? 'default' : record.permissionMode;
   const managerSessionId = getBoundedString(record.managerSessionId, MAX_RALPH_ID_LENGTH);
   const rawWorkspaceDirectory = record.workspaceDirectory ?? record.workspacePath;
   let workspaceDirectory: string | null = null;
@@ -954,7 +955,7 @@ function normalizePersistedRalphConfig(value: unknown): RalphConfig | null {
     !planDocPath ||
     !promptTemplate ||
     !isBoundedInteger(record.iterations, 1, MAX_RALPH_ITERATIONS) ||
-    !isPermissionMode(record.permissionMode) ||
+    !isPermissionMode(permissionMode) ||
     !isSafeInteger(record.createdAt)
   ) {
     return null;
@@ -971,7 +972,7 @@ function normalizePersistedRalphConfig(value: unknown): RalphConfig | null {
     planDocPath,
     iterations: record.iterations,
     promptTemplate,
-    permissionMode: record.permissionMode,
+    permissionMode,
     model,
     agent,
     createdAt: record.createdAt,

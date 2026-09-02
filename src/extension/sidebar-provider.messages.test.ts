@@ -405,18 +405,23 @@ describe('SidebarProvider session message responses', () => {
     });
     await provider.handleMessage({
       type: 'permission-modes/migrate',
-      payload: { modes: { 'session-1': 'auto', 'session-legacy': 'edits' } },
+      payload: { modes: { 'session-1': 'auto', 'session-legacy': 'default' } },
     });
 
     expect(values.get('varro.sessionPermissionModes')).toEqual({
       'session-1': 'full',
-      'session-legacy': 'edits',
+      'session-legacy': 'default',
     });
     expect(posted).toContainEqual({
       type: 'permission-modes/sync',
-      payload: { modes: { 'session-1': 'full', 'session-legacy': 'edits' } },
+      payload: { modes: { 'session-1': 'full', 'session-legacy': 'default' } },
     });
-    expect(server.request).not.toHaveBeenCalled();
+    expect(server.request).toHaveBeenCalledWith(
+      'PATCH',
+      '/session/session-legacy',
+      { permission: [] },
+      { directory: '/repo' }
+    );
   });
 
   it('posts pending deltas before a canonical message API response', async () => {

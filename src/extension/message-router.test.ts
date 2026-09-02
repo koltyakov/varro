@@ -583,7 +583,7 @@ const DISPATCH_EXPECTATIONS = {
     },
   ],
   'permission-mode/update': [
-    { callback: 'updatePermissionMode', args: [{ sessionId: 'session-1', mode: 'edits' }] },
+    { callback: 'updatePermissionMode', args: [{ sessionId: 'session-1', mode: 'auto' }] },
   ],
   'permission-modes/migrate': [
     { callback: 'migratePermissionModes', args: [{ modes: { 'session-1': 'full' } }] },

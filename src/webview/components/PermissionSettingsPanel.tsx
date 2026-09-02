@@ -65,7 +65,7 @@ function mergeLatestPermissionRules(rules: PermissionRule[]) {
 }
 
 function splitSessionPermissionRules(rules: PermissionRule[], mode: PermissionMode) {
-  const candidateModes: PermissionMode[] = [mode, 'edits', 'auto', 'full'];
+  const candidateModes: PermissionMode[] = [mode, 'auto', 'full'];
   const baseline = candidateModes
     .filter((candidate, index, modes) => modes.indexOf(candidate) === index)
     .map((candidate) => getSessionPermissionRulesForMode(candidate, 'update'))
@@ -521,9 +521,6 @@ export function PermissionSettingsPanel() {
   const [serverMemoryError, setServerMemoryError] = createSignal<string | null>(null);
   const [removingServerRule, setRemovingServerRule] = createSignal<string | null>(null);
   let sessionLoadGeneration = 0;
-  const editModeAdditions = getSessionPermissionRulesForMode('edits', 'create').filter(
-    (rule) => rule.permission === 'edit'
-  );
   const defaultDirectRules = getSharedDirectPermissionRules();
   const dirty = createMemo(() => JSON.stringify(rules()) !== JSON.stringify(config().projectRules));
   const sessionDirty = createMemo(
@@ -541,12 +538,6 @@ export function PermissionSettingsPanel() {
     ),
     ...defaultDirectRules,
   ]);
-  const defaultDirectlyAllowsEdits = createMemo(
-    () =>
-      config().effectiveRules.findLast(
-        (rule) => rule.pattern === '*' && (rule.permission === '*' || rule.permission === 'edit')
-      )?.action === 'allow'
-  );
 
   async function load() {
     setLoading(true);
@@ -970,19 +961,6 @@ export function PermissionSettingsPanel() {
                 <span class="permission-config-level">Effective</span>
               </div>
               <PermissionRuleOverview rules={effectiveDefaultRules()} />
-            </section>
-          </Show>
-
-          <Show when={!defaultDirectlyAllowsEdits()}>
-            <section class="permission-config-section">
-              <div class="permission-config-heading">
-                <div>
-                  <h2>Edit-mode addition</h2>
-                  <p>Applied at session level when Auto-accept workspace edits is on.</p>
-                </div>
-                <span class="permission-config-level">Not saved</span>
-              </div>
-              <PermissionRuleOverview rules={editModeAdditions} />
             </section>
           </Show>
         </div>

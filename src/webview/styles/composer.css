@@ -1148,10 +1148,6 @@
   color: var(--vscode-charts-blue, #3794ff);
 }
 
-.permission-mode-icon.edits {
-  color: var(--vscode-charts-blue, #3794ff);
-}
-
 .toolbar-popover {
   position: absolute;
   bottom: 100%;
