@@ -34,6 +34,18 @@ const { configInspectMock, configUpdateMock, registeredCommands, vscodeMock } = 
     },
     window: {
       activeTextEditor: undefined,
+      createWebviewPanel: vi.fn(() => ({
+        webview: {
+          cspSource: 'vscode-webview-resource:',
+          html: '',
+          asWebviewUri: vi.fn((uri: { fsPath: string }) => ({
+            toString: () => `webview:${uri.fsPath}`,
+          })),
+          onDidReceiveMessage: vi.fn(() => ({ dispose: vi.fn() })),
+        },
+        onDidDispose: vi.fn(),
+        reveal: vi.fn(),
+      })),
       showTextDocument: vi.fn(() => Promise.resolve()),
       showWarningMessage: vi.fn(() => Promise.resolve()),
       showErrorMessage: vi.fn(() => Promise.resolve()),
@@ -46,10 +58,12 @@ const { configInspectMock, configUpdateMock, registeredCommands, vscodeMock } = 
       })),
     },
     env: {
+      clipboard: { writeText: vi.fn(() => Promise.resolve()) },
       openExternal: vi.fn(() => Promise.resolve(true)),
     },
     FileType: { Directory: 2 },
     ConfigurationTarget: { Global: 1, Workspace: 2 },
+    ViewColumn: { Active: -1 },
   };
   return {
     configInspectMock: configInspect,
@@ -114,7 +128,7 @@ function register(
     terminalSelection: null as { text: string; terminalName: string } | null,
     captureTerminalSelection: vi.fn(),
   };
-  const context = { subscriptions: [] };
+  const context = { extensionUri: { fsPath: '/extension' }, subscriptions: [] };
   const revealSidebar =
     typeof viewContainerCommand === 'function'
       ? viewContainerCommand
@@ -163,6 +177,10 @@ describe('About command', () => {
     const aboutMarkdown = sidebar.openMarkdownDocument.mock.calls[0]?.[0] ?? '';
     expect(aboutMarkdown).toMatch(/^# Varro\n/);
     expect(aboutMarkdown).not.toContain('# Varro About');
+    expect(aboutMarkdown).toContain('> An OpenCode agent workbench built for Visual Studio Code.');
+    expect(aboutMarkdown).toContain(
+      '| Varro | OpenCode CLI | Server |\n| :--- | :--- | :--- |\n| `unknown` | `1.18.4` | **Healthy** |'
+    );
     expect(aboutMarkdown).not.toMatch(
       /SDK version|Minimum supported version|Maximum tested version|CLI command/
     );
@@ -174,28 +192,37 @@ describe('About command', () => {
     );
     expect(aboutMarkdown).not.toContain('## Diagnostics');
     expect(sidebar.openMarkdownDocument).toHaveBeenCalledWith(
-      expect.stringContaining('- [GitHub repository](https://github.com/koltyakov/varro)'),
+      expect.stringContaining('[GitHub](https://github.com/koltyakov/varro)'),
       'Varro About',
       false
     );
     expect(sidebar.openMarkdownDocument).toHaveBeenCalledWith(
       expect.stringContaining(
-        '- [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=koltyakov.varro)'
+        '[Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=koltyakov.varro)'
       ),
       'Varro About',
       false
     );
     expect(sidebar.openMarkdownDocument).toHaveBeenCalledWith(
       expect.stringContaining(
-        '- [Open VSX Registry](https://open-vsx.org/extension/koltyakov/varro)'
+        '[Open VSX Registry](https://open-vsx.org/extension/koltyakov/varro)'
       ),
       'Varro About',
       false
     );
-    expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith(
-      'markdown.showPreview',
-      expect.objectContaining({ value: 'varro-tool-output:/Varro About.md' })
+    expect(vscodeMock.window.createWebviewPanel).toHaveBeenCalledWith(
+      'varro.about',
+      'About Varro',
+      vscodeMock.ViewColumn.Active,
+      {
+        enableScripts: true,
+        localResourceRoots: [{ fsPath: '/extension/assets' }],
+      }
     );
+    const panel = vscodeMock.window.createWebviewPanel.mock.results.at(-1)?.value;
+    expect(panel?.webview.html).toContain('<h1>Varro</h1>');
+    expect(panel?.webview.html).toContain('src="webview:/extension/assets/icon.png"');
+    expect(panel?.webview.html).toContain('System ready');
     expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
       expect.objectContaining({
         content: expect.stringContaining('  - **Active agents:** `1`'),

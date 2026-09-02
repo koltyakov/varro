@@ -12,10 +12,12 @@ import { getRelativePath } from './util/path';
 import { errorHub } from './error-hub';
 import { logger } from './logger';
 import { compareVersions, extractVersion } from './server-utils';
+import { renderAboutHtml } from './about-view';
 
 type ExtensionPackageJson = {
   name?: unknown;
   displayName?: unknown;
+  description?: unknown;
   version?: unknown;
 };
 
@@ -36,6 +38,9 @@ export function registerCommands(
   server: OpenCodeServer,
   revealSidebar: () => PromiseLike<unknown>
 ) {
+  let aboutPanel: vscode.WebviewPanel | undefined;
+  let aboutDiagnostics = '';
+
   context.subscriptions.push(
     vscode.commands.registerCommand('varro.chat.focus', async () => {
       try {
@@ -124,13 +129,42 @@ export function registerCommands(
     vscode.commands.registerCommand('varro.about', async () => {
       try {
         const serverInfo = await server.readServerInfo();
-        const uri = await sidebar.openMarkdownDocument(
-          renderAboutMarkdown(context, serverInfo),
-          'Varro About',
-          false
-        );
+        const markdown = renderAboutMarkdown(context, serverInfo);
+        aboutDiagnostics = markdown;
+        const uri = await sidebar.openMarkdownDocument(markdown, 'Varro About', false);
         if (!uri) throw new Error('Could not open the generated about report.');
-        await vscode.commands.executeCommand('markdown.showPreview', uri);
+
+        const pkg = readPackageJson(context);
+        const iconPath = vscode.Uri.joinPath(context.extensionUri, 'assets', 'icon.png');
+        const panel =
+          aboutPanel ??
+          vscode.window.createWebviewPanel('varro.about', 'About Varro', vscode.ViewColumn.Active, {
+            enableScripts: true,
+            localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'assets')],
+          });
+        if (!aboutPanel) {
+          aboutPanel = panel;
+          panel.iconPath = iconPath;
+          const messageSubscription = panel.webview.onDidReceiveMessage((message: unknown) => {
+            if (
+              message &&
+              typeof message === 'object' &&
+              (message as { action?: unknown }).action === 'copyDiagnostics'
+            ) {
+              void vscode.env.clipboard.writeText(aboutDiagnostics);
+            }
+          });
+          panel.onDidDispose(() => {
+            messageSubscription.dispose();
+            if (aboutPanel === panel) aboutPanel = undefined;
+          });
+        } else {
+          panel.reveal(vscode.ViewColumn.Active);
+        }
+        panel.webview.html = renderAboutHtml(
+          createAboutViewData(pkg, serverInfo, panel.webview.asWebviewUri(iconPath).toString()),
+          panel.webview.cspSource
+        );
       } catch (err) {
         const message = `Failed to open Varro about: ${err instanceof Error ? err.message : String(err)}`;
         logger.error(message);
@@ -367,6 +401,8 @@ function showAgentsFileError(scope: 'global' | 'project', err: unknown) {
 function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenCodeServerInfo) {
   const pkg = readPackageJson(context);
   const name = getString(pkg.displayName) || getString(pkg.name) || 'Varro';
+  const description =
+    getString(pkg.description) || 'An OpenCode agent workbench built for Visual Studio Code.';
   const version = getString(pkg.version) || 'unknown';
   const maximumTestedVersion = readMaximumTestedOpenCodeVersion();
   const autoUpdate = vscode.workspace
@@ -418,11 +454,15 @@ function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenC
   return [
     `# ${name}`,
     '',
-    '## Varro',
-    `- **Version:** ${markdownCode(version)}`,
-    '- [GitHub repository](https://github.com/koltyakov/varro)',
-    '- [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=koltyakov.varro)',
-    '- [Open VSX Registry](https://open-vsx.org/extension/koltyakov/varro)',
+    `> ${description}`,
+    '',
+    '| Varro | OpenCode CLI | Server |',
+    '| :--- | :--- | :--- |',
+    `| ${markdownCode(version)} | ${markdownCode(installedVersion || 'unavailable')} | **${serverInfo.health.healthy ? 'Healthy' : 'Needs attention'}** |`,
+    '',
+    '[GitHub](https://github.com/koltyakov/varro) / [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=koltyakov.varro) / [Open VSX Registry](https://open-vsx.org/extension/koltyakov/varro)',
+    '',
+    '---',
     '',
     '## OpenCode',
     '- **CLI:**',
@@ -445,6 +485,60 @@ function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenC
     `- **Platform:** ${markdownCode(`${process.platform} ${process.arch}`)}`,
     '',
   ].join('\n');
+}
+
+function createAboutViewData(
+  pkg: ExtensionPackageJson,
+  serverInfo: OpenCodeServerInfo,
+  logoUri: string
+) {
+  const ownership =
+    serverInfo.ownership === 'other-host' ||
+    serverInfo.ownership === 'current-host' ||
+    serverInfo.managedProcess
+      ? 'Managed by Varro'
+      : 'Unmanaged';
+  const serverStatus =
+    serverInfo.status.state === 'running'
+      ? `Running, event stream ${serverInfo.status.eventStream || 'unknown'}`
+      : serverInfo.status.state === 'error'
+        ? `Error: ${serverInfo.status.message}`
+        : serverInfo.status.state;
+  const cliVersion = serverInfo.cliVersion ? extractVersion(serverInfo.cliVersion) : null;
+  const maximumTestedVersion = readMaximumTestedOpenCodeVersion();
+  const updateAvailable =
+    cliVersion !== null && compareVersions(cliVersion, maximumTestedVersion) < 0;
+  const updateCommand = updateAvailable
+    ? getUpgradeCommand(serverInfo.installMethod, process.platform)
+    : null;
+
+  return {
+    name: getString(pkg.displayName) || getString(pkg.name) || 'Varro',
+    description:
+      'OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.',
+    logoUri,
+    varroVersion: getString(pkg.version) || 'unknown',
+    cliVersion: cliVersion || (serverInfo.cliVersionError ? 'Unavailable' : 'Not found'),
+    installMethod: describeInstallMethod(serverInfo.installMethod),
+    binary: serverInfo.resolvedCommand || 'Not resolved',
+    serverVersion: serverInfo.health.version || 'Unknown',
+    serverUrl: serverInfo.url,
+    ownership,
+    serverStatus,
+    healthy: serverInfo.health.healthy,
+    activeAgents: serverInfo.activeAgentError
+      ? `Error: ${serverInfo.activeAgentError}`
+      : String(serverInfo.activeAgentCount ?? 'Unknown'),
+    autoUpdate: vscode.workspace.getConfiguration('varro').get<boolean>('server.autoUpdate', true),
+    vscodeVersion: vscode.version,
+    nodeVersion: process.version,
+    platform: `${process.platform} ${process.arch}`,
+    updateNotice: updateAvailable
+      ? updateCommand
+        ? `Install ${maximumTestedVersion} with: ${updateCommand}`
+        : `Reinstall OpenCode using ${describeInstallMethod(serverInfo.installMethod)}.`
+      : undefined,
+  };
 }
 
 function markdownCode(value: string | number) {
