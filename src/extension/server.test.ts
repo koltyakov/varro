@@ -3048,6 +3048,8 @@ describe('OpenCodeServer managed process lifecycle', () => {
   });
 
   it('waits for cancelled CLI work to settle before stopping for restart', async () => {
+    // Managed startup skips the CLI preflight on Windows.
+    stubPlatform('linux');
     getConfigurationMock.mockImplementation(() => ({
       get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
     }));
