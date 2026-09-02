@@ -4,12 +4,14 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 
 ## 0.28.x - September 2026
 
+- Improved Windows server startup and recovery with faster ownership checks and fewer CLI probes.
 - Added layered permission controls for editing session and project rules, reviewing inherited configuration, and retracting allowances held in OpenCode server memory. Simplified session choices to Default, Auto, and Full access while preserving configured rules.
 - Opened plans in VS Code's Markdown preview and kept previewed files available as active editor context.
 - Made local usage reports faster and safer for large histories by aggregating the OpenCode database in a worker, sharing overlapping report requests, and bounding server fallbacks.
 - Improved pasted-image handling with ordered batch processing, duplicate detection, bounded decoding, and more reliable draft persistence.
 - Strengthened queued-message persistence and attachment cleanup so rapid queue updates, failed writes, ownership transfers, and missing claims recover cleanly.
-- Improved sidebar and editor-chat recovery when webview delivery stalls or an older document reports ready, with bounded delivery backlogs and reliable recovery snapshots.
+- Improved sidebar and editor-chat recovery from delayed state loading, stalled delivery, and stale documents.
+- Reduced startup overhead by activating Varro only when used and connecting to healthy servers before maintenance finishes.
 - Stabilized long-conversation history loading, scroll anchoring when approved tools collapse, prompt-number navigation, streaming Markdown, and session lists with deeply nested subagents.
 - Fixed Enter submission for custom question answers and kept active auto-approve reviews visible.
 - Limited malformed or excessive server events, process output, attachment cleanup, and other background work to keep the extension responsive under heavy load.

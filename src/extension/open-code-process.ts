@@ -264,6 +264,13 @@ type CommandResult = {
   code: number | null;
 };
 
+interface WindowsManagedListenerInspection {
+  pid: number;
+  executable: string;
+  birthIdentity: string;
+  hostBirthIdentity: string;
+}
+
 const PROCESS_COMMAND_TIMEOUT_MS = 2000;
 const PROCESS_COMMAND_KILL_GRACE_MS = 1000;
 const WINDOWS_PROCESS_INSPECTION_TIMEOUT_MS = 10_000;
@@ -274,12 +281,14 @@ const PROCESS_COMMAND_MAX_OUTPUT_CHARS = 1_000_000;
 const INJECTED_CONFIG_DIRECTORY_PREFIX = 'varro-opencode-config-';
 const INJECTED_CONFIG_OWNER_FILE = 'owner.json';
 const STALE_INJECTED_CONFIG_AGE_MS = 7 * 24 * 60 * 60_000;
+const STALE_INJECTED_CONFIG_SWEEP_INTERVAL_MS = 5 * 60_000;
 const LEGACY_OWNERSHIP_CLAIM_STALE_AGE_MS = 30_000;
 const OWNERSHIP_CLAIM_MAX_AGE_MS = 2 * 60_000;
 const SERVER_OWNER_ENV = 'VARRO_SERVER_OWNER';
 const MAX_SERVER_PORT = 65_535;
 const maximumTestedOpenCodeVersion = readMaximumTestedOpenCodeVersion();
-let staleConfigSweep: Promise<void> = Promise.resolve();
+let staleConfigSweep: Promise<void> | null = null;
+let lastStaleConfigSweepAt = 0;
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -324,6 +333,80 @@ function parseWindowsNetstatListeningPids(text: string, port: number) {
     if (Number.isSafeInteger(pid) && pid > 0 && pid !== process.pid) pids.add(pid);
   }
   return [...pids];
+}
+
+async function inspectWindowsManagedListener(
+  port: number,
+  ancestorPid: number
+): Promise<WindowsManagedListenerInspection | null> {
+  const netstat = await runProcess('netstat.exe', ['-ano'], WINDOWS_PROCESS_INSPECTION_TIMEOUT_MS);
+  let listenerExpression: string;
+  if (netstat.code === 0) {
+    const listenerPids = parseWindowsNetstatListeningPids(netstat.stdout, port);
+    if (listenerPids.length === 0) return null;
+    listenerExpression = `@(${listenerPids.join(',')})`;
+  } else {
+    logger.warn(
+      `Windows listener inspection with netstat failed: ${netstat.stderr.trim() || `exit code ${String(netstat.code)}`}`
+    );
+    listenerExpression = `@(Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique)`;
+  }
+
+  const script = [
+    `$listenerIds = ${listenerExpression}`,
+    '$processes = @(Get-CimInstance Win32_Process)',
+    '$byId = @{}',
+    'foreach ($process in $processes) { $byId[[int]$process.ProcessId] = $process }',
+    `$ancestorPid = ${ancestorPid}`,
+    `$hostPid = ${process.pid}`,
+    'foreach ($listenerId in $listenerIds) {',
+    '  $listener = $byId[[int]$listenerId]',
+    '  $currentPid = [int]$listenerId',
+    '  $owned = $false',
+    '  for ($depth = 0; $currentPid -gt 0 -and $depth -lt 32; $depth++) {',
+    '    if ($currentPid -eq $ancestorPid) { $owned = $true; break }',
+    '    $current = $byId[$currentPid]',
+    '    if (-not $current) { break }',
+    '    $currentPid = [int]$current.ParentProcessId',
+    '  }',
+    '  if ($owned -and $listener -and $listener.ExecutablePath -and $listener.CreationDate) {',
+    '    $hostProcess = $byId[$hostPid]',
+    '    [Console]::Out.WriteLine("VARRO_PID=" + $listener.ProcessId)',
+    '    [Console]::Out.WriteLine("VARRO_EXECUTABLE=" + $listener.ExecutablePath)',
+    '    [Console]::Out.WriteLine("VARRO_BIRTH=" + $listener.CreationDate.ToUniversalTime().Ticks)',
+    '    if ($hostProcess -and $hostProcess.CreationDate) { [Console]::Out.WriteLine("VARRO_HOST_BIRTH=" + $hostProcess.CreationDate.ToUniversalTime().Ticks) }',
+    '    break',
+    '  }',
+    '}',
+  ].join('; ');
+  const result = await runProcess(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-Command', script],
+    WINDOWS_PROCESS_INSPECTION_TIMEOUT_MS
+  );
+  if (result.code !== 0) {
+    logger.warn(
+      `Windows managed process inspection failed: ${result.stderr.trim() || `exit code ${String(result.code)}`}`
+    );
+    return null;
+  }
+
+  const values = new Map<string, string>();
+  for (const line of result.stdout.split(/\r?\n/)) {
+    const separator = line.indexOf('=');
+    if (separator > 0) values.set(line.slice(0, separator), line.slice(separator + 1).trim());
+  }
+  const pid = Number.parseInt(values.get('VARRO_PID') ?? '', 10);
+  const executable = values.get('VARRO_EXECUTABLE') ?? '';
+  const birth = values.get('VARRO_BIRTH') ?? '';
+  if (!Number.isSafeInteger(pid) || pid <= 0 || !executable || !birth) return null;
+  const hostBirth = values.get('VARRO_HOST_BIRTH') ?? '';
+  return {
+    pid,
+    executable,
+    birthIdentity: `win32:${birth}`,
+    hostBirthIdentity: hostBirth ? `win32:${hostBirth}` : '',
+  };
 }
 
 function parseInjectedConfigOwner(value: unknown): InjectedConfigOwner | null {
@@ -807,6 +890,15 @@ function isProcessAlive(pid: number) {
 }
 
 export function sweepStaleInjectedConfigDirectories(now = Date.now()): Promise<void> {
+  if (staleConfigSweep) return staleConfigSweep;
+  if (
+    lastStaleConfigSweepAt > 0 &&
+    now >= lastStaleConfigSweepAt &&
+    now - lastStaleConfigSweepAt < STALE_INJECTED_CONFIG_SWEEP_INTERVAL_MS
+  ) {
+    return Promise.resolve();
+  }
+
   const sweep = async () => {
     let entries;
     try {
@@ -834,7 +926,13 @@ export function sweepStaleInjectedConfigDirectories(now = Date.now()): Promise<v
       })
     );
   };
-  staleConfigSweep = staleConfigSweep.then(sweep, sweep);
+  staleConfigSweep = sweep()
+    .then(() => {
+      lastStaleConfigSweepAt = now;
+    })
+    .finally(() => {
+      staleConfigSweep = null;
+    });
   return staleConfigSweep;
 }
 
@@ -904,6 +1002,8 @@ export class OpenCodeProcess {
     value: string;
     found: boolean;
   } | null = null;
+  private installedCliVersionCache: { value: string | null; checkedAt: number } | null = null;
+  private installedCliVersionOperation: Promise<string | null> | null = null;
   private _processStdoutHandler: ((data: Buffer) => void) | null = null;
   private _processStderrHandler: ((data: Buffer) => void) | null = null;
   private _processExitHandler:
@@ -1365,19 +1465,33 @@ export class OpenCodeProcess {
       listenerPid = undefined;
       executable = '';
       birthIdentity = '';
-      const listeners = await findListeningPids(launch.port, this.linuxProcRoot);
-      for (const pid of listeners) {
-        if (await isProcessOrDescendant(pid, proc.pid, this.linuxProcRoot)) {
-          listenerPid = pid;
-          break;
+      if (process.platform === 'win32') {
+        const inspection = await inspectWindowsManagedListener(launch.port, proc.pid);
+        if (inspection) {
+          listenerPid = inspection.pid;
+          executable = inspection.executable;
+          birthIdentity = inspection.birthIdentity;
+          ownershipHostIdentity = inspection.hostBirthIdentity
+            ? { hostPid: process.pid, hostBirthIdentity: inspection.hostBirthIdentity }
+            : {};
+        }
+      } else {
+        const listeners = await findListeningPids(launch.port, this.linuxProcRoot);
+        for (const pid of listeners) {
+          if (await isProcessOrDescendant(pid, proc.pid, this.linuxProcRoot)) {
+            listenerPid = pid;
+            break;
+          }
         }
       }
       if (listenerPid) {
-        [executable, birthIdentity, ownershipHostIdentity] = await Promise.all([
-          readProcessExecutable(listenerPid, this.linuxProcRoot),
-          readProcessBirthIdentity(listenerPid, this.linuxProcRoot),
-          this.readOwnershipHostIdentity(),
-        ]);
+        if (process.platform !== 'win32') {
+          [executable, birthIdentity, ownershipHostIdentity] = await Promise.all([
+            readProcessExecutable(listenerPid, this.linuxProcRoot),
+            readProcessBirthIdentity(listenerPid, this.linuxProcRoot),
+            this.readOwnershipHostIdentity(),
+          ]);
+        }
         if (executable && birthIdentity) break;
       }
       if (attempt + 1 < attempts) await delay(WINDOWS_OWNERSHIP_CONFIRM_RETRY_MS);
@@ -2743,6 +2857,39 @@ export class OpenCodeProcess {
   }
 
   async readInstalledCliVersion(): Promise<string | null> {
+    const now = Date.now();
+    if (
+      this.installedCliVersionCache &&
+      now - this.installedCliVersionCache.checkedAt < OpenCodeProcess.VERSION_CHECK_INTERVAL_MS
+    ) {
+      return this.installedCliVersionCache.value;
+    }
+    if (this.installedCliVersionOperation) return this.installedCliVersionOperation;
+
+    const operation = this.readInstalledCliVersionUncached();
+    this.installedCliVersionOperation = operation;
+    try {
+      const value = await operation;
+      this.installedCliVersionCache = { value, checkedAt: now };
+      return value;
+    } finally {
+      if (this.installedCliVersionOperation === operation) {
+        this.installedCliVersionOperation = null;
+      }
+    }
+  }
+
+  rememberInstalledCliVersion(version: string): void {
+    const value = extractVersion(version);
+    if (!value) return;
+    this.installedCliVersionCache = { value, checkedAt: Date.now() };
+  }
+
+  forgetInstalledCliVersion(): void {
+    this.installedCliVersionCache = null;
+  }
+
+  private async readInstalledCliVersionUncached(): Promise<string | null> {
     if (this.simulateMissingCli) {
       return null;
     }
@@ -2869,6 +3016,7 @@ export class OpenCodeProcess {
    */
   clearResolvedCommandCache() {
     this.resolvedCommandCache = null;
+    this.installedCliVersionCache = null;
   }
 
   /**

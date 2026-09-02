@@ -494,6 +494,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         currentTheme: () => this.currentTheme(),
         renderStatus: () => this.serverEventBridge.getStatus(),
         handleReadySideEffects: () => this.cleanupExpiredRecycleBin(),
+        handleRecoveryLoadedSideEffects: () => this.reconcilePermissionAutomationOwners(true),
         handleVisibleSideEffects: () => this.cleanupExpiredRecycleBin(),
         updateStatusBarItem: () => this.updateStatusBarItem(),
         postThemeUpdate: () =>

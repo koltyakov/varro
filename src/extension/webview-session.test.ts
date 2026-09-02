@@ -177,6 +177,7 @@ function createSession(options?: {
     currentTheme: vi.fn(() => 'dark' as const),
     renderStatus: vi.fn(() => RUNNING_STATUS),
     handleReadySideEffects: vi.fn(() => Promise.resolve()),
+    handleRecoveryLoadedSideEffects: vi.fn(),
     handleVisibleSideEffects: vi.fn(() => Promise.resolve()),
     updateStatusBarItem: vi.fn(),
     postThemeUpdate: vi.fn(),
@@ -526,7 +527,7 @@ describe('WebviewSession', () => {
     }
   });
 
-  it('fails a webview render when recovery state never settles', async () => {
+  it('renders the webview without waiting for recovery state', async () => {
     vi.useFakeTimers();
     try {
       const { session, sessionState } = createSession();
@@ -534,13 +535,42 @@ describe('WebviewSession', () => {
       sessionState.consumeRecoverySnapshot.mockReturnValue(new Promise(() => {}));
 
       await session.resolve(view as never);
-      await vi.advanceTimersByTimeAsync(30_000);
       await flushMicrotasks();
 
-      expect(view.webview.html).toContain('Failed to load Varro webview');
+      expect(view.webview.html).toBe('<html><body>Varro</body></html>');
+      expect(sessionState.consumeRecoverySnapshot).toHaveBeenCalledOnce();
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('replays recovery state that arrives after the webview is ready', async () => {
+    const recovery = createDeferred<RecoverySnapshot>();
+    const { session, sessionState, deps } = createSession();
+    sessionState.consumeRecoverySnapshot.mockReturnValue(recovery.promise);
+    const view = createWebviewView(true);
+    await session.resolve(view as never);
+    await flushMicrotasks();
+    await session.handleReady();
+    sessionState.replayBlockingRequests.mockClear();
+
+    recovery.resolve({
+      interruptedSessions: [{ id: 'session-1', title: 'Interrupted' }],
+      blockingRequests: [
+        {
+          id: 'permission-1',
+          sessionID: 'session-1',
+          kind: 'permission',
+          props: { id: 'permission-1', sessionID: 'session-1' },
+        },
+      ],
+    });
+    await flushMicrotasks();
+
+    expect(sessionState.replayBlockingRequests).toHaveBeenCalledOnce();
+    expect(deps.handleRecoveryLoadedSideEffects).toHaveBeenCalledOnce();
+    expect(session.blockingRequestsForWebview).toHaveLength(1);
+    expect(session.interruptedSessionsForWebview).toHaveLength(1);
   });
 
   it('shares an overlapping recovery load and lets only the current generation commit it', async () => {
@@ -567,7 +597,7 @@ describe('WebviewSession', () => {
 
     expect(sessionState.consumeRecoverySnapshot).toHaveBeenCalledOnce();
     expect(deps.resetStatusBarCache).toHaveBeenCalledOnce();
-    expect(bridge.renderHtml).toHaveBeenCalledOnce();
+    expect(bridge.renderHtml).toHaveBeenCalledTimes(2);
     expect(firstView.webview.html).toContain('aria-label="Loading workspace"');
     expect(secondView.webview.html).toBe('<html><body>Varro</body></html>');
     expect(session.interruptedSessionsForWebview).toEqual([
@@ -904,6 +934,16 @@ describe('WebviewSession', () => {
 
     expect(bridge.getView()).toBeUndefined();
     expect(deps.updateStatusBarItem).toHaveBeenCalledOnce();
+  });
+
+  it('starts the server while a visible webview is rendering', async () => {
+    const html = createDeferred<string>();
+    const { session, deps } = createSession({ renderHtml: () => html.promise });
+
+    await session.resolve(createWebviewView(true) as never);
+
+    expect(deps.ensureServerStarted).toHaveBeenCalledOnce();
+    html.resolve('<html>ready</html>');
   });
 
   it('rotates only the message listener while an editor webview is suspended', async () => {

@@ -1862,6 +1862,46 @@ describe('OpenCodeServer maintenance', () => {
 });
 
 describe('OpenCodeServer compatibility gate', () => {
+  it('does not block a healthy existing server on ownership recovery', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const recovery = deferred<boolean>();
+    const recoverManagedServerOwnership = vi.fn(() => recovery.promise);
+    const prepareForHealthyExistingServer = vi.fn().mockResolvedValue(undefined);
+    const rememberInstalledCliVersion = vi.fn();
+    const requestMaintenanceCheck = vi.fn();
+    const api = server as unknown as {
+      readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
+      requestMaintenanceCheck: typeof requestMaintenanceCheck;
+      processManager: {
+        recoverManagedServerOwnership: typeof recoverManagedServerOwnership;
+        prepareForHealthyExistingServer: typeof prepareForHealthyExistingServer;
+        rememberInstalledCliVersion: typeof rememberInstalledCliVersion;
+        hasOwnershipLeaseCandidate: boolean;
+      };
+    };
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.18.26' });
+    api.requestMaintenanceCheck = requestMaintenanceCheck;
+    Object.defineProperty(api.processManager, 'hasOwnershipLeaseCandidate', {
+      configurable: true,
+      value: true,
+    });
+    api.processManager.recoverManagedServerOwnership = recoverManagedServerOwnership;
+    api.processManager.prepareForHealthyExistingServer = prepareForHealthyExistingServer;
+    api.processManager.rememberInstalledCliVersion = rememberInstalledCliVersion;
+
+    await expect(server.start()).resolves.toBe(server.url);
+
+    expect(recoverManagedServerOwnership).toHaveBeenCalledOnce();
+    expect(prepareForHealthyExistingServer).not.toHaveBeenCalled();
+    expect(rememberInstalledCliVersion).toHaveBeenCalledWith('1.18.26');
+    expect(requestMaintenanceCheck).not.toHaveBeenCalled();
+
+    recovery.resolve(true);
+    await flushMicrotasks();
+    expect(prepareForHealthyExistingServer).toHaveBeenCalledOnce();
+    expect(requestMaintenanceCheck).toHaveBeenCalledOnce();
+  });
+
   it('uses a healthy server newer than the tested compatibility ceiling', async () => {
     const server = new OpenCodeServer(4096, true);
     const prepareForHealthyExistingServer = vi.fn().mockResolvedValue(undefined);
@@ -2232,6 +2272,16 @@ describe('OpenCodeServer compatibility gate', () => {
 });
 
 describe('OpenCodeServer startup health polling', () => {
+  it('does not launch a Windows CLI version probe before managed startup', async () => {
+    stubPlatform('win32');
+    const server = new OpenCodeServer(4096, true);
+    const { api } = configureManagedStartup(server);
+
+    await expect(server.start()).resolves.toBe(server.url);
+
+    expect(api.readInstalledCliVersion).not.toHaveBeenCalled();
+  });
+
   it('keeps the original pollHealth callbacks across recursive retries', async () => {
     const server = new OpenCodeServer(4096, false);
     const resolved = vi.fn();
@@ -2247,7 +2297,10 @@ describe('OpenCodeServer startup health polling', () => {
       ) => void;
       startAttemptId: number;
       disposeGeneration: number;
-      processManager: { confirmManagedServerOwnership: () => Promise<boolean> };
+      processManager: {
+        confirmManagedServerOwnership: () => Promise<boolean>;
+        rememberInstalledCliVersion: (version: string) => void;
+      };
     };
 
     api.readHealthInfo = vi
@@ -2257,6 +2310,7 @@ describe('OpenCodeServer startup health polling', () => {
     api.startAttemptId = 1;
     api.disposeGeneration = 0;
     api.processManager.confirmManagedServerOwnership = vi.fn().mockResolvedValue(true);
+    api.processManager.rememberInstalledCliVersion = vi.fn();
 
     api.pollHealth(1, 0, resolved, rejected);
     await vi.advanceTimersByTimeAsync(200);
@@ -2267,6 +2321,9 @@ describe('OpenCodeServer startup health polling', () => {
     expect(resolved).toHaveBeenCalledWith(server.url);
     expect(resolved).toHaveBeenCalledTimes(1);
     expect(rejected).not.toHaveBeenCalled();
+    expect(api.processManager.rememberInstalledCliVersion).toHaveBeenCalledWith(
+      MINIMUM_SUPPORTED_OPENCODE_VERSION
+    );
   });
 });
 
@@ -2947,7 +3004,7 @@ describe('OpenCodeServer managed process lifecycle', () => {
     expect(disposeProcess).toHaveBeenCalledTimes(1);
     expect(readHealthInfo).toHaveBeenCalledTimes(1);
     expect(spawnMock).not.toHaveBeenCalled();
-    expect(statuses.map((status) => status.state)).toEqual(['stopped']);
+    expect(statuses.map((status) => status.state)).toEqual(['starting', 'stopped']);
     expect(server.status.state).toBe('stopped');
   });
 

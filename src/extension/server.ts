@@ -228,6 +228,7 @@ export class OpenCodeServer extends EventEmitter {
   private lastCeilingNoticeVersion = '';
   private lastRestartBlockers: RestartBlockedState | null = null;
   private adoptedServerRecoveryOperation: Promise<void> | null = null;
+  private existingServerPreparationOperation: Promise<void> | null = null;
 
   constructor(
     port: number,
@@ -376,6 +377,44 @@ export class OpenCodeServer extends EventEmitter {
     }
   }
 
+  private startExistingServerPreparation(
+    disposeGeneration: number,
+    signal: AbortSignal,
+    serverVersion?: string
+  ) {
+    if (this.existingServerPreparationOperation) return;
+    const operation = (async () => {
+      try {
+        if (this.processManager.hasOwnershipLeaseCandidate) {
+          await this.processManager.recoverManagedServerOwnership();
+        }
+        await this.processManager.prepareForHealthyExistingServer();
+        if (signal.aborted || disposeGeneration !== this.disposeGeneration) return;
+        if (this.managedProcess && serverVersion) {
+          this.processManager.rememberInstalledCliVersion(serverVersion);
+        } else {
+          this.processManager.forgetInstalledCliVersion();
+        }
+        if (this.hasInjectedCompactionOverride() && !this.managedProcess) {
+          logger.warn(
+            'Varro chat auto-compaction settings require a Varro-managed OpenCode server; project opencode.json still overrides when present'
+          );
+        }
+        this.requestMaintenanceCheck();
+      } catch (err) {
+        logger.warn(
+          `Failed to prepare existing OpenCode server ownership: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    })();
+    this.existingServerPreparationOperation = operation;
+    void operation.finally(() => {
+      if (this.existingServerPreparationOperation === operation) {
+        this.existingServerPreparationOperation = null;
+      }
+    });
+  }
+
   private setStartPromise(factory: (signal: AbortSignal) => Promise<string>): Promise<string> {
     return this.lifecycle.setStartPromise(factory);
   }
@@ -410,11 +449,6 @@ export class OpenCodeServer extends EventEmitter {
         throw new Error(message);
       }
 
-      if (this.processManager.hasOwnershipLeaseCandidate) {
-        this.throwIfStartCancelled(disposeGeneration, signal);
-        await this.processManager.recoverManagedServerOwnership();
-        this.throwIfStartCancelled(disposeGeneration, signal);
-      }
       if (this.process && this._status.state !== 'running') {
         await this.processManager.stopServerForRestart();
         this.throwIfStartCancelled(disposeGeneration, signal);
@@ -425,15 +459,11 @@ export class OpenCodeServer extends EventEmitter {
         if (isSupportedOpenCodeVersion(health.version)) {
           this.notifyIfAboveTestedCeiling(health.version);
           logger.info(`Found existing OpenCode server at ${this.url}`);
-          await this.processManager.prepareForHealthyExistingServer();
-          this.throwIfStartCancelled(disposeGeneration, signal);
-          if (this.hasInjectedCompactionOverride() && !this.managedProcess) {
-            logger.warn(
-              'Varro chat auto-compaction settings require a Varro-managed OpenCode server; project opencode.json still overrides when present'
-            );
+          if (health.version && this.processManager.hasOwnershipLeaseCandidate) {
+            this.processManager.rememberInstalledCliVersion(health.version);
           }
           this.beginRunningEventStream();
-          this.requestMaintenanceCheck();
+          this.startExistingServerPreparation(disposeGeneration, signal, health.version);
           return this.url;
         }
 
@@ -453,13 +483,17 @@ export class OpenCodeServer extends EventEmitter {
         );
       }
 
+      this.setStatus({ state: 'starting' });
+
       if (this.managedProcess || this.process) {
         await this.processManager.stopServerForRestart();
         this.throwIfStartCancelled(disposeGeneration, signal);
       }
 
       this.throwIfStartCancelled(disposeGeneration, signal);
-      await this.ensureCompatibleCliForLaunch(undefined, disposeGeneration, signal);
+      if (process.platform !== 'win32') {
+        await this.ensureCompatibleCliForLaunch(undefined, disposeGeneration, signal);
+      }
       this.throwIfStartCancelled(disposeGeneration, signal);
 
       return this.launchManagedServer(disposeGeneration, preserveRetryCount, signal);
@@ -493,7 +527,6 @@ export class OpenCodeServer extends EventEmitter {
         return;
       }
 
-      this.setStatus({ state: 'starting' });
       const attemptId = this.lifecycle.beginStartAttempt();
       const stderrLines: string[] = [];
       let attemptFinished = false;
@@ -1161,6 +1194,9 @@ export class OpenCodeServer extends EventEmitter {
         if (!ownershipConfirmed) {
           reject(new Error(OpenCodeServer.OWNERSHIP_CONFIRMATION_FAILED_MESSAGE));
           return;
+        }
+        if (health.version) {
+          this.processManager.rememberInstalledCliVersion(health.version);
         }
         this.processManager.resetPortRetryState();
         this.beginRunningEventStream();
@@ -2073,6 +2109,9 @@ export class OpenCodeServer extends EventEmitter {
     this.transport.clearPendingAttentionRequests();
     this.transport.abortRequests();
     await this.lifecycle.waitForOperationsSettlement();
+    if (this.existingServerPreparationOperation) {
+      await this.existingServerPreparationOperation;
+    }
     if (this.adoptedServerRecoveryOperation) await this.waitForAdoptedServerRecovery();
     await this.processManager.disposeProcess(options);
     this.setStatus({ state: 'stopped' });

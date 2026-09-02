@@ -26,7 +26,6 @@ import type { ExtensionConfigState } from '../shared/provider-limit-config';
 
 export type WebviewHost = vscode.WebviewView | vscode.WebviewPanel;
 const RELIABLE_DELIVERY_TIMEOUT_MS = 5_000;
-const RECOVERY_SNAPSHOT_TIMEOUT_MS = 30_000;
 
 export class WebviewSession {
   public interruptedSessionsForWebview: InterruptedSessionSnapshot[] = [];
@@ -55,6 +54,7 @@ export class WebviewSession {
   private webviewRenderGeneration = 0;
   private readyGeneration: number | null = null;
   private recoverySnapshotLoad?: Promise<RecoverySnapshot>;
+  private recoverySnapshotLoaded = false;
   private themeDisposable?: vscode.Disposable;
   private messageDisposable?: vscode.Disposable;
   private webviewDisposables: vscode.Disposable[] = [];
@@ -86,6 +86,7 @@ export class WebviewSession {
       currentTheme(): InitialWebviewState['theme'];
       renderStatus(): ServerStatus;
       handleReadySideEffects(): Promise<void>;
+      handleRecoveryLoadedSideEffects(): void;
       handleVisibleSideEffects(): Promise<void>;
       updateStatusBarItem(): void;
       postThemeUpdate(): void;
@@ -242,6 +243,10 @@ export class WebviewSession {
     this.disposeWebviewDisposables();
 
     this.registerMessageListener(webviewView, webviewLoadGeneration);
+    this.startRecoverySnapshotLoad();
+    if (webviewView.visible) {
+      void this.deps.ensureServerStarted().catch(() => {});
+    }
 
     this.webviewDisposables.push(
       webviewView.onDidDispose(() => {
@@ -407,29 +412,39 @@ export class WebviewSession {
     webviewRenderGeneration: number,
     webviewView: WebviewHost
   ): Promise<string | undefined> {
-    const recoverySnapshotLoad =
-      this.recoverySnapshotLoad ??
-      (this.recoverySnapshotLoad = rejectAfter(
-        this.sessionState.consumeRecoverySnapshot(),
-        RECOVERY_SNAPSHOT_TIMEOUT_MS,
-        'Timed out while loading webview recovery state.'
-      ));
-    try {
-      const snapshot = await recoverySnapshotLoad;
-      if (
-        this.bridge.getView() !== webviewView ||
-        webviewRenderGeneration !== this.webviewRenderGeneration
-      ) {
-        return undefined;
-      }
-      this.commitRecoverySnapshot(snapshot);
-      this.deps.updateStatusBarItem();
-      return await this.bridge.renderHtml(this.buildInitialState(this.deps.renderStatus()));
-    } finally {
-      if (this.recoverySnapshotLoad === recoverySnapshotLoad) {
-        this.recoverySnapshotLoad = undefined;
-      }
+    await Promise.resolve();
+    if (
+      this.bridge.getView() !== webviewView ||
+      webviewRenderGeneration !== this.webviewRenderGeneration
+    ) {
+      return undefined;
     }
+    return await this.bridge.renderHtml(this.buildInitialState(this.deps.renderStatus()));
+  }
+
+  private startRecoverySnapshotLoad() {
+    if (this.recoverySnapshotLoaded || this.recoverySnapshotLoad) return;
+    const recoverySnapshotLoad = this.sessionState.consumeRecoverySnapshot();
+    this.recoverySnapshotLoad = recoverySnapshotLoad;
+    void recoverySnapshotLoad
+      .then((snapshot) => {
+        this.recoverySnapshotLoaded = true;
+        this.commitRecoverySnapshot(snapshot);
+        this.deps.updateStatusBarItem();
+        if (!this.webviewReady) return;
+        this.postBootMessages(this.deps.renderStatus(), { clearResolvedEmbedded: true });
+        this.deps.handleRecoveryLoadedSideEffects();
+      })
+      .catch((err: unknown) => {
+        logger.warn(
+          `Failed to load webview recovery state: ${err instanceof Error ? err.message : String(err)}`
+        );
+      })
+      .finally(() => {
+        if (this.recoverySnapshotLoad === recoverySnapshotLoad) {
+          this.recoverySnapshotLoad = undefined;
+        }
+      });
   }
 
   private buildInitialState(serverStatus: ServerStatus): InitialWebviewState {
@@ -671,22 +686,6 @@ function resolveWithin<T>(promise: Promise<T>, timeoutMs: number, fallback: T): 
       () => {
         clearTimeout(timeout);
         resolve(fallback);
-      }
-    );
-  });
-}
-
-function rejectAfter<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
-    void promise.then(
-      (value) => {
-        clearTimeout(timeout);
-        resolve(value);
-      },
-      (error: unknown) => {
-        clearTimeout(timeout);
-        reject(error);
       }
     );
   });

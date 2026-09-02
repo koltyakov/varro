@@ -1089,4 +1089,12 @@ describe('extension manifest', () => {
       default: true,
     });
   });
+
+  it('activates on Varro use instead of every VS Code startup', () => {
+    expect(packageJson.contributes.views.varro).toContainEqual(
+      expect.objectContaining({ id: 'varro.chat' })
+    );
+    expect(packageJson.activationEvents).not.toContain('onView:varro.chat');
+    expect(packageJson.activationEvents).not.toContain('onStartupFinished');
+  });
 });
