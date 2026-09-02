@@ -86,7 +86,7 @@
     "material-icon-theme": "5.38.1",
     "oxfmt": "0.66.0",
     "oxlint": "1.81.0",
-    "oxlint-plugin-anti-slop": "github:dmmulroy/anti-slop#6d538555cb151d4121ed51a27db81890eacf8ae9",
+    "oxlint-plugin-anti-slop": "github:dmmulroy/anti-slop#e8c4880471b23ab7f216fba7b27d173a6ef07d4c",
     "rolldown": "1.2.6",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
