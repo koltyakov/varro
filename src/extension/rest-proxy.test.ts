@@ -2234,6 +2234,122 @@ describe('RestProxy handleRequest', () => {
     expect(JSON.stringify(response)).not.toContain('OTHER_');
   });
 
+  it('uses the local database summary without requesting session histories', async () => {
+    const serverRequest = vi.fn<RestProxyCallbacks['server']['request']>(async () => []);
+    const readLocalSessionSummary = vi.fn(async () => ({
+      contextCharacters: { system: 40, user: 40, assistant: 40, tool: 40 },
+      messages: [
+        { info: { role: 'user', time: { created: 1_000 } }, parts: [] },
+        {
+          info: {
+            role: 'assistant',
+            providerID: 'openai',
+            modelID: 'gpt-5.6-sol',
+            time: { created: 2_000, completed: 4_000 },
+            tokens: {
+              total: 130,
+              input: 100,
+              output: 20,
+              reasoning: 0,
+              cache: { read: 10, write: 0 },
+            },
+          },
+          parts: [
+            {
+              type: 'tool',
+              tool: 'apply_patch',
+              state: {
+                status: 'completed',
+                input: {},
+                output: '',
+                metadata: {
+                  files: [{ relativePath: 'src/a.ts', additions: 4, deletions: 1 }],
+                },
+              },
+            },
+          ],
+        },
+      ],
+      descendants: [
+        {
+          id: 'child-1',
+          tokens: {
+            input: 40,
+            output: 5,
+            reasoning: 0,
+            cache: { read: 4, write: 0 },
+          },
+          messages: [],
+        },
+      ],
+    }));
+    const { proxy, callbacks } = createProxy({
+      readLocalSessionSummary,
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(makePayload(822, 'GET', '/varro/session/session-1/diff-summary'));
+
+    expect(readLocalSessionSummary).toHaveBeenCalledWith('session-1');
+    expect(serverRequest).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 822,
+      data: expect.objectContaining({
+        files: 1,
+        additions: 4,
+        deletions: 1,
+        tokens: 165,
+        model: { providerID: 'openai', modelID: 'gpt-5.6-sol' },
+        durationMs: 3_000,
+        activeStartedAt: null,
+        tokenBreakdown: {
+          session: {
+            total: 130,
+            input: 100,
+            output: 20,
+            reasoning: 0,
+            cacheRead: 10,
+            cacheWrite: 0,
+          },
+          subagents: {
+            total: 49,
+            input: 40,
+            output: 5,
+            reasoning: 0,
+            cacheRead: 4,
+            cacheWrite: 0,
+          },
+          subagentCount: 1,
+        },
+        nestedContextBreakdown: [
+          { key: 'system', tokens: 10, percent: 10 },
+          { key: 'user', tokens: 10, percent: 10 },
+          { key: 'assistant', tokens: 10, percent: 10 },
+          { key: 'tool', tokens: 10, percent: 10 },
+          { key: 'other', tokens: 60, percent: 60 },
+        ],
+      }),
+    });
+  });
+
+  it('falls back to API summaries when the local database read fails', async () => {
+    const serverRequest = vi.fn<RestProxyCallbacks['server']['request']>(async () => []);
+    const readLocalSessionSummary = vi.fn(async () => {
+      throw new Error('database unavailable');
+    });
+    const { proxy } = createProxy({
+      readLocalSessionSummary,
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(makePayload(823, 'GET', '/varro/session/session-1/diff-summary'));
+
+    expect(readLocalSessionSummary).toHaveBeenCalledWith('session-1');
+    expect(serverRequest).toHaveBeenCalledWith('GET', '/session/session-1/diff', undefined, {
+      directory: '/repo',
+    });
+  });
+
   it('excludes generated dependency files from the session diff summary', async () => {
     const serverRequest = vi.fn((_method: string, path: string) => {
       if (path === '/session?limit=1000000') {

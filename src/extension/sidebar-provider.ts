@@ -70,6 +70,7 @@ import { FileSearchService } from './file-search-service';
 import { GeneratedDependencyTreeGuard } from './generated-dependency-tree-guard';
 import { HiddenSessionManager } from './hidden-session-manager';
 import { HostPersistence } from './host-persistence';
+import { readLocalSessionSummary } from './local-session-summary';
 import { logger } from './logger';
 import { MessageRouter } from './message-router';
 import { ModelPreferencesStore } from './model-preferences-store';
@@ -556,6 +557,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       hiddenSessions: this.hiddenSessions,
       autoApproveJudge: this.autoApproveJudge,
       sessionTitleFallback: this.sessionTitleFallback,
+      readLocalSessionSummary,
       simulateNoProviders: this.simulateNoProviders,
       getRequestGeneration: () => webviewSession.getRequestGeneration(),
       getStatus: () => this.serverEventBridge.getStatus(),

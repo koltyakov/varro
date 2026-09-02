@@ -12,6 +12,13 @@ export type ContextMessageEntry = { info: Message; parts: Part[] };
 
 type AssistantPartCharacters = { assistant: number; tool: number };
 
+export type ContextCharacterCounts = {
+  system: number;
+  user: number;
+  assistant: number;
+  tool: number;
+};
+
 const estimateTokens = (characters: number) => Math.ceil(characters / 4);
 
 function getUserPartCharacters(part: Part): number {
@@ -44,17 +51,12 @@ export function estimateContextBreakdown(
   messages: readonly ContextMessageEntry[],
   inputTokens: number
 ): ContextBreakdownSegment[] {
-  if (inputTokens <= 0) return [];
-
-  let systemCharacters = 0;
-  let userCharacters = 0;
-  let assistantCharacters = 0;
-  let toolCharacters = 0;
+  const characters: ContextCharacterCounts = { system: 0, user: 0, assistant: 0, tool: 0 };
 
   for (const message of messages) {
     if (message.info.role === 'user') {
-      if (message.info.system?.trim()) systemCharacters = message.info.system.trim().length;
-      userCharacters += message.parts.reduce(
+      if (message.info.system?.trim()) characters.system = message.info.system.trim().length;
+      characters.user += message.parts.reduce(
         (total, part) => total + getUserPartCharacters(part),
         0
       );
@@ -62,17 +64,26 @@ export function estimateContextBreakdown(
     }
 
     for (const part of message.parts) {
-      const characters = getAssistantPartCharacters(part);
-      assistantCharacters += characters.assistant;
-      toolCharacters += characters.tool;
+      const partCharacters = getAssistantPartCharacters(part);
+      characters.assistant += partCharacters.assistant;
+      characters.tool += partCharacters.tool;
     }
   }
 
+  return estimateContextBreakdownFromCharacters(characters, inputTokens);
+}
+
+export function estimateContextBreakdownFromCharacters(
+  characters: ContextCharacterCounts,
+  inputTokens: number
+): ContextBreakdownSegment[] {
+  if (inputTokens <= 0) return [];
+
   const estimated = {
-    system: estimateTokens(systemCharacters),
-    user: estimateTokens(userCharacters),
-    assistant: estimateTokens(assistantCharacters),
-    tool: estimateTokens(toolCharacters),
+    system: estimateTokens(characters.system),
+    user: estimateTokens(characters.user),
+    assistant: estimateTokens(characters.assistant),
+    tool: estimateTokens(characters.tool),
   };
   const estimatedTotal = Object.values(estimated).reduce((total, value) => total + value, 0);
   const scale = estimatedTotal > inputTokens ? inputTokens / estimatedTotal : 1;

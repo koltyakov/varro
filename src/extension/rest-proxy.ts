@@ -6,7 +6,10 @@ import { existsSync, realpathSync } from 'fs';
 import { posix, win32 } from 'path';
 import { applyEdits, modify, parse, printParseErrorCode, type ParseError } from 'jsonc-parser';
 import {
+  estimateContextBreakdownFromCharacters,
   estimateNestedContextBreakdown,
+  type ContextCharacterCounts,
+  type ContextBreakdownKey,
   type ContextMessageEntry,
 } from '../shared/context-breakdown';
 import type {
@@ -49,6 +52,7 @@ import type { AutoApproveJudge } from './auto-approve-judge';
 import type { HiddenSessionManager } from './hidden-session-manager';
 import { isAllowedApiRequest } from './util/webview-message';
 import type { ContextProvider } from './context-provider';
+import type { LocalSessionSummaryData } from './local-session-summary';
 import { logger } from './logger';
 import type { ProviderLimitService } from './provider-limit-service';
 import type { PinnedSessionManager } from './pinned-session-manager';
@@ -220,6 +224,7 @@ export interface RestProxyCallbacks {
   >;
   autoApproveJudge: Pick<AutoApproveJudge, 'judge' | 'resolveModel'>;
   sessionTitleFallback: Pick<SessionTitleFallback, 'renameIfUntitled'>;
+  readLocalSessionSummary?(sessionID: string): Promise<LocalSessionSummaryData | null>;
   simulateNoProviders: boolean;
   getRequestGeneration(): number;
   getStatus(): ServerStatus;
@@ -2310,6 +2315,14 @@ export class RestProxy {
   }
 
   private async readSessionDiffSummary(sessionID: string): Promise<SessionDiffSummary> {
+    let local: LocalSessionSummaryData | null | undefined;
+    try {
+      local = await this.callbacks.readLocalSessionSummary?.(sessionID);
+    } catch {
+      local = null;
+    }
+    if (local) return summarizeLocalSession(local);
+
     const encodedSessionID = encodeURIComponent(sessionID);
     const [diffs, messages, sessions] = await Promise.all([
       this.requestServer('GET', `/session/${encodedSessionID}/diff`),
@@ -4455,6 +4468,97 @@ function summarizeSessionTokenUsage(value: unknown): SessionTokenUsage {
     addSessionTokenUsage(usage, summarizeTokenUsageRecord(tokens));
   }
   return usage;
+}
+
+function summarizeLocalSession(data: LocalSessionSummaryData): SessionDiffSummary {
+  const messages = projectMessageHistory(data.messages);
+  const editStats = summarizeSessionMessageEdits(messages);
+  const session = summarizeSessionTokenUsage(messages);
+  const subagents = emptySessionTokenUsage();
+  const contextSessions = [
+    {
+      messages,
+      characters: data.contextCharacters,
+      inputTokens: data.contextInputTokens,
+    },
+  ];
+
+  for (const descendant of data.descendants) {
+    const descendantMessages = projectMessageHistory(descendant.messages);
+    const snapshot = summarizeTokenUsageRecord(asRecord(descendant.tokens));
+    addSessionTokenUsage(
+      subagents,
+      snapshot.total > 0 ? snapshot : summarizeSessionTokenUsage(descendantMessages)
+    );
+    contextSessions.push({
+      messages: descendantMessages,
+      characters: descendant.contextCharacters,
+      inputTokens: descendant.contextInputTokens,
+    });
+  }
+
+  const tokenBreakdown = {
+    session,
+    subagents,
+    subagentCount: data.descendants.length,
+  } satisfies SessionTokenBreakdown;
+  const result: SessionDiffSummary = {
+    ...editStats,
+    tokens:
+      getSessionTokensExcludingCacheReads(session) + getSessionTokensExcludingCacheReads(subagents),
+    tokenBreakdown,
+    ...summarizeSessionDuration(messages),
+  };
+  const model = summarizeSessionModel(messages);
+  const nestedContextBreakdown = estimateLocalContextBreakdown(contextSessions);
+  if (model) result.model = model;
+  if (nestedContextBreakdown.length > 0) result.nestedContextBreakdown = nestedContextBreakdown;
+  return result;
+}
+
+function estimateLocalContextBreakdown(
+  sessions: Array<{
+    messages: unknown;
+    characters?: ContextCharacterCounts;
+    inputTokens?: number;
+  }>
+) {
+  const totals = {
+    system: 0,
+    user: 0,
+    assistant: 0,
+    tool: 0,
+    other: 0,
+  } satisfies Record<ContextBreakdownKey, number>;
+
+  for (const session of sessions) {
+    const messages = normalizeContextMessages(session.messages);
+    let inputTokens = session.inputTokens ?? 0;
+    if (session.inputTokens === undefined) {
+      for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const info = messages[index]?.info;
+        const input = info?.role === 'assistant' ? info.tokens?.input : 0;
+        if (!input || input <= 0) continue;
+        inputTokens = input;
+        break;
+      }
+    }
+    const breakdown = session.characters
+      ? estimateContextBreakdownFromCharacters(session.characters, inputTokens)
+      : estimateNestedContextBreakdown([messages]);
+    for (const segment of breakdown) totals[segment.key] += segment.tokens;
+  }
+
+  const total = Object.values(totals).reduce((sum, value) => sum + value, 0);
+  if (total <= 0) return [];
+  const keys: ContextBreakdownKey[] = ['system', 'user', 'assistant', 'tool', 'other'];
+  return keys
+    .filter((key) => totals[key] > 0)
+    .map((key) => ({
+      key,
+      tokens: totals[key],
+      percent: Math.round((totals[key] / total) * 1_000) / 10,
+    }));
 }
 
 function normalizeContextMessages(value: unknown): ContextMessageEntry[] {
