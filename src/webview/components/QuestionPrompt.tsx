@@ -305,7 +305,7 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
                               onKeyDown={(event) => {
                                 if (
                                   event.key === 'Enter' &&
-                                  (event.metaKey || event.ctrlKey) &&
+                                  !event.shiftKey &&
                                   !event.isComposing
                                 ) {
                                   event.preventDefault();

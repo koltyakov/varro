@@ -381,11 +381,32 @@ describe('QuestionPrompt custom answers', () => {
     expect(customOption().getAttribute('aria-checked')).toBe('true');
   });
 
-  it('allows Enter to add a new line in the custom input', () => {
+  it('submits a custom answer on Enter', async () => {
+    renderQuestionPrompt(request());
+
+    type(customInput(), 'Something else\nWith more detail');
+    const event = pressKey(customInput(), 'Enter');
+    await Promise.resolve();
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(respondQuestionMock).toHaveBeenCalledWith(
+      'question-1',
+      [['Something else\nWith more detail']],
+      { rethrow: true }
+    );
+  });
+
+  it('allows Shift+Enter to add a new line in the custom input', () => {
     renderQuestionPrompt(request());
 
     type(customInput(), 'Something else');
-    const event = pressKey(customInput(), 'Enter');
+    const event = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    customInput().dispatchEvent(event);
 
     expect(event.defaultPrevented).toBe(false);
     expect(respondQuestionMock).not.toHaveBeenCalled();
@@ -408,6 +429,22 @@ describe('QuestionPrompt custom answers', () => {
     expect(respondQuestionMock).toHaveBeenCalledOnce();
   });
 
+  it('does not submit on Enter while composing', () => {
+    renderQuestionPrompt(request());
+
+    type(customInput(), 'Something else');
+    const event = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      isComposing: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    customInput().dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(respondQuestionMock).not.toHaveBeenCalled();
+  });
+
   it('hides the custom row when the question opts out', () => {
     renderQuestionPrompt({
       id: 'question-no-custom',
@@ -427,6 +464,24 @@ describe('QuestionPrompt custom answers', () => {
 });
 
 describe('QuestionPrompt multi-step flow', () => {
+  it('advances and submits custom answers with Enter', async () => {
+    renderQuestionPrompt(multiQuestionRequest());
+
+    type(customInput(), 'Zig');
+    pressKey(customInput(), 'Enter');
+
+    expect(stepIndicator()).toBe('2 / 2');
+    expect(respondQuestionMock).not.toHaveBeenCalled();
+
+    type(customInput(), 'Deno');
+    pressKey(customInput(), 'Enter');
+    await Promise.resolve();
+
+    expect(respondQuestionMock).toHaveBeenCalledWith('question-multi', [['Zig'], ['Deno']], {
+      rethrow: true,
+    });
+  });
+
   it('shows a step indicator and advances instead of submitting', () => {
     renderQuestionPrompt(multiQuestionRequest());
 
