@@ -86,6 +86,21 @@ describe('getSessionPermissionRulesForMode', () => {
 });
 
 describe('getResolvedAgentPermissionRules', () => {
+  it('copies array rules out of reactive proxies for extension transport', () => {
+    const rule = new Proxy(
+      { permission: 'bash', pattern: 'git status', action: 'allow' as const },
+      {}
+    );
+    const permission = new Proxy([rule], {});
+
+    const resolved = getResolvedAgentPermissionRules(permission);
+
+    expect(resolved).toEqual([{ permission: 'bash', pattern: 'git status', action: 'allow' }]);
+    expect(resolved).not.toBe(permission);
+    expect(resolved[0]).not.toBe(rule);
+    expect(() => structuredClone(resolved)).not.toThrow();
+  });
+
   it('normalizes legacy agent permission objects for default-mode restoration', () => {
     expect(
       getResolvedAgentPermissionRules({

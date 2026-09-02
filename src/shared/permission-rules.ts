@@ -56,10 +56,18 @@ export function getSafeDefaultPermissionRules(): PermissionRule[] {
   return SAFE_DEFAULT_PERMISSION_RULES;
 }
 
-export function getResolvedAgentPermissionRules(permission: Agent['permission']): PermissionRule[] {
-  if (Array.isArray(permission)) return permission;
+export function getResolvedAgentPermissionRules(
+  agentPermission: Agent['permission']
+): PermissionRule[] {
+  if (Array.isArray(agentPermission)) {
+    return agentPermission.map(({ permission, pattern, action }) => ({
+      permission,
+      pattern,
+      action,
+    }));
+  }
 
-  return Object.entries(permission).flatMap(([name, value]): PermissionRule[] => {
+  return Object.entries(agentPermission).flatMap(([name, value]): PermissionRule[] => {
     if (value === 'allow' || value === 'ask' || value === 'deny') {
       return [{ permission: name, pattern: '*', action: value }];
     }
