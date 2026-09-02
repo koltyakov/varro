@@ -654,8 +654,14 @@
   align-items: center;
 }
 
+.assistant-activity-summary:not(.assistant-activity-summary-placeholder)
+  .assistant-activity-summary-main {
+  color: color-mix(in srgb, var(--color-vscode-fg) 68%, transparent);
+}
+
 .assistant-activity-summary-counts {
   color: var(--color-vscode-muted);
+  opacity: 0.68;
 }
 
 .assistant-activity-summary-noun {
