@@ -32,6 +32,7 @@ import {
 import { uiStore } from '../../lib/stores/ui-store';
 import { toApprovedPermissionReference, toPlainJudgeModel } from '../../lib/judge-request';
 import { resetMessageEditState } from '../../lib/message-edit-state';
+import { registerPermissionRemovalIntent } from '../../lib/message-list-layout';
 import { isWorkspaceDirectoryText } from '../../lib/part-utils';
 import { resolveTaskSessionId } from '../../lib/task-session';
 import { normalizePermissionEvent } from '../../lib/session-event-reducer';
@@ -2948,6 +2949,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     const decisionReference = permission
       ? toApprovedPermissionReference(permission, response)
       : null;
+    const releaseRemovalIntent = registerPermissionRemovalIntent(
+      groupMembers.length > 0 ? groupMembers.map((member) => member.id) : [permissionId],
+      response === 'always'
+    );
     try {
       for (const member of groupMembers) {
         const attempt = permissionJudgeAttempts.get(member.id);
@@ -2969,6 +2974,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       }
       if (options?.rethrow) throw err;
       return;
+    } finally {
+      releaseRemovalIntent();
     }
     if (permission && decisionReference) {
       recordPermissionDecisionReference(permission.sessionID, decisionReference);

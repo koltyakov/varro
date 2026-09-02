@@ -183,6 +183,22 @@ describe('compact activity virtualization signatures', () => {
     );
   });
 
+  it('invalidates a row when permission-linked activity enters the active tray', () => {
+    const messages = [
+      {
+        info: { id: 'assistant-1', role: 'assistant' as const },
+        parts: [activityPart],
+      },
+    ];
+
+    expect(getCompactActivityLayoutSignatures(messages, () => 'permission:permission-1')).toEqual(
+      new Map([['assistant-1', 'read-1:permission:permission-1']])
+    );
+    expect(getCompactActivityLayoutSignatures(messages, () => 'active')).toEqual(
+      new Map([['assistant-1', 'read-1:active']])
+    );
+  });
+
   it('revises every participating row when the shared disclosure changes', () => {
     const group = {
       key: 'activity-turn\u0000session-1\u0000user-1',

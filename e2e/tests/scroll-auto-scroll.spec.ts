@@ -20,6 +20,72 @@ test.describe('auto-scroll', () => {
       .toBeLessThan(15);
   });
 
+  test('keeps approved waiting tools from shifting the newest transcript backward', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 504, height: 900 });
+    await page.goto('/e2e/harness/index.html?scenario=permission-tool-collapse');
+    const list = page.locator('.interactive-list');
+    const assistant = page.locator('[data-msg-id="message-permission-collapse-assistant"]');
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+    await expect(page.locator('.tool-call-wait-icon.tool-status-pending')).toHaveCount(8);
+    await expect(page.locator('.permission-prompt-count')).toContainText('8');
+    await expect
+      .poll(() =>
+        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
+      )
+      .toBeLessThan(2);
+
+    const assistantTop = await assistant.evaluate((element) => {
+      const container = element.closest<HTMLElement>('.interactive-list')!;
+      return element.getBoundingClientRect().top - container.getBoundingClientRect().top;
+    });
+    const metricsBefore = await getScrollMetrics(page, '.interactive-list');
+    await page.getByRole('button', { name: 'Allow always' }).click();
+
+    const samples = await list.evaluate(async (element) => {
+      const result: Array<{ assistantTop: number | null; visibleToolCount: number }> = [];
+      for (let frame = 0; frame < 45; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const assistantRow = element.querySelector<HTMLElement>(
+          '[data-msg-id="message-permission-collapse-assistant"]'
+        );
+        result.push({
+          assistantTop: assistantRow
+            ? assistantRow.getBoundingClientRect().top - element.getBoundingClientRect().top
+            : null,
+          visibleToolCount: element.querySelectorAll(
+            '.tool-invocation-header, .assistant-active-activity-item'
+          ).length,
+        });
+      }
+      return result;
+    });
+
+    expect(
+      samples.every(
+        (sample) =>
+          sample.assistantTop !== null && Math.abs(sample.assistantTop - assistantTop) < 1.5
+      ),
+      JSON.stringify({
+        assistantTop,
+        metricsBefore,
+        metricsAfter: await getScrollMetrics(page, '.interactive-list'),
+        reserveHeight: await page
+          .locator('.append-scroll-bottom-reserve')
+          .evaluate((element) => element.getBoundingClientRect().height),
+        samples,
+      })
+    ).toBe(true);
+    expect(
+      samples.every((sample) => sample.visibleToolCount > 0),
+      JSON.stringify(samples)
+    ).toBe(true);
+    await expect(page.locator('.permission-prompt')).toHaveCount(0);
+    await expect(page.locator('.assistant-active-activity-item')).toHaveCount(8);
+    await expect(page.locator('.append-scroll-bottom-reserve')).toBeVisible();
+  });
+
   test('starts an active reasoning row without a full-shell jump', async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem('varro.showThinking', 'true'));
     await page.goto('/e2e/harness/index.html?scenario=large-transcript&activeReasoningEntrance=1');

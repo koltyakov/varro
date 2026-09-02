@@ -32,6 +32,7 @@ import {
   isSessionTreeStatusWorking,
   getSessionTreeIds,
   getSessionTreeRootId,
+  getPermissionGroupMembers,
   messageStructureVersion,
   messageInfoVersion,
   onBeforeShowThinkingPreferenceChange,
@@ -56,7 +57,10 @@ import {
   isAssistantMessage,
   isContinuationAssistantFinish,
 } from '../lib/message-metrics';
-import { registerQueuedMessageRemovalHandler } from '../lib/message-list-layout';
+import {
+  registerPermissionRemovalHandler,
+  registerQueuedMessageRemovalHandler,
+} from '../lib/message-list-layout';
 import {
   getFinalAssistantTextPartId,
   isWorkspaceDirectoryText,
@@ -1273,6 +1277,12 @@ export function MessageList() {
   let loadingRowHiddenByVisibleStream = false;
   let loadingRowReservedForMessageHydration = false;
   let appendBottomReserveTarget = 0;
+  let permissionRemovalBottomTarget: {
+    createdAt: number;
+    permissionIds: Set<string>;
+    sessionId: string;
+    scrollTop: number;
+  } | null = null;
 
   function getVirtualContentOrigin() {
     if (!containerRef) return lastVirtualContentOrigin;
@@ -1482,9 +1492,6 @@ export function MessageList() {
     getInlinePreviewLayoutSignatures(messages(), showFileDiffs())
   );
   let previousInlinePreviewLayoutSignatures = new Map<string, string>();
-  const compactActivityLayoutSignatures = createMemo(() =>
-    getCompactActivityLayoutSignatures(messages())
-  );
   let previousCompactActivityLayoutSignatures = new Map<string, string>();
   // Bootstrap exact heights once, then keep virtualization active as new rows arrive. Newly added
   // rows use provisional heights until mounted instead of remounting the full transcript.
@@ -1661,13 +1668,6 @@ export function MessageList() {
     scheduleChangedLayoutRowMeasurements(previousInlinePreviewLayoutSignatures, current);
 
     previousInlinePreviewLayoutSignatures = new Map(current);
-  });
-
-  createEffect(() => {
-    const current = compactActivityLayoutSignatures();
-    scheduleChangedLayoutRowMeasurements(previousCompactActivityLayoutSignatures, current);
-
-    previousCompactActivityLayoutSignatures = new Map(current);
   });
 
   function invalidateChangedZeroHeightRows(
@@ -2100,7 +2100,6 @@ export function MessageList() {
       ) {
         return;
       }
-      clearActivityExitReserve();
       requestMessageListScrollToBottom();
     });
   });
@@ -2201,6 +2200,31 @@ export function MessageList() {
     const key = getToolCallLookupKey(activeSessionRootId(), part.messageID, part.callID);
     return key ? (permissionRequestsByToolCall().get(key) ?? null) : null;
   }
+
+  const compactActivityLayoutSignatures = createMemo(() =>
+    getCompactActivityLayoutSignatures(messages(), (part) => {
+      const key = getAssistantActivityPartKey(part);
+      if (part.type === 'tool') {
+        const question = getQuestionRequestForTool(part);
+        if (question) return `question:${question.id}`;
+        const permission = getPermissionMatchForTool(part);
+        if (permission) {
+          return `permission:${permission.permission.id}:${permission.isActive ? 'active' : 'queued'}`;
+        }
+      }
+      if (visibleActiveActivityPartKeys().has(key)) return 'active';
+      if (retainedActivityPartKeys().has(key)) return 'retained';
+      if (exitingActivityPartKeys().has(key)) return 'exiting';
+      return isAssistantActivityPartRunning(part) ? 'delayed' : 'grouped';
+    })
+  );
+
+  createEffect(() => {
+    const current = compactActivityLayoutSignatures();
+    scheduleChangedLayoutRowMeasurements(previousCompactActivityLayoutSignatures, current);
+
+    previousCompactActivityLayoutSignatures = new Map(current);
+  });
 
   const stickyUserMessagePreviewCandidate = createMemo(() => {
     // Sticky state must follow current painted geometry. IntersectionObserver bounds can remain
@@ -3955,19 +3979,23 @@ export function MessageList() {
     activityExitSummarySettleFrames = 0;
   }
 
-  function reserveBottomCollapseSpace(reserve: number) {
+  function reserveBottomCollapseSpace(
+    reserve: number,
+    targetScrollTop?: number,
+    options?: { captureSummary?: boolean }
+  ) {
     if (!containerRef || reserve <= 0.5) return;
 
-    captureActivityExitSummaryAnchor();
-    if (activityExitSummaryAnchor) {
-      startActivityExitSummaryObserver(activityExitSummaryAnchor);
-      startActivityExitSummarySettle(activityExitSummaryAnchor);
+    if (options?.captureSummary !== false) {
+      captureActivityExitSummaryAnchor();
+      if (activityExitSummaryAnchor) {
+        startActivityExitSummaryObserver(activityExitSummaryAnchor);
+        startActivityExitSummarySettle(activityExitSummaryAnchor);
+      }
     }
-    const collapseTarget = Math.max(
-      containerRef.scrollTop,
-      lastObservedScrollTop,
-      lastAutoScrolledBottomScrollTop
-    );
+    const collapseTarget =
+      targetScrollTop ??
+      Math.max(containerRef.scrollTop, lastObservedScrollTop, lastAutoScrolledBottomScrollTop);
     appendBottomReserveTarget = collapseTarget;
     setAppendBottomReserve((current) => current + reserve);
     activityExitBottomTarget = collapseTarget;
@@ -5504,8 +5532,128 @@ export function MessageList() {
       return;
     }
 
-    appendBottomReserveTarget = bottomScrollTop();
+    if (existingReserve <= 0.5) appendBottomReserveTarget = bottomScrollTop();
     setAppendBottomReserve((reserve) => reserve + collapseHeight);
+  }
+
+  function prepareForPermissionRemoval(permissionId: string, removeGroup: boolean) {
+    if (!containerRef) return;
+    const permission = state.permissions.find((candidate) =>
+      getPermissionGroupMembers(candidate).some((member) => member.id === permissionId)
+    );
+    if (!permission) return;
+
+    const members = getPermissionGroupMembers(permission);
+    const removedMembers = removeGroup
+      ? members
+      : members.filter((member) => member.id === permissionId);
+    if (removedMembers.length === 0) return;
+    if (
+      permissionRemovalBottomTarget?.sessionId !== permission.sessionID ||
+      permissionRemovalBottomTarget.createdAt !== permission.time.created ||
+      !permissionRemovalBottomTarget.permissionIds.has(permissionId)
+    ) {
+      permissionRemovalBottomTarget = {
+        createdAt: permission.time.created,
+        permissionIds: new Set(members.map((member) => member.id)),
+        sessionId: permission.sessionID,
+        scrollTop: containerRef.scrollTop,
+      };
+    }
+
+    const removedParts: Array<Extract<AssistantActivityPart, { type: 'tool' }>> = [];
+    const disappearingElements = new Set<HTMLElement>();
+    for (const member of removedMembers) {
+      const message = messages().find(
+        (entry) => entry.info.id === member.messageID && entry.info.sessionID === member.sessionID
+      );
+      const part = message?.parts.find(
+        (candidate): candidate is Extract<Part, { type: 'tool' }> =>
+          candidate.type === 'tool' && candidate.callID === member.callID
+      );
+      if (!part) continue;
+      removedParts.push(part);
+      const element = containerRef.querySelector<HTMLElement>(
+        `[data-msg-id="${CSS.escape(part.messageID)}"] [data-assistant-render-key="${CSS.escape(`part:${part.id}`)}"]`
+      );
+      if (element?.getClientRects().length) disappearingElements.add(element);
+    }
+
+    const activePermission = pendingPermissionSequence().activePermission;
+    const activeMemberIds = new Set(
+      activePermission ? getPermissionGroupMembers(activePermission).map((member) => member.id) : []
+    );
+    const removesActivePrompt =
+      removedMembers.some((member) => activeMemberIds.has(member.id)) &&
+      (removeGroup || removedMembers.length === members.length);
+    if (removesActivePrompt) {
+      const prompt = containerRef.querySelector<HTMLElement>('.permission-prompt');
+      if (prompt?.getClientRects().length) disappearingElements.add(prompt);
+    }
+
+    const elementsByFlow = new Map<HTMLElement, Set<HTMLElement>>();
+    for (const element of disappearingElements) {
+      const flow = element.parentElement;
+      if (!flow) continue;
+      const elements = elementsByFlow.get(flow);
+      if (elements) elements.add(element);
+      else elementsByFlow.set(flow, new Set([element]));
+    }
+    let collapseHeight = 0;
+    for (const [flow, elements] of elementsByFlow) {
+      const visibleChildren = [...flow.children].filter(
+        (element): element is HTMLElement =>
+          element instanceof HTMLElement && element.getClientRects().length > 0
+      );
+      const disappearingChildren = visibleChildren.filter((element) => elements.has(element));
+      collapseHeight += disappearingChildren.reduce(
+        (total, element) => total + element.getBoundingClientRect().height,
+        0
+      );
+      const survivingChildren = visibleChildren.filter((element) => !elements.has(element));
+      const gap = Number.parseFloat(getComputedStyle(flow).rowGap) || 0;
+      collapseHeight +=
+        getAssistantFlowSpacingForElements(visibleChildren, gap) -
+        getAssistantFlowSpacingForElements(survivingChildren, gap);
+      if (
+        survivingChildren.length === 0 &&
+        disappearingChildren.length === visibleChildren.length
+      ) {
+        const row = flow.closest<HTMLElement>('.interactive-item-container');
+        if (row) {
+          collapseHeight += Math.max(
+            0,
+            row.getBoundingClientRect().height - flow.getBoundingClientRect().height
+          );
+        }
+      }
+    }
+    reserveBottomCollapseSpace(collapseHeight, permissionRemovalBottomTarget.scrollTop, {
+      captureSummary: false,
+    });
+
+    const now = Date.now();
+    batch(() => {
+      for (const part of removedParts) {
+        if (
+          !isAssistantActivityPartRunning(part) ||
+          !activeToolActivityMessageIds().has(part.messageID) ||
+          !shouldCompactAssistantActivityPart(part, {
+            keepEditInline: keepTrailingTurnEditMessageIds().has(part.messageID),
+            keepReasoningInline: inlineThinkingMessageIds().has(part.messageID),
+          }) ||
+          getQuestionRequestForTool(part)
+        ) {
+          continue;
+        }
+        const key = getAssistantActivityPartKey(part);
+        clearActivityShowTimer(key);
+        settledActivityPartKeys.delete(key);
+        activityPartFirstSeenAt.set(key, now);
+        claimAssistantItemReveal(part.messageID, `active-activity:${part.id}`);
+        setSetMembership(setVisibleActiveActivityPartKeys, key, true);
+      }
+    });
   }
 
   function handleExternalLayoutClickCapture(event: MouseEvent) {
@@ -5580,6 +5728,10 @@ export function MessageList() {
       reserveQueuedMessageRemoval
     );
     onCleanup(unregisterQueuedMessageRemoval);
+    const unregisterPermissionRemoval = registerPermissionRemovalHandler(
+      prepareForPermissionRemoval
+    );
+    onCleanup(unregisterPermissionRemoval);
     const stopCapturingThinkingAnchor = onBeforeShowThinkingPreferenceChange(() => {
       const canPreserveAnchor =
         !autoScroll() &&

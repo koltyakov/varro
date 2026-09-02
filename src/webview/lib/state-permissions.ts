@@ -12,6 +12,7 @@ import {
   markPermissionMutations,
 } from './permission-grouping';
 import { captureSessionStateTime } from './session-state-clock';
+import { prepareForPermissionRemoval, shouldRemovePermissionGroup } from './message-list-layout';
 
 const resolvedQuestionIds = new Set<string>();
 const transitionedQuestionIds = new Set<string>();
@@ -266,45 +267,49 @@ export function removePermission(permissionId: string, options?: { removeGroup?:
       item.duplicateIDs?.includes(permissionId) ||
       item.groupMembers?.some((member) => member.id === permissionId)
   );
+  const removeGroup = shouldRemovePermissionGroup(permissionId, options?.removeGroup === true);
   markPermissionMutations(
-    options?.removeGroup && matchedPermission
+    removeGroup && matchedPermission
       ? getPermissionGroupMembers(matchedPermission).map((member) => member.id)
       : [permissionId]
   );
-  setState(
-    'permissions',
-    produce((perms) => {
-      const idx = perms.findIndex(
-        (p) =>
-          p.id === permissionId ||
-          p.duplicateIDs?.includes(permissionId) ||
-          p.groupMembers?.some((member) => member.id === permissionId)
-      );
-      if (idx === -1) return;
-      if (options?.removeGroup) {
-        perms.splice(idx, 1);
-        return;
-      }
+  batch(() => {
+    if (matchedPermission) prepareForPermissionRemoval(permissionId, removeGroup);
+    setState(
+      'permissions',
+      produce((perms) => {
+        const idx = perms.findIndex(
+          (p) =>
+            p.id === permissionId ||
+            p.duplicateIDs?.includes(permissionId) ||
+            p.groupMembers?.some((member) => member.id === permissionId)
+        );
+        if (idx === -1) return;
+        if (removeGroup) {
+          perms.splice(idx, 1);
+          return;
+        }
 
-      const permission = perms[idx]!;
-      const groupMembers = getPermissionGroupMembers(permission).filter(
-        (member) => member.id !== permissionId
-      );
-      if (groupMembers.length === 0) {
-        perms.splice(idx, 1);
-        return;
-      }
+        const permission = perms[idx]!;
+        const groupMembers = getPermissionGroupMembers(permission).filter(
+          (member) => member.id !== permissionId
+        );
+        if (groupMembers.length === 0) {
+          perms.splice(idx, 1);
+          return;
+        }
 
-      const nextLeader = groupMembers[0]!;
-      permission.id = nextLeader.id;
-      permission.sessionID = nextLeader.sessionID;
-      permission.messageID = nextLeader.messageID;
-      permission.callID = nextLeader.callID;
-      permission.groupMembers = groupMembers.length > 1 ? groupMembers : undefined;
-      permission.duplicateIDs =
-        groupMembers.length > 1 ? groupMembers.map((member) => member.id) : undefined;
-    })
-  );
+        const nextLeader = groupMembers[0]!;
+        permission.id = nextLeader.id;
+        permission.sessionID = nextLeader.sessionID;
+        permission.messageID = nextLeader.messageID;
+        permission.callID = nextLeader.callID;
+        permission.groupMembers = groupMembers.length > 1 ? groupMembers : undefined;
+        permission.duplicateIDs =
+          groupMembers.length > 1 ? groupMembers.map((member) => member.id) : undefined;
+      })
+    );
+  });
 }
 
 export function reconcilePermissions(

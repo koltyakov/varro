@@ -46,6 +46,7 @@ type RequestLog = { method: string; path: string; body?: unknown };
 const SCENARIO_NAMES = [
   'blank',
   'pending-permission',
+  'permission-tool-collapse',
   'returning-linked-permission',
   'hidden-linked-permission',
   'missed-permission-event',
@@ -968,6 +969,75 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         time: { created: BASE_TIME - 500 },
       },
     ];
+    state.nextSequence = 20;
+    return state;
+  }
+
+  if (name === 'permission-tool-collapse') {
+    const session = makeSession(
+      'session-permission-tool-collapse',
+      'Permission tool collapse',
+      BASE_TIME - 1_000
+    );
+    const history: MessageEntry[] = [];
+    for (let index = 0; index < 26; index += 1) {
+      const user = makeUserMessage(
+        session.id,
+        `message-permission-collapse-history-user-${index}`,
+        [`Historical permission request ${index + 1}.`],
+        BASE_TIME - 120_000 + index * 2_000
+      );
+      const assistant = makeAssistantMessage(
+        session.id,
+        `message-permission-collapse-history-assistant-${index}`,
+        user.info.id,
+        `Historical permission response ${index + 1}.`,
+        BASE_TIME - 119_000 + index * 2_000
+      );
+      history.push(user, assistant);
+    }
+    const user = makeUserMessage(
+      session.id,
+      'message-permission-collapse-user',
+      ['Run every verification command.'],
+      BASE_TIME - 6_000
+    );
+    const assistant = makeAssistantMessage(
+      session.id,
+      'message-permission-collapse-assistant',
+      user.info.id,
+      'The verification commands are waiting for approval.',
+      BASE_TIME - 5_000
+    );
+    assistant.parts = Array.from({ length: 8 }, (_, index): Part => ({
+      id: `tool-permission-collapse-${index}`,
+      sessionID: session.id,
+      messageID: assistant.info.id,
+      type: 'tool',
+      callID: `permission-collapse-call-${index}`,
+      tool: 'bash',
+      state: {
+        status: 'running',
+        input: { command: 'npm test' },
+        title: `Verification command ${index + 1}`,
+        metadata: {},
+        time: { start: BASE_TIME - 4_000 + index },
+      },
+    }));
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'busy' };
+    state.messagesBySessionId[session.id] = [...history, user, assistant];
+    state.persistedActiveSessionId = session.id;
+    state.pendingPermissions = assistant.parts.map((part, index) => ({
+      id: `permission-collapse-${index}`,
+      permission: 'bash',
+      sessionID: session.id,
+      title: 'Allow running npm test?',
+      metadata: { command: 'npm test' },
+      tool: { messageID: assistant.info.id, callID: 'callID' in part ? part.callID : '' },
+      patterns: ['npm test'],
+      time: { created: BASE_TIME - 3_900 + index },
+    }));
     state.nextSequence = 20;
     return state;
   }

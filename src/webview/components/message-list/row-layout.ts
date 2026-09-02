@@ -257,15 +257,18 @@ export function getCompactActivityLayoutSignatures(
   messages: readonly {
     info: { id: string; role: 'user' | 'assistant' };
     parts: readonly Part[];
-  }[]
+  }[],
+  getPresentationState: (part: AssistantActivityPart) => string = () => ''
 ) {
   const signatures = new Map<string, string>();
 
   for (const message of messages) {
     if (message.info.role !== 'assistant') continue;
-    const activityPartIds = message.parts.flatMap((part) =>
-      isAssistantActivityPart(part) ? [part.id] : []
-    );
+    const activityPartIds = message.parts.flatMap((part) => {
+      if (!isAssistantActivityPart(part)) return [];
+      const presentationState = getPresentationState(part);
+      return [presentationState ? `${part.id}:${presentationState}` : part.id];
+    });
     if (activityPartIds.length > 0) {
       signatures.set(message.info.id, activityPartIds.join('\u0000'));
     }
