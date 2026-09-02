@@ -15,7 +15,7 @@
   color: var(--color-vscode-input-fg);
   outline: none;
   font-family: inherit;
-  font-weight: 300;
+  font-weight: 400;
   border: none;
   white-space: pre-wrap;
   word-wrap: break-word;
@@ -39,7 +39,7 @@
   align-items: center;
   gap: 4px;
   font-size: 11px;
-  font-weight: 300;
+  font-weight: 400;
   padding: 1px 5px;
   margin: 0 1px;
   border: 1px solid transparent;
@@ -288,7 +288,7 @@
 .chat-thinking-box .thinking-label-text {
   display: block;
   min-width: 0;
-  font-weight: 300;
+  font-weight: 400;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1192,7 +1192,7 @@ kbd {
 }
 
 .chat-tool-invocation-part.tool-invocation-task .tool-invocation-title {
-  font-weight: 300;
+  font-weight: 400;
 }
 
 .chat-tool-invocation-part:not(:last-child) {
@@ -1296,7 +1296,7 @@ kbd {
 .chat-tool-invocation-part .tool-invocation-title {
   flex: 1;
   min-width: 0;
-  font-weight: 300;
+  font-weight: 400;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1915,7 +1915,7 @@ kbd {
   display: inline-flex;
   align-items: center;
   font-size: inherit;
-  font-weight: 300;
+  font-weight: 400;
   color: var(--color-vscode-fg);
   flex-shrink: 0;
   line-height: 1.2;
@@ -1928,7 +1928,7 @@ kbd {
   gap: 4px;
   font-family: inherit;
   font-size: inherit;
-  font-weight: 300;
+  font-weight: 400;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2101,7 +2101,7 @@ kbd {
   display: inline-flex;
   align-items: center;
   font-size: inherit;
-  font-weight: 300;
+  font-weight: 400;
   color: var(--color-vscode-fg);
   flex-shrink: 0;
   line-height: 1.2;
@@ -2114,7 +2114,7 @@ kbd {
   gap: 4px;
   font-family: inherit;
   font-size: inherit;
-  font-weight: 300;
+  font-weight: 400;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

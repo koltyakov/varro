@@ -501,7 +501,7 @@
   overflow: hidden;
   color: color-mix(in srgb, var(--color-vscode-muted) 72%, transparent);
   font-size: 10px;
-  font-weight: 300;
+  font-weight: 400;
   opacity: 0;
   text-overflow: ellipsis;
   white-space: nowrap;

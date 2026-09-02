@@ -1262,6 +1262,7 @@
   background: color-mix(in srgb, var(--models-route-color) 16%, transparent);
   color: color-mix(in srgb, var(--models-route-color) 52%, var(--color-vscode-fg));
   font-weight: 600;
+  line-height: 1;
 }
 
 .models-route-tag-agent {

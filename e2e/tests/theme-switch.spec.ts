@@ -12,7 +12,7 @@ for (const theme of ['dark', 'light'] as const) {
       probe.innerHTML = `
         <div class="rendered-markdown"><h2>Heading</h2><p>Body <code>inline</code></p></div>
         <button class="assistant-activity-summary"><span class="assistant-activity-summary-counts">3 files</span></button>
-        <div class="chat-tool-invocation-part"><span class="tool-invocation-activity-age">21s</span></div>
+        <div class="chat-tool-invocation-part"><span class="tool-invocation-title">Tool title</span><span class="tool-invocation-activity-age">21s</span></div>
       `;
       element.append(probe);
     });
@@ -61,11 +61,15 @@ for (const theme of ['dark', 'light'] as const) {
       const sessionStyle = style('.interactive-session');
       const markdownStyle = style('[data-typography-probe] .rendered-markdown');
       const codeStyle = style('[data-typography-probe] code');
+      const composerStyle = style('.rich-composer');
+      const toolTitleStyle = style('[data-typography-probe] .tool-invocation-title');
       return {
         sessionFontSize: sessionStyle.fontSize,
         markdownFontSize: markdownStyle.fontSize,
         markdownFontWeight: markdownStyle.fontWeight,
         markdownLineHeight: markdownStyle.lineHeight,
+        composerFontWeight: composerStyle.fontWeight,
+        toolTitleFontWeight: toolTitleStyle.fontWeight,
         codeBorderStyle: codeStyle.borderStyle,
         codeColor: codeStyle.color,
         contrasts: [
@@ -79,6 +83,8 @@ for (const theme of ['dark', 'light'] as const) {
     expect(metrics.markdownFontSize).toBe('13.5px');
     expect(metrics.markdownFontWeight).toBe('400');
     expect(metrics.markdownLineHeight).toBe('22.275px');
+    expect(metrics.composerFontWeight).toBe('400');
+    expect(metrics.toolTitleFontWeight).toBe('400');
     expect(metrics.codeBorderStyle).toBe('solid');
     expect(metrics.codeColor).toBe(theme === 'dark' ? 'rgb(215, 186, 125)' : 'rgb(163, 21, 21)');
     for (const ratio of metrics.contrasts) {

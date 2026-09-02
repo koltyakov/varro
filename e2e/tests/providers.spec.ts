@@ -82,6 +82,28 @@ test('opens manage models from the picker and filters the model catalog', async 
   await expect(page.getByText('GitHub Copilot', { exact: true })).toHaveCount(0);
 });
 
+test('centers model route tags within their fixed height', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+
+  await page.getByLabel('GitHub Copilot / GPT-5 mini').click();
+  await page.getByRole('button', { name: 'Manage models', exact: true }).click();
+
+  const nameWrap = page.locator('.models-model-name-wrap').first();
+  await expect(nameWrap).toBeVisible();
+  const tag = nameWrap.locator('[data-testid="route-tag-probe"]');
+  await nameWrap.evaluate((element) => {
+    const routeTag = document.createElement('span');
+    routeTag.className = 'model-capability-tag models-route-tag models-route-tag-commit';
+    routeTag.dataset.testid = 'route-tag-probe';
+    routeTag.textContent = 'commit';
+    element.append(routeTag);
+  });
+
+  await expect(tag).toHaveCSS('height', '16px');
+  await expect(tag).toHaveCSS('line-height', '9px');
+  await expect(tag).toHaveCSS('align-items', 'center');
+});
+
 test('prevents text selection across model rows', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
 
