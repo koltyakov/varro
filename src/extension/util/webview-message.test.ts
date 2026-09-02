@@ -496,6 +496,31 @@ describe('webview message validation', () => {
     expect(
       parseWebviewMessage({
         type: 'vscode/open-text',
+        payload: {
+          content: '# Findings',
+          title: 'Review implementation (task_result)',
+          view: 'markdown-preview',
+        },
+      })
+    ).toEqual({
+      type: 'vscode/open-text',
+      payload: {
+        content: '# Findings',
+        title: 'Review implementation (task_result)',
+        view: 'markdown-preview',
+      },
+    });
+
+    expect(
+      parseWebviewMessage({
+        type: 'vscode/open-text',
+        payload: { content: '# Findings', title: 'Result', view: 'side-by-side' },
+      })
+    ).toBeNull();
+
+    expect(
+      parseWebviewMessage({
+        type: 'vscode/open-text',
         payload: { content: '<svg />', title: 'SVG user message', language: 'xml' },
       })
     ).toEqual({

@@ -42,7 +42,12 @@ export function clampToolText(content: string) {
   return { clamped: true as const, preview: trimBlankEdges(capped), lineCount };
 }
 
-export function openToolText(payload: { content: string; title: string; language?: string }) {
+export function openToolText(payload: {
+  content: string;
+  title: string;
+  language?: string;
+  view?: 'markdown-preview';
+}) {
   postMessage({ type: 'vscode/open-text', payload });
 }
 
@@ -58,6 +63,7 @@ export function ClampedToolText(props: {
   /** Names the editor tab when the full text is opened. */
   title: string;
   language?: string;
+  view?: 'markdown-preview';
   class?: string;
   role?: JSX.HTMLAttributes<HTMLPreElement>['role'];
   'aria-label'?: string;
@@ -88,7 +94,12 @@ export function ClampedToolText(props: {
   const truncated = () => result().clamped || wrapped();
 
   const openFull = () => {
-    openToolText({ content: props.content, title: props.title, language: props.language });
+    openToolText({
+      content: props.content,
+      title: props.title,
+      language: props.language,
+      view: props.view,
+    });
   };
 
   // A click that ends a text selection is the user copying, not asking to open.
@@ -107,7 +118,13 @@ export function ClampedToolText(props: {
       class={`${props.class ?? ''} tool-text-clamped`}
       classList={{ 'is-truncated': truncated() }}
       onClick={openUnlessSelecting}
-      title={truncated() ? 'Open full text in an editor tab' : undefined}
+      title={
+        truncated()
+          ? props.view === 'markdown-preview'
+            ? 'Open full text in Markdown preview'
+            : 'Open full text in an editor tab'
+          : undefined
+      }
       role={props.role}
       aria-label={props['aria-label']}
     >

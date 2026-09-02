@@ -279,7 +279,24 @@ export function createSidebarProviderActions(
       }
     },
     openText: async (payload) => {
-      await deps.toolOutputProvider.open(payload);
+      if (payload.view !== 'markdown-preview') {
+        await deps.toolOutputProvider.open(payload);
+        return;
+      }
+
+      const uri = await deps.toolOutputProvider.open({
+        content: payload.content,
+        title: payload.title,
+        language: 'markdown',
+        show: false,
+      });
+      if (uri) {
+        await vscode.commands.executeCommand(
+          'vscode.openWith',
+          uri,
+          'vscode.markdown.preview.editor'
+        );
+      }
     },
     openExternal: async (url) => {
       if (!url.startsWith('https://')) {

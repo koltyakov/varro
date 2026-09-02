@@ -1154,6 +1154,68 @@ describe('ToolCall', () => {
     expect(rows.some((row) => row.classList.contains('structured-tool-row-block'))).toBe(false);
   });
 
+  it('opens long task prompts and results in Markdown preview', () => {
+    const send = setExtensionSender();
+    const prompt = ['# Review', '', 'Inspect:', '- API', '- UI', '- Tests', '- Docs'].join('\n');
+    const result = [
+      '# Findings',
+      '',
+      '## API',
+      'Ready',
+      '## UI',
+      'Ready',
+      '## Tests',
+      'Ready',
+    ].join('\n');
+    const part: ToolPart = {
+      id: 'tool-markdown-preview',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-markdown-preview',
+      tool: 'task',
+      state: {
+        status: 'completed',
+        input: {
+          subagent_type: 'general',
+          prompt,
+        },
+        output: `<task_result>${result}</task_result>`,
+        title: 'Review implementation',
+        metadata: {},
+        time: { start: 0, end: 1 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+    const rows = Array.from(container?.querySelectorAll('.structured-tool-row') || []);
+    const rowFor = (label: string) =>
+      rows.find((row) => row.querySelector('.structured-tool-label')?.textContent === label);
+    rowFor('prompt')?.querySelector<HTMLPreElement>('.structured-tool-value')?.click();
+    rowFor('task_result')?.querySelector<HTMLPreElement>('.structured-tool-value')?.click();
+
+    expect(send).toHaveBeenNthCalledWith(1, {
+      type: 'vscode/open-text',
+      payload: {
+        content: prompt,
+        title: 'Review implementation (prompt)',
+        language: undefined,
+        view: 'markdown-preview',
+      },
+    });
+    expect(send).toHaveBeenNthCalledWith(2, {
+      type: 'vscode/open-text',
+      payload: {
+        content: result,
+        title: 'Review implementation (task_result)',
+        language: undefined,
+        view: 'markdown-preview',
+      },
+    });
+  });
+
   it('shows the subagent model and reasoning in expanded task details', () => {
     setState('messages', [
       {

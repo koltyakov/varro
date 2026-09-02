@@ -754,13 +754,16 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       const content = getBoundedString(payload?.content, MAX_OPEN_TEXT_LENGTH, true);
       const title = getBoundedString(payload?.title, MAX_OPEN_TEXT_TITLE_LENGTH);
       const language = getOptionalBoundedString(payload?.language, 40);
+      const view = getOptionalBoundedString(payload?.view, 40);
       if (content === null || !title) return null;
       if (language !== undefined && !OPEN_TEXT_LANGUAGES.has(language)) return null;
+      if (view !== undefined && view !== 'markdown-preview') return null;
       const openTextPayload: Extract<WebviewMessage, { type: 'vscode/open-text' }>['payload'] = {
         content,
         title,
       };
       if (language) openTextPayload.language = language;
+      if (view) openTextPayload.view = view;
       return { type, payload: openTextPayload };
     }
 

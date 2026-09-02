@@ -1673,6 +1673,7 @@ function GenericToolCall(props: {
                 result={structuredResult()}
                 onOpenPath={openGenericToolFile}
                 toolTitle={props.title}
+                previewMarkdown={isTask()}
               />
             }
           >
@@ -1817,6 +1818,7 @@ function StructuredToolCard(props: {
   onOpenPath: (path: string) => void;
   /** Prefixes editor-tab titles so an opened value says which tool it came from. */
   toolTitle: string;
+  previewMarkdown?: boolean;
 }) {
   const promptEntry = () => props.inputEntries.find(([key]) => key === 'prompt') || null;
   const nonPromptEntries = () => props.inputEntries.filter(([key]) => key !== 'prompt');
@@ -1867,6 +1869,7 @@ function StructuredToolCard(props: {
             <ClampedToolText
               content={formatExpandedValue(entry()[0], entry()[1])}
               title={`${props.toolTitle} (${entry()[0]})`}
+              view={props.previewMarkdown ? 'markdown-preview' : undefined}
               class="structured-tool-value"
             />
           </div>
@@ -1882,6 +1885,7 @@ function StructuredToolCard(props: {
               content={result().value}
               title={`${props.toolTitle} (${result().label})`}
               language={result().status ? 'plaintext' : undefined}
+              view={props.previewMarkdown && !result().status ? 'markdown-preview' : undefined}
               class={`structured-tool-value structured-tool-value-result${
                 result().status
                   ? ` tool-invocation-error${result().status === 'aborted' ? ' is-aborted' : ''}`

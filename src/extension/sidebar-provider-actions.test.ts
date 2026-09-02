@@ -1,5 +1,6 @@
 /* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-module-mocking, anti-slop/require-safety-comment-for-type-assertion -- These action tests verify imported VS Code commands with partial provider and private-state fixtures. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type * as vscode from 'vscode';
 
 const mocks = vi.hoisted(() => {
   const config = {
@@ -234,6 +235,33 @@ describe('createSidebarProviderActions', () => {
     await actions.openSessionInOpenCode('session-1');
 
     expect(deps.openSessionInTerminal).toHaveBeenCalledWith('session-1');
+  });
+
+  it('opens generated Markdown directly in the preview editor', async () => {
+    const { actions, deps } = createActionFixture();
+    const uri = {
+      scheme: 'varro-tool-output',
+      path: '/id/Review implementation (task_result).md',
+    } as vscode.Uri;
+    deps.toolOutputProvider.open.mockResolvedValueOnce(uri);
+
+    await actions.openText({
+      content: '# Findings',
+      title: 'Review implementation (task_result)',
+      view: 'markdown-preview',
+    });
+
+    expect(deps.toolOutputProvider.open).toHaveBeenCalledWith({
+      content: '# Findings',
+      title: 'Review implementation (task_result)',
+      language: 'markdown',
+      show: false,
+    });
+    expect(mocks.vscode.commands.executeCommand).toHaveBeenCalledWith(
+      'vscode.openWith',
+      uri,
+      'vscode.markdown.preview.editor'
+    );
   });
 
   it('refuses to open an OpenCode session from another workspace', async () => {
