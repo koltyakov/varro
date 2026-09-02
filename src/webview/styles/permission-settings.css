@@ -134,6 +134,7 @@
   color: var(--color-vscode-fg);
   font-size: 11px;
   font-weight: 600;
+  line-height: 15px;
 }
 
 .permission-config-heading > .permission-config-level,
@@ -417,10 +418,6 @@
   text-align: left;
 }
 
-.permission-config-action-button > span {
-  transform: translateY(1px);
-}
-
 .permission-config-action-button > .ui-icon {
   flex: none;
   color: var(--color-vscode-muted);
@@ -530,6 +527,7 @@
   color: var(--color-vscode-muted);
   font-size: 9px;
   font-weight: 600;
+  line-height: 10px;
 }
 
 .permission-rule-group-dot {
@@ -578,7 +576,7 @@
   color: color-mix(in srgb, var(--color-vscode-fg) 84%, var(--color-vscode-muted));
   background: color-mix(in srgb, var(--color-vscode-input-bg) 72%, transparent);
   font-size: 9px;
-  line-height: 1;
+  line-height: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
