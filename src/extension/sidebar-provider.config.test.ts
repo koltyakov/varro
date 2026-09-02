@@ -7,6 +7,7 @@ import {
   getConfigurationValue,
   getVscodeMock,
 } from './sidebar-provider.test-support';
+import { getOpenCodeConfigPaths } from './open-code-process';
 
 const vscodeMock = getVscodeMock();
 
@@ -634,11 +635,13 @@ describe('SidebarProvider local config routing', () => {
   it('attributes global permission config separately from project rules', async () => {
     vi.stubEnv('XDG_CONFIG_HOME', '/global');
     try {
+      const globalConfigPath = getOpenCodeConfigPaths().at(-1);
+      if (!globalConfigPath) throw new Error('Expected an OpenCode global config path');
       vscodeMock.workspace.fs.readFile.mockImplementation((uri: { fsPath: string }) => {
         if (uri.fsPath === '/repo/opencode.jsonc') {
           return Promise.resolve(new TextEncoder().encode('{ "permission": { "bash": "ask" } }'));
         }
-        if (uri.fsPath === '/global/opencode/opencode.jsonc') {
+        if (uri.fsPath === globalConfigPath) {
           return Promise.resolve(
             new TextEncoder().encode('{ "permission": { "webfetch": "allow" } }')
           );
@@ -674,7 +677,7 @@ describe('SidebarProvider local config routing', () => {
             ],
             inheritedSources: [
               {
-                path: '/global/opencode/opencode.jsonc',
+                path: globalConfigPath,
                 rules: [{ permission: 'webfetch', pattern: '*', action: 'allow' }],
                 scope: 'global',
               },
