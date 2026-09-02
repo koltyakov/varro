@@ -1232,8 +1232,7 @@ function renderIncompleteStreamingMarkdown(content: string): IncompleteStreaming
     return { content, marker: null, pendingText: null };
   }
 
-  let marker = STREAMING_MARKDOWN_PENDING_MARKER;
-  while (content.includes(marker)) marker += 'X';
+  const marker = getStreamingMarkdownPendingMarker(content);
   const syntheticFenceCloser =
     openFence && suppressedFenceSuffixStart === pendingStart
       ? `${openFence.char.repeat(openFence.length)}\n\n`
@@ -1244,6 +1243,21 @@ function renderIncompleteStreamingMarkdown(content: string): IncompleteStreaming
     marker,
     pendingText: content.slice(pendingStart),
   };
+}
+
+function getStreamingMarkdownPendingMarker(content: string) {
+  let longestSuffix = -1;
+  let searchFrom = 0;
+  while (searchFrom < content.length) {
+    const markerIndex = content.indexOf(STREAMING_MARKDOWN_PENDING_MARKER, searchFrom);
+    if (markerIndex < 0) break;
+    let suffixLength = 0;
+    const suffixStart = markerIndex + STREAMING_MARKDOWN_PENDING_MARKER.length;
+    while (content[suffixStart + suffixLength] === 'X') suffixLength += 1;
+    longestSuffix = Math.max(longestSuffix, suffixLength);
+    searchFrom = suffixStart + suffixLength;
+  }
+  return `${STREAMING_MARKDOWN_PENDING_MARKER}${'X'.repeat(longestSuffix + 1)}`;
 }
 
 function hasCompletedBareUrlPunctuation(candidate: string) {

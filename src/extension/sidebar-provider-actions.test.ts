@@ -375,6 +375,7 @@ describe('createSidebarProviderActions', () => {
     await actions.handleApiRequest({ id: 4, method: 'GET', path: '/api', body: { ok: true } });
 
     expect(deps.handleReadyMessage).toHaveBeenCalledOnce();
+    expect(deps.handleReadyMessage).toHaveBeenCalledWith(undefined);
     expect(deps.setWebviewFocus).toHaveBeenCalledWith(true);
     expect(deps.setProviderWatchActive).toHaveBeenCalledWith(true);
     expect(deps.postContext).toHaveBeenCalledTimes(2);

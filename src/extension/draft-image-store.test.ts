@@ -17,6 +17,16 @@ function createPersistence() {
   return { persistence, storage };
 }
 
+function draftImage(id: string) {
+  return {
+    id,
+    url: `data:image/png;base64,${id}`,
+    mime: 'image/png',
+    filename: `${id}.png`,
+    size: 1,
+  };
+}
+
 describe('DraftImageStore', () => {
   it('restores pasted images after the host is recreated', async () => {
     const { persistence } = createPersistence();
@@ -103,5 +113,129 @@ describe('DraftImageStore', () => {
 
     expect(store.list()[0]?.contextFile?.path).toBe('/tmp/current-host/image.png');
     expect(persistence.set).not.toHaveBeenCalled();
+  });
+
+  it('coalesces snapshots queued behind a slow persistence write', async () => {
+    let releaseFirstWrite!: () => void;
+    const firstWrite = new Promise<void>((resolve) => {
+      releaseFirstWrite = resolve;
+    });
+    const persisted: unknown[] = [];
+    const persistence: Persistence = {
+      get: () => undefined,
+      set: vi
+        .fn<(key: string, value: unknown) => void | Promise<void>>()
+        .mockImplementationOnce(async (_key, value) => {
+          await firstWrite;
+          persisted.push(value);
+        })
+        .mockImplementation((_key, value) => {
+          persisted.push(value);
+        }),
+      remove: vi.fn(),
+    };
+    const store = new DraftImageStore(persistence);
+    const first = store.update([draftImage('first')]);
+    await Promise.resolve();
+    const second = store.update([draftImage('second')]);
+    const latest = store.update([draftImage('latest')]);
+    expect(persistence.set).toHaveBeenCalledOnce();
+
+    releaseFirstWrite();
+    await Promise.all([first, second, latest]);
+
+    expect(persistence.set).toHaveBeenCalledTimes(2);
+    expect(persisted.at(-1)).toEqual({
+      sidebar: [draftImage('latest')],
+    });
+  });
+
+  it('does not retain a waiter for every replacement snapshot', async () => {
+    let releaseFirstWrite!: () => void;
+    const firstWrite = new Promise<void>((resolve) => {
+      releaseFirstWrite = resolve;
+    });
+    const persistence: Persistence = {
+      get: () => undefined,
+      set: vi
+        .fn<(key: string, value: unknown) => void | Promise<void>>()
+        .mockImplementationOnce(() => firstWrite),
+      remove: vi.fn(),
+    };
+    const store = new DraftImageStore(persistence);
+    const first = store.update([draftImage('first')]);
+    await Promise.resolve();
+    const pending = store.update([draftImage('pending')]);
+    const replacements = Array.from({ length: 1_000 }, (_, index) =>
+      store.update([draftImage(`replacement-${index}`)])
+    );
+
+    expect(new Set(replacements)).toEqual(new Set([pending]));
+    expect(persistence.set).toHaveBeenCalledOnce();
+
+    releaseFirstWrite();
+    await Promise.all([first, pending, ...replacements, store.dispose()]);
+    expect(persistence.set).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects every coalesced update when the shared snapshot write fails', async () => {
+    let releaseFirstWrite!: () => void;
+    const firstWrite = new Promise<void>((resolve) => {
+      releaseFirstWrite = resolve;
+    });
+    const persistence: Persistence = {
+      get: () => undefined,
+      set: vi
+        .fn<(key: string, value: unknown) => void | Promise<void>>()
+        .mockImplementationOnce(() => firstWrite)
+        .mockRejectedValueOnce(new Error('disk full')),
+      remove: vi.fn(),
+    };
+    const store = new DraftImageStore(persistence);
+    const first = store.update([draftImage('first')]);
+    await Promise.resolve();
+    const pending = store.update([draftImage('pending')]);
+    const latest = store.update([draftImage('latest')]);
+
+    expect(latest).toBe(pending);
+    releaseFirstWrite();
+    await first;
+    await expect(pending).rejects.toThrow('disk full');
+    await expect(latest).rejects.toThrow('disk full');
+  });
+
+  it('waits for an update queued during persistence settlement before disposal completes', async () => {
+    let releaseSecondWrite!: () => void;
+    const secondWrite = new Promise<void>((resolve) => {
+      releaseSecondWrite = resolve;
+    });
+    const persistence: Persistence = {
+      get: () => undefined,
+      set: vi
+        .fn<(key: string, value: unknown) => void | Promise<void>>()
+        .mockResolvedValueOnce(undefined)
+        .mockImplementationOnce(() => secondWrite),
+      remove: vi.fn(),
+    };
+    const store = new DraftImageStore(persistence);
+    const firstImage = {
+      id: 'first',
+      url: 'data:image/png;base64,first',
+      mime: 'image/png',
+      filename: 'first.png',
+      size: 1,
+    };
+    await store.update([firstImage]);
+    const secondUpdate = store.update([{ ...firstImage, id: 'second', filename: 'second.png' }]);
+    let disposed = false;
+    const disposal = store.dispose().then(() => {
+      disposed = true;
+    });
+    await Promise.resolve();
+
+    expect(disposed).toBe(false);
+    releaseSecondWrite();
+    await Promise.all([secondUpdate, disposal]);
+    expect(disposed).toBe(true);
   });
 });

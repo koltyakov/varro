@@ -29,6 +29,14 @@ vi.mock('./webview-html', () => ({
 
 import { SidebarProviderBridge } from './sidebar-provider-bridge';
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 function createInitialState(): InitialWebviewState {
   return {
     theme: 'dark',
@@ -164,6 +172,138 @@ describe('SidebarProviderBridge', () => {
     await delivery;
     await Promise.resolve();
 
+    expect(onFailure).not.toHaveBeenCalled();
+  });
+
+  it('bounds pending deliveries when the webview stops acknowledging messages', async () => {
+    const bridge = new SidebarProviderBridge({ fsPath: '/extension' } as never);
+    const view = createView();
+    view.webview.postMessage.mockReturnValue(new Promise(() => {}));
+    const onFailure = vi.fn();
+    bridge.onDeliveryFailure(onFailure);
+    bridge.setView(view as never);
+
+    for (let index = 0; index < 1_000; index += 1) {
+      bridge.post({ type: 'command/focus-input' });
+    }
+
+    expect(view.webview.postMessage).toHaveBeenCalledTimes(512);
+    expect(onFailure).toHaveBeenCalledOnce();
+  });
+
+  it('keeps an overflowed document closed until a fresh document reports ready', async () => {
+    const delivery = createDeferred<boolean>();
+    const bridge = new SidebarProviderBridge({ fsPath: '/extension' } as never);
+    const view = createView();
+    view.webview.postMessage.mockReturnValue(delivery.promise);
+    const onFailure = vi.fn();
+    bridge.onDeliveryFailure(onFailure);
+    bridge.setView(view as never);
+
+    for (let index = 0; index < 513; index += 1) {
+      bridge.post({ type: 'command/focus-input' });
+    }
+    delivery.resolve(true);
+    await delivery.promise;
+    await Promise.resolve();
+
+    bridge.post({ type: 'command/focus-input' });
+    expect(view.webview.postMessage).toHaveBeenCalledTimes(512);
+
+    bridge.markViewReady();
+    view.webview.postMessage.mockReturnValue(Promise.resolve(true));
+    bridge.post({ type: 'command/focus-input' });
+    expect(view.webview.postMessage).toHaveBeenCalledTimes(513);
+  });
+
+  it('does not count synchronous or void deliveries as pending', () => {
+    const bridge = new SidebarProviderBridge({ fsPath: '/extension' } as never);
+    const view = createView();
+    const onFailure = vi.fn();
+    bridge.onDeliveryFailure(onFailure);
+    bridge.setView(view as never);
+
+    for (let index = 0; index < 1_000; index += 1) {
+      bridge.post({ type: 'command/focus-input' });
+    }
+    view.webview.postMessage.mockReturnValue(true);
+    for (let index = 0; index < 1_000; index += 1) {
+      bridge.post({ type: 'command/focus-input' });
+    }
+
+    expect(view.webview.postMessage).toHaveBeenCalledTimes(2_000);
+    expect(onFailure).not.toHaveBeenCalled();
+  });
+
+  it('keeps the same view poisoned across invalidation and reassignment', () => {
+    const bridge = new SidebarProviderBridge({ fsPath: '/extension' } as never);
+    const view = createView();
+    view.webview.postMessage.mockReturnValue(new Promise(() => {}));
+    bridge.setView(view as never);
+
+    for (let index = 0; index < 513; index += 1) {
+      bridge.post({ type: 'command/focus-input' });
+    }
+    bridge.invalidatePendingDeliveries();
+    bridge.setView(view as never);
+    bridge.post({ type: 'command/focus-input' });
+
+    expect(view.webview.postMessage).toHaveBeenCalledTimes(512);
+  });
+
+  it('counts reliable deliveries against the same bound', async () => {
+    const bridge = new SidebarProviderBridge({ fsPath: '/extension' } as never);
+    const view = createView();
+    view.webview.postMessage.mockReturnValue(new Promise(() => {}));
+    bridge.setView(view as never);
+
+    for (let index = 0; index < 512; index += 1) {
+      bridge.post({ type: 'command/focus-input' });
+    }
+
+    await expect(bridge.deliver({ type: 'command/focus-input' })).resolves.toBe(false);
+    expect(view.webview.postMessage).toHaveBeenCalledTimes(512);
+  });
+
+  it('does not treat a void host shim as a reliable acknowledgement', async () => {
+    const bridge = new SidebarProviderBridge({ fsPath: '/extension' } as never);
+    const view = createView();
+    bridge.setView(view as never);
+
+    await expect(bridge.deliver({ type: 'command/focus-input' })).resolves.toBe(false);
+  });
+
+  it('contains errors thrown by the delivery failure handler', async () => {
+    const bridge = new SidebarProviderBridge({ fsPath: '/extension' } as never);
+    const view = createView();
+    view.webview.postMessage.mockResolvedValue(false);
+    bridge.onDeliveryFailure(() => {
+      throw new Error('recovery failed');
+    });
+    bridge.setView(view as never);
+
+    bridge.post({ type: 'command/focus-input' });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mocks.logger.warn).toHaveBeenCalledWith(
+      'Webview delivery failure handler failed: recovery failed'
+    );
+  });
+
+  it('delivers a healthy same-turn burst without forcing recovery', async () => {
+    const bridge = new SidebarProviderBridge({ fsPath: '/extension' } as never);
+    const view = createView();
+    view.webview.postMessage.mockResolvedValue(true);
+    const onFailure = vi.fn();
+    bridge.onDeliveryFailure(onFailure);
+    bridge.setView(view as never);
+
+    for (let index = 0; index < 256; index += 1) {
+      bridge.post({ type: 'command/focus-input' });
+    }
+
+    await vi.waitFor(() => expect(view.webview.postMessage).toHaveBeenCalledTimes(256));
     expect(onFailure).not.toHaveBeenCalled();
   });
 

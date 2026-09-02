@@ -2,7 +2,11 @@
 /* oxlint-disable anti-slop/no-known-value-widening -- Request headers intentionally use the Fetch API dictionary contract. */
 import { parseHealthResponse } from '../shared/health';
 import { CURRENT_OPENCODE_ENDPOINTS } from '../shared/opencode-endpoints';
-import { parseServerEvent, type ServerStatus } from '../shared/protocol';
+import {
+  MAX_SERVER_EVENT_ID_LENGTH,
+  parseServerEvent,
+  type ServerStatus,
+} from '../shared/protocol';
 import { logger } from './logger';
 import { getOpenCodeDirectoryHeaders, scopeOpenCodeRequest } from './util/opencode-request';
 import { anySignal, asRecord, findSseChunkBoundary, getString } from './server-utils';
@@ -447,7 +451,9 @@ export class OpenCodeTransport {
         eventId = '';
       } else if (line.startsWith('id:')) {
         const value = line.slice(3).replace(/^ /, '');
-        if (!value.includes('\0')) eventId = value;
+        if (!value.includes('\0')) {
+          eventId = value.length <= MAX_SERVER_EVENT_ID_LENGTH ? value : '';
+        }
       } else if (line.startsWith('data:')) {
         const value = line.slice(5).trimStart();
         data = data.length === 0 ? value : `${data}\n${value}`;

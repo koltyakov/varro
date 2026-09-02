@@ -5,6 +5,7 @@ export type InlineImagePresentation = 'contain' | 'cover' | 'ambient';
 
 const MIN_COVER_VISIBLE_FRACTION = 0.72;
 const MAX_CACHED_IMAGE_DIMENSIONS = 16;
+const IMAGE_DECODE_TIMEOUT_MS = 10_000;
 const cachedImageDimensions = new Map<string, { width: number; height: number }>();
 
 function getImageDimensionCacheKey(src: string) {
@@ -39,11 +40,23 @@ export async function preloadInlineImageDimensions(src: string) {
   const image = new globalThis.Image();
   image.src = src;
   if (!isFunction(image.decode)) return;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
-    await image.decode();
+    const decoded = await Promise.race([
+      image.decode().then(() => true),
+      new Promise<false>((resolve) => {
+        timeout = setTimeout(() => resolve(false), IMAGE_DECODE_TIMEOUT_MS);
+      }),
+    ]);
+    if (!decoded) {
+      image.src = '';
+      return;
+    }
     rememberImageDimensions(src, image.naturalWidth, image.naturalHeight);
   } catch {
     // The normal message image load path remains the fallback for unsupported formats.
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
   }
 }
 

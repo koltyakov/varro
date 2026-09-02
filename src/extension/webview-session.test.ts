@@ -112,6 +112,7 @@ function createSession(options?: {
     isVisible: vi.fn(() => Boolean(currentView?.visible)),
     onDeliveryFailure: vi.fn(),
     invalidatePendingDeliveries: vi.fn(),
+    markViewReady: vi.fn(),
     post: vi.fn(),
     deliver: vi.fn(() => Promise.resolve(true)),
     webviewOptions: vi.fn(() => ({ enableScripts: true, localResourceRoots: [] })),
@@ -241,15 +242,15 @@ describe('WebviewSession', () => {
     expect(deps.cancelApiRequestsBeforeGeneration.mock.calls).toEqual([[1], [2]]);
   });
 
-  it('invalidates deliveries from an older webview document before handling ready', async () => {
+  it('opens a fresh delivery generation before handling ready', async () => {
     const { session, bridge } = createSession({ editorSurface: true });
     await session.resolve(createWebviewView(true) as never);
-    bridge.invalidatePendingDeliveries.mockClear();
+    bridge.markViewReady.mockClear();
 
     await session.handleReady();
 
-    expect(bridge.invalidatePendingDeliveries).toHaveBeenCalledOnce();
-    expect(bridge.invalidatePendingDeliveries.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(bridge.markViewReady).toHaveBeenCalledOnce();
+    expect(bridge.markViewReady.mock.invocationCallOrder[0]).toBeLessThan(
       bridge.post.mock.invocationCallOrder[0]!
     );
   });
@@ -405,6 +406,7 @@ describe('WebviewSession', () => {
     const view = createWebviewView(true);
 
     await session.resolve(view as never);
+    await flushMicrotasks();
     await session.resolve(view as never);
     await flushMicrotasks();
 
@@ -472,6 +474,23 @@ describe('WebviewSession', () => {
     expect(deps.handleUnavailableSideEffects).not.toHaveBeenCalled();
   });
 
+  it('rejects an interrupted-session delivery completed by a replaced document', async () => {
+    const delivery = createDeferred<boolean>();
+    const { session, bridge } = createSession();
+    const first = createWebviewView(true);
+    const replacement = createWebviewView(true);
+    bridge.deliver.mockReturnValueOnce(delivery.promise);
+    await session.resolve(first as never);
+    await flushMicrotasks();
+    await session.handleReady();
+
+    const result = session.deliverInterruptedSessions(7, [{ id: 'session-1' }]);
+    await session.resolve(replacement as never);
+    delivery.resolve(true);
+
+    await expect(result).resolves.toBe(false);
+  });
+
   it('revokes readiness after interrupted-session delivery fails twice', async () => {
     const { session, bridge, deps } = createSession();
     const view = createWebviewView(true);
@@ -485,6 +504,43 @@ describe('WebviewSession', () => {
 
     expect(bridge.deliver).toHaveBeenCalledTimes(2);
     expect(deps.handleUnavailableSideEffects).toHaveBeenCalledOnce();
+  });
+
+  it('stops retrying an interrupted-session delivery when acknowledgements stall', async () => {
+    vi.useFakeTimers();
+    try {
+      const { session, bridge, deps } = createSession();
+      bridge.deliver.mockReturnValue(new Promise(() => {}));
+      await session.resolve(createWebviewView(true) as never);
+      await session.handleReady();
+      deps.handleUnavailableSideEffects.mockClear();
+
+      const delivery = session.deliverInterruptedSessions(8, [{ id: 'session-1' }]);
+      await vi.advanceTimersByTimeAsync(10_100);
+
+      await expect(delivery).resolves.toBe(false);
+      expect(bridge.deliver).toHaveBeenCalledTimes(2);
+      expect(deps.handleUnavailableSideEffects).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('fails a webview render when recovery state never settles', async () => {
+    vi.useFakeTimers();
+    try {
+      const { session, sessionState } = createSession();
+      const view = createWebviewView(true);
+      sessionState.consumeRecoverySnapshot.mockReturnValue(new Promise(() => {}));
+
+      await session.resolve(view as never);
+      await vi.advanceTimersByTimeAsync(30_000);
+      await flushMicrotasks();
+
+      expect(view.webview.html).toContain('Failed to load Varro webview');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('shares an overlapping recovery load and lets only the current generation commit it', async () => {
@@ -708,7 +764,10 @@ describe('WebviewSession', () => {
     view.listeners.message?.({ type: 'invalid/message' });
 
     expect(deps.handleMessage).toHaveBeenCalledOnce();
-    expect(deps.handleMessage).toHaveBeenCalledWith({ type: 'ready' });
+    expect(deps.handleMessage).toHaveBeenCalledWith({
+      type: 'ready',
+      payload: { documentId: session.getRequestGeneration() },
+    });
     expect(loggerMock.warn).toHaveBeenCalledWith('Ignoring invalid webview message');
   });
 
@@ -881,7 +940,10 @@ describe('WebviewSession', () => {
 
     session.resume();
     view.listeners.message?.({ type: 'ready' });
-    expect(deps.handleMessage).toHaveBeenCalledWith({ type: 'ready' });
+    expect(deps.handleMessage).toHaveBeenCalledWith({
+      type: 'ready',
+      payload: { documentId: session.getRequestGeneration() },
+    });
   });
 
   it('finishes preparing editor HTML when the panel is suspended during rendering', async () => {
@@ -989,31 +1051,77 @@ describe('WebviewSession', () => {
     expect(order).toEqual(['flush', 'post']);
   });
 
-  it('re-posts boot messages before the next API response after a delivery failure', async () => {
-    const { session, bridge } = createSession();
+  it('reloads the current document once after a delivery failure', async () => {
+    const { session, bridge, deps } = createSession();
     const view = createWebviewView(true);
     await session.resolve(view as never);
     await flushMicrotasks();
     await session.handleReady();
     bridge.post.mockClear();
-
-    const postedTypes = () =>
-      bridge.post.mock.calls.map(([message]) => (message as { type: string }).type);
+    bridge.setView.mockClear();
+    deps.cancelApiRequestsBeforeGeneration.mockClear();
 
     const onDeliveryFailure = bridge.onDeliveryFailure.mock.calls[0]?.[0] as () => void;
     expect(onDeliveryFailure).toBeInstanceOf(Function);
     onDeliveryFailure();
+    onDeliveryFailure();
 
-    session.postApiResponse({ id: 1, data: [] }, session.getRequestGeneration());
+    expect(bridge.setView).toHaveBeenCalledOnce();
+    expect(bridge.setView).toHaveBeenCalledWith(view);
+    expect(deps.cancelApiRequestsBeforeGeneration).toHaveBeenCalledOnce();
+    expect(view.webview.html).toContain('aria-label="Loading workspace"');
+    expect(bridge.post).not.toHaveBeenCalled();
 
-    const firstResponseIndex = postedTypes().indexOf('api/response');
-    expect(firstResponseIndex).toBeGreaterThan(-1);
-    expect(postedTypes().slice(0, firstResponseIndex)).toContain('server/status');
-    expect(postedTypes().slice(0, firstResponseIndex)).toContain('config/update');
+    session.postApiResponse({ id: 1, data: [] }, session.getRequestGeneration() - 1);
+    expect(bridge.post).not.toHaveBeenCalled();
+  });
 
-    bridge.post.mockClear();
-    session.postApiResponse({ id: 2, data: [] }, session.getRequestGeneration());
+  it('rejects a stale ready message while a failed document is reloading', async () => {
+    const { session, bridge, deps } = createSession();
+    const view = createWebviewView(true);
+    await session.resolve(view as never);
+    await flushMicrotasks();
+    await session.handleReady();
+    deps.handleMessage.mockClear();
+    const failedGeneration = session.getRequestGeneration();
 
-    expect(postedTypes()).toEqual(['api/response']);
+    const onDeliveryFailure = bridge.onDeliveryFailure.mock.calls[0]?.[0] as () => void;
+    onDeliveryFailure();
+    const recoveryGeneration = session.getRequestGeneration();
+    expect(recoveryGeneration).toBe(failedGeneration + 1);
+
+    view.listeners.message?.({ type: 'ready', payload: { documentId: failedGeneration } });
+    expect(deps.handleMessage).not.toHaveBeenCalled();
+
+    view.listeners.message?.({ type: 'ready', payload: { documentId: recoveryGeneration } });
+    expect(deps.handleMessage).toHaveBeenCalledWith({
+      type: 'ready',
+      payload: { documentId: recoveryGeneration },
+    });
+  });
+
+  it('handles ready once per document generation', async () => {
+    const { session, bridge, deps } = createSession();
+    await session.resolve(createWebviewView(true) as never);
+
+    await session.handleReady();
+    await session.handleReady();
+
+    expect(bridge.markViewReady).toHaveBeenCalledOnce();
+    expect(deps.handleReadySideEffects).toHaveBeenCalledOnce();
+  });
+
+  it('does not let a delayed ready operation cross document generations', async () => {
+    const { session, bridge } = createSession();
+    const view = createWebviewView(true);
+    await session.resolve(view as never);
+    const staleGeneration = session.getRequestGeneration();
+
+    const onDeliveryFailure = bridge.onDeliveryFailure.mock.calls[0]?.[0] as () => void;
+    onDeliveryFailure();
+    bridge.markViewReady.mockClear();
+
+    await expect(session.handleReady(staleGeneration)).resolves.toBe(false);
+    expect(bridge.markViewReady).not.toHaveBeenCalled();
   });
 });

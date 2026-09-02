@@ -1519,12 +1519,25 @@ describe('MessageList history pagination', () => {
   });
 
   it('invalidates pending history state before a late response resolves after cleanup', async () => {
+    const observers: MutationObserver[] = [];
+    vi.spyOn(globalThis, 'MutationObserver').mockImplementation(function TestMutationObserver() {
+      const observer = fixture<MutationObserver>({
+        disconnect: vi.fn(),
+        observe: vi.fn(),
+        takeRecords: () => [],
+      });
+      observers.push(observer);
+      return observer;
+    });
     const harness = await mountDeferredHistory();
     await harness.startLoad(20);
+    const historyObserver = observers.at(-1);
 
     cleanup?.();
     cleanup = undefined;
     await Promise.resolve();
+
+    expect(historyObserver?.disconnect).toHaveBeenCalledOnce();
     await harness.resolveLoad();
 
     expect(harness.getScrollTop()).toBe(20);

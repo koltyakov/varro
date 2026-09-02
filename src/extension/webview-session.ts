@@ -25,6 +25,8 @@ import type {
 import type { ExtensionConfigState } from '../shared/provider-limit-config';
 
 export type WebviewHost = vscode.WebviewView | vscode.WebviewPanel;
+const RELIABLE_DELIVERY_TIMEOUT_MS = 5_000;
+const RECOVERY_SNAPSHOT_TIMEOUT_MS = 30_000;
 
 export class WebviewSession {
   public interruptedSessionsForWebview: InterruptedSessionSnapshot[] = [];
@@ -51,6 +53,7 @@ export class WebviewSession {
   private commandState: { canAbort: boolean; canSwitchSessions: boolean } | undefined;
   private webviewLoadGeneration = 0;
   private webviewRenderGeneration = 0;
+  private readyGeneration: number | null = null;
   private recoverySnapshotLoad?: Promise<RecoverySnapshot>;
   private themeDisposable?: vscode.Disposable;
   private messageDisposable?: vscode.Disposable;
@@ -112,9 +115,17 @@ export class WebviewSession {
     private readonly manageCommandContext = true
   ) {
     this.bridge.onDeliveryFailure(() => {
-      this.deliveryRecoveryPending = true;
+      if (this.deliveryRecoveryInProgress) return;
+      const view = this.bridge.getView();
+      if (!view) return;
+      this.deliveryRecoveryInProgress = true;
       this.webviewReady = false;
       this.deps.handleUnavailableSideEffects();
+      void this.resolve(view).catch((error: unknown) => {
+        logger.error(
+          `Webview delivery recovery failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+      });
     });
   }
 
@@ -122,7 +133,7 @@ export class WebviewSession {
     return this.deps.editorContext?.() ?? this.contextProvider.context;
   }
 
-  private deliveryRecoveryPending = false;
+  private deliveryRecoveryInProgress = false;
 
   getRequestGeneration() {
     return this.webviewLoadGeneration;
@@ -138,10 +149,6 @@ export class WebviewSession {
   ) {
     if (!this.bridge.getView() || requestGeneration !== this.webviewLoadGeneration) return;
     this.deps.flushPendingServerEvents();
-    if (this.deliveryRecoveryPending) {
-      this.deliveryRecoveryPending = false;
-      this.postBootMessages(this.deps.renderStatus());
-    }
     this.bridge.post({ type: 'api/response', payload });
   }
 
@@ -213,6 +220,7 @@ export class WebviewSession {
     this.bridge.invalidatePendingDeliveries();
     this.disposeMessageListener();
     this.webviewReady = false;
+    this.readyGeneration = null;
     this.resetCommandState();
   }
 
@@ -220,6 +228,7 @@ export class WebviewSession {
     this.deps.handleUnavailableSideEffects();
     this.bridge.setView(webviewView);
     this.webviewReady = false;
+    this.readyGeneration = null;
     this.resetCommandState();
     const webviewLoadGeneration = ++this.webviewLoadGeneration;
     const webviewRenderGeneration = ++this.webviewRenderGeneration;
@@ -242,6 +251,7 @@ export class WebviewSession {
           this.disposeMessageListener();
           this.bridge.setView(undefined);
           this.webviewReady = false;
+          this.readyGeneration = null;
           this.resetCommandState();
           this.deps.handleDisposedSideEffects();
           this.deps.updateStatusBarItem();
@@ -300,12 +310,26 @@ export class WebviewSession {
     });
   }
 
-  async handleReady() {
-    this.bridge.invalidatePendingDeliveries();
+  async handleReady(documentId?: number): Promise<boolean> {
+    const generation = this.webviewLoadGeneration;
+    if (documentId !== undefined && documentId !== generation) return false;
+    if (this.readyGeneration === generation) return true;
+    this.bridge.markViewReady();
     const status = this.deps.renderStatus();
     this.webviewReady = true;
-    this.deliveryRecoveryPending = false;
-    this.postBootMessages(status, { clearResolvedEmbedded: true });
+    this.readyGeneration = generation;
+    this.deliveryRecoveryInProgress = false;
+    try {
+      this.postBootMessages(status, { clearResolvedEmbedded: true });
+    } catch (error) {
+      if (generation === this.webviewLoadGeneration) {
+        this.webviewReady = false;
+        this.readyGeneration = null;
+        this.deps.handleUnavailableSideEffects();
+      }
+      throw error;
+    }
+    if (generation !== this.webviewLoadGeneration) return false;
     this.flushPendingCommands();
     this.handleInterruptedSessionNotification();
     void this.deps.handleReadySideEffects().catch((err) => {
@@ -314,6 +338,7 @@ export class WebviewSession {
       );
     });
     void this.deps.ensureServerStarted().catch(() => {});
+    return true;
   }
 
   resume() {
@@ -326,23 +351,24 @@ export class WebviewSession {
   async deliverInterruptedSessions(claimId: number, sessions: InterruptedSessionSnapshot[]) {
     if (sessions.length === 0 || !this.webviewReady) return false;
     const generation = this.webviewLoadGeneration;
-    const view = this.bridge.getView();
     const message = {
       type: 'recovery/interrupted-sessions',
       payload: { claimId, sessionIds: sessions.map((session) => session.id) },
     } satisfies ExtensionMessage;
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      if (
-        !this.webviewReady ||
-        this.webviewLoadGeneration !== generation ||
-        this.bridge.getView() !== view
-      ) {
+      if (!this.webviewReady || this.webviewLoadGeneration !== generation) {
         return false;
       }
-      if (await this.bridge.deliver(message)) return true;
+      const delivered = await resolveWithin(
+        this.bridge.deliver(message),
+        RELIABLE_DELIVERY_TIMEOUT_MS,
+        false
+      );
+      if (!this.webviewReady || this.webviewLoadGeneration !== generation) return false;
+      if (delivered) return true;
       if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    if (this.webviewLoadGeneration === generation && this.bridge.getView() === view) {
+    if (this.webviewLoadGeneration === generation) {
       this.webviewReady = false;
       this.deps.handleUnavailableSideEffects();
     }
@@ -352,7 +378,6 @@ export class WebviewSession {
   handleVisible() {
     const status = this.deps.renderStatus();
     this.sessionState.clearCompletedInWorkspace(this.getEditorContext().workspacePath);
-    this.deliveryRecoveryPending = false;
     this.postBootMessages(status);
     void this.deps.handleVisibleSideEffects().catch((err) => {
       logger.error(
@@ -369,6 +394,7 @@ export class WebviewSession {
       this.webviewRenderGeneration += 1;
     }
     this.webviewReady = false;
+    this.readyGeneration = null;
     this.resetCommandState();
     this.disposeMessageListener();
     this.disposeWebviewDisposables();
@@ -383,7 +409,11 @@ export class WebviewSession {
   ): Promise<string | undefined> {
     const recoverySnapshotLoad =
       this.recoverySnapshotLoad ??
-      (this.recoverySnapshotLoad = this.sessionState.consumeRecoverySnapshot());
+      (this.recoverySnapshotLoad = rejectAfter(
+        this.sessionState.consumeRecoverySnapshot(),
+        RECOVERY_SNAPSHOT_TIMEOUT_MS,
+        'Timed out while loading webview recovery state.'
+      ));
     try {
       const snapshot = await recoverySnapshotLoad;
       if (
@@ -407,6 +437,7 @@ export class WebviewSession {
     const editorContext = this.getEditorContext();
     return {
       webviewContext: this.webviewContext,
+      documentId: this.webviewLoadGeneration,
       theme: this.deps.currentTheme(),
       serverStatus,
       editorContext,
@@ -603,7 +634,18 @@ export class WebviewSession {
         logger.warn('Ignoring invalid webview message');
         return;
       }
-      void this.deps.handleMessage(message);
+      if (message.type === 'ready') {
+        const documentId = message.payload?.documentId;
+        if (
+          (documentId !== undefined && documentId !== generation) ||
+          (this.deliveryRecoveryInProgress && documentId !== generation)
+        ) {
+          return;
+        }
+      }
+      const routedMessage: WebviewMessage =
+        message.type === 'ready' ? { type: 'ready', payload: { documentId: generation } } : message;
+      void this.deps.handleMessage(routedMessage);
     });
   }
 
@@ -616,4 +658,36 @@ export class WebviewSession {
     for (const disposable of this.webviewDisposables) disposable.dispose();
     this.webviewDisposables = [];
   }
+}
+
+function resolveWithin<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => resolve(fallback), timeoutMs);
+    void promise.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timeout);
+        resolve(fallback);
+      }
+    );
+  });
+}
+
+function rejectAfter<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
+    void promise.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timeout);
+        reject(error);
+      }
+    );
+  });
 }

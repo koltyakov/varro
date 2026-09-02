@@ -19,6 +19,7 @@ import { getRelativePath } from './util/path';
 type DroppedFileInput = Pick<DroppedFile, 'path' | 'relativePath' | 'type'>;
 const MAX_CONCURRENT_DROPPED_CONTENT_WRITES = 2;
 const MAX_CONCURRENT_DROPPED_PATH_STATS = 8;
+const MAX_CONCURRENT_DROPPED_CONTENT_REMOVALS = 8;
 const STALE_DROPS_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const DROP_DIRECTORY_NAME_PATTERN = /^drop-[a-zA-Z0-9_-]+$/;
 const DROP_OWNER_MARKER_NAME = '.varro-owner.json';
@@ -28,6 +29,11 @@ interface DropOwnerMarker {
   version: 1;
   pid: number;
   createdAt: number;
+}
+
+interface OwnedContentFile {
+  queuedPdf: boolean;
+  size: number;
 }
 
 type DropOwnerReadResult =
@@ -62,13 +68,18 @@ export class DroppedFilesService {
   private dropsDirGeneration = 0;
   private staleSweepPromise: Promise<void> | null = null;
   private readonly activeContentWrites = new Set<Promise<unknown>>();
-  private readonly ownedContentFiles = new Map<string, number>();
+  private readonly ownedContentFiles = new Map<string, OwnedContentFile>();
   private readonly ownedRemovalPromises = new Map<string, Promise<boolean>>();
+  private readonly ownedRemovalLanes = Array.from(
+    { length: MAX_CONCURRENT_DROPPED_CONTENT_REMOVALS },
+    () => Promise.resolve()
+  );
   private readonly deferredRemovalTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly sessionOwnedFiles = new Map<string, Set<string>>();
   private readonly fileSessionOwners = new Map<string, Set<string>>();
   private ownedContentBytes = 0;
   private reservedContentBytes = 0;
+  private nextOwnedRemovalLane = 0;
 
   constructor(
     private readonly contextProvider: Pick<ContextProvider, 'context'>,
@@ -158,7 +169,7 @@ export class DroppedFilesService {
               );
               await this.tempDropsOps.write(targetPath, buffer, { mode: 0o600 });
               createdPaths.push(targetPath);
-              this.ownedContentFiles.set(targetPath, file.size);
+              this.ownedContentFiles.set(targetPath, { queuedPdf: false, size: file.size });
               this.ownedContentBytes += file.size;
               const uri = vscode.Uri.file(targetPath);
               return {
@@ -199,9 +210,16 @@ export class DroppedFilesService {
     }
     const pending = this.ownedRemovalPromises.get(path);
     if (pending) return pending;
-    const size = this.ownedContentFiles.get(path);
-    if (size === undefined) return false;
-    const removal = this.removeOwnedFileNow(path, size);
+    const owned = this.ownedContentFiles.get(path);
+    if (!owned) return false;
+    const laneIndex = this.nextOwnedRemovalLane++ % this.ownedRemovalLanes.length;
+    const removal = this.ownedRemovalLanes[laneIndex]!.then(() =>
+      this.removeOwnedFileNow(path, owned.size)
+    );
+    this.ownedRemovalLanes[laneIndex] = removal.then(
+      () => undefined,
+      () => undefined
+    );
     this.ownedRemovalPromises.set(path, removal);
     try {
       return await removal;
@@ -209,6 +227,17 @@ export class DroppedFilesService {
       if (this.ownedRemovalPromises.get(path) === removal) {
         this.ownedRemovalPromises.delete(path);
       }
+    }
+  }
+
+  markQueuedPdf(path: string): void {
+    const owned = this.ownedContentFiles.get(path);
+    if (owned) owned.queuedPdf = true;
+  }
+
+  *ownedQueuedPdfPaths(): IterableIterator<string> {
+    for (const [path, owned] of this.ownedContentFiles) {
+      if (owned.queuedPdf && !this.deferredRemovalTimers.has(path)) yield path;
     }
   }
 
@@ -242,7 +271,14 @@ export class DroppedFilesService {
   }
 
   async removeOwnedFiles(paths: Iterable<string>): Promise<void> {
-    await Promise.allSettled(Array.from(paths, (path) => this.removeOwnedFile(path)));
+    let removals: Array<Promise<boolean>> = [];
+    for (const path of paths) {
+      removals.push(this.removeOwnedFile(path));
+      if (removals.length < MAX_CONCURRENT_DROPPED_CONTENT_REMOVALS) continue;
+      await Promise.allSettled(removals);
+      removals = [];
+    }
+    await Promise.allSettled(removals);
   }
 
   async removeSessionOwnedFiles(sessionIds: Iterable<string>): Promise<void> {

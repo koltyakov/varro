@@ -139,6 +139,56 @@ describe('UsageReportService', () => {
     expect(mocks.executeCommand).toHaveBeenCalledWith('markdown.showPreview', uri);
   });
 
+  it('shares overlapping equivalent report commands instead of spawning duplicate work', async () => {
+    let resolveUsage!: (value: { sessionCount: number; usage: [] }) => void;
+    const readLocalUsage = vi.fn(
+      () =>
+        new Promise<{ sessionCount: number; usage: [] }>((resolve) => {
+          resolveUsage = resolve;
+        })
+    );
+    const service = new UsageReportService(
+      { request: vi.fn<Request>() },
+      vi.fn(async () => undefined),
+      readLocalUsage
+    );
+
+    const first = service.openReport();
+    const second = service.openReport();
+
+    expect(second).toBe(first);
+    expect(readLocalUsage).toHaveBeenCalledOnce();
+    resolveUsage({ sessionCount: 0, usage: [] });
+    await Promise.all([first, second]);
+  });
+
+  it('queues a different report mode behind the active report', async () => {
+    let resolveUsage!: (value: { sessionCount: number; usage: [] }) => void;
+    const readLocalUsage = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<{ sessionCount: number; usage: [] }>((resolve) => {
+            resolveUsage = resolve;
+          })
+      )
+      .mockResolvedValueOnce({ sessionCount: 0, usage: [] });
+    const service = new UsageReportService(
+      { request: vi.fn<Request>() },
+      vi.fn(async () => undefined),
+      readLocalUsage
+    );
+
+    const recent = service.openReport();
+    const allTime = service.openReport(true);
+    expect(allTime).not.toBe(recent);
+    expect(readLocalUsage).toHaveBeenCalledOnce();
+
+    resolveUsage({ sessionCount: 0, usage: [] });
+    await Promise.all([recent, allTime]);
+    expect(readLocalUsage).toHaveBeenNthCalledWith(2, undefined, NOW.getTime(), true);
+  });
+
   it('uses local usage metadata without requesting every session history', async () => {
     const request = vi.fn<Request>();
     const readLocalUsage = vi.fn(async () => ({
@@ -169,7 +219,7 @@ describe('UsageReportService', () => {
 
     await service.openReport();
 
-    expect(readLocalUsage).toHaveBeenCalledWith(RECENT_START);
+    expect(readLocalUsage).toHaveBeenCalledWith(RECENT_START, NOW.getTime(), false);
     expect(request).not.toHaveBeenCalled();
     expect(reportContent()).toContain('from 2 sessions scanned');
     expect(reportSection(reportContent(), 'Today')).toContain(
@@ -177,7 +227,7 @@ describe('UsageReportService', () => {
     );
   });
 
-  it('terminates a stalled local database worker and falls back to the server', async () => {
+  it('terminates a stalled local database worker without starting a full-history fallback', async () => {
     const request = vi.fn<Request>(async () => ({ data: [] }));
     const service = new UsageReportService(
       { request },
@@ -185,17 +235,100 @@ describe('UsageReportService', () => {
     );
 
     const report = service.openReport();
+    const rejected = expect(report).rejects.toThrow(
+      'Local OpenCode usage query timed out after 30 seconds'
+    );
     await vi.advanceTimersByTimeAsync(30_000);
-    await report;
+    await rejected;
 
     expect(workerMocks.instances).toHaveLength(1);
     expect(workerMocks.instances[0]?.terminate).toHaveBeenCalledOnce();
-    expect(request).toHaveBeenCalledWith(
-      'GET',
-      `/experimental/session?archived=true&limit=1000&start=${RECENT_START}`,
-      undefined,
-      { unscoped: true, captureNextCursor: true }
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('renders compact aggregates returned by the local database worker', async () => {
+    const request = vi.fn<Request>();
+    const service = new UsageReportService(
+      { request },
+      vi.fn(async () => undefined)
     );
+
+    const report = service.openReport();
+    await Promise.resolve();
+    await Promise.resolve();
+    workerMocks.instances.at(-1)?.listeners.get('message')?.({
+      sessionCount: 2_209,
+      windows: Array.from({ length: 3 }, () => ({
+        totalPromptCount: 9,
+        groups: [
+          {
+            providerID: 'openai',
+            modelID: 'gpt-5.6-sol',
+            prompts: 9,
+            durationMs: 9_000,
+            durationCount: 9,
+            total: 35_101_345,
+            input: 1_734_846,
+            output: 61_048,
+            reasoning: 136_555,
+            cacheRead: 33_168_896,
+            cacheWrite: 0,
+          },
+        ],
+      })),
+    });
+    await report;
+
+    expect(request).not.toHaveBeenCalled();
+    expect(reportContent()).toContain('from 2,209 sessions scanned');
+    expect(reportSection(reportContent(), 'Today')).toContain(
+      '| openai | gpt-5.6-sol | 9 | 35,101,345 | 9s |'
+    );
+  });
+
+  it('refuses an unbounded server fallback when too many sessions need full histories', async () => {
+    const sessions = Array.from({ length: 251 }, (_, index) =>
+      session(`session-${index}`, '/repo', index)
+    );
+    const request = vi.fn<Request>(async (_method, path) => {
+      if (path.startsWith('/experimental/session')) return { data: sessions };
+      throw new Error(`Unexpected request ${path}`);
+    });
+    const service = new UsageReportService(
+      { request },
+      vi.fn(async () => undefined),
+      async () => null
+    );
+
+    await expect(service.openReport()).rejects.toThrow(
+      'Refusing to fetch full history for 251 sessions'
+    );
+    expect(request).toHaveBeenCalledOnce();
+  });
+
+  it('stops paginating the server fallback as soon as its session limit is exceeded', async () => {
+    const request = vi
+      .fn<Request>()
+      .mockResolvedValueOnce({
+        data: Array.from({ length: 250 }, (_, index) =>
+          session(`session-${index}`, '/repo', index)
+        ),
+        nextCursor: 'page-2',
+      })
+      .mockResolvedValueOnce({
+        data: [session('session-250', '/repo', 250)],
+        nextCursor: 'page-3',
+      });
+    const service = new UsageReportService(
+      { request },
+      vi.fn(async () => undefined),
+      async () => null
+    );
+
+    await expect(service.openReport()).rejects.toThrow(
+      'Refusing to fetch full history for 251 sessions'
+    );
+    expect(request).toHaveBeenCalledTimes(2);
   });
 
   it('scans global sessions with one history request each and renders token windows', async () => {

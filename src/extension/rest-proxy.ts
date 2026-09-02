@@ -316,7 +316,7 @@ export class RestProxy {
   private readonly workspaceSessionStatusCoordinator: WorkspaceSessionStatusCoordinator;
   private hasSessionDirectorySnapshot = false;
   private sessionDirectoryBootstrapPromise: Promise<ReadonlyMap<string, string>> | null = null;
-  private readonly permissionJudgeCleanupRequests = new Set<string>();
+  private readonly internalHelperCleanupRequests = new Set<string>();
   private readonly permanentlyDeletedSessionIds = new Set<string>();
   private sessionSummaryListRequests = new Map<
     string,
@@ -2433,7 +2433,7 @@ export class RestProxy {
     const request = this.requestServer('GET', FULL_SESSION_LIST_PATH).then((sessions) => {
       if (!Array.isArray(sessions)) return sessions;
       const projectedSessions = sessions.map(projectSummaryDiffs);
-      this.observePermissionJudgeSessions(projectedSessions);
+      this.observeInternalHelperSessions(projectedSessions);
       return this.callbacks.hiddenSessions.filterVisibleSessions(
         projectedSessions.filter(
           (session): session is { id: string } => typeof asRecord(session)?.id === 'string'
@@ -2575,7 +2575,7 @@ export class RestProxy {
     hiddenSessionSnapshots: unknown[] = sessions
   ) {
     this.recordSessionDirectories(sessions, complete, preserveCompleteSnapshot);
-    this.observePermissionJudgeSessions(hiddenSessionSnapshots);
+    this.observeInternalHelperSessions(hiddenSessionSnapshots);
     for (const session of sessions) {
       const info = asRecord(session);
       if (!info) continue;
@@ -2586,8 +2586,8 @@ export class RestProxy {
     }
   }
 
-  private observePermissionJudgeSessions(sessions: unknown[]) {
-    this.cleanupStalePermissionJudgeSessions(
+  private observeInternalHelperSessions(sessions: unknown[]) {
+    this.cleanupStaleInternalHelperSessions(
       this.callbacks.hiddenSessions.observeSessionList(
         sessions.filter(
           (session): session is { id: string } => typeof asRecord(session)?.id === 'string'
@@ -2596,10 +2596,10 @@ export class RestProxy {
     );
   }
 
-  private cleanupStalePermissionJudgeSessions(sessionIDs: string[]) {
+  private cleanupStaleInternalHelperSessions(sessionIDs: string[]) {
     for (const sessionID of sessionIDs) {
-      if (this.permissionJudgeCleanupRequests.has(sessionID)) continue;
-      this.permissionJudgeCleanupRequests.add(sessionID);
+      if (this.internalHelperCleanupRequests.has(sessionID)) continue;
+      this.internalHelperCleanupRequests.add(sessionID);
       void this.callbacks.server
         .request('DELETE', `/session/${encodeURIComponent(sessionID)}`, undefined, {
           directory: this.sessionDirectories.get(sessionID),
@@ -2610,19 +2610,19 @@ export class RestProxy {
               this.callbacks.hiddenSessions.retainUntilDeleted(sessionID);
             } else {
               logger.warn(
-                `Failed to delete stale permission judge session ${sessionID}: OpenCode did not confirm deletion`
+                `Failed to delete stale internal helper session ${sessionID}: OpenCode did not confirm deletion`
               );
             }
           },
           (err) => {
             logger.warn(
-              `Failed to delete stale permission judge session ${sessionID}: ${
+              `Failed to delete stale internal helper session ${sessionID}: ${
                 err instanceof Error ? err.message : String(err)
               }`
             );
           }
         )
-        .finally(() => this.permissionJudgeCleanupRequests.delete(sessionID));
+        .finally(() => this.internalHelperCleanupRequests.delete(sessionID));
     }
   }
 
@@ -2663,14 +2663,16 @@ export class RestProxy {
     if (!normalizedWorkspacePath) return requests;
     const visibleSessionIDs = await this.getVisibleWorkspaceSessionIDs(
       requests.map((request) => request.sessionID),
-      normalizedWorkspacePath
+      normalizedWorkspacePath,
+      true
     );
     return requests.filter((request) => visibleSessionIDs.has(request.sessionID));
   }
 
   private async getVisibleWorkspaceSessionIDs(
     sessionIDs: string[],
-    workspacePath: string
+    workspacePath: string,
+    requireCompleteResolution = false
   ): Promise<Set<string>> {
     const visible = new Set<string>();
     const unknown: string[] = [];
@@ -2690,8 +2692,14 @@ export class RestProxy {
       }
       try {
         const directory = await this.lookupSessionDirectory(sessionID, workspacePath);
+        if (!directory && requireCompleteResolution) {
+          throw new Error(`Session ${sessionID} did not include a directory`);
+        }
         if (isSameWorkspacePath(directory, workspacePath)) visible.add(sessionID);
-      } catch {
+      } catch (err) {
+        if (requireCompleteResolution) {
+          throw new Error(`Could not resolve pending request session ${sessionID}`, { cause: err });
+        }
         // An unresolved session cannot be assigned to this workspace safely.
       }
     });

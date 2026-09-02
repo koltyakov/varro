@@ -36,6 +36,7 @@ type Usage = {
 
 type Aggregate = Tokens & {
   promptIDs: Set<string>;
+  promptCount?: number;
   durationMs: number;
   durationCount: number;
 };
@@ -51,14 +52,21 @@ type CachedSessionUsage = {
   usage: Usage[];
 };
 
-type LocalUsageSnapshot = {
-  sessionCount: number;
-  usage: Usage[];
-};
+type LocalUsageSnapshot =
+  | { sessionCount: number; usage: Usage[] }
+  | { aggregates: WindowAggregates[]; sessionCount: number };
 
-type LocalUsageReader = (start?: number) => Promise<LocalUsageSnapshot | null>;
+type LocalUsageReader = (
+  start?: number,
+  now?: number,
+  includeAllTime?: boolean
+) => Promise<LocalUsageSnapshot | null>;
 type ReportDocumentOpener = (content: string, title: string) => Promise<vscode.Uri>;
-type WindowAggregates = { window: ReportWindow; groups: Map<string, Aggregate> };
+type WindowAggregates = {
+  window: ReportWindow;
+  groups: Map<string, Aggregate>;
+  totalPromptCount?: number;
+};
 
 const SESSION_PAGE_LIMIT = 1_000;
 const SESSION_CONCURRENCY = 8;
@@ -67,13 +75,18 @@ const SESSION_USAGE_MAX_BYTES = 16 * 1024 * 1024;
 const SESSION_USAGE_CACHE_LIMIT = 500;
 const SESSION_USAGE_CACHE_ENTRY_LIMIT = 10_000;
 const SESSION_USAGE_CACHE_TOTAL_LIMIT = 50_000;
+const SESSION_FALLBACK_MAX_SESSIONS = 250;
 const LOCAL_USAGE_WORKER_TIMEOUT_MS = 30_000;
-const LOCAL_USAGE_DATABASE_MAX_BYTES = 512 * 1024 * 1024;
+const LOCAL_USAGE_MAX_ASSISTANT_ROWS = 250_000;
+const LOCAL_USAGE_MAX_SCANNED_ASSISTANT_ROWS = 1_000_000;
+const LOCAL_USAGE_MAX_ROUTES = 4_096;
+const LOCAL_USAGE_MAX_MESSAGE_DATA_BYTES = 1024 * 1024;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export class UsageReportService {
   private readonly sessionUsageCache = new Map<string, CachedSessionUsage>();
   private sessionUsageCacheEntries = 0;
+  private reportOperation: { includeAllTime: boolean; promise: Promise<void> } | null = null;
 
   constructor(
     private readonly server: OpenCodeRequest,
@@ -82,7 +95,25 @@ export class UsageReportService {
     private readonly openDocument: ReportDocumentOpener = openAnonymousReportDocument
   ) {}
 
-  async openReport(includeAllTime = false): Promise<void> {
+  openReport(includeAllTime = false): Promise<void> {
+    const current = this.reportOperation;
+    if (current) {
+      if (current.includeAllTime === includeAllTime) return current.promise;
+      return current.promise.then(
+        () => this.openReport(includeAllTime),
+        () => this.openReport(includeAllTime)
+      );
+    }
+    const promise = this.openReportNow(includeAllTime);
+    this.reportOperation = { includeAllTime, promise };
+    const finish = () => {
+      if (this.reportOperation?.promise === promise) this.reportOperation = null;
+    };
+    void promise.then(finish, finish);
+    return promise;
+  }
+
+  private async openReportNow(includeAllTime: boolean): Promise<void> {
     try {
       const content = await vscode.window.withProgress(
         {
@@ -90,10 +121,7 @@ export class UsageReportService {
           title: 'Building OpenCode usage report',
           cancellable: false,
         },
-        async () => {
-          await this.ensureServerStarted();
-          return this.buildReport(includeAllTime);
-        }
+        () => this.buildReport(includeAllTime)
       );
       const uri = await this.openDocument(content, 'OpenCode Usage Report');
       await vscode.commands.executeCommand('markdown.showPreview', uri);
@@ -108,14 +136,22 @@ export class UsageReportService {
     const warnings: string[] = [];
     const now = Date.now();
     const start = includeAllTime ? undefined : now - 30 * DAY_MS;
-    const local = await this.readLocalUsage?.(start);
+    const local = await this.readLocalUsage?.(start, now, includeAllTime);
     if (local) {
       this.sessionUsageCache.clear();
       this.sessionUsageCacheEntries = 0;
-      return renderReport(local.usage, local.sessionCount, warnings, now, includeAllTime);
+      return 'aggregates' in local
+        ? renderAggregatedReport(local.aggregates, local.sessionCount, warnings, now)
+        : renderReport(local.usage, local.sessionCount, warnings, now, includeAllTime);
     }
 
+    await this.ensureServerStarted();
     const sessions = await this.listSessions(warnings, start);
+    if (sessions.length > SESSION_FALLBACK_MAX_SESSIONS) {
+      throw new Error(
+        `The local OpenCode usage database is unavailable. Refusing to fetch full history for ${sessions.length.toLocaleString()} sessions.`
+      );
+    }
     const sessionIDs = new Set(sessions.map((session) => session.id));
     for (const id of this.sessionUsageCache.keys()) {
       if (sessionIDs.has(id)) continue;
@@ -171,6 +207,7 @@ export class UsageReportService {
             directory,
             updated: numberValue(asRecord(record?.time)?.updated),
           });
+          if (sessions.size > SESSION_FALLBACK_MAX_SESSIONS) return [...sessions.values()];
         }
       }
 
@@ -268,108 +305,289 @@ async function openAnonymousReportDocument(content: string): Promise<vscode.Uri>
   return document.uri;
 }
 
-async function readLocalUsageDatabase(start?: number): Promise<LocalUsageSnapshot | null> {
+async function readLocalUsageDatabase(
+  start?: number,
+  now = Date.now(),
+  includeAllTime = false
+): Promise<LocalUsageSnapshot | null> {
   const databasePath = join(resolveOpenCodeDataDirectory(), 'opencode.db');
+  const windows = createReportWindows(now, includeAllTime);
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const worker = new Worker(LOCAL_USAGE_WORKER, {
       eval: true,
-      workerData: { databasePath, start: start ?? null },
+      workerData: {
+        databasePath,
+        maxAssistantRows: LOCAL_USAGE_MAX_ASSISTANT_ROWS,
+        maxMessageDataBytes: LOCAL_USAGE_MAX_MESSAGE_DATA_BYTES,
+        maxRoutes: LOCAL_USAGE_MAX_ROUTES,
+        maxScannedAssistantRows: LOCAL_USAGE_MAX_SCANNED_ASSISTANT_ROWS,
+        start: start ?? null,
+        windows,
+      },
     });
     let settled = false;
-    const finish = (result: LocalUsageSnapshot | null) => {
+    const finish = (result: LocalUsageSnapshot | null, error?: Error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
-      void worker.terminate().catch(() => {});
-      resolve(result);
+      void worker
+        .terminate()
+        .catch(() => 0)
+        .then(() => {
+          if (error) reject(error);
+          else resolve(result);
+        });
     };
-    const timeout = setTimeout(() => finish(null), LOCAL_USAGE_WORKER_TIMEOUT_MS);
-    worker.once('message', (value: unknown) => finish(normalizeLocalUsageSnapshot(value)));
-    worker.once('error', () => finish(null));
-    worker.once('exit', () => finish(null));
+    const timeout = setTimeout(
+      () =>
+        finish(
+          null,
+          new Error(
+            `Local OpenCode usage query timed out after ${LOCAL_USAGE_WORKER_TIMEOUT_MS / 1_000} seconds.`
+          )
+        ),
+      LOCAL_USAGE_WORKER_TIMEOUT_MS
+    );
+    worker.once('message', (value: unknown) => {
+      if (value === null) {
+        finish(null);
+        return;
+      }
+      const workerMessage = asRecord(value);
+      const workerError = stringValue(workerMessage?.error);
+      if (workerError) {
+        finish(null, new Error(`Local OpenCode usage query failed: ${workerError}`));
+        return;
+      }
+      const snapshot = normalizeLocalUsageSnapshot(value, windows);
+      finish(
+        snapshot,
+        snapshot ? undefined : new Error('Local OpenCode usage query returned malformed data.')
+      );
+    });
+    worker.once('error', (error) =>
+      finish(null, new Error(`Local OpenCode usage worker failed: ${errorMessage(error)}`))
+    );
+    worker.once('exit', (code) => {
+      if (code !== 0) {
+        finish(null, new Error(`Local OpenCode usage worker exited with code ${code}.`));
+      }
+    });
   });
 }
 
 const LOCAL_USAGE_WORKER = String.raw`
 const { DatabaseSync } = require('node:sqlite');
-const { statSync } = require('node:fs');
+const { existsSync } = require('node:fs');
 const { parentPort, workerData } = require('node:worker_threads');
 
+const optionalNonnegativeNumber = (value) =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+const nonnegativeNumber = (value) => optionalNonnegativeNumber(value) ?? 0;
+const numberValue = (value) =>
+  typeof value === 'number' && Number.isFinite(value) ? value : null;
+const stringValue = (value) =>
+  typeof value === 'string' && value.length <= 512 && value.trim() ? value.trim() : null;
+const emptyAggregate = () => ({
+  promptIDs: new Set(),
+  durationMs: 0,
+  durationCount: 0,
+  total: 0,
+  input: 0,
+  output: 0,
+  reasoning: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+});
+
 try {
-  if (statSync(workerData.databasePath).size > ${LOCAL_USAGE_DATABASE_MAX_BYTES}) {
-    throw new Error('database exceeds local usage scan limit');
+  if (!existsSync(workerData.databasePath)) {
+    parentPort.postMessage(null);
+  } else {
+    const database = new DatabaseSync(workerData.databasePath, { readOnly: true });
+    try {
+      const sessionCount = workerData.start === null
+        ? database.prepare('SELECT count(*) AS count FROM session').get().count
+        : database.prepare('SELECT count(*) AS count FROM session WHERE time_updated >= ?')
+            .get(workerData.start).count;
+      const query = [
+        'SELECT m.session_id AS sessionID,',
+        "json_extract(m.data, '$.providerID') AS providerID,",
+        "json_extract(m.data, '$.model.providerID') AS nestedProviderID,",
+        "json_extract(m.data, '$.modelID') AS modelID,",
+        "json_extract(m.data, '$.model.modelID') AS nestedModelID,",
+        "json_extract(m.data, '$.parentID') AS parentID,",
+        "json_extract(m.data, '$.time.created') AS timeCreated,",
+        "json_extract(m.data, '$.time.completed') AS timeCompleted,",
+        "coalesce(json_extract(m.data, '$.time.completed'), json_extract(m.data, '$.time.created')) AS created,",
+        "json_extract(m.data, '$.tokens.total') AS total,",
+        "json_extract(m.data, '$.tokens.input') AS input,",
+        "json_extract(m.data, '$.tokens.output') AS output,",
+        "json_extract(m.data, '$.tokens.reasoning') AS reasoning,",
+        "json_extract(m.data, '$.tokens.cache.read') AS cacheRead,",
+        "json_extract(m.data, '$.tokens.cache.write') AS cacheWrite",
+        'FROM message m',
+        workerData.start === null
+          ? "WHERE length(m.data) <= ? AND json_extract(m.data, '$.role') = 'assistant'"
+          : "WHERE m.session_id IN (SELECT id FROM session WHERE time_updated >= ?) AND length(m.data) <= ? AND json_extract(m.data, '$.role') = 'assistant'",
+        'LIMIT ?',
+      ].join(' ');
+      const statement = database.prepare(query);
+      const rows = workerData.start === null
+        ? statement.iterate(workerData.maxMessageDataBytes, workerData.maxScannedAssistantRows + 1)
+        : statement.iterate(workerData.start, workerData.maxMessageDataBytes, workerData.maxScannedAssistantRows + 1);
+      const aggregates = workerData.windows.map(() => ({
+        groups: new Map(),
+        promptIDs: new Set(),
+      }));
+      const routes = new Set();
+      let assistantRows = 0;
+      let scannedAssistantRows = 0;
+      const oldestWindowStart = workerData.windows.some((window) => window.start === null)
+        ? null
+        : Math.min(...workerData.windows.map((window) => window.start));
+
+      for (const row of rows) {
+        scannedAssistantRows += 1;
+        if (scannedAssistantRows > workerData.maxScannedAssistantRows) {
+          throw new Error('Usage report exceeds the ' + workerData.maxScannedAssistantRows.toLocaleString() + '-message local scan limit.');
+        }
+        const created = numberValue(row.created);
+        if (created === null || (oldestWindowStart !== null && created < oldestWindowStart)) continue;
+        assistantRows += 1;
+        if (assistantRows > workerData.maxAssistantRows) {
+          throw new Error('Usage report exceeds the ' + workerData.maxAssistantRows.toLocaleString() + '-message local aggregation limit.');
+        }
+        const sessionID = stringValue(row.sessionID);
+        const providerID = stringValue(row.providerID) || stringValue(row.nestedProviderID);
+        const modelID = stringValue(row.modelID) || stringValue(row.nestedModelID);
+        const parentID = stringValue(row.parentID);
+        if (!sessionID || !providerID || !modelID) continue;
+
+        const input = nonnegativeNumber(row.input);
+        const output = nonnegativeNumber(row.output);
+        const reasoning = nonnegativeNumber(row.reasoning);
+        const cacheRead = nonnegativeNumber(row.cacheRead);
+        const cacheWrite = nonnegativeNumber(row.cacheWrite);
+        const total = optionalNonnegativeNumber(row.total) ??
+          input + output + reasoning + cacheRead + cacheWrite;
+        if (total <= 0) continue;
+        const timeCreated = numberValue(row.timeCreated);
+        const timeCompleted = numberValue(row.timeCompleted);
+        const duration = timeCreated !== null && timeCompleted !== null && timeCompleted >= timeCreated
+          ? timeCompleted - timeCreated
+          : null;
+        const promptID = parentID ? sessionID + '\u0000' + parentID : null;
+        const route = providerID + '\u0000' + modelID;
+        if (!routes.has(route)) {
+          if (routes.size >= workerData.maxRoutes) {
+            throw new Error('Usage report exceeds the ' + workerData.maxRoutes.toLocaleString() + '-route local aggregation limit.');
+          }
+          routes.add(route);
+        }
+
+        for (let index = 0; index < workerData.windows.length; index += 1) {
+          const window = workerData.windows[index];
+          if (window.start !== null && created < window.start) continue;
+          const windowAggregate = aggregates[index];
+          const aggregate = windowAggregate.groups.get(route) || emptyAggregate();
+          if (promptID) {
+            aggregate.promptIDs.add(promptID);
+            windowAggregate.promptIDs.add(promptID);
+          }
+          if (duration !== null) {
+            aggregate.durationMs += duration;
+            aggregate.durationCount += 1;
+          }
+          aggregate.total += total;
+          aggregate.input += input;
+          aggregate.output += output;
+          aggregate.reasoning += reasoning;
+          aggregate.cacheRead += cacheRead;
+          aggregate.cacheWrite += cacheWrite;
+          windowAggregate.groups.set(route, aggregate);
+        }
+      }
+
+      parentPort.postMessage({
+        sessionCount: Number(sessionCount),
+        windows: aggregates.map((windowAggregate) => ({
+          totalPromptCount: windowAggregate.promptIDs.size,
+          groups: [...windowAggregate.groups.entries()].map(([route, aggregate]) => {
+            const separator = route.indexOf('\u0000');
+            return {
+              providerID: route.slice(0, separator),
+              modelID: route.slice(separator + 1),
+              prompts: aggregate.promptIDs.size,
+              durationMs: aggregate.durationMs,
+              durationCount: aggregate.durationCount,
+              total: aggregate.total,
+              input: aggregate.input,
+              output: aggregate.output,
+              reasoning: aggregate.reasoning,
+              cacheRead: aggregate.cacheRead,
+              cacheWrite: aggregate.cacheWrite,
+            };
+          }),
+        })),
+      });
+    } finally {
+      database.close();
+    }
   }
-  const database = new DatabaseSync(workerData.databasePath, { readOnly: true });
-  const sessionCount = database
-    .prepare('SELECT count(*) AS count FROM session WHERE ? IS NULL OR time_updated >= ?')
-    .get(workerData.start, workerData.start).count;
-  const query = [
-    'SELECT m.id, m.session_id AS sessionID,',
-    "json_extract(m.data, '$.providerID') AS providerID,",
-    "json_extract(m.data, '$.model.providerID') AS nestedProviderID,",
-    "json_extract(m.data, '$.modelID') AS modelID,",
-    "json_extract(m.data, '$.model.modelID') AS nestedModelID,",
-    "json_extract(m.data, '$.parentID') AS parentID,",
-    "json_extract(m.data, '$.time.created') AS timeCreated,",
-    "json_extract(m.data, '$.time.completed') AS timeCompleted,",
-    "coalesce(json_extract(m.data, '$.time.completed'), json_extract(m.data, '$.time.created')) AS created,",
-    "json_extract(m.data, '$.tokens.total') AS total,",
-    "json_extract(m.data, '$.tokens.input') AS input,",
-    "json_extract(m.data, '$.tokens.output') AS output,",
-    "json_extract(m.data, '$.tokens.reasoning') AS reasoning,",
-    "json_extract(m.data, '$.tokens.cache.read') AS cacheRead,",
-    "json_extract(m.data, '$.tokens.cache.write') AS cacheWrite",
-    'FROM message m WHERE (? IS NULL OR m.time_created >= ?)',
-    "AND json_extract(m.data, '$.role') = 'assistant'",
-  ].join(' ');
-  const rows = database.prepare(query).all(workerData.start, workerData.start);
-  database.close();
-  parentPort.postMessage({ sessionCount: Number(sessionCount), rows });
-} catch {
-  parentPort.postMessage(null);
+} catch (error) {
+  parentPort.postMessage({ error: error instanceof Error ? error.message : String(error) });
 }
 `;
 
-function normalizeLocalUsageSnapshot(value: unknown): LocalUsageSnapshot | null {
+function normalizeLocalUsageSnapshot(
+  value: unknown,
+  windows: ReportWindow[]
+): LocalUsageSnapshot | null {
   const snapshot = asRecord(value);
   const sessionCount = numberValue(snapshot?.sessionCount);
-  if (sessionCount === null || !Array.isArray(snapshot?.rows)) return null;
-
-  const usage: Usage[] = [];
-  for (const rawRow of snapshot.rows) {
-    const row = asRecord(rawRow);
-    const sessionID = stringValue(row?.sessionID);
-    const providerID = stringValue(row?.providerID) || stringValue(row?.nestedProviderID);
-    const modelID = stringValue(row?.modelID) || stringValue(row?.nestedModelID);
-    const parentID = stringValue(row?.parentID);
-    const created = numberValue(row?.created);
-    if (!sessionID || !providerID || !modelID || created === null) continue;
-
-    const input = nonnegativeNumber(row?.input);
-    const output = nonnegativeNumber(row?.output);
-    const reasoning = nonnegativeNumber(row?.reasoning);
-    const cacheRead = nonnegativeNumber(row?.cacheRead);
-    const cacheWrite = nonnegativeNumber(row?.cacheWrite);
-    usage.push({
-      providerID,
-      modelID,
-      promptID: parentID ? `${sessionID}\u0000${parentID}` : null,
-      created,
-      durationMs: assistantDuration(row?.timeCreated, row?.timeCompleted),
-      tokens: {
-        input,
-        output,
-        reasoning,
-        cacheRead,
-        cacheWrite,
-        total:
-          optionalNonnegativeNumber(row?.total) ??
-          input + output + reasoning + cacheRead + cacheWrite,
-      },
-    });
+  if (
+    sessionCount === null ||
+    !Number.isSafeInteger(sessionCount) ||
+    sessionCount < 0 ||
+    !Array.isArray(snapshot?.windows) ||
+    snapshot.windows.length !== windows.length
+  ) {
+    return null;
   }
-  return { sessionCount, usage };
+
+  const aggregates: WindowAggregates[] = [];
+  for (let index = 0; index < windows.length; index += 1) {
+    const rawWindow = asRecord(snapshot.windows[index]);
+    const totalPromptCount = nonnegativeInteger(rawWindow?.totalPromptCount);
+    if (totalPromptCount === null || !Array.isArray(rawWindow?.groups)) return null;
+    const groups = new Map<string, Aggregate>();
+    for (const rawGroup of rawWindow.groups) {
+      const group = asRecord(rawGroup);
+      const providerID = stringValue(group?.providerID);
+      const modelID = stringValue(group?.modelID);
+      const promptCount = nonnegativeInteger(group?.prompts);
+      const durationCount = nonnegativeInteger(group?.durationCount);
+      const durationMs = nonnegativeNumber(group?.durationMs);
+      if (!providerID || !modelID || promptCount === null || durationCount === null) return null;
+      const aggregate: Aggregate = {
+        promptIDs: new Set(),
+        promptCount,
+        durationMs,
+        durationCount,
+        total: nonnegativeNumber(group?.total),
+        input: nonnegativeNumber(group?.input),
+        output: nonnegativeNumber(group?.output),
+        reasoning: nonnegativeNumber(group?.reasoning),
+        cacheRead: nonnegativeNumber(group?.cacheRead),
+        cacheWrite: nonnegativeNumber(group?.cacheWrite),
+      };
+      groups.set(routeKey(providerID, modelID), aggregate);
+    }
+    aggregates.push({ window: windows[index]!, groups, totalPromptCount });
+  }
+  return { sessionCount, aggregates };
 }
 
 function normalizeUsage(
@@ -434,6 +652,13 @@ function renderReport(
 }
 
 function createWindowAggregates(now: number, includeAllTime: boolean): WindowAggregates[] {
+  return createReportWindows(now, includeAllTime).map((window) => ({
+    window,
+    groups: new Map(),
+  }));
+}
+
+function createReportWindows(now: number, includeAllTime: boolean): ReportWindow[] {
   const midnight = new Date(now);
   midnight.setHours(0, 0, 0, 0);
   return [
@@ -441,7 +666,7 @@ function createWindowAggregates(now: number, includeAllTime: boolean): WindowAgg
     { title: 'Last 7 rolling days', start: now - 7 * DAY_MS },
     { title: 'Last 30 rolling days', start: now - 30 * DAY_MS },
     ...(includeAllTime ? [{ title: 'All time', start: null }] : []),
-  ].map((window) => ({ window, groups: new Map() }));
+  ];
 }
 
 function addUsageToWindowAggregates(aggregates: WindowAggregates[], usage: Usage[]): void {
@@ -484,7 +709,7 @@ function renderAggregatedReport(
       lines.push('_No token usage._');
       continue;
     }
-    renderAggregateTable(lines, aggregate.groups);
+    renderAggregateTable(lines, aggregate.groups, aggregate.totalPromptCount);
   }
 
   if (warnings.length > 0) {
@@ -495,24 +720,28 @@ function renderAggregatedReport(
   return lines.join('\n');
 }
 
-function renderAggregateTable(lines: string[], groups: Map<string, Aggregate>): void {
+function renderAggregateTable(
+  lines: string[],
+  groups: Map<string, Aggregate>,
+  totalPromptCount?: number
+): void {
   lines.push(
     '| Provider | Model | Prompts | Total | Duration | Input | Output | Reasoning | Cache read | Cache write |',
     '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |'
   );
   for (const [route, aggregate] of [...groups].toSorted(
     ([leftRoute, left], [rightRoute, right]) =>
-      right.promptIDs.size - left.promptIDs.size ||
+      aggregatePromptCount(right) - aggregatePromptCount(left) ||
       right.total - left.total ||
       leftRoute.localeCompare(rightRoute)
   )) {
     const [providerID = '', modelID = ''] = route.split('\u0000');
     lines.push(renderAggregateRow(providerID, modelID, aggregate));
   }
-  lines.push(renderAggregateRow('**Total**', '', sumAggregates(groups.values())));
+  lines.push(renderAggregateRow('**Total**', '', sumAggregates(groups.values(), totalPromptCount)));
 }
 
-function sumAggregates(values: Iterable<Aggregate>): Aggregate {
+function sumAggregates(values: Iterable<Aggregate>, promptCount?: number): Aggregate {
   const total = emptyAggregate();
   for (const value of values) {
     for (const promptID of value.promptIDs) total.promptIDs.add(promptID);
@@ -520,6 +749,7 @@ function sumAggregates(values: Iterable<Aggregate>): Aggregate {
     total.durationCount += value.durationCount;
     addTokens(total, value);
   }
+  if (promptCount !== undefined) total.promptCount = promptCount;
   return total;
 }
 
@@ -547,7 +777,11 @@ function addTokens(target: Tokens, tokens: Tokens): void {
 }
 
 function renderAggregateRow(providerID: string, modelID: string, aggregate: Aggregate): string {
-  return `| ${escapeMarkdown(providerID)} | ${escapeMarkdown(modelID)} | ${integer(aggregate.promptIDs.size)} | ${integer(aggregate.total)} | ${formatAggregateDuration(aggregate)} | ${integer(aggregate.input)} | ${integer(aggregate.output)} | ${integer(aggregate.reasoning)} | ${integer(aggregate.cacheRead)} | ${integer(aggregate.cacheWrite)} |`;
+  return `| ${escapeMarkdown(providerID)} | ${escapeMarkdown(modelID)} | ${integer(aggregatePromptCount(aggregate))} | ${integer(aggregate.total)} | ${formatAggregateDuration(aggregate)} | ${integer(aggregate.input)} | ${integer(aggregate.output)} | ${integer(aggregate.reasoning)} | ${integer(aggregate.cacheRead)} | ${integer(aggregate.cacheWrite)} |`;
+}
+
+function aggregatePromptCount(aggregate: Aggregate): number {
+  return aggregate.promptCount ?? aggregate.promptIDs.size;
 }
 
 interface ResponsePage {
@@ -610,6 +844,11 @@ function optionalNonnegativeNumber(value: unknown): number | null {
 
 function nonnegativeNumber(value: unknown): number {
   return optionalNonnegativeNumber(value) ?? 0;
+}
+
+function nonnegativeInteger(value: unknown): number | null {
+  const parsed = optionalNonnegativeNumber(value);
+  return parsed !== null && Number.isSafeInteger(parsed) ? parsed : null;
 }
 
 function assistantDuration(created: unknown, completed: unknown): number | null {

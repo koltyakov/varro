@@ -363,6 +363,20 @@ describe('OpenCodeTransport event stream path', () => {
     expect(warnMock).toHaveBeenCalledWith(expect.stringContaining('Ignoring malformed'));
   });
 
+  it('does not retain an oversized SSE event ID for reconnects', () => {
+    const transport = createTransport() as unknown as {
+      processSseChunk(chunk: string): void;
+      lastEventId?: string;
+    };
+    transport.lastEventId = 'previous-event';
+
+    transport.processSseChunk(
+      `id: ${'x'.repeat(513)}\ndata: {"type":"server.connected","properties":{}}`
+    );
+
+    expect(transport.lastEventId).toBe('');
+  });
+
   it('subscribes to the global event stream', async () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error('stop'));
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);

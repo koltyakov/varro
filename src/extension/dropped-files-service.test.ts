@@ -334,10 +334,13 @@ describe('DroppedFilesService', () => {
     services.push(service);
     const ownedPath = join(dropsDir, 'part-0.bin');
     const owned = service as unknown as {
-      ownedContentFiles: Map<string, number>;
+      ownedContentFiles: Map<string, { queuedPdf: boolean; size: number }>;
       ownedContentBytes: number;
     };
-    owned.ownedContentFiles.set(ownedPath, MAX_DROPPED_CONTENT_TOTAL_BYTES);
+    owned.ownedContentFiles.set(ownedPath, {
+      queuedPdf: false,
+      size: MAX_DROPPED_CONTENT_TOTAL_BYTES,
+    });
     owned.ownedContentBytes = MAX_DROPPED_CONTENT_TOTAL_BYTES;
 
     await expect(
@@ -350,6 +353,55 @@ describe('DroppedFilesService', () => {
       service.fromContent([{ name: 'accepted.txt', content: 'YQ==', size: 1 }])
     ).resolves.toHaveLength(1);
     expect(write).toHaveBeenCalledTimes(2);
+  });
+
+  it('bounds concurrent owned-content removals', async () => {
+    let activeRemovals = 0;
+    let peakRemovals = 0;
+    const remove = vi.fn(async () => {
+      activeRemovals += 1;
+      peakRemovals = Math.max(peakRemovals, activeRemovals);
+      await Promise.resolve();
+      activeRemovals -= 1;
+    });
+    const service = new DroppedFilesService({ context: { workspacePath: '/repo' } } as never, {
+      create: vi.fn(async () => '/tmp/varro-drops/drop-removal-cap'),
+      remove,
+      write: vi.fn(async () => {}),
+    });
+    services.push(service);
+    const owned = service as unknown as {
+      ownedContentFiles: Map<string, { queuedPdf: boolean; size: number }>;
+      ownedContentBytes: number;
+    };
+    const paths = Array.from({ length: 40 }, (_, index) => `/tmp/owned-${index}.bin`);
+    for (const path of paths) owned.ownedContentFiles.set(path, { queuedPdf: false, size: 1 });
+    owned.ownedContentBytes = paths.length;
+
+    await Promise.all([
+      service.removeOwnedFiles(paths.slice(0, paths.length / 2)),
+      service.removeOwnedFiles(paths.slice(paths.length / 2)),
+    ]);
+
+    expect(peakRemovals).toBeLessThanOrEqual(8);
+    expect(owned.ownedContentFiles.size).toBe(0);
+  });
+
+  it('tracks queued PDF ownership without a separate path backlog', async () => {
+    const service = new DroppedFilesService({ context: { workspacePath: '/repo' } } as never, {
+      create: vi.fn(async () => '/tmp/varro-drops/drop-pdf-tracking'),
+      remove: vi.fn(async () => {}),
+      write: vi.fn(async () => {}),
+    });
+    services.push(service);
+    const files = await service.fromContent([
+      { name: 'queued.pdf', content: 'YQ==', size: 1 },
+      { name: 'other.txt', content: 'Yg==', size: 1 },
+    ]);
+
+    service.markQueuedPdf(files[0]!.path);
+
+    expect([...service.ownedQueuedPdfPaths()]).toEqual([files[0]!.path]);
   });
 
   it('retains a sent image until the deferred removal window expires', async () => {
@@ -365,6 +417,8 @@ describe('DroppedFilesService', () => {
     const [image] = await service.fromContent([{ name: 'image.png', content: 'YQ==', size: 1 }]);
 
     service.deferOwnedFileRemoval(image!.path);
+    service.markQueuedPdf(image!.path);
+    expect([...service.ownedQueuedPdfPaths()]).toEqual([]);
     await vi.advanceTimersByTimeAsync(30 * 60 * 1000 - 1);
     expect(remove).not.toHaveBeenCalledWith(image!.path, { force: true });
 

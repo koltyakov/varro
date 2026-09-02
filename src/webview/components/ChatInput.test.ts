@@ -44,6 +44,7 @@ import type { UnknownRecord } from '../../shared/type-utils';
 import {
   applyQueuedMessageClaimResult,
   applyQueuedMessagesSnapshot,
+  claimQueuedMessageDispatch,
   syncQueuedMessages,
 } from '../lib/state-queued-messages';
 import { sendQueuedAsSteer } from './chat-input/queued-steer';
@@ -555,13 +556,17 @@ function dispatchImagePaste(target: Element, files: Array<File | null>, text = '
 
 function installControllableFileReader() {
   const originalFileReader = globalThis.FileReader;
-  const pendingReads = new Map<string, { resolve: () => void; reject: () => void }>();
+  const pendingReads = new Map<
+    string,
+    { resolve: (resultName?: string) => void; reject: () => void }
+  >();
 
   class MockFileReader {
     result: string | ArrayBuffer | null = null;
     error: DOMException | null = null;
     private loadListener: (() => void) | undefined;
     private errorListener: (() => void) | undefined;
+    private filename: string | undefined;
 
     addEventListener(type: string, listener: () => void) {
       if (type === 'load') this.loadListener = listener;
@@ -569,9 +574,10 @@ function installControllableFileReader() {
     }
 
     readAsDataURL(file: File) {
+      this.filename = file.name;
       pendingReads.set(file.name, {
-        resolve: () => {
-          this.result = `data:${file.type};base64,${file.name}`;
+        resolve: (resultName = file.name) => {
+          this.result = `data:${file.type};base64,${resultName}`;
           this.loadListener?.();
         },
         reject: () => {
@@ -580,16 +586,23 @@ function installControllableFileReader() {
         },
       });
     }
+
+    abort() {
+      if (this.filename) pendingReads.delete(this.filename);
+    }
   }
 
   // SAFETY: The fixture provides the unknown fields read by this statement.
   globalThis.FileReader = fixture<typeof FileReader>(MockFileReader);
   return {
-    resolve(filename: string) {
+    hasPending(filename: string) {
+      return pendingReads.has(filename);
+    },
+    resolve(filename: string, resultName?: string) {
       const pending = pendingReads.get(filename);
       if (!pending) throw new Error(`No pending FileReader for ${filename}`);
       pendingReads.delete(filename);
-      pending.resolve();
+      pending.resolve(resultName);
     },
     reject(filename: string) {
       const pending = pendingReads.get(filename);
@@ -4409,6 +4422,69 @@ describe('ChatInput', () => {
     ).toBe(false);
   });
 
+  it('stops retrying a queue item missing from the host queue', async () => {
+    vi.useFakeTimers();
+    setState('activeSessionId', 'session-1');
+    setState('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'not persisted' }]);
+    const claims: WebviewMessage[] = [];
+    fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension = (
+      message
+    ) => {
+      if (message.type !== 'queued-messages/claim') return;
+      claims.push(message);
+      queueMicrotask(() =>
+        applyQueuedMessageClaimResult({
+          ...message.payload,
+          granted: false,
+          deniedReason: 'missing',
+        })
+      );
+    };
+
+    cleanup = render(() => ChatInput(), container!);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushAsyncWork();
+
+    expect(claims).toHaveLength(1);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(state.failedQueuedMessageIds).toEqual(['q1']);
+    expect(
+      container?.querySelector<HTMLButtonElement>('[aria-label="Retry queued message"]')?.disabled
+    ).toBe(false);
+  });
+
+  it('releases a queue lease granted after the claim timed out', async () => {
+    vi.useFakeTimers();
+    const sent: WebviewMessage[] = [];
+    fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension = (
+      message
+    ) => sent.push(message);
+    const item = { id: 'q1', sessionId: 'session-1', text: 'late claim' };
+
+    const claim = claimQueuedMessageDispatch(item);
+    const request = sent.find((message) => message.type === 'queued-messages/claim');
+    if (request?.type !== 'queued-messages/claim') throw new Error('Expected queue claim');
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(claim).resolves.toBeNull();
+    applyQueuedMessageClaimResult({ ...request.payload, granted: true, lease: 7 });
+
+    expect(sent.at(-1)).toEqual({
+      type: 'queued-messages/release',
+      payload: { itemId: 'q1', sessionId: 'session-1', lease: 7 },
+    });
+  });
+
+  it('marks a queue item failed when the claim cannot reach the host', async () => {
+    const bridgeWindow = fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window);
+    bridgeWindow.__sendToExtension = undefined;
+    const item = { id: 'q1', sessionId: 'session-1', text: 'offline claim' };
+    setState('queuedMessages', [item]);
+
+    await expect(claimQueuedMessageDispatch(item)).resolves.toBeNull();
+
+    expect(state.failedQueuedMessageIds).toEqual(['q1']);
+  });
+
   it('does not duplicate an in-flight queued dispatch after remounting', async () => {
     vi.useFakeTimers();
     setState('activeSessionId', 'session-1');
@@ -6950,11 +7026,11 @@ describe('ChatInput', () => {
   });
 
   it.each([
-    { label: 'source order', reads: ['first-mixed.png', 'second-mixed.png'] },
-    { label: 'reverse order', reads: ['second-mixed.png', 'first-mixed.png'] },
+    { label: 'source order', probeLaterRead: false },
+    { label: 'reverse order', probeLaterRead: true },
   ])(
     'keeps overlapping mixed pastes ordered and independently undoable in $label',
-    async ({ reads }) => {
+    async ({ probeLaterRead }) => {
       const fileReader = installControllableFileReader();
       try {
         cleanup = render(() => ChatInput(), container!);
@@ -6979,10 +7055,11 @@ describe('ChatInput', () => {
           ' Second'
         );
 
-        for (const filename of reads) {
-          fileReader.resolve(filename);
-          await flushAsyncWork();
-        }
+        if (probeLaterRead) expect(fileReader.hasPending('second-mixed.png')).toBe(false);
+        fileReader.resolve('first-mixed.png');
+        await flushAsyncWork();
+        fileReader.resolve('second-mixed.png');
+        await flushAsyncWork();
 
         expect(inputText()).toBe('First [Image 1] Second [Image 2]');
         expect(
@@ -7174,7 +7251,7 @@ describe('ChatInput', () => {
         [new File(['extra'], 'capacity.png', { type: 'image/png' })],
         'Text at image capacity'
       );
-      fileReader.resolve('capacity.png');
+      expect(fileReader.hasPending('capacity.png')).toBe(false);
       await flushAsyncWork();
 
       expect(inputText()).toBe('Text at image capacity');
@@ -7302,15 +7379,16 @@ describe('ChatInput', () => {
       dispatchImagePaste(editor, firstPaste);
       dispatchImagePaste(editor, secondPaste);
 
-      fileReader.resolve(secondPaste[0]!.name);
-      await flushAsyncWork();
-      expect(state.clipboardImages).toEqual([]);
-
-      for (const file of secondPaste.slice(1)) fileReader.resolve(file.name);
-      await flushAsyncWork();
+      expect(fileReader.hasPending(secondPaste[0]!.name)).toBe(false);
       expect(state.clipboardImages).toEqual([]);
 
       for (const file of firstPaste) fileReader.resolve(file.name);
+      await flushAsyncWork();
+      expect(state.clipboardImages).toHaveLength(firstPaste.length);
+      for (const file of secondPaste.slice(0, MAX_CLIPBOARD_IMAGES - firstPaste.length)) {
+        fileReader.resolve(file.name);
+      }
+      expect(fileReader.hasPending(secondPaste.at(-1)!.name)).toBe(false);
       await flushAsyncWork();
 
       expect(state.clipboardImages).toHaveLength(MAX_CLIPBOARD_IMAGES);
@@ -7331,6 +7409,90 @@ describe('ChatInput', () => {
     }
   });
 
+  it('sends one host snapshot for a multi-image paste transaction', async () => {
+    const fileReader = installControllableFileReader();
+    const sent: WebviewMessage[] = [];
+    const bridgeWindow = fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window);
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
+    try {
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor) throw new Error('Expected composer editor');
+      const images = ['first.png', 'second.png', 'third.png'].map(
+        (name) => new File([name], name, { type: 'image/png' })
+      );
+
+      dispatchImagePaste(editor, images);
+      for (const image of images) fileReader.resolve(image.name);
+      await flushAsyncWork();
+
+      const updates = sent.filter((message) => message.type === 'composer/images-update');
+      expect(updates).toHaveLength(1);
+      expect(updates[0]).toMatchObject({ payload: { images: expect.any(Array) } });
+      if (updates[0]?.type === 'composer/images-update') {
+        expect(updates[0].payload.images).toHaveLength(3);
+      }
+    } finally {
+      fileReader.restore();
+    }
+  });
+
+  it('bounds concurrent pasted-image decodes', async () => {
+    const fileReader = installControllableFileReader();
+    const decodeReleases: Array<() => void> = [];
+    let activeDecodes = 0;
+    let peakDecodes = 0;
+    class ControlledImage {
+      src = '';
+      naturalWidth = 100;
+      naturalHeight = 100;
+
+      decode() {
+        activeDecodes += 1;
+        peakDecodes = Math.max(peakDecodes, activeDecodes);
+        return new Promise<void>((resolve) => {
+          decodeReleases.push(() => {
+            activeDecodes -= 1;
+            resolve();
+          });
+        });
+      }
+    }
+    vi.stubGlobal('Image', ControlledImage);
+    try {
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor) throw new Error('Expected composer editor');
+      const images = ['first.png', 'second.png', 'third.png'].map(
+        (name) => new File([name], name, { type: 'image/png' })
+      );
+
+      dispatchImagePaste(editor, images);
+      const unresolved = new Set(images.map((image) => image.name));
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        for (const filename of unresolved) {
+          if (!fileReader.hasPending(filename)) continue;
+          fileReader.resolve(filename);
+          unresolved.delete(filename);
+        }
+        await flushAsyncWork();
+        decodeReleases.shift()?.();
+        await flushAsyncWork();
+        if (unresolved.size === 0 && activeDecodes === 0) break;
+      }
+
+      expect(unresolved.size).toBe(0);
+      expect(activeDecodes).toBe(0);
+      expect(peakDecodes).toBeLessThanOrEqual(2);
+      expect(state.clipboardImages).toHaveLength(3);
+    } finally {
+      fileReader.restore();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('commits overlapping image-only pastes into a non-empty composer in source order', async () => {
     const fileReader = installControllableFileReader();
     try {
@@ -7347,12 +7509,14 @@ describe('ChatInput', () => {
       dispatchImagePaste(editor, [new File(['a'], 'first.png', { type: 'image/png' })]);
       dispatchImagePaste(editor, [new File(['b'], 'second.png', { type: 'image/png' })]);
 
-      fileReader.resolve('second.png');
-      await flushAsyncWork();
+      expect(fileReader.hasPending('second.png')).toBe(false);
       expect(inputText()).toBe('Review this');
       expect(state.clipboardImages).toEqual([]);
 
       fileReader.resolve('first.png');
+      await flushAsyncWork();
+      expect(inputText()).toBe('Review this [Image 1]');
+      fileReader.resolve('second.png');
       await flushAsyncWork();
 
       expect(inputText()).toBe('Review this [Image 1] [Image 2]');
@@ -7363,6 +7527,66 @@ describe('ChatInput', () => {
         { filename: 'Image 2', url: 'data:image/png;base64,second.png' },
       ]);
       expect(nextPastedImageIndex()).toBe(3);
+    } finally {
+      fileReader.restore();
+    }
+  });
+
+  it('admits a later paste after duplicate images release capacity', async () => {
+    const fileReader = installControllableFileReader();
+    try {
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor) throw new Error('Expected composer editor');
+      const duplicates = Array.from(
+        { length: MAX_CLIPBOARD_IMAGES },
+        (_, index) => new File([String(index)], `duplicate-${index}.png`, { type: 'image/png' })
+      );
+
+      dispatchImagePaste(editor, duplicates);
+      dispatchImagePaste(editor, [new File(['later'], 'later.png', { type: 'image/png' })]);
+      expect(fileReader.hasPending('later.png')).toBe(false);
+
+      for (const file of duplicates) fileReader.resolve(file.name, 'same-content');
+      await flushAsyncWork();
+      expect(state.clipboardImages).toHaveLength(1);
+      expect(fileReader.hasPending('later.png')).toBe(true);
+
+      fileReader.resolve('later.png');
+      await flushAsyncWork();
+      expect(state.clipboardImages.map((image) => image.url)).toEqual([
+        'data:image/png;base64,same-content',
+        'data:image/png;base64,later.png',
+      ]);
+    } finally {
+      fileReader.restore();
+    }
+  });
+
+  it('releases ordered paste admission when a file read stalls', async () => {
+    vi.useFakeTimers();
+    const fileReader = installControllableFileReader();
+    try {
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor) throw new Error('Expected composer editor');
+
+      dispatchImagePaste(editor, [new File(['stalled'], 'stalled.png', { type: 'image/png' })]);
+      dispatchImagePaste(editor, [new File(['later'], 'later.png', { type: 'image/png' })]);
+      expect(fileReader.hasPending('later.png')).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      await flushAsyncWork();
+      expect(fileReader.hasPending('stalled.png')).toBe(false);
+      expect(fileReader.hasPending('later.png')).toBe(true);
+
+      fileReader.resolve('later.png');
+      await flushAsyncWork();
+      expect(state.clipboardImages).toEqual([
+        expect.objectContaining({ url: 'data:image/png;base64,later.png' }),
+      ]);
     } finally {
       fileReader.restore();
     }

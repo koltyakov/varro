@@ -2,6 +2,17 @@
 
 This changelog summarizes the main user-facing improvements in each Varro minor release line. Patch releases are consolidated into their parent minor version. Dates reflect the development history.
 
+## 0.28.x - September 2026
+
+- Added layered permission controls for editing session and project rules, reviewing inherited configuration, and retracting allowances held in OpenCode server memory.
+- Opened plans in VS Code's Markdown preview and kept previewed files available as active editor context.
+- Made local usage reports faster and safer for large histories by aggregating the OpenCode database in a worker, sharing overlapping report requests, and bounding server fallbacks.
+- Improved pasted-image handling with ordered batch processing, duplicate detection, bounded decoding, and more reliable draft persistence.
+- Strengthened queued-message persistence and attachment cleanup so rapid queue updates, failed writes, ownership transfers, and missing claims recover cleanly.
+- Improved sidebar and editor-chat recovery when webview delivery stalls or an older document reports ready, with bounded delivery backlogs and reliable recovery snapshots.
+- Stabilized long-conversation history loading, scroll anchoring, prompt-number navigation, streaming Markdown, and session lists with deeply nested subagents.
+- Limited malformed or excessive server events, process output, attachment cleanup, and other background work to keep the extension responsive under heavy load.
+
 ## 0.27.x - August 2026
 
 - Added a built-in read-only Ask agent for exploring code and answering questions without modifying files, while honoring an existing configured `ask` agent. Built-in agents now have distinct icons in the agent picker.

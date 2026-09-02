@@ -320,6 +320,7 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
     case 'queued-messages/claim-result': {
       const payload = asRecord(record.payload);
       const lease = payload?.lease;
+      const deniedReason = payload?.deniedReason;
       if (
         !payload ||
         !isNumber(payload.requestId) ||
@@ -329,7 +330,10 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
         !isString(payload.sessionId) ||
         !isBoolean(payload.granted) ||
         (lease !== undefined && (!isNumber(lease) || !Number.isSafeInteger(lease) || lease <= 0)) ||
-        (payload.granted ? lease === undefined : lease !== undefined)
+        (payload.granted
+          ? lease === undefined || deniedReason !== undefined
+          : lease !== undefined) ||
+        (deniedReason !== undefined && deniedReason !== 'missing')
       ) {
         return null;
       }
@@ -341,6 +345,7 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
           granted: payload.granted,
         };
       if (lease !== undefined) result.lease = lease;
+      if (deniedReason === 'missing') result.deniedReason = deniedReason;
       return { type, payload: result };
     }
 

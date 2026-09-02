@@ -152,6 +152,56 @@ describe('HiddenSessionManager', () => {
     ).toEqual(['visible']);
   });
 
+  it('recognizes commit-message helpers after the extension host restarts', () => {
+    const manager = new HiddenSessionManager();
+    const now = 1_000_000;
+    const visibleSession = {
+      id: 'visible',
+      title: 'Varro commit message: ordinary-session',
+      permission: [{ permission: '*', pattern: '*', action: 'ask' as const }],
+    };
+    const visibleNumericSession = {
+      id: 'visible-numeric',
+      title: 'Varro commit message: 2',
+      permission: [{ permission: '*', pattern: '*', action: 'allow' as const }],
+    };
+    const markedHelper = {
+      id: 'marked-commit-helper',
+      title: 'Internal helper',
+      metadata: { varroInternal: 'commit-message' },
+      time: { updated: now - 180_000 },
+    };
+    const legacyHelper = {
+      id: 'legacy-commit-helper',
+      title: 'Varro commit message: 1',
+      permission: legacyJudgePermission,
+      time: { updated: now - 180_000 },
+    };
+    const projectedLegacyHelper = {
+      id: 'projected-legacy-commit-helper',
+      title: 'Varro commit message: 3',
+      time: { updated: now - 180_000 },
+    };
+
+    expect(
+      manager.observeSessionList(
+        [visibleSession, visibleNumericSession, markedHelper, legacyHelper, projectedLegacyHelper],
+        now
+      )
+    ).toEqual(['marked-commit-helper', 'legacy-commit-helper', 'projected-legacy-commit-helper']);
+    expect(
+      manager
+        .filterVisibleSessions([
+          visibleSession,
+          visibleNumericSession,
+          markedHelper,
+          legacyHelper,
+          projectedLegacyHelper,
+        ])
+        .map(({ id }) => id)
+    ).toEqual(['visible', 'visible-numeric']);
+  });
+
   it('does not hide an ordinary session renamed with the legacy title prefix', () => {
     const manager = new HiddenSessionManager();
     const now = 1_000_000;

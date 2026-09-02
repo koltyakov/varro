@@ -192,6 +192,103 @@ describe('MessageList prompt numbers', () => {
     });
   });
 
+  it('stops loading older prompt pages when Alt is released', async () => {
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
+    const firstPage = [
+      {
+        info: assistantMessage('assistant-2'),
+        parts: [textPart('assistant-text-2', 'No prompt on this page')],
+      },
+    ] as Awaited<ReturnType<typeof client.session.messages>>;
+    firstPage.nextCursor = 'cursor-1';
+    let resolveFirstPage!: (page: typeof firstPage) => void;
+    const messagesSpy = vi.spyOn(client.session, 'messages').mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFirstPage = resolve;
+      })
+    );
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryPromptCursor('session-1', 'cursor-2');
+    replaceMessages([
+      { info: userMessage('user-3'), parts: [textPart('user-text-3', 'Current prompt')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+    await vi.waitFor(() => expect(messagesSpy).toHaveBeenCalledOnce());
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt' }));
+    resolveFirstPage(firstPage);
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(messagesSpy).toHaveBeenCalledOnce();
+  });
+
+  it('lets a new Alt hold finish an in-flight prompt page owned by the previous hold', async () => {
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
+    const olderPage = [
+      { info: userMessage('user-1'), parts: [textPart('user-text-1', 'Older prompt')] },
+    ] as Awaited<ReturnType<typeof client.session.messages>>;
+    let resolvePage!: (page: typeof olderPage) => void;
+    const messagesSpy = vi.spyOn(client.session, 'messages').mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolvePage = resolve;
+      })
+    );
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryPromptCursor('session-1', 'cursor-older');
+    replaceMessages([
+      { info: userMessage('user-2'), parts: [textPart('user-text-2', 'Current prompt')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+    await vi.waitFor(() => expect(messagesSpy).toHaveBeenCalledOnce());
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt' }));
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+    resolvePage(olderPage);
+
+    await vi.waitFor(() => {
+      expect(
+        [...(container?.querySelectorAll('.user-message-card .prompt-number-badge') ?? [])].map(
+          (badge) => badge.textContent
+        )
+      ).toEqual(['2']);
+    });
+    expect(messagesSpy).toHaveBeenCalledOnce();
+  });
+
+  it('keeps one prompt traversal while Alt is toggled around a stalled page', async () => {
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
+    const olderPage = [
+      { info: userMessage('user-1'), parts: [textPart('user-text-1', 'Older prompt')] },
+    ] as Awaited<ReturnType<typeof client.session.messages>>;
+    let resolvePage!: (page: typeof olderPage) => void;
+    const messagesSpy = vi.spyOn(client.session, 'messages').mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolvePage = resolve;
+      })
+    );
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryPromptCursor('session-1', 'cursor-older');
+    replaceMessages([
+      { info: userMessage('user-2'), parts: [textPart('user-text-2', 'Current prompt')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+    await vi.waitFor(() => expect(messagesSpy).toHaveBeenCalledOnce());
+    for (let index = 0; index < 100; index += 1) {
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt' }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+    }
+    resolvePage(olderPage);
+
+    await vi.waitFor(() =>
+      expect(container?.querySelector('.prompt-number-badge')?.textContent).toBe('2')
+    );
+    expect(messagesSpy).toHaveBeenCalledOnce();
+  });
+
   it('keeps partial prompt numbers hidden after a failed page and retries on the next Alt hold', async () => {
     setState('activeSessionId', 'session-1');
     setSessionHistoryPromptCursor('session-1', 'cursor-older');

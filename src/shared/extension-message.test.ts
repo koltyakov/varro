@@ -920,6 +920,24 @@ describe('parseExtensionMessage queued message claim results', () => {
     });
   });
 
+  it('parses a refused claim for an item missing from the host queue', () => {
+    expect(
+      parseExtensionMessage({
+        type: 'queued-messages/claim-result',
+        payload: { ...base, granted: false, deniedReason: 'missing' },
+      })
+    ).toEqual({
+      type: 'queued-messages/claim-result',
+      payload: {
+        requestId: 1,
+        itemId: 'queued-1',
+        sessionId: 'session-1',
+        granted: false,
+        deniedReason: 'missing',
+      },
+    });
+  });
+
   it('rejects a granted claim without a lease', () => {
     // A grant is the mutual-exclusion token for dispatching a queued message.
     // Accepting one without a lease would let two windows both believe they own it.
@@ -936,6 +954,21 @@ describe('parseExtensionMessage queued message claim results', () => {
       parseExtensionMessage({
         type: 'queued-messages/claim-result',
         payload: { ...base, granted: false, lease: 9 },
+      })
+    ).toBeNull();
+  });
+
+  it('rejects invalid claim denial reasons', () => {
+    expect(
+      parseExtensionMessage({
+        type: 'queued-messages/claim-result',
+        payload: { ...base, granted: false, deniedReason: 'busy' },
+      })
+    ).toBeNull();
+    expect(
+      parseExtensionMessage({
+        type: 'queued-messages/claim-result',
+        payload: { ...base, granted: true, lease: 9, deniedReason: 'missing' },
       })
     ).toBeNull();
   });

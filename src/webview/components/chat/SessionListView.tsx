@@ -2809,13 +2809,40 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
     const cachedCount = descendantSubagentCountBySession.get(sessionId);
     if (cachedCount !== undefined) return cachedCount;
 
-    let count = 0;
-    for (const childId of childSessionIdsByParent.get(sessionId) || []) {
-      count += 1 + countDescendants(childId);
-    }
+    const visiting = new Set<string>();
+    const stack: Array<{ expanded: boolean; sessionId: string }> = [{ expanded: false, sessionId }];
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      if (descendantSubagentCountBySession.has(current.sessionId)) continue;
+      if (current.expanded) {
+        visiting.delete(current.sessionId);
+        let count = 0;
+        for (const childId of childSessionIdsByParent.get(current.sessionId) || []) {
+          const childCount = descendantSubagentCountBySession.get(childId);
+          if (childCount !== undefined && childId !== current.sessionId) {
+            count += 1 + childCount;
+          }
+        }
+        descendantSubagentCountBySession.set(current.sessionId, count);
+        continue;
+      }
 
-    descendantSubagentCountBySession.set(sessionId, count);
-    return count;
+      visiting.add(current.sessionId);
+      stack.push({ expanded: true, sessionId: current.sessionId });
+      const children = childSessionIdsByParent.get(current.sessionId) || [];
+      for (let index = children.length - 1; index >= 0; index -= 1) {
+        const childId = children[index]!;
+        if (
+          childId === current.sessionId ||
+          visiting.has(childId) ||
+          descendantSubagentCountBySession.has(childId)
+        ) {
+          continue;
+        }
+        stack.push({ expanded: false, sessionId: childId });
+      }
+    }
+    return descendantSubagentCountBySession.get(sessionId) ?? 0;
   };
 
   for (const session of sessions) {

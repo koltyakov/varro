@@ -156,7 +156,7 @@ Commands offered in slash-command completion include:
 
 Custom OpenCode commands loaded from your local config also appear in the same completion list. Skill-sourced commands are browsed through `/skills` instead of being mixed into the main slash-command list.
 
-`/stats` scans the last 30 days of retained OpenCode history across projects and opens an untitled Markdown report. It groups token use and total completed assistant duration by provider and model. Use `/stats all` when you need the slower all-time scan. Deleted OpenCode history cannot be included.
+`/stats` scans the last 30 days of retained OpenCode history across projects and opens an untitled Markdown report. It reads and aggregates the local OpenCode SQLite database in a worker so large transcripts do not block the extension host. It groups token use and total completed assistant duration by provider and model. Use `/stats all` when you need the slower all-time scan. To keep extension-host work bounded, local reports stop with an error above 250,000 qualifying assistant messages or 4,096 provider/model routes. Deleted OpenCode history cannot be included.
 
 Some commands only appear when they apply. `/ralph` appears before a session exists, `/export` appears after one exists, and `/init` appears when the workspace can be initialized.
 

@@ -4,10 +4,19 @@ import type { ClipboardImageSnapshot } from '../shared/protocol';
 import { asRecord } from '../shared/type-utils';
 
 const DRAFT_IMAGES_KEY = 'varro.inputDraftImages';
+type DraftImagePersistenceSnapshot = Record<string, Omit<ClipboardImageSnapshot, 'contextFile'>[]>;
+type PendingPersistence = {
+  promise: Promise<void>;
+  reject: (error: Error) => void;
+  resolve: () => void;
+  snapshot: DraftImagePersistenceSnapshot | null;
+};
 
 export class DraftImageStore {
   private readonly imagesByView = new Map<string, ClipboardImageSnapshot[]>();
-  private persistenceQueue: Promise<void> = Promise.resolve();
+  private pendingPersistence: PendingPersistence | undefined;
+  private persistenceDrain: Promise<void> | undefined;
+  private persistenceDraining = false;
 
   constructor(private readonly persistence: Persistence) {
     const stored = persistence.get<unknown>(DRAFT_IMAGES_KEY);
@@ -55,19 +64,58 @@ export class DraftImageStore {
         ownerImages.map(({ contextFile: _contextFile, ...image }) => image),
       ])
     );
-    const operation = this.persistenceQueue.then(() =>
-      this.imagesByView.size > 0
-        ? this.persistence.set(DRAFT_IMAGES_KEY, snapshot)
-        : this.persistence.remove(DRAFT_IMAGES_KEY)
-    );
-    this.persistenceQueue = operation.then(
-      () => {},
-      () => {}
-    );
-    return operation;
+    return this.enqueuePersistence(this.imagesByView.size > 0 ? snapshot : null);
   }
 
-  dispose(): Promise<void> {
-    return this.persistenceQueue;
+  async dispose(): Promise<void> {
+    while (this.persistenceDrain || this.pendingPersistence) {
+      if (!this.persistenceDrain) this.startPersistenceDrain();
+      await this.persistenceDrain;
+    }
+  }
+
+  private enqueuePersistence(snapshot: DraftImagePersistenceSnapshot | null): Promise<void> {
+    if (this.pendingPersistence) {
+      this.pendingPersistence.snapshot = snapshot;
+      return this.pendingPersistence.promise;
+    }
+    let resolve!: () => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<void>((resolvePromise, rejectPromise) => {
+      resolve = resolvePromise;
+      reject = rejectPromise;
+    });
+    this.pendingPersistence = { promise, reject, resolve, snapshot };
+    this.startPersistenceDrain();
+    return promise;
+  }
+
+  private startPersistenceDrain() {
+    if (this.persistenceDraining) return;
+    this.persistenceDraining = true;
+    const drain = this.drainPersistence();
+    this.persistenceDrain = drain;
+    const finish = () => {
+      if (this.persistenceDrain !== drain) return;
+      this.persistenceDrain = undefined;
+      this.persistenceDraining = false;
+      if (this.pendingPersistence) this.startPersistenceDrain();
+    };
+    void drain.then(finish, finish);
+  }
+
+  private async drainPersistence() {
+    while (this.pendingPersistence) {
+      const pending = this.pendingPersistence;
+      this.pendingPersistence = undefined;
+      try {
+        if (pending.snapshot) await this.persistence.set(DRAFT_IMAGES_KEY, pending.snapshot);
+        else await this.persistence.remove(DRAFT_IMAGES_KEY);
+        pending.resolve();
+      } catch (error) {
+        const failure = error instanceof Error ? error : new Error(String(error));
+        pending.reject(failure);
+      }
+    }
   }
 }

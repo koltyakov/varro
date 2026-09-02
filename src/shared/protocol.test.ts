@@ -109,6 +109,16 @@ describe('protocol parsers', () => {
     });
   });
 
+  it('drops oversized server event IDs before they enter dedupe caches', () => {
+    expect(
+      parseServerEvent({
+        id: 'x'.repeat(513),
+        type: 'server.connected',
+        properties: {},
+      })
+    ).toEqual({ type: 'server.connected', properties: {} });
+  });
+
   it('preserves the workspace from direct event locations', () => {
     expect(
       parseServerEvent({

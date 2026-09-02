@@ -56,7 +56,7 @@ export interface SidebarProviderActionDeps {
   selectWorkspace(path: string): Promise<void>;
   postTerminalSelection(selection: TerminalSelection | null): void;
   postConfigState(): void;
-  handleReadyMessage(): Promise<void>;
+  handleReadyMessage(documentId?: number): Promise<void>;
   handleDroppedPaths(paths: string[]): Promise<void>;
   handleDroppedContent(
     files: Array<{ name: string; content: string; size: number }>
@@ -120,7 +120,7 @@ export function createSidebarProviderActions(
   };
 
   return {
-    ready: () => deps.handleReadyMessage(),
+    ready: (documentId) => deps.handleReadyMessage(documentId),
     updateCommandState: (canAbort, canSwitchSessions, model, sessionId) => {
       deps.webviewSession.updateCommandState(canAbort, canSwitchSessions);
       deps.setActiveChatModel(model);

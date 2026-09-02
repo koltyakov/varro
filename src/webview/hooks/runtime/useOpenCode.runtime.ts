@@ -61,8 +61,8 @@ export async function loadOlderSessionHistoryPage(
     : runtime.loadOlderSessionHistoryPage(sessionId);
 }
 
-export async function loadOlderSessionPrompts(sessionId: string) {
-  return getCurrentOpenCodeRuntime().loadOlderSessionPrompts(sessionId);
+export async function loadOlderSessionPrompts(sessionId: string, isOwnerCurrent?: () => boolean) {
+  return getCurrentOpenCodeRuntime().loadOlderSessionPrompts(sessionId, isOwnerCurrent);
 }
 
 export async function createSession(title?: string, initialPermissionMode?: PermissionMode) {

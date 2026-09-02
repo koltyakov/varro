@@ -9,7 +9,11 @@ import * as vscode from 'vscode';
 import type { PermissionRule } from '../shared/opencode-types';
 import type { ChatModelSelection } from '../shared/protocol';
 import { asRecord } from '../shared/type-utils';
-import type { HiddenSessionManager } from './hidden-session-manager';
+import {
+  COMMIT_MESSAGE_SESSION_METADATA,
+  COMMIT_MESSAGE_SESSION_TITLE_PREFIX,
+  type HiddenSessionManager,
+} from './hidden-session-manager';
 import { resolveHelperModel } from './helper-model-selection';
 import { logger } from './logger';
 import type { OpenCodeServer } from './server';
@@ -89,7 +93,6 @@ const GIT_STATUS_UNTRACKED = 7;
 const MAX_HISTORY_ENTRIES = 50;
 const MAX_HISTORY_EXAMPLES = 8;
 const GENERATION_TIMEOUT_MS = 30_000;
-const HELPER_TITLE_PREFIX = 'Varro commit message';
 const REPLACE = 'Replace';
 const CANCEL = 'Cancel';
 const REPLACE_ANYWAY = 'Replace Anyway';
@@ -377,12 +380,13 @@ export class CommitMessageService {
     await this.ensureServerStarted();
     throwIfCancelled(attempt);
 
-    const title = `${HELPER_TITLE_PREFIX}: ${++this.helperSequence}`;
+    const title = `${COMMIT_MESSAGE_SESSION_TITLE_PREFIX}${++this.helperSequence}`;
     attempt.pendingTitle = title;
     this.hiddenSessions.registerPendingTitle(title);
     try {
       const session = await this.server.request('POST', scopedPath('/session', attempt.directory), {
         title,
+        metadata: COMMIT_MESSAGE_SESSION_METADATA,
         permission: DENY_ALL_PERMISSION_RULES,
       });
       attempt.sessionID = getString(asRecord(session)?.id);

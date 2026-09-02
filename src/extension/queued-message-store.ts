@@ -8,10 +8,22 @@ const QUEUED_MESSAGE_REMOVALS_KEY = 'varro.queuedMessageRemovals';
 const COMPLETION_PERSIST_ATTEMPTS = 3;
 const MAX_COMPLETED_DISPATCHES = 512;
 
+type PendingPersistence = {
+  attempts: number;
+  messages: QueuedMessageSnapshot[];
+  persistRemovals: boolean;
+  promise: Promise<void>;
+  reject: (error: Error) => void;
+  resolve: () => void;
+};
+
 export class QueuedMessageStore {
   private messages: QueuedMessageSnapshot[] | undefined;
+  private durableMessages: QueuedMessageSnapshot[] | undefined;
   private readonly removalTombstones: Set<string>;
-  private persistenceQueue: Promise<void> = Promise.resolve();
+  private pendingPersistence: PendingPersistence | undefined;
+  private persistenceDrain: Promise<void> | undefined;
+  private persistenceDraining = false;
   private readonly dispatchClaims = new Map<
     string,
     { activeRequestId?: number; itemId: string; lease: number; viewId: string }
@@ -29,10 +41,17 @@ export class QueuedMessageStore {
     this.messages = messages?.filter(
       (message) => !this.removalTombstones.has(dispatchKey(message.sessionId, message.id))
     );
+    this.durableMessages = this.messages;
   }
 
   list(): QueuedMessageSnapshot[] | undefined {
     return this.messages;
+  }
+
+  has(sessionId: string, itemId: string): boolean {
+    return (this.messages ?? []).some(
+      (message) => message.sessionId === sessionId && message.id === itemId
+    );
   }
 
   update(messages: QueuedMessageSnapshot[]): Promise<void> {
@@ -74,12 +93,7 @@ export class QueuedMessageStore {
           )
       )
       .map((message) => dispatchKey(message.sessionId, message.id));
-    const persistence =
-      removedKeys.length > 0 ? this.persistRemoval(next, removedKeys) : this.persist(next);
-    return persistence.catch((err) => {
-      if (this.messages === next) this.messages = current;
-      throw err;
-    });
+    return removedKeys.length > 0 ? this.persistRemoval(next) : this.persist(next);
   }
 
   transferOwner(fromViewId: string, toViewId: string): Promise<void> {
@@ -155,32 +169,33 @@ export class QueuedMessageStore {
     return claim?.viewId === viewId && claim.itemId === itemId && claim.lease === lease;
   }
 
-  async beginDispatchAdmission(
+  beginDispatchAdmission(
     viewId: string,
     sessionId: string,
     itemId: string,
     lease: number,
     requestId: number,
     messageId: string
-  ) {
-    if (!this.isDispatchClaimCurrent(viewId, sessionId, itemId, lease)) return false;
+  ): Promise<boolean> {
+    if (!this.isDispatchClaimCurrent(viewId, sessionId, itemId, lease)) {
+      return Promise.resolve(false);
+    }
     const claim = this.dispatchClaims.get(sessionId)!;
-    if (claim.activeRequestId !== undefined) return false;
+    if (claim.activeRequestId !== undefined) return Promise.resolve(false);
     const current = this.messages ?? [];
     const message = current.find((item) => item.id === itemId && item.sessionId === sessionId);
     if (!message || (message.messageId !== undefined && message.messageId !== messageId))
-      return false;
+      return Promise.resolve(false);
     if (message.messageId === undefined) {
       this.messages = current.map((item) => (item === message ? { ...item, messageId } : item));
     }
     claim.activeRequestId = requestId;
-    try {
-      await this.persist(this.messages ?? [], COMPLETION_PERSIST_ATTEMPTS);
-      return this.isDispatchAdmissionCurrent(viewId, sessionId, itemId, lease, requestId);
-    } catch (err) {
-      this.releaseDispatchAdmission(viewId, sessionId, itemId, lease, requestId);
-      throw err;
-    }
+    return this.persist(this.messages ?? [], COMPLETION_PERSIST_ATTEMPTS)
+      .then(() => this.isDispatchAdmissionCurrent(viewId, sessionId, itemId, lease, requestId))
+      .catch((err) => {
+        this.releaseDispatchAdmission(viewId, sessionId, itemId, lease, requestId);
+        throw err;
+      });
   }
 
   isDispatchAdmissionCurrent(
@@ -219,7 +234,7 @@ export class QueuedMessageStore {
     this.messages = next;
     return next.length === current.length
       ? Promise.resolve()
-      : this.persist(next, COMPLETION_PERSIST_ATTEMPTS);
+      : this.persistRemoval(next, COMPLETION_PERSIST_ATTEMPTS);
   }
 
   releaseDispatchAdmission(
@@ -271,55 +286,142 @@ export class QueuedMessageStore {
   }
 
   private persist(messages: QueuedMessageSnapshot[], attempts = 1): Promise<void> {
-    const operation = this.persistenceQueue.then(async () => {
-      let failure: unknown;
-      for (let attempt = 0; attempt < attempts; attempt += 1) {
-        try {
-          await this.persistence.set(QUEUED_MESSAGES_KEY, messages);
-          return;
-        } catch (err) {
-          failure = err;
-        }
-      }
-      throw failure;
-    });
-    this.persistenceQueue = operation.then(
-      () => {},
-      () => {}
-    );
-    return operation;
+    return this.enqueuePersistence(messages, false, attempts);
   }
 
-  private persistRemoval(messages: QueuedMessageSnapshot[], removedKeys: string[]): Promise<void> {
-    const operation = this.persistenceQueue.then(async () => {
-      for (const key of removedKeys) this.removalTombstones.add(key);
+  private persistRemoval(messages: QueuedMessageSnapshot[], attempts = 1): Promise<void> {
+    return this.enqueuePersistence(messages, true, attempts);
+  }
+
+  private enqueuePersistence(
+    messages: QueuedMessageSnapshot[],
+    persistRemovals: boolean,
+    attempts: number
+  ): Promise<void> {
+    if (this.pendingPersistence) {
+      this.pendingPersistence.messages = messages;
+      this.pendingPersistence.attempts = Math.max(this.pendingPersistence.attempts, attempts);
+      this.pendingPersistence.persistRemovals ||= persistRemovals;
+      return this.pendingPersistence.promise;
+    }
+
+    let resolve!: () => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<void>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    this.pendingPersistence = {
+      attempts,
+      messages,
+      persistRemovals,
+      promise,
+      reject,
+      resolve,
+    };
+    this.startPersistenceDrain();
+    return promise;
+  }
+
+  private startPersistenceDrain() {
+    if (this.persistenceDraining) return;
+    this.persistenceDraining = true;
+    const drain = this.drainPersistence();
+    this.persistenceDrain = drain;
+    const finish = () => {
+      if (this.persistenceDrain !== drain) return;
+      this.persistenceDrain = undefined;
+      this.persistenceDraining = false;
+      if (this.pendingPersistence) this.startPersistenceDrain();
+    };
+    void drain.then(finish, finish);
+  }
+
+  private async drainPersistence() {
+    while (this.pendingPersistence) {
+      const pending = this.pendingPersistence;
+      this.pendingPersistence = undefined;
+      try {
+        await this.writePendingPersistence(pending);
+        pending.resolve();
+      } catch (error) {
+        if (this.messages === pending.messages) this.messages = this.durableMessages;
+        pending.reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    }
+  }
+
+  private async writePendingPersistence(pending: PendingPersistence) {
+    const pendingKeys = new Set(
+      pending.messages.map((message) => dispatchKey(message.sessionId, message.id))
+    );
+    const removedKeys = pending.persistRemovals
+      ? (this.durableMessages ?? [])
+          .map((message) => dispatchKey(message.sessionId, message.id))
+          .filter((key) => !pendingKeys.has(key))
+      : [];
+    if (removedKeys.length > 0) {
+      const addedKeys = removedKeys.filter((key) => !this.removalTombstones.has(key));
+      for (const key of addedKeys) this.removalTombstones.add(key);
       try {
         await this.persistence.set(QUEUED_MESSAGE_REMOVALS_KEY, [...this.removalTombstones]);
-      } catch (err) {
-        for (const key of removedKeys) this.removalTombstones.delete(key);
-        throw err;
+      } catch (error) {
+        for (const key of addedKeys) this.removalTombstones.delete(key);
+        throw error;
       }
+      this.durableMessages = (this.durableMessages ?? []).filter(
+        (message) => !this.removalTombstones.has(dispatchKey(message.sessionId, message.id))
+      );
+    }
+    const snapshotIsDurable = snapshotsMatch(pending.messages, this.durableMessages ?? []);
 
+    let failure: unknown;
+    for (let attempt = 0; attempt < pending.attempts; attempt += 1) {
       try {
-        await this.persistence.set(QUEUED_MESSAGES_KEY, messages);
-      } catch {
+        await this.persistence.set(QUEUED_MESSAGES_KEY, pending.messages);
+        failure = undefined;
+        break;
+      } catch (error) {
+        failure = error;
+      }
+    }
+    if (failure !== undefined) {
+      if (snapshotIsDurable) {
+        if (this.messages === pending.messages) this.messages = this.durableMessages;
         return;
       }
+      throw failure;
+    }
 
-      this.removalTombstones.clear();
-      try {
-        await this.persistence.set(QUEUED_MESSAGE_REMOVALS_KEY, []);
-      } catch {}
-    });
-    this.persistenceQueue = operation.then(
-      () => {},
-      () => {}
+    if (this.removalTombstones.size === 0) {
+      this.durableMessages = pending.messages;
+      return;
+    }
+
+    const tombstonesAffectSnapshot = pending.messages.some((message) =>
+      this.removalTombstones.has(dispatchKey(message.sessionId, message.id))
     );
-    return operation;
+    try {
+      await this.persistence.set(QUEUED_MESSAGE_REMOVALS_KEY, []);
+      this.removalTombstones.clear();
+      this.durableMessages = pending.messages;
+    } catch (error) {
+      this.durableMessages = pending.messages.filter(
+        (message) => !this.removalTombstones.has(dispatchKey(message.sessionId, message.id))
+      );
+      if (tombstonesAffectSnapshot) throw error;
+    }
+  }
+
+  async whenIdle(): Promise<void> {
+    while (this.persistenceDrain || this.pendingPersistence) {
+      if (!this.persistenceDrain) this.startPersistenceDrain();
+      await this.persistenceDrain;
+    }
   }
 
   dispose(): Promise<void> {
-    return this.persistenceQueue;
+    return this.whenIdle();
   }
 }
 
@@ -329,4 +431,8 @@ function ownerViewId(message: QueuedMessageSnapshot) {
 
 function dispatchKey(sessionId: string, itemId: string) {
   return `${sessionId}\0${itemId}`;
+}
+
+function snapshotsMatch(left: QueuedMessageSnapshot[], right: QueuedMessageSnapshot[]) {
+  return left.length === right.length && left.every((message, index) => message === right[index]);
 }

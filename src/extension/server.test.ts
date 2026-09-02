@@ -2714,6 +2714,109 @@ describe('OpenCodeServer managed process lifecycle', () => {
     expect(server.status.state).toBe('running');
   });
 
+  it('bounds managed process output logging during a noisy stream', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const { children } = configureManagedStartup(server);
+    await expect(server.start()).resolves.toBe(server.url);
+    loggerMock.info.mockClear();
+
+    for (let index = 0; index < 100; index += 1) {
+      children[0]!.stdout.emit('data', Buffer.alloc(64 * 1024, 'x'));
+    }
+
+    expect(loggerMock.info.mock.calls.length).toBeLessThan(100);
+    expect(
+      loggerMock.info.mock.calls.reduce((length, [message]) => length + message.length, 0)
+    ).toBeLessThan(256 * 1024);
+  });
+
+  it('bounds logger calls for a stream of tiny process chunks', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const { children } = configureManagedStartup(server);
+    await expect(server.start()).resolves.toBe(server.url);
+    loggerMock.info.mockClear();
+
+    for (let index = 0; index < 1_000; index += 1) {
+      children[0]!.stdout.emit('data', Buffer.from('x'));
+    }
+
+    expect(loggerMock.info.mock.calls.length).toBeLessThanOrEqual(256);
+  });
+
+  it('stops decoding stdout chunks after the process log budget is exhausted', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const { children } = configureManagedStartup(server);
+    await expect(server.start()).resolves.toBe(server.url);
+    const toString = vi.spyOn(Buffer.prototype, 'toString');
+
+    for (let index = 0; index < 256; index += 1) {
+      children[0]!.stdout.emit('data', Buffer.from('x'));
+    }
+    const decodedAtLimit = toString.mock.calls.length;
+    for (let index = 0; index < 1_000; index += 1) {
+      children[0]!.stdout.emit('data', Buffer.from('ignored'));
+    }
+
+    expect(toString).toHaveBeenCalledTimes(decodedAtLimit);
+  });
+
+  it('charges whitespace-only chunks against the process log budget', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const { children } = configureManagedStartup(server);
+    await expect(server.start()).resolves.toBe(server.url);
+    const toString = vi.spyOn(Buffer.prototype, 'toString');
+
+    for (let index = 0; index < 256; index += 1) {
+      children[0]!.stdout.emit('data', Buffer.alloc(64 * 1024, ' '));
+    }
+    const decodedAtLimit = toString.mock.calls.length;
+    for (let index = 0; index < 1_000; index += 1) {
+      children[0]!.stdout.emit('data', Buffer.alloc(64 * 1024, ' '));
+    }
+
+    expect(toString).toHaveBeenCalledTimes(decodedAtLimit);
+  });
+
+  it('decodes only a bounded prefix of one oversized stdout chunk', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const { children } = configureManagedStartup(server);
+    await expect(server.start()).resolves.toBe(server.url);
+    const chunk = Buffer.alloc(16 * 1024 * 1024, 'x');
+    const fullDecode = vi.spyOn(chunk, 'toString');
+
+    children[0]!.stdout.emit('data', chunk);
+
+    const decodedLengths = fullDecode.mock.contexts.flatMap((context, index) =>
+      fullDecode.mock.calls[index]?.[0] === 'hex' || !Buffer.isBuffer(context)
+        ? []
+        : [context.length]
+    );
+    expect(Math.max(...decodedLengths)).toBeLessThanOrEqual(64 * 1024);
+    expect(loggerMock.info.mock.calls.at(-1)?.[0].length).toBeLessThan(17 * 1024);
+  });
+
+  it('bounds stderr decoding while managed startup is still pending', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const { children } = configureManagedStartup(server, false);
+    const startPromise = server.start();
+    const startResult = expect(startPromise).rejects.toThrow('Server start was cancelled');
+    await flushMicrotasks();
+    await flushMicrotasks();
+    const toString = vi.spyOn(Buffer.prototype, 'toString');
+
+    for (let index = 0; index < 1_000; index += 1) {
+      children[0]!.stderr.emit('data', Buffer.alloc(64 * 1024, 'x'));
+    }
+
+    const decodedBytes = toString.mock.contexts.reduce(
+      (total, context) => total + (Buffer.isBuffer(context) ? context.length : 0),
+      0
+    );
+    expect(decodedBytes).toBeLessThan(2 * 1024 * 1024);
+    await server.dispose();
+    await startResult;
+  });
+
   it('aborts and drains requests before restarting after a managed child exits', async () => {
     const server = new OpenCodeServer(4096, true);
     const { children } = configureManagedStartup(server);

@@ -49,6 +49,7 @@ export function claimQueuedMessageDispatch(
     ) {
       clearTimeout(timer);
       pendingQueueClaims.delete(requestId);
+      setQueuedMessageFailed(message.id, true);
       resolve(null);
     }
   });
@@ -60,12 +61,24 @@ export function applyQueuedMessageClaimResult(payload: {
   sessionId: string;
   granted: boolean;
   lease?: number;
+  deniedReason?: 'missing';
 }) {
   const pending = pendingQueueClaims.get(payload.requestId);
-  if (!pending) return;
+  if (!pending) {
+    if (payload.granted && payload.lease !== undefined) {
+      postMessage({
+        type: 'queued-messages/release',
+        payload: { itemId: payload.itemId, sessionId: payload.sessionId, lease: payload.lease },
+      });
+    }
+    return;
+  }
   clearTimeout(pending.timer);
   pendingQueueClaims.delete(payload.requestId);
   const matches = pending.itemId === payload.itemId && pending.sessionId === payload.sessionId;
+  if (matches && !payload.granted && payload.deniedReason === 'missing') {
+    setQueuedMessageFailed(payload.itemId, true);
+  }
   pending.resolve(matches && payload.granted && payload.lease !== undefined ? payload.lease : null);
 }
 

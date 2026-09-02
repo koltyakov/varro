@@ -456,7 +456,7 @@ type DispatchExpectation = {
  * that no other callback fired.
  */
 const DISPATCH_EXPECTATIONS = {
-  ready: [{ callback: 'ready', args: [] }],
+  ready: [{ callback: 'ready', args: [undefined] }],
   'context/request': [{ callback: 'requestContext', args: [] }],
   'providers/refresh': [{ callback: 'refreshProviders', args: [] }],
   'providers/auth-changed': [{ callback: 'providerAuthChanged', args: [] }],

@@ -27,6 +27,37 @@ afterEach(() => {
 });
 
 describe('MarkdownRenderer performance regressions', () => {
+  it('chooses a streaming placeholder without repeated full-content scans', async () => {
+    const marker = 'VARROPENDINGMARKDOWNPLACEHOLDER';
+    const originalIncludes = String.prototype.includes;
+    const markerChecks: string[] = [];
+    vi.spyOn(String.prototype, 'includes').mockImplementation(
+      function (this: string, search, position) {
+        if (String(search).startsWith(marker)) markerChecks.push(String(search));
+        return originalIncludes.call(this, search, position);
+      }
+    );
+
+    cleanup = render(
+      () => MarkdownRenderer({ content: `${marker}${'X'.repeat(2_000)}[unfinished` }),
+      container
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(markerChecks.length).toBeLessThanOrEqual(2);
+    expect(container.textContent).toContain('[unfinished');
+  });
+
+  it('keeps adjacent placeholder-like source text intact while streaming', async () => {
+    const marker = 'VARROPENDINGMARKDOWNPLACEHOLDER';
+    const content = `${marker}${marker}X[unfinished`;
+
+    cleanup = render(() => MarkdownRenderer({ content }), container);
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(container.textContent.trimEnd()).toBe(content);
+  });
+
   it('parses long plain streaming transcripts incrementally without populating caches', async () => {
     vi.useFakeTimers();
     const paragraphs = Array.from({ length: 80 }, (_, index) =>

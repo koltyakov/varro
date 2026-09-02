@@ -1545,6 +1545,14 @@ describe('webview message validation', () => {
     ).toBeNull();
   });
 
+  it('parses a ready document identity and rejects malformed identities', () => {
+    expect(parseWebviewMessage({ type: 'ready', payload: { documentId: 7 } })).toEqual({
+      type: 'ready',
+      payload: { documentId: 7 },
+    });
+    expect(parseWebviewMessage({ type: 'ready', payload: { documentId: '7' } })).toBeNull();
+  });
+
   it('rejects malformed URLs and unsafe path traversal in helper guards', () => {
     expect(isAllowedExternalUrl('not a url')).toBe(false);
     expect(isAllowedApiRequest('GET', '/session/../message')).toBe(false);

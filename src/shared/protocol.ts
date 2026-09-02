@@ -598,8 +598,14 @@ function parseSyncEventRecord(record: UnknownRecord | null): ServerEvent | null 
   return event as ServerEvent;
 }
 
+export const MAX_SERVER_EVENT_ID_LENGTH = 512;
+
 function getServerEventId(record: UnknownRecord): string | undefined {
-  return isString(record.id) && record.id.length > 0 ? record.id : undefined;
+  return isString(record.id) &&
+    record.id.length > 0 &&
+    record.id.length <= MAX_SERVER_EVENT_ID_LENGTH
+    ? record.id
+    : undefined;
 }
 
 function getServerEventSeq(record: UnknownRecord): number | undefined {
@@ -648,6 +654,9 @@ export type ModelPreferences = {
   pinnedModels: string[];
   modelDisplayNames: Record<string, string>;
 };
+
+export const MAX_CLIPBOARD_IMAGES = 5;
+export const MAX_CLIPBOARD_IMAGE_SIZE = 5 * 1024 * 1024;
 
 export type ClipboardImageSnapshot = {
   id: string;
@@ -701,6 +710,7 @@ export type SiblingWorkspaceAlert = {
 };
 
 export type InitialWebviewState = {
+  documentId?: number;
   webviewContext?: WebviewInstanceContext;
   theme: WebviewThemeKind;
   serverStatus: ServerStatus;
@@ -800,6 +810,7 @@ export type ExtensionMessage =
         sessionId: string;
         granted: boolean;
         lease?: number;
+        deniedReason?: 'missing';
       };
     }
   | {
@@ -982,7 +993,7 @@ export type WebviewMessage =
       type: 'config/update';
       payload: WebviewConfigUpdatePayload;
     }
-  | { type: 'ready' }
+  | { type: 'ready'; payload?: { documentId: number } }
   | {
       type: 'api/request';
       payload: {

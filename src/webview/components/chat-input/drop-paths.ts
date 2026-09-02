@@ -333,13 +333,31 @@ function collectStructuredDropPaths<T>(value: T, paths: Set<string>, keyHint = '
   }
 }
 
-export function readFileAsDataUrl(file: File): Promise<string> {
+export function readFileAsDataUrl(file: File, timeoutMs?: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.addEventListener('load', () => resolve(String(reader.result || '')));
+    let settled = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const finish = (result: { value: string } | { error: Error }) => {
+      if (settled) return;
+      settled = true;
+      if (timeout) clearTimeout(timeout);
+      if ('error' in result) reject(result.error);
+      else resolve(result.value);
+    };
+    reader.addEventListener('load', () => finish({ value: String(reader.result || '') }));
     reader.addEventListener('error', () =>
-      reject(reader.error || new Error('Failed to read clipboard image'))
+      finish({ error: reader.error || new Error('Failed to read clipboard image') })
     );
+    if (timeoutMs !== undefined) {
+      timeout = setTimeout(() => {
+        if (settled) return;
+        finish({ error: new Error(`Timed out reading clipboard image after ${timeoutMs}ms`) });
+        try {
+          reader.abort();
+        } catch {}
+      }, timeoutMs);
+    }
     reader.readAsDataURL(file);
   });
 }

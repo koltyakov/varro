@@ -16,6 +16,7 @@ import { selectSession } from '../../hooks/useOpenCode';
 import {
   getSessionDiffSummaryStateForTests,
   resetSessionDiffSummaryStateForTests,
+  deriveSessionIndicators,
   SessionListSectionHeader,
   SessionListView,
 } from './SessionListView';
@@ -98,6 +99,29 @@ function openSessionActions(row: HTMLElement, x = 40, y = 50) {
     })
   );
 }
+
+describe('deriveSessionIndicators', () => {
+  it('handles cyclic and deeply nested session parent data without recursive overflow', () => {
+    const cyclic = [
+      session('cycle-a', 1, { parentID: 'cycle-b' }),
+      session('cycle-b', 2, { parentID: 'cycle-a' }),
+    ];
+    setSessions(cyclic);
+    expect(() => deriveSessionIndicators(cyclic)).not.toThrow();
+
+    const depth = 15_000;
+    const nested = Array.from({ length: depth }, (_, index) =>
+      session(`nested-${index}`, index + 1, {
+        parentID: index === 0 ? undefined : `nested-${index - 1}`,
+      })
+    );
+    setSessions(nested);
+
+    const indicators = deriveSessionIndicators(nested);
+    expect(indicators.subagentCounts.get('nested-0')).toBe(depth - 1);
+    expect(indicators.subagentCounts.has(`nested-${depth - 1}`)).toBe(false);
+  });
+});
 
 beforeEach(() => {
   resetSessionShareOverridesForTests();

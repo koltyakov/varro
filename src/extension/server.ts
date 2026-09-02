@@ -63,6 +63,13 @@ export interface OpenCodeServerInfo {
   workspaceCwd: string | undefined;
 }
 
+const PROCESS_OUTPUT_LOG_WINDOW_MS = 1_000;
+const PROCESS_OUTPUT_LOG_MAX_CHARS = 128 * 1024;
+const PROCESS_OUTPUT_LOG_MAX_ENTRY_CHARS = 16 * 1024;
+const PROCESS_OUTPUT_LOG_MAX_ENTRIES = 256;
+const PROCESS_STDERR_DIAGNOSTIC_CHARS = 64 * 1024;
+const PROCESS_STDERR_FALLBACK_DIAGNOSTIC_CHARS = 512;
+
 function isSuccessfulUpgradeResult(value: unknown): value is { success: true; version: string } {
   return (
     !!value &&
@@ -496,6 +503,80 @@ export class OpenCodeServer extends EventEmitter {
       let attemptProcessExited = false;
       let attemptCleanup: Promise<void> | null = null;
       let outcomeCleanup: Promise<void> | null = null;
+      let processLogWindowStartedAt = Date.now();
+      let processLogChars = 0;
+      let processLogEntries = 0;
+      let processStderrDiagnosticChars = 0;
+      let processLogDropReported = false;
+      let processLogEntryTruncationReported = false;
+
+      const refreshProcessLogWindow = () => {
+        const now = Date.now();
+        if (now - processLogWindowStartedAt >= PROCESS_OUTPUT_LOG_WINDOW_MS) {
+          processLogWindowStartedAt = now;
+          processLogChars = 0;
+          processLogEntries = 0;
+          processStderrDiagnosticChars = 0;
+          processLogDropReported = false;
+          processLogEntryTruncationReported = false;
+        }
+      };
+      const processOutputLogAvailable = () => {
+        refreshProcessLogWindow();
+        if (
+          processLogEntries < PROCESS_OUTPUT_LOG_MAX_ENTRIES &&
+          processLogChars < PROCESS_OUTPUT_LOG_MAX_CHARS
+        ) {
+          return true;
+        }
+        if (!processLogDropReported) {
+          processLogDropReported = true;
+          logger.warn('Managed server output exceeded 128 KiB/s; suppressing excess output');
+        }
+        return false;
+      };
+      const logProcessOutput = (
+        level: 'error' | 'info',
+        rawText: string,
+        sourceTruncated = false
+      ) => {
+        refreshProcessLogWindow();
+        const prefix = '[server] ';
+        const available =
+          processLogEntries < PROCESS_OUTPUT_LOG_MAX_ENTRIES
+            ? Math.min(
+                PROCESS_OUTPUT_LOG_MAX_ENTRY_CHARS,
+                Math.max(0, PROCESS_OUTPUT_LOG_MAX_CHARS - processLogChars - prefix.length)
+              )
+            : 0;
+        const loggedChars = Math.min(rawText.length, available);
+        const text = rawText.slice(0, loggedChars).trim();
+        processLogChars += loggedChars;
+        processLogEntries += 1;
+        if (text) {
+          const message = `${prefix}${text}`;
+          processLogChars += prefix.length;
+          if (level === 'error') logger.error(message);
+          else logger.info(message);
+        }
+        if (
+          (sourceTruncated || rawText.length > loggedChars) &&
+          available === PROCESS_OUTPUT_LOG_MAX_ENTRY_CHARS &&
+          !processLogEntryTruncationReported
+        ) {
+          processLogEntryTruncationReported = true;
+          logger.warn('Managed server output chunk exceeded 16 KiB; truncating the chunk');
+        }
+        if (
+          (processLogEntries >= PROCESS_OUTPUT_LOG_MAX_ENTRIES ||
+            available < PROCESS_OUTPUT_LOG_MAX_ENTRY_CHARS) &&
+          rawText.length > loggedChars &&
+          !processLogDropReported
+        ) {
+          processLogDropReported = true;
+          logger.warn('Managed server output exceeded 128 KiB/s; suppressing excess output');
+        }
+      };
 
       const isInvalidAttempt = () =>
         signal.aborted || !this.lifecycle.isCurrentStartAttempt(attemptId, disposeGeneration);
@@ -790,15 +871,50 @@ export class OpenCodeServer extends EventEmitter {
         attemptProcess = this.processManager.launchServer({
           getWorkspaceCwd: () => this.getWorkspaceCwd(),
           onStdout: (data) => {
-            logger.info(`[server] ${data.toString().trim()}`);
+            if (!processOutputLogAvailable()) return;
+            const bounded = data.subarray(0, PROCESS_OUTPUT_LOG_MAX_ENTRY_CHARS * 4);
+            logProcessOutput(
+              'info',
+              bounded.toString().slice(0, PROCESS_OUTPUT_LOG_MAX_ENTRY_CHARS),
+              bounded.length < data.length
+            );
           },
           onStderr: (data) => {
-            const text = data.toString().trim();
-            rememberStderr(text);
-            if (isPortInUseMessage(text)) {
-              this.processManager.setPortInUseDetected(true);
+            const shouldLog = processOutputLogAvailable();
+            const availableDiagnosticChars = Math.max(
+              0,
+              PROCESS_STDERR_DIAGNOSTIC_CHARS - processStderrDiagnosticChars
+            );
+            if (availableDiagnosticChars > 0 && !operationSettled) {
+              const diagnostic = data
+                .subarray(-Math.min(data.length, availableDiagnosticChars * 4))
+                .toString()
+                .slice(-availableDiagnosticChars);
+              processStderrDiagnosticChars += diagnostic.length;
+              const text = diagnostic.trim();
+              rememberStderr(text);
+              if (isPortInUseMessage(text)) {
+                this.processManager.setPortInUseDetected(true);
+              }
+            } else if (!operationSettled) {
+              const diagnostic = data
+                .subarray(-PROCESS_STDERR_FALLBACK_DIAGNOSTIC_CHARS)
+                .toString()
+                .slice(-PROCESS_STDERR_FALLBACK_DIAGNOSTIC_CHARS)
+                .trim();
+              rememberStderr(diagnostic);
+              if (isPortInUseMessage(diagnostic)) {
+                this.processManager.setPortInUseDetected(true);
+              }
             }
-            logger.error(`[server] ${text}`);
+            if (shouldLog) {
+              const bounded = data.subarray(0, PROCESS_OUTPUT_LOG_MAX_ENTRY_CHARS * 4);
+              logProcessOutput(
+                'error',
+                bounded.toString().slice(0, PROCESS_OUTPUT_LOG_MAX_ENTRY_CHARS),
+                bounded.length < data.length
+              );
+            }
           },
           onExit: (proc, code, exitSignal) => {
             const wasCurrentProcess = this.process === proc;

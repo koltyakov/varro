@@ -202,6 +202,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly configDisposable: vscode.Disposable;
   private readonly windowStateDisposable: vscode.Disposable;
   private sessionReconcileTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly observedQueuedMessagePersistences = new Set<Promise<void>>();
+  private queuedPdfCleanupRequested = false;
+  private queuedPdfCleanup: Promise<void> | null = null;
   private sessionReconcileIntervalMs = 0;
   private sessionReconcileInFlight: Promise<void> | null = null;
   private sessionReconcileRerunRequested = false;
@@ -624,6 +627,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           requestId
         ),
       completeQueuedMessageDispatchClaim: async (sessionId, itemId, lease, requestId) => {
+        const queuedPdfPaths = (this.queuedMessages.list() ?? [])
+          .find((message) => message.sessionId === sessionId && message.id === itemId)
+          ?.nativePdfs?.flatMap((pdf) => (pdf.contextFile ? [pdf.contextFile.path] : []));
         const persistence = this.queuedMessages.completeDispatchAdmission(
           webviewContext.viewId,
           sessionId,
@@ -632,9 +638,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           requestId
         );
         if (!persistence) return false;
+        for (const path of queuedPdfPaths ?? []) {
+          this.droppedFilesService.deferOwnedFileRemoval(path, sessionId);
+        }
         this.postQueuedSessionStatusFor(sessionId, 'busy');
         this.postQueuedMessageSnapshots();
         this.updateSessionReconcileTimer();
+        this.queuedPdfCleanupRequested = true;
+        this.scheduleQueuedPdfCleanup();
         await persistence;
         return true;
       },
@@ -764,10 +775,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         postTerminalSelection: (selection) =>
           post({ type: 'terminal-selection/update', payload: selection }),
         postConfigState: () => this.postConfigState(),
-        handleReadyMessage: async () => {
+        handleReadyMessage: async (documentId) => {
           try {
             await this.recoverPendingPermissionModeFallbacks();
-            await webviewSession.handleReady();
+            const ready = await webviewSession.handleReady(documentId);
+            if (!ready) return;
             if (endpointRef.endpoint) {
               this.setEndpointReady(endpointRef.endpoint, true);
               if (endpointRef.endpoint.surface === 'editor') {
@@ -1843,6 +1855,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       granted: claim !== null,
     };
     if (claim) result.lease = claim.lease;
+    else if (endpoint?.ready && !this.queuedMessages.has(payload.sessionId, payload.itemId)) {
+      result.deniedReason = 'missing';
+    }
     endpoint?.bridge.post({
       type: 'queued-messages/claim-result',
       payload: result,
@@ -2515,31 +2530,78 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async updateQueuedMessages(viewId: string, messages: QueuedMessageSnapshot[]) {
+  private updateQueuedMessages(viewId: string, messages: QueuedMessageSnapshot[]): Promise<void> {
     const endpoint = [...this.endpoints].find((item) => item.viewId === viewId);
-    if (!endpoint?.ready) return;
-    const previousPdfPaths = new Set(
-      (this.queuedMessagesFor(viewId) ?? []).flatMap((message) =>
+    if (!endpoint?.ready) return Promise.resolve();
+    const nextPdfPaths = new Set(
+      messages.flatMap((message) =>
         (message.nativePdfs ?? []).flatMap((pdf) => (pdf.contextFile ? [pdf.contextFile.path] : []))
       )
     );
-    try {
-      await this.queuedMessages.updateOwned(viewId, messages);
-    } catch (err) {
-      this.postQueuedMessageSnapshots();
-      throw err;
-    }
-    this.postQueuedMessageSnapshots();
-    this.updateSessionReconcileTimer();
-    void this.runSessionReconcile();
-    const currentPdfPaths = new Set(
-      (this.queuedMessagesFor(viewId) ?? []).flatMap((message) =>
-        (message.nativePdfs ?? []).flatMap((pdf) => (pdf.contextFile ? [pdf.contextFile.path] : []))
+    for (const path of nextPdfPaths) this.droppedFilesService.markQueuedPdf(path);
+    const persistence = this.queuedMessages.updateOwned(viewId, messages);
+    this.observeQueuedMessagePersistence(persistence);
+    this.queuedPdfCleanupRequested = true;
+    this.scheduleQueuedPdfCleanup();
+    return Promise.resolve();
+  }
+
+  private observeQueuedMessagePersistence(persistence: Promise<void>) {
+    if (this.observedQueuedMessagePersistences.has(persistence)) return;
+    this.observedQueuedMessagePersistences.add(persistence);
+    void persistence
+      .then(
+        () => {
+          this.postQueuedMessageSnapshots();
+          this.updateSessionReconcileTimer();
+          void this.runSessionReconcile();
+        },
+        (error) => {
+          this.postQueuedMessageSnapshots();
+          logger.error(
+            `Queued message persistence failed: ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
       )
-    );
-    await this.droppedFilesService.removeOwnedFiles(
-      [...previousPdfPaths].filter((path) => !currentPdfPaths.has(path))
-    );
+      .finally(() => {
+        this.observedQueuedMessagePersistences.delete(persistence);
+      });
+  }
+
+  private scheduleQueuedPdfCleanup() {
+    if (this.queuedPdfCleanup) return;
+    const cleanup = (async () => {
+      while (this.queuedPdfCleanupRequested) {
+        this.queuedPdfCleanupRequested = false;
+        await this.queuedMessages.whenIdle();
+        const referencedPaths = new Set(
+          (this.queuedMessages.list() ?? []).flatMap((message) =>
+            (message.nativePdfs ?? []).flatMap((pdf) =>
+              pdf.contextFile ? [pdf.contextFile.path] : []
+            )
+          )
+        );
+        await this.droppedFilesService.removeOwnedFiles(
+          (function* (paths: Iterable<string>) {
+            for (const path of paths) {
+              if (!referencedPaths.has(path)) yield path;
+            }
+          })(this.droppedFilesService.ownedQueuedPdfPaths())
+        );
+      }
+    })();
+    this.queuedPdfCleanup = cleanup;
+    const finish = () => {
+      if (this.queuedPdfCleanup !== cleanup) return;
+      this.queuedPdfCleanup = null;
+      if (this.queuedPdfCleanupRequested) this.scheduleQueuedPdfCleanup();
+    };
+    void cleanup.then(finish, (error) => {
+      logger.error(
+        `Queued PDF cleanup failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+      finish();
+    });
   }
 
   private async transferEditorDraftState(viewId: string) {
@@ -2557,8 +2619,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           ? [image.contextFile.path]
           : []
       );
-    const persistence = this.draftImages.update([], viewId);
-    await Promise.all([persistence, this.droppedFilesService.removeOwnedFiles(imagePaths)]);
+    await this.draftImages.update([], viewId);
+    await this.draftImages.dispose();
+    await this.droppedFilesService.removeOwnedFiles(imagePaths);
   }
 
   private reconcileQueuedMessageOwners() {

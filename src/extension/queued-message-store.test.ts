@@ -108,7 +108,7 @@ describe('QueuedMessageStore', () => {
     expect(new QueuedMessageStore(persistence).list()).toEqual([]);
   });
 
-  it('serializes writes so the newest queue snapshot wins', async () => {
+  it('coalesces stalled writes so only the newest queue snapshot remains pending', async () => {
     const storage = new Map<string, unknown>();
     let releaseFirstWrite: (() => void) | undefined;
     const firstWrite = new Promise<void>((resolve) => {
@@ -152,14 +152,64 @@ describe('QueuedMessageStore', () => {
     ];
 
     const firstUpdate = store.update(first);
-    const latestUpdate = store.update(latest);
     await Promise.resolve();
+    const pendingUpdate = store.update([queuedMessage('pending', 'pending', 'editor-a')]);
+    const replacements = Array.from({ length: 1_000 }, (_, index) =>
+      store.update([queuedMessage(`replacement-${index}`, `replacement-${index}`, 'editor-a')])
+    );
+    const latestUpdate = store.update(latest);
     expect(persistence.set).toHaveBeenCalledOnce();
+    expect(new Set([...replacements, latestUpdate])).toEqual(new Set([pendingUpdate]));
 
     releaseFirstWrite?.();
-    await Promise.all([firstUpdate, latestUpdate]);
+    await Promise.all([firstUpdate, pendingUpdate, ...replacements, latestUpdate, store.dispose()]);
 
+    expect(persistence.set).toHaveBeenCalledTimes(2);
     expect(storage.get('varro.queuedMessages')).toEqual(latest);
+  });
+
+  it('keeps dispatch admission durable when it joins a pending removal', async () => {
+    const { persistence, storage } = createPersistence();
+    const store = new QueuedMessageStore(persistence);
+    const first = queuedMessage('queue-1', 'remove', 'editor-a');
+    const second = queuedMessage('queue-2', 'dispatch', 'editor-b');
+    await store.update([first, second]);
+    let releaseBlocker!: () => void;
+    const blocker = new Promise<void>((resolve) => {
+      releaseBlocker = resolve;
+    });
+    vi.mocked(persistence.set)
+      .mockImplementationOnce(() => blocker)
+      .mockImplementationOnce((key, value) => {
+        storage.set(key, value);
+      })
+      .mockRejectedValueOnce(new Error('first queue write failed'))
+      .mockRejectedValueOnce(new Error('second queue write failed'))
+      .mockImplementationOnce((key, value) => {
+        storage.set(key, value);
+      })
+      .mockImplementationOnce((key, value) => {
+        storage.set(key, value);
+      });
+
+    const blockingUpdate = store.update([first, second]);
+    await Promise.resolve();
+    const removal = store.updateOwned('editor-a', []);
+    const claim = store.claimDispatch('editor-b', 'session-1', 'queue-2', isTestViewEligible)!;
+    const admission = store.beginDispatchAdmission(
+      'editor-b',
+      'session-1',
+      'queue-2',
+      claim.lease,
+      1,
+      'message-2'
+    );
+
+    releaseBlocker();
+    await expect(admission).resolves.toBe(true);
+    await Promise.all([blockingUpdate, removal, store.dispose()]);
+
+    expect(storage.get('varro.queuedMessages')).toEqual([{ ...second, messageId: 'message-2' }]);
   });
 
   it('rolls back an owned queue removal when persistence fails', async () => {
@@ -189,6 +239,51 @@ describe('QueuedMessageStore', () => {
 
     expect(store.list()).toEqual([]);
     expect(new QueuedMessageStore(persistence).list()).toEqual([]);
+  });
+
+  it('rolls overlapping failures back to the last durable snapshot', async () => {
+    const { persistence } = createPersistence();
+    const store = new QueuedMessageStore(persistence);
+    const persisted = queuedMessage('queue-1', 'persisted', 'editor-a');
+    await store.update([persisted]);
+    vi.mocked(persistence.set).mockRejectedValue(new Error('disk full'));
+
+    const first = store.updateOwned('editor-a', [queuedMessage('queue-1', 'first', 'editor-a')]);
+    const second = store.updateOwned('editor-a', [queuedMessage('queue-1', 'second', 'editor-a')]);
+
+    await expect(first).rejects.toThrow('disk full');
+    await expect(second).rejects.toThrow('disk full');
+    expect(store.list()).toEqual([persisted]);
+  });
+
+  it('keeps a durable removal while rolling back a coalesced edit', async () => {
+    const { persistence, storage } = createPersistence();
+    const store = new QueuedMessageStore(persistence);
+    const removed = queuedMessage('queue-1', 'remove', 'editor-a');
+    const kept = queuedMessage('queue-2', 'persisted', 'editor-b');
+    await store.update([removed, kept]);
+    let releaseBlocker!: () => void;
+    const blocker = new Promise<void>((resolve) => {
+      releaseBlocker = resolve;
+    });
+    vi.mocked(persistence.set)
+      .mockImplementationOnce(() => blocker)
+      .mockImplementationOnce((key, value) => {
+        storage.set(key, value);
+      })
+      .mockRejectedValueOnce(new Error('queue snapshot failed'));
+
+    const blockingUpdate = store.update([removed, kept]);
+    await Promise.resolve();
+    const removal = store.updateOwned('editor-a', []);
+    const edit = store.updateOwned('editor-b', [queuedMessage('queue-2', 'edited', 'editor-b')]);
+    releaseBlocker();
+
+    await blockingUpdate;
+    await expect(removal).rejects.toThrow('queue snapshot failed');
+    await expect(edit).rejects.toThrow('queue snapshot failed');
+    expect(store.list()).toEqual([kept]);
+    expect(new QueuedMessageStore(persistence).list()).toMatchObject([kept]);
   });
 
   it('updates only messages owned by the requesting view', async () => {
@@ -347,14 +442,45 @@ describe('QueuedMessageStore', () => {
     expect(
       (storage.get('varro.queuedMessages') as Array<{ messageId?: string }>)[0]?.messageId
     ).toBe('message-1');
-    vi.mocked(persistence.set).mockRejectedValueOnce(new Error('transient write failure'));
+    vi.mocked(persistence.set)
+      .mockImplementationOnce((key, value) => {
+        storage.set(key, value);
+      })
+      .mockRejectedValueOnce(new Error('transient write failure'));
 
     await expect(
       store.completeDispatchAdmission('editor-a', 'session-1', 'queue-1', claim.lease, 1)
     ).resolves.toBeUndefined();
 
-    expect(persistence.set).toHaveBeenCalledTimes(4);
+    expect(persistence.set).toHaveBeenCalledTimes(6);
     expect(storage.get('varro.queuedMessages')).toEqual([]);
+    expect(new QueuedMessageStore(persistence).list()).toEqual([]);
+  });
+
+  it('uses a durable tombstone when every completion snapshot attempt fails', async () => {
+    const { persistence, storage } = createPersistence();
+    const store = new QueuedMessageStore(persistence);
+    await store.update([queuedMessage('queue-1', 'first', 'editor-a')]);
+    const claim = store.claimDispatch('editor-a', 'session-1', 'queue-1', isTestViewEligible)!;
+    await store.beginDispatchAdmission(
+      'editor-a',
+      'session-1',
+      'queue-1',
+      claim.lease,
+      1,
+      'message-1'
+    );
+    vi.mocked(persistence.set)
+      .mockImplementationOnce((key, value) => {
+        storage.set(key, value);
+      })
+      .mockRejectedValue(new Error('disk full'));
+
+    await expect(
+      store.completeDispatchAdmission('editor-a', 'session-1', 'queue-1', claim.lease, 1)
+    ).resolves.toBeUndefined();
+
+    expect(store.list()).toEqual([]);
     expect(new QueuedMessageStore(persistence).list()).toEqual([]);
   });
 });

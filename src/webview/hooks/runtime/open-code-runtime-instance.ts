@@ -154,7 +154,7 @@ export interface OpenCodeRuntime {
     sessionId: string,
     options?: { prefetchBoundaryPrompts?: boolean }
   ): Promise<boolean>;
-  loadOlderSessionPrompts(sessionId: string): Promise<boolean>;
+  loadOlderSessionPrompts(sessionId: string, isOwnerCurrent?: () => boolean): Promise<boolean>;
   createSession(title?: string, initialPermissionMode?: PermissionMode): Promise<string | null>;
   renameSession(id: string, title: string): Promise<boolean>;
   forkSession(id: string, messageID?: string): Promise<string | null>;
@@ -770,21 +770,28 @@ function loadOlderSessionPrompts(
   sessionId: string,
   initialCursor?: string,
   isCurrent: () => boolean = () => true,
-  knownLoadedMessageIds: ReadonlySet<string> = new Set()
+  knownLoadedMessageIds: ReadonlySet<string> = new Set(),
+  shareTraversal = true
 ): Promise<boolean> {
   const revision = getSessionMessageWindowRevision(sessionId);
   const existing = promptHistoryLoads.get(sessionId);
-  if (existing?.revision === revision) return existing.promise;
+  if (shareTraversal && existing?.revision === revision) return existing.promise;
 
   const load = (async () => {
     let cursor = initialCursor ?? getSessionHistoryPromptCursor(sessionId);
     while (cursor) {
-      const pageLoad = client.session.messages(sessionId, {
-        limit: MESSAGE_HISTORY_WINDOW,
-        before: cursor,
-        directory: getSessionDirectory(sessionId),
-      });
-      promptHistoryPageLoads.set(sessionId, { revision, cursor, promise: pageLoad });
+      const existingPageLoad = promptHistoryPageLoads.get(sessionId);
+      const pageLoad =
+        existingPageLoad?.revision === revision && existingPageLoad.cursor === cursor
+          ? existingPageLoad.promise
+          : client.session.messages(sessionId, {
+              limit: MESSAGE_HISTORY_WINDOW,
+              before: cursor,
+              directory: getSessionDirectory(sessionId),
+            });
+      if (pageLoad !== existingPageLoad?.promise) {
+        promptHistoryPageLoads.set(sessionId, { revision, cursor, promise: pageLoad });
+      }
       let page: Awaited<typeof pageLoad>;
       try {
         page = await pageLoad;
@@ -827,11 +834,11 @@ function loadOlderSessionPrompts(
       return false;
     })
     .finally(() => {
-      if (promptHistoryLoads.get(sessionId)?.promise === load) {
+      if (shareTraversal && promptHistoryLoads.get(sessionId)?.promise === load) {
         promptHistoryLoads.delete(sessionId);
       }
     });
-  promptHistoryLoads.set(sessionId, { revision, promise: load });
+  if (shareTraversal) promptHistoryLoads.set(sessionId, { revision, promise: load });
   return load;
 }
 
@@ -1314,7 +1321,11 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         mountBridgeOperations.handleExtensionMessage(msg);
       });
 
-      postMessage({ type: 'ready' });
+      postMessage(
+        initialWebviewState.documentId === undefined
+          ? { type: 'ready' }
+          : { type: 'ready', payload: { documentId: initialWebviewState.documentId } }
+      );
       if (
         webviewContext?.surface !== 'editor' &&
         initialWebviewState.sessionModelMigrationPending
@@ -2840,9 +2851,18 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     await Promise.all([loadSessions(), loadRecycleBin()]);
   }
 
-  function loadOlderSessionPromptsForCurrentWorkspace(sessionId: string) {
+  function loadOlderSessionPromptsForCurrentWorkspace(
+    sessionId: string,
+    isOwnerCurrent?: () => boolean
+  ) {
     const generation = workspaceGeneration;
-    return loadOlderSessionPrompts(sessionId, undefined, () => generation === workspaceGeneration);
+    return loadOlderSessionPrompts(
+      sessionId,
+      undefined,
+      () => generation === workspaceGeneration && (isOwnerCurrent?.() ?? true),
+      new Set(),
+      isOwnerCurrent === undefined
+    );
   }
 
   async function sendMessage(

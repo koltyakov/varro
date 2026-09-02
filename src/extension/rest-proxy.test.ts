@@ -3553,7 +3553,7 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
-  it('does not admit a pending request whose unknown session cannot be resolved', async () => {
+  it('rejects an incomplete pending snapshot when an unknown session cannot be resolved', async () => {
     const permission = { id: 'permission-1', sessionID: 'unknown-child' };
     const serverRequest = vi.fn(async (_method: string, path: string) => {
       if (path === '/permission') return [permission];
@@ -3573,7 +3573,12 @@ describe('RestProxy handleRequest', () => {
 
     await proxy.handleRequest(makePayload(223, 'GET', '/permission'));
 
-    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 223, data: [] });
+    expect(callbacks.sessionState.reconcilePendingAttention).not.toHaveBeenCalled();
+    expect(callbacks.sessionState.finishPendingAttentionReconciliation).toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 223,
+      error: 'Could not resolve pending request session unknown-child',
+    });
   });
 
   it('bounds concurrent lookups for unknown permission sessions', async () => {

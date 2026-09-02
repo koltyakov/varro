@@ -4,11 +4,13 @@ import type { ServerEvent } from '../shared/protocol';
 
 export const PERMISSION_JUDGE_SESSION_TITLE_PREFIX = 'Varro permission judge: ';
 export const PERMISSION_JUDGE_SESSION_METADATA = { varroInternal: 'permission-judge' } as const;
+export const COMMIT_MESSAGE_SESSION_TITLE_PREFIX = 'Varro commit message: ';
+export const COMMIT_MESSAGE_SESSION_METADATA = { varroInternal: 'commit-message' } as const;
 
 // Cover queued helper events without retaining IDs forever when deletion events are missed.
 const DELETION_TOMBSTONE_TTL_MS = 30_000;
 const DELETION_TOMBSTONE_LIMIT = 256;
-const PERMISSION_JUDGE_STALE_AFTER_MS = 2 * 60_000;
+const INTERNAL_SESSION_STALE_AFTER_MS = 2 * 60_000;
 
 type SessionSnapshot = {
   id: string;
@@ -18,7 +20,7 @@ type SessionSnapshot = {
   time?: unknown;
 };
 
-function hasLegacyPermissionJudgeRules(session: SessionSnapshot) {
+function hasInternalHelperRules(session: SessionSnapshot) {
   const permission = session.permission;
   if (!Array.isArray(permission) || permission.length < 2) return false;
   const rules = permission.map((rule) =>
@@ -42,16 +44,23 @@ function hasLegacyPermissionJudgeRules(session: SessionSnapshot) {
   );
 }
 
-function isPermissionJudgeSession(session: SessionSnapshot) {
+function isInternalHelperSession(session: SessionSnapshot) {
   const metadata =
     session.metadata && typeof session.metadata === 'object'
       ? (session.metadata as Record<string, unknown>)
       : null;
+  const title = typeof session.title === 'string' ? session.title : null;
+  const hasHelperRules = hasInternalHelperRules(session);
+  const commitMessageSequence = title?.startsWith(COMMIT_MESSAGE_SESSION_TITLE_PREFIX)
+    ? title.slice(COMMIT_MESSAGE_SESSION_TITLE_PREFIX.length)
+    : null;
   return (
     metadata?.varroInternal === PERMISSION_JUDGE_SESSION_METADATA.varroInternal ||
-    (typeof session.title === 'string' &&
-      session.title.startsWith(PERMISSION_JUDGE_SESSION_TITLE_PREFIX) &&
-      hasLegacyPermissionJudgeRules(session))
+    metadata?.varroInternal === COMMIT_MESSAGE_SESSION_METADATA.varroInternal ||
+    (title?.startsWith(PERMISSION_JUDGE_SESSION_TITLE_PREFIX) === true && hasHelperRules) ||
+    (commitMessageSequence !== null &&
+      /^[1-9]\d*$/.test(commitMessageSequence) &&
+      (session.permission === undefined || hasHelperRules))
   );
 }
 
@@ -126,13 +135,13 @@ export class HiddenSessionManager {
   }
 
   observeSessionList(sessions: SessionSnapshot[], now = Date.now()) {
-    const stalePermissionJudgeIds: string[] = [];
+    const staleInternalSessionIds: string[] = [];
     for (const session of sessions) {
       const hasPendingTitle =
         typeof session.title === 'string' && this.pendingTitles.has(session.title);
-      const isJudge = isPermissionJudgeSession(session);
-      if (!isJudge && !hasPendingTitle) continue;
-      if (isJudge) this.hide(session.id);
+      const isInternalHelper = isInternalHelperSession(session);
+      if (!isInternalHelper && !hasPendingTitle) continue;
+      if (isInternalHelper) this.hide(session.id);
       else if (typeof session.title === 'string') this.hideProvisionally(session.title, session.id);
       const time =
         session.time && typeof session.time === 'object'
@@ -147,12 +156,12 @@ export class HiddenSessionManager {
       if (
         !hasPendingTitle &&
         updatedAt !== null &&
-        now - updatedAt >= PERMISSION_JUDGE_STALE_AFTER_MS
+        now - updatedAt >= INTERNAL_SESSION_STALE_AFTER_MS
       ) {
-        stalePermissionJudgeIds.push(session.id);
+        staleInternalSessionIds.push(session.id);
       }
     }
-    return stalePermissionJudgeIds;
+    return staleInternalSessionIds;
   }
 
   observeEvent(event: ServerEvent) {
@@ -168,19 +177,19 @@ export class HiddenSessionManager {
     if (!id) {
       return;
     }
-    const isJudge = isPermissionJudgeSession({
+    const isInternalHelper = isInternalHelperSession({
       id,
       title,
       metadata: info?.metadata,
       permission: info?.permission,
     });
-    if (isJudge) this.hide(id);
+    if (isInternalHelper) this.hide(id);
     else if (title && this.pendingTitles.has(title)) this.hideProvisionally(title, id);
   }
 
   filterVisibleSessions<T extends SessionSnapshot>(sessions: T[]) {
     return sessions.filter((session) => {
-      if (isPermissionJudgeSession(session)) this.hide(session.id);
+      if (isInternalHelperSession(session)) this.hide(session.id);
       return !this.isHidden(session.id);
     });
   }

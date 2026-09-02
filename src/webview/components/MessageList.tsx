@@ -336,6 +336,18 @@ export function getActiveTurnNavigationMessageId(
 
 export function MessageList() {
   type HistoryLoadingOwner = { windowVersion: number };
+  type PendingOlderHistoryAnchor = {
+    anchor: VisibleScrollAnchor | null;
+    generation: number;
+    invalidated: boolean;
+    owner: 'history' | 'edit';
+    previousScrollHeight: number;
+    previousScrollTop: number;
+    ownershipEpoch: number;
+    inputEpoch: number;
+    releaseAlignment?: () => void;
+    windowVersion: number;
+  };
 
   // oxlint-disable-next-line no-unassigned-vars
   let containerRef: HTMLDivElement | undefined;
@@ -365,7 +377,12 @@ export function MessageList() {
   >(new Set());
   const promptNumberLoads = new Map<
     string,
-    { generation: number; windowVersion: number; promise: Promise<void> }
+    {
+      isActive: () => boolean;
+      owner: { generation: number };
+      windowVersion: number;
+      promise: Promise<void>;
+    }
   >();
   const promptNumberReadyWindowVersions = new Map<string, number>();
   let promptNumberSessionId: string | null = null;
@@ -381,33 +398,56 @@ export function MessageList() {
   ): Promise<void> {
     const windowVersion = getSessionMessageWindowStateVersion(sessionId);
     const existing = promptNumberLoads.get(sessionId);
-    if (existing?.generation === generation && existing.windowVersion === windowVersion) {
-      return existing.promise;
+    if (existing?.windowVersion === windowVersion) {
+      if (existing.isActive()) {
+        existing.owner.generation = generation;
+        return existing.promise;
+      }
+      promptNumberLoads.delete(sessionId);
     }
 
+    const owner = { generation };
+    let active = true;
     const ownsLoad = () =>
       !disposed &&
-      generation === promptNumberHoldGeneration &&
+      altHeld &&
+      owner.generation === promptNumberHoldGeneration &&
       state.activeSessionId === sessionId &&
       getSessionMessageWindowStateVersion(sessionId) === windowVersion;
     const pendingLoad = (async () => {
-      while (ownsLoad() && (await loadOlderSessionPrompts(sessionId))) {
-        // Continue until the prompt cursor reaches the beginning of the session.
+      try {
+        while (ownsLoad() && (await loadOlderSessionPrompts(sessionId, ownsLoad))) {
+          // Continue until the prompt cursor reaches the beginning of the session.
+        }
+        if (
+          !ownsLoad() ||
+          isSessionMessageWindowResetPending(sessionId) ||
+          getSessionHistoryPromptCursor(sessionId)
+        ) {
+          return;
+        }
+        promptNumberReadyWindowVersions.set(sessionId, windowVersion);
+        setPromptNumberReadySessionIds((current) => new Set(current).add(sessionId));
+      } finally {
+        active = false;
       }
-      if (
-        !ownsLoad() ||
-        isSessionMessageWindowResetPending(sessionId) ||
-        getSessionHistoryPromptCursor(sessionId)
-      ) {
-        return;
-      }
-      promptNumberReadyWindowVersions.set(sessionId, windowVersion);
-      setPromptNumberReadySessionIds((current) => new Set(current).add(sessionId));
     })();
     const load = pendingLoad.finally(() => {
       if (promptNumberLoads.get(sessionId)?.promise === load) promptNumberLoads.delete(sessionId);
+      if (
+        owner.generation !== generation &&
+        ownsLoad() &&
+        getSessionHistoryPromptCursor(sessionId)
+      ) {
+        void ensurePromptNumbersReady(sessionId, owner.generation);
+      }
     });
-    promptNumberLoads.set(sessionId, { generation, windowVersion, promise: load });
+    promptNumberLoads.set(sessionId, {
+      isActive: () => active,
+      owner,
+      windowVersion,
+      promise: load,
+    });
     return load;
   }
 
@@ -601,24 +641,12 @@ export function MessageList() {
   let activeFollowLoopSessionId: string | null = null;
   let bottomFollowSettleFrames = 0;
   let bottomFollowObservedStreaming = false;
+  let bottomFollowPreservesNearBottomOffset = false;
   const activeOlderHistoryLoads = new Map<
     string,
     { generation: number; windowVersion: number; promise: Promise<void> }
   >();
-  const pendingOlderHistoryAnchors = new Map<
-    string,
-    {
-      anchor: VisibleScrollAnchor | null;
-      generation: number;
-      invalidated: boolean;
-      owner: 'history' | 'edit';
-      previousScrollHeight: number;
-      previousScrollTop: number;
-      ownershipEpoch: number;
-      inputEpoch: number;
-      windowVersion: number;
-    }
-  >();
+  const pendingOlderHistoryAnchors = new Map<string, PendingOlderHistoryAnchor>();
   let restoringPendingHistoryAnchor = false;
   function getCurrentPendingHistoryAnchor(sessionId: string) {
     const pendingAnchor = pendingOlderHistoryAnchors.get(sessionId);
@@ -4535,7 +4563,11 @@ export function MessageList() {
 
   function startFollowLoop(
     sessionId: string,
-    options?: { immediate?: boolean; observedStreaming?: boolean }
+    options?: {
+      immediate?: boolean;
+      observedStreaming?: boolean;
+      preserveNearBottomOffset?: boolean;
+    }
   ) {
     if (appendScrollRafId) return;
     if (stickyNavigationOwnsScroll()) {
@@ -4546,12 +4578,14 @@ export function MessageList() {
     const currentlyStreaming = state.streamingText.length > 0 || !!state.streamingPartId;
     if (activeFollowLoopSessionId === sessionId) {
       if (currentlyStreaming || options?.observedStreaming) bottomFollowObservedStreaming = true;
+      if (options?.preserveNearBottomOffset) bottomFollowPreservesNearBottomOffset = true;
       return;
     }
     if (initialScrollRafId) cancelAnimationFrame(initialScrollRafId);
 
     activeFollowLoopSessionId = sessionId;
     bottomFollowObservedStreaming = currentlyStreaming || !!options?.observedStreaming;
+    bottomFollowPreservesNearBottomOffset = !!options?.preserveNearBottomOffset;
 
     if (options?.immediate) {
       tick();
@@ -4587,7 +4621,13 @@ export function MessageList() {
       );
       const belowBottomTarget = containerRef.scrollTop < currentBottomScrollTop - 1;
       const trackGrew = currentHeight > lastAutoScrolledTrackHeight + 1;
-      if (belowBottomTarget || trackGrew) {
+      const preservesNearBottomOffset =
+        bottomFollowPreservesNearBottomOffset &&
+        !trackGrew &&
+        currentBottomScrollTop <= lastAutoScrolledBottomScrollTop + 1 &&
+        distanceFromBottom() <= 2;
+      if ((belowBottomTarget && !preservesNearBottomOffset) || trackGrew) {
+        bottomFollowPreservesNearBottomOffset = false;
         performScroll({ force: true });
       }
 
@@ -4597,8 +4637,13 @@ export function MessageList() {
       const stable =
         Math.abs(currentHeight - lastAutoScrolledTrackHeight) <= 1 &&
         Math.abs(currentBottomScrollTop - lastAutoScrolledBottomScrollTop) <= 1 &&
-        distanceFromBottom() <= 1;
-      if (stable && !isStreaming && !belowBottomTarget && !trackGrew) {
+        (distanceFromBottom() <= 1 || preservesNearBottomOffset);
+      if (
+        stable &&
+        !isStreaming &&
+        (!belowBottomTarget || preservesNearBottomOffset) &&
+        !trackGrew
+      ) {
         bottomFollowSettleFrames += 1;
       } else {
         bottomFollowSettleFrames = 0;
@@ -5491,10 +5536,12 @@ export function MessageList() {
     const rows = list.querySelectorAll('[data-queued-message-id]');
     if (rows.length === 1) {
       const styles = getComputedStyle(queue);
+      const parentStyles = queue.parentElement ? getComputedStyle(queue.parentElement) : null;
       reserveExternalBottomCollapse(
         queue.getBoundingClientRect().height +
           (parseFloat(styles.marginTop) || 0) +
-          (parseFloat(styles.marginBottom) || 0)
+          (parseFloat(styles.marginBottom) || 0) +
+          (parseFloat(parentStyles?.rowGap || '') || 0)
       );
       return;
     }
@@ -6136,7 +6183,10 @@ export function MessageList() {
 
     queueMicrotask(() => {
       if (state.activeSessionId !== sessionId || activeSessionWorking() || !autoScroll()) return;
-      startFollowLoop(sessionId, { observedStreaming: true });
+      startFollowLoop(sessionId, {
+        observedStreaming: true,
+        preserveNearBottomOffset: distanceFromBottom() <= 2,
+      });
     });
   });
   createEffect(() => {
@@ -6194,8 +6244,9 @@ export function MessageList() {
           return;
         }
         if (startPendingAppendScrollTransition(sessionId)) return;
-        performScroll();
-        startFollowLoop(sessionId, { observedStreaming: true });
+        const preserveNearBottomOffset = distanceFromBottom() <= 2;
+        if (!preserveNearBottomOffset) performScroll();
+        startFollowLoop(sessionId, { observedStreaming: true, preserveNearBottomOffset });
       });
     }
     prevLoading = loading;
@@ -7509,6 +7560,7 @@ export function MessageList() {
     historyAnchorSettleOwner = null;
     for (const pendingAnchor of pendingOlderHistoryAnchors.values()) {
       pendingAnchor.invalidated = true;
+      pendingAnchor.releaseAlignment?.();
     }
     pendingOlderHistoryAnchors.clear();
     activeOlderHistoryLoads.clear();
@@ -7518,7 +7570,10 @@ export function MessageList() {
   function invalidatePendingHistoryRestoration(sessionId = state.activeSessionId) {
     if (!sessionId) return;
     const pendingAnchor = pendingOlderHistoryAnchors.get(sessionId);
-    if (pendingAnchor) pendingAnchor.invalidated = true;
+    if (pendingAnchor) {
+      pendingAnchor.invalidated = true;
+      pendingAnchor.releaseAlignment?.();
+    }
   }
 
   function handleLoadOlderHistory(options?: {
@@ -7575,7 +7630,7 @@ export function MessageList() {
     if (!isCurrentWindow()) return;
     markSessionHistoryLoadFailed(sessionId, false);
     const anchor = captureVisibleScrollAnchor({ preferStableRenderItem: true });
-    const pendingAnchor = {
+    const pendingAnchor: PendingOlderHistoryAnchor = {
       anchor,
       generation,
       invalidated: false,
@@ -7598,8 +7653,26 @@ export function MessageList() {
       !pendingAnchor.invalidated &&
       userScrollOwnershipEpoch === pendingAnchor.ownershipEpoch &&
       (!settleOwner || historyAnchorSettleOwner === settleOwner);
-    const historyMutationObserver = new MutationObserver(() => {
-      if (!canAlignHistoryAnchor() || !historyStructureChanged()) return;
+    let historyMutationObserver: MutationObserver | null = null;
+    let historyAlignmentReleased = false;
+    const releaseHistoryAlignment = () => {
+      if (historyAlignmentReleased) return;
+      historyAlignmentReleased = true;
+      if (historyRestoreRafId) {
+        cancelAnimationFrame(historyRestoreRafId);
+        historyRestoreRafId = 0;
+      }
+      historyMutationObserver?.disconnect();
+      if (pendingAnchor.releaseAlignment === releaseHistoryAlignment) {
+        pendingAnchor.releaseAlignment = undefined;
+      }
+    };
+    historyMutationObserver = new MutationObserver(() => {
+      if (!canAlignHistoryAnchor()) {
+        releaseHistoryAlignment();
+        return;
+      }
+      if (!historyStructureChanged()) return;
       measureVisibleItems();
       restorePendingHistoryAnchorIfMounted();
       // The first mounted row can restore while Solid is still flushing the prepended range.
@@ -7609,10 +7682,14 @@ export function MessageList() {
       });
     });
     if (trackRef) historyMutationObserver.observe(trackRef, { childList: true, subtree: true });
+    pendingAnchor.releaseAlignment = releaseHistoryAlignment;
     const keepHistoryAnchorAlignedBeforePaint = () => {
       historyRestoreRafId = requestAnimationFrame(() => {
         historyRestoreRafId = 0;
-        if (!canAlignHistoryAnchor()) return;
+        if (!canAlignHistoryAnchor()) {
+          releaseHistoryAlignment();
+          return;
+        }
         if (historyStructureChanged()) {
           measureVisibleItems();
           restorePendingHistoryAnchorIfMounted();
@@ -7725,8 +7802,7 @@ export function MessageList() {
         setPreservedScrollTop(pendingAnchor.previousScrollTop + Math.max(0, heightDelta));
       }
     } finally {
-      if (historyRestoreRafId) cancelAnimationFrame(historyRestoreRafId);
-      historyMutationObserver.disconnect();
+      releaseHistoryAlignment();
       if (
         settleOwner &&
         historyAnchorSettleOwner === settleOwner &&

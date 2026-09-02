@@ -387,6 +387,7 @@ describe('CommitMessageService', () => {
     ]);
 
     const sessionBody = requestBody(request, '/session?');
+    expect(sessionBody?.metadata).toEqual({ varroInternal: 'commit-message' });
     const rules = sessionBody?.permission as PermissionRule[];
     expect(resolveToolAction(rules, 'StructuredOutput')).toBe('allow');
     expect(resolveToolAction(rules, 'bash')).toBe('deny');

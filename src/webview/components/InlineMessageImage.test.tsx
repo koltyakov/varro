@@ -36,6 +36,7 @@ afterEach(() => {
   container = null;
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe('InlineMessageImage', () => {
@@ -127,6 +128,39 @@ describe('InlineMessageImage', () => {
     const image = renderImage(src);
 
     expect(image.classList.contains('chat-image-img-ambient')).toBe(true);
+  });
+
+  it('abandons an image decode that does not settle', async () => {
+    vi.useFakeTimers();
+    class StalledImage {
+      static latest: StalledImage | undefined;
+      private value = '';
+      naturalWidth = 0;
+      naturalHeight = 0;
+
+      constructor() {
+        StalledImage.latest = this;
+      }
+
+      get src() {
+        return this.value;
+      }
+
+      set src(value: string) {
+        this.value = value;
+      }
+
+      decode() {
+        return new Promise<void>(() => {});
+      }
+    }
+    vi.stubGlobal('Image', StalledImage);
+
+    const preload = preloadInlineImageDimensions('data:image/png;base64,stalled');
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    await expect(preload).resolves.toBeUndefined();
+    expect(StalledImage.latest?.src).toBe('');
   });
 
   it('keeps small landscape images contained instead of upscaling them to cover', () => {

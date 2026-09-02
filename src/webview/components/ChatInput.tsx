@@ -26,7 +26,7 @@ import {
   setSelectedAgent,
   setSelectedModel,
   resolveSelectedModel,
-  addClipboardImage,
+  addClipboardImages,
   addNativePdf,
   clearClipboardImages,
   clearNativePdfs,
@@ -86,6 +86,7 @@ import { onMessage, postMessage } from '../lib/bridge';
 import { readWebviewInstanceContext } from '../lib/state-stored-values';
 import { client, serverEvents } from '../lib/client';
 import { requestProviderConnection } from '../lib/provider-connection-state';
+import type { ClipboardImage } from '../lib/app-state-types';
 import {
   applySessionMcps,
   sendMessage,
@@ -474,9 +475,13 @@ function requestAbortSession() {
 
 type StagedPastedImage = { url: string; mime: string; size: number };
 type PastedImageRejection = 'duplicate' | 'limit' | 'oversized' | 'unreadable';
+const PASTED_IMAGE_DECODE_CONCURRENCY = 2;
+const PASTED_IMAGE_READ_TIMEOUT_MS = 10_000;
+const MAX_PENDING_PASTE_TRANSACTIONS = 16;
+const MAX_PENDING_PASTE_IMAGE_BYTES = MAX_CLIPBOARD_IMAGES * MAX_CLIPBOARD_IMAGE_SIZE;
 
 type PasteTransaction = {
-  event: ClipboardEvent;
+  event: ClipboardEvent | null;
   sessionId: string | null;
   mutationVersion: number;
   value: string;
@@ -488,6 +493,8 @@ type PasteTransaction = {
   historyEntry: number | null;
   images: Array<StagedPastedImage | null> | undefined;
   imageRejections: Set<PastedImageRejection>;
+  imageFiles: File[];
+  imageWorkStarted: boolean;
   mentions: Awaited<ReturnType<typeof resolvePastedMentionContextFiles>> | undefined;
 };
 
@@ -910,11 +917,25 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const pendingPasteTransactions: PasteTransaction[] = [];
   const pasteTransactionsByEvent = new Map<ClipboardEvent, PasteTransaction>();
   const pendingImageStores = new Set<string>();
+  const pastedImageDecodeQueues = Array.from({ length: PASTED_IMAGE_DECODE_CONCURRENCY }, () =>
+    Promise.resolve()
+  );
+  let nextPastedImageDecodeQueue = 0;
+  let pendingPasteImageBytes = 0;
+  const preloadPastedImageDimensions = (url: string) => {
+    const queueIndex = nextPastedImageDecodeQueue++ % pastedImageDecodeQueues.length;
+    const operation = pastedImageDecodeQueues[queueIndex]!.then(() =>
+      composerDisposed ? undefined : preloadInlineImageDimensions(url)
+    );
+    pastedImageDecodeQueues[queueIndex] = operation.catch(() => {});
+    return operation;
+  };
   onCleanup(() => {
     composerDisposed = true;
     pendingPasteTransactions.length = 0;
     pasteTransactionsByEvent.clear();
     pendingImageStores.clear();
+    pendingPasteImageBytes = 0;
   });
   const [completionIndex, setCompletionIndex] = createSignal(0);
   const [fileSearchResults, setFileSearchResults] = createSignal<DroppedFile[]>([]);
@@ -2931,8 +2952,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const previousValue = transaction.value;
     const committedImageIds: string[] = [];
     const imageFilenames: string[] = [];
+    const pendingImages: ClipboardImage[] = [];
     const availableSlots = Math.max(0, MAX_CLIPBOARD_IMAGES - state.clipboardImages.length);
     const usedFilenames = new Set(state.clipboardImages.map((image) => image.filename));
+    const usedImageContentKeys = new Set(
+      state.clipboardImages.map((image) => image.contentKey ?? image.url)
+    );
     let imageIndex = nextPastedImageIndex();
 
     applyingComposerHistory = true;
@@ -2945,6 +2970,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             transaction.imageRejections.add('limit');
             continue;
           }
+          const duplicateKey = image.url;
+          if (usedImageContentKeys.has(duplicateKey)) {
+            transaction.imageRejections.add('duplicate');
+            continue;
+          }
 
           let filename = getPastedImageFilename(imageIndex);
           while (usedFilenames.has(filename)) {
@@ -2953,16 +2983,15 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           }
 
           const id = createAttachmentID();
-          if (!addClipboardImage({ id, ...image, filename })) {
-            transaction.imageRejections.add('duplicate');
-            continue;
-          }
-          committedImageIds.push(id);
+          pendingImages.push({ id, ...image, filename });
           imageFilenames.push(filename);
           usedFilenames.add(filename);
+          usedImageContentKeys.add(duplicateKey);
           imageIndex += 1;
         }
-        if (imageFilenames.length > 0) setNextPastedImageIndex(imageIndex);
+        const committedImages = addClipboardImages(pendingImages);
+        committedImageIds.push(...committedImages.map((image) => image.id));
+        if (committedImages.length > 0) setNextPastedImageIndex(imageIndex);
 
         const next = applyPasteTransactionText(
           captureComposerSnapshot(),
@@ -3022,10 +3051,17 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         transaction.images === undefined ||
         transaction.mentions === undefined
       ) {
+        startPendingPasteImageWork();
         return;
       }
       pendingPasteTransactions.shift();
-      pasteTransactionsByEvent.delete(transaction.event);
+      if (transaction.event) pasteTransactionsByEvent.delete(transaction.event);
+      transaction.event = null;
+      pendingPasteImageBytes = Math.max(
+        0,
+        pendingPasteImageBytes -
+          transaction.imageFiles.reduce((total, file) => total + file.size, 0)
+      );
       if (
         composerDisposed ||
         composerSessionId() !== transaction.sessionId ||
@@ -3036,6 +3072,37 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       }
       commitPasteTransaction(transaction);
     }
+  }
+
+  function startPendingPasteImageWork() {
+    const transaction = pendingPasteTransactions[0];
+    if (!transaction || transaction.imageWorkStarted) return;
+    transaction.imageWorkStarted = true;
+    const availableImageSlots = Math.max(0, MAX_CLIPBOARD_IMAGES - state.clipboardImages.length);
+    const imageFiles = transaction.imageFiles.slice(0, availableImageSlots);
+    if (imageFiles.length < transaction.imageFiles.length) {
+      transaction.imageRejections.add('limit');
+    }
+    void Promise.all(
+      imageFiles.map(async (file) => {
+        try {
+          const url = await readFileAsDataUrl(file, PASTED_IMAGE_READ_TIMEOUT_MS);
+          await preloadPastedImageDimensions(url);
+          return {
+            url,
+            mime: file.type || 'image/png',
+            size: file.size,
+          };
+        } catch (err) {
+          logError('chat-input:readPastedImage', err);
+          transaction.imageRejections.add('unreadable');
+          return null;
+        }
+      })
+    ).then((images) => {
+      transaction.images = images;
+      drainPasteTransactions();
+    });
   }
 
   function handlePaste(e: ClipboardEvent) {
@@ -3080,6 +3147,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       );
     }
 
+    if (pendingPasteTransactions.length >= MAX_PENDING_PASTE_TRANSACTIONS) {
+      if (pastedText.trim().length === 0 || pasteHandledAsContextOnly) e.preventDefault();
+      for (const file of pastedContextFiles) addContextFile(file);
+      showSessionActionFeedback('Wait for pending image pastes to finish', 'warning');
+      return;
+    }
+
     if (pastedText.trim().length === 0 || pasteHandledAsContextOnly) e.preventDefault();
     const transaction: PasteTransaction = {
       event: e,
@@ -3094,6 +3168,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       historyEntry: null,
       images: undefined,
       imageRejections: new Set(),
+      imageFiles: [],
+      imageWorkStarted: false,
       mentions: undefined,
     };
     pendingPasteTransactions.push(transaction);
@@ -3114,28 +3190,15 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         transaction.imageRejections.add('oversized');
         continue;
       }
+      if (pendingPasteImageBytes + file.size > MAX_PENDING_PASTE_IMAGE_BYTES) {
+        transaction.imageRejections.add('limit');
+        continue;
+      }
       imageFiles.push(file);
+      pendingPasteImageBytes += file.size;
     }
-    void Promise.all(
-      imageFiles.map(async (file) => {
-        try {
-          const url = await readFileAsDataUrl(file);
-          await preloadInlineImageDimensions(url);
-          return {
-            url,
-            mime: file.type || 'image/png',
-            size: file.size,
-          };
-        } catch (err) {
-          logError('chat-input:readPastedImage', err);
-          transaction.imageRejections.add('unreadable');
-          return null;
-        }
-      })
-    ).then((images) => {
-      transaction.images = images;
-      drainPasteTransactions();
-    });
+    transaction.imageFiles = imageFiles;
+    startPendingPasteImageWork();
     void resolvePastedMentionContextFiles(pastedText)
       .then((mentions) => {
         transaction.mentions = mentions;
@@ -3150,6 +3213,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   function handlePasteInsertion(e: ClipboardEvent, insertion: RichComposerPasteInsertion | null) {
     const transaction = pasteTransactionsByEvent.get(e);
     if (transaction) {
+      pasteTransactionsByEvent.delete(e);
+      transaction.event = null;
       const previousMutationVersion = transaction.mutationVersion;
       const previousValue = transaction.value;
       const resolvedInsertion =

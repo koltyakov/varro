@@ -1,6 +1,10 @@
 import { produce } from 'solid-js/store';
 import type { ClipboardImage, NativePdfAttachment } from './app-state-types';
-import type { DroppedFile } from '../../shared/protocol';
+import {
+  MAX_CLIPBOARD_IMAGES,
+  MAX_CLIPBOARD_IMAGE_SIZE,
+  type DroppedFile,
+} from '../../shared/protocol';
 import { mergeContextFile } from '../../shared/context-files';
 import { inputText, setInputText, setNextPastedImageIndex, setState, state } from './app-state';
 import {
@@ -23,8 +27,7 @@ import { postMessage } from './bridge';
 import { readStoredBooleanRecord } from './state-stored-values';
 import { isSamePath } from './path-display';
 
-export const MAX_CLIPBOARD_IMAGES = 10;
-export const MAX_CLIPBOARD_IMAGE_SIZE = 5 * 1024 * 1024;
+export { MAX_CLIPBOARD_IMAGES, MAX_CLIPBOARD_IMAGE_SIZE };
 
 export function getCurrentDocumentEnabled(
   sessionId: string | null | undefined = state.activeSessionId
@@ -228,37 +231,54 @@ export function stripClipboardImagePlaceholders(text: string, images: ClipboardI
 }
 
 export function addClipboardImage(image: ClipboardImage) {
-  if (image.size > MAX_CLIPBOARD_IMAGE_SIZE) return false;
+  return addClipboardImages([image]).length === 1;
+}
 
-  const duplicateKey = image.contentKey ?? image.url;
-  if (state.clipboardImages.some((item) => (item.contentKey ?? item.url) === duplicateKey)) {
-    return false;
-  }
-
-  const attachmentSequence = ensureClipboardImageAttachmentSequence(
-    image.id,
-    image.attachmentSequence
+export function addClipboardImages(images: ClipboardImage[]): ClipboardImage[] {
+  const duplicateKeys = new Set(
+    state.clipboardImages.map((image) => image.contentKey ?? image.url)
   );
+  const existingIds = new Set(state.clipboardImages.map((image) => image.id));
+  const accepted: ClipboardImage[] = [];
+  for (const image of images) {
+    const duplicateKey = image.contentKey ?? image.url;
+    if (
+      image.size > MAX_CLIPBOARD_IMAGE_SIZE ||
+      duplicateKeys.has(duplicateKey) ||
+      existingIds.has(image.id)
+    ) {
+      continue;
+    }
+    duplicateKeys.add(duplicateKey);
+    existingIds.add(image.id);
+    accepted.push({
+      ...image,
+      attachmentSequence: ensureClipboardImageAttachmentSequence(
+        image.id,
+        image.attachmentSequence
+      ),
+    });
+  }
+  if (accepted.length === 0) return accepted;
+
   setState(
     'clipboardImages',
-    produce((images) => {
-      // Loop rather than drop one so this converges regardless of how the list
-      // got over the cap; `replaceClipboardImages` is what keeps it from
-      // happening in the first place.
-      while (images.length >= MAX_CLIPBOARD_IMAGES) {
-        const removed = images.shift();
-        if (!removed) break;
-        removeClipboardImageAttachmentSequence(removed.id);
-      }
-      if (!images.find((item) => item.id === image.id)) {
-        images.push({ ...image, attachmentSequence });
+    produce((currentImages) => {
+      for (const image of accepted) {
+        // Loop rather than drop one so this converges regardless of how the list
+        // got over the cap; `replaceClipboardImages` is what keeps it from
+        // happening in the first place.
+        while (currentImages.length >= MAX_CLIPBOARD_IMAGES) {
+          const removed = currentImages.shift();
+          if (!removed) break;
+          removeClipboardImageAttachmentSequence(removed.id);
+        }
+        currentImages.push(image);
       }
     })
   );
-
   persistClipboardImages();
-
-  return true;
+  return accepted;
 }
 
 export function setClipboardImageContextFile(id: string, contextFile: DroppedFile) {

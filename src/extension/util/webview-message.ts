@@ -10,6 +10,8 @@ import { OPENCODE_TERMINAL_COMMANDS } from '../../shared/opencode-install';
 import {
   isPermissionMode,
   isSafePersistedSessionId,
+  MAX_CLIPBOARD_IMAGES,
+  MAX_CLIPBOARD_IMAGE_SIZE,
   VARRO_API_ENDPOINTS,
 } from '../../shared/protocol';
 import type {
@@ -181,7 +183,6 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
   if (!type || !hasOwn(WEBVIEW_MESSAGE_TYPES, type)) return null;
 
   switch (type) {
-    case 'ready':
     case 'context/request':
     case 'providers/refresh':
     case 'providers/auth-changed':
@@ -193,6 +194,14 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
     case 'vscode/show-output':
     case 'chat/new-editor':
       return { type };
+
+    case 'ready': {
+      if (message?.payload === undefined) return { type };
+      const payload = asRecord(message.payload);
+      if (payload?.documentId === undefined) return { type };
+      const documentId = getSafeInteger(payload?.documentId);
+      return documentId === null ? null : { type, payload: { documentId } };
+    }
 
     case 'usage/report': {
       const payload = asRecord(message?.payload);
@@ -1364,7 +1373,7 @@ function isValidQueuedMessageRouting(record: UnknownRecord) {
 function sanitizeClipboardImages(
   value: unknown
 ): Extract<WebviewMessage, { type: 'composer/images-update' }>['payload']['images'] | null {
-  if (!Array.isArray(value) || value.length > 5) return null;
+  if (!Array.isArray(value) || value.length > MAX_CLIPBOARD_IMAGES) return null;
   const images: Extract<WebviewMessage, { type: 'composer/images-update' }>['payload']['images'] =
     [];
   for (const item of value) {
@@ -1374,7 +1383,8 @@ function sanitizeClipboardImages(
     const filename = getBoundedString(record?.filename, MAX_DROPPED_CONTENT_NAME_LENGTH);
     const size = getSafeInteger(record?.size);
     const url = getBoundedString(record?.url, MAX_API_BODY_SINGLE_STRING_BYTES);
-    if (!id || !mime || !filename || size === null || !url || size > 5 * 1024 * 1024) return null;
+    if (!id || !mime || !filename || size === null || !url || size > MAX_CLIPBOARD_IMAGE_SIZE)
+      return null;
     const prefix = `data:${mime};base64,`;
     if (!url.startsWith(prefix) || getBase64DecodedSize(url.slice(prefix.length)) !== size)
       return null;

@@ -53,7 +53,7 @@ type RalphMessage = Extract<
 >;
 
 export interface MessageRouterCallbacks {
-  ready(): Promise<void>;
+  ready(documentId?: number): Promise<void>;
   updateCommandState(
     canAbort: boolean,
     canSwitchSessions: boolean,
@@ -143,7 +143,7 @@ export class MessageRouter {
     try {
       switch (msg.type) {
         case 'ready':
-          await this.handleReadyMessage();
+          await this.handleReadyMessage(msg);
           break;
         case 'queued-messages/update':
           await this.callbacks.updateQueuedMessages(msg.payload);
@@ -348,8 +348,8 @@ export class MessageRouter {
     }
   }
 
-  private async handleReadyMessage() {
-    await this.callbacks.ready();
+  private async handleReadyMessage(msg: Extract<WebviewMessage, { type: 'ready' }>) {
+    await this.callbacks.ready(msg.payload?.documentId);
   }
 
   private handleWebviewFocusMessage(msg: Extract<WebviewMessage, { type: 'webview/focus' }>) {
