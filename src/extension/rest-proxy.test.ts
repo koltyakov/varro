@@ -171,6 +171,9 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
         serverMemoryPermissions.set(`${rule.projectID}\0${rule.permission}\0${rule.pattern}`, rule);
       }
     }),
+    forgetServerMemoryPermission: vi.fn((rule) => {
+      serverMemoryPermissions.delete(`${rule.projectID}\0${rule.permission}\0${rule.pattern}`);
+    }),
     getServerMemoryPermissions: vi.fn((projectID) =>
       [...serverMemoryPermissions.values()].filter((rule) => rule.projectID === projectID)
     ),
@@ -1742,6 +1745,30 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 85, data: session });
   });
 
+  it('forwards resolved agent rules when restoring default mode', async () => {
+    const updatePermissionMode = vi.fn(() => Promise.resolve({ id: 'session-1' }));
+    const { proxy } = createProxy({ updatePermissionMode });
+    const defaultPermission = [
+      { permission: '*', pattern: '*', action: 'allow' as const },
+      { permission: 'bash', pattern: '*', action: 'ask' as const },
+    ];
+
+    await proxy.handleRequest(
+      makePayload(850, 'POST', '/varro/session/session-1/permission-mode', {
+        mode: 'default',
+        defaultPermission,
+      })
+    );
+
+    expect(updatePermissionMode).toHaveBeenCalledWith(
+      'session-1',
+      'default',
+      '/repo',
+      false,
+      defaultPermission
+    );
+  });
+
   it('persists authoritative always patterns in project config', async () => {
     const existingConfig = JSON.stringify({
       permission: { bash: { '*': 'ask', 'git *': 'deny' } },
@@ -1858,8 +1885,18 @@ describe('RestProxy handleRequest', () => {
   });
 
   it('lists and retracts server-memory permissions for the session project', async () => {
+    let observed = [
+      {
+        id: 'legacy:perm-1:0',
+        projectID: 'project-1',
+        permission: 'bash',
+        pattern: 'git status *',
+        retractable: false,
+      },
+    ];
     let saved = [
       { id: 'saved-1', projectID: 'project-1', action: 'bash', resource: 'git status *' },
+      { id: 'internal-1', projectID: 'project-1', action: 'bash', resource: 'git describe *' },
     ];
     const serverRequest = vi.fn((method: string, path: string) => {
       if (method === 'GET' && path === '/session/session-1') {
@@ -1876,6 +1913,10 @@ describe('RestProxy handleRequest', () => {
     });
     const { proxy, callbacks } = createProxy({
       server: { ...createCallbacks().server, request: serverRequest } as never,
+      forgetServerMemoryPermission: vi.fn(() => {
+        observed = [];
+      }),
+      getServerMemoryPermissions: vi.fn(() => observed),
     });
 
     await proxy.handleRequest(
@@ -1913,6 +1954,15 @@ describe('RestProxy handleRequest', () => {
   });
 
   it('lists and retracts server-memory permissions for the current project without a session', async () => {
+    let observed = [
+      {
+        id: 'legacy:perm-1:0',
+        projectID: 'project-1',
+        permission: 'bash',
+        pattern: 'opencode *',
+        retractable: false,
+      },
+    ];
     let saved = [{ id: 'saved-1', projectID: 'project-1', action: 'bash', resource: 'opencode *' }];
     const serverRequest = vi.fn((method: string, path: string) => {
       if (method === 'GET' && path === '/project/current') {
@@ -1929,6 +1979,10 @@ describe('RestProxy handleRequest', () => {
     });
     const { proxy, callbacks } = createProxy({
       server: { ...createCallbacks().server, request: serverRequest } as never,
+      forgetServerMemoryPermission: vi.fn(() => {
+        observed = [];
+      }),
+      getServerMemoryPermissions: vi.fn(() => observed),
     });
 
     await proxy.handleRequest(

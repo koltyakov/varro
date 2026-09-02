@@ -64,6 +64,17 @@ function mergeLatestPermissionRules(rules: PermissionRule[]) {
   return [...latest.values()];
 }
 
+function isPermissionRuleSubset(rules: PermissionRule[], comparison: PermissionRule[]) {
+  return rules.every((rule) =>
+    comparison.some(
+      (candidate) =>
+        candidate.permission === rule.permission &&
+        candidate.pattern === rule.pattern &&
+        candidate.action === rule.action
+    )
+  );
+}
+
 function splitSessionPermissionRules(rules: PermissionRule[], mode: PermissionMode) {
   const candidateModes: PermissionMode[] = [mode, 'auto', 'full'];
   const baseline = candidateModes
@@ -538,6 +549,12 @@ export function PermissionSettingsPanel() {
     ),
     ...defaultDirectRules,
   ]);
+  const visibleInheritedSources = createMemo(() =>
+    config().inheritedSources.filter(
+      (source) =>
+        source.rules.length > 0 && !isPermissionRuleSubset(source.rules, effectiveDefaultRules())
+    )
+  );
 
   async function load() {
     setLoading(true);
@@ -936,7 +953,7 @@ export function PermissionSettingsPanel() {
             </Show>
           </section>
 
-          <For each={config().inheritedSources}>
+          <For each={visibleInheritedSources()}>
             {(source) => (
               <section class="permission-config-section">
                 <div class="permission-config-heading">

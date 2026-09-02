@@ -214,9 +214,12 @@ Default mode presents `Reject`, `Once`, and an `Always` scope menu.
   project OpenCode configuration, then sends the same OpenCode standing response for the current
   runtime. The config write must not call OpenCode's config-update route, dispose an instance, or
   restart the server. Never derive or broaden project rules from webview display metadata.
-- Legacy OpenCode permission replies keep `always` rules in an internal instance-local array with no
-  list or removal endpoint. Varro mirrors successful legacy `always` replies from their authoritative
-  request scopes so the layer remains visible; those entries require an OpenCode restart to clear.
+- Varro shows only server-memory entries that match a successful `always` reply it observed. OpenCode's
+  saved-permission endpoint can also return internal allowances that the user did not add; those do not
+  belong in the user-managed layer. Legacy OpenCode permission replies keep `always` rules in an
+  internal instance-local array with no list or removal endpoint. Varro mirrors those replies from
+  their authoritative request scopes so the layer remains visible; those entries require an OpenCode
+  restart to clear.
 - In auto mode, a successful `Always` response rechecks other visible requests in the same
   conversation tree so requests that were already judged can use the new preference.
 - `Reject` denies the request.
@@ -401,8 +404,10 @@ that selection back to the last confirmed snapshot.
 
 - Switching to auto installs Varro's ask-based auto rules, invalidates the authority of older mode
   work, and syncs pending requests into the judge flow.
-- Switching to default clears Varro's session override so OpenCode configuration applies. Any
-  unfinished auto verdict must not approve after the switch.
+- Switching to default appends the selected agent's resolved OpenCode rules after Varro's prior
+  session rules so the configured policy applies under OpenCode's append-only session update API.
+  Recovery without agent context appends a conservative ask-by-default fallback. Any unfinished auto
+  verdict must not approve after the switch.
 - Switching to full first installs allow-all rules, then responds to locally known pending requests,
   then fetches the authoritative pending list to catch hidden or missed requests.
 - A failed mode update rolls back only state still owned by that update. It must not undo a newer

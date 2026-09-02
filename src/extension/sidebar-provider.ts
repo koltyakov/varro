@@ -8,7 +8,10 @@ import type {
   OpenCodeServerMemoryPermission,
   PermissionRule,
 } from '../shared/opencode-types';
-import { getSessionPermissionRulesForMode } from '../shared/permission-rules';
+import {
+  getSafeDefaultPermissionRules,
+  getSessionPermissionRulesForMode,
+} from '../shared/permission-rules';
 import type {
   ChatModelSelection,
   DroppedFile,
@@ -587,6 +590,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           );
         }
       },
+      forgetServerMemoryPermission: (rule) => {
+        this.serverMemoryPermissions.delete(
+          `${rule.projectID}\0${rule.permission}\0${rule.pattern}`
+        );
+      },
       getServerMemoryPermissions: (projectID) =>
         [...this.serverMemoryPermissions.values()].filter((rule) => rule.projectID === projectID),
       postApiResponse: (requestGeneration, payload) =>
@@ -674,7 +682,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           lease,
           requestId
         ),
-      updatePermissionMode: (sessionID, mode, directory, preconfigured) =>
+      updatePermissionMode: (sessionID, mode, directory, preconfigured, defaultPermission) =>
         preconfigured
           ? this.persistPreconfiguredPermissionMode(
               sessionID,
@@ -685,7 +693,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           : this.updateConfirmedPermissionMode(
               sessionID,
               mode,
-              directory ?? endpointServer.getWorkspaceCwd()
+              directory ?? endpointServer.getWorkspaceCwd(),
+              false,
+              defaultPermission
             ),
       allowPermissionForSession: (sessionID, permission, patterns, directory) =>
         this.allowPermissionForSession(
@@ -2051,7 +2061,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     sessionID: string,
     mode: PermissionMode,
     directory?: string,
-    recoverFallback = false
+    recoverFallback = false,
+    defaultPermission?: PermissionRule[]
   ) {
     const previous = this.permissionModeQueues.get(sessionID) ?? Promise.resolve();
     const operation = previous
@@ -2073,10 +2084,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.postPermissionModes();
         let session: unknown;
         try {
+          const permission =
+            mode === 'default'
+              ? (defaultPermission ?? getSafeDefaultPermissionRules())
+              : getSessionPermissionRulesForMode(mode, 'update');
           session = await this.server.request(
             'PATCH',
             `/session/${encodeURIComponent(sessionID)}`,
-            { permission: getSessionPermissionRulesForMode(mode, 'update') },
+            { permission },
             { directory }
           );
         } catch (err) {
@@ -2096,7 +2111,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             await this.server.request(
               'PATCH',
               `/session/${encodeURIComponent(sessionID)}`,
-              { permission: getSessionPermissionRulesForMode('default', 'update') },
+              { permission: getSafeDefaultPermissionRules() },
               { directory }
             );
             await this.sessionPermissionModes.set(sessionID, 'default');
@@ -2217,7 +2232,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             await this.server.request(
               'PATCH',
               `/session/${encodeURIComponent(sessionID)}`,
-              { permission: getSessionPermissionRulesForMode('default', 'update') },
+              { permission: getSafeDefaultPermissionRules() },
               { directory }
             );
           } catch (recoveryError) {
@@ -2234,7 +2249,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             await this.server.request(
               'PATCH',
               `/session/${encodeURIComponent(sessionID)}`,
-              { permission: getSessionPermissionRulesForMode(mode, 'update') },
+              {
+                permission:
+                  mode === 'default'
+                    ? getSafeDefaultPermissionRules()
+                    : getSessionPermissionRulesForMode(mode, 'update'),
+              },
               { directory }
             );
           } catch (err) {

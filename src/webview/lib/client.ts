@@ -584,15 +584,24 @@ export const client = {
       async updatePermissionMode(
         sessionID: string,
         mode: PermissionMode,
-        options?: { directory?: string; preconfigured?: boolean }
+        options?: {
+          directory?: string;
+          preconfigured?: boolean;
+          defaultPermission?: PermissionRule[];
+        }
       ): Promise<Session> {
+        const body = {
+          mode,
+          preconfigured: options?.preconfigured ? true : undefined,
+          defaultPermission: options?.defaultPermission,
+        };
         return apiCall(
           'POST',
           withDirectory(
             buildVarroSessionEndpoint(sessionID, 'permission-mode'),
             options?.directory
           ),
-          options?.preconfigured ? { mode, preconfigured: true } : { mode }
+          body
         );
       },
     },

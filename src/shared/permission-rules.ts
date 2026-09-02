@@ -1,5 +1,5 @@
 import type { PermissionMode } from './protocol';
-import type { PermissionRule } from './opencode-types';
+import type { Agent, PermissionRule } from './opencode-types';
 
 export const KNOWN_PERMISSION_NAMES = [
   'read',
@@ -38,6 +38,11 @@ const SHARED_DIRECT_PERMISSION_RULES: PermissionRule[] = [
   { permission: 'question', pattern: '*', action: 'allow' },
 ];
 
+const SAFE_DEFAULT_PERMISSION_RULES: PermissionRule[] = [
+  { permission: '*', pattern: '*', action: 'ask' },
+  ...SHARED_DIRECT_PERMISSION_RULES,
+];
+
 export function isSharedDirectPermission(permission: string): boolean {
   const normalized = permission.toLowerCase();
   return normalized === 'todowrite' || normalized === 'question';
@@ -45,6 +50,26 @@ export function isSharedDirectPermission(permission: string): boolean {
 
 export function getSharedDirectPermissionRules(): PermissionRule[] {
   return SHARED_DIRECT_PERMISSION_RULES;
+}
+
+export function getSafeDefaultPermissionRules(): PermissionRule[] {
+  return SAFE_DEFAULT_PERMISSION_RULES;
+}
+
+export function getResolvedAgentPermissionRules(permission: Agent['permission']): PermissionRule[] {
+  if (Array.isArray(permission)) return permission;
+
+  return Object.entries(permission).flatMap(([name, value]): PermissionRule[] => {
+    if (value === 'allow' || value === 'ask' || value === 'deny') {
+      return [{ permission: name, pattern: '*', action: value }];
+    }
+    if (!value) return [];
+    return Object.entries(value).map(([pattern, action]) => ({
+      permission: name,
+      pattern,
+      action,
+    }));
+  });
 }
 
 export function isKnownReadOnlyPermission(permission: string): boolean {

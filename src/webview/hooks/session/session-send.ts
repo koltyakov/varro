@@ -1312,15 +1312,16 @@ export async function ensureSessionPermissionWithDependencies(
 
 function hasPermissionRules(current: PermissionRule[] | undefined, required: PermissionRule[]) {
   if (required.length === 0) return !current || current.length === 0;
-  if (!Array.isArray(current) || current.length === 0) return false;
-  return required.every((requiredRule) =>
-    current.some(
-      (rule) =>
-        rule.permission === requiredRule.permission &&
-        rule.pattern === requiredRule.pattern &&
-        rule.action === requiredRule.action
-    )
-  );
+  if (!Array.isArray(current) || current.length < required.length) return false;
+  const offset = current.length - required.length;
+  return required.every((requiredRule, index) => {
+    const rule = current[offset + index];
+    return (
+      rule?.permission === requiredRule.permission &&
+      rule.pattern === requiredRule.pattern &&
+      rule.action === requiredRule.action
+    );
+  });
 }
 
 async function retryPostSendMessageSync(

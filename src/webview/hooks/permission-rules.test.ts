@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { getSessionPermissionRulesForMode } from './permission-rules';
+import {
+  getResolvedAgentPermissionRules,
+  getSessionPermissionRulesForMode,
+} from './permission-rules';
 
 function resolvePermissionAction(
   rules: ReturnType<typeof getSessionPermissionRulesForMode>,
@@ -79,5 +82,20 @@ describe('getSessionPermissionRulesForMode', () => {
     expect(getSessionPermissionRulesForMode('auto', 'update')).toEqual(
       getSessionPermissionRulesForMode('auto', 'create')
     );
+  });
+});
+
+describe('getResolvedAgentPermissionRules', () => {
+  it('normalizes legacy agent permission objects for default-mode restoration', () => {
+    expect(
+      getResolvedAgentPermissionRules({
+        edit: 'deny',
+        bash: { '*': 'ask', 'git status': 'allow' },
+      })
+    ).toEqual([
+      { permission: 'edit', pattern: '*', action: 'deny' },
+      { permission: 'bash', pattern: '*', action: 'ask' },
+      { permission: 'bash', pattern: 'git status', action: 'allow' },
+    ]);
   });
 });

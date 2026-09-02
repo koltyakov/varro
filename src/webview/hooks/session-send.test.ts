@@ -1255,6 +1255,40 @@ describe('session-send helpers', () => {
     expect(updateSessionPermission).toHaveBeenCalledWith('session-1', { permission: [] });
   });
 
+  it('appends resolved default rules after stale full-access rules', async () => {
+    const defaultRules: PermissionRule[] = [
+      { permission: '*', pattern: '*', action: 'allow' },
+      { permission: 'bash', pattern: '*', action: 'ask' },
+    ];
+    const updateSessionPermission = vi.fn(async (_sessionId, input) => ({
+      id: 'session-1',
+      projectID: 'project-1',
+      directory: '/repo',
+      title: 'Session',
+      version: '1',
+      time: { created: 1, updated: 1 },
+      permission: input.permission,
+    }));
+
+    await ensureSessionPermissionWithDependencies(
+      {
+        getSession: () => ({
+          permission: [{ permission: '*', pattern: '*', action: 'allow' }],
+        }),
+        buildPermissionRules: () => defaultRules,
+        getPermissionMode: () => 'default',
+        updateSessionPermission,
+        upsertSession: vi.fn(),
+        setError: vi.fn(),
+      },
+      'session-1'
+    );
+
+    expect(updateSessionPermission).toHaveBeenCalledWith('session-1', {
+      permission: defaultRules,
+    });
+  });
+
   it('keeps default sessions without permission overrides', async () => {
     const updateSessionPermission = vi.fn();
 

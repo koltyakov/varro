@@ -13,6 +13,7 @@ import {
   createSessionWorkspaceMetadata,
 } from '../../../shared/protocol';
 import { DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../../../shared/provider-limit-config';
+import { getResolvedAgentPermissionRules } from '../../../shared/permission-rules';
 import { isPlaceholderSessionTitle } from '../../../shared/session-title';
 import { isSameWorkspacePath } from '../../../shared/workspace-path';
 import { onMessage, postMessage } from '../../lib/bridge';
@@ -2467,9 +2468,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     setPermissionModeForSession: permissionsStore.setPermissionModeForSession,
     setDraftPermissionMode: permissionsStore.setDraftPermissionMode,
     saveProjectPermissionMode: permissionsStore.saveProjectPermissionMode,
-    updateSessionPermission: (sessionId, mode) =>
+    updateSessionPermission: (sessionId, mode, input) =>
       client.varro.session.updatePermissionMode(sessionId, mode, {
         directory: getSessionDirectory(sessionId),
+        defaultPermission: mode === 'default' ? input.permission : undefined,
       }),
     upsertSession,
     getPermissionsForSession: (sessionId) => {
@@ -3000,9 +3002,17 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     mode: PermissionMode,
     sessionId = appStore.state.activeSessionId
   ) {
+    const agentName = sessionId
+      ? routingStore.getSelectedAgentForSession(sessionId) || getDefaultPrimaryAgentNameFromState()
+      : null;
+    const agent = agentName
+      ? appStore.state.allAgents.find((candidate) => candidate.name === agentName)
+      : undefined;
     await sessionApprovalOperations.updatePermissionModeForSession(
       mode,
-      getSessionPermissionRulesForMode(mode, 'update'),
+      mode === 'default' && agent
+        ? getResolvedAgentPermissionRules(agent.permission)
+        : getSessionPermissionRulesForMode(mode, 'update'),
       sessionId
     );
   }

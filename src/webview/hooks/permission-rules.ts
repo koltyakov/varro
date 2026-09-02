@@ -1,1 +1,4 @@
-export { getSessionPermissionRulesForMode } from '../../shared/permission-rules';
+export {
+  getResolvedAgentPermissionRules,
+  getSessionPermissionRulesForMode,
+} from '../../shared/permission-rules';

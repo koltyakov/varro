@@ -222,7 +222,11 @@ test.describe('auto-scroll', () => {
     await expect(
       page.getByText('Final response before completion.', { exact: true })
     ).toBeVisible();
-    await waitForAnimationFrames(page, 15);
+    await expect(
+      page.locator(
+        '[data-msg-id="message-large-assistant-active"] .assistant-message-flow-item-streamed'
+      )
+    ).not.toHaveClass(/measured-entrance-active/);
     await expect
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
       .toBeLessThan(2);

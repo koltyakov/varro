@@ -99,6 +99,32 @@ describe('PermissionSettingsPanel', () => {
     ).toBe('bash');
   });
 
+  it('hides inherited layers that are unchanged in the effective rules', async () => {
+    mocks.load.mockResolvedValue({
+      ...config,
+      inheritedSources: [
+        {
+          path: '/home/user/.config/opencode/opencode.json',
+          rules: [
+            { permission: 'edit', pattern: '*', action: 'allow' },
+            { permission: 'question', pattern: '*', action: 'allow' },
+          ],
+          scope: 'global',
+        },
+      ],
+      effectiveRules: [
+        { permission: 'edit', pattern: '*', action: 'allow' },
+        { permission: 'question', pattern: '*', action: 'allow' },
+      ],
+    });
+    cleanup = render(() => <PermissionSettingsPanel />, container);
+    await flush();
+
+    expect(container.textContent).not.toContain('Global rules');
+    expect(container.textContent).toContain('Effective Default rules');
+    expect(container.querySelectorAll('.permission-rule-overview')).toHaveLength(1);
+  });
+
   it('shows and retracts server-memory rules without an active session', async () => {
     mocks.loadServerMemory.mockResolvedValue({
       supported: true,
