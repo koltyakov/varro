@@ -584,6 +584,53 @@ describe('SidebarProvider local config routing', () => {
     expect(written).toContain('"git status*": "allow"');
   });
 
+  it('recalculates effective permission rules from the updated project config', async () => {
+    const projectConfig = JSON.stringify({
+      permission: {
+        bash: { 'opencode *': 'allow', 'rtk *': 'allow' },
+      },
+    });
+    vscodeMock.workspace.fs.readFile.mockImplementation((uri: { fsPath: string }) => {
+      if (uri.fsPath !== '/repo/opencode.json') return Promise.reject({ code: 'FileNotFound' });
+      const written = vscodeMock.workspace.fs.writeFile.mock.lastCall as unknown as
+        | [{ fsPath: string }, Uint8Array]
+        | undefined;
+      return Promise.resolve(written?.[1] ?? new TextEncoder().encode(projectConfig));
+    });
+    const server = createServer({
+      request: vi.fn(async (_method: string, path: string) =>
+        path === '/config'
+          ? { permission: { bash: { 'opencode *': 'allow', 'rtk *': 'allow' } } }
+          : path === '/session/status'
+            ? {}
+            : []
+      ),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const { posted } = attachTestView(provider);
+
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: {
+        id: 13,
+        method: 'POST',
+        path: '/varro/opencode-config/permissions',
+        body: { rules: [{ permission: 'bash', pattern: 'npm *', action: 'ask' }] },
+      },
+    });
+
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: {
+        id: 13,
+        data: expect.objectContaining({
+          projectRules: [{ permission: 'bash', pattern: 'npm *', action: 'ask' }],
+          effectiveRules: [{ permission: 'bash', pattern: 'npm *', action: 'ask' }],
+        }),
+      },
+    });
+  });
+
   it('attributes global permission config separately from project rules', async () => {
     vi.stubEnv('XDG_CONFIG_HOME', '/global');
     try {
@@ -621,6 +668,10 @@ describe('SidebarProvider local config routing', () => {
           id: 12,
           data: expect.objectContaining({
             projectRules: [{ permission: 'bash', pattern: '*', action: 'ask' }],
+            effectiveRules: [
+              { permission: 'webfetch', pattern: '*', action: 'allow' },
+              { permission: 'bash', pattern: '*', action: 'ask' },
+            ],
             inheritedSources: [
               {
                 path: '/global/opencode/opencode.jsonc',

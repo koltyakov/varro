@@ -44,6 +44,7 @@ import { OpenCodeResponseTooLargeError } from './open-code-transport';
 import { HiddenSessionManager } from './hidden-session-manager';
 import { QueuedMessageStore } from './queued-message-store';
 import { SessionStateManager } from './session-state-manager';
+import type { OpenCodeServerMemoryPermission } from '../shared/opencode-types';
 import type { Persistence } from '../shared/persistence';
 import type { RecycleBinEntry } from '../shared/protocol';
 
@@ -72,6 +73,7 @@ function withSignal(options: Record<string, unknown> = {}) {
 }
 
 function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxyCallbacks {
+  const serverMemoryPermissions = new Map<string, OpenCodeServerMemoryPermission>();
   return {
     server: {
       getWorkspaceCwd: vi.fn(() => '/repo'),
@@ -164,6 +166,14 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
     allowPermissionForSession: vi.fn(() => Promise.resolve(undefined)),
     cleanupExpiredRecycleBin: vi.fn(() => Promise.resolve()),
     removeSessionImages: vi.fn(() => Promise.resolve()),
+    rememberServerMemoryPermissions: vi.fn((rules) => {
+      for (const rule of rules) {
+        serverMemoryPermissions.set(`${rule.projectID}\0${rule.permission}\0${rule.pattern}`, rule);
+      }
+    }),
+    getServerMemoryPermissions: vi.fn((projectID) =>
+      [...serverMemoryPermissions.values()].filter((rule) => rule.projectID === projectID)
+    ),
     postApiResponse: vi.fn(),
     ...overrides,
   };
@@ -1553,6 +1563,62 @@ describe('RestProxy handleRequest', () => {
     );
   });
 
+  it('mirrors acknowledged legacy always replies in the server-memory list', async () => {
+    const serverRequest = vi.fn((method: string, path: string) => {
+      if (method === 'GET' && path === '/permission') {
+        return Promise.resolve([
+          {
+            id: 'perm-1',
+            sessionID: 'session-1',
+            permission: 'bash',
+            always: ['opencode *'],
+          },
+        ]);
+      }
+      if (method === 'GET' && path === '/session/session-1') {
+        return Promise.resolve({ id: 'session-1', projectID: 'project-1', directory: '/repo' });
+      }
+      if (method === 'POST' && path === '/permission/perm-1/reply') return Promise.resolve(true);
+      if (method === 'GET' && path === '/api/permission/saved?projectID=project-1') {
+        return Promise.resolve({ data: [] });
+      }
+      return Promise.resolve(undefined);
+    });
+    const callbacks = createCallbacks({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+    const approvalProxy = new RestProxy(callbacks);
+    const viewerProxy = new RestProxy(callbacks);
+
+    await approvalProxy.handleRequest(
+      makePayload(88, 'POST', '/permission/perm-1/reply', { reply: 'always' })
+    );
+    await viewerProxy.handleRequest(
+      makePayload(
+        89,
+        'GET',
+        '/varro/permission/server-memory?sessionId=session-1&directory=%2Frepo'
+      )
+    );
+
+    expect(callbacks.postApiResponse).toHaveBeenNthCalledWith(1, 1, { id: 88, data: true });
+    expect(callbacks.postApiResponse).toHaveBeenNthCalledWith(2, 1, {
+      id: 89,
+      data: {
+        supported: true,
+        rules: [
+          {
+            id: 'legacy:perm-1:0',
+            projectID: 'project-1',
+            permission: 'bash',
+            pattern: 'opencode *',
+            retractable: false,
+          },
+        ],
+      },
+    });
+  });
+
   it('rejects automatic requests after their ownership lease changes', async () => {
     const { proxy, callbacks } = createProxy({
       isPermissionAutomationLeaseCurrent: vi.fn(() => false),
@@ -1842,6 +1908,54 @@ describe('RestProxy handleRequest', () => {
     });
     expect(callbacks.postApiResponse).toHaveBeenNthCalledWith(2, 1, {
       id: 857,
+      data: { supported: true, rules: [] },
+    });
+  });
+
+  it('lists and retracts server-memory permissions for the current project without a session', async () => {
+    let saved = [{ id: 'saved-1', projectID: 'project-1', action: 'bash', resource: 'opencode *' }];
+    const serverRequest = vi.fn((method: string, path: string) => {
+      if (method === 'GET' && path === '/project/current') {
+        return Promise.resolve({ id: 'project-1', worktree: '/repo' });
+      }
+      if (method === 'GET' && path === '/api/permission/saved?projectID=project-1') {
+        return Promise.resolve({ data: saved });
+      }
+      if (method === 'DELETE' && path === '/api/permission/saved/saved-1') {
+        saved = [];
+        return Promise.resolve(undefined);
+      }
+      return Promise.resolve(undefined);
+    });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(
+      makePayload(858, 'GET', '/varro/permission/server-memory?directory=%2Frepo')
+    );
+    await proxy.handleRequest(
+      makePayload(859, 'DELETE', '/varro/permission/server-memory?directory=%2Frepo', {
+        id: 'saved-1',
+      })
+    );
+
+    expect(callbacks.postApiResponse).toHaveBeenNthCalledWith(1, 1, {
+      id: 858,
+      data: {
+        supported: true,
+        rules: [
+          {
+            id: 'saved-1',
+            projectID: 'project-1',
+            permission: 'bash',
+            pattern: 'opencode *',
+          },
+        ],
+      },
+    });
+    expect(callbacks.postApiResponse).toHaveBeenNthCalledWith(2, 1, {
+      id: 859,
       data: { supported: true, rules: [] },
     });
   });

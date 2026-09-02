@@ -624,27 +624,26 @@ export const client = {
       return apiCall('POST', VARRO_API_ENDPOINTS.openCodeConfigPermissions, { rules });
     },
     async serverMemoryPermissions(
-      sessionId: string,
+      sessionId: string | null,
       options?: { directory?: string }
     ): Promise<OpenCodeServerMemoryPermissions> {
-      const params = new URLSearchParams({ sessionId });
+      const params = new URLSearchParams();
+      if (sessionId) params.set('sessionId', sessionId);
+      const query = params.size > 0 ? `?${params.toString()}` : '';
       return apiCall(
         'GET',
-        withDirectory(
-          `${VARRO_API_ENDPOINTS.permissionServerMemory}?${params.toString()}`,
-          options?.directory
-        )
+        withDirectory(`${VARRO_API_ENDPOINTS.permissionServerMemory}${query}`, options?.directory)
       );
     },
     async removeServerMemoryPermission(
-      sessionId: string,
+      sessionId: string | null,
       id: string,
       options?: { directory?: string }
     ): Promise<OpenCodeServerMemoryPermissions> {
       return apiCall(
         'DELETE',
         withDirectory(VARRO_API_ENDPOINTS.permissionServerMemory, options?.directory),
-        { sessionId, id }
+        sessionId ? { sessionId, id } : { id }
       );
     },
     async saveModelRouting(body: {

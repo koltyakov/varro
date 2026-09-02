@@ -13,6 +13,7 @@ import type {
   Message,
   OpenCodePermissionConfig,
   OpenCodePermissionConfigSource,
+  OpenCodeServerMemoryPermission,
   OpenCodeServerMemoryPermissions,
   Part,
   PermissionRule,
@@ -124,8 +125,8 @@ type SessionPermissionRulesRequest =
   | { kind: 'update'; sessionID: string; rules: PermissionRule[] };
 
 type ServerMemoryPermissionRequest =
-  | { kind: 'list'; sessionID: string }
-  | { kind: 'remove'; sessionID: string; id: string };
+  | { kind: 'list'; sessionID?: string }
+  | { kind: 'remove'; sessionID?: string; id: string };
 
 type OpenCodeConfigFile = {
   path: string;
@@ -237,6 +238,8 @@ export interface RestProxyCallbacks {
   ): Promise<void>;
   cleanupExpiredRecycleBin(): Promise<void>;
   removeSessionImages(sessionIds: Iterable<string>): Promise<void>;
+  rememberServerMemoryPermissions(rules: readonly OpenCodeServerMemoryPermission[]): void;
+  getServerMemoryPermissions(projectID: string): readonly OpenCodeServerMemoryPermission[];
   postApiResponse(requestGeneration: number, payload: ApiResponsePayload): void;
   isPermissionAutomationLeaseCurrent(
     lease: number,
@@ -754,7 +757,9 @@ export class RestProxy {
       );
       if (serverMemoryRequest) {
         const directory = explicitWorkspaceDirectory ?? this.getCurrentWorkspaceResolutionRoot();
-        await this.assertSessionInWorkspace(serverMemoryRequest.sessionID, directory, directory);
+        if (serverMemoryRequest.sessionID) {
+          await this.assertSessionInWorkspace(serverMemoryRequest.sessionID, directory, directory);
+        }
         const data = await this.readServerMemoryPermissions(
           serverMemoryRequest.sessionID,
           directory ?? undefined,
@@ -1089,6 +1094,12 @@ export class RestProxy {
       }
       const paginatedMessages = this.isPaginatedMessagesRequest(method, payload.path);
       const defaultModelRequest = method === 'GET' && payload.path === '/model/default';
+      const legacyServerMemoryRules = await this.prepareLegacyServerMemoryRules(
+        method,
+        payload.path,
+        payload.body,
+        explicitWorkspaceDirectory ?? this.getCurrentWorkspaceResolutionRoot()
+      );
       let responsePromise: Promise<unknown>;
       try {
         if (defaultModelRequest) {
@@ -1175,6 +1186,7 @@ export class RestProxy {
         }
         throw err;
       }
+      this.callbacks.rememberServerMemoryPermissions(legacyServerMemoryRules);
       if (queuedDispatch && promptSessionID) {
         try {
           const completed = await this.callbacks.completeQueuedMessageDispatchClaim(
@@ -3366,15 +3378,14 @@ export class RestProxy {
     if (url.pathname !== VARRO_API_ENDPOINTS.permissionServerMemory) return null;
     if (method === 'GET') {
       const sessionID = url.searchParams.get('sessionId')?.trim() ?? '';
-      if (!sessionID) throw new Error('Session ID is required');
-      return { kind: 'list', sessionID };
+      return sessionID ? { kind: 'list', sessionID } : { kind: 'list' };
     }
     if (method !== 'DELETE') return null;
     const record = asRecord(body);
     const sessionID = typeof record?.sessionId === 'string' ? record.sessionId.trim() : '';
     const id = typeof record?.id === 'string' ? record.id.trim() : '';
-    if (!sessionID || !id) throw new Error('Session ID and saved permission ID are required');
-    return { kind: 'remove', sessionID, id };
+    if (!id) throw new Error('Saved permission ID is required');
+    return sessionID ? { kind: 'remove', sessionID, id } : { kind: 'remove', id };
   }
 
   private parsePermissionRules(values: unknown, allowOverrides = false): PermissionRule[] {
@@ -3794,17 +3805,26 @@ export class RestProxy {
   }
 
   private async readServerMemoryPermissions(
-    sessionID: string,
+    sessionID?: string,
     directory?: string,
     removeID?: string
   ): Promise<OpenCodeServerMemoryPermissions> {
-    const session = asRecord(
-      await this.requestServer('GET', `/session/${encodeURIComponent(sessionID)}`, undefined, {
-        directory,
-      })
+    const project = asRecord(
+      await this.requestServer(
+        'GET',
+        sessionID ? `/session/${encodeURIComponent(sessionID)}` : '/project/current',
+        undefined,
+        { directory }
+      )
     );
-    const projectID = typeof session?.projectID === 'string' ? session.projectID : '';
-    if (!projectID) throw new Error('Session project is unavailable');
+    const projectID =
+      typeof (sessionID ? project?.projectID : project?.id) === 'string'
+        ? sessionID
+          ? project?.projectID
+          : project?.id
+        : '';
+    if (typeof projectID !== 'string' || !projectID) throw new Error('Project is unavailable');
+    const legacyRules = [...this.callbacks.getServerMemoryPermissions(projectID)];
 
     const list = async (): Promise<OpenCodeServerMemoryPermissions> => {
       try {
@@ -3823,7 +3843,7 @@ export class RestProxy {
             reason: 'The OpenCode server returned an unsupported saved-permission response.',
           };
         }
-        const rules = values.flatMap((value) => {
+        const savedRules = values.flatMap((value) => {
           const saved = asRecord(value);
           if (
             typeof saved?.id !== 'string' ||
@@ -3842,8 +3862,20 @@ export class RestProxy {
             },
           ];
         });
-        return { supported: true, rules };
+        const savedScopes = new Set(
+          savedRules.map((rule) => `${rule.permission}\0${rule.pattern}`)
+        );
+        return {
+          supported: true,
+          rules: [
+            ...savedRules,
+            ...legacyRules.filter(
+              (rule) => !savedScopes.has(`${rule.permission}\0${rule.pattern}`)
+            ),
+          ],
+        };
       } catch (cause) {
+        if (legacyRules.length > 0) return { supported: true, rules: legacyRules };
         return {
           supported: false,
           rules: [],
@@ -3857,6 +3889,9 @@ export class RestProxy {
 
     const current = await list();
     if (!removeID || !current.supported) return current;
+    if (removeID.startsWith('legacy:')) {
+      throw new Error('Restart OpenCode to clear this server-memory allowance');
+    }
     if (!current.rules.some((rule) => rule.id === removeID && rule.projectID === projectID)) {
       throw new Error('Saved permission not found for this project');
     }
@@ -3869,22 +3904,76 @@ export class RestProxy {
     return list();
   }
 
+  private async prepareLegacyServerMemoryRules(
+    method: string,
+    path: string,
+    body: unknown,
+    directory: string | null | undefined
+  ): Promise<OpenCodeServerMemoryPermission[]> {
+    if (method !== 'POST' || asRecord(body)?.reply !== 'always') return [];
+    const match = new URL(path, 'http://localhost').pathname.match(
+      /^\/permission\/([^/]+)\/reply$/
+    );
+    if (!match?.[1]) return [];
+
+    try {
+      const permissionID = decodeURIComponent(match[1]);
+      const pending = await this.requestServer('GET', '/permission', undefined, {
+        directory: directory ?? undefined,
+      });
+      if (!Array.isArray(pending)) return [];
+      const request = pending
+        .map((value) => asRecord(asRecord(value)?.info) ?? asRecord(value))
+        .find((value) => {
+          const id = value?.id ?? value?.permissionID ?? value?.requestID;
+          return id === permissionID;
+        });
+      const sessionID = typeof request?.sessionID === 'string' ? request.sessionID : '';
+      const permission =
+        typeof request?.permission === 'string'
+          ? request.permission.trim()
+          : typeof request?.type === 'string'
+            ? request.type.trim()
+            : '';
+      const patterns = Array.isArray(request?.always)
+        ? request.always
+            .filter((value): value is string => typeof value === 'string')
+            .map((value) => value.trim())
+            .filter(Boolean)
+        : [];
+      if (!sessionID || !permission || patterns.length === 0) return [];
+      const session = asRecord(
+        await this.requestServer('GET', `/session/${encodeURIComponent(sessionID)}`, undefined, {
+          directory: directory ?? undefined,
+        })
+      );
+      const projectID = typeof session?.projectID === 'string' ? session.projectID : '';
+      if (!projectID) return [];
+      return [...new Set(patterns)].map((pattern, index) => ({
+        id: `legacy:${permissionID}:${index}`,
+        projectID,
+        permission,
+        pattern,
+        retractable: false,
+      }));
+    } catch (cause) {
+      logger.warn(
+        `Could not mirror server-memory permission: ${cause instanceof Error ? cause.message : String(cause)}`
+      );
+      return [];
+    }
+  }
+
   private async readOpenCodePermissionConfig(): Promise<OpenCodePermissionConfig> {
     const snapshot = await this.readOpenCodeConfigObject();
     const targetPath = getCanonicalOpenCodeConfigPath(snapshot.target.path);
-    const globalSources = await this.readGlobalOpenCodePermissionSources();
-    let effectiveConfig = snapshot.config;
-    try {
-      const serverConfig = asRecord(await this.requestServer('GET', '/config'));
-      if (serverConfig) effectiveConfig = serverConfig;
-    } catch {
-      // The project files remain useful when the OpenCode server is not running yet.
-    }
+    const globalConfig = await this.readGlobalOpenCodePermissionConfig();
+    const effectiveConfig = mergeOpenCodeConfig(globalConfig.config, snapshot.config);
     return {
       targetPath: snapshot.target.path,
       projectRules: this.normalizeOpenCodePermissionRules(snapshot.target.config.permission),
       inheritedSources: [
-        ...globalSources,
+        ...globalConfig.sources,
         ...snapshot.files
           .filter((file) => getCanonicalOpenCodeConfigPath(file.path) !== targetPath)
           .map<OpenCodePermissionConfigSource>((file) => ({
@@ -3904,16 +3993,21 @@ export class RestProxy {
     };
   }
 
-  private async readGlobalOpenCodePermissionSources(): Promise<OpenCodePermissionConfigSource[]> {
+  private async readGlobalOpenCodePermissionConfig(): Promise<{
+    config: Record<string, unknown>;
+    sources: OpenCodePermissionConfigSource[];
+  }> {
     const configuredPath = process.env.OPENCODE_CONFIG?.trim();
     const paths = [...getOpenCodeConfigPaths(), ...(configuredPath ? [configuredPath] : [])].filter(
       (path, index, values) => values.indexOf(path) === index
     );
+    let effectiveConfig: Record<string, unknown> = {};
     const sources: OpenCodePermissionConfigSource[] = [];
     for (const path of paths) {
       try {
         const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(path));
         const config = parseOpenCodeConfig(new TextDecoder().decode(bytes), path);
+        effectiveConfig = mergeOpenCodeConfig(effectiveConfig, config);
         sources.push({
           path,
           rules: this.normalizeOpenCodePermissionRules(config.permission),
@@ -3923,7 +4017,7 @@ export class RestProxy {
         // Missing or unreadable optional global config files do not block project settings.
       }
     }
-    return sources;
+    return { config: effectiveConfig, sources };
   }
 
   private async updateOpenCodePermissionConfig(

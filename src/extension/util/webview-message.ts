@@ -1766,7 +1766,7 @@ const API_ROUTES: ApiRoute[] = [
   ),
   route(VARRO_API_ENDPOINTS.permissionServerMemory, ({ method, url }) =>
     method === 'GET'
-      ? onlyQuery(url, 'sessionId', 'directory') && requiredQuery(url, 'sessionId')
+      ? onlyQuery(url, 'sessionId', 'directory')
       : method === 'DELETE' && optionalDirectoryQuery(url)
   ),
   route(

@@ -216,6 +216,9 @@ Default mode presents `Reject`, `Once`, and an `Always` scope menu.
   project OpenCode configuration, then sends the same OpenCode standing response for the current
   runtime. The config write must not call OpenCode's config-update route, dispose an instance, or
   restart the server. Never derive or broaden project rules from webview display metadata.
+- Legacy OpenCode permission replies keep `always` rules in an internal instance-local array with no
+  list or removal endpoint. Varro mirrors successful legacy `always` replies from their authoritative
+  request scopes so the layer remains visible; those entries require an OpenCode restart to clear.
 - In auto mode, a successful `Always` response rechecks other visible requests in the same
   conversation tree so requests that were already judged can use the new preference.
 - `Reject` denies the request.

@@ -3,7 +3,11 @@
 import * as vscode from 'vscode';
 import { replacesOpenCodeBinary } from '../shared/opencode-install';
 import { MAX_NATIVE_PDF_TOTAL_BYTES } from '../shared/native-pdf';
-import type { OpenCodeModelRouting, PermissionRule } from '../shared/opencode-types';
+import type {
+  OpenCodeModelRouting,
+  OpenCodeServerMemoryPermission,
+  PermissionRule,
+} from '../shared/opencode-types';
 import { getSessionPermissionRulesForMode } from '../shared/permission-rules';
 import type {
   ChatModelSelection,
@@ -214,6 +218,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly generatedDependencyTreeGuard: GeneratedDependencyTreeGuard;
   private readonly workspaceSessionStatusCoordinator = new WorkspaceSessionStatusCoordinator();
   private readonly endpoints = new Set<WebviewEndpoint>();
+  private readonly serverMemoryPermissions = new Map<string, OpenCodeServerMemoryPermission>();
   private readonly editorPanels = new Map<string, EditorEndpoint>();
   private lastFocusedContextViewId: string | null = null;
   private readonly permissionModeQueues = new Map<string, Promise<unknown>>();
@@ -572,6 +577,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       cleanupExpiredRecycleBin: () => this.cleanupExpiredRecycleBin(),
       removeSessionImages: (sessionIds) =>
         this.droppedFilesService.removeSessionOwnedFiles(sessionIds),
+      rememberServerMemoryPermissions: (rules) => {
+        for (const rule of rules) {
+          this.serverMemoryPermissions.set(
+            `${rule.projectID}\0${rule.permission}\0${rule.pattern}`,
+            rule
+          );
+        }
+      },
+      getServerMemoryPermissions: (projectID) =>
+        [...this.serverMemoryPermissions.values()].filter((rule) => rule.projectID === projectID),
       postApiResponse: (requestGeneration, payload) =>
         webviewSession.postApiResponse(payload, requestGeneration),
       isPermissionAutomationLeaseCurrent: (lease, request) => {

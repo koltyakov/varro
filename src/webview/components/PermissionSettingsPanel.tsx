@@ -588,22 +588,23 @@ export function PermissionSettingsPanel() {
   async function loadSessionLayers() {
     const session = activeSession();
     const generation = ++sessionLoadGeneration;
+    setSessionLoading(Boolean(session));
+    setSessionError(null);
+    setServerMemoryError(null);
+    const [sessionResult, memoryResult] = await Promise.allSettled([
+      session
+        ? client.session.getPermissionRulesForSession(session.id, { directory: session.directory })
+        : Promise.resolve([]),
+      client.varro.serverMemoryPermissions(session?.id ?? null, {
+        directory: session?.directory,
+      }),
+    ]);
+    if (generation !== sessionLoadGeneration) return;
     if (!session) {
       setSessionRules([]);
       setSavedSessionRules([]);
       setSessionBaselineRules([]);
-      setServerMemory(null);
-      return;
-    }
-    setSessionLoading(true);
-    setSessionError(null);
-    setServerMemoryError(null);
-    const [sessionResult, memoryResult] = await Promise.allSettled([
-      client.session.getPermissionRulesForSession(session.id, { directory: session.directory }),
-      client.varro.serverMemoryPermissions(session.id, { directory: session.directory }),
-    ]);
-    if (generation !== sessionLoadGeneration) return;
-    if (sessionResult.status === 'fulfilled') {
+    } else if (sessionResult.status === 'fulfilled') {
       const split = splitSessionPermissionRules(sessionResult.value, activePermissionMode());
       setSessionBaselineRules(split.baseline.map((rule) => ({ ...rule })));
       setSessionRules(split.overrides.map((rule) => ({ ...rule })));
@@ -665,13 +666,13 @@ export function PermissionSettingsPanel() {
 
   async function removeServerMemoryPermission(id: string) {
     const session = activeSession();
-    if (!session || removingServerRule()) return;
+    if (removingServerRule()) return;
     setRemovingServerRule(id);
     setServerMemoryError(null);
     try {
       setServerMemory(
-        await client.varro.removeServerMemoryPermission(session.id, id, {
-          directory: session.directory,
+        await client.varro.removeServerMemoryPermission(session?.id ?? null, id, {
+          directory: session?.directory,
         })
       );
     } catch (cause) {
@@ -693,14 +694,8 @@ export function PermissionSettingsPanel() {
 
   createEffect(() => {
     activePermissionMode();
-    if (activeSession()) void loadSessionLayers();
-    else {
-      sessionLoadGeneration += 1;
-      setSessionRules([]);
-      setSavedSessionRules([]);
-      setSessionBaselineRules([]);
-      setServerMemory(null);
-    }
+    activeSession();
+    void loadSessionLayers();
   });
 
   return (
@@ -810,47 +805,56 @@ export function PermissionSettingsPanel() {
                 </Show>
               </Show>
             </section>
+          </Show>
 
-            <section class="permission-config-section">
-              <div class="permission-config-heading">
-                <div>
-                  <h2>Server memory</h2>
-                  <p>Saved allowances applied before project and inherited configuration.</p>
-                </div>
-                <span class="permission-config-level">Until restart</span>
+          <section class="permission-config-section">
+            <div class="permission-config-heading">
+              <div>
+                <h2>Server memory</h2>
+                <p>Saved allowances applied before project and inherited configuration.</p>
               </div>
-              <Show when={serverMemoryError()}>
-                <div class="permission-layer-error" role="alert">
-                  {serverMemoryError()}
-                </div>
-              </Show>
-              <Show
-                when={serverMemory()}
-                fallback={<div class="permission-config-empty">Loading server memory...</div>}
-              >
-                {(memory) => (
+              <span class="permission-config-level">Until restart</span>
+            </div>
+            <Show when={serverMemoryError()}>
+              <div class="permission-layer-error" role="alert">
+                {serverMemoryError()}
+              </div>
+            </Show>
+            <Show
+              when={serverMemory()}
+              fallback={<div class="permission-config-empty">Loading server memory...</div>}
+            >
+              {(memory) => (
+                <Show
+                  when={memory().supported}
+                  fallback={
+                    <div class="permission-config-empty">
+                      {getServerMemoryUnavailableReason(memory())}
+                    </div>
+                  }
+                >
                   <Show
-                    when={memory().supported}
+                    when={memory().rules.length > 0}
                     fallback={
-                      <div class="permission-config-empty">
-                        {getServerMemoryUnavailableReason(memory())}
-                      </div>
+                      <div class="permission-config-empty">No saved server allowances.</div>
                     }
                   >
-                    <Show
-                      when={memory().rules.length > 0}
-                      fallback={
-                        <div class="permission-config-empty">No saved server allowances.</div>
-                      }
-                    >
-                      <div class="permission-memory-list">
-                        <For each={memory().rules}>
-                          {(rule) => (
-                            <div class="permission-memory-rule">
-                              <code>{rule.permission}</code>
-                              <code title={rule.pattern}>{rule.pattern}</code>
-                              <span class="permission-memory-actions">
-                                <span>Allow</span>
+                    <div class="permission-memory-list">
+                      <For each={memory().rules}>
+                        {(rule) => (
+                          <div class="permission-memory-rule">
+                            <code>{rule.permission}</code>
+                            <code title={rule.pattern}>{rule.pattern}</code>
+                            <span class="permission-memory-actions">
+                              <span>Allow</span>
+                              <Show
+                                when={rule.retractable !== false}
+                                fallback={
+                                  <span title="Legacy OpenCode server memory can only be cleared by restarting the server">
+                                    Restart to clear
+                                  </span>
+                                }
+                              >
                                 <Tooltip content="Retract server allowance">
                                   <button
                                     type="button"
@@ -862,17 +866,17 @@ export function PermissionSettingsPanel() {
                                     <UiIcon source={trashIcon} width={14} height={14} />
                                   </button>
                                 </Tooltip>
-                              </span>
-                            </div>
-                          )}
-                        </For>
-                      </div>
-                    </Show>
+                              </Show>
+                            </span>
+                          </div>
+                        )}
+                      </For>
+                    </div>
                   </Show>
-                )}
-              </Show>
-            </section>
-          </Show>
+                </Show>
+              )}
+            </Show>
+          </section>
 
           <section class="permission-config-section">
             <div class="permission-config-heading">

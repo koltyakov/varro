@@ -66,6 +66,7 @@ export type OpenCodeServerMemoryPermission = {
   projectID: string;
   permission: string;
   pattern: string;
+  retractable?: boolean;
 };
 
 export type OpenCodeServerMemoryPermissions =

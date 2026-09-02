@@ -114,6 +114,56 @@ describe('PermissionSettingsPanel', () => {
     expect(container.textContent).not.toContain('Edit-mode addition');
   });
 
+  it('shows and retracts server-memory rules without an active session', async () => {
+    mocks.loadServerMemory.mockResolvedValue({
+      supported: true,
+      rules: [
+        {
+          id: 'saved-1',
+          projectID: 'project-1',
+          permission: 'bash',
+          pattern: 'opencode *',
+        },
+      ],
+    });
+    mocks.removeServerMemory.mockResolvedValue({ supported: true, rules: [] });
+    cleanup = render(() => <PermissionSettingsPanel />, container);
+    await flush();
+
+    expect(container.textContent).not.toContain('Current session rules');
+    expect(container.textContent).toContain('Server memory');
+    expect(container.textContent).toContain('opencode *');
+    expect(mocks.loadServerMemory).toHaveBeenCalledWith(null, { directory: undefined });
+
+    container.querySelector<HTMLButtonElement>('[aria-label="Retract server allowance"]')?.click();
+    await flush();
+
+    expect(mocks.removeServerMemory).toHaveBeenCalledWith(null, 'saved-1', {
+      directory: undefined,
+    });
+  });
+
+  it('shows legacy server-memory rules as restart-only', async () => {
+    mocks.loadServerMemory.mockResolvedValue({
+      supported: true,
+      rules: [
+        {
+          id: 'legacy:perm-1:0',
+          projectID: 'project-1',
+          permission: 'bash',
+          pattern: 'opencode *',
+          retractable: false,
+        },
+      ],
+    });
+    cleanup = render(() => <PermissionSettingsPanel />, container);
+    await flush();
+
+    expect(container.textContent).toContain('opencode *');
+    expect(container.textContent).toContain('Restart to clear');
+    expect(container.querySelector('[aria-label="Retract server allowance"]')).toBeNull();
+  });
+
   it('shows and independently retracts current-session and server-memory rules', async () => {
     setState('sessions', [
       {
