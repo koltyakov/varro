@@ -501,13 +501,19 @@ describe('ToolbarPickers', () => {
     expect(toggleButton?.getAttribute('aria-label')).toBe('Auto-approve permissions');
   });
 
-  it('shows the tail of auto-approve activity with per-dot details', () => {
+  it('shows active reviews and the five latest completed auto-approve activities', () => {
     const onToggle = vi.fn();
     cleanup = render(
       () => (
         <PermissionModePicker
           mode="auto"
           activity={[
+            {
+              permissionId: 'old',
+              status: 'auto-approved',
+              title: 'old completed request',
+              createdAt: 0,
+            },
             {
               permissionId: 'one',
               status: 'reviewing',

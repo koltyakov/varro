@@ -34,6 +34,7 @@ import { isFunction } from '../../lib/runtime-values';
 
 const FAST_MODE_COST_WARNING = 'Fast mode may consume usage limits faster and cost more.';
 const PERMISSIONS_DOCS_URL = 'https://github.com/koltyakov/varro/blob/main/docs/permissions.md';
+const MAX_COMPLETED_AUTO_APPROVE_ACTIVITY = 5;
 
 function isFastModelName(name: string) {
   return formatModelName(name).includes('⚡');
@@ -359,6 +360,19 @@ export function PermissionModePicker(props: {
     if (props.mode === 'auto') return 'Auto approve';
     return 'Default';
   };
+  const visibleActivity = () => {
+    const visible: AutoApproveActivity[] = [];
+    let completedCount = 0;
+    const activity = props.activity ?? [];
+    for (let index = activity.length - 1; index >= 0; index -= 1) {
+      const item = activity[index]!;
+      if (item.status === 'reviewing' || completedCount < MAX_COMPLETED_AUTO_APPROVE_ACTIVITY) {
+        visible.push(item);
+      }
+      if (item.status !== 'reviewing') completedCount += 1;
+    }
+    return visible.toReversed();
+  };
   let popupEl: HTMLDivElement | undefined;
 
   createEffect(() => {
@@ -448,7 +462,7 @@ export function PermissionModePicker(props: {
       <Show when={props.showLabel && props.mode === 'auto' && props.activity?.length}>
         <span class="permission-activity" aria-label="Auto-approve activity">
           <span class="permission-activity-strip">
-            <For each={props.activity?.slice(-8)}>
+            <For each={visibleActivity()}>
               {(activity) => (
                 <span
                   class={`permission-activity-item ${activity.status}`}
