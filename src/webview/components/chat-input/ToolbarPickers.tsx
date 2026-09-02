@@ -305,7 +305,6 @@ export function PermissionModePicker(props: {
   alignTo?: 'left' | 'right';
   alignToTriggerWhenPossible?: boolean;
   mode: PermissionMode;
-  recovering?: boolean;
   activity?: AutoApproveActivity[];
   judgeModel?: { providerName: string; modelName: string } | null;
   showPicker: boolean;
@@ -324,7 +323,6 @@ export function PermissionModePicker(props: {
     { mode: 'full', label: 'Full access', detail: 'Allow commands and edits without prompts' },
   ];
   const title = () => {
-    if (props.recovering) return 'Recovering permission mode';
     if (props.mode === 'full') return 'Full access permissions';
     if (props.mode === 'auto') {
       const model = props.judgeModel;
@@ -335,9 +333,6 @@ export function PermissionModePicker(props: {
     return 'Default permissions';
   };
   const tooltipContent = () => {
-    if (props.recovering) {
-      return 'Recovering permission mode: restoring safe default rules before automation resumes. Select Default to retry now.';
-    }
     const option = options.find((candidate) => candidate.mode === props.mode)!;
     const configNote =
       props.mode === 'default' ? ' Uses your OpenCode permission configuration.' : '';
@@ -348,7 +343,6 @@ export function PermissionModePicker(props: {
     return `${option.label}: ${option.detail}.${configNote}${reviewer}`;
   };
   const buttonLabel = () => {
-    if (props.recovering) return 'Recovering';
     if (props.mode === 'full') return 'Full access';
     if (props.mode === 'auto') return 'Auto approve';
     return 'Default';

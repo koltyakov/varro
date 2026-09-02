@@ -59,7 +59,6 @@ type ToolbarSharedProps = {
   permissionButtonRef?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
   permissionPopoverRef?: HTMLDivElement | ((el: HTMLDivElement) => void);
   permissionMode: PermissionMode;
-  permissionModeRecovering?: boolean;
   autoPermissionActivity?: AutoApproveActivity[];
   autoApproveJudgeModel?: { providerName: string; modelName: string } | null;
   showPermissionPicker: boolean;
@@ -376,7 +375,6 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
                 props.showWorkspaceControl && props.workspaceFolders.length > 1
               }
               mode={props.permissionMode}
-              recovering={props.permissionModeRecovering}
               activity={props.autoPermissionActivity}
               judgeModel={props.autoApproveJudgeModel}
               showPicker={props.showPermissionPicker}

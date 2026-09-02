@@ -2491,7 +2491,7 @@ body.vscode-light .interactive-session .chat-input-toolbars.toolbar-meta {
   padding-right: 0;
 }
 
-.interactive-session .chat-input-toolbars.toolbar-meta:hover .permission-mode-settings-button {
+.interactive-session .permission-mode-controls:hover .permission-mode-settings-button {
   opacity: 0.5;
 }
 
@@ -2501,9 +2501,7 @@ body.vscode-light .interactive-session .chat-input-toolbars.toolbar-meta {
   opacity: 0.9;
 }
 
-.interactive-session
-  .chat-input-toolbars.toolbar-meta:hover
-  .permission-mode-settings-button:hover {
+.interactive-session .permission-mode-controls:hover .permission-mode-settings-button:hover {
   opacity: 0.9;
 }
 

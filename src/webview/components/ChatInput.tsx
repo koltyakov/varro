@@ -52,7 +52,6 @@ import {
   setQueuedMessageFailed,
   setQueuedMessageEdit,
   getPermissionModeForSession,
-  isPermissionModeRecoveryPending,
   requestMessageListScrollToBottom,
   getCurrentDocumentEnabled,
   getProviderLimit,
@@ -4013,9 +4012,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   }));
 
   const activePermissionMode = createMemo(() => getPermissionModeForSession(composerSessionId()));
-  const activePermissionModeRecovering = createMemo(() =>
-    isPermissionModeRecoveryPending(composerSessionId())
-  );
   const [resolvedAutoApproveJudgeModel, setResolvedAutoApproveJudgeModel] =
     createSignal<Awaited<ReturnType<typeof client.varro.resolveJudgeModel>>>(null);
   const autoPermissionActivity = createMemo(() => {
@@ -4565,7 +4561,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               permissionPopoverRef = el;
             }}
             permissionMode={activePermissionMode()}
-            permissionModeRecovering={activePermissionModeRecovering()}
             autoPermissionActivity={autoPermissionActivity()}
             autoApproveJudgeModel={autoApproveJudgeModel()}
             showPermissionPicker={showPermissionModePicker()}
@@ -4787,7 +4782,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             permissionPopoverRef = el;
           }}
           permissionMode={activePermissionMode()}
-          permissionModeRecovering={activePermissionModeRecovering()}
           autoPermissionActivity={autoPermissionActivity()}
           autoApproveJudgeModel={autoApproveJudgeModel()}
           showPermissionPicker={showPermissionModePicker()}
