@@ -92,10 +92,13 @@ export function renderWebviewHtml(
   const serializedImportMap = serializeForInlineScript({
     imports: { [assets.scriptUri]: scriptUri },
   });
-  const htmlClass =
-    initialState.webviewContext?.surface === 'editor'
-      ? ' class="varro-editor-surface varro-editor-layout-pending"'
-      : '';
+  const isEditorSurface = initialState.webviewContext?.surface === 'editor';
+  const htmlClass = isEditorSurface
+    ? ' class="varro-editor-surface varro-editor-layout-pending"'
+    : '';
+  const editorLoadingStyles = isEditorSurface
+    ? '\nbody { background: var(--vscode-editor-background, #1e1e1e); }'
+    : '';
 
   return /*html*/ `<!DOCTYPE html>
 <html lang="en"${htmlClass}>
@@ -105,7 +108,7 @@ export function renderWebviewHtml(
   <meta http-equiv="Content-Security-Policy"
     content="default-src 'none'; img-src ${cspSource} data:; script-src 'nonce-${nonce}' ${cspSource}; style-src 'unsafe-inline' ${cspSource}; font-src data:;" />
   <title>Varro</title>
-  <style>${LOADING_STYLES}</style>
+  <style>${LOADING_STYLES}${editorLoadingStyles}</style>
   <link rel="stylesheet" href="${escapeHtmlAttribute(cssUri)}" />
 </head>
 <body>

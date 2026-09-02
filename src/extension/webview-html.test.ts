@@ -99,6 +99,7 @@ describe('renderWebviewHtml', () => {
     expect(html).toContain(
       '<html lang="en" class="varro-editor-surface varro-editor-layout-pending">'
     );
+    expect(html).toContain('body { background: var(--vscode-editor-background, #1e1e1e); }');
   });
 
   it('does not mark sidebar webviews as editor surfaces', () => {

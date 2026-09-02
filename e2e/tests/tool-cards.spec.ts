@@ -37,7 +37,7 @@ test('keeps compact tool card headers on the same geometry contract', async ({ p
   const fontWeights = await primaryText.evaluateAll((elements) =>
     elements.map((element) => getComputedStyle(element).fontWeight)
   );
-  expect(new Set(fontWeights)).toEqual(new Set(['300']));
+  expect(new Set(fontWeights)).toEqual(new Set(['400']));
 
   const iconSizes = await page.locator('.tool-call-icon').evaluateAll((icons) =>
     icons.map((icon) => {
