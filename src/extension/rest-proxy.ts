@@ -4032,8 +4032,11 @@ export class RestProxy {
       await vscode.workspace.fs.writeFile(fileUri, new TextEncoder().encode(`${normalized}\n`));
     }
 
-    const document = await vscode.workspace.openTextDocument(fileUri);
-    await vscode.window.showTextDocument(document, { preview: false });
+    await vscode.commands.executeCommand(
+      'vscode.openWith',
+      fileUri,
+      'vscode.markdown.preview.editor'
+    );
     return { path: fileUri.fsPath };
   }
 }

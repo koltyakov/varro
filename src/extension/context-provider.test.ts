@@ -59,6 +59,7 @@ const vscodeMock = vi.hoisted(() => ({
     activeTextEditor: undefined as unknown,
     tabGroups: {
       activeTabGroup: { activeTab: undefined as unknown },
+      onDidChangeTabs: vi.fn((_listener?: () => void) => ({ dispose: vi.fn() })),
     },
     onDidChangeActiveTextEditor: vi.fn((_listener?: () => void) => ({ dispose: vi.fn() })),
     onDidChangeTextEditorSelection: vi.fn((_listener?: () => void) => ({ dispose: vi.fn() })),
@@ -152,6 +153,12 @@ const vscodeMock = vi.hoisted(() => ({
   },
   TabInputText: class TabInputText {
     constructor(public readonly uri: unknown) {}
+  },
+  TabInputCustom: class TabInputCustom {
+    constructor(
+      public readonly uri: unknown,
+      public readonly viewType: string
+    ) {}
   },
 }));
 
@@ -1401,6 +1408,45 @@ describe('ContextProvider', () => {
         diagnosticsTotal: 0,
       });
       expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
+    } finally {
+      provider.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('captures an active Markdown preview as the active file', async () => {
+    vi.useFakeTimers();
+    const onChange = vi.fn();
+    const tabsChanged = vi.fn();
+    vscodeMock.window.tabGroups.onDidChangeTabs.mockImplementationOnce((listener?: () => void) => {
+      if (listener) tabsChanged.mockImplementation(listener);
+      return { dispose: vi.fn() };
+    });
+    const uri = {
+      fsPath: '/Users/test/.config/opencode/plans/plan-031f5812af04fbb6.md',
+      scheme: 'file',
+      toString: () => 'file:///Users/test/.config/opencode/plans/plan-031f5812af04fbb6.md',
+    };
+    const provider = new ContextProvider(onChange);
+
+    try {
+      await vi.advanceTimersByTimeAsync(60);
+      vscodeMock.window.tabGroups.activeTabGroup.activeTab = {
+        input: new vscodeMock.TabInputCustom(uri, 'vscode.markdown.preview.editor'),
+      };
+
+      tabsChanged();
+      await vi.advanceTimersByTimeAsync(60);
+
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          activeFile: {
+            path: '/Users/test/.config/opencode/plans/plan-031f5812af04fbb6.md',
+            relativePath: '/Users/test/.config/opencode/plans/plan-031f5812af04fbb6.md',
+            language: 'markdown',
+          },
+        })
+      );
     } finally {
       provider.dispose();
       vi.useRealTimers();

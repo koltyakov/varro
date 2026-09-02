@@ -4,6 +4,9 @@ import { describe, expect, it, vi, type Mock } from 'vitest';
 const mocks = vi.hoisted(() => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   vscode: {
+    commands: {
+      executeCommand: vi.fn(() => Promise.resolve()),
+    },
     window: {
       showOpenDialog: vi.fn(() => Promise.resolve(undefined)),
       showTextDocument: vi.fn(() => Promise.resolve()),
@@ -374,6 +377,25 @@ describe('getOpenCodeDirectoryHeaders', () => {
 });
 
 describe('RestProxy handleRequest', () => {
+  it('opens plans in Markdown preview', async () => {
+    mocks.vscode.commands.executeCommand.mockClear();
+    mocks.vscode.workspace.openTextDocument.mockClear();
+    mocks.vscode.window.showTextDocument.mockClear();
+    const { proxy } = createProxy();
+
+    await proxy.handleRequest(
+      makePayload(1, 'POST', '/varro/plan/open', { content: '# Plan\n\n1. Ship it' })
+    );
+
+    expect(mocks.vscode.commands.executeCommand).toHaveBeenCalledWith(
+      'vscode.openWith',
+      expect.objectContaining({ fsPath: expect.stringMatching(/\/plan-[a-f0-9]{16}\.md$/) }),
+      'vscode.markdown.preview.editor'
+    );
+    expect(mocks.vscode.workspace.openTextDocument).not.toHaveBeenCalled();
+    expect(mocks.vscode.window.showTextDocument).not.toHaveBeenCalled();
+  });
+
   it('persists workspace scope in OpenCode session metadata', async () => {
     const { proxy, callbacks } = createProxy();
     const metadata = {

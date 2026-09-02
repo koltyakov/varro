@@ -70,6 +70,7 @@ export class ContextProvider implements vscode.Disposable {
 
     this.disposables.push(
       vscode.window.onDidChangeActiveTextEditor(() => this.update()),
+      vscode.window.tabGroups.onDidChangeTabs(() => this.update()),
       vscode.window.onDidChangeTextEditorSelection(() => this.debouncedUpdate()),
       vscode.workspace.onDidChangeTextDocument((event) => {
         if (event.document === vscode.window.activeTextEditor?.document) this.debouncedUpdate();
@@ -345,15 +346,22 @@ export class ContextProvider implements vscode.Disposable {
           return;
         }
         const activeTabInput = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
-        if (activeTabInput instanceof vscode.TabInputText) {
-          const workspaceFolder = vscode.workspace.getWorkspaceFolder(activeTabInput.uri);
+        const activeTabFile =
+          activeTabInput instanceof vscode.TabInputText
+            ? { uri: activeTabInput.uri, language: '' }
+            : activeTabInput instanceof vscode.TabInputCustom &&
+                activeTabInput.viewType === 'vscode.markdown.preview.editor'
+              ? { uri: activeTabInput.uri, language: 'markdown' }
+              : null;
+        if (activeTabFile) {
+          const workspaceFolder = vscode.workspace.getWorkspaceFolder(activeTabFile.uri);
           this._context.activeWorkspacePath = workspaceFolder?.uri.fsPath ?? null;
           this._context.activeFile = {
-            path: activeTabInput.uri.fsPath,
+            path: activeTabFile.uri.fsPath,
             relativePath: workspaceFolder
-              ? getRelativePath(activeTabInput.uri, workspaceFolder)
-              : activeTabInput.uri.fsPath,
-            language: '',
+              ? getRelativePath(activeTabFile.uri, workspaceFolder)
+              : activeTabFile.uri.fsPath,
+            language: activeTabFile.language,
           };
           this._context.selection = null;
           this._context.editorText = null;
