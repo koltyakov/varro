@@ -1395,6 +1395,35 @@ describe('ralph runner iteration repair', () => {
     );
   });
 
+  it('bounds concurrent descendant history reads while summarizing an iteration', async () => {
+    const harness = createHarness();
+    const config = createConfig({ iterations: 1 });
+    const descendants = Array.from({ length: 24 }, (_, index) => ({
+      id: `descendant-${index}`,
+      parentID: index === 0 ? 'child-1' : `descendant-${index - 1}`,
+    }));
+    let activeReads = 0;
+    let maxActiveReads = 0;
+
+    harness.readWorkspaceFile.mockResolvedValue('# Plan\n- [x] all done');
+    harness.createSession.mockResolvedValueOnce('child-1');
+    harness.listSessions.mockResolvedValue([{ id: 'child-1' }, ...descendants]);
+    harness.listMessages.mockImplementation(async () => {
+      activeReads += 1;
+      maxActiveReads = Math.max(maxActiveReads, activeReads);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      activeReads -= 1;
+      return assistantReport('lint: PASS\ntypecheck: PASS\ntest: PASS');
+    });
+    settlePromptsViaIdle(harness, { immediate: true });
+
+    await harness.runner.start(config);
+
+    expect(maxActiveReads).toBeGreaterThan(1);
+    expect(maxActiveReads).toBeLessThanOrEqual(4);
+    expect(harness.store.getRun(config.managerSessionId)?.status).toBe('done');
+  });
+
   it('marks an iteration failed when the final assistant text is a usage-limit interruption without verdicts', async () => {
     const harness = createHarness();
     const config = createConfig({ iterations: 1 });

@@ -470,6 +470,50 @@ const activeDiffSummaryKeys = new Set<string>();
 const diffSummaryCacheOrder: string[] = [];
 const relevantDiffSummarySessionsByOwner = new Map<symbol, Set<string>>();
 let relevantDiffSummarySessionIds = new Set<string>();
+type SessionSummaryObserverGroup = {
+  observer: IntersectionObserver;
+  callbacks: Map<Element, () => void>;
+};
+const sessionSummaryObserverGroups = new Map<Element | null, SessionSummaryObserverGroup>();
+
+function observeSessionSummary(element: Element, callback: () => void): () => void {
+  const root = element.closest('.session-list-scroll');
+  let group = sessionSummaryObserverGroups.get(root);
+  if (!group) {
+    const callbacks = new Map<Element, () => void>();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          const observed = callbacks.get(entry.target);
+          if (!observed) continue;
+          callbacks.delete(entry.target);
+          observer.unobserve(entry.target);
+          observed();
+        }
+        if (callbacks.size === 0) {
+          observer.disconnect();
+          sessionSummaryObserverGroups.delete(root);
+        }
+      },
+      { root, rootMargin: '300px 0px' }
+    );
+    group = { observer, callbacks };
+    sessionSummaryObserverGroups.set(root, group);
+  }
+  group.callbacks.set(element, callback);
+  group.observer.observe(element);
+
+  return () => {
+    const current = sessionSummaryObserverGroups.get(root);
+    if (!current || !current.callbacks.delete(element)) return;
+    current.observer.unobserve(element);
+    if (current.callbacks.size === 0) {
+      current.observer.disconnect();
+      sessionSummaryObserverGroups.delete(root);
+    }
+  };
+}
 
 function setDiffSummaryCacheEntry(sessionId: string, entry: SessionDiffSummaryCacheEntry) {
   const previousOrderIndex = diffSummaryCacheOrder.indexOf(sessionId);
@@ -1255,10 +1299,13 @@ export function SessionListView(props: {
 
   let resolutionRequestKey = 0;
   let resolutionRequestActive = false;
+  let resolutionAbortController: AbortController | undefined;
   createEffect(() => {
     const resolutionActive = Boolean(props.subagentParentId);
     if (!resolutionActive) {
       resolutionRequestActive = false;
+      resolutionAbortController?.abort();
+      resolutionAbortController = undefined;
       resolutionRequestKey += 1;
       setAllSessionsForSubagent(null);
       setIsResolvingSubagents(false);
@@ -1268,12 +1315,14 @@ export function SessionListView(props: {
 
     resolutionRequestActive = true;
     const requestKey = ++resolutionRequestKey;
+    const controller = new AbortController();
+    resolutionAbortController = controller;
     setIsResolvingSubagents(true);
     void (async () => {
       let limit = SUBAGENT_SESSION_PAGE_SIZE;
       while (true) {
         if (requestKey !== resolutionRequestKey) return;
-        const page = await listCompleteSessionPage({ limit });
+        const page = await listCompleteSessionPage({ limit, signal: controller.signal });
         if (requestKey !== resolutionRequestKey) return;
         setAllSessionsForSubagent(page.items);
         if (!page.hasMore) return;
@@ -1284,11 +1333,14 @@ export function SessionListView(props: {
       }
     })()
       .catch((error) => {
-        if (requestKey !== resolutionRequestKey) return;
+        if (requestKey !== resolutionRequestKey || controller.signal.aborted) return;
         setError(error instanceof Error ? error.message : String(error));
       })
       .finally(() => {
-        if (requestKey === resolutionRequestKey) setIsResolvingSubagents(false);
+        if (requestKey === resolutionRequestKey) {
+          resolutionAbortController = undefined;
+          setIsResolvingSubagents(false);
+        }
       });
   });
 
@@ -1338,6 +1390,7 @@ export function SessionListView(props: {
   });
   onCleanup(() => {
     resolutionRequestKey += 1;
+    resolutionAbortController?.abort();
     searchRequestKey += 1;
     if (searchDebounceTimer !== undefined) clearTimeout(searchDebounceTimer);
     searchAbortController?.abort();
@@ -2316,19 +2369,7 @@ function SessionListItem(props: {
       return;
     }
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!entries.some((entry) => entry.isIntersecting)) return;
-        setShouldLoadSummary(true);
-        observer.disconnect();
-      },
-      {
-        root: rowRef.closest('.session-list-scroll'),
-        rootMargin: '300px 0px',
-      }
-    );
-    observer.observe(rowRef);
-    onCleanup(() => observer.disconnect());
+    onCleanup(observeSessionSummary(rowRef, () => setShouldLoadSummary(true)));
   });
 
   createEffect(() => {

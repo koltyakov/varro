@@ -351,7 +351,7 @@ export class SessionApprovalOperations {
   ) => {
     const generation = ++this.nextPermissionModeGeneration;
     const sessionKey = sessionId ?? '';
-    this.permissionModeGenerationBySession.set(sessionKey, generation);
+    if (sessionId) this.permissionModeGenerationBySession.set(sessionKey, generation);
     this.draftPermissionModeGeneration = generation;
     const queue = sessionId
       ? (this.permissionModeQueues.get(sessionId) ?? {
@@ -425,6 +425,9 @@ export class SessionApprovalOperations {
       }
       if (queue.pending === 0 && this.permissionModeQueues.get(sessionId) === queue) {
         this.permissionModeQueues.delete(sessionId);
+        if (this.permissionModeGenerationBySession.get(sessionKey) === generation) {
+          this.permissionModeGenerationBySession.delete(sessionKey);
+        }
       }
     }
   };

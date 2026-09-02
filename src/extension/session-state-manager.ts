@@ -1398,7 +1398,13 @@ export class SessionStateManager {
     this.resolvedPendingAttention[kind].delete(requestID);
     if (kind === 'question') this.questionResponsePendingRequests.delete(requestID);
     if (recordEventMutation) this.recordBlockingRequestMutation(kind, requestID);
-    else this.blockingRequestMutations.add(requestID);
+    else if (
+      !this.interruptedRecoveryLoaded ||
+      this.recoverySnapshotPromise ||
+      this.blockingRecoveryCleanupPending
+    ) {
+      this.blockingRequestMutations.add(requestID);
+    }
     if (this.pendingAttention.has(requestID)) return false;
 
     const label =
@@ -1499,7 +1505,13 @@ export class SessionStateManager {
     const revision = this.pendingAttentionRevisions[kind] + 1;
     this.pendingAttentionRevisions[kind] = revision;
     this.pendingAttentionMutationRevisions[kind].set(requestID, revision);
-    this.blockingRequestMutations.add(requestID);
+    if (
+      !this.interruptedRecoveryLoaded ||
+      this.recoverySnapshotPromise ||
+      this.blockingRecoveryCleanupPending
+    ) {
+      this.blockingRequestMutations.add(requestID);
+    }
     this.prunePendingAttentionMutationMetadata(kind);
   }
 

@@ -1,5 +1,4 @@
 /* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type -- Z.ai API payloads are decoded before quota extraction. */
-/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: API JSON remains opaque until adapter validation. */
 import type { ProviderLimitWindow } from '../../../shared/protocol';
 import {
   parseRateLimitResetAt,
@@ -12,6 +11,7 @@ import {
   getString,
   parseFiniteNumber,
   clampPercent,
+  readBoundedResponseJson,
   unsupportedProviderStatus,
 } from '../adapter-utils';
 
@@ -72,7 +72,7 @@ export function createZaiAdapter(): ProviderLimitAdapter {
           };
         }
 
-        const payload = (await response.json()) as unknown;
+        const payload = await readBoundedResponseJson(response);
         const result = extractZaiPayload(payload, checkedAt);
         if (result.kind === 'unsupported') {
           return unsupportedProviderStatus(provider.id, modelID, checkedAt, result.note);

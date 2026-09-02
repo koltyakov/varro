@@ -543,6 +543,19 @@ describe('session effect helpers', () => {
     }
   });
 
+  it('evicts idle message-sync metadata after many unique sessions', async () => {
+    const loadMessages = vi.fn(async () => {});
+    const messageSync = createSessionMessageSyncCoordinator(loadMessages, 60_000);
+
+    for (let index = 0; index <= 500; index += 1) {
+      await messageSync.syncIfStale(`session-${index}`);
+    }
+    expect(loadMessages).toHaveBeenCalledTimes(501);
+
+    await messageSync.syncIfStale('session-0');
+    expect(loadMessages).toHaveBeenCalledTimes(502);
+  });
+
   it('runs one trailing refresh before forced callers behind an active poll resolve', async () => {
     vi.useFakeTimers();
     const staleRequest = deferred<void>();

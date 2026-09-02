@@ -54,6 +54,7 @@ describe('sendMessage', () => {
     const { stateModule, hookModule } = await loadModules();
 
     stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('sessions', [session()]);
     stateModule.setState('selectedAgent', 'plan');
     clientMocks.sessionSendAsync.mockResolvedValue(undefined);
     clientMocks.sessionGet.mockResolvedValue(session());
@@ -134,6 +135,7 @@ describe('sendMessage', () => {
     const { stateModule, hookModule } = await loadModules();
 
     stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('sessions', [session()]);
     stateModule.setState('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
     clientMocks.sessionSendAsync.mockResolvedValue(undefined);
     clientMocks.sessionGet.mockResolvedValue(session());
@@ -155,6 +157,7 @@ describe('sendMessage', () => {
     const { stateModule, hookModule } = await loadModules();
 
     stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('sessions', [session()]);
     stateModule.setState('providers', [
       provider('openrouter', {
         'qwen3-coder-30b': {
@@ -196,6 +199,7 @@ describe('sendMessage', () => {
     const { stateModule, hookModule } = await loadModules();
 
     stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('sessions', [session()]);
     stateModule.setState('providers', [
       provider('openai', {
         'gpt-4o': {
@@ -332,6 +336,7 @@ describe('sendMessage', () => {
     const { stateModule, hookModule } = await loadModules();
 
     stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('sessions', [session()]);
     stateModule.setState('providers', [
       provider('openai', {
         'gpt-4o': {
@@ -387,6 +392,7 @@ describe('sendMessage', () => {
     const { stateModule, hookModule } = await loadModules();
 
     stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('sessions', [session()]);
     stateModule.setState('providers', [
       provider('openai', {
         'gpt-4o': {
@@ -443,6 +449,7 @@ describe('sendMessage', () => {
     const { stateModule, hookModule } = await loadModules();
 
     stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('sessions', [session()]);
     stateModule.setState('providers', [
       provider('openai', {
         'gpt-4o': {
@@ -505,6 +512,7 @@ describe('sendMessage', () => {
     const { stateModule, hookModule } = await loadModules();
 
     stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('sessions', [session()]);
     stateModule.setState('providers', [
       provider('openai', {
         'gpt-4o': {
@@ -553,6 +561,7 @@ describe('sendMessage', () => {
     const { stateModule, hookModule } = await loadModules();
 
     stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('sessions', [session()]);
     stateModule.setState('providers', [
       provider('openai', {
         'gpt-4o': {
@@ -748,10 +757,7 @@ describe('sendMessage', () => {
         metadata: {
           varro: { workspaceScope: 'folder', schemaVersion: 1 },
         },
-        permission: [
-          { permission: 'todowrite', pattern: '*', action: 'allow' },
-          { permission: 'question', pattern: '*', action: 'allow' },
-        ],
+        permission: undefined,
         title: undefined,
       },
       { directory: '/repo-b' }
@@ -1192,6 +1198,7 @@ describe('sendMessage', () => {
     const { stateModule, hookModule } = await loadModules();
 
     stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('sessions', [session()]);
     stateModule.setState('agents', [
       {
         name: 'build',

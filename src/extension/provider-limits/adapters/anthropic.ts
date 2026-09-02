@@ -20,6 +20,8 @@ import {
   getString,
   parseFiniteNumber,
   clampPercent,
+  readBoundedResponseJson,
+  readBoundedResponseText,
   toLabel,
   unsupportedProviderStatus,
 } from '../adapter-utils';
@@ -174,7 +176,7 @@ export function createAnthropicAdapter(): ProviderLimitAdapter {
           };
         }
 
-        const payload = (await response.json()) as unknown;
+        const payload = await readBoundedResponseJson(response);
         const windows = extractAnthropicWindows(payload, checkedAt);
         if (windows.length === 0) {
           if (combinedStatus) return combinedStatus;
@@ -278,7 +280,7 @@ async function readAnthropicLocalProxyStatus(
       };
     }
 
-    const payload = (await response.json()) as unknown;
+    const payload = await readBoundedResponseJson(response);
     const windows = extractMeridianWindows(payload, checkedAt);
     if (windows.length === 0) {
       return {
@@ -622,7 +624,7 @@ async function refreshAnthropicAccessToken(refreshToken: string) {
       signal: AbortSignal.timeout(10_000),
     });
 
-    const payload = parseJsonRecord(await response.text());
+    const payload = parseJsonRecord(await readBoundedResponseText(response));
     if (response.status === 400 || response.status === 401 || response.status === 403) {
       if (getString(payload?.error) === 'invalid_grant') {
         return {

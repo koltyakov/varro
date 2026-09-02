@@ -1,4 +1,4 @@
-/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type -- Provider file and event payloads are decoded at this controller boundary. */
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unsafe-dictionary-type -- Provider file and event payloads are decoded at this controller boundary. */
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Provider records are asserted only after event and file schema checks. */
 import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';

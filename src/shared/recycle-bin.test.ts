@@ -111,6 +111,24 @@ describe('normalizeRecycleBinEntry', () => {
     ).not.toBeNull();
   });
 
+  it('validates a long descendant chain without repeated ancestor walks', () => {
+    const sessions = [session('root')];
+    for (let index = 1; index < 5_000; index += 1) {
+      sessions.push(session(`session-${index}`, index === 1 ? 'root' : `session-${index - 1}`));
+    }
+
+    expect(normalizeRecycleBinEntry(entry({ sessions }))).not.toBeNull();
+  });
+
+  it('rejects persisted recycle-bin collections above their safety limits', () => {
+    expect(normalizeRecycleBinEntries(Array.from({ length: 1_001 }, () => entry()))).toEqual([]);
+    expect(
+      normalizeRecycleBinEntry(
+        entry({ sessions: Array.from({ length: 10_001 }, () => session('root')) })
+      )
+    ).toBeNull();
+  });
+
   it('rejects every persisted entry involved in an overlap', () => {
     const child = session('child', 'root');
     const childRoot = session('child', 'root');

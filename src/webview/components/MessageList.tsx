@@ -4543,11 +4543,7 @@ export function MessageList() {
       return;
     }
     bottomFollowSettleFrames = 0;
-    const currentlyStreaming =
-      state.streamingText.length > 0 ||
-      !!state.streamingPartId ||
-      !!visibleRunningToolPart() ||
-      activeSessionWorking();
+    const currentlyStreaming = state.streamingText.length > 0 || !!state.streamingPartId;
     if (activeFollowLoopSessionId === sessionId) {
       if (currentlyStreaming || options?.observedStreaming) bottomFollowObservedStreaming = true;
       return;
@@ -4595,11 +4591,8 @@ export function MessageList() {
         performScroll({ force: true });
       }
 
-      const isStreaming =
-        state.streamingText.length > 0 ||
-        state.streamingPartId ||
-        visibleRunningToolPart() ||
-        activeSessionWorking();
+      const isStreaming = !!state.streamingText.length || !!state.streamingPartId;
+      const isWorking = !!visibleRunningToolPart() || activeSessionWorking();
       if (isStreaming) bottomFollowObservedStreaming = true;
       const stable =
         Math.abs(currentHeight - lastAutoScrolledTrackHeight) <= 1 &&
@@ -4611,7 +4604,8 @@ export function MessageList() {
         bottomFollowSettleFrames = 0;
       }
 
-      const settleFrameCount = bottomFollowObservedStreaming ? BOTTOM_FOLLOW_SETTLE_FRAME_COUNT : 1;
+      const settleFrameCount =
+        bottomFollowObservedStreaming || isWorking ? BOTTOM_FOLLOW_SETTLE_FRAME_COUNT : 1;
       if (bottomFollowSettleFrames >= settleFrameCount) {
         const shouldFillInitialViewport =
           pendingInitialHistoryFillSessionId === sessionId &&
@@ -6132,6 +6126,19 @@ export function MessageList() {
   });
 
   let prevLoading = isLoading();
+  let previousWorkingSessionId = activeSessionWorking() ? state.activeSessionId : null;
+  createEffect(() => {
+    const sessionId = state.activeSessionId;
+    const working = activeSessionWorking();
+    const completedSessionId = previousWorkingSessionId;
+    previousWorkingSessionId = working ? sessionId : null;
+    if (working || !sessionId || completedSessionId !== sessionId || !autoScroll()) return;
+
+    queueMicrotask(() => {
+      if (state.activeSessionId !== sessionId || activeSessionWorking() || !autoScroll()) return;
+      startFollowLoop(sessionId, { observedStreaming: true });
+    });
+  });
   createEffect(() => {
     const replacementStreaming = !!state.streamingPartId || state.streamingText.length > 0;
     if (!replacementStreaming || exitingActivityPartKeys().size > 0) return;

@@ -1,9 +1,14 @@
 /* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters -- OpenCode Go API payloads are decoded before quota extraction. */
-/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: API JSON remains opaque until adapter validation. */
 import type { ProviderLimitWindow } from '../../../shared/protocol';
 import type { ProviderAuthRecord, ProviderMetadata } from '../../util/provider-limit';
 import type { ProviderLimitAdapter, ProviderLimitAdapterContext } from '../types';
-import { asRecord, clampPercent, getString, unsupportedProviderStatus } from '../adapter-utils';
+import {
+  asRecord,
+  clampPercent,
+  getString,
+  readBoundedResponseJson,
+  unsupportedProviderStatus,
+} from '../adapter-utils';
 
 const OPENCODE_GO_USAGE_ENDPOINT = 'https://opencode.ai/zen/go/v1/usage';
 const OPENCODE_OAUTH_DUMMY_KEY = 'opencode-oauth-dummy-key';
@@ -64,7 +69,7 @@ export function createOpenCodeGoAdapter(): ProviderLimitAdapter {
           };
         }
 
-        const windows = extractOpenCodeGoWindows((await response.json()) as unknown);
+        const windows = extractOpenCodeGoWindows(await readBoundedResponseJson(response));
         if (windows.length === 0) {
           return unsupportedProviderStatus(
             provider.id,

@@ -12,6 +12,7 @@ import {
   getString,
   parseFiniteNumber,
   clampPercent,
+  readBoundedResponseText,
   unsupportedProviderStatus,
 } from '../adapter-utils';
 
@@ -49,7 +50,7 @@ export function createMiniMaxAdapter(): ProviderLimitAdapter {
           },
           signal: AbortSignal.timeout(10_000),
         });
-        const bodyText = await response.text();
+        const bodyText = await readBoundedResponseText(response);
 
         if (response.status === 401) {
           return unsupportedProviderStatus(

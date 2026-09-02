@@ -8,6 +8,7 @@ import {
   clampPercent,
   getString,
   parseFiniteNumber,
+  readBoundedResponseJson,
   unsupportedProviderStatus,
 } from '../adapter-utils';
 
@@ -66,7 +67,10 @@ export function createXaiAdapter(): ProviderLimitAdapter {
           };
         }
 
-        const windows = extractXaiBillingWindows((await response.json()) as unknown, checkedAt);
+        const windows = extractXaiBillingWindows(
+          await readBoundedResponseJson(response),
+          checkedAt
+        );
         if (!windows.some((window) => window.id === 'credits')) {
           const monthlyResponse = await request(XAI_MONTHLY_BILLING_ENDPOINT);
           if (monthlyResponse.status === 401 || monthlyResponse.status === 403) {

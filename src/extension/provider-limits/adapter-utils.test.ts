@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { clampPercent, parseFiniteNumber, toLabel } from './adapter-utils';
+import {
+  clampPercent,
+  parseFiniteNumber,
+  readBoundedResponseJson,
+  readBoundedResponseText,
+  toLabel,
+} from './adapter-utils';
 
 describe('parseFiniteNumber', () => {
   it('passes through finite numbers', () => {
@@ -57,5 +63,23 @@ describe('toLabel', () => {
 
   it('falls back for empty input', () => {
     expect(toLabel('')).toBe('Limit');
+  });
+});
+
+describe('bounded provider responses', () => {
+  it('parses JSON within the response budget', async () => {
+    await expect(readBoundedResponseJson(new Response('{"ok":true}'))).resolves.toEqual({
+      ok: true,
+    });
+  });
+
+  it('rejects declared and streamed bodies above the byte budget', async () => {
+    await expect(
+      readBoundedResponseText(new Response('large', { headers: { 'Content-Length': '5' } }), 4)
+    ).rejects.toThrow('4-byte safety limit');
+
+    await expect(readBoundedResponseText(new Response('large'), 4)).rejects.toThrow(
+      '4-byte safety limit'
+    );
   });
 });

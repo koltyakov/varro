@@ -11,6 +11,7 @@ import {
   getString,
   parseFiniteNumber,
   clampPercent,
+  readBoundedResponseJson,
   toLabel,
   unsupportedProviderStatus,
 } from '../adapter-utils';
@@ -101,7 +102,7 @@ export function createCodexAdapter(): ProviderLimitAdapter {
             };
           }
 
-          const payload = (await response.json()) as unknown;
+          const payload = await readBoundedResponseJson(response);
           const windows = extractCodexWindows(payload, checkedAt);
           const planName = extractCodexPlanName(payload);
           if (windows.length === 0) {

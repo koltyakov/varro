@@ -10,6 +10,7 @@ import {
   asRecord,
   getString,
   parseFiniteNumber,
+  readBoundedResponseJson,
   toLabel,
   unsupportedProviderStatus,
 } from '../adapter-utils';
@@ -77,7 +78,7 @@ export function createGeminiAdapter(): ProviderLimitAdapter {
           };
         }
 
-        const payload = (await response.json()) as unknown;
+        const payload = await readBoundedResponseJson(response);
         const windows = extractGeminiWindows(payload, checkedAt);
         if (windows.length === 0) {
           return unsupportedProviderStatus(

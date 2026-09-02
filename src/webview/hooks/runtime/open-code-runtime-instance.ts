@@ -1154,6 +1154,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     hideDeletedSessionTree(id);
     clearQueuedMessagesForSession(id);
     clearSessionMessageWindowState(id);
+    for (const sessionId of getSessionTreeIds(id)) sessionMessageSyncCoordinator.forget(sessionId);
   }
   const sessionTitleFallbackAttempts = new Map<string, number>();
   const sessionTitleFallbacks = new Map<string, Promise<void>>();
@@ -2032,6 +2033,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     invalidateWorkspace({ preserveSessionCatalog: preserveWorkspaceCatalog });
     statusSnapshots.clear();
     messageSyncGenerations.clear();
+    sessionMessageSyncCoordinator.clear();
     sessionMcpOperations.invalidate();
     pendingAbortRetryAttempts.clear();
     stuckSessionTimers.clear();
@@ -2815,7 +2817,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   }
 
   async function deleteSession(id: string) {
+    const sessionIds = getSessionTreeIds(id);
     await sessionManagementOperations.deleteSession(id);
+    for (const sessionId of sessionIds) sessionMessageSyncCoordinator.forget(sessionId);
   }
 
   async function restoreSession(rootID: string) {
@@ -2823,7 +2827,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   }
 
   async function deleteSessionPermanently(rootID: string) {
+    const sessionIds = getSessionTreeIds(rootID);
     await sessionManagementOperations.deleteSessionPermanently(rootID);
+    for (const sessionId of sessionIds) sessionMessageSyncCoordinator.forget(sessionId);
   }
 
   async function emptyRecycleBin() {

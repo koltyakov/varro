@@ -1108,11 +1108,18 @@ describe('SessionListView diff summaries', () => {
 
   it('loads summaries only when rows approach the scroll viewport', async () => {
     const callbacks = new Map<Element, IntersectionObserverCallback>();
+    let observerCount = 0;
     class TestIntersectionObserver {
-      constructor(private readonly callback: IntersectionObserverCallback) {}
+      constructor(private readonly callback: IntersectionObserverCallback) {
+        observerCount += 1;
+      }
 
       observe(target: Element) {
         callbacks.set(target, this.callback);
+      }
+
+      unobserve(target: Element) {
+        callbacks.delete(target);
       }
 
       disconnect() {}
@@ -1140,6 +1147,7 @@ describe('SessionListView diff summaries', () => {
     const rows = Array.from(container.querySelectorAll('.session-item')).slice(0, 3);
     expect(rows).toHaveLength(3);
     expect(rows.every((row) => callbacks.has(row))).toBe(true);
+    expect(observerCount).toBe(1);
     for (const row of rows) {
       // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       callbacks.get(row)?.(
@@ -2471,10 +2479,22 @@ describe('SessionListView load errors', () => {
         (element) => element.textContent
       )
     ).toEqual(['paginated-child']);
-    expect(client.session.list).toHaveBeenNthCalledWith(1, { limit: 100 });
-    expect(client.session.list).toHaveBeenNthCalledWith(2, { limit: 200 });
-    expect(client.session.list).toHaveBeenNthCalledWith(3, { limit: 400 });
-    expect(client.session.list).toHaveBeenNthCalledWith(4, { limit: 800 });
+    expect(client.session.list).toHaveBeenNthCalledWith(1, {
+      limit: 100,
+      signal: expect.any(AbortSignal),
+    });
+    expect(client.session.list).toHaveBeenNthCalledWith(2, {
+      limit: 200,
+      signal: expect.any(AbortSignal),
+    });
+    expect(client.session.list).toHaveBeenNthCalledWith(3, {
+      limit: 400,
+      signal: expect.any(AbortSignal),
+    });
+    expect(client.session.list).toHaveBeenNthCalledWith(4, {
+      limit: 800,
+      signal: expect.any(AbortSignal),
+    });
     expect(loadMoreSessionsMock).not.toHaveBeenCalled();
     expect(container.querySelector('.session-list-continuation')).toBeNull();
     expect(container.textContent).not.toContain('unrelated-archive');

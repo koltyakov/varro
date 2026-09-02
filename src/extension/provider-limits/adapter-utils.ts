@@ -1,7 +1,48 @@
 /* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters -- Provider adapters share runtime decoders for untrusted API values. */
 import type { ProviderLimitStatus } from '../../shared/protocol';
+import type { JsonValue } from '../../shared/type-utils';
 
 export { asRecord, getString } from '../../shared/type-utils';
+
+export const PROVIDER_RESPONSE_MAX_BYTES = 1024 * 1024;
+
+export async function readBoundedResponseText(
+  response: Response,
+  maxBytes = PROVIDER_RESPONSE_MAX_BYTES
+): Promise<string> {
+  const contentLength = Number(response.headers.get('content-length'));
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    await response.body?.cancel().catch(() => {});
+    throw new Error(`Provider response exceeded the ${maxBytes}-byte safety limit`);
+  }
+  if (!response.body) return '';
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let text = '';
+  try {
+    while (true) {
+      const result = await reader.read();
+      if (result.done) break;
+      bytes += result.value.byteLength;
+      if (bytes > maxBytes) {
+        await reader.cancel().catch(() => {});
+        throw new Error(`Provider response exceeded the ${maxBytes}-byte safety limit`);
+      }
+      text += decoder.decode(result.value, { stream: true });
+    }
+    return text + decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+export async function readBoundedResponseJson(response: Response): Promise<JsonValue> {
+  const text = await readBoundedResponseText(response);
+  // SAFETY: JSON.parse returns only values represented by JsonValue when parsing succeeds.
+  return text ? (JSON.parse(text) as JsonValue) : null;
+}
 
 export function parseFiniteNumber(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;

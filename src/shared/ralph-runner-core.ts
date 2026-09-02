@@ -140,6 +140,8 @@ export type RalphRunner = {
   shutdown(): Promise<void>;
 };
 
+const RALPH_HISTORY_READ_CONCURRENCY = 4;
+
 type ActiveRunState = {
   managerSessionId: string;
   workspaceDirectory: string;
@@ -1184,8 +1186,10 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
     // iteration's work.
     const sessionIds = await collectIterationSessionIds(state, childId);
     throwIfRunCancelled(state);
-    const messagesPerSession = await Promise.all(
-      sessionIds.map(async (sid) => {
+    const messagesPerSession = await mapWithConcurrency(
+      sessionIds,
+      RALPH_HISTORY_READ_CONCURRENCY,
+      async (sid) => {
         try {
           return await awaitPort(state, (signal) =>
             ports.listMessages(sid, signal, state.workspaceDirectory)
@@ -1194,7 +1198,7 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
           throwIfRunCancelled(state);
           throw new Error(`Failed to read Ralph session ${sid} messages`, { cause: err });
         }
-      })
+      }
     );
     throwIfRunCancelled(state);
     let iterationMessages: RalphMessageEntry[] = [];
@@ -1293,6 +1297,24 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
   }
 
   return runner;
+}
+
+async function mapWithConcurrency<T, R>(
+  values: readonly T[],
+  concurrency: number,
+  callback: (value: T) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = [];
+  let nextIndex = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, values.length) }, async () => {
+      while (nextIndex < values.length) {
+        const index = nextIndex++;
+        results[index] = await callback(values[index]!);
+      }
+    })
+  );
+  return results;
 }
 
 function collectSessionTreeIds(rootId: string, sessions: RalphSessionSummary[]): string[] {

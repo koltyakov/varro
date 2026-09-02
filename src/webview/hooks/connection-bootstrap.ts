@@ -11,6 +11,7 @@ type LastOpenedView =
   | { type: 'session'; sessionId: string; directory?: string; timestamp: number };
 
 export const STARTUP_VIEW_RESTORE_WINDOW_MS = 10 * 60 * 1000;
+const MAX_SETTLED_RECOVERY_CLAIMS = 100;
 
 export type InterruptedSessionContinueBody = {
   messageID?: string;
@@ -437,6 +438,11 @@ export function createConnectionBootstrapOperations(deps: {
           if (!deps.isCurrentConnectionGeneration(generation)) return;
           pendingRecoveryClaims.delete(claimId);
           settledRecoveryClaims.set(claimId, consumedSessionIds);
+          while (settledRecoveryClaims.size > MAX_SETTLED_RECOVERY_CLAIMS) {
+            const oldestClaimId = settledRecoveryClaims.keys().next().value;
+            if (oldestClaimId === undefined) break;
+            settledRecoveryClaims.delete(oldestClaimId);
+          }
           acknowledgeRecoveryClaim(claimId, consumedSessionIds);
         } finally {
           processingRecoveryClaims.delete(claimId);

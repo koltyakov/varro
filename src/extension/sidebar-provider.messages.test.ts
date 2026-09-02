@@ -68,10 +68,7 @@ describe('SidebarProvider session message responses', () => {
           patchAttempts += 1;
           expect(serverMode).toBe('full');
           expect(body).toEqual({
-            permission: [
-              { permission: 'todowrite', pattern: '*', action: 'allow' },
-              { permission: 'question', pattern: '*', action: 'allow' },
-            ],
+            permission: [],
           });
           if (patchAttempts === 1) throw new Error('server unavailable');
           serverMode = 'default';
@@ -295,10 +292,7 @@ describe('SidebarProvider session message responses', () => {
           }
           if (method === 'PATCH' && path === '/session/extant') {
             expect(body).toEqual({
-              permission: [
-                { permission: 'todowrite', pattern: '*', action: 'allow' },
-                { permission: 'question', pattern: '*', action: 'allow' },
-              ],
+              permission: [],
             });
             expect(options).toEqual({ directory });
             return { id: 'extant', directory };
@@ -323,10 +317,7 @@ describe('SidebarProvider session message responses', () => {
         'PATCH',
         '/session/extant',
         {
-          permission: [
-            { permission: 'todowrite', pattern: '*', action: 'allow' },
-            { permission: 'question', pattern: '*', action: 'allow' },
-          ],
+          permission: [],
         },
         { directory }
       );

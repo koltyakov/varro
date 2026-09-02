@@ -15,6 +15,7 @@ const HEALTHY_RUNNING_SESSION_SYNC_INTERVAL_MS = 16_000;
 const DEGRADED_IDLE_STATUS_SYNC_INTERVAL_MS = 10_000;
 const HEALTHY_IDLE_STATUS_SYNC_INTERVAL_MS = 60_000;
 const MESSAGE_SYNC_FRESHNESS_MS = 4_000;
+const MAX_TRACKED_MESSAGE_SYNC_SESSIONS = 500;
 const RUNNING_SESSION_SYNC_KEY_SEPARATOR = '\u0000';
 
 type EventStreamState = 'healthy' | 'degraded' | undefined;
@@ -33,18 +34,40 @@ export function createSessionMessageSyncCoordinator(
     requestedForceGeneration: number;
     lastCompletedAt?: number;
     forceWaiters: ForceWaiter[];
+    accessSequence: number;
+    discardWhenIdle: boolean;
   };
 
   const states = new Map<string, SessionSyncState>();
+  let nextAccessSequence = 0;
+  const pruneIdleStates = () => {
+    while (states.size >= MAX_TRACKED_MESSAGE_SYNC_SESSIONS) {
+      let oldest: { sessionId: string; accessSequence: number } | null = null;
+      for (const [sessionId, state] of states) {
+        if (state.active || state.forceWaiters.length > 0) continue;
+        if (!oldest || state.accessSequence < oldest.accessSequence) {
+          oldest = { sessionId, accessSequence: state.accessSequence };
+        }
+      }
+      if (!oldest) return;
+      states.delete(oldest.sessionId);
+    }
+  };
   const getState = (sessionId: string) => {
     let state = states.get(sessionId);
     if (!state) {
+      pruneIdleStates();
       state = {
         active: null,
         requestedForceGeneration: 0,
         forceWaiters: [],
+        accessSequence: ++nextAccessSequence,
+        discardWhenIdle: false,
       };
       states.set(sessionId, state);
+    } else {
+      state.accessSequence = ++nextAccessSequence;
+      state.discardWhenIdle = false;
     }
     return state;
   };
@@ -72,6 +95,10 @@ export function createSessionMessageSyncCoordinator(
       state.active = null;
       if (state.requestedForceGeneration > forceGeneration) {
         void startRequest(sessionId, state, state.requestedForceGeneration);
+      } else if (state.discardWhenIdle) {
+        states.delete(sessionId);
+      } else {
+        pruneIdleStates();
       }
     };
     void request.then(
@@ -111,7 +138,20 @@ export function createSessionMessageSyncCoordinator(
     return startRequest(sessionId, state, state.requestedForceGeneration).then(() => undefined);
   };
 
-  return { sync, syncIfStale };
+  const forget = (sessionId: string) => {
+    const state = states.get(sessionId);
+    if (!state) return;
+    if (!state.active && state.forceWaiters.length === 0) states.delete(sessionId);
+    else state.discardWhenIdle = true;
+  };
+  const clear = () => {
+    for (const [sessionId, state] of states) {
+      if (!state.active && state.forceWaiters.length === 0) states.delete(sessionId);
+      else state.discardWhenIdle = true;
+    }
+  };
+
+  return { sync, syncIfStale, forget, clear };
 }
 
 function resolveProviderLimitPollIntervalMs(

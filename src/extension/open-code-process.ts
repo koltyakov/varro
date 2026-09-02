@@ -47,6 +47,20 @@ import {
 } from './server-utils';
 import { buildServerEnv, getServerPathEntries } from './util/server-path';
 
+const CLI_OUTPUT_MAX_CHARS = 1024 * 1024;
+const CLI_OUTPUT_TRUNCATED_MARKER = '[earlier output truncated]\n';
+
+export function appendBoundedCliOutput(current: string, chunk: string): string {
+  const alreadyTruncated = current.startsWith(CLI_OUTPUT_TRUNCATED_MARKER);
+  const previous = alreadyTruncated ? current.slice(CLI_OUTPUT_TRUNCATED_MARKER.length) : current;
+  const combined = previous + chunk;
+  if (!alreadyTruncated && combined.length <= CLI_OUTPUT_MAX_CHARS) return combined;
+  return (
+    CLI_OUTPUT_TRUNCATED_MARKER +
+    combined.slice(-(CLI_OUTPUT_MAX_CHARS - CLI_OUTPUT_TRUNCATED_MARKER.length))
+  );
+}
+
 export function getOpenCodeConfigDirectory(
   env: NodeJS.ProcessEnv = process.env,
   home = homedir(),
@@ -3023,11 +3037,12 @@ export class OpenCodeProcess {
         proc = crossSpawn(command, args, spawnOptions);
 
         handleStdout = (data: Buffer) => {
-          stdout += data.toString();
+          stdout = appendBoundedCliOutput(stdout, data.toString());
         };
         handleStderr = (data: Buffer) => {
-          stderr += data.toString();
-          if (isPortInUseMessage(data.toString())) {
+          const chunk = data.toString();
+          stderr = appendBoundedCliOutput(stderr, chunk);
+          if (isPortInUseMessage(chunk)) {
             this.portInUseDetected = true;
           }
         };

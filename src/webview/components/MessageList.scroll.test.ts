@@ -227,6 +227,40 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
+  it('stops the follow loop while a busy tool has no geometry changes', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(0, 0, 500, 800);
+        }
+        return new DOMRect(0, 0, 500, 400);
+      }
+    );
+
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    replaceMessages([
+      {
+        info: assistantMessage('assistant-1'),
+        parts: [toolPart('tool-1', 'assistant-1')],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    await Promise.resolve();
+    for (let frame = 0; frame < 4; frame += 1) animationFrames.flush();
+
+    const requestFrame = vi.mocked(globalThis.requestAnimationFrame);
+    const settledRequestCount = requestFrame.mock.calls.length;
+    animationFrames.flush();
+
+    expect(requestFrame).toHaveBeenCalledTimes(settledRequestCount);
+    animationFrames.restore();
+  });
+
   it.each(['insertion', 'removal'] as const)(
     'preserves a detached visible row across a structural %s during active slow scrolling',
     async (mutation) => {

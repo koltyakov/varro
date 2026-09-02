@@ -4,13 +4,20 @@ import { asRecord, isNumber, isString } from './type-utils';
 import type { UnknownRecord } from './type-utils';
 import { isSameWorkspacePath } from './workspace-path';
 
+const MAX_RECYCLE_BIN_ENTRIES = 1_000;
+const MAX_RECYCLE_BIN_SESSIONS_PER_ENTRY = 10_000;
+const MAX_RECYCLE_BIN_TOTAL_SESSIONS = 50_000;
+
 export function normalizeRecycleBinEntries<T>(value: T): RecycleBinEntry[] {
-  if (!Array.isArray(value)) return [];
+  if (!Array.isArray(value) || value.length > MAX_RECYCLE_BIN_ENTRIES) return [];
   const entries = value
     .map(normalizeRecycleBinEntry)
     .filter((entry): entry is RecycleBinEntry => !!entry);
   const sessionIDCounts = new Map<string, number>();
+  let totalSessions = 0;
   for (const entry of entries) {
+    totalSessions += entry.sessions.length;
+    if (totalSessions > MAX_RECYCLE_BIN_TOTAL_SESSIONS) return [];
     for (const session of entry.sessions) {
       sessionIDCounts.set(session.id, (sessionIDCounts.get(session.id) ?? 0) + 1);
     }
@@ -28,7 +35,12 @@ export function normalizeRecycleBinEntry<T>(value: T): RecycleBinEntry | null {
   const deletedAt = isSaneTimestamp(record.deletedAt) ? record.deletedAt : null;
   const expiresAt = isSaneTimestamp(record.expiresAt) ? record.expiresAt : null;
   const root = normalizeRecycleBinSession(record.root);
-  if (!Array.isArray(record.sessions)) return null;
+  if (
+    !Array.isArray(record.sessions) ||
+    record.sessions.length > MAX_RECYCLE_BIN_SESSIONS_PER_ENTRY
+  ) {
+    return null;
+  }
   const normalizedSessions = record.sessions.map(normalizeRecycleBinSession);
 
   if (
@@ -56,7 +68,7 @@ export function normalizeRecycleBinEntry<T>(value: T): RecycleBinEntry | null {
   if (!listedRoot) return null;
   if (!areRecycleBinSessionsEqual(root, listedRoot)) return null;
   if (listedRoot.parentID && sessionsByID.has(listedRoot.parentID)) return null;
-  if (!sessions.every((session) => isRootOrDescendant(session, rootID, sessionsByID))) return null;
+  if (!areRootOrDescendants(sessions, rootID, sessionsByID)) return null;
   if (
     !sessions.every(
       (session) =>
@@ -151,24 +163,33 @@ function isSaneCount<T>(value: T): value is T & number {
   return isNumber(value) && Number.isSafeInteger(value) && value >= 0;
 }
 
-function isRootOrDescendant(
-  session: RecycleBinSession,
+function areRootOrDescendants(
+  sessions: readonly RecycleBinSession[],
   rootID: string,
   sessionsByID: ReadonlyMap<string, RecycleBinSession>
 ) {
-  if (session.id === rootID) return true;
-
-  const visited = new Set([session.id]);
-  let current = session;
-  while (current.parentID) {
-    if (current.parentID === rootID) return true;
-    if (visited.has(current.parentID)) return false;
-    visited.add(current.parentID);
-    const parent = sessionsByID.get(current.parentID);
-    if (!parent) return false;
-    current = parent;
+  const reachesRoot = new Map<string, boolean>([[rootID, true]]);
+  for (const session of sessions) {
+    if (reachesRoot.has(session.id)) continue;
+    const path: string[] = [];
+    const visited = new Set<string>();
+    let current: RecycleBinSession | undefined = session;
+    let valid = false;
+    while (current) {
+      const known = reachesRoot.get(current.id);
+      if (known !== undefined) {
+        valid = known;
+        break;
+      }
+      if (visited.has(current.id)) break;
+      visited.add(current.id);
+      path.push(current.id);
+      current = current.parentID ? sessionsByID.get(current.parentID) : undefined;
+    }
+    for (const sessionID of path) reachesRoot.set(sessionID, valid);
+    if (!valid) return false;
   }
-  return false;
+  return true;
 }
 
 function isNonEmptyString<T>(value: T): value is T & string {

@@ -1,5 +1,4 @@
 /* oxlint-disable anti-slop/no-unknown-parameters -- OpenRouter API payloads are decoded before quota extraction. */
-/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: API JSON remains opaque until adapter validation. */
 import type { ProviderLimitStatus, ProviderLimitWindow } from '../../../shared/protocol';
 import type { ProviderAuthRecord, ProviderMetadata } from '../../util/provider-limit';
 import type { ProviderLimitAdapter, ProviderLimitAdapterContext } from '../types';
@@ -8,6 +7,7 @@ import {
   getString,
   parseFiniteNumber,
   clampPercent,
+  readBoundedResponseJson,
   unsupportedProviderStatus,
 } from '../adapter-utils';
 
@@ -63,7 +63,7 @@ export function createOpenRouterAdapter(): ProviderLimitAdapter {
           };
         }
 
-        const payload = (await response.json()) as unknown;
+        const payload = await readBoundedResponseJson(response);
         const window = extractOpenRouterSpendWindow(payload);
         if (!window) {
           return unsupportedProviderStatus(

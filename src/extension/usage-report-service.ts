@@ -58,16 +58,22 @@ type LocalUsageSnapshot = {
 
 type LocalUsageReader = (start?: number) => Promise<LocalUsageSnapshot | null>;
 type ReportDocumentOpener = (content: string, title: string) => Promise<vscode.Uri>;
+type WindowAggregates = { window: ReportWindow; groups: Map<string, Aggregate> };
 
 const SESSION_PAGE_LIMIT = 1_000;
-const SESSION_CONCURRENCY = 32;
+const SESSION_CONCURRENCY = 8;
 const SESSION_HISTORY_MAX_BYTES = 256 * 1024 * 1024;
 const SESSION_USAGE_MAX_BYTES = 16 * 1024 * 1024;
+const SESSION_USAGE_CACHE_LIMIT = 500;
+const SESSION_USAGE_CACHE_ENTRY_LIMIT = 10_000;
+const SESSION_USAGE_CACHE_TOTAL_LIMIT = 50_000;
 const LOCAL_USAGE_WORKER_TIMEOUT_MS = 30_000;
+const LOCAL_USAGE_DATABASE_MAX_BYTES = 512 * 1024 * 1024;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export class UsageReportService {
   private readonly sessionUsageCache = new Map<string, CachedSessionUsage>();
+  private sessionUsageCacheEntries = 0;
 
   constructor(
     private readonly server: OpenCodeRequest,
@@ -105,21 +111,23 @@ export class UsageReportService {
     const local = await this.readLocalUsage?.(start);
     if (local) {
       this.sessionUsageCache.clear();
+      this.sessionUsageCacheEntries = 0;
       return renderReport(local.usage, local.sessionCount, warnings, now, includeAllTime);
     }
 
     const sessions = await this.listSessions(warnings, start);
     const sessionIDs = new Set(sessions.map((session) => session.id));
     for (const id of this.sessionUsageCache.keys()) {
-      if (!sessionIDs.has(id)) this.sessionUsageCache.delete(id);
+      if (sessionIDs.has(id)) continue;
+      this.sessionUsageCacheEntries -= this.sessionUsageCache.get(id)?.usage.length ?? 0;
+      this.sessionUsageCache.delete(id);
     }
 
-    const usage = (
-      await mapConcurrent(sessions, SESSION_CONCURRENCY, (session) =>
-        this.readSessionUsage(session, warnings)
-      )
-    ).flat();
-    return renderReport(usage, sessions.length, warnings, now, includeAllTime);
+    const aggregates = createWindowAggregates(now, includeAllTime);
+    await mapConcurrent(sessions, SESSION_CONCURRENCY, async (session) => {
+      addUsageToWindowAggregates(aggregates, await this.readSessionUsage(session, warnings));
+    });
+    return renderAggregatedReport(aggregates, sessions.length, warnings, now);
   }
 
   private async listSessions(warnings: string[], start?: number): Promise<Session[]> {
@@ -184,6 +192,8 @@ export class UsageReportService {
       cached?.updated === session.updated &&
       cached.directory === session.directory
     ) {
+      this.sessionUsageCache.delete(session.id);
+      this.sessionUsageCache.set(session.id, cached);
       return cached.usage;
     }
 
@@ -213,16 +223,38 @@ export class UsageReportService {
         usage.push(entry.usage);
       }
       if (session.updated !== null) {
-        this.sessionUsageCache.set(session.id, {
-          directory: session.directory,
-          updated: session.updated,
-          usage,
-        });
+        this.cacheSessionUsage(session, usage);
       }
       return usage;
     } catch (error) {
       warnings.push(`Could not read messages for session ${session.id}: ${errorMessage(error)}.`);
       return [];
+    }
+  }
+
+  private cacheSessionUsage(session: Session, usage: Usage[]): void {
+    if (session.updated === null) return;
+    const previous = this.sessionUsageCache.get(session.id);
+    if (previous) {
+      this.sessionUsageCacheEntries -= previous.usage.length;
+      this.sessionUsageCache.delete(session.id);
+    }
+    if (usage.length > SESSION_USAGE_CACHE_ENTRY_LIMIT) return;
+    this.sessionUsageCache.set(session.id, {
+      directory: session.directory,
+      updated: session.updated,
+      usage,
+    });
+    this.sessionUsageCacheEntries += usage.length;
+    while (
+      this.sessionUsageCache.size > SESSION_USAGE_CACHE_LIMIT ||
+      this.sessionUsageCacheEntries > SESSION_USAGE_CACHE_TOTAL_LIMIT
+    ) {
+      const oldestID = this.sessionUsageCache.keys().next().value;
+      if (oldestID === undefined) break;
+      const oldest = this.sessionUsageCache.get(oldestID);
+      this.sessionUsageCache.delete(oldestID);
+      this.sessionUsageCacheEntries -= oldest?.usage.length ?? 0;
     }
   }
 }
@@ -261,9 +293,13 @@ async function readLocalUsageDatabase(start?: number): Promise<LocalUsageSnapsho
 
 const LOCAL_USAGE_WORKER = String.raw`
 const { DatabaseSync } = require('node:sqlite');
+const { statSync } = require('node:fs');
 const { parentPort, workerData } = require('node:worker_threads');
 
 try {
+  if (statSync(workerData.databasePath).size > ${LOCAL_USAGE_DATABASE_MAX_BYTES}) {
+    throw new Error('database exceeds local usage scan limit');
+  }
   const database = new DatabaseSync(workerData.databasePath, { readOnly: true });
   const sessionCount = database
     .prepare('SELECT count(*) AS count FROM session WHERE ? IS NULL OR time_updated >= ?')
@@ -392,33 +428,63 @@ function renderReport(
   now: number,
   includeAllTime: boolean
 ): string {
+  const aggregates = createWindowAggregates(now, includeAllTime);
+  addUsageToWindowAggregates(aggregates, usage);
+  return renderAggregatedReport(aggregates, sessionCount, warnings, now);
+}
+
+function createWindowAggregates(now: number, includeAllTime: boolean): WindowAggregates[] {
   const midnight = new Date(now);
   midnight.setHours(0, 0, 0, 0);
-  const windows: ReportWindow[] = [
+  return [
     { title: 'Today', start: midnight.getTime() },
     { title: 'Last 7 rolling days', start: now - 7 * DAY_MS },
     { title: 'Last 30 rolling days', start: now - 30 * DAY_MS },
     ...(includeAllTime ? [{ title: 'All time', start: null }] : []),
-  ];
+  ].map((window) => ({ window, groups: new Map() }));
+}
+
+function addUsageToWindowAggregates(aggregates: WindowAggregates[], usage: Usage[]): void {
+  for (const entry of usage) {
+    if (entry.tokens.total <= 0) continue;
+    for (const aggregate of aggregates) {
+      if (aggregate.window.start !== null && entry.created < aggregate.window.start) continue;
+      addUsageToAggregateGroup(aggregate.groups, entry);
+    }
+  }
+}
+
+function addUsageToAggregateGroup(groups: Map<string, Aggregate>, entry: Usage): void {
+  const key = routeKey(entry.providerID, entry.modelID);
+  const aggregate = groups.get(key) || emptyAggregate();
+  if (entry.promptID) aggregate.promptIDs.add(entry.promptID);
+  if (entry.durationMs !== null) {
+    aggregate.durationMs += entry.durationMs;
+    aggregate.durationCount += 1;
+  }
+  addTokens(aggregate, entry.tokens);
+  groups.set(key, aggregate);
+}
+
+function renderAggregatedReport(
+  aggregates: WindowAggregates[],
+  sessionCount: number,
+  warnings: string[],
+  now: number
+): string {
   const lines = [
     '# OpenCode Usage Report',
     '',
     `Generated ${new Date(now).toLocaleString()} from ${sessionCount.toLocaleString()} sessions scanned.`,
   ];
 
-  for (const window of windows) {
-    lines.push('', `## ${window.title}`, '');
-    const windowUsage = (
-      window.start === null ? usage : usage.filter((entry) => entry.created >= window.start!)
-    ).filter((entry) => entry.tokens.total > 0);
-    if (windowUsage.length === 0) {
+  for (const aggregate of aggregates) {
+    lines.push('', `## ${aggregate.window.title}`, '');
+    if (aggregate.groups.size === 0) {
       lines.push('_No token usage._');
       continue;
     }
-    renderAggregateTable(
-      lines,
-      aggregateUsage(windowUsage, (entry) => routeKey(entry.providerID, entry.modelID))
-    );
+    renderAggregateTable(lines, aggregate.groups);
   }
 
   if (warnings.length > 0) {
@@ -444,22 +510,6 @@ function renderAggregateTable(lines: string[], groups: Map<string, Aggregate>): 
     lines.push(renderAggregateRow(providerID, modelID, aggregate));
   }
   lines.push(renderAggregateRow('**Total**', '', sumAggregates(groups.values())));
-}
-
-function aggregateUsage(usage: Usage[], keyFor: (entry: Usage) => string): Map<string, Aggregate> {
-  const groups = new Map<string, Aggregate>();
-  for (const entry of usage) {
-    const key = keyFor(entry);
-    const aggregate = groups.get(key) || emptyAggregate();
-    if (entry.promptID) aggregate.promptIDs.add(entry.promptID);
-    if (entry.durationMs !== null) {
-      aggregate.durationMs += entry.durationMs;
-      aggregate.durationCount += 1;
-    }
-    addTokens(aggregate, entry.tokens);
-    groups.set(key, aggregate);
-  }
-  return groups;
 }
 
 function sumAggregates(values: Iterable<Aggregate>): Aggregate {

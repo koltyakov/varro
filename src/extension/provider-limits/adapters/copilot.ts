@@ -15,6 +15,7 @@ import {
   getString,
   parseFiniteNumber,
   clampPercent,
+  readBoundedResponseJson,
   toLabel,
   unsupportedProviderStatus,
 } from '../adapter-utils';
@@ -102,7 +103,7 @@ export function createCopilotAdapter(): ProviderLimitAdapter {
           };
         }
 
-        const payload = (await response.json()) as unknown;
+        const payload = await readBoundedResponseJson(response);
         const windows = extractCopilotWindows(payload, checkedAt);
         const planName = extractCopilotPlanName(payload);
         if (windows.length === 0) {

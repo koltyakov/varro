@@ -11,6 +11,7 @@ import {
   asRecord,
   getString,
   parseFiniteNumber,
+  PROVIDER_RESPONSE_MAX_BYTES,
   unsupportedProviderStatus,
 } from '../adapter-utils';
 
@@ -467,8 +468,18 @@ async function postAntigravityRequest(
       (response) => {
         activeResponse = response;
         const chunks: Buffer[] = [];
+        let responseBytes = 0;
         response.on('data', (chunk: Buffer | string) => {
           const buffer = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+          responseBytes += buffer.byteLength;
+          if (responseBytes > PROVIDER_RESPONSE_MAX_BYTES) {
+            fail(
+              new Error(
+                `Provider response exceeded the ${PROVIDER_RESPONSE_MAX_BYTES}-byte safety limit`
+              )
+            );
+            return;
+          }
           chunks.push(buffer);
         });
         response.once('error', fail);

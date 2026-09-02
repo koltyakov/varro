@@ -52,6 +52,7 @@ vi.mock('./server-utils', async () => {
 
 import {
   areCompactionSettingsEqual,
+  appendBoundedCliOutput,
   getOpenCodeConfigPaths,
   normalizeCompactionSettings,
   OpenCodeProcess,
@@ -67,6 +68,21 @@ const originalPath = process.env.PATH;
 // Keep fake identities outside the real PID range and unique across concurrent test processes.
 const MOCK_LINUX_PID = 1_073_000_000 + process.pid;
 const MOCK_WINDOWS_PID = 100_000 + process.pid;
+
+describe('appendBoundedCliOutput', () => {
+  it('retains normal output and bounds noisy diagnostics to the latest mebibyte', () => {
+    expect(appendBoundedCliOutput('first', ' second')).toBe('first second');
+
+    const bounded = appendBoundedCliOutput('old'.repeat(500_000), `LATEST-${'x'.repeat(100)}`);
+    expect(bounded.length).toBe(1024 * 1024);
+    expect(bounded.startsWith('[earlier output truncated]\n')).toBe(true);
+    expect(bounded.endsWith(`LATEST-${'x'.repeat(100)}`)).toBe(true);
+
+    const updated = appendBoundedCliOutput(bounded, ' FINAL');
+    expect(updated.length).toBe(1024 * 1024);
+    expect(updated.endsWith(' FINAL')).toBe(true);
+  });
+});
 
 beforeEach(() => {
   delete process.env.OPENCODE_CONFIG;
