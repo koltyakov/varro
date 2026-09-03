@@ -1651,25 +1651,33 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private isEventInEndpointWorkspace(event: ServerEvent, endpoint: WebviewEndpoint) {
     if (!endpoint.workspacePath) return true;
     const workspaceDirectory = this.contextProvider.context.workspaceDirectory;
+    const workspaceDirectoryIsOpenRoot = Boolean(
+      workspaceDirectory && this.contextProvider.getOpenWorkspaceRoot(workspaceDirectory)
+    );
+    const sessionIDs = getWorkspaceSessionIdsForEvent(event);
     if (event.workspaceDirectory) {
       if (
         workspaceDirectory &&
-        !this.contextProvider.getOpenWorkspaceRoot(workspaceDirectory) &&
-        isSameWorkspacePath(event.workspaceDirectory, workspaceDirectory)
+        isSameWorkspacePath(event.workspaceDirectory, workspaceDirectory) &&
+        (!workspaceDirectoryIsOpenRoot ||
+          (sessionIDs.length > 0 &&
+            sessionIDs.every(
+              (sessionID) => this.sessionState.workspaceScopeFor(sessionID) === 'workspace'
+            )))
       ) {
         return true;
       }
       return isSameWorkspacePath(event.workspaceDirectory, endpoint.workspacePath);
     }
-    const sessionIDs = getWorkspaceSessionIdsForEvent(event);
     if (sessionIDs.length === 0) return WORKSPACE_INDEPENDENT_EVENT_TYPES.has(event.type);
     let knownMatch = false;
     for (const sessionID of sessionIDs) {
       const directory = this.sessionState.directoryFor(sessionID);
       if (
         workspaceDirectory &&
-        !this.contextProvider.getOpenWorkspaceRoot(workspaceDirectory) &&
-        isSameWorkspacePath(directory, workspaceDirectory)
+        isSameWorkspacePath(directory, workspaceDirectory) &&
+        (!workspaceDirectoryIsOpenRoot ||
+          this.sessionState.workspaceScopeFor(sessionID) === 'workspace')
       ) {
         knownMatch = true;
         continue;
@@ -3179,9 +3187,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         !this.isSessionAttentionVisible(request.sessionID) &&
         !this.sessionTrash.isHidden(request.sessionID) &&
         !this.hiddenSessions.isHidden(request.sessionID) &&
-        this.sessionState.isSessionInWorkspace(
+        this.sessionState.isSessionVisibleInWorkspace(
           request.sessionID,
-          this.contextProvider.context.workspacePath
+          this.contextProvider.context.workspacePath,
+          this.contextProvider.context.workspaceDirectory,
+          Boolean(
+            this.contextProvider.context.workspaceDirectory &&
+            this.contextProvider.getOpenWorkspaceRoot(
+              this.contextProvider.context.workspaceDirectory
+            )
+          )
         )
     );
     if (pendingRequests.length > 0) {
@@ -3215,9 +3230,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         !this.isSessionAttentionVisible(sessionID) &&
         !this.sessionTrash.isHidden(sessionID) &&
         !this.hiddenSessions.isHidden(sessionID) &&
-        this.sessionState.isSessionInWorkspace(
+        this.sessionState.isSessionVisibleInWorkspace(
           sessionID,
-          this.contextProvider.context.workspacePath
+          this.contextProvider.context.workspacePath,
+          this.contextProvider.context.workspaceDirectory,
+          Boolean(
+            this.contextProvider.context.workspaceDirectory &&
+            this.contextProvider.getOpenWorkspaceRoot(
+              this.contextProvider.context.workspaceDirectory
+            )
+          )
         )
     );
     if (localAlerts.length > 0) {

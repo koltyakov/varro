@@ -81,6 +81,9 @@ type SessionManagementDependencies = {
 };
 
 export class SessionManagementOperations {
+  private readonly renameGenerations = new Map<string, number>();
+  private nextRenameGeneration = 0;
+
   constructor(private readonly deps: SessionManagementDependencies) {}
 
   readonly createSession = async (
@@ -155,16 +158,24 @@ export class SessionManagementOperations {
   };
 
   readonly renameSession = async (id: string, title: string) => {
-    return renameSessionWithDependencies(
-      {
-        updateRemoteSession: this.deps.updateRemoteSession,
-        getSessions: this.deps.getSessions,
-        upsertSession: this.deps.upsertSession,
-        setError: this.deps.setError,
-      },
-      id,
-      title
-    );
+    if (!title.trim()) return false;
+    const generation = ++this.nextRenameGeneration;
+    this.renameGenerations.set(id, generation);
+    try {
+      return await renameSessionWithDependencies(
+        {
+          updateRemoteSession: this.deps.updateRemoteSession,
+          getSessions: this.deps.getSessions,
+          upsertSession: this.deps.upsertSession,
+          setError: this.deps.setError,
+          isCurrentRequest: () => this.renameGenerations.get(id) === generation,
+        },
+        id,
+        title
+      );
+    } finally {
+      if (this.renameGenerations.get(id) === generation) this.renameGenerations.delete(id);
+    }
   };
 
   readonly deleteSession = async (id: string) => {
@@ -501,20 +512,26 @@ export async function renameSessionWithDependencies(
     getSessions(): Session[];
     upsertSession(session: Session): void;
     setError(message: string): void;
+    isCurrentRequest?(): boolean;
   },
   id: string,
   title: string
 ): Promise<boolean> {
   const normalizedTitle = title.trim();
   if (!normalizedTitle) return false;
+  const baseline = deps.getSessions().find((item) => item.id === id);
 
   try {
     const session = await deps.updateRemoteSession(id, { title: normalizedTitle });
+    if (deps.isCurrentRequest?.() === false) return true;
     const current = deps.getSessions().find((item) => item.id === id);
-    deps.upsertSession(current ? { ...current, title: session.title } : session);
+    if (!current || current.title !== baseline?.title) return true;
+    deps.upsertSession({ ...current, title: session.title });
     return true;
   } catch (err) {
-    deps.setError(err instanceof Error ? err.message : 'Failed to rename session');
+    if (deps.isCurrentRequest?.() !== false) {
+      deps.setError(err instanceof Error ? err.message : 'Failed to rename session');
+    }
     return false;
   }
 }

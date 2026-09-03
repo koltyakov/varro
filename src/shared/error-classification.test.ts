@@ -211,6 +211,23 @@ describe('formatProviderErrorDetails', () => {
     expect(details).not.toContain('private');
   });
 
+  it('redacts common credential query values without redacting harmless modes', () => {
+    const details = formatProviderErrorDetails({
+      name: 'APIError',
+      data: {
+        url: 'https://example.com/v1?password=hunter2&passwd=legacy&authorization=bearer-secret&access_key=cloud-secret&mode=password',
+      },
+    });
+
+    expect(details).toContain(
+      'https://example.com/v1?password=REDACTED&passwd=REDACTED&authorization=REDACTED&access_key=REDACTED&mode=password'
+    );
+    expect(details).not.toContain('hunter2');
+    expect(details).not.toContain('legacy');
+    expect(details).not.toContain('bearer-secret');
+    expect(details).not.toContain('cloud-secret');
+  });
+
   it('omits malformed diagnostic URLs', () => {
     expect(
       formatProviderErrorDetails({ name: 'APIError', data: { url: 'http://[invalid' } })

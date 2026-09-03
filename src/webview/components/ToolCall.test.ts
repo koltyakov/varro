@@ -1147,7 +1147,10 @@ describe('ToolCall', () => {
     const rows = Array.from(container?.querySelectorAll('.structured-tool-row') || []);
     const labels = rows.map((row) => row.querySelector('.structured-tool-label')?.textContent);
 
-    expect(labels).toEqual(['subagent_type', 'task_id', 'prompt', 'task_result']);
+    expect(labels).toEqual(['subagent_type', 'prompt', 'task_result']);
+    expect(container?.querySelector('.tool-invocation-detail')?.textContent).not.toContain(
+      'task_id'
+    );
     // Multi-line values used to stack under their label on a one-column row,
     // which broke alignment with the scalar rows. Every row shares one grid now.
     expect(rows.every((row) => row.classList.contains('structured-tool-row'))).toBe(true);

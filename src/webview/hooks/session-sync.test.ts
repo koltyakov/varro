@@ -85,7 +85,7 @@ describe('session sync helpers', () => {
         syncTodosForSession: vi.fn(async () => {}),
         loadQuestions: vi.fn(async () => {}),
         loadSessionStatuses: vi.fn(async () => ({ 'session-1': { type: 'busy' as const } })),
-        mergeSessionStatuses: vi.fn(),
+        mergeSessionStatuses: vi.fn((statuses) => statuses),
         updateUsageLimitState: vi.fn(),
         startLoading,
         stopLoading: vi.fn(),

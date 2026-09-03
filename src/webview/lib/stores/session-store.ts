@@ -130,16 +130,18 @@ export const sessionStore = {
       snapshotStartedAt !== undefined &&
       snapshotStartedAt < latestAppliedSessionStatusSnapshotStartedAt
     ) {
-      return;
+      return null;
     }
     if (snapshotStartedAt !== undefined) {
       latestAppliedSessionStatusSnapshotStartedAt = snapshotStartedAt;
     }
 
+    let reconciledStatuses = statuses;
     batch(() => {
       setState('sessionStatus', (current) => {
         if (snapshotStartedAt === undefined) {
-          return areEqualSessionStatusRecords(current, statuses) ? current : statuses;
+          reconciledStatuses = areEqualSessionStatusRecords(current, statuses) ? current : statuses;
+          return reconciledStatuses;
         }
 
         const next = { ...statuses };
@@ -167,7 +169,8 @@ export const sessionStore = {
             next[sessionId] = currentStatus;
           }
         }
-        return areEqualSessionStatusRecords(current, next) ? current : next;
+        reconciledStatuses = areEqualSessionStatusRecords(current, next) ? current : next;
+        return reconciledStatuses;
       });
       for (let index = state.questionResponsePendingSessionIds.length - 1; index >= 0; index -= 1) {
         clearQuestionResponsePending(
@@ -176,6 +179,7 @@ export const sessionStore = {
         );
       }
     });
+    return reconciledStatuses;
   },
   setSessionStatusEntry(sessionId: string, status: SessionStatus) {
     const prev = state.sessionStatus[sessionId];

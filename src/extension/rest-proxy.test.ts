@@ -109,6 +109,7 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
       handleServerEvent: vi.fn(),
       getSessionWorkspaceMatch: vi.fn(() => true),
       isSessionInWorkspace: vi.fn(() => true),
+      workspaceScopeFor: vi.fn(() => 'folder' as const),
       markSessionBusy: vi.fn((sessionID: string) => ({ sessionID, id: 1 })),
       beginPendingAttentionReconciliation: vi.fn((kind: 'permission' | 'question') => ({
         kind,
@@ -1091,6 +1092,51 @@ describe('RestProxy handleRequest', () => {
       id: 95,
       data: { ok: true },
     });
+  });
+
+  it('rejects an explicit root that does not match the cataloged session directory', async () => {
+    const serverRequest = vi.fn(async (method: string, path: string) => {
+      if (method === 'GET' && path === '/session?limit=1000000&directory=%2Frepo-b') {
+        return [{ id: 'session-b', directory: '/repo-b' }];
+      }
+      if (method === 'GET' && path === '/session/session-b?directory=%2Frepo-a') {
+        return { id: 'session-b', directory: '/repo-b' };
+      }
+      if (method === 'GET' && path === '/session/session-b/message?directory=%2Frepo-a') return [];
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+    const callbacks = createCallbacks({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      sessionState: {
+        ...createCallbacks().sessionState,
+        isSessionInWorkspace: vi.fn(() => false),
+      } as never,
+    });
+    callbacks.contextProvider.context.workspaceFolders = [
+      { name: 'repo-a', path: '/repo-a' },
+      { name: 'repo-b', path: '/repo-b' },
+    ];
+    callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((directory: string) =>
+      directory === '/repo-a' || directory === '/repo-b' ? directory : null
+    );
+    const { proxy } = createProxy(callbacks);
+
+    await proxy.handleRequest(makePayload(951, 'GET', '/session?directory=%2Frepo-b'));
+    vi.mocked(callbacks.postApiResponse).mockClear();
+    await proxy.handleRequest(
+      makePayload(952, 'GET', '/session/session-b/message?directory=%2Frepo-a')
+    );
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 952,
+      error: '404 Session not found',
+    });
+    expect(serverRequest).not.toHaveBeenCalledWith(
+      'GET',
+      '/session/session-b/message?directory=%2Frepo-a',
+      undefined,
+      expect.anything()
+    );
   });
 
   it.each(['prompt_async', 'share'])(
@@ -3988,6 +4034,151 @@ describe('RestProxy handleRequest', () => {
       expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
         id: 221,
         data: [local],
+      });
+    }
+  );
+
+  it.each(['/question', '/permission'])(
+    'uses workspace scope metadata when %s snapshots share an unsaved workspace first root',
+    async (path) => {
+      const ordinary = { id: 'ordinary-request', sessionID: 'ordinary-session' };
+      const workspace = { id: 'workspace-request', sessionID: 'workspace-session' };
+      const serverRequest = vi.fn(async (_method: string, requestPath: string) => {
+        if (requestPath === path) return [ordinary, workspace];
+        if (requestPath === '/session?limit=1000000') {
+          return [
+            { id: 'ordinary-session', directory: '/repo-a' },
+            {
+              id: 'workspace-session',
+              directory: '/repo-a',
+              metadata: { varro: { workspaceScope: 'workspace', schemaVersion: 1 } },
+            },
+          ];
+        }
+        throw new Error(`Unexpected path: ${requestPath}`);
+      });
+      const callbacks = createCallbacks({
+        getWorkspacePath: () => '/repo-b',
+        server: { ...createCallbacks().server, request: serverRequest } as never,
+        sessionState: {
+          ...createCallbacks().sessionState,
+          getSessionWorkspaceMatch: vi.fn(() => undefined),
+        } as never,
+      });
+      callbacks.contextProvider.context.workspacePath = '/repo-b';
+      callbacks.contextProvider.context.workspaceDirectory = '/repo-a';
+      callbacks.contextProvider.context.workspaceFolders = [
+        { name: 'repo-a', path: '/repo-a' },
+        { name: 'repo-b', path: '/repo-b' },
+      ];
+      callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((directory: string) =>
+        directory === '/repo-a' || directory === '/repo-b' ? directory : null
+      );
+      const { proxy } = createProxy(callbacks);
+
+      await proxy.handleRequest(makePayload(221, 'GET', path));
+
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+        id: 221,
+        data: [workspace],
+      });
+    }
+  );
+
+  it('keeps pending requests visible from projected top-level workspace scope', async () => {
+    const permission = { id: 'workspace-request', sessionID: 'workspace-session' };
+    const serverRequest = vi.fn(async (_method: string, requestPath: string) => {
+      if (requestPath === '/permission') return [permission];
+      if (requestPath === '/session?limit=1000000') {
+        return [
+          {
+            id: 'workspace-session',
+            directory: '/repo-a',
+            workspaceScope: 'workspace',
+          },
+        ];
+      }
+      throw new Error(`Unexpected path: ${requestPath}`);
+    });
+    const callbacks = createCallbacks({
+      getWorkspacePath: () => '/repo-b',
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      sessionState: {
+        ...createCallbacks().sessionState,
+        getSessionWorkspaceMatch: vi.fn(() => undefined),
+      } as never,
+    });
+    callbacks.contextProvider.context.workspacePath = '/repo-b';
+    callbacks.contextProvider.context.workspaceDirectory = '/repo-a';
+    callbacks.contextProvider.context.workspaceFolders = [
+      { name: 'repo-a', path: '/repo-a' },
+      { name: 'repo-b', path: '/repo-b' },
+    ];
+    callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((directory: string) =>
+      directory === '/repo-a' || directory === '/repo-b' ? directory : null
+    );
+    const { proxy } = createProxy(callbacks);
+
+    await proxy.handleRequest(makePayload(222, 'GET', '/permission'));
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 222,
+      data: [permission],
+    });
+  });
+
+  it.each(['/question', '/permission'])(
+    'inherits parent workspace scope for child %s snapshots in an unsaved workspace',
+    async (path) => {
+      const request = { id: 'child-request', sessionID: 'child-session' };
+      const manager = new SessionStateManager(
+        {
+          get: vi.fn(),
+          set: vi.fn(() => Promise.resolve()),
+          remove: vi.fn(() => Promise.resolve()),
+        } as never,
+        { onStatusChange: vi.fn() },
+        { shouldShow: () => false }
+      );
+      const serverRequest = vi.fn(async (_method: string, requestPath: string) => {
+        if (requestPath === path) return [request];
+        if (requestPath === '/session?limit=1000000') {
+          return [
+            {
+              id: 'parent-session',
+              directory: '/repo-a',
+              metadata: { varro: { workspaceScope: 'workspace', schemaVersion: 1 } },
+            },
+            {
+              id: 'child-session',
+              parentID: 'parent-session',
+              directory: '/repo-a',
+            },
+          ];
+        }
+        throw new Error(`Unexpected path: ${requestPath}`);
+      });
+      const callbacks = createCallbacks({
+        getWorkspacePath: () => '/repo-b',
+        server: { ...createCallbacks().server, request: serverRequest } as never,
+        sessionState: manager,
+      });
+      callbacks.contextProvider.context.workspacePath = '/repo-b';
+      callbacks.contextProvider.context.workspaceDirectory = '/repo-a';
+      callbacks.contextProvider.context.workspaceFolders = [
+        { name: 'repo-a', path: '/repo-a' },
+        { name: 'repo-b', path: '/repo-b' },
+      ];
+      callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((directory: string) =>
+        directory === '/repo-a' || directory === '/repo-b' ? directory : null
+      );
+      const { proxy } = createProxy(callbacks);
+
+      await proxy.handleRequest(makePayload(223, 'GET', path));
+
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+        id: 223,
+        data: [request],
       });
     }
   );

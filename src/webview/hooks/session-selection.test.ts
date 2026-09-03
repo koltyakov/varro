@@ -97,7 +97,8 @@ function createSelectionDependencies(
     syncTodosForSession: vi.fn(async () => {}),
     loadQuestions: vi.fn(async () => {}),
     loadSessionStatuses: vi.fn(async () => ({})),
-    mergeSessionStatuses: vi.fn(),
+    mergeSessionStatuses: vi.fn((statuses: Record<string, SessionStatus>) => statuses),
+    getSessionStatus: vi.fn(() => undefined),
     updateUsageLimitState: vi.fn(),
     startLoading: vi.fn(),
     stopLoading: vi.fn(),
@@ -180,7 +181,7 @@ describe('session-selection helpers', () => {
         syncTodosForSession: vi.fn(async () => {}),
         loadQuestions: vi.fn(async () => {}),
         loadSessionStatuses: vi.fn(async () => ({ 'session-1': { type: 'busy' as const } })),
-        mergeSessionStatuses: vi.fn(),
+        mergeSessionStatuses: vi.fn((statuses) => statuses),
         updateUsageLimitState: vi.fn(),
         startLoading,
         stopLoading,
@@ -338,7 +339,7 @@ describe('session-selection helpers', () => {
         syncTodosForSession: vi.fn(() => todos.promise),
         loadQuestions: vi.fn(async () => {}),
         loadSessionStatuses: vi.fn(async () => ({})),
-        mergeSessionStatuses: vi.fn(),
+        mergeSessionStatuses: vi.fn((statuses) => statuses),
         updateUsageLimitState: vi.fn(),
         startLoading: vi.fn(),
         stopLoading: vi.fn(),
@@ -425,7 +426,7 @@ describe('session-selection helpers', () => {
         syncTodosForSession: vi.fn(async () => {}),
         loadQuestions: vi.fn(async () => {}),
         loadSessionStatuses: vi.fn(async () => ({})),
-        mergeSessionStatuses: vi.fn(),
+        mergeSessionStatuses: vi.fn((statuses) => statuses),
         updateUsageLimitState: vi.fn(),
         startLoading: vi.fn(),
         stopLoading: vi.fn(),
@@ -480,7 +481,7 @@ describe('session-selection helpers', () => {
         syncTodosForSession: vi.fn(async () => {}),
         loadQuestions: vi.fn(async () => {}),
         loadSessionStatuses: vi.fn(async () => ({})),
-        mergeSessionStatuses: vi.fn(),
+        mergeSessionStatuses: vi.fn((statuses) => statuses),
         updateUsageLimitState: vi.fn(),
         startLoading: vi.fn(),
         stopLoading: vi.fn(),
@@ -629,7 +630,7 @@ describe('session-selection helpers', () => {
         syncTodosForSession,
         loadQuestions: vi.fn(async () => {}),
         loadSessionStatuses: vi.fn(async () => ({})),
-        mergeSessionStatuses: vi.fn(),
+        mergeSessionStatuses: vi.fn((statuses) => statuses),
         updateUsageLimitState: vi.fn(),
         startLoading: vi.fn(),
         stopLoading: vi.fn(),
@@ -653,7 +654,7 @@ describe('session-selection helpers', () => {
     const loaded = deferred<ReturnType<typeof loadedSession>>();
     const statuses = deferred<Record<string, SessionStatus>>();
     const mcpSync = deferred<void>();
-    const mergeSessionStatuses = vi.fn();
+    const mergeSessionStatuses = vi.fn((reconciled: Record<string, SessionStatus>) => reconciled);
     const loadSessionStatuses = vi.fn(() => statuses.promise);
     const deps = createSelectionDependencies({
       getActiveSessionId: () => activeSession.value,
@@ -681,6 +682,46 @@ describe('session-selection helpers', () => {
 
     mcpSync.resolve();
     await selection;
+  });
+
+  it('uses the current retry when an older status snapshot is rejected', async () => {
+    // SAFETY: The fixture provides the string | null fields read by this statement.
+    const activeSession = { value: null as string | null };
+    const retryStatus = {
+      type: 'retry',
+      attempt: 2,
+      message: '429 usage limit reached',
+      next: 8_000,
+    } satisfies SessionStatus;
+    const updateUsageLimitState = vi.fn();
+    const startLoading = vi.fn();
+    const stopLoading = vi.fn();
+    const completedAssistant = {
+      ...assistantMessage('assistant-1'),
+      time: { created: 1, completed: 2 },
+    };
+    const deps = createSelectionDependencies({
+      getActiveSessionId: () => activeSession.value,
+      setActiveSessionId: (id) => {
+        activeSession.value = id;
+      },
+      loadSession: async (id) => ({
+        ...loadedSession(id),
+        messages: [{ info: completedAssistant, parts: [] }],
+      }),
+      loadSessionStatuses: async () => ({ 'session-1': { type: 'busy' } }),
+      mergeSessionStatuses: () => null,
+      getSessionStatus: () => retryStatus,
+      updateUsageLimitState,
+      startLoading,
+      stopLoading,
+    });
+
+    await selectSessionWithDependencies(deps, { next: () => 1 }, 'session-1');
+
+    expect(updateUsageLimitState).toHaveBeenCalledWith('session-1', retryStatus, expect.any(Array));
+    expect(startLoading).toHaveBeenCalledOnce();
+    expect(stopLoading).not.toHaveBeenCalled();
   });
 
   it('does not report loaded messages as failed when follow-up startup sync fails', async () => {
@@ -741,7 +782,7 @@ describe('session-selection helpers', () => {
         loadSessionStatuses: vi.fn(async () => {
           throw new Error('statuses unavailable');
         }),
-        mergeSessionStatuses: vi.fn(),
+        mergeSessionStatuses: vi.fn((statuses) => statuses),
         updateUsageLimitState: vi.fn(),
         startLoading: vi.fn(),
         stopLoading: vi.fn(),
@@ -918,7 +959,7 @@ describe('session-selection helpers', () => {
             next: 2,
           },
         })),
-        mergeSessionStatuses: vi.fn(),
+        mergeSessionStatuses: vi.fn((statuses) => statuses),
         updateUsageLimitState: vi.fn(),
         startLoading,
         stopLoading,

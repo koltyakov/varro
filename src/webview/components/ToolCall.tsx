@@ -1428,8 +1428,9 @@ function GenericToolCall(props: {
   });
   const detailInputEntries = createMemo(() => {
     if (!isTask()) return props.inputEntries;
-    const keys = new Set(props.inputEntries.map(([key]) => key));
-    return [...props.inputEntries, ...taskExecutionEntries().filter(([key]) => !keys.has(key))];
+    const visibleEntries = props.inputEntries.filter(([key]) => key !== 'task_id');
+    const keys = new Set(visibleEntries.map(([key]) => key));
+    return [...visibleEntries, ...taskExecutionEntries().filter(([key]) => !keys.has(key))];
   });
   const taskTokenUsage = createMemo(() => {
     const sessionId = taskSessionId();

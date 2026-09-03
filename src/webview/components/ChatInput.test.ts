@@ -708,6 +708,141 @@ describe('ChatInput', () => {
     expect(pdfChip?.textContent).not.toContain('PDF');
   });
 
+  it('does not attach a delayed pasted PDF after switching sessions', async () => {
+    const fileReader = installControllableFileReader();
+    try {
+      setState('activeSessionId', 'session-a');
+      cleanup = render(() => ChatInput(), container!);
+
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor) throw new Error('Expected composer editor');
+      const pdf = new File(['%PDF-1.7\n'], 'delayed.pdf', { type: 'application/pdf' });
+      dispatchImagePaste(editor, [pdf]);
+      await flushAsyncWork();
+      expect(fileReader.hasPending('delayed.pdf')).toBe(true);
+
+      setState('activeSessionId', 'session-b');
+      fileReader.resolve('delayed.pdf');
+      await flushAsyncWork();
+
+      expect(state.nativePdfs).toEqual([]);
+      expect(container?.textContent).not.toContain('delayed.pdf');
+    } finally {
+      fileReader.restore();
+    }
+  });
+
+  it('does not attach a delayed pasted PDF after sending clears the composer', async () => {
+    const fileReader = installControllableFileReader();
+    try {
+      setState('activeSessionId', 'session-a');
+      setInputText('Send this draft');
+      cleanup = render(() => ChatInput(), container!);
+
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor) throw new Error('Expected composer editor');
+      dispatchImagePaste(editor, [
+        new File(['%PDF-1.7\n'], 'send-delayed.pdf', { type: 'application/pdf' }),
+      ]);
+      await flushAsyncWork();
+      expect(fileReader.hasPending('send-delayed.pdf')).toBe(true);
+
+      container
+        ?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await flushAsyncWork();
+      expect(inputText()).toBe('');
+
+      fileReader.resolve('send-delayed.pdf');
+      await flushAsyncWork();
+
+      expect(state.nativePdfs).toEqual([]);
+    } finally {
+      fileReader.restore();
+    }
+  });
+
+  it('does not attach a delayed pasted PDF after queuing clears the composer', async () => {
+    const fileReader = installControllableFileReader();
+    try {
+      setState('activeSessionId', 'session-a');
+      setState('sessionStatus', 'session-a', { type: 'busy' });
+      setInputText('Queue this draft');
+      cleanup = render(() => ChatInput(), container!);
+
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor) throw new Error('Expected composer editor');
+      dispatchImagePaste(editor, [
+        new File(['%PDF-1.7\n'], 'queue-delayed.pdf', { type: 'application/pdf' }),
+      ]);
+      await flushAsyncWork();
+      expect(fileReader.hasPending('queue-delayed.pdf')).toBe(true);
+
+      container
+        ?.querySelector<HTMLButtonElement>('[aria-label="Add to queue (Enter)"]')
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await flushAsyncWork();
+      expect(inputText()).toBe('');
+      expect(state.queuedMessages).toHaveLength(1);
+
+      fileReader.resolve('queue-delayed.pdf');
+      await flushAsyncWork();
+
+      expect(state.nativePdfs).toEqual([]);
+    } finally {
+      fileReader.restore();
+    }
+  });
+
+  it('does not attach a delayed pasted PDF after the composer is disposed', async () => {
+    const fileReader = installControllableFileReader();
+    try {
+      cleanup = render(() => ChatInput(), container!);
+
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor) throw new Error('Expected composer editor');
+      dispatchImagePaste(editor, [
+        new File(['%PDF-1.7\n'], 'disposed-delayed.pdf', { type: 'application/pdf' }),
+      ]);
+      await flushAsyncWork();
+      expect(fileReader.hasPending('disposed-delayed.pdf')).toBe(true);
+
+      cleanup();
+      cleanup = undefined;
+      fileReader.resolve('disposed-delayed.pdf');
+      await flushAsyncWork();
+
+      expect(state.nativePdfs).toEqual([]);
+    } finally {
+      fileReader.restore();
+    }
+  });
+
+  it('keeps a delayed pasted PDF when the user types before it finishes', async () => {
+    const fileReader = installControllableFileReader();
+    try {
+      setState('activeSessionId', 'session-a');
+      cleanup = render(() => ChatInput(), container!);
+
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor) throw new Error('Expected composer editor');
+      dispatchImagePaste(editor, [
+        new File(['%PDF-1.7\n'], 'typing-delayed.pdf', { type: 'application/pdf' }),
+      ]);
+      await flushAsyncWork();
+      expect(fileReader.hasPending('typing-delayed.pdf')).toBe(true);
+
+      enterComposerText(editor, 'Keep typing');
+      fileReader.resolve('typing-delayed.pdf');
+      await flushAsyncWork();
+
+      expect(inputText()).toBe('Keep typing');
+      expect(state.nativePdfs).toMatchObject([{ filename: 'typing-delayed.pdf' }]);
+    } finally {
+      fileReader.restore();
+    }
+  });
+
   it('hides pre-input status blocks while a diff overlay is expanded', () => {
     setState('todos', [
       { id: 'todo-1', content: 'Working task', status: 'in_progress', priority: 'medium' },

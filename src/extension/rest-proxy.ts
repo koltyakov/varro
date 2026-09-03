@@ -27,6 +27,7 @@ import {
   getSessionWorkspaceScopeFromMetadata,
   isSessionHistoryScope,
   isSafePersistedSessionId,
+  isSessionWorkspaceScope,
   VARRO_API_ENDPOINTS,
 } from '../shared/protocol';
 import type {
@@ -333,6 +334,7 @@ export interface RestProxyCallbacks {
     | 'handleServerEvent'
     | 'getSessionWorkspaceMatch'
     | 'isSessionInWorkspace'
+    | 'workspaceScopeFor'
     | 'markSessionBusy'
     | 'beginPendingAttentionReconciliation'
     | 'finishPendingAttentionReconciliation'
@@ -2898,35 +2900,54 @@ export class RestProxy {
     const visible = new Set<string>();
     const unknown: string[] = [];
     for (const sessionID of new Set(sessionIDs)) {
-      const matches = this.getSessionVisibilityWorkspacePaths(workspacePath).map((path) =>
-        this.callbacks.sessionState.getSessionWorkspaceMatch(sessionID, path)
+      const workspaceMatch = this.callbacks.sessionState.getSessionWorkspaceMatch(
+        sessionID,
+        workspacePath
       );
-      if (matches.includes(true)) visible.add(sessionID);
-      else if (matches.includes(undefined)) unknown.push(sessionID);
+      const workspaceDirectory = this.callbacks.contextProvider.context.workspaceDirectory;
+      const workspaceDirectoryMatch = workspaceDirectory
+        ? this.callbacks.sessionState.getSessionWorkspaceMatch(sessionID, workspaceDirectory)
+        : false;
+      if (workspaceMatch === true) {
+        visible.add(sessionID);
+      } else if (
+        workspaceDirectory &&
+        workspaceDirectoryMatch === true &&
+        (this.isDedicatedWorkspaceDirectory(workspaceDirectory) ||
+          this.getSessionWorkspaceScope(sessionID) === 'workspace')
+      ) {
+        visible.add(sessionID);
+      } else if (
+        workspaceMatch === undefined ||
+        workspaceDirectoryMatch === undefined ||
+        (workspaceDirectoryMatch === true && !this.sessionWorkspaceScopes.has(sessionID))
+      ) {
+        unknown.push(sessionID);
+      }
     }
     if (unknown.length === 0) return visible;
 
     const directories = await this.loadSessionDirectorySnapshot();
     await mapWithConcurrency(unknown, SESSION_VISIBILITY_LOOKUP_CONCURRENCY, async (sessionID) => {
-      const sessionWorkspacePaths = this.getSessionVisibilityWorkspacePaths(workspacePath);
       const knownDirectory = directories.get(sessionID);
       if (knownDirectory) {
-        if (sessionWorkspacePaths.some((path) => isSameWorkspacePath(knownDirectory, path))) {
+        if (this.isSessionVisibleInWorkspace(sessionID, knownDirectory, workspacePath)) {
           visible.add(sessionID);
         }
         return;
       }
       try {
+        const workspaceDirectory = this.callbacks.contextProvider.context.workspaceDirectory;
         const directory = await this.lookupSessionDirectory(
           sessionID,
           this.getSessionWorkspaceScope(sessionID) === 'workspace'
-            ? sessionWorkspacePaths.at(-1)
+            ? (workspaceDirectory ?? workspacePath)
             : workspacePath
         );
         if (!directory && requireCompleteResolution) {
           throw new Error(`Session ${sessionID} did not include a directory`);
         }
-        if (sessionWorkspacePaths.some((path) => isSameWorkspacePath(directory, path))) {
+        if (this.isSessionVisibleInWorkspace(sessionID, directory, workspacePath)) {
           visible.add(sessionID);
         }
       } catch (err) {
@@ -2939,11 +2960,18 @@ export class RestProxy {
     return visible;
   }
 
-  private getSessionVisibilityWorkspacePaths(workspacePath: string): string[] {
+  private isSessionVisibleInWorkspace(
+    sessionID: string,
+    directory: string | undefined,
+    workspacePath: string
+  ): boolean {
+    if (isSameWorkspacePath(directory, workspacePath)) return true;
     const workspaceDirectory = this.callbacks.contextProvider.context.workspaceDirectory;
-    return workspaceDirectory && !isSameWorkspacePath(workspaceDirectory, workspacePath)
-      ? [workspacePath, workspaceDirectory]
-      : [workspacePath];
+    if (!workspaceDirectory || !isSameWorkspacePath(directory, workspaceDirectory)) return false;
+    return (
+      this.isDedicatedWorkspaceDirectory(workspaceDirectory) ||
+      this.getSessionWorkspaceScope(sessionID) === 'workspace'
+    );
   }
 
   private loadSessionDirectorySnapshot(): Promise<ReadonlyMap<string, string>> {
@@ -2994,6 +3022,7 @@ export class RestProxy {
       if (typeof info?.id !== 'string' || typeof info.directory !== 'string') continue;
       if (!normalizeWorkspaceIdentity(info.directory)) continue;
       directories.set(info.id, info.directory);
+      this.readAndRememberSessionWorkspaceScope(info);
     }
     this.sessionDirectories = directories;
     this.hasSessionDirectorySnapshot =
@@ -3031,7 +3060,7 @@ export class RestProxy {
     lookupDirectory?: string
   ) {
     if (!normalizeWorkspaceIdentity(workspacePath)) return;
-    if (this.isAuthorizedSessionDirectory(sessionID)) return;
+    if (this.isAuthorizedSessionDirectory(sessionID, workspacePath ?? undefined)) return;
     if (this.callbacks.sessionState.isSessionInWorkspace(sessionID, workspacePath)) return;
 
     if (this.callbacks.getStatus().state !== 'running') {
@@ -3091,13 +3120,19 @@ export class RestProxy {
   }
 
   private readAndRememberSessionWorkspaceScope(session: Record<string, unknown>) {
-    const scope = getSessionWorkspaceScopeFromMetadata(session.metadata) ?? 'folder';
+    const scope = isSessionWorkspaceScope(session.workspaceScope)
+      ? session.workspaceScope
+      : (getSessionWorkspaceScopeFromMetadata(session.metadata) ?? 'folder');
     if (isSafePersistedSessionId(session.id)) this.sessionWorkspaceScopes.set(session.id, scope);
     return scope;
   }
 
   private getSessionWorkspaceScope(sessionID: string): SessionWorkspaceScope {
-    return this.sessionWorkspaceScopes.get(sessionID) ?? 'folder';
+    const rememberedScope = this.sessionWorkspaceScopes.get(sessionID);
+    const inheritedScope = this.callbacks.sessionState.workspaceScopeFor(sessionID);
+    return rememberedScope === 'workspace' || inheritedScope === 'workspace'
+      ? 'workspace'
+      : 'folder';
   }
 
   private parseSessionCreationScope(

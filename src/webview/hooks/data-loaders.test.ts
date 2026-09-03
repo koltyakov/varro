@@ -10,6 +10,8 @@ import {
   setState,
   state,
 } from '../lib/state';
+import { resetSessionStatusSnapshotTracking, sessionStore } from '../lib/stores/session-store';
+import { deriveUsageLimitNotice } from '../lib/usage-limit';
 import { getClientMocks, provider, session } from './useOpenCode.test-support';
 import {
   createDataLoaderOperations,
@@ -764,7 +766,7 @@ describe('data loaders', () => {
   });
 
   it('hydrates session statuses and usage-limit state for loaded sessions', async () => {
-    const setSessionStatuses = vi.fn();
+    const setSessionStatuses = vi.fn((next: Record<string, SessionStatus>) => next);
     const updateUsageLimitState = vi.fn();
     const logError = vi.fn();
     const statuses = {
@@ -799,6 +801,92 @@ describe('data loaders', () => {
       []
     );
     expect(logError).not.toHaveBeenCalled();
+  });
+
+  it('uses reconciled statuses for coordinated runtime snapshot side effects', async () => {
+    const retryStatus = {
+      type: 'retry',
+      attempt: 3,
+      message: '429 usage limit reached',
+      next: 9_000,
+    } satisfies SessionStatus;
+    const loadSessionStatuses = vi.fn(async () => ({}));
+    const updateUsageLimitState = vi.fn();
+
+    await hydrateSessionStatusesWithDependencies(
+      {
+        loadSessionStatuses,
+        loadSessionStatusSnapshot: async () => ({
+          statuses: { 'session-1': { type: 'busy' } },
+          startedAt: 1_000,
+        }),
+        setSessionStatuses: vi.fn(() => ({ 'session-1': retryStatus })),
+        getSessions: () => [session('session-1')],
+        updateUsageLimitState,
+      },
+      vi.fn()
+    );
+
+    expect(loadSessionStatuses).not.toHaveBeenCalled();
+    expect(updateUsageLimitState).toHaveBeenCalledWith('session-1', retryStatus, []);
+  });
+
+  it('does not clear a newer retry notice when an older status snapshot finishes', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    resetDefaultAppState();
+    resetSessionStatusSnapshotTracking();
+    const pendingStatuses = deferred<Record<string, SessionStatus>>();
+    const loadedSession = session('session-1');
+    sessionStore.setSessions([loadedSession]);
+
+    try {
+      const hydration = hydrateSessionStatusesWithDependencies(
+        {
+          loadSessionStatuses: () => pendingStatuses.promise,
+          setSessionStatuses: sessionStore.setSessionStatuses,
+          getSessions: () => [loadedSession],
+          updateUsageLimitState: (sessionId, status) => {
+            sessionStore.setSessionUsageLimit(
+              sessionId,
+              deriveUsageLimitNotice({ sessionID: sessionId, status, messages: [] })
+            );
+          },
+        },
+        vi.fn()
+      );
+
+      vi.setSystemTime(2_000);
+      const retryStatus = {
+        type: 'retry',
+        attempt: 2,
+        message: '429 usage limit reached',
+        next: 8_000,
+      } satisfies SessionStatus;
+      sessionStore.setSessionStatusEntry(loadedSession.id, retryStatus);
+      sessionStore.setSessionUsageLimit(
+        loadedSession.id,
+        deriveUsageLimitNotice({
+          sessionID: loadedSession.id,
+          status: retryStatus,
+          messages: [],
+        })
+      );
+
+      pendingStatuses.resolve({ [loadedSession.id]: { type: 'busy' } });
+      await hydration;
+
+      expect(state.sessionStatus[loadedSession.id]).toEqual(retryStatus);
+      expect(state.sessionUsageLimits[loadedSession.id]).toMatchObject({
+        source: 'status',
+        statusCode: 429,
+        attempt: 2,
+      });
+    } finally {
+      vi.useRealTimers();
+      resetDefaultAppState();
+      resetSessionStatusSnapshotTracking();
+    }
   });
 
   it('loads commands, questions, sessions, recycle bin entries, and provider limits', async () => {

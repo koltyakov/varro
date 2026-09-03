@@ -1,6 +1,7 @@
 /* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns -- Webview and OpenCode callbacks cross protocol boundaries and validate values before use. */
 import * as vscode from 'vscode';
 import type {
+  BlockingRequestReplayOptions,
   BlockingRequestSnapshot,
   InterruptedSessionSnapshot,
   RecoverySnapshot,
@@ -23,6 +24,7 @@ import type {
   WebviewInstanceContext,
 } from '../shared/protocol';
 import type { ExtensionConfigState } from '../shared/provider-limit-config';
+import { isSameWorkspacePath } from '../shared/workspace-path';
 
 export type WebviewHost = vscode.WebviewView | vscode.WebviewPanel;
 const RELIABLE_DELIVERY_TIMEOUT_MS = 5_000;
@@ -66,6 +68,7 @@ export class WebviewSession {
       | 'clearCompletedInWorkspace'
       | 'consumeRecoverySnapshot'
       | 'isSessionInWorkspace'
+      | 'isSessionVisibleInWorkspace'
       | 'replayBlockingRequests'
     >,
     private readonly sessionTrash: Pick<
@@ -450,11 +453,15 @@ export class WebviewSession {
   private buildInitialState(serverStatus: ServerStatus): InitialWebviewState {
     const config = this.deps.readConfig();
     const editorContext = this.getEditorContext();
+    const workspaceDirectoryIsOpenRoot = (editorContext.workspaceFolders ?? []).some((folder) =>
+      isSameWorkspacePath(folder.path, editorContext.workspaceDirectory)
+    );
     const isSessionInWorkspace = (sessionID: string) =>
-      this.sessionState.isSessionInWorkspace(sessionID, editorContext.workspacePath) ||
-      Boolean(
-        editorContext.workspaceDirectory &&
-        this.sessionState.isSessionInWorkspace(sessionID, editorContext.workspaceDirectory)
+      this.sessionState.isSessionVisibleInWorkspace(
+        sessionID,
+        editorContext.workspacePath,
+        editorContext.workspaceDirectory,
+        workspaceDirectoryIsOpenRoot
       );
     return {
       webviewContext: this.webviewContext,
@@ -509,6 +516,9 @@ export class WebviewSession {
 
   private postBootMessages(status: ServerStatus, options?: { clearResolvedEmbedded?: boolean }) {
     const editorContext = this.getEditorContext();
+    const workspaceDirectoryIsOpenRoot = (editorContext.workspaceFolders ?? []).some((folder) =>
+      isSameWorkspacePath(folder.path, editorContext.workspaceDirectory)
+    );
     this.bridge.post({
       type: 'composer/images-sync',
       payload: { images: this.deps.draftImages() ?? [] },
@@ -575,14 +585,19 @@ export class WebviewSession {
       type: 'permission-automation/update',
       payload: this.deps.permissionAutomation(),
     });
+    const replayOptions: BlockingRequestReplayOptions = {
+      previousRequests: this.blockingRequestsForWebview,
+      clearResolvedEmbedded: options?.clearResolvedEmbedded,
+      workspacePath: editorContext.workspacePath,
+    };
+    if (editorContext.workspaceDirectory) {
+      replayOptions.workspaceDirectory = editorContext.workspaceDirectory;
+      replayOptions.workspaceDirectoryIsOpenRoot = workspaceDirectoryIsOpenRoot;
+    }
     this.sessionState.replayBlockingRequests(
       this.bridge.post.bind(this.bridge),
       new Set([...this.sessionTrash.hiddenSessionIds(), ...this.hiddenSessions.hiddenSessionIds()]),
-      {
-        previousRequests: this.blockingRequestsForWebview,
-        clearResolvedEmbedded: options?.clearResolvedEmbedded,
-        workspacePath: editorContext.workspacePath,
-      }
+      replayOptions
     );
     this.flushPendingInputFocus();
     this.flushPendingSearchSessions();

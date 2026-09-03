@@ -601,6 +601,43 @@ describe('session status helpers', () => {
     );
   });
 
+  it('updates usage limits from the reconciled status after a stale recheck snapshot', async () => {
+    const retryStatus = {
+      type: 'retry',
+      attempt: 2,
+      message: '429 usage limit reached',
+      next: 8_000,
+    } satisfies SessionStatus;
+    const updateUsageLimitState = vi.fn();
+
+    await recheckSessionStatusWithDependencies(
+      {
+        isDocumentVisible: () => true,
+        loadSessionStatuses: async () => ({ 'session-1': { type: 'busy' } }),
+        loadSessionStatusSnapshot: async () => ({
+          statuses: { 'session-1': { type: 'busy' } },
+          startedAt: 1_000,
+        }),
+        shouldIgnorePendingAbortStatus: () => false,
+        hasPendingAbort: () => false,
+        updateUsageLimitState,
+        clearPendingAbort: vi.fn(),
+        stopLoading: vi.fn(),
+        setSessionStatuses: vi.fn(),
+        shouldResyncSessionAfterIdle: () => false,
+        syncSession: vi.fn(async () => {}),
+        syncSessionMessages: vi.fn(async () => {}),
+        startLoading: vi.fn(),
+        isActiveSession: () => false,
+        getCurrentSessionStatus: () => retryStatus,
+        logError: vi.fn(),
+      },
+      'session-1'
+    );
+
+    expect(updateUsageLimitState).toHaveBeenCalledWith('session-1', retryStatus);
+  });
+
   it('keeps loading on busy status even when messages are complete', async () => {
     const stopLoadingSpy = vi.fn();
     const startLoadingSpy = vi.fn();

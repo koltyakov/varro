@@ -112,8 +112,13 @@ function isSensitiveUrlParameter(key: string) {
   const normalized = key.toLowerCase().replaceAll(/[-_.]/g, '');
   return (
     normalized === 'key' ||
+    normalized.endsWith('accesskey') ||
+    normalized.endsWith('accesskeyid') ||
     normalized.endsWith('apikey') ||
+    normalized.endsWith('authorization') ||
     normalized.endsWith('credential') ||
+    normalized.endsWith('passwd') ||
+    normalized.endsWith('password') ||
     normalized.endsWith('secret') ||
     normalized.endsWith('signature') ||
     normalized.endsWith('token')

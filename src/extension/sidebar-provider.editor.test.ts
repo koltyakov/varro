@@ -531,6 +531,54 @@ describe('SidebarProvider editor panels', () => {
     ]);
   });
 
+  it('routes unsaved multi-root workspace events by stored session scope', async () => {
+    const contextProvider = createContextProvider();
+    contextProvider.context.workspacePath = '/repo-b';
+    contextProvider.context.workspaceDirectory = '/repo-a';
+    contextProvider.context.workspaceFolders = [
+      { name: 'Repo A', path: '/repo-a' },
+      { name: 'Repo B', path: '/repo-b' },
+    ];
+    contextProvider.getOpenWorkspaceRoot.mockImplementation((directory: string) =>
+      directory === '/repo-a' || directory === '/repo-b' ? directory : null
+    );
+    const { provider } = await createSidebarProviderInstance({ contextProvider });
+    const { posted } = attachTestView(provider);
+    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
+      .sessionState;
+    sessionState.handleServerEvent({
+      type: 'session.created',
+      properties: { info: { id: 'ordinary-a', directory: '/repo-a' } },
+    });
+    sessionState.handleServerEvent({
+      type: 'session.created',
+      properties: {
+        info: {
+          id: 'workspace-a',
+          directory: '/repo-a',
+          metadata: { varro: { workspaceScope: 'workspace', schemaVersion: 1 } },
+        },
+      },
+    });
+    const ordinaryPermission = {
+      type: 'permission.asked' as const,
+      properties: { id: 'permission-ordinary', sessionID: 'ordinary-a', permission: 'bash' },
+    };
+    const workspaceQuestion = {
+      type: 'question.asked' as const,
+      properties: { id: 'question-workspace', sessionID: 'workspace-a', questions: [] },
+    };
+    sessionState.handleServerEvent(ordinaryPermission);
+    sessionState.handleServerEvent(workspaceQuestion);
+    posted.length = 0;
+
+    provider.post({ type: 'server/event', payload: ordinaryPermission });
+    provider.post({ type: 'server/event', payload: workspaceQuestion });
+
+    expect(posted).not.toContainEqual({ type: 'server/event', payload: ordinaryPermission });
+    expect(posted).toContainEqual({ type: 'server/event', payload: workspaceQuestion });
+  });
+
   it('projects sibling catalog events without detailed session data', async () => {
     const contextProvider = createContextProvider();
     contextProvider.context.workspacePath = '/repo-a';
@@ -2168,6 +2216,44 @@ describe('SidebarProvider editor panels', () => {
 
     expect(statusItem?.hide).toHaveBeenCalledOnce();
     expect(provider.getStatusBarClickAction()).toBe('focus');
+  });
+
+  it('shows status attention for a dedicated multi-root workspace request', async () => {
+    const contextProvider = createContextProvider();
+    contextProvider.context.workspacePath = '/repo-b';
+    contextProvider.context.workspaceDirectory = '/workspaces';
+    contextProvider.context.workspaceFolders = [
+      { name: 'Repo A', path: '/repo-a' },
+      { name: 'Repo B', path: '/repo-b' },
+    ];
+    contextProvider.getOpenWorkspaceRoot.mockImplementation((directory: string) =>
+      directory === '/repo-a' || directory === '/repo-b' ? directory : null
+    );
+    const { provider } = await createSidebarProviderInstance({ contextProvider });
+    const { view } = attachTestView(provider);
+    await provider.handleMessage({ type: 'ready' });
+    view.visible = false;
+    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
+      .sessionState;
+    sessionState.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'workspace-session', directory: '/workspaces' } },
+    });
+    sessionState.handleServerEvent({
+      type: 'permission.asked',
+      properties: {
+        id: 'workspace-permission',
+        sessionID: 'workspace-session',
+        permission: 'bash',
+      },
+    });
+    sessionState.revealPermission('workspace-permission');
+    const statusItem = getVscodeMock().window.createStatusBarItem.mock.results.find(
+      (result) => result.value.name === 'Varro Attention'
+    )?.value;
+
+    expect(statusItem?.text).toBe('$(bell-dot) Varro: 1 waiting');
+    expect(provider.getStatusBarClickAction()).toBe('attention');
   });
 
   it('does not pulse plan attention while the visible chat resumes from a question', async () => {

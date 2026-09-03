@@ -129,7 +129,7 @@ describe('sessionStore', () => {
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(localUpdateTime);
     sessionStore.setSessionStatusEntry('session-1', { type: 'busy' });
 
-    sessionStore.setSessionStatuses(
+    const reconciledStatuses = sessionStore.setSessionStatuses(
       {
         'session-1': { type: 'idle' },
         'session-2': { type: 'busy' },
@@ -141,6 +141,7 @@ describe('sessionStore', () => {
       'session-1': { type: 'busy' },
       'session-2': { type: 'busy' },
     });
+    expect(reconciledStatuses).toEqual(state.sessionStatus);
 
     setMessagesIncremental([{ info: completedAssistantMessage(), parts: [] }]);
 

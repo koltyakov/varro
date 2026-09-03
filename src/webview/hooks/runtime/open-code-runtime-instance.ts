@@ -82,7 +82,10 @@ import {
   createConnectionBootstrapOperations,
   ensureConnectionInitializedWithDependencies,
 } from '../connection-bootstrap';
-import { createStateBoundDataLoaderOperations } from '../data-loaders';
+import {
+  createStateBoundDataLoaderOperations,
+  hydrateSessionStatusesWithDependencies,
+} from '../data-loaders';
 import {
   createMountBridgeOperations,
   postFocusStateWithDependencies,
@@ -1521,17 +1524,16 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   }
 
   async function hydratePolledSessionStatuses(): Promise<void> {
-    try {
-      const snapshot = await loadCurrentSessionStatusSnapshot();
-      sessionStore.setSessionStatuses(snapshot.statuses, {
-        snapshotStartedAt: snapshot.startedAt,
-      });
-      for (const session of appStore.state.sessions) {
-        updateUsageLimitState(session.id, snapshot.statuses[session.id], []);
-      }
-    } catch (err) {
-      logError('session.status', err);
-    }
+    await hydrateSessionStatusesWithDependencies(
+      {
+        loadSessionStatuses: () => client.session.status(),
+        loadSessionStatusSnapshot: loadCurrentSessionStatusSnapshot,
+        setSessionStatuses: sessionStore.setSessionStatuses,
+        getSessions: () => appStore.state.sessions,
+        updateUsageLimitState,
+      },
+      logError
+    );
   }
 
   function recheckSessionStatus(sessionId: string): Promise<void> {

@@ -3,8 +3,12 @@
 import * as vscode from 'vscode';
 import { friendlyErrorName, isAbortedAssistantError } from '../shared/error-classification';
 import type { Persistence } from '../shared/persistence';
-import type { ExtensionMessage, ServerEvent } from '../shared/protocol';
-import { AUTO_APPROVE_JUDGE_TIMEOUT_MS } from '../shared/protocol';
+import type { ExtensionMessage, ServerEvent, SessionWorkspaceScope } from '../shared/protocol';
+import {
+  AUTO_APPROVE_JUDGE_TIMEOUT_MS,
+  getSessionWorkspaceScopeFromMetadata,
+  isSessionWorkspaceScope,
+} from '../shared/protocol';
 import type {
   PermissionEventProperties,
   PermissionV2AskedProperties,
@@ -55,12 +59,21 @@ export type BlockingRequestSnapshot = {
   kind: PendingAttentionKind;
   props: Record<string, unknown>;
   directory?: string;
+  workspaceScope?: SessionWorkspaceScope;
   eventType?: PermissionAskEventType;
 };
 
 export type RecoverySnapshot = {
   interruptedSessions: InterruptedSessionSnapshot[];
   blockingRequests: BlockingRequestSnapshot[];
+};
+
+export type BlockingRequestReplayOptions = {
+  previousRequests?: BlockingRequestSnapshot[];
+  clearResolvedEmbedded?: boolean;
+  workspacePath?: string | null;
+  workspaceDirectory?: string | null;
+  workspaceDirectoryIsOpenRoot?: boolean;
 };
 
 interface PersistedQuestionDefinition {
@@ -141,6 +154,7 @@ export class SessionStateManager {
   private readonly sessionAgents = new Map<string, string>();
   private readonly sessionTitles = new Map<string, string>();
   private readonly sessionDirectories = new Map<string, string>();
+  private readonly sessionWorkspaceScopes = new Map<string, SessionWorkspaceScope>();
   private readonly sessionParentIDs = new Map<string, string>();
   private readonly sessionModes = new Map<string, string>();
   private readonly busyStartedAt = new Map<string, number>();
@@ -400,6 +414,27 @@ export class SessionStateManager {
 
   isSessionInWorkspace(sessionID: string, workspacePath: string | null | undefined): boolean {
     return this.getSessionWorkspaceMatch(sessionID, workspacePath) ?? false;
+  }
+
+  isSessionVisibleInWorkspace(
+    sessionID: string,
+    workspacePath: string | null | undefined,
+    workspaceDirectory: string | null | undefined,
+    workspaceDirectoryIsOpenRoot: boolean
+  ): boolean {
+    if (this.isSessionInWorkspace(sessionID, workspacePath)) return true;
+    if (!workspaceDirectory || !this.isSessionInWorkspace(sessionID, workspaceDirectory)) {
+      return false;
+    }
+    return !workspaceDirectoryIsOpenRoot || this.workspaceScopeFor(sessionID) === 'workspace';
+  }
+
+  workspaceScopeFor(sessionID: string): SessionWorkspaceScope {
+    for (const lineageSessionID of this.sessionLineageFor(sessionID)) {
+      const scope = this.sessionWorkspaceScopes.get(lineageSessionID);
+      if (scope) return scope;
+    }
+    return 'folder';
   }
 
   getSessionWorkspaceMatch(
@@ -1045,11 +1080,11 @@ export class SessionStateManager {
 
   private mergeBlockingRequests(snapshots: BlockingRequestSnapshot[]): void {
     for (const item of snapshots) {
-      if (
-        this.recoveryDeletedSessionIDs.has(item.sessionID) ||
-        this.pendingAttention.has(item.id) ||
-        this.blockingRequestMutations.has(item.id)
-      )
+      if (this.recoveryDeletedSessionIDs.has(item.sessionID)) continue;
+      if (item.workspaceScope) {
+        this.setSessionMetadata(this.sessionWorkspaceScopes, item.sessionID, item.workspaceScope);
+      }
+      if (this.pendingAttention.has(item.id) || this.blockingRequestMutations.has(item.id))
         continue;
       const pending: PendingAttentionEntry = {
         sessionID: item.sessionID,
@@ -1074,11 +1109,7 @@ export class SessionStateManager {
   replayBlockingRequests(
     post: (message: ExtensionMessage) => void,
     hiddenSessionIds: ReadonlySet<string>,
-    options?: {
-      previousRequests?: BlockingRequestSnapshot[];
-      clearResolvedEmbedded?: boolean;
-      workspacePath?: string | null;
-    }
+    options?: BlockingRequestReplayOptions
   ) {
     const currentRequests = [...this.pendingAttention.entries()]
       .map(([id, request]) => ({
@@ -1091,7 +1122,12 @@ export class SessionStateManager {
       .filter(
         (item) =>
           !hiddenSessionIds.has(item.sessionID) &&
-          this.isSessionInWorkspace(item.sessionID, options?.workspacePath)
+          this.isSessionVisibleInWorkspace(
+            item.sessionID,
+            options?.workspacePath,
+            options?.workspaceDirectory,
+            options?.workspaceDirectoryIsOpenRoot ?? false
+          )
       );
     const currentRequestIds = new Set(currentRequests.map((item) => item.id));
 
@@ -1212,6 +1248,9 @@ export class SessionStateManager {
           ),
         };
         if (request.eventType) snapshot.eventType = request.eventType;
+        if (this.workspaceScopeFor(request.sessionID) === 'workspace') {
+          snapshot.workspaceScope = 'workspace';
+        }
         return snapshot;
       })
       .toSorted((a, b) => a.id.localeCompare(b.id))
@@ -1231,6 +1270,9 @@ export class SessionStateManager {
           ),
         };
         if (request.eventType) snapshot.eventType = request.eventType;
+        if (this.workspaceScopeFor(request.sessionID) === 'workspace') {
+          snapshot.workspaceScope = 'workspace';
+        }
         return snapshot;
       })
       .toSorted((a, b) => a.id.localeCompare(b.id))
@@ -1268,6 +1310,12 @@ export class SessionStateManager {
     if (sessionID && parentID) {
       this.setSessionMetadata(this.sessionParentIDs, sessionID, parentID);
     }
+    const workspaceScope = isSessionWorkspaceScope(info?.workspaceScope)
+      ? info.workspaceScope
+      : getSessionWorkspaceScopeFromMetadata(info?.metadata);
+    if (sessionID && workspaceScope) {
+      this.setSessionMetadata(this.sessionWorkspaceScopes, sessionID, workspaceScope);
+    }
     if (sessionID && this.isIgnoredBackgroundSession(sessionID)) {
       alertChanged = this.deleteCompletedSession(sessionID) || alertChanged;
     }
@@ -1298,7 +1346,7 @@ export class SessionStateManager {
     if (sessionID) this.setSessionDirectory(sessionID, directory);
   }
 
-  private getSessionMetadata(map: Map<string, string>, sessionID: string) {
+  private getSessionMetadata<T>(map: Map<string, T>, sessionID: string) {
     const value = map.get(sessionID);
     if (value === undefined) return undefined;
     map.delete(sessionID);
@@ -1310,11 +1358,12 @@ export class SessionStateManager {
     this.getSessionMetadata(this.sessionAgents, sessionID);
     this.getSessionMetadata(this.sessionTitles, sessionID);
     this.getSessionMetadata(this.sessionDirectories, sessionID);
+    this.getSessionMetadata(this.sessionWorkspaceScopes, sessionID);
     this.getSessionMetadata(this.sessionParentIDs, sessionID);
     this.getSessionMetadata(this.sessionModes, sessionID);
   }
 
-  private setSessionMetadata(map: Map<string, string>, sessionID: string, value: string) {
+  private setSessionMetadata<T>(map: Map<string, T>, sessionID: string, value: T) {
     map.delete(sessionID);
     map.set(sessionID, value);
     this.evictOldestSessionMetadata(map);
@@ -1369,7 +1418,7 @@ export class SessionStateManager {
     if (!isSameWorkspacePath(previous, directory)) this.listener.onSessionDirectoryChange?.();
   }
 
-  private evictOldestSessionMetadata(map: Map<string, string>) {
+  private evictOldestSessionMetadata<T>(map: Map<string, T>) {
     while (map.size > MAX_SESSION_METADATA_ENTRIES) {
       let evicted = false;
       for (const sessionID of map.keys()) {
@@ -1439,6 +1488,7 @@ export class SessionStateManager {
     changed = this.sessionAgents.delete(sessionID) || changed;
     changed = this.sessionTitles.delete(sessionID) || changed;
     changed = this.sessionDirectories.delete(sessionID) || changed;
+    changed = this.sessionWorkspaceScopes.delete(sessionID) || changed;
     changed = this.sessionParentIDs.delete(sessionID) || changed;
     changed = this.sessionModes.delete(sessionID) || changed;
     changed = this.unclaimedInterruptedSessions.delete(sessionID) || changed;
@@ -2020,7 +2070,8 @@ function validateBlockingRequestSnapshots(value: unknown): BlockingRequestSnapsh
         typeof item.props === 'object' &&
         (item.eventType === undefined ||
           item.eventType === 'permission.asked' ||
-          item.eventType === 'permission.v2.asked')
+          item.eventType === 'permission.v2.asked') &&
+        (item.workspaceScope === undefined || isSessionWorkspaceScope(item.workspaceScope))
     )
     .slice(0, MAX_PERSISTED_BLOCKING_REQUESTS);
 }

@@ -9,6 +9,7 @@ import {
   forkSessionWithDependencies,
   renameSessionWithDependencies,
   restoreSessionWithDependencies,
+  SessionManagementOperations,
 } from './session/session-management';
 
 function session(id = 'session-1', overrides?: Partial<Session>): Session {
@@ -31,6 +32,18 @@ function deferred<T>() {
     reject = rejectPromise;
   });
   return { promise, resolve, reject };
+}
+
+type OperationsDependencies = ConstructorParameters<typeof SessionManagementOperations>[0];
+
+function renameOperations(
+  deps: Pick<
+    OperationsDependencies,
+    'updateRemoteSession' | 'getSessions' | 'upsertSession' | 'setError'
+  >
+): SessionManagementOperations {
+  // SAFETY: These are all dependencies accessed by renameSession; other operations are not invoked.
+  return new SessionManagementOperations(deps as OperationsDependencies);
 }
 
 describe('session management helpers', () => {
@@ -846,6 +859,139 @@ describe('session management helpers', () => {
     expect(result).toBe(true);
     expect(updateRemoteSession).toHaveBeenCalledWith('session-1', { title: 'Renamed session' });
     expect(upsertSession).toHaveBeenCalledWith({ ...current, title: 'Renamed session' });
+  });
+
+  it('applies only the newest concurrent rename when the older response resolves first', async () => {
+    const firstResponse = deferred<Session>();
+    const secondResponse = deferred<Session>();
+    const responses = [firstResponse, secondResponse];
+    let responseIndex = 0;
+    let sessions = [session('session-1', { title: 'Old title' })];
+    const upsertSession = vi.fn((updated: Session) => {
+      sessions = [updated];
+    });
+    const operations = renameOperations({
+      updateRemoteSession: vi.fn(() => responses[responseIndex++]!.promise),
+      getSessions: () => sessions,
+      upsertSession,
+      setError: vi.fn(),
+    });
+
+    const firstRename = operations.renameSession('session-1', 'First title');
+    const secondRename = operations.renameSession('session-1', 'Second title');
+    firstResponse.resolve(session('session-1', { title: 'First title' }));
+
+    await expect(firstRename).resolves.toBe(true);
+    expect(upsertSession).not.toHaveBeenCalled();
+
+    secondResponse.resolve(session('session-1', { title: 'Second title' }));
+    await expect(secondRename).resolves.toBe(true);
+    expect(sessions[0]?.title).toBe('Second title');
+  });
+
+  it('does not report an error from a superseded rename request', async () => {
+    const firstResponse = deferred<Session>();
+    const secondResponse = deferred<Session>();
+    const responses = [firstResponse, secondResponse];
+    let responseIndex = 0;
+    let sessions = [session('session-1', { title: 'Old title' })];
+    const setError = vi.fn();
+    const operations = renameOperations({
+      updateRemoteSession: vi.fn(() => responses[responseIndex++]!.promise),
+      getSessions: () => sessions,
+      upsertSession: (updated) => {
+        sessions = [updated];
+      },
+      setError,
+    });
+
+    const firstRename = operations.renameSession('session-1', 'First title');
+    const secondRename = operations.renameSession('session-1', 'Second title');
+    secondResponse.resolve(session('session-1', { title: 'Second title' }));
+    await expect(secondRename).resolves.toBe(true);
+
+    firstResponse.reject(new Error('First rename failed'));
+    await expect(firstRename).resolves.toBe(false);
+    expect(setError).not.toHaveBeenCalled();
+  });
+
+  it('does not reuse a rename generation while an older request is pending', async () => {
+    const firstResponse = deferred<Session>();
+    const secondResponse = deferred<Session>();
+    const thirdResponse = deferred<Session>();
+    const responses = [firstResponse, secondResponse, thirdResponse];
+    let responseIndex = 0;
+    let sessions = [session('session-1', { title: 'Old title' })];
+    const setError = vi.fn();
+    const operations = renameOperations({
+      updateRemoteSession: vi.fn(() => responses[responseIndex++]!.promise),
+      getSessions: () => sessions,
+      upsertSession: (updated) => {
+        sessions = [updated];
+      },
+      setError,
+    });
+
+    const firstRename = operations.renameSession('session-1', 'First title');
+    const secondRename = operations.renameSession('session-1', 'Second title');
+    secondResponse.resolve(session('session-1', { title: 'Second title' }));
+    await expect(secondRename).resolves.toBe(true);
+
+    const thirdRename = operations.renameSession('session-1', 'Third title');
+    firstResponse.reject(new Error('First rename failed'));
+    await expect(firstRename).resolves.toBe(false);
+    expect(setError).not.toHaveBeenCalled();
+
+    thirdResponse.resolve(session('session-1', { title: 'Third title' }));
+    await expect(thirdRename).resolves.toBe(true);
+    expect(sessions[0]?.title).toBe('Third title');
+  });
+
+  it('does not overwrite a newer local title when a rename response resolves', async () => {
+    const response = deferred<Session>();
+    let sessions = [session('session-1', { title: 'Old title' })];
+    const upsertSession = vi.fn((updated: Session) => {
+      sessions = [updated];
+    });
+    const pending = renameSessionWithDependencies(
+      {
+        updateRemoteSession: vi.fn(() => response.promise),
+        getSessions: () => sessions,
+        upsertSession,
+        setError: vi.fn(),
+      },
+      'session-1',
+      'Requested title'
+    );
+
+    sessions = [session('session-1', { title: 'Newer event title' })];
+    response.resolve(session('session-1', { title: 'Requested title' }));
+
+    await expect(pending).resolves.toBe(true);
+    expect(sessions[0]?.title).toBe('Newer event title');
+    expect(upsertSession).not.toHaveBeenCalled();
+  });
+
+  it('does not reinsert a session deleted while a rename request is pending', async () => {
+    const response = deferred<Session>();
+    let sessions = [session('session-1', { title: 'Old title' })];
+    const upsertSession = vi.fn();
+    const pending = renameSessionWithDependencies(
+      {
+        updateRemoteSession: vi.fn(() => response.promise),
+        getSessions: () => sessions,
+        upsertSession,
+        setError: vi.fn(),
+      },
+      'session-1',
+      'Requested title'
+    );
+
+    sessions = [];
+    response.resolve(session('session-1', { title: 'Requested title' }));
+
+    await expect(pending).resolves.toBe(true);
+    expect(upsertSession).not.toHaveBeenCalled();
   });
 
   it('rejects an empty manual session title without making a request', async () => {

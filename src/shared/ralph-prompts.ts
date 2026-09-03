@@ -54,18 +54,19 @@ export async function buildIterationPrompt(args: {
   const planContent = await readPlanDocument(config.planDocPath, readFile);
   const planPathWarning = getPlanPromptWarnings(config.planDocPath, planContent);
 
-  return (
-    config.promptTemplate
-      .replaceAll('{{iteration}}', String(iterationIndex))
-      .replaceAll('{{totalIterations}}', String(config.iterations))
-      .replaceAll('{{planPath}}', config.planDocPath)
-      .replaceAll('{{planPathWarning}}', planPathWarning)
-      .replaceAll('{{planContent}}', planContent)
-      // Backwards compat: older custom templates may still reference this
-      // placeholder. Replace it with the generic instruction so the model
-      // still gets useful guidance instead of the literal `{{...}}` token.
-      .replaceAll('{{verificationCommands}}', GENERIC_VERIFICATION_INSTRUCTION)
-      .replaceAll('{{previousSummary}}', previousSummary)
+  const substitutions = new Map([
+    ['{{iteration}}', String(iterationIndex)],
+    ['{{totalIterations}}', String(config.iterations)],
+    ['{{planPath}}', config.planDocPath],
+    ['{{planPathWarning}}', planPathWarning],
+    ['{{planContent}}', planContent],
+    // Backwards compat: older custom templates may still reference this placeholder.
+    ['{{verificationCommands}}', GENERIC_VERIFICATION_INSTRUCTION],
+    ['{{previousSummary}}', previousSummary],
+  ]);
+  return config.promptTemplate.replace(
+    /{{(?:iteration|totalIterations|planPath|planPathWarning|planContent|verificationCommands|previousSummary)}}/g,
+    (placeholder) => substitutions.get(placeholder) ?? placeholder
   );
 }
 

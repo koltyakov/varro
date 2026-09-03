@@ -354,17 +354,21 @@ export async function recheckSessionStatusWithDependencies(
       ? await deps.loadSessionStatusSnapshot()
       : { statuses: await deps.loadSessionStatuses(), startedAt: fallbackStartedAt };
     const { statuses } = snapshot;
-    const status = statuses[sessionId];
-    if (deps.shouldIgnorePendingAbortStatus(sessionId, status)) return;
+    const incomingStatus = statuses[sessionId];
+    if (deps.shouldIgnorePendingAbortStatus(sessionId, incomingStatus)) return;
     deps.setSessionStatuses(
-      { ...statuses, [sessionId]: status ?? { type: 'idle' } },
+      { ...statuses, [sessionId]: incomingStatus ?? { type: 'idle' } },
       { snapshotStartedAt: snapshot.startedAt }
     );
+    const reconciledStatus = deps.getCurrentSessionStatus
+      ? deps.getCurrentSessionStatus(sessionId)
+      : incomingStatus;
 
     const abortedRetry = deps.hasPendingAbort(sessionId);
-    if (!(abortedRetry && (!status || status.type === 'idle'))) {
-      deps.updateUsageLimitState(sessionId, status);
+    if (!(abortedRetry && (!reconciledStatus || reconciledStatus.type === 'idle'))) {
+      deps.updateUsageLimitState(sessionId, reconciledStatus);
     }
+    const status = incomingStatus;
     if (!status || status.type === 'idle') {
       deps.clearPendingAbort(sessionId);
       const syncs: Array<PromiseSettledResult<void>> = [

@@ -2358,6 +2358,43 @@ describe('SessionStateManager notifications', () => {
     expect([...manager.pending.keys()]).toEqual(['permission-1', 'question-2']);
   });
 
+  it('applies recovered workspace scope when the same live request arrives before recovery', async () => {
+    const workspaceState: WorkspaceStateMock = {
+      get: vi.fn((key: string) =>
+        key === 'varro.blockingRequests'
+          ? [
+              {
+                id: 'permission-1',
+                sessionID: 'session-1',
+                kind: 'permission',
+                props: { id: 'permission-1', sessionID: 'session-1' },
+                directory: '/repo-a',
+                workspaceScope: 'workspace',
+              },
+            ]
+          : undefined
+      ),
+      set: vi.fn(() => Promise.resolve()),
+      remove: vi.fn(() => Promise.resolve()),
+    };
+    const manager = new SessionStateManager(
+      workspaceState as never,
+      { onStatusChange: vi.fn() },
+      { shouldShow: () => false }
+    );
+
+    const recovery = manager.consumeRecoverySnapshot();
+    manager.handleServerEvent({
+      type: 'permission.asked',
+      workspaceDirectory: '/repo-a',
+      properties: { id: 'permission-1', sessionID: 'session-1', permission: 'bash' },
+    });
+    await recovery;
+
+    expect(manager.workspaceScopeFor('session-1')).toBe('workspace');
+    expect(manager.isSessionVisibleInWorkspace('session-1', '/repo-b', '/repo-a', true)).toBe(true);
+  });
+
   it('does not resurrect a persisted request replied to during recovery', async () => {
     let releaseBlockingRemove: (() => void) | undefined;
     const workspaceState: WorkspaceStateMock = {
@@ -2803,6 +2840,121 @@ describe('SessionStateManager notifications', () => {
         properties: expect.objectContaining({ id: 'foreign-permission' }),
       },
     });
+  });
+
+  it('replays selected-folder and dedicated workspace-directory prompts together', () => {
+    const manager = createManager(() => false);
+    for (const [sessionID, directory] of [
+      ['folder-session', '/repo-b'],
+      ['workspace-session', '/workspaces'],
+      ['foreign-session', '/repo-a'],
+    ] as const) {
+      manager.handleServerEvent({
+        type: 'session.updated',
+        properties: { info: { id: sessionID, directory } },
+      });
+      manager.handleServerEvent({
+        type: 'permission.asked',
+        properties: { id: `${sessionID}-permission`, sessionID, title: sessionID },
+      });
+    }
+    const post = vi.fn();
+
+    manager.replayBlockingRequests(post, new Set(), {
+      workspacePath: '/repo-b',
+      workspaceDirectory: '/workspaces',
+      workspaceDirectoryIsOpenRoot: false,
+      clearResolvedEmbedded: true,
+      previousRequests: [
+        {
+          id: 'workspace-session-permission',
+          sessionID: 'workspace-session',
+          kind: 'permission',
+          props: { id: 'workspace-session-permission', sessionID: 'workspace-session' },
+        },
+      ],
+    });
+
+    const events = post.mock.calls.map(
+      ([message]) => (message as { payload: { type: string; properties: { id?: string } } }).payload
+    );
+    const replayedIDs = events
+      .filter((event) => event.type === 'permission.asked')
+      .map((event) => event.properties.id);
+    expect(replayedIDs).toEqual(['folder-session-permission', 'workspace-session-permission']);
+    expect(events).not.toContainEqual(
+      expect.objectContaining({
+        type: 'permission.replied',
+        properties: expect.objectContaining({ id: 'workspace-session-permission' }),
+      })
+    );
+  });
+
+  it('uses workspace scope to avoid replaying ordinary first-root prompts across folders', () => {
+    const manager = createManager(() => false);
+    manager.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'ordinary-session', directory: '/repo-a' } },
+    });
+    manager.handleServerEvent({
+      type: 'session.updated',
+      properties: {
+        info: {
+          id: 'workspace-session',
+          directory: '/repo-a',
+          metadata: { varro: { workspaceScope: 'workspace', schemaVersion: 1 } },
+        },
+      },
+    });
+    manager.handleServerEvent({
+      type: 'permission.asked',
+      properties: {
+        id: 'ordinary-permission',
+        sessionID: 'ordinary-session',
+        title: 'Ordinary',
+      },
+    });
+    manager.handleServerEvent({
+      type: 'permission.asked',
+      properties: {
+        id: 'workspace-permission',
+        sessionID: 'workspace-session',
+        title: 'Workspace',
+      },
+    });
+    const post = vi.fn();
+
+    manager.replayBlockingRequests(post, new Set(), {
+      workspacePath: '/repo-b',
+      workspaceDirectory: '/repo-a',
+      workspaceDirectoryIsOpenRoot: true,
+    });
+
+    expect(post).toHaveBeenCalledOnce();
+    expect(post).toHaveBeenCalledWith({
+      type: 'server/event',
+      payload: {
+        type: 'permission.asked',
+        properties: expect.objectContaining({ id: 'workspace-permission' }),
+      },
+    });
+  });
+
+  it('reads projected top-level workspace scope after session metadata is stripped', () => {
+    const manager = createManager(() => false);
+
+    manager.handleServerEvent({
+      type: 'session.updated',
+      properties: {
+        info: {
+          id: 'workspace-session',
+          directory: '/repo-a',
+          workspaceScope: 'workspace',
+        },
+      },
+    });
+
+    expect(manager.workspaceScopeFor('workspace-session')).toBe('workspace');
   });
 
   it('clears an embedded prompt whose session directory is still unknown', () => {

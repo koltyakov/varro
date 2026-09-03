@@ -42,6 +42,7 @@ type WebviewSessionState = Pick<
   | 'clearCompletedInWorkspace'
   | 'consumeRecoverySnapshot'
   | 'isSessionInWorkspace'
+  | 'isSessionVisibleInWorkspace'
   | 'replayBlockingRequests'
 >;
 
@@ -131,8 +132,18 @@ function createSession(options?: {
       } satisfies RecoverySnapshot)
     ),
     isSessionInWorkspace: vi.fn<WebviewSessionState['isSessionInWorkspace']>(() => true),
+    isSessionVisibleInWorkspace: vi.fn<WebviewSessionState['isSessionVisibleInWorkspace']>(
+      () => true
+    ),
     replayBlockingRequests: vi.fn<WebviewSessionState['replayBlockingRequests']>(),
   } satisfies WebviewSessionState;
+  sessionState.isSessionVisibleInWorkspace.mockImplementation(
+    (sessionID, workspacePath, workspaceDirectory) =>
+      sessionState.isSessionInWorkspace(sessionID, workspacePath) ||
+      Boolean(
+        workspaceDirectory && sessionState.isSessionInWorkspace(sessionID, workspaceDirectory)
+      )
+  );
 
   const sessionTrash = {
     hiddenSessionIds: vi.fn(() => new Set<string>()),
@@ -822,6 +833,26 @@ describe('WebviewSession', () => {
     expect(bridge.renderHtml).toHaveBeenCalledWith(
       expect.objectContaining({
         pendingPermissions: [{ id: 'workspace-permission', sessionID: 'workspace-session' }],
+      })
+    );
+  });
+
+  it('replays prompts owned by a dedicated multi-root workspace directory after ready', async () => {
+    const { session, sessionState, contextProvider } = createSession();
+    const view = createWebviewView(true);
+    contextProvider.context.workspacePath = '/repo-b';
+    contextProvider.context.workspaceDirectory = '/workspaces';
+
+    await session.resolve(view as never);
+    await flushMicrotasks();
+    await session.handleReady();
+
+    expect(sessionState.replayBlockingRequests).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.any(Set),
+      expect.objectContaining({
+        workspacePath: '/repo-b',
+        workspaceDirectory: '/workspaces',
       })
     );
   });

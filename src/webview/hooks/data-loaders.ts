@@ -178,7 +178,7 @@ export function createDataLoaderOperations(deps: {
   setSessionStatuses(
     statuses: Record<string, SessionStatus>,
     options?: SessionStatusSnapshotOptions
-  ): void;
+  ): Record<string, SessionStatus> | null;
   getSessions(): Session[];
   clearQueuedMessagesForSession(sessionId: string): void;
   updateUsageLimitState(
@@ -906,10 +906,14 @@ export async function loadRecycleBinWithDependencies(
 export async function hydrateSessionStatusesWithDependencies(
   deps: {
     loadSessionStatuses(): Promise<Record<string, SessionStatus>>;
+    loadSessionStatusSnapshot?(): Promise<{
+      statuses: Record<string, SessionStatus>;
+      startedAt: number;
+    }>;
     setSessionStatuses(
       statuses: Record<string, SessionStatus>,
       options?: SessionStatusSnapshotOptions
-    ): void;
+    ): Record<string, SessionStatus> | null;
     getSessions(): Session[];
     updateUsageLimitState(
       sessionId: string,
@@ -921,10 +925,15 @@ export async function hydrateSessionStatusesWithDependencies(
   isCurrent: () => boolean = () => true
 ) {
   try {
-    const snapshotStartedAt = captureSessionStatusSnapshotTime();
-    const statuses = await deps.loadSessionStatuses();
+    const fallbackStartedAt = captureSessionStatusSnapshotTime();
+    const snapshot = deps.loadSessionStatusSnapshot
+      ? await deps.loadSessionStatusSnapshot()
+      : { statuses: await deps.loadSessionStatuses(), startedAt: fallbackStartedAt };
     if (!isCurrent()) return;
-    deps.setSessionStatuses(statuses, { snapshotStartedAt });
+    const statuses = deps.setSessionStatuses(snapshot.statuses, {
+      snapshotStartedAt: snapshot.startedAt,
+    });
+    if (!statuses) return;
     for (const session of deps.getSessions()) {
       deps.updateUsageLimitState(session.id, statuses[session.id], []);
     }

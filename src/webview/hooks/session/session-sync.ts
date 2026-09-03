@@ -54,7 +54,8 @@ export async function selectSessionWithStateDependencies(
     mergeSessionStatuses(
       statuses: Record<string, SessionStatus>,
       options?: SessionStatusSnapshotOptions
-    ): void;
+    ): Record<string, SessionStatus> | null;
+    getSessionStatus?(sessionId: string): SessionStatus | null | undefined;
     updateUsageLimitState(
       sessionId: string,
       status: SessionStatus | null | undefined,
@@ -155,7 +156,7 @@ type SessionSyncDependencies = {
   mergeSessionStatuses(
     statuses: Record<string, SessionStatus>,
     options?: SessionStatusSnapshotOptions
-  ): void;
+  ): Record<string, SessionStatus> | null;
   updateUsageLimitState(
     sessionId: string,
     status: SessionStatus | null | undefined,
@@ -225,6 +226,7 @@ export class SessionSyncOperations {
         loadQuestions: this.deps.loadQuestions,
         loadSessionStatuses: this.deps.loadSessionStatuses,
         mergeSessionStatuses: this.deps.mergeSessionStatuses,
+        getSessionStatus: this.deps.getSessionStatus,
         updateUsageLimitState: this.deps.updateUsageLimitState,
         startLoading: this.deps.startLoading,
         stopLoading: this.deps.stopLoading,

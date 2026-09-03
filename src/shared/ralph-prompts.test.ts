@@ -76,6 +76,20 @@ describe('ralph prompt helpers', () => {
     expect(prompt).toContain('This is the first iteration.');
   });
 
+  it('preserves replacement tokens and placeholder text in dynamic values', async () => {
+    const prompt = await buildIterationPrompt({
+      config: createConfig({
+        planDocPath: 'plans/$$-$&-{{planContent}}.md',
+        promptTemplate: '{{planPath}}\n{{planContent}}',
+      }),
+      iterationIndex: 1,
+      previousIteration: null,
+      readFile: async () => 'Plan $$ $& {{previousSummary}}',
+    });
+
+    expect(prompt).toBe('plans/$$-$&-{{planContent}}.md\nPlan $$ $& {{previousSummary}}');
+  });
+
   it('includes the current plan document content in the default prompt template', async () => {
     const prompt = await buildIterationPrompt({
       config: createConfig({

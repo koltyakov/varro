@@ -703,6 +703,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   let containerRef: HTMLDivElement | undefined;
   let inputFrameRef: HTMLDivElement | undefined;
   let attachmentRowOwnsPaste = false;
+  let composerDisposed = false;
+  let pdfAttachmentEpoch = 0;
   let permissionPickerRef: HTMLButtonElement | undefined;
   let permissionPopoverRef: HTMLDivElement | undefined;
   let agentPickerRef: HTMLButtonElement | undefined;
@@ -751,6 +753,16 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   let authoritativeQueuedStatusRevision = 0;
   const queuedStatusReconciliationOwner = Symbol();
   const composerSessionId = () => (props.newSession ? null : state.activeSessionId);
+  let pdfAttachmentSessionId = untrack(composerSessionId);
+  const invalidatePendingPdfAttachments = () => {
+    pdfAttachmentEpoch += 1;
+  };
+  createEffect(() => {
+    const sessionId = composerSessionId();
+    if (sessionId === pdfAttachmentSessionId) return;
+    pdfAttachmentSessionId = sessionId;
+    invalidatePendingPdfAttachments();
+  });
   const composerEditingMessage = () => (props.newSession ? null : editingMessage());
   const composerHasActiveQuestion = () => !props.newSession && hasActiveQuestion();
   const composerHasActivePermission = () => !props.newSession && hasActivePermission();
@@ -810,6 +822,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   });
 
   async function attachNativePdfFiles(files: File[]) {
+    const ownerSessionId = composerSessionId();
+    const ownerEpoch = pdfAttachmentEpoch;
+    const ownsComposer = () =>
+      !composerDisposed &&
+      composerSessionId() === ownerSessionId &&
+      pdfAttachmentEpoch === ownerEpoch;
     let remaining =
       MAX_NATIVE_PDF_TOTAL_BYTES - state.nativePdfs.reduce((total, pdf) => total + pdf.size, 0);
     let rejected = false;
@@ -820,6 +838,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       }
       try {
         const content = await readPdfFile(file);
+        if (!ownsComposer()) return;
         const id = createAttachmentID();
         // SAFETY: The surrounding shape or discriminator check establishes the File contract used below.
         const path = (file as File & { path?: string }).path;
@@ -848,6 +867,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           }
         } else rejected = true;
       } catch (err) {
+        if (!ownsComposer()) return;
         logError('chat-input:readPdf', err);
         rejected = true;
       }
@@ -913,8 +933,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const [historyDraft, setHistoryDraft] = createSignal('');
   const [loadingOlderMessageHistory, setLoadingOlderMessageHistory] = createSignal(false);
   const [caretPosition, setCaretPosition] = createSignal(0);
-  // Guards async paste follow-ups against landing in a torn-down composer.
-  let composerDisposed = false;
+  // Guards async attachment follow-ups against landing in a torn-down composer.
   const pendingPasteTransactions: PasteTransaction[] = [];
   const pasteTransactionsByEvent = new Map<ClipboardEvent, PasteTransaction>();
   const pendingImageStores = new Set<string>();
@@ -933,6 +952,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   };
   onCleanup(() => {
     composerDisposed = true;
+    invalidatePendingPdfAttachments();
     pendingPasteTransactions.length = 0;
     pasteTransactionsByEvent.clear();
     pendingImageStores.clear();
@@ -1956,6 +1976,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (builtInCommand === null && !fallbackCommand && !skillCommand) return false;
     setHistoryIndex(null);
     setHistoryDraft('');
+    invalidatePendingPdfAttachments();
     setInputText('');
     resetPastedImageIndex();
     setCompletionIndex(0);
@@ -2078,6 +2099,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       setHistoryIndex(null);
       setHistoryDraft('');
       setCompletionIndex(0);
+      invalidatePendingPdfAttachments();
       setInputText('');
       const clearedInputVersion = inputTextMutationVersion();
       resetPastedImageIndex();
@@ -2213,6 +2235,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       setHistoryIndex(null);
       setHistoryDraft('');
       setCompletionIndex(0);
+      invalidatePendingPdfAttachments();
       setInputText('');
       clearContextFiles();
       setState('terminalSelection', null);
@@ -2230,6 +2253,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     setCompletionIndex(0);
     holdComposerHeightUntilMessageAppend(sendSessionId);
     setWorkspaceSendPending(true);
+    invalidatePendingPdfAttachments();
     setInputText('');
     const clearedInputVersion = inputTextMutationVersion();
     resetPastedImageIndex();
@@ -2732,6 +2756,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       setState('attachedDiagnostics', null);
       clearClipboardImages();
       clearNativePdfs();
+      invalidatePendingPdfAttachments();
       resetPastedImageIndex();
       setComposerValue('');
     });

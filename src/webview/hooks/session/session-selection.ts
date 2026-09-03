@@ -55,7 +55,8 @@ type SessionSelectionDeps = {
   mergeSessionStatuses(
     statuses: Record<string, SessionStatus>,
     options?: SessionStatusSnapshotOptions
-  ): void;
+  ): Record<string, SessionStatus> | null;
+  getSessionStatus?(sessionId: string): SessionStatus | null | undefined;
   updateUsageLimitState(
     sessionId: string,
     status: SessionStatus | null | undefined,
@@ -173,9 +174,12 @@ export async function selectSessionWithDependencies(
   const statuses = await statusSync;
   if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
   if (statuses) {
-    deps.mergeSessionStatuses(statuses, { snapshotStartedAt: statusSnapshotStartedAt });
-    deps.updateUsageLimitState(id, statuses[id], messages);
-    const statusType = statuses[id]?.type;
+    const reconciledStatuses = deps.mergeSessionStatuses(statuses, {
+      snapshotStartedAt: statusSnapshotStartedAt,
+    });
+    const status = reconciledStatuses?.[id] ?? deps.getSessionStatus?.(id);
+    deps.updateUsageLimitState(id, status, messages);
+    const statusType = status?.type;
     if (
       persistedAgent &&
       inferredAgent &&
