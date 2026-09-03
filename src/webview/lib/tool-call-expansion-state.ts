@@ -46,6 +46,10 @@ export function getMessageBlockExpanded(key: string) {
   return readEntry(messageBlockExpansionState, key);
 }
 
+export function getAssistantErrorDetailsExpansionKey(messageId: string) {
+  return `assistant-error-details:${messageId}`;
+}
+
 export function setMessageBlockExpanded(key: string, expanded: boolean) {
   writeEntry(messageBlockExpansionState, key, expanded);
   setMessageBlockExpansionVersion((version) => version + 1);

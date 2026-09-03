@@ -300,6 +300,21 @@ export function getThinkingLayoutSignatures(
   return signatures;
 }
 
+export function getErrorDetailsLayoutSignatures(
+  messages: readonly {
+    info: { id: string; role: 'user' | 'assistant'; error?: unknown };
+  }[],
+  expandedMessageIds: ReadonlySet<string>
+) {
+  return new Map(
+    messages.flatMap((message) =>
+      message.info.role === 'assistant' && message.info.error
+        ? [[message.info.id, expandedMessageIds.has(message.info.id) ? 'expanded' : 'collapsed']]
+        : []
+    )
+  );
+}
+
 export function getCompactActivityDisclosureLayoutSignatures(
   groups: ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>,
   isExpanded: (key: string) => boolean,

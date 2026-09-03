@@ -2677,7 +2677,34 @@ describe('Message assistant final answer rendering', () => {
     expect(details?.textContent).toContain('(empty response body)');
     expect(details?.textContent).toContain('cf-ray: a3558afbee816c31-DFW');
     expect(detailsToggle?.getAttribute('aria-expanded')).toBe('true');
+    const detailsId = detailsToggle?.getAttribute('aria-controls');
+    expect(detailsId).toBeTruthy();
+    expect(details?.id).toBe(detailsId);
     expect(detailsToggle?.textContent).toContain('Hide details');
+  });
+
+  it('keeps provider error details open when the message remounts', () => {
+    const info = {
+      ...assistantMessage('message-3'),
+      error: {
+        name: 'APIError' as const,
+        data: { message: 'Not Found', statusCode: 404, isRetryable: true },
+      },
+    };
+    cleanup = render(() => Message({ info, parts: [] }), container!);
+    container
+      ?.querySelector<HTMLButtonElement>('.assistant-message-flow-item-error-details-toggle')
+      ?.click();
+    cleanup();
+
+    cleanup = render(() => Message({ info, parts: [] }), container!);
+
+    expect(
+      container
+        ?.querySelector('.assistant-message-flow-item-error-details-toggle')
+        ?.getAttribute('aria-expanded')
+    ).toBe('true');
+    expect(container?.querySelector('.assistant-message-flow-item-error-details')).not.toBeNull();
   });
 
   it('renders a retry action for the latest assistant error and retries that turn', async () => {

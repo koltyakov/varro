@@ -1051,6 +1051,7 @@ body.vscode-light
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;
+  user-select: none;
 }
 
 .assistant-message-flow-item-error-details-toggle:hover {

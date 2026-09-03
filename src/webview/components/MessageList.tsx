@@ -96,6 +96,7 @@ import {
   getToolCallLookupKey,
 } from '../lib/tool-call-matching';
 import {
+  getAssistantErrorDetailsExpansionKey,
   getMessageBlockExpanded,
   trackMessageBlockExpansionState,
 } from '../lib/tool-call-expansion-state';
@@ -167,6 +168,7 @@ import {
   getBorderedAdjacencyLayoutSignatures,
   getCompactActivityDisclosureLayoutSignatures,
   getCompactActivityLayoutSignatures,
+  getErrorDetailsLayoutSignatures,
   getInlinePreviewLayoutSignatures,
   getMessageBlockBoundaryMap,
   getRenderEmptyMessageIds,
@@ -6701,6 +6703,23 @@ export function MessageList() {
     });
 
     previousThinkingLayoutSignatures = new Map(current);
+  });
+  const errorDetailsLayoutSignatures = createMemo(() => {
+    trackMessageBlockExpansionState();
+    const expandedMessageIds = new Set(
+      messages().flatMap((message) =>
+        getMessageBlockExpanded(getAssistantErrorDetailsExpansionKey(message.info.id))
+          ? [message.info.id]
+          : []
+      )
+    );
+    return getErrorDetailsLayoutSignatures(messages(), expandedMessageIds);
+  });
+  let previousErrorDetailsLayoutSignatures = new Map<string, string>();
+  createEffect(() => {
+    const current = errorDetailsLayoutSignatures();
+    scheduleChangedLayoutRowMeasurements(previousErrorDetailsLayoutSignatures, current);
+    previousErrorDetailsLayoutSignatures = new Map(current);
   });
   const compactActivityMessages = createMemo(() => {
     const previousSignatures = previousTrailingFileEventSignatureMap();

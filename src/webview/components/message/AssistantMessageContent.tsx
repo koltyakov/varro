@@ -40,6 +40,7 @@ import {
 } from '../../lib/tool-file-change';
 import type { ToolCallPermissionMatch } from '../../lib/tool-call-matching';
 import {
+  getAssistantErrorDetailsExpansionKey,
   getMessageBlockExpanded,
   setMessageBlockExpanded,
   trackMessageBlockExpansionState,
@@ -402,7 +403,16 @@ export function AssistantMessageContent(props: {
 }) {
   const dedupedParts = createMemo(() => deduplicateFileEdits(props.parts));
   const [readModeOpen, setReadModeOpen] = createSignal(false);
-  const [errorDetailsOpen, setErrorDetailsOpen] = createSignal(false);
+  const errorDetailsExpansionKey = () => getAssistantErrorDetailsExpansionKey(props.info.id);
+  const [errorDetailsOpen, setErrorDetailsOpen] = createSignal(
+    getMessageBlockExpanded(errorDetailsExpansionKey()) ?? false
+  );
+  const errorDetailsId = () => `assistant-error-details-${props.info.id}`;
+  const toggleErrorDetails = () => {
+    const open = !errorDetailsOpen();
+    setMessageBlockExpanded(errorDetailsExpansionKey(), open);
+    setErrorDetailsOpen(open);
+  };
   const displayParts = createMemo(() => {
     const visibleParts = dedupedParts().filter(
       (part) => part.type !== 'tool' || shouldShowAssistantPartInline(part)
@@ -1009,12 +1019,15 @@ export function AssistantMessageContent(props: {
               type="button"
               class="assistant-message-flow-item-error-details-toggle"
               aria-expanded={errorDetailsOpen()}
-              onClick={() => setErrorDetailsOpen((open) => !open)}
+              aria-controls={errorDetailsId()}
+              onClick={toggleErrorDetails}
             >
               {errorDetailsOpen() ? 'Hide details' : 'Details'}
             </button>
             <Show when={errorDetailsOpen()}>
-              <pre class="assistant-message-flow-item-error-details">{props.errorDetails!}</pre>
+              <pre id={errorDetailsId()} class="assistant-message-flow-item-error-details">
+                {props.errorDetails!}
+              </pre>
             </Show>
           </Show>
           <Show when={props.errorAction || props.onRetry}>

@@ -14,7 +14,8 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 - Reduced startup overhead by activating Varro only when used and connecting to healthy servers before maintenance finishes.
 - Stabilized long-conversation history loading, scroll anchoring when approved tools collapse, prompt-number navigation, streaming Markdown, and session lists with deeply nested subagents.
 - Fixed Enter submission for custom question answers and kept active auto-approve reviews visible.
-- Limited malformed or excessive server events, process output, attachment cleanup, and other background work to keep the extension responsive under heavy load.
+- Clarified provider failures with provider-aware messages, expandable diagnostics, redacted credentials, and stable detail expansion in virtualized conversations.
+- Improved high-frequency server event handling and OpenCode update support while limiting malformed events, process output, attachment cleanup, and other background work under heavy load.
 
 ## 0.27.x - August 2026
 

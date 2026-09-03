@@ -105,6 +105,21 @@ describe('formatProviderErrorMessage', () => {
     );
   });
 
+  it('does not attribute known non-provider errors to the provider', () => {
+    expect(
+      formatProviderErrorMessage(
+        { name: 'StructuredOutputError', data: { message: 'Invalid output' } },
+        { providerID: 'openai' }
+      )
+    ).toBeNull();
+    expect(
+      formatProviderErrorMessage(
+        { name: 'UnknownError', data: { message: 'Not Found' } },
+        { providerID: 'openai' }
+      )
+    ).toBeNull();
+  });
+
   it('falls back to a generic subject when provider is missing', () => {
     expect(
       formatProviderErrorMessage({
@@ -176,6 +191,30 @@ describe('formatProviderErrorDetails', () => {
       },
     });
     expect(details).toContain('https://chatgpt.com/backend-api/codex/responses');
+  });
+
+  it('redacts credentials from diagnostic URLs', () => {
+    const details = formatProviderErrorDetails({
+      name: 'APIError',
+      data: {
+        url: 'https://user:password@example.com/v1?api_key=secret&access-token=token&mode=test#private',
+      },
+    });
+
+    expect(details).toContain(
+      'https://REDACTED@example.com/v1?api_key=REDACTED&access-token=REDACTED&mode=test'
+    );
+    expect(details).not.toContain('user');
+    expect(details).not.toContain('password');
+    expect(details).not.toContain('secret');
+    expect(details).not.toContain('token&');
+    expect(details).not.toContain('private');
+  });
+
+  it('omits malformed diagnostic URLs', () => {
+    expect(
+      formatProviderErrorDetails({ name: 'APIError', data: { url: 'http://[invalid' } })
+    ).toContain('(invalid URL omitted)');
   });
 
   it('omits missing context and status code pieces', () => {

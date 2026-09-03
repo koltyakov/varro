@@ -54,6 +54,15 @@ export function isTransientProviderConnectionError(
 const MODEL_NOT_FOUND_RE = /\bnot\s+found\b|\bdoes not exist\b|\bunknown model\b/i;
 const TERSE_ERROR_MESSAGE_RE = /^[a-z][a-z0-9 .,'-]{0,63}$/i;
 const PROVIDER_API_ERROR_NAMES = new Set(['APIError', 'AI_APICallError']);
+const KNOWN_NON_PROVIDER_ERROR_NAMES = new Set([
+  'ContentFilterError',
+  'ContextOverflowError',
+  'MessageAbortedError',
+  'MessageOutputLengthError',
+  'ProviderAuthError',
+  'StructuredOutputError',
+  'UnknownError',
+]);
 
 export type ApiErrorMessageContext = {
   providerID?: string | null;
@@ -75,6 +84,7 @@ export function formatProviderErrorMessage(
   context: Pick<ApiErrorMessageContext, 'providerID'> = {}
 ): string | null {
   if (!error || isAbortedAssistantError(error)) return null;
+  if (KNOWN_NON_PROVIDER_ERROR_NAMES.has(error.name ?? '')) return null;
   const message = error.data?.message?.trim();
   if (!message) {
     if (!PROVIDER_API_ERROR_NAMES.has(error.name ?? '')) return null;
@@ -97,6 +107,36 @@ const DIAGNOSTIC_RESPONSE_HEADERS = new Set([
   'server',
   'x-request-id',
 ]);
+
+function isSensitiveUrlParameter(key: string) {
+  const normalized = key.toLowerCase().replaceAll(/[-_.]/g, '');
+  return (
+    normalized === 'key' ||
+    normalized.endsWith('apikey') ||
+    normalized.endsWith('credential') ||
+    normalized.endsWith('secret') ||
+    normalized.endsWith('signature') ||
+    normalized.endsWith('token')
+  );
+}
+
+function sanitizeDiagnosticUrl(value: string) {
+  try {
+    const absolute = /^[a-z][a-z0-9+.-]*:/i.test(value);
+    const url = new URL(value, 'https://diagnostic.invalid');
+    if (url.username || url.password) {
+      url.username = 'REDACTED';
+      url.password = '';
+    }
+    url.hash = '';
+    for (const key of new Set(url.searchParams.keys())) {
+      if (isSensitiveUrlParameter(key)) url.searchParams.set(key, 'REDACTED');
+    }
+    return absolute ? url.toString() : `${url.pathname}${url.search}`;
+  } catch {
+    return '(invalid URL omitted)';
+  }
+}
 
 export function formatProviderErrorDetails(
   error:
@@ -124,7 +164,7 @@ export function formatProviderErrorDetails(
   if (subject) lines.push(subject);
   lines.push(statusCode ? `${name} (HTTP ${statusCode})` : name);
   const url = error.data?.url?.trim() || error.data?.metadata?.url?.trim();
-  if (url) lines.push(url);
+  if (url) lines.push(sanitizeDiagnosticUrl(url));
   const message = error.data?.message?.trim();
   if (message) lines.push(message);
   const responseBody = error.data?.responseBody?.trim();

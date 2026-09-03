@@ -19,6 +19,7 @@ import {
   getBorderedAdjacencyLayoutSignatures,
   getCompactActivityDisclosureLayoutSignatures,
   getCompactActivityLayoutSignatures,
+  getErrorDetailsLayoutSignatures,
   getInlinePreviewLayoutSignatures,
   getMessageBlockBoundaryMap,
   getThinkingLayoutSignatures,
@@ -339,6 +340,23 @@ describe('thinking virtualization signatures', () => {
 
     const collapsed = getThinkingLayoutSignatures(messages, true, new Set());
     const expanded = getThinkingLayoutSignatures(messages, true, new Set(['assistant-1']));
+
+    expect(
+      getChangedInlinePreviewMessageIds(collapsed, expanded, new Set(['assistant-1']))
+    ).toEqual(['assistant-1']);
+  });
+});
+
+describe('error-details virtualization signatures', () => {
+  it('revises cached row geometry when error details expand', () => {
+    const messages = [
+      {
+        info: { id: 'assistant-1', role: 'assistant' as const, error: { name: 'APIError' } },
+      },
+    ];
+
+    const collapsed = getErrorDetailsLayoutSignatures(messages, new Set());
+    const expanded = getErrorDetailsLayoutSignatures(messages, new Set(['assistant-1']));
 
     expect(
       getChangedInlinePreviewMessageIds(collapsed, expanded, new Set(['assistant-1']))
