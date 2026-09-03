@@ -8,6 +8,8 @@ import {
   untrack,
 } from 'solid-js';
 import {
+  formatProviderErrorDetails,
+  formatProviderErrorMessage,
   friendlyErrorName,
   isAbortedAssistantError,
   isProviderAuthFailure,
@@ -286,8 +288,21 @@ export function Message(props: {
       return 'You are signed out of this provider. Re-authenticate to continue.';
     }
     const message = error?.data?.message?.trim();
+    const info = assistant();
+    const providerMessage = formatProviderErrorMessage(error, {
+      providerID: info?.providerID,
+    });
+    if (providerMessage) return providerMessage;
     if (message) return message;
     return friendlyErrorName(error?.name);
+  });
+  const assistantErrorDetails = createMemo(() => {
+    if (!assistantErrorMessage()) return null;
+    const info = assistant();
+    return formatProviderErrorDetails(info?.error, {
+      providerID: info?.providerID,
+      modelID: info?.modelID,
+    });
   });
   const canRetryAssistant = createMemo(() => {
     const error = assistant()?.error;
@@ -583,6 +598,7 @@ export function Message(props: {
                 info={assistant() as AssistantMessage}
                 parts={visibleAssistantParts()}
                 errorMessage={assistantErrorMessage()}
+                errorDetails={assistantErrorDetails()}
                 errorAction={assistantErrorAction()}
                 highlightFinalAnswer={props.highlightFinalAnswer}
                 highlightPlanningAnswer={props.highlightPlanningAnswer}

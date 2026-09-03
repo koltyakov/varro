@@ -1039,6 +1039,40 @@ body.vscode-light
   margin-top: 10px;
 }
 
+.assistant-message-flow-item-error-details-toggle {
+  margin-top: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  opacity: 0.75;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.assistant-message-flow-item-error-details-toggle:hover {
+  opacity: 1;
+}
+
+.assistant-message-flow-item-error-details {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  max-height: 180px;
+  overflow: auto;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-vscode-error) 10%, transparent);
+  color: inherit;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
 .assistant-message-flow-item-error-action {
   font: inherit;
 }

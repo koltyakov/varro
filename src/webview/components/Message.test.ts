@@ -2614,6 +2614,72 @@ describe('Message assistant final answer rendering', () => {
     expect(diffSummary).toBeNull();
   });
 
+  it('renders terse provider API errors with provider and model context', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: {
+            ...assistantMessage('message-3'),
+            error: {
+              name: 'APIError',
+              data: { message: 'Not Found', statusCode: 404, isRetryable: true },
+            },
+          },
+          parts: [reasoningPart('reason-1', 'Inspecting')],
+        }),
+      container!
+    );
+
+    const errorText = container?.querySelector('.assistant-message-flow-item-error');
+
+    expect(errorText?.textContent).toContain(
+      'The provider-1 provider returned "Not Found". The model or API endpoint may be unavailable.'
+    );
+  });
+
+  it('reveals the original provider error from a details toggle', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: {
+            ...assistantMessage('message-3'),
+            error: {
+              name: 'APIError',
+              data: {
+                message: 'Not Found',
+                statusCode: 404,
+                isRetryable: true,
+                responseBody: '',
+                responseHeaders: { server: 'cloudflare', 'cf-ray': 'a3558afbee816c31-DFW' },
+                metadata: { url: 'https://api.openai.com/v1/responses' },
+              },
+            },
+          },
+          parts: [reasoningPart('reason-1', 'Inspecting')],
+        }),
+      container!
+    );
+
+    const detailsToggle = container?.querySelector<HTMLButtonElement>(
+      '.assistant-message-flow-item-error-details-toggle'
+    );
+    expect(detailsToggle).toBeInstanceOf(HTMLButtonElement);
+    expect(detailsToggle?.textContent).toContain('Details');
+    expect(container?.querySelector('.assistant-message-flow-item-error-details')).toBeNull();
+
+    detailsToggle?.click();
+
+    const details = container?.querySelector('.assistant-message-flow-item-error-details');
+    expect(details?.textContent).toContain('provider-1 / model-1');
+    expect(details?.textContent).toContain('APIError (HTTP 404)');
+    expect(details?.textContent).toContain('https://api.openai.com/v1/responses');
+    expect(details?.textContent).toContain('Not Found');
+    expect(details?.textContent).toContain('(empty response body)');
+    expect(details?.textContent).toContain('cf-ray: a3558afbee816c31-DFW');
+    expect(detailsToggle?.getAttribute('aria-expanded')).toBe('true');
+    expect(detailsToggle?.textContent).toContain('Hide details');
+  });
+
   it('renders a retry action for the latest assistant error and retries that turn', async () => {
     const { setState } = await import('../lib/state');
     const user = userMessage('message-2');

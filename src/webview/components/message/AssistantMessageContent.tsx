@@ -377,6 +377,7 @@ export function AssistantMessageContent(props: {
   info: AssistantMessage;
   parts: Part[];
   errorMessage?: string | null;
+  errorDetails?: string | null;
   errorAction?: { label: string; run: () => void } | undefined;
   onRetry?: (() => void) | undefined;
   highlightFinalAnswer?: boolean;
@@ -401,6 +402,7 @@ export function AssistantMessageContent(props: {
 }) {
   const dedupedParts = createMemo(() => deduplicateFileEdits(props.parts));
   const [readModeOpen, setReadModeOpen] = createSignal(false);
+  const [errorDetailsOpen, setErrorDetailsOpen] = createSignal(false);
   const displayParts = createMemo(() => {
     const visibleParts = dedupedParts().filter(
       (part) => part.type !== 'tool' || shouldShowAssistantPartInline(part)
@@ -1000,8 +1002,21 @@ export function AssistantMessageContent(props: {
         )}
       </Show>
       <Show when={props.errorMessage}>
-        <div class="assistant-message-flow-item assistant-message-flow-item-error assistant-flow-block-starts-bordered assistant-flow-block-ends-bordered rendered-markdown">
+        <div class="assistant-message-flow-item-error assistant-message-flow-item-error-rendered-markdown assistant-flow-block-starts-bordered assistant-flow-block-ends-bordered rendered-markdown">
           <p>{props.errorMessage!}</p>
+          <Show when={props.errorDetails}>
+            <button
+              type="button"
+              class="assistant-message-flow-item-error-details-toggle"
+              aria-expanded={errorDetailsOpen()}
+              onClick={() => setErrorDetailsOpen((open) => !open)}
+            >
+              {errorDetailsOpen() ? 'Hide details' : 'Details'}
+            </button>
+            <Show when={errorDetailsOpen()}>
+              <pre class="assistant-message-flow-item-error-details">{props.errorDetails!}</pre>
+            </Show>
+          </Show>
           <Show when={props.errorAction || props.onRetry}>
             <div class="assistant-message-flow-item-error-actions">
               <button

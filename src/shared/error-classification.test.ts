@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  formatProviderErrorDetails,
+  formatProviderErrorMessage,
   friendlyErrorName,
   isAbortedAssistantError,
   isAbortedToolError,
@@ -31,6 +33,200 @@ describe('friendlyErrorName', () => {
     expect(friendlyErrorName(undefined)).toBeNull();
     expect(friendlyErrorName('')).toBeNull();
     expect(friendlyErrorName('   ')).toBeNull();
+  });
+});
+
+describe('formatProviderErrorMessage', () => {
+  it('stays non-committal about the cause for a bare 404', () => {
+    expect(
+      formatProviderErrorMessage(
+        { name: 'APIError', data: { message: 'Not Found', statusCode: 404 } },
+        { providerID: 'openai' }
+      )
+    ).toBe(
+      'The openai provider returned "Not Found". The model or API endpoint may be unavailable.'
+    );
+  });
+
+  it('accepts the AI SDK error name alongside opencode APIError', () => {
+    expect(
+      formatProviderErrorMessage(
+        { name: 'AI_APICallError', data: { message: 'Not Found', statusCode: 404 } },
+        { providerID: 'openai' }
+      )
+    ).toBe(
+      'The openai provider returned "Not Found". The model or API endpoint may be unavailable.'
+    );
+  });
+
+  it('keeps the raw wording when the provider names the model', () => {
+    expect(
+      formatProviderErrorMessage(
+        { name: 'APIError', data: { message: 'Model not found' } },
+        { providerID: 'openai' }
+      )
+    ).toBe(
+      'The openai provider returned "Model not found". The model or API endpoint may be unavailable.'
+    );
+  });
+
+  it('omits the provider clause when providerID is missing', () => {
+    expect(
+      formatProviderErrorMessage({
+        name: 'APIError',
+        data: { message: 'Not Found', statusCode: 404 },
+      })
+    ).toBe('The provider returned "Not Found". The model or API endpoint may be unavailable.');
+  });
+
+  it('wraps terse provider errors with provider context', () => {
+    expect(
+      formatProviderErrorMessage(
+        { name: 'APIError', data: { message: 'Internal Server Error', statusCode: 500 } },
+        { providerID: 'openai' }
+      )
+    ).toBe('The openai provider returned an error: Internal Server Error');
+  });
+
+  it('wraps terse messages from legacy or unknown error shapes too', () => {
+    expect(
+      formatProviderErrorMessage(
+        { name: 'server_error', data: { message: 'Internal Server Error' } },
+        { providerID: 'github-copilot' }
+      )
+    ).toBe('The github-copilot provider returned an error: Internal Server Error');
+    expect(
+      formatProviderErrorMessage(
+        { name: 'server_error', data: { message: 'Not Found' } },
+        { providerID: 'github-copilot' }
+      )
+    ).toBe(
+      'The github-copilot provider returned "Not Found". The model or API endpoint may be unavailable.'
+    );
+  });
+
+  it('falls back to a generic subject when provider is missing', () => {
+    expect(
+      formatProviderErrorMessage({
+        name: 'APIError',
+        data: { message: 'Not Found', statusCode: 404 },
+      })
+    ).toBe('The provider returned "Not Found". The model or API endpoint may be unavailable.');
+  });
+
+  it('synthesizes context from the status code when the message is missing', () => {
+    expect(
+      formatProviderErrorMessage(
+        { name: 'APIError', data: { statusCode: 503 } },
+        { providerID: 'openai' }
+      )
+    ).toBe('The openai provider returned an error (HTTP 503).');
+    expect(
+      formatProviderErrorMessage({ name: 'APIError', data: {} }, { providerID: 'openai' })
+    ).toBe('The openai provider returned an error.');
+  });
+
+  it('returns null for descriptive messages so the raw text is shown', () => {
+    const message = "This model's maximum context length is 200000 tokens. However, you requested.";
+    expect(
+      formatProviderErrorMessage(
+        { name: 'APIError', data: { message, statusCode: 400 } },
+        { providerID: 'openai' }
+      )
+    ).toBeNull();
+  });
+
+  it('returns null for aborted errors and missing errors', () => {
+    expect(
+      formatProviderErrorMessage(
+        { name: 'aborted', data: { message: 'aborted' } },
+        { providerID: 'openai' }
+      )
+    ).toBeNull();
+    expect(formatProviderErrorMessage(undefined)).toBeNull();
+  });
+});
+
+describe('formatProviderErrorDetails', () => {
+  it('returns the raw provider error with context, name, status, and URL', () => {
+    expect(
+      formatProviderErrorDetails(
+        {
+          name: 'APIError',
+          data: {
+            message: 'Not Found',
+            statusCode: 404,
+            metadata: { url: 'https://api.openai.com/v1/responses' },
+          },
+        },
+        { providerID: 'openai', modelID: 'gpt-5.6-sol' }
+      )
+    ).toBe(
+      'openai / gpt-5.6-sol\nAPIError (HTTP 404)\nhttps://api.openai.com/v1/responses\nNot Found'
+    );
+  });
+
+  it('reads the URL from data.url when metadata is absent', () => {
+    const details = formatProviderErrorDetails({
+      name: 'APIError',
+      data: {
+        message: 'Not Found',
+        statusCode: 404,
+        url: 'https://chatgpt.com/backend-api/codex/responses',
+      },
+    });
+    expect(details).toContain('https://chatgpt.com/backend-api/codex/responses');
+  });
+
+  it('omits missing context and status code pieces', () => {
+    expect(formatProviderErrorDetails({ name: 'server_error', data: {} })).toBe('server_error');
+    expect(formatProviderErrorDetails({ name: 'APIError', data: { message: 'Not Found' } })).toBe(
+      'APIError\nNot Found'
+    );
+  });
+
+  it('appends a truncated response body when present', () => {
+    const body = 'x'.repeat(2500);
+    const details = formatProviderErrorDetails({
+      name: 'APIError',
+      data: { message: 'Bad Request', statusCode: 400, responseBody: body },
+    });
+    expect(details).toContain('APIError (HTTP 400)');
+    expect(details).toContain('Bad Request');
+    expect(details?.endsWith('...')).toBe(true);
+    expect(details?.length).toBeLessThan(body.length);
+  });
+
+  it('marks an empty response body and includes only diagnostic headers', () => {
+    const details = formatProviderErrorDetails({
+      name: 'APIError',
+      data: {
+        message: 'Not Found',
+        statusCode: 404,
+        responseBody: '',
+        responseHeaders: {
+          server: 'cloudflare',
+          'cf-ray': 'a3558afbee816c31-DFW',
+          'content-type': 'text/html',
+          nel: '{"report_to":"cf-nel"}',
+          'x-empty': '   ',
+        },
+      },
+    });
+    expect(details).toContain('(empty response body)');
+    expect(details).toContain('cf-ray: a3558afbee816c31-DFW');
+    expect(details).toContain('server: cloudflare');
+    expect(details).not.toContain('content-type');
+    expect(details).not.toContain('nel');
+    expect(details).not.toContain('x-empty');
+    expect(details?.indexOf('cf-ray:')).toBeLessThan(details?.indexOf('server:') ?? 0);
+  });
+
+  it('returns null for aborted or missing errors', () => {
+    expect(
+      formatProviderErrorDetails({ name: 'aborted', data: { message: 'aborted' } })
+    ).toBeNull();
+    expect(formatProviderErrorDetails(undefined)).toBeNull();
   });
 });
 
