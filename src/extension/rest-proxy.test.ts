@@ -3992,6 +3992,50 @@ describe('RestProxy handleRequest', () => {
     }
   );
 
+  it('keeps workspace-scoped permission snapshots visible outside a dedicated folder', async () => {
+    const metadata = { varro: { workspaceScope: 'workspace', schemaVersion: 1 } };
+    const permission = { id: 'permission-workspace', sessionID: 'session-workspace' };
+    const serverRequest = vi.fn((_method: string, path: string) =>
+      Promise.resolve(path === '/permission' ? [permission] : undefined)
+    );
+    const activateSession = vi.fn(() =>
+      Promise.resolve({ id: 'session-workspace', directory: '/workspaces', metadata })
+    );
+    const callbacks = createCallbacks({
+      activateSession,
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      sessionState: {
+        ...createCallbacks().sessionState,
+        getSessionWorkspaceMatch: vi.fn(
+          (_sessionID: string, workspacePath: string | null | undefined) =>
+            workspacePath === '/workspaces'
+        ),
+      } as never,
+    });
+    callbacks.contextProvider.context.workspaceDirectory = '/workspaces';
+    callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((path: string) =>
+      path === '/repo' ? '/repo' : null
+    );
+    const { proxy } = createProxy(callbacks);
+
+    await proxy.handleRequest(
+      makePayload(220, 'POST', '/varro/session/session-workspace/activate', {
+        directory: '/workspaces',
+      })
+    );
+    vi.mocked(callbacks.postApiResponse).mockClear();
+    await proxy.handleRequest(makePayload(221, 'GET', '/permission'));
+
+    expect(callbacks.sessionState.getSessionWorkspaceMatch).toHaveBeenCalledWith(
+      'session-workspace',
+      '/workspaces'
+    );
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 221,
+      data: [permission],
+    });
+  });
+
   it('resolves a pending request missing from the session snapshot before admitting it', async () => {
     const permission = { id: 'permission-1', sessionID: 'early-child' };
     const serverRequest = vi.fn(async (_method: string, path: string) => {

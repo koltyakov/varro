@@ -2898,25 +2898,37 @@ export class RestProxy {
     const visible = new Set<string>();
     const unknown: string[] = [];
     for (const sessionID of new Set(sessionIDs)) {
-      const match = this.callbacks.sessionState.getSessionWorkspaceMatch(sessionID, workspacePath);
-      if (match === true) visible.add(sessionID);
-      if (match === undefined) unknown.push(sessionID);
+      const matches = this.getSessionVisibilityWorkspacePaths(workspacePath).map((path) =>
+        this.callbacks.sessionState.getSessionWorkspaceMatch(sessionID, path)
+      );
+      if (matches.includes(true)) visible.add(sessionID);
+      else if (matches.includes(undefined)) unknown.push(sessionID);
     }
     if (unknown.length === 0) return visible;
 
     const directories = await this.loadSessionDirectorySnapshot();
     await mapWithConcurrency(unknown, SESSION_VISIBILITY_LOOKUP_CONCURRENCY, async (sessionID) => {
+      const sessionWorkspacePaths = this.getSessionVisibilityWorkspacePaths(workspacePath);
       const knownDirectory = directories.get(sessionID);
       if (knownDirectory) {
-        if (isSameWorkspacePath(knownDirectory, workspacePath)) visible.add(sessionID);
+        if (sessionWorkspacePaths.some((path) => isSameWorkspacePath(knownDirectory, path))) {
+          visible.add(sessionID);
+        }
         return;
       }
       try {
-        const directory = await this.lookupSessionDirectory(sessionID, workspacePath);
+        const directory = await this.lookupSessionDirectory(
+          sessionID,
+          this.getSessionWorkspaceScope(sessionID) === 'workspace'
+            ? sessionWorkspacePaths.at(-1)
+            : workspacePath
+        );
         if (!directory && requireCompleteResolution) {
           throw new Error(`Session ${sessionID} did not include a directory`);
         }
-        if (isSameWorkspacePath(directory, workspacePath)) visible.add(sessionID);
+        if (sessionWorkspacePaths.some((path) => isSameWorkspacePath(directory, path))) {
+          visible.add(sessionID);
+        }
       } catch (err) {
         if (requireCompleteResolution) {
           throw new Error(`Could not resolve pending request session ${sessionID}`, { cause: err });
@@ -2925,6 +2937,13 @@ export class RestProxy {
       }
     });
     return visible;
+  }
+
+  private getSessionVisibilityWorkspacePaths(workspacePath: string): string[] {
+    const workspaceDirectory = this.callbacks.contextProvider.context.workspaceDirectory;
+    return workspaceDirectory && !isSameWorkspacePath(workspaceDirectory, workspacePath)
+      ? [workspacePath, workspaceDirectory]
+      : [workspacePath];
   }
 
   private loadSessionDirectorySnapshot(): Promise<ReadonlyMap<string, string>> {

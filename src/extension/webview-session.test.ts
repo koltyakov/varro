@@ -148,6 +148,7 @@ function createSession(options?: {
   const contextProvider = {
     context: {
       workspacePath: '/repo',
+      workspaceDirectory: null as string | null,
       activeFile: null,
       selection: null,
       diagnostics: [],
@@ -227,7 +228,16 @@ function createSession(options?: {
     options?.manageCommandContext
   );
 
-  return { session, bridge, sessionState, sessionTrash, hiddenSessions, contextFilesState, deps };
+  return {
+    session,
+    bridge,
+    sessionState,
+    sessionTrash,
+    hiddenSessions,
+    contextProvider,
+    contextFilesState,
+    deps,
+  };
 }
 
 describe('WebviewSession', () => {
@@ -784,6 +794,36 @@ describe('WebviewSession', () => {
       })
     );
     expect(sessionState.isSessionInWorkspace).toHaveBeenCalledWith('foreign-session', '/repo');
+  });
+
+  it('restores prompts owned by a workspace-scoped session', async () => {
+    const { session, bridge, sessionState, contextProvider } = createSession();
+    const view = createWebviewView(true);
+    contextProvider.context.workspaceDirectory = '/workspaces';
+    sessionState.isSessionInWorkspace.mockImplementation(
+      (_sessionID: string, workspacePath: string | null | undefined) =>
+        workspacePath === '/workspaces'
+    );
+    sessionState.consumeRecoverySnapshot.mockResolvedValue({
+      interruptedSessions: [],
+      blockingRequests: [
+        {
+          id: 'workspace-permission',
+          sessionID: 'workspace-session',
+          kind: 'permission',
+          props: { id: 'workspace-permission', sessionID: 'workspace-session' },
+        },
+      ] satisfies BlockingRequestSnapshot[],
+    });
+
+    await session.resolve(view as never);
+    await flushMicrotasks();
+
+    expect(bridge.renderHtml).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pendingPermissions: [{ id: 'workspace-permission', sessionID: 'workspace-session' }],
+      })
+    );
   });
 
   it('forwards valid webview messages and logs invalid ones', async () => {

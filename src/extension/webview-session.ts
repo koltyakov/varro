@@ -450,6 +450,12 @@ export class WebviewSession {
   private buildInitialState(serverStatus: ServerStatus): InitialWebviewState {
     const config = this.deps.readConfig();
     const editorContext = this.getEditorContext();
+    const isSessionInWorkspace = (sessionID: string) =>
+      this.sessionState.isSessionInWorkspace(sessionID, editorContext.workspacePath) ||
+      Boolean(
+        editorContext.workspaceDirectory &&
+        this.sessionState.isSessionInWorkspace(sessionID, editorContext.workspaceDirectory)
+      );
     return {
       webviewContext: this.webviewContext,
       documentId: this.webviewLoadGeneration,
@@ -485,16 +491,12 @@ export class WebviewSession {
       pendingPermissions: this.blockingRequestsForWebview
         .filter((item) => item.kind === 'permission')
         .filter((item) => !this.isHiddenSession(item.sessionID))
-        .filter((item) =>
-          this.sessionState.isSessionInWorkspace(item.sessionID, editorContext.workspacePath)
-        )
+        .filter((item) => isSessionInWorkspace(item.sessionID))
         .map((item) => item.props),
       pendingQuestions: this.blockingRequestsForWebview
         .filter((item) => item.kind === 'question')
         .filter((item) => !this.isHiddenSession(item.sessionID))
-        .filter((item) =>
-          this.sessionState.isSessionInWorkspace(item.sessionID, editorContext.workspacePath)
-        )
+        .filter((item) => isSessionInWorkspace(item.sessionID))
         .map((item) => item.props),
       pinnedSessionIds: this.pinnedSessions.list(),
       queuedMessages: this.deps.queuedMessages(),
