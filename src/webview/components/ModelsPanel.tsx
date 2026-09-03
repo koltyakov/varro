@@ -11,9 +11,11 @@ import {
   modelVisibilityKey,
   setModelsAdded,
   setModelDisplayName,
+  setModelOrder,
   setModelPinned,
   setModelVisible,
   setModelsVisible,
+  setProviderOrder,
   setProviderVisible,
   setShowModels,
   setState,
@@ -84,6 +86,8 @@ type ModelRouteTag = {
 const MIN_RELOAD_INDICATOR_MS = 500;
 const CONTEXT_MENU_VIEWPORT_MARGIN = 8;
 const MODEL_CATALOG_RESULT_LIMIT = 50;
+const PROVIDER_DRAG_TYPE = 'application/x-varro-provider';
+const MODEL_DRAG_TYPE = 'application/x-varro-model';
 
 function routableAgents() {
   return state.allAgents.filter((agent) => agent.mode === 'subagent');
@@ -94,6 +98,26 @@ function shouldSortProviderLast(provider: ModelProvider, models: readonly Provid
     !isProviderVisible(provider.id) ||
     models.every((model) => state.hiddenModels.includes(modelVisibilityKey(provider.id, model.id)))
   );
+}
+
+function compareProviderOrder(a: ModelProvider, b: ModelProvider) {
+  const aIndex = state.providerOrder.indexOf(a.id);
+  const bIndex = state.providerOrder.indexOf(b.id);
+  if (aIndex < 0 && bIndex < 0) return compareProviders(a, b);
+  if (aIndex < 0) return 1;
+  if (bIndex < 0) return -1;
+  return aIndex - bIndex;
+}
+
+function getOrderedProviderModels(provider: ModelProvider) {
+  return sortProviderModels(getListedProviderModels(provider)).toSorted((a, b) => {
+    const aIndex = state.modelOrder.indexOf(modelVisibilityKey(provider.id, a.id));
+    const bIndex = state.modelOrder.indexOf(modelVisibilityKey(provider.id, b.id));
+    if (aIndex < 0 && bIndex < 0) return 0;
+    if (aIndex < 0) return 1;
+    if (bIndex < 0) return -1;
+    return aIndex - bIndex;
+  });
 }
 
 export function ModelsPanel() {
@@ -107,6 +131,8 @@ export function ModelsPanel() {
   const [contextMenu, setContextMenu] = createSignal<ModelContextMenuState | null>(null);
   const [providerContextMenu, setProviderContextMenu] =
     createSignal<ProviderContextMenuState | null>(null);
+  const [draggedProviderID, setDraggedProviderID] = createSignal<string | null>(null);
+  const [dragOverProviderID, setDragOverProviderID] = createSignal<string | null>(null);
   const [renameDialog, setRenameDialog] = createSignal<ModelRenameState | null>(null);
   const [modelCatalogProvider, setModelCatalogProvider] = createSignal<ModelProvider | null>(null);
   const [showProviderActions, setShowProviderActions] = createSignal(false);
@@ -157,9 +183,9 @@ export function ModelsPanel() {
 
     return state.providers
       .map((provider) => {
-        const models = sortProviderModels(getListedProviderModels(provider));
+        const models = getOrderedProviderModels(provider);
 
-        if (!search) return { provider, models };
+        if (!search) return { provider, models, providerMatches: false };
 
         const providerMatches = [provider.name, provider.id].some((value) =>
           value.toLocaleLowerCase().includes(search)
@@ -167,6 +193,7 @@ export function ModelsPanel() {
 
         return {
           provider,
+          providerMatches,
           models: providerMatches
             ? models
             : models.filter((model) =>
@@ -176,19 +203,25 @@ export function ModelsPanel() {
               ),
         };
       })
-      .filter(
-        (entry) =>
-          entry.models.length > 0 ||
-          isLargeModelCatalog(entry.provider) ||
-          hasManagedModelCatalog(entry.provider.id)
+      .filter((entry) =>
+        search
+          ? entry.providerMatches || entry.models.length > 0
+          : entry.models.length > 0 ||
+            isLargeModelCatalog(entry.provider) ||
+            hasManagedModelCatalog(entry.provider.id)
       )
       .toSorted((a, b) => {
         const availabilityOrder =
           Number(shouldSortProviderLast(a.provider, a.models)) -
           Number(shouldSortProviderLast(b.provider, b.models));
-        return availabilityOrder || compareProviders(a.provider, b.provider);
+        return availabilityOrder || compareProviderOrder(a.provider, b.provider);
       });
   });
+  const activeProviderIDs = createMemo(() =>
+    filteredProviders()
+      .filter(({ provider, models }) => !shouldSortProviderLast(provider, models))
+      .map(({ provider }) => provider.id)
+  );
   const maxCapabilityCount = createMemo(() =>
     Math.max(
       0,
@@ -248,6 +281,50 @@ export function ModelsPanel() {
 
   function closeContextMenu() {
     setContextMenu(null);
+  }
+
+  function reorderProvider(sourceID: string, targetID: string) {
+    if (sourceID === targetID) return;
+    const providerIDs = [...activeProviderIDs()];
+    const sourceIndex = providerIDs.indexOf(sourceID);
+    const targetIndex = providerIDs.indexOf(targetID);
+    const moved = providerIDs[sourceIndex];
+    if (!moved || targetIndex < 0) return;
+
+    providerIDs.splice(sourceIndex, 1);
+    providerIDs.splice(targetIndex, 0, moved);
+    const activeSet = new Set(providerIDs);
+    setProviderOrder([...providerIDs, ...state.providerOrder.filter((id) => !activeSet.has(id))]);
+  }
+
+  function startProviderDrag(event: DragEvent, providerID: string) {
+    if (!event.dataTransfer) return;
+    event.stopPropagation();
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData(PROVIDER_DRAG_TYPE, providerID);
+    // SAFETY: Provider drag starts only from the rendered HTML drag handle.
+    const row = (event.currentTarget as HTMLElement).closest<HTMLElement>('.models-provider');
+    if (row) event.dataTransfer.setDragImage(row, 12, row.offsetHeight / 2);
+    setDraggedProviderID(providerID);
+  }
+
+  function dragOverProvider(event: DragEvent, providerID: string) {
+    const sourceID = draggedProviderID() || event.dataTransfer?.getData(PROVIDER_DRAG_TYPE);
+    if (!sourceID || sourceID === providerID || !activeProviderIDs().includes(providerID)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    setDragOverProviderID(providerID);
+  }
+
+  function dropProvider(event: DragEvent, providerID: string) {
+    const sourceID = draggedProviderID() || event.dataTransfer?.getData(PROVIDER_DRAG_TYPE);
+    if (!sourceID) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (activeProviderIDs().includes(providerID)) reorderProvider(sourceID, providerID);
+    setDraggedProviderID(null);
+    setDragOverProviderID(null);
   }
 
   function hideModel(providerID: string, modelID: string) {
@@ -513,6 +590,19 @@ export function ModelsPanel() {
                 >
                   {isReloading() ? 'Refreshing list' : 'Refresh list'}
                 </button>
+                <div class="models-context-menu-separator" role="separator" />
+                <button
+                  type="button"
+                  class="models-context-menu-item"
+                  role="menuitem"
+                  disabled={state.providerOrder.length === 0}
+                  onClick={() => {
+                    setProviderOrder([]);
+                    setShowProviderActions(false);
+                  }}
+                >
+                  Reset provider order
+                </button>
               </div>
             </Show>
           </div>
@@ -604,6 +694,26 @@ export function ModelsPanel() {
                     forceExpanded={normalizedQuery().length > 0}
                     routing={routing()}
                     previousRouting={state.providerRefreshPending ? previousRouting() : null}
+                    reorderable={!normalizedQuery() && activeProviderIDs().includes(provider.id)}
+                    modelsReorderable={!normalizedQuery()}
+                    dragging={draggedProviderID() === provider.id}
+                    dragOver={dragOverProviderID() === provider.id}
+                    onDragStart={(event) => startProviderDrag(event, provider.id)}
+                    onDragOver={(event) => dragOverProvider(event, provider.id)}
+                    onDragLeave={() => {
+                      if (dragOverProviderID() === provider.id) setDragOverProviderID(null);
+                    }}
+                    onDrop={(event) => dropProvider(event, provider.id)}
+                    onDragEnd={() => {
+                      setDraggedProviderID(null);
+                      setDragOverProviderID(null);
+                    }}
+                    onReorder={(offset) => {
+                      const providerIDs = activeProviderIDs();
+                      const index = providerIDs.indexOf(provider.id);
+                      const targetID = providerIDs[index + offset];
+                      if (targetID) reorderProvider(provider.id, targetID);
+                    }}
                     onOpenContextMenu={(next) => {
                       setProviderContextMenu(null);
                       setContextMenu(next);
@@ -779,7 +889,6 @@ export function ModelsPanel() {
               >
                 {isProviderVisible(menu.providerID) ? 'Hide' : 'Show'} provider
               </button>
-              <div class="models-context-menu-separator" role="separator" />
               <button
                 type="button"
                 class="models-context-menu-item"
@@ -790,6 +899,18 @@ export function ModelsPanel() {
                 }}
               >
                 Disconnect provider
+              </button>
+              <div class="models-context-menu-separator" role="separator" />
+              <button
+                type="button"
+                class="models-context-menu-item"
+                disabled={!state.modelOrder.some((key) => key.startsWith(`${menu.providerID}:`))}
+                onClick={() => {
+                  setModelOrder(menu.providerID, []);
+                  setProviderContextMenu(null);
+                }}
+              >
+                Reset model order
               </button>
             </div>
           </Portal>
@@ -1138,6 +1259,16 @@ function ProviderSection(props: {
   forceExpanded: boolean;
   routing: OpenCodeModelRouting;
   previousRouting: OpenCodeModelRouting | null;
+  reorderable: boolean;
+  modelsReorderable: boolean;
+  dragging: boolean;
+  dragOver: boolean;
+  onDragStart: (event: DragEvent) => void;
+  onDragOver: (event: DragEvent) => void;
+  onDragLeave: () => void;
+  onDrop: (event: DragEvent) => void;
+  onDragEnd: () => void;
+  onReorder: (offset: -1 | 1) => void;
   onOpenContextMenu: (menu: ModelContextMenuState) => void;
   onOpenProviderContextMenu: (menu: ProviderContextMenuState) => void;
   onOpenModelCatalog: () => void;
@@ -1149,6 +1280,8 @@ function ProviderSection(props: {
   const [expanded, setExpanded] = createSignal(
     isProviderVisible(props.provider.id) && enabledCount() > 0
   );
+  const [draggedModelID, setDraggedModelID] = createSignal<string | null>(null);
+  const [dragOverModelID, setDragOverModelID] = createSignal<string | null>(null);
 
   createEffect(() => {
     if (!isProviderVisible(props.provider.id)) setExpanded(false);
@@ -1171,8 +1304,72 @@ function ProviderSection(props: {
     );
   }
 
+  function reorderModel(sourceID: string, targetID: string) {
+    if (sourceID === targetID) return;
+    const modelIDs = props.models.map((model) => model.id);
+    const sourceIndex = modelIDs.indexOf(sourceID);
+    const targetIndex = modelIDs.indexOf(targetID);
+    const moved = modelIDs[sourceIndex];
+    if (!moved || targetIndex < 0) return;
+
+    modelIDs.splice(sourceIndex, 1);
+    modelIDs.splice(targetIndex, 0, moved);
+    setModelOrder(props.provider.id, modelIDs);
+  }
+
+  function draggedModel(event: DragEvent) {
+    if (draggedModelID()) return draggedModelID();
+    const key = event.dataTransfer?.getData(MODEL_DRAG_TYPE) ?? '';
+    const prefix = `${props.provider.id}:`;
+    return key.startsWith(prefix) ? key.slice(prefix.length) : null;
+  }
+
+  function startModelDrag(event: DragEvent, modelID: string) {
+    if (!event.dataTransfer) return;
+    event.stopPropagation();
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData(MODEL_DRAG_TYPE, modelVisibilityKey(props.provider.id, modelID));
+    // SAFETY: Model drag starts only from the rendered HTML drag handle.
+    const row = (event.currentTarget as HTMLElement).closest<HTMLElement>('.models-model-row');
+    if (row) event.dataTransfer.setDragImage(row, 12, row.offsetHeight / 2);
+    setDraggedModelID(modelID);
+  }
+
+  function dragOverModel(event: DragEvent, modelID: string) {
+    const sourceID = draggedModel(event);
+    if (!sourceID || sourceID === modelID) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    setDragOverModelID(modelID);
+  }
+
+  function dropModel(event: DragEvent, modelID: string) {
+    const sourceID = draggedModel(event);
+    if (!sourceID) return;
+    event.preventDefault();
+    event.stopPropagation();
+    reorderModel(sourceID, modelID);
+    setDraggedModelID(null);
+    setDragOverModelID(null);
+  }
+
   return (
-    <div class="models-provider">
+    <div
+      class={`models-provider${props.dragging ? ' is-dragging' : ''}${props.dragOver ? ' is-drag-over' : ''}`}
+      onDragEnter={props.onDragOver}
+      onDragOver={props.onDragOver}
+      onDragLeave={(event) => {
+        if (
+          event.relatedTarget instanceof Node &&
+          event.currentTarget.contains(event.relatedTarget)
+        ) {
+          return;
+        }
+        props.onDragLeave();
+      }}
+      onDrop={props.onDrop}
+    >
       <div
         class="models-provider-header"
         onContextMenu={(event) => {
@@ -1184,6 +1381,31 @@ function ProviderSection(props: {
           });
         }}
       >
+        <Show when={props.reorderable}>
+          <button
+            type="button"
+            class="models-provider-drag-handle"
+            draggable={true}
+            title="Drag to reorder provider"
+            aria-label={`Reorder provider: ${props.provider.name}`}
+            onDragStart={props.onDragStart}
+            onDragEnd={props.onDragEnd}
+            onKeyDown={(event) => {
+              if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+              event.preventDefault();
+              props.onReorder(event.key === 'ArrowUp' ? -1 : 1);
+            }}
+          >
+            <svg width="8" height="12" viewBox="0 0 8 12" fill="currentColor" aria-hidden="true">
+              <circle cx="2" cy="2" r="1" />
+              <circle cx="6" cy="2" r="1" />
+              <circle cx="2" cy="6" r="1" />
+              <circle cx="6" cy="6" r="1" />
+              <circle cx="2" cy="10" r="1" />
+              <circle cx="6" cy="10" r="1" />
+            </svg>
+          </button>
+        </Show>
         <button
           class="models-provider-toggle"
           onClick={() => !props.forceExpanded && setExpanded((v) => !v)}
@@ -1269,7 +1491,19 @@ function ProviderSection(props: {
 
                 return (
                   <label
-                    class="models-model-row"
+                    class={`models-model-row${draggedModelID() === model.id ? ' is-dragging' : ''}${dragOverModelID() === model.id ? ' is-drag-over' : ''}`}
+                    onDragEnter={(event) => dragOverModel(event, model.id)}
+                    onDragOver={(event) => dragOverModel(event, model.id)}
+                    onDragLeave={(event) => {
+                      if (
+                        event.relatedTarget instanceof Node &&
+                        event.currentTarget.contains(event.relatedTarget)
+                      ) {
+                        return;
+                      }
+                      if (dragOverModelID() === model.id) setDragOverModelID(null);
+                    }}
+                    onDrop={(event) => dropModel(event, model.id)}
                     onContextMenu={(event) => {
                       event.preventDefault();
                       props.onOpenContextMenu({
@@ -1280,6 +1514,49 @@ function ProviderSection(props: {
                       });
                     }}
                   >
+                    <Show when={props.modelsReorderable && props.models.length > 1}>
+                      <span
+                        class="models-model-drag-handle"
+                        draggable={true}
+                        role="button"
+                        tabIndex={0}
+                        title="Drag to reorder model"
+                        aria-label={`Reorder model: ${getModelDisplayName(props.provider.id, model.id, model.name)}`}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                        }}
+                        onDragStart={(event) => startModelDrag(event, model.id)}
+                        onDragEnd={() => {
+                          setDraggedModelID(null);
+                          setDragOverModelID(null);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          const index = props.models.findIndex((item) => item.id === model.id);
+                          const targetID =
+                            props.models[index + (event.key === 'ArrowUp' ? -1 : 1)]?.id;
+                          if (targetID) reorderModel(model.id, targetID);
+                        }}
+                      >
+                        <svg
+                          width="8"
+                          height="12"
+                          viewBox="0 0 8 12"
+                          fill="currentColor"
+                          aria-hidden="true"
+                        >
+                          <circle cx="2" cy="2" r="1" />
+                          <circle cx="6" cy="2" r="1" />
+                          <circle cx="2" cy="6" r="1" />
+                          <circle cx="6" cy="6" r="1" />
+                          <circle cx="2" cy="10" r="1" />
+                          <circle cx="6" cy="10" r="1" />
+                        </svg>
+                      </span>
+                    </Show>
                     <input
                       type="checkbox"
                       class="models-checkbox"

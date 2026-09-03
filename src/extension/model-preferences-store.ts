@@ -71,6 +71,8 @@ function mergeModelPreferences(
       base.modelVariantSelections,
       next.modelVariantSelections
     ),
+    providerOrder: mergeOrder(current.providerOrder, base.providerOrder, next.providerOrder),
+    modelOrder: mergeOrder(current.modelOrder, base.modelOrder, next.modelOrder),
     hiddenProviders: mergeArray(
       current.hiddenProviders,
       base.hiddenProviders,
@@ -85,6 +87,13 @@ function mergeModelPreferences(
       next.modelDisplayNames
     ),
   };
+}
+
+function mergeOrder(current: string[], base: string[], next: string[]) {
+  if (base.length === next.length && base.every((item, index) => item === next[index])) {
+    return [...current];
+  }
+  return [...next];
 }
 
 function mergeArray(current: string[], base: string[], next: string[]) {
@@ -119,6 +128,8 @@ function mergeRecord<T extends string | null>(
 function cloneModelPreferences(preferences: ModelPreferences): ModelPreferences {
   return {
     modelVariantSelections: { ...preferences.modelVariantSelections },
+    providerOrder: [...preferences.providerOrder],
+    modelOrder: [...preferences.modelOrder],
     hiddenProviders: [...preferences.hiddenProviders],
     hiddenModels: [...preferences.hiddenModels],
     addedModels: [...preferences.addedModels],

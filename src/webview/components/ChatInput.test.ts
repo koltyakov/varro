@@ -3993,6 +3993,23 @@ describe('ChatInput', () => {
     ).toBe(true);
   });
 
+  it.each(['application/x-varro-provider', 'application/x-varro-model'])(
+    'does not treat %s reordering as a file drop',
+    (dragType) => {
+      cleanup = render(() => ChatInput(), container!);
+      const dataTransfer = createDragDataTransfer();
+      dataTransfer.setData(dragType, 'openai:item');
+
+      const dragEnter = dispatchDragEvent(container!, 'dragenter', dataTransfer);
+      expect(dragEnter.defaultPrevented).toBe(false);
+      expect(document.querySelector('.chat-drop-overlay')).toBeNull();
+
+      const drop = dispatchDragEvent(container!, 'drop', dataTransfer);
+      expect(drop.defaultPrevented).toBe(false);
+      expect(state.droppedFiles).toEqual([]);
+    }
+  );
+
   it('shows queue positions in the drag handles while Alt is held', () => {
     setIsLoading(true);
     setState('activeSessionId', 'session-1');

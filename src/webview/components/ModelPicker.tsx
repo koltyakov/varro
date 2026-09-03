@@ -3,6 +3,7 @@ import {
   getVisibleProviders,
   getModelDisplayName,
   isModelPinned,
+  modelVisibilityKey,
   setModelPinned,
   setShowModels,
   state,
@@ -46,7 +47,14 @@ export function ModelPicker(props: {
   let repositionPopup: (() => void) | undefined;
   let detailsHoverTimer: ReturnType<typeof setTimeout> | undefined;
   const visibleProviders = createMemo(() =>
-    getVisibleProviders(state.providers).toSorted(compareProviders)
+    getVisibleProviders(state.providers).toSorted((a, b) => {
+      const aIndex = state.providerOrder.indexOf(a.id);
+      const bIndex = state.providerOrder.indexOf(b.id);
+      if (aIndex < 0 && bIndex < 0) return compareProviders(a, b);
+      if (aIndex < 0) return 1;
+      if (bIndex < 0) return -1;
+      return aIndex - bIndex;
+    })
   );
   type VisibleProvider = ReturnType<typeof visibleProviders>[number];
   type FlatItem = {
@@ -85,19 +93,28 @@ export function ModelPicker(props: {
     visibleProviders().map((provider) => ({
       provider,
       searchText: `${provider.name}\n${provider.id}`.toLocaleLowerCase(),
-      models: sortProviderModels(Object.values(provider.models)).map((model) => {
-        const displayName = getModelDisplayName(provider.id, model.id, model.name);
-        return {
-          item: {
-            providerID: provider.id,
-            modelID: model.id,
-            name: displayName,
-          },
-          provider,
-          model,
-          searchText: `${displayName}\n${model.name}\n${model.id}`.toLocaleLowerCase(),
-        };
-      }),
+      models: sortProviderModels(Object.values(provider.models))
+        .toSorted((a, b) => {
+          const aIndex = state.modelOrder.indexOf(modelVisibilityKey(provider.id, a.id));
+          const bIndex = state.modelOrder.indexOf(modelVisibilityKey(provider.id, b.id));
+          if (aIndex < 0 && bIndex < 0) return 0;
+          if (aIndex < 0) return 1;
+          if (bIndex < 0) return -1;
+          return aIndex - bIndex;
+        })
+        .map((model) => {
+          const displayName = getModelDisplayName(provider.id, model.id, model.name);
+          return {
+            item: {
+              providerID: provider.id,
+              modelID: model.id,
+              name: displayName,
+            },
+            provider,
+            model,
+            searchText: `${displayName}\n${model.name}\n${model.id}`.toLocaleLowerCase(),
+          };
+        }),
     }))
   );
 

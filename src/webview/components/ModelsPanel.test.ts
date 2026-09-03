@@ -8,6 +8,7 @@ import {
 } from '../lib/provider-connection-state';
 import { setState, state } from '../lib/state';
 import { STORAGE_KEYS } from '../lib/state-storage';
+import { fixture } from '../test-fixtures';
 import { ModelsPanel } from './ModelsPanel';
 
 type TestRuntimeValue =
@@ -112,6 +113,28 @@ function createModels(count: number) {
       ];
     })
   );
+}
+
+function createDragDataTransfer() {
+  const values = new Map<string, string>();
+  // SAFETY: The fixture provides the DataTransfer fields exercised by these drag tests.
+  return fixture<DataTransfer>({
+    effectAllowed: 'uninitialized',
+    dropEffect: 'none',
+    setData(type: string, value: string) {
+      values.set(type, value);
+    },
+    getData(type: string) {
+      return values.get(type) ?? '';
+    },
+    setDragImage: vi.fn(),
+  });
+}
+
+function dispatchDragEvent(target: Element, type: string, dataTransfer: DataTransfer) {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'dataTransfer', { value: dataTransfer });
+  target.dispatchEvent(event);
 }
 
 beforeEach(() => {
@@ -227,6 +250,8 @@ beforeEach(() => {
   ]);
   setState('hiddenProviders', []);
   setState('hiddenModels', []);
+  setState('providerOrder', []);
+  setState('modelOrder', []);
   setState('addedModels', []);
   setState('pinnedModels', []);
   setState('modelDisplayNames', {});
@@ -235,6 +260,8 @@ beforeEach(() => {
   window.localStorage.removeItem(STORAGE_KEYS.modelDisplayNames);
   window.localStorage.removeItem(STORAGE_KEYS.hiddenProviders);
   window.localStorage.removeItem(STORAGE_KEYS.hiddenModels);
+  window.localStorage.removeItem(STORAGE_KEYS.providerOrder);
+  window.localStorage.removeItem(STORAGE_KEYS.modelOrder);
   setState('providerAuthMethods', reconcile({}));
   resetProviderConnectionState();
 });
@@ -258,6 +285,8 @@ afterEach(() => {
   setState('workspaceStatuses', []);
   setState('hiddenProviders', []);
   setState('hiddenModels', []);
+  setState('providerOrder', []);
+  setState('modelOrder', []);
   setState('addedModels', []);
   setState('pinnedModels', []);
   setState('modelDisplayNames', {});
@@ -266,6 +295,8 @@ afterEach(() => {
   window.localStorage.removeItem(STORAGE_KEYS.modelDisplayNames);
   window.localStorage.removeItem(STORAGE_KEYS.hiddenProviders);
   window.localStorage.removeItem(STORAGE_KEYS.hiddenModels);
+  window.localStorage.removeItem(STORAGE_KEYS.providerOrder);
+  window.localStorage.removeItem(STORAGE_KEYS.modelOrder);
   setState('providerAuthMethods', reconcile({}));
   resetProviderConnectionState();
   if (originalResizeObserver) {
@@ -423,6 +454,42 @@ describe('ModelsPanel', () => {
     expect(fastSymbol?.textContent).toBe('⚡');
   });
 
+  it('hides providers without matching search results', async () => {
+    setState('providers', [
+      ...state.providers,
+      {
+        id: 'xai',
+        name: 'xAI',
+        source: 'api',
+        models: {
+          grok: {
+            id: 'grok',
+            name: 'Grok 4.6',
+            capabilities: { toolcall: true },
+            cost: { input: 1, output: 1 },
+          },
+        },
+      },
+    ]);
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    const search = container?.querySelector<HTMLInputElement>(
+      '[aria-label="Filter providers or models"]'
+    );
+    if (search) {
+      search.value = 'grok';
+      search.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    }
+
+    expect(
+      Array.from(container?.querySelectorAll('.models-provider-name') ?? []).map(
+        (item) => item.textContent
+      )
+    ).toEqual(['xAI']);
+    expect(container?.querySelector('.models-model-name')?.textContent).toBe('Grok 4.6');
+  });
+
   it('opens provider actions and requests a list refresh', () => {
     const send = vi.fn();
     window.__sendToExtension = send;
@@ -439,12 +506,31 @@ describe('ModelsPanel', () => {
     const menu = container?.querySelector('[role="menu"]');
     expect(
       Array.from(menu?.querySelectorAll('[role="menuitem"]') ?? []).map((item) => item.textContent)
-    ).toEqual(['Add provider', 'Disconnect provider', 'Refresh list']);
+    ).toEqual(['Add provider', 'Disconnect provider', 'Refresh list', 'Reset provider order']);
+    expect(findButton(menu, 'Reset provider order')?.disabled).toBe(true);
     findButton(menu, 'Refresh list')?.click();
 
     expect(actionsButton).toBeInstanceOf(HTMLButtonElement);
     expect(actionsButton?.getAttribute('aria-expanded')).toBe('false');
     expect(send).toHaveBeenCalledWith({ type: 'providers/refresh' });
+  });
+
+  it('resets a custom provider order from provider actions', () => {
+    setState('providerOrder', ['openai']);
+    cleanup = render(() => ModelsPanel(), container!);
+
+    container?.querySelector<HTMLButtonElement>('[aria-label="Provider actions"]')?.click();
+    const menu = container?.querySelector('[role="menu"]');
+    const resetButton = findButton(container, 'Reset provider order');
+
+    expect(resetButton?.disabled).toBe(false);
+    expect(menu?.querySelector('[role="menuitem"]:last-child')).toBe(resetButton);
+    resetButton?.click();
+
+    expect(resetButton).toBeInstanceOf(HTMLButtonElement);
+    expect(state.providerOrder).toEqual([]);
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEYS.providerOrder)!)).toEqual([]);
+    expect(container?.querySelector('[role="menu"]')).toBeNull();
   });
 
   it('opens the embedded disconnect dialog from provider actions', async () => {
@@ -483,12 +569,14 @@ describe('ModelsPanel', () => {
       ?.querySelector<HTMLElement>('.models-provider-header')
       ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     const deleteButton = findButton(document.body, 'Disconnect provider');
+    const resetButton = findButton(document.body, 'Reset model order');
     deleteButton?.click();
     await Promise.resolve();
     await Promise.resolve();
 
     const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
     expect(deleteButton).toBeInstanceOf(HTMLButtonElement);
+    expect(resetButton?.disabled).toBe(true);
     expect(dialog?.textContent).toContain('OpenAI');
     expect(dialog?.textContent).toContain('Remove the saved credential for OpenAI?');
     expect(dialog?.textContent).toContain('configured in OpenCode config');
@@ -542,6 +630,36 @@ describe('ModelsPanel', () => {
     expect(state.hiddenModels).toEqual(['openai:gpt-5-mini']);
     expect(providerHeader?.querySelector('.models-provider-hidden-marker')).toBeNull();
     expect(JSON.parse(window.localStorage.getItem(STORAGE_KEYS.hiddenProviders)!)).toEqual([]);
+  });
+
+  it('resets a provider model order from its context menu', async () => {
+    setState('modelOrder', ['openai:gpt-5-mini', 'openai:gpt-5']);
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    expect(
+      Array.from(container?.querySelectorAll('.models-model-name') ?? []).map(
+        (item) => item.textContent
+      )
+    ).toEqual(['GPT-5 mini', 'GPT-5']);
+    container
+      ?.querySelector<HTMLElement>('.models-provider-header')
+      ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    const menu = document.body.querySelector('.models-provider-context-menu');
+    const resetButton = findButton(document.body, 'Reset model order');
+
+    expect(resetButton?.disabled).toBe(false);
+    expect(menu?.querySelector('button:last-child')).toBe(resetButton);
+    resetButton?.click();
+
+    expect(resetButton).toBeInstanceOf(HTMLButtonElement);
+    expect(state.modelOrder).toEqual([]);
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEYS.modelOrder)!)).toEqual([]);
+    expect(
+      Array.from(container?.querySelectorAll('.models-model-name') ?? []).map(
+        (item) => item.textContent
+      )
+    ).toEqual(['GPT-5', 'GPT-5 mini']);
   });
 
   it('shows but disables provider deletion for OpenCode Zen', () => {
@@ -1667,6 +1785,112 @@ describe('ModelsPanel', () => {
     await Promise.resolve();
 
     expect(providerNames()).toEqual(['OpenAI', 'Aardvark', 'Alpha']);
+  });
+
+  it('reorders active providers by dragging and persists their order', async () => {
+    setState('providers', [
+      ...state.providers,
+      {
+        id: 'alpha',
+        name: 'Alpha',
+        source: 'api',
+        models: {
+          alpha: {
+            id: 'alpha',
+            name: 'Alpha model',
+            capabilities: { toolcall: true },
+            cost: { input: 1, output: 1 },
+          },
+        },
+      },
+      {
+        id: 'hidden',
+        name: 'Hidden',
+        source: 'api',
+        models: {
+          hidden: {
+            id: 'hidden',
+            name: 'Hidden model',
+            capabilities: { toolcall: true },
+            cost: { input: 1, output: 1 },
+          },
+        },
+      },
+    ]);
+    setState('hiddenProviders', ['hidden']);
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    const providerNames = () =>
+      Array.from(container?.querySelectorAll('.models-provider-name') ?? []).map(
+        (item) => item.textContent
+      );
+    const sections = container!.querySelectorAll<HTMLElement>('.models-provider');
+    const handles = container!.querySelectorAll<HTMLButtonElement>(
+      '[aria-label^="Reorder provider:"]'
+    );
+    const dataTransfer = createDragDataTransfer();
+
+    expect(providerNames()).toEqual(['OpenAI', 'Alpha', 'Hidden']);
+    expect([...handles].map((handle) => handle.getAttribute('aria-label'))).toEqual([
+      'Reorder provider: OpenAI',
+      'Reorder provider: Alpha',
+    ]);
+    dispatchDragEvent(handles[1]!, 'dragstart', dataTransfer);
+    dispatchDragEvent(sections[0]!, 'dragover', dataTransfer);
+    expect(sections[1]?.classList.contains('is-dragging')).toBe(true);
+    expect(sections[0]?.classList.contains('is-drag-over')).toBe(true);
+    dispatchDragEvent(sections[0]!, 'drop', dataTransfer);
+
+    expect(providerNames()).toEqual(['Alpha', 'OpenAI', 'Hidden']);
+    expect(state.providerOrder).toEqual(['alpha', 'openai']);
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEYS.providerOrder)!)).toEqual([
+      'alpha',
+      'openai',
+    ]);
+
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Reorder provider: Alpha"]')
+      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect(providerNames()).toEqual(['OpenAI', 'Alpha', 'Hidden']);
+  });
+
+  it('reorders models by dragging and persists their provider-scoped order', async () => {
+    setState('hiddenModels', ['openai:gpt-5-mini']);
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    const modelNames = () =>
+      Array.from(container?.querySelectorAll('.models-model-name') ?? []).map(
+        (item) => item.textContent
+      );
+    const rows = container!.querySelectorAll<HTMLElement>('.models-model-row');
+    const handles = container!.querySelectorAll<HTMLElement>('[aria-label^="Reorder model:"]');
+    const dataTransfer = createDragDataTransfer();
+
+    expect(modelNames()).toEqual(['GPT-5', 'GPT-5 mini']);
+    expect([...handles].map((handle) => handle.getAttribute('aria-label'))).toEqual([
+      'Reorder model: GPT-5',
+      'Reorder model: GPT-5 mini',
+    ]);
+    dispatchDragEvent(handles[1]!, 'dragstart', dataTransfer);
+    dispatchDragEvent(rows[0]!, 'dragover', dataTransfer);
+    expect(rows[1]?.classList.contains('is-dragging')).toBe(true);
+    expect(rows[0]?.classList.contains('is-drag-over')).toBe(true);
+    dispatchDragEvent(rows[0]!, 'drop', dataTransfer);
+
+    expect(modelNames()).toEqual(['GPT-5 mini', 'GPT-5']);
+    expect(state.modelOrder).toEqual(['openai:gpt-5-mini', 'openai:gpt-5']);
+    expect(state.hiddenModels).toEqual(['openai:gpt-5-mini']);
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEYS.modelOrder)!)).toEqual([
+      'openai:gpt-5-mini',
+      'openai:gpt-5',
+    ]);
+
+    container
+      ?.querySelector<HTMLElement>('[aria-label="Reorder model: GPT-5 mini"]')
+      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect(modelNames()).toEqual(['GPT-5', 'GPT-5 mini']);
   });
 });
 

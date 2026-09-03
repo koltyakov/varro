@@ -4,6 +4,8 @@ import { ModelPreferencesStore } from './model-preferences-store';
 
 const preferences = {
   modelVariantSelections: { 'openai:gpt-5.6-sol': 'xhigh' },
+  providerOrder: ['openai', 'anthropic'],
+  modelOrder: ['openai:gpt-5.6-sol'],
   hiddenProviders: ['anthropic'],
   hiddenModels: ['openai:gpt-5.5'],
   addedModels: ['openai:gpt-5.6-sol'],
@@ -32,6 +34,9 @@ describe('ModelPreferencesStore', () => {
       true
     );
     expect(store.get()).toEqual(updated);
+
+    await store.update(updated, { ...updated, providerOrder: [], modelOrder: [] });
+    expect(store.get()).toEqual({ ...updated, providerOrder: [], modelOrder: [] });
   });
 
   it('merges concurrent changes made from stale webview snapshots', async () => {
@@ -46,10 +51,17 @@ describe('ModelPreferencesStore', () => {
     const store = new ModelPreferencesStore(persistence);
     const base = store.get();
 
-    await store.update(base, { ...base, pinnedModels: ['openai:gpt-5.6-sol'] });
+    await store.update(base, {
+      ...base,
+      providerOrder: ['anthropic', 'openai'],
+      modelOrder: ['anthropic:claude-opus', 'anthropic:claude-sonnet'],
+      pinnedModels: ['openai:gpt-5.6-sol'],
+    });
     await store.update(base, { ...base, hiddenModels: ['anthropic:claude-opus'] });
 
     expect(store.get()).toMatchObject({
+      providerOrder: ['anthropic', 'openai'],
+      modelOrder: ['anthropic:claude-opus', 'anthropic:claude-sonnet'],
       pinnedModels: ['openai:gpt-5.6-sol'],
       hiddenModels: ['anthropic:claude-opus'],
     });

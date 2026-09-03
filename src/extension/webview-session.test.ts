@@ -192,6 +192,8 @@ function createSession(options?: {
     sessionModelMigrationPending: vi.fn(() => false),
     modelPreferences: vi.fn<() => InitialWebviewState['modelPreferences']>(() => ({
       modelVariantSelections: {},
+      providerOrder: [],
+      modelOrder: [],
       hiddenProviders: [],
       hiddenModels: [],
       addedModels: [],

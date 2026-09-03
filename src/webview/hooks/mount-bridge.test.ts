@@ -193,6 +193,8 @@ describe('mount bridge helpers', () => {
   it('applies host model preferences to the current webview', () => {
     const preferences = {
       modelVariantSelections: {},
+      providerOrder: ['openai'],
+      modelOrder: ['openai:gpt-5.6-sol'],
       hiddenProviders: [],
       hiddenModels: [],
       addedModels: [],

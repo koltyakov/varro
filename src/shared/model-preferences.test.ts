@@ -20,6 +20,8 @@ describe('model preference parsing bounds', () => {
     expect(
       parseRequiredModelPreferences({
         modelVariantSelections: {},
+        providerOrder: [],
+        modelOrder: [],
         hiddenProviders: [],
         hiddenModels: [],
         addedModels: [],

@@ -75,6 +75,34 @@ afterEach(() => {
 });
 
 describe('ModelPicker', () => {
+  it('uses manually ordered providers and models', async () => {
+    setState('providers', [
+      createProvider('openai', 'OpenAI', {
+        alpha: createModel('alpha', 'Alpha model'),
+        zeta: createModel('zeta', 'Zeta model'),
+      }),
+      createProvider('custom', 'Custom', {
+        custom: createModel('custom', 'Custom model'),
+      }),
+    ]);
+    setState('providerOrder', ['custom', 'openai']);
+    setState('modelOrder', ['openai:zeta', 'openai:alpha']);
+
+    cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    await flushMicrotasks();
+
+    expect(
+      Array.from(container?.querySelectorAll('.dropdown-group-header') ?? []).map(
+        (item) => item.textContent
+      )
+    ).toEqual(['Custom', 'OpenAI']);
+    expect(
+      Array.from(container?.querySelectorAll('.dropdown-name') ?? []).map(
+        (item) => item.textContent
+      )
+    ).toEqual(['Custom model', 'Zeta model', 'Alpha model']);
+  });
+
   it('does not label provider defaults in the dropdown', async () => {
     setState('providers', [
       createProvider('openai', 'OpenAI', {

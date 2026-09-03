@@ -59,6 +59,8 @@ describe('composer draft persistence', () => {
       },
       modelPreferences: {
         modelVariantSelections: {},
+        providerOrder: ['openai'],
+        modelOrder: ['openai:gpt-5.6-sol'],
         hiddenProviders: [],
         hiddenModels: [],
         addedModels: [],
@@ -70,6 +72,8 @@ describe('composer draft persistence', () => {
     const appState = createAppState();
 
     expect(appState.state.hiddenProviders).toEqual([]);
+    expect(appState.state.providerOrder).toEqual(['openai']);
+    expect(appState.state.modelOrder).toEqual(['openai:gpt-5.6-sol']);
     expect(appState.state.pinnedModels).toEqual(['openai:gpt-5.6-sol']);
   });
 

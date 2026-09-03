@@ -166,6 +166,8 @@ export interface AppState {
   selectedModel: SelectedModel | null;
   sessionSelectedModels: SessionSelectedModels;
   modelVariantSelections: ModelVariantSelections;
+  providerOrder: string[];
+  modelOrder: string[];
   sessionSelectedMcps: SessionSelectedMcps;
   draftSelectedMcps: string[] | null;
   hiddenProviders: string[];
@@ -415,6 +417,9 @@ export function createAppState(): AppStateInstance {
     modelVariantSelections:
       modelPreferences?.modelVariantSelections ??
       readStoredNullableStringRecord(STORAGE_KEYS.modelVariantSelections),
+    providerOrder:
+      modelPreferences?.providerOrder ?? readStoredStringArray(STORAGE_KEYS.providerOrder),
+    modelOrder: modelPreferences?.modelOrder ?? readStoredStringArray(STORAGE_KEYS.modelOrder),
     sessionSelectedMcps: readStoredStringArrayRecord(STORAGE_KEYS.sessionSelectedMcps),
     draftSelectedMcps: null,
     hiddenProviders:

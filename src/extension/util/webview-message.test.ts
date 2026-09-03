@@ -63,6 +63,8 @@ describe('webview message validation', () => {
   it('requires complete model preference update snapshots', () => {
     const preferences = {
       modelVariantSelections: {},
+      providerOrder: [],
+      modelOrder: [],
       hiddenProviders: [],
       hiddenModels: [],
       addedModels: [],
@@ -1839,6 +1841,8 @@ describe('parseWebviewMessage rejection paths', () => {
       type: 'model-preferences/migrate',
       payload: {
         modelVariantSelections: { valid: 'high', oversized },
+        providerOrder: ['openai', oversized],
+        modelOrder: ['openai:gpt-5', oversized],
         hiddenProviders: ['openai', oversized],
         hiddenModels: Array.from({ length: 10_001 }, (_, index) => `provider/model-${index}`),
         addedModels: [],

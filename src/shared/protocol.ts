@@ -661,6 +661,8 @@ export type WebviewInstanceContext = {
 
 export type ModelPreferences = {
   modelVariantSelections: Record<string, string | null>;
+  providerOrder: string[];
+  modelOrder: string[];
   hiddenProviders: string[];
   hiddenModels: string[];
   addedModels: string[];

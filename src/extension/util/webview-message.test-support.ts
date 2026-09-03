@@ -5,6 +5,8 @@ const MODEL_SELECTION: ChatModelSelection = { providerID: 'anthropic', modelID: 
 
 const MODEL_PREFERENCES: ModelPreferences = {
   modelVariantSelections: { 'anthropic/claude-opus-5': 'thinking' },
+  providerOrder: ['anthropic', 'openai'],
+  modelOrder: ['anthropic:claude-opus-5'],
   hiddenProviders: ['openai'],
   hiddenModels: ['openai/gpt-5'],
   addedModels: ['anthropic/claude-haiku-4-5'],

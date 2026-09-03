@@ -317,6 +317,26 @@ export function setModelPinned(providerID: string, modelID: string, pinned: bool
   publishModelPreferences(base);
 }
 
+export function setProviderOrder(providerIDs: readonly string[]) {
+  const base = getModelPreferencesSnapshot();
+  const next = [...new Set(providerIDs)];
+  setState('providerOrder', next);
+  writeStored(STORAGE_KEYS.providerOrder, next);
+  publishModelPreferences(base);
+}
+
+export function setModelOrder(providerID: string, modelIDs: readonly string[]) {
+  const base = getModelPreferencesSnapshot();
+  const prefix = `${providerID}:`;
+  const next = [
+    ...state.modelOrder.filter((key) => !key.startsWith(prefix)),
+    ...[...new Set(modelIDs)].map((modelID) => modelVisibilityKey(providerID, modelID)),
+  ];
+  setState('modelOrder', next);
+  writeStored(STORAGE_KEYS.modelOrder, next);
+  publishModelPreferences(base);
+}
+
 export function setModelAdded(providerID: string, modelID: string, added: boolean) {
   const prefix = `${providerID}:`;
   const currentModelIDs = state.addedModels
@@ -506,6 +526,8 @@ export function resetModelVisibility() {
 export function getModelPreferencesSnapshot() {
   return {
     modelVariantSelections: { ...state.modelVariantSelections },
+    providerOrder: [...state.providerOrder],
+    modelOrder: [...state.modelOrder],
     hiddenProviders: [...state.hiddenProviders],
     hiddenModels: [...state.hiddenModels],
     addedModels: [...state.addedModels],
@@ -518,12 +540,16 @@ export function applyModelPreferencesSnapshot(
   preferences: ReturnType<typeof getModelPreferencesSnapshot>
 ) {
   setState('modelVariantSelections', reconcile(preferences.modelVariantSelections));
+  setState('providerOrder', reconcile(preferences.providerOrder));
+  setState('modelOrder', reconcile(preferences.modelOrder));
   setState('hiddenProviders', reconcile(preferences.hiddenProviders));
   setState('hiddenModels', reconcile(preferences.hiddenModels));
   setState('addedModels', reconcile(preferences.addedModels));
   setState('pinnedModels', reconcile(preferences.pinnedModels));
   setState('modelDisplayNames', reconcile(preferences.modelDisplayNames));
   writeStored(STORAGE_KEYS.modelVariantSelections, preferences.modelVariantSelections);
+  writeStored(STORAGE_KEYS.providerOrder, preferences.providerOrder);
+  writeStored(STORAGE_KEYS.modelOrder, preferences.modelOrder);
   writeStored(STORAGE_KEYS.hiddenProviders, preferences.hiddenProviders);
   writeStored(STORAGE_KEYS.hiddenModels, preferences.hiddenModels);
   writeStored(STORAGE_KEYS.addedModels, preferences.addedModels);

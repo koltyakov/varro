@@ -393,8 +393,10 @@ function canEditQueuedMessage() {
   );
 }
 
-function isQueuedMessageDrag(event: DragEvent) {
-  return Array.from(event.dataTransfer?.types ?? []).includes(QUEUED_MESSAGE_DRAG_TYPE);
+function isInternalDrag(event: DragEvent) {
+  return Array.from(event.dataTransfer?.types ?? []).some(
+    (type) => type === QUEUED_MESSAGE_DRAG_TYPE || type.startsWith('application/x-varro-')
+  );
 }
 
 function activeContextEnabled(sessionId?: string | null) {
@@ -2858,7 +2860,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   }
 
   async function handleDrop(e: DragEvent) {
-    if (isQueuedMessageDrag(e)) return;
+    if (isInternalDrag(e)) return;
     e.preventDefault();
     e.stopPropagation();
     setIsDraggingOver(false);
@@ -3391,7 +3393,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     };
 
     const beginDropTarget = (e: DragEvent) => {
-      if (isQueuedMessageDrag(e)) return;
+      if (isInternalDrag(e)) return;
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
       setIsDraggingOver(true);
@@ -3404,14 +3406,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     };
 
     const handleWindowDrop = async (e: DragEvent) => {
-      if (isQueuedMessageDrag(e)) return;
+      if (isInternalDrag(e)) return;
       e.preventDefault();
       setIsDraggingOver(false);
       await handleDrop(e);
     };
 
     const handleWindowDragLeave = (e: DragEvent) => {
-      if (isQueuedMessageDrag(e)) return;
+      if (isInternalDrag(e)) return;
       if (e.relatedTarget) return;
       setIsDraggingOver(false);
     };
@@ -4394,21 +4396,21 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             'min-height': sendComposerMinHeight() ? `${sendComposerMinHeight()}px` : undefined,
           }}
           onDragEnter={(e) => {
-            if (isQueuedMessageDrag(e)) return;
+            if (isInternalDrag(e)) return;
             e.preventDefault();
             e.stopPropagation();
             if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
             setIsDraggingOver(true);
           }}
           onDragOver={(e) => {
-            if (isQueuedMessageDrag(e)) return;
+            if (isInternalDrag(e)) return;
             e.preventDefault();
             e.stopPropagation();
             if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
             setIsDraggingOver(true);
           }}
           onDragLeave={(e) => {
-            if (isQueuedMessageDrag(e)) return;
+            if (isInternalDrag(e)) return;
             // SAFETY: The surrounding shape or discriminator check establishes the Node contract used below.
             if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
             setIsDraggingOver(false);

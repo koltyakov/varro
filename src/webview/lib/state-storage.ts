@@ -7,6 +7,8 @@ export const STORAGE_KEYS = {
   selectedModel: 'varro.selectedModel',
   sessionSelectedModels: 'varro.sessionSelectedModels',
   modelVariantSelections: 'varro.modelVariantSelections',
+  providerOrder: 'varro.providerOrder',
+  modelOrder: 'varro.modelOrder',
   draftPermissionMode: 'varro.draftPermissionMode',
   sessionPermissionModes: 'varro.sessionPermissionModes',
   sessionSelectedMcps: 'varro.sessionSelectedMcps',

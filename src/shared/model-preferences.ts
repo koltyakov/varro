@@ -11,6 +11,8 @@ export function parseModelPreferences(value: unknown): ModelPreferences {
   const record = asRecord(value);
   return {
     modelVariantSelections: parseNullableStringRecord(record?.modelVariantSelections),
+    providerOrder: parseStringArray(record?.providerOrder),
+    modelOrder: parseStringArray(record?.modelOrder),
     hiddenProviders: parseStringArray(record?.hiddenProviders),
     hiddenModels: parseStringArray(record?.hiddenModels),
     addedModels: parseStringArray(record?.addedModels),
@@ -24,6 +26,8 @@ export function parseRequiredModelPreferences(value: unknown): ModelPreferences 
   if (
     !record ||
     !isNullableStringRecord(record.modelVariantSelections) ||
+    !isStringArray(record.providerOrder) ||
+    !isStringArray(record.modelOrder) ||
     !isStringArray(record.hiddenProviders) ||
     !isStringArray(record.hiddenModels) ||
     !isStringArray(record.addedModels) ||

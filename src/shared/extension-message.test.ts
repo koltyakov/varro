@@ -1135,6 +1135,8 @@ describe('parseExtensionMessage plan state and model preference syncs', () => {
   it('parses a model preference sync and rejects a non-object payload', () => {
     const preferences = {
       modelVariantSelections: { 'anthropic/claude-opus-5': 'thinking' },
+      providerOrder: ['anthropic', 'openai'],
+      modelOrder: ['anthropic:claude-opus-5'],
       hiddenProviders: ['openai'],
       hiddenModels: [],
       addedModels: [],
