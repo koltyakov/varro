@@ -57,7 +57,6 @@ type RecentEventState = {
 type PendingSequenceRange = {
   start: number;
   end: number;
-  contiguous: boolean;
   event: ServerEvent;
 };
 
@@ -278,10 +277,10 @@ export class ServerEventBridge {
     if (!pending) return false;
 
     const range = this.pendingSequenceRanges.get(sessionID);
+    if (range && event.seq !== range.end + 1) return false;
     this.pendingSequenceRanges.set(sessionID, {
       start: range?.start ?? event.seq,
       end: event.seq,
-      contiguous: !range || (range.contiguous && event.seq === range.end + 1),
       event,
     });
     return true;
@@ -296,20 +295,18 @@ export class ServerEventBridge {
     this.pendingSequenceRanges.clear();
     for (const item of pending) this.post({ type: 'server/event', payload: item.event });
     for (const [sessionID, range] of sequenceRanges) {
-      this.post({
-        type: 'server/event',
-        payload: {
-          id: range.event.id,
-          type: range.event.type,
-          ...(range.event.workspaceDirectory
-            ? { workspaceDirectory: range.event.workspaceDirectory }
-            : {}),
-          seq: range.end,
-          sequenceOnly: true,
-          ...(range.contiguous ? { sequenceStart: range.start } : {}),
-          properties: { sessionID },
-        } as ServerEvent,
-      });
+      const payload = {
+        id: range.event.id,
+        type: range.event.type,
+        seq: range.end,
+        sequenceOnly: true,
+        properties: { sessionID },
+      } as ServerEvent;
+      if (range.event.workspaceDirectory) {
+        payload.workspaceDirectory = range.event.workspaceDirectory;
+      }
+      payload.sequenceStart = range.start;
+      this.post({ type: 'server/event', payload });
     }
   }
 

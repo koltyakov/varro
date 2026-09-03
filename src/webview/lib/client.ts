@@ -928,8 +928,9 @@ onMessage((msg) => {
   if (msg.type !== 'server/event') return;
   const evt = msg.payload;
   const observed = evt.id ? observedEventMetadata.get(evt.id) : undefined;
-  const applyEvent = !evt.id || !observed;
-  let dispatchWildcard = applyEvent;
+  const sequenceRangeOnly = evt.sequenceOnly && evt.sequenceStart !== undefined;
+  const applyEvent = !sequenceRangeOnly && (!evt.id || !observed);
+  let dispatchWildcard = applyEvent || sequenceRangeOnly;
   if (evt.id && !observed) {
     observedEventMetadata.set(evt.id, { hasSequence: evt.seq !== undefined });
     while (observedEventMetadata.size > MAX_OBSERVED_EVENT_IDS) {

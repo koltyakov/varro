@@ -1041,6 +1041,27 @@ describe('client', () => {
     );
   });
 
+  it('never applies an unseen coalesced sequence range as a mutation', async () => {
+    const { serverEvents } = await loadClient();
+    const specific = vi.fn();
+    const wildcard = vi.fn();
+    serverEvents.on('session.next.tool.progress', specific);
+    serverEvents.on('*', wildcard);
+    const marker = {
+      id: 'coalesced-progress',
+      type: 'session.next.tool.progress',
+      seq: 100,
+      sequenceOnly: true,
+      sequenceStart: 1,
+      properties: { sessionID: 'session-1' },
+    } as const;
+
+    emitMessage({ type: 'server/event', payload: marker });
+
+    expect(specific).not.toHaveBeenCalled();
+    expect(wildcard).toHaveBeenCalledWith(marker);
+  });
+
   it('reapplies an event after its bounded observation metadata is evicted', async () => {
     const { serverEvents } = await loadClient();
     const specific = vi.fn();

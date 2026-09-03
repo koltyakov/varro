@@ -602,7 +602,7 @@ describe('ServerEventBridge', () => {
     vi.useRealTimers();
   });
 
-  it('does not mark a noncontiguous progress sequence as a safe range', () => {
+  it('forwards a noncontiguous progress twin separately so a cold cursor detects the gap', () => {
     vi.useFakeTimers();
     useParsedEvents();
     const { bridge, handlers, post } = createMocks();
@@ -614,7 +614,7 @@ describe('ServerEventBridge', () => {
         type: 'session.next.tool.progress',
         properties: {
           sessionID: 'session-1',
-          callID: 'call-1',
+          callID: `call-${seq}`,
           structured: { percent: seq },
         },
       } satisfies ServerEvent;
@@ -623,16 +623,45 @@ describe('ServerEventBridge', () => {
     }
     vi.advanceTimersByTime(16);
 
-    expect(post.mock.calls.at(-1)?.[0]).toEqual({
-      type: 'server/event',
-      payload: {
+    expect(post.mock.calls.map(([message]) => message.payload)).toEqual([
+      {
+        id: 'progress-1',
+        type: 'session.next.tool.progress',
+        properties: {
+          sessionID: 'session-1',
+          callID: 'call-1',
+          structured: { percent: 1 },
+        },
+      },
+      {
+        id: 'progress-3',
+        type: 'session.next.tool.progress',
+        properties: {
+          sessionID: 'session-1',
+          callID: 'call-3',
+          structured: { percent: 3 },
+        },
+      },
+      {
+        id: 'progress-1',
+        type: 'session.next.tool.progress',
+        seq: 1,
+        sequenceOnly: true,
+        sequenceStart: 1,
+        properties: { sessionID: 'session-1' },
+      },
+      {
         id: 'progress-3',
         type: 'session.next.tool.progress',
         seq: 3,
         sequenceOnly: true,
-        properties: { sessionID: 'session-1' },
+        properties: {
+          sessionID: 'session-1',
+          callID: 'call-3',
+          structured: { percent: 3 },
+        },
       },
-    });
+    ]);
     vi.useRealTimers();
   });
 
