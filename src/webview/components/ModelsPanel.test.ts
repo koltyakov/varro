@@ -233,6 +233,8 @@ beforeEach(() => {
   window.localStorage.removeItem(STORAGE_KEYS.pinnedModels);
   window.localStorage.removeItem(STORAGE_KEYS.addedModels);
   window.localStorage.removeItem(STORAGE_KEYS.modelDisplayNames);
+  window.localStorage.removeItem(STORAGE_KEYS.hiddenProviders);
+  window.localStorage.removeItem(STORAGE_KEYS.hiddenModels);
   setState('providerAuthMethods', reconcile({}));
   resetProviderConnectionState();
 });
@@ -262,6 +264,8 @@ afterEach(() => {
   window.localStorage.removeItem(STORAGE_KEYS.pinnedModels);
   window.localStorage.removeItem(STORAGE_KEYS.addedModels);
   window.localStorage.removeItem(STORAGE_KEYS.modelDisplayNames);
+  window.localStorage.removeItem(STORAGE_KEYS.hiddenProviders);
+  window.localStorage.removeItem(STORAGE_KEYS.hiddenModels);
   setState('providerAuthMethods', reconcile({}));
   resetProviderConnectionState();
   if (originalResizeObserver) {
@@ -497,6 +501,47 @@ describe('ModelsPanel', () => {
         kind: 'file',
       },
     });
+  });
+
+  it('hides and shows a provider from its context menu', async () => {
+    setState('hiddenModels', ['openai:gpt-5-mini']);
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    const providerHeader = container?.querySelector<HTMLElement>('.models-provider-header');
+    providerHeader?.dispatchEvent(
+      new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+    );
+    findButton(document.body, 'Hide provider')?.click();
+
+    expect(state.hiddenProviders).toEqual(['openai']);
+    expect(state.hiddenModels).toEqual(['openai:gpt-5-mini']);
+    expect(providerHeader?.querySelector('.models-provider-hidden-marker')?.textContent).toBe(
+      'Hidden'
+    );
+    expect(providerHeader?.querySelector('.models-chevron')?.classList.contains('expanded')).toBe(
+      false
+    );
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEYS.hiddenProviders)!)).toEqual([
+      'openai',
+    ]);
+
+    providerHeader?.querySelector<HTMLButtonElement>('.models-provider-toggle')?.click();
+    expect(
+      Array.from(
+        container?.querySelectorAll<HTMLInputElement>('.models-model-row input') ?? []
+      ).map((input) => input.checked)
+    ).toEqual([true, false]);
+
+    providerHeader?.dispatchEvent(
+      new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+    );
+    findButton(document.body, 'Show provider')?.click();
+
+    expect(state.hiddenProviders).toEqual([]);
+    expect(state.hiddenModels).toEqual(['openai:gpt-5-mini']);
+    expect(providerHeader?.querySelector('.models-provider-hidden-marker')).toBeNull();
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEYS.hiddenProviders)!)).toEqual([]);
   });
 
   it('shows but disables provider deletion for OpenCode Zen', () => {
@@ -1538,19 +1583,20 @@ describe('ModelsPanel', () => {
     expect(clientMocks.workspaceStatus).not.toHaveBeenCalled();
   });
 
-  it('collapses providers with no enabled models', async () => {
+  it('collapses hidden providers by default', async () => {
     setState('hiddenProviders', ['openai']);
 
     cleanup = render(() => ModelsPanel(), container!);
     await Promise.resolve();
 
-    expect(container?.textContent).toContain('OpenAI0/2');
+    expect(container?.querySelector('.models-provider-count')?.textContent).toBe('2/2');
+    expect(container?.querySelector('.models-provider-hidden-marker')?.textContent).toBe('Hidden');
     expect(container?.querySelector('.models-chevron')?.classList.contains('expanded')).toBe(false);
     expect(container?.querySelector('.ui-icon.models-chevron')).toBeInstanceOf(HTMLSpanElement);
     expect(container?.querySelector('.models-model-row')).toBeNull();
   });
 
-  it('keeps provider priority order unchanged when providers are toggled', async () => {
+  it('sorts hidden and fully disabled providers after enabled providers', async () => {
     setState('providers', [
       {
         id: 'openai',
@@ -1580,7 +1626,7 @@ describe('ModelsPanel', () => {
       },
       {
         id: 'beta',
-        name: 'Beta',
+        name: 'Aardvark',
         source: 'api',
         models: {
           beta: {
@@ -1592,7 +1638,8 @@ describe('ModelsPanel', () => {
         },
       },
     ]);
-    setState('hiddenProviders', ['alpha']);
+    setState('hiddenProviders', ['openai']);
+    setState('hiddenModels', ['beta:beta']);
     cleanup = render(() => ModelsPanel(), container!);
     await Promise.resolve();
 
@@ -1600,23 +1647,26 @@ describe('ModelsPanel', () => {
       Array.from(container?.querySelectorAll('.models-provider-name') ?? []).map(
         (item) => item.textContent
       );
-    expect(providerNames()).toEqual(['OpenAI', 'Alpha', 'Beta']);
+    expect(providerNames()).toEqual(['Alpha', 'OpenAI', 'Aardvark']);
 
-    const betaSection = Array.from(
+    const openAISection = Array.from(
       container?.querySelectorAll<HTMLElement>('.models-provider') ?? []
-    ).find((section) => section.querySelector('.models-provider-name')?.textContent === 'Beta');
-    betaSection?.querySelector<HTMLInputElement>('.models-checkbox')?.click();
+    ).find((section) => section.querySelector('.models-provider-name')?.textContent === 'OpenAI');
+    openAISection
+      ?.querySelector<HTMLElement>('.models-provider-header')
+      ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    findButton(document.body, 'Show provider')?.click();
     await Promise.resolve();
 
-    expect(providerNames()).toEqual(['OpenAI', 'Alpha', 'Beta']);
+    expect(providerNames()).toEqual(['OpenAI', 'Alpha', 'Aardvark']);
 
-    const alphaSection = Array.from(
+    const disabledSection = Array.from(
       container?.querySelectorAll<HTMLElement>('.models-provider') ?? []
-    ).find((section) => section.querySelector('.models-provider-name')?.textContent === 'Alpha');
-    alphaSection?.querySelector<HTMLInputElement>('.models-checkbox')?.click();
+    ).find((section) => section.querySelector('.models-provider-name')?.textContent === 'Aardvark');
+    disabledSection?.querySelector<HTMLInputElement>('.models-checkbox')?.click();
     await Promise.resolve();
 
-    expect(providerNames()).toEqual(['OpenAI', 'Alpha', 'Beta']);
+    expect(providerNames()).toEqual(['OpenAI', 'Aardvark', 'Alpha']);
   });
 });
 

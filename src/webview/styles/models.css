@@ -906,7 +906,7 @@
 }
 
 .models-provider {
-  border-bottom: 1px solid color-mix(in srgb, var(--color-vscode-border) 12%, transparent);
+  border-bottom: 1px solid var(--color-vscode-border);
 }
 
 .models-provider:last-child {
@@ -959,7 +959,11 @@
 }
 
 .models-provider-count {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
   font-size: 10px;
+  line-height: 1;
   color: var(--color-vscode-muted);
   flex-shrink: 0;
   margin-left: 4px;
@@ -1124,7 +1128,8 @@
   white-space: nowrap;
 }
 
-.models-model-renamed-marker {
+.models-model-renamed-marker,
+.models-provider-hidden-marker {
   flex-shrink: 0;
   margin-left: 5px;
   padding: 1px 4px;

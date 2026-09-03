@@ -3,11 +3,12 @@ import { Portal } from 'solid-js/web';
 import { asRecord } from '../../shared/type-utils';
 import {
   isModelPinned,
-  isModelVisible,
   getListedProviderModels,
   getModelDisplayName,
   hasManagedModelCatalog,
   isLargeModelCatalog,
+  isProviderVisible,
+  modelVisibilityKey,
   setModelsAdded,
   setModelDisplayName,
   setModelPinned,
@@ -86,6 +87,13 @@ const MODEL_CATALOG_RESULT_LIMIT = 50;
 
 function routableAgents() {
   return state.allAgents.filter((agent) => agent.mode === 'subagent');
+}
+
+function shouldSortProviderLast(provider: ModelProvider, models: readonly ProviderModel[]) {
+  return (
+    !isProviderVisible(provider.id) ||
+    models.every((model) => state.hiddenModels.includes(modelVisibilityKey(provider.id, model.id)))
+  );
 }
 
 export function ModelsPanel() {
@@ -174,7 +182,12 @@ export function ModelsPanel() {
           isLargeModelCatalog(entry.provider) ||
           hasManagedModelCatalog(entry.provider.id)
       )
-      .toSorted((a, b) => compareProviders(a.provider, b.provider));
+      .toSorted((a, b) => {
+        const availabilityOrder =
+          Number(shouldSortProviderLast(a.provider, a.models)) -
+          Number(shouldSortProviderLast(b.provider, b.models));
+        return availabilityOrder || compareProviders(a.provider, b.provider);
+      });
   });
   const maxCapabilityCount = createMemo(() =>
     Math.max(
@@ -759,6 +772,17 @@ export function ModelsPanel() {
               <button
                 type="button"
                 class="models-context-menu-item"
+                onClick={() => {
+                  setProviderVisible(menu.providerID, !isProviderVisible(menu.providerID));
+                  setProviderContextMenu(null);
+                }}
+              >
+                {isProviderVisible(menu.providerID) ? 'Hide' : 'Show'} provider
+              </button>
+              <div class="models-context-menu-separator" role="separator" />
+              <button
+                type="button"
+                class="models-context-menu-item"
                 disabled={menu.providerID === 'opencode'}
                 onClick={() => {
                   setProviderContextMenu(null);
@@ -1118,10 +1142,17 @@ function ProviderSection(props: {
   onOpenProviderContextMenu: (menu: ProviderContextMenuState) => void;
   onOpenModelCatalog: () => void;
 }) {
-  const enabledCount = () =>
-    props.models.filter((m) => isModelVisible(props.provider.id, m.id)).length;
+  const isModelEnabled = (modelID: string) =>
+    !state.hiddenModels.includes(modelVisibilityKey(props.provider.id, modelID));
+  const enabledCount = () => props.models.filter((model) => isModelEnabled(model.id)).length;
 
-  const [expanded, setExpanded] = createSignal(enabledCount() > 0);
+  const [expanded, setExpanded] = createSignal(
+    isProviderVisible(props.provider.id) && enabledCount() > 0
+  );
+
+  createEffect(() => {
+    if (!isProviderVisible(props.provider.id)) setExpanded(false);
+  });
 
   const allEnabled = () => props.models.length > 0 && enabledCount() === props.models.length;
   const someEnabled = () => enabledCount() > 0 && !allEnabled();
@@ -1164,6 +1195,9 @@ function ProviderSection(props: {
             height={12}
           />
           <span class="models-provider-name">{props.provider.name}</span>
+          <Show when={!isProviderVisible(props.provider.id)}>
+            <span class="models-provider-hidden-marker">Hidden</span>
+          </Show>
           <span class="models-provider-count">
             {props.reconnectRequired
               ? 'Reconnect'
@@ -1249,7 +1283,7 @@ function ProviderSection(props: {
                     <input
                       type="checkbox"
                       class="models-checkbox"
-                      checked={isModelVisible(props.provider.id, model.id)}
+                      checked={isModelEnabled(model.id)}
                       onChange={(e) =>
                         setModelVisible(props.provider.id, model.id, e.currentTarget.checked)
                       }
