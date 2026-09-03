@@ -249,10 +249,11 @@ export class OpenCodeTransport {
     const controller = this.eventController;
     let shouldReconnect = false;
     let continuityEstablished = false;
+    let connectedAt = 0;
+    let reconnectBackoffReset = false;
     const eventStreamRequest = scopeOpenCodeRequest(serverUrl, EVENT_STREAM_PATH, undefined);
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
     let connectTimer: ReturnType<typeof setTimeout> | null = null;
-    let stabilityTimer: ReturnType<typeof setTimeout> | null = null;
     const isCurrentStream = () => this.isCurrentEventStream(controller, generation);
     const clearConnectTimer = () => {
       if (connectTimer) {
@@ -296,12 +297,8 @@ export class OpenCodeTransport {
       if (!isCurrentStream()) return;
       if (!res.ok || !res.body) throw new Error(`Failed to open event stream: ${res.status}`);
       continuityEstablished = true;
+      connectedAt = Date.now();
       this.options.updateEventStreamState('healthy');
-      stabilityTimer = setTimeout(() => {
-        if (!isCurrentStream() || controller.signal.aborted) return;
-        this.eventReconnectDelay = 1000;
-        this.eventReconnectCount = 0;
-      }, OpenCodeTransport.EVENT_STABILITY_WINDOW_MS);
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
@@ -319,6 +316,14 @@ export class OpenCodeTransport {
           break;
         }
         resetIdleTimer();
+        if (
+          !reconnectBackoffReset &&
+          Date.now() - connectedAt >= OpenCodeTransport.EVENT_STABILITY_WINDOW_MS
+        ) {
+          this.eventReconnectDelay = 1000;
+          this.eventReconnectCount = 0;
+          reconnectBackoffReset = true;
+        }
         buffer += decoder.decode(value, { stream: true });
         let boundary: { index: number; length: number } | null;
         let yieldedAt = Date.now();
@@ -355,10 +360,6 @@ export class OpenCodeTransport {
       if (idleTimer) {
         clearTimeout(idleTimer);
         idleTimer = null;
-      }
-      if (stabilityTimer) {
-        clearTimeout(stabilityTimer);
-        stabilityTimer = null;
       }
       if (
         shouldReconnect &&

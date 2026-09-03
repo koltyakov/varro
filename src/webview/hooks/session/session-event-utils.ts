@@ -354,11 +354,16 @@ export function getEventString<T>(value: T, key: string): string | undefined {
 
 export function parseToolInput(value: string): UnknownRecord {
   if (!value.trim()) return {};
+  return tryParseToolInput(value) ?? {};
+}
+
+export function tryParseToolInput(value: string): UnknownRecord | null {
+  if (!value.trimEnd().endsWith('}')) return null;
   try {
     const parsed = JSON.parse(value);
-    return asToolInput(parsed);
+    return asRecord(parsed);
   } catch {
-    return {};
+    return null;
   }
 }
 

@@ -271,6 +271,7 @@ describe('protocol parsers', () => {
         type: 'session.updated',
         seq: 2,
         sequenceOnly: true,
+        sequenceStart: 1,
         properties: { sessionID: 'session-1', info: { id: 'session-1' } },
       })
     ).toEqual({
@@ -278,6 +279,7 @@ describe('protocol parsers', () => {
       type: 'session.updated',
       seq: 2,
       sequenceOnly: true,
+      sequenceStart: 1,
       properties: { sessionID: 'session-1', info: { id: 'session-1' } },
     });
   });

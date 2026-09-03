@@ -92,6 +92,41 @@ function createEventResponse(signal: AbortSignal, payload: unknown) {
   } as unknown as Response;
 }
 
+function createDelayedEventResponse(signal: AbortSignal, payload: unknown, delayMs: number) {
+  let delivered = false;
+  return {
+    ok: true,
+    body: {
+      getReader() {
+        return {
+          read: () => {
+            if (!delivered) {
+              delivered = true;
+              return new Promise<{ value: Uint8Array; done: false }>((resolve) => {
+                setTimeout(
+                  () =>
+                    resolve({
+                      value: new TextEncoder().encode(`data: ${JSON.stringify(payload)}\n\n`),
+                      done: false,
+                    }),
+                  delayMs
+                );
+              });
+            }
+            return new Promise<never>((_, reject) => {
+              signal.addEventListener(
+                'abort',
+                () => reject(signal.reason instanceof Error ? signal.reason : new Error('aborted')),
+                { once: true }
+              );
+            });
+          },
+        };
+      },
+    },
+  } as unknown as Response;
+}
+
 function createClosedEventResponse() {
   return {
     ok: true,
@@ -207,7 +242,7 @@ describe('OpenCodeTransport reconnect delay', () => {
     transport.stopEventStream();
   });
 
-  it('resets reconnect backoff after an event stream remains stable', async () => {
+  it('does not reset reconnect backoff based on connection age alone', async () => {
     vi.useFakeTimers();
     let signal: AbortSignal | undefined;
     vi.stubGlobal(
@@ -229,6 +264,71 @@ describe('OpenCodeTransport reconnect delay', () => {
     const stream = transport.startEventStream();
     await Promise.resolve();
 
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(transport.eventReconnectDelay).toBe(8_000);
+    expect(transport.eventReconnectCount).toBe(3);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(transport.eventReconnectDelay).toBe(8_000);
+    expect(transport.eventReconnectCount).toBe(3);
+
+    transport.stopEventStream();
+    await stream;
+  });
+
+  it('does not treat an initial event followed by silence as a stable stream', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    let signal: AbortSignal | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input, init) => {
+        signal = init?.signal as AbortSignal;
+        return createEventResponse(signal, { type: 'server.connected', properties: {} });
+      })
+    );
+    const transport = createTransport() as unknown as {
+      startEventStream(): Promise<void>;
+      stopEventStream(): void;
+      eventReconnectDelay: number;
+      eventReconnectCount: number;
+    };
+    transport.eventReconnectDelay = 8_000;
+    transport.eventReconnectCount = 3;
+
+    const stream = transport.startEventStream();
+    await vi.advanceTimersByTimeAsync(45_000);
+    await stream;
+
+    expect(transport.eventReconnectDelay).toBe(16_000);
+    expect(transport.eventReconnectCount).toBe(4);
+    transport.stopEventStream();
+  });
+
+  it('resets reconnect backoff after receiving later stream activity', async () => {
+    vi.useFakeTimers();
+    let signal: AbortSignal | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input, init) => {
+        signal = init?.signal as AbortSignal;
+        return createDelayedEventResponse(
+          signal,
+          { type: 'server.connected', properties: {} },
+          15_000
+        );
+      })
+    );
+    const transport = createTransport() as unknown as {
+      startEventStream(): Promise<void>;
+      stopEventStream(): void;
+      eventReconnectDelay: number;
+      eventReconnectCount: number;
+    };
+    transport.eventReconnectDelay = 8_000;
+    transport.eventReconnectCount = 3;
+
+    const stream = transport.startEventStream();
     await vi.advanceTimersByTimeAsync(14_999);
     expect(transport.eventReconnectDelay).toBe(8_000);
     expect(transport.eventReconnectCount).toBe(3);

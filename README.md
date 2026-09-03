@@ -133,7 +133,7 @@ Varro never mixes staged and unstaged changes, stages files, or commits automati
 
 Varro connects to `http://127.0.0.1:4096` by default. Set `varro.server.port` to another port from 1 through 65535. For manual server management, disable the deprecated debug setting `varro.server.autoStart` and run `opencode serve --port 4096`.
 
-The status bar shows the active OpenCode version and compatible updates. On macOS and Linux, `varro.server.autoUpdate` installs updates only through the OpenCode version tested with the current Varro release. Native Windows does not replace the CLI in the background. It shows an update prompt, waits for active work to finish, and stops a Varro-managed server before opening the update command so Windows releases its lock on `opencode.exe`. Stop a separately managed server yourself before updating.
+The status bar shows the active OpenCode version and available updates. On macOS and Linux, `varro.server.autoUpdate` installs the latest OpenCode CLI update. Native Windows does not replace the CLI in the background. It shows an update prompt, waits for active work to finish, and stops a Varro-managed server before opening the update command so Windows releases its lock on `opencode.exe`. Stop a separately managed server yourself before updating.
 
 Varro reloads global OpenCode configuration when OpenCode is idle. Changes to project configuration may require `Varro: Restart Server`. This command waits for active work and only restarts a server managed by Varro. Restart a manually launched server in its terminal.
 

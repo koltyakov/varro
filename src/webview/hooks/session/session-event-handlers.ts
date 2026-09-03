@@ -345,9 +345,14 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   };
   const noteSeq = (
     sessionId: string | null | undefined,
-    seq: number | undefined
+    seq: number | undefined,
+    sequenceStart?: number
   ): SequenceStatus => {
     if (!sessionId || !isNumber(seq) || !Number.isFinite(seq)) return 'unknown';
+    const rangeStart =
+      isNumber(sequenceStart) && Number.isFinite(sequenceStart) && sequenceStart <= seq
+        ? sequenceStart
+        : seq;
     const last = lastSeqBySession.get(sessionId);
     if (last === undefined) {
       const requiresRecovery =
@@ -377,7 +382,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     }
     pendingSequenceResets.delete(sessionId);
     lastSeqBySession.set(sessionId, seq);
-    return seq === last + 1 ? 'ok' : 'gap';
+    return rangeStart <= last + 1 ? 'ok' : 'gap';
   };
   const isSessionInActiveTree = (sessionId: string | null | undefined) => {
     if (!sessionId) return false;
@@ -568,7 +573,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     if (observed) return observed;
 
     const sessionId = getServerEventSessionId(event);
-    const status = noteSeq(sessionId, event.seq);
+    const status = noteSeq(sessionId, event.seq, event.sequenceStart);
     sequenceStatusByEvent.set(event, status);
     if (sessionId && event.seq !== undefined) {
       if (status === 'gap') {

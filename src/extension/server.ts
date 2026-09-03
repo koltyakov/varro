@@ -2,7 +2,6 @@
 /* oxlint-disable anti-slop/no-known-value-widening, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Server assertions follow lifecycle, process, and response validation. */
 import type { ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
-import * as vscode from 'vscode';
 import {
   MINIMUM_SUPPORTED_OPENCODE_VERSION,
   OPENCODE_UPDATE_REQUIRED_PREFIX,
@@ -12,7 +11,6 @@ import {
   OPENCODE_UPGRADE_COMMAND,
   type OpenCodeInstallMethod,
 } from '../shared/opencode-install';
-import { readMaximumTestedOpenCodeVersion } from './extension-manifest';
 import {
   parseServerEvent,
   type RestartBlockedState,
@@ -119,16 +117,6 @@ function isSupportedOpenCodeVersion(version: string | undefined): boolean {
   );
 }
 
-// Read once: the manifest cannot change while the extension host is alive.
-const maximumTestedOpenCodeVersion = readMaximumTestedOpenCodeVersion();
-
-/** True when `version` is at least one minor release beyond `baseline`. */
-function isMinorVersionAhead(version: string, baseline: string): boolean {
-  const [versionMajor = 0, versionMinor = 0] = version.split('.').map(Number);
-  const [baselineMajor = 0, baselineMinor = 0] = baseline.split('.').map(Number);
-  return versionMajor !== baselineMajor || versionMinor !== baselineMinor;
-}
-
 /**
  * Builds the message and the structured detail together so the two can never
  * disagree. The closing instruction is the important part: after an upgrade
@@ -225,7 +213,6 @@ export class OpenCodeServer extends EventEmitter {
   private terminalCliUpgradeTargetVersion: string | null = null;
   private terminalCliUpgradePreparationOperation: Promise<void> | null = null;
   private terminalCliUpgradeFinishOperation: Promise<void> | null = null;
-  private lastCeilingNoticeVersion = '';
   private lastRestartBlockers: RestartBlockedState | null = null;
   private adoptedServerRecoveryOperation: Promise<void> | null = null;
   private existingServerPreparationOperation: Promise<void> | null = null;
@@ -457,7 +444,6 @@ export class OpenCodeServer extends EventEmitter {
       this.throwIfStartCancelled(disposeGeneration, signal);
       if (health.healthy) {
         if (isSupportedOpenCodeVersion(health.version)) {
-          this.notifyIfAboveTestedCeiling(health.version);
           logger.info(`Found existing OpenCode server at ${this.url}`);
           if (health.version && this.processManager.hasOwnershipLeaseCandidate) {
             this.processManager.rememberInstalledCliVersion(health.version);
@@ -1382,7 +1368,6 @@ export class OpenCodeServer extends EventEmitter {
         const health = await this.readHealthInfo();
         // Covers servers Varro launched itself, which never pass through the
         // existing-server branch in startOperation.
-        if (health.healthy) this.notifyIfAboveTestedCeiling(health.version);
         return health;
       },
       hasActiveSessions: () => this.hasActiveSessions(),
@@ -1561,36 +1546,6 @@ export class OpenCodeServer extends EventEmitter {
         searchedPaths: install.searchedPaths,
       },
     };
-  }
-
-  /**
-   * A CLI newer than Varro's tested ceiling is the normal state right after an
-   * OpenCode release, so this only informs: blocking it would be worse than the
-   * silence it replaces. Patch-level drift is expected within days of every
-   * release and is always logged but never popped up - only a minor or major
-   * ahead of the tested version is worth interrupting for.
-   */
-  private notifyIfAboveTestedCeiling(observedVersion: string | undefined) {
-    const normalized = typeof observedVersion === 'string' ? extractVersion(observedVersion) : null;
-    if (!normalized) return;
-    if (this.lastCeilingNoticeVersion === normalized) return;
-    const testedThrough = maximumTestedOpenCodeVersion;
-    if (compareVersions(normalized, testedThrough) <= 0) return;
-    this.lastCeilingNoticeVersion = normalized;
-
-    const message = `OpenCode ${normalized} is newer than the version Varro has been tested against (${testedThrough}). Varro will keep working; report anything broken so compatibility can be updated.`;
-    logger.warn(message);
-    if (!isMinorVersionAhead(normalized, testedThrough)) return;
-    void vscode.window
-      .showInformationMessage(message, 'Report Issue', 'Show Logs')
-      .then((action) => {
-        if (action === 'Show Logs') logger.show();
-        else if (action === 'Report Issue') {
-          void vscode.env.openExternal(
-            vscode.Uri.parse('https://github.com/koltyakov/varro/issues')
-          );
-        }
-      });
   }
 
   private async restartServerForCliUpdate(serverVersion: string, installedCliVersion: string) {

@@ -215,6 +215,135 @@ describe('projected tool input lifecycle', () => {
     });
   });
 
+  it('does not parse or publish incomplete input fragments', () => {
+    const parse = vi.spyOn(JSON, 'parse');
+    const harness = createHarness();
+    try {
+      emit(harness, 'session.next.tool.input.started', { name: 'write' });
+      upsertPart.mockClear();
+
+      emit(harness, 'session.next.tool.input.delta', { delta: '{"content":"' });
+      for (let index = 0; index < 2_000; index += 1) {
+        emit(harness, 'session.next.tool.input.delta', { delta: 'x}' });
+      }
+
+      expect(parse).not.toHaveBeenCalled();
+      expect(upsertPart).not.toHaveBeenCalled();
+
+      emit(harness, 'session.next.tool.input.delta', { delta: '"}' });
+
+      expect(parse).toHaveBeenCalledOnce();
+      expect(upsertPart).toHaveBeenCalledOnce();
+      expect(currentToolPart(harness).state).toMatchObject({
+        status: 'pending',
+        input: { content: 'x}'.repeat(2_000) },
+      });
+    } finally {
+      parse.mockRestore();
+    }
+  });
+
+  it('rebases accumulated input when an authoritative pending part replaces its raw value', () => {
+    const harness = createHarness();
+    emit(harness, 'session.next.tool.input.started', { name: 'bash' });
+    emit(harness, 'session.next.tool.input.delta', { delta: '{"stale"' });
+
+    const part = currentToolPart(harness);
+    const message = harness.messages[0];
+    if (!message) throw new Error('expected an assistant message');
+    const index = message.parts.indexOf(part);
+    message.parts[index] = {
+      ...part,
+      state: { status: 'pending', input: {}, raw: '{"command":"ls"' },
+    };
+
+    emit(harness, 'session.next.tool.input.delta', { delta: '}' });
+
+    expect(currentToolPart(harness).state).toMatchObject({
+      status: 'pending',
+      input: { command: 'ls' },
+      raw: '{"command":"ls"}',
+    });
+  });
+
+  it('clears accumulated input when a terminal event arrives outside the active tree', () => {
+    const options = { inActiveTree: true };
+    const harness = createHarness(options);
+    emit(harness, 'session.next.tool.input.started', { name: 'bash' });
+    emit(harness, 'session.next.tool.input.delta', { delta: '{"stale":' });
+
+    options.inActiveTree = false;
+    expect(emit(harness, 'session.next.tool.failed')).toBe(false);
+    options.inActiveTree = true;
+    emit(harness, 'session.next.tool.input.delta', { delta: '{"fresh":true}' });
+
+    expect(currentToolPart(harness).state).toMatchObject({
+      status: 'pending',
+      input: { fresh: true },
+      raw: '{"fresh":true}',
+    });
+  });
+
+  it('clears accumulated input when a terminal event arrives after the message unloads', () => {
+    const harness = createHarness();
+    emit(harness, 'session.next.tool.input.started', { name: 'bash' });
+    emit(harness, 'session.next.tool.input.delta', { delta: '{"stale":' });
+    const message = harness.messages[0];
+    if (!message) throw new Error('expected an assistant message');
+
+    harness.messages.length = 0;
+    expect(emit(harness, 'session.next.tool.failed')).toBe(false);
+    harness.messages.push(message);
+    emit(harness, 'session.next.tool.input.delta', { delta: '{"fresh":true}' });
+
+    expect(currentToolPart(harness).state).toMatchObject({
+      status: 'pending',
+      input: { fresh: true },
+      raw: '{"fresh":true}',
+    });
+  });
+
+  it('bounds pending input accumulators', () => {
+    const harness = createHarness();
+    for (let index = 0; index <= 256; index += 1) {
+      const callID = `call-${index}`;
+      emit(harness, 'session.next.tool.input.started', { callID, name: 'bash' });
+      emit(harness, 'session.next.tool.input.delta', { callID, delta: '{"value":' });
+    }
+
+    emit(harness, 'session.next.tool.input.delta', { callID: 'call-0', delta: 'true}' });
+
+    const first = harness.messages[0]?.parts.find((part) => part.id === 'call-0');
+    expect(first?.type === 'tool' ? first.state : null).toMatchObject({
+      status: 'pending',
+      input: {},
+      raw: '',
+    });
+  });
+
+  it('suspends oversized pending input until an authoritative event arrives', () => {
+    const harness = createHarness();
+    emit(harness, 'session.next.tool.input.started', { name: 'write' });
+    upsertPart.mockClear();
+
+    emit(harness, 'session.next.tool.input.delta', {
+      delta: `{"content":"${'x'.repeat(1024 * 1024)}`,
+    });
+    emit(harness, 'session.next.tool.input.delta', { delta: '"}' });
+
+    expect(upsertPart).not.toHaveBeenCalled();
+
+    emit(harness, 'session.next.tool.input.ended', {
+      name: 'write',
+      input: '{"content":"done"}',
+    });
+    expect(currentToolPart(harness).state).toMatchObject({
+      status: 'pending',
+      input: { content: 'done' },
+      raw: '{"content":"done"}',
+    });
+  });
+
   it('exposes a completed apply_patch input before input.ended', () => {
     const harness = createHarness();
     emit(harness, 'session.next.tool.input.started', { name: 'apply_patch' });
@@ -395,6 +524,32 @@ describe('projected tool execution', () => {
         content: [{ type: 'text', text: 'working' }],
         progress: 'working',
       },
+    });
+  });
+
+  it('replaces structured progress snapshots while preserving provider metadata', () => {
+    const harness = createHarness();
+    emit(harness, 'session.next.tool.called', {
+      name: 'bash',
+      provider: { vendor: 'local' },
+      timestamp: 1000,
+    });
+    emit(harness, 'session.next.tool.progress', {
+      progress: 'working',
+      structured: { files: [{ relativePath: 'src/a.ts' }] },
+      content: [{ type: 'text', text: 'working' }],
+    });
+    emit(harness, 'session.next.tool.progress', { structured: { percent: 50 } });
+
+    const state = currentToolPart(harness).state;
+    expect(state.status).toBe('running');
+    if (state.status !== 'running') throw new Error('expected a running tool');
+    expect(state.metadata).toEqual({
+      vendor: 'local',
+      percent: 50,
+      structured: { percent: 50 },
+      content: undefined,
+      progress: undefined,
     });
   });
 

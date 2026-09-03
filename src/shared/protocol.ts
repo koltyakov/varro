@@ -492,6 +492,8 @@ export type ServerEvent = {
     id?: string;
     /** Varro transport marker: advance sequence observers without reapplying the mutation. */
     sequenceOnly?: true;
+    /** First contiguous durable cursor represented by a coalesced sequence-only marker. */
+    sequenceStart?: number;
     /** Workspace carried by OpenCode's global event envelope. */
     workspaceDirectory?: string;
     type: Name;
@@ -510,6 +512,7 @@ type ParsedServerEvent = {
   type: ServerEventName;
   id?: string;
   sequenceOnly?: true;
+  sequenceStart?: number;
   workspaceDirectory?: string;
   seq?: number;
   properties?: UnknownRecord;
@@ -559,6 +562,10 @@ function parseServerEventRecord(record: UnknownRecord | null): ServerEvent | nul
   );
   const id = getServerEventId(record);
   const sequenceOnly = record.sequenceOnly === true;
+  const sequenceStart =
+    isNumber(record.sequenceStart) && Number.isFinite(record.sequenceStart)
+      ? record.sequenceStart
+      : undefined;
   const workspaceDirectory = isString(record.workspaceDirectory)
     ? record.workspaceDirectory
     : undefined;
@@ -568,6 +575,7 @@ function parseServerEventRecord(record: UnknownRecord | null): ServerEvent | nul
   const event: ParsedServerEvent = { type: eventType };
   if (id !== undefined) event.id = id;
   if (sequenceOnly) event.sequenceOnly = true;
+  if (sequenceStart !== undefined) event.sequenceStart = sequenceStart;
   if (workspaceDirectory) event.workspaceDirectory = workspaceDirectory;
   if (seq !== undefined) event.seq = seq;
   if (properties) event.properties = properties;
@@ -584,6 +592,10 @@ function parseSyncEventRecord(record: UnknownRecord | null): ServerEvent | null 
   const properties = asRecord(record.data);
   const id = getServerEventId(record);
   const sequenceOnly = record.sequenceOnly === true;
+  const sequenceStart =
+    isNumber(record.sequenceStart) && Number.isFinite(record.sequenceStart)
+      ? record.sequenceStart
+      : undefined;
   const workspaceDirectory = isString(record.workspaceDirectory)
     ? record.workspaceDirectory
     : undefined;
@@ -591,6 +603,7 @@ function parseSyncEventRecord(record: UnknownRecord | null): ServerEvent | null 
   const event: ParsedServerEvent = { type: eventType };
   if (id !== undefined) event.id = id;
   if (sequenceOnly) event.sequenceOnly = true;
+  if (sequenceStart !== undefined) event.sequenceStart = sequenceStart;
   if (workspaceDirectory) event.workspaceDirectory = workspaceDirectory;
   if (seq !== undefined) event.seq = seq;
   if (properties) event.properties = properties;

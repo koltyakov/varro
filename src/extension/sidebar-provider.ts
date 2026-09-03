@@ -86,7 +86,7 @@ import { ProviderLimitService } from './provider-limit-service';
 import { PinnedSessionManager } from './pinned-session-manager';
 import { QueuedMessageStore } from './queued-message-store';
 import { RalphHost } from './ralph-host';
-import { RestProxy } from './rest-proxy';
+import { InternalHelperCleanupCoordinator, RestProxy } from './rest-proxy';
 import type { OpenCodeServer } from './server';
 import { ServerEventBridge } from './server-event-bridge';
 import { compareVersions, extractVersion } from './server-utils';
@@ -189,6 +189,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly modelPreferences: ModelPreferencesStore;
   private readonly draftImages: DraftImageStore;
   private readonly hiddenSessions: HiddenSessionManager;
+  private readonly internalHelperCleanupCoordinator = new InternalHelperCleanupCoordinator();
   private readonly autoApproveJudge: AutoApproveJudge;
   private readonly commitMessageService: CommitMessageService;
   private readonly sessionTitleFallback: SessionTitleFallback;
@@ -559,6 +560,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       sessionTrash: this.sessionTrash,
       pinnedSessions: this.pinnedSessions,
       hiddenSessions: this.hiddenSessions,
+      internalHelperCleanupCoordinator: this.internalHelperCleanupCoordinator,
       autoApproveJudge: this.autoApproveJudge,
       sessionTitleFallback: this.sessionTitleFallback,
       readLocalSessionSummary,

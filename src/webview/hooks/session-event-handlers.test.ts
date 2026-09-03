@@ -191,6 +191,7 @@ type EventData = {
   properties?: EventProperties;
   seq?: number;
   sequenceOnly?: true;
+  sequenceStart?: number;
 };
 
 type EventProperties = NonNullable<ServerEvent['properties']>;
@@ -2272,6 +2273,35 @@ describe('registerSessionEventHandlers', () => {
       seq: 2,
     });
 
+    expect(syncSessionMessages).not.toHaveBeenCalled();
+  });
+
+  it('accepts a contiguous coalesced sequence range without gap recovery', () => {
+    const handlers = installHandlers();
+    const syncSession = vi.fn().mockResolvedValue(undefined);
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        syncSession,
+        syncSessionMessages,
+      })
+    );
+
+    handlers.get('*')?.({
+      type: 'session.next.tool.called',
+      properties: { sessionID: 'session-1', callID: 'call-1' },
+      seq: 1,
+    });
+    handlers.get('*')?.({
+      type: 'session.next.tool.progress',
+      properties: { sessionID: 'session-1', callID: 'call-1' },
+      seq: 1_000,
+      sequenceOnly: true,
+      sequenceStart: 2,
+    });
+
+    expect(syncSession).not.toHaveBeenCalled();
     expect(syncSessionMessages).not.toHaveBeenCalled();
   });
 

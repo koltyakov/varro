@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: OpenCode Workbench",
-  "version": "0.28.3",
+  "version": "0.28.4",
   "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
@@ -62,7 +62,7 @@
     "vscode:install": "node scripts/vscode-install.mjs"
   },
   "dependencies": {
-    "@opencode-ai/sdk": "^1.18.26",
+    "@opencode-ai/sdk": "^1.18.27",
     "cross-spawn": "7.0.6",
     "dompurify": "3.4.14",
     "highlight.js": "11.12.0",
@@ -372,7 +372,7 @@
         "varro.server.autoUpdate": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically install OpenCode CLI updates only through the OpenCode version declared in Varro's manifest"
+          "description": "Automatically install OpenCode CLI updates"
         },
         "varro.chat.showFileDiffs": {
           "type": "boolean",
@@ -480,12 +480,6 @@
           "type": "string",
           "default": "",
           "description": "Debug only: make OpenCode CLI updates fail with this error text, to exercise the update recovery guidance (for example \"EPERM: operation not permitted\")"
-        },
-        "varro.debug.suggestUntestedOpenCodeUpdates": {
-          "deprecationMessage": "Debug only setting. Not intended for regular use.",
-          "type": "boolean",
-          "default": false,
-          "description": "Debug only: suggest OpenCode CLI versions newer than the version declared in Varro's manifest. These versions are never installed automatically"
         },
         "varro.server.autoStart": {
           "deprecationMessage": "Debug only setting. Not intended for regular use.",

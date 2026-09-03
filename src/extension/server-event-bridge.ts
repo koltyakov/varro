@@ -24,20 +24,41 @@ const DELTA_BATCH_INTERVAL_MS = 16;
 const MAX_BATCHED_DELTA_FRAGMENTS = 256;
 const MAX_BATCHED_DELTA_CHARACTERS = 64 * 1024;
 
-type CoalescableDelta = {
-  key: string;
-  fragmentField: 'delta' | 'text';
-  fragment: string;
-};
+type CoalescableEvent =
+  | {
+      kind: 'append';
+      key: string;
+      fragmentField: 'delta' | 'text';
+      fragment: string;
+    }
+  | {
+      kind: 'merge';
+      key: string;
+    };
 
-type PendingDelta = CoalescableDelta & {
+type PendingEvent = {
+  key: string;
   event: ServerEvent;
-  fragmentCount: number;
-};
+} & (
+  | {
+      kind: 'append';
+      fragmentField: 'delta' | 'text';
+      fragment: string;
+      fragmentCount: number;
+    }
+  | { kind: 'merge' }
+);
 
 type RecentEventState = {
   sequenceObserved: boolean;
   forwarded: boolean;
+};
+
+type PendingSequenceRange = {
+  start: number;
+  end: number;
+  contiguous: boolean;
+  event: ServerEvent;
 };
 
 export class ServerEventBridge {
@@ -48,8 +69,9 @@ export class ServerEventBridge {
   private serverEventHandler: ((event: unknown) => void) | undefined;
   private readonly unknownEventLoggedAt = new Map<string, number>();
   private readonly recentEvents = new Map<string, RecentEventState>();
-  private readonly pendingDeltas = new Map<string, PendingDelta>();
-  private pendingDeltaTimer: ReturnType<typeof setTimeout> | undefined;
+  private readonly pendingEvents = new Map<string, PendingEvent>();
+  private readonly pendingSequenceRanges = new Map<string, PendingSequenceRange>();
+  private pendingEventTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
     private readonly server: Pick<OpenCodeServer, 'on' | 'off'>,
@@ -94,13 +116,13 @@ export class ServerEventBridge {
   }
 
   flushPendingEvents() {
-    this.flushPendingDeltas();
+    this.flushPendingServerEvents();
   }
 
   attach() {
     if (this.serverStatusHandler || this.serverEventHandler) return;
     this.serverStatusHandler = (status: ServerStatus) => {
-      this.flushPendingDeltas();
+      this.flushPendingServerEvents();
       const previousStatus = this.status;
       this.status = status;
       if (this.providerLimitService.shouldClearCache(previousStatus, status)) {
@@ -113,7 +135,7 @@ export class ServerEventBridge {
     this.serverEventHandler = (event: unknown) => {
       const parsed = parseServerEvent(event);
       if (!parsed) {
-        this.flushPendingDeltas();
+        this.flushPendingServerEvents();
         this.logUnknownEvent(event);
         return;
       }
@@ -130,7 +152,7 @@ export class ServerEventBridge {
     if (this.serverEventHandler) this.server.off('event', this.serverEventHandler);
     this.serverStatusHandler = undefined;
     this.serverEventHandler = undefined;
-    this.flushPendingDeltas();
+    this.flushPendingServerEvents();
     void this.sessionState.persist();
     await this.sessionState.flush();
     this.unknownEventLoggedAt.clear();
@@ -150,11 +172,13 @@ export class ServerEventBridge {
         if (event.seq !== undefined && !recent.sequenceObserved) {
           recent.sequenceObserved = true;
           if (recent.forwarded) {
-            this.flushPendingDeltas();
-            this.post({
-              type: 'server/event',
-              payload: { ...event, sequenceOnly: true } as ServerEvent,
-            });
+            if (!this.attachSequenceToPendingProgress(event)) {
+              this.flushPendingServerEvents();
+              this.post({
+                type: 'server/event',
+                payload: { ...event, sequenceOnly: true } as ServerEvent,
+              });
+            }
           }
         }
         return;
@@ -169,11 +193,11 @@ export class ServerEventBridge {
       }
     }
 
-    const delta = getCoalescableDelta(event);
-    if (!delta) this.flushPendingDeltas();
+    const coalescable = getCoalescableEvent(event);
+    if (!coalescable) this.flushPendingServerEvents();
     this.hiddenSessions.observeEvent?.(event);
     if (this.shouldSuppress(event)) {
-      this.flushPendingDeltas();
+      this.flushPendingServerEvents();
       return;
     }
     const routeBeforeStateMutation = event.type === 'session.deleted';
@@ -187,48 +211,106 @@ export class ServerEventBridge {
     }
     if (!routeBeforeStateMutation) {
       if (recent) recent.forwarded = true;
-      if (delta) this.enqueueDelta(event, delta);
+      if (coalescable) this.enqueueEvent(event, coalescable);
       else this.post({ type: 'server/event', payload: event });
     }
   }
 
-  private enqueueDelta(event: ServerEvent, delta: CoalescableDelta) {
-    if (delta.fragment.length > MAX_BATCHED_DELTA_CHARACTERS) {
-      this.flushPendingDeltas();
+  private enqueueEvent(event: ServerEvent, coalescable: CoalescableEvent) {
+    if (
+      coalescable.kind === 'append' &&
+      coalescable.fragment.length > MAX_BATCHED_DELTA_CHARACTERS
+    ) {
+      this.flushPendingServerEvents();
       this.post({ type: 'server/event', payload: event });
       return;
     }
 
-    const pending = this.pendingDeltas.get(delta.key);
+    const pending = this.pendingEvents.get(coalescable.key);
     if (pending) {
+      if (pending.kind === 'merge' && coalescable.kind === 'merge') {
+        this.pendingEvents.set(coalescable.key, {
+          ...pending,
+          event,
+        });
+        return;
+      }
       if (
+        pending.kind === 'append' &&
+        coalescable.kind === 'append' &&
         pending.fragmentCount < MAX_BATCHED_DELTA_FRAGMENTS &&
-        pending.fragment.length + delta.fragment.length <= MAX_BATCHED_DELTA_CHARACTERS
+        pending.fragment.length + coalescable.fragment.length <= MAX_BATCHED_DELTA_CHARACTERS
       ) {
-        const fragment = pending.fragment + delta.fragment;
-        this.pendingDeltas.set(delta.key, {
-          ...delta,
-          event: mergeDeltaEvent(event, delta.fragmentField, fragment),
+        const fragment = pending.fragment + coalescable.fragment;
+        this.pendingEvents.set(coalescable.key, {
+          ...coalescable,
+          event: mergeDeltaEvent(event, coalescable.fragmentField, fragment),
           fragment,
           fragmentCount: pending.fragmentCount + 1,
         });
         return;
       }
-      this.flushPendingDeltas();
+      this.flushPendingServerEvents();
     }
 
-    this.pendingDeltas.set(delta.key, { ...delta, event, fragmentCount: 1 });
-    if (!this.pendingDeltaTimer) {
-      this.pendingDeltaTimer = setTimeout(() => this.flushPendingDeltas(), DELTA_BATCH_INTERVAL_MS);
+    this.pendingEvents.set(
+      coalescable.key,
+      coalescable.kind === 'append'
+        ? { ...coalescable, event, fragmentCount: 1 }
+        : { ...coalescable, event }
+    );
+    if (!this.pendingEventTimer) {
+      this.pendingEventTimer = setTimeout(
+        () => this.flushPendingServerEvents(),
+        DELTA_BATCH_INTERVAL_MS
+      );
     }
   }
 
-  private flushPendingDeltas() {
-    if (this.pendingDeltaTimer) clearTimeout(this.pendingDeltaTimer);
-    this.pendingDeltaTimer = undefined;
-    const pending = [...this.pendingDeltas.values()];
-    this.pendingDeltas.clear();
-    for (const delta of pending) this.post({ type: 'server/event', payload: delta.event });
+  private attachSequenceToPendingProgress(event: ServerEvent) {
+    if (event.type !== 'session.next.tool.progress' || event.seq === undefined) return false;
+    const properties = asRecord(event.properties);
+    const sessionID = properties?.sessionID;
+    if (typeof sessionID !== 'string') return false;
+    const pending = [...this.pendingEvents.values()].find(
+      (item) => item.kind === 'merge' && item.event.id === event.id
+    );
+    if (!pending) return false;
+
+    const range = this.pendingSequenceRanges.get(sessionID);
+    this.pendingSequenceRanges.set(sessionID, {
+      start: range?.start ?? event.seq,
+      end: event.seq,
+      contiguous: !range || (range.contiguous && event.seq === range.end + 1),
+      event,
+    });
+    return true;
+  }
+
+  private flushPendingServerEvents() {
+    if (this.pendingEventTimer) clearTimeout(this.pendingEventTimer);
+    this.pendingEventTimer = undefined;
+    const pending = [...this.pendingEvents.values()];
+    const sequenceRanges = [...this.pendingSequenceRanges.entries()];
+    this.pendingEvents.clear();
+    this.pendingSequenceRanges.clear();
+    for (const item of pending) this.post({ type: 'server/event', payload: item.event });
+    for (const [sessionID, range] of sequenceRanges) {
+      this.post({
+        type: 'server/event',
+        payload: {
+          id: range.event.id,
+          type: range.event.type,
+          ...(range.event.workspaceDirectory
+            ? { workspaceDirectory: range.event.workspaceDirectory }
+            : {}),
+          seq: range.end,
+          sequenceOnly: true,
+          ...(range.contiguous ? { sequenceStart: range.start } : {}),
+          properties: { sessionID },
+        } as ServerEvent,
+      });
+    }
   }
 
   private logUnknownEvent(event: unknown) {
@@ -282,7 +364,7 @@ function projectEventSummaryDiffs(event: ServerEvent): ServerEvent {
   return { ...event, properties: projectedProperties } as ServerEvent;
 }
 
-function getCoalescableDelta(event: ServerEvent): CoalescableDelta | null {
+function getCoalescableEvent(event: ServerEvent): CoalescableEvent | null {
   if (event.seq !== undefined) return null;
   const properties = asRecord(event.properties);
   if (!properties) return null;
@@ -314,6 +396,8 @@ function getCoalescableDelta(event: ServerEvent): CoalescableDelta | null {
         'assistantMessageID',
         'callID',
       ]);
+    case 'session.next.tool.progress':
+      return createMergeableEvent(event.type, properties, ['sessionID', 'callID']);
     case 'session.next.compaction.delta':
       return createCoalescableDelta(event.type, properties, 'text', ['sessionID', 'messageID']);
     default:
@@ -327,17 +411,28 @@ function createCoalescableDelta(
   fragmentField: 'delta' | 'text',
   identityFields: string[],
   eligible = true
-): CoalescableDelta | null {
+): CoalescableEvent | null {
   if (!eligible) return null;
   const fragment = properties[fragmentField];
   if (typeof fragment !== 'string' || fragment.length === 0) return null;
   const identity = identityFields.map((field) => properties[field]);
   if (identity.some((value) => typeof value !== 'string' || value.length === 0)) return null;
   return {
+    kind: 'append',
     key: [type, ...identity].join('\u0000'),
     fragmentField,
     fragment,
   };
+}
+
+function createMergeableEvent(
+  type: string,
+  properties: Record<string, unknown>,
+  identityFields: string[]
+): CoalescableEvent | null {
+  const identity = identityFields.map((field) => properties[field]);
+  if (identity.some((value) => typeof value !== 'string' || value.length === 0)) return null;
+  return { kind: 'merge', key: [type, ...identity].join('\u0000') };
 }
 
 function mergeDeltaEvent(

@@ -12,11 +12,11 @@ import {
   calendarCheckIcon,
   chatBubbleQuestionIcon,
   checkIcon,
-  codeBracketsSquareIcon,
   folderSettingsIcon,
   navArrowDownIcon,
   openNewWindowIcon,
   settingsIcon,
+  toolsIcon,
 } from '../../lib/ui-icons';
 import { formatModelName } from '../../lib/format';
 import { postMessage } from '../../lib/bridge';
@@ -47,7 +47,7 @@ function PickerChevron() {
 const selectedIconStyle = { '--toolbar-selected-icon': toCssUrl(checkIcon) };
 
 function getPrimaryAgentIcon(name: string) {
-  if (name.toLowerCase() === 'build') return codeBracketsSquareIcon;
+  if (name.toLowerCase() === 'build') return toolsIcon;
   if (name.toLowerCase() === 'ask') return chatBubbleQuestionIcon;
   if (name.toLowerCase() === 'plan') return calendarCheckIcon;
   return null;

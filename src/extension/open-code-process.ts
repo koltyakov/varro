@@ -33,7 +33,6 @@ import {
   type OpenCodeUpgradeFailureKind,
 } from '../shared/opencode-install';
 import type { ServerStatus } from '../shared/protocol';
-import { readMaximumTestedOpenCodeVersion } from './extension-manifest';
 import {
   parseManagedServerOwnershipLease,
   type ManagedServerOwnershipLease,
@@ -286,7 +285,6 @@ const LEGACY_OWNERSHIP_CLAIM_STALE_AGE_MS = 30_000;
 const OWNERSHIP_CLAIM_MAX_AGE_MS = 2 * 60_000;
 const SERVER_OWNER_ENV = 'VARRO_SERVER_OWNER';
 const MAX_SERVER_PORT = 65_535;
-const maximumTestedOpenCodeVersion = readMaximumTestedOpenCodeVersion();
 let staleConfigSweep: Promise<void> | null = null;
 let lastStaleConfigSweepAt = 0;
 
@@ -1091,12 +1089,6 @@ export class OpenCodeProcess {
 
   get isAutoUpdateEnabled(): boolean {
     return vscode.workspace.getConfiguration('varro').get<boolean>('server.autoUpdate', true);
-  }
-
-  get shouldSuggestUntestedUpdates(): boolean {
-    return vscode.workspace
-      .getConfiguration('varro')
-      .get<boolean>('debug.suggestUntestedOpenCodeUpdates', false);
   }
 
   get isSimulatingMissingCli(): boolean {
@@ -2744,17 +2736,8 @@ export class OpenCodeProcess {
       return null;
     }
 
-    const exceedsTestedCeiling =
-      compareVersions(latestCliVersion, maximumTestedOpenCodeVersion) > 0;
-    if (exceedsTestedCeiling && !this.shouldSuggestUntestedUpdates) {
-      return null;
-    }
     let backgroundFailure: UpgradeFailureReport | null = null;
-    if (
-      !exceedsTestedCeiling &&
-      this.isBackgroundCliAutoUpdateEnabled() &&
-      process.platform !== 'win32'
-    ) {
+    if (this.isBackgroundCliAutoUpdateEnabled() && process.platform !== 'win32') {
       if (this.lastSuggestedCliVersion === latestCliVersion) {
         return null;
       }
@@ -2782,9 +2765,7 @@ export class OpenCodeProcess {
     }
 
     const upgradeCommand = OpenCodeProcess.CLI_UPGRADE_COMMAND;
-    const message = exceedsTestedCeiling
-      ? `OpenCode CLI ${latestCliVersion} is available, but Varro has only been tested through ${maximumTestedOpenCodeVersion}. Review compatibility before updating with: ${upgradeCommand}`
-      : `OpenCode CLI ${latestCliVersion} is available (installed: ${installedCliVersion}). Update with: ${upgradeCommand}`;
+    const message = `OpenCode CLI ${latestCliVersion} is available (installed: ${installedCliVersion}). Update with: ${upgradeCommand}`;
     logger.info(message);
     void Promise.resolve(
       vscode.window.showInformationMessage(message, OpenCodeProcess.CLI_UPGRADE_ACTION)

@@ -130,7 +130,7 @@ Before release, manually inspect situations that are not deterministic on every 
 - Read-only home/config directories, executable permission errors, and full disks.
 - Sleep/wake, network changes, server crashes, and multiple VS Code windows sharing a configured port.
 - Closing a native Windows update terminal, which allows Varro to use the CLI again after the file lock is released.
-- OpenCode versions newer than Varro's tested ceiling and malformed version output.
+- OpenCode versions newer than Varro's tested version and malformed version output.
 - No providers, provider API failure, provider login cancellation, and invalid provider credentials.
 - Embedded API-key and OAuth connection, code-based and automatic OAuth completion, provider disconnection, terminal fallbacks, and provider-catalog load failure.
 - Expired or revoked provider credentials, targeted reauthentication from both a failed response and the Models view, and authentication-only refresh while another agent is running.

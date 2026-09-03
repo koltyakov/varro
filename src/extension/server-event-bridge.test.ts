@@ -500,6 +500,229 @@ describe('ServerEventBridge', () => {
     vi.useRealTimers();
   });
 
+  it('coalesces rapid tool progress to the latest snapshot', () => {
+    vi.useFakeTimers();
+    useParsedEvents();
+    const { bridge, handlers, post, sessionState } = createMocks();
+    bridge.attach();
+    const first = {
+      type: 'session.next.tool.progress',
+      properties: {
+        sessionID: 'session-1',
+        callID: 'call-1',
+        content: [{ type: 'text', text: 'first' }],
+        structured: { files: [{ relativePath: 'src/a.ts' }] },
+      },
+    } satisfies ServerEvent;
+
+    handlers.event!(first);
+    for (let index = 1; index <= 1_000; index += 1) {
+      handlers.event!({
+        type: 'session.next.tool.progress',
+        properties: {
+          sessionID: 'session-1',
+          callID: 'call-1',
+          content: [{ type: 'text', text: `update-${index}` }],
+          structured: { percent: index / 10 },
+        },
+      } satisfies ServerEvent);
+    }
+
+    expect(sessionState.handleServerEvent).toHaveBeenCalledTimes(1_001);
+    expect(post).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(16);
+
+    expect(post).toHaveBeenCalledOnce();
+    expect(post).toHaveBeenCalledWith({
+      type: 'server/event',
+      payload: {
+        type: 'session.next.tool.progress',
+        properties: {
+          sessionID: 'session-1',
+          callID: 'call-1',
+          content: [{ type: 'text', text: 'update-1000' }],
+          structured: {
+            percent: 100,
+          },
+        },
+      },
+    });
+    vi.useRealTimers();
+  });
+
+  it('coalesces direct tool progress events with their sequenced sync twins', () => {
+    vi.useFakeTimers();
+    useParsedEvents();
+    const { bridge, handlers, post, sessionState } = createMocks();
+    bridge.attach();
+
+    for (let index = 1; index <= 1_000; index += 1) {
+      const direct = {
+        id: `progress-${index}`,
+        type: 'session.next.tool.progress',
+        properties: {
+          sessionID: 'session-1',
+          callID: 'call-1',
+          structured: { percent: index / 10 },
+        },
+      } satisfies ServerEvent;
+      handlers.event!(direct);
+      handlers.event!({ ...direct, seq: index } satisfies ServerEvent);
+    }
+
+    expect(sessionState.handleServerEvent).toHaveBeenCalledTimes(1_000);
+    expect(post).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(16);
+    expect(post.mock.calls.map(([message]) => message)).toEqual([
+      {
+        type: 'server/event',
+        payload: {
+          id: 'progress-1000',
+          type: 'session.next.tool.progress',
+          properties: {
+            sessionID: 'session-1',
+            callID: 'call-1',
+            structured: { percent: 100 },
+          },
+        },
+      },
+      {
+        type: 'server/event',
+        payload: {
+          id: 'progress-1000',
+          type: 'session.next.tool.progress',
+          seq: 1000,
+          sequenceOnly: true,
+          sequenceStart: 1,
+          properties: { sessionID: 'session-1' },
+        },
+      },
+    ]);
+    vi.useRealTimers();
+  });
+
+  it('does not mark a noncontiguous progress sequence as a safe range', () => {
+    vi.useFakeTimers();
+    useParsedEvents();
+    const { bridge, handlers, post } = createMocks();
+    bridge.attach();
+
+    for (const seq of [1, 3]) {
+      const direct = {
+        id: `progress-${seq}`,
+        type: 'session.next.tool.progress',
+        properties: {
+          sessionID: 'session-1',
+          callID: 'call-1',
+          structured: { percent: seq },
+        },
+      } satisfies ServerEvent;
+      handlers.event!(direct);
+      handlers.event!({ ...direct, seq } satisfies ServerEvent);
+    }
+    vi.advanceTimersByTime(16);
+
+    expect(post.mock.calls.at(-1)?.[0]).toEqual({
+      type: 'server/event',
+      payload: {
+        id: 'progress-3',
+        type: 'session.next.tool.progress',
+        seq: 3,
+        sequenceOnly: true,
+        properties: { sessionID: 'session-1' },
+      },
+    });
+    vi.useRealTimers();
+  });
+
+  it('replaces omitted progress properties and structured fields with the latest snapshot', () => {
+    vi.useFakeTimers();
+    useParsedEvents();
+    const { bridge, handlers, post } = createMocks();
+    bridge.attach();
+
+    handlers.event!({
+      type: 'session.next.tool.progress',
+      properties: {
+        sessionID: 'session-1',
+        callID: 'call-1',
+        content: [{ type: 'text', text: 'stale' }],
+        structured: { files: [{ relativePath: 'src/a.ts' }] },
+      },
+    } satisfies ServerEvent);
+    handlers.event!({
+      type: 'session.next.tool.progress',
+      properties: {
+        sessionID: 'session-1',
+        callID: 'call-1',
+        structured: { percent: 50 },
+      },
+    } satisfies ServerEvent);
+    vi.advanceTimersByTime(16);
+
+    expect(post).toHaveBeenCalledWith({
+      type: 'server/event',
+      payload: {
+        type: 'session.next.tool.progress',
+        properties: {
+          sessionID: 'session-1',
+          callID: 'call-1',
+          structured: {
+            percent: 50,
+          },
+        },
+      },
+    });
+    vi.useRealTimers();
+  });
+
+  it('flushes pending tool progress before tool completion', () => {
+    vi.useFakeTimers();
+    useParsedEvents();
+    const { bridge, handlers, post } = createMocks();
+    bridge.attach();
+    const progress = {
+      type: 'session.next.tool.progress',
+      properties: { sessionID: 'session-1', callID: 'call-1', progress: 'working' },
+    } satisfies ServerEvent;
+    const success = {
+      type: 'session.next.tool.success',
+      properties: {
+        sessionID: 'session-1',
+        callID: 'call-1',
+        content: [{ type: 'text', text: 'done' }],
+      },
+    } satisfies ServerEvent;
+
+    handlers.event!(progress);
+    handlers.event!(success);
+
+    expect(post.mock.calls.map(([message]) => message.payload)).toEqual([progress, success]);
+    vi.runAllTimers();
+    expect(post).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it('does not batch sequenced tool progress', () => {
+    vi.useFakeTimers();
+    useParsedEvents();
+    const { bridge, handlers, post } = createMocks();
+    bridge.attach();
+    const progress = {
+      type: 'session.next.tool.progress',
+      properties: { sessionID: 'session-1', callID: 'call-1', progress: 'working' },
+      seq: 1,
+    } satisfies ServerEvent;
+
+    handlers.event!(progress);
+
+    expect(post).toHaveBeenCalledWith({ type: 'server/event', payload: progress });
+    vi.runAllTimers();
+    expect(post).toHaveBeenCalledOnce();
+    vi.useRealTimers();
+  });
+
   it('flushes a pending delta through the public ordering hook', () => {
     vi.useFakeTimers();
     useParsedEvents();

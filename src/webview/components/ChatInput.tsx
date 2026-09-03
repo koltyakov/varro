@@ -1597,7 +1597,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         .map((entry) => entry.item);
     }
 
-    return slashCompletionEntries()
+    const commandItems = slashCompletionEntries()
       .filter((entry) => completion.start === 0 || entry.name === SKILLS_COMMAND_NAME)
       .filter((entry) => {
         if (!query) return true;
@@ -1608,6 +1608,18 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         );
       })
       .map((entry) => entry.item);
+
+    if (!query) return commandItems;
+
+    const skillItems = skillSlashCompletionEntries()
+      .filter(
+        (entry) =>
+          entry.name.includes(query) ||
+          entry.description.includes(query) ||
+          entry.hints.some((hint) => hint.includes(query))
+      )
+      .map((entry) => entry.item);
+    return [...commandItems, ...skillItems];
   });
 
   const composerCompletions = createMemo(() => {

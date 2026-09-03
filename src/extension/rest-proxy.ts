@@ -99,6 +99,13 @@ const SESSION_EVENT_CATALOG_REFRESH_MS = 1_000;
 const SESSION_MESSAGE_RESPONSE_MAX_BYTES = 16 * 1024 * 1024;
 const SESSION_MESSAGE_FALLBACK_MAX_BYTES = 256 * 1024 * 1024;
 const PERMANENT_DELETION_TOMBSTONE_LIMIT = 256;
+const INTERNAL_HELPER_CLEANUP_STATE_LIMIT = 256;
+const INTERNAL_HELPER_CLEANUP_QUEUE_LIMIT = 256;
+const INTERNAL_HELPER_CLEANUP_MAX_CONCURRENCY = 4;
+const INTERNAL_HELPER_CLEANUP_RETRY_INITIAL_MS = 5_000;
+const INTERNAL_HELPER_CLEANUP_RETRY_MAX_MS = 5 * 60_000;
+const INTERNAL_HELPER_CLEANUP_SETTLED_TTL_MS = 30_000;
+const INTERNAL_HELPER_CLEANUP_FAILURE_STATE_TTL_MS = 30 * 60_000;
 const openCodeConfigUpdateLocks = new Map<string, Promise<void>>();
 
 type RecycleBinRequest =
@@ -108,6 +115,141 @@ type RecycleBinRequest =
   | { kind: 'delete'; rootID: string };
 
 type PermanentDeleteRequest = { sessionID: string };
+
+type InternalHelperCleanupState = {
+  failures: number;
+  nextAttemptAt: number;
+  expiresAt: number;
+  settled: boolean;
+};
+
+type InternalHelperCleanupOutcome = 'settled' | 'deferred';
+
+type InternalHelperCleanupJob = {
+  sessionID: string;
+  run(): Promise<InternalHelperCleanupOutcome>;
+  retainSettled(): void;
+};
+
+export class InternalHelperCleanupCoordinator {
+  private readonly activeRequests = new Set<string>();
+  private readonly states = new Map<string, InternalHelperCleanupState>();
+  private readonly pendingJobs = new Map<string, InternalHelperCleanupJob>();
+
+  enqueue(
+    sessionIDs: string[],
+    run: (sessionID: string) => Promise<InternalHelperCleanupOutcome>,
+    retainSettled: (sessionID: string) => void,
+    now = Date.now()
+  ) {
+    this.pruneExpiredStates(now);
+    for (const sessionID of sessionIDs) {
+      const state = this.states.get(sessionID);
+      if (state?.settled && state.nextAttemptAt > now) {
+        retainSettled(sessionID);
+        continue;
+      }
+      if (state && state.nextAttemptAt > now) {
+        state.expiresAt = now + INTERNAL_HELPER_CLEANUP_FAILURE_STATE_TTL_MS;
+        continue;
+      }
+      if (this.activeRequests.has(sessionID) || this.pendingJobs.has(sessionID)) continue;
+      if (this.pendingJobs.size >= INTERNAL_HELPER_CLEANUP_QUEUE_LIMIT) break;
+      this.pendingJobs.set(sessionID, {
+        sessionID,
+        run: () => run(sessionID),
+        retainSettled: () => retainSettled(sessionID),
+      });
+    }
+    this.drain();
+  }
+
+  private drain() {
+    while (
+      this.activeRequests.size < INTERNAL_HELPER_CLEANUP_MAX_CONCURRENCY &&
+      this.pendingJobs.size > 0
+    ) {
+      const sessionID = this.pendingJobs.keys().next().value;
+      if (!sessionID) break;
+      const job = this.pendingJobs.get(sessionID);
+      this.pendingJobs.delete(sessionID);
+      if (!job) continue;
+
+      const now = Date.now();
+      this.pruneExpiredStates(now);
+      const state = this.states.get(sessionID);
+      if (state?.settled && state.nextAttemptAt > now) {
+        job.retainSettled();
+        continue;
+      }
+      if (state && state.nextAttemptAt > now) continue;
+      if (!state && this.states.size >= INTERNAL_HELPER_CLEANUP_STATE_LIMIT) continue;
+
+      const previousFailures = state?.failures ?? 0;
+      this.remember(sessionID, {
+        failures: previousFailures,
+        nextAttemptAt: 0,
+        expiresAt: now + INTERNAL_HELPER_CLEANUP_FAILURE_STATE_TTL_MS,
+        settled: false,
+      });
+      this.activeRequests.add(sessionID);
+      void job
+        .run()
+        .then((outcome) => {
+          const completedAt = Date.now();
+          if (outcome === 'settled') {
+            this.remember(sessionID, {
+              failures: 0,
+              nextAttemptAt: completedAt + INTERNAL_HELPER_CLEANUP_SETTLED_TTL_MS,
+              expiresAt: completedAt + INTERNAL_HELPER_CLEANUP_SETTLED_TTL_MS,
+              settled: true,
+            });
+            return;
+          }
+          this.defer(sessionID, previousFailures, completedAt);
+        })
+        .catch((err: unknown) => {
+          this.defer(sessionID, previousFailures, Date.now());
+          logger.warn(
+            `Unexpected stale internal helper cleanup failure for ${sessionID}: ${
+              err instanceof Error ? err.message : String(err)
+            }`
+          );
+        })
+        .finally(() => {
+          this.activeRequests.delete(sessionID);
+          this.drain();
+        });
+    }
+  }
+
+  private defer(sessionID: string, previousFailures: number, now: number) {
+    const failures = Math.min(previousFailures + 1, 7);
+    const delay = Math.min(
+      INTERNAL_HELPER_CLEANUP_RETRY_INITIAL_MS * 2 ** (failures - 1),
+      INTERNAL_HELPER_CLEANUP_RETRY_MAX_MS
+    );
+    this.remember(sessionID, {
+      failures,
+      nextAttemptAt: now + delay,
+      expiresAt: now + INTERNAL_HELPER_CLEANUP_FAILURE_STATE_TTL_MS,
+      settled: false,
+    });
+  }
+
+  private pruneExpiredStates(now: number) {
+    for (const [sessionID, state] of this.states) {
+      if (state.expiresAt <= now && !this.activeRequests.has(sessionID)) {
+        this.states.delete(sessionID);
+      }
+    }
+  }
+
+  private remember(sessionID: string, state: InternalHelperCleanupState) {
+    this.states.delete(sessionID);
+    this.states.set(sessionID, state);
+  }
+}
 
 type OpenCodeConfigRequest =
   | { kind: 'get' }
@@ -235,6 +377,7 @@ export interface RestProxyCallbacks {
   getWorkspacePath?(): string | null | undefined;
   ensureServerStarted(): Promise<string | undefined>;
   workspaceSessionStatusCoordinator?: WorkspaceSessionStatusCoordinator;
+  internalHelperCleanupCoordinator?: InternalHelperCleanupCoordinator;
   confirmPromptAdmission(workspacePath: string): Promise<boolean>;
   refreshOpenCodeConfig?(
     previousRouting: OpenCodeModelRouting,
@@ -326,7 +469,8 @@ export class RestProxy {
   private readonly workspaceSessionStatusCoordinator: WorkspaceSessionStatusCoordinator;
   private hasSessionDirectorySnapshot = false;
   private sessionDirectoryBootstrapPromise: Promise<ReadonlyMap<string, string>> | null = null;
-  private readonly internalHelperCleanupRequests = new Set<string>();
+  private readonly internalHelperCleanupCoordinator: InternalHelperCleanupCoordinator;
+  private internalHelperCleanupCursor = 0;
   private readonly permanentlyDeletedSessionIds = new Set<string>();
   private sessionSummaryListRequests = new Map<
     string,
@@ -348,6 +492,8 @@ export class RestProxy {
   constructor(private readonly callbacks: RestProxyCallbacks) {
     this.workspaceSessionStatusCoordinator =
       callbacks.workspaceSessionStatusCoordinator ?? new WorkspaceSessionStatusCoordinator();
+    this.internalHelperCleanupCoordinator =
+      callbacks.internalHelperCleanupCoordinator ?? new InternalHelperCleanupCoordinator();
   }
 
   cancelRequest(payload: ApiCancelPayload) {
@@ -2658,33 +2804,47 @@ export class RestProxy {
   }
 
   private cleanupStaleInternalHelperSessions(sessionIDs: string[]) {
-    for (const sessionID of sessionIDs) {
-      if (this.internalHelperCleanupRequests.has(sessionID)) continue;
-      this.internalHelperCleanupRequests.add(sessionID);
-      void this.callbacks.server
-        .request('DELETE', `/session/${encodeURIComponent(sessionID)}`, undefined, {
-          directory: this.sessionDirectories.get(sessionID),
-        })
-        .then(
-          (deleted) => {
-            if (deleted === true) {
-              this.callbacks.hiddenSessions.retainUntilDeleted(sessionID);
-            } else {
-              logger.warn(
-                `Failed to delete stale internal helper session ${sessionID}: OpenCode did not confirm deletion`
-              );
-            }
-          },
-          (err) => {
-            logger.warn(
-              `Failed to delete stale internal helper session ${sessionID}: ${
-                err instanceof Error ? err.message : String(err)
-              }`
-            );
+    if (sessionIDs.length === 0) return;
+    const start = this.internalHelperCleanupCursor % sessionIDs.length;
+    this.internalHelperCleanupCursor =
+      (start + INTERNAL_HELPER_CLEANUP_QUEUE_LIMIT) % sessionIDs.length;
+    const orderedSessionIDs = Array.from(
+      { length: sessionIDs.length },
+      (_, offset) => sessionIDs[(start + offset) % sessionIDs.length]
+    ).filter((sessionID): sessionID is string => !!sessionID);
+    this.internalHelperCleanupCoordinator.enqueue(
+      orderedSessionIDs,
+      async (sessionID) => {
+        try {
+          const deleted = await this.callbacks.server.request(
+            'DELETE',
+            `/session/${encodeURIComponent(sessionID)}`,
+            undefined,
+            { directory: this.sessionDirectories.get(sessionID) }
+          );
+          if (deleted === true) {
+            this.callbacks.hiddenSessions.retainUntilDeleted(sessionID);
+            return 'settled';
           }
-        )
-        .finally(() => this.internalHelperCleanupRequests.delete(sessionID));
-    }
+          logger.warn(
+            `Failed to delete stale internal helper session ${sessionID}: OpenCode did not confirm deletion`
+          );
+          return 'deferred';
+        } catch (err: unknown) {
+          if (isNotFoundError(err)) {
+            this.callbacks.hiddenSessions.retainUntilDeleted(sessionID);
+            return 'settled';
+          }
+          logger.warn(
+            `Failed to delete stale internal helper session ${sessionID}: ${
+              err instanceof Error ? err.message : String(err)
+            }`
+          );
+          return 'deferred';
+        }
+      },
+      (sessionID) => this.callbacks.hiddenSessions.retainUntilDeleted(sessionID)
+    );
   }
 
   private filterVisibleSessions(sessions: unknown[]) {

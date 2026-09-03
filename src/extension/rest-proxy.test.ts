@@ -34,6 +34,7 @@ vi.mock('vscode', () => mocks.vscode);
 vi.mock('./logger', () => ({ logger: mocks.logger }));
 
 import {
+  InternalHelperCleanupCoordinator,
   RestProxy,
   getOpenCodeDirectoryHeaders,
   resolveOpenCodeProjectConfigPaths,
@@ -3379,6 +3380,187 @@ describe('RestProxy handleRequest', () => {
       undefined,
       expect.anything()
     );
+  });
+
+  it('does not retry a stale helper cleanup after the server reports it missing', async () => {
+    const staleHelper = {
+      id: 'missing-helper',
+      directory: '/repo',
+      title: 'Internal helper',
+      metadata: { varroInternal: 'permission-judge' },
+      time: { updated: Date.now() - 180_000 },
+    };
+    const serverRequest = vi.fn((method: string) =>
+      method === 'GET'
+        ? Promise.resolve([staleHelper])
+        : Promise.reject(new Error('404 Session not found: missing-helper'))
+    );
+    const hiddenSessions = new HiddenSessionManager();
+    const retainUntilDeleted = vi.spyOn(hiddenSessions, 'retainUntilDeleted');
+    const { proxy } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      hiddenSessions,
+    });
+
+    await proxy.handleRequest(makePayload(1611, 'GET', '/session?limit=1'));
+    await vi.waitFor(() => {
+      expect(serverRequest.mock.calls.filter(([method]) => method === 'DELETE')).toHaveLength(1);
+    });
+    await proxy.handleRequest(makePayload(1612, 'GET', '/session?limit=1'));
+
+    expect(serverRequest.mock.calls.filter(([method]) => method === 'DELETE')).toHaveLength(1);
+    expect(retainUntilDeleted).toHaveBeenCalledTimes(2);
+    expect(hiddenSessions.isHidden(staleHelper.id)).toBe(true);
+  });
+
+  it('backs off transient stale helper cleanup failures before retrying', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    const staleHelper = {
+      id: 'retry-helper',
+      directory: '/repo',
+      title: 'Internal helper',
+      metadata: { varroInternal: 'permission-judge' },
+      time: { updated: 800_000 },
+    };
+    let deleteAttempts = 0;
+    const serverRequest = vi.fn((method: string) => {
+      if (method === 'GET') return Promise.resolve([staleHelper]);
+      deleteAttempts += 1;
+      return deleteAttempts === 1
+        ? Promise.reject(new Error('server unavailable'))
+        : Promise.resolve(true);
+    });
+    const hiddenSessions = new HiddenSessionManager();
+    const { proxy } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      hiddenSessions,
+    });
+
+    try {
+      await proxy.handleRequest(makePayload(1613, 'GET', '/session?limit=1'));
+      await vi.waitFor(() => expect(deleteAttempts).toBe(1));
+      await proxy.handleRequest(makePayload(1614, 'GET', '/session?limit=1'));
+      now.mockReturnValue(1_004_999);
+      await proxy.handleRequest(makePayload(1615, 'GET', '/session?limit=1'));
+
+      expect(deleteAttempts).toBe(1);
+
+      now.mockReturnValue(1_005_000);
+      await proxy.handleRequest(makePayload(1616, 'GET', '/session?limit=1'));
+      await vi.waitFor(() => expect(deleteAttempts).toBe(2));
+      await proxy.handleRequest(makePayload(1617, 'GET', '/session?limit=1'));
+
+      expect(deleteAttempts).toBe(2);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it('limits concurrent stale helper cleanup and admits later helpers after requests settle', async () => {
+    const staleSessionIDs = Array.from({ length: 6 }, (_, index) => `helper-${index}`);
+    const removals = Array.from({ length: 6 }, () => deferred<boolean>());
+    let deleteAttempts = 0;
+    const serverRequest = vi.fn((method: string) => {
+      if (method === 'GET') return Promise.resolve([]);
+      const removal = removals[deleteAttempts];
+      deleteAttempts += 1;
+      return removal?.promise ?? Promise.resolve(true);
+    });
+    const hiddenSessions = {
+      ...createCallbacks().hiddenSessions,
+      observeSessionList: vi.fn(() => staleSessionIDs),
+      retainUntilDeleted: vi.fn(),
+    };
+    const { proxy } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      hiddenSessions,
+    });
+
+    await proxy.handleRequest(makePayload(1618, 'GET', '/session'));
+    expect(deleteAttempts).toBe(4);
+    await proxy.handleRequest(makePayload(1619, 'GET', '/session'));
+    expect(deleteAttempts).toBe(4);
+
+    for (const removal of removals.slice(0, 4)) removal.resolve(true);
+    await vi.waitFor(() => expect(deleteAttempts).toBe(6));
+    for (const removal of removals.slice(4)) removal.resolve(true);
+  });
+
+  it('reclaims bounded stale helper cleanup state after terminal tombstones expire', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    const coordinator = new InternalHelperCleanupCoordinator();
+    const run = vi.fn(async () => 'settled' as const);
+    try {
+      coordinator.enqueue(
+        Array.from({ length: 256 }, (_, index) => `helper-${index}`),
+        run,
+        vi.fn()
+      );
+      await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(256));
+      await Promise.resolve();
+
+      coordinator.enqueue(['overflow-helper'], run, vi.fn());
+      await Promise.resolve();
+      expect(run).toHaveBeenCalledTimes(256);
+
+      now.mockReturnValue(1_030_000);
+      coordinator.enqueue(['overflow-helper'], run, vi.fn());
+      await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(257));
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it('expires abandoned transient cleanup failures from bounded state', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    const coordinator = new InternalHelperCleanupCoordinator();
+    const run = vi.fn(async () => 'deferred' as const);
+    try {
+      coordinator.enqueue(
+        Array.from({ length: 256 }, (_, index) => `helper-${index}`),
+        run,
+        vi.fn()
+      );
+      await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(256));
+      await Promise.resolve();
+
+      coordinator.enqueue(['overflow-helper'], run, vi.fn());
+      await Promise.resolve();
+      expect(run).toHaveBeenCalledTimes(256);
+
+      now.mockReturnValue(2_800_000);
+      coordinator.enqueue(['overflow-helper'], run, vi.fn());
+      await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(257));
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it('shares stale helper cleanup claims across webview proxies', async () => {
+    const coordinator = new InternalHelperCleanupCoordinator();
+    const serverRequest = vi.fn((method: string) =>
+      method === 'GET' ? Promise.resolve([]) : Promise.reject(new Error('404 Session not found'))
+    );
+    const hiddenSessions = {
+      ...createCallbacks().hiddenSessions,
+      observeSessionList: vi.fn(() => ['shared-helper']),
+      retainUntilDeleted: vi.fn(),
+    };
+    const overrides = {
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      hiddenSessions,
+      internalHelperCleanupCoordinator: coordinator,
+    };
+    const first = createProxy(overrides);
+    const second = createProxy(overrides);
+
+    await Promise.all([
+      first.proxy.handleRequest(makePayload(1621, 'GET', '/session')),
+      second.proxy.handleRequest(makePayload(1622, 'GET', '/session')),
+    ]);
+    await vi.waitFor(() => expect(hiddenSessions.retainUntilDeleted).toHaveBeenCalledOnce());
+
+    expect(serverRequest.mock.calls.filter(([method]) => method === 'DELETE')).toHaveLength(1);
   });
 
   it('hides restarted permission judges from sibling workspace catalogs', async () => {

@@ -2722,6 +2722,59 @@ describe('ChatInput', () => {
     expect(sendMessageMock).not.toHaveBeenCalled();
   });
 
+  it('shows matching skills after one slash query character', async () => {
+    setState('commands', [
+      {
+        name: 'browser-bridge',
+        description: 'Control a browser',
+        template: 'Control a browser',
+        source: 'skill',
+      },
+    ]);
+    setInputText('/b');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
+    editor.focus();
+    setCollapsedSelection(editor.firstChild, '/b'.length);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'b', bubbles: true }));
+    await flushAsyncWork();
+
+    const titles = Array.from(
+      container?.querySelectorAll<HTMLElement>('.composer-completion-title') ?? []
+    ).map((element) => element.textContent);
+    expect(titles).toContain('/browser-bridge');
+    expect(container?.querySelector('.composer-completion-header')).toBeNull();
+  });
+
+  it('does not show skills for a bare slash', async () => {
+    setState('commands', [
+      {
+        name: 'browser-bridge',
+        description: 'Control a browser',
+        template: 'Control a browser',
+        source: 'skill',
+      },
+    ]);
+    setInputText('/');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
+    editor.focus();
+    setCollapsedSelection(editor.firstChild, '/'.length);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: '/', bubbles: true }));
+    await flushAsyncWork();
+
+    const titles = Array.from(
+      container?.querySelectorAll<HTMLElement>('.composer-completion-title') ?? []
+    ).map((element) => element.textContent);
+    expect(titles).not.toContain('/browser-bridge');
+  });
+
   it('selects and runs a skill from the middle of a prompt', async () => {
     setState('commands', [
       {

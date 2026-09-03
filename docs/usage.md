@@ -505,7 +505,7 @@ Server:
 - `varro.server.autoStart` - auto-start `opencode serve` when Varro first needs it; defaults to `true` and is marked deprecated/debug-only in VS Code
 - `varro.server.port` - port used for the local OpenCode server (default `4096`); reload the VS Code window after changing it
 - `varro.server.command` - optional path to the OpenCode CLI executable
-- `varro.server.autoUpdate` - automatically install compatible OpenCode CLI updates in the background on macOS and Linux. Native Windows uses an upgrade prompt instead because a running server can lock `opencode.exe`. Before opening a Windows update command, Varro waits for active work and stops its managed server; stop a manually launched server yourself. Automatic installation is capped at the OpenCode version declared and tested by Varro, and failed automatic updates show tailored recovery guidance.
+- `varro.server.autoUpdate` - automatically install the latest OpenCode CLI update in the background on macOS and Linux. Native Windows uses an upgrade prompt instead because a running server can lock `opencode.exe`. Before opening a Windows update command, Varro waits for active work and stops its managed server; stop a manually launched server yourself. Failed automatic updates show tailored recovery guidance.
 
 Chat view:
 
@@ -531,12 +531,11 @@ There are also deprecated debug-only settings used for development and recovery 
 - `varro.debug.simulateMissingCli`
 - `varro.debug.simulateNoProviders`
 - `varro.debug.simulateUpgradeFailure`
-- `varro.debug.suggestUntestedOpenCodeUpdates`
 
 ## Troubleshooting
 
 - OpenCode CLI missing: install it with `npm install -g opencode-ai`.
-- OpenCode CLI incompatible: `1.16.0` is the runtime floor. `1.18.26` is this release's tested and automatic-update ceiling, not a hard runtime maximum. Newer installed servers are allowed to run, but Varro warns about untested versions and does not offer or automatically install above-ceiling updates by default.
+- OpenCode CLI incompatible: `1.16.0` is the runtime floor. `1.18.27` is the version tested with this Varro release, not a runtime maximum. Newer versions are allowed to run and remain eligible for updates.
 - CLI not on `PATH`: set `varro.server.command` to the executable path.
 - Windows host mismatch: install OpenCode in Windows for a native VS Code window, or inside the distribution for a VS Code WSL window. Run `Varro: About` and check `Platform` if the active extension host is unclear.
 - Windows update reports a locked file: finish active sessions and close the OpenCode update terminal before retrying. Stop any OpenCode server not managed by Varro yourself.

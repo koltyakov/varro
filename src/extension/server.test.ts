@@ -1381,26 +1381,31 @@ describe('OpenCodeServer maintenance', () => {
     );
   });
 
-  it('does not suggest an update beyond the manifest version by default', async () => {
+  it('auto-updates beyond the tested manifest version when enabled', async () => {
     stubPlatform('linux');
     const server = new OpenCodeServer(4096, false);
-    const nextUntestedVersion = nextPatchVersion(MANIFEST_OPENCODE_VERSION);
+    const nextVersion = nextPatchVersion(MANIFEST_OPENCODE_VERSION);
     const api = server as unknown as {
       readLatestCliVersion: () => Promise<string | null>;
     };
     getConfigurationMock.mockImplementation(() => ({
       get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
     }));
-    api.readLatestCliVersion = vi.fn().mockResolvedValue(nextUntestedVersion);
+    api.readLatestCliVersion = vi.fn().mockResolvedValue(nextVersion);
+    stubCliSpawn({ version: nextVersion });
 
     await maybeSuggestCliUpdate(server, MANIFEST_OPENCODE_VERSION);
     await flushMicrotasks();
 
-    expect(spawnMock).not.toHaveBeenCalled();
     expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
+    expect(spawnMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.arrayContaining(['upgrade', nextVersion]),
+      expect.any(Object)
+    );
   });
 
-  it('does not show a compatibility prompt for an installed untested version', async () => {
+  it('offers a normal update beyond the tested manifest version when auto-update is disabled', async () => {
     const server = new OpenCodeServer(4096, false);
     const installedVersion = nextPatchVersion(MANIFEST_OPENCODE_VERSION);
     const latestVersion = nextPatchVersion(installedVersion);
@@ -1413,31 +1418,8 @@ describe('OpenCodeServer maintenance', () => {
     await flushMicrotasks();
 
     expect(spawnMock).not.toHaveBeenCalled();
-    expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
-  });
-
-  it('suggests an update beyond the manifest version when the debug setting is enabled', async () => {
-    stubPlatform('linux');
-    const server = new OpenCodeServer(4096, false);
-    const nextUntestedVersion = nextPatchVersion(MANIFEST_OPENCODE_VERSION);
-    const api = server as unknown as {
-      readLatestCliVersion: () => Promise<string | null>;
-    };
-    getConfigurationMock.mockImplementation(() => ({
-      get: (key: string, fallback?: unknown) => {
-        if (key === 'server.autoUpdate') return true;
-        if (key === 'debug.suggestUntestedOpenCodeUpdates') return true;
-        return fallback;
-      },
-    }));
-    api.readLatestCliVersion = vi.fn().mockResolvedValue(nextUntestedVersion);
-
-    await maybeSuggestCliUpdate(server, MANIFEST_OPENCODE_VERSION);
-    await flushMicrotasks();
-
-    expect(spawnMock).not.toHaveBeenCalled();
     expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledWith(
-      `OpenCode CLI ${nextUntestedVersion} is available, but Varro has only been tested through ${MANIFEST_OPENCODE_VERSION}. Review compatibility before updating with: opencode upgrade`,
+      `OpenCode CLI ${latestVersion} is available (installed: ${installedVersion}). Update with: opencode upgrade`,
       'Run Upgrade'
     );
   });
@@ -1902,7 +1884,7 @@ describe('OpenCodeServer compatibility gate', () => {
     expect(requestMaintenanceCheck).toHaveBeenCalledOnce();
   });
 
-  it('uses a healthy server newer than the tested compatibility ceiling', async () => {
+  it('uses a healthy server from a newer major version without a compatibility prompt', async () => {
     const server = new OpenCodeServer(4096, true);
     const prepareForHealthyExistingServer = vi.fn().mockResolvedValue(undefined);
     const api = server as unknown as {
@@ -1913,7 +1895,7 @@ describe('OpenCodeServer compatibility gate', () => {
         prepareForHealthyExistingServer: typeof prepareForHealthyExistingServer;
       };
     };
-    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.17.19' });
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '2.0.0' });
     api.startEventStream = vi.fn(() => {
       expect(server.status.state).not.toBe('running');
     });
@@ -1929,6 +1911,7 @@ describe('OpenCodeServer compatibility gate', () => {
     });
     expect(prepareForHealthyExistingServer).toHaveBeenCalledOnce();
     expect(spawnMock).not.toHaveBeenCalled();
+    expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
   });
 
   it('allows a Varro window to replace a server leased by another extension host', async () => {
