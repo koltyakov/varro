@@ -20,7 +20,7 @@ describe('development compatibility', () => {
     const advertisedFloors = '22.22.2+ on Node 22, or Node 24.15.0+';
 
     expect(packageJson.engines.node).toBe('^22.22.2 || >=24.15.0');
-    expect(workflow).toContain('node-version: [24.18.1]');
+    expect(workflow).toContain('node-version: [24.20.0]');
     expect(workflow).not.toMatch(/^\s*node-version:\s+(?:22|24)\s*$/m);
     expect(readme).toContain(advertisedFloors);
     expect(developmentGuide).toContain(advertisedFloors);

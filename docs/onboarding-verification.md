@@ -74,7 +74,7 @@ The same process suite runs on `windows-latest` in CI. Windows-specific coverage
 casing, npm/pnpm/Yarn/Volta/Bun locations, `.cmd` and `.bat` quoting, missing shims, process-tree
 termination, file-lock update recovery, and VSIX installation through `code.cmd`.
 
-Windows CI runs unit and host-policy tests, builds, and packages the VSIX on Node `24.18.1`. A
+Windows CI runs unit and host-policy tests, builds, and packages the VSIX on Node `24.20.0`. A
 manually dispatched CI run also launches the real VS Code application on
 `windows-latest` for `clean-install-missing-cli`, `invalid-cli-path`, and `healthy-first-run`. Failed
 sandbox runs upload their isolated profiles as a `windows-vscode-sandbox-*` artifact.

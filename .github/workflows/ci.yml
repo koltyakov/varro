@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [24.18.1]
+        node-version: [24.20.0]
 
     steps:
       - name: Check out repository
@@ -58,7 +58,7 @@ jobs:
     runs-on: windows-latest
     strategy:
       matrix:
-        node-version: [24.18.1]
+        node-version: [24.20.0]
 
     steps:
       - name: Check out repository
@@ -102,7 +102,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 24.18.1
+          node-version: 24.20.0
           cache: npm
 
       - name: Use pinned npm
