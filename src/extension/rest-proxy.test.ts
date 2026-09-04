@@ -2476,6 +2476,37 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
+  it('summarizes large unique diff lists without quadratic file deduplication', async () => {
+    const fileCount = 20_000;
+    const diffs = Array.from({ length: fileCount }, (_, index) => ({
+      file: `/repo/src/file-${index}.ts`,
+      additions: 1,
+      deletions: 0,
+    }));
+    diffs.push({ file: 'src/file-0.ts', additions: 1, deletions: 0 });
+    const serverRequest = vi.fn((_method: string, path: string) => {
+      if (path === '/session/session-1/diff') return Promise.resolve(diffs);
+      if (path === '/session?limit=1000000') {
+        return Promise.resolve([{ id: 'session-1', directory: '/repo' }]);
+      }
+      return Promise.resolve([]);
+    });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(makePayload(89, 'GET', '/varro/session/session-1/diff-summary'));
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 89,
+      data: expect.objectContaining({
+        files: fileCount,
+        additions: fileCount + 1,
+        deletions: 0,
+      }),
+    });
+  });
+
   it('includes a descendant beyond OpenCode default session-list page in token totals', async () => {
     const fullSessionList = [
       { id: 'session-1', directory: '/repo' },

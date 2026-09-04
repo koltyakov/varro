@@ -4740,7 +4740,10 @@ function summarizeSessionDiff(
     : record && isDiffRecord(record)
       ? [record]
       : Object.values(record ?? {});
-  const files: string[] = [];
+  const relativeFiles = new Set<string>();
+  const absoluteFiles = new Set<string>();
+  const absoluteFileSuffixes = new Set<string>();
+  let fileCount = 0;
   let validDiffs = 0;
   let additions = 0;
   let deletions = 0;
@@ -4750,34 +4753,32 @@ function summarizeSessionDiff(
     if (!diff || !isDiffRecord(diff)) continue;
     if (typeof diff.file === 'string' && isGeneratedDependencyPath(diff.file)) continue;
     validDiffs += 1;
-    if (
-      typeof diff.file === 'string' &&
-      diff.file &&
-      !files.some((file) => isSameSummaryFile(file, diff.file as string))
-    ) {
-      files.push(diff.file);
+    if (typeof diff.file === 'string' && diff.file) {
+      const file = normalizeSummaryFile(diff.file);
+      const absolute = isAbsoluteSummaryFile(file);
+      const duplicate = absolute
+        ? absoluteFiles.has(file) ||
+          getSummaryFileSuffixes(file).some((suffix) => relativeFiles.has(suffix))
+        : relativeFiles.has(file) || absoluteFileSuffixes.has(file);
+      if (!duplicate) {
+        fileCount += 1;
+        if (absolute) {
+          absoluteFiles.add(file);
+          for (const suffix of getSummaryFileSuffixes(file)) absoluteFileSuffixes.add(suffix);
+        } else {
+          relativeFiles.add(file);
+        }
+      }
     }
     additions += readDiffLineCount(diff.additions, diff.added);
     deletions += readDiffLineCount(diff.deletions, diff.removed);
   }
 
   return {
-    files: files.length || validDiffs,
+    files: fileCount || validDiffs,
     additions,
     deletions,
   };
-}
-
-function isSameSummaryFile(left: string, right: string) {
-  const leftPath = normalizeSummaryFile(left);
-  const rightPath = normalizeSummaryFile(right);
-  if (leftPath === rightPath) return true;
-
-  if (isAbsoluteSummaryFile(leftPath) === isAbsoluteSummaryFile(rightPath)) return false;
-  const [absolute, relative] = isAbsoluteSummaryFile(leftPath)
-    ? [leftPath, rightPath]
-    : [rightPath, leftPath];
-  return absolute.endsWith(`/${relative}`);
 }
 
 function normalizeSummaryFile(path: string) {
@@ -4786,6 +4787,19 @@ function normalizeSummaryFile(path: string) {
 
 function isAbsoluteSummaryFile(path: string) {
   return path.startsWith('/') || /^[A-Za-z]:\//.test(path);
+}
+
+function getSummaryFileSuffixes(path: string): string[] {
+  const suffixes: string[] = [];
+  for (
+    let separator = path.indexOf('/');
+    separator !== -1;
+    separator = path.indexOf('/', separator + 1)
+  ) {
+    const suffix = path.slice(separator + 1);
+    if (suffix) suffixes.push(suffix);
+  }
+  return suffixes;
 }
 
 function summarizeSessionMessageEdits(
