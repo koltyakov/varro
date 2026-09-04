@@ -184,7 +184,7 @@ describe('createCodexAdapter', () => {
       status: 'available',
       source: 'provider',
       checkedAt: 1_000,
-      planName: 'Pro',
+      planName: 'Pro 20x',
       note: 'Polled Codex OAuth usage endpoint',
       usageLimitResets: {
         availableCount: 3,
@@ -232,6 +232,32 @@ describe('createCodexAdapter', () => {
           percent: 38,
         },
       ],
+    });
+  });
+
+  it('identifies the Pro 5x tier from the prolite plan type', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse({
+        plan_type: 'prolite',
+        rate_limit: {
+          primary_window: {
+            used_percent: 25,
+            reset_at: 1_766_000_000,
+          },
+        },
+      })
+    );
+
+    const status = await adapter.fetch({
+      provider: oauthProvider,
+      authStore: { openai: { type: 'oauth', access: 'codex-auth-store-token' } },
+      modelID: 'gpt-5.4',
+      checkedAt: 1_000,
+    });
+
+    expect(status).toMatchObject({
+      status: 'available',
+      planName: 'Pro 5x',
     });
   });
 
@@ -345,7 +371,7 @@ describe('createCodexAdapter', () => {
       status: 'available',
       source: 'provider',
       checkedAt: 1_000,
-      planName: 'Pro',
+      planName: 'Pro 20x',
       note: 'Polled Codex OAuth usage endpoint',
     });
     expect(status.status === 'available' ? status.windows : []).toEqual(
@@ -658,7 +684,7 @@ describe('createCodexAdapter', () => {
       status: 'available',
       source: 'provider',
       checkedAt: 1_000,
-      planName: 'Pro',
+      planName: 'Pro 20x',
       note: 'Polled Codex OAuth usage endpoint',
       windows: [
         {
@@ -839,7 +865,7 @@ describe('createCodexAdapter', () => {
       status: 'available',
       source: 'provider',
       checkedAt: 1_000,
-      planName: 'Pro',
+      planName: 'Pro 20x',
       note: 'Polled Codex OAuth usage endpoint',
       windows: [
         {

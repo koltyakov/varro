@@ -310,7 +310,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.providerLimitService = new ProviderLimitService(server);
     const isOpenAIPro = async () => {
       const status = await this.providerLimitService.get('openai', null);
-      return status.status === 'available' && status.planName?.trim().toLowerCase() === 'pro';
+      if (status.status !== 'available') return false;
+      const planName = status.planName?.trim().toLowerCase();
+      return planName === 'pro 5x' || planName === 'pro 20x';
     };
     this.bridge = new SidebarProviderBridge(extensionUri);
     this.sessionTrash = new SessionTrashManager(persistence);

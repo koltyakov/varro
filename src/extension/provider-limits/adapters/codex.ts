@@ -52,6 +52,11 @@ const CODEX_WINDOW_LABELS: Record<string, string> = {
   code_review: 'Review Requests',
 };
 
+const CODEX_PLAN_LABELS: Record<string, string> = {
+  pro: 'Pro 20x',
+  prolite: 'Pro 5x',
+};
+
 type CodexCredentials = {
   accessToken: string;
   accountID: string | null;
@@ -291,7 +296,8 @@ function extractCodexWindows(payload: unknown, checkedAt: number) {
 
 function extractCodexPlanName(payload: unknown) {
   const planType = getString(asRecord(payload)?.plan_type);
-  return planType ? toLabel(planType) : null;
+  if (!planType) return null;
+  return CODEX_PLAN_LABELS[planType.toLowerCase()] ?? toLabel(planType);
 }
 
 function buildCodexWindow(
