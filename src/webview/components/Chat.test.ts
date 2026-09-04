@@ -1863,15 +1863,17 @@ describe('header status badges', () => {
     const subagentsButton = headerLeft?.querySelector(
       '.chat-header-subagents'
     ) as HTMLButtonElement | null;
-    const headerChildren = Array.from(headerLeft?.children ?? []);
+    const sessionMeta = headerLeft?.querySelector('.chat-header-session-meta');
+    const metadataChildren = Array.from(sessionMeta?.children ?? []);
 
     expect(title?.textContent).toBe('parent');
+    expect(sessionMeta?.classList).toContain('has-subagents');
     expect(subagentsButton?.getAttribute('aria-label')).toBe('Show 2 sub-agent sessions');
     expect(subagentsButton?.textContent?.trim()).toBe('2');
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     expect(
-      headerChildren.indexOf(title?.closest('.chat-header-session-title') as Element)
-    ).toBeLessThan(headerChildren.indexOf(subagentsButton as Element));
+      metadataChildren.indexOf(title?.closest('.chat-header-session-title') as Element)
+    ).toBeLessThan(metadataChildren.indexOf(subagentsButton as Element));
 
     subagentsButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await Promise.resolve();

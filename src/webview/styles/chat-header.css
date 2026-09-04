@@ -84,7 +84,7 @@
   transition: opacity 0.15s;
 }
 
-.chat-header-left:hover > .chat-header-session-duration {
+.chat-header-left:hover .chat-header-session-duration {
   width: max-content;
   margin-left: 0;
   opacity: 1;
@@ -323,6 +323,17 @@
   align-items: center;
   gap: 4px;
   min-width: 0;
+}
+
+.chat-header-session-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+}
+
+.chat-header-session-meta.has-subagents {
+  align-items: center;
 }
 
 .session-item-subagents-counter.chat-header-subagents {

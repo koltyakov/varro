@@ -580,54 +580,64 @@ export function ActiveChatHeader(props: {
             </button>
           </Tooltip>
         </Show>
-        <span
-          ref={(element) => {
-            titleRef = element;
-          }}
-          class="chat-header-session-title"
-          onContextMenu={openActions}
+        <div
+          class="chat-header-session-meta"
+          classList={{ 'has-subagents': !!props.activeSubagentRootId }}
         >
-          <span class="chat-header-title-text">{props.title}</span>
-          <Show when={isActiveSessionPinned()}>
-            <Tooltip content="Pinned session">
-              <span class="session-item-pinned-marker" aria-label="Pinned session">
-                <UiIcon source={pinIcon} class="session-item-pinned-icon" width={12} height={12} />
-              </span>
-            </Tooltip>
+          <span
+            ref={(element) => {
+              titleRef = element;
+            }}
+            class="chat-header-session-title"
+            onContextMenu={openActions}
+          >
+            <span class="chat-header-title-text">{props.title}</span>
+            <Show when={isActiveSessionPinned()}>
+              <Tooltip content="Pinned session">
+                <span class="session-item-pinned-marker" aria-label="Pinned session">
+                  <UiIcon
+                    source={pinIcon}
+                    class="session-item-pinned-icon"
+                    width={12}
+                    height={12}
+                  />
+                </span>
+              </Tooltip>
+            </Show>
+            <Show when={getActiveSession()?.share?.url}>
+              <Tooltip content="Session is shared">
+                <span class="chat-header-shared-marker" aria-label="Session is shared">
+                  <SharedSessionIcon />
+                </span>
+              </Tooltip>
+            </Show>
+          </span>
+          <Show when={props.activeSubagentRootId}>
+            {(rootSessionId) => (
+              <Tooltip content={props.activeSubagentLabel}>
+                <button
+                  type="button"
+                  class="session-item-subagents session-item-subagents-counter chat-header-subagents"
+                  onClick={() => props.onOpenSubagents(rootSessionId())}
+                  aria-label={props.activeSubagentLabel}
+                >
+                  <UiIcon
+                    source={cableTagIcon}
+                    class="session-item-subagents-icon"
+                    width={16}
+                    height={16}
+                  />
+                  <span class="session-item-subagents-count">{props.activeSubagentCount}</span>
+                </button>
+              </Tooltip>
+            )}
           </Show>
-          <Show when={getActiveSession()?.share?.url}>
-            <Tooltip content="Session is shared">
-              <span class="chat-header-shared-marker" aria-label="Session is shared">
-                <SharedSessionIcon />
-              </span>
-            </Tooltip>
+          <Show when={workedDurationMs()}>
+            {(durationMs) => (
+              <span class="chat-header-session-duration">{formatDuration(durationMs())}</span>
+            )}
           </Show>
-        </span>
-        <Show when={props.activeSubagentRootId}>
-          {(rootSessionId) => (
-            <Tooltip content={props.activeSubagentLabel}>
-              <button
-                type="button"
-                class="session-item-subagents session-item-subagents-counter chat-header-subagents"
-                onClick={() => props.onOpenSubagents(rootSessionId())}
-                aria-label={props.activeSubagentLabel}
-              >
-                <UiIcon
-                  source={cableTagIcon}
-                  class="session-item-subagents-icon"
-                  width={16}
-                  height={16}
-                />
-                <span class="session-item-subagents-count">{props.activeSubagentCount}</span>
-              </button>
-            </Tooltip>
-          )}
-        </Show>
-        <Show when={workedDurationMs()}>
-          {(durationMs) => (
-            <span class="chat-header-session-duration">{formatDuration(durationMs())}</span>
-          )}
-        </Show>
+        </div>
       </div>
       <Show when={props.showActions}>
         <div class="chat-header-actions">
