@@ -38,6 +38,7 @@ describe('getProviderIcon', () => {
   it.each([
     ['openai', openaiIcon],
     ['anthropic', anthropicIcon],
+    ['claude-code', claudeIcon],
     ['openrouter', openrouterIcon],
     ['gemini', geminiIcon],
     ['google', geminiIcon],
