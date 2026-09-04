@@ -12,7 +12,7 @@ import { logError } from './lib/log';
 import { asRecord, getString, isString } from './lib/runtime-values';
 import { ralphStore } from './lib/stores/ralph-store';
 import { observeSurfaceContrast } from './lib/theme';
-import { folderIcon, warningCircleSolidIcon } from './lib/ui-icons';
+import { folderIcon, warningCircleSolidIcon, wifiIcon } from './lib/ui-icons';
 import { UiIcon } from './components/UiIcon';
 import { RalphForm } from './components/ralph/RalphForm';
 
@@ -104,17 +104,6 @@ export function App() {
                 <div class="contents" inert={isReconnecting()}>
                   <Chat />
                 </div>
-                <Show when={isReconnecting()}>
-                  <div
-                    class="pointer-events-auto absolute inset-x-0 top-3 z-50 flex justify-center px-3"
-                    role="status"
-                    aria-live="polite"
-                  >
-                    <div class="rounded-full border border-vscode-border-soft bg-vscode-card px-3 py-1.5 text-[11px] font-medium text-vscode-fg shadow-md">
-                      Reconnecting to OpenCode
-                    </div>
-                  </div>
-                </Show>
               </Show>
             }
           >
@@ -129,6 +118,11 @@ export function App() {
         error={defaultAppState.error}
         errorRetry={defaultAppState.errorRetry}
         onDismissError={() => defaultAppState.setError(null)}
+        status={() =>
+          isReconnecting()
+            ? { message: 'Reconnecting to server', icon: wifiIcon, tone: 'warning' }
+            : null
+        }
       />
     </div>
   );

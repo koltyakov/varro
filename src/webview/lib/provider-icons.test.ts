@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import amazonIcon from '../assets/provider-icons/amazon.svg';
 import anthropicIcon from '../assets/provider-icons/anthropic.svg';
 import azureIcon from '../assets/provider-icons/azure.svg';
+import claudeIcon from '../assets/provider-icons/claude.svg';
 import deepseekIcon from '../assets/provider-icons/deepseek.svg';
 import geminiIcon from '../assets/provider-icons/gemini.svg';
 import githubCopilotIcon from '../assets/provider-icons/copilot.svg';
@@ -26,6 +27,12 @@ describe('getProviderIcon', () => {
 
   it('returns null for an unknown provider', () => {
     expect(getProviderIcon('unknown-provider')).toBeNull();
+  });
+
+  it('maps the exact Claude Code custom provider name to its icon', () => {
+    expect(getProviderIcon('custom-provider', 'Claude Code')).toBe(claudeIcon);
+    expect(getProviderIcon('openai', 'Claude Code')).toBe(claudeIcon);
+    expect(getProviderIcon('custom-provider', 'claude code')).toBeNull();
   });
 
   it.each([

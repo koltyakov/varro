@@ -2498,7 +2498,7 @@ function SessionListItem(props: {
             <Show when={modelDetails()}>
               {(details) => (
                 <Show
-                  when={getProviderIcon(details().providerID)}
+                  when={getProviderIcon(details().providerID, details().providerName)}
                   fallback={
                     <span class="session-item-provider-name">{details().providerName}</span>
                   }

@@ -69,6 +69,7 @@ import warningCircleIcon from 'iconoir/icons/warning-circle.svg';
 import warningCircleSolidIcon from 'iconoir/icons/warning-circle-solid.svg';
 import warningTriangleIcon from 'iconoir/icons/warning-triangle.svg';
 import warningTriangleSolidIcon from 'iconoir/icons/warning-triangle-solid.svg';
+import wifiIcon from 'iconoir/icons/wifi.svg';
 import wrenchIcon from 'iconoir/icons/wrench.svg';
 import xmarkIcon from 'iconoir/icons/xmark.svg';
 
@@ -144,6 +145,7 @@ export {
   warningCircleSolidIcon,
   warningTriangleIcon,
   warningTriangleSolidIcon,
+  wifiIcon,
   wrenchIcon,
   xmarkIcon,
 };

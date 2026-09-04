@@ -41,11 +41,18 @@ interface SessionActionFeedbackProps {
   error?: Accessor<string | null>;
   errorRetry?: Accessor<(() => void) | null>;
   onDismissError?: () => void;
+  status?: Accessor<{ message: string; icon: string; tone?: 'warning' } | null>;
 }
 
 export function SessionActionFeedback(props: SessionActionFeedbackProps = {}) {
   const currentError = () => props.error?.() ?? null;
-  const currentMessage = () => currentError() ?? message();
+  const currentStatus = () => props.status?.() ?? null;
+  const currentMessage = () => currentError() ?? message() ?? currentStatus()?.message ?? null;
+  const currentStatusIcon = () =>
+    currentError() || message() ? null : (currentStatus()?.icon ?? null);
+  const isWarning = () => !currentError() && message() !== null && kind() === 'warning';
+  const hasWarningTone = () =>
+    isWarning() || (!currentError() && message() === null && currentStatus()?.tone === 'warning');
 
   onCleanup(() => {
     reset();
@@ -58,16 +65,16 @@ export function SessionActionFeedback(props: SessionActionFeedbackProps = {}) {
       {(visibleMessage) => (
         <Portal>
           <div
-            class={`session-action-feedback ${currentError() ? 'is-error' : kind() === 'warning' ? 'is-warning' : ''} ${!currentError() && leaving() ? 'is-leaving' : ''}`.trim()}
+            class={`session-action-feedback ${currentError() ? 'is-error' : hasWarningTone() ? 'is-warning' : ''} ${!currentError() && leaving() ? 'is-leaving' : ''}`.trim()}
             role={currentError() ? 'alert' : 'status'}
             aria-live={currentError() ? 'assertive' : 'polite'}
           >
             <span class="session-action-feedback-icon" aria-hidden="true">
               <Show
-                when={currentError() || kind() === 'warning'}
+                when={currentError() || isWarning()}
                 fallback={
                   <UiIcon
-                    source={checkIcon}
+                    source={currentStatusIcon() ?? checkIcon}
                     class="session-action-feedback-glyph"
                     width={11}
                     height={11}

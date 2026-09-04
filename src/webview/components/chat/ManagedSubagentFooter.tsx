@@ -212,7 +212,9 @@ export function ManagedSubagentFooter(props: {
                   title={`${currentModel().providerName} / ${formatModelName(currentModel().modelName)}`}
                 >
                   <span class="toolbar-picker-label model-name">
-                    <Show when={getProviderIcon(currentModel().providerID)}>
+                    <Show
+                      when={getProviderIcon(currentModel().providerID, currentModel().providerName)}
+                    >
                       {(icon) => (
                         <span
                           class="provider-icon"

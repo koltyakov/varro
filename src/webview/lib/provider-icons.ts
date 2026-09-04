@@ -2,6 +2,7 @@
 // Provider SVGs sourced from https://github.com/pheralb/svgl
 import openaiIcon from '../assets/provider-icons/openai.svg';
 import anthropicIcon from '../assets/provider-icons/anthropic.svg';
+import claudeIcon from '../assets/provider-icons/claude.svg';
 import openrouterIcon from '../assets/provider-icons/openrouter.svg';
 import geminiIcon from '../assets/provider-icons/gemini.svg';
 import deepseekIcon from '../assets/provider-icons/deepseek.svg';
@@ -43,7 +44,14 @@ const PROVIDER_ICON_MAP = new Map<string, string>(
   })
 );
 
-export function getProviderIcon(providerID: string | null | undefined) {
-  if (!providerID) return null;
-  return PROVIDER_ICON_MAP.get(providerID) || null;
+export function getProviderIcon(
+  providerID: string | null | undefined,
+  providerName?: string | null
+) {
+  if (providerName === 'Claude Code') return claudeIcon;
+  if (providerID) {
+    const icon = PROVIDER_ICON_MAP.get(providerID);
+    if (icon) return icon;
+  }
+  return null;
 }

@@ -884,7 +884,7 @@ export function ModelPickerButton(props: {
           fallback={<span class="toolbar-picker-label model-name">Model</span>}
         >
           <span class="toolbar-picker-label model-name">
-            <Show when={getProviderIcon(props.providerID)}>
+            <Show when={getProviderIcon(props.providerID, props.providerName)}>
               {(icon) => (
                 <span
                   class="provider-icon"

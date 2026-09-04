@@ -55,6 +55,7 @@ import {
 } from './lib/state';
 import { ralphStore } from './lib/stores/ralph-store';
 import { showSessionActionFeedback } from './components/chat/SessionActionFeedback';
+import { wifiIcon } from './lib/ui-icons';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -166,14 +167,22 @@ describe('AppRoot', () => {
     setConnectionInitialized(false);
 
     expect(container?.textContent).toContain('New Chat');
-    expect(container?.textContent).toContain('Reconnecting to OpenCode');
+    const reconnectToast = document.body.querySelector<HTMLElement>('.session-action-feedback');
+    expect(reconnectToast?.textContent).toContain('Reconnecting to server');
+    expect(reconnectToast?.getAttribute('role')).toBe('status');
+    expect(reconnectToast?.classList).toContain('is-warning');
+    expect(
+      reconnectToast
+        ?.querySelector<HTMLElement>('.session-action-feedback-glyph')
+        ?.style.getPropertyValue('--ui-icon-mask')
+    ).toContain(wifiIcon);
     expect(appMocks.chatMountCount).toBe(1);
 
     setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
     setConnectionInitialized(true);
     setState('serverReconnecting', false);
 
-    expect(container?.textContent).not.toContain('Reconnecting to OpenCode');
+    expect(document.body.querySelector('.session-action-feedback')).toBeNull();
     expect(appMocks.chatMountCount).toBe(1);
   });
 
