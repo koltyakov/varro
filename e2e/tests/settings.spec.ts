@@ -98,6 +98,86 @@ test('thinking visibility preserves a detached virtualized anchor', async ({ pag
   }
 });
 
+test('thinking visibility keeps a distant user-card anchor mounted across large invalidation', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await page.goto(
+    '/e2e/harness/index.html?scenario=heterogeneous-large-transcript&expandedActivity=1&thinkingUnmountAnchor=1'
+  );
+
+  const list = page.locator('.interactive-list');
+  const anchor = page.locator('[data-msg-id="message-heterogeneous-user-101"] .user-message-card');
+  await page.getByRole('button', { name: /^Go to turn 102:/ }).click();
+  await expect(anchor).toBeInViewport();
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      )
+  );
+
+  const before = await anchor.evaluate((element) => {
+    const transcript = element.closest<HTMLElement>('.interactive-list')!;
+    return {
+      top: element.getBoundingClientRect().top - transcript.getBoundingClientRect().top,
+      scrollTop: transcript.scrollTop,
+      scrollHeight: transcript.scrollHeight,
+      mountedRows: transcript.querySelectorAll('[data-msg-id]').length,
+    };
+  });
+  await anchor.evaluate((element) => {
+    const transcript = element.closest<HTMLElement>('.interactive-list')!;
+    const samples: Array<number | null> = [];
+    const sample = () => {
+      samples.push(
+        element.isConnected
+          ? element.getBoundingClientRect().top - transcript.getBoundingClientRect().top
+          : null
+      );
+      document.documentElement.dataset.thinkingAnchorSamples = JSON.stringify(samples);
+      if (samples.length < 16) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
+
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+  await composer.fill('/thinking');
+  await page.keyboard.press('Enter');
+  await expect.poll(() => page.locator('.chat-thinking-box').count()).toBe(0);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => JSON.parse(document.documentElement.dataset.thinkingAnchorSamples ?? '[]').length
+      )
+    )
+    .toBe(16);
+
+  const samplePayload = await page.evaluate(
+    () => document.documentElement.dataset.thinkingAnchorSamples ?? '[]'
+  );
+  const samples: Array<number | null> = JSON.parse(samplePayload);
+  const after = await list.evaluate((element) => ({
+    scrollTop: element.scrollTop,
+    scrollHeight: element.scrollHeight,
+    mountedRows: element.querySelectorAll('[data-msg-id]').length,
+  }));
+  expect(before.scrollHeight - after.scrollHeight).toBeGreaterThan(2_000);
+  expect(before.mountedRows).toBeLessThan(50);
+  expect(after.mountedRows).toBeLessThan(50);
+  for (const top of samples) {
+    expect(top, JSON.stringify({ before, after, samples })).not.toBeNull();
+  }
+  expect(
+    Math.max(...samples.map((top) => Math.abs(top! - before.top))),
+    JSON.stringify({ before, after, samples })
+  ).toBeLessThan(6);
+  expect(
+    Math.abs(samples.at(-1)! - before.top),
+    JSON.stringify({ before, after, samples })
+  ).toBeLessThan(1.5);
+});
+
 test('chat font changes preserve main typography proportions and a detached anchor', async ({
   page,
 }) => {

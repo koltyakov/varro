@@ -794,8 +794,10 @@ export class SessionSendOperations {
     const defaultPermissionMode = permissionsStore.getPermissionModeForSession(null);
     const selectedAgent =
       options?.agent ??
-      routingStore.getSelectedAgentForSession(targetSessionId) ??
-      appStore.state.selectedAgent;
+      (targetSessionId === activeSessionId
+        ? appStore.state.selectedAgent
+        : (routingStore.getSelectedAgentForSession(targetSessionId) ??
+          appStore.state.selectedAgent));
     const sessionSelectedModel = routingStore.getSelectedModelForSession(targetSessionId);
     const selectedModel =
       options?.selectedModel ?? sessionSelectedModel ?? appStore.state.selectedModel;

@@ -3997,6 +3997,8 @@ function createScenarioState(name: ScenarioName): ScenarioState {
   if (name === 'heterogeneous-large-transcript') {
     const tallThinkingAnchor =
       new URLSearchParams(window.location.search).get('tallThinkingAnchor') === '1';
+    const thinkingUnmountAnchor =
+      new URLSearchParams(window.location.search).get('thinkingUnmountAnchor') === '1';
     const session = makeSession(
       'session-heterogeneous-large-transcript',
       'Chat scroll jitter and e2e regression tests',
@@ -4054,16 +4056,22 @@ function createScenarioState(name: ScenarioName): ScenarioState {
           '',
           `This assistant turn intentionally varies height and content type for virtualized scrolling. ${'The row may be much taller than the default estimate. '.repeat(index % 7)}`,
           '',
-          index === 60 && tallThinkingAnchor
-            ? Array.from({ length: 60 }, (_, line) => `${line + 1}. Anchor line ${line + 1}.`).join(
-                '\n'
-              )
-            : index % 5 === 0
-              ? '```ts\nexport function keepScrollStable() {\n  return true;\n}\n```'
-              : '- measured row height should include padding',
+          index === 101 && thinkingUnmountAnchor
+            ? Array.from(
+                { length: 900 },
+                (_, line) => `${line + 1}. Giant trailing response line ${line + 1}.`
+              ).join('\n')
+            : index === 60 && tallThinkingAnchor
+              ? Array.from(
+                  { length: 60 },
+                  (_, line) => `${line + 1}. Anchor line ${line + 1}.`
+                ).join('\n')
+              : index % 5 === 0
+                ? '```ts\nexport function keepScrollStable() {\n  return true;\n}\n```'
+                : '- measured row height should include padding',
         ].join('\n'),
         [
-          ...(index % 4 === 0
+          ...((thinkingUnmountAnchor ? index <= 100 : index % 4 === 0)
             ? [
                 makeReasoningPart(
                   session.id,

@@ -475,6 +475,21 @@ describe('SessionSendOperations', () => {
     expect(appStore.state.terminalSelection).toBeNull();
   });
 
+  it('uses the visible agent when active session routing is stale', async () => {
+    appStore.setState('activeSessionId', 'session-1');
+    appStore.setState('selectedAgent', 'build');
+    appStore.setState('sessionSelectedAgents', 'session-1', 'plan');
+    const sendAsync = vi.fn<SendAsync>(async () => {});
+    const operations = createOperations(sendAsync);
+
+    await operations.sendMessage('implement the plan');
+
+    expect(sendAsync).toHaveBeenCalledWith(
+      'session-1',
+      expect.objectContaining({ agent: 'build' })
+    );
+  });
+
   it('creates a session for an explicitly captured draft despite a later active session', async () => {
     appStore.setState('activeSessionId', 'session-later');
     const createSession = vi.fn(async () => 'session-draft');

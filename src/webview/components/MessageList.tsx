@@ -5784,6 +5784,8 @@ export function MessageList() {
         publishPendingWidthMeasurements({ preserveVisibleAnchor: false });
         cancelWidthResize(anchor?.messageId ?? null);
         restoreVisibleScrollAnchor(anchor);
+      } else {
+        setWidthResizePinnedMessageId(anchor?.messageId ?? null);
       }
     });
     onCleanup(stopCapturingThinkingAnchor);
