@@ -259,6 +259,7 @@ export async function createSidebarProviderInstance(
   options: {
     extensionUri?: { fsPath: string };
     workspaceState?: ReturnType<typeof createWorkspaceState>;
+    globalState?: ReturnType<typeof createWorkspaceState>;
     contextProvider?: ReturnType<typeof createContextProvider>;
     providerSignatureFileSystem?: typeof mocks.providerSignatureFileSystem;
     server?: ReturnType<typeof createServer>;
@@ -266,11 +267,13 @@ export async function createSidebarProviderInstance(
 ) {
   const { SidebarProvider } = await loadSidebarProvider();
   const workspaceState = options.workspaceState ?? createWorkspaceState();
+  const globalState = options.globalState ?? createWorkspaceState();
   const contextProvider = options.contextProvider ?? createContextProvider();
   const server = options.server ?? createServer();
   const provider = new SidebarProvider(
     (options.extensionUri ?? { fsPath: '/extension' }) as never,
     workspaceState as never,
+    globalState as never,
     contextProvider as never,
     server as never,
     'koltyakov.varro',
@@ -278,7 +281,7 @@ export async function createSidebarProviderInstance(
     options.providerSignatureFileSystem ?? mocks.providerSignatureFileSystem
   );
 
-  return { SidebarProvider, provider, workspaceState, contextProvider, server };
+  return { SidebarProvider, provider, workspaceState, globalState, contextProvider, server };
 }
 
 beforeEach(() => {

@@ -213,6 +213,7 @@ export async function activate(context: vscode.ExtensionContext) {
   sidebarProvider = new SidebarProvider(
     context.extensionUri,
     context.workspaceState,
+    context.globalState,
     contextProvider,
     server,
     context.extension.id,

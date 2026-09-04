@@ -12,13 +12,35 @@ export class ModelPreferencesStore {
   private migrationBase: ModelPreferences | null = null;
   private mutationQueue: Promise<void> = Promise.resolve();
 
-  constructor(private readonly persistence: Persistence) {
-    this.preferences = parseModelPreferences(persistence.get<unknown>(MODEL_PREFERENCES_KEY));
-    this.migrationComplete = persistence.get<boolean>(MODEL_PREFERENCES_MIGRATION_KEY) === true;
+  constructor(
+    private readonly persistence: Persistence,
+    legacyWorkspacePersistence?: Persistence
+  ) {
+    const storedPreferences = persistence.get<unknown>(MODEL_PREFERENCES_KEY);
+    const storedMigrationComplete =
+      persistence.get<boolean>(MODEL_PREFERENCES_MIGRATION_KEY) === true;
+    const storedMigrationBase = persistence.get<unknown>(MODEL_PREFERENCES_MIGRATION_BASE_KEY);
+    const hasGlobalState =
+      storedPreferences !== undefined ||
+      storedMigrationComplete ||
+      storedMigrationBase !== undefined;
+    const source = hasGlobalState ? persistence : legacyWorkspacePersistence;
+
+    this.preferences = parseModelPreferences(
+      hasGlobalState ? storedPreferences : source?.get<unknown>(MODEL_PREFERENCES_KEY)
+    );
+    this.migrationComplete = hasGlobalState
+      ? storedMigrationComplete
+      : source?.get<boolean>(MODEL_PREFERENCES_MIGRATION_KEY) === true;
     if (!this.migrationComplete) {
       this.migrationBase = parseRequiredModelPreferences(
-        persistence.get<unknown>(MODEL_PREFERENCES_MIGRATION_BASE_KEY)
+        hasGlobalState
+          ? storedMigrationBase
+          : source?.get<unknown>(MODEL_PREFERENCES_MIGRATION_BASE_KEY)
       );
+    }
+    if (!hasGlobalState && source) {
+      this.mutationQueue = this.persist(this.migrationComplete);
     }
   }
 

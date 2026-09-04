@@ -233,6 +233,30 @@ describe('extension activation', () => {
     );
   });
 
+  it('passes global state to the sidebar provider for shared model preferences', async () => {
+    const { activate } = await import('./extension');
+    const workspaceState = {};
+    const globalState = { get: vi.fn(), update: vi.fn(() => Promise.resolve()) };
+
+    await activate({
+      extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
+      workspaceState,
+      globalState,
+      subscriptions: [],
+    } as never);
+
+    expect(sidebarProviderMock).toHaveBeenCalledWith(
+      {},
+      workspaceState,
+      globalState,
+      expect.anything(),
+      expect.anything(),
+      'koltyakov.varro',
+      false
+    );
+  });
+
   it('initializes and refreshes the inline file changes toolbar context', async () => {
     let fileDiffs = true;
     getMock.mockImplementation((key: string, fallback?: unknown) =>

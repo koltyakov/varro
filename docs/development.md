@@ -249,7 +249,7 @@ The selection-oriented `varro.chat.explainSelection`, `varro.chat.reviewSelectio
 - Messages, tool parts, todos, diffs, permissions, and questions
 - Selected model, agent, reasoning variant, and MCP set
 - Dropped files, pasted images, native PDFs, terminal selection, and attached diagnostics
-- Workspace-scoped permission mode preferences plus model visibility, pin, and local display-name preferences
+- Workspace-scoped permission mode preferences plus global model visibility, pin, ordering, variant, and local display-name preferences
 - Current-document context toggles and skipped plan-session markers
 - Pending attention session IDs and interrupted session IDs from the extension host
 - Queued messages and the unsent composer text draft

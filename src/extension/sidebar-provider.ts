@@ -291,6 +291,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   constructor(
     private readonly extensionUri: vscode.Uri,
     workspaceState: vscode.Memento,
+    globalState: vscode.Memento,
     contextProvider: ContextProvider,
     private readonly server: OpenCodeServer,
     private readonly extensionId: string,
@@ -306,6 +307,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         ? (extensionPackageJson as { version: string }).version
         : 'unknown';
     const persistence = new HostPersistence(workspaceState);
+    const globalPersistence = new HostPersistence(globalState);
     this.droppedFilesService = new DroppedFilesService(contextProvider);
     this.fileSearch = new FileSearchService();
     this.providerLimitService = new ProviderLimitService(server);
@@ -323,7 +325,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.sessionSelectedModels = new SessionModelSelectionStore(persistence);
     this.sessionPlanState = new SessionPlanStateStore(persistence);
     this.sessionHistoryScopes = new SessionHistoryScopeStore(persistence);
-    this.modelPreferences = new ModelPreferencesStore(persistence);
+    this.modelPreferences = new ModelPreferencesStore(globalPersistence, persistence);
     this.draftImages = new DraftImageStore(persistence);
     this.hiddenSessions = new HiddenSessionManager();
     this.autoApproveJudge = new AutoApproveJudge(server, this.hiddenSessions, isOpenAIPro, () =>

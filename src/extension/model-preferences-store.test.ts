@@ -162,4 +162,36 @@ describe('ModelPreferencesStore', () => {
     expect(store.needsMigration()).toBe(false);
     expect(store.get().pinnedModels).toEqual(['openai:gpt-5.6-sol']);
   });
+
+  it('seeds global preferences from legacy workspace storage', async () => {
+    const { persistence: globalPersistence, storage: globalStorage } = createMemoryPersistence();
+    const { persistence: workspacePersistence, storage: workspaceStorage } =
+      createMemoryPersistence();
+    workspaceStorage.set('varro.modelPreferences', preferences);
+    workspaceStorage.set('varro.modelPreferences.hostMigration.v1', true);
+
+    const store = new ModelPreferencesStore(globalPersistence, workspacePersistence);
+
+    expect(store.needsMigration()).toBe(false);
+    expect(store.get()).toEqual(preferences);
+    await store.dispose();
+    expect(globalStorage.get('varro.modelPreferences')).toEqual(preferences);
+    expect(globalStorage.get('varro.modelPreferences.hostMigration.v1')).toBe(true);
+  });
+
+  it('prefers existing global preferences over legacy workspace storage', () => {
+    const { persistence: globalPersistence, storage: globalStorage } = createMemoryPersistence();
+    const { persistence: workspacePersistence, storage: workspaceStorage } =
+      createMemoryPersistence();
+    const globalPreferences = { ...preferences, pinnedModels: ['global/model'] };
+    globalStorage.set('varro.modelPreferences', globalPreferences);
+    globalStorage.set('varro.modelPreferences.hostMigration.v1', true);
+    workspaceStorage.set('varro.modelPreferences', preferences);
+    workspaceStorage.set('varro.modelPreferences.hostMigration.v1', true);
+
+    const store = new ModelPreferencesStore(globalPersistence, workspacePersistence);
+
+    expect(store.get()).toEqual(globalPreferences);
+    expect(globalPersistence.set).not.toHaveBeenCalled();
+  });
 });
