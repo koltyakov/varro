@@ -16,6 +16,8 @@ import {
 } from './app-state';
 import { STORAGE_KEYS, writeStored } from './state-storage';
 
+let loadingGeneration = 0;
+
 const beforeShowThinkingPreferenceChangeListeners = new Set<() => void>();
 
 export function onBeforeShowThinkingPreferenceChange(listener: () => void) {
@@ -36,7 +38,9 @@ export function setShowThinkingPreference(next: boolean) {
   writeStored(STORAGE_KEYS.showThinking, next);
 }
 
-export function startLoading(now = Date.now()) {
+// Async controls can retain this predicate to avoid clearing a later operation.
+export function startLoading(now = Date.now()): () => boolean {
+  const generation = ++loadingGeneration;
   if (!isLoading()) {
     setLoadingStartedAt(now);
   } else if (loadingStartedAt() === null) {
@@ -44,9 +48,11 @@ export function startLoading(now = Date.now()) {
   }
   setLoadingLastActivityAt(now);
   setIsLoading(true);
+  return () => generation === loadingGeneration;
 }
 
 export function stopLoading() {
+  loadingGeneration += 1;
   setIsLoading(false);
   setLoadingStartedAt(null);
   setLoadingLastActivityAt(null);

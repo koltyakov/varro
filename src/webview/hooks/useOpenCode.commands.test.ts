@@ -42,6 +42,82 @@ describe('command helpers', () => {
     );
   });
 
+  it.each([false, true])(
+    'passes picker routing as command defaults (command override: %s)',
+    async (override) => {
+      const { stateModule, hookModule } = await loadModules();
+      stateModule.setState('activeSessionId', 'session-1');
+      stateModule.setState('selectedAgent', 'ask');
+      stateModule.setState('selectedModel', { providerID: 'openai', modelID: 'chosen-model' });
+      stateModule.setState('commands', [
+        override
+          ? {
+              name: 'inspect',
+              template: 'Inspect this code',
+              agent: 'reviewer',
+              model: 'other/command-model',
+            }
+          : { name: 'inspect', template: 'Inspect this code' },
+      ]);
+      stateModule.setState('messages', [{ info: userMessage('user-1'), parts: [] }]);
+      clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+      clientMocks.sessionMessages.mockResolvedValue([]);
+
+      expect(await hookModule.runSlashCommandByName('inspect', '')).toBe(true);
+      expect(clientMocks.sessionCommand.mock.calls.at(-1)?.[1]).toEqual({
+        command: 'inspect',
+        arguments: '',
+        agent: 'ask',
+        model: 'openai/chosen-model',
+      });
+      // OpenCode applies command overrides before these request defaults.
+      expect(stateModule.state.commands[0]?.agent).toBe(override ? 'reviewer' : undefined);
+      expect(stateModule.state.commands[0]?.model).toBe(
+        override ? 'other/command-model' : undefined
+      );
+    }
+  );
+
+  it.each([false, true])(
+    'captures blank-session command routing before creation (navigate: %s)',
+    async (navigate) => {
+      const { stateModule, hookModule } = await loadModules();
+      stateModule.setState('activeSessionId', null);
+      stateModule.setState('selectedAgent', 'ask');
+      stateModule.setState('selectedModel', { providerID: 'openai', modelID: 'chosen-model' });
+      stateModule.setState('commands', [{ name: 'inspect', template: 'Inspect this code' }]);
+      let finish!: (value: ReturnType<typeof session>) => void;
+      clientMocks.sessionCreate.mockReturnValue(
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+      );
+      clientMocks.sessionGet.mockResolvedValue(session('created'));
+      clientMocks.sessionMessages.mockResolvedValue([]);
+      const operation = hookModule.runSlashCommandByName('inspect', 'files');
+      if (navigate) {
+        stateModule.setSessions([session('other')]);
+        stateModule.setState('activeSessionId', 'other');
+        stateModule.setState('selectedAgent', 'build');
+        stateModule.setState('selectedModel', { providerID: 'other', modelID: 'other-model' });
+        stateModule.startLoading();
+      }
+      finish(session('created'));
+      await operation;
+      expect(clientMocks.sessionCommand).toHaveBeenCalledWith(
+        'created',
+        {
+          command: 'inspect',
+          arguments: 'files',
+          agent: 'ask',
+          model: 'openai/chosen-model',
+        },
+        { directory: '/repo' }
+      );
+      if (navigate) expect(stateModule.isLoading()).toBe(true);
+    }
+  );
+
   it('initializes a blank session by sending an AGENTS.md prompt', async () => {
     const { stateModule, hookModule } = await loadModules();
 

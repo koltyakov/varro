@@ -114,6 +114,19 @@ describe('state helpers', () => {
     expect(stateModule.loadingLastActivityAt()).toBeNull();
   });
 
+  it('invalidates loading ownership on a new start or stop, even at the same timestamp', async () => {
+    const stateModule = await loadState();
+    const ownsFirst = stateModule.startLoading(100);
+    stateModule.markLoadingActivity(100);
+    expect(ownsFirst()).toBe(true);
+
+    const ownsSecond = stateModule.startLoading(100);
+    expect(ownsFirst()).toBe(false);
+    expect(ownsSecond()).toBe(true);
+    stateModule.stopLoading();
+    expect(ownsSecond()).toBe(false);
+  });
+
   it('replaces queued messages without changing their position', async () => {
     const stateModule = await loadState();
 

@@ -2362,7 +2362,17 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     setSessionUsageLimit: sessionStore.setSessionUsageLimit,
     logError,
     getMessages: () => appStore.state.messages,
-    startLoading: uiStore.startLoading,
+    startLoading: () => {
+      const sessionId = appStore.state.activeSessionId;
+      const workspace = workspaceGeneration;
+      const selection = sessionSelectionGeneration;
+      const isLoadingCurrent = uiStore.startLoading();
+      return () =>
+        appStore.state.activeSessionId === sessionId &&
+        workspaceGeneration === workspace &&
+        sessionSelectionGeneration === selection &&
+        isLoadingCurrent();
+    },
     invalidateMessageSync: (sessionId) => messageSyncGenerations.invalidate(sessionId),
     deferMessageRemovals,
     pruneMessagesFrom: sessionStore.pruneMessagesFrom,
@@ -2434,6 +2444,15 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       createSession(undefined, permissionsStore.getPermissionModeForSession(null)),
     getMessageCount: () => appStore.state.messages.length,
     hasCommand: routingStore.hasCommand,
+    getCommandRouting: () => {
+      const model =
+        routingStore.getSelectedModelForSession(appStore.state.activeSessionId) ??
+        appStore.state.selectedModel;
+      return {
+        agent: appStore.state.selectedAgent ?? undefined,
+        model: model ? `${model.providerID}/${model.modelID}` : undefined,
+      };
+    },
     startLoading: uiStore.startLoading,
     runSessionCommand: (sessionId, input) =>
       client.session.command(sessionId, input, { directory: getSessionDirectory(sessionId) }),

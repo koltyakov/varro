@@ -83,7 +83,7 @@ export async function abortSessionWithDependencies(
 export async function undoSessionWithDependencies(deps: {
   getActiveSessionId(): string | null;
   getMessages(): Array<{ info: Message }>;
-  startLoading(): void;
+  startLoading(): () => boolean;
   revertSession(sessionId: string, messageId: string): Promise<void | boolean | object>;
   syncSession(sessionId: string): Promise<void | boolean | object>;
   syncSessionMessages(sessionId: string): Promise<void | boolean | object>;
@@ -98,14 +98,16 @@ export async function undoSessionWithDependencies(deps: {
     .find((entry) => entry.info.role === 'assistant' && entry.info.sessionID === sessionId);
   if (!lastAssistant) return;
 
+  const isCurrent = deps.startLoading();
   try {
-    deps.startLoading();
     await deps.revertSession(sessionId, lastAssistant.info.id);
     await Promise.all([deps.syncSession(sessionId), deps.syncSessionMessages(sessionId)]);
-    deps.stopLoading();
+    if (isCurrent()) deps.stopLoading();
   } catch (err) {
-    deps.stopLoading();
-    deps.setError(err instanceof Error ? err.message : 'Failed to undo');
+    if (isCurrent()) {
+      deps.stopLoading();
+      deps.setError(err instanceof Error ? err.message : 'Failed to undo');
+    }
   }
 }
 
@@ -391,7 +393,7 @@ function isSessionDescendantOf(sessionId: string, parentSessionId: string, sessi
 
 export async function redoSessionWithDependencies(deps: {
   getActiveSessionId(): string | null;
-  startLoading(): void;
+  startLoading(): () => boolean;
   unrevertSession(sessionId: string): Promise<Session>;
   upsertSession(session: Session): void;
   syncSession(sessionId: string): Promise<void | boolean | object>;
@@ -402,15 +404,17 @@ export async function redoSessionWithDependencies(deps: {
   const sessionId = deps.getActiveSessionId();
   if (!sessionId) return;
 
+  const isCurrent = deps.startLoading();
   try {
-    deps.startLoading();
     const session = await deps.unrevertSession(sessionId);
     deps.upsertSession(session);
     await Promise.all([deps.syncSession(sessionId), deps.syncSessionMessages(sessionId)]);
-    deps.stopLoading();
+    if (isCurrent()) deps.stopLoading();
   } catch (err) {
-    deps.stopLoading();
-    deps.setError(err instanceof Error ? err.message : 'Failed to redo');
+    if (isCurrent()) {
+      deps.stopLoading();
+      deps.setError(err instanceof Error ? err.message : 'Failed to redo');
+    }
   }
 }
 
@@ -420,7 +424,7 @@ export async function compactSessionWithDependencies(deps: {
   resolveSelectedModel(): ResolvedModel | null;
   setError(message: string): void;
   setSessionCompacting(sessionId: string, compacting: boolean): void;
-  startLoading(): void;
+  startLoading(): () => boolean;
   compactRemoteSession(
     sessionId: string,
     input: { providerID: string; modelID: string }
@@ -440,9 +444,9 @@ export async function compactSessionWithDependencies(deps: {
     return;
   }
 
+  const isCurrent = deps.startLoading();
   try {
     deps.setSessionCompacting(sessionId, true);
-    deps.startLoading();
     await deps.compactRemoteSession(sessionId, {
       providerID: effectiveModel.providerID,
       modelID: effectiveModel.modelID,
@@ -452,11 +456,13 @@ export async function compactSessionWithDependencies(deps: {
     if (!compacting) {
       deps.setSessionCompacting(sessionId, false);
     }
-    deps.stopLoading();
+    if (isCurrent()) deps.stopLoading();
   } catch (err) {
-    deps.stopLoading();
     deps.setSessionCompacting(sessionId, false);
-    deps.setError(err instanceof Error ? err.message : 'Failed to compact session');
+    if (isCurrent()) {
+      deps.stopLoading();
+      deps.setError(err instanceof Error ? err.message : 'Failed to compact session');
+    }
   }
 }
 
@@ -477,7 +483,7 @@ type SessionControlDependencies = {
   setSessionUsageLimit(sessionId: string, notice: SessionUsageLimitSnapshot): void;
   logError(context: string, cause: unknown): void;
   getMessages(): Array<{ info: Message; parts?: Part[] }>;
-  startLoading(): void;
+  startLoading(): () => boolean;
   revertSession(sessionId: string, messageId: string): Promise<void | boolean | object>;
   syncSession(sessionId: string): Promise<void | boolean | object>;
   syncSessionMessages(sessionId: string): Promise<void | boolean | object>;

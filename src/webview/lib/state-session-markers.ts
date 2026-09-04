@@ -46,14 +46,23 @@ export function readScopedSessionMarkerState(
 export function readMergedSessionMarkerState(
   storage: SessionMarkerStorage,
   key: string,
-  workspaceScopes: readonly string[]
+  workspaceScopes: readonly string[],
+  sessions: readonly Pick<Session, 'id' | 'directory'>[] = []
 ) {
+  const stored = readScopedSessionMarkerStore(storage, key);
   const merged: SessionMarkerMap = {};
   for (const workspaceScope of new Set(workspaceScopes)) {
-    for (const [sessionId, timestamp] of Object.entries(
-      readScopedSessionMarkerState(storage, key, workspaceScope)
-    )) {
+    for (const [sessionId, timestamp] of Object.entries(stored[workspaceScope] ?? {})) {
       merged[sessionId] = Math.max(merged[sessionId] ?? 0, timestamp);
+    }
+  }
+  // Exact-directory records may belong to nested projects or other directories
+  // admitted by the host catalog. Restore only the catalog's session IDs.
+  for (const session of sessions) {
+    const markers = stored[getSessionMarkerWorkspaceScope(session.directory)];
+    const timestamp = markers?.[session.id];
+    if (timestamp !== undefined) {
+      merged[session.id] = Math.max(merged[session.id] ?? 0, timestamp);
     }
   }
   return merged;

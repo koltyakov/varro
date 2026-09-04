@@ -130,6 +130,7 @@ describe('session-actions helpers', () => {
 
     const result = await runSlashCommandWithDependencies(
       {
+        getCommandRouting: () => ({}),
         hasCommand: (name) => name === 'test',
         getActiveSessionId: () => 'session-1',
         createSession: vi.fn(async () => 'session-2'),
@@ -187,6 +188,7 @@ describe('session-actions helpers', () => {
     const setError = vi.fn();
     const command = runSlashCommandWithDependencies(
       {
+        getCommandRouting: () => ({}),
         hasCommand: () => true,
         getActiveSessionId: () => activeSessionId,
         createSession: vi.fn(async () => 'session-created'),
@@ -224,6 +226,7 @@ describe('session-actions helpers', () => {
 
     const result = await runSlashCommandWithDependencies(
       {
+        getCommandRouting: () => ({}),
         hasCommand: () => false,
         getActiveSessionId: () => 'session-1',
         createSession: vi.fn(async () => 'session-2'),

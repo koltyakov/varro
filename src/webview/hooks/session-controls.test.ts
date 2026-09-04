@@ -154,7 +154,7 @@ describe('session-controls helpers', () => {
         { info: userMessage('user-1') },
         { info: assistantMessage('assistant-1') },
       ],
-      startLoading: vi.fn(),
+      startLoading: vi.fn(() => () => true),
       revertSession,
       syncSession: vi.fn(async () => {}),
       syncSessionMessages: vi.fn(async () => {}),
@@ -175,7 +175,7 @@ describe('session-controls helpers', () => {
         { info: assistantMessage('assistant-active') },
         { info: assistantMessage('assistant-child', 'child-1') },
       ],
-      startLoading: vi.fn(),
+      startLoading: vi.fn(() => () => true),
       revertSession,
       syncSession: vi.fn(async () => {}),
       syncSessionMessages: vi.fn(async () => {}),
@@ -1139,7 +1139,7 @@ describe('session-controls helpers', () => {
 
     await redoSessionWithDependencies({
       getActiveSessionId: () => 'session-1',
-      startLoading: vi.fn(),
+      startLoading: vi.fn(() => () => true),
       unrevertSession: vi.fn(async () => session('session-1')),
       upsertSession,
       syncSession: vi.fn(async () => {}),
@@ -1160,7 +1160,7 @@ describe('session-controls helpers', () => {
       resolveSelectedModel: () => null,
       setError,
       setSessionCompacting: vi.fn(),
-      startLoading: vi.fn(),
+      startLoading: vi.fn(() => () => true),
       compactRemoteSession: vi.fn(async () => {}),
       syncSession: vi.fn(async () => {}),
       syncSessionMessages: vi.fn(async () => {}),
@@ -1181,7 +1181,7 @@ describe('session-controls helpers', () => {
       resolveSelectedModel: () => ({ providerID: 'openai', modelID: 'gpt-4o' }),
       setError: vi.fn(),
       setSessionCompacting,
-      startLoading: vi.fn(),
+      startLoading: vi.fn(() => () => true),
       compactRemoteSession,
       syncSession: vi.fn(async () => {}),
       syncSessionMessages: vi.fn(async () => {}),
@@ -1266,7 +1266,7 @@ describe('session-controls helpers', () => {
         { info: userMessage('user-1') },
         { info: assistantMessage('assistant-1') },
       ],
-      startLoading: vi.fn(),
+      startLoading: vi.fn(() => () => true),
       revertSession: vi.fn(async () => {
         throw new Error('revert failed');
       }),
@@ -1289,7 +1289,7 @@ describe('session-controls helpers', () => {
         { info: userMessage('user-1') },
         { info: assistantMessage('assistant-1') },
       ],
-      startLoading: vi.fn(),
+      startLoading: vi.fn(() => () => true),
       revertSession: vi.fn(async () => {
         throw 'something went wrong';
       }),
@@ -1325,7 +1325,7 @@ describe('session-controls helpers', () => {
 
     await redoSessionWithDependencies({
       getActiveSessionId: () => 'session-1',
-      startLoading: vi.fn(),
+      startLoading: vi.fn(() => () => true),
       unrevertSession: vi.fn(async () => {
         throw new Error('unrevert failed');
       }),
@@ -1345,7 +1345,7 @@ describe('session-controls helpers', () => {
 
     await redoSessionWithDependencies({
       getActiveSessionId: () => 'session-1',
-      startLoading: vi.fn(),
+      startLoading: vi.fn(() => () => true),
       unrevertSession: vi.fn(async () => {
         throw 42;
       }),
@@ -1390,7 +1390,7 @@ describe('session-controls helpers', () => {
       resolveSelectedModel: () => ({ providerID: 'openai', modelID: 'gpt-4o' }),
       setError,
       setSessionCompacting,
-      startLoading: vi.fn(),
+      startLoading: vi.fn(() => () => true),
       compactRemoteSession: vi.fn(async () => {
         throw new Error('compact failed');
       }),
@@ -1414,7 +1414,7 @@ describe('session-controls helpers', () => {
       resolveSelectedModel: () => ({ providerID: 'openai', modelID: 'gpt-4o' }),
       setError,
       setSessionCompacting: vi.fn(),
-      startLoading: vi.fn(),
+      startLoading: vi.fn(() => () => true),
       compactRemoteSession: vi.fn(async () => {
         throw 'oops';
       }),
@@ -1436,7 +1436,7 @@ describe('session-controls helpers', () => {
       resolveSelectedModel: () => ({ providerID: 'openai', modelID: 'gpt-4o' }),
       setError: vi.fn(),
       setSessionCompacting,
-      startLoading: vi.fn(),
+      startLoading: vi.fn(() => () => true),
       compactRemoteSession: vi.fn(async () => {}),
       syncSession: vi.fn(async () => {}),
       syncSessionMessages: vi.fn(async () => {}),

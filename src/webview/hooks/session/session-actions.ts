@@ -7,6 +7,8 @@ type PlanImplementationSendOptions = {
 };
 
 type InitSendOptions = { targetSessionId: string };
+type CommandRouting = { agent?: string; model?: string };
+type SessionCommandInput = CommandRouting & { command: string; arguments: string };
 
 export const INIT_PROMPT = `Please analyze this codebase and create an AGENTS.md file containing:
 1. Build, lint, and test commands - especially the command to run a single test.
@@ -105,13 +107,11 @@ export async function initSessionWithDependencies(
 export async function runSlashCommandWithDependencies(
   deps: {
     hasCommand(name: string): boolean;
+    getCommandRouting(): CommandRouting;
     getActiveSessionId(): string | null;
     createSession(): Promise<string | null>;
     startLoading(): void;
-    runSessionCommand(
-      sessionId: string,
-      input: { command: string; arguments: string }
-    ): Promise<MessageEntry>;
+    runSessionCommand(sessionId: string, input: SessionCommandInput): Promise<MessageEntry>;
     shouldApplyToActiveSession(sessionId: string): boolean;
     upsertMessageInfo(info: Message): void;
     upsertPart(part: Part): void;
@@ -130,6 +130,7 @@ export async function runSlashCommandWithDependencies(
     return false;
   }
 
+  const routing = { ...deps.getCommandRouting() };
   let sessionId = deps.getActiveSessionId();
   if (!sessionId) {
     const createdId = await deps.createSession();
@@ -138,10 +139,11 @@ export async function runSlashCommandWithDependencies(
   }
 
   try {
-    deps.startLoading();
+    if (deps.shouldApplyToActiveSession(sessionId)) deps.startLoading();
     const result = await deps.runSessionCommand(sessionId, {
       command: name,
       arguments: args,
+      ...routing,
     });
     if (deps.shouldApplyToActiveSession(sessionId)) {
       deps.upsertMessageInfo(result.info);
@@ -179,11 +181,9 @@ type SessionActionDependencies = {
   createSession(): Promise<string | null>;
   getMessageCount(): number;
   hasCommand(name: string): boolean;
+  getCommandRouting(): CommandRouting;
   startLoading(): void;
-  runSessionCommand(
-    sessionId: string,
-    input: { command: string; arguments: string }
-  ): Promise<MessageEntry>;
+  runSessionCommand(sessionId: string, input: SessionCommandInput): Promise<MessageEntry>;
   shouldApplyToActiveSession(sessionId: string): boolean;
   upsertMessageInfo(info: Message): void;
   upsertPart(part: Part): void;
@@ -238,6 +238,7 @@ export class SessionActionOperations {
     return runSlashCommandWithDependencies(
       {
         hasCommand: this.deps.hasCommand,
+        getCommandRouting: this.deps.getCommandRouting,
         getActiveSessionId: this.deps.getActiveSessionId,
         createSession: this.deps.createSession,
         startLoading: this.deps.startLoading,

@@ -1,9 +1,10 @@
+import { batch } from 'solid-js';
 import { produce, reconcile } from 'solid-js/store';
 import type { Message, MessageEntry, Session, SessionStatus } from '../types';
 import type { RecycleBinEntry, WorkspaceStatusEventSummary } from '../../shared/protocol';
 import type { WorkspaceStatusEntry } from '../../shared/opencode-types';
 import { isAbortedAssistantError } from '../../shared/error-classification';
-import { isSameWorkspacePath } from '../../shared/workspace-path';
+import { getRelativePathWithinWorkspace, isSameWorkspacePath } from '../../shared/workspace-path';
 import type { UsageLimitNotice } from './usage-limit';
 import {
   getSessionMarkerWorkspaceScopeValue,
@@ -37,6 +38,28 @@ import { STORAGE_KEYS, readStored, writeStored } from './state-storage';
 
 const EMPTY_SESSION_TREE_IDS: string[] = [];
 const markerStorage = { readStored, writeStored };
+const restoredMarkerDirectories = new Map<string, string>();
+
+function restoreCatalogSessionMarkers(sessions: readonly Session[]) {
+  const unrestored = sessions.filter(
+    (session) => restoredMarkerDirectories.get(session.id) !== session.directory
+  );
+  if (unrestored.length === 0) return;
+  for (const field of [
+    'lastSeenSessions',
+    'skippedPlanSessions',
+    'completedSessionResponses',
+  ] as const) {
+    const stored = readMergedSessionMarkerState(markerStorage, STORAGE_KEYS[field], [], unrestored);
+    batch(() => {
+      for (const [sessionId, timestamp] of Object.entries(stored)) {
+        const current = state[field][sessionId];
+        if (current === undefined || timestamp > current) setState(field, sessionId, timestamp);
+      }
+    });
+  }
+  for (const session of unrestored) restoredMarkerDirectories.set(session.id, session.directory);
+}
 
 function writeMarkerForSession(key: string, sessionId: string, timestamp: number | undefined) {
   const directory = state.sessions.find((session) => session.id === sessionId)?.directory;
@@ -237,7 +260,11 @@ export function setWorkspaceStatusSummary(summary: WorkspaceStatusEventSummary) 
 export function setSessions(nextSessions: Session[]) {
   sessionTreeIndex.invalidate();
   setState('sessions', reconcile(nextSessions, { key: 'id' }));
+  restoreCatalogSessionMarkers(nextSessions);
   const sessionIds = new Set(nextSessions.map((session) => session.id));
+  for (const sessionId of restoredMarkerDirectories.keys()) {
+    if (!sessionIds.has(sessionId)) restoredMarkerDirectories.delete(sessionId);
+  }
   const nextMarkers = pruneSkippedPlanSessions(state.skippedPlanSessions, sessionIds);
   if (nextMarkers) {
     setState(
@@ -272,6 +299,7 @@ export function syncSessionMarkersForWorkspace(
   const scopes = (workspacePaths.length > 0 ? workspacePaths : [workspacePath]).map((path) =>
     getSessionMarkerWorkspaceScope(path)
   );
+  restoredMarkerDirectories.clear();
   setSessionMarkerWorkspaceScopeValue(scope);
   setState(
     'lastSeenSessions',
@@ -285,6 +313,11 @@ export function syncSessionMarkersForWorkspace(
     'completedSessionResponses',
     reconcile(
       readMergedSessionMarkerState(markerStorage, STORAGE_KEYS.completedSessionResponses, scopes)
+    )
+  );
+  restoreCatalogSessionMarkers(
+    state.sessions.filter((session) =>
+      scopes.some((root) => getRelativePathWithinWorkspace(session.directory, root) !== null)
     )
   );
 }
