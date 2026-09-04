@@ -816,7 +816,10 @@ export class RestProxy {
       const requestDirectories =
         !scopedWorkspaceDirectory &&
         method === 'GET' &&
-        (requestPathname === '/session' || requestPathname === '/session/status')
+        (requestPathname === '/session' ||
+          requestPathname === '/session/status' ||
+          requestPathname === '/permission' ||
+          requestPathname === '/question')
           ? this.getOpenWorkspaceRoots()
           : [
               scopedWorkspaceDirectory ??
@@ -1293,10 +1296,19 @@ export class RestProxy {
           : method === 'GET' && requestPathname === '/question'
             ? ('question' as const)
             : undefined;
+      const workspaceDirectory =
+        this.callbacks.contextProvider.context.workspaceDirectory ?? undefined;
       const pendingAttentionReconciliation = pendingAttentionKind
         ? this.callbacks.sessionState.beginPendingAttentionReconciliation(
             pendingAttentionKind,
-            this.getCurrentWorkspacePath()
+            this.getCurrentWorkspacePath(),
+            workspaceDirectory,
+            Boolean(
+              workspaceDirectory &&
+              this.callbacks.contextProvider.context.workspaceFolders?.some((folder) =>
+                isSameWorkspacePath(folder.path, workspaceDirectory)
+              )
+            )
           )
         : undefined;
 
@@ -1341,6 +1353,11 @@ export class RestProxy {
             queuedHistorySessionID ? undefined : payload.body,
             requestSignal,
             queuedDispatch ? (explicitWorkspaceDirectory ?? undefined) : undefined
+          );
+        } else if (pendingAttentionKind && !scopedWorkspaceDirectory) {
+          responsePromise = this.requestWorkspacePendingAttention(
+            pendingAttentionKind === 'permission' ? '/permission' : '/question',
+            requestSignal
           );
         } else {
           this.assertPermissionAutomationLeaseCurrent(method, payload);
@@ -2013,6 +2030,80 @@ export class RestProxy {
       results.every((result) => result.catalogComplete)
     );
     return Object.assign({}, ...results.map((result) => result.statuses));
+  }
+
+  private async requestWorkspacePendingAttention(
+    path: '/permission' | '/question',
+    signal?: AbortSignal
+  ): Promise<unknown[]> {
+    const roots = this.getOpenWorkspaceRoots();
+    if (roots.length === 0) {
+      const response = await this.requestServer(
+        'GET',
+        path,
+        undefined,
+        signal ? { signal } : undefined
+      );
+      if (!Array.isArray(response)) {
+        throw new Error(`Malformed pending ${path.slice(1)} response`);
+      }
+      return response;
+    }
+
+    const scopes = await Promise.all(
+      roots.map((root) => this.resolveSessionCatalogScope(root, signal))
+    );
+    const catalogs = await Promise.all(
+      scopes.map((scope, index) => {
+        const root = roots[index]!;
+        return scope.kind === 'exact'
+          ? Promise.resolve(null)
+          : this.loadWorkspaceStatusSessionCatalog(root, signal, true, scope);
+      })
+    );
+    const directories = new Map<string, string>();
+    const rememberDirectory = (directory: string) => {
+      const identity = normalizeWorkspaceIdentity(directory);
+      if (identity) directories.set(identity, directory);
+    };
+    for (const root of roots) rememberDirectory(root);
+    for (const catalog of catalogs) {
+      if (!catalog) continue;
+      if (!catalog.complete) {
+        throw new Error('Cannot reconcile pending requests from an incomplete session catalog');
+      }
+      for (const session of catalog.sessions) rememberDirectory(session.directory);
+    }
+
+    const responses = await Promise.all(
+      [...directories.values()].map((directory) =>
+        this.requestServer('GET', path, undefined, { directory, signal })
+      )
+    );
+    const requests: unknown[] = [];
+    const seenIDs = new Set<string>();
+    const seenValues = new Set<unknown>();
+    for (const response of responses) {
+      if (!Array.isArray(response)) {
+        throw new Error(`Malformed pending ${path.slice(1)} response`);
+      }
+      for (const value of response) {
+        const record = asRecord(value);
+        const props =
+          asRecord(asRecord(record?.properties)?.info) ?? asRecord(record?.info) ?? record;
+        const rawID = props?.id ?? props?.permissionID ?? props?.requestID;
+        const id = typeof rawID === 'string' ? rawID.trim() : '';
+        if (id) {
+          if (seenIDs.has(id)) continue;
+          seenIDs.add(id);
+        } else {
+          if (seenValues.has(value)) continue;
+          seenValues.add(value);
+        }
+        requests.push(value);
+      }
+    }
+    return requests;
   }
 
   private requestWorkspaceStatusForDirectory(

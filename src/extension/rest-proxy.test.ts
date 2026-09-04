@@ -4210,6 +4210,142 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
+  it.each(['/question', '/permission'] as const)(
+    'aggregates %s snapshots across workspace roots before filtering',
+    async (path) => {
+      const ordinary = { id: 'ordinary-request', sessionID: 'ordinary-session' };
+      const workspace = { id: 'workspace-request', sessionID: 'workspace-session' };
+      const serverRequest = vi.fn(
+        async (
+          _method: string,
+          requestPath: string,
+          _body?: unknown,
+          options?: { directory?: string }
+        ) => {
+          if (requestPath !== path) throw new Error(`Unexpected path: ${requestPath}`);
+          if (options?.directory === '/repo-a') return [ordinary, workspace];
+          if (options?.directory === '/repo-b') return [];
+          throw new Error(`Unexpected directory: ${options?.directory}`);
+        }
+      );
+      const callbacks = createCallbacks({
+        getWorkspacePath: () => '/repo-b',
+        server: { ...createCallbacks().server, request: serverRequest } as never,
+        sessionState: {
+          ...createCallbacks().sessionState,
+          getSessionWorkspaceMatch: vi.fn(
+            (sessionID: string, workspacePath: string | null | undefined) =>
+              sessionID === 'workspace-session' && workspacePath === '/repo-a'
+          ),
+          workspaceScopeFor: vi.fn((sessionID: string) =>
+            sessionID === 'workspace-session' ? 'workspace' : 'folder'
+          ),
+        } as never,
+      });
+      callbacks.contextProvider.context.workspacePath = '/repo-b';
+      callbacks.contextProvider.context.workspaceDirectory = '/repo-a';
+      callbacks.contextProvider.context.workspaceFolders = [
+        { name: 'repo-a', path: '/repo-a' },
+        { name: 'repo-b', path: '/repo-b' },
+      ];
+      callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((directory: string) =>
+        directory === '/repo-a' || directory === '/repo-b' ? directory : null
+      );
+      const { proxy } = createProxy(callbacks);
+
+      await proxy.handleRequest(makePayload(225, 'GET', path));
+
+      expect(serverRequest).toHaveBeenCalledWith(
+        'GET',
+        path,
+        undefined,
+        withSignal({ directory: '/repo-a' })
+      );
+      expect(serverRequest).toHaveBeenCalledWith(
+        'GET',
+        path,
+        undefined,
+        withSignal({ directory: '/repo-b' })
+      );
+      expect(callbacks.sessionState.beginPendingAttentionReconciliation).toHaveBeenCalledWith(
+        path === '/permission' ? 'permission' : 'question',
+        '/repo-b',
+        '/repo-a',
+        true
+      );
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+        id: 225,
+        data: [workspace],
+      });
+    }
+  );
+
+  it('queries descendant session directories when aggregating pending permissions', async () => {
+    const permission = { id: 'nested-permission', sessionID: 'nested-session' };
+    const serverRequest = vi.fn(
+      async (_method: string, path: string, _body?: unknown, options?: { directory?: string }) => {
+        if (path === '/experimental/session?limit=1000000') {
+          return [{ id: 'nested-session', directory: '/repo/packages/nested' }];
+        }
+        if (path === '/permission' && options?.directory === '/repo') return [];
+        if (path === '/permission' && options?.directory === '/repo/packages/nested') {
+          return [permission];
+        }
+        throw new Error(`Unexpected request: ${path} (${options?.directory})`);
+      }
+    );
+    const { proxy, callbacks } = createProxy({
+      getSessionHistoryScope: () => 'descendants',
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(makePayload(226, 'GET', '/permission'));
+
+    expect(serverRequest).toHaveBeenCalledWith(
+      'GET',
+      '/permission',
+      undefined,
+      withSignal({ directory: '/repo/packages/nested' })
+    );
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 226,
+      data: [permission],
+    });
+  });
+
+  it('rejects a partial aggregate permission snapshot without reconciling it', async () => {
+    const serverRequest = vi.fn(
+      async (_method: string, path: string, _body?: unknown, options?: { directory?: string }) => {
+        if (path !== '/permission') throw new Error(`Unexpected path: ${path}`);
+        if (options?.directory === '/repo-a') return [];
+        throw new Error('repo-b unavailable');
+      }
+    );
+    const callbacks = createCallbacks({
+      getWorkspacePath: () => '/repo-b',
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+    callbacks.contextProvider.context.workspacePath = '/repo-b';
+    callbacks.contextProvider.context.workspaceDirectory = '/repo-a';
+    callbacks.contextProvider.context.workspaceFolders = [
+      { name: 'repo-a', path: '/repo-a' },
+      { name: 'repo-b', path: '/repo-b' },
+    ];
+    callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((directory: string) =>
+      directory === '/repo-a' || directory === '/repo-b' ? directory : null
+    );
+    const { proxy } = createProxy(callbacks);
+
+    await proxy.handleRequest(makePayload(227, 'GET', '/permission'));
+
+    expect(callbacks.sessionState.reconcilePendingAttention).not.toHaveBeenCalled();
+    expect(callbacks.sessionState.finishPendingAttentionReconciliation).toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 227,
+      error: 'repo-b unavailable',
+    });
+  });
+
   it.each(['/question', '/permission'])(
     'inherits parent workspace scope for child %s snapshots in an unsaved workspace',
     async (path) => {

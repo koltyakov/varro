@@ -45,6 +45,8 @@ export type PendingAttentionReconciliation = {
   readonly mutationRevision: number;
   readonly requestGeneration: number;
   readonly workspacePath?: string;
+  readonly workspaceDirectory?: string;
+  readonly workspaceDirectoryIsOpenRoot?: boolean;
 };
 
 export type InterruptedSessionSnapshot = {
@@ -919,13 +921,22 @@ export class SessionStateManager {
 
   beginPendingAttentionReconciliation(
     kind: PendingAttentionKind,
-    workspacePath?: string
+    workspacePath?: string,
+    workspaceDirectory?: string,
+    workspaceDirectoryIsOpenRoot = false
   ): PendingAttentionReconciliation {
     const requestGeneration = this.pendingAttentionRequestGenerations[kind] + 1;
     this.pendingAttentionRequestGenerations[kind] = requestGeneration;
     const mutationRevision = this.pendingAttentionRevisions[kind];
     this.activePendingAttentionReconciliations[kind].set(requestGeneration, mutationRevision);
-    return { kind, mutationRevision, requestGeneration, workspacePath };
+    return {
+      kind,
+      mutationRevision,
+      requestGeneration,
+      workspacePath,
+      workspaceDirectory,
+      workspaceDirectoryIsOpenRoot,
+    };
   }
 
   reconcilePendingAttention(
@@ -955,7 +966,9 @@ export class SessionStateManager {
         kind,
         requests,
         mutationRevision,
-        reconciliation.workspacePath
+        reconciliation.workspacePath,
+        reconciliation.workspaceDirectory,
+        reconciliation.workspaceDirectoryIsOpenRoot ?? false
       );
     } finally {
       this.finishPendingAttentionReconciliation(reconciliation);
@@ -973,7 +986,9 @@ export class SessionStateManager {
     kind: PendingAttentionKind,
     requests: readonly unknown[],
     startedAtRevision: number,
-    workspacePath?: string
+    workspacePath?: string,
+    workspaceDirectory?: string,
+    workspaceDirectoryIsOpenRoot = false
   ): void {
     const snapshotCandidates = requests
       .map((value) => {
@@ -997,7 +1012,12 @@ export class SessionStateManager {
       if (request.kind !== kind || snapshotIDs.has(id)) continue;
       if (
         workspacePath &&
-        this.getSessionWorkspaceMatch(request.sessionID, workspacePath) !== true
+        !this.isSessionVisibleInWorkspace(
+          request.sessionID,
+          workspacePath,
+          workspaceDirectory,
+          workspaceDirectoryIsOpenRoot
+        )
       ) {
         continue;
       }

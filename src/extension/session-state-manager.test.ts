@@ -2149,6 +2149,43 @@ describe('SessionStateManager notifications', () => {
     expect([...manager.pending.keys()]).toEqual(['permission-b']);
   });
 
+  it('clears resolved workspace-scoped requests without clearing ordinary sibling requests', () => {
+    const manager = createManager();
+    manager.handleServerEvent({
+      type: 'session.created',
+      properties: { info: { id: 'ordinary-session', directory: '/repo-a' } },
+    });
+    manager.handleServerEvent({
+      type: 'session.created',
+      properties: {
+        info: {
+          id: 'workspace-session',
+          directory: '/repo-a',
+          metadata: { varro: { workspaceScope: 'workspace', schemaVersion: 1 } },
+        },
+      },
+    });
+    for (const [id, sessionID] of [
+      ['ordinary-permission', 'ordinary-session'],
+      ['workspace-permission', 'workspace-session'],
+    ] as const) {
+      manager.handleServerEvent({
+        type: 'permission.asked',
+        properties: { id, sessionID, permission: 'bash' },
+      });
+    }
+
+    const reconciliation = manager.beginPendingAttentionReconciliation(
+      'permission',
+      '/repo-b',
+      '/repo-a',
+      true
+    );
+    manager.reconcilePendingAttention('permission', [], reconciliation);
+
+    expect([...manager.pending.keys()]).toEqual(['ordinary-permission']);
+  });
+
   it('preserves newer ask and reply events while an older snapshot is in flight', () => {
     const manager = createManager(() => false);
     manager.handleServerEvent({

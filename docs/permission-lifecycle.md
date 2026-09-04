@@ -392,7 +392,10 @@ mutation guards. Preserve these rules:
 - A visible prompt must post `permission/reveal` so host-side deferred attention becomes visible too.
 
 The extension filters pending snapshots to the current workspace and removes hidden or recycled
-sessions before reconciling host attention. Keep permission and question reconciliation independent.
+sessions before reconciling host attention. It must first collect each snapshot from every OpenCode
+directory instance that can own a visible session. If any required directory or session catalog fails,
+reject the snapshot rather than using partial omissions as proof that a request resolved. Keep
+permission and question reconciliation independent.
 
 ## Mode Changes
 
