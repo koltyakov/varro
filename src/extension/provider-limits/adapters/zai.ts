@@ -1,5 +1,10 @@
 /* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type -- Z.ai API payloads are decoded before quota extraction. */
-import type { ProviderLimitWindow } from '../../../shared/protocol';
+import type {
+  ProviderLimitResetCredit,
+  ProviderLimitResetCredits,
+  ProviderLimitStatus,
+  ProviderLimitWindow,
+} from '../../../shared/protocol';
 import {
   parseRateLimitResetAt,
   type ProviderAuthRecord,
@@ -16,6 +21,8 @@ import {
 } from '../adapter-utils';
 
 const ZAI_QUOTA_ENDPOINT = 'https://api.z.ai/api/monitor/usage/quota/limit';
+const ZAI_RESET_CARDS_ENDPOINT =
+  'https://api.z.ai/api/biz/customer-package-reset/list?targetType=PERSONAL';
 const OPENCODE_OAUTH_DUMMY_KEY = 'opencode-oauth-dummy-key';
 const ZAI_PROVIDER_IDS = new Set(['zai', 'zai-coding-plan']);
 const ZAI_MCP_MODELS = new Set(['search-prime', 'web-reader', 'zread']);
@@ -88,7 +95,7 @@ export function createZaiAdapter(): ProviderLimitAdapter {
           };
         }
 
-        return {
+        const status: ProviderLimitStatus = {
           providerID: provider.id,
           modelID,
           status: 'available',
@@ -97,6 +104,9 @@ export function createZaiAdapter(): ProviderLimitAdapter {
           windows: result.windows,
           note: 'Polled Z.ai quota endpoint',
         };
+        const resetCredits = await fetchZaiResetCredits(token);
+        if (resetCredits) status.usageLimitResets = resetCredits;
+        return status;
       } catch {
         return {
           providerID: provider.id,
@@ -109,6 +119,61 @@ export function createZaiAdapter(): ProviderLimitAdapter {
       }
     },
   };
+}
+
+async function fetchZaiResetCredits(token: string): Promise<ProviderLimitResetCredits | null> {
+  try {
+    const response = await fetch(ZAI_RESET_CARDS_ENDPOINT, {
+      headers: {
+        Accept: 'application/json',
+        Authorization: token,
+        'Content-Type': 'application/json',
+        'User-Agent': 'Varro/0.1.0',
+      },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) return null;
+
+    const payload = asRecord(await readBoundedResponseJson(response));
+    if (parseFiniteNumber(payload?.code) !== 200 || payload?.success === false) return null;
+
+    const data = asRecord(payload?.data);
+    const credits = [
+      ...extractZaiResetCredits(data?.weekResets, 'Weekly quota reset'),
+      ...extractZaiResetCredits(data?.fiveHourResets, '5-hour quota reset'),
+    ].toSorted((left, right) => left.expiresAt! - right.expiresAt!);
+    const availableCount =
+      countAvailableZaiResetCredits(data?.weekResets) +
+      countAvailableZaiResetCredits(data?.fiveHourResets);
+    return availableCount > 0 ? { availableCount, credits } : null;
+  } catch {
+    return null;
+  }
+}
+
+function countAvailableZaiResetCredits(value: unknown) {
+  if (!Array.isArray(value)) return 0;
+  return value.filter((entry) => asRecord(entry)?.available === true).length;
+}
+
+function extractZaiResetCredits(value: unknown, title: string): ProviderLimitResetCredit[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map<ProviderLimitResetCredit | null>((entry) => {
+      const record = asRecord(entry);
+      if (record?.available !== true) return null;
+      const expiresAt = parseZaiResetCreditExpiration(record.expireTime);
+      return expiresAt == null ? null : { title, expiresAt };
+    })
+    .filter((credit): credit is ProviderLimitResetCredit => credit != null);
+}
+
+function parseZaiResetCreditExpiration(value: unknown) {
+  const timestamp = getString(value);
+  if (!timestamp) return null;
+  const expiresAt = Date.parse(timestamp.replace(' ', 'T'));
+  return Number.isFinite(expiresAt) ? expiresAt : null;
 }
 
 function extractZaiPayload(payload: unknown, checkedAt: number): ZaiPayloadResult {
@@ -217,7 +282,7 @@ function findAliasedZaiAuthRecord(
 }
 
 function getZaiWindowDescriptor(type: string, limitRecord: Record<string, unknown>) {
-  if (type === 'TOKENS_LIMIT') {
+  if (type === 'TOKENS_LIMIT' || type === 'CREDIT_LIMIT') {
     const unit = parseFiniteNumber(limitRecord.unit);
     const number = parseFiniteNumber(limitRecord.number);
     if (unit === 3 && number === 5) {
@@ -227,7 +292,7 @@ function getZaiWindowDescriptor(type: string, limitRecord: Record<string, unknow
         unit: 'unknown' as const,
       };
     }
-    if (unit === 6 && number === 1) {
+    if (unit === 6) {
       return {
         id: 'weekly',
         label: 'Weekly Quota',
@@ -236,8 +301,8 @@ function getZaiWindowDescriptor(type: string, limitRecord: Record<string, unknow
     }
 
     return {
-      id: buildZaiQuotaId('tokens', unit, number),
-      label: 'Tokens Quota',
+      id: buildZaiQuotaId(type === 'CREDIT_LIMIT' ? 'credits' : 'tokens', unit, number),
+      label: type === 'CREDIT_LIMIT' ? 'Credits Quota' : 'Tokens Quota',
       unit: 'unknown' as const,
     };
   }

@@ -74,12 +74,44 @@ describe('createZaiAdapter', () => {
   });
 
   it('parses bounded windows from the Z.ai quota endpoint', async () => {
-    vi.mocked(fetch).mockImplementation(async (_input, init) => {
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
       expect(init?.headers).toMatchObject({
         Accept: 'application/json',
         Authorization: 'zai_test_key_12345',
         'User-Agent': 'Varro/0.1.0',
       });
+
+      if (String(input).includes('/customer-package-reset/list')) {
+        return new Response(
+          JSON.stringify({
+            code: 200,
+            msg: 'Operation successful',
+            success: true,
+            data: {
+              fiveHourResets: [
+                {
+                  recordId: 10,
+                  expireTime: '2026-09-12T12:00:00Z',
+                  available: true,
+                },
+              ],
+              weekResets: [
+                {
+                  recordId: 20,
+                  expireTime: '2026-09-20T12:00:00Z',
+                  available: true,
+                },
+                {
+                  recordId: 21,
+                  expireTime: '2026-09-27T12:00:00Z',
+                  available: false,
+                },
+              ],
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
 
       return new Response(
         JSON.stringify({
@@ -120,9 +152,9 @@ describe('createZaiAdapter', () => {
                 nextResetTime: 1770398385482,
               },
               {
-                type: 'TOKENS_LIMIT',
+                type: 'CREDIT_LIMIT',
                 unit: 6,
-                number: 1,
+                number: 7,
                 percentage: 2,
                 nextResetTime: 1771000000000,
               },
@@ -147,6 +179,19 @@ describe('createZaiAdapter', () => {
       source: 'provider',
       checkedAt: 1_000,
       note: 'Polled Z.ai quota endpoint',
+      usageLimitResets: {
+        availableCount: 2,
+        credits: [
+          {
+            title: '5-hour quota reset',
+            expiresAt: Date.parse('2026-09-12T12:00:00Z'),
+          },
+          {
+            title: 'Weekly quota reset',
+            expiresAt: Date.parse('2026-09-20T12:00:00Z'),
+          },
+        ],
+      },
       windows: [
         {
           id: 'mcp',

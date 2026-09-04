@@ -119,7 +119,7 @@ Run `/stats` or `Varro: Usage Stats` for a Markdown report from retained OpenCod
 
 ![Context window and session token breakdown](https://raw.githubusercontent.com/koltyakov/varro/main/assets/context.png)
 
-Varro shows quota windows and reset times when OpenCode metadata or a supported provider endpoint supplies them. Direct limit checks support OpenAI/Codex, GitHub Copilot, OpenRouter, xAI, Ollama Cloud, Z.ai, Kimi for Coding, and OpenCode Go. After a usage-limit error, you can stop retries or switch providers.
+Varro shows quota windows, reset times, and available OpenAI/Codex or Z.ai usage-limit resets when supported provider endpoints supply them. Direct limit checks support OpenAI/Codex, GitHub Copilot, OpenRouter, xAI, Ollama Cloud, Z.ai, Kimi for Coding, and OpenCode Go. After a usage-limit error, you can stop retries or switch providers.
 
 ![Provider quota limits and reset windows](https://raw.githubusercontent.com/koltyakov/varro/main/assets/limits.png)
 

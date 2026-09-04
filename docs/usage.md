@@ -277,7 +277,7 @@ When an assistant response fails because a provider credential expired, was revo
 The composer can show model and session metadata:
 
 - Provider limit status, when Varro can read quota information from OpenCode metadata or a supported provider endpoint.
-- Available OpenAI/Codex usage-limit reset credits and their expiration times. Varro displays these credits and links to ChatGPT's Usage settings, but does not redeem them.
+- Available OpenAI/Codex and Z.ai usage-limit resets and their expiration times. Varro displays these resets and links to the provider's usage page, but does not redeem them.
 - Context usage, based on token totals from assistant messages and the selected model's context window.
 - Reported session cost in the context popup, when OpenCode supplies cost data.
 

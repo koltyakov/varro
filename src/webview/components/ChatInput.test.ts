@@ -1447,7 +1447,7 @@ describe('ChatInput', () => {
     expect(chip?.textContent).toContain('80%');
   });
 
-  it('shows Z.ai MCP quota only in provider limit popup details', async () => {
+  it('shows Z.ai quota windows and available resets', async () => {
     setState('providers', [
       {
         id: 'zai-coding-plan',
@@ -1472,6 +1472,15 @@ describe('ChatInput', () => {
         status: 'available',
         source: 'provider',
         checkedAt: 1,
+        usageLimitResets: {
+          availableCount: 1,
+          credits: [
+            {
+              title: 'Weekly quota reset',
+              expiresAt: Date.parse('2026-09-20T12:00:00Z'),
+            },
+          ],
+        },
         windows: [
           {
             id: 'five_hour',
@@ -1521,6 +1530,16 @@ describe('ChatInput', () => {
     expect(popup?.textContent).toContain('87/100 left');
     expect(popup?.textContent).toContain('98/100 left');
     expect(popup?.textContent).toContain('1,000/1,000 left');
+    const resetToggle = popup?.querySelector<HTMLButtonElement>('.provider-limit-reset-toggle');
+    expect(resetToggle?.textContent).toContain('Usage limit resets (1)');
+
+    resetToggle?.click();
+    await Promise.resolve();
+    expect(popup?.textContent).not.toContain('Weekly quota reset');
+    expect(popup?.textContent).toContain('Expires');
+    expect(popup?.querySelector<HTMLAnchorElement>('.provider-limit-reset-link')?.href).toBe(
+      'https://z.ai/manage-apikey/coding-plan/personal/usage'
+    );
   });
 
   it('shows OpenAI usage-limit resets in a collapsed read-only popup section', async () => {

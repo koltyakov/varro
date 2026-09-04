@@ -20,6 +20,7 @@ import { UiIcon } from '../UiIcon';
 const PROVIDER_LIMIT_WARNING_PERCENT = 75;
 const PROVIDER_LIMIT_ERROR_PERCENT = 90;
 const OPENAI_USAGE_URL = 'https://chatgpt.com/#settings/Usage';
+const ZAI_USAGE_URL = 'https://z.ai/manage-apikey/coding-plan/personal/usage';
 
 export function ProviderLimitPopup(props: {
   ref?: HTMLDivElement | ((el: HTMLDivElement) => void);
@@ -34,9 +35,18 @@ export function ProviderLimitPopup(props: {
   const planName = () =>
     props.limit?.status === 'available' ? props.limit.planName || null : null;
   const resetCredits = () => {
-    if (props.limit?.status !== 'available' || props.limit.providerID !== 'openai') return null;
+    if (props.limit?.status !== 'available') return null;
     const resets = props.limit.usageLimitResets;
     return resets && resets.availableCount > 0 ? resets : null;
+  };
+  const resetCreditsUsageLink = () => {
+    if (props.limit?.providerID === 'openai') {
+      return { label: 'ChatGPT Usage', url: OPENAI_USAGE_URL };
+    }
+    if (props.limit?.providerID === 'zai' || props.limit?.providerID === 'zai-coding-plan') {
+      return { label: 'Z.ai Usage', url: ZAI_USAGE_URL };
+    }
+    return null;
   };
   let popupEl: HTMLDivElement | undefined;
 
@@ -122,20 +132,24 @@ export function ProviderLimitPopup(props: {
                       </li>
                     </Show>
                   </ul>
-                  <a
-                    class="provider-limit-reset-link"
-                    href={OPENAI_USAGE_URL}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      postMessage({
-                        type: 'vscode/open-external',
-                        payload: { url: OPENAI_USAGE_URL },
-                      });
-                    }}
-                  >
-                    ChatGPT Usage
-                    <UiIcon source={openNewWindowIcon} width="11" height="11" />
-                  </a>
+                  <Show when={resetCreditsUsageLink()}>
+                    {(link) => (
+                      <a
+                        class="provider-limit-reset-link"
+                        href={link().url}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          postMessage({
+                            type: 'vscode/open-external',
+                            payload: { url: link().url },
+                          });
+                        }}
+                      >
+                        {link().label}
+                        <UiIcon source={openNewWindowIcon} width="11" height="11" />
+                      </a>
+                    )}
+                  </Show>
                 </div>
               </Show>
             </div>
@@ -161,7 +175,7 @@ function formatResetCreditExpiration(expiresAt: number) {
 }
 
 function isGenericResetCreditTitle(title: string) {
-  return title.trim().toLowerCase() === 'full reset';
+  return new Set(['full reset', 'weekly quota reset']).has(title.trim().toLowerCase());
 }
 
 function ProviderLimitRow(props: { window: ProviderLimitWindow }) {
