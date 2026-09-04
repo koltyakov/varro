@@ -30,6 +30,7 @@
   --color-vscode-muted: var(--vscode-descriptionForeground, #8b8b8b);
   --color-vscode-accent: var(--vscode-focusBorder, #007fd4);
   --color-vscode-error: var(--vscode-errorForeground, #f44747);
+  --color-vscode-info: var(--vscode-charts-blue, #75beff);
   --color-vscode-warning: var(--vscode-editorWarning-foreground, #cca700);
   --color-vscode-success: var(--vscode-charts-green, #73c991);
   --color-vscode-card: var(--vscode-editorWidget-background, #252526);

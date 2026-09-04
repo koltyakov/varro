@@ -576,7 +576,8 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
   ): Promise<RalphStopReason | null> {
     const lastCompleted = lastCompletedIteration(run);
     const hasOutstandingVerificationFailure =
-      !!lastCompleted && hasFailedVerdict(lastCompleted.verification);
+      !!lastCompleted &&
+      (lastCompleted.status === 'failed' || hasFailedVerdict(lastCompleted.verification));
     const planContent = await readPlanContentSafe(run.config.planDocPath, state);
     throwIfRunCancelled(state);
     const planIncomplete =

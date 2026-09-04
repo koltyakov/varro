@@ -7,6 +7,7 @@ import {
   parseServerEvent,
   type ServerStatus,
 } from '../shared/protocol';
+import { normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import { logger } from './logger';
 import { getOpenCodeDirectoryHeaders, scopeOpenCodeRequest } from './util/opencode-request';
 import { anySignal, asRecord, findSseChunkBoundary, getString } from './server-utils';
@@ -82,6 +83,7 @@ export class OpenCodeTransport {
   private readonly requestControllers = new Set<AbortController>();
   private readonly requestSettlementWaiters = new Set<() => void>();
   private readonly pendingAttentionRequests = new Map<string, string>();
+  private readonly observedSessionDirectories = new Map<string, string>();
 
   constructor(options: OpenCodeTransportOptions) {
     this.options = options;
@@ -444,6 +446,10 @@ export class OpenCodeTransport {
     return [...new Set(this.pendingAttentionRequests.values())];
   }
 
+  getObservedSessionDirectories(): ReadonlyMap<string, string> {
+    return new Map(this.observedSessionDirectories);
+  }
+
   private processSseChunk(chunk: string, controller?: AbortController, generation?: number) {
     let data = '';
     let eventId: string | undefined;
@@ -503,8 +509,26 @@ export class OpenCodeTransport {
     const type = parsed.type;
     const props = asRecord(parsed.properties);
     const requestProps = asRecord(props?.info) || props;
+    const eventDirectory = parsed.workspaceDirectory;
+    const rememberSessionDirectory = (
+      sessionID: string | undefined,
+      directory = eventDirectory
+    ) => {
+      if (sessionID && directory) this.observedSessionDirectories.set(sessionID, directory);
+    };
 
     switch (type) {
+      case 'session.created':
+      case 'session.updated': {
+        const info = asRecord(props?.info);
+        rememberSessionDirectory(getString(info?.id), getString(info?.directory) || eventDirectory);
+        break;
+      }
+      case 'session.status':
+      case 'session.idle':
+        rememberSessionDirectory(getString(props?.sessionID));
+        break;
+      case 'permission.updated':
       case 'permission.asked':
       case 'permission.v2.asked':
       case 'question.asked':
@@ -516,6 +540,7 @@ export class OpenCodeTransport {
         const sessionID = getString(requestProps?.sessionID);
         if (requestID && sessionID) {
           this.pendingAttentionRequests.set(requestID, sessionID);
+          rememberSessionDirectory(sessionID);
         }
         break;
       }
@@ -542,6 +567,21 @@ export class OpenCodeTransport {
             this.pendingAttentionRequests.delete(requestID);
           }
         }
+        this.observedSessionDirectories.delete(sessionID);
+        break;
+      }
+      case 'server.instance.disposed': {
+        const disposedIdentity = normalizeWorkspaceIdentity(eventDirectory);
+        if (!disposedIdentity) break;
+        for (const [sessionID, directory] of this.observedSessionDirectories) {
+          if (normalizeWorkspaceIdentity(directory) === disposedIdentity) {
+            this.observedSessionDirectories.delete(sessionID);
+          }
+        }
+        break;
+      }
+      case 'global.disposed': {
+        this.observedSessionDirectories.clear();
         break;
       }
     }

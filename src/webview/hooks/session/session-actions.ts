@@ -6,6 +6,8 @@ type PlanImplementationSendOptions = {
   preserveComposer: true;
 };
 
+type InitSendOptions = { targetSessionId: string };
+
 export const INIT_PROMPT = `Please analyze this codebase and create an AGENTS.md file containing:
 1. Build, lint, and test commands - especially the command to run a single test.
 2. Code style guidelines including imports, formatting, types, naming conventions, error handling, etc.
@@ -81,7 +83,7 @@ export async function initSessionWithDependencies(
     createSession(): Promise<string | null>;
     getMessageCount(): number;
     setError(message: string): void;
-    sendMessage(prompt: string): Promise<void | boolean | object>;
+    sendMessage(prompt: string, options?: InitSendOptions): Promise<void | boolean | object>;
   },
   prompt = INIT_PROMPT
 ) {
@@ -97,7 +99,7 @@ export async function initSessionWithDependencies(
     return;
   }
 
-  await deps.sendMessage(prompt);
+  await deps.sendMessage(prompt, { targetSessionId: sessionId });
 }
 
 export async function runSlashCommandWithDependencies(
@@ -152,11 +154,13 @@ export async function runSlashCommandWithDependencies(
     await Promise.all([deps.syncSession(sessionId), deps.recheckSessionStatus(sessionId)]).catch(
       () => {}
     );
-    deps.stopLoading();
+    if (deps.shouldApplyToActiveSession(sessionId)) deps.stopLoading();
     return true;
   } catch (err) {
-    deps.stopLoading();
-    deps.setError(err instanceof Error ? err.message : `Failed to run /${name}`);
+    if (deps.shouldApplyToActiveSession(sessionId)) {
+      deps.stopLoading();
+      deps.setError(err instanceof Error ? err.message : `Failed to run /${name}`);
+    }
     return false;
   }
 }
@@ -169,7 +173,7 @@ type SessionActionDependencies = {
   applySelectedAgent(agent: string, sessionId: string): void;
   sendMessage(
     prompt: string,
-    options?: PlanImplementationSendOptions
+    options?: PlanImplementationSendOptions | InitSendOptions
   ): Promise<void | boolean | object>;
   openPlan(markdown: string): Promise<void | boolean | object>;
   createSession(): Promise<string | null>;

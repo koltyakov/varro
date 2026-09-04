@@ -93,6 +93,18 @@ function createHarness(
     on: vi.fn(),
     off: vi.fn(),
     restart: vi.fn(async () => 'http://127.0.0.1:4096'),
+    readRestartBlockers: vi.fn(
+      async (): Promise<{
+        totalSessionCount: number;
+        directories: Array<{ directory: string | null; sessionCount: number }>;
+      }> =>
+        idle
+          ? { totalSessionCount: 0, directories: [] }
+          : {
+              totalSessionCount: 1,
+              directories: [{ directory: '/repo', sessionCount: 1 }],
+            }
+    ),
     readServerInfo: vi.fn(async () => ({ managedProcess: options.managedProcess ?? true })),
     request: vi.fn(async (_method: string, path: string) => {
       if (path === '/session/status') return idle ? {} : { active: { type: 'busy' } };
@@ -177,6 +189,7 @@ async function activateWatching(h: Harness) {
 
 function resetCalls(h: Harness) {
   h.server.restart.mockClear();
+  h.server.readRestartBlockers.mockClear();
   h.server.request.mockClear();
   h.server.readServerInfo.mockClear();
   h.persistence.set.mockClear();
@@ -683,6 +696,26 @@ describe('ProviderFileRefreshController', () => {
   });
 
   describe('invalidation scheduling', () => {
+    it('does not globally invalidate while a nested OpenCode instance is busy', async () => {
+      const h = createHarness({
+        files: { [CONFIG_PATHS[0]]: 'v1' },
+        workspaceDirectories: ['/repo'],
+      });
+      await h.controller.initializeSignature();
+      h.server.readRestartBlockers.mockResolvedValue({
+        totalSessionCount: 1,
+        directories: [{ directory: '/repo/packages/app', sessionCount: 1 }],
+      });
+      h.fileSystem.files.set(CONFIG_PATHS[0], 'v2');
+
+      await h.controller.refreshState();
+
+      expect(h.server.readRestartBlockers).toHaveBeenCalledOnce();
+      expect(h.server.request).not.toHaveBeenCalledWith('POST', '/global/dispose');
+      expect(h.server.restart).not.toHaveBeenCalled();
+      expect(h.values.has(PENDING_STATE_KEY)).toBe(true);
+    });
+
     it('refreshes the UI immediately and defers invalidation until the server is idle', async () => {
       const h = createHarness({ files: { [CONFIG_PATHS[0]]: 'v1' } });
       await activateWatching(h);

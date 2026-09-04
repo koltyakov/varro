@@ -1399,6 +1399,28 @@ describe('webview message validation', () => {
     ).toBeNull();
   });
 
+  it('preserves the exact session directory for native diff requests', () => {
+    expect(
+      parseWebviewMessage({
+        type: 'vscode/open',
+        payload: {
+          path: 'src/app.ts',
+          view: 'diff',
+          sessionID: 'nested-session',
+          directory: '/repo/packages/app',
+        },
+      })
+    ).toEqual({
+      type: 'vscode/open',
+      payload: {
+        path: 'src/app.ts',
+        view: 'diff',
+        sessionID: 'nested-session',
+        directory: '/repo/packages/app',
+      },
+    });
+  });
+
   it('validates dropped-content encoding, declared sizes, and aggregate limits', () => {
     expect(
       parseWebviewMessage({

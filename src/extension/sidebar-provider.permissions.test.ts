@@ -9,7 +9,140 @@ import {
   getVscodeMock,
 } from './sidebar-provider.test-support';
 
+const PROJECT_ROOT = '/repo';
+const PROJECT_SESSION_DIRECTORY = '/worktrees/feature';
+const projectAttentionCases = [
+  {
+    kind: 'permission',
+    event: {
+      type: 'permission.asked',
+      properties: {
+        id: 'project-permission',
+        sessionID: 'project-session',
+        permission: 'bash',
+        title: 'Run command',
+        always: [],
+      },
+    },
+    replyPath: '/permission/project-permission/reply',
+    replyBody: { reply: 'once' },
+  },
+  {
+    kind: 'question',
+    event: {
+      type: 'question.asked',
+      properties: {
+        id: 'project-question',
+        sessionID: 'project-session',
+        questions: [],
+      },
+    },
+    replyPath: '/question/project-question/reply',
+    replyBody: { answers: [['Yes']] },
+  },
+] as const;
+
+async function createProjectAttentionHarness() {
+  const values = new Map<string, unknown>([
+    ['varro.sessionHistoryScopes', { 'project:project-1': 'project' }],
+    ['varro.sessionHistoryScopeProjects', { [PROJECT_ROOT]: 'project:project-1' }],
+  ]);
+  const workspaceState = {
+    get: vi.fn((key: string, fallback?: unknown) => values.get(key) ?? fallback),
+    update: vi.fn(() => Promise.resolve()),
+  };
+  const contextProvider = createContextProvider();
+  contextProvider.getOpenWorkspaceRoot = vi.fn((path: string) =>
+    path === PROJECT_ROOT ? PROJECT_ROOT : null
+  );
+  const server = createServer({
+    request: vi.fn(async (method: string, path: string) => {
+      if (path === '/project/current') {
+        return { id: 'project-1', worktree: PROJECT_ROOT, vcs: 'git' };
+      }
+      const url = new URL(path, 'http://localhost');
+      if (
+        url.pathname === '/session' &&
+        url.searchParams.get('limit') === '1000000' &&
+        url.searchParams.get('scope') === 'project'
+      ) {
+        return [
+          {
+            id: 'project-session',
+            projectID: 'project-1',
+            directory: PROJECT_SESSION_DIRECTORY,
+            title: 'Project session',
+          },
+        ];
+      }
+      if (
+        method === 'POST' &&
+        (path === '/permission/project-permission/reply' ||
+          path === '/question/project-question/reply')
+      ) {
+        return true;
+      }
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    }),
+  });
+  const { provider } = await createSidebarProviderInstance({
+    contextProvider,
+    server,
+    workspaceState: workspaceState as never,
+  });
+  const { posted } = attachTestView(provider);
+  await provider.handleMessage({ type: 'ready' });
+  await provider.handleMessage({
+    type: 'api/request',
+    payload: { id: 300, method: 'GET', path: '/session' },
+  });
+  const eventHandler = server.on.mock.calls.find(([event]) => event === 'event')?.[1] as
+    | ((event: unknown) => void)
+    | undefined;
+  if (!eventHandler) throw new Error('Expected the server event bridge to be attached');
+  return { eventHandler, posted, provider, server };
+}
+
 describe('SidebarProvider permission replay', () => {
+  it.each(projectAttentionCases)(
+    'forwards nested project-catalog $kind events to the owning endpoint',
+    async ({ event }) => {
+      const { eventHandler, posted } = await createProjectAttentionHarness();
+      posted.length = 0;
+
+      eventHandler({ directory: PROJECT_SESSION_DIRECTORY, payload: event });
+
+      expect(posted).toContainEqual({
+        type: 'server/event',
+        payload: { ...event, workspaceDirectory: PROJECT_SESSION_DIRECTORY },
+      });
+    }
+  );
+
+  it.each(projectAttentionCases)(
+    'sends nested project-catalog $kind replies to the exact session instance',
+    async ({ event, replyBody, replyPath }) => {
+      const { eventHandler, provider, server } = await createProjectAttentionHarness();
+      eventHandler({ directory: PROJECT_SESSION_DIRECTORY, payload: event });
+      server.request.mockClear();
+
+      await provider.handleMessage({
+        type: 'api/request',
+        payload: { id: 301, method: 'POST', path: replyPath, body: replyBody },
+      });
+
+      expect(server.request).toHaveBeenCalledWith(
+        'POST',
+        replyPath,
+        replyBody,
+        expect.objectContaining({
+          directory: PROJECT_SESSION_DIRECTORY,
+          signal: expect.any(AbortSignal),
+        })
+      );
+    }
+  );
+
   it('replays pending permission requests after the webview becomes ready', async () => {
     const { provider } = await createSidebarProviderInstance({
       server: createServer({

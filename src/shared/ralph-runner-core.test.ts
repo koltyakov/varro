@@ -1447,6 +1447,34 @@ describe('ralph runner iteration repair', () => {
     );
   });
 
+  it('does not mark an exhausted run done when final verification has no verdicts', async () => {
+    const harness = createHarness();
+    const config = createConfig({ iterations: 1 });
+
+    harness.readWorkspaceFile.mockResolvedValue('# Plan\n- [x] all done');
+    harness.createSession
+      .mockResolvedValueOnce('child-1')
+      .mockResolvedValueOnce('repair-1')
+      .mockResolvedValueOnce('repair-2');
+    harness.listMessages.mockResolvedValue(
+      assistantReport('Verification could not produce any supported check results.')
+    );
+    settlePromptsViaIdle(harness);
+
+    await harness.runner.start(config);
+
+    const run = harness.store.getRun(config.managerSessionId);
+    expect(run?.iterations[0]).toEqual(
+      expect.objectContaining({
+        status: 'failed',
+        verification: {},
+        repairSessionIds: ['repair-1', 'repair-2'],
+      })
+    );
+    expect(run?.status).toBe('incomplete');
+    expect(run?.stopReason).toBe('iteration_limit_with_gap');
+  });
+
   it('sends parent-driven verification follow-up and spawns a repair sub-agent on failure', async () => {
     const harness = createHarness();
     const config = createConfig({ iterations: 1 });

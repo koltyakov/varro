@@ -732,11 +732,13 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       const kind = payload?.kind;
       const view = payload?.view;
       const sessionID = getOptionalBoundedString(payload?.sessionID, 512);
+      const directory = getOptionalBoundedString(payload?.directory, MAX_PATH_LENGTH);
       const requestId =
         payload?.requestId === undefined ? undefined : getSafeInteger(payload.requestId);
       if (!path || (payload?.line !== undefined && line === null)) return null;
       if (payload?.requestId !== undefined && requestId === null) return null;
       if (payload?.sessionID !== undefined && !sessionID) return null;
+      if (payload?.directory !== undefined && !directory) return null;
       if (kind !== undefined && kind !== 'auto' && kind !== 'file' && kind !== 'directory')
         return null;
       if (view !== undefined && view !== 'diff') return null;
@@ -745,6 +747,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       if (kind) openPayload.kind = kind;
       if (view) openPayload.view = view;
       if (sessionID) openPayload.sessionID = sessionID;
+      if (directory) openPayload.directory = directory;
       if (requestId !== undefined && requestId !== null) openPayload.requestId = requestId;
       return { type, payload: openPayload };
     }

@@ -83,6 +83,53 @@ describe('SessionDiffDocumentProvider', () => {
     }
   });
 
+  it('loads a nested session diff from its exact requested directory', async () => {
+    const nestedDirectory = '/repo/packages/app';
+    const request = vi.fn(
+      async (_method: string, path: string, _body?: unknown, options?: { directory?: string }) => {
+        if (options?.directory !== nestedDirectory) throw new Error('Wrong OpenCode instance');
+        return path === '/session/nested-session'
+          ? { id: 'nested-session', directory: nestedDirectory }
+          : [
+              {
+                file: 'src/app.ts',
+                before: 'old',
+                after: 'new',
+                additions: 1,
+                deletions: 1,
+              },
+            ];
+      }
+    );
+    const server = {
+      getWorkspaceCwd: () => '/repo',
+      request,
+    };
+    const authorizeDirectory = vi.fn(() => Promise.resolve(true));
+    const provider = new SessionDiffDocumentProvider(server as never);
+
+    try {
+      await expect(
+        provider.open(
+          'nested-session',
+          `${nestedDirectory}/src/app.ts`,
+          nestedDirectory,
+          server as never,
+          authorizeDirectory
+        )
+      ).resolves.toBe('opened');
+      expect(authorizeDirectory).toHaveBeenCalledWith('nested-session', nestedDirectory);
+      expect(request).toHaveBeenCalledWith('GET', '/session/nested-session', undefined, {
+        directory: nestedDirectory,
+      });
+      expect(request).toHaveBeenCalledWith('GET', '/session/nested-session/diff', undefined, {
+        directory: nestedDirectory,
+      });
+    } finally {
+      provider.dispose();
+    }
+  });
+
   it('falls back when OpenCode does not provide both sides', async () => {
     const provider = new SessionDiffDocumentProvider({
       getWorkspaceCwd: () => '/repo',
@@ -179,6 +226,39 @@ describe('SessionDiffDocumentProvider', () => {
         directory: '/repo',
       });
       expect(request).not.toHaveBeenCalledWith('GET', '/session/session-foreign/diff');
+      expect(vscodeMock.commands.executeCommand).not.toHaveBeenCalled();
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('refuses an explicitly scoped diff outside the current workspace without catalog authorization', async () => {
+    const request = vi.fn(async (_method: string, path: string) => {
+      if (path === '/session/session-foreign') {
+        return { id: 'session-foreign', directory: '/other-repo' };
+      }
+      return [
+        {
+          file: 'src/app.ts',
+          before: 'old',
+          after: 'new',
+          additions: 1,
+          deletions: 1,
+        },
+      ];
+    });
+    const provider = new SessionDiffDocumentProvider({
+      getWorkspaceCwd: () => '/repo',
+      request,
+    } as never);
+
+    try {
+      await expect(provider.open('session-foreign', 'src/app.ts', '/other-repo')).resolves.toBe(
+        'forbidden'
+      );
+      expect(request).not.toHaveBeenCalledWith('GET', '/session/session-foreign/diff', undefined, {
+        directory: '/other-repo',
+      });
       expect(vscodeMock.commands.executeCommand).not.toHaveBeenCalled();
     } finally {
       provider.dispose();

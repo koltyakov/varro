@@ -94,7 +94,6 @@ const SESSION_SUMMARY_DESCENDANT_CONCURRENCY = 4;
 const SESSION_VISIBILITY_LOOKUP_CONCURRENCY = 4;
 const SESSION_SUMMARY_CACHE_TTL_MS = 2_000;
 const SESSION_SUMMARY_CACHE_LIMIT = 200;
-const STATUS_SESSION_CATALOG_REFRESH_MS = 5_000;
 const CURRENT_PROJECT_CACHE_TTL_MS = 2_000;
 const SESSION_EVENT_CATALOG_REFRESH_MS = 1_000;
 const SESSION_MESSAGE_RESPONSE_MAX_BYTES = 16 * 1024 * 1024;
@@ -377,6 +376,10 @@ export interface RestProxyCallbacks {
   associateSessionHistoryScope?(root: string, key: string): Promise<void>;
   updateSessionHistoryScope?(key: string, scope: SessionHistoryScope): Promise<void>;
   getWorkspacePath?(): string | null | undefined;
+  resolvePendingAttentionRequest?(
+    requestID: string
+  ): { sessionID: string; directory?: string } | undefined;
+  shouldAbortSessionBeforeRecycle?(sessionID: string): boolean;
   ensureServerStarted(): Promise<string | undefined>;
   workspaceSessionStatusCoordinator?: WorkspaceSessionStatusCoordinator;
   internalHelperCleanupCoordinator?: InternalHelperCleanupCoordinator;
@@ -456,10 +459,6 @@ export class RestProxy {
     { rootIdentity: string; sessions: Map<string, AuthorizedSessionDirectory> }
   >();
   private sessionWorkspaceScopes = new Map<string, SessionWorkspaceScope>();
-  private workspaceStatusSessionCatalogs = new Map<
-    string,
-    { complete: boolean; loadedAt: number; sessions: WorkspaceSession[] }
-  >();
   private currentProjects = new Map<
     string,
     { expiresAt: number; request: Promise<SessionCatalogProject> }
@@ -525,7 +524,7 @@ export class RestProxy {
   }
 
   invalidateSessionCatalog() {
-    this.workspaceStatusSessionCatalogs.clear();
+    this.workspaceSessionStatusCoordinator.clearCatalogs();
     this.currentProjects.clear();
     this.sessionEventCatalogRefreshes.clear();
     this.authorizedSessionDirectories.clear();
@@ -570,6 +569,43 @@ export class RestProxy {
       return true;
     }
     return false;
+  }
+
+  isSessionCatalogInventoryAuthorized(sessionID: string, directory?: string): boolean {
+    const authorized = this.authorizedSessionDirectories.get(sessionID);
+    return Boolean(
+      authorized && (!directory || isSameWorkspacePath(authorized.directory, directory))
+    );
+  }
+
+  async authorizeSessionDirectory(sessionID: string, directory: string): Promise<boolean> {
+    if (!sessionID.trim() || !normalizeWorkspaceIdentity(directory)) return false;
+    try {
+      this.requireOpenWorkspaceRoot(directory);
+      return true;
+    } catch {
+      // Nested directories and project worktrees require a fresh catalog match.
+    }
+
+    const scopes = await Promise.all(
+      this.getOpenWorkspaceRoots().map((root) => this.resolveSessionCatalogScope(root))
+    );
+    const candidateScopes = scopes.filter(
+      (scope): scope is Extract<ResolvedSessionCatalogScope, { kind: 'descendants' | 'project' }> =>
+        scope.kind === 'project' ||
+        (scope.kind === 'descendants' &&
+          getRelativePathWithinWorkspace(directory, scope.root) !== null)
+    );
+    const catalogs = await Promise.all(
+      candidateScopes.map((scope) =>
+        this.loadWorkspaceStatusSessionCatalog(scope.root, undefined, true, scope)
+      )
+    );
+    return catalogs.some((catalog) =>
+      catalog.sessions.some(
+        (session) => session.id === sessionID && isSameWorkspacePath(session.directory, directory)
+      )
+    );
   }
 
   async refreshSessionCatalogEventAuthorization(
@@ -718,6 +754,11 @@ export class RestProxy {
       }
       this.assertPermissionAutomationLeaseCurrent(method, payload);
 
+      const attentionReplyRequestID = parseAttentionReplyRequestID(method, payload.path);
+      const attentionReplyDirectory = attentionReplyRequestID
+        ? this.resolvePendingAttentionReplyDirectory(attentionReplyRequestID)
+        : null;
+
       const queuedHistoryWorkspaceDirectory = queuedHistorySessionID
         ? asRecord(payload.body)?.workspaceDirectory
         : undefined;
@@ -727,11 +768,23 @@ export class RestProxy {
           ? queuedHistoryWorkspaceDirectory.trim() || null
           : null);
       const directSessionID = parseDirectSessionID(payload.path);
-      const explicitWorkspaceDirectory = requestedWorkspaceDirectory
-        ? directSessionID
-          ? this.requireAuthorizedSessionDirectory(directSessionID, requestedWorkspaceDirectory)
-          : this.requireOpenWorkspaceRoot(requestedWorkspaceDirectory)
-        : null;
+      let explicitWorkspaceDirectory: string | null = null;
+      if (requestedWorkspaceDirectory) {
+        if (directSessionID) {
+          explicitWorkspaceDirectory = this.requireAuthorizedSessionDirectory(
+            directSessionID,
+            requestedWorkspaceDirectory
+          );
+        } else if (attentionReplyDirectory) {
+          if (!isSameWorkspacePath(requestedWorkspaceDirectory, attentionReplyDirectory)) {
+            throw new Error('404 Attention request not found');
+          }
+          explicitWorkspaceDirectory = attentionReplyDirectory;
+        } else {
+          explicitWorkspaceDirectory = this.requireOpenWorkspaceRoot(requestedWorkspaceDirectory);
+        }
+      }
+      const scopedWorkspaceDirectory = explicitWorkspaceDirectory ?? attentionReplyDirectory;
       const activationRequest = this.parseSessionActivationRequest(
         method,
         payload.path,
@@ -748,25 +801,25 @@ export class RestProxy {
         this.callbacks.contextProvider.context.workspacePath ??
         this.callbacks.server.getWorkspaceCwd();
       const allowsCrossRootDirectory =
-        Boolean(activationRequest || directSessionID) ||
+        Boolean(activationRequest || directSessionID || attentionReplyDirectory) ||
         requestPathname === '/session' ||
         requestPathname === VARRO_API_ENDPOINTS.sessionHistoryScope ||
         (method === 'GET' && requestPathname === '/session/status');
       if (
-        explicitWorkspaceDirectory &&
+        scopedWorkspaceDirectory &&
         endpointWorkspaceDirectory &&
-        !isSameWorkspacePath(explicitWorkspaceDirectory, endpointWorkspaceDirectory) &&
+        !isSameWorkspacePath(scopedWorkspaceDirectory, endpointWorkspaceDirectory) &&
         !allowsCrossRootDirectory
       ) {
         throw new Error('Activate the session workspace before accessing directory-scoped data');
       }
       const requestDirectories =
-        !explicitWorkspaceDirectory &&
+        !scopedWorkspaceDirectory &&
         method === 'GET' &&
         (requestPathname === '/session' || requestPathname === '/session/status')
           ? this.getOpenWorkspaceRoots()
           : [
-              explicitWorkspaceDirectory ??
+              scopedWorkspaceDirectory ??
                 this.getCurrentWorkspaceResolutionRoot() ??
                 endpointWorkspaceDirectory,
             ].filter((directory): directory is string => Boolean(directory));
@@ -778,8 +831,8 @@ export class RestProxy {
         this.workspaceRequests.add(workspaceRequest);
       }
       const requestSignal = request?.controller.signal ?? workspaceRequest?.controller.signal;
-      if (explicitWorkspaceDirectory) {
-        this.requestWorkspaceDirectory.enterWith(explicitWorkspaceDirectory);
+      if (scopedWorkspaceDirectory) {
+        this.requestWorkspaceDirectory.enterWith(scopedWorkspaceDirectory);
       }
       const promptWorkspaceDirectory = promptSessionID
         ? (explicitWorkspaceDirectory ??
@@ -1868,63 +1921,73 @@ export class RestProxy {
       })
     );
     this.workspaceSessionStatusCoordinator.clearCatalogsOutside(openRootIdentities);
-    for (const identity of this.workspaceStatusSessionCatalogs.keys()) {
-      if (!openRootIdentities.has(identity)) this.workspaceStatusSessionCatalogs.delete(identity);
-    }
 
     const settledResults = await Promise.allSettled(
       roots.map(async (root) => {
         const requestOptions = signal ? { signal, directory: root } : { directory: root };
         const scope = await scopeRequests.get(root)!;
         const identity = this.getSessionCatalogIdentity(root, scope);
-        const cachedCatalog = identity
-          ? this.workspaceStatusSessionCatalogs.get(identity)
-          : undefined;
-        const statusRequest = identity
-          ? this.workspaceSessionStatusCoordinator.requestStatus(
-              identity,
-              () => this.requestServer('GET', '/session/status', undefined, { directory: root }),
-              signal
-            )
+        const rootStatusRequest = identity
+          ? this.requestWorkspaceStatusForDirectory(identity, root, signal)
           : this.requestServer('GET', '/session/status', undefined, requestOptions);
-        const [statusValue, initialCatalog] = cachedCatalog
-          ? [await statusRequest, cachedCatalog]
-          : await Promise.all([
-              statusRequest,
-              this.loadWorkspaceStatusSessionCatalog(root, signal, false, scope),
-            ]);
-        if (!statusValue || Array.isArray(statusValue) || typeof statusValue !== 'object') {
-          throw new Error('Malformed session status response');
+        const [rootStatusValue, catalog] = await Promise.all([
+          rootStatusRequest,
+          this.loadWorkspaceStatusSessionCatalog(root, signal, true, scope),
+        ]);
+        const statusDirectories = new Map<string, string>();
+        const rootIdentity = normalizeWorkspaceIdentity(root);
+        if (rootIdentity) statusDirectories.set(rootIdentity, root);
+        for (const session of catalog.sessions) {
+          const sessionIdentity = normalizeWorkspaceIdentity(session.directory);
+          if (sessionIdentity) statusDirectories.set(sessionIdentity, session.directory);
         }
-        const knownSessionIDs = new Set(initialCatalog.sessions.map((session) => session.id));
-        const hasUnknownStatus = Object.keys(statusValue).some(
-          (sessionID) => !knownSessionIDs.has(sessionID)
+        const statusValues = await Promise.all([
+          rootStatusValue,
+          ...[...statusDirectories.entries()]
+            .filter(([directoryIdentity]) => directoryIdentity !== rootIdentity)
+            .map(([, directory]) =>
+              identity
+                ? this.requestWorkspaceStatusForDirectory(identity, directory, signal)
+                : this.requestServer('GET', '/session/status', undefined, {
+                    ...requestOptions,
+                    directory,
+                  })
+            ),
+        ]);
+        const statuses = Object.assign(
+          {},
+          ...statusValues.map((statusValue) => {
+            if (!statusValue || Array.isArray(statusValue) || typeof statusValue !== 'object') {
+              throw new Error('Malformed session status response');
+            }
+            return statusValue;
+          })
         );
-        const catalog =
-          hasUnknownStatus &&
-          Date.now() - initialCatalog.loadedAt >= STATUS_SESSION_CATALOG_REFRESH_MS
-            ? await this.loadWorkspaceStatusSessionCatalog(root, signal, true)
-            : initialCatalog;
         const sessions = catalog.sessions;
-        const visibleIDs = new Set(
-          this.filterWorkspaceVisibleSessions(sessions).map((session) => session.id)
+        const visibleSessions = this.filterWorkspaceVisibleSessions(sessions);
+        const visibleSessionsByID = new Map(
+          visibleSessions.map((session) => [session.id, session] as const)
         );
         const endpointWorkspaceDirectory =
           this.callbacks.getWorkspacePath?.() ??
           this.callbacks.contextProvider.context.workspacePath ??
           this.callbacks.server.getWorkspaceCwd();
-        const exposeFullStatus =
-          !endpointWorkspaceDirectory || isSameWorkspacePath(root, endpointWorkspaceDirectory);
         return {
           catalogComplete: catalog.complete,
           sessions,
           statuses: Object.fromEntries(
-            Object.entries(statusValue)
-              .filter(([sessionID]) => visibleIDs.has(sessionID))
-              .map(([sessionID, status]) => [
-                sessionID,
-                exposeFullStatus ? status : projectWorkspaceCatalogStatus(status),
-              ])
+            Object.entries(statuses)
+              .filter(([sessionID]) => visibleSessionsByID.has(sessionID))
+              .map(([sessionID, status]) => {
+                const sessionDirectory = visibleSessionsByID.get(sessionID)?.directory;
+                const exposeFullStatus =
+                  !endpointWorkspaceDirectory ||
+                  isSameWorkspacePath(sessionDirectory, endpointWorkspaceDirectory);
+                return [
+                  sessionID,
+                  exposeFullStatus ? status : projectWorkspaceCatalogStatus(status),
+                ];
+              })
           ),
         };
       })
@@ -1950,6 +2013,20 @@ export class RestProxy {
       results.every((result) => result.catalogComplete)
     );
     return Object.assign({}, ...results.map((result) => result.statuses));
+  }
+
+  private requestWorkspaceStatusForDirectory(
+    catalogIdentity: string,
+    directory: string,
+    signal?: AbortSignal
+  ) {
+    const directoryIdentity = normalizeWorkspaceIdentity(directory);
+    const requestIdentity = `${catalogIdentity}\0${directoryIdentity ?? directory}`;
+    return this.workspaceSessionStatusCoordinator.requestStatus(
+      requestIdentity,
+      () => this.requestServer('GET', '/session/status', undefined, { directory }),
+      signal
+    );
   }
 
   private async loadWorkspaceStatusSessionCatalog(
@@ -1986,7 +2063,6 @@ export class RestProxy {
       sessions,
     };
     this.rememberAuthorizedSessionCatalog(root, scope, sessions, catalog.complete);
-    if (identity) this.workspaceStatusSessionCatalogs.set(identity, catalog);
     return catalog;
   }
 
@@ -3091,6 +3167,27 @@ export class RestProxy {
     }
   }
 
+  private resolvePendingAttentionReplyDirectory(requestID: string): string | null {
+    const request = this.callbacks.resolvePendingAttentionRequest?.(requestID);
+    if (!request) return null;
+    const authorized = this.authorizedSessionDirectories.get(request.sessionID);
+    if (
+      authorized &&
+      (!request.directory || isSameWorkspacePath(authorized.directory, request.directory))
+    ) {
+      return authorized.directory;
+    }
+    if (
+      request.directory &&
+      (isSameWorkspacePath(request.directory, this.callbacks.getWorkspacePath?.()) ||
+        (this.callbacks.sessionState.workspaceScopeFor(request.sessionID) === 'workspace' &&
+          Boolean(this.callbacks.contextProvider.getOpenWorkspaceRoot(request.directory))))
+    ) {
+      return request.directory;
+    }
+    throw new Error('404 Attention request not found');
+  }
+
   private requireAuthorizedSessionActivation(
     sessionID: string,
     directory: string
@@ -3349,7 +3446,9 @@ export class RestProxy {
   }
 
   private async moveSessionToRecycleBin(sessionID: string) {
-    const directory = this.authorizedSessionDirectories.get(sessionID)?.directory;
+    const directory =
+      this.authorizedSessionDirectories.get(sessionID)?.directory ??
+      this.requestWorkspaceDirectory.getStore();
     const sessions = (
       (await this.requestServer(
         'GET',
@@ -3363,6 +3462,35 @@ export class RestProxy {
         this.readAndRememberSessionWorkspaceScope(session)
       );
     });
+    const statuses = asRecord(
+      await this.requestServer(
+        'GET',
+        '/session/status',
+        undefined,
+        directory ? { directory } : undefined
+      )
+    );
+    if (!statuses) throw new Error('Malformed session status response');
+    const sessionIDs = [
+      sessionID,
+      ...collectDescendantSessions(sessions, sessionID).map((session) => session.id),
+    ];
+    for (const candidateID of sessionIDs) {
+      const status = asRecord(statuses[candidateID]);
+      if (
+        status?.type !== 'busy' &&
+        status?.type !== 'retry' &&
+        !this.callbacks.shouldAbortSessionBeforeRecycle?.(candidateID)
+      ) {
+        continue;
+      }
+      await this.requestServer(
+        'POST',
+        `/session/${encodeURIComponent(candidateID)}/abort`,
+        undefined,
+        directory ? { directory } : undefined
+      );
+    }
     const entry = await this.callbacks.sessionTrash.moveToTrash(sessionID, sessions);
     if (!entry) {
       throw new Error('404 Session not found');
@@ -5152,4 +5280,13 @@ function isPermissionAutomationRequest(method: string, path: string): boolean {
     pathname === VARRO_API_ENDPOINTS.permissionJudge ||
     /^\/permission\/[^/]+\/reply$/.test(pathname)
   );
+}
+
+function parseAttentionReplyRequestID(method: string, path: string): string | null {
+  if (method !== 'POST') return null;
+  const match = new URL(path, 'http://localhost').pathname.match(
+    /^\/(?:permission\/([^/]+)\/reply|question\/([^/]+)\/(?:reply|reject))$/
+  );
+  const requestID = match?.[1] ?? match?.[2];
+  return requestID ? decodeURIComponent(requestID) : null;
 }

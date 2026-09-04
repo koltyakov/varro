@@ -326,20 +326,10 @@ export function ChatWorkspace(props: {
           class={`chat-workspace ${props.isDesktopSessionPaneRight ? 'chat-workspace-pane-right' : ''}`}
         >
           <Show when={props.showDesktopSessionPane} fallback={mainShell()}>
-            <Show
-              when={props.isDesktopSessionPaneRight}
-              fallback={
-                <>
-                  {sessionSidebar()}
-                  {mainShell()}
-                </>
-              }
-            >
-              <>
-                {mainShell()}
-                {sessionSidebar()}
-              </>
-            </Show>
+            <>
+              {mainShell()}
+              {sessionSidebar()}
+            </>
           </Show>
         </div>
       </Show>

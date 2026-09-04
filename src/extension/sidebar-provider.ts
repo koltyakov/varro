@@ -37,6 +37,19 @@ const WORKSPACE_CATALOG_EVENT_TYPES = new Set<ServerEvent['type']>([
   'session.status',
   'session.idle',
 ]);
+const WORKSPACE_ATTENTION_EVENT_TYPES = new Set<ServerEvent['type']>([
+  'permission.updated',
+  'permission.asked',
+  'permission.replied',
+  'permission.v2.asked',
+  'permission.v2.replied',
+  'question.asked',
+  'question.replied',
+  'question.rejected',
+  'question.v2.asked',
+  'question.v2.replied',
+  'question.v2.rejected',
+]);
 const WORKSPACE_INDEPENDENT_EVENT_TYPES = new Set<ServerEvent['type']>([
   'server.connected',
   'server.heartbeat',
@@ -164,6 +177,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private static readonly SESSION_RECONCILE_INTERVAL_MS = 10_000;
   private static readonly QUEUE_RECONCILE_INTERVAL_MS = 1_000;
   private static readonly SESSION_RECONCILE_GRACE_MS = 10_000;
+  private static readonly QUEUE_OWNER_RECONCILE_MAX_ATTEMPTS = 3;
   private static readonly PERMISSION_MODE_FALLBACK_RETRY_INITIAL_MS = 5_000;
   private static readonly PERMISSION_MODE_FALLBACK_RETRY_MAX_MS = 5 * 60_000;
   private static readonly MAX_DEFERRED_WORKSPACE_EVENTS = 1_000;
@@ -577,6 +591,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.post({ type: 'session/catalog-invalidated' });
       },
       getWorkspacePath: () => endpointRef.endpoint?.workspacePath ?? initialWorkspacePath,
+      resolvePendingAttentionRequest: (requestID) => {
+        const pending = this.sessionState.pending.get(requestID);
+        if (!pending) return undefined;
+        return {
+          sessionID: pending.sessionID,
+          directory: this.sessionState.directoryFor(pending.sessionID),
+        };
+      },
+      shouldAbortSessionBeforeRecycle: (sessionID) =>
+        this.sessionState.busy.has(sessionID) ||
+        [...this.sessionState.pending.values()].some((request) => request.sessionID === sessionID),
       ensureServerStarted: () => this.runtime.ensureServerStarted(),
       confirmPromptAdmission: (workspacePath) =>
         generatedDependencyTreeGuard.confirmPromptAdmission(workspacePath),
@@ -780,7 +805,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         restProxy,
         getWorkspaceDirectory: () => endpointServer.getWorkspaceCwd(),
         sessionDiffProvider: {
-          open: (sessionID, path) => this.sessionDiffProvider.open(sessionID, path, endpointServer),
+          open: (sessionID, path, directory) =>
+            this.sessionDiffProvider.open(
+              sessionID,
+              path,
+              directory,
+              endpointServer,
+              (candidateSessionID, candidateDirectory) =>
+                restProxy.authorizeSessionDirectory(candidateSessionID, candidateDirectory)
+            ),
         },
         toolOutputProvider: this.toolOutputProvider,
         server: this.server,
@@ -1479,18 +1512,24 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (this.isEventInEndpointWorkspace(msg.payload, endpoint)) return msg;
     const sessionIDs = getWorkspaceSessionIdsForEvent(msg.payload);
     const directory = this.getEventDirectory(msg.payload, sessionIDs);
+    const catalogEvent = WORKSPACE_CATALOG_EVENT_TYPES.has(msg.payload.type);
+    const attentionEvent = WORKSPACE_ATTENTION_EVENT_TYPES.has(msg.payload.type);
+    const catalogAuthorized =
+      sessionIDs.length > 0 &&
+      sessionIDs.every((sessionID) =>
+        attentionEvent
+          ? endpoint.restProxy.isSessionCatalogInventoryAuthorized(sessionID, directory)
+          : endpoint.restProxy.isSessionCatalogEventAuthorized(sessionID, directory)
+      );
     if (
-      !WORKSPACE_CATALOG_EVENT_TYPES.has(msg.payload.type) ||
-      (!this.isEventInOpenWorkspace(msg.payload) &&
-        !(
-          sessionIDs.length > 0 &&
-          sessionIDs.every((sessionID) =>
-            endpoint.restProxy.isSessionCatalogEventAuthorized(sessionID, directory)
-          )
-        ))
+      (!catalogEvent && !attentionEvent) ||
+      (attentionEvent && !catalogAuthorized) ||
+      (catalogEvent && !this.isEventInOpenWorkspace(msg.payload) && !catalogAuthorized)
     ) {
       return null;
     }
+
+    if (attentionEvent) return msg;
 
     const projected = projectWorkspaceCatalogEvent(msg.payload);
     const { seq: _seq, sequenceOnly: _sequenceOnly, ...event } = projected;
@@ -1501,7 +1540,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     msg: Extract<ExtensionMessage, { type: 'server/event' }>,
     endpoint: WebviewEndpoint
   ) {
-    if (!WORKSPACE_CATALOG_EVENT_TYPES.has(msg.payload.type)) return;
+    if (
+      !WORKSPACE_CATALOG_EVENT_TYPES.has(msg.payload.type) &&
+      !WORKSPACE_ATTENTION_EVENT_TYPES.has(msg.payload.type)
+    ) {
+      return;
+    }
     const sessionIDs = getWorkspaceSessionIdsForEvent(msg.payload);
     if (sessionIDs.length === 0) return;
     const directory = this.getEventDirectory(msg.payload, sessionIDs);
@@ -2690,7 +2734,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await this.droppedFilesService.removeOwnedFiles(imagePaths);
   }
 
-  private reconcileQueuedMessageOwners() {
+  private reconcileQueuedMessageOwners(
+    remainingAttempts = SidebarProvider.QUEUE_OWNER_RECONCILE_MAX_ATTEMPTS
+  ) {
     const eligibleEndpoints = [...this.endpoints].filter((endpoint) => endpoint.ready);
     if (eligibleEndpoints.length === 0) return;
     const eligibleByViewId = new Map(
@@ -2715,6 +2761,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (!persistence) return;
     this.postQueuedMessageSnapshots();
     void persistence.catch((err) => {
+      this.postQueuedMessageSnapshots();
+      if (remainingAttempts > 1) this.reconcileQueuedMessageOwners(remainingAttempts - 1);
       logger.warn(
         `Failed to persist queued message ownership transfer: ${err instanceof Error ? err.message : String(err)}`
       );

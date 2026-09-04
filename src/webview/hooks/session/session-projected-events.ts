@@ -106,17 +106,20 @@ function rememberBoundedToolState<T>(
 export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventContext) {
   const pendingToolInput = new Map<string, PendingToolInput>();
   const runningToolProviders = new Map<string, UnknownRecord>();
+  const findProjectedAssistant = (sessionId: string, assistantMessageID?: string) =>
+    ctx.findAssistantMessage(sessionId, assistantMessageID) ||
+    latestAssistantMessageForSession(ctx.getMessages(), sessionId);
   const applyProjectedPart = (
     sessionId: string,
     assistantMessageID: string | undefined,
     part: Part
   ) => {
-    const message = ctx.findAssistantMessage(sessionId, assistantMessageID);
+    const message = findProjectedAssistant(sessionId, assistantMessageID);
     if (!message) {
       ctx.scheduleActiveMessageSync(sessionId);
       return false;
     }
-    sessionStore.upsertPart(part);
+    sessionStore.upsertPart({ ...part, messageID: message.info.id });
     return true;
   };
   const ensureProjectedTextPart = (
@@ -125,7 +128,7 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
     partID: string,
     text = ''
   ) => {
-    const message = ctx.findAssistantMessage(sessionId, assistantMessageID);
+    const message = findProjectedAssistant(sessionId, assistantMessageID);
     if (!message) {
       ctx.scheduleActiveMessageSync(sessionId);
       return null;
@@ -170,9 +173,7 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
     const assistantMessageID = getEventString(props, 'assistantMessageID');
     const callID = getEventString(props, 'callID');
     if (!callID) return false;
-    const message =
-      ctx.findAssistantMessage(sessionId, assistantMessageID) ||
-      latestAssistantMessageForSession(ctx.getMessages(), sessionId);
+    const message = findProjectedAssistant(sessionId, assistantMessageID);
     if (!message) {
       ctx.scheduleActiveMessageSync(sessionId);
       return false;

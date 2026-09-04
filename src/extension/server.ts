@@ -38,6 +38,7 @@ import {
   isPortInUseMessage,
   normalizeRunningStatus,
 } from './server-utils';
+import { FULL_SESSION_LIST_LIMIT } from './util/session-list';
 
 export type { OpenCodeCompactionSettings };
 
@@ -1603,45 +1604,105 @@ export class OpenCodeServer extends EventEmitter {
     // Use the transport directly: restart preflight runs after the lifecycle
     // has reserved the restart operation, while public request() intentionally
     // waits behind that operation.
-    const [statuses, questions, permissions] = await Promise.all([
-      this.transport.request('GET', '/session/status', undefined, { unscoped: true }),
-      this.transport.request('GET', '/question', undefined, { unscoped: true }),
-      this.transport.request('GET', '/permission', undefined, { unscoped: true }),
-    ]);
-
-    if (!statuses || typeof statuses !== 'object' || Array.isArray(statuses)) {
-      throw new Error('OpenCode returned an invalid session status response');
-    }
-    if (!Array.isArray(questions)) {
-      throw new Error('OpenCode returned an invalid pending question response');
-    }
-    if (!Array.isArray(permissions)) {
-      throw new Error('OpenCode returned an invalid pending permission response');
-    }
+    const observedSessionDirectories = this.transport.getObservedSessionDirectories();
     const blockingSessionIDs = new Set<string>();
-    for (const [sessionID, value] of Object.entries(statuses)) {
-      const status =
-        value && typeof value === 'object' && !Array.isArray(value)
-          ? (value as Record<string, unknown>)
-          : null;
-      if (
-        !sessionID.trim() ||
-        !status ||
-        (status.type !== 'idle' && status.type !== 'busy' && status.type !== 'retry')
-      ) {
+    const directoriesBySessionID = new Map(observedSessionDirectories);
+    const readSnapshot = async (directory?: string) => {
+      const options = directory ? { directory } : { unscoped: true };
+      const [statuses, questions, permissions] = await Promise.all([
+        this.transport.request('GET', '/session/status', undefined, options),
+        this.transport.request('GET', '/question', undefined, options),
+        this.transport.request('GET', '/permission', undefined, options),
+      ]);
+      return { directory, statuses, questions, permissions };
+    };
+    const collectSnapshot = (snapshot: Awaited<ReturnType<typeof readSnapshot>>) => {
+      const { directory, statuses, questions, permissions } = snapshot;
+      if (!statuses || typeof statuses !== 'object' || Array.isArray(statuses)) {
         throw new Error('OpenCode returned an invalid session status response');
       }
-      if (status.type === 'busy' || status.type === 'retry') blockingSessionIDs.add(sessionID);
+      if (!Array.isArray(questions)) {
+        throw new Error('OpenCode returned an invalid pending question response');
+      }
+      if (!Array.isArray(permissions)) {
+        throw new Error('OpenCode returned an invalid pending permission response');
+      }
+      for (const [sessionID, value] of Object.entries(statuses)) {
+        const status =
+          value && typeof value === 'object' && !Array.isArray(value)
+            ? (value as Record<string, unknown>)
+            : null;
+        if (
+          !sessionID.trim() ||
+          !status ||
+          (status.type !== 'idle' && status.type !== 'busy' && status.type !== 'retry')
+        ) {
+          throw new Error('OpenCode returned an invalid session status response');
+        }
+        if (directory && !directoriesBySessionID.has(sessionID)) {
+          directoriesBySessionID.set(sessionID, directory);
+        }
+        if (status.type === 'busy' || status.type === 'retry') blockingSessionIDs.add(sessionID);
+      }
+      for (const question of questions) {
+        const sessionID = getSessionID(question);
+        if (!sessionID) throw new Error('OpenCode returned an invalid pending question response');
+        if (directory && !directoriesBySessionID.has(sessionID)) {
+          directoriesBySessionID.set(sessionID, directory);
+        }
+        blockingSessionIDs.add(sessionID);
+      }
+      for (const permission of permissions) {
+        const sessionID = getSessionID(permission);
+        if (!sessionID) {
+          throw new Error('OpenCode returned an invalid pending permission response');
+        }
+        if (directory && !directoriesBySessionID.has(sessionID)) {
+          directoriesBySessionID.set(sessionID, directory);
+        }
+        blockingSessionIDs.add(sessionID);
+      }
+    };
+
+    collectSnapshot(await readSnapshot());
+
+    const sessionInventory = await this.transport.request(
+      'GET',
+      `/experimental/session?limit=${FULL_SESSION_LIST_LIMIT}`,
+      undefined,
+      { unscoped: true }
+    );
+    if (!Array.isArray(sessionInventory)) {
+      throw new Error('OpenCode returned an invalid global session list');
     }
-    for (const question of questions) {
-      const sessionID = getSessionID(question);
-      if (!sessionID) throw new Error('OpenCode returned an invalid pending question response');
-      blockingSessionIDs.add(sessionID);
+    if (sessionInventory.length >= FULL_SESSION_LIST_LIMIT) {
+      throw new Error('OpenCode global session list exceeded the restart safety limit');
     }
-    for (const permission of permissions) {
-      const sessionID = getSessionID(permission);
-      if (!sessionID) throw new Error('OpenCode returned an invalid pending permission response');
-      blockingSessionIDs.add(sessionID);
+
+    const probeDirectories = new Map<string, string>();
+    for (const directory of observedSessionDirectories.values()) {
+      const identity = normalizeWorkspaceIdentity(directory);
+      if (identity) probeDirectories.set(identity, directory);
+    }
+    for (const value of sessionInventory) {
+      if (!value || typeof value !== 'object') {
+        throw new Error('OpenCode returned an invalid global session list');
+      }
+      const session = value as Record<string, unknown>;
+      const id = typeof session.id === 'string' && session.id.trim() ? session.id : null;
+      const directory = typeof session.directory === 'string' ? session.directory : null;
+      const directoryIdentity = normalizeWorkspaceIdentity(directory);
+      if (!id || !directory || !directoryIdentity) {
+        throw new Error('OpenCode returned an invalid global session list');
+      }
+      directoriesBySessionID.set(id, directory);
+      probeDirectories.set(directoryIdentity, directory);
+    }
+
+    const directories = [...probeDirectories.values()];
+    for (let index = 0; index < directories.length; index += 8) {
+      const snapshots = await Promise.all(directories.slice(index, index + 8).map(readSnapshot));
+      for (const snapshot of snapshots) collectSnapshot(snapshot);
     }
     for (const sessionID of this.transport.getPendingAttentionSessionIDs()) {
       blockingSessionIDs.add(sessionID);
@@ -1651,26 +1712,6 @@ export class OpenCodeServer extends EventEmitter {
       const result = { totalSessionCount: 0, directories: [] };
       this.lastRestartBlockers = result;
       return result;
-    }
-
-    let sessions: unknown[] = [];
-    try {
-      const value = await this.transport.request('GET', '/session', undefined, { unscoped: true });
-      if (Array.isArray(value)) sessions = value;
-      else
-        logger.warn('OpenCode returned an invalid session list while describing restart blockers');
-    } catch (err) {
-      logger.warn(
-        `Could not read session directories for restart blockers: ${err instanceof Error ? err.message : String(err)}`
-      );
-    }
-
-    const directoriesBySessionID = new Map<string, string>();
-    for (const value of sessions) {
-      if (!value || typeof value !== 'object') continue;
-      const session = value as Record<string, unknown>;
-      if (typeof session.id !== 'string' || typeof session.directory !== 'string') continue;
-      directoriesBySessionID.set(session.id, session.directory);
     }
 
     const grouped = new Map<string, { directory: string | null; sessionCount: number }>();

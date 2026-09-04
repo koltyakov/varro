@@ -3,6 +3,7 @@ import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
 import { collapseExpandedDiffOverlays, hasExpandedDiffOverlay } from '../lib/diff-overlay-state';
+import { resetDefaultAppState, setState } from '../lib/state';
 import { xmarkIcon } from '../lib/ui-icons';
 import { DiffView, getDiffLines, parseUnifiedPatch } from './DiffView';
 import { toCssUrl } from './UiIcon';
@@ -49,6 +50,7 @@ beforeEach(() => {
   document.body.appendChild(messageListShell);
   delete window.__sendToExtension;
   resetToolCallExpansionState();
+  resetDefaultAppState();
 });
 
 afterEach(() => {
@@ -59,6 +61,7 @@ afterEach(() => {
   messageListShell?.remove();
   messageListShell = null;
   delete window.__sendToExtension;
+  resetDefaultAppState();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.useRealTimers();
@@ -998,6 +1001,49 @@ describe('DiffView', () => {
       cleanup = render(() => DiffView({ diffs: [diff] }), container!);
     }).not.toThrow();
     expect(container?.querySelector('.diff-view-filename')?.textContent).toBe('src/example.ts');
+  });
+
+  it('opens a nested-session diff with its exact directory', () => {
+    const send = vi.fn();
+    window.__sendToExtension = send;
+    setState('activeSessionId', 'nested-session');
+    setState('sessions', [
+      {
+        id: 'nested-session',
+        projectID: 'project-1',
+        directory: '/repo/packages/app',
+        title: 'Nested session',
+        version: '1',
+        time: { created: 1, updated: 2 },
+      },
+    ]);
+
+    cleanup = render(
+      () =>
+        DiffView({
+          diffs: [
+            {
+              file: 'src/app.ts',
+              patch: makeAddedPatch(1),
+              additions: 1,
+              deletions: 0,
+            },
+          ],
+        }),
+      container!
+    );
+    container?.querySelector<HTMLButtonElement>('button.diff-view-filename')?.click();
+
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open',
+      payload: {
+        path: 'src/app.ts',
+        kind: 'file',
+        view: 'diff',
+        sessionID: 'nested-session',
+        directory: '/repo/packages/app',
+      },
+    });
   });
 
   it('expands from the code preview and opens from either filename', () => {

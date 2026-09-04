@@ -195,11 +195,11 @@ describe('ChangedFilesList', () => {
     expect(container?.querySelector('.changed-files-lines')).toBeNull();
   });
 
-  it('opens file rows in VS Code diff view', () => {
+  it('opens nested-session file rows with their exact directory', () => {
     const send = vi.fn();
     window.__sendToExtension = send;
     setState('activeSessionId', 'session-1');
-    setState('sessions', [session()]);
+    setState('sessions', [session({ directory: '/workspace/packages/app' })]);
     setState('messages', [{ info: assistantMessage(), parts: [fileEditPart('src/app.ts')] }]);
 
     cleanup = render(() => <ChangedFilesList />, container!);
@@ -216,6 +216,7 @@ describe('ChangedFilesList', () => {
         kind: 'file',
         view: 'diff',
         sessionID: 'session-1',
+        directory: '/workspace/packages/app',
       },
     });
   });

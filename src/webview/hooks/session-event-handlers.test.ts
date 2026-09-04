@@ -396,6 +396,71 @@ describe('registerSessionEventHandlers', () => {
     expect(syncSession).toHaveBeenCalledWith('session-1', expect.any(Object));
   });
 
+  it('removes a gapped session deletion when canonical recovery reports it missing', async () => {
+    const handlers = installHandlers();
+    const removeDeletedSessionTree = vi.fn();
+    const syncSession = vi.fn().mockRejectedValue(new Error('404 Session not found'));
+    const cleanups = registerSessionEventHandlers(
+      createDefaultDeps({ removeDeletedSessionTree, syncSession })
+    );
+
+    try {
+      emitServerEvent(handlers, 'session.updated', {
+        seq: 1,
+        properties: { info: { id: 'session-1', title: 'Current' } },
+      });
+      emitServerEvent(handlers, 'session.deleted', {
+        seq: 3,
+        properties: { info: { id: 'session-1' } },
+      });
+      await vi.waitFor(() => expect(syncSession).toHaveBeenCalledOnce());
+
+      await vi.waitFor(() => expect(removeDeletedSessionTree).toHaveBeenCalledWith('session-1'));
+    } finally {
+      for (const cleanup of cleanups) cleanup();
+    }
+  });
+
+  it('ignores a delayed not-found recovery after a newer gap supersedes it', async () => {
+    const handlers = installHandlers();
+    const removeDeletedSessionTree = vi.fn();
+    let rejectRecovery!: (error: Error) => void;
+    const recovery = new Promise<void>((_resolve, reject) => {
+      rejectRecovery = reject;
+    });
+    const syncSession = vi
+      .fn()
+      .mockImplementationOnce(() => recovery)
+      .mockResolvedValue(undefined);
+    const cleanups = registerSessionEventHandlers(
+      createDefaultDeps({ removeDeletedSessionTree, syncSession })
+    );
+
+    try {
+      emitServerEvent(handlers, 'session.updated', {
+        seq: 1,
+        properties: { info: { id: 'session-1', title: 'Original' } },
+      });
+      emitServerEvent(handlers, 'session.deleted', {
+        seq: 3,
+        properties: { info: { id: 'session-1' } },
+      });
+      await vi.waitFor(() => expect(syncSession).toHaveBeenCalledOnce());
+
+      emitServerEvent(handlers, 'session.updated', {
+        seq: 5,
+        properties: { info: { id: 'session-1', title: 'Newer' } },
+      });
+
+      rejectRecovery(new Error('404 Session not found'));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(removeDeletedSessionTree).not.toHaveBeenCalled();
+    } finally {
+      for (const cleanup of cleanups) cleanup();
+    }
+  });
+
   it.each(['todowrite', 'question'])(
     'directly allows %s without broadening Default',
     async (type) => {

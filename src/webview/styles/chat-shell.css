@@ -130,6 +130,10 @@ input:focus-visible {
   min-width: 0;
 }
 
+.chat-workspace:not(.chat-workspace-pane-right) .chat-session-sidebar {
+  order: -1;
+}
+
 .chat-session-sidebar {
   display: none;
   flex-direction: column;

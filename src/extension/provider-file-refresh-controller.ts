@@ -30,7 +30,10 @@ export const nodeProviderSignatureFileSystem: ProviderSignatureFileSystem = {
 };
 
 type ProviderFileRefreshDependencies = {
-  server: Pick<OpenCodeServer, 'status' | 'request' | 'restart' | 'readServerInfo' | 'on' | 'off'>;
+  server: Pick<
+    OpenCodeServer,
+    'status' | 'request' | 'restart' | 'readServerInfo' | 'readRestartBlockers' | 'on' | 'off'
+  >;
   persistence: Pick<Persistence, 'get' | 'set' | 'remove'>;
   clearProviderLimitCache(): void;
   postRefresh(options?: { revalidateAuth: true }): void;
@@ -405,11 +408,12 @@ export class ProviderFileRefreshController {
       pendingScope === 'workspace'
         ? [...this.pendingWorkspaceDirectories]
         : [...new Set(this.dependencies.getWorkspaceDirectories().filter(Boolean))];
-    const idleResults = await Promise.all(
-      idleDirectories.length > 0
+    const idleResults = await Promise.all([
+      ...(pendingScope === 'global' ? [this.isServerGloballyIdle()] : []),
+      ...(idleDirectories.length > 0
         ? idleDirectories.map((directory) => this.isServerIdle(directory))
-        : [this.isServerIdle()]
-    );
+        : [this.isServerIdle()]),
+    ]);
     const idle = idleResults.includes(false) ? false : idleResults.includes(null) ? null : true;
     if (this.disposed || generation !== this.refreshGeneration) return;
     if (idle === false) {
@@ -548,6 +552,14 @@ export class ProviderFileRefreshController {
         if (type === 'busy' || type === 'retry') return false;
       }
       return questions.length === 0 && permissions.length === 0;
+    } catch {
+      return null;
+    }
+  }
+
+  private async isServerGloballyIdle(): Promise<boolean | null> {
+    try {
+      return (await this.dependencies.server.readRestartBlockers()).totalSessionCount === 0;
     } catch {
       return null;
     }

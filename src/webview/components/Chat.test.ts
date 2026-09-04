@@ -3518,7 +3518,7 @@ describe('header status badges', () => {
     expect(workspace?.lastElementChild).toBe(sidebar);
   });
 
-  it('keeps the message list available when switching the desktop session pane from right to left', async () => {
+  it('preserves the live chat DOM and transient state when the desktop pane changes sides', async () => {
     setState('sessions', [session('session-1', 500), session('session-2', 400)]);
     setState('activeSessionId', 'session-1');
     setState(
@@ -3531,14 +3531,21 @@ describe('header status badges', () => {
     cleanup = render(() => Chat(), container!);
     await Promise.resolve();
 
+    const messageList = container?.querySelector<HTMLDivElement>('.interactive-list[role="log"]');
+    const composer = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!messageList || !composer) throw new Error('Expected the live message list and composer');
+    messageList.scrollTop = 173;
+    composer.focus();
+
     setDesktopSessionPaneSide('left');
     await Promise.resolve();
     await Promise.resolve();
 
     expect(container?.querySelector('.chat-workspace-pane-right')).toBeNull();
-    expect(container?.querySelector('.interactive-list[role="log"]')).toBeInstanceOf(
-      HTMLDivElement
-    );
+    expect(container?.querySelector('.interactive-list[role="log"]')).toBe(messageList);
+    expect(container?.querySelector('.rich-composer')).toBe(composer);
+    expect(messageList.scrollTop).toBe(173);
+    expect(document.activeElement).toBe(composer);
   });
 });
 

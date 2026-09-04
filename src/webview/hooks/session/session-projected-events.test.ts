@@ -189,6 +189,22 @@ describe('projected text events', () => {
     expect(harness.scheduleActiveMessageSync).toHaveBeenCalledWith(SESSION_ID);
     expect(upsertPart).not.toHaveBeenCalled();
   });
+
+  it('falls back to the loaded assistant when a projected text event uses its v2 id', () => {
+    const harness = createHarness();
+
+    expect(
+      emit(harness, 'session.next.text.delta', {
+        assistantMessageID: 'v2-assistant-1',
+        textID: 'text-1',
+        delta: 'hello',
+      })
+    ).toBe(true);
+    expect(upsertPart).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'text-1', messageID: MESSAGE_ID, type: 'text' })
+    );
+    expect(harness.scheduleActiveMessageSync).not.toHaveBeenCalled();
+  });
 });
 
 describe('projected tool input lifecycle', () => {

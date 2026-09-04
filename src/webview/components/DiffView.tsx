@@ -842,6 +842,8 @@ function DiffItem(props: {
         kind: 'file',
         view: 'diff',
         sessionID: state.activeSessionId ? state.activeSessionId : undefined,
+        directory: state.sessions.find((session) => session.id === state.activeSessionId)
+          ?.directory,
       },
     });
   };

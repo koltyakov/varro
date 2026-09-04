@@ -2531,6 +2531,178 @@ describe('SidebarProvider editor panels', () => {
     );
   });
 
+  it('does not leave an optimistically transferred queue unclaimable after persistence fails', async () => {
+    const { provider, workspaceState } = await createSidebarProviderInstance();
+    const first = createPanel();
+    const second = createPanel();
+    await provider.deserializeWebviewPanel(first.panel as never, {
+      'varro.editorViewId': 'editor-first',
+    });
+    await provider.deserializeWebviewPanel(second.panel as never, {
+      'varro.editorViewId': 'editor-second',
+    });
+    await vi.waitFor(() => expect(first.panel.webview.html).toContain('varro-editor-surface'));
+    await vi.waitFor(() => expect(second.panel.webview.html).toContain('varro-editor-surface'));
+    first.receive({ type: 'ready' });
+    second.receive({ type: 'ready' });
+    await vi.waitFor(() =>
+      expect(first.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'permission-automation/update',
+        payload: expect.objectContaining({ owner: true }),
+      })
+    );
+    first.receive({
+      type: 'queued-messages/update',
+      payload: {
+        messages: [
+          {
+            id: 'queue-1',
+            sessionId: 'session-1',
+            text: 'Continue',
+            droppedFiles: [],
+            clipboardImages: [],
+            terminalSelection: null,
+          },
+        ],
+      },
+    });
+    const queuedMessages = (
+      provider as unknown as { queuedMessages: { whenIdle(): Promise<void> } }
+    ).queuedMessages;
+    await vi.waitFor(() =>
+      expect(first.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'queued-messages/sync',
+        payload: { messages: [expect.objectContaining({ id: 'queue-1' })] },
+      })
+    );
+    await queuedMessages.whenIdle();
+
+    let rejectedOwnershipWrite = false;
+    workspaceState.update.mockImplementation((key: string) => {
+      if (!rejectedOwnershipWrite && key === 'varro.queuedMessages') {
+        rejectedOwnershipWrite = true;
+        return Promise.reject(new Error('ownership write failed'));
+      }
+      return Promise.resolve();
+    });
+    second.panel.webview.postMessage.mockClear();
+
+    first.panel.dispose();
+
+    await vi.waitFor(() =>
+      expect(second.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'queued-messages/sync',
+        payload: {
+          messages: [expect.objectContaining({ id: 'queue-1', ownerViewId: 'editor-second' })],
+        },
+      })
+    );
+    await queuedMessages.whenIdle();
+    const latestSnapshot = (
+      second.panel.webview.postMessage.mock.calls.map(([message]) => message) as Array<{
+        type?: string;
+        payload?: { messages?: QueuedMessageSnapshot[] };
+      }>
+    )
+      .filter((message) => message.type === 'queued-messages/sync')
+      .at(-1);
+    second.receive({
+      type: 'queued-messages/claim',
+      payload: { requestId: 91, itemId: 'queue-1', sessionId: 'session-1' },
+    });
+    await vi.waitFor(() =>
+      expect(second.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'queued-messages/claim-result',
+        payload: expect.objectContaining({ requestId: 91 }),
+      })
+    );
+    const claimResult = (
+      second.panel.webview.postMessage.mock.calls.map(([message]) => message) as Array<{
+        type?: string;
+        payload?: { requestId?: number; granted?: boolean };
+      }>
+    ).findLast((message) => message.type === 'queued-messages/claim-result');
+
+    expect({
+      messages: latestSnapshot?.payload?.messages ?? [],
+      granted: claimResult?.payload?.granted,
+    }).toEqual({
+      messages: [expect.objectContaining({ id: 'queue-1', ownerViewId: 'editor-second' })],
+      granted: true,
+    });
+  });
+
+  it('retries queue ownership after two persistence failures remove the durable owner', async () => {
+    const { provider, workspaceState } = await createSidebarProviderInstance();
+    const first = createPanel();
+    const second = createPanel();
+    await provider.deserializeWebviewPanel(first.panel as never, {
+      'varro.editorViewId': 'editor-first',
+    });
+    await provider.deserializeWebviewPanel(second.panel as never, {
+      'varro.editorViewId': 'editor-second',
+    });
+    await vi.waitFor(() => expect(first.panel.webview.html).toContain('varro-editor-surface'));
+    await vi.waitFor(() => expect(second.panel.webview.html).toContain('varro-editor-surface'));
+    first.receive({ type: 'ready' });
+    second.receive({ type: 'ready' });
+    await vi.waitFor(() =>
+      expect(first.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'permission-automation/update',
+        payload: expect.objectContaining({ owner: true }),
+      })
+    );
+    first.receive({
+      type: 'queued-messages/update',
+      payload: {
+        messages: [
+          {
+            id: 'queue-retry',
+            sessionId: 'session-retry',
+            text: 'Continue after persistence recovers',
+            droppedFiles: [],
+            clipboardImages: [],
+            terminalSelection: null,
+          },
+        ],
+      },
+    });
+    const queuedMessages = (
+      provider as unknown as { queuedMessages: { whenIdle(): Promise<void> } }
+    ).queuedMessages;
+    await vi.waitFor(() =>
+      expect(first.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'queued-messages/sync',
+        payload: { messages: [expect.objectContaining({ id: 'queue-retry' })] },
+      })
+    );
+    await queuedMessages.whenIdle();
+
+    let ownershipWriteAttempts = 0;
+    workspaceState.update.mockImplementation((key: string) => {
+      if (key !== 'varro.queuedMessages') return Promise.resolve();
+      ownershipWriteAttempts += 1;
+      return ownershipWriteAttempts <= 2
+        ? Promise.reject(new Error(`ownership write ${ownershipWriteAttempts} failed`))
+        : Promise.resolve();
+    });
+
+    first.panel.dispose();
+    await queuedMessages.whenIdle();
+
+    expect(ownershipWriteAttempts).toBe(3);
+    second.receive({
+      type: 'queued-messages/claim',
+      payload: { requestId: 92, itemId: 'queue-retry', sessionId: 'session-retry' },
+    });
+    await vi.waitFor(() =>
+      expect(second.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'queued-messages/claim-result',
+        payload: expect.objectContaining({ requestId: 92, granted: true }),
+      })
+    );
+  });
+
   it('keeps interrupted recovery claimable until the elected view acknowledges it', async () => {
     const storage = new Map<string, unknown>([
       [

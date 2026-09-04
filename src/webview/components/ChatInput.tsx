@@ -4468,7 +4468,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
                 removeContextFile(path);
                 postMessage({ type: 'files/remove', payload: { path } });
               }}
-              onRemoveClipboardImage={removeClipboardImage}
+              onRemoveClipboardImage={removeClipboardImageWithCleanup}
               onRemoveNativePdf={removeNativePdfWithCleanup}
               onOpenFile={openContextFileInEditor}
               onPreviewImage={(image) => setPreviewImageId(image.id)}

@@ -338,6 +338,44 @@ describe('McpPicker', () => {
     expect(mocks.status).toHaveBeenCalled();
   });
 
+  it('does not open OAuth after the authorization dialog is closed', async () => {
+    let resolveAuth:
+      | ((authorization: { authorizationUrl: string; oauthState: string }) => void)
+      | undefined;
+    mocks.startAuth.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveAuth = resolve;
+        })
+    );
+    setMcpStatuses({ oauth: { status: 'needs_auth' } });
+    cleanup = render(
+      () =>
+        McpPicker({
+          sessionId: 'session-1',
+          onChange: vi.fn(),
+          onClose: vi.fn(),
+        }),
+      container!
+    );
+
+    container?.querySelector<HTMLButtonElement>('.dropdown-item')?.click();
+    await vi.waitFor(() => expect(mocks.startAuth).toHaveBeenCalledWith('oauth'));
+    document.querySelector<HTMLButtonElement>('.provider-connect-close')?.click();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+
+    resolveAuth?.({
+      authorizationUrl: 'https://mcp.example.com/authorize',
+      oauthState: 'state-1',
+    });
+    await flushMicrotasks(4);
+
+    expect(mocks.postMessage).not.toHaveBeenCalledWith({
+      type: 'vscode/open-external',
+      payload: { url: 'https://mcp.example.com/authorize' },
+    });
+  });
+
   it('rejects unsafe authorization URLs without opening them', async () => {
     mocks.startAuth.mockResolvedValue({
       authorizationUrl: 'http://mcp.example.com/authorize',

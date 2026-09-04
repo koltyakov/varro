@@ -6,6 +6,7 @@ import {
   createMemo,
   createSignal,
   createUniqueId,
+  onCleanup,
   onMount,
 } from 'solid-js';
 import type {
@@ -596,6 +597,8 @@ export function PermissionSettingsPanel() {
   async function loadSessionLayers() {
     const session = activeSession();
     const generation = ++sessionLoadGeneration;
+    setSessionSaving(false);
+    setRemovingServerRule(null);
     setSessionLoading(Boolean(session));
     setSessionError(null);
     setServerMemoryError(null);
@@ -642,6 +645,9 @@ export function PermissionSettingsPanel() {
   async function saveSessionRules() {
     const session = activeSession();
     if (!session) return;
+    const generation = sessionLoadGeneration;
+    const shouldApply = () =>
+      generation === sessionLoadGeneration && activeSession()?.id === session.id;
     const normalized = mergeLatestPermissionRules(
       sessionRules().map((rule) => ({
         permission: rule.permission.trim(),
@@ -661,34 +667,40 @@ export function PermissionSettingsPanel() {
         [...sessionBaselineRules(), ...normalized],
         { directory: session.directory }
       );
+      if (!shouldApply()) return;
       const split = splitSessionPermissionRules(next, activePermissionMode());
       setSessionBaselineRules(split.baseline.map((rule) => ({ ...rule })));
       setSessionRules(split.overrides.map((rule) => ({ ...rule })));
       setSavedSessionRules(split.overrides.map((rule) => ({ ...rule })));
     } catch (cause) {
+      if (!shouldApply()) return;
       setSessionError(cause instanceof Error ? cause.message : 'Could not save session rules');
     } finally {
-      setSessionSaving(false);
+      if (shouldApply()) setSessionSaving(false);
     }
   }
 
   async function removeServerMemoryPermission(id: string) {
     const session = activeSession();
+    const sessionId = session?.id ?? null;
+    const generation = sessionLoadGeneration;
+    const shouldApply = () =>
+      generation === sessionLoadGeneration && (activeSession()?.id ?? null) === sessionId;
     if (removingServerRule()) return;
     setRemovingServerRule(id);
     setServerMemoryError(null);
     try {
-      setServerMemory(
-        await client.varro.removeServerMemoryPermission(session?.id ?? null, id, {
-          directory: session?.directory,
-        })
-      );
+      const next = await client.varro.removeServerMemoryPermission(sessionId, id, {
+        directory: session?.directory,
+      });
+      if (shouldApply()) setServerMemory(next);
     } catch (cause) {
+      if (!shouldApply()) return;
       setServerMemoryError(
         cause instanceof Error ? cause.message : 'Could not retract the saved server permission'
       );
     } finally {
-      setRemovingServerRule(null);
+      if (shouldApply()) setRemovingServerRule(null);
     }
   }
 
@@ -704,6 +716,10 @@ export function PermissionSettingsPanel() {
     activePermissionMode();
     activeSession();
     void loadSessionLayers();
+  });
+
+  onCleanup(() => {
+    sessionLoadGeneration += 1;
   });
 
   return (

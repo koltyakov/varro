@@ -79,7 +79,31 @@ describe('session-actions helpers', () => {
       sendMessage,
     });
 
-    expect(sendMessage).toHaveBeenCalledWith(INIT_PROMPT);
+    expect(sendMessage).toHaveBeenCalledWith(INIT_PROMPT, { targetSessionId: 'session-1' });
+  });
+
+  it('sends init to the created session when selection changes before creation settles', async () => {
+    let activeSessionId: string | null = null;
+    let resolveCreate: ((sessionId: string) => void) | undefined;
+    const sendTargets: Array<string | null> = [];
+    const initializing = initSessionWithDependencies({
+      getActiveSessionId: () => activeSessionId,
+      createSession: () =>
+        new Promise<string>((resolve) => {
+          resolveCreate = resolve;
+        }),
+      getMessageCount: () => 0,
+      setError: vi.fn(),
+      sendMessage: vi.fn(async (_prompt, options?: { targetSessionId?: string }) => {
+        sendTargets.push(options?.targetSessionId ?? activeSessionId);
+      }),
+    });
+
+    resolveCreate?.('session-created');
+    activeSessionId = 'session-selected';
+    await initializing;
+
+    expect(sendTargets).toEqual(['session-created']);
   });
 
   it('refuses to initialize non-blank sessions', async () => {
@@ -154,6 +178,45 @@ describe('session-actions helpers', () => {
     expect(syncTodosFromMessages).toHaveBeenCalledTimes(1);
     expect(requestMessageListScrollToBottom).toHaveBeenCalledTimes(1);
     expect(stopLoading).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let a stale slash command clear loading or report an error', async () => {
+    let activeSessionId = 'session-1';
+    let rejectCommand: ((error: Error) => void) | undefined;
+    const stopLoading = vi.fn();
+    const setError = vi.fn();
+    const command = runSlashCommandWithDependencies(
+      {
+        hasCommand: () => true,
+        getActiveSessionId: () => activeSessionId,
+        createSession: vi.fn(async () => 'session-created'),
+        startLoading: vi.fn(),
+        runSessionCommand: vi.fn(
+          () =>
+            new Promise<MessageEntry>((_resolve, reject) => {
+              rejectCommand = reject;
+            })
+        ),
+        shouldApplyToActiveSession: (sessionId) => sessionId === activeSessionId,
+        upsertMessageInfo: vi.fn(),
+        upsertPart: vi.fn(),
+        syncTodosFromMessages: vi.fn(),
+        requestMessageListScrollToBottom: vi.fn(),
+        syncSession: vi.fn(async () => {}),
+        recheckSessionStatus: vi.fn(async () => {}),
+        stopLoading,
+        setError,
+      },
+      'test',
+      ''
+    );
+
+    activeSessionId = 'session-2';
+    rejectCommand?.(new Error('command failed'));
+    await command;
+
+    expect(stopLoading).not.toHaveBeenCalled();
+    expect(setError).not.toHaveBeenCalled();
   });
 
   it('rejects unknown slash commands', async () => {

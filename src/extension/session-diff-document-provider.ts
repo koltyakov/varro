@@ -7,6 +7,7 @@ import type { FileDiff } from '../shared/opencode-types';
 import {
   getRelativePathWithinWorkspace,
   isAbsoluteWorkspacePath,
+  isSameWorkspacePath,
   normalizeWorkspaceIdentity,
 } from '../shared/workspace-path';
 import type { OpenCodeServer } from './server';
@@ -14,6 +15,10 @@ import { assertSessionInCurrentWorkspace } from './session-workspace';
 
 const SCHEME = 'varro-session-diff';
 type SessionDiffOpenResult = 'opened' | 'unavailable' | 'forbidden';
+type SessionDirectoryAuthorizer = (
+  sessionID: string,
+  directory: string
+) => boolean | Promise<boolean>;
 
 export class SessionDiffDocumentProvider implements vscode.TextDocumentContentProvider {
   private readonly contents = new Map<string, string>();
@@ -36,23 +41,46 @@ export class SessionDiffDocumentProvider implements vscode.TextDocumentContentPr
   async open(
     sessionID: string,
     requestedPath: string,
-    server: Pick<OpenCodeServer, 'getWorkspaceCwd' | 'request'> = this.server
+    requestedDirectory?: string,
+    server: Pick<OpenCodeServer, 'getWorkspaceCwd' | 'request'> = this.server,
+    authorizeDirectory?: SessionDirectoryAuthorizer
   ): Promise<SessionDiffOpenResult> {
     if (this.disposed) return 'unavailable';
-    const workspacePath = server.getWorkspaceCwd();
-    const workspaceIdentity = normalizeWorkspaceIdentity(workspacePath);
+    const endpointWorkspaceIdentity = normalizeWorkspaceIdentity(server.getWorkspaceCwd());
+    const workspacePath = requestedDirectory ?? server.getWorkspaceCwd();
     const workspaceChanged = () =>
       Boolean(
-        workspaceIdentity &&
-        normalizeWorkspaceIdentity(server.getWorkspaceCwd()) !== workspaceIdentity
+        endpointWorkspaceIdentity &&
+        normalizeWorkspaceIdentity(server.getWorkspaceCwd()) !== endpointWorkspaceIdentity
       );
+    if (requestedDirectory && !isSameWorkspacePath(requestedDirectory, server.getWorkspaceCwd())) {
+      try {
+        if (!(await authorizeDirectory?.(sessionID, requestedDirectory)) || workspaceChanged()) {
+          return 'forbidden';
+        }
+      } catch {
+        return 'forbidden';
+      }
+    }
+    let sessionDirectory: string | undefined;
     try {
-      await assertSessionInCurrentWorkspace(server, sessionID);
+      sessionDirectory = await assertSessionInCurrentWorkspace(
+        server,
+        sessionID,
+        requestedDirectory
+      );
     } catch {
       return 'forbidden';
     }
     try {
-      const value = await server.request('GET', `/session/${encodeURIComponent(sessionID)}/diff`);
+      const diffPath = `/session/${encodeURIComponent(sessionID)}/diff`;
+      let value: unknown;
+      if (requestedDirectory) {
+        if (!sessionDirectory) return 'forbidden';
+        value = await server.request('GET', diffPath, undefined, { directory: sessionDirectory });
+      } else {
+        value = await server.request('GET', diffPath);
+      }
       if (workspaceChanged()) return 'forbidden';
       if (this.disposed || !Array.isArray(value)) return 'unavailable';
       const diff = findFileDiff(value, requestedPath, workspacePath);

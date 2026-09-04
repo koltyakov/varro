@@ -572,6 +572,25 @@ describe('OpenCodeTransport event stream path', () => {
     expect(transport.hasPendingAttentionRequests()).toBe(false);
   });
 
+  it('tracks legacy permission.updated events as pending attention', () => {
+    const transport = createTransport() as unknown as {
+      observeServerEvent(event: unknown): void;
+      getPendingAttentionSessionIDs(): string[];
+    };
+
+    transport.observeServerEvent({
+      type: 'permission.updated',
+      properties: {
+        id: 'permission-legacy',
+        sessionID: 'session-legacy',
+        permission: 'bash',
+        patterns: ['*'],
+      },
+    });
+
+    expect(transport.getPendingAttentionSessionIDs()).toEqual(['session-legacy']);
+  });
+
   it('tracks direct v2 permission events from data payloads', () => {
     const transport = createTransport() as unknown as {
       observeServerEvent(event: unknown): void;

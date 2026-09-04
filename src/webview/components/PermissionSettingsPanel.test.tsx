@@ -1,6 +1,7 @@
 import { render } from 'solid-js/web';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OpenCodePermissionConfig } from '../../shared/protocol';
+import type { PermissionRule } from '../../shared/opencode-types';
 import { getSessionPermissionRulesForMode } from '../../shared/permission-rules';
 import { setState } from '../lib/state';
 import { PermissionSettingsPanel } from './PermissionSettingsPanel';
@@ -242,6 +243,68 @@ describe('PermissionSettingsPanel', () => {
       directory: '/repo',
     });
     expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  it('keeps the newly selected session rules when an older save resolves', async () => {
+    setState('sessions', [
+      {
+        id: 'session-a',
+        projectID: 'project-1',
+        directory: '/repo/a',
+        title: 'Session A',
+        version: '1',
+        time: { created: 1, updated: 1 },
+      },
+      {
+        id: 'session-b',
+        projectID: 'project-1',
+        directory: '/repo/b',
+        title: 'Session B',
+        version: '1',
+        time: { created: 2, updated: 2 },
+      },
+    ]);
+    setState('activeSessionId', 'session-a');
+    mocks.loadSessionRules.mockImplementation(async (sessionId: string) => [
+      {
+        permission: 'bash',
+        pattern: sessionId === 'session-a' ? 'session-a rule' : 'session-b rule',
+        action: 'allow',
+      },
+    ]);
+    let resolveSave: ((rules: PermissionRule[]) => void) | undefined;
+    mocks.saveSessionRules.mockImplementationOnce(
+      () =>
+        new Promise<PermissionRule[]>((resolve) => {
+          resolveSave = resolve;
+        })
+    );
+    cleanup = render(() => <PermissionSettingsPanel />, container);
+    await flush();
+
+    const sessionSection = [
+      ...container.querySelectorAll<HTMLElement>('.permission-config-section'),
+    ].find((section) => section.querySelector('h2')?.textContent === 'Current session rules')!;
+    const patternInput = sessionSection.querySelector<HTMLInputElement>(
+      'input[aria-label="Pattern"]'
+    )!;
+    patternInput.value = 'session-a edited';
+    patternInput.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    sessionSection.querySelector<HTMLButtonElement>('.permission-settings-save')?.click();
+    await flush();
+
+    setState('activeSessionId', 'session-b');
+    await vi.waitFor(() =>
+      expect(
+        sessionSection.querySelector<HTMLInputElement>('input[aria-label="Pattern"]')?.value
+      ).toBe('session-b rule')
+    );
+    resolveSave?.([{ permission: 'bash', pattern: 'session-a saved', action: 'allow' }]);
+    await flush();
+
+    expect(
+      sessionSection.querySelector<HTMLInputElement>('input[aria-label="Pattern"]')?.value
+    ).toBe('session-b rule');
   });
 
   it('infers hidden mode rules and keeps only the latest session override', async () => {

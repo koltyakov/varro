@@ -228,6 +228,11 @@ function McpAuthDialog(props: {
   const [currentStatus, setCurrentStatus] = createSignal<McpStatus>(props.server.status);
   const [isSubmitting, setIsSubmitting] = createSignal(false);
   const [errorMessage, setErrorMessage] = createSignal('');
+  let disposed = false;
+
+  onCleanup(() => {
+    disposed = true;
+  });
 
   onMount(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -253,6 +258,7 @@ function McpAuthDialog(props: {
     setErrorMessage('');
     try {
       const authorization = await client.mcp.startAuth(props.server.name);
+      if (disposed) return;
       const url = new URL(authorization.authorizationUrl);
       if (url.protocol !== 'https:') {
         throw new Error(
@@ -262,9 +268,9 @@ function McpAuthDialog(props: {
       setAuthorizationUrl(url.href);
       postMessage({ type: 'vscode/open-external', payload: { url: url.href } });
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : String(error));
+      if (!disposed) setErrorMessage(error instanceof Error ? error.message : String(error));
     } finally {
-      setIsSubmitting(false);
+      if (!disposed) setIsSubmitting(false);
     }
   }
 

@@ -2311,6 +2311,90 @@ describe('OpenCodeServer startup health polling', () => {
 });
 
 describe('OpenCodeServer restart blockers', () => {
+  it('includes busy sessions observed in a nested OpenCode instance', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const nestedDirectory = '/repo/packages/app';
+    const request = vi.fn(
+      async (_method: string, path: string, _body?: unknown, options?: { directory?: string }) => {
+        if (path.startsWith('/experimental/session')) {
+          return [{ id: 'nested-session', directory: nestedDirectory }];
+        }
+        if (path === '/session/status') {
+          return options?.directory === nestedDirectory
+            ? { 'nested-session': { type: 'busy' } }
+            : {};
+        }
+        if (path === '/question' || path === '/permission') return [];
+        if (path === '/session') {
+          return options?.directory === nestedDirectory
+            ? [{ id: 'nested-session', directory: nestedDirectory }]
+            : [];
+        }
+        throw new Error(`Unexpected request: ${path}`);
+      }
+    );
+    const transport = (
+      server as unknown as {
+        transport: {
+          observeServerEvent(event: unknown): void;
+          request: typeof request;
+        };
+      }
+    ).transport;
+    transport.request = request;
+    transport.observeServerEvent({
+      directory: nestedDirectory,
+      payload: {
+        type: 'session.status',
+        properties: { sessionID: 'nested-session', status: { type: 'busy' } },
+      },
+    });
+
+    await expect(server.readRestartBlockers()).resolves.toEqual({
+      totalSessionCount: 1,
+      directories: [{ directory: nestedDirectory, sessionCount: 1 }],
+    });
+  });
+
+  it('discovers a busy nested instance without observing its prior status event', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const nestedDirectory = '/repo/packages/app';
+    const request = vi.fn(
+      async (_method: string, path: string, _body?: unknown, options?: { directory?: string }) => {
+        if (path.startsWith('/experimental/session')) {
+          return [{ id: 'nested-session', directory: nestedDirectory }];
+        }
+        if (path === '/session/status') {
+          return options?.directory === nestedDirectory
+            ? { 'nested-session': { type: 'busy' } }
+            : {};
+        }
+        if (path === '/question' || path === '/permission' || path === '/session') return [];
+        throw new Error(`Unexpected request: ${path}`);
+      }
+    );
+    const transport = (
+      server as unknown as {
+        transport: { request: typeof request };
+      }
+    ).transport;
+    transport.request = request;
+
+    await expect(server.readRestartBlockers()).resolves.toEqual({
+      totalSessionCount: 1,
+      directories: [{ directory: nestedDirectory, sessionCount: 1 }],
+    });
+    expect(request).toHaveBeenCalledWith(
+      'GET',
+      expect.stringMatching(/^\/experimental\/session/),
+      undefined,
+      expect.objectContaining({ unscoped: true })
+    );
+    expect(request).toHaveBeenCalledWith('GET', '/session/status', undefined, {
+      directory: nestedDirectory,
+    });
+  });
+
   it('groups unique blocking sessions by normalized directory', async () => {
     const server = new OpenCodeServer(4096, true);
     vi.mocked(fetch).mockImplementation(async (input) => {
@@ -2362,6 +2446,7 @@ describe('OpenCodeServer restart blockers', () => {
   it('merges unscoped status, question, permission, and observed session IDs', async () => {
     const server = new OpenCodeServer(4096, true);
     const request = vi.fn(async (_method: string, path: string) => {
+      if (path.startsWith('/experimental/session')) return [];
       if (path === '/session/status') return { 'session-1': { type: 'busy' } };
       if (path === '/question') return [{ sessionID: 'session-2' }];
       if (path === '/permission') return [{ sessionID: 'session-3' }];
@@ -2389,6 +2474,7 @@ describe('OpenCodeServer restart blockers', () => {
   it('includes a synchronized attention ask when restart snapshots are empty', async () => {
     const server = new OpenCodeServer(4096, true);
     const request = vi.fn(async (_method: string, path: string) => {
+      if (path.startsWith('/experimental/session')) return [];
       if (path === '/session/status') return {};
       if (path === '/question' || path === '/permission' || path === '/session') return [];
       throw new Error(`Unexpected request: ${path}`);

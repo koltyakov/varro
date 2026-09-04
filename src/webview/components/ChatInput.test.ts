@@ -7031,6 +7031,44 @@ describe('ChatInput', () => {
     expect(after.every((chip, index) => chip === before[index])).toBe(true);
   });
 
+  it('releases a stored image removed from the attachment strip', async () => {
+    const bridgeWindow = fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window);
+    const originalSend = bridgeWindow.__sendToExtension;
+    const sent: WebviewMessage[] = [];
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
+    try {
+      addClipboardImage({
+        id: 'stored-image',
+        url: 'data:image/png;base64,aW1hZ2U=',
+        mime: 'image/png',
+        filename: 'Stored image',
+        size: 5,
+        contextFile: {
+          path: '/tmp/varro/stored-image.png',
+          relativePath: 'stored-image.png',
+          type: 'file',
+        },
+      });
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+
+      const removeButton = container?.querySelector<HTMLButtonElement>(
+        '.chat-attachments-container .chat-attachment-chip .chip-remove'
+      );
+      if (!removeButton) throw new Error('Expected the stored image attachment remove button');
+      removeButton.click();
+
+      expect(state.clipboardImages).toEqual([]);
+      expect(sent).toContainEqual({
+        type: 'images/release',
+        payload: { paths: ['/tmp/varro/stored-image.png'], deferred: false },
+      });
+    } finally {
+      if (originalSend) bridgeWindow.__sendToExtension = originalSend;
+      else delete bridgeWindow.__sendToExtension;
+    }
+  });
+
   it('enables a non-vision image chip after an exact @vision mention', async () => {
     const fileReader = installControllableFileReader();
     setupVisionDelegationModelState();

@@ -99,6 +99,12 @@ function createActionFixture() {
   const restProxy = {
     handleRequest: vi.fn(() => Promise.resolve()),
     cancelRequest: vi.fn(),
+    authorizeSessionDirectory: vi.fn((_sessionID: string, directory: string) =>
+      Promise.resolve(
+        Boolean(contextProvider.getOpenWorkspaceRoot(directory)) ||
+          contextProvider.context.workspaceDirectory === directory
+      )
+    ),
   };
   const sessionDiffProvider = {
     open: vi.fn<SessionDiffProvider['open']>(() => Promise.resolve('unavailable')),
@@ -214,6 +220,67 @@ function createActionFixture() {
   };
 }
 
+type ActionFixture = ReturnType<typeof createActionFixture>;
+const NESTED_SESSION_DIRECTORY = '/repo/packages/app';
+const nestedSessionActionCases: Array<{
+  name: string;
+  invoke(fixture: ActionFixture): void | Promise<void>;
+  verify(fixture: ActionFixture): void;
+}> = [
+  {
+    name: 'terminal open',
+    invoke: ({ actions }) =>
+      actions.openSessionInOpenCode('nested-session', NESTED_SESSION_DIRECTORY),
+    verify: ({ deps }) => {
+      expect(deps.openSessionInTerminal).toHaveBeenCalledWith(
+        'nested-session',
+        NESTED_SESSION_DIRECTORY
+      );
+    },
+  },
+  {
+    name: 'editor open',
+    invoke: ({ actions }) =>
+      actions.openSessionInEditor(
+        'nested-session',
+        'Nested session',
+        undefined,
+        undefined,
+        NESTED_SESSION_DIRECTORY
+      ),
+    verify: ({ deps }) => {
+      expect(deps.openSessionInEditor).toHaveBeenCalledWith(
+        'nested-session',
+        'Nested session',
+        undefined,
+        undefined,
+        NESTED_SESSION_DIRECTORY
+      );
+    },
+  },
+  {
+    name: 'sidebar open',
+    invoke: ({ actions }) =>
+      actions.openSessionInSidebar('nested-session', NESTED_SESSION_DIRECTORY),
+    verify: ({ deps }) => {
+      expect(deps.openSessionInSidebar).toHaveBeenCalledWith(
+        'nested-session',
+        NESTED_SESSION_DIRECTORY
+      );
+    },
+  },
+  {
+    name: 'export',
+    invoke: ({ actions }) => actions.exportSession('nested-session', NESTED_SESSION_DIRECTORY),
+    verify: ({ sessionExportService }) => {
+      expect(sessionExportService.exportSession).toHaveBeenCalledWith(
+        'nested-session',
+        NESTED_SESSION_DIRECTORY
+      );
+    },
+  },
+];
+
 describe('createSidebarProviderActions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -236,6 +303,77 @@ describe('createSidebarProviderActions', () => {
 
     expect(deps.openSessionInTerminal).toHaveBeenCalledWith('session-1');
   });
+
+  it.each(nestedSessionActionCases)(
+    'preserves the exact authorized session directory for $name',
+    async ({ invoke, verify }) => {
+      const fixture = createActionFixture();
+      fixture.contextProvider.getOpenWorkspaceRoot.mockImplementation((directory: string) =>
+        directory === '/repo' || directory === NESTED_SESSION_DIRECTORY ? '/repo' : null
+      );
+      const request = vi.fn(
+        async (
+          _method: string,
+          _path: string,
+          _body?: Record<string, never>,
+          options?: { directory?: string }
+        ) => {
+          if (options?.directory !== NESTED_SESSION_DIRECTORY) {
+            throw new Error('404 Session not found in this OpenCode instance');
+          }
+          return {
+            id: 'nested-session',
+            projectID: 'project-1',
+            directory: NESTED_SESSION_DIRECTORY,
+          };
+        }
+      );
+      Object.assign(fixture.server, { request });
+
+      await Promise.resolve(invoke(fixture)).catch(() => undefined);
+
+      expect(request).toHaveBeenCalledWith('GET', '/session/nested-session', undefined, {
+        directory: NESTED_SESSION_DIRECTORY,
+      });
+      verify(fixture);
+    }
+  );
+
+  it.each(nestedSessionActionCases)(
+    'supports an authorized nested session for $name with exact-root workspace matching',
+    async ({ invoke, verify }) => {
+      const fixture = createActionFixture();
+      fixture.contextProvider.getOpenWorkspaceRoot.mockImplementation((directory: string) =>
+        directory === '/repo' ? '/repo' : null
+      );
+      fixture.restProxy.authorizeSessionDirectory.mockResolvedValue(true);
+      const request = vi.fn(
+        async (
+          _method: string,
+          _path: string,
+          _body?: Record<string, never>,
+          options?: { directory?: string }
+        ) => {
+          if (options?.directory !== NESTED_SESSION_DIRECTORY) {
+            throw new Error('404 Session not found in this OpenCode instance');
+          }
+          return {
+            id: 'nested-session',
+            projectID: 'project-1',
+            directory: NESTED_SESSION_DIRECTORY,
+          };
+        }
+      );
+      Object.assign(fixture.server, { request });
+
+      await expect(Promise.resolve().then(() => invoke(fixture))).resolves.toBeUndefined();
+
+      expect(request).toHaveBeenCalledWith('GET', '/session/nested-session', undefined, {
+        directory: NESTED_SESSION_DIRECTORY,
+      });
+      verify(fixture);
+    }
+  );
 
   it('opens generated Markdown directly in the preview editor', async () => {
     const { actions, deps } = createActionFixture();
@@ -326,6 +464,49 @@ describe('createSidebarProviderActions', () => {
       type: 'vscode/open-result',
       payload: { requestId: 7, status: 'unavailable' },
     });
+  });
+
+  it('opens a native diff through the exact session directory', async () => {
+    const { actions, contextProvider, deps } = createActionFixture();
+    deps.sessionDiffProvider.open.mockResolvedValue('opened');
+
+    await actions.openPath({
+      path: `${NESTED_SESSION_DIRECTORY}/src/app.ts`,
+      view: 'diff',
+      sessionID: 'nested-session',
+      directory: NESTED_SESSION_DIRECTORY,
+    } as never);
+
+    expect(deps.sessionDiffProvider.open).toHaveBeenCalledWith(
+      'nested-session',
+      `${NESTED_SESSION_DIRECTORY}/src/app.ts`,
+      NESTED_SESSION_DIRECTORY
+    );
+    expect(contextProvider.openPath).not.toHaveBeenCalled();
+  });
+
+  it('falls back from an unavailable native diff within the exact session directory', async () => {
+    const { actions, contextProvider, deps, restProxy } = createActionFixture();
+    deps.sessionDiffProvider.open.mockResolvedValue('unavailable');
+    restProxy.authorizeSessionDirectory.mockResolvedValue(true);
+
+    await actions.openPath({
+      path: 'src/app.ts',
+      kind: 'file',
+      view: 'diff',
+      sessionID: 'nested-session',
+      directory: NESTED_SESSION_DIRECTORY,
+    });
+
+    expect(deps.sessionDiffProvider.open).toHaveBeenCalledWith(
+      'nested-session',
+      'src/app.ts',
+      NESTED_SESSION_DIRECTORY
+    );
+    expect(contextProvider.openPath).toHaveBeenCalledWith(
+      `${NESTED_SESSION_DIRECTORY}/src/app.ts`,
+      expect.objectContaining({ kind: 'file', view: 'diff' })
+    );
   });
 
   it('updates command state and mirrors the active chat model', () => {

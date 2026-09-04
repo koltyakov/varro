@@ -210,6 +210,7 @@ function ChangedFileItem(props: { change: FileChange }) {
         kind: 'file',
         view: 'diff',
         sessionID: state.activeSessionId ? state.activeSessionId : undefined,
+        directory: getActiveSession()?.directory,
       },
     });
   };

@@ -990,6 +990,7 @@ export type WebviewMessage =
         kind?: 'auto' | 'file' | 'directory';
         view?: 'diff';
         sessionID?: string;
+        directory?: string;
         requestId?: number;
       };
     }

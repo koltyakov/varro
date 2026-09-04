@@ -1,5 +1,6 @@
 /* oxlint-disable anti-slop/no-unsafe-dictionary-type -- Action dispatch carries protocol payload records that each handler validates. */
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Action payloads are parsed by the webview decoder before dispatch. */
+import { isAbsolute, resolve } from 'node:path';
 import * as vscode from 'vscode';
 import type { ContextProvider } from './context-provider';
 import { logger } from './logger';
@@ -18,7 +19,6 @@ import type {
   TerminalSelection,
   WebviewRoute,
 } from '../shared/protocol';
-import { isSameWorkspacePath } from '../shared/workspace-path';
 
 type ConfigPayload = Extract<
   Parameters<MessageRouterCallbacks['updateConfig']>[0],
@@ -118,6 +118,13 @@ export function createSidebarProviderActions(
     void operation.then(finish, finish);
     return operation;
   };
+  const getAuthorizedSessionDirectory = async (sessionId: string, directory?: string) => {
+    if (!directory) return undefined;
+    if (!(await deps.restProxy.authorizeSessionDirectory(sessionId, directory))) {
+      throw new Error('Session workspace folder is not open');
+    }
+    return directory;
+  };
 
   return {
     ready: (documentId) => deps.handleReadyMessage(documentId),
@@ -148,10 +155,7 @@ export function createSidebarProviderActions(
     },
     runInTerminal: (command, title) => deps.runInTerminal(command, title),
     openSessionInOpenCode: async (sessionId, requestedDirectory) => {
-      const directory = requestedDirectory
-        ? getOpenSessionDirectory(deps.contextProvider, requestedDirectory)
-        : undefined;
-      if (requestedDirectory && !directory) throw new Error('Session workspace folder is not open');
+      const directory = await getAuthorizedSessionDirectory(sessionId, requestedDirectory);
       await assertSessionInCurrentWorkspace(
         deps.sessionServer ?? deps.server,
         sessionId,
@@ -162,10 +166,7 @@ export function createSidebarProviderActions(
         : deps.openSessionInTerminal(sessionId));
     },
     openSessionInEditor: async (sessionId, title, model, rootSessionId, requestedDirectory) => {
-      const directory = requestedDirectory
-        ? getOpenSessionDirectory(deps.contextProvider, requestedDirectory)
-        : undefined;
-      if (requestedDirectory && !directory) throw new Error('Session workspace folder is not open');
+      const directory = await getAuthorizedSessionDirectory(sessionId, requestedDirectory);
       const validatedDirectory = await assertSessionInCurrentWorkspace(
         deps.sessionServer ?? deps.server,
         sessionId,
@@ -174,10 +175,7 @@ export function createSidebarProviderActions(
       await deps.openSessionInEditor(sessionId, title, model, rootSessionId, validatedDirectory);
     },
     openSessionInSidebar: async (sessionId, requestedDirectory) => {
-      const directory = requestedDirectory
-        ? getOpenSessionDirectory(deps.contextProvider, requestedDirectory)
-        : undefined;
-      if (requestedDirectory && !directory) throw new Error('Session workspace folder is not open');
+      const directory = await getAuthorizedSessionDirectory(sessionId, requestedDirectory);
       const validatedDirectory = await assertSessionInCurrentWorkspace(
         deps.sessionServer ?? deps.server,
         sessionId,
@@ -202,10 +200,7 @@ export function createSidebarProviderActions(
     migrateModelPreferences: (payload) => deps.migrateModelPreferences(payload),
     updateDraftImages: (payload) => deps.updateDraftImages(payload),
     exportSession: async (sessionId, requestedDirectory) => {
-      const directory = requestedDirectory
-        ? getOpenSessionDirectory(deps.contextProvider, requestedDirectory)
-        : undefined;
-      if (requestedDirectory && !directory) throw new Error('Session workspace folder is not open');
+      const directory = await getAuthorizedSessionDirectory(sessionId, requestedDirectory);
       const validatedDirectory = await assertSessionInCurrentWorkspace(
         deps.sessionServer ?? deps.server,
         sessionId,
@@ -250,8 +245,13 @@ export function createSidebarProviderActions(
     },
     openPath: async (payload: OpenPathPayload) => {
       const workspaceDirectory = deps.getWorkspaceDirectory();
+      let fallbackPath = payload.path;
       if (payload.view === 'diff' && payload.sessionID) {
-        const result = await deps.sessionDiffProvider.open(payload.sessionID, payload.path);
+        const result = await deps.sessionDiffProvider.open(
+          payload.sessionID,
+          payload.path,
+          payload.directory
+        );
         if (result !== 'unavailable') {
           if (payload.requestId !== undefined) {
             deps.post({
@@ -264,8 +264,15 @@ export function createSidebarProviderActions(
           }
           return;
         }
+        if (payload.directory && !isAbsolute(fallbackPath)) {
+          const directory = await getAuthorizedSessionDirectory(
+            payload.sessionID,
+            payload.directory
+          );
+          if (directory) fallbackPath = resolve(directory, fallbackPath);
+        }
       }
-      const status = await deps.contextProvider.openPath(payload.path, {
+      const status = await deps.contextProvider.openPath(fallbackPath, {
         line: payload.line,
         kind: payload.kind,
         view: payload.view,
@@ -332,13 +339,4 @@ export function createSidebarProviderActions(
       else logger.info(line);
     },
   };
-}
-
-function getOpenSessionDirectory(contextProvider: ContextProvider, directory: string) {
-  const workspaceRoot = contextProvider.getOpenWorkspaceRoot(directory);
-  if (workspaceRoot) return workspaceRoot;
-  const workspaceDirectory = contextProvider.context.workspaceDirectory;
-  return workspaceDirectory && isSameWorkspacePath(directory, workspaceDirectory)
-    ? workspaceDirectory
-    : null;
 }

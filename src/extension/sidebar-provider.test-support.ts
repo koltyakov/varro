@@ -205,6 +205,7 @@ export function createServer(
     request: ReturnType<typeof vi.fn>;
     restart: ReturnType<typeof vi.fn>;
     readServerInfo: ReturnType<typeof vi.fn>;
+    readRestartBlockers: ReturnType<typeof vi.fn>;
     getWorkspaceCwd: ReturnType<typeof vi.fn>;
     resolveCommand: ReturnType<typeof vi.fn>;
     prepareForWindowsCliUpgrade: ReturnType<typeof vi.fn>;
@@ -219,6 +220,7 @@ export function createServer(
     request: vi.fn(),
     restart: vi.fn(() => Promise.resolve('http://127.0.0.1:4096')),
     readServerInfo: vi.fn(() => Promise.resolve({ managedProcess: true })),
+    readRestartBlockers: vi.fn(() => Promise.resolve({ totalSessionCount: 0, directories: [] })),
     getWorkspaceCwd: vi.fn(() => '/repo'),
     resolveCommand: vi.fn(() => 'opencode'),
     prepareForWindowsCliUpgrade: vi.fn(() => Promise.resolve()),

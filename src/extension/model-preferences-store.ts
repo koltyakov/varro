@@ -1,18 +1,25 @@
 import type { Persistence } from '../shared/persistence';
 import type { ModelPreferences } from '../shared/protocol';
-import { parseModelPreferences } from '../shared/model-preferences';
+import { parseModelPreferences, parseRequiredModelPreferences } from '../shared/model-preferences';
 
 const MODEL_PREFERENCES_KEY = 'varro.modelPreferences';
 const MODEL_PREFERENCES_MIGRATION_KEY = 'varro.modelPreferences.hostMigration.v1';
+const MODEL_PREFERENCES_MIGRATION_BASE_KEY = 'varro.modelPreferences.hostMigrationBase.v1';
 
 export class ModelPreferencesStore {
   private preferences: ModelPreferences;
   private migrationComplete: boolean;
+  private migrationBase: ModelPreferences | null = null;
   private mutationQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly persistence: Persistence) {
     this.preferences = parseModelPreferences(persistence.get<unknown>(MODEL_PREFERENCES_KEY));
     this.migrationComplete = persistence.get<boolean>(MODEL_PREFERENCES_MIGRATION_KEY) === true;
+    if (!this.migrationComplete) {
+      this.migrationBase = parseRequiredModelPreferences(
+        persistence.get<unknown>(MODEL_PREFERENCES_MIGRATION_BASE_KEY)
+      );
+    }
   }
 
   get() {
@@ -25,8 +32,13 @@ export class ModelPreferencesStore {
 
   update(base: ModelPreferences, preferences: ModelPreferences): Promise<ModelPreferences> {
     return this.mutate(async () => {
-      this.preferences = mergeModelPreferences(this.preferences, base, preferences);
-      await this.persist();
+      if (!this.migrationComplete && !this.migrationBase) {
+        this.migrationBase = cloneModelPreferences(base);
+        this.preferences = cloneModelPreferences(preferences);
+      } else {
+        this.preferences = mergeModelPreferences(this.preferences, base, preferences);
+      }
+      await this.persist(this.migrationComplete);
       return this.get();
     });
   }
@@ -34,8 +46,11 @@ export class ModelPreferencesStore {
   migrateLegacy(preferences: ModelPreferences): Promise<ModelPreferences> {
     return this.mutate(async () => {
       if (this.migrationComplete) return this.get();
-      this.preferences = cloneModelPreferences(preferences);
-      await this.persist();
+      this.preferences = this.migrationBase
+        ? mergeModelPreferences(preferences, this.migrationBase, this.preferences)
+        : cloneModelPreferences(preferences);
+      await this.persist(true);
+      this.migrationBase = null;
       return this.get();
     });
   }
@@ -44,10 +59,15 @@ export class ModelPreferencesStore {
     return this.mutationQueue;
   }
 
-  private async persist() {
+  private async persist(completeMigration: boolean) {
+    if (!completeMigration && this.migrationBase) {
+      await this.persistence.set(MODEL_PREFERENCES_MIGRATION_BASE_KEY, this.migrationBase);
+    }
     await this.persistence.set(MODEL_PREFERENCES_KEY, this.preferences);
+    if (!completeMigration) return;
     await this.persistence.set(MODEL_PREFERENCES_MIGRATION_KEY, true);
     this.migrationComplete = true;
+    await this.persistence.remove(MODEL_PREFERENCES_MIGRATION_BASE_KEY);
   }
 
   private mutate<T>(operation: () => Promise<T>): Promise<T> {

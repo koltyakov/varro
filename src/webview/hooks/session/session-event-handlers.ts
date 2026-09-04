@@ -106,6 +106,10 @@ function runGapSync(
   }
 }
 
+function isSessionNotFoundError<T>(error: T) {
+  return error instanceof Error && /^404\b.*session not found/i.test(error.message);
+}
+
 type EventHandlerDependencies = {
   getActiveSessionId(): string | null;
   getSessionStatus(sessionId: string): SessionStatus | null | undefined;
@@ -326,6 +330,16 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   let disposed = false;
   let pendingPermissionSync = false;
   let serverReconciliation: Promise<void | boolean | object> | null = null;
+  const removeDeletedSession = (sessionId: string) => {
+    settledIdleSessions.delete(sessionId);
+    const retryTimer = transientConnectionRetryTimers.get(sessionId);
+    if (retryTimer !== undefined) clearTimeout(retryTimer);
+    transientConnectionRetryTimers.delete(sessionId);
+    const dirtyGap = dirtyGaps.get(sessionId);
+    if (dirtyGap?.retryTimer !== undefined) clearTimeout(dirtyGap.retryTimer);
+    dirtyGaps.delete(sessionId);
+    deps.removeDeletedSessionTree(sessionId);
+  };
   // Returns 'unknown' when the event carries no seq (e.g. an ephemeral delta - caller
   // keeps its default behavior), 'ok' when the event is in order or a duplicate, or 'gap'
   // when at least one durable event was skipped (a targeted resync is warranted).
@@ -492,6 +506,15 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       ([metadataResult, transcriptResult]) => {
         if (disposed || dirtyGaps.get(sessionId) !== state) return;
         state.syncing = false;
+        if (
+          metadataResult.status === 'rejected' &&
+          isSessionNotFoundError(metadataResult.reason) &&
+          state.generation === generation &&
+          !state.retryPending
+        ) {
+          removeDeletedSession(sessionId);
+          return;
+        }
         if (metadataResult.status === 'rejected') {
           deps.logError('syncSession', metadataResult.reason);
         }
@@ -1179,9 +1202,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
       const id = (data.properties?.info as { id: string } | undefined)?.id;
       if (id) {
-        settledIdleSessions.delete(id);
-        cancelTransientConnectionRetry(id);
-        deps.removeDeletedSessionTree(id);
+        removeDeletedSession(id);
       }
     })
   );
