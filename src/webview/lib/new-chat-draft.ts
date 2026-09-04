@@ -68,6 +68,7 @@ export function startNewChatDraft() {
     // rows and streaming effects reading entries that were just removed.
     if (!deferTranscriptClear) clearMessages();
     setState('messagesLoading', false);
+    setState('pendingSessionSelectionId', null);
     if (!blankSessionId) {
       setState('activeSessionId', null);
       persistActiveSessionId(null);

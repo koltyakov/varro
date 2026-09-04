@@ -126,6 +126,7 @@ export interface AppState {
   sessionsPaginationError: string | null;
   recycleBinLoadError: string | null;
   messagesLoading: boolean;
+  pendingSessionSelectionId: string | null;
   pinnedSessionIds: string[];
   recycleBinEntries: RecycleBinEntry[];
   activeSessionId: string | null;
@@ -372,6 +373,7 @@ export function createAppState(): AppStateInstance {
     sessionsPaginationError: null,
     recycleBinLoadError: null,
     messagesLoading: false,
+    pendingSessionSelectionId: null,
     pinnedSessionIds: initialWebviewState.pinnedSessionIds ?? [],
     recycleBinEntries: initialWebviewState.recycleBinEntries ?? [],
     activeSessionId: null,

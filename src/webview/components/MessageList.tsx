@@ -8034,7 +8034,7 @@ export function MessageList() {
             )}
           </Show>
           <Show
-            when={messages().length > 0}
+            when={!state.pendingSessionSelectionId && messages().length > 0}
             fallback={
               <Show
                 when={state.messagesLoading}

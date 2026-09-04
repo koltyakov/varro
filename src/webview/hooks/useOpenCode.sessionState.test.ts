@@ -221,7 +221,11 @@ describe('useOpenCode session state flows', () => {
     const selection = hookModule.selectSession('session-b', { directory: '/repo-b' });
     await vi.waitFor(() => expect(clientMocks.sessionActivate).toHaveBeenCalledOnce());
 
+    expect(stateModule.state.pendingSessionSelectionId).toBe('session-b');
+    expect(stateModule.state.messagesLoading).toBe(true);
+
     startNewChatDraft();
+    expect(stateModule.state.pendingSessionSelectionId).toBeNull();
     activation.resolve(siblingSession);
     await selection;
 

@@ -1003,7 +1003,7 @@ export function resetWorkspaceDerivedState(options?: { preserveWorkspaceCatalog?
     }
     appStore.setState('sessionsLoadingMore', false);
     appStore.setState('sessionsPaginationError', null);
-    appStore.setState('messagesLoading', false);
+    appStore.setState('messagesLoading', appStore.state.pendingSessionSelectionId !== null);
     appStore.setState('permissions', []);
     appStore.setState('questions', []);
     appStore.setState('compactingSessionIds', []);
@@ -2589,9 +2589,14 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     sessionActivationController = activationController;
     const knownSession = appStore.state.sessions.find((session) => session.id === id);
     const targetDirectory = options?.directory ?? knownSession?.directory;
+    appStore.setState('pendingSessionSelectionId', null);
     sessionActivationDirectory = null;
     if (targetDirectory && !isSameWorkspacePath(targetDirectory, currentWorkspacePath)) {
       sessionActivationDirectory = targetDirectory;
+      batch(() => {
+        appStore.setState('pendingSessionSelectionId', id);
+        appStore.setState('messagesLoading', true);
+      });
       try {
         const activatedSession = await client.session.activate(id, targetDirectory, {
           signal: activationController.signal,
@@ -2603,6 +2608,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           if (sessionActivationController === activationController) {
             sessionActivationController = null;
             sessionActivationDirectory = null;
+            batch(() => {
+              appStore.setState('pendingSessionSelectionId', null);
+              appStore.setState('messagesLoading', false);
+            });
           }
           return false;
         }
@@ -2619,6 +2628,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         if (sessionActivationController === activationController) {
           sessionActivationController = null;
           sessionActivationDirectory = null;
+          batch(() => {
+            appStore.setState('pendingSessionSelectionId', null);
+            appStore.setState('messagesLoading', false);
+          });
         }
         return false;
       }
@@ -2629,7 +2642,11 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       sessionActivationDirectory = null;
     }
     messageSyncGenerations.invalidate(id);
-    await sessionSyncOperations.selectSession(id, options);
+    const selection = sessionSyncOperations.selectSession(id, options);
+    if (appStore.state.pendingSessionSelectionId === id) {
+      appStore.setState('pendingSessionSelectionId', null);
+    }
+    await selection;
     if (appStore.state.activeSessionId === id) {
       const directory = getSessionDirectory(id);
       sessionStore.persistLastOpenedView(

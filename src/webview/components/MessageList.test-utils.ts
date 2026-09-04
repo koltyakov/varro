@@ -76,6 +76,7 @@ export function installMessageListTestEnvironment(
     setState('questions', []);
     setState('activeSessionId', null);
     setState('messagesLoading', false);
+    setState('pendingSessionSelectionId', null);
     setState('providers', []);
     setState('agents', []);
     setState('allAgents', []);

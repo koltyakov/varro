@@ -356,6 +356,26 @@ describe('MessageList entrance animation', () => {
 });
 
 describe('MessageList loading states', () => {
+  it('hides the previous transcript while a cross-workspace session activation is pending', async () => {
+    setSessions([
+      session('session-1', { time: { created: 1, updated: 2 } }),
+      session('session-2', { time: { created: 1, updated: 2 } }),
+    ]);
+    setState('activeSessionId', 'session-1');
+    replaceMessages([{ info: userMessage('message-1'), parts: [] }]);
+    batch(() => {
+      setState('pendingSessionSelectionId', 'session-2');
+      setState('messagesLoading', true);
+    });
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelector('[data-msg-id="message-1"]')).toBeNull();
+    expect(container?.querySelector('.chat-messages-loading')).not.toBeNull();
+    expect(container?.querySelector('.chat-empty-state')).toBeNull();
+  });
+
   it('shows a loading indicator instead of a blank transcript while messages load', async () => {
     setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
     setState('activeSessionId', 'session-1');

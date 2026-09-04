@@ -460,8 +460,9 @@ export function Chat() {
   });
 
   const activeTitle = () => {
-    if (!state.activeSessionId) return 'New Chat';
-    const session = sessionsById().get(state.activeSessionId);
+    const sessionId = state.pendingSessionSelectionId ?? state.activeSessionId;
+    if (!sessionId) return 'New Chat';
+    const session = sessionsById().get(sessionId);
     return normalizeSessionTitle(session?.title) || 'New Chat';
   };
   const headerSessionCounts = createMemo(() => {
