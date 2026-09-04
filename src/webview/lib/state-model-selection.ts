@@ -486,23 +486,6 @@ export function setModelsVisible(
   setState('hiddenModels', next);
   writeStored(STORAGE_KEYS.hiddenModels, next);
 
-  if (visible && !isProviderVisible(providerID)) {
-    const nextProviders = state.hiddenProviders.filter((item) => item !== providerID);
-    setState('hiddenProviders', nextProviders);
-    writeStored(STORAGE_KEYS.hiddenProviders, nextProviders);
-
-    const provider = state.providers.find((p) => p.id === providerID);
-    if (provider) {
-      const otherKeys = getListedProviderModels(provider)
-        .map((model) => model.id)
-        .filter((id) => !modelIDs.includes(id))
-        .map((id) => modelVisibilityKey(providerID, id));
-      const nextHidden = [...next, ...otherKeys.filter((k) => !next.includes(k))];
-      setState('hiddenModels', nextHidden);
-      writeStored(STORAGE_KEYS.hiddenModels, nextHidden);
-    }
-  }
-
   publishModelPreferences(base);
 
   if (

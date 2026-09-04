@@ -1565,8 +1565,9 @@ describe('state helpers', () => {
     expect(stateModule.state.selectedModel).toBeNull();
 
     stateModule.setModelVisible('openai', 'gpt-4.1', true);
-    expect(stateModule.state.hiddenProviders).toEqual([]);
-    expect(stateModule.state.hiddenModels).toEqual(['openai:gpt-4o']);
+    expect(stateModule.state.hiddenProviders).toEqual(['openai']);
+    expect(stateModule.state.hiddenModels).toEqual([]);
+    stateModule.setProviderVisible('openai', true);
 
     stateModule.setSelectedModel({ providerID: 'anthropic', modelID: 'claude' });
     stateModule.setModelVisible('anthropic', 'claude', false);

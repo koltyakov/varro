@@ -217,6 +217,12 @@ export function ModelsPanel() {
         return availabilityOrder || compareProviderOrder(a.provider, b.provider);
       });
   });
+  const filteredProviderEntries = createMemo(
+    () => new Map(filteredProviders().map((entry) => [entry.provider.id, entry]))
+  );
+  const filteredProviderIDs = createMemo(() =>
+    filteredProviders().map(({ provider }) => provider.id)
+  );
   const activeProviderIDs = createMemo(() =>
     filteredProviders()
       .filter(({ provider, models }) => !shouldSortProviderLast(provider, models))
@@ -684,47 +690,50 @@ export function ModelsPanel() {
               when={filteredProviders().length > 0}
               fallback={<div class="models-empty">No matching models</div>}
             >
-              <For each={filteredProviders()}>
-                {({ provider, models }) => (
-                  <ProviderSection
-                    provider={provider}
-                    models={models}
-                    maxCapabilityCount={maxCapabilityCount()}
-                    reconnectRequired={providerRequiresReconnection(provider.id)}
-                    forceExpanded={normalizedQuery().length > 0}
-                    routing={routing()}
-                    previousRouting={state.providerRefreshPending ? previousRouting() : null}
-                    reorderable={!normalizedQuery() && activeProviderIDs().includes(provider.id)}
-                    modelsReorderable={!normalizedQuery()}
-                    dragging={draggedProviderID() === provider.id}
-                    dragOver={dragOverProviderID() === provider.id}
-                    onDragStart={(event) => startProviderDrag(event, provider.id)}
-                    onDragOver={(event) => dragOverProvider(event, provider.id)}
-                    onDragLeave={() => {
-                      if (dragOverProviderID() === provider.id) setDragOverProviderID(null);
-                    }}
-                    onDrop={(event) => dropProvider(event, provider.id)}
-                    onDragEnd={() => {
-                      setDraggedProviderID(null);
-                      setDragOverProviderID(null);
-                    }}
-                    onReorder={(offset) => {
-                      const providerIDs = activeProviderIDs();
-                      const index = providerIDs.indexOf(provider.id);
-                      const targetID = providerIDs[index + offset];
-                      if (targetID) reorderProvider(provider.id, targetID);
-                    }}
-                    onOpenContextMenu={(next) => {
-                      setProviderContextMenu(null);
-                      setContextMenu(next);
-                    }}
-                    onOpenProviderContextMenu={(next) => {
-                      closeContextMenu();
-                      setProviderContextMenu(next);
-                    }}
-                    onOpenModelCatalog={() => setModelCatalogProvider(provider)}
-                  />
-                )}
+              <For each={filteredProviderIDs()}>
+                {(providerID) => {
+                  const entry = () => filteredProviderEntries().get(providerID)!;
+                  return (
+                    <ProviderSection
+                      provider={entry().provider}
+                      models={entry().models}
+                      maxCapabilityCount={maxCapabilityCount()}
+                      reconnectRequired={providerRequiresReconnection(providerID)}
+                      forceExpanded={normalizedQuery().length > 0}
+                      routing={routing()}
+                      previousRouting={state.providerRefreshPending ? previousRouting() : null}
+                      reorderable={!normalizedQuery() && activeProviderIDs().includes(providerID)}
+                      modelsReorderable={!normalizedQuery()}
+                      dragging={draggedProviderID() === providerID}
+                      dragOver={dragOverProviderID() === providerID}
+                      onDragStart={(event) => startProviderDrag(event, providerID)}
+                      onDragOver={(event) => dragOverProvider(event, providerID)}
+                      onDragLeave={() => {
+                        if (dragOverProviderID() === providerID) setDragOverProviderID(null);
+                      }}
+                      onDrop={(event) => dropProvider(event, providerID)}
+                      onDragEnd={() => {
+                        setDraggedProviderID(null);
+                        setDragOverProviderID(null);
+                      }}
+                      onReorder={(offset) => {
+                        const providerIDs = activeProviderIDs();
+                        const index = providerIDs.indexOf(providerID);
+                        const targetID = providerIDs[index + offset];
+                        if (targetID) reorderProvider(providerID, targetID);
+                      }}
+                      onOpenContextMenu={(next) => {
+                        setProviderContextMenu(null);
+                        setContextMenu(next);
+                      }}
+                      onOpenProviderContextMenu={(next) => {
+                        closeContextMenu();
+                        setProviderContextMenu(next);
+                      }}
+                      onOpenModelCatalog={() => setModelCatalogProvider(entry().provider)}
+                    />
+                  );
+                }}
               </For>
             </Show>
           </Show>
@@ -1282,9 +1291,19 @@ function ProviderSection(props: {
   );
   const [draggedModelID, setDraggedModelID] = createSignal<string | null>(null);
   const [dragOverModelID, setDragOverModelID] = createSignal<string | null>(null);
+  let providerWasVisible = isProviderVisible(props.provider.id);
+  let previousModelCount = props.models.length;
 
   createEffect(() => {
-    if (!isProviderVisible(props.provider.id)) setExpanded(false);
+    const providerIsVisible = isProviderVisible(props.provider.id);
+    const modelCount = props.models.length;
+    if (providerIsVisible !== providerWasVisible) {
+      setExpanded(providerIsVisible && enabledCount() > 0);
+    } else if (providerIsVisible && previousModelCount === 0 && modelCount > 0) {
+      setExpanded(true);
+    }
+    providerWasVisible = providerIsVisible;
+    previousModelCount = modelCount;
   });
 
   const allEnabled = () => props.models.length > 0 && enabledCount() === props.models.length;

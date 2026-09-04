@@ -1595,8 +1595,6 @@ describe('ModelsPanel', () => {
     findButton(document, 'Hide model')?.click();
     await Promise.resolve();
 
-    container?.querySelector<HTMLButtonElement>('.models-provider-toggle')?.click();
-    await Promise.resolve();
     const remainingCheckbox = modelRows()[0]?.querySelector<HTMLInputElement>('.models-checkbox');
     expect(modelRows()).toHaveLength(1);
     expect(modelRows()[0]?.textContent).toContain('GPT-5 mini');
@@ -1714,6 +1712,59 @@ describe('ModelsPanel', () => {
     expect(container?.querySelector('.models-model-row')).toBeNull();
   });
 
+  it('keeps a hidden provider expanded and hidden when a model is enabled', async () => {
+    setState('hiddenProviders', ['openai']);
+    setState('hiddenModels', ['openai:gpt-5-mini']);
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    const section = container?.querySelector<HTMLElement>('.models-provider');
+    section?.querySelector<HTMLButtonElement>('.models-provider-toggle')?.click();
+    const modelCheckbox = Array.from(
+      section?.querySelectorAll<HTMLInputElement>('.models-model-row .models-checkbox') ?? []
+    ).find((checkbox) => !checkbox.checked);
+    modelCheckbox?.click();
+    await Promise.resolve();
+
+    expect(container?.querySelector('.models-provider')).toBe(section);
+    expect(section?.querySelector('.models-chevron')?.classList.contains('expanded')).toBe(true);
+    expect(section?.querySelectorAll('.models-model-row')).toHaveLength(2);
+    expect(modelCheckbox?.checked).toBe(true);
+    expect(state.hiddenProviders).toEqual(['openai']);
+    expect(state.hiddenModels).toEqual([]);
+  });
+
+  it('keeps a hidden provider expanded when its managed model set changes', async () => {
+    setState('hiddenProviders', ['openai']);
+    setState('addedModels', ['openai:*', 'openai:gpt-5', 'openai:gpt-5-mini']);
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    const section = container?.querySelector<HTMLElement>('.models-provider');
+    section?.querySelector<HTMLButtonElement>('.models-provider-toggle')?.click();
+    findButton(section, 'Add models')?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const dialog = document.body.querySelector<HTMLElement>('.models-model-catalog-dialog');
+    const removedModelRow = Array.from(
+      dialog?.querySelectorAll<HTMLElement>('.models-model-catalog-row') ?? []
+    ).find((row) => row.querySelector('.models-model-catalog-id')?.textContent === '(gpt-5-mini)');
+
+    expect(container?.querySelector('.models-provider')).toBe(section);
+    expect(section?.querySelector('.models-chevron')?.classList.contains('expanded')).toBe(true);
+
+    removedModelRow?.querySelector<HTMLInputElement>('.models-checkbox')?.click();
+    findButton(dialog, 'Save changes')?.click();
+    await Promise.resolve();
+
+    expect(container?.querySelector('.models-provider')).toBe(section);
+    expect(section?.querySelector('.models-chevron')?.classList.contains('expanded')).toBe(true);
+    expect(section?.querySelectorAll('.models-model-row')).toHaveLength(1);
+    expect(section?.querySelector('.models-model-name')?.textContent).toBe('GPT-5');
+    expect(state.hiddenProviders).toEqual(['openai']);
+  });
+
   it('sorts hidden and fully disabled providers after enabled providers', async () => {
     setState('providers', [
       {
@@ -1781,10 +1832,20 @@ describe('ModelsPanel', () => {
     const disabledSection = Array.from(
       container?.querySelectorAll<HTMLElement>('.models-provider') ?? []
     ).find((section) => section.querySelector('.models-provider-name')?.textContent === 'Aardvark');
-    disabledSection?.querySelector<HTMLInputElement>('.models-checkbox')?.click();
+    disabledSection?.querySelector<HTMLButtonElement>('.models-provider-toggle')?.click();
+    disabledSection
+      ?.querySelector<HTMLInputElement>('.models-provider-header .models-checkbox')
+      ?.click();
     await Promise.resolve();
 
     expect(providerNames()).toEqual(['OpenAI', 'Aardvark', 'Alpha']);
+    const movedSection = Array.from(
+      container?.querySelectorAll<HTMLElement>('.models-provider') ?? []
+    ).find((section) => section.querySelector('.models-provider-name')?.textContent === 'Aardvark');
+    expect(movedSection).toBe(disabledSection);
+    expect(movedSection?.querySelector('.models-chevron')?.classList.contains('expanded')).toBe(
+      true
+    );
   });
 
   it('reorders active providers by dragging and persists their order', async () => {
