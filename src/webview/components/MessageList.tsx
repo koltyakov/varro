@@ -3854,6 +3854,7 @@ export function MessageList() {
       groupKey: summary.dataset.activitySummaryGroupKey,
       top: summary.getBoundingClientRect().top - containerRef.getBoundingClientRect().top,
     };
+    activityExitHeldResponseTextSignature = getResponseTextSignature();
   }
 
   function startActivityExitSummaryObserver(anchor: ActivityExitSummaryAnchor) {
@@ -4309,6 +4310,16 @@ export function MessageList() {
     if (!containerRef) return;
     const reserve = untrack(appendBottomReserve);
     if (reserve <= 0) return;
+    if (
+      activityExitSummaryAnchor &&
+      isLoading() &&
+      !state.streamingPartId &&
+      state.streamingText.length === 0 &&
+      !hasVisibleActivityTrayRows() &&
+      getResponseTextSignature() === activityExitHeldResponseTextSignature
+    ) {
+      return;
+    }
 
     const unreservedBottom = Math.max(
       0,
