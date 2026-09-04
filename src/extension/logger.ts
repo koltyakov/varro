@@ -29,7 +29,7 @@ function safeStringify(value: unknown): string {
 
 function formatLogLine(level: string, msg: string, args: unknown[]) {
   const suffix = args.length ? ` ${safeStringify(args)}` : '';
-  return `[${level}] ${msg}${suffix}`;
+  return `${new Date().toISOString()} [${level}] ${msg}${suffix}`;
 }
 
 export const logger = {

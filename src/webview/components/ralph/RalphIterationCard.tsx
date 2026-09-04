@@ -1,6 +1,13 @@
 import { For, Show, createEffect, createSignal, onCleanup } from 'solid-js';
-import type { RalphIteration, RalphVerificationVerdict } from '../../../shared/ralph';
+import type {
+  RalphIteration,
+  RalphVerificationEvidence,
+  RalphVerificationVerdict,
+} from '../../../shared/ralph';
 import { selectSession } from '../../hooks/useOpenCode';
+import { client } from '../../lib/client';
+import { postMessage } from '../../lib/bridge';
+import { isString } from '../../lib/runtime-values';
 import { formatDuration } from '../../lib/message-metrics';
 import { getRalphIterationLiveIssue } from './ralph-live-issue';
 
@@ -35,10 +42,49 @@ const STATUS_LABELS = {
   running: 'Running',
   passed: 'Passed',
   failed: 'Failed',
+  unverified: 'Unverified',
   aborted: 'Aborted',
 } satisfies RalphIterationStatusLabels;
 
 export function RalphIterationCard(props: { iteration: RalphIteration }) {
+  const [openingEvidence, setOpeningEvidence] = createSignal(false);
+  const [evidenceError, setEvidenceError] = createSignal<string | null>(null);
+  const openEvidence = async (name: string, evidence: RalphVerificationEvidence) => {
+    if (openingEvidence()) return;
+    setOpeningEvidence(true);
+    setEvidenceError(null);
+    try {
+      const messages = await client.session.messages(evidence.sessionId);
+      const message = messages.find((entry) => entry.info.id === evidence.messageId);
+      const part = message?.parts.find((entry) => entry.id === evidence.partId);
+      if (
+        part?.type !== 'tool' ||
+        part.tool !== 'bash' ||
+        part.state.status !== 'completed' ||
+        !isString(part.state.input.command) ||
+        part.state.input.command.trim().replace(/ +/g, ' ') !== evidence.command
+      ) {
+        throw new Error(
+          'Command output is no longer available. Open the session to inspect its history.'
+        );
+      }
+      if (
+        !postMessage({
+          type: 'vscode/open-text',
+          payload: {
+            title: `Ralph ${name} command output`,
+            content: `${evidence.command}\nRecorded exit: ${evidence.exitCode}\nModel reported: ${evidence.reportedVerdict}\n\n${part.state.output}`,
+            language: 'plaintext',
+          },
+        })
+      )
+        throw new Error('Could not open command output in the editor.');
+    } catch (error) {
+      setEvidenceError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setOpeningEvidence(false);
+    }
+  };
   // Acquire the shared ticker only while this iteration is still in flight,
   // so completed iterations don't keep an interval alive.
   createEffect(() => {
@@ -72,51 +118,95 @@ export function RalphIterationCard(props: { iteration: RalphIteration }) {
   const statusLabel = () => (hasErrorState() ? 'Error' : STATUS_LABELS[props.iteration.status]);
 
   return (
-    <button
-      type="button"
-      class={`ralph-iter-card ralph-iter-${props.iteration.status}${hasErrorState() ? ' ralph-iter-error' : ''}`}
-      onClick={open}
-      disabled={!props.iteration.childSessionId}
-      title={note() || undefined}
-    >
-      <span class="ralph-iter-index">#{props.iteration.index}</span>
-      <span class={`ralph-iter-status ralph-iter-status-${statusClass()}`}>{statusLabel()}</span>
-      <Show when={props.iteration.tokens}>
-        {(tokens) => (
-          <span
-            class="ralph-iter-tokens"
-            title={`input ${tokens().input} · output ${tokens().output}${tokens().reasoning ? ` · reasoning ${tokens().reasoning}` : ''}${tokens().cacheRead || tokens().cacheWrite ? ` · cache r${tokens().cacheRead}/w${tokens().cacheWrite}` : ''} · total ${tokens().total} (sub-agents included)`}
-          >
-            ↓{formatTokens(tokens().input)} ↑{formatTokens(tokens().output)}
+    <>
+      <button
+        type="button"
+        class={`ralph-iter-card ralph-iter-${props.iteration.status}${hasErrorState() ? ' ralph-iter-error' : ''}`}
+        onClick={open}
+        disabled={!props.iteration.childSessionId}
+        title={note() || undefined}
+      >
+        <span class="ralph-iter-index">#{props.iteration.index}</span>
+        <span class={`ralph-iter-status ralph-iter-status-${statusClass()}`}>{statusLabel()}</span>
+        <Show when={props.iteration.tokens}>
+          {(tokens) => (
+            <span
+              class="ralph-iter-tokens"
+              title={`input ${tokens().input} · output ${tokens().output}${tokens().reasoning ? ` · reasoning ${tokens().reasoning}` : ''}${tokens().cacheRead || tokens().cacheWrite ? ` · cache r${tokens().cacheRead}/w${tokens().cacheWrite}` : ''} · total ${tokens().total} (sub-agents included)`}
+            >
+              ↓{formatTokens(tokens().input)} ↑{formatTokens(tokens().output)}
+            </span>
+          )}
+        </Show>
+        <span class="ralph-iter-verdicts">
+          <span class="ralph-iter-verdicts-track">
+            <For each={Object.entries(props.iteration.verification)}>
+              {([name, value]) => (
+                <Verdict
+                  label={shortenVerdictLabel(name)}
+                  fullName={name}
+                  value={value}
+                  evidence={props.iteration.verificationEvidence?.[name]}
+                />
+              )}
+            </For>
           </span>
-        )}
-      </Show>
-      <span class="ralph-iter-verdicts">
-        <span class="ralph-iter-verdicts-track">
-          <For each={Object.entries(props.iteration.verification)}>
-            {([name, value]) => (
-              <Verdict label={shortenVerdictLabel(name)} fullName={name} value={value} />
+        </span>
+        <Show when={showNote() && note()}>
+          {(value) => <span class="ralph-iter-note">{value()}</span>}
+        </Show>
+        <Show when={!hidesDuration() && durationMs() !== null}>
+          <span class="ralph-iter-duration">{formatDuration(durationMs()!)}</span>
+        </Show>
+      </button>
+      <Show when={Object.keys(props.iteration.verificationEvidence ?? {}).length > 0}>
+        <details class="ralph-verification-evidence">
+          <summary>Verification command evidence</summary>
+          <For each={Object.entries(props.iteration.verificationEvidence ?? {})}>
+            {([name, evidence]) => (
+              <div>
+                <button
+                  type="button"
+                  disabled={openingEvidence()}
+                  onClick={() => void openEvidence(name, evidence)}
+                  title="Open recorded command output"
+                >
+                  {name}: <code>{evidence.command}</code> - exit {evidence.exitCode}
+                  <Show when={evidence.reportedVerdict === 'pass' && evidence.exitCode !== 0}>
+                    {' '}
+                    (model reported PASS; command failed)
+                  </Show>
+                </button>
+                <button type="button" onClick={() => void selectSession(evidence.sessionId)}>
+                  Open {name} session
+                </button>
+              </div>
             )}
           </For>
-        </span>
-      </span>
-      <Show when={showNote() && note()}>
-        {(value) => <span class="ralph-iter-note">{value()}</span>}
+          <Show when={evidenceError()}>{(message) => <p role="alert">{message()}</p>}</Show>
+        </details>
       </Show>
-      <Show when={!hidesDuration() && durationMs() !== null}>
-        <span class="ralph-iter-duration">{formatDuration(durationMs()!)}</span>
-      </Show>
-    </button>
+    </>
   );
 }
 
-function Verdict(props: { label: string; fullName: string; value: RalphVerificationVerdict }) {
+function Verdict(props: {
+  label: string;
+  fullName: string;
+  value: RalphVerificationVerdict;
+  evidence?: RalphVerificationEvidence;
+}) {
+  const source = () =>
+    props.evidence
+      ? `command exit ${props.evidence.exitCode}; model reported ${props.evidence.reportedVerdict}`
+      : 'model-reported';
   return (
     <span
       class={`ralph-iter-verdict ralph-iter-verdict-${props.value}`}
-      title={`${props.fullName}: ${props.value}`}
+      title={`${props.fullName}: ${props.value} (${source()})`}
     >
       {props.label}:{props.value}
+      {props.evidence ? ' (command)' : ' (reported)'}
     </span>
   );
 }

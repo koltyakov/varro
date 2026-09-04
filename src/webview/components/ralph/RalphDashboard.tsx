@@ -305,7 +305,7 @@ function stopReasonTooltip(reason: RalphStopReason): string {
     case 'iteration_limit':
       return 'Reached the configured iteration limit with no outstanding verification or plan items.';
     case 'iteration_limit_with_gap':
-      return 'Reached the configured iteration limit while the plan still has unchecked items or the last iteration had failed verifications.';
+      return 'Reached the configured iteration limit while the plan still has unchecked items or the last iteration had failed or unverified checks.';
     case 'consecutive_passes':
       return 'Stopped after consecutive passing iterations and a clean plan checklist.';
     case 'done_marker':

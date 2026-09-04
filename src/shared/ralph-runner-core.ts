@@ -68,7 +68,14 @@ export type RalphMessageEntry = {
       total?: number;
     };
   };
-  parts: Array<{ type: string; text?: string; files?: string[] }>;
+  parts: Array<{
+    type: string;
+    id?: string;
+    tool?: string;
+    state?: unknown;
+    text?: string;
+    files?: string[];
+  }>;
 };
 
 export type RalphSendBody = {
@@ -577,7 +584,9 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
     const lastCompleted = lastCompletedIteration(run);
     const hasOutstandingVerificationFailure =
       !!lastCompleted &&
-      (lastCompleted.status === 'failed' || hasFailedVerdict(lastCompleted.verification));
+      (lastCompleted.status === 'failed' ||
+        lastCompleted.status === 'unverified' ||
+        hasFailedVerdict(lastCompleted.verification));
     const planContent = await readPlanContentSafe(run.config.planDocPath, state);
     throwIfRunCancelled(state);
     const planIncomplete =
@@ -1273,13 +1282,28 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
       (verificationPromptIndex < 0 || verificationReportIndex < 0)
         ? {}
         : parseVerificationVerdicts(lastAssistantText);
+    const verificationEvidence = collectVerificationEvidence(
+      childId,
+      iterationMessages,
+      verificationPromptIndex,
+      verificationReportIndex,
+      verification
+    );
+    const discrepancies: string[] = [];
+    for (const [name, evidence] of Object.entries(verificationEvidence)) {
+      // Preserve the model's claim in the evidence, but never let PASS conceal a failed command.
+      if (evidence.exitCode !== 0 && verification[name] === 'pass') {
+        verification[name] = 'fail';
+        discrepancies.push(`${name}: model reported PASS, command exited ${evidence.exitCode}`);
+      }
+    }
     const status = inferIterationStatus(verification);
     const note = verificationResponseMissing
       ? `The verification prompt for Ralph session ${childId} has no assistant response; verification will be resumed`
       : Object.keys(verification).length === 0 &&
           !isInterruptionLikeAssistantText(lastAssistantText)
         ? `No completed verification report was found for Ralph session ${childId}. Last output: ${lastAssistantText.slice(0, 200)}`
-        : lastAssistantText.slice(0, 280);
+        : (discrepancies.length > 0 ? discrepancies.join('; ') : lastAssistantText).slice(0, 280);
 
     const settledIteration: RalphIteration = {
       index: iterationIndex,
@@ -1289,6 +1313,7 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
       endedAt: Date.now(),
       filesChanged: Array.from(filesChangedSet),
       verification,
+      verificationEvidence,
       tokens: tokens.total > 0 ? tokens : undefined,
       cost: cost > 0 ? cost : undefined,
       note,
@@ -1392,7 +1417,13 @@ function isVerificationPromptMessage(message: RalphMessageEntry): boolean {
 
 function nextIterationIndex(run: RalphRun): number {
   const indexes = run.iterations
-    .filter((it) => it.status === 'passed' || it.status === 'failed' || it.status === 'aborted')
+    .filter(
+      (it) =>
+        it.status === 'passed' ||
+        it.status === 'failed' ||
+        it.status === 'unverified' ||
+        it.status === 'aborted'
+    )
     .map((it) => it.index);
   const completed = indexes.length === 0 ? 0 : Math.max(...indexes);
   return completed + 1;
@@ -1470,7 +1501,8 @@ export function planHasOutstandingTasks(content: string): boolean {
 function lastCompletedIteration(run: RalphRun): RalphIteration | null {
   for (let i = run.iterations.length - 1; i >= 0; i -= 1) {
     const it = run.iterations[i];
-    if (it && (it.status === 'passed' || it.status === 'failed')) return it;
+    if (it && (it.status === 'passed' || it.status === 'failed' || it.status === 'unverified'))
+      return it;
   }
   return null;
 }
@@ -1517,6 +1549,7 @@ function mergeRepairResult(
     endedAt: repair.endedAt ?? iteration.endedAt,
     filesChanged,
     verification: repair.verification,
+    verificationEvidence: repair.verificationEvidence,
     tokens,
     cost,
     note: repair.note ?? iteration.note,
@@ -1589,7 +1622,77 @@ function inferIterationStatus(verdicts: RalphIteration['verification']): RalphIt
   const reported = Object.values(verdicts);
   if (reported.length === 0) return 'failed';
   if (reported.some((v) => v === 'fail')) return 'failed';
+  if (!reported.some((v) => v === 'pass')) return 'unverified';
   return 'passed';
+}
+
+function collectVerificationEvidence(
+  sessionId: string,
+  messages: RalphMessageEntry[],
+  promptIndex: number,
+  reportIndex: number,
+  verification: RalphIteration['verification']
+): NonNullable<RalphIteration['verificationEvidence']> {
+  const evidence: NonNullable<RalphIteration['verificationEvidence']> = {};
+  if (promptIndex < 0 || reportIndex < 0) return evidence;
+  const candidates = new Map<
+    string,
+    NonNullable<RalphIteration['verificationEvidence']>[string][]
+  >();
+  for (const [index, message] of messages.entries()) {
+    if (
+      message.info.role !== 'assistant' ||
+      !message.info.id ||
+      !messageOccursAfter(messages, index, promptIndex) ||
+      (index !== reportIndex && messageOccursAfter(messages, index, reportIndex))
+    )
+      continue;
+    for (const part of message.parts) {
+      if (part.type !== 'tool' || part.tool !== 'bash' || !part.id) continue;
+      const state = asRecord(part.state);
+      const input = asRecord(state?.input);
+      const metadata = asRecord(state?.metadata);
+      const command = input?.command;
+      const exitCode = metadata?.exit ?? metadata?.exitCode;
+      if (
+        state?.status !== 'completed' ||
+        !isString(command) ||
+        command.length > 512 ||
+        !isNumber(exitCode) ||
+        !Number.isSafeInteger(exitCode)
+      )
+        continue;
+      // Only a standalone command is attributable. Shell chains, flags, aliases, and
+      // repeated executions remain model-reported instead of guessing which check ran.
+      const normalized = command.trim().replace(/ +/g, ' ');
+      if (!/^[a-zA-Z0-9_:. /-]+$/.test(normalized)) continue;
+      for (const [name, reportedVerdict] of Object.entries(verification)) {
+        const commands = [
+          name,
+          `npm run ${name}`,
+          `pnpm run ${name}`,
+          `yarn ${name}`,
+          `bun run ${name}`,
+        ];
+        if (name === 'test') commands.push('npm test', 'pnpm test', 'bun test');
+        if (!commands.includes(normalized)) continue;
+        const matches = candidates.get(name) ?? [];
+        matches.push({
+          sessionId,
+          messageId: message.info.id,
+          partId: part.id,
+          command: normalized,
+          exitCode,
+          reportedVerdict,
+        });
+        candidates.set(name, matches);
+      }
+    }
+  }
+  for (const [name, matches] of candidates) {
+    if (matches.length === 1) evidence[name] = matches[0]!;
+  }
+  return evidence;
 }
 
 function isInterruptionLikeAssistantText(text: string): boolean {

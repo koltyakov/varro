@@ -36,8 +36,14 @@ describe('logger', () => {
     logger.error('Failed', new Error('boom'));
 
     expect(createOutputChannelMock).toHaveBeenCalledWith('Varro');
-    expect(appendLineMock).toHaveBeenNthCalledWith(1, '[INFO] Started [{"requestId":"abc123"}]');
-    expect(appendLineMock).toHaveBeenNthCalledWith(2, '[WARN] Slow request');
+    expect(appendLineMock).toHaveBeenNthCalledWith(
+      1,
+      expect.stringMatching(/^\d{4}-\d{2}-\d{2}T.*Z \[INFO\] Started \[\{"requestId":"abc123"\}\]$/)
+    );
+    expect(appendLineMock).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('[WARN] Slow request')
+    );
     expect(appendLineMock).toHaveBeenNthCalledWith(
       3,
       expect.stringContaining('[ERROR] Failed [{"name":"Error","message":"boom"')
@@ -50,7 +56,9 @@ describe('logger', () => {
 
     logger.info('Circular payload', circular);
 
-    expect(appendLineMock).toHaveBeenCalledWith('[INFO] Circular payload [object Object]');
+    expect(appendLineMock).toHaveBeenCalledWith(
+      expect.stringContaining('[INFO] Circular payload [object Object]')
+    );
   });
 
   it('forwards show and dispose to the output channel', () => {

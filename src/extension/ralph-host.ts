@@ -913,8 +913,8 @@ function normalizePersistedRalphRun(
     if (typeof record.note !== 'string' || record.note.length > MAX_RALPH_NOTE_LENGTH) return null;
     note = record.note || undefined;
   }
-  const status =
-    !config.workspaceDirectory && record.status === 'running' ? 'paused' : record.status;
+  let status = !config.workspaceDirectory && record.status === 'running' ? 'paused' : record.status;
+  if (status === 'done' && iterations.at(-1)?.status === 'unverified') status = 'incomplete';
   if (!config.workspaceDirectory) note = RALPH_WORKSPACE_MISSING_NOTE;
 
   const run: RalphRun = {
@@ -928,6 +928,8 @@ function normalizePersistedRalphRun(
     if (!isRalphStopReason(record.stopReason)) return null;
     run.stopReason = record.stopReason;
   }
+  if (record.status === 'done' && status === 'incomplete')
+    run.stopReason = 'iteration_limit_with_gap';
   if (note) run.note = note;
   return run;
 }
@@ -1029,7 +1031,12 @@ function normalizePersistedRalphIteration(value: unknown, maxIndex: number): Ral
   const iteration: RalphIteration = {
     index: record.index,
     childSessionId: record.childSessionId,
-    status: record.status,
+    status:
+      record.status === 'passed' &&
+      Object.values(verification).length > 0 &&
+      Object.values(verification).every((verdict) => verdict === 'skipped')
+        ? 'unverified'
+        : record.status,
     startedAt: record.startedAt,
     endedAt: record.endedAt,
     filesChanged,
@@ -1061,6 +1068,37 @@ function normalizePersistedRalphIteration(value: unknown, maxIndex: number): Ral
     );
     if (!repairSessionIds.every((id): id is string => id !== null)) return null;
     iteration.repairSessionIds = repairSessionIds;
+  }
+  if (record.verificationEvidence !== undefined) {
+    const entries = asRecord(record.verificationEvidence);
+    if (!entries || Object.keys(entries).length > MAX_RALPH_VERIFICATIONS) return null;
+    iteration.verificationEvidence = {};
+    for (const [name, rawEvidence] of Object.entries(entries)) {
+      const entry = asRecord(rawEvidence);
+      if (!entry || !Object.hasOwn(verification, name)) return null;
+      const sessionId = getBoundedString(entry.sessionId, MAX_RALPH_ID_LENGTH);
+      const messageId = getBoundedString(entry.messageId, MAX_RALPH_ID_LENGTH);
+      const partId = getBoundedString(entry.partId, MAX_RALPH_ID_LENGTH);
+      const command = getBoundedString(entry.command, 512);
+      if (
+        !sessionId ||
+        !messageId ||
+        !partId ||
+        !command ||
+        !isBoundedInteger(entry.exitCode, -Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER) ||
+        !isRalphVerificationVerdict(entry.reportedVerdict) ||
+        (sessionId !== iteration.childSessionId && !iteration.repairSessionIds?.includes(sessionId))
+      )
+        return null;
+      iteration.verificationEvidence[name] = {
+        sessionId,
+        messageId,
+        partId,
+        command,
+        exitCode: entry.exitCode,
+        reportedVerdict: entry.reportedVerdict,
+      };
+    }
   }
   return iteration;
 }
@@ -1178,6 +1216,7 @@ function isRalphIterationStatus(value: unknown): value is RalphIteration['status
     value === 'running' ||
     value === 'passed' ||
     value === 'failed' ||
+    value === 'unverified' ||
     value === 'aborted'
   );
 }

@@ -9,6 +9,7 @@ import {
 } from '../shared/protocol';
 import { normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import { logger } from './logger';
+import { diagnosticRoute, diagnosticTimeline } from './diagnostics';
 import { getOpenCodeDirectoryHeaders, scopeOpenCodeRequest } from './util/opencode-request';
 import { anySignal, asRecord, findSseChunkBoundary, getString } from './server-utils';
 
@@ -78,6 +79,7 @@ export class OpenCodeTransport {
   private eventStreamGeneration = 0;
   private eventStreamServerUrl: string | undefined;
   private lastEventId = '';
+  private diagnosticHealth: boolean | undefined;
   private requestWorkspaceDirectory: string | undefined;
   private eventStreamDirectory: string | undefined;
   private readonly requestControllers = new Set<AbortController>();
@@ -104,6 +106,8 @@ export class OpenCodeTransport {
         : (options?.directory ?? this.getWorkspaceDirectoryForRequest(method, path))
     );
     const controller = new AbortController();
+    const operationId = diagnosticTimeline.nextId('request');
+    let responseStatus: number | undefined;
     const timeoutSignal = AbortSignal.timeout(this.getRequestTimeoutMs(method, path));
     this.requestControllers.add(controller);
     const headers: Record<string, string> = {
@@ -122,6 +126,7 @@ export class OpenCodeTransport {
         init.body = JSON.stringify(body);
       }
       const res = await fetch(scoped.url, init);
+      responseStatus = res.status;
       const text = await readResponseText(
         res,
         options?.maxResponseBytes ?? OpenCodeTransport.RESPONSE_MAX_BYTES,
@@ -146,6 +151,21 @@ export class OpenCodeTransport {
       }
       return data;
     } catch (err) {
+      diagnosticTimeline.record({
+        event: 'rest-failure',
+        operationId,
+        method,
+        route: diagnosticRoute(path),
+        status: responseStatus,
+        state: timeoutSignal.aborted
+          ? 'timeout'
+          : init.signal?.aborted
+            ? 'cancelled'
+            : responseStatus
+              ? 'response-error'
+              : 'network-error',
+      });
+      logger.warn(`OpenCode request failed (${operationId}): ${method} ${diagnosticRoute(path)}`);
       if (timeoutSignal.aborted && !controller.signal.aborted) {
         throw new Error(`OpenCode request timed out: ${method} ${path}`, { cause: err });
       }
@@ -218,15 +238,23 @@ export class OpenCodeTransport {
   }
 
   async readHealthInfo(): Promise<{ healthy: boolean; version?: string }> {
+    let health: { healthy: boolean; version?: string } = { healthy: false };
     try {
       const res = await fetch(`${this.options.getUrl()}${CURRENT_OPENCODE_ENDPOINTS.health}`, {
         signal: AbortSignal.timeout(OpenCodeTransport.HEALTH_TIMEOUT_MS),
       });
-      if (!res.ok) return { healthy: false };
-      return parseHealthResponse(await res.json()) ?? { healthy: false };
+      if (res.ok) health = parseHealthResponse(await res.json()) ?? { healthy: false };
     } catch {
-      return { healthy: false };
+      // A failed probe is represented by the unhealthy snapshot below.
     }
+    if (this.diagnosticHealth !== health.healthy) {
+      diagnosticTimeline.record({
+        event: 'health',
+        state: health.healthy ? 'healthy' : 'unhealthy',
+      });
+      this.diagnosticHealth = health.healthy;
+    }
+    return health;
   }
 
   async checkHealth(): Promise<boolean> {
@@ -247,6 +275,12 @@ export class OpenCodeTransport {
       this.requestWorkspaceDirectory = eventStreamDirectory;
     }
     const generation = ++this.eventStreamGeneration;
+    const operationId = diagnosticTimeline.nextId('stream');
+    diagnosticTimeline.record({
+      event: 'stream-connect',
+      operationId,
+      attempt: this.eventReconnectCount,
+    });
     this.eventController = new AbortController();
     const controller = this.eventController;
     let shouldReconnect = false;
@@ -300,6 +334,7 @@ export class OpenCodeTransport {
       if (!res.ok || !res.body) throw new Error(`Failed to open event stream: ${res.status}`);
       continuityEstablished = true;
       connectedAt = Date.now();
+      diagnosticTimeline.record({ event: 'stream-healthy', operationId });
       this.options.updateEventStreamState('healthy');
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -318,6 +353,7 @@ export class OpenCodeTransport {
           break;
         }
         resetIdleTimer();
+        diagnosticTimeline.streamActivity(operationId);
         if (
           !reconnectBackoffReset &&
           Date.now() - connectedAt >= OpenCodeTransport.EVENT_STABILITY_WINDOW_MS
@@ -379,6 +415,13 @@ export class OpenCodeTransport {
         }
 
         const delay = this.getEventReconnectDelay();
+        diagnosticTimeline.record({
+          event: 'stream-retry',
+          operationId,
+          state: 'degraded',
+          attempt: this.eventReconnectCount,
+          delayMs: delay,
+        });
         this.eventReconnectTimer = setTimeout(() => {
           if (this.options.isDisposing() || this.options.getStatus().state !== 'running') {
             this.eventReconnectTimer = null;
@@ -398,6 +441,7 @@ export class OpenCodeTransport {
 
     this.requestWorkspaceDirectory = directory;
     this.eventStreamDirectory = directory;
+    diagnosticTimeline.record({ event: 'workspace-activated', directory });
     return Promise.resolve({ state: 'connected', directory });
   }
 

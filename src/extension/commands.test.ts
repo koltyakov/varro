@@ -41,7 +41,10 @@ const { configInspectMock, configUpdateMock, registeredCommands, vscodeMock } = 
           asWebviewUri: vi.fn((uri: { fsPath: string }) => ({
             toString: () => `webview:${uri.fsPath}`,
           })),
-          onDidReceiveMessage: vi.fn(() => ({ dispose: vi.fn() })),
+          onDidReceiveMessage: vi.fn((_handler: (message: unknown) => unknown) => ({
+            dispose: vi.fn(),
+          })),
+          postMessage: vi.fn(async (_message: unknown) => true),
         },
         onDidDispose: vi.fn(),
         reveal: vi.fn(),
@@ -49,6 +52,7 @@ const { configInspectMock, configUpdateMock, registeredCommands, vscodeMock } = 
       showTextDocument: vi.fn(() => Promise.resolve()),
       showWarningMessage: vi.fn(() => Promise.resolve()),
       showErrorMessage: vi.fn(() => Promise.resolve()),
+      showSaveDialog: vi.fn<() => Promise<{ fsPath: string } | undefined>>(async () => undefined),
     },
     Uri: {
       file: vi.fn((fsPath: string) => ({ fsPath })),
@@ -147,6 +151,58 @@ function register(
 }
 
 describe('About command', () => {
+  it('previews and exports the same redacted snapshot with optional local paths', async () => {
+    register('/repo', {
+      readServerInfo: vi.fn().mockResolvedValue({
+        status: { state: 'running', url: 'http://localhost:4096' },
+        url: 'http://localhost:4096',
+        health: { healthy: true, version: '1.18.4' },
+        cliVersion: '1.18.4',
+        installMethod: 'bun',
+        resolvedCommand: '/Users/alex/opencode',
+        activeAgentError: 'api_key=secret-credential',
+      }),
+    });
+    await runCommand('varro.about');
+    const panel = vscodeMock.window.createWebviewPanel.mock.results.at(-1)!.value;
+    const receive = panel.webview.onDidReceiveMessage.mock.calls[0]![0];
+    const root = document.createElement('div');
+    root.innerHTML = panel.webview.html;
+    const preview = root.querySelector('#diagnostics-preview')!.textContent;
+    expect(preview).toContain('Recent diagnostic events');
+    expect(preview).not.toContain('/Users/alex');
+    expect(preview).not.toContain('secret-credential');
+    await receive({ action: 'copyDiagnostics' });
+    expect(vscodeMock.env.clipboard.writeText).toHaveBeenLastCalledWith(preview);
+    expect(panel.webview.postMessage).toHaveBeenLastCalledWith({
+      type: 'diagnostics-result',
+      text: 'Copied',
+    });
+    await receive({ action: 'copyDiagnostics', includePaths: true });
+    expect(vscodeMock.env.clipboard.writeText).toHaveBeenLastCalledWith(
+      expect.stringContaining('/Users/alex/opencode')
+    );
+    const destination = { fsPath: '/tmp/varro-diagnostics.md' };
+    vscodeMock.window.showSaveDialog.mockResolvedValueOnce(destination);
+    await receive({ action: 'saveDiagnostics' });
+    expect(vscodeMock.workspace.fs.writeFile).toHaveBeenLastCalledWith(
+      destination,
+      new TextEncoder().encode(preview!)
+    );
+    expect(panel.webview.postMessage).toHaveBeenLastCalledWith({
+      type: 'diagnostics-result',
+      text: 'Saved',
+    });
+    const writes = vscodeMock.workspace.fs.writeFile.mock.calls.length;
+    await receive({ action: 'saveDiagnostics' });
+    expect(vscodeMock.workspace.fs.writeFile.mock.calls).toHaveLength(writes);
+    vscodeMock.env.clipboard.writeText.mockRejectedValueOnce(new Error('clipboard unavailable'));
+    await receive({ action: 'copyDiagnostics' });
+    expect(panel.webview.postMessage).toHaveBeenLastCalledWith({
+      type: 'diagnostics-result',
+      text: 'Export failed',
+    });
+  });
   it('shows OpenCode server details without redundant diagnostics', async () => {
     const { sidebar } = register('/repo', {
       readServerInfo: vi.fn().mockResolvedValue({

@@ -23,10 +23,25 @@ export type RalphStopReason =
   | 'manual_stop'
   | 'iteration_error';
 
-export type RalphIterationStatus = 'pending' | 'running' | 'passed' | 'failed' | 'aborted';
+export type RalphIterationStatus =
+  | 'pending'
+  | 'running'
+  | 'passed'
+  | 'failed'
+  | 'unverified'
+  | 'aborted';
 export type RalphIterationPhase = 'primary' | 'verification' | 'repair';
 
 export type RalphVerificationVerdict = 'pass' | 'fail' | 'skipped';
+
+export type RalphVerificationEvidence = {
+  sessionId: string;
+  messageId: string;
+  partId: string;
+  command: string;
+  exitCode: number;
+  reportedVerdict: RalphVerificationVerdict;
+};
 
 export type RalphSelectedModel = {
   providerID: string;
@@ -72,6 +87,8 @@ export type RalphIteration = {
    * name. Order is preserved as encountered in the model's report.
    */
   verification: Record<string, RalphVerificationVerdict>;
+  /** Exact command matches from this verification turn; absent entries are model-reported. */
+  verificationEvidence?: Record<string, RalphVerificationEvidence>;
   tokens?: RalphIterationTokens;
   cost?: number;
   note?: string;

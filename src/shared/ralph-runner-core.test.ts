@@ -201,6 +201,127 @@ function completedVerificationReport(text: string): RalphMessageEntry[] {
   ];
 }
 
+function verificationWithCommand(
+  command: string,
+  exitCode: number,
+  report = 'lint: PASS'
+): RalphMessageEntry[] {
+  const messages = completedVerificationReport(report);
+  messages.splice(1, 0, {
+    info: { id: 'message-command', role: 'assistant', time: { created: 250 } },
+    parts: [
+      {
+        type: 'tool',
+        id: 'part-command',
+        tool: 'bash',
+        state: {
+          status: 'completed',
+          input: { command },
+          metadata: { exit: exitCode },
+        },
+      },
+    ],
+  });
+  return messages;
+}
+
+describe('Ralph verification provenance', () => {
+  it('keeps all-skipped verification incomplete even after the plan becomes DONE', async () => {
+    const harness = createHarness();
+    harness.readWorkspaceFile.mockResolvedValueOnce('# Plan\n- [ ] work').mockResolvedValue('DONE');
+    harness.createSession.mockResolvedValue('child-1');
+    harness.listMessages.mockResolvedValue(
+      completedVerificationReport('lint: SKIPPED - unavailable')
+    );
+    settlePromptsViaIdle(harness, { immediate: true });
+    await harness.runner.start(createConfig({ iterations: 1 }));
+    expect(harness.store.getRun('manager-1')).toMatchObject({
+      status: 'incomplete',
+      stopReason: 'iteration_limit_with_gap',
+      iterations: [{ status: 'unverified', verification: { lint: 'skipped' } }],
+    });
+    expect(harness.createSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('exposes a contradictory PASS and replaces its evidence with the repair turn', async () => {
+    const harness = createHarness();
+    harness.readWorkspaceFile.mockResolvedValue('# Plan\n- [x] work');
+    harness.createSession.mockResolvedValueOnce('child-1').mockResolvedValueOnce('repair-1');
+    harness.listMessages.mockImplementation(async (id) =>
+      verificationWithCommand('npm run lint', id === 'child-1' ? 2 : 0)
+    );
+    settlePromptsViaIdle(harness, { immediate: true });
+    const snapshots: RalphIteration[] = [];
+    const upsert = harness.store.upsertIteration;
+    harness.store.upsertIteration = (id, iteration) => {
+      snapshots.push(structuredClone(iteration));
+      upsert(id, iteration);
+    };
+    await harness.runner.start(createConfig({ iterations: 1 }));
+    expect(snapshots).toContainEqual(
+      expect.objectContaining({
+        phase: 'repair',
+        verification: { lint: 'fail' },
+        verificationEvidence: {
+          lint: expect.objectContaining({
+            sessionId: 'child-1',
+            exitCode: 2,
+            reportedVerdict: 'pass',
+          }),
+        },
+      })
+    );
+    expect(harness.store.getRun('manager-1')?.iterations[0]).toMatchObject({
+      status: 'passed',
+      verification: { lint: 'pass' },
+      repairSessionIds: ['repair-1'],
+      verificationEvidence: {
+        lint: {
+          sessionId: 'repair-1',
+          exitCode: 0,
+          reportedVerdict: 'pass',
+          messageId: 'message-command',
+          partId: 'part-command',
+        },
+      },
+    });
+  });
+
+  it.each([
+    'shell-chain',
+    'previous-turn',
+    'repeated-command',
+    'no-exit-code',
+    'unrelated-check',
+  ] as const)('leaves %s evidence model-reported', async (scenario) => {
+    const harness = createHarness();
+    const messages = verificationWithCommand(
+      scenario === 'shell-chain'
+        ? 'npm run lint && echo done'
+        : scenario === 'unrelated-check'
+          ? 'npm test'
+          : 'npm run lint',
+      2
+    );
+    const commandMessage = messages[1]!;
+    if (scenario === 'previous-turn') commandMessage.info.time = { created: 100 };
+    if (scenario === 'repeated-command') messages.splice(2, 0, structuredClone(commandMessage));
+    if (scenario === 'no-exit-code')
+      commandMessage.parts[0]!.state = { status: 'completed', input: { command: 'npm run lint' } };
+    harness.readWorkspaceFile.mockResolvedValue('# Plan\n- [x] work');
+    harness.createSession.mockResolvedValue('child-1');
+    harness.listMessages.mockResolvedValue(messages);
+    settlePromptsViaIdle(harness, { immediate: true });
+    await harness.runner.start(createConfig({ iterations: 1 }));
+    expect(harness.store.getRun('manager-1')?.iterations[0]).toMatchObject({
+      status: 'passed',
+      verification: { lint: 'pass' },
+      verificationEvidence: {},
+    });
+    expect(harness.createSession).toHaveBeenCalledTimes(1);
+  });
+});
+
 function createDeferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
   const promise = new Promise<T>((promiseResolve) => {

@@ -4,6 +4,8 @@ import type { RalphIteration } from '../../../shared/ralph';
 import type { Session } from '../../types';
 import { setSessionUsageLimit, setState } from '../../lib/state';
 import { RalphIterationCard } from './RalphIterationCard';
+import { client } from '../../lib/client';
+import * as bridge from '../../lib/bridge';
 
 const selectSessionMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 
@@ -49,17 +51,149 @@ afterEach(() => {
   container?.remove();
   container = null;
   vi.useRealTimers();
+  vi.restoreAllMocks();
   setState('sessionStatus', {});
   setState('sessionUsageLimits', {});
   setState('failedSessionIds', []);
 });
 
 describe('RalphIterationCard', () => {
+  it('explains contradictory command evidence and opens the repair session', async () => {
+    cleanup = render(
+      () =>
+        RalphIterationCard({
+          iteration: iteration({
+            childSessionId: 'child-1',
+            status: 'failed',
+            verification: { lint: 'fail' },
+            verificationEvidence: {
+              lint: {
+                sessionId: 'repair-1',
+                messageId: 'message-1',
+                partId: 'part-1',
+                command: 'npm run lint',
+                exitCode: 2,
+                reportedVerdict: 'pass',
+              },
+            },
+          }),
+        }),
+      container!
+    );
+    expect(container?.textContent).toContain('model reported PASS; command failed');
+    expect(container?.querySelector('.ralph-iter-verdict')?.textContent).toBe(
+      'lint:fail (command)'
+    );
+    Array.from(
+      container?.querySelectorAll<HTMLButtonElement>('.ralph-verification-evidence button') ?? []
+    )
+      .find((button) => button.textContent?.includes('Open lint session'))
+      ?.click();
+    await flushMicrotasks();
+    expect(selectSessionMock).toHaveBeenCalledWith('repair-1');
+  });
+
+  it('opens the exact recorded tool output and reports missing evidence without substituting another tool', async () => {
+    const messages: Awaited<ReturnType<typeof client.session.messages>> = [
+      {
+        info: {
+          id: 'message-1',
+          sessionID: 'repair-1',
+          role: 'assistant',
+          time: { created: 200 },
+          parentID: 'prompt-1',
+          modelID: 'model',
+          providerID: 'provider',
+          mode: 'build',
+          agent: 'build',
+          path: { cwd: '/repo', root: '/repo' },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        },
+        parts: [
+          {
+            type: 'tool',
+            tool: 'bash',
+            id: 'part-other',
+            sessionID: 'repair-1',
+            messageID: 'message-1',
+            callID: 'call-other',
+            state: {
+              status: 'completed',
+              input: { command: 'npm test' },
+              output: 'wrong output',
+              title: 'test',
+              metadata: { exit: 0 },
+              time: { start: 200, end: 210 },
+            },
+          },
+          {
+            type: 'tool',
+            tool: 'bash',
+            id: 'part-1',
+            sessionID: 'repair-1',
+            messageID: 'message-1',
+            callID: 'call-1',
+            state: {
+              status: 'completed',
+              input: { command: 'npm run lint' },
+              output: 'lint failed on line 12',
+              title: 'lint',
+              metadata: { exit: 2 },
+              time: { start: 220, end: 230 },
+            },
+          },
+        ],
+      },
+    ];
+    const readMessages = vi.spyOn(client.session, 'messages').mockResolvedValue(messages);
+    const openText = vi.spyOn(bridge, 'postMessage').mockReturnValue(true);
+    cleanup = render(
+      () =>
+        RalphIterationCard({
+          iteration: iteration({
+            childSessionId: 'child-1',
+            status: 'failed',
+            verification: { lint: 'fail' },
+            verificationEvidence: {
+              lint: {
+                sessionId: 'repair-1',
+                messageId: 'message-1',
+                partId: 'part-1',
+                command: 'npm run lint',
+                exitCode: 2,
+                reportedVerdict: 'pass',
+              },
+            },
+          }),
+        }),
+      container!
+    );
+    container?.querySelector<HTMLButtonElement>('.ralph-verification-evidence button')?.click();
+    await flushMicrotasks(5);
+    expect(readMessages).toHaveBeenCalledWith('repair-1');
+    expect(openText).toHaveBeenCalledWith({
+      type: 'vscode/open-text',
+      payload: {
+        title: 'Ralph lint command output',
+        language: 'plaintext',
+        content: 'npm run lint\nRecorded exit: 2\nModel reported: pass\n\nlint failed on line 12',
+      },
+    });
+    readMessages.mockResolvedValue([]);
+    container?.querySelector<HTMLButtonElement>('.ralph-verification-evidence button')?.click();
+    await flushMicrotasks(5);
+    expect(container?.querySelector('[role="alert"]')?.textContent).toContain(
+      'no longer available'
+    );
+    expect(openText).toHaveBeenCalledTimes(1);
+  });
   it.each([
     ['pending', 'Pending'],
     ['running', 'Running'],
     ['passed', 'Passed'],
     ['failed', 'Error'],
+    ['unverified', 'Unverified'],
     ['aborted', 'Aborted'],
   ] as const)('renders the %s status label', (status, label) => {
     cleanup = render(() => RalphIterationCard({ iteration: iteration({ status }) }), container!);
@@ -138,11 +272,11 @@ describe('RalphIterationCard', () => {
     const tokens = container?.querySelector('.ralph-iter-tokens');
 
     expect(verdicts.map((node) => node.textContent)).toEqual([
-      'cb:pass',
-      'typecheck:fail',
-      'lint:skipped',
+      'cb:pass (reported)',
+      'typecheck:fail (reported)',
+      'lint:skipped (reported)',
     ]);
-    expect(verdicts[0]?.getAttribute('title')).toBe('cargo build: pass');
+    expect(verdicts[0]?.getAttribute('title')).toBe('cargo build: pass (model-reported)');
     expect(tokens?.textContent).toBe('↓1.2k ↑13k');
     expect(tokens?.getAttribute('title')).toContain('input 1200');
     expect(tokens?.getAttribute('title')).toContain('output 12500');

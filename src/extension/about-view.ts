@@ -19,6 +19,8 @@ export type AboutViewData = {
   nodeVersion: string;
   platform: string;
   updateNotice?: string;
+  diagnostics?: string;
+  diagnosticsWithPaths?: string;
 };
 
 export function renderAboutHtml(data: AboutViewData, cspSource: string): string {
@@ -177,6 +179,16 @@ export function renderAboutHtml(data: AboutViewData, cspSource: string): string 
       <div class="runtime-item"><span class="runtime-label">Platform</span><code>${escapeHtml(data.platform)}</code></div>
     </section>
 
+    <details class="card" style="margin-top: 16px">
+      <summary>Preview diagnostics</summary>
+      <p>Recent lifecycle events are included. Credentials and URL query values are removed.</p>
+      <label><input id="include-paths" type="checkbox"> Include local paths</label>
+      <pre id="diagnostics-preview" style="white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto">${escapeHtml(data.diagnostics ?? '')}</pre>
+      <template id="diagnostics-redacted">${escapeHtml(data.diagnostics ?? '')}</template>
+      <template id="diagnostics-with-paths">${escapeHtml(data.diagnosticsWithPaths ?? '')}</template>
+      <button id="save-diagnostics" type="button">Save diagnostics</button>
+      <span id="diagnostics-result" role="status" aria-live="polite"></span>
+    </details>
     <footer>
       <nav class="links" aria-label="Varro links">
         <a href="https://github.com/koltyakov/varro"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 13.5c-3 .9-3-1.5-4-2m8 4v-2.3c0-.7-.2-1.2-.5-1.5 1.8-.2 3.7-.9 3.7-4A3.1 3.1 0 0 0 12.4 5c.1-.5.1-1.3-.3-2.1 0 0-.7-.2-2.4.9a8.2 8.2 0 0 0-4.4 0c-1.7-1.1-2.4-.9-2.4-.9C2.5 3.7 2.5 4.5 2.6 5a3.1 3.1 0 0 0-.8 2.2c0 3.1 1.9 3.8 3.7 4-.3.3-.5.7-.5 1.4v2.9" /></svg>GitHub</a>
@@ -189,11 +201,22 @@ export function renderAboutHtml(data: AboutViewData, cspSource: string): string 
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const copyButton = document.getElementById('copy-diagnostics');
-    const copyLabel = copyButton.querySelector('span');
+    const includePaths = document.getElementById('include-paths');
+    includePaths.addEventListener('change', () => {
+      const source = document.getElementById(includePaths.checked ? 'diagnostics-with-paths' : 'diagnostics-redacted');
+      document.getElementById('diagnostics-preview').textContent = source.content.textContent;
+      document.getElementById('diagnostics-result').textContent = '';
+    });
     copyButton.addEventListener('click', () => {
-      vscode.postMessage({ action: 'copyDiagnostics' });
-      copyLabel.textContent = 'Copied';
-      setTimeout(() => { copyLabel.textContent = 'Copy diagnostics'; }, 1600);
+      vscode.postMessage({ action: 'copyDiagnostics', includePaths: includePaths.checked });
+    });
+    document.getElementById('save-diagnostics').addEventListener('click', () => {
+      vscode.postMessage({ action: 'saveDiagnostics', includePaths: includePaths.checked });
+    });
+    window.addEventListener('message', (event) => {
+      if (event.data?.type === 'diagnostics-result' && typeof event.data.text === 'string') {
+        document.getElementById('diagnostics-result').textContent = event.data.text;
+      }
     });
   </script>
 </body>

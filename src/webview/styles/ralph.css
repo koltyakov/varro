@@ -769,6 +769,7 @@
   border-color: color-mix(in srgb, var(--color-vscode-error) 45%, transparent);
 }
 
+.ralph-iter-status-unverified,
 .ralph-iter-status-pending {
   color: var(--color-vscode-muted);
   background: color-mix(in srgb, var(--color-vscode-fg) 6%, transparent);
@@ -876,6 +877,22 @@
 
 .ralph-iter-verdict-skipped {
   color: var(--color-vscode-muted);
+}
+
+.ralph-verification-evidence {
+  border: 1px solid var(--color-vscode-border);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  font-size: 11px;
+}
+
+.ralph-verification-evidence button {
+  display: block;
+  width: 100%;
+  padding: 6px;
+  text-align: left;
+  color: inherit;
+  overflow-wrap: anywhere;
 }
 
 .ralph-iter-note {

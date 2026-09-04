@@ -31,6 +31,7 @@ import {
   type OpenCodeRescopeResult,
 } from './open-code-transport';
 import { logger } from './logger';
+import { diagnosticTimeline } from './diagnostics';
 import { ServerLifecycleStateMachine } from './server-lifecycle';
 import {
   compareVersions,
@@ -305,6 +306,9 @@ export class OpenCodeServer extends EventEmitter {
   private setStatus(s: ServerStatus) {
     const previousStatus = this._status;
     const nextStatus = normalizeRunningStatus(s, this._status);
+    if (previousStatus.state !== nextStatus.state) {
+      diagnosticTimeline.record({ event: 'server-state', state: nextStatus.state });
+    }
     this._status = nextStatus;
     if (nextStatus.state === 'running') {
       this.startMaintenanceLoop();

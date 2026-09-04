@@ -1,5 +1,6 @@
 /* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns -- Command handlers decode VS Code extension API values before use. */
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Assertions bind VS Code command contexts to contracts checked by each handler. */
+/* oxlint-disable unicorn/require-post-message-target-origin -- VS Code Webview.postMessage accepts no targetOrigin. */
 import * as vscode from 'vscode';
 import { getSelectionRangesFromEditorContext } from '../shared/context-files';
 import { describeInstallMethod, getUpgradeCommand } from '../shared/opencode-install';
@@ -13,6 +14,7 @@ import { errorHub } from './error-hub';
 import { logger } from './logger';
 import { compareVersions, extractVersion } from './server-utils';
 import { renderAboutHtml } from './about-view';
+import { diagnosticTimeline } from './diagnostics';
 
 type ExtensionPackageJson = {
   name?: unknown;
@@ -40,6 +42,7 @@ export function registerCommands(
 ) {
   let aboutPanel: vscode.WebviewPanel | undefined;
   let aboutDiagnostics = '';
+  let aboutDiagnosticsWithPaths = '';
 
   context.subscriptions.push(
     vscode.commands.registerCommand('varro.chat.focus', async () => {
@@ -130,7 +133,8 @@ export function registerCommands(
       try {
         const serverInfo = await server.readServerInfo();
         const markdown = renderAboutMarkdown(context, serverInfo);
-        aboutDiagnostics = markdown;
+        aboutDiagnostics = diagnosticTimeline.export(markdown);
+        aboutDiagnosticsWithPaths = diagnosticTimeline.export(markdown, false);
         const uri = await sidebar.openMarkdownDocument(markdown, 'Varro About', false);
         if (!uri) throw new Error('Could not open the generated about report.');
 
@@ -145,15 +149,45 @@ export function registerCommands(
         if (!aboutPanel) {
           aboutPanel = panel;
           panel.iconPath = iconPath;
-          const messageSubscription = panel.webview.onDidReceiveMessage((message: unknown) => {
-            if (
-              message &&
-              typeof message === 'object' &&
-              (message as { action?: unknown }).action === 'copyDiagnostics'
-            ) {
-              void vscode.env.clipboard.writeText(aboutDiagnostics);
+          const messageSubscription = panel.webview.onDidReceiveMessage(
+            async (message: unknown) => {
+              if (!message || typeof message !== 'object') return;
+              const { action, includePaths } = message as {
+                action?: unknown;
+                includePaths?: unknown;
+              };
+              if (action !== 'copyDiagnostics' && action !== 'saveDiagnostics') return;
+              const report = includePaths === true ? aboutDiagnosticsWithPaths : aboutDiagnostics;
+              try {
+                if (action === 'copyDiagnostics') {
+                  await vscode.env.clipboard.writeText(report);
+                } else {
+                  const destination = await vscode.window.showSaveDialog({
+                    title: 'Save Varro diagnostics',
+                    filters: { Markdown: ['md'] },
+                  });
+                  if (!destination) return;
+                  await vscode.workspace.fs.writeFile(
+                    destination,
+                    new TextEncoder().encode(report)
+                  );
+                }
+                await panel.webview.postMessage({
+                  type: 'diagnostics-result',
+                  text: action === 'copyDiagnostics' ? 'Copied' : 'Saved',
+                });
+              } catch (error) {
+                const detail = error instanceof Error ? error.message : String(error);
+                void vscode.window.showErrorMessage(
+                  `Could not export Varro diagnostics: ${detail}`
+                );
+                await panel.webview.postMessage({
+                  type: 'diagnostics-result',
+                  text: 'Export failed',
+                });
+              }
             }
-          });
+          );
           panel.onDidDispose(() => {
             messageSubscription.dispose();
             if (aboutPanel === panel) aboutPanel = undefined;
@@ -162,7 +196,15 @@ export function registerCommands(
           panel.reveal(vscode.ViewColumn.Active);
         }
         panel.webview.html = renderAboutHtml(
-          createAboutViewData(pkg, serverInfo, panel.webview.asWebviewUri(iconPath).toString()),
+          {
+            ...createAboutViewData(
+              pkg,
+              serverInfo,
+              panel.webview.asWebviewUri(iconPath).toString()
+            ),
+            diagnostics: aboutDiagnostics,
+            diagnosticsWithPaths: aboutDiagnosticsWithPaths,
+          },
           panel.webview.cspSource
         );
       } catch (err) {

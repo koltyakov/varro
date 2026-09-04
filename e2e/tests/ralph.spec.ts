@@ -208,6 +208,33 @@ test('iteration cards show verification verdicts for passed iteration', async ({
   await expect(pendingCard.locator('.ralph-iter-index')).toContainText('#3');
 });
 
+test('verification distinguishes skipped checks and command discrepancies after reload', async ({ page }) => {
+  await page.setViewportSize({ width: 600, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=ralph-dashboard');
+  await page.evaluate(() => {
+    const runs = JSON.parse(localStorage.getItem('varro.ralph.runs')!);
+    const run = runs['session-ralph-1'];
+    run.status = 'incomplete';
+    run.stopReason = 'iteration_limit_with_gap';
+    run.iterations[0].status = 'unverified';
+    run.iterations[0].verification = { lint: 'skipped' };
+    run.iterations[1].status = 'failed';
+    run.iterations[1].endedAt = run.updatedAt;
+    run.iterations[1].verification = { test: 'fail' };
+    run.iterations[1].verificationEvidence = { test: {
+      sessionId: 'session-ralph-child-2', messageId: 'msg-test', partId: 'part-test',
+      command: 'npm test', exitCode: 1, reportedVerdict: 'pass',
+    } };
+    localStorage.setItem('varro.ralph.runs', JSON.stringify(runs));
+  });
+  await page.reload();
+  await expect(page.locator('.ralph-iter-status-unverified')).toHaveText('Unverified');
+  await expect(page.locator('.ralph-iter-verdict-skipped')).toHaveText('lint:skipped (reported)');
+  await expect(page.locator('.ralph-iter-verdict-fail')).toHaveText('test:fail (command)');
+  await page.getByText('Verification command evidence', { exact: true }).click();
+  await expect(page.getByRole('button', { name: /npm test - exit 1/ })).toContainText('model reported PASS; command failed');
+});
+
 test('stop button transitions run to stopped with manual_stop reason', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=ralph-dashboard');
 

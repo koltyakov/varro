@@ -30,6 +30,7 @@ vi.mock('./util/opencode-request', () => ({
 }));
 
 import { OpenCodeTransport } from './open-code-transport';
+import { diagnosticTimeline } from './diagnostics';
 import { getOpenCodeDirectoryHeaders, scopeOpenCodeRequest } from './util/opencode-request';
 
 function createTransport() {
@@ -142,6 +143,7 @@ function createClosedEventResponse() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  diagnosticTimeline.clear();
 });
 
 afterEach(() => {
@@ -157,6 +159,52 @@ function stubPlatform(platform: NodeJS.Platform) {
 }
 
 describe('OpenCodeTransport request timeouts', () => {
+  it('exports healthy REST, degraded stream, reconnect, activity, and request failure without bodies', async () => {
+    vi.useFakeTimers();
+    const transport = createTransport();
+    let eventAttempts = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.includes('/global/health'))
+          return new Response(JSON.stringify({ healthy: true, version: '1.18.4' }));
+        if (url.includes('/global/event')) {
+          eventAttempts += 1;
+          if (eventAttempts === 1) return new Response('', { status: 503 });
+          return createEventResponse(init!.signal!, { type: 'server.connected', properties: {} });
+        }
+        return new Response(JSON.stringify({ message: 'private response api_key=secret' }), {
+          status: 500,
+        });
+      })
+    );
+    try {
+      await transport.readHealthInfo();
+      await transport.rescopeEventStream('/repo/private');
+      await transport.startEventStream();
+      await vi.advanceTimersByTimeAsync(2000);
+      await expect(
+        transport.request('POST', '/session/private-id/prompt_async?token=secret', {
+          parts: [{ text: 'private prompt' }],
+        })
+      ).rejects.toThrow();
+      const report = diagnosticTimeline.export('# Healthy snapshot');
+      expect(report).toContain('"state":"healthy"');
+      expect(report).toContain('stream-retry');
+      expect(report).toContain('"attempt":1');
+      expect(report).toContain('stream-healthy');
+      expect(report).not.toContain('Last stream activity: not observed');
+      expect(report).toContain('rest-failure');
+      expect(report).toContain('/session/:id/prompt_async');
+      expect(report.indexOf('stream-retry')).toBeLessThan(report.indexOf('stream-healthy'));
+      expect(report).not.toMatch(
+        /private prompt|private response|private-id|secret|\/repo\/private/
+      );
+    } finally {
+      transport.stopEventStream();
+      vi.unstubAllGlobals();
+    }
+  });
   it.each([
     { method: 'POST', path: '/mcp/demo/auth/authenticate', expected: 310_000 },
     { method: 'post', path: '/provider/openai/oauth/callback?directory=/repo', expected: 310_000 },

@@ -248,6 +248,54 @@ describe('HostRalphStore', () => {
     ).toEqual(phases);
   });
 
+  it('round-trips repair evidence and migrates skipped-only passes to unverified', async () => {
+    const { persistence } = createMemoryPersistence();
+    const store = new HostRalphStore(persistence, vi.fn());
+    const config = createConfig({ iterations: 2 });
+    store.startRun(config);
+    store.upsertIteration(config.managerSessionId, {
+      index: 1,
+      childSessionId: 'child-1',
+      status: 'failed',
+      phase: 'verification',
+      startedAt: 100,
+      endedAt: 200,
+      filesChanged: [],
+      repairSessionIds: ['repair-1'],
+      verification: { lint: 'fail' },
+      verificationEvidence: {
+        lint: {
+          sessionId: 'repair-1',
+          messageId: 'msg-1',
+          partId: 'part-1',
+          command: 'npm run lint',
+          exitCode: 2,
+          reportedVerdict: 'pass',
+        },
+      },
+    });
+    store.upsertIteration(config.managerSessionId, {
+      index: 2,
+      childSessionId: 'child-2',
+      status: 'passed',
+      startedAt: 300,
+      endedAt: 400,
+      filesChanged: [],
+      verification: { lint: 'skipped' },
+    });
+    store.setStatus(config.managerSessionId, 'done', 'iteration_limit');
+    await store.flush();
+    const reloaded = new HostRalphStore(persistence, vi.fn());
+    const run = reloaded.getRun(config.managerSessionId);
+    expect(run?.iterations[0]?.verificationEvidence?.lint).toMatchObject({
+      sessionId: 'repair-1',
+      exitCode: 2,
+      reportedVerdict: 'pass',
+    });
+    expect(run?.iterations[1]?.status).toBe('unverified');
+    expect(run?.status).toBe('incomplete');
+  });
+
   it('coalesces delayed persistence writes and flushes the latest snapshot', async () => {
     const writes: Array<Record<string, RalphRun>> = [];
     const releases: Array<() => void> = [];
