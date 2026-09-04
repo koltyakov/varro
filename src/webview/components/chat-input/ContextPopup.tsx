@@ -2,6 +2,7 @@ import { For, createSignal, onCleanup, onMount, Show } from 'solid-js';
 import {
   checkSquareIcon,
   databaseBackupIcon,
+  databaseScriptPlusIcon,
   navArrowRightIcon,
   squareIcon,
 } from '../../lib/ui-icons';
@@ -25,6 +26,8 @@ const CONTEXT_USAGE_ERROR_PERCENT = 90;
 const CONTEXT_COMPACT_ACTION_PERCENT = 30;
 const CACHE_READ_TOOLTIP =
   "Tokens reused from the provider's prompt cache. They count toward the context window but are excluded from session totals.";
+const CACHE_WRITE_TOOLTIP =
+  "Tokens stored in the provider's prompt cache for reuse by later requests. They count toward session input and totals.";
 
 type ContextBreakdownLabels = Record<ContextBreakdownKey, string>;
 
@@ -85,6 +88,16 @@ function CacheReadInfo() {
     <Tooltip content={CACHE_READ_TOOLTIP}>
       <span class="context-popup-cache-read-info" tabindex="0" aria-label="Cache read details">
         <UiIcon source={databaseBackupIcon} width="11" height="11" />
+      </span>
+    </Tooltip>
+  );
+}
+
+function CacheWriteInfo() {
+  return (
+    <Tooltip content={CACHE_WRITE_TOOLTIP}>
+      <span class="context-popup-cache-write-info" tabindex="0" aria-label="Cache write details">
+        <UiIcon source={databaseScriptPlusIcon} width="11" height="11" />
       </span>
     </Tooltip>
   );
@@ -168,7 +181,10 @@ export function ContextPopup(props: {
           {(row) => (
             <div
               class="context-popup-row"
-              classList={{ 'context-popup-row-cache-read': row.key === 'cacheRead' }}
+              classList={{
+                'context-popup-row-cache-read': row.key === 'cacheRead',
+                'context-popup-row-cache-write': row.key === 'cacheWrite',
+              }}
             >
               <span class="context-popup-row-label">{row.label}</span>
               <span
@@ -176,6 +192,9 @@ export function ContextPopup(props: {
               >
                 <Show when={row.key === 'cacheRead'}>
                   <CacheReadInfo />
+                </Show>
+                <Show when={row.key === 'cacheWrite'}>
+                  <CacheWriteInfo />
                 </Show>
                 {sessionTokensAvailable() ? formatNumber(row.value) : '--'}
               </span>
@@ -265,12 +284,18 @@ export function ContextPopup(props: {
               {(row) => (
                 <div
                   class="context-popup-row"
-                  classList={{ 'context-popup-row-cache-read': row.key === 'cacheRead' }}
+                  classList={{
+                    'context-popup-row-cache-read': row.key === 'cacheRead',
+                    'context-popup-row-cache-write': row.key === 'cacheWrite',
+                  }}
                 >
                   <span class="context-popup-row-label">{row.label}</span>
                   <span class="context-popup-row-value">
                     <Show when={row.key === 'cacheRead'}>
                       <CacheReadInfo />
+                    </Show>
+                    <Show when={row.key === 'cacheWrite'}>
+                      <CacheWriteInfo />
                     </Show>
                     {formatNumber(row.value)}
                   </span>

@@ -48,7 +48,7 @@ import {
   syncQueuedMessages,
 } from '../lib/state-queued-messages';
 import { sendQueuedAsSteer } from './chat-input/queued-steer';
-import { databaseBackupIcon, runningIcon } from '../lib/ui-icons';
+import { databaseBackupIcon, databaseScriptPlusIcon, runningIcon } from '../lib/ui-icons';
 import { toCssUrl } from './UiIcon';
 
 interface SessionEventProperties extends UnknownRecord {
@@ -1886,7 +1886,7 @@ describe('ChatInput', () => {
           input: 500,
           output: 100,
           reasoning: 0,
-          cache: { read: 50, write: 0 },
+          cache: { read: 50, write: 25 },
         },
       }),
     ]);
@@ -1901,7 +1901,7 @@ describe('ChatInput', () => {
     const sections = [...(container?.querySelectorAll('.context-popup-section') || [])];
     expect(sections.map((section) => section.textContent)).toEqual([
       'Session Tokens',
-      'Agents (1)600',
+      'Agents (1)625',
     ]);
     expect(readContextRows(sections[0])).toMatchObject({
       Input: '400',
@@ -1922,17 +1922,22 @@ describe('ChatInput', () => {
     expect(subagentToggle.getAttribute('aria-expanded')).toBe('true');
     expect(subagentToggle.querySelector('.context-popup-section-summary')).toBeNull();
     expect(readContextRows(sections[1])).toMatchObject({
-      Input: '500',
+      Input: '525',
       Output: '100',
       'Cache read': '50',
-      Total: '600',
+      'Cache write': '25',
+      Total: '625',
     });
     const agentCacheReadRow = subagentToggle.nextElementSibling?.querySelector(
       '.context-popup-row-cache-read'
     );
     expect(agentCacheReadRow?.querySelector('.context-popup-cache-read-info')).not.toBeNull();
+    const agentCacheWriteRow = subagentToggle.nextElementSibling?.querySelector(
+      '.context-popup-row-cache-write'
+    );
+    expect(agentCacheWriteRow?.querySelector('.context-popup-cache-write-info')).not.toBeNull();
     expect(container?.querySelector('.context-popup-overall-total')?.textContent).toContain(
-      'Overall1,100'
+      'Overall1,125'
     );
   });
 
@@ -2041,6 +2046,46 @@ describe('ChatInput', () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
       "Tokens reused from the provider's prompt cache. They count toward the context window but are excluded from session totals."
+    );
+  });
+
+  it('dims cache writes and explains how they contribute to session totals', async () => {
+    vi.useFakeTimers();
+    setupModelState();
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [
+      session('session-1', 2_000, {
+        tokens: {
+          input: 1_000,
+          output: 200,
+          reasoning: 0,
+          cache: { read: 0, write: 25 },
+        },
+      }),
+    ]);
+    setState('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
+
+    cleanup = render(() => ChatInput(), container!);
+    container
+      ?.querySelector<HTMLButtonElement>('.chat-context-usage')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    const cacheWriteRow = container?.querySelector('.context-popup-row-cache-write');
+    const info = cacheWriteRow?.querySelector<HTMLElement>('.context-popup-cache-write-info');
+    const icon = info?.querySelector<HTMLElement>('.ui-icon');
+    expect(cacheWriteRow?.querySelector('.context-popup-row-label')?.textContent).toBe(
+      'Cache write'
+    );
+    expect(cacheWriteRow?.querySelector('.context-popup-row-value')?.textContent).toBe('25');
+    expect(info?.tabIndex).toBe(0);
+    expect(info?.getAttribute('aria-describedby')).toBeTruthy();
+    expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(databaseScriptPlusIcon));
+
+    info?.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
+      "Tokens stored in the provider's prompt cache for reuse by later requests. They count toward session input and totals."
     );
   });
 

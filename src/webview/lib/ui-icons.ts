@@ -18,6 +18,7 @@ import clockIcon from 'iconoir/icons/clock.svg';
 import codeBracketsSquareIcon from 'iconoir/icons/code-brackets-square.svg';
 import copyIcon from 'iconoir/icons/copy.svg';
 import databaseBackupIcon from 'iconoir/icons/database-backup.svg';
+import databaseScriptPlusIcon from 'iconoir/icons/database-script-plus.svg';
 import downloadIcon from 'iconoir/icons/download.svg';
 import editPencilIcon from 'iconoir/icons/edit-pencil.svg';
 import emptyPageIcon from 'iconoir/icons/empty-page.svg';
@@ -94,6 +95,7 @@ export {
   codeBracketsSquareIcon,
   copyIcon,
   databaseBackupIcon,
+  databaseScriptPlusIcon,
   downloadIcon,
   editPencilIcon,
   emptyPageIcon,
