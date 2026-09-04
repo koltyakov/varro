@@ -1,4 +1,5 @@
 /* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-module-mocking, anti-slop/require-safety-comment-for-type-assertion -- These action tests verify imported VS Code commands with partial provider and private-state fixtures. */
+import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as vscode from 'vscode';
 
@@ -504,7 +505,7 @@ describe('createSidebarProviderActions', () => {
       NESTED_SESSION_DIRECTORY
     );
     expect(contextProvider.openPath).toHaveBeenCalledWith(
-      `${NESTED_SESSION_DIRECTORY}/src/app.ts`,
+      resolve(NESTED_SESSION_DIRECTORY, 'src/app.ts'),
       expect.objectContaining({ kind: 'file', view: 'diff' })
     );
   });
