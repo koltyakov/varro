@@ -82,6 +82,7 @@ type IncompleteStreamingMarkdown = {
   content: string;
   marker: string | null;
   pendingText: string | null;
+  hidePendingText: boolean;
 };
 
 type MarkdownHydrationFlags = {
@@ -1102,6 +1103,14 @@ function isEscapedMarkdownDelimiter(content: string, index: number, lineStart: n
   return backslashCount % 2 === 1;
 }
 
+function isPotentialStreamingFileReference(raw: string) {
+  const candidate = raw.trim();
+  if (!candidate) return false;
+  if (/[\\/]/.test(candidate)) return true;
+  if (/^(?:[\w@+-]+\.)+[A-Za-z0-9]*$/.test(candidate)) return true;
+  return SPECIAL_FILE_NAMES.has(candidate.toLowerCase());
+}
+
 function renderIncompleteStreamingMarkdown(content: string): IncompleteStreamingMarkdown {
   let index = 0;
   let openFence: MarkdownFenceState | null = null;
@@ -1206,6 +1215,24 @@ function renderIncompleteStreamingMarkdown(content: string): IncompleteStreaming
   const visibleContent = content.slice(0, pendingStart);
   const blockSafeContent = hideIncompleteStreamingBlock(visibleContent);
   pendingStart = Math.min(pendingStart, blockSafeContent.length);
+  const visiblePendingStarts: number[] = [];
+  if (
+    inlineStart !== null &&
+    !isPotentialStreamingFileReference(content.slice(inlineStart + inlineDelimiterLength))
+  ) {
+    visiblePendingStarts.push(inlineStart);
+  }
+  const trailingOrderedListMarker = blockSafeContent.match(/(?:^|\r?\n)([ \t]{0,3}\d+[.)][ \t]*)$/);
+  if (trailingOrderedListMarker) {
+    visiblePendingStarts.push(
+      trailingOrderedListMarker.index! +
+        trailingOrderedListMarker[0].length -
+        trailingOrderedListMarker[1]!.length
+    );
+  }
+  const visiblePendingStart =
+    visiblePendingStarts.length > 0 ? Math.min(...visiblePendingStarts) : null;
+  if (visiblePendingStart !== null) pendingStart = Math.min(pendingStart, visiblePendingStart);
   const trailingPath = blockSafeContent.match(TRAILING_BARE_PATH_CANDIDATE_RE);
   if (trailingPath) {
     const candidateStart = trailingPath.index! + trailingPath[0].length - trailingPath[1]!.length;
@@ -1229,7 +1256,7 @@ function renderIncompleteStreamingMarkdown(content: string): IncompleteStreaming
   }
   pendingStart = Math.min(pendingStart, hideIncompleteStreamingTableRow(blockSafeContent).length);
   if (pendingStart >= content.length) {
-    return { content, marker: null, pendingText: null };
+    return { content, marker: null, pendingText: null, hidePendingText: false };
   }
 
   const marker = getStreamingMarkdownPendingMarker(content);
@@ -1242,6 +1269,7 @@ function renderIncompleteStreamingMarkdown(content: string): IncompleteStreaming
     content: `${content.slice(0, pendingStart)}${syntheticFenceCloser}${marker}`,
     marker,
     pendingText: content.slice(pendingStart),
+    hidePendingText: pendingStart !== visiblePendingStart,
   };
 }
 
@@ -1323,20 +1351,6 @@ function hideIncompleteStreamingBlock(content: string) {
     );
   }
 
-  if (!/\r?\n$/.test(content)) {
-    const trailingOrderedList = content.match(
-      /(?:^|\r?\n)([ \t]{0,3}\d+(?:[.)](?:[ \t]+[^\r\n]*)?)?)$/
-    );
-    if (trailingOrderedList) {
-      return content.slice(
-        0,
-        (trailingOrderedList.index ?? 0) +
-          trailingOrderedList[0].length -
-          (trailingOrderedList[1]?.length ?? 0)
-      );
-    }
-  }
-
   const blockStartMatch = content.match(/(?:^|\r?\n\s*\r?\n)([^\r\n]*(?:\r?\n[^\r\n]*)?)$/);
   if (!blockStartMatch) return content;
   const block = blockStartMatch[1] ?? '';
@@ -1398,7 +1412,7 @@ function parseIncompleteStreamingMarkdown(content: string, options: ParseMarkdow
 
   return html.replace(
     prepared.marker,
-    `<span class="streaming-markdown-pending" aria-hidden="true">${escapeHtml(prepared.pendingText)}</span>`
+    `<span class="streaming-markdown-pending${prepared.hidePendingText ? ' streaming-markdown-pending-hidden' : ''}"${prepared.hidePendingText ? ' aria-hidden="true"' : ''}>${escapeHtml(prepared.pendingText)}</span>`
   );
 }
 

@@ -1345,7 +1345,7 @@ describe('MarkdownRenderer', () => {
     expect(container?.querySelector('code')?.textContent?.trim()).toBe('const ready = true;');
   });
 
-  it('does not retract a streamed ordered-list marker while its delimiter completes', async () => {
+  it('paints an active ordered-list item while it streams', async () => {
     const base = 'Scope protects attention.';
     const [content, setContent] = createSignal(`${base}\n\n6`);
     cleanup = render(
@@ -1360,20 +1360,22 @@ describe('MarkdownRenderer', () => {
     );
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
-    expect(container?.querySelector('.streaming-markdown-pending')?.textContent).toBe('6');
+    expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
+    expect(container?.textContent).toContain('6');
 
     setContent(`${base}\n\n6.`);
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
-    expect(container?.querySelector('ol')).toBeNull();
+    const marker = container?.querySelector('.streaming-markdown-pending');
+    expect(marker?.textContent).toBe('6.');
+    expect(marker?.getAttribute('aria-hidden')).toBeNull();
+    expect(marker?.classList).not.toContain('streaming-markdown-pending-hidden');
 
     setContent(`${base}\n\n6. A bounded task identifies`);
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
-    expect(container?.querySelector('ol')).toBeNull();
-    expect(container?.querySelector('.streaming-markdown-pending')?.textContent).toBe(
-      '6. A bounded task identifies'
-    );
+    expect(container?.querySelector('ol li')?.textContent).toBe('A bounded task identifies');
+    expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
 
     setContent(`${base}\n\n6. A bounded task identifies\n`);
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
@@ -1464,6 +1466,9 @@ describe('MarkdownRenderer', () => {
       'src/webview/components/Markdown'
     );
     expect(container?.querySelectorAll('a.file-path-link')).toHaveLength(0);
+    expect(container?.querySelector('.streaming-markdown-pending')?.classList).toContain(
+      'streaming-markdown-pending-hidden'
+    );
 
     setContent('The related tests are in `src/webview/components/MarkdownRenderer.test.ts');
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
@@ -1478,6 +1483,19 @@ describe('MarkdownRenderer', () => {
     expect(link?.title).toBe('/repo/src/webview/components/MarkdownRenderer.test.ts');
     expect(container?.textContent).not.toContain('src/webview/components/');
     expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
+  });
+
+  it('paints unfinished inline code when it is not a file reference', async () => {
+    cleanup = render(
+      () => MarkdownRenderer({ content: 'Current value: `still streaming token by token' }),
+      container!
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    const pending = container?.querySelector('.streaming-markdown-pending');
+    expect(pending?.textContent).toBe('`still streaming token by token');
+    expect(pending?.getAttribute('aria-hidden')).toBeNull();
+    expect(pending?.classList).not.toContain('streaming-markdown-pending-hidden');
   });
 
   it('reserves an unfinished Markdown link until its destination closes', async () => {

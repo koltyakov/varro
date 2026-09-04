@@ -1582,9 +1582,12 @@ body.vscode-light
 }
 
 .rendered-markdown .streaming-markdown-pending {
-  visibility: hidden;
   white-space: pre-wrap;
   pointer-events: none;
+}
+
+.rendered-markdown .streaming-markdown-pending-hidden {
+  visibility: hidden;
 }
 
 .rendered-markdown p {
