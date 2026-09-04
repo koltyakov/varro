@@ -244,6 +244,7 @@ describe('routing-state helpers', () => {
 
     expect(
       getActiveProviderSelection({
+        activeSessionId: 'existing-session',
         selectedModel: { providerID: 'anthropic', modelID: 'claude' },
         providers,
         providerDefaults: { openai: 'gpt-4o', anthropic: 'claude' },
@@ -252,6 +253,7 @@ describe('routing-state helpers', () => {
 
     expect(
       getActiveProviderSelection({
+        activeSessionId: null,
         selectedModel: null,
         providers,
         providerDefaults: { openai: 'gpt-4o', anthropic: 'claude' },

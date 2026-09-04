@@ -162,6 +162,7 @@ export class ServerEventBridge {
 
   private acceptParsedEvent(event: ServerEvent) {
     event = projectEventSummaryDiffs(event);
+    if (event.type === 'plugin.added') this.providerLimitService.clearCache();
     let recent: RecentEventState | undefined;
     if (event.id) {
       recent = this.recentEvents.get(event.id);

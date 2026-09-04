@@ -738,6 +738,42 @@ describe('session effect helpers', () => {
     }
   });
 
+  it('retargets provider-limit polling after a model switch', async () => {
+    const [selection, setSelection] = createSignal({
+      providerID: 'claude-code',
+      modelID: 'claude-sonnet-5',
+    });
+    const loadProviderLimit = vi.fn(async () => null);
+
+    const dispose = createRoot((cleanup) => {
+      registerProviderLimitRefreshEffect({
+        getServerState: () => 'running',
+        areProvidersLoaded: () => true,
+        isDocumentVisible: () => true,
+        isActiveSessionWorking: () => false,
+        getActiveProviderSelection: selection,
+        getProviderLimit: () => null,
+        loadProviderLimit,
+        setProviderLimit: vi.fn(),
+        getPollIntervalMs: () => 120_000,
+        logError: vi.fn(),
+      });
+      return cleanup;
+    });
+
+    try {
+      await Promise.resolve();
+      expect(loadProviderLimit).toHaveBeenLastCalledWith('claude-code', 'claude-sonnet-5');
+
+      setSelection({ providerID: 'claude-code', modelID: 'claude-opus-5' });
+      await Promise.resolve();
+      expect(loadProviderLimit).toHaveBeenLastCalledWith('claude-code', 'claude-opus-5');
+      expect(loadProviderLimit).toHaveBeenCalledTimes(2);
+    } finally {
+      dispose();
+    }
+  });
+
   it('refreshes provider limits even when the current model was previously unsupported', async () => {
     const loadProviderLimit = vi.fn(async () => null);
 

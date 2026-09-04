@@ -2148,7 +2148,7 @@ describe('ChatInput', () => {
     cleanup = render(() => ChatInput(), container!);
 
     const button = container?.querySelector<HTMLButtonElement>('.toolbar-limit-chip');
-    expect(button?.getAttribute('aria-label')).toContain('5-Hour Limit: 39 / 100 left');
+    expect(button?.getAttribute('aria-label')).toContain('5-Hour Limit: 61% used');
     expect(button?.getAttribute('title')).toBeNull();
 
     button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -2162,7 +2162,7 @@ describe('ChatInput', () => {
     );
     expect(popup?.textContent).not.toContain('GPT-4o');
     expect(button?.hasAttribute('title')).toBe(false);
-    expect(button?.getAttribute('aria-label')).toContain('5-Hour Limit: 39 / 100 left');
+    expect(button?.getAttribute('aria-label')).toContain('5-Hour Limit: 61% used');
   });
 
   it('renders permission, context usage, and provider limits in the lower metadata row', () => {

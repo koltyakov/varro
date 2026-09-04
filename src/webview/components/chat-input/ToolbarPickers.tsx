@@ -935,7 +935,11 @@ export function ProviderLimitChip(props: {
   return (
     <Show when={props.badges.length > 0}>
       <Tooltip
-        content={props.title ?? props.ariaLabel ?? 'Provider limits'}
+        content={
+          <span class="provider-limit-tooltip">
+            {props.title ?? props.ariaLabel ?? 'Provider limits'}
+          </span>
+        }
         disabled={!props.title}
       >
         <button

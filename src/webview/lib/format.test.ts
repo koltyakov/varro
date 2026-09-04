@@ -180,7 +180,7 @@ describe('format helpers', () => {
 
     expect(formatProviderLimitCompactPrefix(limit)).toBe('D');
     expect(formatProviderLimitCompact(limit)).toBe('24%');
-    expect(formatProviderLimitTitle(limit, 60_000)).toBe('Requests: 12 / 50 left, resets in 1m');
+    expect(formatProviderLimitTitle(limit, 60_000)).toBe('Requests: 76% used, resets 1m');
   });
 
   it('keeps provider request counts precise when compact rounding would be misleading', () => {
@@ -197,9 +197,7 @@ describe('format helpers', () => {
 
     expect(formatProviderLimitWindowValue(window, window.remaining)).toBe('1,431');
     expect(formatProviderLimitWindowValue(window, window.limit)).toBe('1,500');
-    expect(formatProviderLimitTitle(limit)).toBe(
-      'Monthly Premium Requests: 1,431 / 1,500 left (4.6% used)'
-    );
+    expect(formatProviderLimitTitle(limit)).toBe('Monthly Premium Requests: 4.6% used');
   });
 
   it('formats provider limits as precise USD values', () => {
@@ -215,7 +213,7 @@ describe('format helpers', () => {
 
     expect(formatProviderLimitWindowValue(window, window.remaining)).toBe('$0.90');
     expect(formatProviderLimitWindowValue(window, window.limit)).toBe('$1.00');
-    expect(formatProviderLimitTitle(limit)).toBe('Spend: $0.90 / $1.00 left');
+    expect(formatProviderLimitTitle(limit)).toBe('Spend: 10% used');
   });
 
   it('keeps a compact badge for a single unprefixed window', () => {
@@ -232,7 +230,7 @@ describe('format helpers', () => {
 
     expect(formatProviderLimitCompactPrefix(limit)).toBe('');
     expect(getProviderLimitCompactBadges(limit)).toEqual([{ label: '0%', tone: 'error' }]);
-    expect(formatProviderLimitTitle(limit, 60_000)).toBe('Messages: 0 / 40 left, resets in 1m');
+    expect(formatProviderLimitTitle(limit, 60_000)).toBe('Messages: 100% used, resets 1m');
   });
 
   it('omits 5h, W, and M prefixes in compact provider limit badge groups', () => {
@@ -348,6 +346,38 @@ describe('format helpers', () => {
     expect(getProviderLimitCompactBadges(limit)).toEqual([
       { label: '95%', tone: 'default' },
       { label: '97%', tone: 'default' },
+    ]);
+  });
+
+  it('treats the Claude Code current session as the first 5h window', () => {
+    const limit = availableLimit([
+      {
+        id: 'current-week-all-models',
+        label: 'Current week (all models)',
+        unit: 'unknown',
+        remaining: 98,
+        limit: 100,
+        resetAt: null,
+        percent: 2,
+      },
+      {
+        id: 'current-session',
+        label: 'Current session',
+        unit: 'unknown',
+        remaining: 100,
+        limit: 100,
+        resetAt: null,
+        percent: 0,
+      },
+    ]);
+
+    expect(getOrderedProviderLimitWindows(limit).map((window) => window.id)).toEqual([
+      'current-session',
+      'current-week-all-models',
+    ]);
+    expect(getProviderLimitCompactBadges(limit)).toEqual([
+      { label: '100%', tone: 'default' },
+      { label: '98%', tone: 'default' },
     ]);
   });
 
@@ -737,7 +767,14 @@ describe('format helpers', () => {
     ).toBe('Rate limits unavailable');
 
     const limit = availableLimit([
-      { id: 'subsec', label: 'Subsec', unit: 'requests', remaining: 1, limit: 10, resetAt: 500 },
+      {
+        id: 'subsec',
+        label: 'Subsec Quota',
+        unit: 'requests',
+        remaining: 1,
+        limit: 10,
+        resetAt: 500,
+      },
       {
         id: 'seconds',
         label: 'Seconds',
@@ -765,7 +802,7 @@ describe('format helpers', () => {
     ]);
 
     expect(formatProviderLimitTitle(limit, 0)).toBe(
-      'Subsec: 1 / 10 left, resets in <1s | Seconds: 2 left, resets in 20s | Hours: 3 / 3,000 left, resets in 1h | Days: 4 / 40 left, resets in 3d'
+      'Subsec: 90% used, resets <1s\nSeconds: 2 left, resets 20s\nHours: 99.9% used, resets 1h\nDays: 90% used, resets 3d'
     );
   });
 
@@ -793,7 +830,7 @@ describe('format helpers', () => {
 
     expect(getPrimaryProviderLimitWindow(limit)).toEqual(limit.windows[1]);
     expect(formatProviderLimitTitle(limit, 0)).toBe(
-      'Requests: 80 left (20% used) | Monthly Spend: $12.50 / $40.00 left (68.8% used), resets in 1m'
+      'Requests: 20% used\nMonthly Spend: 68.8% used, resets 1m'
     );
   });
 

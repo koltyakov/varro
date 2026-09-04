@@ -872,6 +872,18 @@ describe('SidebarProvider editor panels', () => {
     });
   });
 
+  it('broadcasts unscoped plugin-added events so provider catalogs refresh', async () => {
+    const contextProvider = createContextProvider();
+    contextProvider.context.workspacePath = '/repo-a';
+    const { provider } = await createSidebarProviderInstance({ contextProvider });
+    const { posted } = attachTestView(provider);
+    const event = { type: 'plugin.added' as const, properties: {} };
+
+    provider.post({ type: 'server/event', payload: event });
+
+    expect(posted).toContainEqual({ type: 'server/event', payload: event });
+  });
+
   it('does not broadcast folder events when the workspace file is inside that folder', async () => {
     const contextProvider = createContextProvider();
     contextProvider.context.workspacePath = '/repo-a';

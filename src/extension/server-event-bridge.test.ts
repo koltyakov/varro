@@ -207,6 +207,16 @@ describe('ServerEventBridge', () => {
     expect(post).toHaveBeenCalledWith({ type: 'server/event', payload: parsed });
   });
 
+  it('clears provider limit caches when a plugin is added', () => {
+    const { bridge, handlers, providerLimitService } = createMocks();
+    useParsedEvents();
+    bridge.attach();
+
+    handlers.event!({ type: 'plugin.added', properties: {} });
+
+    expect(providerLimitService.clearCache).toHaveBeenCalledOnce();
+  });
+
   it('bounds diff details in server events before persisting or posting them', () => {
     useParsedEvents();
     const { bridge, handlers, post, sessionState } = createMocks();

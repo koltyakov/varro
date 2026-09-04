@@ -360,6 +360,7 @@ export function handleExtensionMessageWithDependencies(
       if (
         msg.payload.type === 'catalog.updated' ||
         msg.payload.type === 'models-dev.refreshed' ||
+        msg.payload.type === 'plugin.added' ||
         msg.payload.type === 'integration.updated' ||
         msg.payload.type === 'integration.connection.updated'
       ) {

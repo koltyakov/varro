@@ -243,15 +243,16 @@ export function formatProviderLimitTitle(
 
   return limit.windows
     .map((window) => {
-      const total = window.limit != null ? ` / ${formatWindowValue(window, window.limit)}` : '';
-      const percent =
-        window.percent != null && Number.isFinite(window.percent)
-          ? ` (${formatPercent(window.percent)}% used)`
-          : '';
-      const reset = window.resetAt ? `, resets in ${formatRelativeReset(window.resetAt, now)}` : '';
-      return `${window.label}: ${formatWindowValue(window, window.remaining)}${total} left${percent}${reset}`;
+      const usedPercent = getProviderLimitWindowUsedPercent(window);
+      const usage =
+        usedPercent != null
+          ? `${formatPercent(usedPercent)}% used`
+          : `${formatWindowValue(window, window.remaining)} left`;
+      const reset = window.resetAt ? `, resets ${formatRelativeReset(window.resetAt, now)}` : '';
+      const label = window.label.replace(/\s+Quota$/i, '');
+      return `${label}: ${usage}${reset}`;
     })
-    .join(' | ');
+    .join('\n');
 }
 
 function compareProviderLimitWindows(a: ProviderLimitWindow, b: ProviderLimitWindow) {
@@ -312,7 +313,13 @@ function getProviderLimitWindowPeriodLabel(window: ProviderLimitWindow) {
 
   if (id.includes('month') || label.includes('month')) return 'M';
   if (id.includes('week') || id.includes('seven_day') || label.includes('week')) return 'W';
-  if (id.includes('five_hour') || label.includes('5-hour') || label.includes('5 hour')) {
+  if (
+    id.includes('five_hour') ||
+    id === 'current-session' ||
+    label.includes('5-hour') ||
+    label.includes('5 hour') ||
+    label === 'current session'
+  ) {
     return '5h';
   }
   if (

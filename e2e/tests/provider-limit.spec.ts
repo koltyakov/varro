@@ -13,9 +13,10 @@ test('exhausted provider limit shows retry context and a descriptive toolbar chi
   await expect(chip).toBeVisible();
   await expect(badge).toHaveClass(/\berror\b/);
   await expect(chip).toContainText('0%');
-  await expect(chip).toHaveAttribute('aria-label', /Messages/);
-  await expect(chip).toHaveAttribute('aria-label', /0/);
-  await expect(chip).toHaveAttribute('aria-label', /40/);
+  await expect(chip).toHaveAttribute(
+    'aria-label',
+    /^Messages: 100% used, resets (?:<1s|\d+[smhd])$/
+  );
 });
 
 test('provider limit popup responds to repeated clicks', async ({ page }) => {

@@ -768,6 +768,10 @@
   color: var(--color-vscode-warning);
 }
 
+.provider-limit-tooltip {
+  white-space: pre;
+}
+
 .toolbar-limit-chip-badge.error {
   color: color-mix(in srgb, var(--color-vscode-error) 64%, transparent);
 }

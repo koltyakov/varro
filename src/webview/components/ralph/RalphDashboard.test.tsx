@@ -239,7 +239,7 @@ describe('RalphDashboard', () => {
     expect(container?.querySelector('.ralph-dashboard-provider-limit')?.textContent).toBe('D 8%');
     expect(
       container?.querySelector('.ralph-dashboard-provider-limits')?.getAttribute('title')
-    ).toContain('Daily: 8 / 100 left');
+    ).toContain('Daily: 92% used');
     expect(container?.querySelector('.ralph-dashboard-provider-limit')?.className).toContain(
       'error'
     );
@@ -347,9 +347,9 @@ describe('RalphDashboard', () => {
     expect(limits?.textContent).toContain('Limits:');
     expect(badges).toEqual(['0%', '12%', '40%']);
     expect(limits?.textContent).toContain('·');
-    expect(limits?.getAttribute('title')).toContain('5-hour: 0 / 100 left');
-    expect(limits?.getAttribute('title')).toContain('Weekly: 12 / 100 left');
-    expect(limits?.getAttribute('title')).toContain('Monthly: 40 / 100 left');
+    expect(limits?.getAttribute('title')).toContain('5-hour: 100% used');
+    expect(limits?.getAttribute('title')).toContain('Weekly: 88% used');
+    expect(limits?.getAttribute('title')).toContain('Monthly: 60% used');
   });
 
   it.each([

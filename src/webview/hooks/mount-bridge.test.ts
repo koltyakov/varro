@@ -757,6 +757,7 @@ describe('mount bridge helpers', () => {
     for (const type of [
       'catalog.updated',
       'models-dev.refreshed',
+      'plugin.added',
       'integration.updated',
       'integration.connection.updated',
     ] as const) {
@@ -787,7 +788,7 @@ describe('mount bridge helpers', () => {
     expect(removeDroppedContextFile).toHaveBeenCalledWith('/repo/file.ts');
     expect(refreshMcps).toHaveBeenCalledTimes(2);
     expect(refreshLsps).toHaveBeenCalledOnce();
-    expect(refreshProviders).toHaveBeenCalledTimes(6);
+    expect(refreshProviders).toHaveBeenCalledTimes(7);
     expect(setProviderRefreshPending).toHaveBeenCalledWith(true);
     expect(revalidateProviderAuth).toHaveBeenCalledTimes(3);
     expect(openExternal).toHaveBeenCalledWith('https://mcp.example.com/authorize');

@@ -4,6 +4,29 @@ import { findProviderLimitAdapter } from './index';
 import type { ProviderMetadata } from '../util/provider-limit';
 
 describe('provider limit adapters', () => {
+  it('prefers the OpenCode Claude adapter for its exact provider descriptor', () => {
+    const adapter = findProviderLimitAdapter(
+      {
+        id: 'claude-code',
+        options: {
+          'claude-code': {
+            providerLimits: {
+              schemaVersion: 1,
+              transport: 'http',
+              url: 'http://127.0.0.1:43127/provider-limit',
+              token: 'local-secret',
+            },
+          },
+        },
+        models: {},
+      },
+      {}
+    );
+
+    expect(adapter?.id).toBe('claude-code');
+    expect(adapter?.capabilities).toEqual({ localIpc: true });
+  });
+
   it('prefers the Codex adapter for OAuth-backed OpenAI providers', () => {
     const adapter = findProviderLimitAdapter(
       {

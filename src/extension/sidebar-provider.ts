@@ -57,6 +57,7 @@ const WORKSPACE_INDEPENDENT_EVENT_TYPES = new Set<ServerEvent['type']>([
   'global.disposed',
   'catalog.updated',
   'models-dev.refreshed',
+  'plugin.added',
   'installation.updated',
   'installation.update-available',
   'workspace.ready',

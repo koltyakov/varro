@@ -8,11 +8,13 @@ import { createKimiAdapter } from './kimi';
 import { createMiniMaxAdapter } from './minimax';
 import { createOllamaCloudAdapter } from './ollama-cloud';
 import { createOpenCodeGoAdapter } from './opencode-go';
+import { createOpenCodeClaudeAdapter } from './opencode-claude';
 import { createOpenRouterAdapter } from './openrouter';
 import { createXaiAdapter } from './xai';
 import { createZaiAdapter } from './zai';
 
 export const providerLimitAdapters = [
+  createOpenCodeClaudeAdapter(),
   createAntigravityAdapter(),
   createAnthropicAdapter(),
   createCodexAdapter(),
