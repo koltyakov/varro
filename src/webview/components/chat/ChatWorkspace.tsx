@@ -247,7 +247,9 @@ export function ChatWorkspace(props: {
   );
 
   return (
-    <div class="interactive-session">
+    <div
+      class={`interactive-session${props.showModels ? ' interactive-session-showing-models' : ''}`}
+    >
       <Show when={props.showSessionHeader}>
         <div
           class={`chat-header ${props.shouldRenderWorkspace ? 'chat-header-centered chat-header-chat-layout' : ''}`}

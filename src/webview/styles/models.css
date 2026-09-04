@@ -9,6 +9,10 @@
   --models-scrollbar-inset: 0px;
 }
 
+.interactive-session-showing-models > :not(.models-panel) {
+  visibility: hidden;
+}
+
 .models-header {
   padding: 0;
   flex-shrink: 0;

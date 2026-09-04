@@ -1,6 +1,8 @@
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: This E2E callback invokes the provider hook installed by the controlled harness fixture. */
 import { expect, test } from '@playwright/test';
 
+import { appendDeltaToRapidStreaming } from './scroll-helpers';
+
 test('shows usage-limit retry state and lets the user switch providers', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=usage-limit');
 
@@ -80,6 +82,43 @@ test('opens manage models from the picker and filters the model catalog', async 
   await expect(page.getByText('OpenAI', { exact: true })).toBeVisible();
   await expect(page.getByText('GPT-4.1', { exact: true })).toBeVisible();
   await expect(page.getByText('GitHub Copilot', { exact: true })).toHaveCount(0);
+});
+
+test('keeps a running chat out of the model dialog backdrop', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
+  await page.evaluate(() => {
+    localStorage.setItem(
+      'varro.addedModels',
+      JSON.stringify(['openai:*', 'openai:gpt-4.1', 'openai:gpt-4.1-mini'])
+    );
+  });
+  await page.reload();
+
+  const workspace = page.locator('.chat-workspace');
+  await expect(workspace).toBeVisible();
+  await page.getByLabel('GitHub Copilot / GPT-5 mini').click();
+  await page.getByRole('button', { name: 'Manage models', exact: true }).click();
+
+  await expect(page.getByText('Models', { exact: true })).toBeVisible();
+  await expect(workspace).toHaveCSS('visibility', 'hidden');
+
+  const openAIProvider = page.locator('.models-provider').filter({ hasText: 'OpenAI' });
+  await openAIProvider.getByRole('button', { name: 'Add models' }).click();
+
+  const overlay = page.locator('.provider-connect-overlay');
+  await expect(overlay).toBeVisible();
+  await expect(overlay).toHaveCSS('backdrop-filter', 'blur(2px)');
+
+  const streamedText = 'Updated while the Models panel was open.';
+  await appendDeltaToRapidStreaming(page, ` ${streamedText}`);
+  await expect(workspace).toContainText(streamedText);
+  await expect(workspace).toHaveCSS('visibility', 'hidden');
+
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+
+  await expect(workspace).toBeVisible();
+  await expect(workspace).toContainText(streamedText);
 });
 
 test('centers model route tags within their fixed height', async ({ page }) => {
