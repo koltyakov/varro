@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  executeVscodeCommand,
   reserveLoopbackPort,
   resizeVscodeSidebar,
   waitForVscodeProcess,
@@ -116,6 +117,16 @@ const codePid =
   process.platform === 'darwin'
     ? await waitForVscodeProcess(executable, userData)
     : child.pid;
+const focusDeadline = Date.now() + 15_000;
+while (true) {
+  try {
+    await executeVscodeCommand(remoteDebuggingPort, 'View: Focus on Varro View');
+    break;
+  } catch (error) {
+    if (Date.now() >= focusDeadline) throw error;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+}
 const sidebarWidth = await resizeVscodeSidebar(remoteDebuggingPort, configuredSidebarWidth);
 const metadataPath = path.join(profileRoot, 'launch.json');
 const metadata = await writeVscodeLaunchMetadata(metadataPath, {
