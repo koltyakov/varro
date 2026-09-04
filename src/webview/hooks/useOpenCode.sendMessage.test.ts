@@ -724,6 +724,12 @@ describe('sendMessage', () => {
 
   it('creates the first session in the manually selected workspace folder', async () => {
     const { stateModule, hookModule } = await loadModules();
+    let publishedState:
+      | {
+          activeSessionId: string | null;
+          messages: typeof stateModule.state.messages;
+        }
+      | undefined;
 
     stateModule.setState('editorContext', {
       workspacePath: '/repo-b',
@@ -736,6 +742,18 @@ describe('sendMessage', () => {
       selection: null,
       diagnostics: [],
     });
+    stateModule.setState('providers', [
+      provider('openai', {
+        'gpt-4o': {
+          id: 'gpt-4o',
+          name: 'GPT-4o',
+          capabilities: { toolcall: true },
+          cost: { input: 0, output: 0 },
+        },
+      }),
+    ]);
+    stateModule.setState('providerDefaults', { openai: 'gpt-4o' });
+    stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
     stateModule.setManualWorkspaceSelection(false);
     clientMocks.sessionCreate.mockResolvedValue({
       ...session('session-2'),
@@ -750,6 +768,12 @@ describe('sendMessage', () => {
 
     await hookModule.sendMessage('Work in Repo B', {
       newSessionWorkspace: { scope: 'folder', directory: '/repo-b' },
+      onOptimisticPublish: () => {
+        publishedState = {
+          activeSessionId: stateModule.state.activeSessionId,
+          messages: [...stateModule.state.messages],
+        };
+      },
     });
 
     expect(clientMocks.sessionCreate).toHaveBeenCalledWith(
@@ -767,6 +791,14 @@ describe('sendMessage', () => {
       expect.objectContaining({ parts: [{ type: 'text', text: 'Work in Repo B' }] }),
       { directory: '/repo-b' }
     );
+    expect(publishedState?.activeSessionId).toBe('session-2');
+    expect(publishedState?.messages).toEqual([]);
+    expect(stateModule.state.messages).toEqual([
+      expect.objectContaining({
+        info: expect.objectContaining({ sessionID: 'session-2', role: 'user' }),
+        parts: [expect.objectContaining({ type: 'text', text: 'Work in Repo B' })],
+      }),
+    ]);
   });
 
   it('keeps a newer selection while sending the captured draft to a delayed new session', async () => {

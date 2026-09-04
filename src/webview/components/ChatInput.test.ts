@@ -2185,6 +2185,10 @@ describe('ChatInput', () => {
       setState('activeSessionId', null);
       setState('droppedFiles', []);
     });
+    sendMessageMock.mockImplementation(async (_text, options) => {
+      options?.onOptimisticPublish?.();
+      return true;
+    });
 
     cleanup = render(() => ChatInput({ newSession: true, onBeforeSend }), container!);
 
@@ -2220,6 +2224,8 @@ describe('ChatInput', () => {
         attachedDiagnostics: undefined,
       },
       newSessionWorkspace: { scope: 'folder', directory: null },
+      onOptimisticPublish: expect.any(Function),
+      targetSessionId: null,
     });
   });
 
@@ -5806,7 +5812,9 @@ describe('ChatInput', () => {
     expect(sequence).toEqual(['select:/repo-b', 'send', 'select:/repo-a']);
   });
 
-  it('captures the selected folder before the new-chat composer is replaced', async () => {
+  it('keeps the selected folder until the first message is ready to replace the composer', async () => {
+    let publishOptimisticMessage: (() => void) | undefined;
+    let resolveSend: ((value: boolean) => void) | undefined;
     setState('editorContext', {
       workspacePath: '/repo-a',
       workspaceDirectory: '/workspace',
@@ -5835,7 +5843,13 @@ describe('ChatInput', () => {
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     setState('editorContext', 'workspacePath', '/repo-b');
     setInputText('Stay in Repo B');
-    sendMessageMock.mockResolvedValue(true);
+    sendMessageMock.mockImplementation(
+      (_text, options) =>
+        new Promise<boolean>((resolve) => {
+          publishOptimisticMessage = options?.onOptimisticPublish;
+          resolveSend = resolve;
+        })
+    );
     await flushAsyncWork();
 
     container
@@ -5843,12 +5857,22 @@ describe('ChatInput', () => {
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await flushAsyncWork();
 
+    expect(manualWorkspaceSelection()).toBe(true);
+    expect(sendMessageMock).toHaveBeenCalledWith(
+      'Stay in Repo B',
+      expect.objectContaining({
+        noReply: false,
+        queuedAttachments: expect.any(Object),
+        newSessionWorkspace: { scope: 'folder', directory: '/repo-b' },
+        onOptimisticPublish: expect.any(Function),
+      })
+    );
+
+    publishOptimisticMessage?.();
     expect(manualWorkspaceSelection()).toBe(false);
-    expect(sendMessageMock).toHaveBeenCalledWith('Stay in Repo B', {
-      noReply: false,
-      queuedAttachments: expect.any(Object),
-      newSessionWorkspace: { scope: 'folder', directory: '/repo-b' },
-    });
+
+    resolveSend?.(true);
+    await flushAsyncWork();
   });
 
   it('restores a failed send before releasing its manual workspace selection', async () => {

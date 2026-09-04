@@ -616,14 +616,14 @@ export function ModelsPanel() {
             when={runningAgentCount() > 0}
             fallback={
               <span>
-                <strong>Refreshing provider configuration.</strong> The provider list will update
-                automatically.
+                <strong>Synchronizing providers with OpenCode.</strong> The provider list will
+                update automatically.
               </span>
             }
           >
             <span>
-              <strong>Configuration update queued.</strong> Changes will appear automatically when{' '}
-              {runningAgentCount()} running{' '}
+              <strong>Provider synchronization queued.</strong> Updates will appear automatically
+              when {runningAgentCount()} running{' '}
               {runningAgentCount() === 1 ? 'agent finishes' : 'agents finish'}.
               <Show when={previousRouting()}>
                 {' '}

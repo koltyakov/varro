@@ -119,6 +119,7 @@ type SessionSendOptions = SendFlowOptions & {
   workspaceDirectory?: string;
   newSessionWorkspace?: SessionWorkspaceTarget;
   queuedMessageDispatch?: { itemId: string; lease: number };
+  onOptimisticPublish?: () => void;
 };
 
 type CapturedComposerAttachments = {
@@ -938,7 +939,7 @@ export class SessionSendOperations {
   };
 
   readonly sendMessage = async (text: string, options?: SessionSendOptions) => {
-    return await this.prepareSendMessage(text, options)();
+    return await this.prepareSendMessage(text, options)(options?.onOptimisticPublish);
   };
 
   readonly retryMessage = async (messageId: string, sessionId = appStore.state.activeSessionId) => {

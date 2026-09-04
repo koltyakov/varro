@@ -1153,7 +1153,7 @@ describe('ModelsPanel', () => {
     cleanup = render(() => ModelsPanel(), container!);
 
     expect(container?.querySelector('.models-provider-refresh-notice')?.textContent).toContain(
-      'Refreshing provider configuration.'
+      'Synchronizing providers with OpenCode.'
     );
   });
 
@@ -1175,7 +1175,7 @@ describe('ModelsPanel', () => {
 
     const notice = container?.querySelector<HTMLElement>('.models-provider-refresh-notice');
     expect(notice?.getAttribute('role')).toBe('status');
-    expect(notice?.textContent).toContain('Configuration update queued.');
+    expect(notice?.textContent).toContain('Provider synchronization queued.');
     expect(notice?.textContent).toContain('when 2 running agents finish.');
 
     setState('sessionStatus', 'session-2', { type: 'idle' });

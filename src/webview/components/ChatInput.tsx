@@ -2159,8 +2159,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       }
     }
 
-    if (props.newSession) props.onBeforeSend?.();
-
     if (
       mode !== 'steer' &&
       mode !== 'after-stop' &&
@@ -2262,7 +2260,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     try {
       // Slash-command detection is async. Keep the send attached to the composer
       // where Enter was pressed if navigation changes the active session meanwhile.
-      const capturedTarget = composerSessionId() !== sendSessionId ? sendSessionId : undefined;
+      const capturedTarget =
+        props.newSession || composerSessionId() !== sendSessionId ? sendSessionId : undefined;
       const sendOptions: NonNullable<Parameters<typeof sendMessage>[1]> =
         mode === 'steer'
           ? { delivery: 'steer' }
@@ -2270,6 +2269,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               noReply: false,
               queuedAttachments: props.newSession ? queuedAttachments : undefined,
               newSessionWorkspace,
+              onOptimisticPublish: props.newSession ? props.onBeforeSend : undefined,
             };
       if (capturedTarget !== undefined) sendOptions.targetSessionId = capturedTarget;
       const pendingSend = sendMessage(text, sendOptions);
