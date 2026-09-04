@@ -3,7 +3,12 @@
 import { readFile } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
-import type { ProviderLimitStatus, ProviderLimitWindow } from '../../../shared/protocol';
+import type {
+  ProviderLimitResetCredit,
+  ProviderLimitResetCredits,
+  ProviderLimitStatus,
+  ProviderLimitWindow,
+} from '../../../shared/protocol';
 import { parseRateLimitResetAt, type ProviderAuthRecord } from '../../util/provider-limit';
 import type { ProviderLimitAdapter, ProviderLimitAdapterContext } from '../types';
 import {
@@ -17,8 +22,14 @@ import {
 } from '../adapter-utils';
 
 const CODEX_USAGE_ENDPOINTS = [
-  'https://chatgpt.com/backend-api/wham/usage',
-  'https://chatgpt.com/api/codex/usage',
+  {
+    usage: 'https://chatgpt.com/backend-api/wham/usage',
+    resetCredits: 'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits',
+  },
+  {
+    usage: 'https://chatgpt.com/api/codex/usage',
+    resetCredits: 'https://chatgpt.com/api/codex/rate-limit-reset-credits',
+  },
 ] as const;
 const CODEX_AUTH_FILE_NAME = 'auth.json';
 const CODEX_USER_AGENT = 'codex-cli/1.0.0';
@@ -72,7 +83,7 @@ export function createCodexAdapter(): ProviderLimitAdapter {
 
       try {
         for (const endpoint of CODEX_USAGE_ENDPOINTS) {
-          const response = await fetch(endpoint, {
+          const response = await fetch(endpoint.usage, {
             headers,
             signal: AbortSignal.timeout(10_000),
           });
@@ -124,6 +135,12 @@ export function createCodexAdapter(): ProviderLimitAdapter {
             note: 'Polled Codex OAuth usage endpoint',
           };
           if (planName) status.planName = planName;
+          const resetCredits = await fetchCodexResetCredits(
+            payload,
+            endpoint.resetCredits,
+            headers
+          );
+          if (resetCredits) status.usageLimitResets = resetCredits;
           return status;
         }
       } catch {
@@ -147,6 +164,88 @@ export function createCodexAdapter(): ProviderLimitAdapter {
       );
     },
   };
+}
+
+async function fetchCodexResetCredits(
+  usagePayload: unknown,
+  endpoint: string,
+  headers: CodexHeaders
+): Promise<ProviderLimitResetCredits | null> {
+  const summaryCount = extractCodexResetCreditCount(usagePayload);
+  if (summaryCount == null || summaryCount <= 0) return null;
+
+  const summary: ProviderLimitResetCredits = {
+    availableCount: summaryCount,
+    credits: null,
+  };
+
+  try {
+    const response = await fetch(endpoint, {
+      headers,
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) return summary;
+
+    const payload = await readBoundedResponseJson(response);
+    const record = asRecord(payload);
+    if (!record || !Array.isArray(record.credits)) return summary;
+
+    const detailCount = parseAvailableCount(record.available_count ?? record.availableCount);
+    const availableCount = detailCount ?? summaryCount;
+    if (availableCount <= 0) return null;
+
+    const credits = record.credits
+      .map((credit) => extractCodexResetCredit(credit))
+      .filter((credit): credit is ProviderLimitResetCredit => credit != null)
+      .toSorted((left, right) => (left.expiresAt ?? Infinity) - (right.expiresAt ?? Infinity))
+      .slice(0, availableCount);
+
+    return { availableCount, credits };
+  } catch {
+    return summary;
+  }
+}
+
+function extractCodexResetCreditCount(payload: unknown) {
+  const record = asRecord(payload);
+  const summary = asRecord(record?.rate_limit_reset_credits ?? record?.rateLimitResetCredits);
+  return parseAvailableCount(summary?.available_count ?? summary?.availableCount);
+}
+
+function parseAvailableCount(value: unknown) {
+  const count = parseFiniteNumber(value);
+  if (count == null) return null;
+  return Math.max(0, Math.floor(count));
+}
+
+function extractCodexResetCredit(value: unknown): ProviderLimitResetCredit | null {
+  const record = asRecord(value);
+  if (!record || getString(record.status).toLowerCase() !== 'available') return null;
+
+  const hasExpiration = 'expires_at' in record || 'expiresAt' in record;
+  if (!hasExpiration) return null;
+  const rawExpiration = 'expires_at' in record ? record.expires_at : record.expiresAt;
+  const expiresAt = parseCodexResetCreditExpiration(rawExpiration);
+  if (expiresAt === undefined) return null;
+
+  return {
+    title: getString(record.title) || 'Full reset',
+    expiresAt,
+  };
+}
+
+function parseCodexResetCreditExpiration(value: unknown): number | null | undefined {
+  if (value === null) return null;
+  const timestamp = getString(value);
+  if (
+    !timestamp ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(timestamp)
+  ) {
+    return undefined;
+  }
+
+  const expiresAt = Date.parse(timestamp);
+  return Number.isFinite(expiresAt) ? expiresAt : undefined;
 }
 
 function buildCodexHeaders(credentials: CodexCredentials) {

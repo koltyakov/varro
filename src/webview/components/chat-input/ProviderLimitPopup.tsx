@@ -1,4 +1,4 @@
-import { For, onCleanup, onMount, Show } from 'solid-js';
+import { createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 import type { ProviderLimitStatus, ProviderLimitWindow } from '../../../shared/protocol';
 import {
   alignPopupToBoundary,
@@ -12,10 +12,14 @@ import {
   getProviderLimitWindowRemainingPercent,
   getProviderLimitWindowUsedPercent,
 } from '../../lib/format';
+import { postMessage } from '../../lib/bridge';
 import { isFunction } from '../../lib/runtime-values';
+import { navArrowRightIcon, openNewWindowIcon } from '../../lib/ui-icons';
+import { UiIcon } from '../UiIcon';
 
 const PROVIDER_LIMIT_WARNING_PERCENT = 75;
 const PROVIDER_LIMIT_ERROR_PERCENT = 90;
+const OPENAI_USAGE_URL = 'https://chatgpt.com/#settings/Usage';
 
 export function ProviderLimitPopup(props: {
   ref?: HTMLDivElement | ((el: HTMLDivElement) => void);
@@ -25,9 +29,15 @@ export function ProviderLimitPopup(props: {
   providerName: string;
   onClose: () => void;
 }) {
+  const [resetCreditsExpanded, setResetCreditsExpanded] = createSignal(false);
   const windows = () => getOrderedProviderLimitWindows(props.limit);
   const planName = () =>
     props.limit?.status === 'available' ? props.limit.planName || null : null;
+  const resetCredits = () => {
+    if (props.limit?.status !== 'available' || props.limit.providerID !== 'openai') return null;
+    const resets = props.limit.usageLimitResets;
+    return resets && resets.availableCount > 0 ? resets : null;
+  };
   let popupEl: HTMLDivElement | undefined;
 
   const setRef = (el: HTMLDivElement) => {
@@ -68,6 +78,71 @@ export function ProviderLimitPopup(props: {
         </div>
       </Show>
 
+      <Show when={resetCredits()}>
+        {(resets) => {
+          const unavailableCount = () =>
+            Math.max(resets().availableCount - (resets().credits?.length ?? 0), 0);
+          return (
+            <div class="provider-limit-reset-section">
+              <button
+                type="button"
+                class="provider-limit-reset-toggle"
+                aria-expanded={resetCreditsExpanded()}
+                onClick={() => setResetCreditsExpanded((expanded) => !expanded)}
+              >
+                <span>Usage limit resets ({resets().availableCount})</span>
+                <UiIcon
+                  source={navArrowRightIcon}
+                  class={`provider-limit-reset-chevron${resetCreditsExpanded() ? ' expanded' : ''}`}
+                  width="10"
+                  height="10"
+                />
+              </button>
+              <Show when={resetCreditsExpanded()}>
+                <div class="provider-limit-reset-content">
+                  <ul class="provider-limit-reset-rows" aria-label="Available usage limit resets">
+                    <For each={resets().credits ?? []}>
+                      {(credit) => (
+                        <li class="provider-limit-reset-row">
+                          <Show when={!isGenericResetCreditTitle(credit.title)}>
+                            <span class="provider-limit-reset-title">{credit.title}: </span>
+                          </Show>
+                          <span class="provider-limit-reset-expiration">
+                            {credit.expiresAt == null
+                              ? 'Does not expire'
+                              : `Expires ${formatResetCreditExpiration(credit.expiresAt)}`}
+                          </span>
+                        </li>
+                      )}
+                    </For>
+                    <Show when={unavailableCount() > 0}>
+                      <li class="provider-limit-reset-unavailable">
+                        Expiration details unavailable for {unavailableCount()}{' '}
+                        {unavailableCount() === 1 ? 'reset' : 'resets'}.
+                      </li>
+                    </Show>
+                  </ul>
+                  <a
+                    class="provider-limit-reset-link"
+                    href={OPENAI_USAGE_URL}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      postMessage({
+                        type: 'vscode/open-external',
+                        payload: { url: OPENAI_USAGE_URL },
+                      });
+                    }}
+                  >
+                    ChatGPT Usage
+                    <UiIcon source={openNewWindowIcon} width="11" height="11" />
+                  </a>
+                </div>
+              </Show>
+            </div>
+          );
+        }}
+      </Show>
+
       <Show when={props.providerName}>
         <div class="provider-limit-popup-provider">
           {props.providerName}
@@ -76,6 +151,17 @@ export function ProviderLimitPopup(props: {
       </Show>
     </div>
   );
+}
+
+function formatResetCreditExpiration(expiresAt: number) {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(expiresAt);
+}
+
+function isGenericResetCreditTitle(title: string) {
+  return title.trim().toLowerCase() === 'full reset';
 }
 
 function ProviderLimitRow(props: { window: ProviderLimitWindow }) {

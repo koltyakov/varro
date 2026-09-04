@@ -93,6 +93,52 @@ describe('createCodexAdapter', () => {
               limit_window_seconds: 18_000,
             },
           },
+          rate_limit_reset_credits: {
+            available_count: 3,
+          },
+        })
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          available_count: 3,
+          credits: [
+            {
+              id: 'credit-later',
+              status: 'available',
+              expires_at: '2026-10-03T02:41:00Z',
+              title: 'Weekly reset',
+            },
+            {
+              id: 'credit-redeemed',
+              status: 'redeemed',
+              expires_at: '2026-09-20T00:00:00Z',
+              title: 'Redeemed reset',
+            },
+            {
+              id: 'credit-earlier',
+              status: 'available',
+              expires_at: '2026-09-20T00:23:00Z',
+              title: null,
+            },
+            {
+              id: 'credit-no-expiration',
+              status: 'available',
+              expires_at: null,
+              title: 'Non-expiring reset',
+            },
+            {
+              id: 'credit-relative-expiration',
+              status: 'available',
+              expires_at: '5m',
+              title: 'Malformed relative expiration',
+            },
+            {
+              id: 'credit-numeric-expiration',
+              status: 'available',
+              expires_at: 1_766_000_000,
+              title: 'Malformed numeric expiration',
+            },
+          ],
         })
       );
 
@@ -123,6 +169,15 @@ describe('createCodexAdapter', () => {
         }),
       })
     );
+    expect(fetch).toHaveBeenNthCalledWith(
+      3,
+      'https://chatgpt.com/api/codex/rate-limit-reset-credits',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer codex-file-token',
+        }),
+      })
+    );
     expect(status).toEqual({
       providerID: 'openai',
       modelID: 'gpt-5.4',
@@ -131,6 +186,23 @@ describe('createCodexAdapter', () => {
       checkedAt: 1_000,
       planName: 'Pro',
       note: 'Polled Codex OAuth usage endpoint',
+      usageLimitResets: {
+        availableCount: 3,
+        credits: [
+          {
+            title: 'Full reset',
+            expiresAt: Date.parse('2026-09-20T00:23:00Z'),
+          },
+          {
+            title: 'Weekly reset',
+            expiresAt: Date.parse('2026-10-03T02:41:00Z'),
+          },
+          {
+            title: 'Non-expiring reset',
+            expiresAt: null,
+          },
+        ],
+      },
       windows: [
         {
           id: 'five_hour',
@@ -161,6 +233,72 @@ describe('createCodexAdapter', () => {
         },
       ],
     });
+  });
+
+  it('keeps the reset count when reset-credit details are unavailable', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        jsonResponse({
+          plan_type: 'plus',
+          rate_limit: {
+            primary_window: {
+              used_percent: 25,
+              reset_at: 1_766_000_000,
+            },
+          },
+          rate_limit_reset_credits: {
+            available_count: '2',
+          },
+        })
+      )
+      .mockResolvedValueOnce(new Response('', { status: 503 }));
+
+    const status = await adapter.fetch({
+      provider: oauthProvider,
+      authStore: { openai: { type: 'oauth', access: 'codex-auth-store-token' } },
+      modelID: 'gpt-5.4',
+      checkedAt: 1_000,
+    });
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits',
+      expect.any(Object)
+    );
+    expect(status).toMatchObject({
+      status: 'available',
+      usageLimitResets: {
+        availableCount: 2,
+        credits: null,
+      },
+    });
+  });
+
+  it('does not request reset-credit details when no resets are available', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      jsonResponse({
+        plan_type: 'plus',
+        rate_limit: {
+          primary_window: {
+            used_percent: 25,
+            reset_at: 1_766_000_000,
+          },
+        },
+        rate_limit_reset_credits: {
+          available_count: 0,
+        },
+      })
+    );
+
+    const status = await adapter.fetch({
+      provider: oauthProvider,
+      authStore: { openai: { type: 'oauth', access: 'codex-auth-store-token' } },
+      modelID: 'gpt-5.4',
+      checkedAt: 1_000,
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(status).not.toHaveProperty('usageLimitResets');
   });
 
   it('uses Spark-specific quotas when a Codex Spark model is selected', async () => {

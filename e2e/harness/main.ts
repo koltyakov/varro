@@ -5152,6 +5152,19 @@ async function handleApiRequest(
         source: 'provider',
         checkedAt: Date.now(),
         note: 'Provider usage window exhausted in mock scenario.',
+        usageLimitResets: {
+          availableCount: 2,
+          credits: [
+            {
+              title: 'Full reset',
+              expiresAt: BASE_TIME + 7 * 24 * 60 * 60 * 1000,
+            },
+            {
+              title: 'Full reset',
+              expiresAt: BASE_TIME + 21 * 24 * 60 * 60 * 1000,
+            },
+          ],
+        },
         windows: [
           {
             id: 'messages',

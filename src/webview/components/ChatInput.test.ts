@@ -1523,6 +1523,65 @@ describe('ChatInput', () => {
     expect(popup?.textContent).toContain('1,000/1,000 left');
   });
 
+  it('shows OpenAI usage-limit resets in a collapsed read-only popup section', async () => {
+    setupModelState();
+    const expiresAt = Date.parse('2026-09-20T19:23:00Z');
+    setState('providerLimits', {
+      'openai:gpt-4o': availableProviderLimit({
+        usageLimitResets: {
+          availableCount: 3,
+          credits: [
+            { title: 'Full reset', expiresAt },
+            { title: 'Non-expiring reset', expiresAt: null },
+          ],
+        },
+      }),
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    container?.querySelector<HTMLButtonElement>('.toolbar-limit-chip')?.click();
+    await Promise.resolve();
+
+    const toggle = container?.querySelector<HTMLButtonElement>('.provider-limit-reset-toggle');
+    expect(toggle?.textContent).toContain('Usage limit resets (3)');
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+    expect(container?.querySelector('.provider-limit-reset-rows')).toBeNull();
+
+    toggle?.click();
+    await Promise.resolve();
+
+    const expectedExpiration = new Intl.DateTimeFormat(undefined, {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    }).format(expiresAt);
+    const rows = container?.querySelector('.provider-limit-reset-rows');
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+    expect(rows?.tagName).toBe('UL');
+    expect(rows?.querySelectorAll('li')).toHaveLength(3);
+    expect(rows?.textContent).not.toContain('Full reset');
+    expect(rows?.textContent).toContain(`Expires ${expectedExpiration}`);
+    expect(rows?.textContent).toContain('Non-expiring reset');
+    expect(rows?.textContent).toContain('Does not expire');
+    expect(rows?.textContent).toContain('Expiration details unavailable for 1 reset.');
+    const usageLink = container?.querySelector<HTMLAnchorElement>('.provider-limit-reset-link');
+    expect(usageLink?.textContent).toContain('ChatGPT Usage');
+    expect(usageLink?.href).toBe('https://chatgpt.com/#settings/Usage');
+    expect(container?.querySelector('button')?.textContent).not.toContain('Use reset');
+
+    setState('providerLimits', {
+      'openai:gpt-4o': availableProviderLimit({
+        usageLimitResets: {
+          availableCount: 0,
+          credits: [],
+        },
+      }),
+    });
+    await Promise.resolve();
+
+    expect(container?.querySelector('.provider-limit-reset-section')).toBeNull();
+  });
+
   it('filters provider-limit badges and popup rows for the selected model', async () => {
     setState('providers', [
       {

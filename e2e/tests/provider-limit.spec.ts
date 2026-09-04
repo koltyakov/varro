@@ -1,4 +1,6 @@
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: This E2E check reads the controlled harness URL log. */
 import { expect, test } from '@playwright/test';
+import { getE2EState } from './helpers';
 
 test('exhausted provider limit shows retry context and a descriptive toolbar chip', async ({
   page,
@@ -27,6 +29,43 @@ test('provider limit popup responds to repeated clicks', async ({ page }) => {
     await chip.click();
     await expect(popup).toHaveCount(0);
   }
+});
+
+test('provider limit popup expands OpenAI usage-limit reset details', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=usage-limit');
+
+  await page.locator('.toolbar-limit-chip').click();
+  const toggle = page.locator('.provider-limit-reset-toggle');
+  const rows = page.locator('.provider-limit-reset-rows');
+  await expect(toggle).toContainText('Usage limit resets (2)');
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(rows).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'ChatGPT Usage' })).toHaveCount(0);
+
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(rows).toBeVisible();
+  await expect(rows).toHaveRole('list');
+  await expect(rows.locator('.provider-limit-reset-row')).toHaveCount(2);
+  await expect(rows).not.toContainText('Full reset');
+  await expect(rows).toContainText('Expires');
+  await expect(page.getByRole('button', { name: 'Use reset' })).toHaveCount(0);
+
+  const usageLink = page.getByRole('link', { name: 'ChatGPT Usage' });
+  await expect(usageLink).toHaveAttribute('href', 'https://chatgpt.com/#settings/Usage');
+  await usageLink.click();
+  await expect
+    .poll(() =>
+      getE2EState(page, () => {
+        const value = (
+          window as Window & {
+            __varroE2E?: { externalUrls?: string[] };
+          }
+        ).__varroE2E;
+        return value?.externalUrls?.[0] || null;
+      })
+    )
+    .toBe('https://chatgpt.com/#settings/Usage');
 });
 
 test('provider limit chip is absent for scenarios without a rate-limited provider', async ({

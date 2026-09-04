@@ -218,6 +218,16 @@ export type ProviderLimitWindow = {
   percent?: number | null;
 };
 
+export type ProviderLimitResetCredit = {
+  title: string;
+  expiresAt: number | null;
+};
+
+export type ProviderLimitResetCredits = {
+  availableCount: number;
+  credits: ProviderLimitResetCredit[] | null;
+};
+
 export type ProviderLimitStatus =
   | {
       providerID: string;
@@ -228,6 +238,7 @@ export type ProviderLimitStatus =
       windows: ProviderLimitWindow[];
       planName?: string;
       note?: string;
+      usageLimitResets?: ProviderLimitResetCredits;
     }
   | {
       providerID: string;
