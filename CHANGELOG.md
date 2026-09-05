@@ -6,12 +6,14 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 
 - Improved Windows server startup and recovery, event handling, and OpenCode update support while limiting background work under heavy load.
 - Added layered permission controls for session and project rules, inherited configuration, and server-memory allowances. Simplified session choices to Default, Auto, and Full access.
-- Added provider visibility and ordering controls, plus clearer failures with expandable, redacted diagnostics.
+- Added provider visibility and ordering controls, shared model preferences across workspaces, and usage-limit reporting for Claude Code. OpenAI and Z.ai limits now include reset details.
+- Added drag-and-drop and keyboard reordering for pinned sessions, with custom order preserved across session lists and navigation.
+- Expanded redacted diagnostics and Ralph verification evidence, with clearer provider failures and reconnect feedback.
 - Opened plans in VS Code's Markdown preview while keeping them available as editor context.
 - Sped up local usage reports for large histories with worker-based database aggregation and bounded fallbacks.
 - Improved pasted images, draft and queued-message persistence, and attachment cleanup.
-- Strengthened sidebar and editor-chat recovery across delayed state, stalled delivery, stale documents, cross-folder prompts, and concurrent session-scope changes.
-- Stabilized long conversations, scrolling, prompt navigation, streaming Markdown, and deeply nested session lists.
+- Strengthened sidebar and editor-chat recovery across delayed state, stalled delivery, stale documents, cross-folder prompts, concurrent session-scope changes, and asynchronous session transitions.
+- Stabilized long conversations, scrolling during activity transitions, prompt navigation, streaming Markdown, and deeply nested session lists.
 - Fixed custom-answer submission and kept active auto-approve reviews visible.
 
 ## 0.27.x - August 2026
