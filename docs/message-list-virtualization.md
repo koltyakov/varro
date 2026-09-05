@@ -273,6 +273,10 @@ Direct input acquires ownership only when it can affect the transcript:
   consuming the reserve.
 - Timer, CSS animation, and cleanup paths must share a bounded completion contract. Cleanup must still
   run when the row unmounts, the session changes, or user input takes ownership.
+- While an activity exit holds a fixed scroll target, summary-anchor restoration may restore that
+  target and reserve its physical scroll-range shortfall, but must not add reserve for summary drift.
+  Space below the summary cannot correct its position, and observing the resulting spacer mutations
+  can starve frames and exit cleanup forever.
 - The matching CSS animation is authoritative for visual completion. Re-pin the active tray after
   `assistant-active-activity-in` finishes. Keep an exiting item mounted until
   `assistant-active-activity-out` finishes; the timer is an idempotent bounded fallback with a grace

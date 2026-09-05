@@ -399,7 +399,11 @@ test('activity exit tolerates persistent summary drift without observer feedback
       top: top(),
       scrollTop: container.scrollTop,
       bottomDistance: container.scrollHeight - container.clientHeight - container.scrollTop,
-      reserveBudget: tray.getBoundingClientRect().height + 2,
+      // The prefix summary survives, but the tray and its preceding flow gap disappear.
+      reserveBudget:
+        tray.getBoundingClientRect().height +
+        (Number.parseFloat(getComputedStyle(tray.parentElement!).rowGap) || 0) +
+        2,
     };
     const samples: Array<{
       top: number;

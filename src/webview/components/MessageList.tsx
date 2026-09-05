@@ -3937,6 +3937,19 @@ export function MessageList() {
 
   function restoreActivityExitSummaryAnchor(anchor: ActivityExitSummaryAnchor) {
     if (!containerRef || state.activeSessionId !== anchor.sessionId) return;
+    if (exitingActivityPartKeys().size > 0 && activityExitBottomTarget !== null) {
+      // Keep the fixed exit target reachable, but do not reserve for summary drift:
+      // that cannot move the summary and would feed back through spacer mutations.
+      const shortfall =
+        activityExitBottomTarget -
+        Math.max(0, containerRef.scrollHeight - containerRef.clientHeight);
+      if (shortfall > 0.5) {
+        appendBottomReserveTarget = activityExitBottomTarget;
+        setAppendBottomReserve((current) => current + shortfall);
+      }
+      setPreservedScrollTop(activityExitBottomTarget);
+      return;
+    }
     const summary = anchor.element.isConnected
       ? anchor.element
       : anchor.groupKey
@@ -3951,10 +3964,7 @@ export function MessageList() {
     const delta = currentTop - anchor.top;
     if (Math.abs(delta) <= 0.5) return;
 
-    const nextScrollTop =
-      exitingActivityPartKeys().size > 0 && activityExitBottomTarget !== null
-        ? activityExitBottomTarget
-        : containerRef.scrollTop + delta;
+    const nextScrollTop = containerRef.scrollTop + delta;
     if (delta > 0) setAppendBottomReserve((current) => current + delta);
     appendBottomReserveTarget = nextScrollTop;
     setPreservedScrollTop(nextScrollTop);
