@@ -2,6 +2,68 @@
 import { expect, test } from '@playwright/test';
 import { getE2EState } from './helpers';
 
+test('a pathological code line preserves text and leaves the browser event loop responsive', async ({
+  page,
+}) => {
+  await page.goto('/e2e/harness/index.html?scenario=message-rendering');
+  // Wait for the real lazy-loaded syntax parser so this cannot pass on its loading fallback.
+  await expect(page.locator('.rendered-markdown .hljs-keyword').first()).toBeVisible();
+
+  const source = `${'a'.repeat(30_000)}!<&`;
+  const longestTaskGap = await page.evaluate(async (text) => {
+    let lastTick = performance.now();
+    let longestGap = 0;
+    const ready = new Promise<number>((resolve, reject) => {
+      const started = lastTick;
+      const timer = setInterval(() => {
+        const now = performance.now();
+        longestGap = Math.max(longestGap, now - lastTick);
+        lastTick = now;
+        const code = document.querySelector('.rendered-markdown pre code');
+        if (code?.textContent?.trimEnd() === text) {
+          clearInterval(timer);
+          resolve(longestGap);
+        } else if (now - started > 10_000) {
+          clearInterval(timer);
+          reject(new Error('The replacement code block never rendered'));
+        }
+      }, 10);
+    });
+    window.postMessage(
+      {
+        type: 'server/event',
+        payload: {
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              id: 'message-rendering-assistant-part-1',
+              sessionID: 'session-message-rendering',
+              messageID: 'message-rendering-assistant',
+              type: 'text',
+              text: `\`\`\`ts\n${text}\n\`\`\``,
+            },
+          },
+        },
+      },
+      '*'
+    );
+    return ready;
+  }, source);
+
+  expect(longestTaskGap).toBeLessThan(500);
+  const block = page.locator('.rendered-markdown .interactive-result-code-block').last();
+  await expect(block.locator('code')).toHaveText(source);
+  await expect(block.locator('[class^="hljs-"]')).toHaveCount(0);
+  expect(
+    await block.locator('[data-copy-text]').evaluate((button) =>
+      decodeURIComponent(button.getAttribute('data-copy-text') ?? '')
+    )
+  ).toBe(source.slice(0, 20_000));
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+  await composer.fill('Still responsive');
+  await expect(composer).toHaveText('Still responsive');
+});
+
 test('opens read mode for long assistant answers and preserves rendered content', async ({
   page,
 }) => {

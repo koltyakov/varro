@@ -3802,6 +3802,17 @@ export function MessageList() {
     }
 
     let reserve = item.getBoundingClientRect().height + gap;
+    // The CSS sibling selector drops the next surviving item's leading padding when the first
+    // non-exiting item leaves. Measure that space BEFORE changing exiting membership: subsequent
+    // completions otherwise see already-shrunken siblings and permanently under-reserve the tray.
+    // Preserve this with scroll-activity-collapse.spec.ts, including its amplified-spacing case.
+    const nextItem = remainingItems?.[0] === item ? remainingItems[1] : undefined;
+    const nextContent = nextItem?.querySelector<HTMLElement>(
+      '.assistant-active-activity-item-content'
+    );
+    if (nextItem && nextContent && nextItem.getClientRects().length > 0) {
+      reserve += Number.parseFloat(getComputedStyle(nextContent).paddingTop) || 0;
+    }
     if (tray && summary) {
       if (remainingItems?.length === 1 && remainingItems[0] === item) {
         reserve += Number.parseFloat(getComputedStyle(summary).marginBottom) || 0;

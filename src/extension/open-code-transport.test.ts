@@ -159,6 +159,62 @@ function stubPlatform(platform: NodeJS.Platform) {
 }
 
 describe('OpenCodeTransport request timeouts', () => {
+  it.each([false, true])(
+    'yields between buffered SSE chunks and honors cancellation (stop=%s)',
+    async (stopOnHeartbeat) => {
+      const transport = createTransport();
+      const totalEvents = 100;
+      let clock = 1_000;
+      let nextEvent = 0;
+      vi.spyOn(Date, 'now').mockImplementation(() => clock);
+      emitEventMock.mockImplementation(() => {
+        // Every event is individually cheap, but the entire buffered burst is not.
+        clock += 2;
+      });
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => ({
+          ok: true,
+          body: {
+            getReader: () => ({
+              read: async () =>
+                nextEvent < totalEvents
+                  ? {
+                      done: false,
+                      value: new TextEncoder().encode(
+                        `data: ${JSON.stringify({ type: 'server.connected', properties: { index: nextEvent++ } })}\n\n`
+                      ),
+                    }
+                  : { done: true, value: undefined },
+            }),
+          },
+        }))
+      );
+      const heartbeat = new Promise<number>((resolve) => {
+        setTimeout(() => {
+          const processed = emitEventMock.mock.calls.length;
+          if (stopOnHeartbeat) transport.stopEventStream();
+          resolve(processed);
+        }, 0);
+      });
+
+      try {
+        await transport.startEventStream();
+        const processedAtHeartbeat = await heartbeat;
+        expect(processedAtHeartbeat).toBeGreaterThan(0);
+        expect(processedAtHeartbeat).toBeLessThan(totalEvents);
+        const expectedEvents = stopOnHeartbeat ? processedAtHeartbeat : totalEvents;
+        expect(emitEventMock.mock.calls.map(([event]) => event.properties.index)).toEqual(
+          Array.from({ length: expectedEvents }, (_, index) => index)
+        );
+      } finally {
+        transport.stopEventStream();
+        emitEventMock.mockReset();
+        vi.unstubAllGlobals();
+      }
+    }
+  );
+
   it('exports healthy REST, degraded stream, reconnect, activity, and request failure without bodies', async () => {
     vi.useFakeTimers();
     const transport = createTransport();
@@ -386,6 +442,8 @@ describe('OpenCodeTransport reconnect delay', () => {
     expect(transport.eventReconnectCount).toBe(0);
 
     transport.stopEventStream();
+    // The delayed event can now pause in the cooperative yield before observing cancellation.
+    await vi.advanceTimersByTimeAsync(1);
     await stream;
   });
 });

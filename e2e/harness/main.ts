@@ -2816,6 +2816,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     const searchParams = new URLSearchParams(window.location.search);
     const activeTray = searchParams.get('activeTray') === '1';
     const activeTrayIndex = Number.parseInt(searchParams.get('activeTrayIndex') ?? '20', 10);
+    const activeTrayCount = Number.parseInt(searchParams.get('activeTrayCount') ?? '1', 10);
     const session = makeSession(
       'session-tool-cards-large-transcript',
       'Tool card virtualization stability',
@@ -2936,18 +2937,21 @@ function createScenarioState(name: ScenarioName): ScenarioState {
 
       if (activeTray && index === activeTrayIndex) {
         markAssistantInProgress(assistant);
-        assistant.parts = [
-          {
-            ...commonToolPart,
-            tool: 'grep',
-            state: {
-              status: 'running',
-              input: { pattern: 'virtualized-activity', path: 'src/webview' },
-              title: 'Search virtualized activity',
-              time: { start: createdAt + 1 },
-            },
+        assistant.parts = Array.from({ length: activeTrayCount }, (_, activityIndex) => ({
+          ...commonToolPart,
+          id: activityIndex === 0 ? commonToolPart.id : `${commonToolPart.id}-${activityIndex}`,
+          callID:
+            activityIndex === 0
+              ? commonToolPart.callID
+              : `${commonToolPart.callID}-${activityIndex}`,
+          tool: 'grep',
+          state: {
+            status: 'running',
+            input: { pattern: 'virtualized-activity', path: 'src/webview' },
+            title: 'Search virtualized activity',
+            time: { start: createdAt + 1 },
           },
-        ];
+        }));
       }
 
       messages.push(user, assistant);

@@ -445,6 +445,23 @@ image loads.
 
 ## What Was Missed
 
+### Sequential Tool Exits Removed Unmeasured Sibling Spacing
+
+Three visible tools completing during a busy turn exposed an 18 px reserve deficit. Changing the
+first tool to `is-exiting` also removed the next non-exiting tool's 9 px leading padding through a
+CSS sibling selector. Sequential exit measurements then saw three 33 px items instead of the
+original 33, 42, and 42 px. The browser clamped the shrinking scroll range before Thinking returned.
+
+Reserve the next surviving item's computed leading padding before changing the first non-exiting
+item's class. Count that gap once; later measurements must see its already-reserved removal. Keep
+clipped-tray handling distinct so revealing hidden items does not create false reserve.
+
+`e2e/tests/scroll-activity-collapse.spec.ts` exercises real busy-turn completion events at normal and
+artificially amplified spacing, including retained, staggered, virtualized, and clipped trays.
+Preserve its same-message frame samples and lifecycle assertions. One-tool fixtures, idle-only
+collapse, mock-persistence-only updates, and settled-only assertions do not reproduce this defect.
+Do not widen tolerances or change the existing CSS spacing/animation to make this regression pass.
+
 ### Approximate Fixtures Replaced The Real Reproduction
 
 Generic 50-row fixtures and an all-at-once 129-message replay passed while the real extension path

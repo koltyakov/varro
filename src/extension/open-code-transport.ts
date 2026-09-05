@@ -340,6 +340,9 @@ export class OpenCodeTransport {
       const decoder = new TextDecoder();
       let buffer = '';
       let cursor = 0;
+      // Buffered reads resolve as microtasks. Carry the budget across chunks so
+      // a burst of individually cheap events still yields to timers and host IPC.
+      let yieldedAt = Date.now();
       resetIdleTimer();
       while (true) {
         const { value, done } = await reader.read();
@@ -364,7 +367,6 @@ export class OpenCodeTransport {
         }
         buffer += decoder.decode(value, { stream: true });
         let boundary: { index: number; length: number } | null;
-        let yieldedAt = Date.now();
         while ((boundary = findSseChunkBoundary(buffer, cursor))) {
           this.processSseChunk(buffer.slice(cursor, boundary.index), controller, generation);
           cursor = boundary.index + boundary.length;

@@ -1410,6 +1410,13 @@ test.describe('auto-scroll', () => {
       )
       .toBeLessThan(2);
     await page.waitForTimeout(1_250);
+    // Establish the exact bottom before capturing a subpixel-stability baseline. Live events
+    // otherwise finish the initial one-pixel follow offset before the exit has even started.
+    await page.locator('.interactive-list').evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await waitForAnimationFrames(page, 4);
     const anchor = await getVisibleMessageAnchor(page.locator('.interactive-list'));
     const exploredTop = await page
       .locator('.assistant-activity-summary')
@@ -1420,47 +1427,60 @@ test.describe('auto-scroll', () => {
         return summary.getBoundingClientRect().top - container.getBoundingClientRect().top;
       });
 
-    await page.evaluate(() => {
-      const harnessWindow = window as typeof window & {
-        __varroE2E?: {
-          getSessionMessages?: (id: string) => Array<{ parts: Array<Record<string, unknown>> }>;
-          updateMessagePart?: (part: Record<string, unknown>) => void;
+    const { exitSamples, exploredSamples, sawExit, remainingItems } = await page
+      .locator('.interactive-list')
+      .evaluate(async (element, anchorId) => {
+        const harnessWindow = window as typeof window & {
+          __varroE2E?: {
+            getSessionMessages?: (id: string) => Array<{ parts: Array<Record<string, unknown>> }>;
+            updateMessagePart?: (part: Record<string, unknown>) => void;
+          };
         };
-      };
-      const part = harnessWindow.__varroE2E
-        ?.getSessionMessages?.('session-tool-cards-large-transcript')
-        .flatMap((message) => message.parts)
-        .find((candidate) => candidate.id === 'message-tool-cards-assistant-69-tool');
-      if (!part) throw new Error('Trailing active tool fixture is missing');
-      const previousState = part.state as Record<string, unknown>;
-      part.state = {
-        status: 'completed',
-        input: previousState.input,
-        output: 'Found matches',
-        title: 'Search virtualized activity',
-        metadata: {},
-        time: { start: Date.now() - 1_000, end: Date.now() },
-      };
-      harnessWindow.__varroE2E?.updateMessagePart?.(part);
-    });
-
-    const [exitSamples, exploredSamples] = await Promise.all([
-      sampleMessageTopAcrossFrames(page.locator('.interactive-list'), anchor.id, 90),
-      page.locator('.interactive-list').evaluate(async (element) => {
-        const tops: Array<number | null> = [];
-        for (let frame = 0; frame < 90; frame += 1) {
+        const part = harnessWindow.__varroE2E
+          ?.getSessionMessages?.('session-tool-cards-large-transcript')
+          .flatMap((message) => message.parts)
+          .find((candidate) => candidate.id === 'message-tool-cards-assistant-69-tool');
+        if (!part) throw new Error('Trailing active tool fixture is missing');
+        const previousState = part.state as Record<string, unknown>;
+        part.state = {
+          status: 'completed',
+          input: previousState.input,
+          output: 'Found matches',
+          title: 'Search virtualized activity',
+          metadata: {},
+          time: { start: Date.now() - 1_000, end: Date.now() },
+        };
+        harnessWindow.__varroE2E?.updateMessagePart?.(part);
+        // Persistence updates alone wait for polling. Deliver the event and sample in the same
+        // browser turn so retention, exit, and the reserve handoff cannot escape the assertions.
+        window.postMessage(
+          { type: 'server/event', payload: { type: 'message.part.updated', properties: { part } } },
+          '*'
+        );
+        const exitSamples: Array<number | null> = [];
+        const exploredSamples: Array<number | null> = [];
+        let sawExit = false;
+        const started = performance.now();
+        while (performance.now() - started < 3_000) {
           await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-          const summaries = element.querySelectorAll<HTMLElement>('.assistant-activity-summary');
-          const summary = summaries[summaries.length - 1];
-          tops.push(
-            summary
-              ? summary.getBoundingClientRect().top - element.getBoundingClientRect().top
-              : null
+          const row = element.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(anchorId)}"]`);
+          const summary = element.querySelector<HTMLElement>(
+            '[data-msg-id="message-tool-cards-assistant-69"] .assistant-activity-summary'
           );
+          const top = element.getBoundingClientRect().top;
+          exitSamples.push(row ? row.getBoundingClientRect().top - top : null);
+          exploredSamples.push(summary ? summary.getBoundingClientRect().top - top : null);
+          sawExit ||= !!element.querySelector('.assistant-active-activity-item.is-exiting');
         }
-        return tops;
-      }),
-    ]);
+        return {
+          exitSamples,
+          exploredSamples,
+          sawExit,
+          remainingItems: element.querySelectorAll('.assistant-active-activity-item').length,
+        };
+      }, anchor.id);
+    expect(sawExit).toBe(true);
+    expect(remainingItems).toBe(0);
     expect(
       exitSamples.every((top) => top !== null && Math.abs(top - anchor.top) <= 1.5),
       JSON.stringify({ anchor, exitSamples })
@@ -1571,6 +1591,10 @@ test.describe('auto-scroll', () => {
         time: { start: Date.now() - 1_000, end: Date.now() },
       };
       harnessWindow.__varroE2E?.updateMessagePart?.(part);
+      window.postMessage(
+        { type: 'server/event', payload: { type: 'message.part.updated', properties: { part } } },
+        '*'
+      );
     });
 
     await expect(activeItem).toHaveCount(0, { timeout: 5_000 });

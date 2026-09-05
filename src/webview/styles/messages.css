@@ -446,6 +446,9 @@
   overflow: clip;
 }
 
+/* Changing the first non-exiting item also removes the next item's padding. MessageList must
+   reserve that sibling space before setting is-exiting. Keep this selector and the pre-exit
+   accounting in sync; scroll-activity-collapse.spec.ts protects simultaneous completions. */
 .assistant-active-activity-items
   > .assistant-active-activity-item:not(.is-exiting)
   ~ .assistant-active-activity-item:not(.is-exiting)

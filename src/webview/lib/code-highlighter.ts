@@ -6,6 +6,9 @@ type CodeHighlighter = {
 };
 type CodeHighlighterLoader = () => Promise<CodeHighlighter>;
 
+const MAX_HIGHLIGHT_CHARACTERS = 20_000;
+const MAX_HIGHLIGHT_LINE_CHARACTERS = 1_000;
+
 const CODE_LANGUAGE_ALIASES = new Map<string, string>([
   ['console', 'bash'],
   ['js', 'javascript'],
@@ -39,6 +42,15 @@ export function resolveCodeLanguage(language?: string): string | undefined {
 }
 
 export function highlightCode(text: string, language: string): string | null {
+  // Highlight.js runs synchronously. Some language matchers take quadratic time on
+  // long lines, so a timeout around the call cannot keep the webview responsive.
+  if (text.length > MAX_HIGHLIGHT_CHARACTERS) return null;
+  let lineLength = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '\n' || char === '\r') lineLength = 0;
+    else if (++lineLength > MAX_HIGHLIGHT_LINE_CHARACTERS) return null;
+  }
   return codeHighlighter?.highlightCode(text, language) ?? null;
 }
 

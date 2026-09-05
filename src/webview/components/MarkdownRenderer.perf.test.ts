@@ -1,16 +1,21 @@
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import DOMPurify from 'dompurify';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import hljs from 'highlight.js/lib/core';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { loadCodeHighlighter } from '../lib/code-highlighter';
 import {
   __parseMarkdownForTests,
   __resetMarkdownCachesForTests,
   getMarkdownCacheStatsForTests,
   MarkdownRenderer,
+  renderHighlightedCodeHtml,
 } from './MarkdownRenderer';
 
 let container: HTMLDivElement;
 let cleanup: (() => void) | undefined;
+
+beforeAll(() => loadCodeHighlighter());
 
 beforeEach(() => {
   __resetMarkdownCachesForTests();
@@ -27,6 +32,23 @@ afterEach(() => {
 });
 
 describe('MarkdownRenderer performance regressions', () => {
+  it.each([
+    ['a pathological TypeScript line', `${'a'.repeat(30_000)}!<&`],
+    ['a long line in a small block', `${'a'.repeat(1_001)}!<&`],
+    ['an oversized block of short lines', 'const value = 1;\n'.repeat(1_300)],
+  ])('renders %s as intact plaintext without running the syntax parser', (_label, text) => {
+    // Avoid actually blocking the test worker on the known quadratic TypeScript matcher.
+    const highlight = vi.spyOn(hljs, 'highlight').mockImplementation(() => {
+      throw new Error('Syntax parsing must be skipped for this input');
+    });
+
+    container.innerHTML = renderHighlightedCodeHtml(text, 'typescript');
+
+    expect(container.textContent).toBe(text);
+    expect(container.querySelector('*')).toBeNull();
+    expect(highlight.mock.calls.length).toBe(0);
+  });
+
   it('chooses a streaming placeholder without repeated full-content scans', async () => {
     const marker = 'VARROPENDINGMARKDOWNPLACEHOLDER';
     const originalIncludes = String.prototype.includes;
