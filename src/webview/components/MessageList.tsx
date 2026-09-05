@@ -1594,6 +1594,8 @@ export function MessageList() {
     );
     const activeSessionId = state.activeSessionId;
     const invalidatedAnchorOwnershipEpoch = userScrollOwnershipEpoch;
+    // Native scroll movement is reported after wheel/key intent, so layout settling must yield to both.
+    const invalidatedAnchorInputEpoch = directScrollInputEpoch;
     const preferredLayoutAnchor = preferredAnchor ?? pendingThinkingLayoutAnchor;
     const invalidatedAnchor =
       (invalidatedUnmountedHeight || mountedRows.length > 0) &&
@@ -1626,6 +1628,7 @@ export function MessageList() {
       queueMicrotask(() => {
         if (
           userScrollOwnershipEpoch === invalidatedAnchorOwnershipEpoch &&
+          directScrollInputEpoch === invalidatedAnchorInputEpoch &&
           !stickyNavigationOwnsScroll() &&
           !pendingExpansionScrollAnchor
         ) {
@@ -1635,6 +1638,7 @@ export function MessageList() {
               await waitForAnimationFrame();
               if (
                 userScrollOwnershipEpoch !== invalidatedAnchorOwnershipEpoch ||
+                directScrollInputEpoch !== invalidatedAnchorInputEpoch ||
                 stickyNavigationOwnsScroll() ||
                 pendingExpansionScrollAnchor
               ) {
@@ -8019,6 +8023,13 @@ export function MessageList() {
 
   return (
     <div class="interactive-list-shell min-h-0 flex-1">
+      <Show when={state.messagesLoading}>
+        <div class="chat-messages-loading" role="status" aria-label="Loading messages">
+          <span class="chat-messages-loading-dot" />
+          <span class="chat-messages-loading-dot" style={{ 'animation-delay': '0.3s' }} />
+          <span class="chat-messages-loading-dot" style={{ 'animation-delay': '0.6s' }} />
+        </div>
+      </Show>
       <div
         ref={containerRef}
         class={`interactive-list min-h-0 flex-1 overflow-y-auto${showModelPicker() ? ' showing-model-picker' : ''}${autoScroll() || shouldMeasureRows() || loadingOlderHistory() || exitingActivityPartKeys().size > 0 ? ' managed-scroll-anchor' : ''}${editingMessage() ? ' editing-message' : ''}${state.messagesLoading && messages().length > 0 ? ' is-session-hydrating' : ''}`}
@@ -8058,45 +8069,34 @@ export function MessageList() {
           <Show
             when={!state.pendingSessionSelectionId && messages().length > 0}
             fallback={
-              <Show
-                when={state.messagesLoading}
-                fallback={
-                  <Show when={shouldShowStarterLogo()}>
-                    <div class="chat-empty-state">
-                      <Show when={state.emptyStateLogoUri}>
-                        <img
-                          class="chat-empty-logo"
-                          src={state.emptyStateLogoUri}
-                          width="256"
-                          height="256"
-                          alt=""
-                          aria-hidden="true"
-                          draggable="false"
-                        />
-                      </Show>
-                      <div class="chat-empty-hints">
-                        <span class="chat-empty-hint">
-                          <kbd>@</kbd> add files and agents
-                        </span>
-                        <span class="chat-empty-hint">
-                          <kbd>/</kbd> run commands
-                        </span>
-                        <span class="chat-empty-hint">
-                          <kbd>&amp;</kbd> link sessions
-                        </span>
-                        <span class="chat-empty-hint">
-                          <kbd>Shift</kbd>
-                          <kbd>Enter</kbd> new line
-                        </span>
-                      </div>
-                    </div>
+              <Show when={!state.messagesLoading && shouldShowStarterLogo()}>
+                <div class="chat-empty-state">
+                  <Show when={state.emptyStateLogoUri}>
+                    <img
+                      class="chat-empty-logo"
+                      src={state.emptyStateLogoUri}
+                      width="256"
+                      height="256"
+                      alt=""
+                      aria-hidden="true"
+                      draggable="false"
+                    />
                   </Show>
-                }
-              >
-                <div class="chat-messages-loading" role="status" aria-label="Loading messages">
-                  <span class="chat-messages-loading-dot" />
-                  <span class="chat-messages-loading-dot" style={{ 'animation-delay': '0.3s' }} />
-                  <span class="chat-messages-loading-dot" style={{ 'animation-delay': '0.6s' }} />
+                  <div class="chat-empty-hints">
+                    <span class="chat-empty-hint">
+                      <kbd>@</kbd> add files and agents
+                    </span>
+                    <span class="chat-empty-hint">
+                      <kbd>/</kbd> run commands
+                    </span>
+                    <span class="chat-empty-hint">
+                      <kbd>&amp;</kbd> link sessions
+                    </span>
+                    <span class="chat-empty-hint">
+                      <kbd>Shift</kbd>
+                      <kbd>Enter</kbd> new line
+                    </span>
+                  </div>
                 </div>
               </Show>
             }

@@ -195,6 +195,12 @@ input:focus-visible {
   visibility: hidden;
 }
 
+.interactive-list-shell > .chat-messages-loading {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
 .interactive-list.managed-scroll-anchor,
 .interactive-list.editing-message {
   overflow-anchor: none;

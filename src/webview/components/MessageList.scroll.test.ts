@@ -995,6 +995,103 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
+  it('restores a detached paragraph during the native zoom frame after an earlier frame sampler', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    let hostWidth = 486;
+    let pixelRatio = 1;
+    let listTop = 37;
+    let reflowOffset = 0;
+    let scrollTopValue = 0;
+    vi.spyOn(window, 'innerWidth', 'get').mockImplementation(() => hostWidth);
+    vi.spyOn(window, 'devicePixelRatio', 'get').mockImplementation(() => pixelRatio);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this.classList.contains('interactive-list')) {
+          return new DOMRect(0, listTop, hostWidth, 631);
+        }
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(0, listTop - scrollTopValue, hostWidth, 15000);
+        }
+        const row = this.dataset.msgId ? this : this.closest<HTMLElement>('[data-msg-id]');
+        const messageId = row?.dataset.msgId;
+        if (messageId?.startsWith('assistant-')) {
+          const index = Number(messageId.replace('assistant-', ''));
+          const top = listTop + index * 300 + reflowOffset - scrollTopValue;
+          if (this.matches('.rendered-markdown p')) {
+            return new DOMRect(0, top + 24, hostWidth, 22.28);
+          }
+          return new DOMRect(0, top, hostWidth, 300);
+        }
+        return new DOMRect(0, 0, hostWidth, 40);
+      }
+    );
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 50 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts: [
+            {
+              ...textPart(`text-${index}`, `I will end this sentence with END-${index}.`),
+              messageID: messageId,
+            },
+          ],
+        };
+      })
+    );
+    cleanup = render(() => MessageList(), container!);
+    const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
+    Object.defineProperties(list, {
+      clientHeight: { configurable: true, value: 631 },
+      clientWidth: { configurable: true, get: () => hostWidth },
+      offsetWidth: { configurable: true, get: () => hostWidth },
+      scrollHeight: { configurable: true, value: 15000 },
+      scrollTop: {
+        configurable: true,
+        get: () => scrollTopValue,
+        set: (value: number) => {
+          scrollTopValue = value;
+        },
+      },
+    });
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    scrollTopValue = 20 * 300;
+    list.dispatchEvent(new Event('scroll'));
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+    const paragraph = container!.querySelector<HTMLElement>(
+      '[data-msg-id="assistant-20"] .rendered-markdown p'
+    )!;
+    expect(paragraph.getBoundingClientRect().top).toBe(61);
+
+    let sampledTop: number | undefined;
+    requestAnimationFrame(() => {
+      sampledTop = paragraph.getBoundingClientRect().top;
+    });
+    pixelRatio = 1.2;
+    listTop = 36.822914;
+    window.dispatchEvent(new Event('resize'));
+    // Native zoom can reflow again after the resize event, before the queued frame callbacks.
+    hostWidth = 405;
+    reflowOffset = -42.684894;
+    animationFrames.flush();
+    expect(sampledTop).toBeCloseTo(18.13802, 4);
+    expect(paragraph.getBoundingClientRect().top - listTop).toBeCloseTo(24, 4);
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+      expect(paragraph.getBoundingClientRect().top - listTop).toBeCloseTo(24, 4);
+    }
+    animationFrames.restore();
+  });
+
   it('does not refresh a fully visible resize anchor after local width reflow', async () => {
     vi.useFakeTimers();
     const animationFrames = installQueuedAnimationFrameMocks();
@@ -1480,6 +1577,146 @@ describe('MessageList auto-scroll', () => {
       ],
       fixture<ResizeObserver>(rowObserver)
     );
+    expect(scrollTopValue).toBe(wheelDestination);
+    animationFrames.restore();
+  });
+
+  it('cancels compact activity layout settling before native wheel movement is reported', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const rowIds = Array.from({ length: 60 }, (_, index) => {
+      if (index === 20) return 'user-active';
+      if (index === 21) return 'assistant-completed';
+      if (index === 22) return 'assistant-running';
+      if (index === 23) return 'assistant-edit';
+      return `assistant-${index}`;
+    });
+    const rowIndex = new Map(rowIds.map((id, index) => [id, index]));
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 0, 500, 400);
+        }
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(0, -scrollTopValue, 500, 6000);
+        }
+        const row = this.dataset.msgId ? this : this.closest<HTMLElement>('[data-msg-id]');
+        const index = row?.dataset.msgId ? rowIndex.get(row.dataset.msgId) : undefined;
+        if (index !== undefined) {
+          return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
+        }
+        return new DOMRect(0, 0, 500, 40);
+      }
+    );
+
+    const completed = toolPart('grep-completed', 'assistant-completed', 'call-grep-completed');
+    completed.tool = 'grep';
+    completed.state = {
+      status: 'completed',
+      input: { pattern: 'activity' },
+      output: 'matches',
+      title: 'activity',
+      metadata: {},
+      time: { start: 1, end: 2 },
+    };
+    const running = toolPart('bash-running', 'assistant-running', 'call-bash-running');
+    running.tool = 'bash';
+    running.state = {
+      status: 'running',
+      input: { command: 'npm run test' },
+      title: 'npm run test',
+      time: { start: 3 },
+    };
+    const completedRunning = toolPart('bash-running', 'assistant-running', 'call-bash-running');
+    completedRunning.tool = 'bash';
+    completedRunning.state = {
+      status: 'completed',
+      input: { command: 'npm run test' },
+      output: 'passed',
+      title: 'npm run test',
+      metadata: {},
+      time: { start: 3, end: 4 },
+    };
+    const edit = toolPart('patch-completed', 'assistant-edit', 'call-patch-completed');
+    edit.tool = 'apply_patch';
+    edit.state = {
+      status: 'completed',
+      input: { patchText: '*** Begin Patch\n*** Update File: src/app.ts\n*** End Patch' },
+      output: 'Done',
+      title: 'apply_patch',
+      metadata: {},
+      time: { start: 5, end: 6 },
+    };
+    const messagesWith = (activity: ReturnType<typeof toolPart>) =>
+      rowIds.map((messageId, index) => {
+        if (messageId === 'user-active') {
+          return {
+            info: userMessage(messageId),
+            parts: [textPart('prompt-active', 'Inspect, edit, and verify the activity flow')],
+          };
+        }
+        const parts =
+          messageId === 'assistant-completed'
+            ? [completed]
+            : messageId === 'assistant-running'
+              ? [reasoningPart('reasoning-running', 'Checking the active change'), activity]
+              : messageId === 'assistant-edit'
+                ? [edit]
+                : [textPart(`text-${index}`, `Response ${index}`)];
+        return {
+          info: assistantMessage(messageId, { parentID: 'user-active' }),
+          parts,
+        };
+      });
+
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    replaceMessages(messagesWith(running));
+    cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered MessageList fixture always provides its transcript element.
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'clientWidth', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'offsetWidth', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 6000 });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    scrollTopValue = 2000;
+    list.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    animationFrames.flush();
+    await vi.advanceTimersByTimeAsync(500);
+
+    replaceMessages(messagesWith(completedRunning));
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -64 }));
+    scrollTopValue -= 64;
+    const wheelDestination = scrollTopValue;
+    const anchor = container?.querySelector<HTMLElement>(
+      '[data-msg-id="user-active"] .user-message-card'
+    );
+    const anchorDestination = anchor?.getBoundingClientRect().top;
+
+    for (let frame = 0; frame < 12; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+      expect(scrollTopValue).toBe(wheelDestination);
+      expect(anchor?.getBoundingClientRect().top).toBe(anchorDestination);
+    }
+    list.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    animationFrames.flush();
     expect(scrollTopValue).toBe(wheelDestination);
     animationFrames.restore();
   });

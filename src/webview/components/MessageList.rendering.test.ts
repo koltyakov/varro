@@ -356,6 +356,63 @@ describe('MessageList entrance animation', () => {
 });
 
 describe('MessageList loading states', () => {
+  it('keeps loading visible through populated hydration on consecutive session openings', async () => {
+    setSessions([
+      session('session-1', { time: { created: 1, updated: 2 } }),
+      session('session-2', { time: { created: 1, updated: 2 } }),
+    ]);
+    setState('activeSessionId', 'session-1');
+    setState('messagesLoading', true);
+    replaceMessages([]);
+    cleanup = render(() => MessageList(), container!);
+
+    const expectVisibleLoading = () => {
+      const indicators = container!.querySelectorAll(
+        '[role="status"][aria-label="Loading messages"]'
+      );
+      expect(indicators).toHaveLength(1);
+      expect(indicators[0]!.closest('.is-session-hydrating')).toBeNull();
+      expect(indicators[0]!.closest('[hidden], [aria-hidden="true"]')).toBeNull();
+    };
+
+    for (const sessionId of ['session-1', 'session-2']) {
+      batch(() => {
+        setState('activeSessionId', sessionId);
+        setState('messagesLoading', true);
+        replaceMessages([]);
+      });
+      await Promise.resolve();
+      expectVisibleLoading();
+
+      // AI-08: rows arrive before messagesLoading clears. They must stay hidden,
+      // but the loading status must survive this handoff outside the hidden list.
+      const messageId = `${sessionId}-message`;
+      replaceMessages([
+        {
+          info: { ...userMessage(messageId), sessionID: sessionId },
+          parts: [
+            {
+              ...textPart(`${sessionId}-text`, 'Hydrating transcript'),
+              messageID: messageId,
+              sessionID: sessionId,
+            },
+          ],
+        },
+      ]);
+      await Promise.resolve();
+      const row = container!.querySelector(`[data-msg-id="${messageId}"]`);
+      expect(row).not.toBeNull();
+      expect(row!.closest('.is-session-hydrating')).not.toBeNull();
+      expectVisibleLoading();
+
+      setState('messagesLoading', false);
+      await Promise.resolve();
+      expect(container!.querySelector(`[data-msg-id="${messageId}"]`)).toBe(row);
+      expect(row!.closest('.is-session-hydrating')).toBeNull();
+      expect(container!.querySelector('[aria-label="Loading messages"]')).toBeNull();
+    }
+  });
+
   it('hides the previous transcript while a cross-workspace session activation is pending', async () => {
     setSessions([
       session('session-1', { time: { created: 1, updated: 2 } }),
