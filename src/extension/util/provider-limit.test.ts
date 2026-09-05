@@ -204,6 +204,26 @@ describe('provider limit helpers', () => {
     });
   });
 
+  it('preserves OAuth refresh metadata needed by provider limit adapters', () => {
+    expect(
+      parseProviderAuthStore(
+        JSON.stringify({
+          xai: {
+            type: 'oauth',
+            access: 'access-token',
+            refresh: 'refresh-token',
+            expires: 123_456,
+          },
+        })
+      ).xai
+    ).toEqual({
+      type: 'oauth',
+      access: 'access-token',
+      refresh: 'refresh-token',
+      expires: 123_456,
+    });
+  });
+
   it('does not send auth tokens to provider metadata URLs for unknown providers', () => {
     const authStore = parseProviderAuthStore(
       JSON.stringify({

@@ -87,6 +87,99 @@ describe('createXaiAdapter', () => {
     });
   });
 
+  it('refreshes an expired OAuth token before polling billing limits', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        Response.json({
+          access_token: 'refreshed-access-token',
+          refresh_token: 'rotated-refresh-token',
+          expires_in: 3600,
+        })
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          config: {
+            creditUsagePercent: 20,
+            currentPeriod: { type: 'WEEKLY', end: '2026-09-12T12:00:00.000Z' },
+          },
+        })
+      );
+    const setProviderAuth = vi.fn(async () => {});
+
+    const status = await adapter.fetch({
+      provider,
+      authStore: {
+        xai: {
+          type: 'oauth',
+          access: 'expired-access-token',
+          refresh: 'stored-refresh-token',
+          expires: 1,
+        },
+      },
+      modelID: 'grok-code-fast-1',
+      checkedAt: 5_000,
+      setProviderAuth,
+    });
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      'https://auth.x.ai/oauth2/token',
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.stringContaining('refresh_token=stored-refresh-token'),
+      })
+    );
+    expect(setProviderAuth).toHaveBeenCalledWith('xai', {
+      type: 'oauth',
+      access: 'refreshed-access-token',
+      refresh: 'rotated-refresh-token',
+      expires: expect.any(Number),
+    });
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      'https://cli-chat-proxy.grok.com/v1/billing?format=credits',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer refreshed-access-token',
+        }),
+      })
+    );
+    expect(status).toMatchObject({ status: 'available', windows: [{ remaining: 80 }] });
+  });
+
+  it('refreshes and retries when billing rejects a token without expiry metadata', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response('', { status: 401 }))
+      .mockResolvedValueOnce(
+        Response.json({ access_token: 'refreshed-access-token', expires_in: 3600 })
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          config: {
+            creditUsagePercent: 10,
+            currentPeriod: { type: 'WEEKLY', end: '2026-09-12T12:00:00.000Z' },
+          },
+        })
+      );
+
+    const status = await adapter.fetch({
+      provider,
+      authStore: {
+        xai: {
+          type: 'oauth',
+          access: 'rejected-access-token',
+          refresh: 'stored-refresh-token',
+        },
+      },
+      modelID: null,
+      checkedAt: 5_000,
+      setProviderAuth: vi.fn(async () => {}),
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(status).toMatchObject({ status: 'available', windows: [{ remaining: 90 }] });
+  });
+
   it('falls back to absolute monthly credit accounting', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       Response.json({

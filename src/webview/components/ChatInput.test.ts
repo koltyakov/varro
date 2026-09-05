@@ -68,6 +68,7 @@ const {
   runSlashCommandByNameMock,
   sendMessageMock,
   queuedMessageWasAdmittedMock,
+  refreshProviderLimitMock,
   serverEventHandlers,
   serverEventsOnMock,
 } = vi.hoisted(() => ({
@@ -82,6 +83,7 @@ const {
   runSlashCommandByNameMock: vi.fn(async () => true),
   sendMessageMock: vi.fn<typeof UseOpenCodeModule.sendMessage>(async () => true),
   queuedMessageWasAdmittedMock: vi.fn(),
+  refreshProviderLimitMock: vi.fn(async () => {}),
   serverEventHandlers: new Map<
     string,
     Set<(event: { type: string; properties?: UnknownRecord }) => void>
@@ -105,6 +107,7 @@ vi.mock('../hooks/useOpenCode', async () => {
     editMessage: editMessageMock,
     forkSession: forkSessionMock,
     loadOlderSessionPrompts: loadOlderSessionPromptsMock,
+    refreshProviderLimit: refreshProviderLimitMock,
     redoSession: redoSessionMock,
     undoSession: undoSessionMock,
     runSlashCommandByName: runSlashCommandByNameMock,
@@ -281,6 +284,8 @@ afterEach(() => {
   );
   loadOlderSessionPromptsMock.mockReset();
   loadOlderSessionPromptsMock.mockResolvedValue(false);
+  refreshProviderLimitMock.mockReset();
+  refreshProviderLimitMock.mockResolvedValue(undefined);
   serverEventHandlers.clear();
   serverEventsOnMock.mockClear();
   runSlashCommandByNameMock.mockReset();
@@ -5309,6 +5314,68 @@ describe('ChatInput', () => {
       modelID: 'original',
       variant: 'high',
     });
+  });
+
+  it('retrieves provider limits as soon as a model is selected while editing', async () => {
+    setState('activeSessionId', 'session-1');
+    setState('providers', [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          current: {
+            id: 'current',
+            name: 'Current model',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+          },
+        },
+      },
+      {
+        id: 'xai',
+        name: 'xAI',
+        source: 'api',
+        models: {
+          'grok-code-fast-1': {
+            id: 'grok-code-fast-1',
+            name: 'Grok Code Fast 1',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+          },
+        },
+      },
+    ]);
+    setState('providerDefaults', { openai: 'current', xai: 'grok-code-fast-1' });
+    setState('selectedModel', { providerID: 'openai', modelID: 'current' });
+    setState('messages', [
+      {
+        info: {
+          id: 'message-1',
+          sessionID: 'session-1',
+          role: 'user',
+          time: { created: 1 },
+          agent: 'build',
+          model: { providerID: 'openai', modelID: 'current' },
+        },
+        parts: [],
+      },
+    ]);
+
+    cleanup = render(() => ChatInput(), container!);
+    startEditingMessage('message-1', 'session-1', 'edited prompt');
+    setShowModelPicker(true);
+    await Promise.resolve();
+
+    const grokOption = [
+      ...(container?.querySelectorAll<HTMLButtonElement>('.model-picker-item') ?? []),
+    ].find((option) => option.textContent?.includes('Grok Code Fast 1'));
+    grokOption?.click();
+    await Promise.resolve();
+
+    expect(grokOption).toBeDefined();
+    expect(refreshProviderLimitMock).toHaveBeenCalledWith('xai', 'grok-code-fast-1');
+    expect(editMessageMock).not.toHaveBeenCalled();
   });
 
   it('restores edited text and preserves the prior draft when an optimistic send fails', async () => {

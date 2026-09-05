@@ -189,6 +189,9 @@ export class ProviderLimitService {
           authStore,
           modelID,
           checkedAt,
+          setProviderAuth: async (id, auth) => {
+            await this.server.request('PUT', `/auth/${encodeURIComponent(id)}`, auth);
+          },
         }),
         ProviderLimitService.PROVIDER_LIMIT_ADAPTER_TIMEOUT_MS
       );
@@ -398,6 +401,8 @@ function serializeProviderAuthStore(authStore: Record<string, ProviderAuthRecord
               providerID,
               auth.type,
               fingerprintSecret(auth.access),
+              fingerprintSecret(auth.refresh || ''),
+              auth.expires || 0,
               fingerprintSecret(auth.accountId || ''),
             ]
           : [providerID, auth.type, fingerprintSecret(auth.key)]

@@ -151,6 +151,7 @@ export interface OpenCodeRuntime {
   useOpenCode(): { client: typeof client };
   recheckSessionStatus(sessionId: string): Promise<void>;
   refreshRoutingState(): Promise<void>;
+  refreshProviderLimit(providerID: string, modelID?: string | null): Promise<void>;
   continueInterruptedSession(sessionId: string): Promise<void>;
   applySessionMcps(names: string[], sessionId?: string | null): Promise<void>;
   selectSession(id: string, options?: SessionSelectionOptions): Promise<boolean>;
@@ -3065,6 +3066,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     useOpenCode,
     recheckSessionStatus,
     refreshRoutingState,
+    refreshProviderLimit,
     continueInterruptedSession,
     applySessionMcps,
     selectSession,

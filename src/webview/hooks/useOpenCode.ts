@@ -22,6 +22,7 @@ export {
   recheckSessionStatus,
   redoSession,
   renameSession,
+  refreshProviderLimit,
   refreshRoutingState,
   rejectQuestion,
   reloadSessions,

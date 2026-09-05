@@ -15,15 +15,25 @@ import {
 const XAI_BILLING_ENDPOINT = 'https://cli-chat-proxy.grok.com/v1/billing?format=credits';
 const XAI_MONTHLY_BILLING_ENDPOINT = 'https://cli-chat-proxy.grok.com/v1/billing';
 const XAI_CREDITS_ENDPOINT = 'https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig';
+const XAI_OAUTH_TOKEN_ENDPOINT = 'https://auth.x.ai/oauth2/token';
+const XAI_OAUTH_CLIENT_ID = 'b1a00492-073a-47ea-816f-4c329264a828';
+const XAI_OAUTH_EXPIRY_BUFFER_MS = 5 * 60_000;
 const EMPTY_GRPC_FRAME = new Uint8Array(5);
 
 export function createXaiAdapter(): ProviderLimitAdapter {
   return {
     id: 'xai',
+    capabilities: { oauthRefresh: true },
     matches(provider, authStore) {
       return provider.id === 'xai' && authStore.xai?.type === 'oauth';
     },
-    async fetch({ provider, authStore, modelID, checkedAt }: ProviderLimitAdapterContext) {
+    async fetch({
+      provider,
+      authStore,
+      modelID,
+      checkedAt,
+      setProviderAuth,
+    }: ProviderLimitAdapterContext) {
       const auth = authStore.xai;
       if (auth?.type !== 'oauth') {
         return unsupportedProviderStatus(
@@ -35,17 +45,44 @@ export function createXaiAdapter(): ProviderLimitAdapter {
       }
 
       try {
+        let accessToken = auth.access;
+        let refreshed = false;
+        const refreshAccessToken = async () => {
+          if (!auth.refresh || !setProviderAuth) return false;
+          const next = await refreshXaiAccessToken(auth.refresh);
+          await setProviderAuth(provider.id, {
+            type: 'oauth',
+            access: next.accessToken,
+            refresh: next.refreshToken,
+            expires: next.expires,
+          });
+          accessToken = next.accessToken;
+          refreshed = true;
+          return true;
+        };
+        if (
+          auth.refresh &&
+          auth.expires != null &&
+          auth.expires <= Date.now() + XAI_OAUTH_EXPIRY_BUFFER_MS
+        ) {
+          await refreshAccessToken();
+        }
+
         const request = (url: string) =>
           fetch(url, {
             headers: {
               Accept: 'application/json',
-              Authorization: `Bearer ${auth.access}`,
+              Authorization: `Bearer ${accessToken}`,
               'x-xai-token-auth': 'xai-grok-cli',
               'User-Agent': 'Varro/0.1.0',
             },
             signal: AbortSignal.timeout(10_000),
           });
-        const response = await request(XAI_BILLING_ENDPOINT);
+        let response = await request(XAI_BILLING_ENDPOINT);
+
+        if ((response.status === 401 || response.status === 403) && !refreshed) {
+          if (await refreshAccessToken()) response = await request(XAI_BILLING_ENDPOINT);
+        }
 
         if (response.status === 401 || response.status === 403) {
           return unsupportedProviderStatus(
@@ -105,7 +142,7 @@ export function createXaiAdapter(): ProviderLimitAdapter {
             method: 'POST',
             headers: {
               Accept: '*/*',
-              Authorization: `Bearer ${auth.access}`,
+              Authorization: `Bearer ${accessToken}`,
               'Content-Type': 'application/grpc-web+proto',
               Origin: 'https://grok.com',
               Referer: 'https://grok.com/?_s=usage',
@@ -181,6 +218,30 @@ export function createXaiAdapter(): ProviderLimitAdapter {
         };
       }
     },
+  };
+}
+
+async function refreshXaiAccessToken(refreshToken: string) {
+  const response = await fetch(XAI_OAUTH_TOKEN_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      client_id: XAI_OAUTH_CLIENT_ID,
+    }).toString(),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error(`xAI OAuth token refresh returned ${response.status}`);
+
+  const payload = asRecord(await readBoundedResponseJson(response));
+  const accessToken = getString(payload?.access_token);
+  if (!accessToken) throw new Error('xAI OAuth token refresh did not return an access token');
+  const expiresIn = parseFiniteNumber(payload?.expires_in) ?? 3600;
+  return {
+    accessToken,
+    refreshToken: getString(payload?.refresh_token) || refreshToken,
+    expires: Date.now() + Math.max(0, expiresIn) * 1000,
   };
 }
 

@@ -95,6 +95,7 @@ import {
   editMessage,
   initSession,
   loadOlderSessionPrompts,
+  refreshProviderLimit,
   redoSession,
   runSlashCommandByName,
   undoSession,
@@ -4115,6 +4116,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     nextModel: RalphSelectedModel,
     rememberVariant?: string | null
   ) {
+    void refreshProviderLimit(nextModel.providerID, nextModel.modelID);
     if (composerEditingMessage()) {
       setEditSelectedModel(nextModel);
       return;

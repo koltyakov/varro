@@ -9,6 +9,7 @@ function createRuntimeMock(label: string) {
     useOpenCode: vi.fn(() => useOpenCodeResult),
     recheckSessionStatus: vi.fn().mockResolvedValue(undefined),
     refreshRoutingState: vi.fn().mockResolvedValue(undefined),
+    refreshProviderLimit: vi.fn().mockResolvedValue(undefined),
     continueInterruptedSession: vi.fn().mockResolvedValue(undefined),
     applySessionMcps: vi.fn().mockResolvedValue(undefined),
     selectSession: vi.fn().mockResolvedValue(undefined),

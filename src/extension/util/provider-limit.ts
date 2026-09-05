@@ -10,7 +10,7 @@ import { resolveOpenCodeDataDirectory } from '../../shared/opencode-data-directo
 import { asRecord, getString } from '../../shared/type-utils';
 
 export type ProviderAuthRecord =
-  | { type: 'oauth'; access: string; accountId?: string }
+  | { type: 'oauth'; access: string; refresh?: string; expires?: number; accountId?: string }
   | { type: 'api' | 'wellknown'; key: string };
 
 type ProviderModel = {
@@ -233,6 +233,15 @@ export function parseProviderAuthStore(raw: string): Record<string, ProviderAuth
         type: 'oauth',
         access: auth.access.trim(),
       };
+      const refresh = getString(auth.refresh);
+      if (refresh && oauth.type === 'oauth') oauth.refresh = refresh;
+      if (
+        typeof auth.expires === 'number' &&
+        Number.isFinite(auth.expires) &&
+        oauth.type === 'oauth'
+      ) {
+        oauth.expires = auth.expires;
+      }
       if (accountId && oauth.type === 'oauth') oauth.accountId = accountId;
       authStore[providerID] = oauth;
       continue;

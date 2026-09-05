@@ -35,6 +35,10 @@ export async function refreshRoutingState() {
   await getCurrentOpenCodeRuntime().refreshRoutingState();
 }
 
+export async function refreshProviderLimit(providerID: string, modelID?: string | null) {
+  await getCurrentOpenCodeRuntime().refreshProviderLimit(providerID, modelID);
+}
+
 export async function continueInterruptedSession(sessionId: string) {
   await getCurrentOpenCodeRuntime().continueInterruptedSession(sessionId);
 }

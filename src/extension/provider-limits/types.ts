@@ -6,6 +6,7 @@ export interface ProviderLimitAdapterContext {
   authStore: Record<string, ProviderAuthRecord>;
   modelID: string | null;
   checkedAt: number;
+  setProviderAuth?(providerID: string, auth: ProviderAuthRecord): Promise<void>;
 }
 
 export interface ProviderLimitAdapterCapabilities {
