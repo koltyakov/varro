@@ -369,3 +369,200 @@ for (const scenario of exitCases) {
     }
   });
 }
+
+test('activity exit tolerates persistent summary drift without observer feedback', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 495, height: 1269 });
+  await page.goto(
+    '/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayPrefix=1&activeTrayCompletedPrefix=1&activeTrayCount=3'
+  );
+  const items = page.locator('.assistant-active-activity-item');
+  await expect(items).toHaveCount(3);
+  await items.last().evaluate(async (element) => {
+    await Promise.all(element.getAnimations().map((animation) => animation.finished));
+  });
+  await page.waitForTimeout(2_100);
+
+  const list = page.locator('.interactive-list');
+  const result = await list.evaluate(async (container) => {
+    const summary = container.querySelector<HTMLElement>('.assistant-activity-summary');
+    const tray = container.querySelector('.assistant-active-activity-tray');
+    if (!summary || !tray) throw new Error('Active summary and tray are required');
+    const messageId = summary.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+    if (!messageId) throw new Error('Summary identity is missing');
+    const summarySelector = `[data-msg-id="${CSS.escape(messageId)}"] .assistant-activity-summary`;
+    const top = () =>
+      container.querySelector(summarySelector)!.getBoundingClientRect().top -
+      container.getBoundingClientRect().top;
+    const before = {
+      top: top(),
+      scrollTop: container.scrollTop,
+      bottomDistance: container.scrollHeight - container.clientHeight - container.scrollTop,
+      reserveBudget: tray.getBoundingClientRect().height + 2,
+    };
+    const samples: Array<{
+      top: number;
+      scrollTop: number;
+      exiting: number;
+      active: number;
+      append: number;
+      exit: number;
+    }> = [];
+    let guardTrips = 0;
+    let maxDeliveries = 0;
+    let injectedDrift: number | null = null;
+    let timerFired = false;
+    const NativeMutationObserver = window.MutationObserver;
+    // Keep native delivery semantics. Only a runaway reserve-only microtask chain is cut off,
+    // and the test explicitly fails if that safety guard was needed to let frames/timers run.
+    window.MutationObserver = class extends NativeMutationObserver {
+      constructor(callback: MutationCallback) {
+        let deliveries = 0;
+        let resetPending = false;
+        super((records, observer) => {
+          if (
+            records.length > 0 &&
+            records.every(
+              (record) =>
+                record.type === 'attributes' &&
+                record.attributeName === 'style' &&
+                record.target instanceof HTMLElement &&
+                record.target.classList.contains('append-scroll-bottom-reserve')
+            )
+          ) {
+            if (!resetPending) {
+              resetPending = true;
+              setTimeout(() => {
+                deliveries = 0;
+                resetPending = false;
+              }, 0);
+            }
+            maxDeliveries = Math.max(maxDeliveries, ++deliveries);
+            if (deliveries > 100) {
+              guardTrips += 1;
+              observer.disconnect();
+              return;
+            }
+          }
+          callback(records, observer);
+        });
+      }
+    };
+    // Exit ownership captures the summary before is-exiting is published. A real CSS offset
+    // then leaves a positive 1px delta while that owner still holds its fixed scroll target.
+    const driftObserver = new NativeMutationObserver(() => {
+      if (!container.querySelector('.assistant-active-activity-item.is-exiting')) return;
+      const current = container.querySelector<HTMLElement>(summarySelector)!;
+      current.style.translate = `0 ${before.top + 1 - top()}px`;
+      injectedDrift = top() - before.top;
+      driftObserver.disconnect();
+    });
+    driftObserver.observe(container, {
+      attributes: true,
+      attributeFilter: ['class'],
+      subtree: true,
+    });
+    const timer = setTimeout(() => {
+      timerFired = true;
+    }, 250);
+    try {
+      const harness = (
+        window as typeof window & {
+          __varroE2E: {
+            getSessionMessages: (id: string) => MessageEntry[];
+            updateMessagePart: (part: Part) => void;
+          };
+        }
+      ).__varroE2E;
+      const running = harness
+        .getSessionMessages('session-tool-cards')
+        .flatMap((message) => message.parts)
+        .filter(
+          (part): part is Extract<Part, { type: 'tool' }> =>
+            part.type === 'tool' && part.state.status === 'running'
+        );
+      if (running.length !== 3) throw new Error('Expected three running tools');
+      for (const part of running) {
+        if (part.state.status !== 'running') throw new Error('Expected a running tool');
+        const completed: Part = {
+          ...part,
+          state: {
+            ...part.state,
+            status: 'completed',
+            title: part.state.title ?? part.tool,
+            output: 'Done',
+            metadata: {},
+            time: { start: Date.now() - 3_000, end: Date.now() },
+          },
+        };
+        harness.updateMessagePart(completed);
+        window.postMessage(
+          {
+            type: 'server/event',
+            payload: { type: 'message.part.updated', properties: { part: completed } },
+          },
+          '*'
+        );
+      }
+      const start = performance.now();
+      while (performance.now() - start < 3_500) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        samples.push({
+          top: top(),
+          scrollTop: container.scrollTop,
+          exiting: container.querySelectorAll('.assistant-active-activity-item.is-exiting').length,
+          active: container.querySelectorAll('.assistant-active-activity-item').length,
+          append:
+            container.querySelector('.append-scroll-bottom-reserve')?.getBoundingClientRect()
+              .height ?? 0,
+          exit:
+            container.querySelector('.activity-exit-bottom-reserve')?.getBoundingClientRect()
+              .height ?? 0,
+        });
+      }
+      return { before, messageId, injectedDrift, guardTrips, maxDeliveries, timerFired, samples };
+    } finally {
+      clearTimeout(timer);
+      driftObserver.disconnect();
+      window.MutationObserver = NativeMutationObserver;
+    }
+  });
+  await test.info().attach('observer-feedback-geometry', {
+    body: JSON.stringify(result, null, 2),
+    contentType: 'application/json',
+  });
+  expect(result.before.bottomDistance).toBeLessThanOrEqual(2);
+  expect(result.injectedDrift, 'The fixture must introduce a positive 1px exit-anchor delta').toBe(
+    1
+  );
+  expect(result.samples.some((sample) => sample.exiting === 3)).toBe(true);
+  expect(
+    result.guardTrips,
+    `Activity exit must not feed back on its own reserve style (${result.maxDeliveries} deliveries without yielding)`
+  ).toBe(0);
+  expect(result.timerFired).toBe(true);
+  expect(result.samples.length).toBeGreaterThan(30);
+  expect(
+    Math.max(...result.samples.map((sample) => sample.append + sample.exit))
+  ).toBeLessThanOrEqual(result.before.reserveBudget);
+  for (const sample of result.samples.filter((frame) => frame.exiting > 0)) {
+    expect(Math.abs(sample.scrollTop - result.before.scrollTop)).toBeLessThanOrEqual(1);
+    expect(Math.abs(sample.top - result.before.top)).toBeLessThanOrEqual(1);
+  }
+  expect(result.samples.at(-1)?.active).toBe(0);
+  expect(result.samples.at(-1)?.exit).toBe(0);
+
+  // Direct input must release the remaining append reserve and the held summary owner.
+  const bounds = await list.boundingBox();
+  if (!bounds) throw new Error('Transcript viewport is missing');
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + 100);
+  await page.mouse.wheel(0, -360);
+  await expect(page.locator('.append-scroll-bottom-reserve')).toHaveCount(0);
+  await expect(page.locator('.activity-exit-bottom-reserve')).toHaveCount(0);
+  await expect
+    .poll(() =>
+      list.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop)
+    )
+    .toBeGreaterThan(100);
+});

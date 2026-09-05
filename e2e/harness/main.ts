@@ -2785,6 +2785,9 @@ function createScenarioState(name: ScenarioName): ScenarioState {
               },
             ]
           : []),
+        ...(new URLSearchParams(window.location.search).get('activeTrayCompletedPrefix') === '1'
+          ? assistant.parts.slice(0, 1)
+          : []),
         ...Array.from({ length: activeTrayCount }, (_, index) => ({
           id: `tool-active-${index}`,
           sessionID: session.id,
