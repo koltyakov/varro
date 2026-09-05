@@ -380,6 +380,7 @@ export type VarroSessionEndpointAction =
   | 'diff-summary'
   | 'permission-mode'
   | 'pin'
+  | 'reorder-pin'
   | 'rename-if-untitled';
 
 export function buildVarroSessionEndpoint(

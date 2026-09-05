@@ -1233,13 +1233,14 @@ describe('header status badges', () => {
     expect(container?.querySelector('.chat-main-shell')).toBeInstanceOf(HTMLDivElement);
   });
 
-  it('switches sessions when requested by the extension host', () => {
+  it('switches sessions in persisted pin order when requested by the extension host', () => {
     // SAFETY: The fixture provides the never fields read by this statement.
     const selectSessionSpy = vi
       .spyOn(openCodeModule, 'selectSession')
       .mockResolvedValue(undefined as never);
     setState('sessions', [session('newest', 300), session('middle', 200), session('oldest', 100)]);
-    setState('activeSessionId', 'middle');
+    setState('pinnedSessionIds', ['oldest', 'middle']);
+    setState('activeSessionId', 'oldest');
 
     cleanup = render(() => Chat(), container!);
 
@@ -1249,7 +1250,7 @@ describe('header status badges', () => {
       })
     );
 
-    expect(selectSessionSpy).toHaveBeenCalledWith('oldest');
+    expect(selectSessionSpy).toHaveBeenCalledWith('middle');
   });
 
   it('returns to the sessions list with Escape', async () => {

@@ -100,6 +100,32 @@ function openSessionActions(row: HTMLElement, x = 40, y = 50) {
   );
 }
 
+function createDragDataTransfer() {
+  const values = new Map<string, string>();
+  const types: string[] = [];
+  // SAFETY: The fixture provides the DataTransfer fields exercised by these drag tests.
+  return fixture<DataTransfer>({
+    types,
+    effectAllowed: 'uninitialized',
+    dropEffect: 'none',
+    setData(type: string, value: string) {
+      values.set(type, value);
+      if (!types.includes(type)) types.push(type);
+    },
+    getData(type: string) {
+      return values.get(type) ?? '';
+    },
+    setDragImage: vi.fn(),
+  });
+}
+
+function dispatchDragEvent(target: Element, type: string, dataTransfer: DataTransfer) {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'dataTransfer', { value: dataTransfer });
+  target.dispatchEvent(event);
+  return event;
+}
+
 describe('deriveSessionIndicators', () => {
   it('handles cyclic and deeply nested session parent data without recursive overflow', () => {
     const cyclic = [
@@ -1276,6 +1302,17 @@ describe('SessionListView diff summaries', () => {
 });
 
 describe('SessionListView pins', () => {
+  it('does not show a reorder handle for the only pinned session', () => {
+    const now = Date.now();
+    setState('sessions', [session('pinned', now), session('unpinned', now - 1_000)]);
+    setState('pinnedSessionIds', ['pinned']);
+
+    cleanup = render(() => <SessionListView />, container);
+
+    const pinnedRow = container.querySelector<HTMLElement>('[data-session-id="pinned"]');
+    expect(pinnedRow?.querySelector('.session-item-drag-handle')).toBeNull();
+  });
+
   it('pins and unpins a session from its row menu and marks it', async () => {
     const setPinned = vi
       .spyOn(client.varro.session, 'setPinned')
@@ -1345,6 +1382,89 @@ describe('SessionListView pins', () => {
     expect(rows.filter((row) => row.classList.contains('starts-unpinned-group'))).toEqual([
       rows[2],
     ]);
+  });
+
+  it('renders persisted pin order and reorders pinned sessions by drag and drop', async () => {
+    const reorderPinned = vi
+      .spyOn(client.varro.session, 'reorderPinned')
+      .mockResolvedValue(['pinned-newer', 'pinned-older']);
+    const now = Date.now();
+    setState('sessions', [
+      session('pinned-newer', now),
+      session('pinned-older', now - 1_000),
+      session('unpinned', now + 1_000),
+    ]);
+    setState('pinnedSessionIds', ['pinned-older', 'pinned-newer']);
+    setState('sessionStatus', { 'pinned-newer': { type: 'busy' } });
+    cleanup = render(() => <SessionListView />, container);
+
+    const rows = () => Array.from(container.querySelectorAll<HTMLElement>('.session-item'));
+    expect(rows().map((row) => row.dataset.sessionId)).toEqual([
+      'pinned-older',
+      'pinned-newer',
+      'unpinned',
+    ]);
+    const handles = container.querySelectorAll<HTMLElement>('.session-item-drag-handle');
+    expect(handles).toHaveLength(2);
+    expect(rows()[0]?.querySelector('.session-item-leading.has-status')).toBeNull();
+    expect(
+      rows()[0]?.querySelector('.session-item-leading > .session-item-drag-handle')
+    ).not.toBeNull();
+    expect(
+      rows()[1]?.querySelector('.session-item-leading.has-status > .session-status-indicator')
+    ).not.toBeNull();
+    expect(
+      rows()[1]?.querySelector('.session-item-leading.has-status > .session-item-drag-handle')
+    ).not.toBeNull();
+
+    const dataTransfer = createDragDataTransfer();
+    dispatchDragEvent(handles[0]!, 'dragstart', dataTransfer);
+    dispatchDragEvent(rows()[1]!, 'dragover', dataTransfer);
+    expect(rows()[0]?.classList.contains('is-dragging-pinned')).toBe(true);
+    expect(rows()[1]?.classList.contains('is-drag-over-pinned')).toBe(true);
+    dispatchDragEvent(rows()[1]!, 'drop', dataTransfer);
+
+    await vi.waitFor(() =>
+      expect(reorderPinned).toHaveBeenCalledWith('pinned-older', 'pinned-newer', {
+        directory: '/repo',
+        targetDirectory: '/repo',
+      })
+    );
+    await vi.waitFor(() =>
+      expect(rows().map((row) => row.dataset.sessionId)).toEqual([
+        'pinned-newer',
+        'pinned-older',
+        'unpinned',
+      ])
+    );
+  });
+
+  it('supports keyboard pin reordering and restores order after a failed write', async () => {
+    const reorderPinned = vi
+      .spyOn(client.varro.session, 'reorderPinned')
+      .mockRejectedValue(new Error('write failed'));
+    const now = Date.now();
+    setState('sessions', [session('first', now), session('second', now - 1_000)]);
+    setState('pinnedSessionIds', ['first', 'second']);
+    cleanup = render(() => <SessionListView />, container);
+
+    container
+      .querySelector<HTMLButtonElement>('[aria-label="Reorder pinned session: first"]')!
+      .dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowDown' }));
+
+    await vi.waitFor(() =>
+      expect(reorderPinned).toHaveBeenCalledWith('first', 'second', {
+        directory: '/repo',
+        targetDirectory: '/repo',
+      })
+    );
+    await vi.waitFor(() => expect(error()).toBe('write failed'));
+    expect(appState.pinnedSessionIds).toEqual(['first', 'second']);
+    expect(
+      Array.from(container.querySelectorAll<HTMLElement>('.session-item')).map(
+        (row) => row.dataset.sessionId
+      )
+    ).toEqual(['first', 'second']);
   });
 });
 

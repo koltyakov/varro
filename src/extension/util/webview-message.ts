@@ -1789,6 +1789,10 @@ const API_ROUTES: ApiRoute[] = [
     ({ method, url }) => method === 'POST' && optionalDirectoryQuery(url)
   ),
   route(
+    `${VARRO_API_ENDPOINTS.session}/:id/reorder-pin`,
+    ({ method, url }) => method === 'POST' && optionalDirectoryQuery(url)
+  ),
+  route(
     `${VARRO_API_ENDPOINTS.session}/:id/permission-mode`,
     ({ method, url }) => method === 'POST' && optionalDirectoryQuery(url)
   ),

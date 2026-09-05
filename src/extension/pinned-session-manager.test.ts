@@ -35,6 +35,33 @@ describe('PinnedSessionManager', () => {
     expect(stored.value).toEqual(['session-2']);
   });
 
+  it('reorders pinned sessions', async () => {
+    stored.value = ['session-1', 'session-2', 'session-3'];
+    const manager = new PinnedSessionManager(persistence);
+
+    await expect(manager.reorder('session-1', 'session-3')).resolves.toEqual([
+      'session-2',
+      'session-3',
+      'session-1',
+    ]);
+    await expect(manager.reorder('session-1', 'session-2')).resolves.toEqual([
+      'session-1',
+      'session-2',
+      'session-3',
+    ]);
+    expect(stored.value).toEqual(['session-1', 'session-2', 'session-3']);
+  });
+
+  it('rejects reorder requests for unpinned sessions', async () => {
+    stored.value = ['session-1'];
+    const manager = new PinnedSessionManager(persistence);
+
+    await expect(manager.reorder('session-1', 'session-2')).rejects.toThrow(
+      'Pinned session not found'
+    );
+    expect(persistence.set).not.toHaveBeenCalled();
+  });
+
   it('keeps memory unchanged when persistence fails', async () => {
     stored.value = ['session-1'];
     const manager = new PinnedSessionManager(persistence);
@@ -42,5 +69,14 @@ describe('PinnedSessionManager', () => {
 
     await expect(manager.setPinned('session-2', true)).rejects.toThrow('write failed');
     expect(manager.list()).toEqual(['session-1']);
+  });
+
+  it('keeps reorder state unchanged when persistence fails', async () => {
+    stored.value = ['session-1', 'session-2'];
+    const manager = new PinnedSessionManager(persistence);
+    persistence.set.mockRejectedValueOnce(new Error('write failed'));
+
+    await expect(manager.reorder('session-1', 'session-2')).rejects.toThrow('write failed');
+    expect(manager.list()).toEqual(['session-1', 'session-2']);
   });
 });

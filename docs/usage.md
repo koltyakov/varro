@@ -173,7 +173,7 @@ Sessions from every open workspace root appear in one catalog. Use the folder fi
 - Search uses OpenCode's native root-session search across loaded and older history and returns up to 30 results. Matching fields depend on the installed OpenCode version. Run `Varro: Search Sessions` to open and focus search directly.
 - Filter or jump to `Running`, `Needs attention`, `Failed`, `Plan ready`, and `Completed` sessions from the header badges.
 - Open sub-agent sessions from the parent session row when they exist.
-- Top-level sessions can be renamed, pinned, or moved to the recycle bin. Any session can open in the sidebar, an editor tab, or the OpenCode TUI; copy its ID; and be shared or unshared. Opening an editor session in the sidebar closes its matching editor tab. Sharing asks OpenCode to create a share link and copies it to the clipboard.
+- Top-level sessions can be renamed, pinned, or moved to the recycle bin. Drag a pinned session's handle, or focus it and press `ArrowUp` or `ArrowDown`, to reorder pinned sessions. Any session can open in the sidebar, an editor tab, or the OpenCode TUI; copy its ID; and be shared or unshared. Opening an editor session in the sidebar closes its matching editor tab. Sharing asks OpenCode to create a share link and copies it to the clipboard.
 - Deleted session roots move into a recycle bin section where you can restore them or delete them permanently for 24 hours before they expire.
 - Stop the active run with `Varro: Abort Session`.
 - Use `/export` to open the current session as JSON in the editor.

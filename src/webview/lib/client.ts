@@ -569,6 +569,20 @@ export const client = {
           { pinned }
         );
       },
+      async reorderPinned(
+        sourceSessionID: string,
+        targetSessionID: string,
+        options?: { directory?: string; targetDirectory?: string }
+      ): Promise<string[]> {
+        return apiCall(
+          'POST',
+          withDirectory(
+            buildVarroSessionEndpoint(sourceSessionID, 'reorder-pin'),
+            options?.directory
+          ),
+          { targetSessionID, targetDirectory: options?.targetDirectory }
+        );
+      },
       async renameIfUntitled(
         sessionID: string,
         options?: { directory?: string }

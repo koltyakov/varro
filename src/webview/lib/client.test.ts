@@ -1501,6 +1501,23 @@ describe('client', () => {
     );
   });
 
+  it('reorders pinned sessions through the canonical encoded route', async () => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockResolvedValue(['target', 'session with space']);
+
+    await expect(
+      client.varro.session.reorderPinned('session with space', 'target', {
+        directory: '/repo',
+        targetDirectory: '/other-repo',
+      })
+    ).resolves.toEqual(['target', 'session with space']);
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
+      'POST',
+      '/varro/session/session%20with%20space/reorder-pin?directory=%2Frepo',
+      { targetSessionID: 'target', targetDirectory: '/other-repo' }
+    );
+  });
+
   it('rejects entries with a malformed partial summary', async () => {
     const { client } = await loadClient();
     const session = {

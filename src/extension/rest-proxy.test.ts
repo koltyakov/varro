@@ -135,6 +135,9 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
       restore: vi.fn(() => Promise.resolve(null)),
     },
     pinnedSessions: {
+      reorder: vi.fn((_sourceSessionID: string, _targetSessionID: string) =>
+        Promise.resolve(['session-1', 'session-2'])
+      ),
       setPinned: vi.fn((_sessionID: string, pinned: boolean) =>
         Promise.resolve(pinned ? ['session-1'] : [])
       ),
@@ -726,7 +729,9 @@ describe('RestProxy handleRequest', () => {
 
   it('updates pinned sessions without starting OpenCode', async () => {
     const setPinned = vi.fn(() => Promise.resolve(['session-1']));
-    const { proxy, callbacks } = createProxy({ pinnedSessions: { setPinned } });
+    const { proxy, callbacks } = createProxy({
+      pinnedSessions: { ...createCallbacks().pinnedSessions, setPinned },
+    });
 
     await proxy.handleRequest(
       makePayload(8, 'POST', '/varro/session/session-1/pin', { pinned: true })
@@ -751,6 +756,43 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 9,
       error: 'Invalid pin request',
+    });
+  });
+
+  it('reorders pinned sessions without starting OpenCode', async () => {
+    const reorder = vi.fn(() => Promise.resolve(['session-2', 'session-1']));
+    const { proxy, callbacks } = createProxy({
+      pinnedSessions: { ...createCallbacks().pinnedSessions, reorder },
+    });
+
+    await proxy.handleRequest(
+      makePayload(93, 'POST', '/varro/session/session-1/reorder-pin?directory=%2Frepo', {
+        targetSessionID: 'session-2',
+        targetDirectory: '/repo',
+      })
+    );
+
+    expect(reorder).toHaveBeenCalledWith('session-1', 'session-2');
+    expect(callbacks.ensureServerStarted).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 93,
+      data: ['session-2', 'session-1'],
+    });
+  });
+
+  it('rejects malformed pinned session reorder requests', async () => {
+    const { proxy, callbacks } = createProxy();
+
+    await proxy.handleRequest(
+      makePayload(94, 'POST', '/varro/session/session-1/reorder-pin', {
+        targetSessionID: '',
+      })
+    );
+
+    expect(callbacks.pinnedSessions.reorder).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 94,
+      error: 'Invalid pinned session reorder request',
     });
   });
 
@@ -789,7 +831,7 @@ describe('RestProxy handleRequest', () => {
         ...createCallbacks().sessionState,
         isSessionInWorkspace: vi.fn(() => false),
       } as never,
-      pinnedSessions: { setPinned },
+      pinnedSessions: { ...createCallbacks().pinnedSessions, setPinned },
     });
 
     await proxy.handleRequest(

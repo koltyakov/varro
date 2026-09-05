@@ -55,7 +55,7 @@ import { isEmptySession, shouldHideEmptySessionFromList } from '../../lib/empty-
 import { formatEditCount, formatModelName, formatVariantLabel } from '../../lib/format';
 import { formatDuration, formatRelativeAge } from '../../lib/message-metrics';
 import { getProviderIcon } from '../../lib/provider-icons';
-import { compareSessionsByActivity } from '../../lib/session-order';
+import { compareSessionsByActivity, compareSessionsForDisplay } from '../../lib/session-order';
 import {
   archiveIcon,
   forwardMessageIcon,
@@ -114,6 +114,8 @@ const SESSION_HISTORY_SCOPE_OPTIONS = [
     icon: gitIcon,
   },
 ] as const;
+
+const PINNED_SESSION_DRAG_TYPE = 'application/x-varro-pinned-session';
 
 function getDirectoryName(directory: string) {
   const normalized = directory.replace(/\\/g, '/').replace(/\/+$/, '');
@@ -825,7 +827,8 @@ export function groupSessions(
   isPlanReady: (session: (typeof state.sessions)[number]) => boolean,
   isNewlyCompleted: (session: (typeof state.sessions)[number]) => boolean,
   now: number,
-  isPinned: (sessionId: string) => boolean = () => false
+  isPinned: (sessionId: string) => boolean = () => false,
+  pinnedSessionIds: readonly string[] = []
 ): SessionGroups {
   const primaries: (typeof state.sessions)[number][] = [];
   const subagents: (typeof state.sessions)[number][] = [];
@@ -883,6 +886,8 @@ export function groupSessions(
     }
   }
 
+  pinned.sort((left, right) => compareSessionsForDisplay(left, right, now, pinnedSessionIds));
+
   return {
     pinned,
     failed,
@@ -935,12 +940,39 @@ function getSessionPriorityRank(
 }
 
 function sortSessionsForDisplay(sessions: typeof state.sessions, now: number) {
-  return sessions.toSorted((left, right) => {
-    const pinRank =
-      Number(state.pinnedSessionIds.includes(right.id)) -
-      Number(state.pinnedSessionIds.includes(left.id));
-    return pinRank || compareSessionsByActivity(left, right, now);
-  });
+  return sessions.toSorted((left, right) =>
+    compareSessionsForDisplay(left, right, now, state.pinnedSessionIds)
+  );
+}
+
+async function reorderPinnedSession(sourceSessionId: string, targetSessionId: string) {
+  if (sourceSessionId === targetSessionId) return;
+  const previous = [...state.pinnedSessionIds];
+  const sourceIndex = previous.indexOf(sourceSessionId);
+  const targetIndex = previous.indexOf(targetSessionId);
+  if (sourceIndex < 0 || targetIndex < 0) return;
+
+  const next = [...previous];
+  const [sourceId] = next.splice(sourceIndex, 1);
+  next.splice(targetIndex, 0, sourceId!);
+  setState('pinnedSessionIds', next);
+
+  const sourceSession = state.sessions.find((session) => session.id === sourceSessionId);
+  const targetSession = state.sessions.find((session) => session.id === targetSessionId);
+  try {
+    const pinnedSessionIds = await client.varro.session.reorderPinned(
+      sourceSessionId,
+      targetSessionId,
+      {
+        directory: sourceSession?.directory,
+        targetDirectory: targetSession?.directory,
+      }
+    );
+    setState('pinnedSessionIds', pinnedSessionIds);
+  } catch (error) {
+    setState('pinnedSessionIds', previous);
+    setError(error instanceof Error ? error.message : String(error));
+  }
 }
 
 export async function archiveSessionGroup(
@@ -1228,6 +1260,8 @@ export function SessionListView(props: {
   const [isSearchingAllSessions, setIsSearchingAllSessions] = createSignal(false);
   const [showAllModelDetails, setShowAllModelDetails] = createSignal(false);
   const [frozenSessionOrder, setFrozenSessionOrder] = createSignal<string[] | null>(null);
+  const [draggedPinnedSessionId, setDraggedPinnedSessionId] = createSignal<string | null>(null);
+  const [dragOverPinnedSessionId, setDragOverPinnedSessionId] = createSignal<string | null>(null);
   const [hasScrollableContent, setHasScrollableContent] = createSignal(false);
   let containerRef: HTMLDivElement | undefined;
   let searchInputRef: HTMLInputElement | undefined;
@@ -1451,7 +1485,8 @@ export function SessionListView(props: {
       (session) => sessionIndicators().planReadyIds.has(session.id),
       (session) => sessionIndicators().newlyCompletedIds.has(session.id),
       ageNow(),
-      (sessionId) => state.pinnedSessionIds.includes(sessionId)
+      (sessionId) => state.pinnedSessionIds.includes(sessionId),
+      state.pinnedSessionIds
     )
   );
   const overflowOtherSessions = () => groupedSessions().overflowOther;
@@ -1559,6 +1594,40 @@ export function SessionListView(props: {
     if (shouldShowSearch() && trimmedSearchQuery()) return searchResultSessions();
     return baseVisibleSessions();
   });
+
+  const startPinnedSessionDrag = (event: DragEvent, sessionId: string) => {
+    if (!event.dataTransfer) return;
+    event.stopPropagation();
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData(PINNED_SESSION_DRAG_TYPE, sessionId);
+    const handle = event.currentTarget;
+    if (!(handle instanceof HTMLElement)) return;
+    const row = handle.closest<HTMLElement>('.session-item');
+    if (row) event.dataTransfer.setDragImage(row, 12, row.offsetHeight / 2);
+    setDraggedPinnedSessionId(sessionId);
+  };
+
+  const dragOverPinnedSession = (event: DragEvent, targetSessionId: string) => {
+    const sourceSessionId =
+      draggedPinnedSessionId() || event.dataTransfer?.getData(PINNED_SESSION_DRAG_TYPE);
+    if (!sourceSessionId || sourceSessionId === targetSessionId) return;
+    if (!state.pinnedSessionIds.includes(targetSessionId)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    setDragOverPinnedSessionId(targetSessionId);
+  };
+
+  const dropPinnedSession = (event: DragEvent, targetSessionId: string) => {
+    const sourceSessionId =
+      draggedPinnedSessionId() || event.dataTransfer?.getData(PINNED_SESSION_DRAG_TYPE);
+    if (!sourceSessionId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setDraggedPinnedSessionId(null);
+    setDragOverPinnedSessionId(null);
+    void reorderPinnedSession(sourceSessionId, targetSessionId);
+  };
 
   const updateScrollableContent = () => {
     const scroll = containerRef?.querySelector<HTMLElement>('.session-list-scroll');
@@ -1670,7 +1739,8 @@ export function SessionListView(props: {
   const renderSessionItems = (
     sessions: () => typeof state.sessions,
     indexOffset = 0,
-    separatePinnedSessions = false
+    separatePinnedSessions = false,
+    reorderPinnedSessions = false
   ) => {
     const orderedSessions = createMemo(() => {
       const items = sessions();
@@ -1691,6 +1761,14 @@ export function SessionListView(props: {
       <For each={orderedSessions().map((session) => session.id)}>
         {(sessionId, index) => {
           const session = () => sessionsById().get(sessionId)!;
+          const visiblePinnedSessionIds = () =>
+            orderedSessions()
+              .filter((item) => state.pinnedSessionIds.includes(item.id))
+              .map((item) => item.id);
+          const canReorderPinned = () =>
+            reorderPinnedSessions &&
+            state.pinnedSessionIds.includes(sessionId) &&
+            visiblePinnedSessionIds().length > 1;
           const startsUnpinnedGroup = () => {
             if (!separatePinnedSessions || index() === 0) return false;
             const previousSession = orderedSessions()[index() - 1];
@@ -1741,6 +1819,9 @@ export function SessionListView(props: {
               isNewlyCompleted={sessionIndicators().newlyCompletedIds.has(sessionId)}
               isCompletedPlanSession={sessionIndicators().planReadyIds.has(sessionId)}
               isPinned={state.pinnedSessionIds.includes(sessionId)}
+              canReorderPinned={canReorderPinned()}
+              isDraggingPinned={draggedPinnedSessionId() === sessionId}
+              isDragOverPinned={dragOverPinnedSessionId() === sessionId}
               startsUnpinnedGroup={startsUnpinnedGroup()}
               folderLabel={getSessionFolderLabel(session())}
               onTogglePinned={async () => {
@@ -1754,6 +1835,22 @@ export function SessionListView(props: {
                 } catch (error) {
                   setError(error instanceof Error ? error.message : String(error));
                 }
+              }}
+              onPinnedDragStart={(event) => startPinnedSessionDrag(event, sessionId)}
+              onPinnedDragEnd={() => {
+                setDraggedPinnedSessionId(null);
+                setDragOverPinnedSessionId(null);
+              }}
+              onPinnedDragOver={(event) => dragOverPinnedSession(event, sessionId)}
+              onPinnedDragLeave={() => {
+                if (dragOverPinnedSessionId() === sessionId) setDragOverPinnedSessionId(null);
+              }}
+              onPinnedDrop={(event) => dropPinnedSession(event, sessionId)}
+              onReorderPinned={(direction) => {
+                const pinnedIds = visiblePinnedSessionIds();
+                const pinnedIndex = pinnedIds.indexOf(sessionId);
+                const targetSessionId = pinnedIds[pinnedIndex + direction];
+                if (targetSessionId) void reorderPinnedSession(sessionId, targetSessionId);
               }}
               onOpenSubagents={props.onOpenSubagents}
               onActiveSessionReselect={props.onActiveSessionReselect}
@@ -1791,7 +1888,7 @@ export function SessionListView(props: {
             </Show>
             <Show when={expanded()}>
               <div class="session-list-scroll session-list-section-scroll">
-                {renderSessionItems(surfacedSessions, 0, true)}
+                {renderSessionItems(surfacedSessions, 0, true, true)}
               </div>
             </Show>
           </div>
@@ -2207,9 +2304,18 @@ function SessionListItem(props: {
   isNewlyCompleted: boolean;
   isCompletedPlanSession: boolean;
   isPinned: boolean;
+  canReorderPinned: boolean;
+  isDraggingPinned: boolean;
+  isDragOverPinned: boolean;
   startsUnpinnedGroup: boolean;
   folderLabel: string | null;
   onTogglePinned: () => Promise<void>;
+  onPinnedDragStart: (event: DragEvent) => void;
+  onPinnedDragEnd: () => void;
+  onPinnedDragOver: (event: DragEvent) => void;
+  onPinnedDragLeave: () => void;
+  onPinnedDrop: (event: DragEvent) => void;
+  onReorderPinned: (direction: -1 | 1) => void;
   onOpenSubagents?: (parentSessionId: string) => void;
   onActiveSessionReselect?: () => void;
   embedded?: boolean;
@@ -2434,7 +2540,7 @@ function SessionListItem(props: {
       ref={(element) => {
         rowRef = element;
       }}
-      class={`session-item ${isActive() ? 'active' : ''} ${props.isPinned ? 'is-pinned' : ''} ${props.startsUnpinnedGroup ? 'starts-unpinned-group' : ''} ${showActions() ? 'is-context-selected' : ''} ${props.actions.sessionId() && !showActions() ? 'is-context-obscured' : ''} ${isFocused() ? 'keyboard-focus' : ''} ${modelDetails() ? 'has-model-details' : ''}`}
+      class={`session-item ${isActive() ? 'active' : ''} ${props.isPinned ? 'is-pinned' : ''} ${props.isDraggingPinned ? 'is-dragging-pinned' : ''} ${props.isDragOverPinned ? 'is-drag-over-pinned' : ''} ${props.startsUnpinnedGroup ? 'starts-unpinned-group' : ''} ${showActions() ? 'is-context-selected' : ''} ${props.actions.sessionId() && !showActions() ? 'is-context-obscured' : ''} ${isFocused() ? 'keyboard-focus' : ''} ${modelDetails() ? 'has-model-details' : ''}`}
       data-session-id={props.session.id}
       inert={props.actions.sessionId() ? true : undefined}
       onMouseMove={() => {
@@ -2448,7 +2554,56 @@ function SessionListItem(props: {
       onPointerCancel={handleRowPointerCancel}
       onContextMenu={openActions}
       onClick={handleRowClick}
+      onDragEnter={props.onPinnedDragOver}
+      onDragOver={props.onPinnedDragOver}
+      onDragLeave={(event) => {
+        if (
+          event.relatedTarget instanceof Node &&
+          event.currentTarget.contains(event.relatedTarget)
+        ) {
+          return;
+        }
+        props.onPinnedDragLeave();
+      }}
+      onDrop={props.onPinnedDrop}
     >
+      <span class={`session-item-leading ${indicatorKind() ? 'has-status' : ''}`}>
+        <Show when={indicatorKind()}>
+          {(kind) => (
+            <span
+              class={`session-item-indicator session-status-indicator ${getSessionStatusIndicatorClass(kind())}`}
+              title={indicatorTitle(kind())}
+              aria-label={indicatorTitle(kind())}
+            />
+          )}
+        </Show>
+        <Show when={props.canReorderPinned}>
+          <button
+            type="button"
+            class="session-item-drag-handle"
+            draggable={true}
+            title="Drag to reorder pinned session"
+            aria-label={`Reorder pinned session: ${normalizeSessionTitle(props.session.title) || 'Untitled'}`}
+            onDragStart={props.onPinnedDragStart}
+            onDragEnd={props.onPinnedDragEnd}
+            onKeyDown={(event) => {
+              if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+              event.preventDefault();
+              event.stopPropagation();
+              props.onReorderPinned(event.key === 'ArrowUp' ? -1 : 1);
+            }}
+          >
+            <svg width="8" height="12" viewBox="0 0 8 12" fill="currentColor" aria-hidden="true">
+              <circle cx="2" cy="2" r="1" />
+              <circle cx="6" cy="2" r="1" />
+              <circle cx="2" cy="6" r="1" />
+              <circle cx="6" cy="6" r="1" />
+              <circle cx="2" cy="10" r="1" />
+              <circle cx="6" cy="10" r="1" />
+            </svg>
+          </button>
+        </Show>
+      </span>
       <button
         ref={(element) => {
           sessionButtonRef = element;
@@ -2461,17 +2616,6 @@ function SessionListItem(props: {
           if (!props.actions.sessionId()) props.setFocusedIndex(props.itemIndex());
         }}
       >
-        <Show when={indicatorKind()} fallback={<span class="session-item-indicator-spacer" />}>
-          {(kind) => (
-            <span class="session-item-indicator-slot">
-              <span
-                class={`session-item-indicator session-status-indicator ${getSessionStatusIndicatorClass(kind())}`}
-                title={indicatorTitle(kind())}
-                aria-label={indicatorTitle(kind())}
-              />
-            </span>
-          )}
-        </Show>
         <div class="session-item-content">
           <span class="session-item-title">
             <span class="session-item-title-text">

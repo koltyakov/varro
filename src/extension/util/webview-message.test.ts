@@ -227,6 +227,7 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('GET', '/varro/session/session-1/diff-summary')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/session/session-1/pin')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/session/session-1/rename-if-untitled')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/varro/session/session-1/reorder-pin')).toBe(true);
     expect(isAllowedApiRequest('DELETE', '/varro/session/session-1/delete')).toBe(true);
     expect(isAllowedApiRequest('GET', '/varro/session-trash')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/session-trash/session-1/restore')).toBe(true);

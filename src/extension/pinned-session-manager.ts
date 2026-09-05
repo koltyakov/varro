@@ -28,6 +28,22 @@ export class PinnedSessionManager {
     });
   }
 
+  async reorder(sourceSessionID: string, targetSessionID: string) {
+    return this.mutate(async () => {
+      if (sourceSessionID === targetSessionID) return this.list();
+      const sourceIndex = this.ids.indexOf(sourceSessionID);
+      const targetIndex = this.ids.indexOf(targetSessionID);
+      if (sourceIndex < 0 || targetIndex < 0) throw new Error('Pinned session not found');
+
+      const next = [...this.ids];
+      const [sourceID] = next.splice(sourceIndex, 1);
+      next.splice(targetIndex, 0, sourceID!);
+      await this.persistence.set(PINNED_SESSION_IDS_KEY, next);
+      this.ids = next;
+      return this.list();
+    });
+  }
+
   private mutate<T>(operation: () => Promise<T>): Promise<T> {
     const result = this.mutationQueue.then(operation);
     this.mutationQueue = result.then(

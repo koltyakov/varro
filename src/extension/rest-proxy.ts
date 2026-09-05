@@ -355,7 +355,7 @@ export interface RestProxyCallbacks {
     | 'moveToTrash'
     | 'restore'
   >;
-  pinnedSessions: Pick<PinnedSessionManager, 'setPinned'>;
+  pinnedSessions: Pick<PinnedSessionManager, 'reorder' | 'setPinned'>;
   hiddenSessions: Pick<
     HiddenSessionManager,
     | 'filterVisibleSessionRequests'
@@ -884,6 +884,33 @@ export class RestProxy {
         const data = await this.callbacks.pinnedSessions.setPinned(
           pinRequest.sessionID,
           pinRequest.pinned
+        );
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
+
+      const reorderPinRequest = this.parseReorderPinRequest(method, payload.path, payload.body);
+      if (reorderPinRequest) {
+        const workspaceDirectory = explicitWorkspaceDirectory ?? this.getCurrentWorkspacePath();
+        const targetWorkspaceDirectory = reorderPinRequest.targetDirectory
+          ? this.requireAuthorizedSessionDirectory(
+              reorderPinRequest.targetSessionID,
+              reorderPinRequest.targetDirectory
+            )
+          : workspaceDirectory;
+        await this.assertSessionInWorkspace(
+          reorderPinRequest.sourceSessionID,
+          workspaceDirectory,
+          explicitWorkspaceDirectory ?? undefined
+        );
+        await this.assertSessionInWorkspace(
+          reorderPinRequest.targetSessionID,
+          targetWorkspaceDirectory,
+          targetWorkspaceDirectory
+        );
+        const data = await this.callbacks.pinnedSessions.reorder(
+          reorderPinRequest.sourceSessionID,
+          reorderPinRequest.targetSessionID
         );
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
@@ -2534,6 +2561,29 @@ export class RestProxy {
     const record = asRecord(body);
     if (typeof record?.pinned !== 'boolean') throw new Error('Invalid pin request');
     return { sessionID: decodeURIComponent(match[1]!), pinned: record.pinned };
+  }
+
+  private parseReorderPinRequest(method: string, path: string, body: unknown) {
+    if (method !== 'POST') return null;
+    const url = new URL(path, 'http://localhost');
+    const match = url.pathname.match(/^\/varro\/session\/([^/]+)\/reorder-pin$/);
+    if (!match) return null;
+    const targetSessionID = asRecord(body)?.targetSessionID;
+    const targetDirectory = asRecord(body)?.targetDirectory;
+    if (typeof targetSessionID !== 'string' || !targetSessionID) {
+      throw new Error('Invalid pinned session reorder request');
+    }
+    if (
+      targetDirectory !== undefined &&
+      (typeof targetDirectory !== 'string' || !targetDirectory)
+    ) {
+      throw new Error('Invalid pinned session reorder request');
+    }
+    return {
+      sourceSessionID: decodeURIComponent(match[1]!),
+      targetSessionID,
+      targetDirectory,
+    };
   }
 
   private parseSessionActivationRequest(method: string, path: string, body: unknown) {

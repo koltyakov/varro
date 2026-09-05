@@ -50,7 +50,7 @@ import {
   postMessage,
   type SlowApiRequest,
 } from '../lib/bridge';
-import { compareSessionsByActivity } from '../lib/session-order';
+import { compareSessionsForDisplay } from '../lib/session-order';
 import {
   consumeProviderConnectionRequest,
   providerConnectionRequest,
@@ -244,7 +244,8 @@ export function Chat() {
         (session) => indicators.planReadyIds.has(session.id),
         (session) => indicators.newlyCompletedIds.has(session.id),
         sessionListNow(),
-        (sessionId) => state.pinnedSessionIds.includes(sessionId)
+        (sessionId) => state.pinnedSessionIds.includes(sessionId),
+        state.pinnedSessionIds
       )
     );
   });
@@ -614,12 +615,9 @@ export function Chat() {
     if (!activeSessionId) return;
 
     const now = Date.now();
-    const orderedSessions = primarySessions().toSorted((left, right) => {
-      const pinOrder =
-        Number(state.pinnedSessionIds.includes(right.id)) -
-        Number(state.pinnedSessionIds.includes(left.id));
-      return pinOrder || compareSessionsByActivity(left, right, now);
-    });
+    const orderedSessions = primarySessions().toSorted((left, right) =>
+      compareSessionsForDisplay(left, right, now, state.pinnedSessionIds)
+    );
     if (orderedSessions.length < 2) return;
 
     const activeIndex = orderedSessions.findIndex((session) => session.id === activeSessionId);

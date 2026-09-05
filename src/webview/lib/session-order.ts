@@ -22,3 +22,17 @@ export function compareSessionsByActivity(
     getUpdateAgeBucket(left.time.updated, now) - getUpdateAgeBucket(right.time.updated, now);
   return activityOrder || right.time.created - left.time.created;
 }
+
+export function compareSessionsForDisplay(
+  left: Pick<Session, 'id' | 'time'>,
+  right: Pick<Session, 'id' | 'time'>,
+  now: number,
+  pinnedSessionIds: readonly string[]
+): number {
+  const leftPinIndex = pinnedSessionIds.indexOf(left.id);
+  const rightPinIndex = pinnedSessionIds.indexOf(right.id);
+  if (leftPinIndex >= 0 && rightPinIndex >= 0) return leftPinIndex - rightPinIndex;
+  if (leftPinIndex >= 0) return -1;
+  if (rightPinIndex >= 0) return 1;
+  return compareSessionsByActivity(left, right, now);
+}
