@@ -301,6 +301,63 @@ double render, order swap, collapsed gap, or surrounding-content shift fails the
 same final DOM eventually returns. A final screenshot, settled geometry assertion, or successful model
 response cannot by itself prove that flicker did not occur.
 
+### Recorded Session Playback Variation
+
+AI-07 can optionally retain the exact `server/event` messages delivered to the real Varro webview.
+Use this for a stream with an unusual tool order, edit pattern, or flicker boundary that is worth testing
+again without another model run. It is an ad-hoc variation, not part of the standard suite and not a CI
+requirement.
+
+Capture only by explicit choice. Add a label to the normal AI-07 controller command:
+
+```sh
+npm run ai:live -- run --manifest <manifest-path> --launch <launch.json> --scenario AI-07 \
+  --playback-label "parallel tools completing around file edit"
+```
+
+The controller stores the session metadata, canonical transcript before and after the turn, and timed
+webview events in `<varro-root>/varro-playback.db`. Use `--playback-db <path>` to select another database.
+The default database and its SQLite sidecar files are ignored by Git. A capture can contain prompts,
+model output, command output, and source snippets. Inspect it before retaining or sharing it. Do not
+capture credentials or private repository content.
+
+Completed local sessions can also supply useful rendering cases even though their original SSE cadence
+is gone. Import one assistant turn with:
+
+```sh
+npm run ai:playback -- import-history --session <session-id> --message <assistant-message-id> \
+  --label "reason this turn is useful"
+```
+
+Historical imports use the real session, message, part, tool output, and timing records from OpenCode's
+local database. They retain up to 120 preceding messages, stream text and reasoning in bounded chunks,
+and reconstruct tool parts through pending, running, and terminal states. Their scenario is `HISTORY` so
+they cannot be mistaken for exact live captures. Use live capture when the original sub-frame event
+spacing matters.
+
+List and replay retained captures with:
+
+```sh
+npm run ai:playback -- list
+npm run ai:playback -- replay --id <capture-id>
+```
+
+Normal E2E runs use a deterministic mocked session and never load the playback database or capture
+files. The local replay CLI reads the database and runs `e2e/local/session-playback.spec.ts` through
+`playwright.ai-playback.config.ts`. Both paths share the same frame assertions and canonical transcript
+check; recorded captures are only used by this explicit local AI test invocation.
+
+Replay preserves source gaps of 250 ms or less. It caps longer waits at 500 ms, so token bursts and fast
+tool handoffs keep their original spacing while model and command idle time does not make the test drag.
+Use `--short-gap-ms` and `--max-gap-ms` to tune those limits. The replay runs through the normal webview
+event handlers in the Playwright harness and samples consecutive animation frames. It fails on blank
+transcript frames, duplicate message or activity identities, brief disappear/reappear flashes, rising
+opacity during an exit, or a final transcript that differs from the recorded canonical result.
+
+This variation replays the model/session event stream, not native wheel, keyboard, resize, or workbench
+actions. Keep those actions in the seeded real-editor run. A playback pass is useful regression evidence,
+but it cannot satisfy AI-07's real-editor precondition or change the overall AI test result.
+
 ## Transcript Recipes
 
 Prefix every generated prompt with a unique marker such as `[VFZ:<seed>:T07]`. Markers make visual
@@ -862,6 +919,7 @@ Create `artifacts/ai-fuzzy/<timestamp>-<seed>.md` from this template:
 - Run-created session IDs and deletion verification:
 - Observed descendants and guarded cleanup verification:
 - Observation method and optional screenshots:
+- Optional playback capture ID, label, database path, and replay result:
 
 ## Preflight
 

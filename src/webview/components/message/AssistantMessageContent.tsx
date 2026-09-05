@@ -1,4 +1,13 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import {
+  For,
+  Show,
+  createEffect,
+  createMemo,
+  createSignal,
+  mapArray,
+  onCleanup,
+  onMount,
+} from 'solid-js';
 import { Portal } from 'solid-js/web';
 import {
   getAssistantActivityCountItems,
@@ -606,7 +615,14 @@ export function AssistantMessageContent(props: {
           activityParts.push(nextPart);
           index += 1;
         }
-        const key = `active-activity-tray:${activityParts[0]!.id}`;
+        // Keep the surviving tray connected when its leading item finishes exiting.
+        const previousTray = previousItems?.find(
+          (item) =>
+            item.kind === 'active-activity-tray' &&
+            item.parts.some((candidate) => candidate.id === activityParts[0]!.id) &&
+            !items.some((current) => current.key === item.key)
+        );
+        const key = previousTray?.key ?? `active-activity-tray:${activityParts[0]!.id}`;
         const previous = previousByKey.get(key);
         if (
           previous?.kind === 'active-activity-tray' &&
@@ -728,6 +744,76 @@ export function AssistantMessageContent(props: {
     return claimReveal(getRevealTrackingKey(item)) ? ' assistant-message-flow-item-streamed' : '';
   };
 
+  // A tray can split while a sibling exits. Own each item here so moving it between
+  // trays or replacing its streamed data does not restart its CSS animation.
+  const activeActivityParts = createMemo(
+    () =>
+      new Map(
+        renderItems().flatMap((item) =>
+          item.kind === 'active-activity-tray'
+            ? item.parts.map((part) => [part.id, part] as const)
+            : []
+        )
+      )
+  );
+  const activeActivityElements = mapArray(
+    () => [...activeActivityParts().keys()],
+    (partId) => {
+      const part = createMemo(() => activeActivityParts().get(partId)!);
+      const partKey = getAssistantActivityPartKey(part());
+      const [entering, setEntering] = createSignal(
+        claimReveal(`active-activity:${partId}`) && !isLightweight()
+      );
+      const exiting = () => !isLightweight() && !!props.exitingActivityPartKeys?.has(partKey);
+      createEffect(() => {
+        if (isLightweight() || props.exitingActivityPartKeys?.has(partKey)) setEntering(false);
+      });
+      // SAFETY: This JSX expression creates a single native div, not a component or fragment.
+      const element = (
+        <div
+          class={`assistant-active-activity-item${entering() ? ' is-entering' : ''}${props.retainedActivityPartKeys?.has(partKey) ? ' is-completed' : ''}${exiting() ? ' is-exiting' : ''}`}
+          data-activity-part-id={partId}
+          onAnimationEnd={(event) => {
+            if (
+              event.target === event.currentTarget &&
+              event.animationName === 'assistant-active-activity-in'
+            ) {
+              setEntering(false);
+            }
+          }}
+        >
+          <div class="assistant-active-activity-item-content">
+            <MessagePart
+              part={part()}
+              messageInfo={props.info}
+              streamedText={props.textForPart(part())}
+              streaming={props.isPartStreaming?.(part())}
+              expandReasoning={props.expandReasoning}
+              lightweight={isLightweight()}
+              questionRequest={
+                // SAFETY: The discriminator checks the same current activity part.
+                part().type === 'tool'
+                  ? props.questionRequestForTool?.(part() as ToolPart)
+                  : undefined
+              }
+              permissionMatch={
+                // SAFETY: The discriminator checks the same current activity part.
+                part().type === 'tool'
+                  ? props.permissionMatchForTool?.(part() as ToolPart)
+                  : undefined
+              }
+              renderPermissionPrompt={false}
+            />
+          </div>
+        </div>
+      ) as HTMLDivElement;
+      // MessageList measures disappearing items before reserving their exit space.
+      onCleanup(() => queueMicrotask(() => element.remove()));
+      return [partId, element] as const;
+    }
+  );
+  const activeActivityElementById = createMemo(() => new Map(activeActivityElements()));
+
   const renderAssistantItem = (entry: AssistantRenderEntry) => {
     if (entry.item().kind === 'active-activity-tray') {
       const item = () =>
@@ -800,43 +886,34 @@ export function AssistantMessageContent(props: {
             )}
           </Show>
           <div
-            ref={(element) => onCleanup(prepareActiveActivityItemsViewport(element))}
+            ref={(element) => {
+              onCleanup(prepareActiveActivityItemsViewport(element));
+              createEffect(() => {
+                let next = element.firstChild;
+                for (const part of item().parts) {
+                  const child = activeActivityElementById().get(part.id)!;
+                  if (child === next) next = next.nextSibling;
+                  else if (child.isConnected && element.isConnected) {
+                    // Flush pending animation styles before the state-preserving move.
+                    child.getAnimations();
+                    element.moveBefore(child, next);
+                  } else element.insertBefore(child, next);
+                }
+                while (next) {
+                  const child = next;
+                  next = next.nextSibling;
+                  if (
+                    !(child instanceof HTMLElement) ||
+                    activeActivityElementById().get(child.dataset.activityPartId!) !== child
+                  ) {
+                    element.removeChild(child);
+                  }
+                }
+              });
+            }}
             class="assistant-active-activity-items"
             data-max-visible-items={MAX_VISIBLE_ACTIVE_ACTIVITY_ITEMS}
-          >
-            <For each={item().parts}>
-              {(part) => {
-                const partKey = getAssistantActivityPartKey(part);
-                const entering = claimReveal(`active-activity:${part.id}`) && !isLightweight();
-                const exiting = () =>
-                  !isLightweight() && !!props.exitingActivityPartKeys?.has(partKey);
-                return (
-                  <div
-                    class={`assistant-active-activity-item${entering ? ' is-entering' : ''}${props.retainedActivityPartKeys?.has(partKey) ? ' is-completed' : ''}${exiting() ? ' is-exiting' : ''}`}
-                    data-activity-part-id={part.id}
-                  >
-                    <div class="assistant-active-activity-item-content">
-                      <MessagePart
-                        part={part}
-                        messageInfo={props.info}
-                        streamedText={props.textForPart(part)}
-                        streaming={props.isPartStreaming?.(part)}
-                        expandReasoning={props.expandReasoning}
-                        lightweight={isLightweight()}
-                        questionRequest={
-                          part.type === 'tool' ? props.questionRequestForTool?.(part) : undefined
-                        }
-                        permissionMatch={
-                          part.type === 'tool' ? props.permissionMatchForTool?.(part) : undefined
-                        }
-                        renderPermissionPrompt={false}
-                      />
-                    </div>
-                  </div>
-                );
-              }}
-            </For>
-          </div>
+          />
         </div>
       );
     }

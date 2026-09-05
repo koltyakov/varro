@@ -122,22 +122,20 @@ test('keeps a running chat out of the model dialog backdrop', async ({ page }) =
 });
 
 test('centers model route tags within their fixed height', async ({ page }) => {
-  await page.goto('/e2e/harness/index.html?scenario=blank');
+  await page.goto('/e2e/harness/index.html?scenario=blank&commitModel=1');
 
   await page.getByLabel('GitHub Copilot / GPT-5 mini').click();
   await page.getByRole('button', { name: 'Manage models', exact: true }).click();
 
-  const nameWrap = page.locator('.models-model-name-wrap').first();
-  await expect(nameWrap).toBeVisible();
-  const tag = nameWrap.locator('[data-testid="route-tag-probe"]');
-  await nameWrap.evaluate((element) => {
-    const routeTag = document.createElement('span');
-    routeTag.className = 'model-capability-tag models-route-tag models-route-tag-commit';
-    routeTag.dataset.testid = 'route-tag-probe';
-    routeTag.textContent = 'commit';
-    element.append(routeTag);
-  });
+  const tag = page.getByLabel('Commit message model', { exact: true });
+  await expect(tag).toBeVisible();
+  // Exercise a real row remount instead of appending a probe that refresh can discard.
+  const filter = page.getByLabel('Filter providers or models');
+  await filter.fill('gpt-4.1');
+  await expect(tag).toHaveCount(0);
+  await filter.clear();
 
+  await expect(tag).toHaveText('commit');
   await expect(tag).toHaveCSS('height', '16px');
   await expect(tag).toHaveCSS('line-height', '9px');
   await expect(tag).toHaveCSS('align-items', 'center');
@@ -153,18 +151,8 @@ test('prevents text selection across model rows', async ({ page }) => {
   await expect(modelNames.first()).toBeVisible();
   await expect(page.locator('.models-model-row').first()).toHaveCSS('user-select', 'none');
 
-  const firstBox = await modelNames.nth(0).boundingBox();
-  const secondBox = await modelNames.nth(1).boundingBox();
-  expect(firstBox).not.toBeNull();
-  expect(secondBox).not.toBeNull();
-  if (!firstBox || !secondBox) return;
-
-  await page.mouse.move(firstBox.x + 2, firstBox.y + firstBox.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(secondBox.x + secondBox.width - 2, secondBox.y + secondBox.height / 2, {
-    steps: 5,
-  });
-  await page.mouse.up();
+  // Resolve live rows during the gesture; the catalog refresh can replace earlier measurements.
+  await modelNames.nth(0).dragTo(modelNames.nth(1));
 
   expect(await page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('');
 });

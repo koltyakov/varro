@@ -316,13 +316,13 @@ for (const scenario of exitCases) {
       );
       const appendText = (text: string) =>
         page.evaluate(
-          ({ sessionId, messageID, text }) => {
+          (payload) => {
             const part: Part = {
               id: 'activity-replacement-text',
-              sessionID: sessionId,
-              messageID,
+              sessionID: payload.sessionId,
+              messageID: payload.messageID,
               type: 'text',
-              text,
+              text: payload.text,
             };
             const harness = (
               window as typeof window & { __varroE2E: { updateMessagePart: (part: Part) => void } }

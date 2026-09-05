@@ -13,6 +13,7 @@ import {
   verifyVscodeLaunchIdentity,
 } from './vscode-launch-process.mjs';
 import { requireFixtureWorkspace } from './ai-fuzzy-preconditions.mjs';
+import { savePlaybackCapture } from './ai-session-playback.mjs';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_MODEL = 'openai/gpt-5.6-luna';
@@ -412,6 +413,10 @@ class OpenCodeClient {
     ).then((result) => (Array.isArray(result) ? result : (result?.items ?? [])));
   }
 
+  getSession(sessionId) {
+    return this.request('GET', `/session/${encodeURIComponent(sessionId)}`);
+  }
+
   send(sessionId, prompt, model) {
     return this.request('POST', `/session/${encodeURIComponent(sessionId)}/prompt_async`, {
       parts: [{ type: 'text', text: prompt }],
@@ -687,6 +692,37 @@ class CdpController {
       throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text);
     }
     return result.result.value;
+  }
+
+  startSessionEventCapture() {
+    return this.evaluate(`(() => {
+      globalThis.__varroSessionEventCapture?.stop();
+      const startedAt = performance.now();
+      const events = [];
+      const listener = (message) => {
+        if (message.data?.type !== 'server/event' || !message.data.payload) return;
+        events.push({
+          offsetMs: performance.now() - startedAt,
+          event: structuredClone(message.data.payload),
+        });
+      };
+      window.addEventListener('message', listener);
+      globalThis.__varroSessionEventCapture = {
+        events,
+        stop() { window.removeEventListener('message', listener); },
+      };
+      return true;
+    })()`);
+  }
+
+  finishSessionEventCapture() {
+    return this.evaluate(`(() => {
+      const capture = globalThis.__varroSessionEventCapture;
+      if (!capture) return [];
+      capture.stop();
+      delete globalThis.__varroSessionEventCapture;
+      return capture.events;
+    })()`);
   }
 
   evaluateInCurrentContext(expression) {
@@ -3427,6 +3463,11 @@ async function runLive(options) {
   if (!['AI-07', 'AI-08', 'AI-17', 'AI-18', 'AI-19'].includes(scenario)) {
     throw new Error('--scenario must be AI-07, AI-08, AI-17, AI-18, or AI-19');
   }
+  const playbackLabel = options['playback-label']?.trim() ?? '';
+  if (playbackLabel && scenario !== 'AI-07') {
+    throw new Error('--playback-label is currently supported for AI-07');
+  }
+  const playbackDatabase = path.resolve(options['playback-db'] ?? 'varro-playback.db');
   const maxPrompts = Number(options['max-prompts'] ?? DEFAULT_MAX_PROMPTS);
   const timeoutMs = Number(options['gate-timeout-ms'] ?? DEFAULT_GATE_TIMEOUT_MS);
   const restartCount = parseRestartCount(options['restart-count']);
@@ -3503,6 +3544,7 @@ async function runLive(options) {
   let modelMayEdit = false;
   let controllerError = null;
   let descendantsBefore = null;
+  let playbackSource = null;
   try {
     await (async () => {
     if (scenario === 'AI-17') {
@@ -3547,6 +3589,14 @@ async function runLive(options) {
     descendantsBefore = new Set(
       findSessionDescendants(sessionsBefore, tracked.id).map((session) => session.id)
     );
+    if (playbackLabel) {
+      const [session, initialMessages] = await Promise.all([
+        client.getSession(tracked.id),
+        client.messages(tracked.id, 1000),
+      ]);
+      playbackSource = { session, initialMessages };
+      await cdp.startSessionEventCapture();
+    }
     if (scenario === 'AI-17') {
       const tokens = [
         ...Array.from({ length: 20 }, (_, index) =>
@@ -3855,6 +3905,31 @@ async function runLive(options) {
   } catch (error) {
     controllerError = error;
   }
+  if (playbackSource) {
+    try {
+      const [events, finalMessages] = await Promise.all([
+        cdp.finishSessionEventCapture(),
+        client.messages(tracked.id, 1000),
+      ]);
+      const playback = savePlaybackCapture(playbackDatabase, {
+        label: playbackLabel,
+        scenario,
+        capturedAt: new Date().toISOString(),
+        model: requestedModel,
+        session: playbackSource.session,
+        initialMessages: playbackSource.initialMessages,
+        finalMessages,
+        events,
+      });
+      process.stdout.write(`${JSON.stringify({ playback }, null, 2)}\n`);
+    } catch (error) {
+      controllerError = controllerError
+        ? new AggregateError([controllerError, error], 'Live scenario and playback capture failed', {
+            cause: controllerError,
+          })
+        : error;
+    }
+  }
   try {
     cdp.close();
   } catch (error) {
@@ -3911,7 +3986,7 @@ async function main() {
   const { command, options } = parseArgs(process.argv.slice(2));
   if (command === 'run') return runLive(options);
   throw new Error(
-    'Usage: ai-fuzzy-live.mjs run --manifest <path> --launch <path> --scenario AI-07|AI-08|AI-17|AI-18|AI-19'
+    'Usage: ai-fuzzy-live.mjs run --manifest <path> --launch <path> --scenario AI-07|AI-08|AI-17|AI-18|AI-19 [--playback-label <label>]'
   );
 }
 

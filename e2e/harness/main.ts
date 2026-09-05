@@ -118,6 +118,7 @@ const SCENARIO_NAMES = [
   'multi-agent-streaming',
   'rapid-streaming-jitter',
   'multi-agent-large-streaming',
+  'session-playback',
 ] as const;
 type ScenarioName = (typeof SCENARIO_NAMES)[number];
 
@@ -183,6 +184,10 @@ type HarnessWindow = Window & {
   __initialTheme?: string;
   __initialWebviewState?: InitialWebviewState;
   __sendToExtension?: (message: WebviewMessage) => void | Promise<void>;
+  varroPlaybackCapture?: {
+    session: Session;
+    initialMessages: MessageEntry[];
+  };
   __varroE2E?: {
     requests: RequestLog[];
     permissionResponses: PermissionResponse[];
@@ -203,6 +208,7 @@ type HarnessWindow = Window & {
     pendingHistoryRequestCount?: () => number;
     getSessionMessages?: (sessionId: string) => MessageEntry[];
     getPendingPermissions?: () => Array<Record<string, unknown>>;
+    replayServerEvent?: (event: unknown) => void;
   };
 };
 
@@ -806,6 +812,18 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     nextSequence: 0,
     healthFailuresRemaining: 0,
   };
+
+  if (name === 'session-playback') {
+    const capture = (window as HarnessWindow).varroPlaybackCapture;
+    if (!capture?.session?.id) throw new Error('Session playback capture was not injected');
+    state.workspacePath = capture.session.directory;
+    state.sessions = [structuredClone(capture.session)];
+    state.messagesBySessionId[capture.session.id] = structuredClone(capture.initialMessages);
+    state.sessionStatuses[capture.session.id] = { type: 'idle' };
+    state.persistedActiveSessionId = capture.session.id;
+    state.nextSequence = 300;
+    return state;
+  }
 
   if (name === 'restored-session') {
     const session = makeSession('session-restored', 'Restored Session', BASE_TIME - 2_000);
@@ -4938,6 +4956,73 @@ function dispatchToWebview(message: unknown) {
   window.postMessage(message, '*');
 }
 
+function replayServerEvent(state: ScenarioState, eventValue: unknown) {
+  const event = asRecord(eventValue);
+  const properties = asRecord(event.properties);
+  const type = event.type;
+  if (type === 'message.updated') {
+    const info = asRecord(properties.info);
+    const sessionId = typeof info.sessionID === 'string' ? info.sessionID : '';
+    const messageId = typeof info.id === 'string' ? info.id : '';
+    const messages = state.messagesBySessionId[sessionId];
+    if (messages && messageId) {
+      const existing = messages.find((entry) => entry.info.id === messageId);
+      if (existing) existing.info = { ...existing.info, ...info } as Message;
+      else if (info.role === 'user' || info.role === 'assistant') {
+        messages.push({ info: info as Message, parts: [] });
+      }
+    }
+  } else if (type === 'message.part.updated') {
+    const part = properties.part as Part | undefined;
+    if (part?.sessionID) {
+      const message = state.messagesBySessionId[part.sessionID]?.find(
+        (entry) => entry.info.id === part.messageID
+      );
+      if (message) {
+        const index = message.parts.findIndex((candidate) => candidate.id === part.id);
+        if (index < 0) message.parts.push(structuredClone(part));
+        else message.parts[index] = structuredClone(part);
+      }
+    }
+  } else if (type === 'message.part.delta') {
+    const sessionId = typeof properties.sessionID === 'string' ? properties.sessionID : '';
+    const messageId = typeof properties.messageID === 'string' ? properties.messageID : '';
+    const partId = typeof properties.partID === 'string' ? properties.partID : '';
+    const field = typeof properties.field === 'string' ? properties.field : '';
+    const delta = typeof properties.delta === 'string' ? properties.delta : '';
+    const part = state.messagesBySessionId[sessionId]
+      ?.find((entry) => entry.info.id === messageId)
+      ?.parts.find((candidate) => candidate.id === partId);
+    if (part && field) {
+      const mutablePart = part as unknown as Record<string, unknown>;
+      mutablePart[field] =
+        `${typeof mutablePart[field] === 'string' ? mutablePart[field] : ''}${delta}`;
+    }
+  } else if (type === 'message.part.removed') {
+    const sessionId = typeof properties.sessionID === 'string' ? properties.sessionID : '';
+    const messageId = typeof properties.messageID === 'string' ? properties.messageID : '';
+    const partId = typeof properties.partID === 'string' ? properties.partID : '';
+    const message = state.messagesBySessionId[sessionId]?.find(
+      (entry) => entry.info.id === messageId
+    );
+    if (message) message.parts = message.parts.filter((part) => part.id !== partId);
+  } else if (type === 'message.removed') {
+    const sessionId = typeof properties.sessionID === 'string' ? properties.sessionID : '';
+    const messageId = typeof properties.messageID === 'string' ? properties.messageID : '';
+    if (state.messagesBySessionId[sessionId]) {
+      state.messagesBySessionId[sessionId] = state.messagesBySessionId[sessionId].filter(
+        (entry) => entry.info.id !== messageId
+      );
+    }
+  } else if (type === 'session.status') {
+    const sessionId = typeof properties.sessionID === 'string' ? properties.sessionID : '';
+    if (sessionId && properties.status) {
+      state.sessionStatuses[sessionId] = properties.status as SessionStatus;
+    }
+  }
+  dispatchToWebview({ type: 'server/event', payload: eventValue });
+}
+
 function dispatchPostReadyMessage(message: unknown) {
   if (
     message &&
@@ -5103,6 +5188,19 @@ async function handleApiRequest(
     return {
       providers: state.providers,
       default: state.providerDefaults,
+    };
+  }
+
+  if (
+    method === 'GET' &&
+    path === '/varro/opencode-config' &&
+    new URLSearchParams(window.location.search).get('commitModel') === '1'
+  ) {
+    return {
+      smallModel: null,
+      agentModels: {},
+      commitMessageModel: { providerID: DEFAULT_PROVIDER_ID, modelID: DEFAULT_MODEL_ID },
+      autoApproveModel: null,
     };
   }
 
@@ -6070,6 +6168,7 @@ function setUpHarness() {
     updateSessionStatus: (sessionId, status) => {
       scenarioState.sessionStatuses[sessionId] = status;
     },
+    replayServerEvent: (event) => replayServerEvent(scenarioState, event),
   };
   document.body.dataset.vscodeThemeKind = THEME;
   if (THEME !== 'dark') {

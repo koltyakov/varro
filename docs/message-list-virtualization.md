@@ -262,6 +262,10 @@ Direct input acquires ownership only when it can affect the transcript:
 - Transition identity is part identity, not the current group owner or array position. Moving an
   activity part from running to retained, exiting, and grouped must not hide its source row before the
   exit completes.
+- Tool-state object replacement and tray splits must preserve the active item's DOM and animation
+  progress. A fading sibling must not restart its exit when a completed middle item splits the tray.
+  Flush pending animation styles before moving a connected item with `moveBefore`; keep its source
+  connected until the destination takes ownership.
 - A bottom reserve compensates only for space actively disappearing from flow. It is inert structural
   chrome, does not become part of row-only virtual prefixes, and is removed when no exit remains.
 - When bottom-pinned activity leaves flow, including a direct active-tray collapse into Explored,

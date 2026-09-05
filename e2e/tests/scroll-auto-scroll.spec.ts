@@ -1457,9 +1457,9 @@ test.describe('auto-scroll', () => {
           { type: 'server/event', payload: { type: 'message.part.updated', properties: { part } } },
           '*'
         );
-        const exitSamples: Array<number | null> = [];
-        const exploredSamples: Array<number | null> = [];
-        let sawExit = false;
+        const rowTops: Array<number | null> = [];
+        const summaryTops: Array<number | null> = [];
+        let observedExit = false;
         const started = performance.now();
         while (performance.now() - started < 3_000) {
           await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -1468,14 +1468,14 @@ test.describe('auto-scroll', () => {
             '[data-msg-id="message-tool-cards-assistant-69"] .assistant-activity-summary'
           );
           const top = element.getBoundingClientRect().top;
-          exitSamples.push(row ? row.getBoundingClientRect().top - top : null);
-          exploredSamples.push(summary ? summary.getBoundingClientRect().top - top : null);
-          sawExit ||= !!element.querySelector('.assistant-active-activity-item.is-exiting');
+          rowTops.push(row ? row.getBoundingClientRect().top - top : null);
+          summaryTops.push(summary ? summary.getBoundingClientRect().top - top : null);
+          observedExit ||= !!element.querySelector('.assistant-active-activity-item.is-exiting');
         }
         return {
-          exitSamples,
-          exploredSamples,
-          sawExit,
+          exitSamples: rowTops,
+          exploredSamples: summaryTops,
+          sawExit: observedExit,
           remainingItems: element.querySelectorAll('.assistant-active-activity-item').length,
         };
       }, anchor.id);
