@@ -526,7 +526,8 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
     case 'workspace/select': {
       const payload = asRecord(message?.payload);
       const path = getBoundedString(payload?.path, MAX_PATH_LENGTH);
-      return path ? { type, payload: { path } } : null;
+      const requestId = getSafeInteger(payload?.requestId);
+      return path && requestId !== null ? { type, payload: { path, requestId } } : null;
     }
 
     case 'commands/state': {

@@ -516,7 +516,7 @@ describe('SessionListView model details', () => {
     await vi.waitFor(() => expect(getScope).toHaveBeenCalledWith('/repo-b'));
     expect(send).toHaveBeenCalledWith({
       type: 'workspace/select',
-      payload: { path: '/repo-b' },
+      payload: { path: '/repo-b', requestId: expect.any(Number) },
     });
     expect(selector?.textContent).toContain('Repo B');
     expect(showSessionPicker()).toBe(false);

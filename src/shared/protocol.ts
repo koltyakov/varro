@@ -802,6 +802,10 @@ export type ExtensionMessage =
   | { type: 'providers/refresh'; payload?: { revalidateAuth: true } }
   | { type: 'providers/status'; payload: { pending: boolean } }
   | { type: 'context/update'; payload: EditorContext }
+  | {
+      type: 'workspace/select-failed';
+      payload: { requestId: number; path: string; error: string };
+    }
   | { type: 'terminal-selection/update'; payload: TerminalSelection | null }
   | { type: 'files/dropped'; payload: DroppedFile[] }
   | { type: 'pdfs/picked'; payload: NativePdfAttachment[] }
@@ -880,7 +884,7 @@ export type ExtensionMessage =
 
 export type WebviewMessage =
   | { type: 'context/request' }
-  | { type: 'workspace/select'; payload: { path: string } }
+  | { type: 'workspace/select'; payload: { path: string; requestId: number } }
   | {
       type: 'commands/state';
       payload: {

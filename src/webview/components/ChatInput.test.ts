@@ -30,7 +30,10 @@ import {
   setQueuedMessageEdit,
   manualWorkspaceSelection,
   setManualWorkspaceSelection,
+  setError,
 } from '../lib/state';
+import { handleWorkspaceSelectionFailure } from '../lib/workspace-selection';
+import { startNewChatDraft } from '../lib/new-chat-draft';
 import { client } from '../lib/client';
 import { resetMessageEditState, startEditingMessage } from '../lib/message-edit-state';
 import { setSessionHistoryPrompts } from '../lib/message-window';
@@ -219,6 +222,8 @@ afterEach(() => {
   setShowModelPicker(false);
   setManualWorkspaceSelection(false);
   setState('pendingWorkspaceSelectionPath', null);
+  setState('workspaceSelectionRequestId', null);
+  setError(null);
   setState('providerRefreshPending', false);
   setState('workspaceCatalogReloadPending', false);
   resetProviderConnectionState();
@@ -5719,7 +5724,7 @@ describe('ChatInput', () => {
     ).toContain('Repo B');
     expect(messages).toContainEqual({
       type: 'workspace/select',
-      payload: { path: '/repo-b' },
+      payload: { path: '/repo-b', requestId: expect.any(Number) },
     });
 
     setState('editorContext', 'workspacePath', '/repo-b');
@@ -5777,6 +5782,7 @@ describe('ChatInput', () => {
   });
 
   it('selects the active file workspace for an empty new chat', async () => {
+    setupModelState();
     const messages: WebviewMessage[] = [];
     fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension = (
       message
@@ -5798,9 +5804,170 @@ describe('ChatInput', () => {
 
     expect(messages).toContainEqual({
       type: 'workspace/select',
-      payload: { path: '/repo-b' },
+      payload: { path: '/repo-b', requestId: expect.any(Number) },
     });
+    expect(state.pendingWorkspaceSelectionPath).toBe('/repo-b');
+    expect(state.workspaceSelectionRequestId).toEqual(expect.any(Number));
+
+    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+    enterComposerText(editor, 'Send after the workspace acknowledgement');
+    const sendButton = container!.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')!;
+    expect(sendButton.disabled).toBe(true);
+    editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flushAsyncWork();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(inputText()).toBe('Send after the workspace acknowledgement');
+
+    setState('editorContext', 'workspacePath', '/repo-b');
+    await flushAsyncWork();
+
+    expect(state.pendingWorkspaceSelectionPath).toBeNull();
+    expect(sendButton.disabled).toBe(false);
+    sendButton.click();
+    await flushAsyncWork();
+    expect(sendMessageMock).toHaveBeenCalledWith(
+      'Send after the workspace acknowledgement',
+      expect.objectContaining({ noReply: false })
+    );
+    expect(messages.filter((message) => message.type === 'workspace/select')).toHaveLength(1);
   });
+
+  it.each(['', 'Keep this draft after the failed switch'])(
+    'recovers from a failed automatic workspace switch with draft %j',
+    async (draft) => {
+      setupModelState();
+      const messages: WebviewMessage[] = [];
+      fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
+        (message) => messages.push(message);
+      setState('editorContext', {
+        workspacePath: '/repo-a',
+        activeWorkspacePath: '/repo-b',
+        workspaceFolders: [
+          { name: 'Repo A', path: '/repo-a' },
+          { name: 'Repo B', path: '/repo-b' },
+        ],
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      });
+      cleanup = render(() => ChatInput({ newSession: true }), container!);
+      await flushAsyncWork();
+
+      const request = messages.find((message) => message.type === 'workspace/select');
+      if (!request || request.type !== 'workspace/select')
+        throw new Error('Expected workspace request');
+      expect(request.payload).toEqual({ path: '/repo-b', requestId: expect.any(Number) });
+      expect(state.workspaceSelectionRequestId).toBe(request.payload.requestId);
+      expect(state.pendingWorkspaceSelectionPath).toBe('/repo-b');
+      const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+      if (draft) enterComposerText(editor, draft);
+      const sendButton = container!.querySelector<HTMLButtonElement>(
+        '[aria-label="Send (Enter)"]'
+      )!;
+      expect(sendButton.disabled).toBe(true);
+      editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await flushAsyncWork();
+      expect(sendMessageMock).not.toHaveBeenCalled();
+
+      handleWorkspaceSelectionFailure({ ...request.payload, error: 'Folder unavailable' });
+      await flushAsyncWork();
+
+      expect(state.pendingWorkspaceSelectionPath).toBeNull();
+      expect(state.workspaceSelectionRequestId).toBeNull();
+      expect(manualWorkspaceSelection()).toBe(true);
+      expect(state.editorContext.workspacePath).toBe('/repo-a');
+      expect(inputText()).toBe(draft);
+      expect(editor.textContent).toBe(draft);
+      expect(messages.filter((message) => message.type === 'workspace/select')).toEqual([request]);
+
+      const text = draft || 'Send in the current workspace';
+      if (!draft) enterComposerText(editor, text);
+      expect(sendButton.disabled).toBe(false);
+      sendButton.click();
+      await flushAsyncWork();
+      expect(sendMessageMock).toHaveBeenCalledWith(
+        text,
+        expect.objectContaining({ newSessionWorkspace: { scope: 'folder', directory: '/repo-a' } })
+      );
+    }
+  );
+
+  it.each(['/repo-a', '/repo-b'])(
+    'allows a new chat after an unresolved plan with the active editor in %s',
+    async (activeWorkspacePath) => {
+      vi.useFakeTimers();
+      setupModelState();
+      const messages: WebviewMessage[] = [];
+      fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
+        (message) => messages.push(message);
+      setState('activeSessionId', 'session-1');
+      setState('sessions', [session('session-1', 2_000, { directory: '/repo-a' })]);
+      const assistant = assistantMessageEntry({ input: 100, output: 20 });
+      setState('messages', [
+        {
+          ...assistant,
+          info: {
+            ...assistant.info,
+            agent: 'plan',
+            finish: 'stop',
+            time: { created: 1_000, completed: 2_000 },
+            path: { cwd: '/repo-a', root: '/repo-a' },
+          },
+          parts: [
+            {
+              id: 'plan-text',
+              sessionID: 'session-1',
+              messageID: assistant.info.id,
+              type: 'text',
+              text: 'Plan: add validation, then cover invalid input with tests.',
+            },
+          ],
+        },
+      ]);
+      setState('editorContext', {
+        workspacePath: '/repo-a',
+        activeWorkspacePath,
+        workspaceFolders: [
+          { name: 'Repo A', path: '/repo-a' },
+          { name: 'Repo B', path: '/repo-b' },
+        ],
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      });
+      cleanup = render(() => ChatInput(), container!);
+      expect(messages).not.toContainEqual(expect.objectContaining({ type: 'workspace/select' }));
+
+      startNewChatDraft();
+      await flushAsyncWork();
+      expect(state.activeSessionId).toBeNull();
+      const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+      enterComposerText(editor, 'Start a separate task');
+      const sendButton = container!.querySelector<HTMLButtonElement>(
+        '[aria-label="Send (Enter)"]'
+      )!;
+      if (activeWorkspacePath === '/repo-b') {
+        expect(messages.filter((message) => message.type === 'workspace/select')).toEqual([
+          { type: 'workspace/select', payload: { path: '/repo-b', requestId: expect.any(Number) } },
+        ]);
+        expect(sendButton.disabled).toBe(true);
+        setState('editorContext', 'workspacePath', '/repo-b');
+      } else {
+        expect(messages).not.toContainEqual(expect.objectContaining({ type: 'workspace/select' }));
+      }
+      await vi.advanceTimersByTimeAsync(50);
+      expect(state.messages).toEqual([]);
+      expect(state.pendingWorkspaceSelectionPath).toBeNull();
+      expect(inputText()).toBe('Start a separate task');
+      expect(sendButton.disabled).toBe(false);
+      sendButton.click();
+      await flushAsyncWork();
+      expect(sendMessageMock).toHaveBeenCalledWith(
+        'Start a separate task',
+        expect.objectContaining({ noReply: false })
+      );
+    }
+  );
 
   it('does not reselect an equivalent UNC workspace for an empty new chat', async () => {
     const messages: WebviewMessage[] = [];
@@ -5873,7 +6040,7 @@ describe('ChatInput', () => {
 
     expect(messages).toContainEqual({
       type: 'workspace/select',
-      payload: { path: '/repo-b' },
+      payload: { path: '/repo-b', requestId: expect.any(Number) },
     });
   });
 
@@ -5906,7 +6073,7 @@ describe('ChatInput', () => {
     await flushAsyncWork();
 
     expect(messages.filter((message) => message.type === 'workspace/select')).toEqual([
-      { type: 'workspace/select', payload: { path: '/repo-b' } },
+      { type: 'workspace/select', payload: { path: '/repo-b', requestId: expect.any(Number) } },
     ]);
 
     setInputText('Reset the manual choice');
@@ -5914,8 +6081,8 @@ describe('ChatInput', () => {
     await flushAsyncWork();
 
     expect(messages.filter((message) => message.type === 'workspace/select')).toEqual([
-      { type: 'workspace/select', payload: { path: '/repo-b' } },
-      { type: 'workspace/select', payload: { path: '/repo-a' } },
+      { type: 'workspace/select', payload: { path: '/repo-b', requestId: expect.any(Number) } },
+      { type: 'workspace/select', payload: { path: '/repo-a', requestId: expect.any(Number) } },
     ]);
   });
 
@@ -5947,7 +6114,7 @@ describe('ChatInput', () => {
 
     expect(messages).toContainEqual({
       type: 'workspace/select',
-      payload: { path: '/repo-a' },
+      payload: { path: '/repo-a', requestId: expect.any(Number) },
     });
   });
 
@@ -6095,7 +6262,7 @@ describe('ChatInput', () => {
     expect(manualWorkspaceSelection()).toBe(true);
     expect(messages).not.toContainEqual({
       type: 'workspace/select',
-      payload: { path: '/repo-a' },
+      payload: { path: '/repo-a', requestId: expect.any(Number) },
     });
   });
 

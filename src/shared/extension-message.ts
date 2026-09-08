@@ -27,6 +27,7 @@ const KNOWN_TYPES = new Set<string>([
   'providers/refresh',
   'providers/status',
   'context/update',
+  'workspace/select-failed',
   'terminal-selection/update',
   'files/dropped',
   'pdfs/picked',
@@ -138,6 +139,24 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
     case 'context/update': {
       const payload = asRecord(record.payload);
       return isEditorContext(payload) ? { type, payload } : null;
+    }
+
+    case 'workspace/select-failed': {
+      const payload = asRecord(record.payload);
+      if (
+        !payload ||
+        !isNumber(payload.requestId) ||
+        !Number.isSafeInteger(payload.requestId) ||
+        payload.requestId < 0 ||
+        !isString(payload.path) ||
+        !isString(payload.error)
+      ) {
+        return null;
+      }
+      return {
+        type,
+        payload: { requestId: payload.requestId, path: payload.path, error: payload.error },
+      };
     }
 
     case 'sibling-workspace-alerts/update': {

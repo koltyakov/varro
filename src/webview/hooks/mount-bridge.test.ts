@@ -434,6 +434,37 @@ describe('mount bridge helpers', () => {
     expect(setServerReconnecting).toHaveBeenLastCalledWith(false);
   });
 
+  it('routes correlated workspace selection failures', () => {
+    const workspaceSelectionFailed = vi.fn();
+    const payload = { requestId: 12, path: '/repo-b', error: 'Folder is not open' };
+    handleExtensionMessageWithDependencies(
+      createMessageDependencies({ workspaceSelectionFailed }),
+      {
+        type: 'workspace/select-failed',
+        payload,
+      }
+    );
+    expect(workspaceSelectionFailed).toHaveBeenCalledWith(payload);
+  });
+
+  it('acknowledges context even when the workspace has not changed', () => {
+    const acknowledgeWorkspaceSelection = vi.fn();
+    const resetWorkspaceForChange = vi.fn();
+    handleExtensionMessageWithDependencies(
+      createMessageDependencies({
+        getCurrentWorkspacePath: () => '/repo-b',
+        acknowledgeWorkspaceSelection,
+        resetWorkspaceForChange,
+      }),
+      {
+        type: 'context/update',
+        payload: { workspacePath: '/repo-b', activeFile: null, selection: null, diagnostics: [] },
+      }
+    );
+    expect(acknowledgeWorkspaceSelection).toHaveBeenCalledWith('/repo-b');
+    expect(resetWorkspaceForChange).not.toHaveBeenCalled();
+  });
+
   it('resets workspace state before reconciling a context workspace change', () => {
     const setCurrentWorkspacePath = vi.fn();
     const setEditorContext = vi.fn();

@@ -144,8 +144,20 @@ export function createSidebarProviderActions(
       deps.postContext();
       deps.postTerminalSelection(deps.contextFilesState.getTerminalSelection());
     },
-    selectWorkspace: async (path) => {
-      await deps.selectWorkspace(path);
+    selectWorkspace: async ({ path, requestId }) => {
+      try {
+        await deps.selectWorkspace(path);
+      } catch (error) {
+        deps.post({
+          type: 'workspace/select-failed',
+          payload: {
+            requestId,
+            path,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        });
+        throw error;
+      }
     },
     refreshProviders: () => deps.refreshProviders(),
     providerAuthChanged: () => deps.providerAuthChanged(),

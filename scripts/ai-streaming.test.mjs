@@ -3,12 +3,12 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
-import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import vm from 'node:vm';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { WebSocketServer as SocketServer } from 'ws';
 
 import {
   bounded,
@@ -28,10 +28,6 @@ import {
 } from './ai-streaming.mjs';
 import { createStreamingServer } from './ai-streaming-server.mjs';
 import { reserveLoopbackPort, writeVscodeLaunchMetadata } from './vscode-launch-process.mjs';
-
-const { wsServer: SocketServer } = createRequire(import.meta.url)(
-  'playwright-core/lib/utilsBundle'
-);
 
 test('CLI parses explicit sources and timing, rejecting ambiguous or unsafe arguments', () => {
   assert.deepEqual(

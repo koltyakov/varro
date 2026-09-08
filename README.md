@@ -61,6 +61,8 @@ Varro supports VS Code and VSCodium. Support for other VS Code forks is limited;
 
 Varro filters sessions to the current workspace and groups them into `Recent`, `Archive`, and `Recycle Bin`. Filters identify `Running`, `Needs attention`, `Failed`, `Plan ready`, and `Completed` sessions. Rows can show queued prompts, changed files, added and removed lines, token use, duration, and current state.
 
+Indicators at the top of the chat summarize activity in other sessions: a numbered spinner means running, blue means waiting for input or permission, red means failed, yellow means a plan is ready, and green means completed. Select an indicator to open the matching session or filter. Colors may vary with the active VS Code theme. See the [usage guide](https://github.com/koltyakov/varro/blob/main/docs/usage.md#sessions) for details.
+
 OpenCode search covers loaded and older root sessions. Open any session in the sidebar, an editor tab, or the OpenCode TUI. Root sessions can be pinned, renamed, shared, or recycled. Child sessions remain linked to their parent. On wide layouts, the session list can remain beside the active chat.
 
 When Varro is hidden, VS Code notifications report plans, failures, permission requests, and questions from root sessions. The status bar links to sessions that need attention, then to completed background work.

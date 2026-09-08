@@ -10,6 +10,7 @@ import {
   untrack,
 } from 'solid-js';
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../../shared/workspace-path';
+import { requestWorkspaceSelection } from '../lib/workspace-selection';
 import {
   state,
   inputText,
@@ -818,8 +819,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       return;
     }
 
-    setPendingWorkspacePath(activeWorkspacePath);
-    postMessage({ type: 'workspace/select', payload: { path: activeWorkspacePath } });
+    requestWorkspaceSelection(activeWorkspacePath);
   });
 
   async function attachNativePdfFiles(files: File[]) {
@@ -4780,15 +4780,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             if (!canSelectWorkspace()) return;
             detachBlankSessionForWorkspace(path);
             setManualWorkspaceSelection(true);
-            setPendingWorkspacePath(path);
+            requestWorkspaceSelection(path);
             setShowWorkspacePicker(false);
-            postMessage({ type: 'workspace/select', payload: { path } });
           }}
           onSelectWorkspaceScope={() => {
             if (!canSelectWorkspace()) return;
             detachBlankSessionForWorkspace(null);
             setManualWorkspaceSelection(false);
-            setPendingWorkspacePath(null);
+            requestWorkspaceSelection(null);
             setShowWorkspacePicker(false);
           }}
           showMcpControl={!composerEditingMessage() && showMcpControl()}

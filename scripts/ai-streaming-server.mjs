@@ -17,6 +17,7 @@ const EVENT_TYPES = new Set([
   'todo.updated',
   'session.diff',
 ]);
+const MAX_SUBSCRIBER_BUFFER_BYTES = 8 * 1024 * 1024;
 
 /**
  * await createStreamingServer({ capture, timeline, directory }) binds 127.0.0.1:0.
@@ -437,8 +438,9 @@ export async function createStreamingServer({ capture, timeline, directory }) {
           apply(state, entry.event);
           const actualMs = performance.now() - epoch;
           const payload = `data: ${JSON.stringify({ directory, payload: entry.event })}\n\n`;
+          const payloadBytes = Buffer.byteLength(payload);
           for (const subscriber of subscribers) {
-            if (subscriber.writableLength + Buffer.byteLength(payload) > 8 * 1024 * 1024) {
+            if (subscriber.writableLength + payloadBytes > MAX_SUBSCRIBER_BUFFER_BYTES) {
               throw new Error('Replay subscriber exceeded the 8 MiB output buffer limit');
             }
             subscriber.write(payload);

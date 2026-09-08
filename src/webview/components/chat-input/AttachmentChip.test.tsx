@@ -1,3 +1,4 @@
+import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { getFileTypeIcon } from '../FileTypeIcon';
@@ -19,6 +20,39 @@ afterEach(() => {
 });
 
 describe('AttachmentChip', () => {
+  it('keeps an off current-document toggle operable without announcing it as disabled', () => {
+    const [enabled, setEnabled] = createSignal(false);
+    cleanup = render(
+      () => (
+        <AttachmentChip
+          label="app.ts"
+          disabled={!enabled()}
+          toggle
+          onClick={() => setEnabled((value) => !value)}
+        />
+      ),
+      container
+    );
+    const chip = container.querySelector<HTMLElement>('[role="button"]')!;
+    expect(chip.tabIndex).toBe(0);
+    expect(chip.getAttribute('aria-pressed')).toBe('false');
+    expect(chip.hasAttribute('aria-disabled')).toBe(false);
+    expect(chip.classList.contains('disabled')).toBe(true);
+    chip.click();
+    expect(chip.getAttribute('aria-pressed')).toBe('true');
+    chip.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(chip.getAttribute('aria-pressed')).toBe('false');
+    chip.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+    expect(chip.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('still announces an unsupported attachment as disabled', () => {
+    cleanup = render(() => <AttachmentChip label="diagram.png" icon="image" disabled />, container);
+    const chip = container.querySelector<HTMLElement>('.chat-attachment-chip')!;
+    expect(chip.getAttribute('aria-disabled')).toBe('true');
+    expect(chip.hasAttribute('aria-pressed')).toBe(false);
+  });
+
   it('shows an image preview above the chip while hovered', () => {
     container.className = 'chat-input-shell';
     cleanup = render(

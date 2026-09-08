@@ -109,6 +109,7 @@ export interface AppState {
   agentsLoaded: boolean;
   commandsLoaded: boolean;
   pendingWorkspaceSelectionPath: string | null;
+  workspaceSelectionRequestId: number | null;
   providerRefreshPending: boolean;
   editorContext: EditorContext;
   terminalSelection: { text: string; terminalName: string } | null;
@@ -352,6 +353,7 @@ export function createAppState(): AppStateInstance {
     agentsLoaded: false,
     commandsLoaded: false,
     pendingWorkspaceSelectionPath: null,
+    workspaceSelectionRequestId: null,
     providerRefreshPending: false,
     editorContext: initialWebviewState.editorContext ?? defaultEditorContext,
     terminalSelection: discardQueuedEditDraft

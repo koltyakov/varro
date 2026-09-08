@@ -1,12 +1,14 @@
 import { Show } from 'solid-js';
 import { Tooltip } from '../Tooltip';
 
+const HEADER_BADGE_TOOLTIP_DELAY_MS = 1000;
+
 export function RunningSessionsBadge(props: { count: number; onClick: () => void }) {
   const label = () => `${props.count} running session${props.count === 1 ? '' : 's'}`;
 
   return (
     <Show when={props.count > 0}>
-      <Tooltip content={label()}>
+      <Tooltip content={label()} delay={HEADER_BADGE_TOOLTIP_DELAY_MS}>
         <button
           type="button"
           class="chat-header-running-badge"
@@ -26,7 +28,7 @@ export function AttentionSessionsBadge(props: { count: number; onClick: () => vo
 
   return (
     <Show when={props.count > 0}>
-      <Tooltip content={label}>
+      <Tooltip content={label} delay={HEADER_BADGE_TOOLTIP_DELAY_MS}>
         <button
           type="button"
           class="chat-header-attention-badge"
@@ -45,7 +47,7 @@ export function FailedSessionsBadge(props: { count: number; onClick: () => void 
 
   return (
     <Show when={props.count > 0}>
-      <Tooltip content={label}>
+      <Tooltip content={label} delay={HEADER_BADGE_TOOLTIP_DELAY_MS}>
         <button
           type="button"
           class="chat-header-failed-badge"
@@ -64,7 +66,7 @@ export function PlanReadyBadge(props: { count: number; onClick: () => void }) {
 
   return (
     <Show when={props.count > 0}>
-      <Tooltip content={label}>
+      <Tooltip content={label} delay={HEADER_BADGE_TOOLTIP_DELAY_MS}>
         <button
           type="button"
           class="chat-header-plan-badge"
@@ -83,7 +85,7 @@ export function CompletedSessionsBadge(props: { count: number; onClick: () => vo
 
   return (
     <Show when={props.count > 0}>
-      <Tooltip content={label}>
+      <Tooltip content={label} delay={HEADER_BADGE_TOOLTIP_DELAY_MS}>
         <button
           type="button"
           class="chat-header-completed-badge"

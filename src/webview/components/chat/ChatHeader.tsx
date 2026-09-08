@@ -3,6 +3,7 @@ import { Portal } from 'solid-js/web';
 import type { SessionDiffSummary, SiblingWorkspaceAlertKind } from '../../../shared/protocol';
 import { deleteSession } from '../../hooks/useOpenCode';
 import { postMessage } from '../../lib/bridge';
+import { requestWorkspaceSelection } from '../../lib/workspace-selection';
 import { client } from '../../lib/client';
 import { formatDuration } from '../../lib/message-metrics';
 import { clampPopupToViewport } from '../../lib/popup-position';
@@ -177,8 +178,7 @@ function SiblingWorkspaceAlertsButton() {
     setShowMenu(false);
     setShowSessionPicker(true);
     setManualWorkspaceSelection(true);
-    setState('pendingWorkspaceSelectionPath', path);
-    postMessage({ type: 'workspace/select', payload: { path } });
+    requestWorkspaceSelection(path);
   };
   const moveMenuFocus = (event: KeyboardEvent) => {
     if (!menuRef || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;

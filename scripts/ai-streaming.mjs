@@ -4,12 +4,12 @@ import { createWriteStream } from 'node:fs';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import net from 'node:net';
-import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { WebSocket as Socket } from 'ws';
 
 import { buildReplayTimeline } from './ai-session-playback.mjs';
 import { prepareStreamingRun } from './ai-streaming-selection.mjs';
@@ -19,8 +19,6 @@ import {
   vscodeLaunchCommandMatches,
   writeVscodeLaunchMetadata,
 } from './vscode-launch-process.mjs';
-
-const { ws: Socket } = createRequire(import.meta.url)('playwright-core/lib/utilsBundle');
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const json = (file, value) =>
@@ -487,10 +485,18 @@ async function findSidebar(port, signal) {
   while (true) {
     signal.throwIfAborted();
     const matches = [];
+    let targets;
     try {
-      const targets = await fetch(`http://127.0.0.1:${port}/json/list`, { signal }).then(
-        (response) => response.json()
-      );
+      const response = await fetch(`http://127.0.0.1:${port}/json/list`, { signal });
+      if (!response.ok) throw new Error(`CDP target list returned HTTP ${response.status}`);
+      targets = await response.json();
+      if (!Array.isArray(targets)) throw new Error('CDP target list is not an array');
+    } catch {
+      signal.throwIfAborted();
+      await sleep(200, undefined, { signal });
+      continue;
+    }
+    try {
       for (const target of targets.filter(
         (entry) => entry.type === 'iframe' && entry.url.includes('extensionId=koltyakov.varro')
       )) {
@@ -500,11 +506,11 @@ async function findSidebar(port, signal) {
         signal.throwIfAborted();
       }
       if (matches.length > 1) throw new Error('Multiple exact Varro sidebar frames');
-      if (matches.length === 1) return matches[0];
     } catch (error) {
       for (const frame of matches) frame.close();
       throw error;
     }
+    if (matches.length === 1) return matches[0];
     await sleep(200, undefined, { signal });
   }
 }

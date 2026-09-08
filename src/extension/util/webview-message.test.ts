@@ -1313,6 +1313,32 @@ describe('webview message validation', () => {
     ).toBeNull();
   });
 
+  it.each([undefined, null, '1', -1, 1.5, NaN, Infinity, -Infinity, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects invalid workspace selection requestId %s',
+    (requestId) => {
+      expect(
+        parseWebviewMessage({ type: 'workspace/select', payload: { path: '/repo', requestId } })
+      ).toBeNull();
+    }
+  );
+
+  it.each([0, 1, Number.MAX_SAFE_INTEGER])(
+    'accepts workspace selection requestId %s',
+    (requestId) => {
+      const message = { type: 'workspace/select', payload: { path: '/repo', requestId } };
+      expect(parseWebviewMessage(message)).toEqual(message);
+    }
+  );
+
+  it.each([undefined, null, '', 1, 'a'.repeat(16_385)])(
+    'rejects invalid workspace selection paths',
+    (path) => {
+      expect(
+        parseWebviewMessage({ type: 'workspace/select', payload: { path, requestId: 0 } })
+      ).toBeNull();
+    }
+  );
+
   it('validates workspace selection, command state, and session diff identity', () => {
     expect(parseWebviewMessage({ type: 'vscode/open-folder' })).toEqual({
       type: 'vscode/open-folder',
@@ -1321,8 +1347,11 @@ describe('webview message validation', () => {
       type: 'webview/reload',
     });
     expect(
-      parseWebviewMessage({ type: 'workspace/select', payload: { path: '/repo/packages/app' } })
-    ).toEqual({ type: 'workspace/select', payload: { path: '/repo/packages/app' } });
+      parseWebviewMessage({
+        type: 'workspace/select',
+        payload: { path: '/repo/packages/app', requestId: 7 },
+      })
+    ).toEqual({ type: 'workspace/select', payload: { path: '/repo/packages/app', requestId: 7 } });
     expect(
       parseWebviewMessage({
         type: 'commands/state',

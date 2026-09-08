@@ -14,6 +14,7 @@ import type {
   SiblingWorkspaceAlert,
 } from '../shared/protocol';
 import type { SessionStateManager } from './session-state-manager';
+import { parseExtensionMessage } from '../shared/extension-message';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -123,7 +124,7 @@ describe('SidebarProvider editor panels', () => {
       payload: { text: 'npm test', terminalName: 'Terminal 1' },
     });
 
-    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 1 } });
     editor.panel.webview.postMessage.mockClear();
     editor.receive({ type: 'context/request' });
 
@@ -310,7 +311,7 @@ describe('SidebarProvider editor panels', () => {
 
     await provider.handleMessage({
       type: 'workspace/select',
-      payload: { path: '/repo-b' },
+      payload: { path: '/repo-b', requestId: 1 },
     });
     sessionState.handleServerEvent({
       type: 'question.asked',
@@ -326,6 +327,69 @@ describe('SidebarProvider editor panels', () => {
     ]);
   });
 
+  it.each(['sidebar', 'editor'] as const)(
+    'acknowledges %s workspace selection when global context emits no update',
+    async (surface) => {
+      const contextProvider = createContextProvider();
+      const { provider } = await createSidebarProviderInstance({ contextProvider });
+      const { posted } = attachTestView(provider);
+      const editor = createPanel();
+      getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+      await provider.openNewEditor();
+      // Another endpoint already selected this global workspace, so no context event fires.
+      contextProvider.context.workspacePath = '/repo-b';
+      contextProvider.selectWorkspace.mockResolvedValueOnce(undefined);
+      posted.length = 0;
+      editor.panel.webview.postMessage.mockClear();
+
+      const selectionMessage = {
+        type: 'workspace/select' as const,
+        payload: { path: '/repo-b', requestId: 7 },
+      };
+      if (surface === 'sidebar') await provider.handleMessage(selectionMessage);
+      else editor.receive(selectionMessage);
+
+      await vi.waitFor(() => {
+        const messages =
+          surface === 'sidebar'
+            ? posted
+            : editor.panel.webview.postMessage.mock.calls.map(([message]) => message);
+        expect(lastEditorContext(messages)?.workspacePath).toBe('/repo-b');
+        expect(messages).not.toContainEqual(
+          expect.objectContaining({ type: 'workspace/select-failed' })
+        );
+      });
+    }
+  );
+
+  it('posts authoritative sidebar context and a correlated failure when persistence rejects', async () => {
+    const contextProvider = createContextProvider();
+    contextProvider.selectWorkspace.mockRejectedValueOnce(new Error('Persistence failed'));
+    const { provider } = await createSidebarProviderInstance({ contextProvider });
+    const { posted } = attachTestView(provider);
+
+    await provider.handleMessage({
+      type: 'workspace/select',
+      payload: { path: '/repo-b', requestId: 8 },
+    });
+
+    expect(lastEditorContext(posted)?.workspacePath).toBe('/repo-b');
+    expect(posted).toContainEqual({
+      type: 'workspace/select-failed',
+      payload: { path: '/repo-b', requestId: 8, error: 'Persistence failed' },
+    });
+    expect(
+      posted
+        .map(parseExtensionMessage)
+        .filter(
+          (message) =>
+            message?.type === 'context/update' || message?.type === 'workspace/select-failed'
+        )
+        .slice(-2)
+        .map((message) => message.type)
+    ).toEqual(['context/update', 'workspace/select-failed']);
+  });
+
   it('keeps workspace selections independent while sharing active editor context', async () => {
     const contextProvider = createContextProvider();
     const { provider } = await createSidebarProviderInstance({ contextProvider });
@@ -336,7 +400,7 @@ describe('SidebarProvider editor panels', () => {
 
     await provider.handleMessage({
       type: 'workspace/select',
-      payload: { path: '/repo-b' },
+      payload: { path: '/repo-b', requestId: 1 },
     });
     contextProvider.context.activeFile = {
       path: '/repo-b/app.ts',
@@ -351,7 +415,7 @@ describe('SidebarProvider editor panels', () => {
       lastEditorContext(editor.panel.webview.postMessage.mock.calls.map(([message]) => message))
     ).toMatchObject({ workspacePath: '/repo', activeFile: contextProvider.context.activeFile });
 
-    editor.receive({ type: 'workspace/select', payload: { path: '/repo-c' } });
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-c', requestId: 2 } });
     await vi.waitFor(() =>
       expect(
         lastEditorContext(editor.panel.webview.postMessage.mock.calls.map(([message]) => message))
@@ -387,7 +451,7 @@ describe('SidebarProvider editor panels', () => {
     getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
     await provider.openNewEditor();
 
-    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 1 } });
     editor.receive({
       type: 'api/request',
       payload: { id: 41, method: 'GET', path: '/config/providers' },
@@ -413,7 +477,7 @@ describe('SidebarProvider editor panels', () => {
       type: 'api/request',
       payload: { id: 42, method: 'GET', path: '/config/providers' },
     });
-    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 1 } });
 
     await vi.waitFor(() =>
       expect(server.request).toHaveBeenCalledWith(
@@ -431,7 +495,7 @@ describe('SidebarProvider editor panels', () => {
     const editor = createPanel();
     getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
     await provider.openNewEditor();
-    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 1 } });
 
     editor.receive({ type: 'vscode/open', payload: { path: 'src/app.ts', kind: 'file' } });
 
@@ -455,13 +519,19 @@ describe('SidebarProvider editor panels', () => {
     getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
     await provider.openNewEditor();
 
-    editor.receive({ type: 'workspace/select', payload: { path: '/outside' } });
+    editor.receive({ type: 'workspace/select', payload: { path: '/outside', requestId: 1 } });
     editor.receive({
       type: 'api/request',
       payload: { id: 42, method: 'GET', path: '/config/providers' },
     });
 
     await vi.waitFor(() => expect(server.request).toHaveBeenCalled());
+    await vi.waitFor(() =>
+      expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'workspace/select-failed',
+        payload: { path: '/outside', requestId: 1, error: 'Selected workspace folder is not open' },
+      })
+    );
     expect(server.request).not.toHaveBeenCalledWith(
       'GET',
       '/config/providers',
@@ -478,7 +548,7 @@ describe('SidebarProvider editor panels', () => {
     const editor = createPanel();
     getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
     await provider.openNewEditor();
-    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 1 } });
     await vi.waitFor(() =>
       expect(
         lastEditorContext(editor.panel.webview.postMessage.mock.calls.map(([message]) => message))
@@ -852,7 +922,7 @@ describe('SidebarProvider editor panels', () => {
     const editor = createPanel();
     getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
     await provider.openNewEditor();
-    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 1 } });
     await vi.waitFor(() =>
       expect(
         lastEditorContext(editor.panel.webview.postMessage.mock.calls.map(([message]) => message))
@@ -893,7 +963,7 @@ describe('SidebarProvider editor panels', () => {
     const editor = createPanel();
     getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
     await provider.openNewEditor();
-    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 1 } });
     await vi.waitFor(() =>
       expect(
         lastEditorContext(editor.panel.webview.postMessage.mock.calls.map(([message]) => message))
@@ -1239,7 +1309,7 @@ describe('SidebarProvider editor panels', () => {
     const editor = createPanel();
     getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
     await provider.openNewEditor();
-    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 1 } });
     editor.receive({ type: 'ready' });
 
     await vi.waitFor(() => {
@@ -1272,7 +1342,7 @@ describe('SidebarProvider editor panels', () => {
         .filter((message) => message.type === 'permission-automation/update');
     const initialLease = updates().at(-1)?.payload?.lease;
 
-    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 1 } });
 
     await vi.waitFor(() => expect(updates().at(-1)?.payload?.lease).not.toBe(initialLease));
     expect(updates().at(-1)?.payload?.lease).toBeGreaterThan(initialLease ?? -1);
@@ -1287,7 +1357,7 @@ describe('SidebarProvider editor panels', () => {
     const editor = createPanel();
     getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
     await provider.openNewEditor();
-    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 2 } });
     editor.receive({ type: 'ready' });
 
     const sidebarUpdates = () =>
@@ -1311,7 +1381,7 @@ describe('SidebarProvider editor panels', () => {
     const editor = createPanel();
     getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
     await provider.openNewEditor();
-    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 1 } });
     const sessionState = (provider as unknown as { sessionState: SessionStateManager })
       .sessionState;
     sessionState.handleServerEvent({
@@ -1342,7 +1412,7 @@ describe('SidebarProvider editor panels', () => {
     const editor = createPanel();
     getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
     await provider.openNewEditor();
-    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 1 } });
     posted.length = 0;
     editor.panel.webview.postMessage.mockClear();
     const event = {
@@ -1390,7 +1460,7 @@ describe('SidebarProvider editor panels', () => {
     const editor = createPanel();
     getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
     await provider.openNewEditor();
-    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 1 } });
     posted.length = 0;
     editor.panel.webview.postMessage.mockClear();
     const event = {
@@ -1461,7 +1531,7 @@ describe('SidebarProvider editor panels', () => {
     const editor = createPanel();
     getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
     await provider.openNewEditor();
-    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 1 } });
     editor.receive({ type: 'ready' });
     await vi.waitFor(() =>
       expect(editor.panel.webview.postMessage).toHaveBeenCalledWith(
@@ -1521,7 +1591,7 @@ describe('SidebarProvider editor panels', () => {
     const editor = createPanel();
     getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
     await provider.openNewEditor();
-    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 1 } });
     contextProvider.context.activeWorkspacePath = null;
     contextProvider.context.activeFile = {
       path: '/tmp/notes.ts',
@@ -1543,7 +1613,7 @@ describe('SidebarProvider editor panels', () => {
     const editor = createPanel();
     getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
     await provider.openNewEditor();
-    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    editor.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 2 } });
     await vi.waitFor(() =>
       expect(
         lastEditorContext(editor.panel.webview.postMessage.mock.calls.map(([message]) => message))
@@ -2900,7 +2970,7 @@ describe('SidebarProvider editor panels', () => {
       })
     );
 
-    first.receive({ type: 'workspace/select', payload: { path: '/repo-b' } });
+    first.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 1 } });
 
     await vi.waitFor(() =>
       expect(second.panel.webview.postMessage).toHaveBeenCalledWith({

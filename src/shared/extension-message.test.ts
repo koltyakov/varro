@@ -2,6 +2,46 @@ import { describe, expect, it } from 'vitest';
 import { parseExtensionMessage } from './extension-message';
 
 describe('parseExtensionMessage', () => {
+  it.each([0, 7, Number.MAX_SAFE_INTEGER])(
+    'parses workspace selection failure with requestId %s',
+    (requestId) => {
+      const message = {
+        type: 'workspace/select-failed',
+        payload: { requestId, path: '/repo-b', error: 'Persistence failed' },
+      };
+      expect(parseExtensionMessage(message)).toEqual(message);
+    }
+  );
+
+  it.each([undefined, null, '7', -1, 1.5, NaN, Infinity, -Infinity, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects workspace selection failure with invalid requestId %s',
+    (requestId) => {
+      expect(
+        parseExtensionMessage({
+          type: 'workspace/select-failed',
+          payload: { requestId, path: '/repo-b', error: 'Persistence failed' },
+        })
+      ).toBeNull();
+    }
+  );
+
+  it.each([
+    undefined,
+    null,
+    [],
+    'failure',
+    {},
+    { requestId: 7, error: 'Persistence failed' },
+    { requestId: 7, path: '/repo-b' },
+    { requestId: 7, path: null, error: 'Persistence failed' },
+    { requestId: 7, path: 42, error: 'Persistence failed' },
+    { requestId: 7, path: '/repo-b', error: null },
+    { requestId: 7, path: '/repo-b', error: 42 },
+    { requestId: 7, path: '/repo-b', error: { message: 'Persistence failed' } },
+  ])('rejects malformed workspace selection failure payloads', (payload) => {
+    expect(parseExtensionMessage({ type: 'workspace/select-failed', payload })).toBeNull();
+  });
+
   it('parses persisted session plan and agent state', () => {
     expect(
       parseExtensionMessage({

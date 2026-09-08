@@ -155,7 +155,7 @@ describe('ActiveChatHeader', () => {
 
     expect(send).toHaveBeenCalledWith({
       type: 'workspace/select',
-      payload: { path: '/repo-b' },
+      payload: { path: '/repo-b', requestId: expect.any(Number) },
     });
     expect(showSessionPicker()).toBe(true);
     expect(document.body.querySelector('.sibling-workspace-alerts-menu')).toBeNull();
@@ -189,7 +189,7 @@ describe('ActiveChatHeader', () => {
 
     expect(send).toHaveBeenCalledWith({
       type: 'workspace/select',
-      payload: { path: '/repo-c' },
+      payload: { path: '/repo-c', requestId: expect.any(Number) },
     });
     expect(document.body.querySelector('.sibling-workspace-alerts-menu')).toBeNull();
   });

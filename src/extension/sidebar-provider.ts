@@ -833,9 +833,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           initialWorkspacePath = workspacePath;
           if (endpointRef.endpoint) this.setEndpointWorkspace(endpointRef.endpoint, workspacePath);
           this.reconcilePermissionAutomationOwners();
-          if (webviewContext.surface === 'sidebar') {
-            await this.contextProvider.selectWorkspace(workspacePath);
-          } else {
+          try {
+            if (webviewContext.surface === 'sidebar') {
+              await this.contextProvider.selectWorkspace(workspacePath);
+            }
+          } finally {
+            // The endpoint has switched even if persisting the global selection fails.
             post({ type: 'context/update', payload: getEndpointContext() });
           }
           this.postSiblingWorkspaceAlerts();

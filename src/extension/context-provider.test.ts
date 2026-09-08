@@ -1561,6 +1561,50 @@ describe('ContextProvider', () => {
     }
   });
 
+  it.each(['saved', 'dirty', 'untitled'])(
+    'uses inclusive selected lines for a %s editor',
+    (kind) => {
+      const selection = {
+        isEmpty: false,
+        start: { line: 2, character: 0 },
+        end: { line: 4, character: 0 },
+      };
+      const getText = vi.fn(() => 'first\nsecond\n');
+      vscodeMock.window.activeTextEditor = {
+        document: {
+          uri: {
+            fsPath: '/repo/app.ts',
+            scheme: kind === 'untitled' ? 'untitled' : 'file',
+            toString: () => `${kind}:/repo/app.ts`,
+          },
+          fileName: 'app.ts',
+          isUntitled: kind === 'untitled',
+          isDirty: kind !== 'saved',
+          languageId: 'typescript',
+          getText,
+        },
+        selection,
+      };
+
+      for (const character of [0, 1]) {
+        selection.end.character = character;
+        const provider = new ContextProvider(noop);
+        try {
+          const range = { startLine: 3, endLine: character === 0 ? 4 : 5 };
+          expect(provider.context.selection).toEqual(range);
+          if (kind === 'saved') {
+            expect(provider.context.editorText).toBeNull();
+          } else {
+            expect(provider.context.editorText).toMatchObject({ range, text: 'first\nsecond\n' });
+            expect(getText).toHaveBeenCalledWith(selection);
+          }
+        } finally {
+          provider.dispose();
+        }
+      }
+    }
+  );
+
   it('captures selected text from a dirty editor instead of relying on disk content', () => {
     const onChange = vi.fn();
     const uri = {

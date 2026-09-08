@@ -617,7 +617,7 @@ async function getEditorSelectionTarget() {
       type: 'file' as const,
       lineRanges: getSelectionRangesFromEditorContext({
         startLine: editor.selection.start.line + 1,
-        endLine: editor.selection.end.line + 1,
+        endLine: editor.selection.end.line + (editor.selection.end.character === 0 ? 0 : 1),
       }),
     };
   } catch {

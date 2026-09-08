@@ -385,7 +385,10 @@ export class ContextProvider implements vscode.Disposable {
       this._context.activeFile = null;
       const selection = editor.selection;
       this._context.selection = !selection.isEmpty
-        ? { startLine: selection.start.line + 1, endLine: selection.end.line + 1 }
+        ? {
+            startLine: selection.start.line + 1,
+            endLine: selection.end.line + (selection.end.character === 0 ? 0 : 1),
+          }
         : null;
       this._context.editorText = this.createEditorTextContext(editor, null, doc.fileName);
       if (!this.captureContextSnapshot()) return;
@@ -413,7 +416,7 @@ export class ContextProvider implements vscode.Disposable {
     if (!selection.isEmpty) {
       this._context.selection = {
         startLine: selection.start.line + 1,
-        endLine: selection.end.line + 1,
+        endLine: selection.end.line + (selection.end.character === 0 ? 0 : 1),
       };
     } else {
       this._context.selection = null;
@@ -902,7 +905,10 @@ export class ContextProvider implements vscode.Disposable {
         path,
         relativePath,
         language: document.languageId,
-        range: { startLine: selection.start.line + 1, endLine: selection.end.line + 1 },
+        range: {
+          startLine: selection.start.line + 1,
+          endLine: selection.end.line + (selection.end.character === 0 ? 0 : 1),
+        },
         text: text.slice(0, ContextProvider.MAX_SELECTION_CHARACTERS),
         truncated,
       };

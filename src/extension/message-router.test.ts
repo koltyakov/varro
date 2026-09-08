@@ -470,7 +470,9 @@ const DISPATCH_EXPECTATIONS = {
   'vscode/open-folder': [{ callback: 'openFolder', args: [] }],
   'vscode/show-output': [{ callback: 'showOutput', args: [] }],
   'chat/new-editor': [{ callback: 'openNewEditor', args: [] }],
-  'workspace/select': [{ callback: 'selectWorkspace', args: ['/workspace'] }],
+  'workspace/select': [
+    { callback: 'selectWorkspace', args: [{ path: '/workspace', requestId: 7 }] },
+  ],
   'commands/state': [
     {
       callback: 'updateCommandState',

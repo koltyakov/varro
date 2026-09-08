@@ -57,7 +57,7 @@ VS Code WSL follows the same rule. Check the lower-left remote indicator before 
 Varro can include more than the text in the composer.
 
 - Working directory and, in multi-root workspaces, the open workspace-folder map
-- Active file, when live current-document context is enabled for the session
+- Active file, when live current-document context is enabled
 - Current selection, including unsaved selected text, or a bounded window of a dirty editor buffer when there is no selection, when live current-document context is enabled
 - Selected terminal text
 - Diagnostics from the active file when you explicitly attach current Problems with `/diagnostics`
@@ -66,7 +66,7 @@ Varro can include more than the text in the composer.
 - Pasted image attachments when the selected model supports vision, or path-backed images delegated through a configured `@vision` subagent
 - Native PDF attachments when the selected model advertises PDF input support
 
-The current document appears as a chip above the composer. You can click that chip to disable or re-enable live current-document context for the active session.
+The current document appears as a chip above the composer. Click it to disable or re-enable live current-document context. Varro saves this preference per project/workspace and keeps it across file changes and chat sessions until you toggle it again.
 
 In a multi-root workspace, session history and search cover every open root. The session-list folder picker filters that workspace-wide catalog without changing where new work runs. A new empty chat follows the active editor's root; use the working-directory picker in the composer toolbar to choose another root. Existing and restored sessions always run in their recorded directory and cannot be moved between roots.
 
@@ -179,6 +179,18 @@ Sessions from every open workspace root appear in one catalog. Use the folder fi
 - Use `/export` to open the current session as JSON in the editor.
 - Changed-file rows open the selected session's before/after snapshot in VS Code's native diff editor when OpenCode provides both sides, with the working-tree Git diff as a fallback.
 - Use the conversation-turn rail beside the transcript to jump between user prompts. If the target turn is outside the loaded message window, Varro loads older history before navigating to it.
+
+The indicators at the top of the chat summarize activity in other sessions. Select one to open the matching session directly or show all matching sessions. Their colors follow the active VS Code theme, but normally appear as follows:
+
+| Indicator | Meaning |
+| --- | --- |
+| Number inside a spinner | Sessions that are running. The number is the session count. |
+| Blue dot | Sessions waiting for an answer or permission. |
+| Red dot | Failed sessions you have not opened since the failure. |
+| Yellow dot | Completed plans you have not opened since the latest plan update. |
+| Green dot | Sessions with completed work you have not opened yet. |
+
+The session list uses the same status colors. Hover over any indicator to see its meaning.
 
 Opening a session fetches the newest 200 messages. Scrolling to the top automatically prepends the next 200-message page while preserving the visible position. If an earlier page fails to load, the history boundary changes into a `Retry` action.
 

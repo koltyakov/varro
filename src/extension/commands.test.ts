@@ -1101,6 +1101,23 @@ describe('varro.chat.addSelectionToContext', () => {
     vscodeMock.workspace.getWorkspaceFolder.mockReturnValue(undefined);
   });
 
+  it.each([0, 1])('respects the exclusive selection end at character %i', async (character) => {
+    const { sidebar } = register();
+    const editor = editorWithSelection('/repo/a.ts', 2, 4);
+    vscodeMock.window.activeTextEditor = {
+      ...editor,
+      selection: { ...editor.selection, end: { line: 4, character } },
+    } as never;
+
+    await runCommand('varro.chat.addSelectionToContext');
+
+    expect(sidebar.postDroppedFiles).toHaveBeenCalledWith([
+      expect.objectContaining({
+        lineRanges: [{ startLine: 3, endLine: character === 0 ? 4 : 5 }],
+      }),
+    ]);
+  });
+
   it('posts the selected range as a one-based line range', async () => {
     const { sidebar } = register();
     vscodeMock.window.activeTextEditor = editorWithSelection('/repo/a.ts', 11, 19) as never;

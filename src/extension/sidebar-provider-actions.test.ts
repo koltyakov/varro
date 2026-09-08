@@ -292,10 +292,26 @@ describe('createSidebarProviderActions', () => {
   it('routes workspace selection through the endpoint callback', async () => {
     const { actions, deps } = createActionFixture();
 
-    await actions.selectWorkspace('/repo-b');
+    await actions.selectWorkspace({ path: '/repo-b', requestId: 7 });
 
     expect(deps.selectWorkspace).toHaveBeenCalledWith('/repo-b');
+    expect(deps.post).not.toHaveBeenCalled();
   });
+
+  it.each([new Error('Selection failed'), 'Selection failed'])(
+    'posts a correlated workspace failure and rethrows %s',
+    async (error) => {
+      const { actions, deps } = createActionFixture();
+      vi.mocked(deps.selectWorkspace).mockRejectedValueOnce(error);
+
+      await expect(actions.selectWorkspace({ path: '/repo-b', requestId: 7 })).rejects.toBe(error);
+
+      expect(deps.post).toHaveBeenCalledWith({
+        type: 'workspace/select-failed',
+        payload: { path: '/repo-b', requestId: 7, error: 'Selection failed' },
+      });
+    }
+  );
 
   it('opens an OpenCode session in the terminal', async () => {
     const { actions, deps } = createActionFixture();

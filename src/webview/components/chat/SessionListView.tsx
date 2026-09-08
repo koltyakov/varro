@@ -50,6 +50,7 @@ import type { Session } from '../../types';
 import { client, type SessionListPage } from '../../lib/client';
 import { postMessage } from '../../lib/bridge';
 import { setManualWorkspaceSelection } from '../../lib/app-state';
+import { requestWorkspaceSelection } from '../../lib/workspace-selection';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { isEmptySession, shouldHideEmptySessionFromList } from '../../lib/empty-session';
 import { formatEditCount, formatModelName, formatVariantLabel } from '../../lib/format';
@@ -2075,10 +2076,9 @@ export function SessionListView(props: {
         onSelect={(path) => {
           setFolderFilter(path);
           setManualWorkspaceSelection(path !== null);
-          setState('pendingWorkspaceSelectionPath', path);
-          if (path && !isSameWorkspacePath(path, state.editorContext.workspacePath)) {
-            postMessage({ type: 'workspace/select', payload: { path } });
-          }
+          requestWorkspaceSelection(
+            path && !isSameWorkspacePath(path, state.editorContext.workspacePath) ? path : null
+          );
         }}
       />
       <Show when={shouldShowSearch()}>

@@ -65,7 +65,9 @@ export interface MessageRouterCallbacks {
   revealPermission(permissionId: string): void;
   setProviderWatchActive(active: boolean): void;
   requestContext(): void;
-  selectWorkspace(path: string): Promise<void>;
+  selectWorkspace(
+    payload: Extract<WebviewMessage, { type: 'workspace/select' }>['payload']
+  ): Promise<void>;
   refreshProviders(): Promise<void>;
   providerAuthChanged(): Promise<void>;
   clearTerminalSelection(): void;
@@ -208,7 +210,7 @@ export class MessageRouter {
           this.handleContextRequestMessage();
           break;
         case 'workspace/select':
-          await this.callbacks.selectWorkspace(msg.payload.path);
+          await this.callbacks.selectWorkspace(msg.payload);
           break;
         case 'providers/refresh':
           await this.handleProvidersRefreshMessage();

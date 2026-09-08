@@ -89,7 +89,7 @@ export function AttachmentChip(props: {
     <span
       class={`chat-attachment-chip${props.disabled ? ' disabled' : ''}${props.onClick ? ' clickable' : ''}`}
       title={showTitle() ? props.title : undefined}
-      aria-disabled={props.disabled ? 'true' : undefined}
+      aria-disabled={props.disabled && !(props.toggle && props.onClick) ? 'true' : undefined}
       aria-pressed={
         props.onClick && props.toggle ? (!props.disabled ? 'true' : 'false') : undefined
       }

@@ -12,6 +12,7 @@ import { ralphStore } from '../lib/stores/ralph-store';
 import { sessionStore } from '../lib/stores/session-store';
 import { uiStore } from '../lib/stores/ui-store';
 import { postMessage } from '../lib/bridge';
+import { handleWorkspaceSelectionFailure } from '../lib/workspace-selection';
 import { applyChatFontConfig } from '../lib/chat-font-config';
 import { getWorkspaceStatusEventSummary } from '../lib/client';
 import { isString } from '../lib/runtime-values';
@@ -104,6 +105,13 @@ export function createMountBridgeOperations(deps: {
         setCurrentWorkspacePath: deps.setCurrentWorkspacePath,
         persistWorkspacePath: (path) => writeStored(STORAGE_KEYS.workspacePath, path),
         setEditorContext: composerStore.setEditorContext,
+        workspaceSelectionFailed: handleWorkspaceSelectionFailure,
+        acknowledgeWorkspaceSelection: (path) => {
+          if (isSameWorkspacePath(path, appStore.state.pendingWorkspaceSelectionPath)) {
+            // Keep the request ID: persisting the host selection can fail after the endpoint switches.
+            appStore.setState('pendingWorkspaceSelectionPath', null);
+          }
+        },
         rememberCurrentDocumentNavigation: composerStore.rememberCurrentDocumentNavigation,
         syncWorkspaceState: (path) => {
           sessionStore.syncWorkspaceState(path);
@@ -183,6 +191,10 @@ export function handleExtensionMessageWithDependencies(
     persistWorkspacePath?(path: string | null): void;
     setEditorContext(
       payload: Extract<ExtensionMessage, { type: 'context/update' }>['payload']
+    ): void;
+    acknowledgeWorkspaceSelection?(path: string | null): void;
+    workspaceSelectionFailed?(
+      payload: Extract<ExtensionMessage, { type: 'workspace/select-failed' }>['payload']
     ): void;
     rememberCurrentDocumentNavigation(previousPath: string | null, nextPath: string | null): void;
     syncWorkspaceState(path: string | null): void;
@@ -267,6 +279,9 @@ export function handleExtensionMessageWithDependencies(
     case 'session/catalog-invalidated':
       void deps.reloadSessionCatalog?.();
       break;
+    case 'workspace/select-failed':
+      deps.workspaceSelectionFailed?.(msg.payload);
+      break;
     case 'context/update': {
       const previousActiveFilePath = deps.getPreviousActiveFilePath();
       const previousWorkspaceFolders = deps.getCurrentWorkspaceFolders?.() ?? [];
@@ -284,6 +299,7 @@ export function handleExtensionMessageWithDependencies(
       deps.setCurrentWorkspacePath(nextWorkspacePath);
       deps.persistWorkspacePath?.(nextWorkspacePath);
       deps.setEditorContext(msg.payload);
+      deps.acknowledgeWorkspaceSelection?.(nextWorkspacePath);
       if (initialWorkspaceContext || workspaceChanged || workspaceMembershipChanged) {
         deps.syncWorkspaceState(nextWorkspacePath);
       }
