@@ -457,20 +457,17 @@ export async function replay(filePath, id, options) {
     const replayFile = path.join(replayDirectory, 'capture.json');
     await writeFile(replayFile, `${JSON.stringify({ capture, timeline })}\n`);
     const cli = fileURLToPath(import.meta.resolve('@playwright/test/cli'));
-    const child = spawn(
-      process.execPath,
-      [cli, 'test', '--config', 'playwright.ai-playback.config.ts'],
-      {
-        cwd: fileURLToPath(new URL('..', import.meta.url)),
-        detached: process.platform !== 'win32',
-        stdio: 'inherit',
-        env: {
-          ...process.env,
-          VARRO_PLAYBACK_ID: String(id),
-          VARRO_PLAYBACK_FILE: replayFile,
-        },
-      }
-    );
+    const child = spawn(process.execPath, [cli, 'test'], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      detached: process.platform !== 'win32',
+      stdio: 'inherit',
+      env: {
+        ...process.env,
+        VARRO_E2E_MODE: 'playback',
+        VARRO_PLAYBACK_ID: String(id),
+        VARRO_PLAYBACK_FILE: replayFile,
+      },
+    });
     const code = await new Promise((resolve, reject) => {
       let stopping = false;
       const stop = async (error) => {

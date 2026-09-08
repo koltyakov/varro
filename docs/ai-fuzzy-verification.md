@@ -353,8 +353,8 @@ npm run ai:playback -- replay --id <capture-id>
 
 Normal E2E runs use deterministic mocked sessions and never load the local playback database or recorded
 capture files. The local replay CLI reads the database and runs `e2e/local/session-playback.spec.ts` through
-`playwright.ai-playback.config.ts`. Both paths share the same frame assertions and canonical transcript
-check; recorded captures are only used by this explicit local AI test invocation.
+`playwright.config.ts` with `VARRO_E2E_MODE=playback`. Both paths share the same frame assertions and
+canonical transcript check; recorded captures are only used by this explicit local AI test invocation.
 
 Playback reuses one harness server. E2E mode disables Vite's development WebSocket as well as HMR;
 disabling HMR alone still allows a dropped socket to reload the page during replay. The CLI gives

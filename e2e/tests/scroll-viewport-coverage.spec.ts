@@ -6,6 +6,7 @@ import type { Locator } from '@playwright/test';
 import type { ServerEvent } from '../../src/shared/protocol';
 import type { TextPart } from '../../src/webview/types';
 import { getScrollMetrics, waitForAnimationFrames } from './helpers';
+import { viewportPixelGaps } from './viewport-pixels';
 
 async function getBlankBottomArea(list: Locator) {
   return list.evaluate((element) => {
@@ -36,7 +37,8 @@ async function getBlankBottomArea(list: Locator) {
 }
 
 test.describe('viewport content coverage', () => {
-  test('paints the full viewport through native -720px streaming detachment', async ({ page }) => {
+  test('covers the viewport through native -720px streaming detachment', async ({ page }) => {
+    const strictRaster = test.info().config.metadata.strictViewportRaster === true;
     await page.setViewportSize({ width: 486, height: 794 });
     await page.goto('/e2e/harness/index.html?scenario=large-transcript&activeReasoningEntrance=1');
     const list = page.locator('.interactive-list');
@@ -78,14 +80,14 @@ test.describe('viewport content coverage', () => {
     if (!bounds) throw new Error('Transcript viewport is missing');
     await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
 
-    const cdp = await page.context().newCDPSession(page);
+    const cdp = strictRaster ? await page.context().newCDPSession(page) : undefined;
     const frames: string[] = [];
-    cdp.on('Page.screencastFrame', (frame) => {
+    cdp?.on('Page.screencastFrame', (frame) => {
       frames.push(frame.data);
       // A final frame can arrive while the capture session is detaching.
       void cdp.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => {});
     });
-    await cdp.send('Page.startScreencast', { format: 'png', everyNthFrame: 1 });
+    await cdp?.send('Page.startScreencast', { format: 'png', everyNthFrame: 1 });
     await waitForAnimationFrames(page, 4);
     const before = await list.evaluate((element) => ({
       scrollTop: element.scrollTop,
@@ -128,50 +130,18 @@ test.describe('viewport content coverage', () => {
     await page.mouse.wheel(0, -720);
     const samples = await samplesPending;
     await page.evaluate((timer) => clearInterval(timer), streamTimer);
-    await cdp.send('Page.stopScreencast');
-    await cdp.detach();
+    await cdp?.send('Page.stopScreencast');
+    await cdp?.detach();
+    if (!strictRaster) {
+      // Settled pixels catch persistent blanks, not transient compositor checkerboarding.
+      await waitForAnimationFrames(page, 4);
+      const settled = await page.screenshot({
+        path: test.info().outputPath('settled-viewport.png'),
+      });
+      frames.push(settled.toString('base64'));
+    }
 
-    const gaps = await page.evaluate(
-      async ({ frames: capturedFrames, bounds: viewportBounds }) => {
-        const result: number[] = [];
-        for (const frame of capturedFrames) {
-          const image = new Image();
-          image.src = `data:image/png;base64,${frame}`;
-          await image.decode();
-          const canvas = document.createElement('canvas');
-          canvas.width = image.width;
-          canvas.height = image.height;
-          const context = canvas.getContext('2d');
-          if (!context) throw new Error('Pixel coverage context is missing');
-          context.drawImage(image, 0, 0);
-          const pixels = context.getImageData(0, 0, image.width, image.height).data;
-          let gap = 0;
-          let maxGap = 0;
-          // Exclude sticky chrome and the bottom fade, but inspect every physical scanline between them.
-          for (
-            let y = Math.ceil(viewportBounds.y + 150);
-            y < viewportBounds.y + viewportBounds.height - 20;
-            y += 1
-          ) {
-            let painted = 0;
-            for (
-              let x = Math.ceil(viewportBounds.x + 18);
-              x < viewportBounds.x + viewportBounds.width - 24;
-              x += 1
-            ) {
-              const offset = (y * image.width + x) * 4;
-              if (pixels[offset]! > 100 && pixels[offset + 1]! > 100 && pixels[offset + 2]! > 100)
-                painted += 1;
-            }
-            gap = painted >= 3 ? 0 : gap + 1;
-            maxGap = Math.max(maxGap, gap);
-          }
-          result.push(maxGap);
-        }
-        return result;
-      },
-      { frames, bounds }
-    );
+    const gaps = await viewportPixelGaps(page, frames, bounds);
     await writeFile(
       test.info().outputPath('coverage.json'),
       JSON.stringify({ before, bounds, gaps, samples }, null, 2)
@@ -187,7 +157,7 @@ test.describe('viewport content coverage', () => {
         contentType: 'image/png',
       });
     }
-    expect(frames.length).toBeGreaterThan(1);
+    expect(frames.length).toBeGreaterThan(strictRaster ? 1 : 0);
     expect(Math.max(...samples.map((sample) => sample.mountedRows))).toBeLessThan(40);
     expect(Math.max(...samples.map((sample) => sample.gap))).toBeLessThanOrEqual(80);
     expect(samples.at(-1)!.streamingText.length).toBeGreaterThan(samples[0]!.streamingText.length);

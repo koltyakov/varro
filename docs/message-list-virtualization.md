@@ -616,6 +616,55 @@ a valid reproduction.
 
 ## Required Regression Coverage
 
+### Native Wheel Raster Contract
+
+The user-approved split for the native `-720px` streaming-detachment regression keeps the
+mandatory test in `e2e/tests/scroll-viewport-coverage.spec.ts`. It still uses native wheel input,
+samples DOM coverage and the same message anchor every animation frame, bounds mounted rows,
+checks continued streaming, and requires more than 600 px distance from bottom. After streaming
+stops and four settling frames pass, a screenshot must have no blank scanline run over 80 px.
+The screenshot and `coverage.json` are saved in the test output directory.
+
+Run the mandatory coverage with:
+
+```sh
+npm run test:e2e -- e2e/tests/scroll-viewport-coverage.spec.ts
+```
+
+The strict per-frame screencast contract is a separately runnable diagnostic:
+
+```sh
+npm run test:e2e:raster
+npm run test:e2e:raster -- --repeat-each=5
+```
+
+The script selects `VARRO_E2E_MODE=raster` in `playwright.config.ts`. This mode reuses the same
+application test with strict capture enabled and runs `e2e/tests/diagnostics/viewport-raster.spec.ts`,
+the plain static HTML reproduction without
+Varro code, streaming, containment, or virtualization. The standard config explicitly ignores
+the diagnostics directory and does not enable strict capture. The diagnostic uses one worker,
+no retries, and the unchanged standard browser launch settings. Both fixtures retain every
+captured frame in the pixel check, assert a maximum gap of `<= 80`, and save `coverage.json`
+and failing `partial-viewport-*.png` images under `tmp/viewport-raster-diagnostic/`. Failing
+images are also Playwright attachments. A reproduced gap exits nonzero; it is not an expected-failure
+annotation or a passing visual check.
+
+The September 8, 2026 investigation found a 410 px first-scroll gap in Varro and a 244 px gap
+in plain HTML while the application DOM, anchor, mount, and streaming checks passed. A compositor
+trace without image capture also reported a missing tile. Local evidence and experiments are in
+`tmp/viewport-raster-investigation.md`; these ignored files are not required to run either test.
+This is evidence of Chromium raster checkerboarding, not proof of a capture-only artifact or
+proof that an application workaround is impossible.
+
+The mandatory pass catches persistent blanks but does not certify uninterrupted compositor paint
+during the wheel gesture. DOM rectangles alone cannot establish painted coverage, and CDP does not
+record every OS-displayed frame. Restore strict per-frame coverage to the mandatory suite only
+after a demonstrated browser/raster fix or application paint fix passes repeated runs of both
+fixtures under the supported standard launch configuration, with the native gesture, scan region,
+80 px limit, and unfiltered captured frames preserved. Verify the real editor visually as well.
+Do not restore it by filtering frames, substituting synthetic scrolling, relaxing the limit, or
+adding launch flags that synchronize away the failure.
+
 Changes to `MessageList`, `VirtualizedContent`, row measurement, message windowing, sticky prompts,
 attachments, or inline editing should run at least:
 

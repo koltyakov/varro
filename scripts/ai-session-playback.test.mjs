@@ -19,44 +19,44 @@ import {
   savePlaybackCapture,
 } from './ai-session-playback.mjs';
 
-test('normal discovery excludes local capture playback', () => {
+test('discovery isolates standard, playback, and raster modes', () => {
   const cwd = fileURLToPath(new URL('..', import.meta.url));
   const cli = fileURLToPath(new URL('../node_modules/@playwright/test/cli.js', import.meta.url));
-  for (const local of [false, true]) {
+  for (const mode of ['', 'playback', 'raster']) {
     const report = JSON.parse(
-      execFileSync(
-        process.execPath,
-        [
-          cli,
-          'test',
-          '--list',
-          '--reporter=json',
-          ...(local ? ['--config', 'playwright.ai-playback.config.ts'] : []),
-        ],
-        {
-          cwd,
-          encoding: 'utf8',
-          timeout: 30_000,
-          maxBuffer: 10 * 1024 * 1024,
-          env: {
-            ...process.env,
-            VARRO_PLAYBACK_ID: '92',
-            VARRO_PLAYBACK_FILE: path.join(cwd, 'nonexistent-playback-capture.json'),
-          },
-        }
-      )
+      execFileSync(process.execPath, [cli, 'test', '--list', '--reporter=json'], {
+        cwd,
+        encoding: 'utf8',
+        timeout: 30_000,
+        maxBuffer: 10 * 1024 * 1024,
+        env: {
+          ...process.env,
+          VARRO_E2E_MODE: mode,
+          VARRO_PLAYBACK_ID: '92',
+          VARRO_PLAYBACK_FILE: path.join(cwd, 'nonexistent-playback-capture.json'),
+        },
+      })
     );
     const files = report.suites.map((suite) => suite.file);
-    if (local) {
+    const servers = [report.config.webServer].flat();
+    assert.equal(servers.length, 1);
+    assert.equal(servers[0].reuseExistingServer, mode === 'playback');
+    assert.equal(report.config.metadata.strictViewportRaster, mode === 'raster');
+    if (mode === 'playback') {
       assert.deepEqual(files, ['session-playback.spec.ts']);
       assert.equal(report.config.workers, 1);
-      const servers = [report.config.webServer].flat();
-      assert.ok(servers[0], 'playback must expose a single web server, not a merged server array');
-      assert.equal(servers.length, 1);
-      assert.equal(servers[0].reuseExistingServer, true);
+      assert.equal(report.config.projects[0].retries, 0);
+    } else if (mode === 'raster') {
+      assert.deepEqual(files.toSorted(), [
+        'diagnostics/viewport-raster.spec.ts',
+        'scroll-viewport-coverage.spec.ts',
+      ]);
+      assert.equal(report.config.workers, 1);
+      assert.equal(report.config.projects[0].retries, 0);
     } else {
       assert.ok(files.includes('scroll-tool-flicker.spec.ts'));
       assert.ok(files.every((file) => !file.includes('session-playback.spec.ts')));
+      assert.ok(files.every((file) => !file.startsWith('diagnostics/')));
       const flicker = report.suites.find((suite) => suite.file === 'scroll-tool-flicker.spec.ts');
       assert.equal(flicker.specs.length, 5);
       assert.ok(
@@ -546,7 +546,8 @@ for (const reason of ['timeout', 'SIGINT', 'SIGTERM']) {
       const { command, args, options } = fixture.invocation();
       assert.equal(command, process.execPath);
       assert.equal(args[0], fileURLToPath(import.meta.resolve('@playwright/test/cli')));
-      assert.deepEqual(args.slice(1), ['test', '--config', 'playwright.ai-playback.config.ts']);
+      assert.deepEqual(args.slice(1), ['test']);
+      assert.equal(options.env.VARRO_E2E_MODE, 'playback');
       assert.equal(options.detached, process.platform !== 'win32');
       const { timeline } = JSON.parse(await readFile(options.env.VARRO_PLAYBACK_FILE, 'utf8'));
       assert.equal(

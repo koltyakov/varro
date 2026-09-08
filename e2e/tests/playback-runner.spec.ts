@@ -39,14 +39,17 @@ test('recorded playback reuses the running harness without starting another serv
       [
         createRequire(path.join(process.cwd(), 'package.json')).resolve('@playwright/test/cli'),
         'test',
-        '--config',
-        'playwright.ai-playback.config.ts',
         '--output',
         path.join(directory, 'results'),
       ],
       {
         timeout: 50_000,
-        env: { ...process.env, VARRO_PLAYBACK_ID: '1', VARRO_PLAYBACK_FILE: captureFile },
+        env: {
+          ...process.env,
+          VARRO_E2E_MODE: 'playback',
+          VARRO_PLAYBACK_ID: '1',
+          VARRO_PLAYBACK_FILE: captureFile,
+        },
       }
     );
     expect(stdout).toContain('1 passed');
