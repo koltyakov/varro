@@ -5380,6 +5380,9 @@ export function MessageList() {
       }
       containerRef.scrollTop = resolvedScrollTop;
       directMovementAnchor = null;
+      // Host resize can arrive before the destination frame. It must restore the
+      // keyboard destination, not the detached anchor from before this movement.
+      rememberDetachedVisibleAnchor(captureWidthResizeVisibleScrollAnchor());
       const sessionId = state.activeSessionId;
       if (keydownDestinationRafId) cancelAnimationFrame(keydownDestinationRafId);
       keydownDestinationRafId = requestAnimationFrame(() => {

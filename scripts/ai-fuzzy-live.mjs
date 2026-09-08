@@ -14,6 +14,7 @@ import {
 } from './vscode-launch-process.mjs';
 import { requireFixtureWorkspace } from './ai-fuzzy-preconditions.mjs';
 import { savePlaybackCapture } from './ai-session-playback.mjs';
+import { installObserver } from './ai-streaming.mjs';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_MODEL = 'openai/gpt-5.6-luna';
@@ -606,7 +607,7 @@ export function inventoryVerifiedDescendants(
   return { observed, recorded };
 }
 
-class CdpController {
+export class CdpController {
   constructor(port, socket, contextId, frameId = null, targetId = null) {
     this.port = port;
     this.socket = socket;
@@ -853,12 +854,27 @@ class CdpController {
           const messageId = element.closest('[data-msg-id]')?.getAttribute('data-msg-id');
           return messageId && scope.messageIds.includes(messageId);
         });
-        const visibleElement = elements.find((candidate) => {
+        const visibleBounds = (candidate) => {
           const rect = candidate.getBoundingClientRect();
-          const transcript = candidate.closest('.interactive-list')?.getBoundingClientRect();
-          const top = Math.max(0, transcript?.top ?? 0);
-          const bottom = Math.min(innerHeight, transcript?.bottom ?? innerHeight);
-          return rect.bottom > top && rect.top < bottom && rect.right > 0 && rect.left < innerWidth;
+          let top = Math.max(0, rect.top), bottom = Math.min(innerHeight, rect.bottom);
+          let left = Math.max(0, rect.left), right = Math.min(innerWidth, rect.right);
+          for (let parent = candidate.parentElement; parent; parent = parent.parentElement) {
+            const style = getComputedStyle(parent);
+            const bounds = parent.getBoundingClientRect();
+            if (style.overflowY !== 'visible') {
+              top = Math.max(top, bounds.top + parent.clientTop);
+              bottom = Math.min(bottom, bounds.top + parent.clientTop + parent.clientHeight);
+            }
+            if (style.overflowX !== 'visible') {
+              left = Math.max(left, bounds.left + parent.clientLeft);
+              right = Math.min(right, bounds.left + parent.clientLeft + parent.clientWidth);
+            }
+          }
+          return { top, bottom, left, right };
+        };
+        const visibleElement = elements.find((candidate) => {
+          const bounds = visibleBounds(candidate);
+          return bounds.bottom > bounds.top && bounds.right > bounds.left;
         });
         const element = visibleElement ?? elements.toSorted((left, right) => {
           const distance = (candidate) => {
@@ -871,15 +887,13 @@ class CdpController {
         })[0];
         if (!element) return null;
         const rect = element.getBoundingClientRect();
-        const transcript = element.closest('.interactive-list')?.getBoundingClientRect();
-        const visibleTop = Math.max(0, transcript?.top ?? 0, rect.top);
-        const visibleBottom = Math.min(innerHeight, transcript?.bottom ?? innerHeight, rect.bottom);
-        const visible = visibleBottom > visibleTop && rect.right > 0 && rect.left < innerWidth;
+        const { top: visibleTop, bottom: visibleBottom, left: visibleLeft, right: visibleRight } = visibleBounds(element);
+        const visible = visibleBottom > visibleTop && visibleRight > visibleLeft;
         const point = ${
           edge === 'safe'
             ? `(() => {
-                const left = Math.max(0, rect.left) + 8;
-                const right = Math.min(innerWidth, rect.right) - 20;
+                const left = visibleLeft + 8;
+                const right = visibleRight - 20;
                 const top = visibleTop + 8;
                 const bottom = visibleBottom - 8;
                 if (right <= left || bottom <= top) return null;
@@ -897,33 +911,62 @@ class CdpController {
                 }
                 return null;
               })()`
-            : `{ x: ${edge === 'right' ? 'rect.right - 6' : 'rect.x + rect.width / 2'}, y: (visibleTop + visibleBottom) / 2 }`
+            : `{ x: ${edge === 'right' ? 'Math.max(visibleLeft, visibleRight - 6)' : '(visibleLeft + visibleRight) / 2'}, y: (visibleTop + visibleBottom) / 2 }`
         };
-        if (!point) return null;
-        const hit = document.elementFromPoint(point.x, point.y);
+        const hit = point && document.elementFromPoint(point.x, point.y);
         const pointVisible = visible && !!hit && (hit === element || element.contains(hit));
-        return {
-          visible: pointVisible,
-          ...point,
-          direction:
-            rect.top < (transcript?.top ?? 0) ||
-            (!pointVisible && point.y < ((transcript?.top ?? 0) + (transcript?.bottom ?? innerHeight)) / 2)
-              ? -1
-              : 1,
-          transcript: (() => {
-            const bounds = document.querySelector('.interactive-list')?.getBoundingClientRect();
-            return bounds ? { x: bounds.right - 6, y: bounds.y + bounds.height / 2 } : null;
-          })(),
-        };
+        if (pointVisible) return { visible: true, ...point };
+        // Reveal the nearest vertical clip, never an unrelated transcript or an occluder.
+        let revealRect = rect;
+        for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+          const style = getComputedStyle(parent);
+          if (style.overflowY === 'visible') continue;
+          const bounds = parent.getBoundingClientRect();
+          const top = bounds.top + parent.clientTop;
+          const bottom = top + parent.clientHeight;
+          if (revealRect.bottom > top && revealRect.top < bottom) continue;
+          if (!['auto', 'scroll'].includes(style.overflowY)) return null;
+          const direction = revealRect.bottom <= top ? -1 : 1;
+          const remaining = direction < 0 ? parent.scrollTop : parent.scrollHeight - parent.clientHeight - parent.scrollTop;
+          if (remaining <= 0) return null;
+          const clip = visibleBounds(parent);
+          clip.left = Math.max(clip.left, bounds.left + parent.clientLeft);
+          clip.right = Math.min(clip.right, bounds.left + parent.clientLeft + parent.clientWidth);
+          clip.top = Math.max(clip.top, top);
+          clip.bottom = Math.min(clip.bottom, bottom);
+          if (clip.right <= clip.left) return null;
+          if (clip.bottom <= clip.top) {
+            // Reveal the offscreen scroll owner before sending wheel input to its contents.
+            revealRect = bounds;
+            continue;
+          }
+          const xs = [(clip.left + clip.right) / 2, clip.right - 1, clip.left + 1];
+          const ys = [(clip.top + clip.bottom) / 2, clip.top + 1, clip.bottom - 1];
+          for (const x of xs) {
+            for (const y of ys) {
+              let receiver = document.elementFromPoint(x, y);
+              if (!receiver || !parent.contains(receiver)) continue;
+              // A scrollable descendant could consume the gesture instead.
+              while (receiver !== parent) {
+                if (['auto', 'scroll'].includes(getComputedStyle(receiver).overflowY) &&
+                    receiver.scrollHeight > receiver.clientHeight) break;
+                receiver = receiver.parentElement;
+              }
+              if (receiver !== parent) continue;
+              const distance = Math.abs((revealRect.top + revealRect.bottom - top - bottom) / 2);
+              return { visible: false, wheel: { x, y, deltaY: direction * Math.min(180, remaining, distance) } };
+            }
+          }
+          return null;
+        }
+        return null;
       })()`);
       if (!result) return null;
       if (result.visible) return { x: result.x, y: result.y };
-      if (!result.transcript) return null;
       await this.call('Input.dispatchMouseEvent', {
         type: 'mouseWheel',
-        ...result.transcript,
+        ...result.wheel,
         deltaX: 0,
-        deltaY: result.direction * 180,
       });
       await new Promise((resolve) => setTimeout(resolve, 34));
     }
@@ -1838,6 +1881,17 @@ export async function sendComposerPromptWithRetry(
 
 function transcriptMoved(before, after) {
   if (!before?.transcript || !after?.transcript) return false;
+  if (
+    before.transcript.visibleRows?.some(
+      (row) =>
+        Number.isFinite(row.top) &&
+        after.transcript.visibleRows?.some(
+          (candidate) => candidate.messageId === row.messageId && Number.isFinite(candidate.top)
+        )
+    )
+  ) {
+    return transcriptMovementDirection(before, after) !== 0;
+  }
   return (
     Math.abs(after.transcript.scrollTop - before.transcript.scrollTop) > 1.5 ||
     after.transcript.firstVisibleMessageId !== before.transcript.firstVisibleMessageId ||
@@ -1861,6 +1915,18 @@ function transcriptMovementDirection(before, after) {
     if (Math.abs(delta) > 1.5) return Math.sign(delta);
   }
   if (hasSharedPaintedRow) return 0;
+  // A changed coordinate system cannot prove input direction without a shared row.
+  if (
+    ['scrollHeight', 'clientHeight'].some(
+      (key) =>
+        Number.isFinite(before.transcript[key]) &&
+        Number.isFinite(after.transcript[key]) &&
+        before.transcript[key] !== after.transcript[key]
+    ) ||
+    (Number.isFinite(before.width) && Number.isFinite(after.width) && before.width !== after.width)
+  ) {
+    return null;
+  }
   const scrollDelta = after.transcript.scrollTop - before.transcript.scrollTop;
   return Math.abs(scrollDelta) > 1.5 ? Math.sign(scrollDelta) : 0;
 }
@@ -1951,18 +2017,24 @@ export function verifyActionEffect(action, before, after, details = {}) {
       return { verified: false, reason: 'transcript destination did not move' };
     }
     const expectedDirection = expectedTranscriptDirection(action);
-    if (
-      expectedDirection !== null &&
-      transcriptMovementDirection(before, after) !== expectedDirection
-    ) {
+    const movementDirection = transcriptMovementDirection(before, after);
+    if (expectedDirection !== null && movementDirection === null) {
+      return { verified: false, reason: 'transcript movement direction could not be verified' };
+    }
+    if (expectedDirection !== null && movementDirection !== expectedDirection) {
       return { verified: false, reason: 'transcript moved opposite the requested direction' };
     }
-    if (
-      expectedDirection !== null &&
-      details.settledAfter &&
-      transcriptMovementDirection(after, details.settledAfter) === -expectedDirection
-    ) {
-      return { verified: false, reason: 'transcript movement reversed after the input' };
+    if (expectedDirection !== null && details.settledAfter) {
+      const settledDirection = transcriptMovementDirection(after, details.settledAfter);
+      if (settledDirection === null) {
+        return {
+          verified: false,
+          reason: 'settled transcript movement direction could not be verified',
+        };
+      }
+      if (settledDirection === -expectedDirection) {
+        return { verified: false, reason: 'transcript movement reversed after the input' };
+      }
     }
     return { verified: true };
   }
@@ -3456,6 +3528,94 @@ async function runLifecycleScenario({
   }
 }
 
+export async function executeActivityScenario({
+  cdp, client, sessionId, marker, scope, timeoutMs,
+  pollIntervalMs = 50, runActions = executeActionPlan,
+}) {
+  const deadline = Date.now() + timeoutMs;
+  const evidence = {
+    executed: false, actions: [], observations: [], completedWhileDetached: [],
+    runningAtReturn: [], visualVerification: 'NEEDS_AI_REVIEW',
+  };
+  let phase = 'disclosure-and-wheel';
+  const read = async () => {
+    const [messages, snapshot, busy] = await Promise.all([
+      client.messages(sessionId), cdp.snapshot(marker), client.isBusy(sessionId),
+    ]);
+    const users = messages.filter((entry) => entry.info.role === 'user' &&
+      entry.parts?.some((part) => part.type === 'text' && part.text?.includes(marker)));
+    if (users.length !== 1) throw new Error('Marked prompt did not resolve to exactly one canonical user');
+    const tools = messages.filter((entry) => entry.info.role === 'assistant' &&
+      entry.info.parentID === users[0].info.id).flatMap((entry) => entry.parts ?? [])
+      .filter((part) => part.type === 'tool')
+      .map((part) => ({ id: part.id, status: part.state?.status }));
+    const transcript = snapshot.transcript;
+    const detached = snapshot.jumpToLatest === true && !!transcript &&
+      transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop > 2;
+    const sample = { at: Date.now(), busy, detached, tools, snapshot };
+    evidence.observations.push(sample);
+    return sample;
+  };
+  try {
+    if (!scope?.messageIds?.length) throw new Error('Marked activity scope is unavailable');
+    evidence.actions = await runActions(cdp, [
+      { step: 1, action: 'expand disclosure' },
+      { step: 2, action: 'wheel transcript', delta: -96 },
+    ], '', null, { scope, marker, sessionId, isActive: () => client.isBusy(sessionId) });
+    if (evidence.actions.length !== 2 || evidence.actions.some((action) => !action.executed)) {
+      throw new Error('Required disclosure or outer wheel action failed');
+    }
+    phase = 'detached-completions';
+    const baseline = await read();
+    if (!baseline.detached || !baseline.busy) throw new Error('Live detachment was not established');
+    // Only tools observed unfinished after detachment can count as detached completions.
+    const unfinished = new Set(baseline.tools.filter((tool) => ['pending', 'running'].includes(tool.status)).map((tool) => tool.id));
+    let sample = baseline;
+    while (Date.now() < deadline) {
+      sample = await read();
+      if (!sample.detached) throw new Error('Transcript reattached before two tool completions');
+      for (const tool of sample.tools) {
+        if (['pending', 'running'].includes(tool.status)) unfinished.add(tool.id);
+        if (tool.status === 'completed' && unfinished.has(tool.id) && !evidence.completedWhileDetached.includes(tool.id)) {
+          evidence.completedWhileDetached.push(tool.id);
+        }
+      }
+      if (evidence.completedWhileDetached.length >= 2) break;
+      if (!sample.busy) throw new Error('Stream settled before two detached tool completions');
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    }
+    if (evidence.completedWhileDetached.length < 2) throw new Error('Timed out waiting for two detached tool completions');
+    phase = 'return-while-tool-active';
+    while (sample.busy && !sample.tools.some((tool) => tool.status === 'running') && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+      sample = await read();
+      if (!sample.detached) throw new Error('Transcript reattached before the return action');
+    }
+    if (!sample.busy || !sample.tools.some((tool) => tool.status === 'running')) throw new Error('No running tool remained for return to bottom');
+    const dispatched = await cdp.click('[aria-label="Scroll to latest message"]');
+    if (!dispatched) throw new Error('Native return-to-bottom control was unavailable');
+    let after = await read();
+    while (after.busy && after.snapshot.transcript &&
+      after.snapshot.transcript.scrollHeight - after.snapshot.transcript.clientHeight - after.snapshot.transcript.scrollTop > 2 &&
+      Date.now() < deadline &&
+      after.tools.some((tool) => tool.status === 'running')) {
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+      after = await read();
+    }
+    evidence.runningAtReturn = after.tools.filter((tool) => tool.status === 'running').map((tool) => tool.id);
+    const transcript = after.snapshot.transcript;
+    const executed = dispatched && after.busy && evidence.runningAtReturn.length > 0 &&
+      !!transcript && transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop <= 2;
+    evidence.actions.push({ step: 3, action: 'return while tool active', dispatched, executed, before: sample, after });
+    if (!executed) throw new Error('Return did not reach bottom while a tool was still running');
+    evidence.executed = true;
+  } catch (error) {
+    evidence.failurePhase = phase;
+    evidence.reason = error instanceof Error ? error.message : String(error);
+  }
+  return evidence;
+}
+
 async function runLive(options) {
   const manifestPath = path.resolve(required(options, 'manifest'));
   const launchPath = path.resolve(required(options, 'launch'));
@@ -3545,6 +3705,7 @@ async function runLive(options) {
   let controllerError = null;
   let descendantsBefore = null;
   let playbackSource = null;
+  let activityObservationStarted = false;
   try {
     await (async () => {
     if (scenario === 'AI-17') {
@@ -3737,6 +3898,11 @@ async function runLive(options) {
     let handoff = null;
     let actions = [];
     let scope = null;
+    let activityExecution = null;
+    if (scenario === 'AI-07') {
+      await cdp.evaluate(`(() => { (${installObserver.toString()})(); globalThis.varroAiStreamingObserver.start(); })()`);
+      activityObservationStarted = true;
+    }
     for (let attempt = 1; attempt <= maxPrompts; attempt += 1) {
       const idleDeadline = Date.now() + timeoutMs;
       while (await client.isBusy(tracked.id)) {
@@ -3811,6 +3977,9 @@ async function runLive(options) {
             renderKeys: gate.bestSnapshot.turnRenderKeys,
           }
         : null;
+      if (scenario === 'AI-07') {
+        attemptRecord.fixtureBeforeExecution = await fixtureStatus(manifest.workspace);
+      }
       if (gate.bestSnapshot?.nestedActivityScroller?.hasRange) {
         handoff = await nestedHandoff(cdp, gate.marker, scope);
         if (shouldRetryNestedHandoff(handoff)) {
@@ -3822,7 +3991,19 @@ async function runLive(options) {
       }
       attemptRecord.handoff = handoff;
       attemptRecord.actionScope = scope;
-      if (scenario === 'AI-07') break;
+      if (scenario === 'AI-07') {
+        if (handoff && !handoff.passed) {
+          activityExecution = { executed: false, actions: [], failurePhase: 'nested-handoff', reason: 'Nested-to-outer wheel ownership failed' };
+          attemptRecord.activityExecution = activityExecution;
+          break;
+        }
+        activityExecution = await executeActivityScenario({
+          cdp, client, sessionId: tracked.id, marker: gate.marker, scope, timeoutMs,
+        });
+        actions = activityExecution.actions;
+        attemptRecord.activityExecution = activityExecution;
+        break;
+      }
 
       actions = await executeActionPlan(
         cdp,
@@ -3841,6 +4022,21 @@ async function runLive(options) {
       if (!shouldRetryAi08WithFreshStream(attemptActionFailure, attempt, maxPrompts)) break;
     }
     const settled = await waitForIdle(client, tracked.id, timeoutMs);
+    let activityObservation = null;
+    if (activityObservationStarted) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      activityObservation = await cdp.evaluate('globalThis.varroAiStreamingObserver.stop()');
+      activityObservationStarted = false;
+    }
+    if (activityExecution) {
+      activityExecution.settled = settled;
+      activityExecution.finalSnapshot = await cdp.captureActionState(scope);
+      if (!settled || !activityExecution.finalSnapshot.disclosures?.length) {
+        activityExecution.executed = false;
+        activityExecution.failurePhase ??= 'settled-projection';
+        activityExecution.reason ??= 'Stream did not settle into a retained activity disclosure';
+      }
+    }
     const fixtureAfterPreparation = await fixtureStatus(manifest.workspace);
     const actionFailure = actions.find((action) => !action.executed);
     const promptMarkers = attempts.map((attempt) => attempt.prompt.match(/^\[VFZ:[^\]]+\]/)?.[0]).filter(Boolean);
@@ -3885,9 +4081,20 @@ async function runLive(options) {
       settled,
       fixtureAfterPreparation,
     };
+    if (scenario === 'AI-07') {
+      Object.assign(result, {
+        preparation: { passed: best?.missing.length === 0 },
+        activityExecution,
+        activityObservation,
+        scenarioVerification: 'NEEDS_AI_REVIEW',
+      });
+    }
     recordLivePreparationResult(manifest, scenario, result);
     await writeJsonAtomic(manifestPath, manifest);
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    if (scenario === 'AI-07' && activityExecution && !activityExecution.executed) {
+      throw new Error(`AI-07 execution failed at ${activityExecution.failurePhase}: ${activityExecution.reason}`);
+    }
     if (!result.prepared) {
       const reason = actionFailure
         ? `native action ${String(actionFailure.step)} (${actionFailure.action}) was unavailable`
@@ -3901,9 +4108,20 @@ async function runLive(options) {
         `${scenario} actions ran, but the stream did not settle within ${String(timeoutMs)}ms; changed paths were recorded and the stream was left running`
       );
     }
+    if (scenario === 'AI-07' && !activityExecution?.executed) {
+      throw new Error(`AI-07 execution failed at ${activityExecution?.failurePhase ?? 'preparation'}: ${activityExecution?.reason ?? 'execution was not reached'}`);
+    }
     })();
   } catch (error) {
     controllerError = error;
+  }
+  if (activityObservationStarted) {
+    try {
+      manifest.livePreparation[scenario].activityObservation = await cdp.evaluate('globalThis.varroAiStreamingObserver.stop()');
+      await writeJsonAtomic(manifestPath, manifest);
+    } catch (error) {
+      controllerError = new AggregateError([controllerError, error].filter(Boolean), 'AI-07 frame observation cleanup failed');
+    }
   }
   if (playbackSource) {
     try {

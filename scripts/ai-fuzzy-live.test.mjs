@@ -856,6 +856,170 @@ test('uses painted rows instead of raw scroll coordinates for delayed reversal c
   );
 });
 
+test('preserves the recorded AI-08 ArrowUp failure despite concurrent height growth', () => {
+  // Reduced from seed 20260908T215225Z, action 26. These are row boxes, not descendants.
+  const [before, after] = [
+    [65818, 66575, [-212, 106, 185, 211, 361, 361, 485]],
+    [68639, 69347, [-261, 57, 136, 162, 312, 312, 436]],
+  ].map(([scrollTop, scrollHeight, tops]) => ({
+    focusOwner: 'transcript',
+    transcript: {
+      scrollTop,
+      scrollHeight,
+      clientHeight: 491,
+      visibleRows: tops.map((top, index) => ({ messageId: `row-${index}`, top })),
+    },
+  }));
+  assert.deepEqual(
+    verifyActionEffect({ action: 'key on transcript', key: 'ArrowUp' }, before, after, {
+      dispatched: true,
+      settledAfter: after,
+    }),
+    { verified: false, reason: 'transcript moved opposite the requested direction' }
+  );
+});
+
+test('does not mistake anchor-preserving height compensation for native movement', () => {
+  const before = {
+    focusOwner: 'composer',
+    transcript: {
+      scrollTop: 100,
+      scrollHeight: 1000,
+      clientHeight: 400,
+      visibleRows: [{ messageId: 'message-1', top: 20 }],
+    },
+  };
+  const after = {
+    ...before,
+    transcript: { ...before.transcript, scrollTop: 300, scrollHeight: 1200 },
+  };
+  assert.deepEqual(
+    verifyActionEffect({ action: 'Space in composer' }, before, after, { dispatched: true }),
+    { verified: true }
+  );
+  assert.deepEqual(
+    verifyActionEffect({ action: 'wheel transcript', delta: 96 }, before, after, {
+      dispatched: true,
+    }),
+    { verified: false, reason: 'transcript destination did not move' }
+  );
+});
+
+test('requires direction evidence when height changes without a shared visible row', () => {
+  const before = {
+    focusOwner: 'transcript',
+    transcript: {
+      scrollTop: 100,
+      scrollHeight: 1000,
+      clientHeight: 400,
+      visibleRows: [{ messageId: 'old', top: 20 }],
+    },
+  };
+  const after = {
+    ...before,
+    transcript: {
+      ...before.transcript,
+      scrollTop: 300,
+      scrollHeight: 1200,
+      visibleRows: [{ messageId: 'new', top: 20 }],
+    },
+  };
+  for (const delta of [-96, 96]) {
+    assert.deepEqual(
+      verifyActionEffect({ action: 'wheel transcript', delta }, before, after, {
+        dispatched: true,
+      }),
+      { verified: false, reason: 'transcript movement direction could not be verified' }
+    );
+  }
+});
+
+test('keeps shared-row direction authoritative over height-driven scroll coordinates', () => {
+  const before = {
+    focusOwner: 'transcript',
+    transcript: {
+      scrollTop: 100,
+      scrollHeight: 1000,
+      clientHeight: 400,
+      visibleRows: [{ messageId: 'message-1', top: 20 }],
+    },
+  };
+  const after = {
+    ...before,
+    transcript: {
+      ...before.transcript,
+      scrollTop: 300,
+      scrollHeight: 1240,
+      visibleRows: [{ messageId: 'message-1', top: 60 }],
+    },
+  };
+  const action = { action: 'key on transcript', key: 'ArrowUp' };
+  assert.deepEqual(
+    verifyActionEffect(action, before, after, { dispatched: true, settledAfter: after }),
+    {
+      verified: true,
+    }
+  );
+  assert.deepEqual(verifyActionEffect(action, before, after), {
+    verified: false,
+    reason: 'input was not dispatched',
+  });
+  assert.equal(
+    verifyActionEffect(
+      action,
+      before,
+      { ...after, focusOwner: 'composer' },
+      {
+        dispatched: true,
+      }
+    ).verified,
+    false
+  );
+  assert.equal(
+    verifyActionEffect(
+      { action: 'Space in composer' },
+      before,
+      {
+        ...after,
+        focusOwner: 'composer',
+      },
+      { dispatched: true }
+    ).verified,
+    false
+  );
+});
+
+test('requires settle evidence when height changes without a shared visible row', () => {
+  const before = {
+    focusOwner: 'transcript',
+    transcript: {
+      scrollTop: 100,
+      scrollHeight: 1000,
+      clientHeight: 400,
+      visibleRows: [{ messageId: 'message-1', top: 100 }],
+    },
+  };
+  const after = {
+    ...before,
+    transcript: {
+      ...before.transcript,
+      scrollTop: 200,
+      visibleRows: [{ messageId: 'message-1', top: 0 }],
+    },
+  };
+  const settledAfter = {
+    ...after,
+    transcript: { ...after.transcript, scrollTop: 150, scrollHeight: 950, visibleRows: [] },
+  };
+  assert.deepEqual(
+    verifyActionEffect({ action: 'wheel transcript', delta: 96 }, before, after, {
+      dispatched: true,
+      settledAfter,
+    }),
+    { verified: false, reason: 'settled transcript movement direction could not be verified' }
+  );
+});
+
 test('uses the current editor action label', async () => {
   let clickedText = null;
   const clicked = await clickOpenInEditor({
