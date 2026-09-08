@@ -261,6 +261,94 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
+  it.each(['text', 'part', 'track', 'container'] as const)(
+    'settles a paused stream and resumes follow after %s changes without overriding detachment',
+    async (trigger) => {
+      const animationFrames = installQueuedAnimationFrameMocks();
+      const observers: Array<{ callback: ResizeObserverCallback; observer: ResizeObserver }> = [];
+      globalThis.ResizeObserver = class implements ResizeObserver {
+        constructor(callback: ResizeObserverCallback) {
+          observers.push({ callback, observer: this });
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      };
+      let trackHeight = 1200;
+      let viewportHeight = 400;
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+        function (this: HTMLElement) {
+          return new DOMRect(
+            0,
+            0,
+            500,
+            this.classList.contains('interactive-list-track') ? trackHeight : viewportHeight
+          );
+        }
+      );
+      setState('activeSessionId', 'session-1');
+      setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+      replaceMessages([
+        {
+          info: assistantMessage('assistant-1'),
+          parts: [{ ...textPart('text-1', 'Paused'), messageID: 'assistant-1' }],
+        },
+      ]);
+      setState('streamingPartId', 'text-1');
+      setState('streamingText', trigger === 'part' ? '' : 'Paused');
+      cleanup = render(() => MessageList(), container!);
+      const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
+      const track = container!.querySelector<HTMLDivElement>('.interactive-list-track')!;
+      Object.defineProperty(list, 'clientHeight', { get: () => viewportHeight });
+      Object.defineProperty(list, 'scrollHeight', { get: () => trackHeight });
+      await Promise.resolve();
+      await Promise.resolve();
+      for (let frame = 0; frame < 8; frame += 1) animationFrames.flush();
+      expect(list.scrollTop).toBe(800);
+      const requestFrame = vi.mocked(globalThis.requestAnimationFrame);
+      const pausedRequestCount = requestFrame.mock.calls.length;
+      animationFrames.flush();
+      expect(requestFrame).toHaveBeenCalledTimes(pausedRequestCount);
+
+      const resume = async () => {
+        if (trigger === 'text' || trigger === 'part') {
+          trackHeight += 200;
+          setState('streamingText', `${state.streamingText} resumed`);
+        } else {
+          if (trigger === 'track') trackHeight += 200;
+          else viewportHeight -= 100;
+          for (const { callback, observer } of observers) {
+            callback(
+              [fixture<ResizeObserverEntry>({ target: trigger === 'track' ? track : list })],
+              observer
+            );
+          }
+        }
+        await Promise.resolve();
+        animationFrames.flush();
+      };
+      await resume();
+      expect(list.scrollTop).toBe(trackHeight - viewportHeight);
+      // Deferred layout must still be followed before the next resize notification.
+      trackHeight += 100;
+      animationFrames.flush();
+      expect(list.scrollTop).toBe(trackHeight - viewportHeight);
+      for (let frame = 0; frame < 8; frame += 1) animationFrames.flush();
+      const resumedRequestCount = requestFrame.mock.calls.length;
+      animationFrames.flush();
+      expect(requestFrame).toHaveBeenCalledTimes(resumedRequestCount);
+
+      list.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, bubbles: true }));
+      list.scrollTop -= 200;
+      list.dispatchEvent(new Event('scroll'));
+      const detachedScrollTop = list.scrollTop;
+      await resume();
+      for (let frame = 0; frame < 8; frame += 1) animationFrames.flush();
+      expect(list.scrollTop).toBe(detachedScrollTop);
+      animationFrames.restore();
+    }
+  );
+
   it.each(['insertion', 'removal'] as const)(
     'preserves a detached visible row across a structural %s during active slow scrolling',
     async (mutation) => {

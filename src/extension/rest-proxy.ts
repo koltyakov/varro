@@ -1473,6 +1473,9 @@ export class RestProxy {
         response = this.withSessionWorkspaceScope(session, sessionCreationScope);
       }
       const forkParentSessionID = this.parseForkParentSessionID(method, payload.path);
+      if (sessionCreationScope || forkParentSessionID) {
+        this.workspaceSessionStatusCoordinator.clearCatalogs();
+      }
       if (forkParentSessionID) {
         const session = asRecord(response);
         if (isSafePersistedSessionId(session?.id)) {
@@ -1976,7 +1979,7 @@ export class RestProxy {
           : this.requestServer('GET', '/session/status', undefined, requestOptions);
         const [rootStatusValue, catalog] = await Promise.all([
           rootStatusRequest,
-          this.loadWorkspaceStatusSessionCatalog(root, signal, true, scope),
+          this.loadWorkspaceStatusSessionCatalog(root, signal, false, scope),
         ]);
         const statusDirectories = new Map<string, string>();
         const rootIdentity = normalizeWorkspaceIdentity(root);

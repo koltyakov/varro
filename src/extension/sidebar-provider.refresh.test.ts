@@ -400,14 +400,11 @@ describe('SidebarProvider provider refresh', () => {
 
   it('refreshes the UI immediately and defers managed invalidation until work is idle', async () => {
     vi.useFakeTimers();
-    let statusRequestCount = 0;
+    let idle = false;
     const server = createServer({
       request: vi.fn(async (_method: string, path: string) => {
         if (path === '/question' || path === '/permission') return [];
-        if (path === '/session/status') {
-          statusRequestCount += 1;
-          return statusRequestCount <= 6 ? { active: { type: 'busy' } } : {};
-        }
+        if (path === '/session/status') return idle ? {} : { active: { type: 'busy' } };
         return undefined;
       }),
       readServerInfo: vi.fn(async () => ({ managedProcess: true })),
@@ -424,7 +421,8 @@ describe('SidebarProvider provider refresh', () => {
     expect(posted).toContainEqual({ type: 'providers/refresh' });
     expect(posted).toContainEqual({ type: 'providers/status', payload: { pending: true } });
 
-    await vi.advanceTimersByTimeAsync(6_000);
+    idle = true;
+    await vi.advanceTimersByTimeAsync(1_000);
 
     expect(server.request).toHaveBeenCalledWith('POST', '/global/dispose');
     expect(server.restart).not.toHaveBeenCalled();

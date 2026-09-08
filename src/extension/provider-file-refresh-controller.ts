@@ -62,6 +62,7 @@ type PersistedPendingRefreshState =
 export class ProviderFileRefreshController {
   private static readonly PENDING_STATE_KEY = 'varro.providerRefresh.pending';
   private static readonly RETRY_MS = 1_000;
+  private static readonly BUSY_RETRY_MAX_MS = 30_000;
   private static readonly MAX_RETRIES = 5;
   private static readonly SIGNATURE_MAX_BYTES = 1024 * 1024;
   private static readonly SIGNATURE_TIMEOUT_MS = 1_000;
@@ -69,6 +70,7 @@ export class ProviderFileRefreshController {
   private configWatchers: vscode.FileSystemWatcher[] = [];
   private authWatcher: vscode.FileSystemWatcher | null = null;
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private busyRetryMs = ProviderFileRefreshController.RETRY_MS;
   private refreshGeneration = 0;
   private observedFilesSignature: string | null = null;
   private pendingScope: PendingRefreshScope | null = null;
@@ -419,7 +421,9 @@ export class ProviderFileRefreshController {
     if (idle === false) {
       this.authIdleCandidate = null;
       this.postPendingStatus();
-      this.scheduleInvalidationRetry(generation, retryCount, false);
+      const delay = this.busyRetryMs;
+      this.busyRetryMs = Math.min(delay * 2, ProviderFileRefreshController.BUSY_RETRY_MAX_MS);
+      this.scheduleInvalidationRetry(generation, retryCount, false, delay);
       return;
     }
     if (idle === null) {
@@ -481,6 +485,7 @@ export class ProviderFileRefreshController {
         }
         this.unmanagedServerSynchronized = true;
       }
+      this.busyRetryMs = ProviderFileRefreshController.RETRY_MS;
       if (pendingRevision === this.pendingRevision) {
         this.pendingScope = null;
         this.pendingWorkspaceDirectories.clear();
@@ -565,7 +570,12 @@ export class ProviderFileRefreshController {
     }
   }
 
-  private scheduleInvalidationRetry(generation: number, retryCount: number, bounded = true) {
+  private scheduleInvalidationRetry(
+    generation: number,
+    retryCount: number,
+    bounded = true,
+    delay = ProviderFileRefreshController.RETRY_MS
+  ) {
     if (
       this.disposed ||
       generation !== this.refreshGeneration ||
@@ -582,7 +592,7 @@ export class ProviderFileRefreshController {
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = null;
       void this.maybeInvalidate(generation, bounded ? retryCount + 1 : 0);
-    }, ProviderFileRefreshController.RETRY_MS);
+    }, delay);
   }
 
   private postPendingStatus() {
@@ -592,6 +602,7 @@ export class ProviderFileRefreshController {
   }
 
   private async markRefreshPending(scope: PendingRefreshScope) {
+    this.busyRetryMs = ProviderFileRefreshController.RETRY_MS;
     this.pendingRevision += 1;
     if (!this.pendingScope || scope === 'global') {
       this.pendingScope = scope;

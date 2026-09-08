@@ -4,6 +4,8 @@ type WorkspaceStatusCatalog = {
   sessions: unknown[];
 };
 
+const STATUS_CATALOG_MAX_AGE_MS = 5_000;
+
 export class WorkspaceSessionStatusCoordinator {
   private readonly statusRequests = new Map<string, Promise<unknown>>();
   private readonly catalogRequests = new Map<string, Promise<WorkspaceStatusCatalog>>();
@@ -32,19 +34,24 @@ export class WorkspaceSessionStatusCoordinator {
     load: () => Promise<unknown>,
     options?: { force?: boolean; signal?: AbortSignal }
   ): Promise<WorkspaceStatusCatalog> {
-    if (!options?.force) {
+    let request = this.catalogRequests.get(workspaceIdentity);
+    if (!request && !options?.force) {
       const cached = this.catalogs.get(workspaceIdentity);
-      if (cached) return raceAgainstAbort(Promise.resolve(cached), options?.signal);
+      if (cached && Date.now() - cached.loadedAt < STATUS_CATALOG_MAX_AGE_MS) {
+        return raceAgainstAbort(Promise.resolve(cached), options?.signal);
+      }
     }
 
-    let request = this.catalogRequests.get(workspaceIdentity);
     if (!request) {
       const currentRequest = Promise.resolve()
         .then(load)
         .then((value) => {
           if (!Array.isArray(value)) throw new Error('Malformed session list response');
           const catalog = { loadedAt: Date.now(), sessions: value };
-          this.catalogs.set(workspaceIdentity, catalog);
+          // Invalidated reads may finish for existing callers, but must not restore the cache.
+          if (this.catalogRequests.get(workspaceIdentity) === currentRequest) {
+            this.catalogs.set(workspaceIdentity, catalog);
+          }
           return catalog;
         });
       request = currentRequest;
@@ -61,10 +68,14 @@ export class WorkspaceSessionStatusCoordinator {
     for (const identity of this.catalogs.keys()) {
       if (!workspaceIdentities.has(identity)) this.catalogs.delete(identity);
     }
+    for (const identity of this.catalogRequests.keys()) {
+      if (!workspaceIdentities.has(identity)) this.catalogRequests.delete(identity);
+    }
   }
 
   clearCatalogs() {
     this.catalogs.clear();
+    this.catalogRequests.clear();
   }
 
   private deleteCurrent<T>(requests: Map<string, Promise<T>>, key: string, request: Promise<T>) {

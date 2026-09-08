@@ -4353,38 +4353,63 @@ describe('RestProxy handleRequest', () => {
     }
   );
 
-  it('queries descendant session directories when aggregating pending permissions', async () => {
-    const permission = { id: 'nested-permission', sessionID: 'nested-session' };
-    const serverRequest = vi.fn(
-      async (_method: string, path: string, _body?: unknown, options?: { directory?: string }) => {
-        if (path === '/experimental/session?limit=1000000') {
-          return [{ id: 'nested-session', directory: '/repo/packages/nested' }];
+  it.each(['/permission', '/question'])(
+    'refreshes a warm status catalog before aggregating pending %s',
+    async (pendingPath) => {
+      const permission = { id: 'nested-permission', sessionID: 'nested-session' };
+      let childCreated = false;
+      const serverRequest = vi.fn(
+        async (
+          _method: string,
+          path: string,
+          _body?: unknown,
+          options?: { directory?: string }
+        ) => {
+          if (path === '/session/status') return {};
+          if (path === '/experimental/session?limit=1000000') {
+            return childCreated
+              ? [
+                  {
+                    id: 'nested-session',
+                    parentID: 'parent-session',
+                    directory: '/repo/packages/nested',
+                  },
+                ]
+              : [];
+          }
+          if (path === pendingPath && options?.directory === '/repo') return [];
+          if (path === pendingPath && options?.directory === '/repo/packages/nested') {
+            return [permission];
+          }
+          throw new Error(`Unexpected request: ${path} (${options?.directory})`);
         }
-        if (path === '/permission' && options?.directory === '/repo') return [];
-        if (path === '/permission' && options?.directory === '/repo/packages/nested') {
-          return [permission];
-        }
-        throw new Error(`Unexpected request: ${path} (${options?.directory})`);
-      }
-    );
-    const { proxy, callbacks } = createProxy({
-      getSessionHistoryScope: () => 'descendants',
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+      );
+      const { proxy, callbacks } = createProxy({
+        getSessionHistoryScope: () => 'descendants',
+        server: { ...createCallbacks().server, request: serverRequest } as never,
+      });
 
-    await proxy.handleRequest(makePayload(226, 'GET', '/permission'));
+      await proxy.handleRequest(makePayload(225, 'GET', '/session/status'));
+      childCreated = true;
+      await proxy.handleRequest(makePayload(226, 'GET', pendingPath));
 
-    expect(serverRequest).toHaveBeenCalledWith(
-      'GET',
-      '/permission',
-      undefined,
-      withSignal({ directory: '/repo/packages/nested' })
-    );
-    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
-      id: 226,
-      data: [permission],
-    });
-  });
+      expect(serverRequest).toHaveBeenCalledWith(
+        'GET',
+        pendingPath,
+        undefined,
+        withSignal({ directory: '/repo/packages/nested' })
+      );
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+        id: 226,
+        data: [permission],
+      });
+      expect(
+        serverRequest.mock.calls.filter(
+          ([, path]) => path === '/experimental/session?limit=1000000'
+        )
+      ).toHaveLength(2);
+    }
+  );
 
   it('rejects a partial aggregate permission snapshot without reconciling it', async () => {
     const serverRequest = vi.fn(
@@ -4661,25 +4686,32 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
-  it('refreshes the validated session catalog on each status poll', async () => {
-    const serverRequest = vi.fn(async (_method: string, path: string) => {
-      if (path === '/session?limit=1000000') return [{ id: 'session-1', directory: '/repo' }];
-      if (path === '/session/status') return { 'session-1': { type: 'busy' } };
-      throw new Error(`Unexpected path: ${path}`);
-    });
-    const { proxy } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+  it('reuses the validated session catalog while polling fresh statuses', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    try {
+      const serverRequest = vi.fn(async (_method: string, path: string) => {
+        if (path === '/session?limit=1000000') return [{ id: 'session-1', directory: '/repo' }];
+        if (path === '/session/status') return { 'session-1': { type: 'busy' } };
+        throw new Error(`Unexpected path: ${path}`);
+      });
+      const { proxy } = createProxy({
+        server: { ...createCallbacks().server, request: serverRequest } as never,
+      });
 
-    await proxy.handleRequest(makePayload(226, 'GET', '/session/status'));
-    await proxy.handleRequest(makePayload(227, 'GET', '/session/status'));
+      for (let poll = 0; poll < 5; poll += 1) {
+        now.mockReturnValue(1_000 + poll * 1_000);
+        await proxy.handleRequest(makePayload(226 + poll, 'GET', '/session/status'));
+      }
 
-    expect(
-      serverRequest.mock.calls.filter(([, path]) => path === '/session?limit=1000000')
-    ).toHaveLength(2);
-    expect(serverRequest.mock.calls.filter(([, path]) => path === '/session/status')).toHaveLength(
-      2
-    );
+      expect(
+        serverRequest.mock.calls.filter(([, path]) => path === '/session?limit=1000000')
+      ).toHaveLength(1);
+      expect(
+        serverRequest.mock.calls.filter(([, path]) => path === '/session/status')
+      ).toHaveLength(5);
+    } finally {
+      now.mockRestore();
+    }
   });
 
   it('refreshes a stale status catalog when a new session appears', async () => {
@@ -4722,6 +4754,37 @@ describe('RestProxy handleRequest', () => {
       },
     });
     nowSpy.mockRestore();
+  });
+
+  it('invalidates a warm status catalog after creating a session', async () => {
+    const sessions = [{ id: 'session-1', directory: '/repo' }];
+    const serverRequest = vi.fn(async (method: string, path: string) => {
+      if (path === '/session?limit=1000000') return [...sessions];
+      if (path === '/session/status') {
+        return Object.fromEntries(sessions.map((session) => [session.id, { type: 'busy' }]));
+      }
+      if (method === 'POST' && path === '/session') {
+        const session = { id: 'session-2', directory: '/repo' };
+        sessions.push(session);
+        return session;
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(makePayload(230, 'GET', '/session/status'));
+    await proxy.handleRequest(makePayload(231, 'POST', '/session', {}));
+    await proxy.handleRequest(makePayload(232, 'GET', '/session/status'));
+
+    expect(
+      serverRequest.mock.calls.filter(([, path]) => path === '/session?limit=1000000')
+    ).toHaveLength(2);
+    expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+      id: 232,
+      data: { 'session-1': { type: 'busy' }, 'session-2': { type: 'busy' } },
+    });
   });
 
   it('loads sessions from a workspace folder and its descendants', async () => {
@@ -5049,61 +5112,78 @@ describe('RestProxy handleRequest', () => {
     ).resolves.toBe(false);
   });
 
-  it('discovers status directories added after the project catalog was cached', async () => {
-    const nestedDirectory = '/worktrees/feature';
-    let catalog: Array<{
-      id: string;
-      projectID: string;
-      directory: string;
-      title: string;
-    }> = [];
-    const serverRequest = vi.fn(
-      async (_method: string, path: string, _body?: unknown, options?: { directory?: string }) => {
-        if (path === '/project/current') {
-          return { id: 'project-1', worktree: '/repo', vcs: 'git' };
-        }
-        if (path === '/session?limit=1000000&scope=project') return catalog;
-        if (path === '/session/status') {
-          return options?.directory === nestedDirectory
-            ? { 'nested-session': { type: 'busy' } }
-            : {};
-        }
-        throw new Error(`Unexpected path: ${path}`);
+  it.each(['invalidation', 'expiry', 'event authorization'])(
+    'discovers new project status directories after catalog %s',
+    async (recovery) => {
+      const now = vi.spyOn(Date, 'now').mockReturnValue(1_000);
+      try {
+        const nestedDirectory = '/worktrees/feature';
+        let catalog: Array<{
+          id: string;
+          projectID: string;
+          directory: string;
+          title: string;
+        }> = [];
+        const serverRequest = vi.fn(
+          async (
+            _method: string,
+            path: string,
+            _body?: unknown,
+            options?: { directory?: string }
+          ) => {
+            if (path === '/project/current') {
+              return { id: 'project-1', worktree: '/repo', vcs: 'git' };
+            }
+            if (path === '/session?limit=1000000&scope=project') return catalog;
+            if (path === '/session/status') {
+              return options?.directory === nestedDirectory
+                ? { 'nested-session': { type: 'busy' } }
+                : {};
+            }
+            throw new Error(`Unexpected path: ${path}`);
+          }
+        );
+        const callbacks = createCallbacks({
+          getSessionHistoryScope: () => 'project',
+          server: { ...createCallbacks().server, request: serverRequest } as never,
+        });
+        callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((path: string) =>
+          path === '/repo' ? '/repo' : null
+        );
+        const { proxy } = createProxy(callbacks);
+
+        await proxy.handleRequest(makePayload(22476, 'GET', '/session/status'));
+        expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 22476, data: {} });
+
+        catalog = [
+          {
+            id: 'nested-session',
+            projectID: 'project-1',
+            directory: nestedDirectory,
+            title: 'Nested session',
+          },
+        ];
+        vi.mocked(callbacks.postApiResponse).mockClear();
+        serverRequest.mockClear();
+
+        if (recovery === 'invalidation') proxy.invalidateSessionCatalog();
+        else if (recovery === 'expiry') now.mockReturnValue(6_000);
+        else
+          await proxy.refreshSessionCatalogEventAuthorization(['nested-session'], nestedDirectory);
+        await proxy.handleRequest(makePayload(22477, 'GET', '/session/status'));
+
+        expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+          id: 22477,
+          data: { 'nested-session': { type: 'busy' } },
+        });
+        expect(serverRequest).toHaveBeenCalledWith('GET', '/session/status', undefined, {
+          directory: nestedDirectory,
+        });
+      } finally {
+        now.mockRestore();
       }
-    );
-    const callbacks = createCallbacks({
-      getSessionHistoryScope: () => 'project',
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
-    callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((path: string) =>
-      path === '/repo' ? '/repo' : null
-    );
-    const { proxy } = createProxy(callbacks);
-
-    await proxy.handleRequest(makePayload(22476, 'GET', '/session/status'));
-    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 22476, data: {} });
-
-    catalog = [
-      {
-        id: 'nested-session',
-        projectID: 'project-1',
-        directory: nestedDirectory,
-        title: 'Nested session',
-      },
-    ];
-    vi.mocked(callbacks.postApiResponse).mockClear();
-    serverRequest.mockClear();
-
-    await proxy.handleRequest(makePayload(22477, 'GET', '/session/status'));
-
-    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
-      id: 22477,
-      data: { 'nested-session': { type: 'busy' } },
-    });
-    expect(serverRequest).toHaveBeenCalledWith('GET', '/session/status', undefined, {
-      directory: nestedDirectory,
-    });
-  });
+    }
+  );
 
   it('loads and activates sessions from the entire OpenCode project', async () => {
     const serverRequest = vi.fn(async (_method: string, path: string) => {

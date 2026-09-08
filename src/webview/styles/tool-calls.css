@@ -391,8 +391,8 @@
   background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: chat-thinking-shimmer 2s linear infinite;
-  will-change: background-position;
+  /* Text-clipped backgrounds repaint; keep waiting indicators below display frame rate. */
+  animation: chat-thinking-shimmer 2s steps(12) infinite;
 }
 
 .model-change-indicator {

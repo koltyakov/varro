@@ -4704,12 +4704,7 @@ export function MessageList() {
         Math.abs(currentHeight - lastAutoScrolledTrackHeight) <= 1 &&
         Math.abs(currentBottomScrollTop - lastAutoScrolledBottomScrollTop) <= 1 &&
         (distanceFromBottom() <= 1 || preservesNearBottomOffset);
-      if (
-        stable &&
-        !isStreaming &&
-        (!belowBottomTarget || preservesNearBottomOffset) &&
-        !trackGrew
-      ) {
+      if (stable && (!belowBottomTarget || preservesNearBottomOffset) && !trackGrew) {
         bottomFollowSettleFrames += 1;
       } else {
         bottomFollowSettleFrames = 0;
@@ -5983,7 +5978,15 @@ export function MessageList() {
         scheduleStickyPreviewViewportState(containerRef.scrollTop, currentContainerClientHeight);
       }
       if (trackChanged || containerHeightChanged || widthChanged) {
-        if (trackChanged && shouldCorrectBottomAfterResize()) performScroll({ force: true });
+        if (trackChanged && shouldCorrectBottomAfterResize()) {
+          performScroll({ force: true });
+          if (widthChanged && widthResizeActive) {
+            pendingWidthFollowCorrection = true;
+          } else {
+            const sessionId = state.activeSessionId;
+            if (sessionId) startFollowLoop(sessionId);
+          }
+        }
         scheduleVisibleMeasurement({ afterResize: true, widthResize: widthChanged });
       }
     });

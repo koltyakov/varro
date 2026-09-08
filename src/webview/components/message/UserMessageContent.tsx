@@ -445,9 +445,9 @@ function parseUserMessageAttachmentLine(
     }
   }
 
-  // Inline @file mentions belong to the prompt body, even when the line ends
-  // with a slash-style path like "test @e2e/tests/review.spec.ts".
-  if (hasEmbeddedMentionReference(line)) {
+  // @ tokens belong to the prompt body unless backed by a separate attachment.
+  // This includes standalone mentions and scoped package names.
+  if (hasMentionReference(line)) {
     return null;
   }
 
@@ -462,9 +462,9 @@ function parseUserMessageAttachmentLine(
   return null;
 }
 
-function hasEmbeddedMentionReference(line: string): boolean {
+function hasMentionReference(line: string): boolean {
   const match = line.match(/(^|[\s(])@([^\s@)]+?\/?)(?=$|[\s),.:;!?])/);
-  return (match?.index ?? -1) > 0;
+  return match !== null;
 }
 
 export function getUserMessageEditText(parts: Part[]): string {
@@ -1239,6 +1239,8 @@ function isStandaloneFileReference(text: string): boolean {
   }
   if (/\[\d+\/\d+\]/.test(trimmed)) return false;
   if (/["'{}[\],<>|]/.test(trimmed) || trimmed.includes('>')) return false;
+  // A lone trailing backslash is not enough evidence of a directory path.
+  if (/^[^/\\]+\\$/.test(trimmed)) return false;
 
   const normalizedInput = trimmed.replace(/\\/g, '/');
   if (/:\d+(?::\d+)?$/.test(normalizedInput)) return false;

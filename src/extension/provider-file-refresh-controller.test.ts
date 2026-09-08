@@ -612,7 +612,7 @@ describe('ProviderFileRefreshController', () => {
       });
 
       siblingBusy = false;
-      await vi.advanceTimersByTimeAsync(2 * RETRY_MS);
+      await vi.advanceTimersByTimeAsync(3 * RETRY_MS);
 
       expect(h.server.restart).toHaveBeenCalledOnce();
     });
@@ -696,6 +696,136 @@ describe('ProviderFileRefreshController', () => {
   });
 
   describe('invalidation scheduling', () => {
+    it('caps busy backoff and eventually refreshes without another event', async () => {
+      const h = createHarness();
+      await activateWatching(h);
+      resetCalls(h);
+      h.setIdle(false);
+      await h.controller.refreshState();
+
+      let checks = 1;
+      for (const delay of [1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000]) {
+        await vi.advanceTimersByTimeAsync(delay - 1);
+        expect(h.server.readRestartBlockers).toHaveBeenCalledTimes(checks);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(h.server.readRestartBlockers).toHaveBeenCalledTimes(++checks);
+        expect(globalDisposeCallCount(h)).toBe(0);
+        expect(h.server.restart).not.toHaveBeenCalled();
+        expect(h.values.has(PENDING_STATE_KEY)).toBe(true);
+        expect(h.postPendingStatus).not.toHaveBeenCalledWith(false);
+      }
+
+      h.setIdle(true);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(globalDisposeCallCount(h)).toBe(1);
+      expect(h.values.has(PENDING_STATE_KEY)).toBe(false);
+      expect(h.postPendingStatus).toHaveBeenLastCalledWith(false);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(h.server.readRestartBlockers).toHaveBeenCalledTimes(checks + 1);
+    });
+
+    it.each(['config', 'workspace', 'auth'] as const)(
+      'resets busy backoff for a new %s request',
+      async (source) => {
+        const h = createHarness({ files: { [CONFIG_PATHS[0]]: 'v1' } });
+        await activateWatching(h);
+        h.setIdle(false);
+        await h.controller.refreshState();
+        await vi.advanceTimersByTimeAsync(7_000);
+        resetCalls(h);
+
+        if (source === 'config') {
+          h.fileSystem.files.set(CONFIG_PATHS[0], 'v2');
+          fireWatcherEvent(0);
+          await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+        } else if (source === 'workspace') {
+          await h.controller.refreshWorkspaceState(routing('old'), routing('new'), '/repo');
+        } else {
+          await h.controller.acknowledgeEmbeddedAuthChange();
+        }
+
+        expect(h.server.readRestartBlockers).toHaveBeenCalledOnce();
+        await vi.advanceTimersByTimeAsync(RETRY_MS - 1);
+        expect(h.server.readRestartBlockers).toHaveBeenCalledOnce();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(h.server.readRestartBlockers).toHaveBeenCalledTimes(2);
+        expect(globalDisposeCallCount(h)).toBe(0);
+        expect(h.server.restart).not.toHaveBeenCalled();
+      }
+    );
+
+    it('does not reset busy backoff for an unchanged watcher event', async () => {
+      const h = createHarness();
+      await activateWatching(h);
+      h.setIdle(false);
+      await h.controller.refreshState();
+      await vi.advanceTimersByTimeAsync(7_000);
+      resetCalls(h);
+
+      fireWatcherEvent(0);
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+      expect(h.server.readRestartBlockers).toHaveBeenCalledOnce();
+      expect(h.persistence.set).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(16_000 - 1);
+      expect(h.server.readRestartBlockers).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(h.server.readRestartBlockers).toHaveBeenCalledTimes(2);
+    });
+
+    it.each(['deactivate', 'dispose'] as const)(
+      'cancels a backed-off retry on %s',
+      async (action) => {
+        const h = createHarness();
+        await activateWatching(h);
+        h.setIdle(false);
+        await h.controller.refreshState();
+        await vi.advanceTimersByTimeAsync(31_000);
+        resetCalls(h);
+
+        if (action === 'deactivate') h.controller.setActive(false);
+        else h.controller.dispose();
+        h.setIdle(true);
+        await vi.advanceTimersByTimeAsync(60_000);
+
+        expect(h.server.readRestartBlockers).not.toHaveBeenCalled();
+        expect(h.server.request).not.toHaveBeenCalled();
+        expect(h.server.restart).not.toHaveBeenCalled();
+        expect(h.values.has(PENDING_STATE_KEY)).toBe(true);
+      }
+    );
+
+    it.each(['/permission', '/question'])(
+      'keeps auth refresh pending while %s blocks an otherwise idle server',
+      async (blockingPath) => {
+        const h = createHarness();
+        await activateWatching(h);
+        resetCalls(h);
+        let pending = true;
+        h.server.request.mockImplementation(async (_method: string, path: string) => {
+          if (path === '/session/status') return {};
+          if (path === '/permission' || path === '/question') {
+            return path === blockingPath && pending ? [{ id: 'pending' }] : [];
+          }
+          return undefined;
+        });
+        await h.controller.acknowledgeEmbeddedAuthChange();
+        await vi.advanceTimersByTimeAsync(61_000);
+        expect(h.server.readRestartBlockers).toHaveBeenCalledTimes(7);
+        expect(h.server.restart).not.toHaveBeenCalled();
+        expect(globalDisposeCallCount(h)).toBe(0);
+        expect(h.values.has(PENDING_STATE_KEY)).toBe(true);
+        expect(h.postPendingStatus).not.toHaveBeenCalledWith(false);
+
+        pending = false;
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(h.server.restart).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(RETRY_MS);
+        expect(h.server.restart).toHaveBeenCalledOnce();
+        expect(h.postRefresh).toHaveBeenLastCalledWith({ revalidateAuth: true });
+        expect(h.values.has(PENDING_STATE_KEY)).toBe(false);
+      }
+    );
+
     it('does not globally invalidate while a nested OpenCode instance is busy', async () => {
       const h = createHarness({
         files: { [CONFIG_PATHS[0]]: 'v1' },
