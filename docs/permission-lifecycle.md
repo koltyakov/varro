@@ -203,6 +203,8 @@ automatic retry rather than exposing a manual approval that contradicts full acc
 ## Manual Approval
 
 Default mode presents `Reject`, `Once`, and an `Always` scope menu.
+The `Allow always` button only opens the menu; it has no default or remembered scope.
+Choosing a scope immediately submits that approval. Dismissing the menu leaves the request pending.
 
 - `Once` approves the specific request.
 - `Always allow for this session` adds the request's server-provided `always` patterns to that

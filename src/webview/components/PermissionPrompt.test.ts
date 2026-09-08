@@ -68,22 +68,20 @@ describe('PermissionPrompt', () => {
     expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual([
       'Allow once',
       'Allow always',
-      'Always allow options',
       'Reject',
     ]);
     expect(
       buttons.map((button) => button.querySelector('.permission-action-label-short')?.textContent)
-    ).toEqual(['Once', 'Always', undefined, 'Reject']);
+    ).toEqual(['Once', 'Always', 'Reject']);
     expect(buttons[0]?.classList).toContain('question-btn-primary');
     expect(buttons[1]?.classList).toContain('question-btn-secondary');
-    expect(buttons[2]?.classList).toContain('permission-always-menu-trigger');
-    expect(buttons[3]?.classList).toContain('question-btn-danger');
+    expect(buttons[1]?.getAttribute('aria-haspopup')).toBe('menu');
+    expect(buttons[1]?.getAttribute('aria-expanded')).toBe('false');
+    expect(buttons[2]?.classList).toContain('question-btn-danger');
     expect(container?.querySelector('.permission-prompt')?.classList).not.toContain(
       'animate-fade-in'
     );
-    const scopeNote = container?.querySelector('.permission-prompt-scope-note')?.textContent;
-    expect(scopeNote).toContain('matching requests in this session, until OpenCode restarts');
-    expect(scopeNote).not.toContain('guides AI review');
+    expect(container?.querySelector('.permission-prompt-scope-note')).toBeNull();
   });
 
   it('allows only rejection when recovered details are incomplete', () => {
@@ -100,9 +98,6 @@ describe('PermissionPrompt', () => {
     );
     expect(
       container?.querySelector<HTMLButtonElement>('[aria-label="Allow always"]')?.disabled
-    ).toBe(true);
-    expect(
-      container?.querySelector<HTMLButtonElement>('[aria-label="Always allow options"]')?.disabled
     ).toBe(true);
     expect(container?.querySelector<HTMLButtonElement>('[aria-label="Reject"]')?.disabled).toBe(
       false
@@ -219,7 +214,6 @@ describe('PermissionPrompt', () => {
   it.each([
     ['Reject', 'reject'],
     ['Allow once', 'once'],
-    ['Allow always', 'always'],
   ] as const)('%s sends the %s response', (label, response) => {
     cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
 
@@ -230,36 +224,78 @@ describe('PermissionPrompt', () => {
     expect(mocks.respondPermission).toHaveBeenCalledWith('session-1', 'permission-1', response);
   });
 
-  it('offers session, server-memory, and project scopes for always allow', async () => {
-    cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
+  it.each(['session', 'server', 'project'] as const)(
+    'approves only the chosen %s scope',
+    async (scope) => {
+      cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
 
-    container?.querySelector<HTMLButtonElement>('[aria-label="Always allow options"]')?.click();
-    await Promise.resolve();
+      const trigger = container?.querySelector<HTMLButtonElement>('[aria-label="Allow always"]');
+      trigger?.click();
+      await Promise.resolve();
 
-    const menu = document.body.querySelector('[aria-label="Always allow scope"]');
-    expect(menu?.textContent).toContain('Always allow for this session');
-    expect(menu?.textContent).toContain('Always allow in server memory');
-    expect(menu?.textContent).toContain('Always allow for this project');
+      const menu = document.body.querySelector('[aria-label="Always allow scope"]');
+      expect(menu?.textContent).toContain('For this session');
+      expect(menu?.textContent).toContain('Until server restart');
+      expect(menu?.textContent).toContain('For this project');
+      expect(trigger?.getAttribute('aria-expanded')).toBe('true');
+      expect(mocks.respondPermission).not.toHaveBeenCalled();
+      expect(mocks.alwaysAllowPermissionForSession).not.toHaveBeenCalled();
+      expect(mocks.alwaysAllowPermissionForProject).not.toHaveBeenCalled();
 
-    menu
-      ?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
-      .item(0)
-      .dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    expect(mocks.alwaysAllowPermissionForSession).toHaveBeenCalledWith('session-1', 'permission-1');
-  });
+      menu
+        ?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
+        .item(['session', 'server', 'project'].indexOf(scope))
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      expect(document.body.querySelector('[role="menu"]')).toBeNull();
+      expect(mocks.respondPermission).toHaveBeenCalledTimes(scope === 'server' ? 1 : 0);
+      expect(mocks.alwaysAllowPermissionForSession).toHaveBeenCalledTimes(
+        scope === 'session' ? 1 : 0
+      );
+      expect(mocks.alwaysAllowPermissionForProject).toHaveBeenCalledTimes(
+        scope === 'project' ? 1 : 0
+      );
+      if (scope === 'server') {
+        expect(mocks.respondPermission).toHaveBeenCalledWith('session-1', 'permission-1', 'always');
+      } else {
+        const approve =
+          scope === 'session'
+            ? mocks.alwaysAllowPermissionForSession
+            : mocks.alwaysAllowPermissionForProject;
+        expect(approve).toHaveBeenCalledWith('session-1', 'permission-1');
+      }
+      await Promise.resolve();
+      trigger?.click();
+      expect(document.body.querySelector('[role="menu"]')).not.toBeNull();
+    }
+  );
 
-  it('persists project always allow before responding', async () => {
-    cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
+  it.each(['Escape', 'outside click', 'trigger click'])(
+    'dismisses the scope menu with %s without responding',
+    async (dismissal) => {
+      cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
 
-    container?.querySelector<HTMLButtonElement>('[aria-label="Always allow options"]')?.click();
-    await Promise.resolve();
-    document.body
-      .querySelectorAll<HTMLButtonElement>('[aria-label="Always allow scope"] [role="menuitem"]')
-      .item(2)
-      .dispatchEvent(new MouseEvent('click', { bubbles: true }));
-
-    expect(mocks.alwaysAllowPermissionForProject).toHaveBeenCalledWith('session-1', 'permission-1');
-  });
+      const trigger = container?.querySelector<HTMLButtonElement>('[aria-label="Allow always"]');
+      trigger?.click();
+      await Promise.resolve();
+      expect(document.activeElement?.getAttribute('role')).toBe('menuitem');
+      if (dismissal === 'Escape') {
+        const event = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+        window.dispatchEvent(event);
+        expect(event.defaultPrevented).toBe(true);
+        expect(document.activeElement).toBe(trigger);
+      } else if (dismissal === 'outside click') {
+        document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+      } else {
+        trigger?.click();
+      }
+      expect(document.body.querySelector('[role="menu"]')).toBeNull();
+      expect(trigger?.getAttribute('aria-expanded')).toBe('false');
+      expect(container?.querySelector('.permission-prompt')).not.toBeNull();
+      expect(mocks.respondPermission).not.toHaveBeenCalled();
+      expect(mocks.alwaysAllowPermissionForSession).not.toHaveBeenCalled();
+      expect(mocks.alwaysAllowPermissionForProject).not.toHaveBeenCalled();
+    }
+  );
 
   it('keeps a permission response locked across prompt remounts', async () => {
     let resolveResponse!: () => void;

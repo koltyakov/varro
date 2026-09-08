@@ -81,14 +81,15 @@ export function PermissionPrompt(props: {
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
+      event.preventDefault();
       setAlwaysMenuOpen(false);
       alwaysMenuButton?.focus();
     };
     window.addEventListener('pointerdown', closeOnPointerDown);
-    window.addEventListener('keydown', closeOnEscape);
+    window.addEventListener('keydown', closeOnEscape, true);
     onCleanup(() => {
       window.removeEventListener('pointerdown', closeOnPointerDown);
-      window.removeEventListener('keydown', closeOnEscape);
+      window.removeEventListener('keydown', closeOnEscape, true);
     });
   });
 
@@ -179,21 +180,18 @@ export function PermissionPrompt(props: {
         </div>
       </Show>
 
-      <div class="permission-prompt-scope-note">
-        <Show
-          when={!props.permission.recoveredIncomplete}
-          fallback={
-            <>Approval details are incomplete after reload. Reject or wait for reconnection.</>
-          }
-        >
-          Always allow can cover matching requests in this session, until OpenCode restarts, or in
-          project config.
-        </Show>
-        <Show when={isAutoApproveMode() && !props.permission.recoveredIncomplete}>
-          {' '}
-          In Auto approve mode, it also guides AI review toward similar non-destructive actions.
-        </Show>
-      </div>
+      <Show when={props.permission.recoveredIncomplete || isAutoApproveMode()}>
+        <div class="permission-prompt-scope-note">
+          <Show
+            when={!props.permission.recoveredIncomplete}
+            fallback={
+              <>Approval details are incomplete after reload. Reject or wait for reconnection.</>
+            }
+          >
+            Always allow also guides AI review toward similar non-destructive actions.
+          </Show>
+        </div>
+      </Show>
 
       <div class="permission-prompt-actions">
         <button
@@ -209,47 +207,43 @@ export function PermissionPrompt(props: {
             Once
           </span>
         </button>
-        <div class="permission-always-button-group">
-          <button
-            class="question-btn question-btn-secondary permission-always-main"
-            aria-label="Allow always"
-            title="Always allow matching requests until OpenCode restarts"
-            disabled={responding() || props.permission.recoveredIncomplete}
-            onClick={() => handleAlways('server')}
+        <button
+          ref={(element) => (alwaysMenuButton = element)}
+          class="question-btn question-btn-secondary permission-always-main"
+          type="button"
+          aria-label="Allow always"
+          aria-haspopup="menu"
+          aria-expanded={alwaysMenuOpen()}
+          title="Choose where to allow matching requests"
+          disabled={responding() || props.permission.recoveredIncomplete}
+          onClick={() => {
+            if (!alwaysMenuOpen() && alwaysMenuButton) {
+              const rect = alwaysMenuButton.getBoundingClientRect();
+              setAlwaysMenuPosition({ left: rect.right, top: rect.top - 4 });
+            }
+            setAlwaysMenuOpen((open) => !open);
+          }}
+        >
+          <span class="permission-always-label" aria-hidden="true">
+            <span class="permission-action-label permission-action-label-full">Allow always</span>
+            <span class="permission-action-label permission-action-label-short">Always</span>
+          </span>
+          <svg
+            class="permission-always-chevron"
+            width="12"
+            height="12"
+            viewBox="0 0 15 15"
+            fill="none"
+            aria-hidden="true"
           >
-            <span class="permission-action-label permission-action-label-full" aria-hidden="true">
-              Allow always
-            </span>
-            <span class="permission-action-label permission-action-label-short" aria-hidden="true">
-              Always
-            </span>
-          </button>
-          <button
-            ref={(element) => (alwaysMenuButton = element)}
-            class="permission-always-menu-trigger"
-            type="button"
-            aria-label="Always allow options"
-            aria-haspopup="menu"
-            aria-expanded={alwaysMenuOpen()}
-            title="Always allow options"
-            disabled={responding() || props.permission.recoveredIncomplete}
-            onClick={() => {
-              if (!alwaysMenuOpen() && alwaysMenuButton) {
-                const rect = alwaysMenuButton.getBoundingClientRect();
-                setAlwaysMenuPosition({ left: rect.right, top: rect.top - 4 });
-              }
-              setAlwaysMenuOpen((open) => !open);
-            }}
-          >
-            <svg width="12" height="12" viewBox="0 0 15 15" fill="currentColor" aria-hidden="true">
-              <path
-                fill-rule="evenodd"
-                clip-rule="evenodd"
-                d="M8.625 2.5C8.625 3.12132 8.12132 3.625 7.5 3.625C6.87868 3.625 6.375 3.12132 6.375 2.5C6.375 1.87868 6.87868 1.375 7.5 1.375C8.12132 1.375 8.625 1.87868 8.625 2.5ZM8.625 7.5C8.625 8.12132 8.12132 8.625 7.5 8.625C6.87868 8.625 6.375 8.12132 6.375 7.5C6.375 6.87868 6.87868 6.375 7.5 6.375C8.12132 6.375 8.625 6.87868 8.625 7.5ZM7.5 13.625C8.12132 13.625 8.625 13.1213 8.625 12.5C8.625 11.8787 8.12132 11.375 7.5 11.375C6.87868 11.375 6.375 11.8787 6.375 12.5C6.375 13.1213 6.87868 13.625 7.5 13.625Z"
-              />
-            </svg>
-          </button>
-        </div>
+            <path
+              d="m4 6 3.5 3.5L11 6"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
         <button
           class="question-btn question-btn-danger"
           aria-label="Reject"
@@ -291,15 +285,15 @@ export function PermissionPrompt(props: {
             }}
           >
             <button type="button" role="menuitem" onClick={() => handleAlways('session')}>
-              <span>Always allow for this session</span>
-              <small>Until this session ends</small>
+              <span>For this session</span>
+              <small>Matching requests in this session</small>
             </button>
             <button type="button" role="menuitem" onClick={() => handleAlways('server')}>
-              <span>Always allow in server memory</span>
-              <small>Until OpenCode restarts</small>
+              <span>Until server restart</span>
+              <small>Matching requests across sessions</small>
             </button>
             <button type="button" role="menuitem" onClick={() => handleAlways('project')}>
-              <span>Always allow for this project</span>
+              <span>For this project</span>
               <small>Saved in the project OpenCode config</small>
             </button>
           </div>

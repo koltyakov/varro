@@ -42,6 +42,7 @@ test.describe('auto-scroll', () => {
     });
     const metricsBefore = await getScrollMetrics(page, '.interactive-list');
     await page.getByRole('button', { name: 'Allow always' }).click();
+    await page.getByRole('menuitem', { name: /Until server restart/ }).click();
 
     const samples = await list.evaluate(async (element) => {
       const result: Array<{ assistantTop: number | null; visibleToolCount: number }> = [];
