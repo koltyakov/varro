@@ -790,7 +790,7 @@ function prependLinkIcon(anchor: HTMLAnchorElement, icon: HTMLElement, keepFirst
   leadingLabel.className = 'link-leading-label';
   leadingLabel.textContent = leadingText;
   leadingContent.append(icon, leadingLabel);
-  anchor.prepend(leadingContent);
+  firstText.before(leadingContent);
 }
 
 function linkifySessionReferences(fragment: DocumentFragment) {

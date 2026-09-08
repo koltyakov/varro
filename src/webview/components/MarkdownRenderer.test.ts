@@ -474,6 +474,29 @@ describe('MarkdownRenderer', () => {
     });
   });
 
+  it.each([
+    ['`claude-agent-acp`', 'code'],
+    ['**claude-agent-acp**', 'strong'],
+    ['*claude-agent-acp*', 'em'],
+    ['**`claude-agent-acp`**', 'strong code'],
+  ])('preserves formatting when decorating a link labeled %s', (label, selector) => {
+    cleanup = render(
+      () => MarkdownRenderer({ content: `[${label}](https://example.test)` }),
+      container!
+    );
+
+    const link = container?.querySelector('a.external-link');
+    const formattedLabel = link?.querySelector(selector);
+    expect(link?.textContent).toBe('claude-agent-acp');
+    expect(link?.getAttribute('aria-label')).toBe('claude-agent-acp');
+    expect(formattedLabel?.textContent).toBe('claude-agent-acp');
+    expect(formattedLabel?.querySelector('.link-leading-label')?.textContent).toBe('c');
+    expect(
+      formattedLabel?.querySelector('.link-leading-content > .external-link-icon')
+    ).not.toBeNull();
+    expect(link?.querySelectorAll('.external-link-icon')).toHaveLength(1);
+  });
+
   it('renders linked badge markdown as user-clicked text links', () => {
     cleanup = render(
       () =>
