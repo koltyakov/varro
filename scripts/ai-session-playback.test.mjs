@@ -49,7 +49,7 @@ test('normal discovery excludes local capture playback', () => {
       assert.ok(files.includes('scroll-tool-flicker.spec.ts'));
       assert.ok(files.every((file) => !file.includes('session-playback.spec.ts')));
       const flicker = report.suites.find((suite) => suite.file === 'scroll-tool-flicker.spec.ts');
-      assert.equal(flicker.specs.length, 4);
+      assert.equal(flicker.specs.length, 5);
       assert.ok(flicker.specs.some((spec) => spec.title === 'mocked session playback has no frame-level flicker'));
     }
   }
@@ -69,6 +69,19 @@ test('preserves short event gaps and caps long idle gaps', () => {
       { delayMs: 500, sourceGapMs: 5_000 },
     ]
   );
+});
+
+test('never lengthens medium gaps and preserves burst and threshold timing', () => {
+  const gaps = [0, 1, 249, 250, 251, 300, 499, 500, 501, 30_000];
+  let offsetMs = 0;
+  const timeline = buildReplayTimeline(gaps.map((gap) => ({
+    offsetMs: (offsetMs += gap), event: { type: 'test' },
+  })));
+  assert.deepEqual(timeline.map((entry) => entry.delayMs), [0, 1, 249, 250, 251, 300, 499, 500, 500, 500]);
+  for (const value of [NaN, Infinity, -1]) {
+    assert.throws(() => buildReplayTimeline([], { shortGapMs: value }), /timing/);
+    assert.throws(() => buildReplayTimeline([], { maxGapMs: value }), /timing/);
+  }
 });
 
 test('filters another session and removes stream sequence metadata', () => {

@@ -1023,6 +1023,10 @@ describe('MessageList compact activity', () => {
     );
 
     await vi.advanceTimersByTimeAsync(420);
+    expect(
+      container?.querySelector('[data-activity-part-id="search-1"].is-exiting')
+    ).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(250);
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       'Explored: 1 file, 1 search'
     );
@@ -1539,6 +1543,10 @@ describe('MessageList compact activity', () => {
     expect(followerRow?.classList).not.toContain('interactive-item-render-empty');
 
     await vi.advanceTimersByTimeAsync(420);
+    expect(
+      container?.querySelector('[data-activity-part-id="command-running"].is-exiting')
+    ).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(250);
     expect(container?.querySelector('[data-activity-part-id="command-running"]')).toBeNull();
     expect(followerRow?.classList).toContain('interactive-item-render-empty');
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
@@ -1881,6 +1889,10 @@ describe('MessageList compact activity', () => {
     ).not.toBeNull();
 
     await vi.advanceTimersByTimeAsync(420);
+    expect(
+      container?.querySelector('[data-activity-part-id="command-1"].is-exiting')
+    ).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(250);
 
     expect(container?.querySelector('.assistant-active-activity-tray')).toBeNull();
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(

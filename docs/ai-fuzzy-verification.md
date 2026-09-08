@@ -16,6 +16,10 @@ Use this playbook when the user asks to **Run AI tests** or **Run fuzzy tests**.
 aliases. Unless the user narrows the scope, run the standard suite defined below and report every
 scenario as `PASS`, `FAIL`, or `BLOCKED`.
 
+**Run streaming tests** invokes the separate [AI streaming suite](ai-streaming-verification.md).
+It selects existing history and replays it in the real VS Code sandbox without new model calls.
+It does not replace the live-model scenarios in this playbook.
+
 This is exploratory verification, not a replacement for deterministic tests. Any failure found here
 must be reduced to the smallest repeatable action sequence and, when practical, preserved as a unit or
 Playwright regression.

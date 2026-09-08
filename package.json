@@ -55,6 +55,7 @@
     "ai:preconditions": "node scripts/ai-fuzzy-preconditions.mjs",
     "ai:live": "node scripts/ai-fuzzy-live.mjs",
     "ai:playback": "node scripts/ai-session-playback.mjs",
+    "ai:streaming": "node scripts/ai-streaming.mjs",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc -p tsconfig.json",
     "typecheck:suggestions": "node scripts/check-ts-suggestions.mjs",

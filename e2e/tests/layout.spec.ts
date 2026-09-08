@@ -338,6 +338,24 @@ test('keeps active-tray wheel input local before outer transcript movement', asy
 });
 
 test('keeps the active tool gap fixed through its entrance animation', async ({ page }) => {
+  await page.addInitScript(() => {
+    document.addEventListener('animationstart', (event) => {
+      if (
+        !(event.target instanceof HTMLElement) ||
+        event.animationName !== 'assistant-active-activity-in'
+      ) {
+        return;
+      }
+      const animation = event.target
+        .getAnimations()
+        .find(
+          (candidate) =>
+            candidate instanceof CSSAnimation &&
+            candidate.animationName === 'assistant-active-activity-in'
+        );
+      if (animation) animation.pause();
+    });
+  });
   await page.goto('/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayCount=1');
   const activeTool = page.locator('.assistant-active-activity-item .chat-tool-invocation-part');
   await expect(activeTool).toBeVisible();

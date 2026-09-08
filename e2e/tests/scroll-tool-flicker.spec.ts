@@ -285,6 +285,82 @@ test('running tool updates preserve the node and its current entrance animation'
   );
 });
 
+test('tool completion preserves the running outer node through retention and exit', async ({
+  page,
+}) => {
+  await page.goto(
+    '/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayCount=3&activeTrayCompletedPrefix=1'
+  );
+  const items = page.locator('.assistant-active-activity-item');
+  await expect(items).toHaveCount(3);
+  const result = await page.evaluate(async () => {
+    // SAFETY: The controlled tool-cards harness exposes this typed test API.
+    const harness = (window as HarnessWindow).__varroE2E;
+    const running = harness
+      .getSessionMessages('session-tool-cards')
+      .flatMap((message) => message.parts)
+      .filter((part): part is ToolPart => part.type === 'tool' && part.state.status === 'running');
+    const originals = running.map((part) =>
+      document.querySelector(`.assistant-active-activity-item[data-activity-part-id="${part.id}"]`)
+    );
+    if (originals.some((node) => !node)) throw new Error('Expected all running outer nodes');
+    await Promise.all(
+      originals.flatMap((node) => node!.getAnimations().map((animation) => animation.finished))
+    );
+    const samples: Array<{ sameNodes: boolean; retained: number; exiting: number; count: number }> =
+      [];
+    for (const part of running.toReversed()) {
+      if (part.state.status !== 'running') throw new Error('Expected a running tool');
+      harness.replayServerEvent({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            ...part,
+            state: {
+              ...part.state,
+              status: 'completed',
+              title: part.state.title ?? part.tool,
+              output: 'Done',
+              metadata: {},
+              time: { ...part.state.time, end: Date.now() },
+            },
+          } satisfies ToolPart,
+        },
+      });
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    const start = performance.now();
+    do {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const current = [...document.querySelectorAll('.assistant-active-activity-item')];
+      samples.push({
+        sameNodes: current.every((node) => originals.includes(node)),
+        retained: current.filter((node) => node.classList.contains('is-completed')).length,
+        exiting: current.filter((node) => node.classList.contains('is-exiting')).length,
+        count: current.length,
+      });
+    } while (performance.now() - start < 3_500);
+    return { samples, originalsDisconnected: originals.every((node) => !node!.isConnected) };
+  });
+  expect(
+    result.samples.some((sample) => sample.retained === 3),
+    'Must observe minimum retention'
+  ).toBe(true);
+  expect(
+    result.samples.some((sample) => sample.exiting > 0),
+    'Must observe the real exit'
+  ).toBe(true);
+  expect(
+    result.samples.every((sample) => sample.sameNodes),
+    'Completion must not replace a running outer node'
+  ).toBe(true);
+  expect(result.samples.at(-1)?.count).toBe(0);
+  expect(result.originalsDisconnected).toBe(true);
+  await expect(items).toHaveCount(0);
+  await expect(page.locator('.assistant-active-activity-items')).toHaveCount(0);
+  await expect(page.locator('.activity-exit-bottom-reserve')).toHaveCount(0);
+});
+
 for (const removedIndex of [0, 1]) {
   test(`a ${removedIndex === 0 ? 'leading' : 'middle'} completion does not restart a later tool exit when the tray splits`, async ({
     page,

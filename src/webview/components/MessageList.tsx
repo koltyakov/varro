@@ -7101,10 +7101,13 @@ export function MessageList() {
       };
       const exitTimer = holdMs > 0 ? setTimeout(beginExit, holdMs) : undefined;
       if (holdMs === 0) beginExit();
-      const finishTimer = setTimeout(() => {
-        const timers = activityCompletionTimers.get(key);
-        if (timers) completeActivityExit(key, timers);
-      }, holdMs + ACTIVITY_EXIT_MS);
+      const finishTimer = setTimeout(
+        () => {
+          const timers = activityCompletionTimers.get(key);
+          if (timers) completeActivityExit(key, timers);
+        },
+        holdMs + ACTIVITY_EXIT_MS + ACTIVITY_EXIT_CLEANUP_GRACE_MS
+      );
       activityCompletionTimers.set(key, { finishTimer, exitTimer });
     }
 

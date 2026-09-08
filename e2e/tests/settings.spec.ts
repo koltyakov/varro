@@ -70,10 +70,13 @@ test('thinking visibility preserves a detached virtualized anchor', async ({ pag
     }, width);
     await page.waitForTimeout(150);
   }
-  const afterResize = await anchorElement.evaluate(
-    (element) => element.getBoundingClientRect().top
-  );
-  expect(Math.abs(afterResize - anchor.top)).toBeLessThan(1.5);
+  await expect
+    .poll(() =>
+      anchorElement.evaluate((element, top) => {
+        return Math.abs(element.getBoundingClientRect().top - top);
+      }, anchor.top)
+    )
+    .toBeLessThan(1.5);
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
 
   for (const expectedThinkingCount of [0, 1]) {

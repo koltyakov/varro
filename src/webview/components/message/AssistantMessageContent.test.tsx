@@ -923,6 +923,23 @@ describe('AssistantMessageContent', () => {
     expect(container?.querySelector('.assistant-message-flow-item-streamed')).toBeNull();
   });
 
+  it.each([undefined, new Set<string>()])(
+    'does not replay settled tool history with visible membership %s',
+    (visibleActiveActivityPartKeys) => {
+      renderAssistantMessageContent({
+        parts: [toolPart('command-history', 'bash', { command: 'npm test' })],
+        visibleActiveActivityPartKeys,
+      });
+
+      expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+        'Explored: 1 command'
+      );
+      expect(container?.querySelector('.assistant-active-activity-item')).toBeNull();
+      expect(container?.querySelector('.assistant-active-activity-tray')).toBeNull();
+      expect(container?.querySelector('.assistant-message-flow-item-streamed')).toBeNull();
+    }
+  );
+
   it('does not replay reveals when remounted with a shared claim function', () => {
     const info = createAssistantMessage({ time: { created: 0 } });
     const claimedKeys = new Map<string, Set<string>>();

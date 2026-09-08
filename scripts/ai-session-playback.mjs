@@ -84,7 +84,7 @@ export function buildReplayTimeline(
   events,
   { shortGapMs = DEFAULT_SHORT_GAP_MS, maxGapMs = DEFAULT_MAX_GAP_MS } = {}
 ) {
-  if (shortGapMs < 0 || maxGapMs < shortGapMs) {
+  if (!Number.isFinite(shortGapMs) || !Number.isFinite(maxGapMs) || shortGapMs < 0 || maxGapMs < shortGapMs) {
     throw new Error('Replay timing requires 0 <= shortGapMs <= maxGapMs');
   }
   let previousOffset = 0;
@@ -94,7 +94,7 @@ export function buildReplayTimeline(
     previousOffset = offsetMs;
     return {
       ...entry,
-      delayMs: sourceGapMs <= shortGapMs ? sourceGapMs : maxGapMs,
+      delayMs: sourceGapMs <= shortGapMs ? sourceGapMs : Math.min(sourceGapMs, maxGapMs),
       sourceGapMs,
     };
   });

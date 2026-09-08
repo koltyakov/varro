@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { access, mkdir, mkdtemp } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -86,6 +86,25 @@ const launchArgs =
   process.platform === 'darwin'
     ? ['-n', '-a', path.resolve(executable, '../../..'), '--args', ...vscodeArgs]
     : vscodeArgs;
+// Preserve recovery identifiers before macOS hands the launch to LaunchServices.
+if (process.env.VARRO_AI_LAUNCH_INTENT) {
+  await writeFile(
+    process.env.VARRO_AI_LAUNCH_INTENT,
+    `${JSON.stringify(
+      {
+        executable,
+        workspace,
+        profileRoot,
+        userDataDir: userData,
+        extensionsDir: extensions,
+        remoteDebuggingPort,
+      },
+      null,
+      2
+    )}\n`,
+    { flag: 'wx', mode: 0o600 }
+  );
+}
 const child = spawn(launchExecutable, launchArgs, {
   cwd: projectRoot,
   detached: true,
@@ -114,9 +133,7 @@ await new Promise((resolve, reject) => {
 });
 
 const codePid =
-  process.platform === 'darwin'
-    ? await waitForVscodeProcess(executable, userData)
-    : child.pid;
+  process.platform === 'darwin' ? await waitForVscodeProcess(executable, userData) : child.pid;
 const focusDeadline = Date.now() + 15_000;
 while (true) {
   try {

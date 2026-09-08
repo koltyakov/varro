@@ -493,9 +493,10 @@ export function AssistantMessageContent(props: {
     if (!isLocallyCompactActivityCandidate(part)) return false;
     const key = getAssistantActivityPartKey(part);
     return (
-      (isAssistantActivityPartRunning(part) &&
-        (!props.visibleActiveActivityPartKeys ||
-          props.visibleActiveActivityPartKeys.has(getAssistantActivityPartKey(part)))) ||
+      // Completion can reach projection before the lifecycle assigns retention.
+      (props.visibleActiveActivityPartKeys
+        ? props.visibleActiveActivityPartKeys.has(key)
+        : isAssistantActivityPartRunning(part)) ||
       !!props.retainedActivityPartKeys?.has(key) ||
       !!props.exitingActivityPartKeys?.has(key)
     );
