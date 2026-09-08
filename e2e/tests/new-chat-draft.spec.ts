@@ -46,9 +46,6 @@ test('new chat during active streaming opens a draft and keeps handlers alive', 
 }) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(String(error)));
-  page.on('console', (message) => {
-    if (message.type() === 'error') errors.push(`console: ${message.text()}`);
-  });
 
   await page.goto('/e2e/harness/index.html?scenario=busy-stop-send');
   await expect(

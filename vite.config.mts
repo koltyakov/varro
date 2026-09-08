@@ -30,7 +30,8 @@ export default defineConfig(({ mode }) => ({
   optimizeDeps: {
     entries: ['preview.html', 'e2e/harness/index.html'],
   },
-  server: mode === 'e2e' ? { hmr: false, watch: null } : undefined,
+  // Disabling HMR alone still lets Vite reload the page after a socket reconnect.
+  server: mode === 'e2e' ? { hmr: false, ws: false, watch: null } : undefined,
   build: {
     outDir: resolve(projectRoot, 'dist/webview'),
     emptyOutDir: true,

@@ -1,10 +1,11 @@
 /* oxlint-disable anti-slop/no-runtime-typeof -- This script validates captured JSON and SQLite rows at their I/O boundaries. */
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 const DEFAULT_DATABASE = 'varro-playback.db';
 const DEFAULT_SHORT_GAP_MS = 250;
@@ -377,36 +378,121 @@ function listCaptures(filePath) {
   }
 }
 
-async function replay(filePath, id, options) {
+export async function replay(filePath, id, options) {
   const capture = readPlaybackCapture(filePath, id);
-  const replayDirectory = await mkdtemp(path.join(os.tmpdir(), 'varro-playback-run-'));
-  const replayFile = path.join(replayDirectory, 'capture.json');
   const timeline = buildReplayTimeline(capture.events, {
     shortGapMs: Number(options['short-gap-ms'] ?? DEFAULT_SHORT_GAP_MS),
     maxGapMs: Number(options['max-gap-ms'] ?? DEFAULT_MAX_GAP_MS),
   });
-  await writeFile(replayFile, `${JSON.stringify({ capture, timeline })}\n`);
-  const npmCli = process.env.npm_execpath;
-  const command = npmCli ? process.execPath : process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  const args = npmCli
-    ? [npmCli, 'run', 'test:e2e', '--', '--config', 'playwright.ai-playback.config.ts']
-    : ['run', 'test:e2e', '--', '--config', 'playwright.ai-playback.config.ts'];
-  const child = spawn(command, args, {
-    stdio: 'inherit',
-    env: {
-      ...process.env,
-      VARRO_PLAYBACK_ID: String(id),
-      VARRO_PLAYBACK_FILE: replayFile,
-    },
-  });
-  const code = await new Promise((resolve, reject) => {
-    child.once('error', reject);
-    child.once('exit', (exitCode, signal) => {
-      if (signal) reject(new Error(`Playback test exited from signal ${signal}`));
-      else resolve(exitCode ?? 1);
+  // Allow two minutes for the web server and one minute for browser startup and teardown.
+  const timeoutMs = Math.ceil(timeline.reduce((total, entry) => total + entry.delayMs, 0)) + 180_000;
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 2_147_483_647) {
+    throw new Error('Replay duration exceeds the supported subprocess deadline');
+  }
+  const replayDirectory = await mkdtemp(path.join(os.tmpdir(), 'varro-playback-run-'));
+  let timer;
+  let onInterrupt;
+  try {
+    const replayFile = path.join(replayDirectory, 'capture.json');
+    await writeFile(replayFile, `${JSON.stringify({ capture, timeline })}\n`);
+    const cli = fileURLToPath(import.meta.resolve('@playwright/test/cli'));
+    const child = spawn(process.execPath, [cli, 'test', '--config', 'playwright.ai-playback.config.ts'], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      detached: process.platform !== 'win32',
+      stdio: 'inherit',
+      env: {
+        ...process.env,
+        VARRO_PLAYBACK_ID: String(id),
+        VARRO_PLAYBACK_FILE: replayFile,
+      },
     });
-  }).finally(() => rm(replayDirectory, { recursive: true, force: true }));
-  if (code !== 0) process.exitCode = code;
+    const code = await new Promise((resolve, reject) => {
+      let stopping = false;
+      const stop = async (error) => {
+        if (stopping) return;
+        stopping = true;
+        clearTimeout(timer);
+        try {
+          if (child.pid) {
+            if (process.platform === 'win32') {
+              await promisify(execFile)('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+                timeout: 5_000,
+                killSignal: 'SIGKILL',
+                windowsHide: true,
+              });
+            } else {
+              const owned = [child.pid];
+              const groups = new Set([child.pid]);
+              let cleanupError;
+              try {
+                // Playwright can detach its web server, so the root process group is not enough.
+                const { stdout } = await promisify(execFile)('ps', ['-A', '-o', 'pid=,ppid=,pgid='], {
+                  timeout: 5_000,
+                  killSignal: 'SIGKILL',
+                  maxBuffer: 4 * 1024 * 1024,
+                });
+                const rows = stdout
+                  .trim()
+                  .split('\n')
+                  .map((row) => row.trim().split(/\s+/).map(Number));
+                for (const parent of owned) {
+                  for (const [pid, ppid] of rows) {
+                    if (ppid === parent) owned.push(pid);
+                  }
+                }
+                for (const [pid, , pgid] of rows) {
+                  if (owned.includes(pid) && owned.includes(pgid)) groups.add(pgid);
+                }
+              } catch (discoveryError) {
+                cleanupError = discoveryError;
+              }
+              for (const pid of [
+                ...owned.toReversed(),
+                ...[...groups].toReversed().map((group) => -group),
+              ]) {
+                try {
+                  process.kill(pid, 'SIGKILL');
+                } catch (killError) {
+                  if (killError.code !== 'ESRCH') cleanupError ??= killError;
+                }
+              }
+              if (cleanupError) throw cleanupError;
+            }
+          }
+          reject(error);
+        } catch (cleanupError) {
+          reject(new Error(`${error.message}; process cleanup failed: ${cleanupError.message}`, {
+            cause: cleanupError,
+          }));
+        } finally {
+          // A failed OS cleanup must not turn the deadline into another indefinite wait.
+          child.unref();
+        }
+      };
+      onInterrupt = (signal) => {
+        void stop(new Error(`Playback interrupted by ${signal}`));
+      };
+      process.on('SIGINT', onInterrupt);
+      process.on('SIGTERM', onInterrupt);
+      timer = setTimeout(() => {
+        void stop(new Error(`Playback timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      child.once('error', reject);
+      child.once('exit', (exitCode, signal) => {
+        if (stopping) return;
+        if (signal) reject(new Error(`Playback test exited from signal ${signal}`));
+        else resolve(exitCode ?? 1);
+      });
+    });
+    if (code !== 0) process.exitCode = code;
+  } finally {
+    clearTimeout(timer);
+    if (onInterrupt) {
+      process.off('SIGINT', onInterrupt);
+      process.off('SIGTERM', onInterrupt);
+    }
+    await rm(replayDirectory, { recursive: true, force: true });
+  }
 }
 
 async function main() {

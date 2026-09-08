@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import childProcess, { execFileSync } from 'node:child_process';
+import { once } from 'node:events';
+import fs, { access, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -11,6 +14,7 @@ import {
   eventBelongsToSession,
   normalizeCapturedEvents,
   readPlaybackCapture,
+  replay,
   reconstructHistoricalEvents,
   savePlaybackCapture,
 } from './ai-session-playback.mjs';
@@ -37,6 +41,10 @@ test('normal discovery excludes local capture playback', () => {
     if (local) {
       assert.deepEqual(files, ['session-playback.spec.ts']);
       assert.equal(report.config.workers, 1);
+      const servers = [report.config.webServer].flat();
+      assert.ok(servers[0], 'playback must expose a single web server, not a merged server array');
+      assert.equal(servers.length, 1);
+      assert.equal(servers[0].reuseExistingServer, true);
     } else {
       assert.ok(files.includes('scroll-tool-flicker.spec.ts'));
       assert.ok(files.every((file) => !file.includes('session-playback.spec.ts')));
@@ -179,4 +187,181 @@ test('reconstructs historical text streaming and tool lifecycle boundaries', () 
   assert.deepEqual(toolStates, ['pending', 'running', 'completed']);
   assert.equal(streamed, 'streamed response');
   assert.equal(events.at(-1).event.properties.status.type, 'idle');
+});
+
+const spawn = childProcess.spawn;
+const hangingProcess = `
+  process.on('SIGINT', () => {});
+  process.on('SIGTERM', () => {});
+  setInterval(() => {}, 1000);
+  process.send(process.pid);
+`;
+
+async function prepareReplay(t, source) {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'varro-playback-test-'));
+  const database = path.join(directory, 'capture.db');
+  const { id } = savePlaybackCapture(database, {
+    label: 'subprocess test',
+    scenario: 'TEST',
+    capturedAt: '2026-09-07T00:00:00.000Z',
+    session: { id: 'session-a' },
+    initialMessages: [],
+    finalMessages: [],
+    events: [20, 120, 5_120].map((offsetMs) => ({
+      offsetMs,
+      event: { type: 'session.status', properties: { sessionID: 'session-a' } },
+    })),
+  });
+  const listeners = ['SIGINT', 'SIGTERM'].map((signal) => process.listeners(signal));
+  const children = [];
+  let invocation;
+  const started = Promise.withResolvers();
+  t.mock.method(childProcess, 'spawn', (command, args, options) => {
+    invocation = { command, args, options };
+    const child = spawn(
+      source === null ? path.join(directory, 'missing-node') : process.execPath,
+      ['--input-type=commonjs', '-e', source ?? ''],
+      {
+        ...options,
+        stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+      }
+    );
+    children.push(child);
+    child.once('message', (pids) => started.resolve(pids));
+    child.once('error', started.reject);
+    return child;
+  });
+  syncBuiltinESMExports();
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  t.after(async () => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+    t.mock.timers.reset();
+    for (const child of children) {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    }
+    await rm(directory, { recursive: true, force: true });
+  });
+  return {
+    run: () => replay(database, id, {}),
+    started: started.promise,
+    invocation: () => invocation,
+    async assertClean(replayFile = invocation.options.env.VARRO_PLAYBACK_FILE) {
+      await assert.rejects(access(path.dirname(replayFile)), { code: 'ENOENT' });
+      assert.deepEqual(process.listeners('SIGINT'), listeners[0]);
+      assert.deepEqual(process.listeners('SIGTERM'), listeners[1]);
+    },
+  };
+}
+
+for (const reason of ['timeout', 'SIGINT', 'SIGTERM']) {
+  test(`replay kills only its owned hanging process tree on ${reason}`, { timeout: 15_000 }, async (t) => {
+    const fixture = await prepareReplay(t, `
+      const { spawn } = require('node:child_process');
+      const { once } = require('node:events');
+      process.on('SIGINT', () => {});
+      process.on('SIGTERM', () => {});
+      Promise.all([false, true].map(async (detached) => {
+        const child = spawn(process.execPath, ['-e', ${JSON.stringify(hangingProcess)}], {
+          detached,
+          stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+        });
+        const [pid] = await once(child, 'message');
+        return pid;
+      })).then((pids) => process.send([process.pid, ...pids]));
+      setInterval(() => {}, 1000);
+    `);
+    const unrelated = spawn(process.execPath, ['-e', hangingProcess], {
+      stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+    });
+    t.after(() => unrelated.kill('SIGKILL'));
+    await once(unrelated, 'message');
+    const result = fixture.run();
+    const rejected = assert.rejects(
+      result,
+      reason === 'timeout'
+        ? /Playback timed out after 180620ms/
+        : new RegExp(`Playback interrupted by ${reason}`)
+    );
+    const pids = await fixture.started;
+    t.after(() => {
+      for (const pid of pids) {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch (error) {
+          if (error.code !== 'ESRCH') throw error;
+        }
+      }
+    });
+    const { command, args, options } = fixture.invocation();
+    assert.equal(command, process.execPath);
+    assert.equal(args[0], fileURLToPath(import.meta.resolve('@playwright/test/cli')));
+    assert.deepEqual(args.slice(1), ['test', '--config', 'playwright.ai-playback.config.ts']);
+    assert.equal(options.detached, process.platform !== 'win32');
+    const { timeline } = JSON.parse(await readFile(options.env.VARRO_PLAYBACK_FILE, 'utf8'));
+    assert.equal(timeline.reduce((total, entry) => total + entry.delayMs, 0), 620);
+    // Advance only the deadline clock, after every real descendant has reported readiness.
+    t.mock.timers.tick(180_619);
+    assert.ok(pids.every((pid) => process.kill(pid, 0)));
+    if (reason === 'timeout') t.mock.timers.tick(1);
+    else {
+      process.emit(reason, reason);
+      process.emit(reason, reason);
+    }
+    await rejected;
+    for (const pid of pids) {
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        try {
+          process.kill(pid, 0);
+        } catch (error) {
+          assert.equal(error.code, 'ESRCH');
+          break;
+        }
+        await delay(10);
+      }
+      assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
+    }
+    assert.equal(process.kill(unrelated.pid, 0), true);
+    await fixture.assertClean();
+  });
+}
+
+for (const code of [0, 7]) {
+  test(
+    `replay preserves exit code ${code} and removes its fixture and handlers`,
+    { timeout: 10_000 },
+    async (t) => {
+      const fixture = await prepareReplay(t, `process.send(process.pid); process.exit(${code});`);
+      const previousExitCode = process.exitCode;
+      t.after(() => {
+        process.exitCode = previousExitCode;
+      });
+      await fixture.run();
+      assert.equal(process.exitCode, code === 0 ? previousExitCode : code);
+      t.mock.timers.tick(200_000);
+      await fixture.assertClean();
+    }
+  );
+}
+
+test('replay removes its fixture and handlers on spawn failure', { timeout: 10_000 }, async (t) => {
+  const fixture = await prepareReplay(t, null);
+  const failedStart = assert.rejects(fixture.started, { code: 'ENOENT' });
+  await assert.rejects(fixture.run(), { code: 'ENOENT' });
+  await failedStart;
+  t.mock.timers.tick(200_000);
+  await fixture.assertClean();
+});
+
+test('replay removes its temporary directory when writing the fixture fails', async (t) => {
+  const fixture = await prepareReplay(t, '');
+  let replayFile;
+  t.mock.method(fs, 'writeFile', async (file) => {
+    replayFile = file;
+    throw new Error('fixture write failed');
+  });
+  syncBuiltinESMExports();
+  await assert.rejects(fixture.run(), /fixture write failed/);
+  assert.equal(fixture.invocation(), undefined);
+  await fixture.assertClean(replayFile);
 });

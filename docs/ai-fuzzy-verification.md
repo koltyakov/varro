@@ -342,10 +342,20 @@ npm run ai:playback -- list
 npm run ai:playback -- replay --id <capture-id>
 ```
 
-Normal E2E runs use a deterministic mocked session and never load the playback database or capture
-files. The local replay CLI reads the database and runs `e2e/local/session-playback.spec.ts` through
+Normal E2E runs use deterministic mocked sessions and never load the local playback database or recorded
+capture files. The local replay CLI reads the database and runs `e2e/local/session-playback.spec.ts` through
 `playwright.ai-playback.config.ts`. Both paths share the same frame assertions and canonical transcript
 check; recorded captures are only used by this explicit local AI test invocation.
+
+Playback reuses one harness server. E2E mode disables Vite's development WebSocket as well as HMR;
+disabling HMR alone still allows a dropped socket to reload the page during replay. The CLI gives
+Playwright the compressed timeline duration plus 180 seconds for startup, replay, and teardown. A
+deadline or interruption terminates owned processes and removes the temporary fixture. Failed local
+playback traces are retained under `tmp/playwright-playback/` until the next local replay.
+
+`e2e/tests/playback-runner.spec.ts` covers server reuse with a generated fixture and socket loss during
+an active browser evaluation. `scripts/ai-session-playback.test.mjs` covers the subprocess deadline,
+interruption, descendant cleanup, and fixture cleanup without relying on a working browser.
 
 Replay preserves source gaps of 250 ms or less. It caps longer waits at 500 ms, so token bursts and fast
 tool handoffs keep their original spacing while model and command idle time does not make the test drag.
