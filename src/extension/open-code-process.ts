@@ -1595,10 +1595,6 @@ export class OpenCodeProcess {
   async syncInjectedConfigFile() {
     await this.runInjectedConfigOperation(async () => {
       await sweepStaleInjectedConfigDirectories();
-      if (!this.hasInjectedConfigOverride()) {
-        await this.removeInjectedConfigFile(this.injectedConfigPath);
-        return;
-      }
       if (getEnvironmentValue(process.env, 'OPENCODE_CONFIG')?.trim()) {
         await this.removeInjectedConfigFile(this.injectedConfigPath);
         logger.warn(
@@ -1629,7 +1625,9 @@ export class OpenCodeProcess {
     if (this.compactionSettings.reserved !== null) {
       compaction.reserved = this.compactionSettings.reserved;
     }
-    const config: Record<string, unknown> = {};
+    const config: Record<string, unknown> = {
+      experimental: { continue_loop_on_deny: true },
+    };
     if (Object.keys(compaction).length > 0) config.compaction = compaction;
     if (this.askAgentEnabled && !(await this.hasConfiguredAskAgent())) {
       config.agent = { ask: ASK_AGENT };
@@ -1708,10 +1706,6 @@ export class OpenCodeProcess {
 
   hasInjectedCompactionOverride() {
     return this.compactionSettings.auto !== null || this.compactionSettings.reserved !== null;
-  }
-
-  hasInjectedConfigOverride() {
-    return this.hasInjectedCompactionOverride() || this.askAgentEnabled;
   }
 
   async updateAskAgentEnabled(enabled: boolean, callbacks: UpdateCompactionSettingsCallbacks) {

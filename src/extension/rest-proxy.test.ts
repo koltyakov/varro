@@ -490,6 +490,17 @@ describe('RestProxy handleRequest', () => {
 
     const workspaceBody = vi.mocked(callbacks.server.request).mock.calls[0]?.[2];
     const folderBody = vi.mocked(callbacks.server.request).mock.calls[1]?.[2];
+    for (const body of [workspaceBody, folderBody]) {
+      for (const instruction of [
+        'do not retry the denied action or bypass the rejection through another tool, command, or subagent',
+        'Continue independent permitted work when possible',
+        'explain what is blocked and ask the user how to proceed',
+      ]) {
+        expect(body).toEqual(
+          expect.objectContaining({ system: expect.stringContaining(instruction) })
+        );
+      }
+    }
     expect(workspaceBody).toEqual(
       expect.objectContaining({
         system: expect.stringContaining('Treat these folders as one logical workspace'),

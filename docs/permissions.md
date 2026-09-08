@@ -25,6 +25,16 @@ When OpenCode asks for permission, Varro places the request beside the action th
   server restarts. Its menu also offers a session-only rule or a persistent project-config rule.
 - `Reject` denies the request.
 
+On Varro-managed servers, rejecting a request lets the agent continue without that action. The agent
+is instructed not to retry or bypass the rejection, to continue permitted work, and to explain when
+the denied action blocks completion. Use Stop to end the run. OpenCode may also reject other pending
+requests in the same session. Skipping a question likewise lets the agent continue.
+
+This uses OpenCode's `experimental.continue_loop_on_deny: true` runtime default. Project or inline
+config can override it. If you manage the server yourself or supply `OPENCODE_CONFIG`, enable that
+setting in your own OpenCode config. After updating Varro, restart its server once active work has
+finished to load the new default.
+
 Read the command, path, URL, or tool details before responding. `Always` can cover later matching actions, so use `Once` when the scope is unclear. Child-session requests appear in the parent conversation, but the permission still belongs to the child.
 
 ## How automatic review works

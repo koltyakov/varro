@@ -1308,7 +1308,7 @@ export class RestProxy {
         }
       }
       if (promptSessionID && promptWorkspaceDirectory) {
-        forwardedBody = this.withWorkspaceScopeSystemPrompt(
+        forwardedBody = this.withSessionSystemPrompt(
           forwardedBody,
           this.getSessionWorkspaceScope(promptSessionID),
           promptWorkspaceDirectory
@@ -3427,7 +3427,7 @@ export class RestProxy {
     );
   }
 
-  private withWorkspaceScopeSystemPrompt(
+  private withSessionSystemPrompt(
     body: unknown,
     scope: SessionWorkspaceScope,
     workingDirectory: string
@@ -3452,9 +3452,11 @@ export class RestProxy {
             'Treat the selected folder as the primary working scope. The other listed folders are sibling workspace context; accessing them may require external_directory approval.',
           ].join(' ');
     const existing = typeof record.system === 'string' ? record.system.trim() : '';
+    const permissionPrompt =
+      'If the user rejects a tool permission, do not retry the denied action or bypass the rejection through another tool, command, or subagent. Continue independent permitted work when possible. If completing the task requires the denied action, explain what is blocked and ask the user how to proceed. A rejected permission is not a request to abandon the whole task.';
     return {
       ...record,
-      system: existing ? `${existing}\n\nVS Code workspace context:\n${scopePrompt}` : scopePrompt,
+      system: `${existing ? `${existing}\n\nVS Code workspace context:\n` : ''}${scopePrompt}\n\n${permissionPrompt}`,
     };
   }
 

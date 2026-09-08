@@ -1804,7 +1804,7 @@ export function MessageList() {
     () =>
       structurallyTrailingInterruptedMessageId() ??
       explicitTerminalFinalResponseMessageId() ??
-      structurallyTrailingRejectedInteractionMessageId() ??
+      (!activeSessionWorking() ? structurallyTrailingRejectedInteractionMessageId() : null) ??
       trailingSummaryOwner()?.messageId ??
       (!isLoading() && !activeSessionWorking() ? trailingFinalResponseMessageId() : null) ??
       null

@@ -185,15 +185,29 @@ hidden, or outside the mounted virtual range.
 
 After a user rejects a permission, OpenCode may complete the assistant message with `finish:
 tool-calls` and place `The user rejected permission to use this specific tool call.` on an error-state
-tool part. Treat that specific error as a stopped turn, not as a generic command failure or a
-continuation to discard: keep the tool card outside compact activity, label it `rejected`, and render
-the terminal turn summary with `Permission rejected`. Generic command-level `permission denied`
-errors must not be classified as user rejection.
+tool part. Keep that tool card outside compact activity and label it `rejected`. The rejected tool
+does not prove the turn stopped: suppress its terminal summary while the session is working, then
+summarize the eventual final response normally. For idle rejection-only histories, retain the
+`Permission rejected` terminal summary. Generic command-level `permission denied` errors must not
+be classified as user rejection.
+
+Varro-managed servers default `experimental.continue_loop_on_deny` to `true` in their temporary
+runtime config. OpenCode returns the denied tool result to the model and continues its existing loop;
+Varro must not approve the tool, abort/restart the turn, or submit a synthetic user message to resume
+it. Session prompt guidance tells the agent to continue independent permitted work, never retry or
+bypass the denied action, and explain the blocker when the task requires it. OpenCode also rejects
+other pending permissions in the same owning session when one is rejected.
+
+Project and inline OpenCode config can override this default. Caller-provided `OPENCODE_CONFIG`
+remains untouched and skips Varro's injection; externally managed servers require their own setting.
+Existing servers must reload runtime config before the default takes effect. Never restart a server
+inside a permission-response transaction.
 
 Skipping a question similarly completes its tool with `QuestionRejectedError` and
-`The user dismissed this question`. Treat that exact error as a stopped turn, label the question tool
-with a compact `Question skipped` summary instead of generic input/error JSON, and render the terminal
-turn summary with `Question skipped`; other question failures remain generic failures.
+`The user dismissed this question`. The continuation setting also applies to skipped questions.
+Label the question tool with a compact `Question skipped` summary instead of generic input/error
+JSON. Render the terminal turn summary with `Question skipped` only for idle skip-only histories;
+other question failures remain generic failures.
 
 Full mode intentionally does not restore a prompt while the mode remains `full`. A failed full-mode
 reply currently surfaces an error and remains pending for a later permission sync to retry. Do not

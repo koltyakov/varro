@@ -4140,6 +4140,89 @@ describe('MessageList loading row', () => {
     );
   });
 
+  it.each([
+    ['bash', 'The user rejected permission to use this specific tool call.', 'Permission rejected'],
+    ['question', 'QuestionRejectedError: The user dismissed this question', 'Question skipped'],
+  ])('keeps a rejected %s visible without ending a working turn', async (tool, error, label) => {
+    const rejectedTool = toolPart('tool-1', 'assistant-1');
+    rejectedTool.tool = tool;
+    rejectedTool.state = {
+      status: 'error',
+      input:
+        tool === 'bash'
+          ? { command: 'npm run release' }
+          : { questions: [{ question: 'Which version should be released?' }] },
+      error,
+      time: { start: 3_000, end: 10_000 },
+    };
+    const toolStep = assistantMessage('assistant-1', {
+      time: { created: 2_000, completed: 11_000 },
+      tokens: { input: 42, output: 7, reasoning: 0, cache: { read: 0, write: 0 } },
+    });
+    toolStep.finish = 'tool-calls';
+    const dialog: MessageEntry[] = [
+      {
+        info: { ...userMessage('user-1'), time: { created: 1_000 } },
+        parts: [textPart('text-user-1', 'Help with the release')],
+      },
+      { info: toolStep, parts: [rejectedTool] },
+    ];
+    setState('activeSessionId', 'session-1');
+    replaceMessages(dialog);
+    // Authoritative busy status must suffice even without local loading state.
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.assistant-dialog-summary')).toBeNull();
+    expect(container?.querySelector('.assistant-activity-summary')).toBeNull();
+    expect(
+      container?.querySelector(
+        tool === 'bash' ? '.tool-invocation-error-label' : '.question-summary-answer'
+      )?.textContent
+    ).toBe(tool === 'bash' ? 'rejected' : 'Skipped');
+
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'idle' } }));
+    await Promise.resolve();
+    expect(container?.querySelector('.assistant-dialog-summary')?.textContent).toContain(label);
+
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    await Promise.resolve();
+    vi.advanceTimersByTime(700);
+    await Promise.resolve();
+    expect(container?.querySelector('.assistant-dialog-summary')).toBeNull();
+
+    const finalAnswer = assistantMessage('assistant-2', {
+      time: { created: 12_000, completed: 13_000 },
+      tokens: { input: 8, output: 3, reasoning: 0, cache: { read: 0, write: 0 } },
+    });
+    finalAnswer.finish = 'stop';
+    batch(() => {
+      replaceMessages([
+        ...dialog,
+        {
+          info: finalAnswer,
+          parts: [
+            { ...textPart('text-assistant-2', 'No release was needed.'), messageID: 'assistant-2' },
+          ],
+        },
+      ]);
+      setState('sessionStatus', reconcile({ 'session-1': { type: 'idle' } }));
+    });
+    await Promise.resolve();
+
+    expect(container?.querySelectorAll('.assistant-dialog-summary')).toHaveLength(1);
+    expect(container?.querySelector('.assistant-dialog-summary')?.textContent).toContain(
+      'Worked for 12s - Tokens ↑ 50 ↓ 10'
+    );
+    expect(container?.querySelector('.assistant-dialog-summary')?.textContent).not.toContain(label);
+    expect(
+      container?.querySelector(
+        tool === 'bash' ? '.tool-invocation-error-label' : '.question-summary-answer'
+      )?.textContent
+    ).toBe(tool === 'bash' ? 'rejected' : 'Skipped');
+  });
+
   it('shows a skipped question as a stopped turn instead of a failure', async () => {
     const skippedQuestion = toolPart('tool-1', 'assistant-1');
     skippedQuestion.tool = 'question';

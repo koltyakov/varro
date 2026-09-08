@@ -2008,7 +2008,9 @@ describe('OpenCodeProcess config ownership', () => {
       true
     );
 
-    expect(JSON.parse(await manager.serializeInjectedConfig())).toEqual({});
+    expect(JSON.parse(await manager.serializeInjectedConfig())).toEqual({
+      experimental: { continue_loop_on_deny: true },
+    });
   });
 
   it('prefers an Ask agent from an ancestor project OpenCode config', async () => {
@@ -2035,7 +2037,9 @@ describe('OpenCodeProcess config ownership', () => {
       true
     );
 
-    expect(JSON.parse(await manager.serializeInjectedConfig())).toEqual({});
+    expect(JSON.parse(await manager.serializeInjectedConfig())).toEqual({
+      experimental: { continue_loop_on_deny: true },
+    });
 
     await Promise.all([
       rm(project, { recursive: true, force: true }),
@@ -2071,7 +2075,9 @@ describe('OpenCodeProcess config ownership', () => {
       true
     );
 
-    expect(JSON.parse(await manager.serializeInjectedConfig())).toEqual({});
+    expect(JSON.parse(await manager.serializeInjectedConfig())).toEqual({
+      experimental: { continue_loop_on_deny: true },
+    });
     expect(loggerMock.warn).not.toHaveBeenCalled();
 
     await Promise.all([
@@ -2116,10 +2122,58 @@ describe('OpenCodeProcess config ownership', () => {
     ]);
   });
 
-  it('does not inject the Ask agent when the setting is disabled', async () => {
+  it('injects continuation defaults with Ask disabled and no compaction override', async () => {
     const manager = new OpenCodeProcess(4096, true, 'opencode');
 
-    expect(JSON.parse(await manager.serializeInjectedConfig())).toEqual({});
+    await manager.syncInjectedConfigFile();
+    try {
+      const env = (manager as unknown as { buildServerEnv(): NodeJS.ProcessEnv }).buildServerEnv();
+      expect(env.OPENCODE_CONFIG).toBeTruthy();
+      expect(JSON.parse(await readFile(env.OPENCODE_CONFIG!, 'utf-8'))).toEqual({
+        experimental: { continue_loop_on_deny: true },
+      });
+    } finally {
+      await manager.cleanupPreparedInjectedConfigFile();
+    }
+  });
+
+  it('preserves caller OPENCODE_CONFIG instead of injecting runtime defaults', async () => {
+    process.env.OPENCODE_CONFIG = '/caller/opencode.jsonc';
+    const manager = new OpenCodeProcess(4096, true, 'opencode');
+
+    await manager.syncInjectedConfigFile();
+
+    expect(
+      (manager as unknown as { buildServerEnv(): NodeJS.ProcessEnv }).buildServerEnv()
+        .OPENCODE_CONFIG
+    ).toBe(process.env.OPENCODE_CONFIG);
+    expect(loggerMock.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Preserving caller-provided OPENCODE_CONFIG')
+    );
+  });
+
+  it('leaves inline and project continuation overrides for OpenCode to apply after defaults', async () => {
+    const project = await mkdtemp(join(tmpdir(), 'varro-project-config-'));
+    const projectConfig = join(project, 'opencode.json');
+    const override = JSON.stringify({ experimental: { continue_loop_on_deny: false } });
+    await writeFile(projectConfig, override, 'utf-8');
+    process.env.OPENCODE_CONFIG_CONTENT = override;
+    vscodeMock.workspace.workspaceFolders = [{ uri: { fsPath: project } }];
+    const manager = new OpenCodeProcess(4096, true, 'opencode');
+
+    try {
+      await manager.syncInjectedConfigFile();
+      const env = (manager as unknown as { buildServerEnv(): NodeJS.ProcessEnv }).buildServerEnv();
+      expect(env.OPENCODE_CONFIG_CONTENT).toBe(override);
+      expect(env.OPENCODE_CONFIG).not.toBe(projectConfig);
+      expect(JSON.parse(await readFile(env.OPENCODE_CONFIG!, 'utf-8'))).toEqual({
+        experimental: { continue_loop_on_deny: true },
+      });
+      expect(await readFile(projectConfig, 'utf-8')).toBe(override);
+    } finally {
+      await manager.cleanupPreparedInjectedConfigFile();
+      await rm(project, { recursive: true, force: true });
+    }
   });
 
   it('restarts a managed server when enabling Ask requires a new runtime config', async () => {
@@ -2188,6 +2242,7 @@ describe('OpenCodeProcess config ownership', () => {
 
     expect(firstPath).not.toBe(secondPath);
     expect(JSON.parse(await readFile(secondPath, 'utf-8'))).toEqual({
+      experimental: { continue_loop_on_deny: true },
       compaction: { auto: true, reserved: 4096 },
     });
     await manager.cleanupPreparedInjectedConfigFile();
