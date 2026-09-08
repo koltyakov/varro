@@ -1536,6 +1536,55 @@ describe('ToolCall', () => {
     expect(getDirectSessionReturnId('subagent-session-1')).toBe('session-1');
   });
 
+  it('opens a resumed subagent session from task_id', () => {
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [
+      session('session-1', { time: { created: 1_000, updated: 2_000 } }),
+      session('subagent-session-1', {
+        parentID: 'session-1',
+        time: { created: 500, updated: 2_000 },
+      }),
+    ]);
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'task',
+      state: {
+        status: 'running',
+        input: {
+          task_id: 'subagent-session-1',
+          subagent_type: 'general',
+          prompt: 'Continue reviewing the implementation',
+        },
+        title: 'Continue implementation review',
+        metadata: {},
+        time: { start: 2_100 },
+      },
+    };
+    setState('messages', [
+      {
+        info: assistantMessage('message-1', { time: { created: 2_000 } }),
+        parts: [part],
+      },
+    ]);
+
+    cleanup = render(() => ToolCall({ part }), container!);
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+    const runningStatus = container?.querySelector<HTMLButtonElement>(
+      '.tool-invocation-subagent-running'
+    );
+    expect(runningStatus?.disabled).toBe(false);
+
+    runningStatus?.click();
+
+    expect(selectSessionMock).toHaveBeenCalledWith('subagent-session-1');
+    expect(getDirectSessionReturnId('subagent-session-1')).toBe('session-1');
+  });
+
   it('shows retry status when subagent session is retrying', () => {
     setState('sessionStatus', {
       'subagent-session-1': {

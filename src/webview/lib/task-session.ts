@@ -27,6 +27,10 @@ function getTaskSessionIdFromMetadata(metadata: UnknownRecord | undefined) {
   return null;
 }
 
+function getTaskSessionIdFromInput(input: UnknownRecord | undefined) {
+  return isString(input?.task_id) ? input.task_id : null;
+}
+
 function normalizeTaskMatchLabel(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, ' ');
 }
@@ -62,6 +66,9 @@ export function resolveTaskSessionId(
     }
     return metadataSessionId;
   }
+
+  const inputSessionId = getTaskSessionIdFromInput(tool.state.input);
+  if (inputSessionId) return inputSessionId;
 
   const parent =
     lookup?.messagesById.get(tool.messageID) ??

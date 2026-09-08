@@ -44,6 +44,46 @@ describe('task session resolution', () => {
     ).toBe('child-1');
   });
 
+  it('uses task_id for a resumed child created before the parent message', () => {
+    const tool = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'assistant-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'task',
+      state: {
+        status: 'running',
+        input: { task_id: 'child-1', description: 'Continue the review' },
+        title: 'Continue the review',
+        metadata: {},
+        time: { start: 1_100 },
+      },
+    } satisfies ToolPart;
+    // SAFETY: The fixture provides the Message fields read by this statement.
+    const parent = {
+      id: 'assistant-1',
+      sessionID: 'session-1',
+      role: 'assistant',
+      time: { created: 1_000 },
+    } as Message;
+
+    expect(
+      resolveTaskSessionId(
+        tool,
+        [{ info: parent, parts: [tool] }],
+        [
+          {
+            id: 'child-1',
+            parentID: 'session-1',
+            title: 'Original review',
+            time: { created: 500 },
+          },
+        ]
+      )
+    ).toBe('child-1');
+  });
+
   it('does not attribute a child created after the next user turn', () => {
     const tool = {
       id: 'tool-1',
