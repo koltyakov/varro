@@ -359,6 +359,42 @@ describe('optimistic user message reconciliation', () => {
     expect(state.messages[0]!.parts).toEqual([textPart('part-server', 'msg-1', 'server text')]);
   });
 
+  it.each(['before metadata', 'after metadata', 'after refresh'])(
+    'preserves pending context when a prompt update repeats %s',
+    (timing) => {
+      const prompt =
+        'Implement the plan from your last response in the current workspace. Make the code changes instead of revising the plan.';
+      const context = textPart('msg-1-part-1', 'msg-1', '[Working directory: /repo]');
+      const serverPrompt = textPart('server-text', 'msg-1', prompt);
+      upsertMessage({
+        info: userMessage('msg-1'),
+        parts: [textPart('msg-1-part-0', 'msg-1', prompt), context],
+      });
+      if (timing === 'after metadata') upsertMessageInfo(userMessage('msg-1'));
+
+      upsertPart(serverPrompt);
+      if (timing === 'after refresh') {
+        setMessagesIncremental([{ info: userMessage('msg-1'), parts: [serverPrompt] }], {
+          preserveExtraParts: true,
+        });
+      }
+      upsertPart(serverPrompt);
+
+      expect(state.messages[0]!.parts).toEqual([serverPrompt, context]);
+
+      const serverContext = { ...context, id: 'server-context' };
+      upsertPart(serverContext);
+      expect(state.messages[0]!.parts).toEqual([serverPrompt, serverContext]);
+
+      setMessagesIncremental(
+        [{ info: userMessage('msg-1'), parts: [serverPrompt, serverContext] }],
+        { preserveExtraParts: true }
+      );
+      upsertPart(serverPrompt);
+      expect(state.messages[0]!.parts).toEqual([serverPrompt, serverContext]);
+    }
+  );
+
   it('does not append the same acknowledged prompt under a second server part id', () => {
     upsertMessage({
       info: userMessage('msg-1'),

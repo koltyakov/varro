@@ -134,6 +134,22 @@ export function upsertPart(part: Part) {
       produce((msgs) => {
         const idx = messageIndex.findMessageIndex(msgs, msgId);
         if (idx === -1) return;
+        // Repeated server updates must not consume another pending optimistic part.
+        const location = messageIndex.findPartLocation(msgs, nextPart.id);
+        if (location && location.msgIdx === idx) {
+          const currentPart = msgs[idx]!.parts[location.partIdx];
+          const mergedPart = mergePartUpdate(currentPart, nextPart);
+          msgs[idx]!.parts[location.partIdx] = mergedPart;
+          removeAcknowledgedOptimisticImageFilePart(msgs[idx]!, nextPart);
+          if (
+            getAssistantDialogPartSignature(currentPart) !==
+              getAssistantDialogPartSignature(mergedPart) ||
+            isPartRenderVisibilityChanged(currentPart, mergedPart)
+          ) {
+            messageIndex.notifyPartContentChange();
+          }
+          return;
+        }
         if (isOptimisticUserMessage(msgs[idx]!) && !isLocalOptimisticPartId(nextPart.id, msgId)) {
           const optimisticPartIndex = findMatchingOptimisticPartIndex(msgs[idx]!, nextPart);
           if (optimisticPartIndex !== -1) {
@@ -161,20 +177,6 @@ export function upsertPart(part: Part) {
           msgs[idx]!,
           nextPart
         );
-        const location = messageIndex.findPartLocation(msgs, nextPart.id);
-        if (location && location.msgIdx === idx) {
-          const currentPart = msgs[idx]!.parts[location.partIdx];
-          const mergedPart = mergePartUpdate(currentPart, nextPart);
-          msgs[idx]!.parts[location.partIdx] = mergedPart;
-          if (
-            getAssistantDialogPartSignature(currentPart) !==
-              getAssistantDialogPartSignature(mergedPart) ||
-            isPartRenderVisibilityChanged(currentPart, mergedPart)
-          ) {
-            messageIndex.notifyPartContentChange();
-          }
-          return;
-        }
         if (optimisticImageIndex !== -1) {
           msgs[idx]!.parts.splice(optimisticImageIndex, 0, nextPart);
           messageIndex.invalidate();
