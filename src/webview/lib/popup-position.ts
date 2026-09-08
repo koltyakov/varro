@@ -1,3 +1,6 @@
+export const PICKER_DETAILS_HOVER_DELAY_MS = 2_000;
+export const RIGHT_PICKER_DETAILS_HOVER_DELAY_MS = 500;
+
 /**
  * Top edge of the visually usable area for a popup, in viewport coordinates.
  *

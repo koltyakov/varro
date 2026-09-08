@@ -62,9 +62,13 @@ test('recorded playback reuses the running harness without starting another serv
   }
 });
 
-test('E2E server socket loss cannot navigate an active playback document', async ({ page }) => {
+test('E2E server socket loss cannot navigate an active playback document', async ({
+  page,
+}, testInfo) => {
   const server = await createServer({
     mode: 'e2e',
+    // Do not let this server's dependency optimizer replace the running harness's cache.
+    cacheDir: testInfo.outputPath('vite-cache'),
     server: { host: '127.0.0.1', port: 0 },
   });
   try {

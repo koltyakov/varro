@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { registerProviderLimitRefreshEffect } from '../hooks/session/session-effects';
-import { getActiveProviderSelection } from '../hooks/routing-state';
+import { getActiveProviderSelection, isProviderWorking } from '../hooks/routing-state';
 import { createAppState } from '../lib/state';
 import type { AssistantMessage, Provider } from '../types';
 import type { ProviderLimitStatus } from '../../shared/protocol';
@@ -70,13 +70,24 @@ describe('session effects perf guards', () => {
     appState.setState('providers', [createProvider()]);
     appState.setState('providerDefaults', { openai: 'gpt-4o' });
     appState.setState('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
+    appState.setState('sessionStatus', 'background', { type: 'busy' });
+    appState.setState('sessionSelectedModels', 'background', {
+      providerID: 'openai',
+      modelID: 'gpt-4o',
+    });
 
     const dispose = createPerfRoot(() => {
       registerProviderLimitRefreshEffect({
         getServerState: () => appState.state.serverStatus.state,
         areProvidersLoaded: () => appState.state.providersLoaded,
         isDocumentVisible: () => true,
-        isActiveSessionWorking: () => false,
+        isProviderWorking: (providerID) =>
+          isProviderWorking(
+            providerID,
+            appState.state.sessionStatus,
+            (sessionId) => appState.state.sessionSelectedModels[sessionId]?.providerID
+          ),
+        getRequestScope: () => 0,
         getActiveProviderSelection: () =>
           getActiveProviderSelection({
             selectedModel: appState.state.selectedModel,
@@ -103,6 +114,19 @@ describe('session effects perf guards', () => {
         getCount: () => loadProviderLimit.mock.calls.length,
         mutate: () => {
           appState.setState('messages', [{ info: createAssistantMessage('message-1'), parts: [] }]);
+        },
+      });
+
+      await expectEffectDependencyIsolation({
+        label: 'provider-limit busy/retry transitions',
+        getCount: () => loadProviderLimit.mock.calls.length,
+        mutate: () => {
+          appState.setState('sessionStatus', 'background', {
+            type: 'retry',
+            attempt: 2,
+            message: 'Retrying',
+            next: 1000,
+          });
         },
       });
 
@@ -134,7 +158,8 @@ describe('session effects perf guards', () => {
         getServerState: () => appState.state.serverStatus.state,
         areProvidersLoaded: () => appState.state.providersLoaded,
         isDocumentVisible: () => true,
-        isActiveSessionWorking: () => false,
+        isProviderWorking: () => false,
+        getRequestScope: () => 0,
         getActiveProviderSelection: () =>
           getActiveProviderSelection({
             selectedModel: appState.state.selectedModel,

@@ -1236,7 +1236,8 @@ export class RestProxy {
       if (providerLimitRequest) {
         const data = await this.callbacks.providerLimitService.get(
           providerLimitRequest.providerID,
-          providerLimitRequest.modelID
+          providerLimitRequest.modelID,
+          explicitWorkspaceDirectory ?? this.getCurrentWorkspaceResolutionRoot()
         );
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;

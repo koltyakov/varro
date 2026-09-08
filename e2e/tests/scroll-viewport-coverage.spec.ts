@@ -1,7 +1,10 @@
 /* oxlint-disable anti-slop/no-unsafe-dictionary-type -- Browser callbacks model synthetic message parts whose variant-specific fields are intentionally open. */
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Assertions access and mutate message fixtures installed by the controlled E2E harness. */
+import { writeFile } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
 import type { Locator } from '@playwright/test';
+import type { ServerEvent } from '../../src/shared/protocol';
+import type { TextPart } from '../../src/webview/types';
 import { getScrollMetrics, waitForAnimationFrames } from './helpers';
 
 async function getBlankBottomArea(list: Locator) {
@@ -33,6 +36,176 @@ async function getBlankBottomArea(list: Locator) {
 }
 
 test.describe('viewport content coverage', () => {
+  test('paints the full viewport through native -720px streaming detachment', async ({ page }) => {
+    await page.setViewportSize({ width: 486, height: 794 });
+    await page.goto('/e2e/harness/index.html?scenario=large-transcript&activeReasoningEntrance=1');
+    const list = page.locator('.interactive-list');
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+    await expect
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+      .toBeLessThan(15);
+    await waitForAnimationFrames(page, 12);
+    const streamTimer = await page.evaluate(() => {
+      const harness = (
+        window as Window & {
+          __varroE2E?: { replayServerEvent: (event: ServerEvent) => void };
+        }
+      ).__varroE2E;
+      if (!harness) throw new Error('Streaming harness is missing');
+      const part: TextPart = {
+        id: 'str03-stream',
+        sessionID: 'session-large-transcript',
+        messageID: 'message-large-assistant-active',
+        type: 'text',
+        text: 'Streaming coverage',
+      };
+      harness.replayServerEvent({ type: 'message.part.updated', properties: { part } });
+      return window.setInterval(() => {
+        harness.replayServerEvent({
+          type: 'message.part.delta',
+          properties: {
+            sessionID: part.sessionID,
+            messageID: part.messageID,
+            partID: part.id,
+            field: 'text',
+            delta: ' sample',
+          },
+        });
+      }, 50);
+    });
+    await waitForAnimationFrames(page, 8);
+    const bounds = await list.boundingBox();
+    if (!bounds) throw new Error('Transcript viewport is missing');
+    await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+
+    const cdp = await page.context().newCDPSession(page);
+    const frames: string[] = [];
+    cdp.on('Page.screencastFrame', (frame) => {
+      frames.push(frame.data);
+      // A final frame can arrive while the capture session is detaching.
+      void cdp.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => {});
+    });
+    await cdp.send('Page.startScreencast', { format: 'png', everyNthFrame: 1 });
+    await waitForAnimationFrames(page, 4);
+    const before = await list.evaluate((element) => ({
+      scrollTop: element.scrollTop,
+      rows: [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].map((row) => ({
+        id: row.dataset.msgId,
+        top: row.getBoundingClientRect().top,
+        bottom: row.getBoundingClientRect().bottom,
+        textLength: row.textContent?.length ?? 0,
+        placeholder: row.classList.contains('interactive-item-virtual-placeholder'),
+      })),
+    }));
+    const samplesPending = list.evaluate(async (element) => {
+      const samples = [];
+      for (let index = 0; index < 16; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const viewportRect = element.getBoundingClientRect();
+        const rows = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')];
+        let coveredTo = viewportRect.top;
+        let gap = 0;
+        for (const row of rows) {
+          if (row.classList.contains('interactive-item-virtual-placeholder')) continue;
+          const rect = row.getBoundingClientRect();
+          if (rect.bottom <= viewportRect.top || rect.top >= viewportRect.bottom) continue;
+          gap = Math.max(gap, rect.top - coveredTo);
+          coveredTo = Math.max(coveredTo, rect.bottom);
+        }
+        const anchor = element.querySelector('[data-msg-id="message-large-assistant-235"]');
+        samples.push({
+          scrollTop: element.scrollTop,
+          mountedRows: rows.length,
+          gap: Math.max(gap, viewportRect.bottom - coveredTo),
+          anchorTop: anchor?.getBoundingClientRect().top ?? null,
+          streamingText:
+            element.querySelector('[data-msg-id="message-large-assistant-active"]')?.textContent ??
+            '',
+        });
+      }
+      return samples;
+    });
+    await page.mouse.wheel(0, -720);
+    const samples = await samplesPending;
+    await page.evaluate((timer) => clearInterval(timer), streamTimer);
+    await cdp.send('Page.stopScreencast');
+    await cdp.detach();
+
+    const gaps = await page.evaluate(
+      async ({ frames: capturedFrames, bounds: viewportBounds }) => {
+        const result: number[] = [];
+        for (const frame of capturedFrames) {
+          const image = new Image();
+          image.src = `data:image/png;base64,${frame}`;
+          await image.decode();
+          const canvas = document.createElement('canvas');
+          canvas.width = image.width;
+          canvas.height = image.height;
+          const context = canvas.getContext('2d');
+          if (!context) throw new Error('Pixel coverage context is missing');
+          context.drawImage(image, 0, 0);
+          const pixels = context.getImageData(0, 0, image.width, image.height).data;
+          let gap = 0;
+          let maxGap = 0;
+          // Exclude sticky chrome and the bottom fade, but inspect every physical scanline between them.
+          for (
+            let y = Math.ceil(viewportBounds.y + 150);
+            y < viewportBounds.y + viewportBounds.height - 20;
+            y += 1
+          ) {
+            let painted = 0;
+            for (
+              let x = Math.ceil(viewportBounds.x + 18);
+              x < viewportBounds.x + viewportBounds.width - 24;
+              x += 1
+            ) {
+              const offset = (y * image.width + x) * 4;
+              if (pixels[offset]! > 100 && pixels[offset + 1]! > 100 && pixels[offset + 2]! > 100)
+                painted += 1;
+            }
+            gap = painted >= 3 ? 0 : gap + 1;
+            maxGap = Math.max(maxGap, gap);
+          }
+          result.push(maxGap);
+        }
+        return result;
+      },
+      { frames, bounds }
+    );
+    await writeFile(
+      test.info().outputPath('coverage.json'),
+      JSON.stringify({ before, bounds, gaps, samples }, null, 2)
+    );
+    for (let index = 0; index < frames.length; index += 1) {
+      if (gaps[index]! <= 80) continue;
+      await writeFile(
+        test.info().outputPath(`partial-viewport-${index}.png`),
+        Buffer.from(frames[index]!, 'base64')
+      );
+      await test.info().attach(`partial-viewport-${index}`, {
+        body: Buffer.from(frames[index]!, 'base64'),
+        contentType: 'image/png',
+      });
+    }
+    expect(frames.length).toBeGreaterThan(1);
+    expect(Math.max(...samples.map((sample) => sample.mountedRows))).toBeLessThan(40);
+    expect(Math.max(...samples.map((sample) => sample.gap))).toBeLessThanOrEqual(80);
+    expect(samples.at(-1)!.streamingText.length).toBeGreaterThan(samples[0]!.streamingText.length);
+    const anchor = before.rows.find((row) => row.id === 'message-large-assistant-235');
+    if (!anchor) throw new Error('Destination anchor was not in the mounted overscan');
+    expect(before.rows.every((row) => !row.placeholder)).toBe(true);
+    for (const sample of samples) {
+      expect(sample.anchorTop).not.toBeNull();
+      expect(
+        Math.abs(sample.anchorTop! + sample.scrollTop - anchor.top - before.scrollTop)
+      ).toBeLessThan(1.5);
+    }
+    expect(Math.max(...gaps), JSON.stringify(gaps)).toBeLessThanOrEqual(80);
+    expect((await getScrollMetrics(page, '.interactive-list')).distanceFromBottom).toBeGreaterThan(
+      600
+    );
+  });
+
   test('uses newly available space when the host viewport grows', async ({ page }) => {
     await page.setViewportSize({ width: 900, height: 600 });
     await page.goto('/e2e/harness/index.html?scenario=large-transcript');

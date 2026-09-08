@@ -1,6 +1,7 @@
 /* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/require-safety-comment-for-type-assertion -- These refresh tests inspect controlled provider internals and model opaque server and filesystem results. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { OpenCodeModelRouting } from '../shared/opencode-types';
+import type { ProviderLimitUpdate } from '../shared/protocol';
 import {
   attachTestView,
   createServer,
@@ -20,7 +21,11 @@ type ProviderRefreshAccess = {
     readFilesSignature(): Promise<string>;
     refreshState(generation?: number, requireSignatureChange?: boolean): Promise<void>;
   };
-  providerLimitService: { clearCache(): void };
+  providerLimitService: {
+    clearCache(): void;
+    dispose(): void;
+    onUpdate(update: ProviderLimitUpdate): void;
+  };
   refreshOpenCodeWorkspaceState(
     previousRouting?: OpenCodeModelRouting,
     currentRouting?: OpenCodeModelRouting
@@ -36,6 +41,29 @@ afterEach(() => {
 });
 
 describe('SidebarProvider provider refresh', () => {
+  it('posts narrow quota snapshots to the webview and disposes observation with the provider', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const { posted } = attachTestView(provider);
+    const service = (provider as unknown as ProviderRefreshAccess).providerLimitService;
+    const dispose = vi.spyOn(service, 'dispose');
+    const payload: ProviderLimitUpdate = {
+      directory: '/repo',
+      status: {
+        providerID: 'openai',
+        modelID: 'gpt',
+        source: 'provider',
+        status: 'error',
+        checkedAt: 10,
+        note: 'Shared cooldown',
+      },
+    };
+    service.onUpdate(payload);
+    expect(posted).toContainEqual({ type: 'provider-limit/updated', payload });
+    expect(posted).not.toContainEqual({ type: 'providers/refresh' });
+    await provider.dispose();
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
   it('does not read provider files synchronously during construction', async () => {
     const { provider } = await createSidebarProviderInstance();
 

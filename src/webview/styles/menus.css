@@ -638,9 +638,9 @@ body.vscode-high-contrast-light .model-picker-item.selected {
   width: 220px;
   padding: 9px 10px;
   border: 1px solid color-mix(in srgb, var(--color-vscode-border-strong) 82%, transparent);
-  border-radius: var(--chat-radius-popover);
+  border-radius: var(--radius-card);
   background: var(--color-vscode-surface-raised);
-  box-shadow: var(--chat-shadow-popover);
+  box-shadow: var(--shadow-popover);
   color: var(--color-vscode-fg);
   pointer-events: none;
 }

@@ -72,7 +72,13 @@ export function createCodexAdapter(): ProviderLimitAdapter {
       if (auth?.type === 'oauth') return true;
       return getString(asRecord(provider.options)?.apiKey) === OPENCODE_OAUTH_DUMMY_KEY;
     },
-    async fetch({ provider, authStore, modelID, checkedAt }: ProviderLimitAdapterContext) {
+    async fetch({
+      provider,
+      authStore,
+      modelID,
+      checkedAt,
+      coordinate,
+    }: ProviderLimitAdapterContext) {
       const credentials = await resolveCodexCredentials(authStore);
       if (!credentials) {
         return unsupportedProviderStatus(
@@ -84,89 +90,113 @@ export function createCodexAdapter(): ProviderLimitAdapter {
       }
 
       const headers = buildCodexHeaders(credentials);
-      let lastStatus: number | null = null;
+      const poll = async (): Promise<ProviderLimitStatus> => {
+        let lastStatus: number | null = null;
 
-      try {
-        for (const endpoint of CODEX_USAGE_ENDPOINTS) {
-          const response = await fetch(endpoint.usage, {
-            headers,
-            signal: AbortSignal.timeout(10_000),
-          });
+        try {
+          for (const endpoint of CODEX_USAGE_ENDPOINTS) {
+            const response = await fetch(endpoint.usage, {
+              headers,
+              signal: AbortSignal.timeout(10_000),
+            });
 
-          if (response.status === 404) {
-            lastStatus = response.status;
-            continue;
-          }
+            if (response.status === 404) {
+              lastStatus = response.status;
+              continue;
+            }
 
-          if (response.status === 401 || response.status === 403) {
-            return unsupportedProviderStatus(
-              provider.id,
-              modelID,
-              checkedAt,
-              `Codex usage endpoint rejected credentials (${response.status})`
-            );
-          }
+            if (response.status === 401 || response.status === 403) {
+              return unsupportedProviderStatus(
+                provider.id,
+                modelID,
+                checkedAt,
+                `Codex usage endpoint rejected credentials (${response.status})`
+              );
+            }
 
-          if (!response.ok) {
-            return {
+            if (!response.ok) {
+              return {
+                providerID: provider.id,
+                modelID,
+                status: 'error',
+                source: 'provider',
+                checkedAt,
+                note: `Codex usage endpoint returned ${response.status}`,
+              };
+            }
+
+            const payload = await readBoundedResponseJson(response);
+            const windows = extractCodexWindows(payload, checkedAt);
+            const planName = extractCodexPlanName(payload);
+            if (windows.length === 0) {
+              return unsupportedProviderStatus(
+                provider.id,
+                modelID,
+                checkedAt,
+                'Codex usage endpoint did not expose any known quotas'
+              );
+            }
+
+            const status: ProviderLimitStatus = {
               providerID: provider.id,
               modelID,
-              status: 'error',
+              status: 'available',
               source: 'provider',
               checkedAt,
-              note: `Codex usage endpoint returned ${response.status}`,
+              windows,
+              note: 'Polled Codex OAuth usage endpoint',
             };
-          }
-
-          const payload = await readBoundedResponseJson(response);
-          const windows = extractCodexWindows(payload, checkedAt);
-          const planName = extractCodexPlanName(payload);
-          if (windows.length === 0) {
-            return unsupportedProviderStatus(
-              provider.id,
-              modelID,
-              checkedAt,
-              'Codex usage endpoint did not expose any known quotas'
+            if (planName) status.planName = planName;
+            const resetCredits = await fetchCodexResetCredits(
+              payload,
+              endpoint.resetCredits,
+              headers
             );
+            if (resetCredits) status.usageLimitResets = resetCredits;
+            return status;
           }
-
-          const status: ProviderLimitStatus = {
+        } catch {
+          return {
             providerID: provider.id,
             modelID,
-            status: 'available',
+            status: 'error',
             source: 'provider',
             checkedAt,
-            windows,
-            note: 'Polled Codex OAuth usage endpoint',
+            note: 'Failed to poll the Codex usage endpoint',
           };
-          if (planName) status.planName = planName;
-          const resetCredits = await fetchCodexResetCredits(
-            payload,
-            endpoint.resetCredits,
-            headers
-          );
-          if (resetCredits) status.usageLimitResets = resetCredits;
-          return status;
         }
-      } catch {
-        return {
-          providerID: provider.id,
-          modelID,
-          status: 'error',
-          source: 'provider',
-          checkedAt,
-          note: 'Failed to poll the Codex usage endpoint',
-        };
-      }
 
-      return unsupportedProviderStatus(
-        provider.id,
-        modelID,
-        checkedAt,
-        lastStatus === 404
-          ? 'Codex usage endpoint returned 404'
-          : 'Codex usage endpoint did not expose any known quotas'
-      );
+        return unsupportedProviderStatus(
+          provider.id,
+          modelID,
+          checkedAt,
+          lastStatus === 404
+            ? 'Codex usage endpoint returned 404'
+            : 'Codex usage endpoint did not expose any known quotas'
+        );
+      };
+      return coordinate
+        ? coordinate(
+            [
+              ...CODEX_USAGE_ENDPOINTS.flatMap((endpoint) => [
+                endpoint.usage,
+                endpoint.resetCredits,
+              ]),
+              credentials.accessToken,
+              credentials.accountID ?? '',
+            ],
+            poll,
+            {
+              isIdentityCurrent: async (currentAuth) => {
+                const current = await resolveCodexCredentials(currentAuth);
+                return (
+                  current?.accessToken === credentials.accessToken &&
+                  current.accountID === credentials.accountID
+                );
+              },
+            }
+          )
+        : poll();
     },
   };
 }

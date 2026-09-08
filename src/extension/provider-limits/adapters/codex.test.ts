@@ -60,6 +60,47 @@ describe('createCodexAdapter', () => {
     ).toBe(false);
   });
 
+  it('coordinates using the resolved file token and account without resolving again for fetch', async () => {
+    vi.mocked(readFile).mockResolvedValue(
+      JSON.stringify({ tokens: { access_token: 'original', account_id: 'account-a' } })
+    );
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse({ rate_limit: { primary_window: { used_percent: 20 } } })
+    );
+    const status = await adapter.fetch({
+      provider: oauthProvider,
+      authStore: {},
+      modelID: 'model-a',
+      checkedAt: 1_000,
+      coordinate: async (identity, poll) => {
+        expect(identity).toEqual([
+          'https://chatgpt.com/backend-api/wham/usage',
+          'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits',
+          'https://chatgpt.com/api/codex/usage',
+          'https://chatgpt.com/api/codex/rate-limit-reset-credits',
+          'original',
+          'account-a',
+        ]);
+        vi.mocked(readFile).mockResolvedValue(
+          JSON.stringify({ tokens: { access_token: 'replacement', account_id: 'account-b' } })
+        );
+        return poll();
+      },
+    });
+    expect(status.status).toBe('available');
+    expect(readFile).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith(
+      'https://chatgpt.com/backend-api/wham/usage',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer original',
+          'ChatGPT-Account-Id': 'account-a',
+          'X-Account-Id': 'account-a',
+        }),
+      })
+    );
+  });
+
   it('falls back to the secondary Codex endpoint and parses known quota windows', async () => {
     vi.mocked(readFile).mockResolvedValue(
       JSON.stringify({

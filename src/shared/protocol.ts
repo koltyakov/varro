@@ -249,6 +249,11 @@ export type ProviderLimitStatus =
       note: string;
     };
 
+export type ProviderLimitUpdate = {
+  directory: string | null;
+  status: ProviderLimitStatus;
+};
+
 export type McpStatus = {
   status: 'connected' | 'disabled' | 'failed' | 'needs_auth' | 'needs_client_registration';
   error?: string;
@@ -800,6 +805,7 @@ export type ExtensionMessage =
   | { type: 'server/restart-blocked'; payload: RestartBlockedState }
   | { type: 'server/event'; payload: ServerEvent }
   | { type: 'providers/refresh'; payload?: { revalidateAuth: true } }
+  | { type: 'provider-limit/updated'; payload: ProviderLimitUpdate }
   | { type: 'providers/status'; payload: { pending: boolean } }
   | { type: 'context/update'; payload: EditorContext }
   | {

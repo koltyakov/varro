@@ -1588,7 +1588,7 @@ describe('RestProxy handleRequest', () => {
     await proxy.handleRequest(
       makePayload(8, 'GET', '/varro/provider-limit?providerID=openai&modelID=gpt-4')
     );
-    expect(callbacks.providerLimitService.get).toHaveBeenCalledWith('openai', 'gpt-4');
+    expect(callbacks.providerLimitService.get).toHaveBeenCalledWith('openai', 'gpt-4', '/repo');
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 8, data: limitStatus });
   });
 

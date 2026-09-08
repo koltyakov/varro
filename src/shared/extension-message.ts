@@ -9,6 +9,7 @@ import {
   type DroppedFile,
   type EditorContext,
   type ExtensionMessage,
+  type ProviderLimitStatus,
   type RalphStatePayload,
   type RestartBlockedState,
   type ServerStatus,
@@ -26,6 +27,7 @@ const KNOWN_TYPES = new Set<string>([
   'server/event',
   'providers/refresh',
   'providers/status',
+  'provider-limit/updated',
   'context/update',
   'workspace/select-failed',
   'terminal-selection/update',
@@ -107,6 +109,18 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
       const payload = asRecord(record.payload);
       if (payload?.revalidateAuth !== true) return null;
       return { type, payload: { revalidateAuth: true } };
+    }
+
+    case 'provider-limit/updated': {
+      const payload = asRecord(record.payload);
+      const status = asRecord(payload?.status);
+      if (
+        !payload ||
+        (payload.directory !== null && !isString(payload.directory)) ||
+        !isProviderLimitStatus(status)
+      )
+        return null;
+      return { type, payload: { directory: payload.directory, status } };
     }
 
     case 'providers/status': {
@@ -601,6 +615,58 @@ function parseRestartBlockedState<T>(value: T): RestartBlockedState | null {
     result.checkId = payload.checkId;
   }
   return result;
+}
+
+function isProviderLimitStatus(value: UnknownRecord | null): value is ProviderLimitStatus {
+  if (
+    !value ||
+    !isString(value.providerID) ||
+    !value.providerID ||
+    (value.modelID !== undefined && value.modelID !== null && !isString(value.modelID)) ||
+    (value.source !== 'provider' && value.source !== 'opencode') ||
+    !isNumber(value.checkedAt) ||
+    !Number.isFinite(value.checkedAt) ||
+    value.checkedAt < 0 ||
+    (value.note !== undefined && !isString(value.note))
+  )
+    return false;
+  if (value.status === 'error' || value.status === 'unsupported') return isString(value.note);
+  if (value.status !== 'available' || !Array.isArray(value.windows)) return false;
+  if (value.planName !== undefined && !isString(value.planName)) return false;
+  if (value.usageLimitResets !== undefined) {
+    const resets = asRecord(value.usageLimitResets);
+    if (
+      !resets ||
+      !isNumber(resets.availableCount) ||
+      (resets.credits !== null &&
+        (!Array.isArray(resets.credits) ||
+          !resets.credits.every((item) => {
+            const credit = asRecord(item);
+            return (
+              credit &&
+              isString(credit.title) &&
+              (credit.expiresAt === null || isNumber(credit.expiresAt))
+            );
+          })))
+    )
+      return false;
+  }
+  return value.windows.every((item) => {
+    const window = asRecord(item);
+    return (
+      window &&
+      isString(window.id) &&
+      isString(window.label) &&
+      ['requests', 'tokens', 'messages', 'credits', 'usd', 'unknown'].includes(
+        String(window.unit)
+      ) &&
+      isNumber(window.remaining) &&
+      Number.isFinite(window.remaining) &&
+      (window.limit === null || (isNumber(window.limit) && Number.isFinite(window.limit))) &&
+      (window.resetAt === null || (isNumber(window.resetAt) && Number.isFinite(window.resetAt))) &&
+      (window.percent == null || (isNumber(window.percent) && Number.isFinite(window.percent)))
+    );
+  });
 }
 
 function isServerStatus(value: UnknownRecord | null): value is ServerStatus {

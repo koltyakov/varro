@@ -103,6 +103,17 @@ describe('format helpers', () => {
     expect(formatLabelWithProvider('   ', 'OpenAI')).toBe('');
   });
 
+  it('includes stale snapshot metadata in available limit tooltips', () => {
+    const limit = {
+      ...availableLimit([]),
+      checkedAt: 1_000,
+      note: 'Refresh failed; showing last known limits.',
+    };
+    expect(formatProviderLimitTitle(limit, 121_000)).toContain(`${limit.note}\nSnapshot age: 2m`);
+    expect(formatProviderLimitTitle(limit, 0)).toContain('Snapshot age: 0s');
+    expect(limit.checkedAt).toBe(1_000);
+  });
+
   it('selects the most constrained provider limit window', () => {
     const limit = availableLimit([
       {

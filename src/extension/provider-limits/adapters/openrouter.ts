@@ -22,7 +22,13 @@ export function createOpenRouterAdapter(): ProviderLimitAdapter {
         provider.id === 'openrouter' && resolveOpenRouterAuthToken(provider, authStore) != null
       );
     },
-    async fetch({ provider, authStore, modelID, checkedAt }: ProviderLimitAdapterContext) {
+    async fetch({
+      provider,
+      authStore,
+      modelID,
+      checkedAt,
+      coordinate,
+    }: ProviderLimitAdapterContext) {
       const token = resolveOpenRouterAuthToken(provider, authStore);
       if (!token) {
         return unsupportedProviderStatus(
@@ -33,68 +39,71 @@ export function createOpenRouterAdapter(): ProviderLimitAdapter {
         );
       }
 
-      try {
-        const response = await fetch(OPENROUTER_AUTH_KEY_ENDPOINT, {
-          headers: {
-            Accept: 'application/json',
-            Authorization: `Bearer ${token}`,
-            'User-Agent': 'Varro/0.1.0',
-          },
-          signal: AbortSignal.timeout(10_000),
-        });
+      const poll = async (): Promise<ProviderLimitStatus> => {
+        try {
+          const response = await fetch(OPENROUTER_AUTH_KEY_ENDPOINT, {
+            headers: {
+              Accept: 'application/json',
+              Authorization: `Bearer ${token}`,
+              'User-Agent': 'Varro/0.1.0',
+            },
+            signal: AbortSignal.timeout(10_000),
+          });
 
-        if (response.status === 401 || response.status === 403) {
-          return unsupportedProviderStatus(
-            provider.id,
+          if (response.status === 401 || response.status === 403) {
+            return unsupportedProviderStatus(
+              provider.id,
+              modelID,
+              checkedAt,
+              `OpenRouter auth key endpoint rejected credentials (${response.status})`
+            );
+          }
+
+          if (!response.ok) {
+            return {
+              providerID: provider.id,
+              modelID,
+              status: 'error',
+              source: 'provider',
+              checkedAt,
+              note: `OpenRouter auth key endpoint returned ${response.status}`,
+            };
+          }
+
+          const payload = await readBoundedResponseJson(response);
+          const window = extractOpenRouterSpendWindow(payload);
+          if (!window) {
+            return unsupportedProviderStatus(
+              provider.id,
+              modelID,
+              checkedAt,
+              'OpenRouter auth key endpoint did not expose a bounded spend limit'
+            );
+          }
+
+          const status: ProviderLimitStatus = {
+            providerID: provider.id,
             modelID,
+            status: 'available',
+            source: 'provider',
             checkedAt,
-            `OpenRouter auth key endpoint rejected credentials (${response.status})`
-          );
-        }
-
-        if (!response.ok) {
+            windows: [window],
+            note: 'Polled OpenRouter auth key endpoint',
+          };
+          if (isOpenRouterFreeTier(payload)) status.planName = 'Free';
+          return status;
+        } catch {
           return {
             providerID: provider.id,
             modelID,
             status: 'error',
             source: 'provider',
             checkedAt,
-            note: `OpenRouter auth key endpoint returned ${response.status}`,
+            note: 'Failed to poll the OpenRouter auth key endpoint',
           };
         }
-
-        const payload = await readBoundedResponseJson(response);
-        const window = extractOpenRouterSpendWindow(payload);
-        if (!window) {
-          return unsupportedProviderStatus(
-            provider.id,
-            modelID,
-            checkedAt,
-            'OpenRouter auth key endpoint did not expose a bounded spend limit'
-          );
-        }
-
-        const status: ProviderLimitStatus = {
-          providerID: provider.id,
-          modelID,
-          status: 'available',
-          source: 'provider',
-          checkedAt,
-          windows: [window],
-          note: 'Polled OpenRouter auth key endpoint',
-        };
-        if (isOpenRouterFreeTier(payload)) status.planName = 'Free';
-        return status;
-      } catch {
-        return {
-          providerID: provider.id,
-          modelID,
-          status: 'error',
-          source: 'provider',
-          checkedAt,
-          note: 'Failed to poll the OpenRouter auth key endpoint',
-        };
-      }
+      };
+      return coordinate ? coordinate([OPENROUTER_AUTH_KEY_ENDPOINT, token], poll) : poll();
     },
   };
 }
@@ -130,7 +139,7 @@ function extractOpenRouterSpendWindow(payload: unknown): ProviderLimitWindow | n
   return window;
 }
 
-function resolveOpenRouterAuthToken(
+export function resolveOpenRouterAuthToken(
   provider: ProviderMetadata,
   authStore: Record<string, ProviderAuthRecord>
 ) {

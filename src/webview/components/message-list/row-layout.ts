@@ -320,17 +320,22 @@ export function getCompactActivityDisclosureLayoutSignatures(
   isExpanded: (key: string) => boolean,
   getPartLayoutState?: (part: AssistantActivityPart) => string
 ) {
+  const groupSignatures = new Map<AssistantActivityGroupInfo, string>();
   return new Map(
     [...groups].map(([messageId, messageGroups]) => [
       messageId,
       messageGroups
         .map((group) => {
+          const cached = groupSignatures.get(group);
+          if (cached !== undefined) return cached;
           const partSignature = group.parts
             .map(
               (part) => `${part.messageID}\u0000${part.id}\u0000${getPartLayoutState?.(part) ?? ''}`
             )
             .join('\u0002');
-          return `${group.key}\u0000${group.ownerMessageId}\u0000${group.ownerPartId}\u0000${isExpanded(group.key) ? 'expanded' : 'collapsed'}\u0000${partSignature}`;
+          const signature = `${group.key}\u0000${group.ownerMessageId}\u0000${group.ownerPartId}\u0000${isExpanded(group.key) ? 'expanded' : 'collapsed'}\u0000${partSignature}`;
+          groupSignatures.set(group, signature);
+          return signature;
         })
         .join('\u0001'),
     ])
@@ -350,6 +355,17 @@ export function getRenderEmptyMessageIds(
   streaming?: { partId: string | null; text: string }
 ) {
   const result = new Set<string>();
+  const groupByPartKey = new Map<string, AssistantActivityGroupInfo>();
+  const indexedGroups = new Set<AssistantActivityGroupInfo>();
+  for (const messageGroups of groups.values()) {
+    for (const group of messageGroups) {
+      if (indexedGroups.has(group)) continue;
+      indexedGroups.add(group);
+      for (const part of group.parts) {
+        groupByPartKey.set(getAssistantActivityPartKey(part), group);
+      }
+    }
+  }
 
   for (const message of messages) {
     if (message.info.role === 'user') {
@@ -368,11 +384,6 @@ export function getRenderEmptyMessageIds(
       continue;
     }
     const messageGroups = groups.get(message.info.id) ?? [];
-    const groupByPartKey = new Map(
-      messageGroups.flatMap((group) =>
-        group.parts.map((part) => [getAssistantActivityPartKey(part), group] as const)
-      )
-    );
     let hasVisibleRowContent = false;
 
     for (const part of message.parts) {
@@ -398,7 +409,12 @@ export function getRenderEmptyMessageIds(
       }
 
       const group = groupByPartKey.get(partKey);
-      if (!group || group.ownerMessageId === message.info.id || isExpanded(group.key)) {
+      if (
+        !group ||
+        !messageGroups.includes(group) ||
+        group.ownerMessageId === message.info.id ||
+        isExpanded(group.key)
+      ) {
         hasVisibleRowContent = true;
         break;
       }

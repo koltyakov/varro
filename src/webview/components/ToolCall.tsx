@@ -575,18 +575,25 @@ export function ToolCall(props: {
     return permission;
   };
 
+  const toolContentKind = createMemo(() => {
+    if (questionSkipped()) return 'skipped-question';
+    if (questionSummaryItems().length > 0) return 'question';
+    if (fileChanges().length > 0) return 'file-change';
+    return isReadTool() ? 'read' : 'generic';
+  });
   const toolContent = () => {
-    if (questionSkipped()) {
+    const kind = toolContentKind();
+    if (kind === 'skipped-question') {
       return (
         <QuestionToolSummary title="Question skipped" items={questionSummaryItems()} skipped />
       );
     }
 
-    if (questionSummaryItems().length > 0) {
+    if (kind === 'question') {
       return <QuestionToolSummary title={title()} items={questionSummaryItems()} />;
     }
 
-    if (fileChanges().length > 0) {
+    if (kind === 'file-change') {
       return (
         <FileChangeCard
           toolState={state()}
@@ -601,7 +608,7 @@ export function ToolCall(props: {
       );
     }
 
-    if (isReadTool()) {
+    if (kind === 'read') {
       return (
         <ReadToolCard
           toolState={state()}
@@ -1062,7 +1069,7 @@ function FileChangeCard(props: {
               <a
                 href="#"
                 class="file-path-link file-edit-path-link"
-                onClick={openFileChangePath(change()!.fromPath || change()!.path)}
+                onClick={(event) => openFileChangePath(change()!.fromPath || change()!.path)(event)}
               >
                 <FileTypeIcon
                   path={change()!.fromPath || change()!.path}
@@ -1074,7 +1081,7 @@ function FileChangeCard(props: {
               <a
                 href="#"
                 class="file-path-link file-edit-path-link"
-                onClick={openFileChangePath(change()!.toPath || change()!.path)}
+                onClick={(event) => openFileChangePath(change()!.toPath || change()!.path)(event)}
               >
                 <FileTypeIcon
                   path={change()!.toPath || change()!.path}
@@ -1091,7 +1098,7 @@ function FileChangeCard(props: {
               <a
                 href="#"
                 class="file-path-link file-edit-path-link"
-                onClick={openFileChangePath(change()!.path)}
+                onClick={(event) => openFileChangePath(change()!.path)(event)}
               >
                 <FileTypeIcon path={change()!.path} class="file-edit-file-icon" />
                 {formatFileChangeDisplayName(change()!.path)}
@@ -1116,7 +1123,9 @@ function FileChangeCard(props: {
         <div class="chat-tool-invocation-part file-change-card">
           <div
             class={`file-change-card-header${props.compact ? '' : ' is-standalone'}${canExpandError() ? ' is-expandable' : ''}`}
-            onClick={canExpandError() ? props.toggleExpand : undefined}
+            onClick={() => {
+              if (canExpandError()) props.toggleExpand();
+            }}
           >
             <Show when={props.compact}>{statusContent(true)}</Show>
             {fileContent()}

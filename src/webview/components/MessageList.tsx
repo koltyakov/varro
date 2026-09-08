@@ -7161,23 +7161,18 @@ export function MessageList() {
   );
   createComputed<ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>>((previous) => {
     const current = assistantActivityGroupMap();
-    const currentKeys = new Set(
-      [...current.values()].flatMap((groups) => groups.map(({ key }) => key))
-    );
+    const currentGroups = new Set([...current.values()].flat());
+    const currentKeys = new Set([...currentGroups].map(({ key }) => key));
     const currentPartKeys = new Set(
-      [...current.values()].flatMap((groups) =>
-        groups.flatMap((group) => group.parts.map(getAssistantActivityPartKey))
-      )
+      [...currentGroups].flatMap((group) => group.parts.map(getAssistantActivityPartKey))
     );
     const disappearedKeys = new Set<string>();
-    for (const groups of previous.values()) {
-      for (const group of groups) {
-        if (
-          !currentKeys.has(group.key) &&
-          group.parts.every((part) => currentPartKeys.has(getAssistantActivityPartKey(part)))
-        ) {
-          disappearedKeys.add(group.key);
-        }
+    for (const group of new Set([...previous.values()].flat())) {
+      if (
+        !currentKeys.has(group.key) &&
+        group.parts.every((part) => currentPartKeys.has(getAssistantActivityPartKey(part)))
+      ) {
+        disappearedKeys.add(group.key);
       }
     }
     reserveCollapsedActivityGroupSpace(disappearedKeys);

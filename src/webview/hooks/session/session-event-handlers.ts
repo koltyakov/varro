@@ -1,3 +1,4 @@
+import { batch } from 'solid-js';
 import {
   isAbortedAssistantError,
   isTransientProviderConnectionError,
@@ -684,17 +685,19 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     }
     settledIdleSessions.add(sessionId);
     const hadActiveAssistantReply = hasActiveAssistantReply(deps.getMessages());
-    if (!alreadySettled) settleLatestAssistantOnIdle(sessionId, Date.now());
-    deps.clearPendingAbort(sessionId);
-    sessionStore.setSessionCompacting(sessionId, false);
-    deps.setSessionStatusEntry(sessionId, { type: 'idle' });
-    if (!abortedRetry) deps.updateUsageLimitState(sessionId, { type: 'idle' });
-    if (sessionId === deps.getActiveSessionId()) {
-      if (isActiveTreeWorking()) uiStore.startLoading();
-      else uiStore.stopLoading();
-    } else if (isSessionInActiveTree(sessionId) && !isActiveTreeWorking()) {
-      uiStore.stopLoading();
-    }
+    batch(() => {
+      if (!alreadySettled) settleLatestAssistantOnIdle(sessionId, Date.now());
+      deps.clearPendingAbort(sessionId);
+      sessionStore.setSessionCompacting(sessionId, false);
+      deps.setSessionStatusEntry(sessionId, { type: 'idle' });
+      if (!abortedRetry) deps.updateUsageLimitState(sessionId, { type: 'idle' });
+      if (sessionId === deps.getActiveSessionId()) {
+        if (isActiveTreeWorking()) uiStore.startLoading();
+        else uiStore.stopLoading();
+      } else if (isSessionInActiveTree(sessionId) && !isActiveTreeWorking()) {
+        uiStore.stopLoading();
+      }
+    });
     if (alreadySettled) return;
     deps
       .syncSession(sessionId)
@@ -1339,40 +1342,42 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       }
 
       if (isSessionInActiveTree(sessionID)) {
-        if (!assistantFinished) markSessionProgress(sessionID);
-        uiStore.markLoadingActivity();
-        if (message) {
-          recordSessionMessageSnapshotMutation(sessionID);
-          if (
-            !deps
-              .getMessages()
-              .some(
-                (entry) =>
-                  entry.info.id === message.id && entry.info.sessionID === message.sessionID
-              )
-          ) {
-            invalidateMessageLoads(sessionID);
-          }
-          sessionStore.upsertMessageInfo(message);
-        } else {
-          scheduleMessageSync(sessionID);
-        }
-        if (assistantFinished) {
-          if (assistantMessage) {
-            sessionStore.finishMessageStreaming(assistantMessage.id);
-            syncMessagePartsIfMissing(assistantMessage);
-            if (assistantCompleted) scheduleMessageSync(sessionID);
-            deps.handoffTodosToMessages();
-            refreshSettledTodos(sessionID);
+        batch(() => {
+          if (!assistantFinished) markSessionProgress(sessionID);
+          uiStore.markLoadingActivity();
+          if (message) {
+            recordSessionMessageSnapshotMutation(sessionID);
+            if (
+              !deps
+                .getMessages()
+                .some(
+                  (entry) =>
+                    entry.info.id === message.id && entry.info.sessionID === message.sessionID
+                )
+            ) {
+              invalidateMessageLoads(sessionID);
+            }
+            sessionStore.upsertMessageInfo(message);
           } else {
-            const settledMessageId = settlePartialAssistantUpdate(
-              sessionID,
-              partialMessage,
-              assistantMessage
-            );
-            if (settledMessageId) recordSessionMessageSnapshotMutation(sessionID);
+            scheduleMessageSync(sessionID);
           }
-        }
+          if (assistantFinished) {
+            if (assistantMessage) {
+              sessionStore.finishMessageStreaming(assistantMessage.id);
+              syncMessagePartsIfMissing(assistantMessage);
+              if (assistantCompleted) scheduleMessageSync(sessionID);
+              deps.handoffTodosToMessages();
+              refreshSettledTodos(sessionID);
+            } else {
+              const settledMessageId = settlePartialAssistantUpdate(
+                sessionID,
+                partialMessage,
+                assistantMessage
+              );
+              if (settledMessageId) recordSessionMessageSnapshotMutation(sessionID);
+            }
+          }
+        });
       }
       if (partialMessage?.role === 'assistant') {
         sessionStore.setSessionFailed(

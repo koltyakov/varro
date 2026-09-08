@@ -1802,6 +1802,13 @@ describe('state helpers', () => {
     expect(stateModule.getProviderLimit('openai', 'gpt-4.1')).toEqual(gpt41Limit);
     expect(stateModule.getProviderLimit('openai', 'missing')).toBeNull();
 
+    stateModule.setProviderLimit('openai', 'gpt-4.1', { ...gpt41Limit, checkedAt: 1 });
+    expect(stateModule.getProviderLimit('openai', 'gpt-4.1')).toEqual(gpt41Limit);
+    const stale = { ...gpt41Limit, note: 'Refresh failed; showing last known limits.' };
+    stateModule.setProviderLimit('openai', 'gpt-4.1', stale);
+    expect(stateModule.getProviderLimit('openai', 'gpt-4.1')).toEqual(stale);
+    stateModule.setProviderLimit('openai', 'gpt-4.1', gpt41Limit);
+
     stateModule.setProviderLimit('openai', 'gpt-4o', null);
     expect(stateModule.getProviderLimit('openai', 'gpt-4o')).toBeNull();
     expect(stateModule.getProviderLimit('openai', 'gpt-4.1')).toEqual(gpt41Limit);

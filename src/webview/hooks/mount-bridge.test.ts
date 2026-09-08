@@ -32,6 +32,7 @@ const {
   applyModelPreferencesSnapshot,
   applySessionSelectedAgentUpdate,
   applySessionPlanStateUpdate,
+  setProviderLimit,
 } = vi.hoisted(() => ({
   setState: vi.fn(),
   setError: vi.fn(),
@@ -56,6 +57,7 @@ const {
   applyModelPreferencesSnapshot: vi.fn(),
   applySessionSelectedAgentUpdate: vi.fn(),
   applySessionPlanStateUpdate: vi.fn(),
+  setProviderLimit: vi.fn(),
 }));
 
 /* oxlint-disable anti-slop/no-module-mocking -- These tests exercise mount-bridge integration with state and client modules. */
@@ -69,6 +71,7 @@ vi.mock('../lib/state', async () => {
       editorContext: { ...actual.state.editorContext, activeFile: null },
     },
     setState,
+    setProviderLimit,
     setError,
     setTheme,
     addContextFiles,
@@ -747,6 +750,38 @@ describe('mount bridge helpers', () => {
       setWorkspaceStatusSummary: vi.fn(),
       setWorkspaceStatuses: vi.fn(),
     };
+
+    const quotaUpdate: ExtensionMessage = {
+      type: 'provider-limit/updated',
+      payload: {
+        directory: '/repo',
+        status: {
+          providerID: 'openai',
+          modelID: 'gpt',
+          source: 'provider',
+          status: 'error',
+          checkedAt: 10,
+          note: 'Quota unavailable',
+        },
+      },
+    };
+    handleExtensionMessageWithDependencies(deps, quotaUpdate);
+    expect(setProviderLimit).not.toHaveBeenCalled();
+    handleExtensionMessageWithDependencies(
+      { ...deps, getCurrentWorkspacePath: () => '/other' },
+      quotaUpdate
+    );
+    expect(setProviderLimit).not.toHaveBeenCalled();
+    handleExtensionMessageWithDependencies(
+      { ...deps, getCurrentWorkspacePath: () => '/repo/' },
+      quotaUpdate
+    );
+    expect(setProviderLimit).toHaveBeenCalledExactlyOnceWith(
+      'openai',
+      'gpt',
+      quotaUpdate.payload.status
+    );
+    expect(refreshProviders).not.toHaveBeenCalled();
 
     handleExtensionMessageWithDependencies(deps, { type: 'command/new-session' });
     handleExtensionMessageWithDependencies(deps, {

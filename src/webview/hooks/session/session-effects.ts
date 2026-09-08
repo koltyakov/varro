@@ -6,7 +6,8 @@ import type { SessionStatus } from '../../types';
 type ProviderSelection = { providerID: string; modelID?: string | null };
 
 const DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_MS = DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS * 1000;
-const ACTIVE_SESSION_PROVIDER_LIMIT_POLL_INTERVAL_MS = 30_000;
+const ACTIVE_PROVIDER_LIMIT_POLL_INTERVAL_MS = 30_000;
+const PROVIDER_LIMIT_COMPLETION_REFRESH_DELAY_MS = 31_000;
 const DEGRADED_LOADING_STATUS_POLL_MS = 1_000;
 const HEALTHY_LOADING_STATUS_POLL_INITIAL_MS = 4_000;
 const HEALTHY_LOADING_STATUS_POLL_MAX_MS = 16_000;
@@ -154,15 +155,12 @@ export function createSessionMessageSyncCoordinator(
   return { sync, syncIfStale, forget, clear };
 }
 
-function resolveProviderLimitPollIntervalMs(
-  baseIntervalMs: number,
-  isActiveSessionWorking: boolean
-) {
-  if (!isActiveSessionWorking || baseIntervalMs !== DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_MS) {
+function resolveProviderLimitPollIntervalMs(baseIntervalMs: number, isProviderWorking: boolean) {
+  if (!isProviderWorking || baseIntervalMs !== DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_MS) {
     return baseIntervalMs;
   }
 
-  return ACTIVE_SESSION_PROVIDER_LIMIT_POLL_INTERVAL_MS;
+  return ACTIVE_PROVIDER_LIMIT_POLL_INTERVAL_MS;
 }
 
 export function registerLoadingStatusPollEffect(deps: {
@@ -380,7 +378,8 @@ export function registerProviderLimitRefreshEffect(deps: {
   getServerState(): string;
   areProvidersLoaded(): boolean;
   isDocumentVisible(): boolean;
-  isActiveSessionWorking(): boolean;
+  isProviderWorking(providerID: string): boolean;
+  getRequestScope(): number;
   getActiveProviderSelection(): ProviderSelection | null;
   getProviderLimit(
     providerID: string,
@@ -398,56 +397,87 @@ export function registerProviderLimitRefreshEffect(deps: {
   getPollIntervalMs(): number;
   logError(context: string, cause: unknown): void;
 }) {
+  const pollingTarget = createMemo(
+    () => {
+      if (deps.getServerState() !== 'running' || !deps.areProvidersLoaded()) return null;
+      const pollIntervalMs = deps.getPollIntervalMs();
+      if (pollIntervalMs < 0) return null;
+      const active = deps.getActiveProviderSelection();
+      if (!active) return null;
+      const working = deps.isProviderWorking(active.providerID);
+
+      return {
+        providerID: active.providerID,
+        modelID: active.modelID,
+        scope: deps.getRequestScope(),
+        working,
+        pollIntervalMs: resolveProviderLimitPollIntervalMs(pollIntervalMs, working),
+      };
+    },
+    null,
+    {
+      equals: (a, b) =>
+        a?.providerID === b?.providerID &&
+        a?.modelID === b?.modelID &&
+        a?.scope === b?.scope &&
+        a?.working === b?.working &&
+        a?.pollIntervalMs === b?.pollIntervalMs,
+    }
+  );
   createEffect(
-    on(
-      () => {
-        const visible = deps.isDocumentVisible();
-        if (deps.getServerState() !== 'running' || !deps.areProvidersLoaded() || !visible)
-          return null;
-        const pollIntervalMs = deps.getPollIntervalMs();
-        if (pollIntervalMs < 0) return null;
-        const active = deps.getActiveProviderSelection();
-        if (!active) return null;
+    on(pollingTarget, (target, previous) => {
+      if (!target) return;
 
-        return {
-          providerID: active.providerID,
-          modelID: active.modelID,
-          pollIntervalMs: resolveProviderLimitPollIntervalMs(
-            pollIntervalMs,
-            deps.isActiveSessionWorking()
-          ),
-        };
-      },
-      (target) => {
-        if (!target) return;
-
-        let cancelled = false;
-        let inFlight = false;
-        const refresh = async () => {
-          if (cancelled || inFlight || !deps.isDocumentVisible()) return;
-          inFlight = true;
-          try {
-            const limit = await deps.loadProviderLimit(target.providerID, target.modelID);
-            if (!cancelled) {
-              deps.setProviderLimit(target.providerID, target.modelID, limit);
-            }
-          } catch (err) {
-            deps.logError('loadProviderLimit', err);
-          } finally {
-            inFlight = false;
+      let cancelled = false;
+      let inFlight = false;
+      const refresh = async (completion = false) => {
+        if (
+          cancelled ||
+          inFlight ||
+          (!completion && !target.working && !deps.isDocumentVisible()) ||
+          target.scope !== deps.getRequestScope()
+        )
+          return;
+        inFlight = true;
+        try {
+          const limit = await deps.loadProviderLimit(target.providerID, target.modelID);
+          if (!cancelled && target.scope === deps.getRequestScope()) {
+            deps.setProviderLimit(target.providerID, target.modelID, limit);
           }
-        };
+        } catch (err) {
+          deps.logError('loadProviderLimit', err);
+        } finally {
+          inFlight = false;
+        }
+      };
 
-        void refresh();
-        const timer = window.setInterval(() => {
+      const shouldPoll = createMemo(() => target.working || deps.isDocumentVisible());
+      createEffect(
+        on(shouldPoll, (enabled) => {
+          if (!enabled) return;
           void refresh();
-        }, target.pollIntervalMs);
+          const timer = window.setInterval(() => {
+            void refresh();
+          }, target.pollIntervalMs);
+          onCleanup(() => window.clearInterval(timer));
+        })
+      );
+      // Wait beyond the backend's 30-second TTL for final usage, even while hidden.
+      const completionTimer =
+        previous?.working &&
+        !target.working &&
+        previous.providerID === target.providerID &&
+        previous.modelID === target.modelID &&
+        previous.scope === target.scope
+          ? window.setTimeout(() => {
+              void refresh(true);
+            }, PROVIDER_LIMIT_COMPLETION_REFRESH_DELAY_MS)
+          : undefined;
 
-        onCleanup(() => {
-          cancelled = true;
-          window.clearInterval(timer);
-        });
-      }
-    )
+      onCleanup(() => {
+        cancelled = true;
+        if (completionTimer !== undefined) window.clearTimeout(completionTimer);
+      });
+    })
   );
 }

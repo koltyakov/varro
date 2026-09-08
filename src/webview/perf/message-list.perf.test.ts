@@ -2,7 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { MessageList } from '../components/MessageList';
 import { getAssistantDialogSummaryMap } from '../components/message-list/assistant-dialog';
-import { replaceMessages, resetDefaultAppState, setState } from '../lib/state';
+import { replaceMessages, resetDefaultAppState, setState, upsertPart } from '../lib/state';
+import {
+  getAssistantActivityGroupMap,
+  preserveAssistantActivityGroupKeys,
+} from '../lib/assistant-activity';
+import {
+  getCompactActivityDisclosureLayoutSignatures,
+  getRenderEmptyMessageIds,
+} from '../components/message-list/row-layout';
 import type { AssistantMessage, Message, Part, TextPart } from '../types';
 import { settlePerfEffects } from './harness';
 
@@ -237,5 +245,110 @@ describe('MessageList perf guards', () => {
     const largeTranscriptReads = countIdReads(1_000);
 
     expect(largeTranscriptReads).toBeLessThan(smallTranscriptReads * 15);
+  });
+
+  it.each(['keys', 'disclosure', 'empty'] as const)(
+    'visits shared activity parts linearly when deriving %s',
+    (operation) => {
+      const countReads = (size: number) => {
+        let reads = 0;
+        const messages = Array.from({ length: size }, (_, index) => {
+          const id = `activity-${index}`;
+          const part: Part = {
+            id: `reasoning-${index}`,
+            messageID: id,
+            sessionID: 'session-1',
+            type: 'reasoning',
+            text: 'Generated historical reasoning.\n'.repeat(40),
+            time: { start: 1, end: 2 },
+          };
+          Object.defineProperty(part, 'messageID', {
+            get() {
+              reads += 1;
+              return id;
+            },
+          });
+          return entry(createAssistantMessage(id), [part]);
+        });
+        const groups = getAssistantActivityGroupMap(messages);
+        expect(groups.size).toBe(size);
+        expect(groups.get('activity-0')![0]).toBe(groups.get(`activity-${size - 1}`)![0]);
+        reads = 0;
+        if (operation === 'keys') preserveAssistantActivityGroupKeys(groups, groups);
+        if (operation === 'disclosure')
+          getCompactActivityDisclosureLayoutSignatures(groups, () => false);
+        if (operation === 'empty') {
+          expect(getRenderEmptyMessageIds(messages, groups, () => false).size).toBe(size - 1);
+        }
+        return reads;
+      };
+      const small = countReads(40);
+      const large = countReads(160);
+      expect(
+        large,
+        `${operation} part reads must scale with parts, not messages times parts`
+      ).toBeLessThanOrEqual(small * 5);
+    }
+  );
+
+  it('bounds baseline activity reads when a final Markdown part is committed', async () => {
+    const size = 160;
+    let baselineReads = 0;
+    const messages = Array.from({ length: size }, (_, index) => {
+      const id = `activity-${index}`;
+      const part: Part =
+        index % 2 === 0
+          ? {
+              id: `part-${index}`,
+              messageID: id,
+              sessionID: 'session-1',
+              type: 'reasoning',
+              text: 'Generated historical reasoning.\n'.repeat(40),
+              time: { start: 1, end: 2 },
+            }
+          : {
+              id: `part-${index}`,
+              messageID: id,
+              sessionID: 'session-1',
+              type: 'tool',
+              tool: 'read',
+              callID: `call-${index}`,
+              state: {
+                status: 'completed',
+                input: { filePath: `/workspace/file-${index}.ts` },
+                output: 'Generated output.\n'.repeat(40),
+                title: 'Read file',
+                metadata: {},
+                time: { start: 1, end: 2 },
+              },
+            };
+      Object.defineProperty(part, 'messageID', {
+        get() {
+          baselineReads += 1;
+          return id;
+        },
+      });
+      return entry(createAssistantMessage(id), [part]);
+    });
+    const text = '# Final report\n\nGenerated Markdown result.\n'.repeat(220);
+    messages.push(
+      entry({ ...createAssistantMessage('final'), parentID: 'new-user', time: { created: 3 } }, [
+        createTextPart('final-text', 'final', ''),
+      ])
+    );
+    setState('messages', messages);
+    setState('activeSessionId', 'session-1');
+    setState('streamingPartId', 'final-text');
+    setState('streamingText', text);
+    cleanup = render(() => MessageList(), container!);
+    await settlePerfEffects();
+    expect(baselineReads).toBeGreaterThan(0);
+    baselineReads = 0;
+    upsertPart({ ...createTextPart('final-text', 'final', text), time: { start: 3, end: 4 } });
+    await settlePerfEffects();
+    expect(
+      baselineReads,
+      'final part commitment must not rescan each shared group for every historical row'
+    ).toBeLessThan(size * 100);
   });
 });

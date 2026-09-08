@@ -446,6 +446,7 @@ export function setProviderLimit(
         return;
       }
 
+      if (current[key] && current[key].checkedAt > limit.checkedAt) return;
       current[key] = limit;
     })
   );

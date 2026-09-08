@@ -167,6 +167,7 @@ describe('ModelPicker', () => {
   });
 
   it('shows model details only while hovering when there is room on the right', async () => {
+    vi.useFakeTimers();
     setState('providers', [
       createProvider('openai', 'OpenAI', {
         detailed: createModel('detailed', 'GPT-5 Detailed', {
@@ -192,6 +193,12 @@ describe('ModelPicker', () => {
       right: 300,
     });
     row?.dispatchEvent(new MouseEvent('mouseenter'));
+    await flushMicrotasks();
+
+    expect(container?.querySelector('.model-picker-details')).toBeNull();
+    vi.advanceTimersByTime(499);
+    expect(container?.querySelector('.model-picker-details')).toBeNull();
+    vi.advanceTimersByTime(1);
     await flushMicrotasks();
 
     expect(container?.querySelector('.model-picker-details')?.textContent).toContain('OpenAI');

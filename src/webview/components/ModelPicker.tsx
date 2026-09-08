@@ -9,7 +9,12 @@ import {
   state,
 } from '../lib/state';
 import { formatVariantLabel as formatThinkingLabel, formatContextLimit } from '../lib/format';
-import { observePopupViewport, placeTriggerDropdownAnchor } from '../lib/popup-position';
+import {
+  observePopupViewport,
+  PICKER_DETAILS_HOVER_DELAY_MS,
+  placeTriggerDropdownAnchor,
+  RIGHT_PICKER_DETAILS_HOVER_DELAY_MS,
+} from '../lib/popup-position';
 import { modelSupportsVariants } from '../lib/model-capabilities';
 import { compareProviders, sortProviderModels } from '../lib/model-ordering';
 import { STORAGE_KEYS, readStored, writeStored } from '../lib/state-storage';
@@ -26,7 +31,6 @@ interface ModelSelection {
 
 const DEBUG_ANIMATE_MANAGE_MODELS = false; // set to true to always animate the "Manage models" button when opening the model picker
 const STACKED_DETAILS_MAX_WIDTH = 700;
-const STACKED_DETAILS_HOVER_DELAY_MS = 2_000;
 
 export function ModelPicker(props: {
   onSelect: (sel: ModelSelection) => void;
@@ -432,6 +436,7 @@ export function ModelPicker(props: {
                                 setFocusIndex(myIndex());
                                 setHoveredEntry({ provider, model });
                                 if (!anchorRef || !menuRef) return;
+                                const menu = menuRef;
                                 const anchorBox = anchorRef.getBoundingClientRect();
                                 const rowBox = event.currentTarget.getBoundingClientRect();
                                 setDetailsTop(
@@ -443,20 +448,28 @@ export function ModelPicker(props: {
                                     )
                                   )
                                 );
-                                if (window.innerWidth <= STACKED_DETAILS_MAX_WIDTH) {
-                                  setDetailsPlacement(null);
-                                  detailsHoverTimer = setTimeout(() => {
-                                    setDetailsPlacement('top');
+                                setDetailsPlacement(null);
+                                const detailsFitOnRight =
+                                  window.innerWidth > STACKED_DETAILS_MAX_WIDTH &&
+                                  menu.getBoundingClientRect().right + 235 <= window.innerWidth;
+                                detailsHoverTimer = setTimeout(
+                                  () => {
+                                    if (window.innerWidth <= STACKED_DETAILS_MAX_WIDTH) {
+                                      setDetailsPlacement('top');
+                                    } else {
+                                      setDetailsPlacement(
+                                        menu.getBoundingClientRect().right + 235 <=
+                                          window.innerWidth
+                                          ? 'right'
+                                          : null
+                                      );
+                                    }
                                     queueMicrotask(() => repositionPopup?.());
-                                  }, STACKED_DETAILS_HOVER_DELAY_MS);
-                                } else {
-                                  setDetailsPlacement(
-                                    menuRef.getBoundingClientRect().right + 235 <= window.innerWidth
-                                      ? 'right'
-                                      : null
-                                  );
-                                  queueMicrotask(() => repositionPopup?.());
-                                }
+                                  },
+                                  detailsFitOnRight
+                                    ? RIGHT_PICKER_DETAILS_HOVER_DELAY_MS
+                                    : PICKER_DETAILS_HOVER_DELAY_MS
+                                );
                               }}
                               onMouseLeave={() => {
                                 clearTimeout(detailsHoverTimer);

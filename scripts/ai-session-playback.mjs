@@ -10,9 +10,16 @@ import { promisify } from 'node:util';
 const DEFAULT_DATABASE = 'varro-playback.db';
 const DEFAULT_SHORT_GAP_MS = 250;
 const DEFAULT_MAX_GAP_MS = 500;
-const DEFAULT_HISTORY_DATABASE = path.join(os.homedir(), '.local', 'share', 'opencode', 'opencode.db');
+const DEFAULT_HISTORY_DATABASE = path.join(
+  os.homedir(),
+  '.local',
+  'share',
+  'opencode',
+  'opencode.db'
+);
 const HISTORY_BASELINE_MESSAGES = 120;
 const MAX_STREAM_CHUNKS = 80;
+const MAX_TIMED_STREAM_CHUNKS = 4096;
 
 function openDatabase(filePath) {
   const database = new DatabaseSync(filePath);
@@ -84,7 +91,12 @@ export function buildReplayTimeline(
   events,
   { shortGapMs = DEFAULT_SHORT_GAP_MS, maxGapMs = DEFAULT_MAX_GAP_MS } = {}
 ) {
-  if (!Number.isFinite(shortGapMs) || !Number.isFinite(maxGapMs) || shortGapMs < 0 || maxGapMs < shortGapMs) {
+  if (
+    !Number.isFinite(shortGapMs) ||
+    !Number.isFinite(maxGapMs) ||
+    shortGapMs < 0 ||
+    maxGapMs < shortGapMs
+  ) {
     throw new Error('Replay timing requires 0 <= shortGapMs <= maxGapMs');
   }
   let previousOffset = 0;
@@ -155,7 +167,10 @@ function parseJson(value, owner) {
   try {
     return JSON.parse(value);
   } catch (error) {
-    throw new Error(`Could not parse ${owner}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+    throw new Error(
+      `Could not parse ${owner}: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error }
+    );
   }
 }
 
@@ -175,11 +190,23 @@ function projectHistoricalPart(row) {
   };
 }
 
-function streamChunks(text) {
-  const chunkSize = Math.max(240, Math.ceil(text.length / MAX_STREAM_CHUNKS));
+function streamChunks(text, duration) {
+  const count = Math.min(
+    text.length,
+    MAX_TIMED_STREAM_CHUNKS,
+    Math.max(
+      Math.min(MAX_STREAM_CHUNKS, Math.ceil(text.length / 240)),
+      Math.ceil((duration ?? 0) / DEFAULT_SHORT_GAP_MS)
+    )
+  );
   const chunks = [];
-  for (let offset = 0; offset < text.length; offset += chunkSize) {
-    chunks.push(text.slice(offset, offset + chunkSize));
+  for (let index = 0; index < count; index += 1) {
+    chunks.push(
+      text.slice(
+        Math.floor((index * text.length) / count),
+        Math.floor(((index + 1) * text.length) / count)
+      )
+    );
   }
   return chunks;
 }
@@ -187,12 +214,16 @@ function streamChunks(text) {
 export function reconstructHistoricalEvents(sessionId, userMessage, assistantMessage, partRows) {
   const events = [];
   let order = 0;
-  const add = (offsetMs, event) => events.push({ offsetMs: Math.max(0, offsetMs), order: order++, event });
+  const add = (offsetMs, event) =>
+    events.push({ offsetMs: Math.max(0, offsetMs), order: order++, event });
   add(0, { type: 'message.updated', properties: { info: userMessage.info } });
   for (const part of userMessage.parts) {
     add(4, { type: 'message.part.updated', properties: { part } });
   }
-  add(8, { type: 'session.status', properties: { sessionID: sessionId, status: { type: 'busy' } } });
+  add(8, {
+    type: 'session.status',
+    properties: { sessionID: sessionId, status: { type: 'busy' } },
+  });
   const activeInfo = structuredClone(assistantMessage.info);
   if (activeInfo.time) delete activeInfo.time.completed;
   delete activeInfo.finish;
@@ -201,19 +232,43 @@ export function reconstructHistoricalEvents(sessionId, userMessage, assistantMes
 
   const assistantCreated = Number(assistantMessage.info.time?.created) || 0;
   let lastOffset = 12;
-  for (const row of partRows) {
+  for (const [rowIndex, row] of partRows.entries()) {
     const part = projectHistoricalPart(row);
     const sourceOffset = Math.max(16, Number(row.time_created) - assistantCreated);
     const baseOffset = Number.isFinite(sourceOffset) ? sourceOffset : lastOffset + 16;
     if ((part.type === 'text' || part.type === 'reasoning') && typeof part.text === 'string') {
       const finalText = part.text;
-      const chunks = streamChunks(finalText);
-      add(baseOffset, {
+      const messageEnd = assistantMessage.info.time?.completed;
+      const span = [
+        [part.time?.start, part.time?.end],
+        [row.time_created, row.time_updated],
+      ].find(
+        ([start, end]) =>
+          Number.isFinite(start) &&
+          Number.isFinite(end) &&
+          start >= assistantCreated &&
+          end > start &&
+          (!Number.isFinite(messageEnd) || end <= messageEnd)
+      );
+      const startedAt = span ? Math.max(16, span[0] - assistantCreated) : baseOffset;
+      const duration = span ? Math.max(0, span[1] - assistantCreated - startedAt) : undefined;
+      const chunks = streamChunks(finalText, duration);
+      // Only estimated timing is clipped to the next part; persisted spans can overlap tools.
+      const fallbackEnd = Math.min(
+        ...[partRows[rowIndex + 1]?.time_created, messageEnd]
+          .filter((time) => Number.isFinite(time) && time >= assistantCreated + startedAt)
+          .map((time) => time - assistantCreated)
+      );
+      const completedAt =
+        duration === undefined
+          ? Math.min(startedAt + chunks.length * 32, fallbackEnd)
+          : startedAt + duration;
+      add(startedAt, {
         type: 'message.part.updated',
         properties: { part: { ...part, text: '' } },
       });
       chunks.forEach((delta, index) => {
-        add(baseOffset + (index + 1) * 32, {
+        add(startedAt + ((index + 1) * (completedAt - startedAt)) / chunks.length, {
           type: 'message.part.delta',
           properties: {
             sessionID: sessionId,
@@ -224,7 +279,6 @@ export function reconstructHistoricalEvents(sessionId, userMessage, assistantMes
           },
         });
       });
-      const completedAt = baseOffset + (chunks.length + 1) * 32;
       add(completedAt, { type: 'message.part.updated', properties: { part } });
       lastOffset = Math.max(lastOffset, completedAt);
       continue;
@@ -277,7 +331,13 @@ export function reconstructHistoricalEvents(sessionId, userMessage, assistantMes
     .map(({ offsetMs, event }) => ({ offsetMs, event }));
 }
 
-export function importHistoricalPlayback({ sourceDatabase, playbackDatabase, sessionId, messageId, label }) {
+export function importHistoricalPlayback({
+  sourceDatabase,
+  playbackDatabase,
+  sessionId,
+  messageId,
+  label,
+}) {
   const source = new DatabaseSync(sourceDatabase, { readOnly: true });
   try {
     const sessionRow = source.prepare('SELECT * FROM session WHERE id = ?').get(sessionId);
@@ -285,7 +345,8 @@ export function importHistoricalPlayback({ sourceDatabase, playbackDatabase, ses
     const assistantRow = source
       .prepare('SELECT * FROM message WHERE id = ? AND session_id = ?')
       .get(messageId, sessionId);
-    if (!assistantRow) throw new Error(`Historical message ${messageId} was not found in ${sessionId}`);
+    if (!assistantRow)
+      throw new Error(`Historical message ${messageId} was not found in ${sessionId}`);
     const assistantData = parseJson(assistantRow.data, `message ${messageId}`);
     if (assistantData.role !== 'assistant' || typeof assistantData.parentID !== 'string') {
       throw new Error(`Historical message ${messageId} is not a linked assistant response`);
@@ -306,11 +367,10 @@ export function importHistoricalPlayback({ sourceDatabase, playbackDatabase, ses
     const messagesById = new Map(messages.map((message) => [message.info.id, message]));
     const placeholders = selectedRows.map(() => '?').join(',');
     const partRows = source
-      .prepare(
-        `SELECT * FROM part WHERE message_id IN (${placeholders}) ORDER BY time_created, id`
-      )
+      .prepare(`SELECT * FROM part WHERE message_id IN (${placeholders}) ORDER BY time_created, id`)
       .all(...selectedRows.map((row) => row.id));
-    for (const row of partRows) messagesById.get(row.message_id)?.parts.push(projectHistoricalPart(row));
+    for (const row of partRows)
+      messagesById.get(row.message_id)?.parts.push(projectHistoricalPart(row));
     const userMessage = messagesById.get(userRow.id);
     const assistantMessage = messagesById.get(assistantRow.id);
     const assistantPartRows = partRows.filter((row) => row.message_id === assistantRow.id);
@@ -385,7 +445,8 @@ export async function replay(filePath, id, options) {
     maxGapMs: Number(options['max-gap-ms'] ?? DEFAULT_MAX_GAP_MS),
   });
   // Allow two minutes for the web server and one minute for browser startup and teardown.
-  const timeoutMs = Math.ceil(timeline.reduce((total, entry) => total + entry.delayMs, 0)) + 180_000;
+  const timeoutMs =
+    Math.ceil(timeline.reduce((total, entry) => total + entry.delayMs, 0)) + 180_000;
   if (!Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 2_147_483_647) {
     throw new Error('Replay duration exceeds the supported subprocess deadline');
   }
@@ -396,16 +457,20 @@ export async function replay(filePath, id, options) {
     const replayFile = path.join(replayDirectory, 'capture.json');
     await writeFile(replayFile, `${JSON.stringify({ capture, timeline })}\n`);
     const cli = fileURLToPath(import.meta.resolve('@playwright/test/cli'));
-    const child = spawn(process.execPath, [cli, 'test', '--config', 'playwright.ai-playback.config.ts'], {
-      cwd: fileURLToPath(new URL('..', import.meta.url)),
-      detached: process.platform !== 'win32',
-      stdio: 'inherit',
-      env: {
-        ...process.env,
-        VARRO_PLAYBACK_ID: String(id),
-        VARRO_PLAYBACK_FILE: replayFile,
-      },
-    });
+    const child = spawn(
+      process.execPath,
+      [cli, 'test', '--config', 'playwright.ai-playback.config.ts'],
+      {
+        cwd: fileURLToPath(new URL('..', import.meta.url)),
+        detached: process.platform !== 'win32',
+        stdio: 'inherit',
+        env: {
+          ...process.env,
+          VARRO_PLAYBACK_ID: String(id),
+          VARRO_PLAYBACK_FILE: replayFile,
+        },
+      }
+    );
     const code = await new Promise((resolve, reject) => {
       let stopping = false;
       const stop = async (error) => {
@@ -426,11 +491,15 @@ export async function replay(filePath, id, options) {
               let cleanupError;
               try {
                 // Playwright can detach its web server, so the root process group is not enough.
-                const { stdout } = await promisify(execFile)('ps', ['-A', '-o', 'pid=,ppid=,pgid='], {
-                  timeout: 5_000,
-                  killSignal: 'SIGKILL',
-                  maxBuffer: 4 * 1024 * 1024,
-                });
+                const { stdout } = await promisify(execFile)(
+                  'ps',
+                  ['-A', '-o', 'pid=,ppid=,pgid='],
+                  {
+                    timeout: 5_000,
+                    killSignal: 'SIGKILL',
+                    maxBuffer: 4 * 1024 * 1024,
+                  }
+                );
                 const rows = stdout
                   .trim()
                   .split('\n')
@@ -461,9 +530,11 @@ export async function replay(filePath, id, options) {
           }
           reject(error);
         } catch (cleanupError) {
-          reject(new Error(`${error.message}; process cleanup failed: ${cleanupError.message}`, {
-            cause: cleanupError,
-          }));
+          reject(
+            new Error(`${error.message}; process cleanup failed: ${cleanupError.message}`, {
+              cause: cleanupError,
+            })
+          );
         } finally {
           // A failed OS cleanup must not turn the deadline into another indefinite wait.
           child.unref();

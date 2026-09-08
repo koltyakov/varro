@@ -502,6 +502,71 @@ describe('useOpenCode initialization', () => {
     }
   });
 
+  it.each([
+    { storedProvider: 'openai', metadataProvider: 'anthropic', polls: true },
+    { storedProvider: 'anthropic', metadataProvider: 'openai', polls: false },
+    { storedProvider: null, metadataProvider: 'openai', polls: true },
+    { storedProvider: null, metadataProvider: null, polls: false },
+  ])(
+    'infers hidden background provider activity without using the composer: %j',
+    async ({ storedProvider, metadataProvider, polls }) => {
+      vi.useFakeTimers();
+      const originalVisibility = document.visibilityState;
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+      clientMocks.providerLimit.mockResolvedValue(null);
+      const { stateModule, hookModule } = await loadModules();
+      const dispose = createRoot((cleanup) => {
+        hookModule.useOpenCode();
+        return cleanup;
+      });
+      try {
+        await Promise.resolve();
+        stateModule.setState('serverStatus', { state: 'running' });
+        stateModule.setState('providers', [
+          provider('openai', {
+            'gpt-4o': {
+              id: 'gpt-4o',
+              name: 'GPT-4o',
+              capabilities: { toolcall: true },
+              cost: { input: 0, output: 0 },
+            },
+          }),
+        ]);
+        stateModule.setState('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
+        const background = session('background');
+        if (metadataProvider) background.model = { providerID: metadataProvider, id: 'old-model' };
+        stateModule.setState('sessions', [background]);
+        if (storedProvider) {
+          stateModule.setState('sessionSelectedModels', 'background', {
+            providerID: storedProvider,
+            modelID: 'new-model',
+          });
+        }
+        stateModule.setState('sessionStatus', 'background', { type: 'busy' });
+        stateModule.setState('providersLoaded', true);
+        await vi.advanceTimersByTimeAsync(20_000);
+        const calls = clientMocks.providerLimit.mock.calls.length;
+        expect(calls).toBe(polls ? 1 : 0);
+        stateModule.setState('sessionStatus', 'background', {
+          type: 'retry',
+          attempt: 1,
+          message: 'Retrying',
+          next: 1000,
+        });
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(clientMocks.providerLimit).toHaveBeenCalledTimes(polls ? 2 : 0);
+        if (polls) expect(clientMocks.providerLimit).toHaveBeenLastCalledWith('openai', 'gpt-4o');
+      } finally {
+        dispose();
+        Object.defineProperty(document, 'visibilityState', {
+          configurable: true,
+          value: originalVisibility,
+        });
+        vi.useRealTimers();
+      }
+    }
+  );
+
   it('refreshes provider limits after the webview becomes visible again', async () => {
     vi.useFakeTimers();
     const originalVisibility = document.visibilityState;

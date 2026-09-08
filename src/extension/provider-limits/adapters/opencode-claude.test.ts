@@ -61,6 +61,33 @@ describe('createOpenCodeClaudeAdapter', () => {
     vi.unstubAllGlobals();
   });
 
+  it('coordinates the exact IPC URL and token captured before metadata changes', async () => {
+    const mutableProvider = createProvider('http://127.0.0.1:43127/provider-limit', 'original');
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify(availableResponse())));
+    const status = await adapter.fetch({
+      provider: mutableProvider,
+      authStore: {},
+      modelID: 'model-a',
+      checkedAt: 1_000,
+      coordinate: async (identity, poll) => {
+        expect(identity).toEqual(['http://127.0.0.1:43127/provider-limit', 'original']);
+        mutableProvider.options = createProvider(
+          'http://127.0.0.1:43128/provider-limit',
+          'replacement'
+        ).options;
+        return poll();
+      },
+    });
+    expect(status.status).toBe('available');
+    expect(fetch).toHaveBeenCalledWith(
+      'http://127.0.0.1:43127/provider-limit',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer original' }),
+        redirect: 'error',
+      })
+    );
+  });
+
   it('matches only the exact provider with a safe versioned loopback descriptor', () => {
     expect(adapter.matches(provider, {})).toBe(true);
     expect(adapter.matches(createProvider('http://[::1]:43127/provider-limit', 'secret'), {})).toBe(
@@ -101,7 +128,7 @@ describe('createOpenCodeClaudeAdapter', () => {
     ).toBe(false);
   });
 
-  it('fetches the endpoint without redirects and normalizes account limits to the requested model', async () => {
+  it('normalizes the model without replacing the source freshness timestamp', async () => {
     vi.mocked(fetch).mockResolvedValue(Response.json(availableResponse()));
 
     const status = await adapter.fetch({
@@ -126,7 +153,7 @@ describe('createOpenCodeClaudeAdapter', () => {
       ...availableResponse().providerLimit,
       providerID: 'claude-code',
       modelID: 'claude-sonnet-5',
-      checkedAt: 5_000,
+      checkedAt: 1_000,
     });
   });
 
@@ -152,7 +179,7 @@ describe('createOpenCodeClaudeAdapter', () => {
       modelID: 'claude-opus-5',
       status: 'unsupported',
       source: 'provider',
-      checkedAt: 5_000,
+      checkedAt: 1_000,
       note: 'Usage unavailable for this account',
     });
   });

@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { render } from 'solid-js/web';
+import { createSignal } from 'solid-js';
 import { createStore } from 'solid-js/store';
-import { resetDefaultAppState, setShowThinking, setState } from '../lib/state';
+import { resetDefaultAppState, setShowFileDiffs, setShowThinking, setState } from '../lib/state';
 import { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
 import { lightBulbIcon } from '../lib/ui-icons';
-import type { AssistantMessage, Part, ReasoningPart } from '../types';
+import type { AssistantMessage, Part, ReasoningPart, ToolPart } from '../types';
+import { ToolCall } from './ToolCall';
 import {
   MessagePart,
   formatReasoningDuration,
@@ -67,6 +69,86 @@ function reasoningPart(text: string, overrides: Partial<ReasoningPart> = {}): Re
 function nextFrame() {
   return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 }
+
+it.each([
+  { name: 'MessagePart', Component: MessagePart },
+  { name: 'ToolCall', Component: ToolCall },
+])(
+  '$name retains an expanded diff across tool replacement and updates its content',
+  async ({ Component }) => {
+    setShowFileDiffs(true);
+    container!.className = 'interactive-list-shell';
+    const input = {
+      filePath: 'src/preview.css',
+      oldString: Array.from({ length: 40 }, (_, index) => `.row-${index} { width: 1px; }`).join(
+        '\n'
+      ),
+      newString: Array.from({ length: 40 }, (_, index) => `.row-${index} { width: 2px; }`).join(
+        '\n'
+      ),
+    };
+    const initial: ToolPart = {
+      id: 'edit-1',
+      messageID: 'message-1',
+      sessionID: 'session-1',
+      type: 'tool',
+      tool: 'edit',
+      callID: 'call-1',
+      state: { status: 'running', input, time: { start: 1 } },
+    };
+    const [part, setPart] = createSignal(initial);
+    cleanup = render(
+      () =>
+        Component({
+          get part() {
+            return part();
+          },
+        }),
+      container!
+    );
+    await nextFrame();
+    container!.querySelector<HTMLButtonElement>('.diff-view-toggle')!.click();
+    await nextFrame();
+    const overlay = container!.querySelector<HTMLElement>('.diff-view-overlay');
+    expect(overlay).not.toBeNull();
+    const viewport = overlay!.querySelector<HTMLElement>('.diff-view-overlay-lines')!;
+    viewport.scrollTop = 120;
+    const completed: ToolPart = {
+      ...initial,
+      state: {
+        status: 'completed',
+        input,
+        title: 'Edited',
+        output: 'Updated',
+        metadata: {},
+        time: { start: 1, end: 2 },
+      },
+    };
+    setPart(completed);
+    await nextFrame();
+    expect(overlay!.isConnected).toBe(true);
+    expect(container!.querySelector('.diff-view-overlay')).toBe(overlay);
+    expect(viewport.scrollTop).toBe(120);
+    expect(container!.querySelector('.file-edit-card')).toBeNull();
+
+    setPart({
+      ...completed,
+      state: {
+        ...completed.state,
+        input: {
+          ...input,
+          oldString: '.row-0 { width: 1px; }',
+          newString: input.newString.replaceAll('2px', '3px'),
+        },
+      },
+    });
+    await nextFrame();
+    expect(container!.querySelector('.diff-view-overlay')).toBe(overlay);
+    expect(overlay!.textContent).toContain('width: 3px');
+    expect(overlay!.textContent).not.toContain('width: 2px');
+    expect(container!.querySelector('.diff-view-file')!.textContent).toContain('width: 3px');
+  }
+);
 
 function assistantMessage(id: string, overrides: Partial<AssistantMessage> = {}): AssistantMessage {
   const base: AssistantMessage = {

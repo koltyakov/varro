@@ -20,7 +20,7 @@ import {
   type AssistantActivityKind,
   type AssistantActivityPart,
 } from '../../lib/assistant-activity';
-import { isLoading, showFileDiffs } from '../../lib/state';
+import { isLoading } from '../../lib/state';
 import {
   editPencilIcon,
   emptyPageIcon,
@@ -43,10 +43,7 @@ import {
   shouldShowAssistantPartInHighlightedCard,
   shouldShowAssistantPartInline,
 } from '../../lib/part-utils';
-import {
-  getToolFileChangeSignature,
-  getToolInlineFileChangesLayoutSignature,
-} from '../../lib/tool-file-change';
+import { getToolFileChangeSignature } from '../../lib/tool-file-change';
 import type { ToolCallPermissionMatch } from '../../lib/tool-call-matching';
 import {
   getAssistantErrorDetailsExpansionKey,
@@ -89,10 +86,7 @@ function getActivityGroupRevealTrackingKey(parts: readonly AssistantActivityPart
   return `activity-group:${parts[0]!.id}`;
 }
 
-// File-edit stacks rekey on every appended edit, so track their reveal by the
-// first part id; otherwise appending an edit replays the whole stack animation.
 function getRevealTrackingKey(item: AssistantRenderItem) {
-  if (item.kind === 'file-edit-stack') return `file-edit-stack:${item.parts[0]!.id}`;
   if (item.kind === 'activity-group') return getActivityGroupRevealTrackingKey(item.parts);
   return item.key;
 }
@@ -369,18 +363,9 @@ function prepareActiveActivityItemsViewport(element: HTMLDivElement) {
   };
 }
 
-export function getFileEditStackRenderKey(
-  parts: readonly ToolPart[],
-  inlinePreviewEnabled: boolean
-) {
-  const baseKey = `file-edit-stack:${parts[0]!.id}:${parts[parts.length - 1]!.id}`;
-  if (!inlinePreviewEnabled) return baseKey;
-
-  const inlinePreviewSignature = parts
-    .map((part) => getToolInlineFileChangesLayoutSignature(part.tool, part.state))
-    .filter((signature): signature is string => signature !== null)
-    .join('|');
-  return inlinePreviewSignature ? `${baseKey}:inline:${inlinePreviewSignature}` : baseKey;
+export function getFileEditStackRenderKey(parts: readonly ToolPart[]) {
+  // Preview geometry is invalidated by row-layout, not by remounting the stack.
+  return `file-edit-stack:${parts[0]!.id}`;
 }
 
 export function AssistantMessageContent(props: {
@@ -670,7 +655,7 @@ export function AssistantMessageContent(props: {
           // SAFETY: The surrounding shape or discriminator check establishes the ToolPart contract used below.
           fileEditParts.push(parts[++index]! as ToolPart);
         }
-        const key = getFileEditStackRenderKey(fileEditParts, showFileDiffs());
+        const key = getFileEditStackRenderKey(fileEditParts);
         const previous = previousByKey.get(key);
         if (previous?.kind === 'file-edit-stack' && samePartList(previous.parts, fileEditParts)) {
           items.push(previous);
@@ -974,6 +959,7 @@ export function AssistantMessageContent(props: {
     if (initialItem.kind === 'file-edit-stack') {
       // SAFETY: The surrounding shape or discriminator check establishes the Extract<AssistantRenderItem, { kind: 'file-edit-stack' }> contract used below.
       const item = () => entry.item() as Extract<AssistantRenderItem, { kind: 'file-edit-stack' }>;
+      const partsById = createMemo(() => new Map(item().parts.map((part) => [part.id, part])));
       return (
         <div
           ref={(element) => {
@@ -991,19 +977,22 @@ export function AssistantMessageContent(props: {
           data-assistant-render-key={entry.key}
         >
           <div class="assistant-file-edit-stack">
-            <For each={item().parts}>
-              {(part) => (
-                <MessagePart
-                  part={part}
-                  messageInfo={props.info}
-                  streamedText={props.textForPart(part)}
-                  streaming={props.isPartStreaming?.(part)}
-                  lightweight={isLightweight()}
-                  questionRequest={props.questionRequestForTool?.(part)}
-                  permissionMatch={props.permissionMatchForTool?.(part)}
-                  renderPermissionPrompt={false}
-                />
-              )}
+            <For each={Array.from(partsById().keys())}>
+              {(id) => {
+                const part = () => partsById().get(id)!;
+                return (
+                  <MessagePart
+                    part={part()}
+                    messageInfo={props.info}
+                    streamedText={props.textForPart(part())}
+                    streaming={props.isPartStreaming?.(part())}
+                    lightweight={isLightweight()}
+                    questionRequest={props.questionRequestForTool?.(part())}
+                    permissionMatch={props.permissionMatchForTool?.(part())}
+                    renderPermissionPrompt={false}
+                  />
+                );
+              }}
             </For>
           </div>
         </div>

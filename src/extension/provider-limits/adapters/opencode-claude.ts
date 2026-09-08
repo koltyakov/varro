@@ -33,7 +33,7 @@ export function createOpenCodeClaudeAdapter(): ProviderLimitAdapter {
     matches(provider) {
       return provider.id === PROVIDER_ID && getProviderLimitDescriptor(provider) != null;
     },
-    async fetch({ provider, modelID, checkedAt }: ProviderLimitAdapterContext) {
+    async fetch({ provider, modelID, checkedAt, coordinate }: ProviderLimitAdapterContext) {
       const descriptor = getProviderLimitDescriptor(provider);
       if (provider.id !== PROVIDER_ID || !descriptor) {
         return unsupportedProviderStatus(
@@ -44,55 +44,57 @@ export function createOpenCodeClaudeAdapter(): ProviderLimitAdapter {
         );
       }
 
-      try {
-        const response = await fetch(descriptor.url, {
-          method: 'GET',
-          headers: {
-            Accept: 'application/json',
-            Authorization: `Bearer ${descriptor.token}`,
-          },
-          redirect: 'error',
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-        });
+      const poll = async (): Promise<ProviderLimitStatus> => {
+        try {
+          const response = await fetch(descriptor.url, {
+            method: 'GET',
+            headers: {
+              Accept: 'application/json',
+              Authorization: `Bearer ${descriptor.token}`,
+            },
+            redirect: 'error',
+            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          });
 
-        if (response.status === 401 || response.status === 403) {
-          return unsupportedProviderStatus(
-            PROVIDER_ID,
+          if (response.status === 401 || response.status === 403) {
+            return unsupportedProviderStatus(
+              PROVIDER_ID,
+              modelID,
+              checkedAt,
+              `Claude Code provider-limit endpoint rejected credentials (${response.status})`
+            );
+          }
+          if (!response.ok) {
+            return errorStatus(
+              modelID,
+              checkedAt,
+              `Claude Code provider-limit endpoint returned ${response.status}`
+            );
+          }
+
+          const providerLimit = parseProviderLimitResponse(await readBoundedResponseJson(response));
+          if (!providerLimit) {
+            return errorStatus(
+              modelID,
+              checkedAt,
+              'Claude Code provider-limit endpoint returned an invalid response'
+            );
+          }
+
+          return {
+            ...providerLimit,
+            providerID: PROVIDER_ID,
             modelID,
-            checkedAt,
-            `Claude Code provider-limit endpoint rejected credentials (${response.status})`
-          );
-        }
-        if (!response.ok) {
+          };
+        } catch {
           return errorStatus(
             modelID,
             checkedAt,
-            `Claude Code provider-limit endpoint returned ${response.status}`
+            'Failed to poll the Claude Code provider-limit endpoint'
           );
         }
-
-        const providerLimit = parseProviderLimitResponse(await readBoundedResponseJson(response));
-        if (!providerLimit) {
-          return errorStatus(
-            modelID,
-            checkedAt,
-            'Claude Code provider-limit endpoint returned an invalid response'
-          );
-        }
-
-        return {
-          ...providerLimit,
-          providerID: PROVIDER_ID,
-          modelID,
-          checkedAt,
-        };
-      } catch {
-        return errorStatus(
-          modelID,
-          checkedAt,
-          'Failed to poll the Claude Code provider-limit endpoint'
-        );
-      }
+      };
+      return coordinate ? coordinate([descriptor.url, descriptor.token], poll) : poll();
     },
   };
 }

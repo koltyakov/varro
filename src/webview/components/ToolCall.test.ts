@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
+import { createComponent, createSignal } from 'solid-js';
 import type * as UseOpenCodeModule from '../hooks/useOpenCode';
 import { setShowFileDiffs, setState } from '../lib/state';
 import type { AssistantMessage, Permission, QuestionRequest, Session, ToolPart } from '../types';
@@ -3112,6 +3113,108 @@ describe('FileChangeCard', () => {
     );
     expect(container?.querySelectorAll('.diff-view-line-addition')).toHaveLength(2);
   });
+
+  it.each(['pending', 'running'] as const)(
+    'expands a retained file-card header after %s becomes error',
+    (status) => {
+      const initial: ToolPart = {
+        id: 'tool-retained-error',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        type: 'tool',
+        callID: 'call-retained-error',
+        tool: 'edit',
+        state:
+          status === 'pending'
+            ? { status, input: { filePath: 'src/a.ts' }, raw: '' }
+            : { status, input: { filePath: 'src/a.ts' }, time: { start: 0 } },
+      };
+      const [part, setPart] = createSignal(initial);
+      cleanup = render(
+        () =>
+          createComponent(ToolCall, {
+            get part() {
+              return part();
+            },
+          }),
+        container!
+      );
+      const header = container!.querySelector<HTMLElement>('.file-change-card-header')!;
+      header.click();
+      expect(container!.querySelector('.file-edit-error-detail')).toBeNull();
+      expect(getToolCallExpanded(getToolCallExpansionKey(initial))).toBe(false);
+      setPart({
+        ...initial,
+        state: {
+          status: 'error',
+          input: initial.state.input,
+          error: 'Edit failed',
+          time: { start: 0, end: 1 },
+        },
+      });
+      expect(container!.querySelector('.file-change-card-header')).toBe(header);
+      expect(header.classList).toContain('is-expandable');
+      header.click();
+      expect(container!.querySelector('.file-edit-error-detail')?.textContent).toBe('Edit failed');
+      header.click();
+      expect(container!.querySelector('.file-edit-error-detail')).toBeNull();
+      setPart(initial);
+      expect(container!.querySelector('.file-change-card-header')).toBe(header);
+      header.click();
+      expect(getToolCallExpanded(getToolCallExpansionKey(initial))).toBe(false);
+    }
+  );
+
+  it.each(['edit', 'move'] as const)(
+    'opens current paths from retained %s links after input replacement',
+    (kind) => {
+      const send = setExtensionSender();
+      const input = (name: string) =>
+        kind === 'edit'
+          ? { filePath: `src/${name}.ts` }
+          : {
+              patchText: `*** Begin Patch\n*** Update File: src/${name}.ts\n*** Move to: src/${name}-moved.ts\n@@\n-old\n+new\n*** End Patch`,
+            };
+      const initial: ToolPart = {
+        id: 'tool-retained-path',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        type: 'tool',
+        callID: 'call-retained-path',
+        tool: kind === 'edit' ? 'edit' : 'apply_patch',
+        state: { status: 'running', input: input('a'), time: { start: 0 } },
+      };
+      const [part, setPart] = createSignal(initial);
+      cleanup = render(
+        () =>
+          createComponent(ToolCall, {
+            get part() {
+              return part();
+            },
+          }),
+        container!
+      );
+      const links = Array.from(
+        container!.querySelectorAll<HTMLAnchorElement>('.file-edit-path-link')
+      );
+      expect(links).toHaveLength(kind === 'edit' ? 1 : 2);
+      setPart({ ...initial, state: { ...initial.state, input: input('b') } });
+      const currentLinks = Array.from(container!.querySelectorAll('.file-edit-path-link'));
+      for (const [index, link] of links.entries()) {
+        expect(currentLinks[index]).toBe(link);
+        expect(link.textContent).toContain(index === 0 ? 'b.ts' : 'b-moved.ts');
+        link.click();
+        expect(send).toHaveBeenLastCalledWith({
+          type: 'vscode/open',
+          payload: {
+            path: index === 0 ? 'src/b.ts' : 'src/b-moved.ts',
+            kind: 'file',
+            view: 'diff',
+          },
+        });
+      }
+    }
+  );
 
   it('keeps failed apply_patch status visible beside proposed inline changes', () => {
     setShowFileDiffs(true);

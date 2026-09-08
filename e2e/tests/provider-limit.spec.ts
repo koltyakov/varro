@@ -15,7 +15,7 @@ test('exhausted provider limit shows retry context and a descriptive toolbar chi
   await expect(chip).toContainText('0%');
   await expect(chip).toHaveAttribute(
     'aria-label',
-    /^Messages: 100% used, resets (?:<1s|\d+[smhd])$/
+    /^Messages: 100% used, resets (?:<1s|\d+[smhd])\nProvider usage window exhausted in mock scenario\.\nSnapshot age: \d+[smh]$/
   );
 });
 

@@ -334,8 +334,13 @@ npm run ai:playback -- import-history --session <session-id> --message <assistan
 ```
 
 Historical imports use the real session, message, part, tool output, and timing records from OpenCode's
-local database. They retain up to 120 preceding messages, stream text and reasoning in bounded chunks,
-and reconstruct tool parts through pending, running, and terminal states. Their scenario is `HISTORY` so
+local database. They retain up to 120 preceding messages and estimate text/reasoning cadence over valid
+part start/end times, with database creation/update times as fallback. Nonempty chunks cover the full
+span with gaps at most 250 ms where text length and the 4,096-chunk limit permit; sparse text and extreme
+spans can still be compressed. Missing trustworthy timing uses a 32 ms estimate bounded by the next
+part or message completion. Long idle CLI/subagent gaps cap at 500 ms without globally accelerating
+interleaved streaming. Existing captures are unchanged; select again or reimport for the new timing.
+Imports reconstruct tool parts through pending, running, and terminal states. Their scenario is `HISTORY` so
 they cannot be mistaken for exact live captures. Use live capture when the original sub-frame event
 spacing matters.
 

@@ -392,18 +392,18 @@ export function applyMessagePartDelta(
 }
 
 export function finishMessageStreaming(messageId: string) {
-  flushPendingStreamingDeltas();
-  const partId = state.streamingPartId;
-  if (!partId) return;
-
-  const location = messageIndex.findPartLocation(state.messages, partId);
-  if (!location) return;
-
-  const message = state.messages[location.msgIdx];
-  if (!message || message.info.id !== messageId) return;
-
-  streamingDeltaQueue.reset();
   batch(() => {
+    flushPendingStreamingDeltas();
+    const partId = state.streamingPartId;
+    if (!partId) return;
+
+    const location = messageIndex.findPartLocation(state.messages, partId);
+    if (!location) return;
+
+    const message = state.messages[location.msgIdx];
+    if (!message || message.info.id !== messageId) return;
+
+    streamingDeltaQueue.reset();
     setState('messages', location.msgIdx, 'parts', location.partIdx, (currentPart) => {
       if (currentPart.type !== 'text' && currentPart.type !== 'reasoning') return currentPart;
       if (currentPart.text === state.streamingText) return currentPart;
@@ -414,8 +414,8 @@ export function finishMessageStreaming(messageId: string) {
     });
     setState('streamingPartId', null);
     setState('streamingText', '');
+    messageIndex.notifyPartContentChange();
   });
-  messageIndex.notifyPartContentChange();
 }
 
 export function removeMessagePart(sessionId: string, messageId: string, partId: string) {

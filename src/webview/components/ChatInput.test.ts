@@ -1403,7 +1403,7 @@ describe('ChatInput', () => {
     expect(dropdown?.querySelector('button')).toBeNull();
   });
 
-  it('shows all available provider-limit windows under the fixed threshold', () => {
+  it('shows all available provider-limit windows under the fixed threshold', async () => {
     setState('providers', [
       {
         id: 'openai',
@@ -1455,6 +1455,23 @@ describe('ChatInput', () => {
     expect(chip).not.toBeNull();
     expect(chip?.textContent).toContain('41%');
     expect(chip?.textContent).toContain('80%');
+
+    const checkedAt = Date.now() - 120_000;
+    setState('providerLimits', 'openai:gpt-4o', {
+      checkedAt,
+      note: 'Refresh failed; showing last known limits.',
+    });
+    expect(chip?.getAttribute('aria-label')).toContain(
+      'Refresh failed; showing last known limits.'
+    );
+    expect(chip?.getAttribute('aria-label')).toContain('Snapshot age: 2m');
+    container?.querySelector<HTMLButtonElement>('.toolbar-limit-chip')?.click();
+    await flushAsyncWork();
+    const popup = container?.querySelector('.provider-limit-popup');
+    expect(popup).not.toBeNull();
+    expect(popup?.textContent).not.toContain('Refresh failed; showing last known limits.');
+    expect(popup?.textContent).not.toContain('Snapshot age:');
+    expect(state.providerLimits['openai:gpt-4o']?.checkedAt).toBe(checkedAt);
   });
 
   it('shows Z.ai quota windows and available resets', async () => {

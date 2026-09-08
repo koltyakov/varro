@@ -15,6 +15,7 @@ import {
   type ProviderMetadata,
 } from '../../util/provider-limit';
 import type { ProviderLimitAdapter, ProviderLimitAdapterContext } from '../types';
+import { ProviderQuotaIdentityChanged } from '../types';
 import {
   asRecord,
   getString,
@@ -75,7 +76,13 @@ export function createAnthropicAdapter(): ProviderLimitAdapter {
     matches(provider) {
       return provider.id === 'anthropic';
     },
-    async fetch({ provider, authStore, modelID, checkedAt }: ProviderLimitAdapterContext) {
+    async fetch({
+      provider,
+      authStore,
+      modelID,
+      checkedAt,
+      coordinate,
+    }: ProviderLimitAdapterContext) {
       const statuslineStatus = await readAnthropicStatuslineStatus(provider.id, modelID, checkedAt);
 
       const localProxyBaseUrl = getAnthropicLocalProxyBaseUrl(provider);
@@ -88,7 +95,7 @@ export function createAnthropicAdapter(): ProviderLimitAdapter {
       );
       if (combinedStatus && hasHiddenAnthropicWindows(combinedStatus)) return combinedStatus;
 
-      const credentials = await resolveAnthropicCredentials(authStore);
+      let credentials = await resolveAnthropicCredentials(authStore);
       if (!credentials?.accessToken) {
         if (combinedStatus) return combinedStatus;
 
@@ -113,104 +120,129 @@ export function createAnthropicAdapter(): ProviderLimitAdapter {
         );
       }
 
-      try {
-        let response = await fetchAnthropicUsage(credentials.accessToken);
-        let note = 'Polled Anthropic OAuth usage endpoint';
-
-        if (shouldRefreshAnthropicCredentials(response.status, credentials)) {
-          const refreshed = await refreshAnthropicAccessToken(credentials.refreshToken);
-          if (refreshed.status === 'unsupported') {
-            return unsupportedProviderStatus(provider.id, modelID, checkedAt, refreshed.note);
+      const poll = async (): Promise<ProviderLimitStatus> => {
+        try {
+          if (!credentials) throw new Error('Anthropic credentials unavailable');
+          if (coordinate && credentials.origin === 'claude-credentials') {
+            // A previous lock holder may have rotated the file while we waited.
+            const current = await readAnthropicCredentialsFromClaudeCredentials();
+            if (!current?.accessToken) throw new ProviderQuotaIdentityChanged();
+            const changed = current.accessToken !== credentials.accessToken;
+            credentials = current;
+            if (changed) throw new ProviderQuotaIdentityChanged();
           }
-          if (refreshed.status === 'error') {
-            return {
-              providerID: provider.id,
+          let response = await fetchAnthropicUsage(credentials.accessToken);
+          let note = 'Polled Anthropic OAuth usage endpoint';
+
+          if (shouldRefreshAnthropicCredentials(response.status, credentials)) {
+            const refreshed = await refreshAnthropicAccessToken(credentials.refreshToken);
+            if (refreshed.status === 'unsupported') {
+              return unsupportedProviderStatus(provider.id, modelID, checkedAt, refreshed.note);
+            }
+            if (refreshed.status === 'error') {
+              return {
+                providerID: provider.id,
+                modelID,
+                status: 'error',
+                source: 'provider',
+                checkedAt,
+                note: `${refreshed.note} after Anthropic usage endpoint returned ${response.status}`,
+              };
+            }
+
+            try {
+              await writeAnthropicCredentials(
+                credentials.credentialsFilePath,
+                credentials.refreshToken,
+                refreshed.accessToken,
+                refreshed.refreshToken,
+                refreshed.expiresInSeconds
+              );
+            } catch {
+              return {
+                providerID: provider.id,
+                modelID,
+                status: 'error',
+                source: 'provider',
+                checkedAt,
+                note: `Anthropic usage endpoint returned ${response.status} and refreshed credentials could not be saved`,
+              };
+            }
+
+            response = await fetchAnthropicUsage(refreshed.accessToken);
+            note = 'Polled Anthropic OAuth usage endpoint after refreshing OAuth token';
+          }
+
+          if (response.status === 401 || response.status === 403) {
+            return unsupportedProviderStatus(
+              provider.id,
               modelID,
-              status: 'error',
-              source: 'provider',
               checkedAt,
-              note: `${refreshed.note} after Anthropic usage endpoint returned ${response.status}`,
-            };
-          }
-
-          try {
-            await writeAnthropicCredentials(
-              credentials.credentialsFilePath,
-              credentials.refreshToken,
-              refreshed.accessToken,
-              refreshed.refreshToken,
-              refreshed.expiresInSeconds
+              `Anthropic usage endpoint rejected credentials (${response.status})`
             );
-          } catch {
+          }
+
+          if (!response.ok) {
             return {
               providerID: provider.id,
               modelID,
               status: 'error',
               source: 'provider',
               checkedAt,
-              note: `Anthropic usage endpoint returned ${response.status} and refreshed credentials could not be saved`,
+              note: `Anthropic usage endpoint returned ${response.status}`,
             };
           }
 
-          response = await fetchAnthropicUsage(refreshed.accessToken);
-          note = 'Polled Anthropic OAuth usage endpoint after refreshing OAuth token';
-        }
+          const payload = await readBoundedResponseJson(response);
+          const windows = extractAnthropicWindows(payload, checkedAt);
+          if (windows.length === 0) {
+            return unsupportedProviderStatus(
+              provider.id,
+              modelID,
+              checkedAt,
+              'Anthropic usage endpoint did not expose any known quotas'
+            );
+          }
 
-        if (response.status === 401 || response.status === 403) {
-          return unsupportedProviderStatus(
-            provider.id,
+          const apiStatus: ProviderLimitStatus = {
+            providerID: provider.id,
             modelID,
+            status: 'available',
+            source: 'provider',
             checkedAt,
-            `Anthropic usage endpoint rejected credentials (${response.status})`
-          );
-        }
+            windows,
+            note,
+          };
 
-        if (!response.ok) {
+          return apiStatus;
+        } catch (error) {
+          if (error instanceof ProviderQuotaIdentityChanged) throw error;
           return {
             providerID: provider.id,
             modelID,
             status: 'error',
             source: 'provider',
             checkedAt,
-            note: `Anthropic usage endpoint returned ${response.status}`,
+            note: 'Failed to poll the Anthropic usage endpoint',
           };
         }
-
-        const payload = await readBoundedResponseJson(response);
-        const windows = extractAnthropicWindows(payload, checkedAt);
-        if (windows.length === 0) {
-          if (combinedStatus) return combinedStatus;
-
-          return unsupportedProviderStatus(
-            provider.id,
-            modelID,
-            checkedAt,
-            'Anthropic usage endpoint did not expose any known quotas'
-          );
-        }
-
-        const apiStatus: ProviderLimitStatus = {
-          providerID: provider.id,
-          modelID,
-          status: 'available',
-          source: 'provider',
-          checkedAt,
-          windows,
-          note,
-        };
-
+      };
+      const accessToken = credentials.accessToken;
+      try {
+        const apiStatus = coordinate
+          ? await coordinate([ANTHROPIC_USAGE_ENDPOINT, accessToken], poll, {
+              enabled: !combinedStatus && !localProxyBaseUrl,
+              isIdentityCurrent: async (currentAuth) =>
+                (await resolveAnthropicCredentials(currentAuth))?.accessToken === accessToken,
+            })
+          : await poll();
         return mergeAnthropicStatuses(combinedStatus, apiStatus) ?? apiStatus;
-      } catch {
-        if (combinedStatus) return combinedStatus;
-
-        return {
-          providerID: provider.id,
-          modelID,
-          status: 'error',
-          source: 'provider',
-          checkedAt,
-          note: 'Failed to poll the Anthropic usage endpoint',
-        };
+      } catch (error) {
+        if (!(error instanceof ProviderQuotaIdentityChanged)) throw error;
+        return (
+          combinedStatus ??
+          unsupportedProviderStatus(provider.id, modelID, checkedAt, error.message)
+        );
       }
     },
   };
@@ -229,7 +261,7 @@ function mergeAnthropicStatuses(
   const note = [primary.note, secondary.note].filter(Boolean).join(' + ') || undefined;
   const merged: ProviderLimitStatus = {
     ...primary,
-    checkedAt: Math.max(primary.checkedAt, secondary.checkedAt),
+    checkedAt: Math.min(primary.checkedAt, secondary.checkedAt),
     windows,
   };
   if (note) merged.note = note;
@@ -452,7 +484,7 @@ async function readAnthropicStatuslineStatus(
       modelID,
       status: 'available',
       source: 'provider',
-      checkedAt,
+      checkedAt: Math.min(checkedAt, info.mtimeMs),
       windows,
       note: 'Read from Anthropic statusline bridge file',
     };
@@ -542,7 +574,7 @@ async function resolveAnthropicCredentials(
   authStore: Record<string, ProviderAuthRecord>
 ): Promise<AnthropicCredentials | null> {
   const auth = authStore.anthropic;
-  if (auth?.type === 'oauth') {
+  if (auth?.type === 'oauth' && getString(auth.access)) {
     return {
       accessToken: auth.access,
       refreshToken: null,

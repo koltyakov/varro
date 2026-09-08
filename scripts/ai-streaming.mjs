@@ -26,7 +26,16 @@ const json = (file, value) =>
 const readJson = async (file) => JSON.parse(await readFile(file, 'utf8'));
 const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
 const schemas = {
-  prepare: ['source', 'directory', 'controller-session', 'seed', 'count', 'output'],
+  prepare: [
+    'source',
+    'directory',
+    'source-session',
+    'server-url',
+    'controller-session',
+    'seed',
+    'count',
+    'output',
+  ],
   run: [
     'capture',
     'output',
@@ -61,7 +70,7 @@ export function parseArgs(args) {
   }
   const required =
     command === 'prepare'
-      ? ['source', 'directory', 'controller-session', 'seed']
+      ? ['source', 'directory', 'seed']
       : command === 'run'
         ? ['capture', 'output']
         : ['control'];
@@ -947,6 +956,8 @@ export async function main(args = process.argv.slice(2)) {
       sourceDatabase: options.source,
       directory: options.directory,
       controllerSessionId: options['controller-session'],
+      sourceSessionId: options['source-session'],
+      serverUrl: options['server-url'],
       seed: options.seed,
       count: options.count ?? 3,
       outputDirectory:

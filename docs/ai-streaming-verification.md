@@ -14,10 +14,10 @@ host startup assertions, or a final screenshot cannot substitute for watching th
 
 ## Default scope
 
-1. Record the tested commit, existing worktree changes, run seed, controller session ID, and source
+1. Record the tested commit, existing worktree changes, run seed, active-session status evidence, and source
    workspace. Do not discard unrelated changes. Read the message-list identity, clipping, and
    scroll-ownership rules in [Message List Virtualization](message-list-virtualization.md).
-2. Run the preflight below, then prepare three complementary historical responses from the requested
+2. Run the preflight below, then prepare responses from three of the longest eligible histories in the requested
    workspace. Without an explicit source workspace, use the current project. Inspect coverage and
    selection reasons before launching the editor.
 3. Run `STR-01` through `STR-03` with AI observation. Reuse a capture and seed when reproducing a
@@ -51,21 +51,43 @@ Script tests use generated data; normal test discovery never reads the user's se
 npm run ai:streaming -- prepare \
   --source "$HOME/.local/share/opencode/opencode.db" \
   --directory "$PWD" \
-  --controller-session <controller-session-id> \
   --seed <seed> \
   --count 3 \
   --output artifacts/ai-streaming/<run>/selection
 ```
 
-Use the actual controller ID, not a placeholder inferred from recency. If it cannot be established,
-ask before preparing. Directory matching is exact and does not include child or unrelated projects.
-The selector opens the source SQLite database read-only and scans at most the latest 500 assistant
-messages. It excludes the controller, sessions with incomplete assistant messages, and responses
-without a same-session user parent. This is a persisted-history eligibility check, not a live-server
-idle check. Do not select a session known to be active even if its latest stored message is complete.
+No session ID is required. Omit `--source-session` to select distinct sessions by descending total
+persisted message count, with session ID breaking length ties. Use `--source-session <id>` to restrict
+the source to one session; it still yields at most one response. `--controller-session <id>` is an
+optional additional exclusion, never a substitute for automatic activity checks.
 
-Selection greedily adds weighted coverage for reasoning, text, tools, edits, large output, Markdown,
-and baseline history above 50 messages. Seeded hashes break ties. The AI reviews these reasons and
+Before opening SQLite, the runner reads `GET /session/status?directory=...` from the source workspace's
+known OpenCode server. It discovers loopback listeners belonging to `OPENCODE_PID` with `lsof -nP`
+and requires exactly one valid status endpoint. IPv6 loopback listeners retain their `[::1]` address.
+Before requesting status, it resolves the source database's real path and uses `lsof -a -p <pid>`
+with that file selector to verify the listener owner has the database open. This checks OS file
+identity, not stored-session recency or an empty status response. The manifest records the PID,
+canonical database path, and association method. These checks do not read database contents.
+If discovery is unavailable or ambiguous, supply `--server-url http://127.0.0.1:<port>` or
+`--server-url 'http://[::1]:<port>'`. Explicit URLs require a numeric loopback address and exactly one
+listener owner, discovered by port and address; that PID must also hold the source database open.
+There is no operator-assertion bypass. Missing `lsof`, inaccessible process metadata, an unheld
+database, or ambiguous ownership blocks preparation before SQLite opens. Status failures also block preparation;
+no fallback treats completed stored history as proof of inactivity. Busy and retry sessions are
+excluded automatically, including a controller whose latest persisted response is already complete.
+Status is a point-in-time check, not a lock or proof that another server has no activity. If other
+servers serve the same source workspace, resolve that scope before preparing.
+
+Directory matching is exact and does not include child or unrelated projects. The selector opens
+SQLite read-only, ranks at most 500 sessions, and examines at most 50 recent assistant responses per
+session. It checks for incomplete assistant messages across each entire session and excludes those
+sessions, plus responses without a same-session user parent. Scan limits and truncation are recorded;
+the longest-history claim applies only to eligible histories within these bounds.
+
+The longest `--count` eligible sessions form the subset first. Selection then greedily adds weighted
+response coverage within that subset for reasoning, text, tools, edits, large output, Markdown,
+and baseline history above 50 messages, choosing one response per session. Seeded hashes break
+response ties; richer responses in shorter sessions cannot displace the longest subset. The AI reviews these reasons and
 checks that selected content actually exercises the requested UI. Stored message counts alone do not
 prove more than 50 rendered rows, because Varro can group or hide rows.
 
@@ -75,8 +97,15 @@ Output files are created exclusively and are not overwritten. A shortfall or emp
 explicit resolution before the suite can pass.
 
 Historical imports contain one assistant message plus its user parent and up to 120 preceding
-messages. They do not reconstruct an entire multi-message agent turn. Text/reasoning chunks use
-synthetic 32 ms spacing; tool transitions use persisted timing. Command output may arrive as a single
+messages. They do not reconstruct an entire multi-message agent turn. Text/reasoning cadence is estimated
+over valid persisted part start/end times, falling back to database creation/update times. Adaptive,
+nonempty chunks preserve the full span with gaps at most 250 ms when text length and the 4,096-chunk
+limit allow it. Sparse text or extreme spans can still have gaps compressed by the scheduler; no empty
+deltas pad idle time into streaming. Without a trustworthy span, the estimate uses 32 ms spacing,
+shortened when needed to finish by the next part or message completion. Tool transitions retain
+pending/running/completed states and persisted timing. Long idle CLI/subagent waits are capped at
+500 ms without globally speeding up concurrent streams. Existing captures are never rewritten;
+prepare a new selection or reimport to use this timing. Command output may arrive as a single
 terminal snapshot. These captures are labeled `HISTORY`, not exact live SSE recordings. Retained
 live capture JSON in the same format can also be passed to `run` when exact delivered-event order
 matters. Unsupported events or foreign child-session routing fail before playback.

@@ -24,6 +24,7 @@ import {
   applySessionPermissionModesSnapshot,
   applySessionSelectedModelsSnapshot,
   syncSessionMarkersForWorkspace,
+  setProviderLimit,
 } from '../lib/state';
 import {
   applyQueuedMessageClaimResult,
@@ -387,6 +388,16 @@ export function handleExtensionMessageWithDependencies(
         msg.payload.type === 'integration.connection.updated'
       ) {
         deps.revalidateProviderAuth?.();
+      }
+      break;
+    case 'provider-limit/updated':
+      if (
+        msg.payload.directory === null
+          ? deps.getCurrentWorkspacePath() === null
+          : isSameWorkspacePath(msg.payload.directory, deps.getCurrentWorkspacePath())
+      ) {
+        const status = msg.payload.status;
+        setProviderLimit(status.providerID, status.modelID, status);
       }
       break;
     case 'providers/refresh':

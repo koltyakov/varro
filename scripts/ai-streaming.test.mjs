@@ -31,6 +31,26 @@ import { reserveLoopbackPort, writeVscodeLaunchMetadata } from './vscode-launch-
 
 test('CLI parses explicit sources and timing, rejecting ambiguous or unsafe arguments', () => {
   assert.deepEqual(
+    parseArgs(['prepare', '--source', 'db', '--directory', '/scope', '--seed', 'seed']).options,
+    { source: 'db', directory: '/scope', seed: 'seed' }
+  );
+  assert.equal(
+    parseArgs([
+      'prepare',
+      '--source',
+      'db',
+      '--directory',
+      '/scope',
+      '--seed',
+      'seed',
+      '--source-session',
+      'chosen',
+      '--server-url',
+      'http://127.0.0.1:4096',
+    ]).options['source-session'],
+    'chosen'
+  );
+  assert.deepEqual(
     parseArgs([
       'prepare',
       '--source',

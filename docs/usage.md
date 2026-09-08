@@ -299,7 +299,11 @@ Provider and configuration changes are revalidated without interrupting running 
 
 ### Provider-Limit Polling And Credentials
 
-Provider-limit polling is enabled. Varro polls every `120` seconds and every `30` seconds while the active session is working. Results are cached briefly in the extension host.
+Provider-limit polling is enabled. Varro polls every `120` seconds while visible and idle, and every `30` seconds while any known session uses the selected provider. Active-provider polling continues with the sidebar hidden. A follow-up refresh runs `31` seconds after work finishes so the provider has time to report final usage.
+
+On macOS and Linux, OpenAI/Codex subscriptions, Anthropic OAuth, Claude Code IPC, and OpenRouter share quota snapshots and retry cooldowns between extension hosts using the same OS user and local filesystem. Matching credentials and endpoints share polling across models. Other windows receive shared snapshot updates within about two seconds without extra provider requests. Different accounts or endpoint identities remain separate. Anthropic local statusline/proxy results remain local, and native Windows uses process-local caching.
+
+Successful snapshots are cached for `30` seconds; provider errors and rate limits apply separate retry cooldowns. When a refresh fails, the limits tooltip includes the last successful snapshot's age and a stale-data note. Last-good fallback data expires after `15` minutes. Provider-side reporting delays can still make quota changes appear later than streamed usage.
 
 Adapter coverage currently includes Antigravity, Anthropic, OpenAI/Codex, OpenCode Go, GitHub Copilot, Gemini, OpenRouter, Z.AI, MiniMax, Kimi, Ollama Cloud, and xAI SuperGrok, plus metadata-header probes for compatible OpenAI, GitHub Copilot, and xAI API-key configurations. Availability depends on the provider and credential type; unsupported providers simply do not show quota details.
 

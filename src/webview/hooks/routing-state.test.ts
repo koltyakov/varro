@@ -8,6 +8,7 @@ import {
   getBuildAgentName,
   getDefaultPrimaryAgentName,
   getUsageLimitNoticeContext,
+  isProviderWorking,
   reconcileLoadedAgents,
   reconcileLoadedProviders,
 } from './routing-state';
@@ -33,6 +34,28 @@ function agent(name: string, overrides?: Partial<Agent>): Agent {
 }
 
 describe('routing-state helpers', () => {
+  it('counts busy and retry sessions for the provider regardless of the active tree', () => {
+    const statuses = {
+      active: { type: 'idle' as const },
+      background: { type: 'busy' as const },
+      child: { type: 'retry' as const, attempt: 1, message: 'Retrying', next: 1000 },
+      unknown: { type: 'busy' as const },
+    };
+    const providers = new Map([
+      ['active', 'openai'],
+      ['background', 'openai'],
+      ['child', 'anthropic'],
+    ]);
+    expect(isProviderWorking('openai', statuses, (id) => providers.get(id))).toBe(true);
+    expect(isProviderWorking('anthropic', statuses, (id) => providers.get(id))).toBe(true);
+    expect(isProviderWorking('other', statuses, (id) => providers.get(id))).toBe(false);
+    expect(
+      isProviderWorking('openai', { ...statuses, background: { type: 'idle' } }, (id) =>
+        providers.get(id)
+      )
+    ).toBe(false);
+  });
+
   it('prefers the build agent for default primary selection', () => {
     expect(getDefaultPrimaryAgentName([agent('plan'), agent('build')])).toBe('build');
     expect(getBuildAgentName([agent('plan'), agent('build')])).toBe('build');

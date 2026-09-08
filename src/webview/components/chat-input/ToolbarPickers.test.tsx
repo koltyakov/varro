@@ -921,7 +921,8 @@ describe('ToolbarPickers', () => {
     );
   });
 
-  it('shows model-style agent details when hovering a truncated description', () => {
+  it('shows model-style agent details after the right-side hover delay', async () => {
+    vi.useFakeTimers();
     const description =
       'Investigates the codebase and provides a detailed review without changing files';
     cleanup = render(
@@ -951,6 +952,12 @@ describe('ToolbarPickers', () => {
       scrollWidth: { configurable: true, value: 300 },
     });
     option?.dispatchEvent(new MouseEvent('mouseenter'));
+
+    expect(document.querySelector('.agent-picker-details')).toBeNull();
+    vi.advanceTimersByTime(499);
+    expect(document.querySelector('.agent-picker-details')).toBeNull();
+    vi.advanceTimersByTime(1);
+    await flushMicrotasks();
 
     const details = document.querySelector('.agent-picker-details');
     expect(details?.querySelector('.agent-picker-details-description')?.textContent).toBe(

@@ -241,7 +241,7 @@ export function formatProviderLimitTitle(
   if (!limit) return '';
   if (limit.status !== 'available') return limit.note;
 
-  return limit.windows
+  const windowDescriptions = limit.windows
     .map((window) => {
       const usedPercent = getProviderLimitWindowUsedPercent(window);
       const usage =
@@ -253,6 +253,20 @@ export function formatProviderLimitTitle(
       return `${label}: ${usage}${reset}`;
     })
     .join('\n');
+  return limit.note
+    ? `${windowDescriptions}\n${limit.note}\n${formatProviderLimitSnapshotAge(limit, now)}`
+    : windowDescriptions;
+}
+
+export function formatProviderLimitSnapshotAge(limit: ProviderLimitStatus, now = Date.now()) {
+  const seconds = Math.max(0, Math.floor((now - limit.checkedAt) / 1000));
+  const age =
+    seconds < 60
+      ? `${seconds}s`
+      : seconds < 3600
+        ? `${Math.floor(seconds / 60)}m`
+        : `${Math.floor(seconds / 3600)}h`;
+  return `Snapshot age: ${age}`;
 }
 
 function compareProviderLimitWindows(a: ProviderLimitWindow, b: ProviderLimitWindow) {

@@ -4,6 +4,7 @@ import { render } from 'solid-js/web';
 import { getAssistantActivityPartKey } from '../../lib/assistant-activity';
 import { resetDefaultAppState, setIsLoading, setShowFileDiffs } from '../../lib/state';
 import { resetToolCallExpansionState } from '../../lib/tool-call-expansion-state';
+import { getInlinePreviewLayoutSignatures } from '../message-list/row-layout';
 import { emptyPageIcon, searchIcon, terminalIcon } from '../../lib/ui-icons';
 import type { AssistantMessage, Part, ReasoningPart, TextPart, ToolPart } from '../../types';
 import { toCssUrl } from '../UiIcon';
@@ -979,7 +980,7 @@ describe('AssistantMessageContent', () => {
     expect(container?.querySelector('.assistant-message-flow-item-streamed')).toBeNull();
   });
 
-  it('does not re-animate a file-edit stack when another edit is appended', () => {
+  it('does not re-animate a file-edit stack when another edit is appended', async () => {
     setShowFileDiffs(true);
     const info = createAssistantMessage({ time: { created: 0 } });
     const [parts, setParts] = createSignal<Part[]>([fileEditPart('edit-1', 'src/a.ts')]);
@@ -1003,13 +1004,65 @@ describe('AssistantMessageContent', () => {
       'assistant-message-flow-item-streamed'
     );
 
-    setParts((current) => [...current, fileEditPart('edit-2', 'src/b.ts')]);
+    await Promise.resolve();
+    const stack = container!.querySelector(stackSelector)!;
+    expect(stack.classList).toContain('measured-entrance-active');
+    const animationEnd = new Event('animationend');
+    Object.defineProperty(animationEnd, 'animationName', { value: 'streamed-assistant-item-in' });
+    stack.dispatchEvent(animationEnd);
+    expect(stack.classList).not.toContain('measured-entrance-active');
 
+    setParts((current) => [...current, fileEditPart('edit-2', 'src/b.ts')]);
+    await Promise.resolve();
+
+    expect(container?.querySelector(stackSelector)).toBe(stack);
     expect(container?.querySelector(stackSelector)?.classList).not.toContain(
-      'assistant-message-flow-item-streamed'
+      'measured-entrance-active'
     );
     expect(container?.querySelectorAll('.message-part-mock')).toHaveLength(2);
     expect(container?.querySelector<HTMLElement>('[data-part-id="edit-2"]')).not.toBeNull();
+  });
+
+  it('retains file-edit children across completion, replacement, and stack splits', () => {
+    setShowFileDiffs(true);
+    const first = { ...previewFileEditPart('edit-1', 'src/a.ts'), tool: 'edit' };
+    const second = { ...previewFileEditPart('edit-2', 'src/b.ts'), tool: 'edit' };
+    const [parts, setParts] = createSignal<Part[]>([first]);
+    cleanup = render(
+      () => (
+        <AssistantMessageContent
+          info={createAssistantMessage({ time: { created: 0 } })}
+          parts={parts()}
+          textForPart={(part) => (part.type === 'tool' ? part.state.status : null)}
+        />
+      ),
+      container!
+    );
+    const stack = container!.querySelector('.assistant-file-edit-stack');
+    const firstNode = container!.querySelector('[data-part-id="edit-1"]');
+    const running: ToolPart = {
+      ...second,
+      state: { status: 'running', input: { filePath: 'src/b.ts' }, time: { start: 2 } },
+    };
+    setParts([first, running]);
+    expect(container!.querySelector('.assistant-file-edit-stack')).toBe(stack);
+    expect(container!.querySelector('[data-part-id="edit-1"]')).toBe(firstNode);
+    const secondNode = container!.querySelector('[data-part-id="edit-2"]');
+    setParts([{ ...first }, second]);
+    expect(firstNode?.isConnected).toBe(true);
+    expect(container!.querySelector('[data-part-id="edit-1"]')).toBe(firstNode);
+    expect(container!.querySelector('[data-part-id="edit-2"]')).toBe(secondNode);
+    expect(secondNode?.textContent).toBe('completed');
+
+    setParts([first, textPart('separator', 'Between edits'), second]);
+    expect(container!.querySelectorAll('.assistant-file-edit-stack')).toHaveLength(2);
+    expect(container!.querySelector('[data-part-id="edit-1"]')).toBe(firstNode);
+    expect(container!.querySelectorAll('[data-part-id="edit-2"]')).toHaveLength(1);
+    setParts([first, second]);
+    expect(container!.querySelectorAll('.assistant-file-edit-stack')).toHaveLength(1);
+    expect(container!.querySelector('[data-part-id="edit-1"]')).toBe(firstNode);
+    expect(container!.querySelectorAll('[data-part-id="edit-2"]')).toHaveLength(1);
+    expect(container!.querySelector('[data-part-id="separator"]')).toBeNull();
   });
 
   it('filters highlighted-card meta text and opens read mode only while Alt is pressed', async () => {
@@ -1278,7 +1331,7 @@ describe('AssistantMessageContent', () => {
     expect(container?.querySelectorAll('[data-assistant-render-key]')).toHaveLength(1);
   });
 
-  it('revises file stack keys only when inline preview content affects layout', () => {
+  it('invalidates preview layout independently of file stack identity', () => {
     const compactPart = fileEditPart('edit-1', 'src/one.ts');
     const previewPart: ToolPart = {
       ...fileEditPart('edit-2', 'src/two.ts'),
@@ -1293,12 +1346,24 @@ describe('AssistantMessageContent', () => {
       ),
     };
 
-    expect(getFileEditStackRenderKey([compactPart], true)).toBe(
-      getFileEditStackRenderKey([compactPart], false)
+    expect(getFileEditStackRenderKey([compactPart, previewPart])).toBe(
+      getFileEditStackRenderKey([compactPart])
     );
-    expect(getFileEditStackRenderKey([previewPart], true)).not.toBe(
-      getFileEditStackRenderKey([previewPart], false)
+    const messages = [{ info: { id: 'assistant-1' }, parts: [previewPart] }];
+    expect(getInlinePreviewLayoutSignatures(messages, true)).not.toEqual(
+      getInlinePreviewLayoutSignatures(messages, false)
     );
+    const updated = {
+      ...previewPart,
+      state: completedToolState(
+        { filePath: 'src/two.ts', oldString: 'before', newString: 'after\nmore lines' },
+        'Edited'
+      ),
+    };
+    expect(getFileEditStackRenderKey([updated])).toBe(getFileEditStackRenderKey([previewPart]));
+    expect(
+      getInlinePreviewLayoutSignatures([{ ...messages[0]!, parts: [updated] }], true)
+    ).not.toEqual(getInlinePreviewLayoutSignatures(messages, true));
   });
 
   it('renders retry actions for assistant errors and disables them while loading', () => {

@@ -2,7 +2,14 @@ import { Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-j
 import { getMessageById, state, showThinking } from '../lib/state';
 import { formatAgentLabel, formatModelName, formatVariantLabel } from '../lib/format';
 import { formatDuration } from '../lib/message-metrics';
-import type { AssistantMessage, Part, ReasoningPart, SubtaskPart, TextPart } from '../types';
+import type {
+  AssistantMessage,
+  Part,
+  ReasoningPart,
+  SubtaskPart,
+  TextPart,
+  ToolPart,
+} from '../types';
 import type { ToolCallPermissionMatch } from '../lib/tool-call-matching';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ImagePreviewOverlay, createImagePreviewEffect } from './ImagePreview';
@@ -49,17 +56,6 @@ export function MessagePart(props: {
             lightweight={props.lightweight}
           />
         );
-      case 'tool':
-        return (
-          <ToolCall
-            part={part}
-            questionRequest={props.questionRequest}
-            permissionMatch={props.permissionMatch}
-            renderPermissionPrompt={props.renderPermissionPrompt}
-            lightweight={props.lightweight}
-            compactFileChanges={props.compactFileChanges}
-          />
-        );
       case 'reasoning':
         return (
           <Show when={showThinking()}>
@@ -96,7 +92,19 @@ export function MessagePart(props: {
     }
   };
 
-  return <>{render()}</>;
+  return (
+    <Show when={p().type === 'tool'} fallback={render()}>
+      <ToolCall
+        // SAFETY: The Show branch only renders tool parts.
+        part={p() as ToolPart}
+        questionRequest={props.questionRequest}
+        permissionMatch={props.permissionMatch}
+        renderPermissionPrompt={props.renderPermissionPrompt}
+        lightweight={props.lightweight}
+        compactFileChanges={props.compactFileChanges}
+      />
+    </Show>
+  );
 }
 
 function RetryNotice(props: { part: Extract<Part, { type: 'retry' }> }) {

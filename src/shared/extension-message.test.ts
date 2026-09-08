@@ -2,6 +2,62 @@ import { describe, expect, it } from 'vitest';
 import { parseExtensionMessage } from './extension-message';
 
 describe('parseExtensionMessage', () => {
+  it('parses workspace-scoped provider quota snapshots', () => {
+    const message = {
+      type: 'provider-limit/updated',
+      payload: {
+        directory: '/repo',
+        status: {
+          providerID: 'openai',
+          modelID: 'gpt',
+          source: 'provider',
+          status: 'available',
+          checkedAt: 10,
+          windows: [
+            {
+              id: 'five_hour',
+              label: '5-Hour Limit',
+              unit: 'requests',
+              remaining: 5,
+              limit: 10,
+              resetAt: null,
+            },
+          ],
+          usageLimitResets: {
+            availableCount: 1,
+            credits: [{ title: 'Full reset', expiresAt: null }],
+          },
+        },
+      },
+    };
+    expect(parseExtensionMessage(message)).toEqual(message);
+    expect(
+      parseExtensionMessage({ ...message, payload: { ...message.payload, directory: null } })
+    ).not.toBeNull();
+    for (const directory of [undefined, 42, {}]) {
+      expect(
+        parseExtensionMessage({ ...message, payload: { ...message.payload, directory } })
+      ).toBeNull();
+    }
+    for (const invalid of [
+      { providerID: null },
+      { modelID: 1 },
+      { source: 'unknown' },
+      { status: 'unknown' },
+      { checkedAt: NaN },
+      { windows: [null] },
+      { windows: [{ id: 'bad' }] },
+      { usageLimitResets: { credits: [null] } },
+    ]) {
+      expect(
+        parseExtensionMessage({
+          ...message,
+          payload: { ...message.payload, status: { ...message.payload.status, ...invalid } },
+        })
+      ).toBeNull();
+    }
+  });
+
   it.each([0, 7, Number.MAX_SAFE_INTEGER])(
     'parses workspace selection failure with requestId %s',
     (requestId) => {

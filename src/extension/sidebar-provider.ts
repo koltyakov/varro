@@ -310,7 +310,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const globalPersistence = new HostPersistence(globalState);
     this.droppedFilesService = new DroppedFilesService(contextProvider);
     this.fileSearch = new FileSearchService();
-    this.providerLimitService = new ProviderLimitService(server);
+    this.providerLimitService = new ProviderLimitService(server, undefined, undefined, (payload) =>
+      this.post({ type: 'provider-limit/updated', payload })
+    );
     const isOpenAIPro = async () => {
       const status = await this.providerLimitService.get('openai', null);
       if (status.status !== 'available') return false;
@@ -2585,6 +2587,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   async dispose() {
+    this.providerLimitService.dispose();
     this.disposing = true;
     this.sessionReconcileRerunRequested = false;
     if (this.sessionReconcileTimer) {

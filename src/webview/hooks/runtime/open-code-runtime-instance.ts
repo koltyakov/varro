@@ -97,6 +97,7 @@ import {
   deriveSelectedModelFromMessages,
   deriveSelectedModelFromSession,
   getActiveProviderSelection as getActiveProviderSelectionForState,
+  isProviderWorking,
   getBuildAgentName,
   getDefaultPrimaryAgentName,
   getUsageLimitNoticeContext as getUsageLimitNoticeContextForState,
@@ -1428,10 +1429,23 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       getServerState: () => appStore.state.serverStatus.state,
       areProvidersLoaded: () => appStore.state.providersLoaded,
       isDocumentVisible: documentVisible,
-      isActiveSessionWorking: () => {
-        const activeSessionId = appStore.state.activeSessionId;
-        return activeSessionId ? isSessionTreeStatusWorking(activeSessionId) : false;
-      },
+      isProviderWorking: (providerID) =>
+        isProviderWorking(providerID, appStore.state.sessionStatus, (sessionId) => {
+          const managerSessionId = ralphStore.isRalphSession(sessionId)
+            ? sessionId
+            : ralphStore.findManagerSessionIdForChild(sessionId);
+          return (
+            (managerSessionId
+              ? ralphStore.getRun(managerSessionId)?.config.model?.providerID
+              : null) ??
+            routingStore.getSelectedModelForSession(sessionId)?.providerID ??
+            (sessionId === appStore.state.activeSessionId
+              ? appStore.state.selectedModel?.providerID
+              : null) ??
+            appStore.state.sessions.find((session) => session.id === sessionId)?.model?.providerID
+          );
+        }),
+      getRequestScope: () => connectionGeneration,
       getActiveProviderSelection,
       getProviderLimit: routingStore.getProviderLimit,
       loadProviderLimit: (providerID, modelID) => client.config.providerLimit(providerID, modelID),

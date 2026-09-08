@@ -92,7 +92,7 @@ function createStatus(status: ProviderLimitStatus['status']): ProviderLimitStatu
       modelID: 'gpt-5.4',
       status,
       source: 'opencode',
-      checkedAt: 0,
+      checkedAt: Date.now(),
       note: 'cached status',
       windows: [
         {
@@ -202,15 +202,15 @@ describe('ProviderLimitService', () => {
       .mockReturnValueOnce(firstAuth.promise)
       .mockReturnValueOnce(secondAuth.promise);
     mocks.parseProviderAuthStoreMock.mockImplementation((raw: string) => ({
-      anthropic: { type: 'oauth', access: raw },
+      local: { type: 'oauth', access: raw },
     }));
-    const server = createProviderServer([{ id: 'anthropic', models: {} }]);
+    const server = createProviderServer([{ id: 'local', models: {} }]);
     const service = new ProviderLimitService(server);
 
-    const stale = service.get('anthropic', null);
+    const stale = service.get('local', null);
     await vi.waitFor(() => expect(mocks.readFileMock).toHaveBeenCalledTimes(1));
     service.clearCache();
-    const fresh = service.get('anthropic', null);
+    const fresh = service.get('local', null);
     await vi.waitFor(() => expect(mocks.readFileMock).toHaveBeenCalledTimes(2));
 
     secondAuth.resolve('new-token');
@@ -218,11 +218,11 @@ describe('ProviderLimitService', () => {
     firstAuth.resolve('old-token');
     await stale;
 
-    await service.get('anthropic', 'another-model');
+    await service.get('local', 'another-model');
     expect(mocks.readFileMock).toHaveBeenCalledTimes(2);
     expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        authStore: { anthropic: { type: 'oauth', access: 'new-token' } },
+        authStore: { local: { type: 'oauth', access: 'new-token' } },
       })
     );
   });
@@ -260,7 +260,7 @@ describe('ProviderLimitService', () => {
     expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(3);
   });
 
-  it('caches available statuses for five minutes', async () => {
+  it('caches available statuses for thirty seconds', async () => {
     const server = createServer();
     const service = new ProviderLimitService(server);
     const available = createStatus('available');
@@ -270,7 +270,7 @@ describe('ProviderLimitService', () => {
     await service.get('openai', 'gpt-5.4');
     expect(mocks.extractOpenCodeProviderLimitMock).toHaveBeenCalledTimes(1);
 
-    await vi.advanceTimersByTimeAsync(5 * 60_000 - 1);
+    await vi.advanceTimersByTimeAsync(30_000 - 1);
     await service.get('openai', 'gpt-5.4');
     expect(mocks.extractOpenCodeProviderLimitMock).toHaveBeenCalledTimes(1);
 
@@ -459,7 +459,7 @@ describe('ProviderLimitService', () => {
       modelID: 'qwen3-coder-30b',
       status: 'available',
       source: 'provider',
-      checkedAt: Date.now(),
+      checkedAt: Date.now() - 5 * 60_000,
       note: 'Polled OpenRouter usage endpoint. Showing the last successful quota snapshot because the latest provider poll failed: OpenRouter usage endpoint returned 502',
       windows: [
         {
@@ -526,6 +526,24 @@ describe('ProviderLimitService', () => {
     });
   });
 
+  it('preserves the source timestamp of a successful adapter snapshot', async () => {
+    const service = new ProviderLimitService(createServer());
+    const status = { ...createStatus('available'), checkedAt: Date.now() - 60_000 };
+    mocks.fetchProviderLimitFromAdapterMock.mockResolvedValueOnce(status);
+    await expect(service.get('openai', 'gpt-5.4')).resolves.toEqual(status);
+  });
+
+  it('does not let a cached fallback outlive the stale retention bound', async () => {
+    const service = new ProviderLimitService(createServer());
+    mocks.fetchProviderLimitFromAdapterMock.mockResolvedValueOnce(createStatus('available'));
+    await service.get('openai', 'gpt-5.4');
+    await vi.advanceTimersByTimeAsync(15 * 60_000 - 1_000);
+    mocks.fetchProviderLimitFromAdapterMock.mockResolvedValue(createStatus('error'));
+    await expect(service.get('openai', 'gpt-5.4')).resolves.toMatchObject({ status: 'available' });
+    await vi.advanceTimersByTimeAsync(1_001);
+    await expect(service.get('openai', 'gpt-5.4')).resolves.toMatchObject({ status: 'error' });
+  });
+
   it('prefers provider adapter snapshots over OpenCode metadata when available', async () => {
     const server = createProviderServer([{ id: 'zai', models: { 'glm-4.5': {} } }]);
     const service = new ProviderLimitService(server);
@@ -586,7 +604,7 @@ describe('ProviderLimitService', () => {
     expect(mocks.extractOpenCodeProviderLimitMock).not.toHaveBeenCalled();
   });
 
-  it('suppresses repeated credential rejections for the rest of the session', async () => {
+  it('rechecks subscription credentials instead of suppressing file-backed rotation for the session', async () => {
     const server = createProviderServer([{ id: 'anthropic', models: {} }]);
     const service = new ProviderLimitService(server);
     mocks.parseProviderAuthStoreMock.mockReturnValue({
@@ -618,10 +636,11 @@ describe('ProviderLimitService', () => {
       checkedAt: Date.now(),
       note: 'Anthropic usage endpoint rejected credentials (401)',
     });
-    expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(2);
   });
 
   it('retries a cached auth failure after the auth store snapshot changes', async () => {
+    const sourceCheckedAt = Date.now();
     const server = createProviderServer([{ id: 'anthropic', models: {} }]);
     const service = new ProviderLimitService(server);
     mocks.parseProviderAuthStoreMock
@@ -665,7 +684,7 @@ describe('ProviderLimitService', () => {
       modelID: null,
       status: 'available',
       source: 'provider',
-      checkedAt: Date.now(),
+      checkedAt: sourceCheckedAt,
       note: 'Polled Anthropic OAuth usage endpoint',
       windows: [
         {
@@ -708,13 +727,13 @@ describe('ProviderLimitService', () => {
       expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(1)
     );
 
-    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(45_000);
     await expect(first).resolves.toMatchObject({
       providerID: 'openai',
       modelID: 'gpt-5.4',
       status: 'error',
       source: 'provider',
-      note: 'Provider limit adapter failed: timed out after 30000ms',
+      note: 'Provider limit adapter failed: timed out after 45000ms',
     });
 
     mocks.fetchProviderLimitFromAdapterMock.mockResolvedValue(null);

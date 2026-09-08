@@ -28,6 +28,8 @@ import {
   clampPopupToViewport,
   flipPopupDownIfNeeded,
   observePopupViewport,
+  PICKER_DETAILS_HOVER_DELAY_MS,
+  RIGHT_PICKER_DETAILS_HOVER_DELAY_MS,
 } from '../../lib/popup-position';
 import { PermissionModeIcon } from './PermissionModeIcon';
 import { isFunction } from '../../lib/runtime-values';
@@ -528,6 +530,7 @@ export function AgentPicker(props: {
   onFocusIndex: (index: number) => void;
 }) {
   let popupEl: HTMLDivElement | undefined;
+  let detailsHoverTimer: ReturnType<typeof setTimeout> | undefined;
   const [optionDetails, setOptionDetails] = createSignal<{
     detail: string;
     style: Record<string, string>;
@@ -638,6 +641,28 @@ export function AgentPicker(props: {
     });
   };
 
+  const hideOptionDetails = () => {
+    clearTimeout(detailsHoverTimer);
+    detailsHoverTimer = undefined;
+    setOptionDetails(null);
+  };
+
+  const scheduleOptionDetails = (detail: string, option: HTMLElement) => {
+    hideOptionDetails();
+    const popupBox = popupEl?.getBoundingClientRect();
+    const detailsFitOnRight =
+      popupBox !== undefined && popupBox.right + 7 + 220 <= window.innerWidth - 8;
+    detailsHoverTimer = setTimeout(
+      () => {
+        detailsHoverTimer = undefined;
+        showOptionDetails(detail, option);
+      },
+      detailsFitOnRight ? RIGHT_PICKER_DETAILS_HOVER_DELAY_MS : PICKER_DETAILS_HOVER_DELAY_MS
+    );
+  };
+
+  onCleanup(hideOptionDetails);
+
   return (
     <div style={{ position: 'relative' }}>
       <Tooltip content={tooltipContent()}>
@@ -677,8 +702,8 @@ export function AgentPicker(props: {
                 focused={props.focusIndex === index()}
                 onSelect={() => props.onSelect(agent)}
                 onFocus={() => props.onFocusIndex(index())}
-                onShowDetails={showOptionDetails}
-                onHideDetails={() => setOptionDetails(null)}
+                onShowDetails={scheduleOptionDetails}
+                onHideDetails={hideOptionDetails}
               />
             )}
           </For>

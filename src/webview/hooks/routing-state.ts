@@ -1,6 +1,6 @@
 import type { SelectedModel } from '../lib/app-state-types';
 import { resolveSelectedModel } from '../lib/state';
-import type { Agent, MessageEntry, Provider, Session } from '../types';
+import type { Agent, MessageEntry, Provider, Session, SessionStatus } from '../types';
 
 type AgentSelectionUpdate = {
   value: string | null;
@@ -162,6 +162,18 @@ export function reconcileLoadedProviders(args: {
   return { effectiveModel, nextSelectedModel: undefined };
 }
 
+export function isProviderWorking(
+  providerID: string,
+  statuses: Record<string, SessionStatus>,
+  getSessionProviderID: (sessionId: string) => string | null | undefined
+) {
+  return Object.entries(statuses).some(
+    ([sessionId, status]) =>
+      (status.type === 'busy' || status.type === 'retry') &&
+      getSessionProviderID(sessionId) === providerID
+  );
+}
+
 export function getActiveProviderSelection(args: {
   activeSessionId?: string | null;
   selectedModel: SelectedModel | null;
@@ -176,7 +188,9 @@ export function getActiveProviderSelection(args: {
     return { providerID: ralphModel.providerID, modelID: ralphModel.modelID };
   }
 
-  const selected = resolveSelectedModel(args.selectedModel, args.providers, args.providerDefaults);
+  const selected = resolveSelectedModel(args.selectedModel, args.providers, args.providerDefaults, {
+    allowHidden: true,
+  });
   if (selected) {
     return { providerID: selected.providerID, modelID: selected.modelID };
   }

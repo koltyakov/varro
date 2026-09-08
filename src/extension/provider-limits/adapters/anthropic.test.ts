@@ -91,7 +91,35 @@ describe('createAnthropicAdapter', () => {
     });
   });
 
+  it('skips a file token rotated while waiting without refreshing the old token', async () => {
+    vi.mocked(readFile).mockResolvedValue(
+      JSON.stringify({ claudeAiOauth: { accessToken: 'original', refreshToken: 'refresh-secret' } })
+    );
+    vi.mocked(fetch).mockResolvedValue(Response.json({ five_hour: { utilization: 20 } }));
+    const identities: string[][] = [];
+    const status = await adapter.fetch({
+      provider,
+      authStore: {},
+      modelID: null,
+      checkedAt: 1_000,
+      coordinate: async (identity, poll) => {
+        identities.push(identity);
+        vi.mocked(readFile).mockResolvedValue(
+          JSON.stringify({ claudeAiOauth: { accessToken: 'replacement' } })
+        );
+        return poll();
+      },
+    });
+    expect(status.status).toBe('unsupported');
+    expect(identities).toEqual([['https://api.anthropic.com/api/oauth/usage', 'original']]);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(mkdir).not.toHaveBeenCalled();
+    expect(rename).not.toHaveBeenCalled();
+  });
+
   it('prefers a fresh statusline bridge file before polling the API', async () => {
+    const coordinate = vi.fn();
     vi.mocked(stat).mockResolvedValue({
       isFile: () => true,
       mtimeMs: Date.now(),
@@ -110,9 +138,11 @@ describe('createAnthropicAdapter', () => {
       authStore: {},
       modelID: 'claude-sonnet-4',
       checkedAt: 1_000,
+      coordinate,
     });
 
     expect(fetch).not.toHaveBeenCalled();
+    expect(coordinate).not.toHaveBeenCalled();
     expect(status).toEqual({
       providerID: 'anthropic',
       modelID: 'claude-sonnet-4',
@@ -208,7 +238,52 @@ describe('createAnthropicAdapter', () => {
     });
   });
 
+  it('reads local windows outside coordination without refreshing a cached API timestamp', async () => {
+    const checkedAt = Date.now();
+    vi.mocked(stat).mockResolvedValue({
+      isFile: () => true,
+      mtimeMs: checkedAt - 1_000,
+    } as Awaited<ReturnType<typeof stat>>);
+    vi.mocked(readFile).mockResolvedValue(
+      JSON.stringify({
+        rate_limits: { five_hour: { used_percentage: 42 } },
+      })
+    );
+    const status = await adapter.fetch({
+      provider,
+      authStore: { anthropic: { type: 'oauth', access: 'token' } },
+      modelID: null,
+      checkedAt,
+      coordinate: async () => ({
+        providerID: 'anthropic',
+        modelID: null,
+        source: 'provider',
+        status: 'available',
+        checkedAt: checkedAt - 60_000,
+        windows: [
+          {
+            id: 'seven_day',
+            label: 'Weekly All-Model',
+            unit: 'unknown',
+            remaining: 80,
+            limit: 100,
+            resetAt: null,
+          },
+        ],
+      }),
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(status).toMatchObject({
+      checkedAt: checkedAt - 60_000,
+      windows: [
+        { id: 'seven_day', remaining: 80 },
+        { id: 'five_hour', remaining: 58 },
+      ],
+    });
+  });
+
   it('reads quota windows from a local Claude proxy when Anthropic uses a loopback base URL', async () => {
+    const coordinate = vi.fn();
     vi.mocked(stat).mockRejectedValue(new Error('missing statusline file'));
     vi.mocked(fetch).mockResolvedValue(
       new Response(
@@ -242,8 +317,10 @@ describe('createAnthropicAdapter', () => {
       authStore: {},
       modelID: 'claude-sonnet-4',
       checkedAt: 1_000,
+      coordinate,
     });
 
+    expect(coordinate).not.toHaveBeenCalled();
     const [url, init] = vi.mocked(fetch).mock.calls[0] ?? [];
     expect(String(url)).toBe('http://127.0.0.1:3456/v1/usage/quota');
     expect(init).toEqual(
@@ -314,83 +391,86 @@ describe('createAnthropicAdapter', () => {
     });
   });
 
-  it('falls back to Claude credentials when OpenCode auth is absent', async () => {
-    vi.mocked(stat).mockRejectedValue(new Error('missing statusline file'));
-    vi.mocked(readFile).mockResolvedValue(
-      JSON.stringify({ claudeAiOauth: { accessToken: 'anthropic-file-token' } })
-    );
-    vi.mocked(fetch).mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          five_hour: {
-            utilization: 45.2,
-            resets_at: '2026-03-04T10:00:00Z',
-            is_enabled: true,
-          },
-          seven_day: {
-            utilization: 12.8,
-            resets_at: '2026-03-11T10:00:00Z',
-            is_enabled: true,
-          },
-          extra_usage: {
-            utilization: 8,
-            is_enabled: false,
-          },
-          unknown_key: {
-            utilization: 99,
-            is_enabled: true,
-          },
-        }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }
-      )
-    );
+  it.each([undefined, '', '  '])(
+    'falls back to Claude credentials with absent or empty OpenCode access (%s)',
+    async (access) => {
+      vi.mocked(stat).mockRejectedValue(new Error('missing statusline file'));
+      vi.mocked(readFile).mockResolvedValue(
+        JSON.stringify({ claudeAiOauth: { accessToken: 'anthropic-file-token' } })
+      );
+      vi.mocked(fetch).mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            five_hour: {
+              utilization: 45.2,
+              resets_at: '2026-03-04T10:00:00Z',
+              is_enabled: true,
+            },
+            seven_day: {
+              utilization: 12.8,
+              resets_at: '2026-03-11T10:00:00Z',
+              is_enabled: true,
+            },
+            extra_usage: {
+              utilization: 8,
+              is_enabled: false,
+            },
+            unknown_key: {
+              utilization: 99,
+              is_enabled: true,
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      );
 
-    const status = await adapter.fetch({
-      provider,
-      authStore: {},
-      modelID: null,
-      checkedAt: 1_000,
-    });
+      const status = await adapter.fetch({
+        provider,
+        authStore: access === undefined ? {} : { anthropic: { type: 'oauth', access } },
+        modelID: null,
+        checkedAt: 1_000,
+      });
 
-    expect(fetch).toHaveBeenCalledWith(
-      'https://api.anthropic.com/api/oauth/usage',
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: 'Bearer anthropic-file-token',
-          'anthropic-beta': 'oauth-2025-04-20',
-          'User-Agent': 'claude-code/2.1.69',
-        }),
-      })
-    );
-    expect(status).toEqual({
-      providerID: 'anthropic',
-      modelID: null,
-      status: 'available',
-      source: 'provider',
-      checkedAt: 1_000,
-      note: 'Polled Anthropic OAuth usage endpoint',
-      windows: [
-        {
-          id: 'five_hour',
-          label: '5-Hour Limit',
-          unit: 'unknown',
-          remaining: 54.8,
-          limit: 100,
-          resetAt: Date.parse('2026-03-04T10:00:00Z'),
-          percent: 45.2,
-        },
-        {
-          id: 'seven_day',
-          label: 'Weekly All-Model',
-          unit: 'unknown',
-          remaining: 87.2,
-          limit: 100,
-          resetAt: Date.parse('2026-03-11T10:00:00Z'),
-          percent: 12.8,
-        },
-      ],
-    });
-  });
+      expect(fetch).toHaveBeenCalledWith(
+        'https://api.anthropic.com/api/oauth/usage',
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: 'Bearer anthropic-file-token',
+            'anthropic-beta': 'oauth-2025-04-20',
+            'User-Agent': 'claude-code/2.1.69',
+          }),
+        })
+      );
+      expect(status).toEqual({
+        providerID: 'anthropic',
+        modelID: null,
+        status: 'available',
+        source: 'provider',
+        checkedAt: 1_000,
+        note: 'Polled Anthropic OAuth usage endpoint',
+        windows: [
+          {
+            id: 'five_hour',
+            label: '5-Hour Limit',
+            unit: 'unknown',
+            remaining: 54.8,
+            limit: 100,
+            resetAt: Date.parse('2026-03-04T10:00:00Z'),
+            percent: 45.2,
+          },
+          {
+            id: 'seven_day',
+            label: 'Weekly All-Model',
+            unit: 'unknown',
+            remaining: 87.2,
+            limit: 100,
+            resetAt: Date.parse('2026-03-11T10:00:00Z'),
+            percent: 12.8,
+          },
+        ],
+      });
+    }
+  );
 
   it('uses direct monthly credit bounds when Anthropic exposes them', async () => {
     vi.mocked(stat).mockRejectedValue(new Error('missing statusline file'));
@@ -532,70 +612,76 @@ describe('createAnthropicAdapter', () => {
     expect(status.status).toBe('unsupported');
   });
 
-  it('refreshes file-backed OAuth credentials and retries after a 401 response', async () => {
-    vi.mocked(stat).mockRejectedValue(new Error('missing statusline file'));
-    vi.mocked(readFile).mockResolvedValue(
-      JSON.stringify({
+  it.each([false, true])(
+    'refreshes file-backed OAuth credentials and retries after a 401 response (coordinated: %s)',
+    async (coordinated) => {
+      vi.mocked(stat).mockRejectedValue(new Error('missing statusline file'));
+      vi.mocked(readFile).mockResolvedValue(
+        JSON.stringify({
+          theme: 'dark',
+          claudeAiOauth: {
+            accessToken: 'anthropic-file-token',
+            refreshToken: 'anthropic-refresh-token',
+            scopes: ['openid'],
+          },
+        })
+      );
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(new Response('{}', { status: 401 }))
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              access_token: 'anthropic-refreshed-access-token',
+              refresh_token: 'anthropic-refreshed-refresh-token',
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          )
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              five_hour: { utilization: 12, is_enabled: true },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          )
+        );
+
+      const status = await adapter.fetch({
+        provider,
+        authStore: {},
+        modelID: null,
+        checkedAt: 1_000,
+        coordinate: coordinated ? async (_identity, poll) => poll() : undefined,
+      });
+
+      expect(fetch).toHaveBeenCalledTimes(3);
+      expect(writeFile).toHaveBeenCalledWith(
+        expect.stringMatching(/\.claude[\\/]\.credentials\.json\..*\.tmp$/),
+        expect.stringContaining('anthropic-refreshed-access-token'),
+        { encoding: 'utf-8', mode: 0o600 }
+      );
+      const written = JSON.parse(String(vi.mocked(writeFile).mock.calls[0]?.[1])) as Record<
+        string,
+        unknown
+      >;
+      expect(written).toEqual({
         theme: 'dark',
         claudeAiOauth: {
-          accessToken: 'anthropic-file-token',
-          refreshToken: 'anthropic-refresh-token',
+          accessToken: 'anthropic-refreshed-access-token',
+          refreshToken: 'anthropic-refreshed-refresh-token',
           scopes: ['openid'],
         },
-      })
-    );
-    vi.mocked(fetch)
-      .mockResolvedValueOnce(new Response('{}', { status: 401 }))
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            access_token: 'anthropic-refreshed-access-token',
-            refresh_token: 'anthropic-refreshed-refresh-token',
-          }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } }
-        )
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            five_hour: { utilization: 12, is_enabled: true },
-          }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } }
-        )
+      });
+      expect(rm).toHaveBeenCalledWith(
+        expect.stringMatching(/\.claude[\\/]\.credentials\.json\..*\.tmp$/),
+        { force: true }
       );
-
-    const status = await adapter.fetch({
-      provider,
-      authStore: {},
-      modelID: null,
-      checkedAt: 1_000,
-    });
-
-    expect(fetch).toHaveBeenCalledTimes(3);
-    expect(writeFile).toHaveBeenCalledWith(
-      expect.stringMatching(/\.claude[\\/]\.credentials\.json\..*\.tmp$/),
-      expect.stringContaining('anthropic-refreshed-access-token'),
-      { encoding: 'utf-8', mode: 0o600 }
-    );
-    const written = JSON.parse(String(vi.mocked(writeFile).mock.calls[0]?.[1])) as Record<
-      string,
-      unknown
-    >;
-    expect(written).toEqual({
-      theme: 'dark',
-      claudeAiOauth: {
-        accessToken: 'anthropic-refreshed-access-token',
-        refreshToken: 'anthropic-refreshed-refresh-token',
-        scopes: ['openid'],
-      },
-    });
-    expect(rm).toHaveBeenCalledWith(
-      expect.stringMatching(/\.claude[\\/]\.credentials\.json\..*\.tmp$/),
-      { force: true }
-    );
-    expect(status.status).toBe('available');
-    expect(status.note).toBe('Polled Anthropic OAuth usage endpoint after refreshing OAuth token');
-  });
+      expect(status.status).toBe('available');
+      expect(status.note).toBe(
+        'Polled Anthropic OAuth usage endpoint after refreshing OAuth token'
+      );
+    }
+  );
 
   it('does not overwrite a refresh token rotated on disk during refresh', async () => {
     vi.mocked(stat).mockRejectedValue(new Error('missing statusline file'));

@@ -219,8 +219,12 @@ export function preserveAssistantActivityGroupKeys(
   options?: { pinPreviousOwner?: (group: AssistantActivityGroupInfo) => boolean }
 ) {
   const previousGroupByPart = new Map<string, AssistantActivityGroupInfo>();
+  const indexedGroups = new Set<AssistantActivityGroupInfo>();
   for (const groups of previous.values()) {
     for (const group of groups) {
+      // A cross-message segment is shared by every participating message.
+      if (indexedGroups.has(group)) continue;
+      indexedGroups.add(group);
       for (const part of group.parts) {
         previousGroupByPart.set(`${part.sessionID}\u0000${part.messageID}\u0000${part.id}`, group);
       }
