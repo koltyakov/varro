@@ -224,6 +224,8 @@ export async function createBootstrapProxy(replay) {
       return send(response, 405, { error: 'Replay is read-only' });
     }
     const pathname = new URL(request.url, 'http://127.0.0.1').pathname;
+    if (pathname === '/varro/test-isolation')
+      return send(response, 200, { kind: 'read-only-replay' });
     if (pathname === '/provider')
       return send(response, 200, {
         all: [provider],
@@ -726,7 +728,7 @@ export async function runCapture(options) {
       'varro.server.port': proxy.port,
       'varro.server.command': fakeCommand,
       'varro.server.autoUpdate': false,
-      'varro.server.autoStart': true,
+      'varro.server.autoStart': false,
       'security.workspace.trust.enabled': false,
       'telemetry.telemetryLevel': 'off',
       'update.mode': 'none',
@@ -756,6 +758,7 @@ export async function runCapture(options) {
       env: {
         ...process.env,
         VARRO_AI_WORKSPACE: workspace,
+        VARRO_AI_REPLAY_URL: proxy.url,
         VARRO_AI_LAUNCH_INTENT: path.join(output, 'launch-intent.json'),
         VARRO_SANDBOX_FAKE_MODE: 'startup-exit',
         VARRO_SANDBOX_FAKE_VERSION: '1.18.30',

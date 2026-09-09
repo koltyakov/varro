@@ -13,6 +13,7 @@ import {
   verifyVscodeLaunchIdentity,
 } from './vscode-launch-process.mjs';
 import { requireFixtureWorkspace } from './ai-fuzzy-preconditions.mjs';
+import { requireIsolatedTestServer } from './ai-test-isolation.mjs';
 import { savePlaybackCapture } from './ai-session-playback.mjs';
 import { installObserver } from './ai-streaming.mjs';
 
@@ -396,7 +397,7 @@ class OpenCodeClient {
       },
     };
     if (body !== undefined) init.body = JSON.stringify(body);
-    const response = await fetch(url, init);
+    const response = await fetch(url, { ...init, redirect: 'error' });
     const text = await response.text();
     if (!response.ok) throw new Error(`${method} ${route} failed (${String(response.status)}): ${text}`);
     return text ? JSON.parse(text) : null;
@@ -3642,6 +3643,10 @@ async function runLive(options) {
     readFile(launchPath, 'utf8').then(JSON.parse),
   ]);
   manifest.workspace = await requireFixtureWorkspace(manifest.workspace);
+  manifest.isolation = await requireIsolatedTestServer(manifest.server, manifest.workspace);
+  if (launch.testServerUrl !== manifest.isolation.serverUrl) {
+    throw new Error('Test host is not pinned to the verified isolated server; relaunch it');
+  }
   const launchWorkspace = await requireFixtureWorkspace(launch.workspace);
   if (launchWorkspace !== manifest.workspace) {
     throw new Error(`Launch workspace ${launch.workspace} does not match ${manifest.workspace}`);

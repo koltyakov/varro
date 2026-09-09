@@ -3,6 +3,7 @@ import { access, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { requireIsolatedTestServer, testServerOrigin } from './ai-test-isolation.mjs';
 
 import {
   executeVscodeCommand,
@@ -46,12 +47,31 @@ async function resolveVscodeExecutable() {
 const executable = await resolveVscodeExecutable();
 const workspace = path.resolve(process.env.VARRO_AI_WORKSPACE?.trim() || projectRoot);
 await access(workspace);
+const replayUrl = process.env.VARRO_AI_REPLAY_URL;
+const testServerUrl = testServerOrigin(replayUrl ?? process.env.VARRO_AI_SERVER_URL);
+let isolation;
+if (replayUrl) {
+  const response = await fetch(new URL('/varro/test-isolation', testServerUrl), {
+    redirect: 'error', signal: AbortSignal.timeout(5_000),
+  });
+  if (!response.ok || (await response.json()).kind !== 'read-only-replay') {
+    throw new Error('The replay endpoint is not a read-only replay server');
+  }
+} else {
+  isolation = await requireIsolatedTestServer(testServerUrl, workspace);
+}
 // Keep this short because macOS limits local IPC socket paths to roughly 103 bytes.
 const profileRoot = await mkdtemp(path.join(os.tmpdir(), 'vfz-'));
 const userData = path.join(profileRoot, 'u');
 const extensions = path.join(profileRoot, 'e');
 await mkdir(userData);
 await mkdir(extensions);
+await mkdir(path.join(userData, 'User'));
+await writeFile(path.join(userData, 'User/settings.json'), JSON.stringify({
+  'varro.server.port': Number(new URL(testServerUrl).port),
+  'varro.server.autoStart': false,
+  'varro.server.autoUpdate': false,
+}));
 const remoteDebuggingPort = await reserveLoopbackPort();
 const configuredSidebarWidth = Number(process.env.VARRO_AI_SIDEBAR_WIDTH ?? 486);
 if (!Number.isFinite(configuredSidebarWidth) || configuredSidebarWidth < 300) {
@@ -60,6 +80,14 @@ if (!Number.isFinite(configuredSidebarWidth) || configuredSidebarWidth < 300) {
 
 const environment = { ...process.env };
 delete environment.ELECTRON_RUN_AS_NODE;
+delete environment.OPENCODE_PID;
+environment.VARRO_TEST_SERVER_URL = testServerUrl;
+environment.XDG_DATA_HOME = isolation?.xdgDataHome ?? path.join(profileRoot, 'data');
+environment.XDG_STATE_HOME = path.join(profileRoot, 'state');
+environment.XDG_CACHE_HOME = path.join(profileRoot, 'cache');
+environment.XDG_CONFIG_HOME = path.join(profileRoot, 'config');
+environment.OPENCODE_DB = isolation?.sourceDatabase ?? path.join(profileRoot, 'opencode.db');
+environment.OPENCODE_PID = '';
 
 const vscodeArgs = [
   '--no-sandbox',
@@ -84,7 +112,10 @@ const vscodeArgs = [
 const launchExecutable = process.platform === 'darwin' ? '/usr/bin/open' : executable;
 const launchArgs =
   process.platform === 'darwin'
-    ? ['-n', '-a', path.resolve(executable, '../../..'), '--args', ...vscodeArgs]
+    ? ['-n', '-a', path.resolve(executable, '../../..'),
+      ...['VARRO_TEST_SERVER_URL', 'XDG_DATA_HOME', 'XDG_STATE_HOME', 'XDG_CACHE_HOME', 'XDG_CONFIG_HOME', 'OPENCODE_DB', 'OPENCODE_PID'].flatMap(
+        (key) => ['--env', `${key}=${environment[key]}`]
+      ), '--args', ...vscodeArgs]
     : vscodeArgs;
 // Preserve recovery identifiers before macOS hands the launch to LaunchServices.
 if (process.env.VARRO_AI_LAUNCH_INTENT) {
@@ -134,17 +165,18 @@ await new Promise((resolve, reject) => {
 
 const codePid =
   process.platform === 'darwin' ? await waitForVscodeProcess(executable, userData) : child.pid;
-const focusDeadline = Date.now() + 15_000;
+const focusDeadline = Date.now() + 30_000;
+let sidebarWidth;
 while (true) {
   try {
     await executeVscodeCommand(remoteDebuggingPort, 'View: Focus on Varro View');
+    sidebarWidth = await resizeVscodeSidebar(remoteDebuggingPort, configuredSidebarWidth, 2_000);
     break;
   } catch (error) {
     if (Date.now() >= focusDeadline) throw error;
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
 }
-const sidebarWidth = await resizeVscodeSidebar(remoteDebuggingPort, configuredSidebarWidth);
 const metadataPath = path.join(profileRoot, 'launch.json');
 const metadata = await writeVscodeLaunchMetadata(metadataPath, {
   pid: codePid,
@@ -156,6 +188,9 @@ const metadata = await writeVscodeLaunchMetadata(metadataPath, {
   remoteDebuggingPort,
   sidebarWidth,
 });
+metadata.testServerUrl = testServerUrl;
+metadata.isolation = isolation ?? { kind: 'read-only-replay' };
+await writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`, { mode: 0o600 });
 
 child.unref();
 process.stdout.write(

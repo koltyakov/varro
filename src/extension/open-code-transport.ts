@@ -72,6 +72,7 @@ export class OpenCodeTransport {
   private static readonly EVENT_PROCESSING_YIELD_MS = 8;
   private static readonly MAX_EVENT_RECONNECT_DELAY_MS = 30_000;
   private readonly options: OpenCodeTransportOptions;
+  private readonly testServerUrl = process.env.VARRO_TEST_SERVER_URL;
   private eventController: AbortController | null = null;
   private eventReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private eventReconnectDelay = 1000;
@@ -88,7 +89,17 @@ export class OpenCodeTransport {
   private readonly observedSessionDirectories = new Map<string, string>();
 
   constructor(options: OpenCodeTransportOptions) {
-    this.options = options;
+    const testServerUrl = this.testServerUrl;
+    this.options = {
+      ...options,
+      getUrl: () => {
+        const url = options.getUrl();
+        if (testServerUrl && url !== testServerUrl) {
+          throw new Error(`AI test transport refused unverified server ${url}`);
+        }
+        return url;
+      },
+    };
     this.requestWorkspaceDirectory = options.getWorkspaceCwd();
   }
 
@@ -105,6 +116,9 @@ export class OpenCodeTransport {
         ? undefined
         : (options?.directory ?? this.getWorkspaceDirectoryForRequest(method, path))
     );
+    if (this.testServerUrl && new URL(scoped.url).origin !== this.testServerUrl) {
+      throw new Error('AI test transport refused a request outside its verified server');
+    }
     const controller = new AbortController();
     const operationId = diagnosticTimeline.nextId('request');
     let responseStatus: number | undefined;
@@ -115,6 +129,7 @@ export class OpenCodeTransport {
     };
     const init: RequestInit = {
       method,
+      redirect: 'error',
       headers,
       signal: options?.signal
         ? anySignal(controller.signal, timeoutSignal, options.signal)
@@ -241,6 +256,7 @@ export class OpenCodeTransport {
     let health: { healthy: boolean; version?: string } = { healthy: false };
     try {
       const res = await fetch(`${this.options.getUrl()}${CURRENT_OPENCODE_ENDPOINTS.health}`, {
+        redirect: 'error',
         signal: AbortSignal.timeout(OpenCodeTransport.HEALTH_TIMEOUT_MS),
       });
       if (res.ok) health = parseHealthResponse(await res.json()) ?? { healthy: false };
@@ -326,6 +342,7 @@ export class OpenCodeTransport {
       };
       if (this.lastEventId) headers['Last-Event-ID'] = this.lastEventId;
       const res = await fetch(eventStreamRequest.url, {
+        redirect: 'error',
         signal: controller.signal,
         headers,
       });

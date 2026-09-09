@@ -333,6 +333,12 @@ async function runScenario(scenario, vscodeExecutable) {
       {
         ...process.env,
         ...getScenarioEnvironment(scenario, root),
+        XDG_DATA_HOME: path.join(root, 'data'),
+        XDG_STATE_HOME: path.join(root, 'state'),
+        XDG_CACHE_HOME: path.join(root, 'cache'),
+        XDG_CONFIG_HOME: path.join(root, 'config'),
+        OPENCODE_DB: path.join(root, 'opencode.db'),
+        OPENCODE_PID: '',
         VARRO_SANDBOX_LAUNCH_FILE: launchFile,
         VARRO_SANDBOX_PID_FILE: pidFile,
         VARRO_SANDBOX_PORT: String(port),

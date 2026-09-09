@@ -149,7 +149,33 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   vi.useRealTimers();
+});
+
+describe('AI test server isolation', () => {
+  it('blocks metadata mutations, health checks, and event connections to an unverified server', async () => {
+    vi.stubEnv('VARRO_TEST_SERVER_URL', 'http://127.0.0.1:49999');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const transport = createTransport();
+    await expect(
+      transport.request('PATCH', '/session/production', { permission: [] })
+    ).rejects.toThrow('AI test transport refused unverified server');
+    expect(await transport.readHealthInfo()).toEqual({ healthy: false });
+    await expect(transport.startEventStream()).rejects.toThrow(
+      'AI test transport refused unverified server'
+    );
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('rejects absolute request URLs even when the configured server is verified', async () => {
+    vi.stubEnv('VARRO_TEST_SERVER_URL', 'http://localhost:4096');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    await expect(
+      createTransport().request('PATCH', 'http://127.0.0.1:4097/session/production', {})
+    ).rejects.toThrow('outside its verified server');
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 });
 
 function stubPlatform(platform: NodeJS.Platform) {

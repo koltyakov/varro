@@ -176,6 +176,37 @@ what was omitted.
 
 ## Real Editor Setup
 
+### Database isolation
+
+A separate VS Code profile does not isolate OpenCode storage. Live tests must use a dedicated
+OpenCode server with its database under `<varro-root>/artifacts/ai-test-data/`. The preparation,
+verification, live, cleanup, and editor-launch commands verify `/path` and use `lsof` to confirm
+that the listener owns that database. They reject production storage and symlink/hard-link aliases.
+Port 4096 is no longer a default. Missing isolation is a blocked test, never permission to use the
+production server. This verification currently requires macOS or Linux with `lsof`.
+
+Start a dedicated server in a tracked terminal, for example with an available port:
+
+```sh
+XDG_DATA_HOME="$PWD/artifacts/ai-test-data/data" \
+XDG_CONFIG_HOME="$PWD/artifacts/ai-test-data/config" \
+XDG_STATE_HOME="$PWD/artifacts/ai-test-data/state" \
+XDG_CACHE_HOME="$PWD/artifacts/ai-test-data/cache" \
+OPENCODE_DB="$PWD/artifacts/ai-test-data/data/opencode/opencode.db" \
+opencode serve --hostname 127.0.0.1 --port 49001
+```
+
+Provision model credentials in this isolated environment before preparing history. Do not move the
+production database into it. Use `VARRO_AI_SERVER_URL=http://127.0.0.1:49001` for both
+`ai:preconditions` and `ai:vscode`, or pass `--server` to preparation. The launcher pins the host's
+transport to that verified origin, isolates CLI storage, and disables automatic server startup and
+updates. Record the dedicated server PID and stop it during cleanup along with the test editor.
+
+Production session metadata, including permissions and timestamps, must remain unchanged. A request
+to run tests does not authorize a migration or repair. Such changes require an explicit user request
+identifying the intended production changes. Existing production golden histories must be imported
+as copies or regenerated in isolated storage before use. Old production-backed manifests are rejected.
+
 1. Prepare the clean `tmp/opencode` fixture under Repository Fixture Safety, then run
    `VARRO_AI_WORKSPACE="$PWD/tmp/opencode" npm run ai:vscode` to build Varro and launch a persistent,
    isolated Extension Development Host. Use the printed profile and workspace paths in the ledger. This

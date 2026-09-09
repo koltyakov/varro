@@ -4,10 +4,10 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { requireIsolatedTestServer } from './ai-test-isolation.mjs';
 
 const execFileAsync = promisify(execFile);
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const DEFAULT_SERVER = 'http://127.0.0.1:4096';
 const DEFAULT_MODEL = 'openai/gpt-5.6-luna';
 const DEFAULT_TURNS = 110;
 
@@ -167,6 +167,7 @@ class OpenCodeClient {
     url.searchParams.set('directory', this.workspace);
     const init = {
       method,
+      redirect: 'error',
       headers: {
         'content-type': 'application/json',
         'x-opencode-directory': this.workspace,
@@ -302,7 +303,8 @@ async function prepareRun(options) {
   );
   const turns = Number(options.turns ?? DEFAULT_TURNS);
   if (!Number.isInteger(turns) || turns < 110) throw new Error('--turns must be an integer of at least 110');
-  const client = new OpenCodeClient(options.server ?? DEFAULT_SERVER, workspace);
+  const isolation = await requireIsolatedTestServer(options.server ?? process.env.VARRO_AI_SERVER_URL, workspace);
+  const client = new OpenCodeClient(isolation.serverUrl, workspace);
   const fixture = await fixtureStatus(workspace);
   if (fixture.status) throw new Error(`Fixture must be clean before preparation:\n${fixture.status}`);
 
@@ -335,7 +337,8 @@ async function prepareRun(options) {
     version: 1,
     seed,
     createdAt: new Date().toISOString(),
-    server: options.server ?? DEFAULT_SERVER,
+    server: isolation.serverUrl,
+    isolation,
     workspace,
     fixture,
     modelForGoldenGeneration: source.generated ? options.model ?? DEFAULT_MODEL : null,
@@ -355,7 +358,8 @@ async function inspect(options) {
   const workspace = await requireFixtureWorkspace(
     options.workspace ?? path.join(projectRoot, 'tmp/opencode')
   );
-  const client = new OpenCodeClient(options.server ?? DEFAULT_SERVER, workspace);
+  const isolation = await requireIsolatedTestServer(options.server ?? process.env.VARRO_AI_SERVER_URL, workspace);
+  const client = new OpenCodeClient(isolation.serverUrl, workspace);
   const result = await validateGolden(client, sessionId, Number(options.turns ?? DEFAULT_TURNS));
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
@@ -364,6 +368,7 @@ async function verifyRun(options) {
   const manifestPath = path.resolve(requiredOption(options, 'manifest'));
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   manifest.workspace = await requireFixtureWorkspace(manifest.workspace);
+  manifest.isolation = await requireIsolatedTestServer(manifest.server, manifest.workspace);
   const client = new OpenCodeClient(manifest.server, manifest.workspace);
   const fixture = await fixtureStatus(manifest.workspace);
   if (fixture.status) throw new Error(`Fixture must be clean before the timed run:\n${fixture.status}`);
@@ -404,6 +409,7 @@ async function cleanup(options) {
   const manifestPath = path.resolve(requiredOption(options, 'manifest'));
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   manifest.workspace = await requireFixtureWorkspace(manifest.workspace);
+  manifest.isolation = await requireIsolatedTestServer(manifest.server, manifest.workspace);
   const prefix = `VFZ ${manifest.seed}`;
   const client = new OpenCodeClient(manifest.server, manifest.workspace);
   const allSessions = await client.listAllSessions();

@@ -270,6 +270,8 @@ export async function executeVscodeCommand(remoteDebuggingPort, commandLabel) {
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
     await requests.call('Input.insertText', { text: commandLabel });
+    // Filtering the command palette is asynchronous on a cold workbench.
+    await new Promise((resolve) => setTimeout(resolve, 250));
     for (const type of ['keyDown', 'keyUp']) {
       await requests.call('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter' });
     }

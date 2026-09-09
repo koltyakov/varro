@@ -132,6 +132,11 @@ The controller creates a disposable workspace and isolated profile, binds a loop
 and starts the real VS Code launcher. Bootstrap exposes an inert replay provider so onboarding does
 not hide the transcript. All model, tool, edit, abort, delete, and other HTTP mutations are rejected.
 Source session IDs are remapped; source sessions and source databases are never changed.
+The launcher verifies the read-only replay endpoint before starting VS Code, pins all extension
+transport traffic to that origin, and isolates OpenCode CLI data/config/state/cache paths. It must
+fail rather than fall back to a production server. Neither test startup nor permission recovery may
+change production session metadata. Only an explicit user request for those production changes
+authorizes a separate repair or migration; a streaming-test request does not.
 
 The command prints a private `control.json` path immediately and reports `phase: armed` after it has
 opened the replay session in the exact Varro sidebar. The run's `run.json` identifies the host,
