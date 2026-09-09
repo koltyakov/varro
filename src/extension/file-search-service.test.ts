@@ -245,6 +245,44 @@ describe('FileSearchService', () => {
     expect(secondSearch?.dispose).toHaveBeenCalledTimes(1);
   });
 
+  it('returns unique parent folders ahead of their matching files', async () => {
+    vscodeMock.workspace.findFiles.mockResolvedValue([
+      { fsPath: '/repo/src/components/Button.tsx' },
+      { fsPath: '/repo/src/components/Input.tsx' },
+    ]);
+    const { FileSearchService } = await loadModule();
+    const service = new FileSearchService();
+    const onResult = vi.fn();
+    try {
+      search(service, 1, 'src', 10, onResult);
+      await vi.waitFor(() => expect(onResult).toHaveBeenCalledTimes(1));
+      expect(onResult).toHaveBeenCalledWith({
+        requestId: 1,
+        query: 'src',
+        files: [
+          { path: '/repo/src', relativePath: 'src', type: 'directory' },
+          {
+            path: '/repo/src/components',
+            relativePath: 'src/components',
+            type: 'directory',
+          },
+          {
+            path: '/repo/src/components/Input.tsx',
+            relativePath: 'src/components/Input.tsx',
+            type: 'file',
+          },
+          {
+            path: '/repo/src/components/Button.tsx',
+            relativePath: 'src/components/Button.tsx',
+            type: 'file',
+          },
+        ],
+      });
+    } finally {
+      service.dispose();
+    }
+  });
+
   it('reuses cached workspace files until dispose clears the cache', async () => {
     vscodeMock.workspace.findFiles.mockResolvedValue([
       { fsPath: '/repo/src/very/long-name.ts' },
@@ -269,13 +307,15 @@ describe('FileSearchService', () => {
     expect(firstResult).toHaveBeenCalledWith({
       requestId: 1,
       query: '',
-      files: [{ path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' }],
+      files: [{ path: '/repo/src', relativePath: 'src', type: 'directory' }],
     });
     expect(secondResult).toHaveBeenCalledWith({
       requestId: 2,
       query: '',
       files: [
+        { path: '/repo/src', relativePath: 'src', type: 'directory' },
         { path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' },
+        { path: '/repo/src/very', relativePath: 'src/very', type: 'directory' },
         {
           path: '/repo/src/very/long-name.ts',
           relativePath: 'src/very/long-name.ts',
@@ -324,12 +364,18 @@ describe('FileSearchService', () => {
     expect(firstResult).toHaveBeenCalledWith({
       requestId: 1,
       query: '',
-      files: [{ path: '/repo/src/first.ts', relativePath: 'src/first.ts', type: 'file' }],
+      files: [
+        { path: '/repo/src', relativePath: 'src', type: 'directory' },
+        { path: '/repo/src/first.ts', relativePath: 'src/first.ts', type: 'file' },
+      ],
     });
     expect(secondResult).toHaveBeenCalledWith({
       requestId: 2,
       query: '',
-      files: [{ path: '/repo/src/second.ts', relativePath: 'src/second.ts', type: 'file' }],
+      files: [
+        { path: '/repo/src', relativePath: 'src', type: 'directory' },
+        { path: '/repo/src/second.ts', relativePath: 'src/second.ts', type: 'file' },
+      ],
     });
     service.dispose();
   });
@@ -358,7 +404,10 @@ describe('FileSearchService', () => {
     expect(onResult).toHaveBeenCalledWith({
       requestId: 1,
       query: '',
-      files: [{ path: '/repo/src/fresh.ts', relativePath: 'src/fresh.ts', type: 'file' }],
+      files: [
+        { path: '/repo/src', relativePath: 'src', type: 'directory' },
+        { path: '/repo/src/fresh.ts', relativePath: 'src/fresh.ts', type: 'file' },
+      ],
     });
     service.dispose();
   });
@@ -471,12 +520,18 @@ describe('FileSearchService', () => {
     expect(secondResult).toHaveBeenCalledWith({
       requestId: 2,
       query: '',
-      files: [{ path: '/repo/src/second.ts', relativePath: 'src/second.ts', type: 'file' }],
+      files: [
+        { path: '/repo/src', relativePath: 'src', type: 'directory' },
+        { path: '/repo/src/second.ts', relativePath: 'src/second.ts', type: 'file' },
+      ],
     });
     expect(thirdResult).toHaveBeenCalledWith({
       requestId: 3,
       query: '',
-      files: [{ path: '/repo/src/third.ts', relativePath: 'src/third.ts', type: 'file' }],
+      files: [
+        { path: '/repo/src', relativePath: 'src', type: 'directory' },
+        { path: '/repo/src/third.ts', relativePath: 'src/third.ts', type: 'file' },
+      ],
     });
 
     service.dispose();
@@ -519,6 +574,9 @@ describe('FileSearchService', () => {
       requestId: 1,
       query: '',
       files: [
+        { path: '/docs', relativePath: 'docs', type: 'directory' },
+        { path: '/repo', relativePath: 'repo', type: 'directory' },
+        { path: '/repo/src', relativePath: 'repo/src', type: 'directory' },
         { path: '/docs/guide.md', relativePath: 'docs/guide.md', type: 'file' },
         { path: '/repo/src/app.ts', relativePath: 'repo/src/app.ts', type: 'file' },
       ],
@@ -564,6 +622,9 @@ describe('FileSearchService', () => {
       requestId: 2,
       query: '',
       files: [
+        { path: '/docs', relativePath: 'docs', type: 'directory' },
+        { path: '/repo', relativePath: 'repo', type: 'directory' },
+        { path: '/repo/src', relativePath: 'repo/src', type: 'directory' },
         { path: '/docs/guide.md', relativePath: 'docs/guide.md', type: 'file' },
         { path: '/repo/src/app.ts', relativePath: 'repo/src/app.ts', type: 'file' },
       ],

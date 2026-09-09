@@ -1,5 +1,9 @@
 # Third-Party Notices
 
+## Material Design Icons
+
+Varro includes the [account-cog icon from Material Design Icons](https://github.com/Templarian/MaterialDesign/blob/master/svg/account-cog.svg), distributed by Pictogrammers under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0). The bundled SVG separates the account and cog into paths with different colors.
+
 ## Material Icon Theme
 
 Varro includes icons from [Material Icon Theme](https://github.com/material-extensions/vscode-material-icon-theme), licensed under the MIT License.

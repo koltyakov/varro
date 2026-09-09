@@ -143,6 +143,18 @@ describe('shouldRequestMentionFileSearch', () => {
 });
 
 describe('getActiveCompletion', () => {
+  it('detects dollar skills only at token boundaries', () => {
+    expect(getActiveCompletion('$', 1)).toEqual({ type: 'skill', query: '', start: 0, end: 1 });
+    expect(getActiveCompletion('use $browser', 12)).toEqual({
+      type: 'skill',
+      query: 'browser',
+      start: 4,
+      end: 12,
+    });
+    expect(getActiveCompletion('cost$5', 6)).toBeNull();
+    expect(getActiveCompletion('$browser ', 9)).toBeNull();
+  });
+
   it('detects slash commands at token boundaries', () => {
     expect(getActiveCompletion('/rev', 4)).toEqual({
       type: 'slash',

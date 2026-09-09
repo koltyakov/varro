@@ -3,6 +3,7 @@ import type { Agent, Session } from '../../types';
 import type { DroppedFile, WorkspaceFolderContext } from '../../../shared/protocol';
 import { normalizeSessionTitle } from '../../../shared/session-title';
 import { getWorkspaceFolderLabel } from '../../../shared/workspace-folders';
+import { formatSkillReference } from '../../lib/skill-reference';
 
 export const SKILLS_COMMAND_NAME = 'skills';
 
@@ -42,6 +43,14 @@ export function getActiveCompletion(text: string, cursor: number) {
   const prefix = text.slice(0, cursor);
   const tokenStart = Math.max(prefix.lastIndexOf(' '), prefix.lastIndexOf('\n')) + 1;
   const token = prefix.slice(tokenStart);
+  if (token.startsWith('$')) {
+    return {
+      type: 'skill' as const,
+      query: token.slice(1),
+      start: tokenStart,
+      end: cursor,
+    };
+  }
   if (token.startsWith('/')) {
     return {
       type: 'slash' as const,
@@ -154,6 +163,11 @@ export function getCompletionSelection(
   confirm = false
 ): CompletionSelection | null {
   if (!completion || !item) return null;
+
+  if (completion.type === 'skill') {
+    if (item.type !== 'skill') return null;
+    return { type: 'apply-mention', value: formatSkillReference(item.name) };
+  }
 
   if (completion.type === 'slash') {
     if (!('name' in item)) return null;

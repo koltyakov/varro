@@ -1123,6 +1123,7 @@ describe('RichComposerArea', () => {
   it.each([
     ['mention-file', ' '],
     ['mention-agent', ' '],
+    ['mention-skill', ' '],
     ['image', ''],
   ] as const)('crosses a terminal %s chip with one horizontal arrow press', (type, separator) => {
     const marker = `[${type}]`;

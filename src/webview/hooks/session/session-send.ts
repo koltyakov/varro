@@ -61,6 +61,7 @@ import type {
 } from '../../types';
 import { canDelegateVision } from '../../lib/vision-delegation';
 import { isString } from '../../lib/runtime-values';
+import { formatSkillAttachment, getSkillReferences } from '../../lib/skill-reference';
 
 type ComposerState = {
   selectedAgent: string | null;
@@ -237,6 +238,9 @@ export function buildSessionSendBody(
     : false;
   const parts: SessionSendBody['parts'] = [];
   if (promptText.trim()) parts.push({ type: 'text', text: promptText });
+  for (const name of getSkillReferences(promptText)) {
+    parts.push({ type: 'text', text: formatSkillAttachment(name) });
+  }
 
   const workspacePath = composerState.editorContext.workspacePath;
 

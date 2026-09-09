@@ -452,7 +452,7 @@
   );
   box-shadow: color-mix(in srgb, var(--color-vscode-accent) 16%, var(--color-vscode-surface-raised))
     var(--composer-completion-scrollbar-inset) 0 0;
-  color: var(--vscode-list-activeSelectionForeground, var(--color-vscode-fg));
+  color: var(--color-vscode-fg);
 }
 
 .composer-completion-icon {
@@ -540,10 +540,7 @@
 
 .composer-completion-item.completion-slash .composer-completion-detail {
   flex: 1 1 auto;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  text-align: right;
+  text-align: left;
 }
 
 .composer-completion-item.completion-file .composer-completion-title-shell {

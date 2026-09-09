@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { basename, relative } from 'path';
+import { basename, dirname, relative } from 'path';
 import type { DroppedFile } from '../shared/protocol';
 import { getWorkspaceFolderLabel } from '../shared/workspace-folders';
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
@@ -287,26 +287,51 @@ export class FileSearchService {
           path: folder.uri.fsPath,
         }));
         const seen = new Set<string>();
-        const entries = fileGroups.flat().flatMap(({ uri, workspaceFolder }) => {
-          if (seen.size >= FileSearchService.MAX_CANDIDATES) return [];
-          const identity = normalizeWorkspaceIdentity(uri.fsPath) ?? uri.fsPath;
-          if (seen.has(identity)) return [];
-          seen.add(identity);
-          const owningFolder = vscode.workspace.getWorkspaceFolder(uri) ?? workspaceFolder;
-          const relativePath =
-            workspaceFolders.length > 1
-              ? `${getWorkspaceFolderLabel(owningFolder.uri.fsPath, folderContexts) ?? owningFolder.name}/${vscode.workspace
-                  .asRelativePath(uri, false)
-                  .replace(/\\/g, '/')}`
-              : getRelativePath(uri, owningFolder);
-          return {
-            path: uri.fsPath,
-            relativePath,
-            type: 'file' as const,
-            relativePathLower: relativePath.toLowerCase(),
-            leafLower: basename(relativePath).toLowerCase(),
-          };
-        });
+        const entries: WorkspaceFileSearchEntry[] = fileGroups
+          .flat()
+          .flatMap(({ uri, workspaceFolder }) => {
+            if (seen.size >= FileSearchService.MAX_CANDIDATES) return [];
+            const identity = normalizeWorkspaceIdentity(uri.fsPath) ?? uri.fsPath;
+            if (seen.has(identity)) return [];
+            seen.add(identity);
+            const owningFolder = vscode.workspace.getWorkspaceFolder(uri) ?? workspaceFolder;
+            const relativePath =
+              workspaceFolders.length > 1
+                ? `${getWorkspaceFolderLabel(owningFolder.uri.fsPath, folderContexts) ?? owningFolder.name}/${vscode.workspace
+                    .asRelativePath(uri, false)
+                    .replace(/\\/g, '/')}`
+                : getRelativePath(uri, owningFolder);
+            return {
+              path: uri.fsPath,
+              relativePath,
+              type: 'file' as const,
+              relativePathLower: relativePath.toLowerCase(),
+              leafLower: basename(relativePath).toLowerCase(),
+            };
+          });
+        // findFiles only returns files. Index their ancestors as selectable folders too.
+        const directories = new Map<string, WorkspaceFileSearchEntry>();
+        for (const entry of entries) {
+          let path = dirname(entry.path);
+          let relativePath = entry.relativePath.split('/').slice(0, -1).join('/');
+          while (relativePath) {
+            const identity = normalizeWorkspaceIdentity(path) ?? path;
+            if (directories.has(identity)) break;
+            directories.set(identity, {
+              path,
+              relativePath,
+              type: 'directory',
+              relativePathLower: relativePath.toLowerCase(),
+              leafLower: basename(relativePath).toLowerCase(),
+            });
+            if (workspaceFolders.some((folder) => isSameWorkspacePath(folder.uri.fsPath, path))) {
+              break;
+            }
+            path = dirname(path);
+            relativePath = relativePath.split('/').slice(0, -1).join('/');
+          }
+        }
+        entries.push(...directories.values());
         this.workspaceFileCache = entries;
         this.hasWorkspaceFileCache = true;
         this.workspaceFileCacheAt = Date.now();

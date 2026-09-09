@@ -15,6 +15,7 @@ import {
 import { fixture } from '../../test-fixtures';
 import type { UnknownRecord } from '../../../shared/type-utils';
 import { clearDirectSessionReturn, getDirectSessionReturnId } from '../../lib/session-navigation';
+import { formatSkillAttachment } from '../../lib/skill-reference';
 
 const selectSessionMock = vi.hoisted(() => vi.fn());
 const retryMessageMock = vi.hoisted(() => vi.fn());
@@ -116,6 +117,26 @@ afterEach(() => {
 });
 
 describe('UserMessageContent', () => {
+  it('renders skill chips inline and above the message alongside file attachments', () => {
+    renderUserContent([
+      textPart('prompt', 'Use $[browser-bridge] and $[unslop].'),
+      textPart('skill-1', formatSkillAttachment('browser-bridge')),
+      textPart('skill-2', formatSkillAttachment('unslop')),
+      textPart('file', '[Attached file: README.md]'),
+    ]);
+    const attachments = container?.querySelector('.message-attachments-leading');
+    const text = container?.querySelector('.user-message-text');
+    expect(attachments?.textContent).toContain('browser-bridge');
+    expect(attachments?.textContent).toContain('unslop');
+    expect(attachments?.textContent).toContain('README.md');
+    expect(
+      Array.from(text?.querySelectorAll('.inline-chip') ?? []).map((chip) => chip.textContent)
+    ).toEqual(['browser-bridge', 'unslop']);
+    expect(text?.textContent).toBe('Use browser-bridge and unslop.');
+    expect(container?.textContent).not.toContain('Use the skill tool');
+    expect(attachments?.compareDocumentPosition(text!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
   it('renders each text part as its own paragraph in the scroll container', () => {
     renderUserContent([textPart('text-1', 'Line 1'), textPart('text-2', 'Line 2')]);
 

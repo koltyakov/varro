@@ -42,8 +42,10 @@ import { MaterialChipIcon } from '../MaterialChipIcon';
 import { isFunction } from '../../lib/runtime-values';
 import { navArrowLeftIcon, navArrowRightIcon } from '../../lib/ui-icons';
 import { UiIcon } from '../UiIcon';
+import { formatSkillReference, parseSkillAttachment } from '../../lib/skill-reference';
 
 export type MessageAttachment =
+  | { type: 'skill'; name: string }
   | {
       type: 'file-selection';
       filename: string;
@@ -251,6 +253,15 @@ export function parseUserMessageContent(parts: Part[]): ParsedUserMessageContent
     // SAFETY: The surrounding shape or discriminator check establishes the TextPart contract used below.
     const text = (part as TextPart).text;
     if (!text || isVisionDelegationContextText(text)) continue;
+    const skill = parseSkillAttachment(text);
+    if (skill) {
+      if (
+        !attachments.some((attachment) => attachment.type === 'skill' && attachment.name === skill)
+      ) {
+        attachments.push({ type: 'skill', name: skill });
+      }
+      continue;
+    }
 
     const parsedText = parseUserMessageText(text);
     attachments.push(...parsedText.attachments);
@@ -475,7 +486,12 @@ export function getUserMessageEditContext(parts: Part[]): MessageEditContext {
   const parsed = parseUserMessageContent(parts);
   const filesByPath = new Map<string, MessageEditContext['files'][number]>();
   for (const attachment of parsed.attachments) {
-    if (attachment.type === 'terminal-selection' || attachment.type === 'editor-text') continue;
+    if (
+      attachment.type === 'terminal-selection' ||
+      attachment.type === 'editor-text' ||
+      attachment.type === 'skill'
+    )
+      continue;
 
     const path = attachment.type === 'file-selection' ? attachment.filename : attachment.path;
     const file: MessageEditContext['files'][number] = {
@@ -612,7 +628,8 @@ export function UserMessageContent(props: {
   const visibleAttachments = createMemo(() =>
     indexedAttachments().filter(
       ({ id, attachment }) =>
-        !inlineAttachmentIds().has(id) && attachment !== expandedTerminalAttachment()
+        (attachment.type === 'skill' || !inlineAttachmentIds().has(id)) &&
+        attachment !== expandedTerminalAttachment()
     )
   );
   const visibleAgentParts = createMemo(() => {
@@ -1266,6 +1283,8 @@ function isStandaloneFileReference(text: string): boolean {
 
 function getAttachmentTextMarker(attachment: MessageAttachment): string | null {
   switch (attachment.type) {
+    case 'skill':
+      return formatSkillReference(attachment.name);
     case 'file-reference':
       return `@${attachment.path}`;
     case 'file-selection':
@@ -1622,6 +1641,18 @@ function InlineAgentChip(props: { part: AgentPart; marker: string }) {
 }
 
 function InlineMessageAttachmentChip(props: { attachment: MessageAttachment }) {
+  if (props.attachment.type === 'skill') {
+    return (
+      <span
+        class="inline-chip"
+        data-copy-marker={getInlineAttachmentCopyMarker(props.attachment)}
+        title={getAttachmentTitle(props.attachment)}
+      >
+        <MaterialChipIcon kind="skill" class="inline-chip-icon" />
+        <span class="inline-chip-label">{getAttachmentLabel(props.attachment)}</span>
+      </span>
+    );
+  }
   const attachment = () => props.attachment;
   const isFolder = () =>
     attachment().type === 'file-reference' &&
@@ -1662,6 +1693,7 @@ function InlineMessageAttachmentChip(props: { attachment: MessageAttachment }) {
 }
 
 function openAttachment(value: MessageAttachment) {
+  if (value.type === 'skill') return;
   if (value.type === 'editor-text') {
     if (value.text === undefined) return;
     postMessage({
@@ -1716,6 +1748,7 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
   const isTerminal = () => attachment().type === 'terminal-selection';
   const isOpenable = () => {
     const value = attachment();
+    if (value.type === 'skill') return false;
     if (value.type === 'terminal-selection') return Boolean(value.text);
     if (value.type === 'editor-text') return value.text !== undefined;
     return true;
@@ -1724,6 +1757,7 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
   const handleClick = () => openAttachment(attachment());
 
   const iconSvg = () => {
+    if (attachment().type === 'skill') return <MaterialChipIcon kind="skill" class="chip-icon" />;
     if (isFolder()) {
       return <FolderIcon class="chip-icon" width="12" height="12" />;
     }
@@ -2029,6 +2063,8 @@ function getTerminalLineCountLabel(text: string | undefined): string | null {
 
 function getAttachmentLabel(attachment: MessageAttachment): string {
   switch (attachment.type) {
+    case 'skill':
+      return attachment.name;
     case 'file-selection':
       return getLeafPathName(attachment.filename);
     case 'editor-text':
@@ -2049,6 +2085,8 @@ function getMessageAttachmentPath(attachment: MessageAttachment): string | undef
 
 function getAttachmentTitle(attachment: MessageAttachment): string {
   switch (attachment.type) {
+    case 'skill':
+      return `Skill: ${attachment.name}`;
     case 'file-selection':
       return `${attachment.filename}:${attachment.lineRanges.map((range) => `${range.startLine}-${range.endLine}`).join(',')}`;
     case 'editor-text':
@@ -2066,6 +2104,8 @@ function getInlineAttachmentCopyMarker(attachment: MessageAttachment): string {
 
 function getStandaloneAttachmentCopyText(attachment: MessageAttachment): string {
   switch (attachment.type) {
+    case 'skill':
+      return formatSkillReference(attachment.name);
     case 'file-selection':
       return formatSelectionReference(attachment.filename, attachment.lineRanges);
     case 'editor-text': {

@@ -250,6 +250,7 @@ import {
   shouldRequestMentionFileSearch,
 } from './chat-input/completion';
 import { forkActiveSession, getSlashCommands } from './chat-input/slash-commands';
+import { formatSkillReference, getSkillReferences } from '../lib/skill-reference';
 import {
   collectDroppedPaths,
   parseDroppedText,
@@ -1181,6 +1182,17 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const chips: RichComposerChip[] = [];
     const text = inputText();
 
+    for (const name of getSkillReferences(text)) {
+      chips.push({
+        id: `skill:${name}`,
+        type: 'mention-skill',
+        label: name,
+        title: `Skill: ${name}`,
+        icon: 'skill',
+        textMarker: formatSkillReference(name),
+      });
+    }
+
     for (const file of composerFiles()) {
       const label = getLeafPathName(file.relativePath || file.path);
       const marker = `@${file.relativePath || file.path}`;
@@ -1443,6 +1455,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         action: () => {},
         key: `skill:${command.name}`,
         type: 'slash' as const,
+        source: 'skill' as const,
       },
       name: command.name.toLowerCase(),
       description: (command.description || command.template).toLowerCase(),
@@ -1649,11 +1662,24 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const completion = activeCompletion();
     if (!completion) return [];
     if (completion.type === 'slash') return slashCompletions();
+    if (completion.type === 'skill') {
+      const query = completion.query.toLowerCase();
+      return skillSlashCompletionEntries()
+        .filter(
+          (entry) =>
+            !query ||
+            entry.name.includes(query) ||
+            entry.description.includes(query) ||
+            entry.hints.some((hint) => hint.includes(query))
+        )
+        .map((entry) => ({ ...entry.item, type: 'skill' as const }));
+    }
     return completion.type === 'session' ? sessionCompletions() : mentionCompletions();
   });
 
   const completionHeader = createMemo(() => {
     const completion = activeCompletion();
+    if (completion?.type === 'skill') return 'Skills';
     if (completion?.type === 'session') return undefined;
     if (showFileSearchHint()) return 'Type to search workspace files';
     if (
@@ -1885,7 +1911,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
     if (completionSelection.file) addContextFile(completionSelection.file);
     if (completionSelection.session) rememberSessionReference(completionSelection.session);
-    if (completion?.type !== 'mention' && completion?.type !== 'session') return;
+    if (
+      completion?.type !== 'mention' &&
+      completion?.type !== 'session' &&
+      completion?.type !== 'skill'
+    )
+      return;
     applyCompletionValue(completion, completionSelection.value);
   }
 
@@ -1903,7 +1934,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   }
 
   function applyCompletionValue(
-    completion: Extract<ReturnType<typeof getActiveCompletion>, { type: 'mention' | 'session' }>,
+    completion: Extract<
+      ReturnType<typeof getActiveCompletion>,
+      { type: 'mention' | 'session' | 'skill' }
+    >,
     value: string
   ) {
     const text = inputText();
@@ -4575,7 +4609,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               if (completionSelection.file) addContextFile(completionSelection.file);
               if (completionSelection.session)
                 rememberSessionReference(completionSelection.session);
-              if (completion?.type !== 'mention' && completion?.type !== 'session') return;
+              if (
+                completion?.type !== 'mention' &&
+                completion?.type !== 'session' &&
+                completion?.type !== 'skill'
+              )
+                return;
               applyCompletionValue(completion, completionSelection.value);
             }}
           />

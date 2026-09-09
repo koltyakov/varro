@@ -8,10 +8,10 @@ import {
 
 describe('MaterialChipIcon', () => {
   it('provides distinct Material assets for each chip kind', () => {
-    const icons = (['agent', 'terminal', 'image', 'session', 'external-link'] as const).map(
-      getMaterialChipIcon
-    );
-    expect(new Set(icons).size).toBe(5);
+    const icons = (
+      ['agent', 'skill', 'terminal', 'image', 'session', 'external-link'] as const
+    ).map(getMaterialChipIcon);
+    expect(new Set(icons).size).toBe(6);
   });
 
   it('renders decorative images for Solid and DOM callers', () => {
@@ -22,6 +22,9 @@ describe('MaterialChipIcon', () => {
     expect(container.querySelector('.material-chip-icon')).toBeInstanceOf(HTMLImageElement);
     expect(domIcon.classList).toContain('session-reference-icon');
     expect(domIcon.getAttribute('aria-hidden')).toBe('true');
+    const agentIcon = createMaterialChipIconElement('agent', 'completion-agent-icon');
+    expect(agentIcon).toBeInstanceOf(HTMLImageElement);
+    expect(agentIcon.getAttribute('src')).toBe(getMaterialChipIcon('agent'));
     cleanup();
   });
 });

@@ -16,12 +16,27 @@ const CARET_SPACER = '\u200B';
 
 export type RichComposerChip = {
   id: string;
-  type: 'mention-file' | 'mention-agent' | 'mention-session' | 'external-link' | 'image';
+  type:
+    | 'mention-file'
+    | 'mention-agent'
+    | 'mention-skill'
+    | 'mention-session'
+    | 'external-link'
+    | 'image';
   label: string;
   path?: string;
   title?: string;
   detail?: string;
-  icon?: 'file' | 'folder' | 'image' | 'terminal' | 'agent' | 'session' | 'external-link' | 'git';
+  icon?:
+    | 'file'
+    | 'folder'
+    | 'image'
+    | 'terminal'
+    | 'agent'
+    | 'skill'
+    | 'session'
+    | 'external-link'
+    | 'git';
   disabled?: boolean;
   previewImage?: { url: string; alt: string };
   textMarker: string;
@@ -1081,6 +1096,7 @@ function getChipIcon(icon?: string): HTMLSpanElement {
 function getMaterialIconKind(icon?: string): MaterialChipIconKind | null {
   if (
     icon === 'agent' ||
+    icon === 'skill' ||
     icon === 'image' ||
     icon === 'terminal' ||
     icon === 'session' ||

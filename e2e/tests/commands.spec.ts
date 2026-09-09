@@ -1,5 +1,34 @@
 import { expect, test } from '@playwright/test';
 
+test('sends multiple inline skill chips and shows them above the message', async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 500, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=slash-commands');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+  await composer.fill('Use $[browser-bridge] to inspect the page, then $[unslop].');
+  await expect(composer.locator('[data-chip-type="mention-skill"]')).toHaveText([
+    'browser-bridge',
+    'unslop',
+  ]);
+  await composer.press('Enter');
+  const message = page.locator('.user-message-card').last();
+  await expect(message.locator('.user-message-text .inline-chip')).toHaveText([
+    'browser-bridge',
+    'unslop',
+  ]);
+  const attachments = message.locator('.message-attachments-leading');
+  await expect(attachments).toContainText('browser-bridge');
+  await expect(attachments).toContainText('unslop');
+  await expect(message).not.toContainText('Use the skill tool');
+  const railBox = await attachments.boundingBox();
+  const textBox = await message.locator('.user-message-text').boundingBox();
+  expect(railBox).not.toBeNull();
+  expect(textBox).not.toBeNull();
+  expect(railBox!.y + railBox!.height).toBeLessThanOrEqual(textBox!.y);
+  await page.screenshot({ path: testInfo.outputPath('skill-attachments.png') });
+});
+
 test('hides disabled slash commands', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=slash-commands');
 

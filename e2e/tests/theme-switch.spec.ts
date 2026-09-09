@@ -1,6 +1,30 @@
 /* oxlint-disable unicorn/consistent-function-scoping -- Browser-side contrast helpers must stay inside the serialized page.evaluate callback. */
 import { expect, test } from '@playwright/test';
 
+for (const theme of ['dark', 'light']) {
+  test(`${theme} completion selection keeps readable text`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 500, height: 800 });
+    await page.goto(`/e2e/harness/index.html?scenario=slash-commands&theme=${theme}`);
+    await page.evaluate(() => {
+      document.body.style.setProperty('--vscode-list-activeSelectionForeground', '#ffffff');
+    });
+    const composer = page.locator('.rich-composer').first();
+    await composer.fill('/');
+    const selected = page.locator('.composer-completion-item.selected .composer-completion-title');
+    const unselected = page
+      .locator('.composer-completion-item:not(.selected) .composer-completion-title')
+      .first();
+    await expect(selected).toBeVisible();
+    const foreground = await unselected.evaluate((element) => getComputedStyle(element).color);
+    expect(foreground).not.toBe('rgb(255, 255, 255)');
+    await expect(selected).toHaveCSS('color', foreground, { timeout: 1000 });
+    await page.locator('.composer-completion-menu').evaluate(async (element) => {
+      await Promise.all(element.getAnimations().map((animation) => animation.finished));
+    });
+    await page.screenshot({ path: testInfo.outputPath('completion-selection.png') });
+  });
+}
+
 for (const theme of ['dark', 'light'] as const) {
   test(`${theme} chat typography keeps main metrics and readable metadata`, async ({ page }) => {
     await page.goto(`/e2e/harness/index.html?scenario=blank&theme=${theme}`);

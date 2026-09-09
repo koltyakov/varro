@@ -4,6 +4,12 @@ import type { DroppedFile, EditorContext } from '../../shared/protocol';
 import type { ClipboardImage, NativePdfAttachment } from '../lib/app-state-types';
 import type { Agent, Message, MessageEntry, Part, PermissionRule, Provider } from '../types';
 import { setState } from '../lib/state';
+import { formatSkillAttachment } from '../lib/skill-reference';
+import {
+  getUserMessageEditContext,
+  getUserMessageEditText,
+  parseUserMessageContent,
+} from '../components/message/UserMessageContent';
 import type { SessionSendBody } from './session/session-send';
 import {
   buildSessionSendBody,
@@ -106,6 +112,38 @@ function createState(overrides?: {
 }
 
 describe('session-send helpers', () => {
+  it('sends multiple skill tool requests once each and preserves editable prompt and attachments', () => {
+    const text = 'Use $[browser-bridge] here and finish with $[unslop]. Again $[browser-bridge]';
+    const result = buildSessionSendBody(
+      createState({
+        droppedFiles: [{ path: '/repo/README.md', relativePath: 'README.md', type: 'file' }],
+      }),
+      'session-1',
+      text,
+      () => false
+    );
+    expect(result?.body.parts).toEqual([
+      { type: 'text', text },
+      { type: 'text', text: formatSkillAttachment('browser-bridge') },
+      { type: 'text', text: formatSkillAttachment('unslop') },
+      { type: 'text', text: 'README.md' },
+    ]);
+    const persistedParts: Part[] = (result?.body.parts ?? []).map((part, index) => ({
+      id: `part-${index}`,
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'text',
+      text: part.text ?? '',
+    }));
+    expect(parseUserMessageContent(persistedParts).attachments).toEqual([
+      { type: 'skill', name: 'browser-bridge' },
+      { type: 'skill', name: 'unslop' },
+      { type: 'file-reference', path: 'README.md', isDirectory: false },
+    ]);
+    expect(getUserMessageEditText(persistedParts)).toBe(text);
+    expect(getUserMessageEditContext(persistedParts).files).toHaveLength(1);
+  });
+
   afterEach(() => {
     vi.useRealTimers();
     setState('hiddenModels', []);

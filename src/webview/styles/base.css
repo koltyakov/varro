@@ -273,6 +273,10 @@
   vertical-align: middle;
 }
 
+body:is(.vscode-light, .vscode-high-contrast-light) .material-chip-icon[data-chip-icon='agent'] {
+  content: url('../assets/agent-light.svg');
+}
+
 @keyframes fade-in {
   from {
     opacity: 0;

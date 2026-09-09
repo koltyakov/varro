@@ -48,7 +48,7 @@ export type SlashCommand = {
 };
 
 export type CompletionItem =
-  | (SlashCommand & { key: string; type: 'slash' })
+  | (SlashCommand & { key: string; type: 'slash' | 'skill' })
   | MentionCompletionItem;
 
 export function CompletionMenu(props: {
@@ -117,8 +117,13 @@ export function CompletionMenu(props: {
       </Show>
       <For each={props.items}>
         {(item, index) => {
-          const isSlash = item.type === 'slash';
-          const title = 'name' in item ? `/${item.name}` : item.label;
+          const isSlash = item.type === 'slash' || item.type === 'skill';
+          const isSkill =
+            item.type === 'skill' || (item.type === 'slash' && item.source === 'skill');
+          const title = () =>
+            'name' in item
+              ? `${isSkill ? (props.header === 'Skills' ? '' : '/skill:') : '/'}${item.name}`
+              : item.label;
           const detail =
             item.type === 'session'
               ? `${item.detail ? `${item.detail} · ` : ''}${formatRelativeAge(item.session.time.updated, Date.now())}`
@@ -128,16 +133,18 @@ export function CompletionMenu(props: {
           return (
             <button
               ref={(el) => itemRefs.set(item.key, el)}
-              class={`composer-completion-item completion-${item.type} ${props.selectedIndex === index() ? 'selected' : ''}`}
+              class={`composer-completion-item completion-${isSlash ? 'slash' : item.type} ${props.selectedIndex === index() ? 'selected' : ''}`}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => props.onSelect(item)}
             >
-              <Show when={!isSlash}>
+              <Show when={!isSlash || (isSkill && props.header === 'Skills')}>
                 <span class="composer-completion-icon">
                   <Show
                     when={item.type === 'agent'}
                     fallback={
-                      item.type === 'session' ? (
+                      isSkill ? (
+                        <MaterialChipIcon kind="skill" class="completion-skill-icon" />
+                      ) : item.type === 'session' ? (
                         <MaterialChipIcon kind="session" class="completion-session-icon" />
                       ) : item.type === 'file' && item.file.type === 'directory' ? (
                         <FolderIcon width={12} height={12} />
@@ -155,7 +162,7 @@ export function CompletionMenu(props: {
                   </Show>
                 </span>
               </Show>
-              <CompletionTitle title={title} />
+              <CompletionTitle title={title()} />
               <span
                 class={`composer-completion-detail${item.type === 'session' ? ' composer-completion-age' : ''}`}
                 title={item.type === 'session' ? item.session.directory : detail}
