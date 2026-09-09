@@ -77,6 +77,18 @@ import {
 
 const MISSING_PART_RECOVERY_RETRY_MIN_MS = 100;
 const MISSING_PART_RECOVERY_RETRY_MAX_MS = 1_000;
+const MISSING_PART_DELTA_MAX_CHARACTERS = 1024 * 1024;
+
+type MissingPartRecovery = {
+  sessionID: string;
+  messageID: string;
+  partID: string;
+  text: string | null;
+  generation: number;
+  syncing: boolean;
+  retryDelayMs: number;
+  retryTimer?: ReturnType<typeof setTimeout>;
+};
 const MAX_TRACKED_SESSION_SEQUENCES = 512;
 const MAX_TRACKED_IDLE_SETTLEMENTS = 512;
 const MAX_EVICTED_SESSION_SEQUENCES = 512;
@@ -298,16 +310,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   const cleanups: Array<() => void> = [];
   const messageSyncs = new Set<string>();
   const pendingTranscriptMessageSyncs = new Set<string>();
-  const pendingMissingPartDeltas = new Map<
-    string,
-    {
-      sessionID: string;
-      generation: number;
-      syncing: boolean;
-      retryDelayMs: number;
-      retryTimer?: ReturnType<typeof setTimeout>;
-    }
-  >();
+  const pendingMissingPartDeltas = new Map<string, MissingPartRecovery>();
   const toolExecutionTimes = new Map<string, ToolExecutionTime>();
   const transientConnectionRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   // Per-session debounce timers for the optimistic streamed-completion settle.
@@ -1040,16 +1043,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   };
   const hasMessagePart = (messageID: string, partID: string) =>
     findMessagePart(messageID, partID) !== null;
-  const recoverMissingPartDeltas = (
-    key: string,
-    pending: {
-      sessionID: string;
-      generation: number;
-      syncing: boolean;
-      retryDelayMs: number;
-      retryTimer?: ReturnType<typeof setTimeout>;
-    }
-  ) => {
+  const recoverMissingPartDeltas = (key: string, pending: MissingPartRecovery) => {
     if (pending.syncing || pendingMissingPartDeltas.get(key) !== pending) return;
 
     pending.syncing = true;
@@ -1058,11 +1052,32 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       .then(async () => {
         if (pendingMissingPartDeltas.get(key) !== pending) return;
 
-        // The synchronized part is canonical. Record which arrivals the bounded
-        // follow-up is intended to cover rather than replaying queued fragments.
+        // A nonempty synchronized part is canonical. Record which arrivals the
+        // bounded follow-up covers so those fragments are not appended twice.
         const followUpGeneration = pending.generation;
         await deps.syncSessionMessages(pending.sessionID);
         if (pendingMissingPartDeltas.get(key) !== pending) return;
+        const part = findMessagePart(pending.messageID, pending.partID);
+        if (
+          pending.text &&
+          isSessionInActiveTree(pending.sessionID) &&
+          part?.sessionID === pending.sessionID &&
+          (part.type === 'text' || part.type === 'reasoning') &&
+          part.text === ''
+        ) {
+          // Some servers persist only the empty part and its final text. Their
+          // recovery snapshot cannot replace the live fragments received here.
+          recordSessionMessageSnapshotMutation(pending.sessionID);
+          sessionStore.applyMessagePartDelta(
+            pending.messageID,
+            pending.partID,
+            pending.text,
+            pending.sessionID,
+            'text'
+          );
+          pendingMissingPartDeltas.delete(key);
+          return;
+        }
         if (pending.generation === followUpGeneration) {
           pendingMissingPartDeltas.delete(key);
           return;
@@ -1090,16 +1105,31 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         deps.logError('syncSessionMessages', err);
       });
   };
-  const queueMissingPartDelta = (sessionID: string, messageID: string, partID: string) => {
+  const queueMissingPartDelta = (
+    sessionID: string,
+    messageID: string,
+    partID: string,
+    delta: string,
+    field: string
+  ) => {
     const key = getPartDeltaQueueKey(messageID, partID);
     const existing = pendingMissingPartDeltas.get(key);
-    const pending = existing || {
+    const pending: MissingPartRecovery = existing || {
       sessionID,
+      messageID,
+      partID,
+      text: '',
       generation: 0,
       syncing: false,
       retryDelayMs: MISSING_PART_RECOVERY_RETRY_MIN_MS,
     };
     pending.sessionID = sessionID;
+    if (field === 'text' && pending.text !== null) {
+      pending.text =
+        pending.text.length + delta.length <= MISSING_PART_DELTA_MAX_CHARACTERS
+          ? pending.text + delta
+          : null;
+    }
     pending.generation += 1;
     pendingMissingPartDeltas.set(key, pending);
     recoverMissingPartDeltas(key, pending);
@@ -1476,7 +1506,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         !hasMessagePart(messageID, partID)
       ) {
         if (seqStatus === 'gap') return;
-        queueMissingPartDelta(sessionID, messageID, partID);
+        queueMissingPartDelta(sessionID, messageID, partID, delta, field);
         return;
       }
       recordSessionMessageSnapshotMutation(sessionID);

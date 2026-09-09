@@ -1974,6 +1974,83 @@ describe('registerSessionEventHandlers', () => {
     expect(logError).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { type: 'text' as const, canonicalText: '' },
+    { type: 'reasoning' as const, canonicalText: '' },
+    { type: 'text' as const, canonicalText: 'Opening paragraph.\n\n| Candidate | Files |\n' },
+  ])(
+    'recovers initial $type deltas without duplicating canonical text "$canonicalText"',
+    async ({ type, canonicalText }) => {
+      const handlers = installHandlers();
+      const message = createAssistantEntry();
+      let resolveInitialSync: (() => void) | undefined;
+      const syncSessionMessages = vi
+        .fn<() => Promise<void>>()
+        .mockImplementationOnce(
+          () =>
+            new Promise<void>((resolve) => {
+              resolveInitialSync = () => {
+                const common = {
+                  id: 'part-1',
+                  sessionID: 'session-1',
+                  messageID: 'assistant-1',
+                  text: canonicalText,
+                };
+                message.parts.push(
+                  type === 'reasoning'
+                    ? { ...common, type, time: { start: 0 } }
+                    : { ...common, type }
+                );
+                resolve();
+              };
+            })
+        )
+        .mockResolvedValue(undefined);
+      registerSessionEventHandlers(
+        createDefaultDeps({
+          getActiveSessionId: () => 'session-1',
+          getMessages: () => [message],
+          syncSessionMessages,
+        })
+      );
+      applyMessagePartDelta.mockClear();
+      const emitDelta = (delta: string) =>
+        handlers.get('message.part.delta')?.({
+          properties: {
+            sessionID: 'session-1',
+            messageID: 'assistant-1',
+            partID: 'part-1',
+            field: 'text',
+            delta,
+          },
+        });
+      emitDelta('Opening paragraph.\n\n');
+      emitDelta('| Candidate | Files |\n');
+      resolveInitialSync?.();
+      await vi.waitFor(() => expect(syncSessionMessages).toHaveBeenCalledTimes(2));
+      if (canonicalText) {
+        expect(applyMessagePartDelta).not.toHaveBeenCalled();
+      } else {
+        expect(applyMessagePartDelta).toHaveBeenCalledTimes(1);
+        expect(applyMessagePartDelta).toHaveBeenCalledWith(
+          'assistant-1',
+          'part-1',
+          'Opening paragraph.\n\n| Candidate | Files |\n',
+          'session-1',
+          'text'
+        );
+      }
+      emitDelta('|---|---|\n');
+      expect(applyMessagePartDelta).toHaveBeenLastCalledWith(
+        'assistant-1',
+        'part-1',
+        '|---|---|\n',
+        'session-1',
+        'text'
+      );
+    }
+  );
+
   it('backs off before recovering a delta that arrives after the follow-up snapshot', async () => {
     const handlers = installHandlers();
     const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
