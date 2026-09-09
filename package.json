@@ -47,6 +47,7 @@
     "fmt": "oxfmt src/",
     "test": "node scripts/run-tests.mjs",
     "test:scripts": "node --test scripts/*.test.mjs",
+    "test:scripts:browser": "node --test scripts/browser/*.test.mjs",
     "test:compatibility": "node scripts/opencode-compatibility/run.mjs --check-floor --report artifacts/opencode-compatibility.json --summary scripts/opencode-compatibility/verified.json",
     "compatibility:discover": "node scripts/opencode-compatibility/run.mjs --report artifacts/opencode-compatibility.json",
     "test:e2e": "playwright test",

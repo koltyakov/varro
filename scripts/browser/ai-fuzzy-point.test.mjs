@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { after as afterAll, before as beforeAll, test } from 'node:test';
 import { chromium } from '@playwright/test';
 
-import { CdpController } from './ai-fuzzy-live.mjs';
+import { CdpController } from '../ai-fuzzy-live.mjs';
 
 let browser;
 beforeAll(async () => {
@@ -35,7 +35,7 @@ async function fixture(t, nested = false) {
   `);
   await page.addStyleTag({
     content: await readFile(
-      new URL('../src/webview/styles/chat-shell.css', import.meta.url),
+      new URL('../../src/webview/styles/chat-shell.css', import.meta.url),
       'utf8'
     ),
   });

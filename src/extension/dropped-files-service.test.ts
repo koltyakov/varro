@@ -220,11 +220,11 @@ describe('DroppedFilesService', () => {
     vscodeMock.workspace.asRelativePath.mockReturnValue('docs');
 
     await expect(service.fromPaths(['docs'])).resolves.toEqual([
-      { path: '/repo/alpha/docs', relativePath: 'alpha/docs', type: 'directory' },
+      { path: join('/repo/alpha', 'docs'), relativePath: 'alpha/docs', type: 'directory' },
     ]);
     expect(vscodeMock.workspace.fs.stat.mock.calls).toEqual([
-      [{ fsPath: '/repo/beta/docs' }],
-      [{ fsPath: '/repo/alpha/docs' }],
+      [{ fsPath: join('/repo/beta', 'docs') }],
+      [{ fsPath: join('/repo/alpha', 'docs') }],
     ]);
     expect(loggerMock.warn).not.toHaveBeenCalled();
   });
