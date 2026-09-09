@@ -1,5 +1,6 @@
 /* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-object-parameters, anti-slop/no-unknown-parameters, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: These tests call private message handlers with protocol-shaped fixtures and untyped persistence values. */
 import { describe, expect, it, vi, type Mock } from 'vitest';
+import { getSafeDefaultPermissionRules } from '../shared/permission-rules';
 import {
   attachTestView,
   createContextProvider,
@@ -404,7 +405,9 @@ describe('SidebarProvider session message responses', () => {
         return Promise.resolve();
       }),
     };
-    const server = createServer();
+    const server = createServer({
+      request: vi.fn(async () => ({ id: 'session-legacy', permission: [] })),
+    });
     const { provider } = await createSidebarProviderInstance({
       server,
       workspaceState: workspaceState as never,
@@ -438,6 +441,71 @@ describe('SidebarProvider session message responses', () => {
           { permission: 'question', pattern: '*', action: 'allow' },
         ],
       },
+      { directory: '/repo' }
+    );
+  });
+
+  it.each([false, true])(
+    'preserves old session recency when another workspace migrates an applied fallback, repeated=%s',
+    async (repeated) => {
+      const fallback = getSafeDefaultPermissionRules();
+      const session = {
+        id: 'session-old',
+        time: { created: 1, updated: 2 },
+        permission: [
+          { permission: '*', pattern: '*', action: 'allow' },
+          ...(repeated ? fallback : []),
+          ...fallback,
+        ],
+      };
+      const server = createServer({
+        request: vi.fn(async (method: string) => {
+          if (method === 'PATCH') session.time.updated = Date.now();
+          return session;
+        }),
+      });
+      const { provider } = await createSidebarProviderInstance({ server });
+      const { posted } = attachTestView(provider);
+
+      await provider.handleMessage({
+        type: 'permission-modes/migrate',
+        payload: { modes: { 'session-old': 'default' } },
+      });
+
+      expect(server.request).toHaveBeenCalledWith('GET', '/session/session-old', undefined, {
+        directory: '/repo',
+      });
+      expect(server.request.mock.calls.some(([method]) => method === 'PATCH')).toBe(false);
+      expect(session.time.updated).toBe(2);
+      expect(posted).toContainEqual({
+        type: 'permission-modes/sync',
+        payload: { modes: { 'session-old': 'default' } },
+      });
+    }
+  );
+
+  it('reapplies a migrated fallback when later rules override it', async () => {
+    const server = createServer({
+      request: vi.fn(async () => ({
+        id: 'session-old',
+        permission: [
+          ...getSafeDefaultPermissionRules(),
+          { permission: '*', pattern: '*', action: 'allow' },
+        ],
+      })),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    attachTestView(provider);
+
+    await provider.handleMessage({
+      type: 'permission-modes/migrate',
+      payload: { modes: { 'session-old': 'default' } },
+    });
+
+    expect(server.request).toHaveBeenCalledWith(
+      'PATCH',
+      '/session/session-old',
+      { permission: getSafeDefaultPermissionRules() },
       { directory: '/repo' }
     );
   });

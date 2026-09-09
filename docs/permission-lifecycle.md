@@ -439,6 +439,11 @@ that selection back to the last confirmed snapshot.
 
 Persisted `edits` selections from versions that exposed Auto-accept edits migrate to `default`.
 Session migrations must also clear the removed mode's OpenCode session rules before recovery ends.
+Before appending migration rules, read the session and check whether its rules already end with the
+required fallback. An authoritative matching suffix confirms that migration is already applied.
+Skip the PATCH in that case: OpenCode appends duplicate rules and advances `time.updated` even when
+the permission policy is unchanged, making old sessions appear recently active in another workspace.
+An earlier matching sequence is insufficient if later rules override it.
 
 Do not optimistically clear permission prompts as part of a mode selection. Full mode may own them
 automatically only after its rule update succeeds, and unresolved requests must remain discoverable

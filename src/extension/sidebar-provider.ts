@@ -2311,17 +2311,33 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.postPermissionModes();
         if (resetRemoteRules) {
           try {
-            await this.server.request(
-              'PATCH',
-              `/session/${encodeURIComponent(sessionID)}`,
-              {
-                permission:
-                  mode === 'default'
-                    ? getSafeDefaultPermissionRules()
-                    : getSessionPermissionRulesForMode(mode, 'update'),
-              },
-              { directory }
+            const path = `/session/${encodeURIComponent(sessionID)}`;
+            const session = asRecord(
+              await this.server.request('GET', path, undefined, { directory })
             );
+            if (session?.id !== sessionID)
+              throw new Error('Cannot verify session permission rules');
+            const permission =
+              mode === 'default'
+                ? getSafeDefaultPermissionRules()
+                : getSessionPermissionRulesForMode(mode, 'update');
+            const existing = Array.isArray(session.permission) ? session.permission : [];
+            // OpenCode appends rules and bumps time.updated on every PATCH. A new
+            // workspace can migrate the same selections, so confirm the suffix
+            // before writing. Earlier matches do not override later rules.
+            const alreadyApplied =
+              existing.length >= permission.length &&
+              permission.every((rule, index) => {
+                const current = asRecord(existing[existing.length - permission.length + index]);
+                return (
+                  current?.permission === rule.permission &&
+                  current.pattern === rule.pattern &&
+                  current.action === rule.action
+                );
+              });
+            if (!alreadyApplied) {
+              await this.server.request('PATCH', path, { permission }, { directory });
+            }
           } catch (err) {
             this.postPermissionModes();
             this.schedulePermissionModeFallbackRecovery();
