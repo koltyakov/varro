@@ -93,7 +93,7 @@ async function main() {
       ...partition.vitestArgs,
     ]);
   }
-  if (partition.runNode) await run(['--test', ...partition.nodeArgs]);
+  if (partition.runNode) await run(['--test', '--test-timeout=60000', ...partition.nodeArgs]);
 }
 
 if (path.resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {

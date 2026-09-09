@@ -10,6 +10,9 @@ import http from 'node:http';
 import { readPlaybackCapture } from './ai-session-playback.mjs';
 import { prepareStreamingRun, readActiveSessions } from './ai-streaming-selection.mjs';
 
+// Real listener/database ownership checks require lsof. Mocked discovery tests run everywhere.
+const ownershipTest = process.platform === 'win32' ? test.skip : test;
+
 async function fixture(t) {
   const status = {};
   const server = http.createServer((request, response) => {
@@ -22,7 +25,6 @@ async function fixture(t) {
   t.after(() => new Promise((resolve) => server.close(resolve)));
   const serverUrl = `http://127.0.0.1:${server.address().port}`;
   const root = await mkdtemp(path.join(os.tmpdir(), 'varro-selection-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
   const sourceDatabase = path.join(root, 'source.db');
   const db = new DatabaseSync(sourceDatabase);
   db.exec(`
@@ -34,7 +36,10 @@ async function fixture(t) {
     CREATE INDEX message_session ON message(session_id);
     CREATE INDEX part_message ON part(message_id);
   `);
-  t.after(() => db.close());
+  t.after(async () => {
+    db.close();
+    await rm(root, { recursive: true, force: true });
+  });
   const message = (id, session, time, data) =>
     db
       .prepare('INSERT INTO message VALUES (?, ?, ?, ?)')
@@ -96,7 +101,7 @@ async function fixture(t) {
   };
 }
 
-test('selects diverse history deterministically, imports captures, and leaves source unchanged', async (t) => {
+ownershipTest('selects diverse history deterministically, imports captures, and leaves source unchanged', async (t) => {
   const f = await fixture(t);
   f.add(
     'prose',
@@ -157,7 +162,7 @@ test('selects diverse history deterministically, imports captures, and leaves so
   assert.deepEqual(await readFile(f.sourceDatabase), before);
 });
 
-test('excludes controller, incomplete sessions, wrong directories, and invalid user links', async (t) => {
+ownershipTest('excludes controller, incomplete sessions, wrong directories, and invalid user links', async (t) => {
   const f = await fixture(t);
   for (const id of [
     'controller',
@@ -206,7 +211,7 @@ test('excludes controller, incomplete sessions, wrong directories, and invalid u
   );
 });
 
-test('seed breaks equal-score ties and session scan is bounded', async (t) => {
+ownershipTest('seed breaks equal-score ties and session scan is bounded', async (t) => {
   const f = await fixture(t);
   for (let i = 0; i < 502; i++) f.add(`session-${i}`, [], { time: 1_000 + i });
   f.message('old-incomplete', 'session-501', 1, { role: 'assistant', time: { created: 1 } });
@@ -229,7 +234,7 @@ test('seed breaks equal-score ties and session scan is bounded', async (t) => {
   assert.equal(new Set(a.selected.map((item) => item.sourceSessionId)).size, 5);
 });
 
-test('reports unavailable and count-limited coverage, including empty history', async (t) => {
+ownershipTest('reports unavailable and count-limited coverage, including empty history', async (t) => {
   const f = await fixture(t);
   const empty = await prepareStreamingRun(f.options());
   assert.equal(empty.selectedCount, 0);
@@ -250,7 +255,7 @@ test('reports unavailable and count-limited coverage, including empty history', 
   );
 });
 
-test('requires baseline history above the production virtualization threshold', async (t) => {
+ownershipTest('requires baseline history above the production virtualization threshold', async (t) => {
   const f = await fixture(t);
   f.add('below', [], { baseline: 40 });
   f.add('boundary', [], { baseline: 50 });
@@ -265,7 +270,7 @@ test('requires baseline history above the production virtualization threshold', 
   assert.equal(result.policy.baselineMessages, 51);
 });
 
-test('validates options and refuses to overwrite source aliases or previous output', async (t) => {
+ownershipTest('validates options and refuses to overwrite source aliases or previous output', async (t) => {
   const f = await fixture(t);
   for (const key of ['sourceDatabase', 'directory', 'outputDirectory']) {
     for (const value of [undefined, '', ' ', 1]) {
@@ -288,7 +293,7 @@ test('validates options and refuses to overwrite source aliases or previous outp
   assert.deepEqual(await readFile(f.sourceDatabase), before);
 });
 
-test('automatically excludes busy and retry sessions even with complete stored history', async (t) => {
+ownershipTest('automatically excludes busy and retry sessions even with complete stored history', async (t) => {
   const f = await fixture(t);
   f.add('busy', [], { baseline: 100 });
   f.add('retry', [], { baseline: 90 });
@@ -312,7 +317,7 @@ test('automatically excludes busy and retry sessions even with complete stored h
   assert.equal(filtered.shortfall, 2);
 });
 
-test('chooses response coverage within the longest distinct session subset', async (t) => {
+ownershipTest('chooses response coverage within the longest distinct session subset', async (t) => {
   const f = await fixture(t);
   f.add('long', [{ type: 'text', text: '# Markdown' }], { baseline: 20 });
   f.message('another', 'long', 600, {
@@ -369,14 +374,22 @@ test('status discovery uses only PID listeners and fails closed on missing or in
     /supply --server-url/
   );
   f.status.bad = { type: 'unknown' };
-  await assert.rejects(prepareStreamingRun(f.options()), /Invalid session status/);
+  await assert.rejects(
+    readActiveSessions(
+      { sourceDatabase: f.sourceDatabase, directory: '/workspace', serverUrl: f.serverUrl },
+      async (_command, args) => ({
+        stdout: args.includes('--') ? 'p123\nf10\n' : `p123\nn127.0.0.1:${port}\n`,
+      })
+    ),
+    /Invalid session status/
+  );
   await assert.rejects(
     readActiveSessions({ directory: '/workspace', serverUrl: 'https://example.com' }),
     /loopback/
   );
 });
 
-test('IPv6 discovery preserves the listener host and verifies the canonical database path', async (t) => {
+ownershipTest('IPv6 discovery preserves the listener host and verifies the canonical database path', async (t) => {
   const f = await fixture(t);
   const server = http.createServer((_request, response) => response.end('{}'));
   await new Promise((resolve, reject) => {
@@ -441,6 +454,10 @@ test('automatic and explicit status endpoints fail closed without matching open 
     ),
     /Cannot verify.*permission denied/
   );
+});
+
+ownershipTest('real status ownership verifies open databases and their aliases', async (t) => {
+  const f = await fixture(t);
   const actual = await readActiveSessions({
     sourceDatabase: f.sourceDatabase,
     directory: '/workspace',
@@ -476,7 +493,7 @@ test('automatic and explicit status endpoints fail closed without matching open 
   assert.equal(hardLinked.serverPid, process.pid);
 });
 
-test('records response truncation and checks incompleteness beyond the response scan', async (t) => {
+ownershipTest('records response truncation and checks incompleteness beyond the response scan', async (t) => {
   const f = await fixture(t);
   f.add('long');
   for (let i = 0; i < 51; i++)

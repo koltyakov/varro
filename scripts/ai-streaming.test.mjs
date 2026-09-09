@@ -277,7 +277,7 @@ test(
   }
 );
 
-test('launcher shutdown waits for SIGKILL exit when SIGTERM is ignored', async (t) => {
+test('launcher shutdown waits for process exit, escalating when SIGTERM is ignored', async (t) => {
   const child = spawn(
     process.execPath,
     ['-e', 'process.on("SIGTERM",()=>{});setInterval(()=>{},1000);console.log("ready")'],
@@ -289,8 +289,10 @@ test('launcher shutdown waits for SIGKILL exit when SIGTERM is ignored', async (
     await exit;
   });
   await once(child.stdout, 'data');
-  assert.equal((await stopLauncher(child, exit)).signal, 'SIGKILL');
-  assert.equal(child.signalCode, 'SIGKILL');
+  // Windows terminates the child on SIGTERM even when it has a signal handler.
+  const signal = process.platform === 'win32' ? 'SIGTERM' : 'SIGKILL';
+  assert.equal((await stopLauncher(child, exit)).signal, signal);
+  assert.equal(child.signalCode, signal);
 });
 
 test(

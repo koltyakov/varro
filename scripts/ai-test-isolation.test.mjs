@@ -16,7 +16,8 @@ test('live tests cannot silently select production or a redirect-capable remote 
   assert.equal(testServerOrigin('http://127.0.0.1:49001/'), 'http://127.0.0.1:49001');
 });
 
-test('requires a distinct test database held by the actual listener and rejects production aliases', async (t) => {
+// Real ownership verification uses lsof, which is unavailable on Windows.
+test('requires a distinct test database held by the actual listener and rejects production aliases', { skip: process.platform === 'win32' }, async (t) => {
   const temporary = await mkdtemp(path.join(os.tmpdir(), 'test-isolation-'));
   const root = await realpath(temporary);
   const testRoot = path.join(root, 'tests');
