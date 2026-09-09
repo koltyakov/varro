@@ -176,7 +176,7 @@ describe('createXaiAdapter', () => {
       setProviderAuth: vi.fn(async () => {}),
     });
 
-    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(fetch).toHaveBeenCalledTimes(4);
     expect(status).toMatchObject({ status: 'available', windows: [{ remaining: 90 }] });
   });
 
@@ -223,6 +223,87 @@ describe('createXaiAdapter', () => {
       'https://cli-chat-proxy.grok.com/v1/billing',
       expect.any(Object)
     );
+  });
+
+  it('includes unexpired Grok reset tokens sorted by expiration', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(Response.json({ config: { creditUsagePercent: 11 } }))
+      .mockResolvedValueOnce(
+        new Response(
+          createResetResponse([
+            { tokenId: 'later', validityEnd: '2026-09-20T12:00:00Z' },
+            { tokenId: 'expired', validityEnd: '2026-09-09T12:00:00Z' },
+            { tokenId: 'available', validityEnd: '2026-09-12T12:00:00Z' },
+            { tokenId: 'missing-expiration' },
+            { tokenId: '', validityEnd: '2026-09-12T12:00:00Z' },
+          ])
+        )
+      );
+
+    const status = await adapter.fetch({
+      provider,
+      authStore: oauthStore,
+      modelID: null,
+      checkedAt: Date.parse('2026-09-09T12:00:00Z'),
+    });
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      'https://grok.com/grok_api_v2.GrokBuildBilling/GetRemainingResets',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer supergrok-access-token',
+          'Content-Type': 'application/grpc-web+proto',
+          'x-grpc-web': '1',
+        }),
+        body: new Uint8Array(5),
+      })
+    );
+    expect(status).toMatchObject({
+      status: 'available',
+      windows: [{ percent: 11 }],
+      usageLimitResets: {
+        availableCount: 2,
+        credits: [
+          { title: 'Weekly quota reset', expiresAt: Date.parse('2026-09-12T12:00:00Z') },
+          { title: 'Weekly quota reset', expiresAt: Date.parse('2026-09-20T12:00:00Z') },
+        ],
+      },
+    });
+  });
+
+  it.each([
+    { name: 'empty', response: () => new Response(createResetResponse([])) },
+    {
+      name: 'an empty gRPC body',
+      response: () => new Response(null, { headers: { 'Content-Type': 'application/grpc' } }),
+    },
+    { name: 'truncated', response: () => new Response(createResetResponse([]).subarray(0, 4)) },
+    { name: 'malformed protobuf', response: () => new Response(createGrpcFrame([0x0a, 0xff])) },
+    {
+      name: 'a gRPC error',
+      response: () =>
+        new Response(
+          createResetResponse([{ tokenId: 'available', validityEnd: '2026-09-12T12:00:00Z' }], 16)
+        ),
+    },
+    { name: 'unauthorized', response: () => new Response('', { status: 401 }) },
+    { name: 'unavailable', response: () => new Response('', { status: 503 }) },
+  ])('keeps billing limits when reset details are $name', async ({ response }) => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(Response.json({ config: { creditUsagePercent: 11 } }))
+      .mockResolvedValueOnce(response());
+
+    const status = await adapter.fetch({
+      provider,
+      authStore: oauthStore,
+      modelID: null,
+      checkedAt: 5_000,
+    });
+
+    expect(status).toMatchObject({ status: 'available', windows: [{ percent: 11 }] });
+    expect(status).not.toHaveProperty('usageLimitResets');
   });
 
   it('falls back to the SuperGrok credits RPC when REST billing is unbounded', async () => {
@@ -288,6 +369,31 @@ describe('createXaiAdapter', () => {
     });
   });
 });
+
+function createResetResponse(
+  tokens: Array<{ tokenId: string; validityEnd?: string }>,
+  grpcStatus = 0
+) {
+  const payload = tokens.flatMap((token) => {
+    const id = [...new TextEncoder().encode(token.tokenId)];
+    const fields = encodeField(1, 2, [...encodeVarint(id.length), ...id]);
+    if (token.validityEnd) {
+      const timestamp = encodeField(1, 0, encodeVarint(Date.parse(token.validityEnd) / 1000));
+      fields.push(...encodeField(3, 2, [...encodeVarint(timestamp.length), ...timestamp]));
+    }
+    return encodeField(1, 2, [...encodeVarint(fields.length), ...fields]);
+  });
+  const trailers = [...new TextEncoder().encode(`grpc-status: ${grpcStatus}\r\n`)];
+  return new Uint8Array([...createGrpcFrame(payload), ...createGrpcFrame(trailers, 0x80)]);
+}
+
+function createGrpcFrame(payload: number[], flags = 0) {
+  const frame = new Uint8Array(5 + payload.length);
+  frame[0] = flags;
+  new DataView(frame.buffer).setUint32(1, payload.length);
+  frame.set(payload, 5);
+  return frame;
+}
 
 function createCreditsResponseFrame(resetAt: number) {
   const timestamp = encodeVarint(Math.floor(resetAt / 1000));

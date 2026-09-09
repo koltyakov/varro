@@ -21,6 +21,7 @@ const PROVIDER_LIMIT_WARNING_PERCENT = 75;
 const PROVIDER_LIMIT_ERROR_PERCENT = 90;
 const OPENAI_USAGE_URL = 'https://chatgpt.com/#settings/Usage';
 const ZAI_USAGE_URL = 'https://z.ai/manage-apikey/coding-plan/personal/usage';
+const XAI_USAGE_URL = 'https://grok.com/?_s=usage';
 
 export function ProviderLimitPopup(props: {
   ref?: HTMLDivElement | ((el: HTMLDivElement) => void);
@@ -42,6 +43,9 @@ export function ProviderLimitPopup(props: {
   const resetCreditsUsageLink = () => {
     if (props.limit?.providerID === 'openai') {
       return { label: 'ChatGPT Usage', url: OPENAI_USAGE_URL };
+    }
+    if (props.limit?.providerID === 'xai') {
+      return { label: 'Grok Usage', url: XAI_USAGE_URL };
     }
     if (props.limit?.providerID === 'zai' || props.limit?.providerID === 'zai-coding-plan') {
       return { label: 'Z.ai Usage', url: ZAI_USAGE_URL };

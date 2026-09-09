@@ -1,6 +1,10 @@
 /* oxlint-disable anti-slop/no-unknown-parameters -- xAI billing payloads are decoded before quota extraction. */
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: API JSON remains opaque until adapter validation. */
-import type { ProviderLimitWindow } from '../../../shared/protocol';
+import type {
+  ProviderLimitResetCredits,
+  ProviderLimitStatus,
+  ProviderLimitWindow,
+} from '../../../shared/protocol';
 import { parseRateLimitResetAt } from '../../util/provider-limit';
 import type { ProviderLimitAdapter, ProviderLimitAdapterContext } from '../types';
 import {
@@ -15,6 +19,7 @@ import {
 const XAI_BILLING_ENDPOINT = 'https://cli-chat-proxy.grok.com/v1/billing?format=credits';
 const XAI_MONTHLY_BILLING_ENDPOINT = 'https://cli-chat-proxy.grok.com/v1/billing';
 const XAI_CREDITS_ENDPOINT = 'https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig';
+const XAI_RESETS_ENDPOINT = 'https://grok.com/grok_api_v2.GrokBuildBilling/GetRemainingResets';
 const XAI_OAUTH_TOKEN_ENDPOINT = 'https://auth.x.ai/oauth2/token';
 const XAI_OAUTH_CLIENT_ID = 'b1a00492-073a-47ea-816f-4c329264a828';
 const XAI_OAUTH_EXPIRY_BUFFER_MS = 5 * 60_000;
@@ -197,7 +202,8 @@ export function createXaiAdapter(): ProviderLimitAdapter {
           );
         }
 
-        return {
+        const usageLimitResets = await fetchXaiResetCredits(accessToken, checkedAt);
+        const status: ProviderLimitStatus = {
           providerID: provider.id,
           modelID,
           status: 'available',
@@ -207,6 +213,8 @@ export function createXaiAdapter(): ProviderLimitAdapter {
           planName: 'SuperGrok',
           note: 'Polled SuperGrok billing endpoint',
         };
+        if (usageLimitResets) status.usageLimitResets = usageLimitResets;
+        return status;
       } catch {
         return {
           providerID: provider.id,
@@ -219,6 +227,113 @@ export function createXaiAdapter(): ProviderLimitAdapter {
       }
     },
   };
+}
+
+async function fetchXaiResetCredits(
+  accessToken: string,
+  checkedAt: number
+): Promise<ProviderLimitResetCredits | null> {
+  try {
+    const response = await fetch(XAI_RESETS_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        Accept: '*/*',
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/grpc-web+proto',
+        'x-grpc-web': '1',
+        'x-user-agent': 'connect-es/2.1.1',
+        Origin: 'https://grok.com',
+        Referer: 'https://grok.com/?_s=usage',
+        'User-Agent': 'Varro/0.1.0',
+      },
+      body: EMPTY_GRPC_FRAME,
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) return null;
+
+    return parseXaiResetCredits(new Uint8Array(await response.arrayBuffer()), checkedAt);
+  } catch {
+    // Reset details are optional; keep the billing limits when this request fails.
+    return null;
+  }
+}
+
+function parseXaiResetCredits(
+  bytes: Uint8Array,
+  checkedAt: number
+): ProviderLimitResetCredits | null {
+  const credits: Array<{ title: string; expiresAt: number }> = [];
+  let grpcStatus: string | undefined;
+  for (let index = 0; index < bytes.length;) {
+    if (index + 5 > bytes.length) return null;
+    const flags = bytes[index];
+    const length = new DataView(bytes.buffer, bytes.byteOffset + index + 1, 4).getUint32(0);
+    const end = index + 5 + length;
+    if (end > bytes.length) return null;
+    const frame = bytes.subarray(index + 5, end);
+    index = end;
+    if (flags === 0x80) {
+      grpcStatus = new TextDecoder().decode(frame).match(/(?:^|\r?\n)grpc-status:\s*(\d+)/i)?.[1];
+      continue;
+    }
+    if (flags !== 0) return null;
+
+    // GetRemainingResetsResponse.tokens = 1; ResetToken.token_id = 1, validity_end = 3.
+    for (const entry of readXaiProtobufFields(frame)) {
+      if (entry.field !== 1 || !(entry.value instanceof Uint8Array)) continue;
+      const token = readXaiProtobufFields(entry.value);
+      const id = token.find((field) => field.field === 1)?.value;
+      const validityEnd = token.find((field) => field.field === 3)?.value;
+      if (!(id instanceof Uint8Array) || id.length === 0 || !(validityEnd instanceof Uint8Array)) {
+        continue;
+      }
+      const timestamp = readXaiProtobufFields(validityEnd);
+      const seconds = parseFiniteNumber(timestamp.find((field) => field.field === 1)?.value);
+      const nanos = parseFiniteNumber(timestamp.find((field) => field.field === 2)?.value ?? 0);
+      if (seconds == null || nanos == null || nanos >= 1_000_000_000) continue;
+      const expiresAt = seconds * 1000 + Math.floor(nanos / 1_000_000);
+      if (!Number.isFinite(new Date(expiresAt).getTime()) || expiresAt <= checkedAt) continue;
+      credits.push({ title: 'Weekly quota reset', expiresAt });
+    }
+  }
+  if (grpcStatus !== '0' || credits.length === 0) return null;
+  credits.sort((left, right) => left.expiresAt - right.expiresAt);
+  return { availableCount: credits.length, credits };
+}
+
+function readXaiProtobufFields(bytes: Uint8Array) {
+  const fields: Array<{ field: number; value: number | Uint8Array }> = [];
+  const read = (index: number) => {
+    const [value, end] = readVarint(bytes, index);
+    if (end <= index || (bytes[end - 1]! & 0x80) !== 0 || !Number.isSafeInteger(value)) {
+      throw new Error('Invalid Grok reset protobuf varint');
+    }
+    return [value, end] as const;
+  };
+  for (let index = 0; index < bytes.length;) {
+    const [tag, next] = read(index);
+    index = next;
+    const field = tag >>> 3;
+    const wire = tag & 7;
+    if (field === 0) throw new Error('Invalid Grok reset protobuf field');
+    if (wire === 0) {
+      const [value, end] = read(index);
+      fields.push({ field, value });
+      index = end;
+    } else if (wire === 2) {
+      const [length, start] = read(index);
+      const end = start + length;
+      if (end > bytes.length) throw new Error('Truncated Grok reset protobuf field');
+      fields.push({ field, value: bytes.subarray(start, end) });
+      index = end;
+    } else if (wire === 1 || wire === 5) {
+      index += wire === 1 ? 8 : 4;
+      if (index > bytes.length) throw new Error('Truncated Grok reset protobuf field');
+    } else {
+      throw new Error('Unsupported Grok reset protobuf wire type');
+    }
+  }
+  return fields;
 }
 
 async function refreshXaiAccessToken(refreshToken: string) {
