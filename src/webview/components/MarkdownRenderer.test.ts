@@ -1,4 +1,4 @@
-import { createComponent, createSignal } from 'solid-js';
+import { createComponent, createEffect, createSignal, onCleanup } from 'solid-js';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import DOMPurify from 'dompurify';
@@ -129,6 +129,296 @@ afterEach(() => {
 });
 
 describe('MarkdownRenderer', () => {
+  it('does not create inline roots after disposal before queued hydration', async () => {
+    const [value, setValue] = createSignal(0);
+    const mounted = vi.fn();
+    const effect = vi.fn();
+    const disposed = vi.fn();
+    cleanup = render(
+      () =>
+        MarkdownRenderer({
+          content: 'SLOTMARKER',
+          inlineSlots: [
+            {
+              marker: 'SLOTMARKER',
+              render: () => {
+                mounted();
+                createEffect(() => effect(value()));
+                onCleanup(disposed);
+                return document.createElement('button');
+              },
+            },
+          ],
+        }),
+      container!
+    );
+    expect(mounted).toHaveBeenCalledOnce();
+    cleanup();
+    cleanup = undefined;
+    expect(disposed).toHaveBeenCalledOnce();
+    const effectCount = effect.mock.calls.length;
+    await Promise.resolve();
+    setValue(1);
+    expect(mounted).toHaveBeenCalledOnce();
+    expect(effect).toHaveBeenCalledTimes(effectCount);
+    expect(disposed).toHaveBeenCalledOnce();
+  });
+
+  it('appends safe stable prose without replacing nodes or remounting inline slots', async () => {
+    vi.useFakeTimers();
+    const send = vi.fn();
+    window.__sendToExtension = send;
+    const [content, setContent] = createSignal('First SLOTONE https://example.test/one\n\nTail');
+    const [value, setValue] = createSignal(0);
+    const mounted = vi.fn();
+    const disposed = vi.fn();
+    const effect = vi.fn();
+    const inlineSlots = ['SLOTONE', 'SLOTTWO'].map((marker) => ({
+      marker,
+      render: () => {
+        mounted(marker);
+        onCleanup(() => disposed(marker));
+        const button = document.createElement('button');
+        createEffect(() => {
+          effect(marker, value());
+          button.textContent = `${marker} ${value()}`;
+        });
+        return button;
+      },
+    }));
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+          inlineSlots,
+        }),
+      container!
+    );
+    await vi.advanceTimersByTimeAsync(16);
+    mounted.mockClear();
+    disposed.mockClear();
+    const stable = container!.querySelector('[data-markdown-segment="stable"]')!;
+    const paragraph = stable.firstChild;
+    const button = stable.querySelector('button');
+    const link = stable.querySelector('a');
+    const icon = link?.querySelector('.external-link-icon');
+    setContent(
+      'First SLOTONE https://example.test/one\n\nSecond SLOTTWO https://example.test/two\n\nTail'
+    );
+    await vi.advanceTimersByTimeAsync(16);
+    expect(stable.firstChild).toBe(paragraph);
+    expect(stable.querySelector('button')).toBe(button);
+    expect(stable.querySelector('a')).toBe(link);
+    expect(link?.querySelector('.external-link-icon')).toBe(icon);
+    expect(mounted.mock.calls).toEqual([['SLOTTWO']]);
+    expect(disposed).not.toHaveBeenCalled();
+    setContent(`${content()}\n\nLast tail`);
+    await vi.advanceTimersByTimeAsync(16);
+    expect(stable.firstChild).toBe(paragraph);
+    expect(mounted).toHaveBeenCalledOnce();
+    expect(disposed).not.toHaveBeenCalled();
+    effect.mockClear();
+    setValue(1);
+    expect(effect.mock.calls).toEqual([
+      ['SLOTONE', 1],
+      ['SLOTTWO', 1],
+    ]);
+    expect(stable.querySelectorAll('.external-link-icon')).toHaveLength(2);
+    for (const anchor of stable.querySelectorAll('a')) dispatchAnchorClick(anchor);
+    expect(send.mock.calls.map(([message]) => message)).toEqual([
+      { type: 'vscode/open-external', payload: { url: 'https://example.test/one' } },
+      { type: 'vscode/open-external', payload: { url: 'https://example.test/two' } },
+    ]);
+    cleanup();
+    cleanup = undefined;
+    expect(disposed.mock.calls).toEqual([['SLOTONE'], ['SLOTTWO']]);
+  });
+
+  it('matches full parsing after repeated safe appends and completion', async () => {
+    vi.useFakeTimers();
+    const [content, setContent] = createSignal('First &amp; prose\n\nTail');
+    const [complete, setComplete] = createSignal(false);
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+          get cacheByContent() {
+            return complete();
+          },
+        }),
+      container!
+    );
+    await vi.advanceTimersByTimeAsync(16);
+    const stable = container!.querySelector('[data-markdown-segment="stable"]')!;
+    const first = stable.firstChild;
+    for (const paragraph of [
+      'See src/example.ts and https://example.test/docs',
+      'Literal &lt;script&gt; text',
+    ]) {
+      setContent(`${content()}\n\n${paragraph}\n\nEnd`);
+      await vi.advanceTimersByTimeAsync(16);
+      expect(stable.firstChild).toBe(first);
+      expect(stable.innerHTML).toBe(
+        __parseMarkdownForTests(splitStreamingMarkdownContent(content()).stableContent, {
+          cacheByContent: false,
+        })
+      );
+    }
+    setComplete(true);
+    await vi.advanceTimersByTimeAsync(16);
+    const tail = container!.querySelector('[data-markdown-segment="tail"]')!;
+    expect(stable.innerHTML + tail.innerHTML).toBe(
+      __parseMarkdownForTests(content(), { cacheByContent: true })
+    );
+    expect(container!.querySelector('script')).toBeNull();
+  });
+
+  it.each([
+    ['unsafe delta', 'First\n\n**Second**\n\nTail'],
+    ['unsafe prefix', '**First**\n\nSecond\n\nTail'],
+    ['non-append edit', 'Changed\n\nTail'],
+  ])('replaces stable DOM for %s with normal parsing', async (_label, next) => {
+    vi.useFakeTimers();
+    const initial = _label === 'unsafe prefix' ? '**First**\n\nTail' : 'First\n\nTail';
+    const [content, setContent] = createSignal(initial);
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+        }),
+      container!
+    );
+    await vi.advanceTimersByTimeAsync(16);
+    const stable = container!.querySelector('[data-markdown-segment="stable"]')!;
+    const first = stable.firstChild;
+    setContent(next);
+    await vi.advanceTimersByTimeAsync(16);
+    expect(stable.firstChild).not.toBe(first);
+    expect(stable.innerHTML).toBe(
+      __parseMarkdownForTests(splitStreamingMarkdownContent(next).stableContent, {
+        cacheByContent: false,
+      })
+    );
+  });
+
+  it.each(['workspace', 'render option'])(
+    'replaces appended stable DOM after a %s change',
+    async (change) => {
+      vi.useFakeTimers();
+      setState('editorContext', 'workspacePath', '/old');
+      const [content, setContent] = createSignal('See src/first.ts\n\nTail');
+      const [disablePathLinkify, setDisablePathLinkify] = createSignal(false);
+      cleanup = render(
+        () =>
+          createComponent(MarkdownRenderer, {
+            get content() {
+              return content();
+            },
+            get disablePathLinkify() {
+              return disablePathLinkify();
+            },
+          }),
+        container!
+      );
+      await vi.advanceTimersByTimeAsync(16);
+      const stable = container!.querySelector('[data-markdown-segment="stable"]')!;
+      const first = stable.firstChild;
+      setContent('See src/first.ts\n\nSee src/second.ts\n\nTail');
+      await vi.advanceTimersByTimeAsync(16);
+      expect(stable.firstChild).toBe(first);
+      if (change === 'workspace') setState('editorContext', 'workspacePath', '/new');
+      else setDisablePathLinkify(true);
+      setContent(`${content()}\n\nEnd`);
+      await vi.advanceTimersByTimeAsync(16);
+      expect(stable.firstChild).not.toBe(first);
+      expect(stable.innerHTML).toBe(
+        __parseMarkdownForTests(splitStreamingMarkdownContent(content()).stableContent, {
+          cacheByContent: false,
+          disablePathLinkify: disablePathLinkify(),
+        })
+      );
+      if (change === 'workspace') {
+        expect(stable.querySelector('a')?.getAttribute('href')).toBe('/new/src/first.ts');
+      } else {
+        expect(stable.querySelector('a')).toBeNull();
+      }
+    }
+  );
+
+  it('replaces inline slot renderers after safe appends and disposes them on fallback', async () => {
+    vi.useFakeTimers();
+    const mounted = vi.fn();
+    const disposed = vi.fn();
+    const makeSlot = (label: string) => ({
+      marker: 'SLOTMARKER',
+      render: () => {
+        mounted(label);
+        onCleanup(() => disposed(label));
+        const button = document.createElement('button');
+        button.textContent = label;
+        return button;
+      },
+    });
+    const [slots, setSlots] = createSignal([makeSlot('old')]);
+    const [content, setContent] = createSignal('SLOTMARKER\n\nTail');
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+          get inlineSlots() {
+            return slots();
+          },
+        }),
+      container!
+    );
+    await vi.advanceTimersByTimeAsync(16);
+    setContent('SLOTMARKER\n\nMore prose\n\nTail');
+    await vi.advanceTimersByTimeAsync(16);
+    mounted.mockClear();
+    disposed.mockClear();
+    setSlots([makeSlot('new')]);
+    await Promise.resolve();
+    expect(mounted.mock.calls).toEqual([['new']]);
+    expect(disposed.mock.calls).toEqual([['old']]);
+    expect(container!.querySelector('button')?.textContent).toBe('new');
+    setContent('Replacement **markdown**\n\nTail');
+    await vi.advanceTimersByTimeAsync(16);
+    expect(disposed.mock.calls).toEqual([['old'], ['new']]);
+    expect(container!.querySelector('button')).toBeNull();
+  });
+
+  it('does not hydrate a replacement tail after disposal between a frame and its microtask', async () => {
+    vi.useFakeTimers();
+    const mounted = vi.fn(() => document.createElement('button'));
+    const [content, setContent] = createSignal('Initial');
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+          inlineSlots: [{ marker: 'SLOTMARKER', render: mounted }],
+        }),
+      container!
+    );
+    await vi.advanceTimersByTimeAsync(16);
+    setContent('SLOTMARKER');
+    vi.advanceTimersByTime(16);
+    expect(container!.textContent).toContain('SLOTMARKER');
+    cleanup();
+    cleanup = undefined;
+    await Promise.resolve();
+    expect(mounted).not.toHaveBeenCalled();
+  });
+
   it('renders indented text as prose while preserving fenced code blocks', () => {
     const indentedHtml = __parseMarkdownForTests(
       'Failure details\n\n    Error: expected 37\n    Received: 36.71875',

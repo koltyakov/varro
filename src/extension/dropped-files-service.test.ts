@@ -181,7 +181,7 @@ describe('DroppedFilesService', () => {
         type: 'directory',
       },
     ]);
-    expect(vscodeMock.workspace.fs.stat).toHaveBeenCalledTimes(2);
+    expect(vscodeMock.workspace.fs.stat).toHaveBeenCalledOnce();
   });
 
   it('ignores blank and workspace-escaping relative paths', async () => {
@@ -203,6 +203,30 @@ describe('DroppedFilesService', () => {
     expect(loggerMock.warn).toHaveBeenCalledWith(
       'Ignoring dropped path ../secrets.txt: Path does not exist'
     );
+  });
+
+  it('tries workspace candidates in order and reuses the successful stat', async () => {
+    const service = new DroppedFilesService({ context: { workspacePath: '/repo/beta' } } as never);
+    services.push(service);
+    const alpha = { name: 'alpha', uri: { fsPath: '/repo/alpha' } };
+    const beta = { name: 'beta', uri: { fsPath: '/repo/beta' } };
+    vscodeMock.workspace.workspaceFolders = [alpha, beta];
+    vscodeMock.workspace.fs.stat.mockReset();
+    vscodeMock.workspace.fs.stat
+      .mockRejectedValueOnce(new Error('Permission denied'))
+      .mockResolvedValueOnce({ type: vscodeMock.FileType.Directory })
+      .mockRejectedValue(new Error('Unexpected repeated stat'));
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue(alpha);
+    vscodeMock.workspace.asRelativePath.mockReturnValue('docs');
+
+    await expect(service.fromPaths(['docs'])).resolves.toEqual([
+      { path: '/repo/alpha/docs', relativePath: 'alpha/docs', type: 'directory' },
+    ]);
+    expect(vscodeMock.workspace.fs.stat.mock.calls).toEqual([
+      [{ fsPath: '/repo/beta/docs' }],
+      [{ fsPath: '/repo/alpha/docs' }],
+    ]);
+    expect(loggerMock.warn).not.toHaveBeenCalled();
   });
 
   it('rejects oversized dropped content before decoding base64', async () => {

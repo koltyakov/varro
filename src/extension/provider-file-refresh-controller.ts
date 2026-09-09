@@ -406,50 +406,50 @@ export class ProviderFileRefreshController {
       return;
     }
 
-    const idleDirectories =
-      pendingScope === 'workspace'
-        ? [...this.pendingWorkspaceDirectories]
-        : [...new Set(this.dependencies.getWorkspaceDirectories().filter(Boolean))];
-    const idleResults = await Promise.all([
-      ...(pendingScope === 'global' ? [this.isServerGloballyIdle()] : []),
-      ...(idleDirectories.length > 0
-        ? idleDirectories.map((directory) => this.isServerIdle(directory))
-        : [this.isServerIdle()]),
-    ]);
-    const idle = idleResults.includes(false) ? false : idleResults.includes(null) ? null : true;
-    if (this.disposed || generation !== this.refreshGeneration) return;
-    if (idle === false) {
-      this.authIdleCandidate = null;
-      this.postPendingStatus();
-      const delay = this.busyRetryMs;
-      this.busyRetryMs = Math.min(delay * 2, ProviderFileRefreshController.BUSY_RETRY_MAX_MS);
-      this.scheduleInvalidationRetry(generation, retryCount, false, delay);
-      return;
-    }
-    if (idle === null) {
-      this.authIdleCandidate = null;
-      this.scheduleInvalidationRetry(generation, retryCount);
-      return;
-    }
-    if (this.authRevalidationPending && this.authWatcher) {
-      const now = Date.now();
-      if (
-        this.authIdleCandidate?.generation !== generation ||
-        now - this.authIdleCandidate.since < ProviderFileRefreshController.RETRY_MS
-      ) {
-        if (this.authIdleCandidate?.generation !== generation) {
-          this.authIdleCandidate = { generation, since: now };
-        }
-        this.postPendingStatus();
-        this.scheduleInvalidationRetry(generation, retryCount, false);
-        return;
-      }
-    }
-    this.authIdleCandidate = null;
-
-    const pendingRevision = this.pendingRevision;
     this.invalidationInFlight = true;
     try {
+      const idleDirectories =
+        pendingScope === 'workspace'
+          ? [...this.pendingWorkspaceDirectories]
+          : [...new Set(this.dependencies.getWorkspaceDirectories().filter(Boolean))];
+      const idleResults = await Promise.all([
+        ...(pendingScope === 'global' ? [this.isServerGloballyIdle()] : []),
+        ...(idleDirectories.length > 0
+          ? idleDirectories.map((directory) => this.isServerIdle(directory))
+          : [this.isServerIdle()]),
+      ]);
+      const idle = idleResults.includes(false) ? false : idleResults.includes(null) ? null : true;
+      if (this.disposed || generation !== this.refreshGeneration) return;
+      if (idle === false) {
+        this.authIdleCandidate = null;
+        this.postPendingStatus();
+        const delay = this.busyRetryMs;
+        this.busyRetryMs = Math.min(delay * 2, ProviderFileRefreshController.BUSY_RETRY_MAX_MS);
+        this.scheduleInvalidationRetry(generation, retryCount, false, delay);
+        return;
+      }
+      if (idle === null) {
+        this.authIdleCandidate = null;
+        this.scheduleInvalidationRetry(generation, retryCount);
+        return;
+      }
+      if (this.authRevalidationPending && this.authWatcher) {
+        const now = Date.now();
+        if (
+          this.authIdleCandidate?.generation !== generation ||
+          now - this.authIdleCandidate.since < ProviderFileRefreshController.RETRY_MS
+        ) {
+          if (this.authIdleCandidate?.generation !== generation) {
+            this.authIdleCandidate = { generation, since: now };
+          }
+          this.postPendingStatus();
+          this.scheduleInvalidationRetry(generation, retryCount, false);
+          return;
+        }
+      }
+      this.authIdleCandidate = null;
+
+      const pendingRevision = this.pendingRevision;
       if (pendingScope === 'workspace') {
         const directories = [...this.pendingWorkspaceDirectories];
         if (directories.length === 0) {

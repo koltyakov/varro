@@ -13,6 +13,8 @@ import {
 import type { AssistantMessage, FileDiff, NormalizedTodo, Permission, TextPart } from '../types';
 import { respondPermissionWithDependencies } from '../hooks/session/session-approvals';
 import { createPerfRoot, settlePerfEffects } from './harness';
+import { defaultAppState, messageIndex } from '../lib/app-state';
+import { flushPendingStreamingDeltasFor } from '../lib/streaming-deltas';
 
 function createAssistantMessage(id: string): AssistantMessage {
   return {
@@ -89,6 +91,93 @@ describe('state perf guards', () => {
   afterEach(() => {
     resetDefaultAppState();
   });
+
+  it.each(['upsert', 'delta'] as const)(
+    'does not access unrelated historical parts when %s creates parts with a warm index',
+    (operation) => {
+      let historicalPartAccesses = 0;
+      const history = Array.from({ length: 1000 }, (_, index) => {
+        const parts = [createTextPart(`part-${index}`, `message-${index}`, 'History')];
+        return {
+          info: createAssistantMessage(`message-${index}`),
+          get parts() {
+            historicalPartAccesses++;
+            return parts;
+          },
+        };
+      });
+      setState('messages', [...history, { info: createAssistantMessage('active'), parts: [] }]);
+      messageIndex.ensureIndex(state.messages);
+      historicalPartAccesses = 0;
+
+      for (let index = 0; index < 10; index++) {
+        const partId = `new-${index}`;
+        if (operation === 'upsert') {
+          upsertPart(createTextPart(partId, 'active', 'New text'));
+        } else {
+          defaultAppState.streamingDeltaQueue.set({
+            messageId: 'active',
+            partId,
+            partType: 'text',
+            partStartedAt: 0,
+            text: 'New text',
+          });
+          flushPendingStreamingDeltasFor(defaultAppState);
+        }
+      }
+
+      expect(historicalPartAccesses).toBe(0);
+      expect(state.messages[1000]!.parts.map((part) => part.id)).toEqual(
+        Array.from({ length: 10 }, (_, index) => `new-${index}`)
+      );
+      expect(messageIndex.getIndexedPartLocation('new-9')).toEqual({
+        msgIdx: 1000,
+        partIdx: 9,
+      });
+    }
+  );
+
+  it.each(['upsert', 'delta'] as const)(
+    '%s resolves part owners after a history prepend',
+    (operation) => {
+      setMessagesIncremental([
+        {
+          info: createAssistantMessage('active'),
+          parts: [createTextPart('existing', 'active', 'Before')],
+        },
+      ]);
+      messageIndex.ensureIndex(state.messages);
+      setMessagesIncremental([
+        {
+          info: createAssistantMessage('older'),
+          parts: [createTextPart('historical', 'older', 'History')],
+        },
+        ...state.messages,
+      ]);
+
+      for (const partId of ['existing', 'new']) {
+        if (operation === 'upsert') {
+          upsertPart(createTextPart(partId, 'active', 'Before and after'));
+        } else {
+          defaultAppState.streamingDeltaQueue.set({
+            messageId: 'active',
+            partId,
+            partType: 'text',
+            partStartedAt: 0,
+            text: 'Before and after',
+          });
+        }
+      }
+      flushPendingStreamingDeltasFor(defaultAppState);
+
+      expect(state.messages[0]!.parts).toEqual([createTextPart('historical', 'older', 'History')]);
+      expect(state.messages[1]!.parts).toEqual([
+        createTextPart('existing', 'active', 'Before and after'),
+        createTextPart('new', 'active', 'Before and after'),
+      ]);
+      expect(messageIndex.getIndexedPartLocation('new')).toEqual({ msgIdx: 1, partIdx: 1 });
+    }
+  );
 
   it('clears message state with a single reactive flush', async () => {
     setState('messages', [

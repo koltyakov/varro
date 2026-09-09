@@ -306,7 +306,7 @@ function maybeSuggestCliUpdate(server: OpenCodeServer, installedCliVersion: stri
  */
 function stubCliSpawn(options: { version?: string; stderr?: string } = {}) {
   spawnMock.mockImplementation((_command, args: string[]) => {
-    let exitHandler: ((code: number | null, signal: NodeJS.Signals | null) => void) | undefined;
+    let closeHandler: ((code: number | null, signal: NodeJS.Signals | null) => void) | undefined;
     let stdoutHandler: ((chunk: Buffer) => void) | undefined;
     let stderrHandler: ((chunk: Buffer) => void) | undefined;
     const proc = {
@@ -322,9 +322,9 @@ function stubCliSpawn(options: { version?: string; stderr?: string } = {}) {
         }),
         off: vi.fn(),
       },
-      once: vi.fn((event: string, listener: typeof exitHandler) => {
-        if (event === 'exit') {
-          exitHandler = listener;
+      once: vi.fn((event: string, listener: typeof closeHandler) => {
+        if (event === 'close') {
+          closeHandler = listener;
         }
       }),
       removeAllListeners: vi.fn(),
@@ -340,7 +340,7 @@ function stubCliSpawn(options: { version?: string; stderr?: string } = {}) {
       if (options.stderr && args?.includes('upgrade')) {
         stderrHandler?.(Buffer.from(options.stderr));
       }
-      exitHandler?.(0, null);
+      closeHandler?.(0, null);
     });
     return proc as never;
   });

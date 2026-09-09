@@ -3179,7 +3179,7 @@ export class OpenCodeProcess {
               : err,
           });
         });
-        proc.once('exit', (code, signal) => {
+        proc.once('close', (code, signal) => {
           if (timedOut) return;
           if (code === 0) {
             finish({ output: stdout.trim() });

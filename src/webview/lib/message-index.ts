@@ -84,18 +84,19 @@ export function createMessageIndex(callbacks?: MessageIndexCallbacks | (() => vo
       return msgs.findIndex((m) => m.info.id === id);
     },
 
-    findPartLocation(msgs: MessageEntry[], partId: string) {
+    findPartLocation(msgs: MessageEntry[], partId: string, ownerMsgIdx?: number) {
       ensureIndex(msgs);
       const indexed = partById.get(partId);
-      if (indexed) {
+      if (indexed && (ownerMsgIdx === undefined || indexed.msgIdx === ownerMsgIdx)) {
         const message = msgs[indexed.msgIdx];
         if (message?.parts[indexed.partIdx]?.id === partId) {
           return indexed;
         }
       }
 
-      for (let msgIdx = 0; msgIdx < msgs.length; msgIdx++) {
-        const partIdx = msgs[msgIdx]!.parts.findIndex((part) => part.id === partId);
+      const end = ownerMsgIdx === undefined ? msgs.length : ownerMsgIdx + 1;
+      for (let msgIdx = ownerMsgIdx ?? 0; msgIdx < end; msgIdx++) {
+        const partIdx = msgs[msgIdx]?.parts.findIndex((part) => part.id === partId) ?? -1;
         if (partIdx !== -1) {
           const location = { msgIdx, partIdx };
           partById.set(partId, location);

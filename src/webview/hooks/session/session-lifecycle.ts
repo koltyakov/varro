@@ -25,7 +25,7 @@ type LifecycleDependencies = {
   getState(): LifecycleState;
   getCurrentWorkspacePath(): string | null;
   getOpenWorkspacePaths(): string[];
-  setSessions(sessions: Session[]): void;
+  setSessions(sessions: Session[], complete?: boolean): void;
   clearSessionStatusEntry(sessionId: string): void;
   clearPendingAbort(sessionId: string | null | undefined): void;
   clearPendingAbortTree(sessionIds: string[]): void;
@@ -111,7 +111,8 @@ export class SessionLifecycleOperations {
     });
   };
 
-  readonly applySessions = (sessions: Session[]) => applySessions(this.lifecycleDeps, sessions);
+  readonly applySessions = (sessions: Session[], complete = false) =>
+    applySessions(this.lifecycleDeps, sessions, complete);
 
   readonly clearDeletedSessionState = (id: string) =>
     clearDeletedSessionState(this.lifecycleDeps, id);
@@ -184,7 +185,7 @@ function mergeFreshSession(existing: Session | undefined, incoming: Session) {
   return merged;
 }
 
-export function applySessions(deps: LifecycleDependencies, sessions: Session[]) {
+export function applySessions(deps: LifecycleDependencies, sessions: Session[], complete = false) {
   const existingById = new Map(deps.getState().sessions.map((session) => [session.id, session]));
   const nextSessions = sortSessions(
     sessions
@@ -192,7 +193,7 @@ export function applySessions(deps: LifecycleDependencies, sessions: Session[]) 
       .map((session) => mergeFreshSession(existingById.get(session.id), session))
   );
   batch(() => {
-    deps.setSessions(nextSessions);
+    deps.setSessions(nextSessions, complete);
 
     const { activeSessionId } = deps.getState();
     if (activeSessionId && !nextSessions.some((session) => session.id === activeSessionId)) {

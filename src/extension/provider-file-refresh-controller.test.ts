@@ -696,6 +696,64 @@ describe('ProviderFileRefreshController', () => {
   });
 
   describe('invalidation scheduling', () => {
+    it('coalesces status events while idle probes and disposal are in flight', async () => {
+      const h = createHarness({ persisted: { version: 1, revalidateAuth: false } });
+      let resolveProbe!: () => void;
+      let resolveDispose!: () => void;
+      h.server.request.mockImplementation(async (_method: string, path: string) => {
+        if (path === '/permission') {
+          await new Promise<void>((resolve) => {
+            resolveProbe = resolve;
+          });
+          return [];
+        }
+        if (path === '/question') return [];
+        if (path === '/session/status') return {};
+        if (path === '/global/dispose') {
+          await new Promise<void>((resolve) => {
+            resolveDispose = resolve;
+          });
+        }
+        return undefined;
+      });
+
+      emitStatusEvent(h.server, h.server.status);
+      emitStatusEvent(h.server, h.server.status);
+      expect(h.server.request.mock.calls.filter(([, path]) => path === '/permission')).toHaveLength(
+        1
+      );
+      resolveProbe();
+      await vi.advanceTimersByTimeAsync(0);
+      emitStatusEvent(h.server, h.server.status);
+      expect(globalDisposeCallCount(h)).toBe(1);
+      resolveDispose();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(globalDisposeCallCount(h)).toBe(1);
+      expect(h.values.has(PENDING_STATE_KEY)).toBe(false);
+    });
+
+    it('retries a newer refresh generation after an older idle probe completes', async () => {
+      const h = createHarness({ persisted: { version: 1, revalidateAuth: false } });
+      let resolveProbe!: () => void;
+      h.server.readRestartBlockers.mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => {
+          resolveProbe = resolve;
+        });
+        return { totalSessionCount: 0, directories: [] };
+      });
+      emitStatusEvent(h.server, h.server.status);
+      await h.controller.refreshState();
+      expect(h.server.readRestartBlockers).toHaveBeenCalledOnce();
+      expect(globalDisposeCallCount(h)).toBe(0);
+
+      resolveProbe();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(h.server.readRestartBlockers).toHaveBeenCalledTimes(2);
+      expect(globalDisposeCallCount(h)).toBe(1);
+      expect(h.values.has(PENDING_STATE_KEY)).toBe(false);
+    });
+
     it('caps busy backoff and eventually refreshes without another event', async () => {
       const h = createHarness();
       await activateWatching(h);

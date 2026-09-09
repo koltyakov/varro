@@ -257,10 +257,12 @@ export function setWorkspaceStatusSummary(summary: WorkspaceStatusEventSummary) 
   setState('workspaceStatusSummary', summary);
 }
 
-export function setSessions(nextSessions: Session[]) {
+export function setSessions(nextSessions: Session[], complete = false) {
   sessionTreeIndex.invalidate();
   setState('sessions', reconcile(nextSessions, { key: 'id' }));
   restoreCatalogSessionMarkers(nextSessions);
+  // Pagination and local mutations cannot prove that an unloaded session was deleted.
+  if (!complete) return;
   const sessionIds = new Set(nextSessions.map((session) => session.id));
   for (const sessionId of restoredMarkerDirectories.keys()) {
     if (!sessionIds.has(sessionId)) restoredMarkerDirectories.delete(sessionId);

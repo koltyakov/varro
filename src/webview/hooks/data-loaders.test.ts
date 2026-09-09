@@ -1024,7 +1024,7 @@ describe('data loaders', () => {
     response.resolve([session('existing')]);
     await load;
 
-    expect(applySessions).toHaveBeenCalledWith([session('existing'), session('new-session')]);
+    expect(applySessions).toHaveBeenCalledWith([session('existing'), session('new-session')], true);
   });
 
   it('allows a locally removed session to reappear in a later snapshot', async () => {
@@ -1096,6 +1096,45 @@ describe('data loaders', () => {
       'session-1': 'build',
       'session-2': 'plan',
     });
+  });
+
+  it.each([
+    { hasMore: true },
+    { hasMore: false, incomplete: true, unavailableDirectories: ['/repo'] },
+  ])('carries partial catalog completeness through session lifecycle: %j', async (partial) => {
+    const stateModule = await import('../lib/state');
+    const { SessionLifecycleOperations } = await import('./session/session-lifecycle');
+    stateModule.setSessions([]);
+    stateModule.setState('completedSessionResponses', { unloaded: 100 });
+    stateModule.setState('skippedPlanSessions', { unloaded: 100 });
+    const lifecycle = new SessionLifecycleOperations({
+      getCurrentWorkspacePath: () => '/repo',
+      clearPendingAbort: vi.fn(),
+      clearPendingAbortTree: vi.fn(),
+      resetTodoSync: vi.fn(),
+      resetToolCallExpansionState: vi.fn(),
+      publishSessionModel: vi.fn(),
+    });
+    const listSessions = vi
+      .fn<DataLoaderDependencies['listSessions']>()
+      .mockResolvedValueOnce({ items: [session('recent')], ...partial })
+      .mockResolvedValueOnce({ items: [session('recent')], hasMore: false });
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listSessions,
+        getSessions: () => stateModule.state.sessions,
+        applySessions: lifecycle.applySessions,
+      })
+    );
+    await operations.loadSessions();
+    expect(stateModule.state.completedSessionResponses.unloaded).toBe(100);
+    expect(stateModule.state.skippedPlanSessions.unloaded).toBe(100);
+    lifecycle.upsertSession(session('recent'));
+    expect(stateModule.state.completedSessionResponses.unloaded).toBe(100);
+    expect(stateModule.state.skippedPlanSessions.unloaded).toBe(100);
+    await operations.loadSessions();
+    expect(stateModule.state.completedSessionResponses.unloaded).toBeUndefined();
+    expect(stateModule.state.skippedPlanSessions.unloaded).toBeUndefined();
   });
 
   it('preserves queues omitted from a partial refresh until a complete snapshot confirms removal', async () => {
@@ -1482,7 +1521,7 @@ describe('data loaders', () => {
     expect(applySessions).not.toHaveBeenCalled();
 
     await operations.loadSessions();
-    expect(applySessions).toHaveBeenCalledWith([]);
+    expect(applySessions).toHaveBeenCalledWith([], true);
     expect(logError).not.toHaveBeenCalled();
   });
 
@@ -1505,7 +1544,7 @@ describe('data loaders', () => {
     currentSessions = [];
     await operations.loadSessions();
     expect(applySessions).toHaveBeenCalledOnce();
-    expect(applySessions).toHaveBeenCalledWith([]);
+    expect(applySessions).toHaveBeenCalledWith([], true);
   });
 
   it('resets empty session snapshot confirmation after a non-empty snapshot', async () => {
@@ -1533,7 +1572,7 @@ describe('data loaders', () => {
     await operations.loadSessions();
 
     expect(applySessions).toHaveBeenCalledTimes(1);
-    expect(applySessions).toHaveBeenCalledWith(listedSessions);
+    expect(applySessions).toHaveBeenCalledWith(listedSessions, true);
     expect(logError).not.toHaveBeenCalled();
   });
 

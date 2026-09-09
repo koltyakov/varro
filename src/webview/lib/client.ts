@@ -779,7 +779,10 @@ export const client = {
 
   question: {
     async list(): Promise<QuestionRequest[]> {
-      return getSharedQuestionList();
+      // Each reconciliation captures its own baseline and needs a fresh snapshot.
+      return apiCall('GET', '/question').then((response) =>
+        requireArray<QuestionRequest>(response, '/question')
+      );
     },
     async reply(requestID: string, answers: Array<Array<string>>): Promise<boolean> {
       return apiCall('POST', `/question/${encodeURIComponent(requestID)}/reply`, { answers });
@@ -791,7 +794,10 @@ export const client = {
 
   permission: {
     async list(): Promise<unknown[]> {
-      return getSharedPermissionList();
+      // Do not share an older snapshot with a caller that captured a newer baseline.
+      return apiCall('GET', '/permission').then((response) =>
+        requireArray<Permission>(response, '/permission')
+      );
     },
   },
 };
@@ -841,8 +847,6 @@ type SharedRequestSlot<T> = { current: Promise<T> | null };
 const sessionStatusSlot: SharedRequestSlot<Record<string, SessionStatus>> = {
   current: null,
 };
-const questionListSlot: SharedRequestSlot<QuestionRequest[]> = { current: null };
-const permissionListSlot: SharedRequestSlot<Permission[]> = { current: null };
 
 function sharedRequest<T>(
   slot: { current: Promise<T> | null },
@@ -898,22 +902,6 @@ function getSharedSessionStatus(): Promise<Record<string, SessionStatus>> {
   );
 }
 
-function getSharedQuestionList(): Promise<QuestionRequest[]> {
-  return sharedRequest(questionListSlot, () =>
-    apiCall('GET', '/question').then((response) =>
-      requireArray<QuestionRequest>(response, '/question')
-    )
-  );
-}
-
-function getSharedPermissionList(): Promise<Permission[]> {
-  return sharedRequest(permissionListSlot, () =>
-    apiCall('GET', '/permission').then((response) =>
-      requireArray<Permission>(response, '/permission')
-    )
-  );
-}
-
 type EventHandler<TEvent extends ServerEvent = ServerEvent> = (data: TEvent) => void;
 
 type ServerEventsApi = {
@@ -932,8 +920,6 @@ let workspaceStatusSummary: WorkspaceStatusEventSummary = { entries: [] };
 export function invalidateClientWorkspaceCaches(): void {
   fileStatusCache = null;
   sessionStatusSlot.current = null;
-  questionListSlot.current = null;
-  permissionListSlot.current = null;
   observedEventMetadata.clear();
   workspaceStatusSummary = { entries: [] };
 }

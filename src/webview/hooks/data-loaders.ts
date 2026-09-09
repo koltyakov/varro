@@ -48,7 +48,7 @@ async function runLoad<T>(
 }
 
 export function createStateBoundDataLoaderOperations(deps: {
-  applySessions(sessions: Session[]): void;
+  applySessions(sessions: Session[], complete: boolean): void;
   updateUsageLimitState(
     sessionId: string,
     status: SessionStatus | null | undefined,
@@ -166,7 +166,7 @@ export function createDataLoaderOperations(deps: {
   setWorkspaceStatuses(entries: WorkspaceStatusEntry[]): void;
   finishWorkspaceCatalogReload(): void;
   listSessions(limit?: number): Promise<Session[] | SessionListPage>;
-  applySessions(sessions: Session[]): void;
+  applySessions(sessions: Session[], complete: boolean): void;
   setSessionsLoadError?(message: string | null): void;
   setSessionsHasMore?(value: boolean): void;
   setSessionsLoadingMore?(value: boolean): void;
@@ -436,7 +436,7 @@ export function createDataLoaderOperations(deps: {
               )
             )
           );
-          deps.applySessions(nextSessions);
+          deps.applySessions(nextSessions, !hasMore && !incomplete);
           deps.setSessionsHasMore?.(hasMore);
         },
       },

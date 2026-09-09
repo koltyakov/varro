@@ -57,6 +57,55 @@ describe('createMessageIndex', () => {
     expect(idx.findPartLocation(msgs, 'missing')).toBeNull();
   });
 
+  it('limits scoped lookups to the owner while preserving global fallback', () => {
+    const idx = createMessageIndex();
+    const msgs = [entry('history', ['historical']), entry('owner', ['owned'])];
+    idx.ensureIndex(msgs);
+    const historyParts = vi.spyOn(msgs[0]!.parts, 'findIndex');
+
+    expect(idx.findPartLocation(msgs, 'historical', 1)).toBeNull();
+    expect(idx.findPartLocation(msgs, 'missing', 1)).toBeNull();
+    expect(idx.findPartLocation(msgs, 'owned', 1)).toEqual({ msgIdx: 1, partIdx: 0 });
+    expect(historyParts).not.toHaveBeenCalled();
+
+    msgs[0]!.parts.push(part('uncached'));
+    expect(idx.findPartLocation(msgs, 'uncached')).toEqual({ msgIdx: 0, partIdx: 1 });
+    expect(historyParts).toHaveBeenCalledOnce();
+  });
+
+  it('repairs stale scoped part positions without invalidating first', () => {
+    const idx = createMessageIndex();
+    const msgs = [entry('history', ['historical']), entry('owner', ['first', 'target'])];
+    idx.ensureIndex(msgs);
+    msgs[1]!.parts.unshift(part('inserted'));
+
+    expect(idx.findPartLocation(msgs, 'target', 1)).toEqual({ msgIdx: 1, partIdx: 2 });
+    expect(idx.getIndexedPartLocation('target')).toEqual({ msgIdx: 1, partIdx: 2 });
+    msgs[1]!.parts.splice(2, 1);
+    expect(idx.findPartLocation(msgs, 'target', 1)).toBeNull();
+  });
+
+  it('resolves scoped locations after history prepend and message removal invalidation', () => {
+    const idx = createMessageIndex();
+    const msgs = [entry('owner', ['first', 'target'])];
+    idx.ensureIndex(msgs);
+    msgs.unshift(entry('history', ['historical']));
+    idx.invalidate();
+
+    const owner = idx.findMessageIndex(msgs, 'owner');
+    expect(owner).toBe(1);
+    expect(idx.findPartLocation(msgs, 'target', owner)).toEqual({ msgIdx: 1, partIdx: 1 });
+    msgs[owner]!.parts.splice(0, 1);
+    idx.removePart(msgs, 'first', { msgIdx: owner, partIdx: 0 });
+    expect(idx.findPartLocation(msgs, 'target', owner)).toEqual({ msgIdx: 1, partIdx: 0 });
+
+    msgs.shift();
+    idx.invalidate();
+    expect(idx.findMessageIndex(msgs, 'owner')).toBe(0);
+    expect(idx.findPartLocation(msgs, 'target', 0)).toEqual({ msgIdx: 0, partIdx: 0 });
+    expect(idx.findPartLocation(msgs, 'historical')).toBeNull();
+  });
+
   it('getIndexedPartLocation returns null before any indexing', () => {
     const idx = createMessageIndex();
 

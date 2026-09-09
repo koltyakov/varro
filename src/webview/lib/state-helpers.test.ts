@@ -570,21 +570,24 @@ describe('state helpers', () => {
     expect(window.localStorage.getItem('varro.lastSeenSessions')).toBe(JSON.stringify({}));
   });
 
-  it('prunes stale skipped session markers when sessions refresh', async () => {
+  it('prunes stale skipped session markers on a complete refresh', async () => {
     const stateModule = await loadState();
 
     stateModule.setState('skippedPlanSessions', { stale: 3, 'session-1': 4 });
 
-    stateModule.setSessions([
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/repo',
-        title: 'session-1',
-        version: '1',
-        time: { created: 100, updated: 200 },
-      },
-    ]);
+    stateModule.setSessions(
+      [
+        {
+          id: 'session-1',
+          projectID: 'project-1',
+          directory: '/repo',
+          title: 'session-1',
+          version: '1',
+          time: { created: 100, updated: 200 },
+        },
+      ],
+      true
+    );
 
     expect(stateModule.state.skippedPlanSessions).toEqual({ 'session-1': 4 });
   });

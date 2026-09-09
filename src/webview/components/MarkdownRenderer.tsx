@@ -1981,6 +1981,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
     initialSegments.stableContent
   );
   const inlineSlotDisposers = new Map<HTMLElement, () => void>();
+  let disposed = false;
 
   function disposeInlineSlots(root?: HTMLElement) {
     for (const [element, dispose] of inlineSlotDisposers) {
@@ -1993,7 +1994,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
   }
 
   function hydrateInlineSlots(root?: HTMLElement) {
-    if (!root) return;
+    if (disposed || !root) return;
     disposeInlineSlots(root);
 
     const slots = props.inlineSlots;
@@ -2050,6 +2051,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
   }
 
   function hydrateMarkdownRoot(root: HTMLDivElement | undefined, flags: MarkdownHydrationFlags) {
+    if (disposed) return;
     hydrateRenderedMarkdown(root, flags);
     hydrateInlineSlots(root);
   }
@@ -2130,6 +2132,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
         codeHighlighterChanged;
       const appendOnlyStableDelta =
         !renderModeChanged &&
+        !codeHighlighterChanged &&
         workspacePath === lastAppliedWorkspacePath &&
         sessionContextKey === lastAppliedSessionContextKey
           ? getAppendOnlyStableDelta(
@@ -2138,18 +2141,21 @@ export function MarkdownRenderer(props: MarkdownProps) {
               lastAppliedStableContentWasAppendOnlySafe
             )
           : null;
+      const appendedStableHtml = appendOnlyStableDelta
+        ? parseMarkdown(appendOnlyStableDelta, {
+            cacheByContent: false,
+            disablePathLinkify,
+            disableCodeHighlighting: isLightweight,
+            allowMermaidHydration: isLightweight,
+            escapeHtml: escapeRawHtml,
+          })
+        : null;
       const nextStableHtml =
         segments.stableContent.length === 0
           ? ''
           : stableContentChanged
-            ? appendOnlyStableDelta
-              ? `${lastAppliedStableHtml}${parseMarkdown(appendOnlyStableDelta, {
-                  cacheByContent: false,
-                  disablePathLinkify,
-                  disableCodeHighlighting: isLightweight,
-                  allowMermaidHydration: isLightweight,
-                  escapeHtml: escapeRawHtml,
-                })}`
+            ? appendedStableHtml !== null
+              ? `${lastAppliedStableHtml}${appendedStableHtml}`
               : parseMarkdown(segments.stableContent, {
                   cacheByContent: false,
                   disablePathLinkify,
@@ -2182,7 +2188,16 @@ export function MarkdownRenderer(props: MarkdownProps) {
       const stableChanged = nextStableHtml !== lastAppliedStableHtml;
       const tailChanged = nextTailHtml !== lastAppliedTailHtml;
       if (stableChanged) {
-        disposeInlineSlots(stableRef);
+        if (appendedStableHtml !== null && stableRef) {
+          // Hydrate only the sanitized delta so existing slots and link state survive.
+          const appendedRoot = document.createElement('div');
+          appendedRoot.innerHTML = appendedStableHtml;
+          hydrateMarkdownRoot(appendedRoot, getMarkdownHydrationFlags(appendedStableHtml));
+          stableRef.append(...appendedRoot.childNodes);
+        } else {
+          disposeInlineSlots(stableRef);
+          if (stableRef) stableRef.innerHTML = nextStableHtml;
+        }
         lastAppliedStableContent = segments.stableContent;
         lastAppliedStableHtml = nextStableHtml;
         lastAppliedStableContentWasAppendOnlySafe = appendOnlyStableDelta
@@ -2220,7 +2235,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
       }
 
       queueMicrotask(() => {
-        if (stableChanged) {
+        if (stableChanged && appendedStableHtml === null) {
           hydrateMarkdownRoot(stableRef, lastAppliedStableHydrationFlags);
         }
         if (tailChanged) {
@@ -2283,6 +2298,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
   const copyTimeouts = new Set<ReturnType<typeof setTimeout>>();
 
   onCleanup(() => {
+    disposed = true;
     if (mermaidPreview()) {
       postMessage({ type: 'vscode/mermaid-preview', payload: { open: false } });
     }
@@ -2425,7 +2441,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
           ref={stableRef}
           data-markdown-segment="stable"
           style={{ display: stableHtml() ? 'contents' : 'none' }}
-          innerHTML={stableHtml()}
+          innerHTML={lastAppliedStableHtml}
         />
         <div
           ref={tailRef}

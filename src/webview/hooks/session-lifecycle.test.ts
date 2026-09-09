@@ -566,10 +566,10 @@ describe('session-lifecycle helpers', () => {
 
     operations.applySessions(state.sessions);
 
-    expect(setSessionsState).toHaveBeenCalledWith([
-      session('session-2', '/repo-b', 2),
-      session('session-1', '/repo-a', 1),
-    ]);
+    expect(setSessionsState).toHaveBeenCalledWith(
+      [session('session-2', '/repo-b', 2), session('session-1', '/repo-a', 1)],
+      false
+    );
     expect(resetTodoSync).not.toHaveBeenCalled();
     expect(resetToolCallExpansionState).not.toHaveBeenCalled();
     expect(persistActiveSessionId).not.toHaveBeenCalled();

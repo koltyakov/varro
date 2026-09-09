@@ -2321,6 +2321,7 @@ describe('OpenCodeProcess config ownership', () => {
       queueMicrotask(() => {
         child.stdout.emit('data', Buffer.from('1.18.26\n'));
         child.emit('exit', 0, null);
+        child.emit('close', 0, null);
       });
       return child;
     });
@@ -2346,6 +2347,43 @@ describe('OpenCodeProcess config ownership', () => {
     await expect(manager.readInstalledCliVersion()).resolves.toBe('1.18.26');
     expect(spawnMock).not.toHaveBeenCalled();
   });
+
+  it.each([0, 1])(
+    'drains late CLI output after exit code %s before settling on close',
+    async (code) => {
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+        kill: vi.fn(),
+      });
+      spawnMock.mockReturnValue(child);
+      const manager = new OpenCodeProcess(4096, true, 'opencode');
+      const api = manager as unknown as {
+        runCliCommandWithDiagnostics(args: string[]): Promise<{ stdout: string; stderr: string }>;
+      };
+      const settled = vi.fn();
+      const result = api.runCliCommandWithDiagnostics(['--version']);
+      void result.then(settled, settled);
+      child.stdout.emit('data', Buffer.from('first '));
+      child.emit('exit', code, null);
+      await Promise.resolve();
+      expect(settled).not.toHaveBeenCalled();
+      child.stdout.emit('data', Buffer.from('late stdout\n'));
+      child.stderr.emit('data', Buffer.from('late diagnostic\n'));
+      child.emit('close', code, null);
+
+      if (code === 0) {
+        await expect(result).resolves.toEqual({
+          stdout: 'first late stdout',
+          stderr: 'late diagnostic',
+        });
+      } else {
+        await expect(result).rejects.toThrow('late diagnostic');
+      }
+      expect(child.stdout.listenerCount('data')).toBe(0);
+      expect(child.stderr.listenerCount('data')).toBe(0);
+    }
+  );
 
   it('taskkills a timed-out Windows CLI shim process tree', async () => {
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });

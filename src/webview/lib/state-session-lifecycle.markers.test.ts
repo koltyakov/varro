@@ -8,6 +8,33 @@ function session(id: string, directory: string, projectID = 'project'): Session 
 beforeEach(() => vi.resetModules());
 
 describe('catalog marker restoration', () => {
+  it('preserves unloaded markers and storage until an authoritative complete catalog arrives', async () => {
+    const keys = ['varro.skippedPlanSessions', 'varro.completedSessionResponses'];
+    for (const key of keys) {
+      window.localStorage.setItem(key, JSON.stringify({ '/repo': { older: 100, deleted: 100 } }));
+    }
+    const state = await import('./state');
+    state.setState('editorContext', 'workspaceFolders', [{ name: 'repo', path: '/repo' }]);
+    state.syncSessionMarkersForWorkspace('/repo', ['/repo']);
+    const firstPage = Array.from({ length: 100 }, (_, i) => session(`recent-${i}`, '/repo'));
+    state.setSessions(firstPage, false);
+    // Local updates must not upgrade a partial catalog to an authoritative snapshot.
+    state.setSessions([...firstPage, session('created', '/repo')]);
+    for (const key of keys) {
+      expect(JSON.parse(window.localStorage.getItem(key)!)).toEqual({
+        '/repo': { older: 100, deleted: 100 },
+      });
+    }
+    expect(state.state.skippedPlanSessions).toEqual({ older: 100, deleted: 100 });
+    expect(state.state.completedSessionResponses).toEqual({ older: 100, deleted: 100 });
+    state.setSessions([...firstPage, session('older', '/repo')], true);
+    expect(state.state.skippedPlanSessions).toEqual({ older: 100 });
+    expect(state.state.completedSessionResponses).toEqual({ older: 100 });
+    for (const key of keys) {
+      expect(JSON.parse(window.localStorage.getItem(key)!)).toEqual({ '/repo': { older: 100 } });
+    }
+  });
+
   it('retains nested read and completion markers during workspace restoration', async () => {
     const state = await import('./state');
     state.syncSessionMarkersForWorkspace('/repo', ['/repo']);

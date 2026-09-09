@@ -815,18 +815,25 @@ describe('client', () => {
     expect(bridgeMocks.apiCall).toHaveBeenCalledWith('GET', '/session/status');
   });
 
-  it('dedupes concurrent question list requests', async () => {
-    const { client } = await loadClient();
-    const deferred = Promise.resolve([{ id: 'q1' }]);
-    bridgeMocks.apiCall.mockReturnValue(deferred);
-
-    const [first, second] = await Promise.all([client.question.list(), client.question.list()]);
-
-    expect(first).toEqual([{ id: 'q1' }]);
-    expect(second).toEqual([{ id: 'q1' }]);
-    expect(bridgeMocks.apiCall).toHaveBeenCalledTimes(1);
-    expect(bridgeMocks.apiCall).toHaveBeenCalledWith('GET', '/question');
-  });
+  it.each(['question', 'permission'] as const)(
+    'starts independent %s snapshots across an ask event',
+    async (kind) => {
+      const { client } = await loadClient();
+      const old = createDeferred<unknown>();
+      const fresh = createDeferred<unknown>();
+      bridgeMocks.apiCall.mockReturnValueOnce(old.promise).mockReturnValueOnce(fresh.promise);
+      const first = client[kind].list();
+      const ask = { id: 'new-ask', sessionID: 'session-1' };
+      emitMessage({ type: 'server/event', payload: { type: `${kind}.asked`, properties: ask } });
+      const second = client[kind].list();
+      expect(bridgeMocks.apiCall).toHaveBeenCalledTimes(2);
+      expect(bridgeMocks.apiCall).toHaveBeenLastCalledWith('GET', `/${kind}`);
+      old.resolve([]);
+      await expect(first).resolves.toEqual([]);
+      fresh.resolve([ask]);
+      await expect(second).resolves.toEqual([ask]);
+    }
+  );
 
   it.each([
     {
@@ -871,8 +878,9 @@ describe('client', () => {
       oldDeferred.resolve(oldValue);
       await expect(oldRequest).resolves.toBe(oldValue);
 
+      bridgeMocks.apiCall.mockReturnValueOnce(currentDeferred.promise);
       const nextConsumer = load(client);
-      expect(bridgeMocks.apiCall).toHaveBeenCalledTimes(2);
+      expect(bridgeMocks.apiCall).toHaveBeenCalledTimes(path === '/session/status' ? 2 : 3);
 
       currentDeferred.resolve(newValue);
       await expect(Promise.all([currentRequest, nextConsumer])).resolves.toEqual([

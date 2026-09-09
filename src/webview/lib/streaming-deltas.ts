@@ -117,7 +117,16 @@ export function flushPendingStreamingDeltasFor(appState: AppStateInstance) {
     appState.setState('streamingText', latest.text);
 
     for (const item of deltas) {
-      const location = appState.messageIndex.findPartLocation(appState.state.messages, item.partId);
+      const msgIdx = appState.messageIndex.findMessageIndex(
+        appState.state.messages,
+        item.messageId
+      );
+      if (msgIdx === -1) continue;
+      const location = appState.messageIndex.findPartLocation(
+        appState.state.messages,
+        item.partId,
+        msgIdx
+      );
       if (location) {
         const currentPart = appState.state.messages[location.msgIdx]?.parts[location.partIdx];
         if (
@@ -135,11 +144,6 @@ export function flushPendingStreamingDeltasFor(appState: AppStateInstance) {
         continue;
       }
 
-      const msgIdx = appState.messageIndex.findMessageIndex(
-        appState.state.messages,
-        item.messageId
-      );
-      if (msgIdx === -1) continue;
       const commonPart = {
         id: item.partId,
         messageID: item.messageId,

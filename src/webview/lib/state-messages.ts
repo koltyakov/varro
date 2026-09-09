@@ -135,8 +135,8 @@ export function upsertPart(part: Part) {
         const idx = messageIndex.findMessageIndex(msgs, msgId);
         if (idx === -1) return;
         // Repeated server updates must not consume another pending optimistic part.
-        const location = messageIndex.findPartLocation(msgs, nextPart.id);
-        if (location && location.msgIdx === idx) {
+        const location = messageIndex.findPartLocation(msgs, nextPart.id, idx);
+        if (location) {
           const currentPart = msgs[idx]!.parts[location.partIdx];
           const mergedPart = mergePartUpdate(currentPart, nextPart);
           msgs[idx]!.parts[location.partIdx] = mergedPart;

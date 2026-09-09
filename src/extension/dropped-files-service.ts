@@ -318,11 +318,11 @@ export class DroppedFilesService {
       const chunkResults = await Promise.all(
         chunk.map(async (path) => {
           try {
-            const uri = await this.resolveDroppedUri(path);
-            if (!uri) {
+            const resolved = await this.resolveDroppedUri(path);
+            if (!resolved) {
               throw new Error('Path does not exist');
             }
-            const stat = await vscode.workspace.fs.stat(uri);
+            const { uri, stat } = resolved;
             const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
             const relativePath = getRelativePath(uri, workspaceFolder);
 
@@ -346,15 +346,17 @@ export class DroppedFilesService {
     return dropped.filter((item): item is DroppedFileInput => Boolean(item));
   }
 
-  private async resolveDroppedUri(rawPath: string): Promise<vscode.Uri | null> {
+  private async resolveDroppedUri(
+    rawPath: string
+  ): Promise<{ uri: vscode.Uri; stat: vscode.FileStat } | null> {
     const input = rawPath.trim();
     if (!input) return null;
 
     const absoluteUri = vscode.Uri.file(input);
     if (isAbsolute(input)) {
       try {
-        await vscode.workspace.fs.stat(absoluteUri);
-        return absoluteUri;
+        const stat = await vscode.workspace.fs.stat(absoluteUri);
+        return { uri: absoluteUri, stat };
       } catch {
         return null;
       }
@@ -382,9 +384,9 @@ export class DroppedFilesService {
         continue;
       }
       try {
-        await vscode.workspace.fs.stat(candidate);
+        const stat = await vscode.workspace.fs.stat(candidate);
         if (vscode.workspace.getWorkspaceFolder(candidate)?.uri.fsPath === folder.uri.fsPath) {
-          return candidate;
+          return { uri: candidate, stat };
         }
       } catch {}
     }
