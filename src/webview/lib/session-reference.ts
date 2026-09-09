@@ -1,5 +1,6 @@
 import { normalizeSessionTitle } from '../../shared/session-title';
 import { getWorkspaceFolderLabel } from '../../shared/workspace-folders';
+import type { Session } from '../types';
 import { state } from './state';
 
 export type SessionReference = {
@@ -22,6 +23,13 @@ export function resolveSessionReference(
   marker = sessionId
 ): SessionReference | null {
   const session = state.sessions.find((candidate) => candidate.id === sessionId);
+  return createSessionReference(session, marker);
+}
+
+function createSessionReference(
+  session: Session | undefined,
+  marker: string
+): SessionReference | null {
   if (!session) return null;
 
   const folderLabel =
@@ -43,12 +51,16 @@ export function resolveSessionReference(
 export function splitSessionReferenceText(content: string): SessionReferenceTextSegment[] {
   const segments: SessionReferenceTextSegment[] = [];
   let lastIndex = 0;
+  const matches = Array.from(content.matchAll(SESSION_ID_RE));
+  const sessions = matches.length > 1 ? indexReferencedSessions(matches) : null;
 
-  for (const match of content.matchAll(SESSION_ID_RE)) {
+  for (const match of matches) {
     const index = match.index ?? 0;
     const marker = match[0];
     const sessionId = match[1] || match[2]!;
-    const reference = resolveSessionReference(sessionId, marker);
+    const reference = sessions
+      ? createSessionReference(sessions.get(sessionId), marker)
+      : resolveSessionReference(sessionId, marker);
     if (!reference) continue;
 
     if (index > lastIndex) {
@@ -65,15 +77,38 @@ export function splitSessionReferenceText(content: string): SessionReferenceText
 }
 
 export function getSessionReferenceContextKey(content: string): string {
-  const markers = [...new Set(Array.from(content.matchAll(SESSION_ID_RE), (match) => match[0]))];
-  return markers
-    .map((marker) => {
-      const match = Array.from(marker.matchAll(SESSION_ID_RE))[0];
-      const sessionId = match?.[1] || match?.[2] || marker;
-      const reference = resolveSessionReference(sessionId, marker);
-      return reference
+  const matches = Array.from(content.matchAll(SESSION_ID_RE));
+  if (matches.length === 0) return '';
+  const sessions = matches.length > 1 ? indexReferencedSessions(matches) : null;
+  const markers = new Set<string>();
+  const keys: string[] = [];
+  for (const match of matches) {
+    const marker = match[0];
+    if (markers.has(marker)) continue;
+    markers.add(marker);
+    const sessionId = match[1] || match[2]!;
+    const reference = sessions
+      ? createSessionReference(sessions.get(sessionId), marker)
+      : resolveSessionReference(sessionId, marker);
+    keys.push(
+      reference
         ? `found:${reference.id}:${reference.directory}:${reference.title}:${reference.folderLabel ?? ''}`
-        : `missing:${marker}`;
-    })
-    .join('\u0000');
+        : `missing:${marker}`
+    );
+  }
+  return keys.join('\u0000');
+}
+
+function indexReferencedSessions(matches: readonly RegExpMatchArray[]): Map<string, Session> {
+  const remaining = new Set(matches.map((match) => match[1] || match[2]!));
+  const sessions = new Map<string, Session>();
+  // Keep the first matching session, as Array.find does, and retain only the
+  // referenced IDs. This index lives for one calculation so metadata stays live.
+  for (const session of state.sessions) {
+    const id = session.id;
+    if (!remaining.delete(id)) continue;
+    sessions.set(id, session);
+    if (remaining.size === 0) break;
+  }
+  return sessions;
 }

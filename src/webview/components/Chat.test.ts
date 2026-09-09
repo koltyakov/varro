@@ -1128,6 +1128,49 @@ describe('header status badges', () => {
     expect(container?.querySelector('.chat-transport-banner')).toBeNull();
   });
 
+  it.each([false, true])('derives raw indicators once with session picker %s', (picker) => {
+    setState('sessions', [session('first', Date.now()), session('second', Date.now() - 1)]);
+    setState('activeSessionId', 'first');
+    setState('sessionStatus', { first: { type: 'busy' }, second: { type: 'idle' } });
+    setShowSessionPicker(picker);
+    // Each raw derivation reads the Ralph catalog once. Spy on the real store
+    // method so both the parent and list's local derivations are counted.
+    const catalogReads = vi.spyOn(ralphStore, 'getAllRuns');
+    cleanup = render(() => Chat(), container!);
+    expect(container?.querySelectorAll('.session-item').length).toBeGreaterThan(0);
+    catalogReads.mockClear();
+
+    setState('sessionStatus', 'second', { type: 'busy' });
+
+    expect(catalogReads).toHaveBeenCalledTimes(1);
+    const row = container?.querySelector('[data-session-id="second"]');
+    expect(row?.querySelector('.session-item-indicator.is-running')).not.toBeNull();
+    setState('sessionStatus', 'second', { type: 'idle' });
+    vi.advanceTimersByTime(1199);
+    expect(row?.querySelector('.session-item-indicator.is-running')).not.toBeNull();
+    vi.advanceTimersByTime(1);
+    expect(row?.querySelector('.session-item-indicator.is-running')).toBeNull();
+  });
+
+  it('keeps list settling local when the session list remounts during a parent settle window', () => {
+    setState('sessions', [session('first', Date.now()), session('other', Date.now() - 1)]);
+    setState('activeSessionId', 'other');
+    setState('sessionStatus', { first: { type: 'busy' } });
+    cleanup = render(() => Chat(), container!);
+    setState('sessionStatus', 'first', { type: 'idle' });
+    vi.advanceTimersByTime(500);
+    expect(container?.querySelector('.session-item-indicator.is-running')).not.toBeNull();
+    const previousRow = container?.querySelector('[data-session-id="first"]');
+
+    setShowSessionPicker(true);
+
+    expect(container?.querySelector('.session-item')).not.toBeNull();
+    expect(container?.querySelector('[data-session-id="first"]')).not.toBe(previousRow);
+    expect(container?.querySelector('.session-item-indicator.is-running')).toBeNull();
+    vi.advanceTimersByTime(700);
+    expect(container?.querySelector('.session-item-indicator.is-running')).toBeNull();
+  });
+
   it('shows a count only for running sessions', () => {
     setState('sessions', [
       session('running-1', 500),

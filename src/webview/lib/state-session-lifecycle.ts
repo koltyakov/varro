@@ -24,17 +24,15 @@ import {
   isSessionCompletedResponseUnreadMarker,
   isSessionUnreadMarker,
   isSkippedPlanSessionMarker,
-  nextCompletedSessionResponses,
-  nextSeenSessions,
-  nextSkippedPlanSessions,
+  nextSessionMarkerTimestamp,
   pruneSessionMarkers,
   pruneSkippedPlanSessions,
   readMergedSessionMarkerState,
-  readScopedSessionMarkerState,
-  removeSessionMarker,
+  updateScopedSessionMarker,
   writeScopedSessionMarkerState,
 } from './state-session-markers';
 import { STORAGE_KEYS, readStored, writeStored } from './state-storage';
+import { isNumber } from './runtime-values';
 
 const EMPTY_SESSION_TREE_IDS: string[] = [];
 const markerStorage = { readStored, writeStored };
@@ -66,10 +64,7 @@ function writeMarkerForSession(key: string, sessionId: string, timestamp: number
   const scope = directory
     ? getSessionMarkerWorkspaceScope(directory)
     : getSessionMarkerWorkspaceScopeValue();
-  const markers = { ...readScopedSessionMarkerState(markerStorage, key, scope) };
-  if (timestamp === undefined) delete markers[sessionId];
-  else markers[sessionId] = timestamp;
-  writeScopedSessionMarkerState(markerStorage, key, scope, markers);
+  updateScopedSessionMarker(markerStorage, key, scope, sessionId, timestamp);
 }
 
 function writeOpenWorkspaceMarkerState(key: string, markers: Record<string, number>) {
@@ -95,28 +90,23 @@ export function consumeInterruptedSessionIds() {
 }
 
 export function markSessionSeen(id: string, updatedAt?: number) {
-  const nextSessions = nextSeenSessions(state.lastSeenSessions, id, updatedAt);
-  if (!nextSessions) return false;
-  setState('lastSeenSessions', id, nextSessions[id]!);
-  writeMarkerForSession(STORAGE_KEYS.lastSeenSessions, id, nextSessions[id]);
+  const timestamp = nextSessionMarkerTimestamp(state.lastSeenSessions[id], updatedAt);
+  if (timestamp === null) return false;
+  setState('lastSeenSessions', id, timestamp);
+  writeMarkerForSession(STORAGE_KEYS.lastSeenSessions, id, timestamp);
   postMessage({ type: 'session/seen', payload: { sessionId: id } });
   return true;
 }
 
 export function markSessionResponseCompleted(id: string, completedAt?: number) {
-  const nextSessions = nextCompletedSessionResponses(
-    state.completedSessionResponses,
-    id,
-    completedAt
-  );
-  if (!nextSessions) return;
-  setState('completedSessionResponses', id, nextSessions[id]!);
-  writeMarkerForSession(STORAGE_KEYS.completedSessionResponses, id, nextSessions[id]);
+  const timestamp = nextSessionMarkerTimestamp(state.completedSessionResponses[id], completedAt);
+  if (timestamp === null) return;
+  setState('completedSessionResponses', id, timestamp);
+  writeMarkerForSession(STORAGE_KEYS.completedSessionResponses, id, timestamp);
 }
 
 export function clearSessionSeen(id: string) {
-  const nextSessions = removeSessionMarker(state.lastSeenSessions, id);
-  if (!nextSessions) return;
+  if (!(id in state.lastSeenSessions)) return;
   setState(
     'lastSeenSessions',
     produce((draft) => {
@@ -127,18 +117,14 @@ export function clearSessionSeen(id: string) {
 }
 
 export function skipPlanSession(sessionId: string, updatedAt?: number) {
-  const next = nextSkippedPlanSessions(
-    state.skippedPlanSessions,
-    state.sessions,
-    sessionId,
-    updatedAt
-  );
-  if (!next) return;
-  setState('skippedPlanSessions', sessionId, next[sessionId]!);
-  writeMarkerForSession(STORAGE_KEYS.skippedPlanSessions, sessionId, next[sessionId]);
+  const skippedAt =
+    updatedAt ?? state.sessions.find((session) => session.id === sessionId)?.time.updated;
+  if (!isNumber(skippedAt)) return;
+  setState('skippedPlanSessions', sessionId, skippedAt);
+  writeMarkerForSession(STORAGE_KEYS.skippedPlanSessions, sessionId, skippedAt);
   postMessage({
     type: 'session-plan-state/update',
-    payload: { sessionId, skippedAt: next[sessionId]! },
+    payload: { sessionId, skippedAt },
   });
 }
 
@@ -147,8 +133,7 @@ export function clearSkippedPlanSession(sessionId: string) {
     type: 'session-plan-state/update',
     payload: { sessionId, skippedAt: null },
   });
-  const nextSessions = removeSessionMarker(state.skippedPlanSessions, sessionId);
-  if (!nextSessions) return;
+  if (!(sessionId in state.skippedPlanSessions)) return;
   setState(
     'skippedPlanSessions',
     produce((draft) => {
@@ -159,11 +144,17 @@ export function clearSkippedPlanSession(sessionId: string) {
 }
 
 export function applySessionPlanStateUpdate(sessionId: string, skippedAt: number | null) {
-  const nextSessions = { ...state.skippedPlanSessions };
-  if (skippedAt === null) delete nextSessions[sessionId];
-  else nextSessions[sessionId] = skippedAt;
-  setState('skippedPlanSessions', reconcile(nextSessions));
-  writeMarkerForSession(STORAGE_KEYS.skippedPlanSessions, sessionId, nextSessions[sessionId]);
+  if (skippedAt === null) {
+    setState(
+      'skippedPlanSessions',
+      produce((draft) => {
+        delete draft[sessionId];
+      })
+    );
+  } else {
+    setState('skippedPlanSessions', sessionId, skippedAt);
+  }
+  writeMarkerForSession(STORAGE_KEYS.skippedPlanSessions, sessionId, skippedAt ?? undefined);
 }
 
 export function isSkippedPlanSession(sessionId: string, updatedAt: number) {

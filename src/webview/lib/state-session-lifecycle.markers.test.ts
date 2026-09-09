@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../types';
 
 function session(id: string, directory: string, projectID = 'project'): Session {
@@ -6,8 +6,57 @@ function session(id: string, directory: string, projectID = 'project'): Session 
 }
 
 beforeEach(() => vi.resetModules());
+afterEach(() => vi.restoreAllMocks());
 
 describe('catalog marker restoration', () => {
+  it('reads persisted markers once per update without copying unrelated in-memory markers', async () => {
+    const state = await import('./state');
+    const { BrowserPersistence } = await import('./browser-persistence');
+    state.setSessions([session('active', '/repo')]);
+    let unrelatedReads = 0;
+    state.setState('lastSeenSessions', {
+      get unrelated() {
+        unrelatedReads += 1;
+        return 100;
+      },
+    });
+    unrelatedReads = 0;
+    const reads = vi.spyOn(BrowserPersistence.prototype, 'get');
+
+    expect(state.markSessionSeen('active', 200)).toBe(true);
+
+    expect(reads.mock.calls.filter(([key]) => key === 'varro.lastSeenSessions')).toHaveLength(1);
+    expect(unrelatedReads).toBe(0);
+    expect(JSON.parse(window.localStorage.getItem('varro.lastSeenSessions')!)).toEqual({
+      '/repo': { active: 200 },
+    });
+    reads.mockClear();
+    expect(state.markSessionSeen('active', 100)).toBe(false);
+    expect(reads).not.toHaveBeenCalled();
+    expect(state.state.lastSeenSessions.active).toBe(200);
+  });
+
+  it('keeps zero timestamps, skipped-plan updates, and selective removal synchronous', async () => {
+    const state = await import('./state');
+    state.setSessions([session('first', '/repo'), session('second', '/repo')]);
+    state.markSessionSeen('first', 0);
+    state.markSessionSeen('second', 100);
+    state.clearSessionSeen('first');
+    expect(JSON.parse(window.localStorage.getItem('varro.lastSeenSessions')!)).toEqual({
+      '/repo': { second: 100 },
+    });
+    state.markSessionResponseCompleted('first', 0);
+    expect(state.state.completedSessionResponses.first).toBe(0);
+    state.skipPlanSession('first');
+    state.skipPlanSession('second', 0);
+    state.skipPlanSession('missing');
+    expect(state.state.skippedPlanSessions).toEqual({ first: 100, second: 0 });
+    state.clearSkippedPlanSession('first');
+    expect(JSON.parse(window.localStorage.getItem('varro.skippedPlanSessions')!)).toEqual({
+      '/repo': { second: 0 },
+    });
+  });
+
   it('preserves unloaded markers and storage until an authoritative complete catalog arrives', async () => {
     const keys = ['varro.skippedPlanSessions', 'varro.completedSessionResponses'];
     for (const key of keys) {

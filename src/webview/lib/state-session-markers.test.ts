@@ -1,18 +1,15 @@
-import { describe, expect, it } from 'vitest';
-import type { Session } from '../types';
+import { describe, expect, it, vi } from 'vitest';
 import {
   getSessionMarkerWorkspaceScope,
   isSessionCompletedResponseUnreadMarker,
   isSessionUnreadMarker,
   isSkippedPlanSessionMarker,
-  nextCompletedSessionResponses,
-  nextSeenSessions,
-  nextSkippedPlanSessions,
+  nextSessionMarkerTimestamp,
   pruneSkippedPlanSessions,
   readInitialSessionMarkerScope,
   readMergedSessionMarkerState,
   readScopedSessionMarkerState,
-  removeSessionMarker,
+  updateScopedSessionMarker,
   writeScopedSessionMarkerState,
 } from './state-session-markers';
 
@@ -49,17 +46,6 @@ function createStorage(initial: TestRuntimeRecord = {}) {
     get(key: string) {
       return store.get(key);
     },
-  };
-}
-
-function session(id: string, updated: number): Session {
-  return {
-    id,
-    projectID: 'project-1',
-    directory: '/repo',
-    title: id,
-    version: '1',
-    time: { created: updated - 1, updated },
   };
 }
 
@@ -115,6 +101,50 @@ describe('state session markers', () => {
     });
   });
 
+  it.each([
+    null,
+    [],
+    7,
+    { legacy: 123 },
+    {
+      '/repo': { retained: 100, invalid: 'bad', infinite: Number.POSITIVE_INFINITY },
+      '/other': { another: 200 },
+      '/invalid': [],
+    },
+  ])('preserves the existing scoped-write result for storage %j', (initial) => {
+    const storage = createStorage({ markers: initial });
+    const previousStorage = createStorage({ markers: initial });
+    const reads = vi.spyOn(storage, 'readStored');
+    for (const timestamp of [300, 0, undefined]) {
+      const previous = { ...readScopedSessionMarkerState(previousStorage, 'markers', '/repo') };
+      if (timestamp === undefined) delete previous.target;
+      else previous.target = timestamp;
+      writeScopedSessionMarkerState(previousStorage, 'markers', '/repo', previous);
+      reads.mockClear();
+
+      updateScopedSessionMarker(storage, 'markers', '/repo', 'target', timestamp);
+
+      expect(reads).toHaveBeenCalledTimes(1);
+      expect(storage.get('markers')).toEqual(previousStorage.get('markers'));
+    }
+  });
+
+  it('preserves interleaved clients and removes only the requested marker or empty scope', () => {
+    const storage = createStorage({ markers: { '/repo': { retained: 100 } } });
+    const firstClient = { readStored: storage.readStored, writeStored: storage.writeStored };
+    const secondClient = { readStored: storage.readStored, writeStored: storage.writeStored };
+
+    updateScopedSessionMarker(firstClient, 'markers', '/repo', 'first', 200);
+    updateScopedSessionMarker(secondClient, 'markers', '/other', 'second', 300);
+    updateScopedSessionMarker(firstClient, 'markers', '/repo', 'first', undefined);
+    expect(storage.get('markers')).toEqual({
+      '/repo': { retained: 100 },
+      '/other': { second: 300 },
+    });
+    updateScopedSessionMarker(secondClient, 'markers', '/other', 'second', undefined);
+    expect(storage.get('markers')).toEqual({ '/repo': { retained: 100 } });
+  });
+
   it('merges markers from open workspace roots using the latest timestamp', () => {
     const storage = createStorage({
       'varro.lastSeenSessions': {
@@ -129,19 +159,14 @@ describe('state session markers', () => {
     ).toEqual({ shared: 200, 'session-a': 150, 'session-b': 250 });
   });
 
-  it('derives next seen, skipped, and pruned marker maps', () => {
-    expect(nextSeenSessions({ 'session-1': 100 }, 'session-1', 150, 120)).toEqual({
-      'session-1': 150,
-    });
-    expect(nextSeenSessions({ 'session-1': 150 }, 'session-1', 150, 120)).toBeNull();
-    expect(nextSeenSessions({ 'session-1': 150 }, 'session-1', 150, 999)).toBeNull();
-    expect(nextCompletedSessionResponses({ 'session-1': 100 }, 'session-1', 150, 120)).toEqual({
-      'session-1': 150,
-    });
-    expect(nextCompletedSessionResponses({ 'session-1': 150 }, 'session-1', 150, 120)).toBeNull();
+  it('derives monotonic timestamps and pruned marker maps', () => {
+    expect(nextSessionMarkerTimestamp(100, 150, 120)).toBe(150);
+    expect(nextSessionMarkerTimestamp(150, 150, 120)).toBeNull();
+    expect(nextSessionMarkerTimestamp(150, 150, 999)).toBeNull();
+    expect(nextSessionMarkerTimestamp(undefined, 0, 999)).toBe(0);
     // Re-settling an already-seen message must use its real completion time, not `now`,
     // so a session read at 500 stays read when its old (300) completion is replayed.
-    expect(nextCompletedSessionResponses({ 'session-1': 500 }, 'session-1', 300, 999)).toBeNull();
+    expect(nextSessionMarkerTimestamp(500, 300, 999)).toBeNull();
     expect(
       isSessionCompletedResponseUnreadMarker(
         { 'session-1': 300 },
@@ -150,20 +175,7 @@ describe('state session markers', () => {
       )
     ).toBe(false);
     // Completions without a timestamp still fall back to `now`.
-    expect(
-      nextCompletedSessionResponses({ 'session-1': 100 }, 'session-1', undefined, 999)
-    ).toEqual({
-      'session-1': 999,
-    });
-
-    expect(removeSessionMarker({ 'session-1': 100, 'session-2': 200 }, 'session-1')).toEqual({
-      'session-2': 200,
-    });
-
-    expect(nextSkippedPlanSessions({}, [session('session-1', 300)], 'session-1')).toEqual({
-      'session-1': 300,
-    });
-    expect(nextSkippedPlanSessions({}, [], 'missing')).toBeNull();
+    expect(nextSessionMarkerTimestamp(100, undefined, 999)).toBe(999);
 
     expect(isSkippedPlanSessionMarker({ 'session-1': 300 }, 'session-1', 250)).toBe(true);
     expect(isSkippedPlanSessionMarker({ 'session-1': 300 }, 'session-1', 301)).toBe(false);

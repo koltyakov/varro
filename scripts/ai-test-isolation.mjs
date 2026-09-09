@@ -16,7 +16,12 @@ export function testServerOrigin(server) {
   return url.origin;
 }
 
-export async function requireIsolatedTestServer(server, directory, root = testDataRoot) {
+export async function requireIsolatedTestServer(
+  server,
+  directory,
+  root = testDataRoot,
+  dataDirectory = process.env.VARRO_AI_DATA_DIR
+) {
   const serverUrl = testServerOrigin(server);
   const response = await fetch(new URL(`/path?directory=${encodeURIComponent(directory)}`, serverUrl), {
     redirect: 'error',
@@ -24,7 +29,14 @@ export async function requireIsolatedTestServer(server, directory, root = testDa
   });
   if (!response.ok) throw new Error(`Cannot verify AI test data directory: HTTP ${response.status}`);
   const paths = await response.json();
-  const data = await realpath(paths.data);
+  const reportedData = paths.data ?? dataDirectory;
+  if (!reportedData) {
+    throw new Error('OpenCode /path does not report its data directory; set VARRO_AI_DATA_DIR to the isolated directory containing opencode.db');
+  }
+  const data = await realpath(reportedData);
+  if (dataDirectory && await realpath(dataDirectory) !== data) {
+    throw new Error('OpenCode data directory does not match VARRO_AI_DATA_DIR');
+  }
   const expectedRoot = path.resolve(root);
   const relative = path.relative(expectedRoot, data);
   if (await realpath(expectedRoot) !== expectedRoot || !relative || relative.startsWith('..') || path.isAbsolute(relative)) {

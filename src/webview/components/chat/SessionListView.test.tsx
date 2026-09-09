@@ -2,6 +2,7 @@ import { render } from 'solid-js/web';
 import { reconcile } from 'solid-js/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../../types';
+import type { SessionDiffSummary } from '../../../shared/protocol';
 import { client } from '../../lib/client';
 import {
   error,
@@ -953,6 +954,51 @@ describe('SessionListView queued messages', () => {
 });
 
 describe('SessionListView diff summaries', () => {
+  it('does not reread settled row statistics when another summary resolves', async () => {
+    const pending = deferred<SessionDiffSummary>();
+    let settledTokenReads = 0;
+    const settled: SessionDiffSummary = {
+      files: 2,
+      additions: 6,
+      deletions: 4,
+      get tokens() {
+        settledTokenReads += 1;
+        return 900;
+      },
+      durationMs: 65_000,
+      activeStartedAt: null,
+    };
+    vi.spyOn(client.varro.session, 'diffSummary').mockImplementation((id) =>
+      id === 'settled' ? Promise.resolve(settled) : pending.promise
+    );
+    const now = Date.now();
+    setSessions([session('settled', now), session('pending', now - 1)]);
+    cleanup = render(() => <SessionListView />, container);
+    const settledRow = container.querySelector('[data-session-id="settled"]');
+    const pendingRow = container.querySelector('[data-session-id="pending"]');
+    await vi.waitFor(() => expect(settledRow?.textContent).toContain('900 tokens'));
+    expect(pendingRow?.querySelector('.session-item-meta-skeleton')).not.toBeNull();
+    const previousText = settledRow?.textContent;
+    settledTokenReads = 0;
+
+    pending.resolve({
+      files: 3,
+      additions: 10,
+      deletions: 2,
+      tokens: 1200,
+      durationMs: 10_000,
+      activeStartedAt: null,
+    });
+    await vi.waitFor(() => expect(getSessionDiffSummaryStateForTests().active).toBe(0));
+
+    expect(settledTokenReads).toBe(0);
+    expect(container.querySelector('[data-session-id="settled"]')).toBe(settledRow);
+    expect(container.querySelector('[data-session-id="pending"]')).toBe(pendingRow);
+    expect(settledRow?.textContent).toBe(previousText);
+    expect(pendingRow?.textContent).toContain('3 files');
+    expect(pendingRow?.querySelector('.session-item-meta-skeleton')).toBeNull();
+  });
+
   it('shows a skeleton instead of zero counters while the aggregate summary loads', async () => {
     const pending = deferred<{
       files: number;

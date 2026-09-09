@@ -1181,6 +1181,37 @@ describe('MarkdownRenderer', () => {
     );
   });
 
+  it('invalidates finalized multi-reference Markdown after renaming and removing sessions', async () => {
+    setState(
+      'sessions',
+      ['first', 'second'].map((name) => ({
+        id: `ses_${name}`,
+        projectID: 'project-1',
+        directory: '/repo',
+        title: name,
+        version: '1',
+        time: { created: 0, updated: 0 },
+      }))
+    );
+    const content = 'Open ses_first and session:ses_second.';
+    cleanup = render(() => MarkdownRenderer({ content, cacheByContent: true }), container!);
+    expect(container?.querySelectorAll('a.session-reference-link')).toHaveLength(2);
+
+    setState('sessions', 0, 'title', 'Renamed first');
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    expect(container?.querySelector('[data-session-id="ses_first"]')?.textContent).toBe(
+      'Renamed first'
+    );
+    expect(container?.querySelector('[data-session-id="ses_second"]')?.getAttribute('href')).toBe(
+      '#session/ses_second'
+    );
+
+    setState('sessions', []);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    expect(container?.querySelector('a.session-reference-link')).toBeNull();
+    expect(container?.textContent).toContain(content);
+  });
+
   it('does not treat protocol-relative links as local files', () => {
     const send = vi.fn();
     window.__sendToExtension = send;

@@ -840,6 +840,7 @@ export function Chat() {
   return (
     <>
       <ChatWorkspace
+        rawSessionIndicators={rawSessionIndicators()}
         shouldRenderWorkspace={shouldRenderWorkspace()}
         isDesktopSessionPaneRight={isDesktopSessionPaneRight()}
         showDesktopSessionPane={!isEditorSurface}

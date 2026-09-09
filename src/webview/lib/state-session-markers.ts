@@ -83,49 +83,33 @@ export function writeScopedSessionMarkerState(
   storage.writeStored(key, nextStore);
 }
 
-export function nextSeenSessions(
-  current: SessionMarkerMap,
+export function updateScopedSessionMarker(
+  storage: SessionMarkerStorage,
+  key: string,
+  workspaceScope: string,
   sessionId: string,
-  updatedAt?: number,
-  now = Date.now()
+  timestamp: number | undefined
 ) {
-  const seenAt = Math.max(current[sessionId] ?? 0, updatedAt ?? now);
-  if (current[sessionId] === seenAt) return null;
-  return { ...current, [sessionId]: seenAt };
+  const nextStore = readScopedSessionMarkerStore(storage, key);
+  const markers = Object.hasOwn(nextStore, workspaceScope) ? nextStore[workspaceScope]! : {};
+  if (timestamp === undefined) delete markers[sessionId];
+  else markers[sessionId] = timestamp;
+  if (Object.keys(markers).length === 0) delete nextStore[workspaceScope];
+  else nextStore[workspaceScope] = markers;
+  storage.writeStored(key, nextStore);
 }
 
-export function nextCompletedSessionResponses(
-  current: SessionMarkerMap,
-  sessionId: string,
-  completedAt?: number,
+export function nextSessionMarkerTimestamp(
+  current: number | undefined,
+  updatedAt?: number,
   now = Date.now()
 ) {
   // Use the real completion time when known so that re-settling already-seen messages
   // (e.g. loading a session's history) can't push the marker past an older "seen" marker
   // and resurrect a false unread badge. `now` is only a fallback for completions that
   // arrive without a timestamp (status-transition events).
-  const completed = Math.max(current[sessionId] ?? 0, completedAt ?? now);
-  if (current[sessionId] === completed) return null;
-  return { ...current, [sessionId]: completed };
-}
-
-export function removeSessionMarker(current: SessionMarkerMap, sessionId: string) {
-  if (!(sessionId in current)) return null;
-  const next = { ...current };
-  delete next[sessionId];
-  return next;
-}
-
-export function nextSkippedPlanSessions(
-  current: SessionMarkerMap,
-  sessions: Session[],
-  sessionId: string,
-  updatedAt?: number
-) {
-  const sessionUpdatedAt =
-    updatedAt ?? sessions.find((session) => session.id === sessionId)?.time.updated;
-  if (!isNumber(sessionUpdatedAt)) return null;
-  return { ...current, [sessionId]: sessionUpdatedAt };
+  const timestamp = Math.max(current ?? 0, updatedAt ?? now);
+  return current === timestamp ? null : timestamp;
 }
 
 export function isSkippedPlanSessionMarker(

@@ -202,6 +202,12 @@ production database into it. Use `VARRO_AI_SERVER_URL=http://127.0.0.1:49001` fo
 transport to that verified origin, isolates CLI storage, and disables automatic server startup and
 updates. Record the dedicated server PID and stop it during cleanup along with the test editor.
 
+For OpenCode versions whose `/path` response omits `data`, also set
+`VARRO_AI_DATA_DIR="$PWD/artifacts/ai-test-data/data/opencode"` on preparation, verification,
+live-controller, cleanup, and editor-launch commands. This explicit directory is subject to the same
+test-root, symlink/hard-link, and listener-owned database checks. When the server reports a data
+directory, it must agree with the configured directory.
+
 Production session metadata, including permissions and timestamps, must remain unchanged. A request
 to run tests does not authorize a migration or repair. Such changes require an explicit user request
 identifying the intended production changes. Existing production golden histories must be imported

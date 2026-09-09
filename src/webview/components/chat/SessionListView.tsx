@@ -82,6 +82,17 @@ import { UiIcon } from '../UiIcon';
 import { FolderIcon } from '../FolderIcon';
 import { getWorkspaceCompactLabel, WorkspacePicker } from '../chat-input/ToolbarPickers';
 import { Tooltip } from '../Tooltip';
+import { sessionDiffSummaries } from './session-diff-summaries';
+
+const {
+  cache: sessionDiffSummaryCache,
+  enqueue: enqueueDiffSummaryRequest,
+  observe: observeSessionSummary,
+  updateRelevantSessions: updateRelevantDiffSummarySessions,
+} = sessionDiffSummaries;
+
+export const getSessionDiffSummaryStateForTests = sessionDiffSummaries.getStateForTests;
+export const resetSessionDiffSummaryStateForTests = sessionDiffSummaries.resetForTests;
 
 type SessionGroups = {
   pinned: (typeof state.sessions)[number][];
@@ -390,18 +401,6 @@ function openSessionWithDisplayedModel(session: Session, diffSummary: SessionDif
   }
 }
 
-type SessionDiffSummaryCacheEntry = {
-  status: 'loading' | 'ready' | 'error';
-  updated: number;
-  stats: SessionDiffSummary | null;
-};
-
-type SessionDiffSummaryRequest = {
-  sessionId: string;
-  directory?: string;
-  updated: number;
-};
-
 export type SessionStatusIndicatorKind =
   | 'failed'
   | 'attention'
@@ -416,9 +415,6 @@ const MAX_SUBAGENT_SESSION_LIMIT = 1_000_000;
 const SESSION_SEARCH_LIMIT = 30;
 const SESSION_SEARCH_DEBOUNCE_MS = 200;
 const PARTIAL_SESSION_LIST_ATTEMPTS = 2;
-const SESSION_DIFF_SUMMARY_CONCURRENCY = 4;
-const SESSION_DIFF_SUMMARY_QUEUE_LIMIT = 100;
-const SESSION_DIFF_SUMMARY_CACHE_LIMIT = 200;
 
 async function listCompleteSessionPage(
   options: NonNullable<Parameters<typeof client.session.list>[0]>
@@ -439,10 +435,6 @@ async function listCompleteSessionPage(
   throw new Error('Some workspace folders could not be loaded');
 }
 
-function getDiffSummaryKey(sessionId: string, updated: number): string {
-  return `${sessionId}:${updated}`;
-}
-
 function getSessionTreeFailedUpdated(sessionId: string): number | undefined {
   let updated: number | undefined;
   for (const treeSessionId of getSessionTreeIds(sessionId)) {
@@ -457,190 +449,6 @@ export function isSessionFailureUnread(sessionId: string): boolean {
     sessionId,
     getSessionTreeFailedUpdated(sessionId) ?? getSessionTreeUpdated(sessionId)
   );
-}
-
-// Module-scoped so cached diff summaries survive the session list being
-// unmounted and remounted (navigating away and back). Persisting the cache and
-// keeping the last-known stats while refreshing avoids the "0 0 0 -> numbers"
-// flash on every return.
-const [sessionDiffSummaryCache, setSessionDiffSummaryCache] = createSignal<
-  Record<string, SessionDiffSummaryCacheEntry | undefined>
->({});
-let activeDiffSummaryRequests = 0;
-const diffSummaryQueue: SessionDiffSummaryRequest[] = [];
-const queuedDiffSummaryKeys = new Set<string>();
-const activeDiffSummaryKeys = new Set<string>();
-const diffSummaryCacheOrder: string[] = [];
-const relevantDiffSummarySessionsByOwner = new Map<symbol, Set<string>>();
-let relevantDiffSummarySessionIds = new Set<string>();
-type SessionSummaryObserverGroup = {
-  observer: IntersectionObserver;
-  callbacks: Map<Element, () => void>;
-};
-const sessionSummaryObserverGroups = new Map<Element | null, SessionSummaryObserverGroup>();
-
-function observeSessionSummary(element: Element, callback: () => void): () => void {
-  const root = element.closest('.session-list-scroll');
-  let group = sessionSummaryObserverGroups.get(root);
-  if (!group) {
-    const callbacks = new Map<Element, () => void>();
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (!entry.isIntersecting) continue;
-          const observed = callbacks.get(entry.target);
-          if (!observed) continue;
-          callbacks.delete(entry.target);
-          observer.unobserve(entry.target);
-          observed();
-        }
-        if (callbacks.size === 0) {
-          observer.disconnect();
-          sessionSummaryObserverGroups.delete(root);
-        }
-      },
-      { root, rootMargin: '300px 0px' }
-    );
-    group = { observer, callbacks };
-    sessionSummaryObserverGroups.set(root, group);
-  }
-  group.callbacks.set(element, callback);
-  group.observer.observe(element);
-
-  return () => {
-    const current = sessionSummaryObserverGroups.get(root);
-    if (!current || !current.callbacks.delete(element)) return;
-    current.observer.unobserve(element);
-    if (current.callbacks.size === 0) {
-      current.observer.disconnect();
-      sessionSummaryObserverGroups.delete(root);
-    }
-  };
-}
-
-function setDiffSummaryCacheEntry(sessionId: string, entry: SessionDiffSummaryCacheEntry) {
-  const previousOrderIndex = diffSummaryCacheOrder.indexOf(sessionId);
-  if (previousOrderIndex !== -1) diffSummaryCacheOrder.splice(previousOrderIndex, 1);
-  diffSummaryCacheOrder.push(sessionId);
-
-  const evictedSessionIds: string[] = [];
-  while (diffSummaryCacheOrder.length > SESSION_DIFF_SUMMARY_CACHE_LIMIT) {
-    const evicted = diffSummaryCacheOrder.shift();
-    if (evicted) evictedSessionIds.push(evicted);
-  }
-
-  setSessionDiffSummaryCache((cache) => {
-    const next = { ...cache, [sessionId]: entry };
-    for (const evictedSessionId of evictedSessionIds) delete next[evictedSessionId];
-    return next;
-  });
-}
-
-function updateRelevantDiffSummarySessions(owner: symbol, sessionIds: Set<string> | null) {
-  if (sessionIds) relevantDiffSummarySessionsByOwner.set(owner, sessionIds);
-  else relevantDiffSummarySessionsByOwner.delete(owner);
-
-  relevantDiffSummarySessionIds = new Set(
-    Array.from(relevantDiffSummarySessionsByOwner.values()).flatMap((ids) => Array.from(ids))
-  );
-
-  for (let index = diffSummaryQueue.length - 1; index >= 0; index -= 1) {
-    const request = diffSummaryQueue[index]!;
-    if (relevantDiffSummarySessionIds.has(request.sessionId)) continue;
-    diffSummaryQueue.splice(index, 1);
-    queuedDiffSummaryKeys.delete(getDiffSummaryKey(request.sessionId, request.updated));
-  }
-}
-
-function isCurrentDiffSummaryRequest(request: SessionDiffSummaryRequest) {
-  return (
-    relevantDiffSummarySessionIds.has(request.sessionId) &&
-    getSessionTreeUpdated(request.sessionId) === request.updated
-  );
-}
-
-function enqueueDiffSummaryRequest(session: Session, updated = getSessionTreeUpdated(session.id)) {
-  const cache = untrack(sessionDiffSummaryCache);
-  const cached = cache[session.id];
-  // A matching failure is settled for this revision. Retrying from this reactive
-  // effect would otherwise form a tight request loop until the server recovers.
-  if (cached?.updated === updated && (cached.status === 'ready' || cached.status === 'error')) {
-    return;
-  }
-
-  const key = getDiffSummaryKey(session.id, updated);
-  if (queuedDiffSummaryKeys.has(key) || activeDiffSummaryKeys.has(key)) return;
-  if (diffSummaryQueue.length >= SESSION_DIFF_SUMMARY_QUEUE_LIMIT) return;
-
-  queuedDiffSummaryKeys.add(key);
-  diffSummaryQueue.push({ sessionId: session.id, directory: session.directory, updated });
-  setDiffSummaryCacheEntry(session.id, {
-    // Keep showing the previous numbers while the refresh is in flight.
-    status: 'loading',
-    updated,
-    stats: cached?.stats ?? null,
-  });
-  pumpDiffSummaryQueue();
-}
-
-function pumpDiffSummaryQueue() {
-  while (
-    activeDiffSummaryRequests < SESSION_DIFF_SUMMARY_CONCURRENCY &&
-    diffSummaryQueue.length > 0
-  ) {
-    const request = diffSummaryQueue.shift()!;
-    const requestKey = getDiffSummaryKey(request.sessionId, request.updated);
-    queuedDiffSummaryKeys.delete(requestKey);
-
-    if (!isCurrentDiffSummaryRequest(request)) continue;
-
-    activeDiffSummaryRequests += 1;
-    activeDiffSummaryKeys.add(requestKey);
-    void client.varro.session
-      .diffSummary(request.sessionId, request.updated, { directory: request.directory })
-      .then((summary) => {
-        if (!isCurrentDiffSummaryRequest(request)) return;
-        setDiffSummaryCacheEntry(request.sessionId, {
-          status: 'ready',
-          updated: request.updated,
-          stats: summary,
-        });
-      })
-      .catch(() => {
-        if (!isCurrentDiffSummaryRequest(request)) return;
-        setDiffSummaryCacheEntry(request.sessionId, {
-          status: 'error',
-          updated: request.updated,
-          stats: sessionDiffSummaryCache()[request.sessionId]?.stats ?? null,
-        });
-      })
-      .finally(() => {
-        activeDiffSummaryRequests -= 1;
-        activeDiffSummaryKeys.delete(requestKey);
-        pumpDiffSummaryQueue();
-      });
-  }
-}
-
-export function getSessionDiffSummaryStateForTests() {
-  return {
-    active: activeDiffSummaryRequests,
-    queued: diffSummaryQueue.length,
-    cached: Object.keys(sessionDiffSummaryCache()).length,
-    queueLimit: SESSION_DIFF_SUMMARY_QUEUE_LIMIT,
-    cacheLimit: SESSION_DIFF_SUMMARY_CACHE_LIMIT,
-  };
-}
-
-export function resetSessionDiffSummaryStateForTests() {
-  activeDiffSummaryRequests = 0;
-  diffSummaryQueue.length = 0;
-  queuedDiffSummaryKeys.clear();
-  activeDiffSummaryKeys.clear();
-  diffSummaryCacheOrder.length = 0;
-  relevantDiffSummarySessionsByOwner.clear();
-  relevantDiffSummarySessionIds.clear();
-  setSessionDiffSummaryCache({});
 }
 
 export type SessionListFilter = 'running' | 'attention' | 'failed' | 'plan-ready' | 'completed';
@@ -1227,6 +1035,7 @@ function SessionListWorkspaceSelector(props: {
 }
 
 export function SessionListView(props: {
+  rawSessionIndicators?: SessionIndicatorSets;
   sessionFilter?: SessionListFilter | null;
   subagentParentId?: string | null;
   onOpenSubagents?: (parentSessionId: string) => void;
@@ -1431,7 +1240,9 @@ export function SessionListView(props: {
     searchAbortController?.abort();
   });
 
-  const rawSessionIndicators = createMemo(() => deriveSessionIndicators(state.sessions));
+  const rawSessionIndicators = createMemo(
+    () => props.rawSessionIndicators ?? deriveSessionIndicators(state.sessions)
+  );
   const sessionIndicators = createStableSessionIndicators(rawSessionIndicators);
   const queuedMessageCounts = createMemo(() => {
     const counts = new Map<string, number>();
@@ -1762,6 +1573,7 @@ export function SessionListView(props: {
       <For each={orderedSessions().map((session) => session.id)}>
         {(sessionId, index) => {
           const session = () => sessionsById().get(sessionId)!;
+          const diffSummary = createMemo(() => sessionDiffSummaryCache()[sessionId]);
           const visiblePinnedSessionIds = () =>
             orderedSessions()
               .filter((item) => state.pinnedSessionIds.includes(item.id))
@@ -1784,25 +1596,24 @@ export function SessionListView(props: {
               session={session()}
               summaryUpdated={getSessionTreeUpdated(sessionId)}
               onRequestSummary={(updated) => enqueueDiffSummaryRequest(session(), updated)}
-              diffSummary={sessionDiffSummaryCache()[sessionId]?.stats ?? null}
+              diffSummary={diffSummary()?.stats ?? null}
               isSummaryLoading={
-                sessionDiffSummaryCache()[sessionId]?.status === 'loading' &&
-                sessionDiffSummaryCache()[sessionId]?.stats === null
+                diffSummary()?.status === 'loading' && diffSummary()?.stats === null
               }
               tokens={
-                sessionDiffSummaryCache()[sessionId]?.stats?.historyStatsUnavailable
+                diffSummary()?.stats?.historyStatsUnavailable
                   ? null
-                  : (sessionDiffSummaryCache()[sessionId]?.stats?.tokens ?? null)
+                  : (diffSummary()?.stats?.tokens ?? null)
               }
               durationMs={
-                sessionDiffSummaryCache()[sessionId]?.stats?.historyStatsUnavailable
+                diffSummary()?.stats?.historyStatsUnavailable
                   ? null
-                  : (sessionDiffSummaryCache()[sessionId]?.stats?.durationMs ?? null)
+                  : (diffSummary()?.stats?.durationMs ?? null)
               }
               activeStartedAt={
-                sessionDiffSummaryCache()[sessionId]?.stats?.historyStatsUnavailable
+                diffSummary()?.stats?.historyStatsUnavailable
                   ? null
-                  : (sessionDiffSummaryCache()[sessionId]?.stats?.activeStartedAt ?? null)
+                  : (diffSummary()?.stats?.activeStartedAt ?? null)
               }
               itemIndex={() => indexOffset + index()}
               focusedIndex={focusedIndex}

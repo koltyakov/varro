@@ -6,7 +6,7 @@ import { ModelsPanel } from '../ModelsPanel';
 import { PermissionSettingsPanel } from '../PermissionSettingsPanel';
 import { ActiveChatHeader, SessionPickerHeader } from './ChatHeader';
 import { SessionListView } from './SessionListView';
-import type { SessionListFilter } from './SessionListView';
+import type { SessionIndicatorSets, SessionListFilter } from './SessionListView';
 import type { SlowApiRequest } from '../../lib/bridge';
 import { editingMessage, inlineEditMount } from '../../lib/message-edit-state';
 import { ralphStore } from '../../lib/stores/ralph-store';
@@ -51,6 +51,7 @@ function ComposerHost() {
 }
 
 export function ChatWorkspace(props: {
+  rawSessionIndicators: SessionIndicatorSets;
   shouldRenderWorkspace: boolean;
   isDesktopSessionPaneRight: boolean;
   showDesktopSessionPane: boolean;
@@ -198,6 +199,7 @@ export function ChatWorkspace(props: {
         </div>
       </div>
       <SessionListView
+        rawSessionIndicators={props.rawSessionIndicators}
         embedded
         class="session-list-view-sidebar"
         sessionFilter={props.showSessionPicker ? props.sessionFilter : null}
@@ -313,6 +315,7 @@ export function ChatWorkspace(props: {
         fallback={
           <>
             <SessionListView
+              rawSessionIndicators={props.rawSessionIndicators}
               sessionFilter={props.sessionFilter}
               subagentParentId={props.subagentParentId}
               onOpenSubagents={props.onOpenSubagentSessions}
