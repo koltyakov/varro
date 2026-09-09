@@ -10,6 +10,63 @@ const SESSION_ID = 'session-rapid-streaming-jitter';
 const MESSAGE_ID = 'message-rapid-assistant-streaming';
 const ROW = `[data-msg-id="${MESSAGE_ID}"]`;
 
+test('keeps filename links inside narrow table cells throughout streaming and completion', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 486, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
+  const markdown = page.locator(`${ROW} .rendered-markdown`);
+  await expect(markdown).toHaveText('Starting...');
+  let text =
+    'Starting...\n\n| Candidate | Files to cover | Benefit | Complication |\n|---|---|---|---|\n';
+  await appendDeltaToRapidStreaming(page, text.slice('Starting...'.length));
+  for (const row of [
+    '| Gradle | `build.gradle.kts` | Java support | Build logic |\n',
+    '| Conda | `environment.yml`, `environment.yaml` | Python support | Channels |\n',
+  ]) {
+    text += row;
+    await appendDeltaToRapidStreaming(page, row);
+    await expect(markdown.locator('tbody tr')).toHaveCount(text.includes('Conda') ? 2 : 1);
+    const overflow = await markdown.locator('td .link-leading-content').evaluateAll((links) =>
+      links.flatMap((link) => {
+        const cell = link.closest('td')!;
+        const box = link.getBoundingClientRect();
+        const cellBox = cell.getBoundingClientRect();
+        return box.right > cellBox.right - parseFloat(getComputedStyle(cell).paddingRight) + 1
+          ? [link.textContent]
+          : [];
+      })
+    );
+    expect(overflow).toEqual([]);
+    const orphanedIcons = await markdown.locator('td .link-leading-content').evaluateAll((links) =>
+      links.flatMap((link) => {
+        const icon = link.querySelector('.file-path-icon')!;
+        const label = link.querySelector('.link-leading-label')!;
+        const range = document.createRange();
+        range.setStart(label.firstChild!, 0);
+        range.setEnd(label.firstChild!, 1);
+        return range.getBoundingClientRect().top > icon.getBoundingClientRect().bottom
+          ? [label.textContent]
+          : [];
+      })
+    );
+    expect(orphanedIcons).toEqual([]);
+  }
+  await completeResponse(page, text);
+  await expect(page.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0);
+  await expect(markdown.locator('thead th')).toHaveText([
+    'Candidate',
+    'Files to cover',
+    'Benefit',
+    'Complication',
+  ]);
+  await expect(markdown.locator('a.file-path-link')).toHaveText([
+    'build.gradle.kts',
+    'environment.yml',
+    'environment.yaml',
+  ]);
+});
+
 async function attachEvidence(testInfo: TestInfo, name: string, json: string) {
   const path = testInfo.outputPath(name);
   await writeFile(path, json);

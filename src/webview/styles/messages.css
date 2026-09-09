@@ -2068,6 +2068,13 @@ body.vscode-light
   overflow-wrap: break-word;
 }
 
+.rendered-markdown table .link-leading-content {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
 .rendered-markdown table th:first-child,
 .rendered-markdown table td:first-child {
   width: clamp(120px, 22%, 180px);
