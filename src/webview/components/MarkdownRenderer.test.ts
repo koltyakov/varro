@@ -1568,6 +1568,7 @@ describe('MarkdownRenderer', () => {
   });
 
   it('holds the active streaming table body row until its line completes', async () => {
+    const [completed, setCompleted] = createSignal(false);
     const [content, setContent] = createSignal(
       'Status follows.\n\n| Name | State |\n| --- | --- |\n| Renderer | Act'
     );
@@ -1577,16 +1578,28 @@ describe('MarkdownRenderer', () => {
           get content() {
             return content();
           },
+          get cacheByContent() {
+            return completed();
+          },
         }),
       container!
     );
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
     expect(container?.querySelector('table')).not.toBeNull();
-    const pendingRow = container?.querySelector('.streaming-markdown-pending');
-    expect(pendingRow?.textContent).toContain('Renderer | Act');
-    expect(pendingRow?.getAttribute('aria-hidden')).toBe('true');
-    expect(pendingRow?.closest('tbody')).not.toBeNull();
+    expect(container?.querySelectorAll('tbody tr')).toHaveLength(0);
+    expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
+
+    setContent(
+      'Status follows.\n\n| Name | State |\n| --- | --- |\n| Renderer | Active |\n| Next | ' +
+        'Still streaming a long description. '.repeat(30)
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(container?.querySelectorAll('tbody tr')).toHaveLength(1);
+    expect(container?.querySelector('tbody')?.textContent).toContain('Renderer');
+    expect(container?.textContent).not.toContain('Still streaming');
+    expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
 
     setContent('Status follows.\n\n| Name | State |\n| --- | --- |\n| Renderer | Active |\n');
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
@@ -1594,6 +1607,17 @@ describe('MarkdownRenderer', () => {
     expect(container?.querySelector('tbody')?.textContent).toContain('Renderer');
     expect(container?.querySelector('tbody')?.textContent).toContain('Active');
     expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
+
+    setContent(
+      'Status follows.\n\n| Name | State |\n| --- | --- |\n| Renderer | Active |\n| Final | Done |'
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    expect(container?.querySelectorAll('tbody tr')).toHaveLength(1);
+
+    setCompleted(true);
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    expect(container?.querySelectorAll('tbody tr')).toHaveLength(2);
+    expect(container?.querySelector('tbody')?.textContent).toContain('Done');
   });
 
   it('renders a complete streaming table without trailing pipes', async () => {

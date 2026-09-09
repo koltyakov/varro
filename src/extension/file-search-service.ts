@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { basename } from 'path';
+import { basename, relative } from 'path';
 import type { DroppedFile } from '../shared/protocol';
 import { getWorkspaceFolderLabel } from '../shared/workspace-folders';
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
@@ -18,8 +18,24 @@ export type FileSearchResult = {
 };
 
 const WORKSPACE_FILE_GLOB = '**/*';
-const WORKSPACE_FILE_EXCLUDE_GLOB =
-  '{**/node_modules/**,**/.venv/**,**/venv/**,**/.tox/**,**/__pycache__/**,**/.git/**,**/dist/**,**/build/**,**/out/**,**/.next/**,**/.turbo/**,**/tmp/**,**/coverage/**}';
+const WORKSPACE_FILE_EXCLUDED_DIRECTORIES = new Set([
+  'node_modules',
+  '.venv',
+  'venv',
+  '.tox',
+  '__pycache__',
+  '.git',
+  'dist',
+  'build',
+  'out',
+  '.next',
+  '.turbo',
+  'tmp',
+  'coverage',
+]);
+const WORKSPACE_FILE_EXCLUDE_GLOB = `{${[...WORKSPACE_FILE_EXCLUDED_DIRECTORIES]
+  .map((directory) => `**/${directory}/**`)
+  .join(',')}}`;
 
 class WorkspaceFileCacheInvalidatedError extends Error {}
 
@@ -128,8 +144,17 @@ export class FileSearchService {
         true,
         false
       );
-      watcher.onDidCreate(() => this.scheduleWorkspaceFileCacheClear());
-      watcher.onDidDelete(() => this.scheduleWorkspaceFileCacheClear());
+      const invalidate = (uri: vscode.Uri) => {
+        const directories = relative(workspaceFolder.uri.fsPath, uri.fsPath)
+          .replace(/\\/g, '/')
+          .split('/')
+          .slice(0, -1);
+        if (directories.some((directory) => WORKSPACE_FILE_EXCLUDED_DIRECTORIES.has(directory)))
+          return;
+        this.scheduleWorkspaceFileCacheClear();
+      };
+      watcher.onDidCreate(invalidate);
+      watcher.onDidDelete(invalidate);
       return watcher;
     });
   }

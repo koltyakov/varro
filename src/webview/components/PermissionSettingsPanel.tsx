@@ -19,6 +19,7 @@ import {
   KNOWN_PERMISSION_NAMES,
   getSharedDirectPermissionRules,
   getSessionPermissionRulesForMode,
+  isScalarConfigPermission,
 } from '../../shared/permission-rules';
 import { client } from '../lib/client';
 import { getPermissionModeForSession, setShowPermissionSettings, state } from '../lib/state';
@@ -87,7 +88,9 @@ function splitSessionPermissionRules(rules: PermissionRule[], mode: PermissionMo
         candidate.length <= rules.length &&
         candidate.every(
           (rule, index) =>
-            rules[index]?.permission === rule.permission && rules[index]?.pattern === rule.pattern
+            rules[index]?.permission === rule.permission &&
+            rules[index]?.pattern === rule.pattern &&
+            rules[index]?.action === rule.action
         )
     );
   return {
@@ -480,19 +483,34 @@ function PermissionActionSelect(props: {
 
 function PermissionRuleRow(props: {
   rule: PermissionRule;
+  projectConfig?: boolean;
   onChange: (rule: PermissionRule) => void;
   onRemove: () => void;
 }) {
+  const scalarConfigPermission = () =>
+    props.projectConfig === true &&
+    props.rule.pattern === '*' &&
+    isScalarConfigPermission(props.rule.permission);
   return (
     <div class="permission-config-rule">
       <PermissionNameInput
         value={props.rule.permission}
-        onInput={(permission) => props.onChange({ ...props.rule, permission })}
+        onInput={(permission) =>
+          props.onChange({
+            ...props.rule,
+            permission,
+            pattern:
+              props.projectConfig === true && isScalarConfigPermission(permission)
+                ? '*'
+                : props.rule.pattern,
+          })
+        }
       />
       <input
         value={props.rule.pattern}
         aria-label="Pattern"
-        placeholder="Pattern"
+        placeholder={scalarConfigPermission() ? 'Project-wide' : 'Pattern'}
+        disabled={scalarConfigPermission()}
         onInput={(event) => props.onChange({ ...props.rule, pattern: event.currentTarget.value })}
       />
       <span class="permission-config-edit-actions">
@@ -958,6 +976,7 @@ export function PermissionSettingsPanel() {
                   {(rule, index) => (
                     <PermissionRuleRow
                       rule={rule()}
+                      projectConfig
                       onChange={(next) => updateRule(index, next)}
                       onRemove={() =>
                         setRules((current) => current.filter((_, itemIndex) => itemIndex !== index))

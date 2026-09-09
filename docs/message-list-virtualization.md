@@ -306,6 +306,10 @@ Direct input acquires ownership only when it can affect the transcript:
 - Animation identity is a one-time message/render-key claim, not current DOM position. Virtual remount,
   completed-history reopening, or appending to an existing file-edit stack must not replay a claimed
   entrance.
+- A retained activity-summary anchor owns scrolling until replacement content arrives. Replacement
+  includes inline edits and other standalone response parts, not only Markdown text. Bottom-follow
+  must not write a competing position during that hold, and queued restore callbacks must verify the
+  anchor is still current before scrolling.
 
 ### Sticky Prompts
 
@@ -562,6 +566,22 @@ Principle: walk every current production boundary with user-sized movement, samp
 frame, verify request order, and preserve bounded rendering through the real beginning of history.
 
 ## Required Debugging Workflow
+
+The September 9 mixed-content streaming reproduction exposed a retained summary anchor restoring an
+old scroll position after inline edit cards began appearing. The completed-turn replay produced
+`scrollTop` sequences such as `130 -> 85 -> 131` on consecutive frames with nearly unchanged content
+height. The exit owner watched only response text and therefore missed inline edits. Normal
+bottom-follow continued writing a newer position while the summary settle callback restored the old
+one. `e2e/tests/scroll-activity-handoff.spec.ts` reduces this to an existing Explored group, one running
+read that exits, and a following inline edit. Preserve its every-frame same-element reversal check
+both during settling and after the retained hold begins.
+
+The same replay also exposed a short-transcript reserve error. Clamping the unreserved bottom to zero
+discarded the space between the natural content bottom and the viewport bottom. When an entering text
+block replaced the reserve, the scroll range briefly became too short and Chromium clamped the
+position backward. Preserve that negative unreserved offset when calculating the required reserve,
+and do not consume append reserve from temporary exit space while its departing tray still exists.
+The handoff regression covers both overflowing history and history just below the overflow boundary.
 
 1. Reproduce with the reported session or an exact serialized equivalent.
 2. Match extension pagination: initial 200-message window and `before` page prepends.

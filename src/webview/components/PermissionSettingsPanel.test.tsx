@@ -343,6 +343,35 @@ describe('PermissionSettingsPanel', () => {
     );
   });
 
+  it('does not hide generated-looking session rules with different actions', async () => {
+    setState('sessions', [
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'Session',
+        version: '1',
+        time: { created: 1, updated: 1 },
+      },
+    ]);
+    setState('activeSessionId', 'session-1');
+    setState('sessionPermissionModes', { 'session-1': 'auto' });
+    const autoRules = getSessionPermissionRulesForMode('auto', 'update');
+    mocks.loadSessionRules.mockResolvedValue([
+      { ...autoRules[0]!, action: 'allow' },
+      ...autoRules.slice(1),
+    ]);
+    cleanup = render(() => <PermissionSettingsPanel />, container);
+    await flush();
+
+    const sessionSection = [
+      ...container.querySelectorAll<HTMLElement>('.permission-config-section'),
+    ].find((section) => section.querySelector('h2')?.textContent === 'Current session rules')!;
+    expect(sessionSection.querySelectorAll('.permission-config-rule')).toHaveLength(
+      autoRules.length
+    );
+  });
+
   it('adds and saves a project permission rule', async () => {
     const saved = {
       ...config,
@@ -361,6 +390,9 @@ describe('PermissionSettingsPanel', () => {
     );
     names[1]!.value = 'websearch';
     names[1]!.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    const patterns = container.querySelectorAll<HTMLInputElement>('input[aria-label="Pattern"]');
+    expect(patterns[1]?.value).toBe('*');
+    expect(patterns[1]?.disabled).toBe(true);
     const actions = container.querySelectorAll<HTMLButtonElement>(
       '.permission-config-action-button'
     );

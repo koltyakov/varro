@@ -758,7 +758,7 @@ export async function runCapture(options) {
         VARRO_AI_WORKSPACE: workspace,
         VARRO_AI_LAUNCH_INTENT: path.join(output, 'launch-intent.json'),
         VARRO_SANDBOX_FAKE_MODE: 'startup-exit',
-        VARRO_SANDBOX_FAKE_VERSION: '1.18.29',
+        VARRO_SANDBOX_FAKE_VERSION: '1.18.30',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });

@@ -1,3 +1,4 @@
+import { batch } from 'solid-js';
 import { appStore } from '../lib/stores/app-store';
 import { isTodoToolName } from '../lib/tool-normalization';
 import type { AssistantMessage, MessageEntry, NormalizedTodo, Part } from '../types';
@@ -68,8 +69,12 @@ export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
           setStateTodos([]);
           return;
         }
-        setStateTodos(todos, { preserveAdvancedStatuses: true });
-        advanceTodosFromMessages(messages);
+        // Resolve the native snapshot and message fallback as one visible update.
+        // An empty intermediate list would unmount the panel and replay its entrance animation.
+        batch(() => {
+          setStateTodos(todos, { preserveAdvancedStatuses: true });
+          advanceTodosFromMessages(messages);
+        });
       }
     } catch {
       nativeTodosEnabled = false;

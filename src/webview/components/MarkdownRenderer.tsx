@@ -1254,7 +1254,11 @@ function renderIncompleteStreamingMarkdown(content: string): IncompleteStreaming
       trailingAngleUrl.index! + trailingAngleUrl[0].length - trailingAngleUrl[1]!.length;
     pendingStart = Math.min(pendingStart, candidateStart);
   }
-  pendingStart = Math.min(pendingStart, hideIncompleteStreamingTableRow(blockSafeContent).length);
+  const tableSafeContent = hideIncompleteStreamingTableRow(blockSafeContent);
+  if (tableSafeContent.length < blockSafeContent.length) {
+    // A hidden marker still creates a table row and reserves its growing text height.
+    return { content: tableSafeContent, marker: null, pendingText: null, hidePendingText: false };
+  }
   if (pendingStart >= content.length) {
     return { content, marker: null, pendingText: null, hidePendingText: false };
   }

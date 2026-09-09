@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
+import { Show } from 'solid-js';
 import { TodoList } from './TodoList';
-import { resetDefaultAppState, setState } from '../lib/state';
+import { resetDefaultAppState, setState, state } from '../lib/state';
+import { createTodoSyncOperations } from '../hooks/todo-sync';
 import { STORAGE_KEYS, readStored, writeStored } from '../lib/state-storage';
-import type { UserMessage } from '../types';
+import type { MessageEntry, NormalizedTodo, UserMessage } from '../types';
 import { fixture } from '../test-fixtures';
 
 let container: HTMLDivElement | null = null;
@@ -66,6 +68,66 @@ describe('TodoList', () => {
     expect(list?.hasAttribute('tabindex')).toBe(false);
     expect(list?.querySelectorAll('li')).toHaveLength(0);
     expect(progressFill?.style.width).toBe('0%');
+  });
+
+  it('keeps the expanded panel mounted when an empty native snapshot falls back to message todos', async () => {
+    const todos: NormalizedTodo[] = [
+      {
+        id: 'task-1',
+        content: 'Keep the replay panel visible',
+        status: 'in_progress',
+        priority: 'high',
+      },
+    ];
+    const messages: MessageEntry[] = [
+      fixture<MessageEntry>({
+        info: {
+          id: 'assistant-1',
+          sessionID: 'session-1',
+          role: 'assistant',
+          time: { created: 1 },
+        },
+        parts: [
+          {
+            id: 'todo-part',
+            messageID: 'assistant-1',
+            sessionID: 'session-1',
+            type: 'tool',
+            tool: 'todowrite',
+            callID: 'todo-call',
+            state: {
+              status: 'completed',
+              input: { todos },
+              output: '',
+              title: 'Todos',
+              metadata: {},
+              time: { start: 1, end: 2 },
+            },
+          },
+        ],
+      }),
+    ];
+    setState('activeSessionId', 'session-1');
+    setState('todos', todos);
+    cleanup = render(
+      () => (
+        <Show when={state.todos.length > 0}>
+          <TodoList />
+        </Show>
+      ),
+      container!
+    );
+    const panel = container!.querySelector('.todo-block');
+    const list = container!.querySelector('.todo-block-list');
+    expect(list).not.toBeNull();
+    const operations = createTodoSyncOperations({ loadSessionTodos: async () => [] });
+    await operations.syncTodosForSession('session-1', messages);
+    await operations.syncTodosForSession('session-1', messages);
+    expect(container!.querySelector('.todo-block')).toBe(panel);
+    expect(container!.querySelector('.todo-block-list')).toBe(list);
+    expect(container!.querySelector('.todo-block-header')?.getAttribute('aria-expanded')).toBe(
+      'true'
+    );
   });
 
   it('makes an overflowing todo list keyboard-scrollable', async () => {

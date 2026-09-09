@@ -622,8 +622,12 @@ export type PermissionEventProperties =
       permissionID?: string;
       requestID?: string;
       permission?: string;
+      action?: string;
       pattern?: string | string[];
       patterns?: string | string[];
+      resources?: string[];
+      always?: string[];
+      save?: string[];
       sessionID: string;
       messageID?: string;
       callID?: string;
@@ -631,6 +635,7 @@ export type PermissionEventProperties =
       metadata?: UnknownRecord;
       time?: { created: number };
       tool?: { messageID?: string; callID?: string };
+      source?: { type?: string; messageID?: string; callID?: string };
       type?: string;
     };
 

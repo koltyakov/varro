@@ -80,15 +80,15 @@ describe('FileSearchService', () => {
     vi.useRealTimers();
     const workspaceFolder = vscodeMock.workspaceFolder;
     vscodeMock.workspace.createFileSystemWatcher.mockImplementation(() => {
-      let createListener: (() => void) | undefined;
-      let deleteListener: (() => void) | undefined;
+      let createListener: ((uri: { fsPath: string }) => void) | undefined;
+      let deleteListener: ((uri: { fsPath: string }) => void) | undefined;
       let changeListener: (() => void) | undefined;
       return {
-        onDidCreate: vi.fn((listener: () => void) => {
+        onDidCreate: vi.fn((listener: (uri: { fsPath: string }) => void) => {
           createListener = listener;
           return { dispose: vi.fn() };
         }),
-        onDidDelete: vi.fn((listener: () => void) => {
+        onDidDelete: vi.fn((listener: (uri: { fsPath: string }) => void) => {
           deleteListener = listener;
           return { dispose: vi.fn() };
         }),
@@ -97,8 +97,8 @@ describe('FileSearchService', () => {
           return { dispose: vi.fn() };
         }),
         dispose: vi.fn(),
-        fireCreate: () => createListener?.(),
-        fireDelete: () => deleteListener?.(),
+        fireCreate: (fsPath = '/repo/src/new.ts') => createListener?.({ fsPath }),
+        fireDelete: (fsPath = '/repo/src/old.ts') => deleteListener?.({ fsPath }),
         fireChange: () => changeListener?.(),
       };
     });
@@ -152,6 +152,33 @@ describe('FileSearchService', () => {
 
     expect(vscodeMock.workspace.findFiles).toHaveBeenCalledTimes(1);
     service.dispose();
+  });
+
+  it.each(['fireCreate', 'fireDelete'] as const)('ignores excluded paths on %s', async (event) => {
+    vscodeMock.workspace.findFiles.mockResolvedValue([{ fsPath: '/repo/src/first.ts' }]);
+    const { FileSearchService } = await loadModule();
+    const service = new FileSearchService();
+    const onResult = vi.fn();
+    try {
+      search(service, 1, '', 10, onResult);
+      await vi.waitFor(() => expect(onResult).toHaveBeenCalledTimes(1));
+      const watcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[0]!.value as {
+        fireCreate(path: string): void;
+        fireDelete(path: string): void;
+      };
+      for (const directory of ['dist', 'build', 'node_modules', '.git', 'coverage']) {
+        watcher[event](`/repo/packages/app/${directory}/output.js`);
+      }
+      search(service, 2, '', 10, onResult);
+      await vi.waitFor(() => expect(onResult).toHaveBeenCalledTimes(2));
+      expect(vscodeMock.workspace.findFiles).toHaveBeenCalledTimes(1);
+      watcher[event]('/repo/src/new-file.ts');
+      search(service, 3, '', 10, onResult);
+      await vi.waitFor(() => expect(onResult).toHaveBeenCalledTimes(3));
+      expect(vscodeMock.workspace.findFiles).toHaveBeenCalledTimes(2);
+    } finally {
+      service.dispose();
+    }
   });
 
   it('disposes an inactive watcher and recreates it on the next search', async () => {

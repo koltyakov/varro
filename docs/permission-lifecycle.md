@@ -230,6 +230,11 @@ Choosing a scope immediately submits that approval. Dismissing the menu leaves t
   project OpenCode configuration, then sends the same OpenCode standing response for the current
   runtime. The config write must not call OpenCode's config-update route, dispose an instance, or
   restart the server. Never derive or broaden project rules from webview display metadata.
+- Project config follows OpenCode's `PermissionConfig` shape. A top-level scalar action represents
+  the `*` permission and `*` pattern and must remain effective when adding a narrower rule.
+  `todowrite`, `question`, `webfetch`, `websearch`, and `doom_loop` accept only scalar actions inside
+  the permission object; never serialize pattern maps for those names or broaden a non-wildcard
+  standing scope to make it fit.
 - Varro shows only server-memory entries that match a successful `always` reply it observed. OpenCode's
   saved-permission endpoint can also return internal allowances that the user did not add; those do not
   belong in the user-managed layer. Legacy OpenCode permission replies keep `always` rules in an

@@ -21,6 +21,18 @@ export const KNOWN_PERMISSION_NAMES = [
   'skill',
 ] as const;
 
+const SCALAR_CONFIG_PERMISSION_NAMES = new Set([
+  'todowrite',
+  'question',
+  'webfetch',
+  'websearch',
+  'doom_loop',
+]);
+
+export function isScalarConfigPermission(permission: string): boolean {
+  return SCALAR_CONFIG_PERMISSION_NAMES.has(permission);
+}
+
 const FULL_ACCESS_PERMISSION_RULES: PermissionRule[] = [
   ...KNOWN_PERMISSION_NAMES.map<PermissionRule>((permission) => ({
     permission,

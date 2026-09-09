@@ -142,6 +142,7 @@ describe('normalizePermissionEvent', () => {
       sessionID: 'session-1',
       action: 'edit',
       resources: ['src/app.ts', 'src/app.test.ts'],
+      save: ['src/*'],
       metadata: { reason: 'tool call' },
       source: { type: 'tool', messageID: 'msg-42', callID: 'call-1' },
     });
@@ -150,6 +151,7 @@ describe('normalizePermissionEvent', () => {
     expect(out?.id).toBe('perm-v2');
     expect(out?.type).toBe('edit');
     expect(out?.pattern).toEqual(['src/app.ts', 'src/app.test.ts']);
+    expect(out?.always).toEqual(['src/*']);
     expect(out?.messageID).toBe('msg-42');
     expect(out?.callID).toBe('call-1');
     expect(out?.title).toBe('edit src/app.ts, src/app.test.ts');

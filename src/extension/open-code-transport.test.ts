@@ -30,6 +30,7 @@ vi.mock('./util/opencode-request', () => ({
 }));
 
 import { OpenCodeTransport } from './open-code-transport';
+import * as serverUtils from './server-utils';
 import { diagnosticTimeline } from './diagnostics';
 import { getOpenCodeDirectoryHeaders, scopeOpenCodeRequest } from './util/opencode-request';
 
@@ -159,6 +160,46 @@ function stubPlatform(platform: NodeJS.Platform) {
 }
 
 describe('OpenCodeTransport request timeouts', () => {
+  it.each(['\n\n', '\r\n\r\n', '\r\r', '\r\n\n', '\n\r\n'])(
+    'preserves fragmented events and split %j delimiters',
+    async (delimiter) => {
+      const transport = createTransport();
+      const events = [
+        { type: 'server.connected', properties: { text: 'x'.repeat(32_768) } },
+        { type: 'server.connected', properties: { text: 'second' } },
+      ];
+      const wire = events.map((event) => `data: ${JSON.stringify(event)}${delimiter}`).join('');
+      const scan = vi.spyOn(serverUtils, 'findSseChunkBoundary');
+      let offset = 0;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => ({
+          ok: true,
+          body: {
+            getReader: () => ({
+              read: async () =>
+                offset < wire.length
+                  ? { done: false, value: new TextEncoder().encode(wire.slice(offset, ++offset)) }
+                  : { done: true, value: undefined },
+            }),
+          },
+        }))
+      );
+      try {
+        await transport.startEventStream();
+        expect(emitEventMock.mock.calls.map(([event]) => event)).toEqual(events);
+        const scannedCharacters = scan.mock.calls.reduce(
+          (total, [buffer, start]) => total + buffer.length - start,
+          0
+        );
+        expect(scannedCharacters).toBeLessThanOrEqual(wire.length * 4);
+      } finally {
+        transport.stopEventStream();
+        vi.unstubAllGlobals();
+      }
+    }
+  );
+
   it.each([false, true])(
     'yields between buffered SSE chunks and honors cancellation (stop=%s)',
     async (stopOnHeartbeat) => {

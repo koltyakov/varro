@@ -22,6 +22,7 @@ import type {
   PermissionRule,
 } from '../shared/opencode-types';
 import { parseSessionPromptEndpoint } from '../shared/opencode-endpoints';
+import { isScalarConfigPermission } from '../shared/permission-rules';
 import {
   createSessionWorkspaceMetadata,
   getSessionWorkspaceScopeFromMetadata,
@@ -289,6 +290,7 @@ type OpenCodeConfigSnapshot = {
 };
 
 type SessionSummaryCacheEntry = {
+  pending: boolean;
   expiresAt: number;
   request: Promise<SessionDiffSummary>;
 };
@@ -2764,7 +2766,7 @@ export class RestProxy {
     const cacheKey = revisionCacheKey ?? sessionID;
     const now = Date.now();
     const cached = this.sessionSummaryRequests.get(cacheKey);
-    if (cached && cached.expiresAt > now) {
+    if (cached && (cached.pending || cached.expiresAt > now)) {
       this.sessionSummaryRequests.delete(cacheKey);
       this.sessionSummaryRequests.set(cacheKey, cached);
       return cached.request;
@@ -2773,6 +2775,7 @@ export class RestProxy {
 
     const request = this.readSessionDiffSummary(sessionID);
     const entry = {
+      pending: true,
       expiresAt: now + SESSION_SUMMARY_CACHE_TTL_MS,
       request,
     };
@@ -2784,6 +2787,7 @@ export class RestProxy {
     }
     void request.then(
       () => {
+        entry.pending = false;
         if (!revisionCacheKey && this.sessionSummaryRequests.get(cacheKey) === entry) {
           this.sessionSummaryRequests.delete(cacheKey);
         }
@@ -4273,18 +4277,41 @@ export class RestProxy {
           nextRaw = applyJsoncChange(nextRaw, ['$schema'], 'https://opencode.ai/config.json');
         }
 
-        const targetPermission = asRecord(target.config.permission)?.[permission];
-        const effectivePermission = asRecord(currentSnapshot.config.permission)?.[permission];
-        const rules: Record<string, unknown> =
-          typeof targetPermission === 'string'
-            ? { '*': targetPermission }
-            : asRecord(targetPermission)
-              ? { ...asRecord(targetPermission) }
-              : typeof effectivePermission === 'string'
-                ? { '*': effectivePermission }
-                : {};
-        for (const pattern of patterns) rules[pattern] = 'allow';
-        nextRaw = applyJsoncChange(nextRaw, ['permission', permission], rules);
+        const targetPermissionConfig = target.config.permission;
+        const effectivePermissionConfig = currentSnapshot.config.permission;
+        const scalarConfigPermission = isScalarConfigPermission(permission);
+        if (scalarConfigPermission && patterns.some((pattern) => pattern !== '*')) {
+          throw new Error(
+            `Project permission ${permission} only supports the wildcard pattern in OpenCode config`
+          );
+        }
+        const fallbackAction = isPermissionAction(targetPermissionConfig)
+          ? targetPermissionConfig
+          : isPermissionAction(effectivePermissionConfig)
+            ? effectivePermissionConfig
+            : null;
+        if (fallbackAction) {
+          const permissionConfig: Record<string, unknown> = { '*': fallbackAction };
+          permissionConfig[permission] = scalarConfigPermission
+            ? 'allow'
+            : Object.fromEntries(patterns.map((pattern) => [pattern, 'allow']));
+          nextRaw = applyJsoncChange(nextRaw, ['permission'], permissionConfig);
+        } else if (scalarConfigPermission) {
+          nextRaw = applyJsoncChange(nextRaw, ['permission', permission], 'allow');
+        } else {
+          const targetPermission = asRecord(target.config.permission)?.[permission];
+          const effectivePermission = asRecord(currentSnapshot.config.permission)?.[permission];
+          const rules: Record<string, unknown> =
+            typeof targetPermission === 'string'
+              ? { '*': targetPermission }
+              : asRecord(targetPermission)
+                ? { ...asRecord(targetPermission) }
+                : typeof effectivePermission === 'string'
+                  ? { '*': effectivePermission }
+                  : {};
+          for (const pattern of patterns) rules[pattern] = 'allow';
+          nextRaw = applyJsoncChange(nextRaw, ['permission', permission], rules);
+        }
 
         const latestStat = await this.readConfigStat(target.uri);
         if (!this.areConfigStatsEqual(initialStat, latestStat)) {
@@ -4302,6 +4329,9 @@ export class RestProxy {
   }
 
   private normalizeOpenCodePermissionRules(value: unknown): PermissionRule[] {
+    if (isPermissionAction(value)) {
+      return [{ permission: '*', pattern: '*', action: value }];
+    }
     const permissions = asRecord(value);
     if (!permissions) return [];
     const rules: PermissionRule[] = [];
@@ -4596,9 +4626,25 @@ export class RestProxy {
         if (typeof target.config.$schema !== 'string' || !target.config.$schema.trim()) {
           nextRaw = applyJsoncChange(nextRaw, ['$schema'], 'https://opencode.ai/config.json');
         }
-        const permissionConfig: Record<string, Record<string, PermissionRule['action']>> = {};
+        const permissionConfig: Record<
+          string,
+          PermissionRule['action'] | Record<string, PermissionRule['action']>
+        > = {};
         for (const rule of rules) {
-          (permissionConfig[rule.permission] ??= {})[rule.pattern] = rule.action;
+          if (isScalarConfigPermission(rule.permission)) {
+            if (rule.pattern !== '*') {
+              throw new Error(
+                `Project permission ${rule.permission} only supports the wildcard pattern in OpenCode config`
+              );
+            }
+            permissionConfig[rule.permission] = rule.action;
+            continue;
+          }
+          const permissionRules = permissionConfig[rule.permission];
+          const patterns =
+            permissionRules && typeof permissionRules !== 'string' ? permissionRules : {};
+          patterns[rule.pattern] = rule.action;
+          permissionConfig[rule.permission] = patterns;
         }
         nextRaw = applyJsoncChange(
           nextRaw,
@@ -4763,6 +4809,10 @@ function parseOpenCodeConfig(raw: string, path: string): Record<string, unknown>
     throw new Error(`OpenCode config at ${path} must contain a JSON object`);
   }
   return parsed as Record<string, unknown>;
+}
+
+function isPermissionAction(value: unknown): value is PermissionRule['action'] {
+  return value === 'allow' || value === 'ask' || value === 'deny';
 }
 
 function mergeOpenCodeConfig(

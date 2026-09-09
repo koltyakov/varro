@@ -626,7 +626,7 @@ export function MessageList() {
   let activityExitSummaryObserver: MutationObserver | null = null;
   let activityExitSummarySettleRafId = 0;
   let activityExitSummarySettleFrames = 0;
-  let activityExitHeldResponseTextSignature: string | null = null;
+  let activityExitHeldResponseContentSignature: string | null = null;
   let activityCollapseSettleRafId = 0;
   let lastWheelAt = Number.NEGATIVE_INFINITY;
   let lastUserScrollAt = Number.NEGATIVE_INFINITY;
@@ -3869,19 +3869,20 @@ export function MessageList() {
       groupKey: summary.dataset.activitySummaryGroupKey,
       top: summary.getBoundingClientRect().top - containerRef.getBoundingClientRect().top,
     };
-    activityExitHeldResponseTextSignature = getResponseTextSignature();
+    activityExitHeldResponseContentSignature = getResponseContentSignature();
   }
 
   function startActivityExitSummaryObserver(anchor: ActivityExitSummaryAnchor) {
     if (!trackRef || activityExitSummaryObserver) return;
     activityExitSummaryObserver = new MutationObserver(() => {
+      // New standalone content ends the collapse owner's hold even during settling.
+      // Otherwise an inline edit and bottom follow can race the obsolete summary target.
       if (
-        activityExitHeldResponseTextSignature !== null &&
-        activityExitSummarySettleFrames === 0 &&
+        activityExitHeldResponseContentSignature !== null &&
         activityExitBottomTarget === null &&
         exitingActivityPartKeys().size === 0 &&
         isLoading() &&
-        getResponseTextSignature() !== activityExitHeldResponseTextSignature
+        getResponseContentSignature() !== activityExitHeldResponseContentSignature
       ) {
         clearActivityExitSummaryAnchor();
         performScroll({ force: true });
@@ -3925,9 +3926,9 @@ export function MessageList() {
       ) {
         activityExitSummarySettleRafId = requestAnimationFrame(settle);
       } else if (isLoading() && untrack(appendBottomReserve) > 0.5) {
-        // Keep ownership without a hot frame loop until completion or response text arrives.
+        // Keep ownership without a hot frame loop until completion or response content arrives.
         activityExitSummarySettleFrames = 0;
-        activityExitHeldResponseTextSignature = getResponseTextSignature();
+        activityExitHeldResponseContentSignature = getResponseContentSignature();
       } else {
         clearActivityExitSummaryAnchor();
       }
@@ -3936,7 +3937,12 @@ export function MessageList() {
   }
 
   function restoreActivityExitSummaryAnchor(anchor: ActivityExitSummaryAnchor) {
-    if (!containerRef || state.activeSessionId !== anchor.sessionId) return;
+    if (
+      !containerRef ||
+      state.activeSessionId !== anchor.sessionId ||
+      activityExitSummaryAnchor !== anchor
+    )
+      return;
     if (exitingActivityPartKeys().size > 0 && activityExitBottomTarget !== null) {
       // Keep the fixed exit target reachable, but do not reserve for summary drift:
       // that cannot move the summary and would feed back through spacer mutations.
@@ -3981,20 +3987,22 @@ export function MessageList() {
 
   function clearActivityExitSummaryAnchor() {
     activityExitSummaryAnchor = null;
-    activityExitHeldResponseTextSignature = null;
+    activityExitHeldResponseContentSignature = null;
     stopActivityExitSummaryObserver();
   }
 
-  function getResponseTextSignature() {
+  function getResponseContentSignature() {
     if (!trackRef) return '';
     return [
       ...trackRef.querySelectorAll<HTMLElement>(
-        '.assistant-message-flow-item > .rendered-markdown'
+        '.assistant-message-flow-item[data-assistant-render-key^="part:"], .assistant-message-flow-item[data-assistant-render-key^="file-edit-stack:"]'
       ),
     ]
+      .filter((element) => (element.textContent?.length ?? 0) > 0)
       .map((element) => {
-        const item = element.closest<HTMLElement>('[data-assistant-render-key]');
-        return `${item?.dataset.assistantRenderKey ?? ''}:${element.textContent?.length ?? 0}`;
+        // Inline edits and other standalone parts consume the exit reserve just like prose.
+        // Exclude activity groups/trays: their own collapse must keep its summary anchor.
+        return `${element.dataset.assistantRenderKey ?? ''}:${element.textContent?.length ?? 0}`;
       })
       .join('|');
   }
@@ -4293,7 +4301,12 @@ export function MessageList() {
   }
 
   function performScroll(options?: { force?: boolean }) {
-    if (stickyNavigationOwnsScroll() || activityExitBottomTarget !== null) return;
+    if (
+      stickyNavigationOwnsScroll() ||
+      activityExitBottomTarget !== null ||
+      activityExitSummaryAnchor
+    )
+      return;
     if (appendScrollRafId) return;
     if (!options?.force && userScrollRecentlyActive() && !followModeLocked) return;
 
@@ -4335,21 +4348,22 @@ export function MessageList() {
     if (!containerRef) return;
     const reserve = untrack(appendBottomReserve);
     if (reserve <= 0) return;
+    // Exit space temporarily overlaps the departing tray; it is not replacement content.
+    if (activityExitBottomTarget !== null) return;
     if (
       activityExitSummaryAnchor &&
       isLoading() &&
       !state.streamingPartId &&
       state.streamingText.length === 0 &&
       !hasVisibleActivityTrayRows() &&
-      getResponseTextSignature() === activityExitHeldResponseTextSignature
+      getResponseContentSignature() === activityExitHeldResponseContentSignature
     ) {
       return;
     }
 
-    const unreservedBottom = Math.max(
-      0,
-      containerRef.scrollHeight - reserve - containerRef.clientHeight
-    );
+    // A short transcript also needs reserve for the space below its natural content.
+    // Clamping this to zero drops that space before an entering block has grown into it.
+    const unreservedBottom = containerRef.scrollHeight - reserve - containerRef.clientHeight;
     const nextReserve = Math.max(0, appendBottomReserveTarget - unreservedBottom);
     if (Math.abs(nextReserve - reserve) <= 0.5) return;
     setAppendBottomReserve(nextReserve);

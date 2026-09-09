@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Message, Session } from '../types';
+import { resolveMessagesSelectedModel } from './session/session-sync';
 import {
-  resolveMessagesSelectedModel,
-  selectSessionWithStateDependencies,
-  syncSessionMessagesWithStateDependencies,
-  syncSessionWithStateDependencies,
-} from './session/session-sync';
+  selectSessionWithDependencies,
+  syncSessionMessagesWithDependencies,
+  syncSessionWithDependencies,
+} from './session/session-selection';
 import { provider } from './useOpenCode.test-support';
 
 function assistantMessage(id: string): Message {
@@ -47,7 +47,7 @@ describe('session sync helpers', () => {
     const activeSession = { value: 'session-0' as string | null };
     const startLoading = vi.fn();
 
-    await selectSessionWithStateDependencies(
+    await selectSessionWithDependencies(
       {
         getActiveSessionId: () => activeSession.value,
         setActiveSessionId: (id) => {
@@ -104,7 +104,7 @@ describe('session sync helpers', () => {
     const messages = [{ info: assistantMessage('assistant-1'), parts: [] }];
     const currentGeneration = { value: 0 };
 
-    await syncSessionMessagesWithStateDependencies(
+    await syncSessionMessagesWithDependencies(
       {
         getActiveSessionId: () => 'session-1',
         getSessionStatus: () => ({ type: 'idle' }),
@@ -133,7 +133,7 @@ describe('session sync helpers', () => {
   it('syncs session metadata through the state dependency wrapper', async () => {
     const upsertSession = vi.fn();
 
-    await syncSessionWithStateDependencies(
+    await syncSessionWithDependencies(
       {
         loadSession: vi.fn(async () => session('session-1')),
         upsertSession,
@@ -148,7 +148,7 @@ describe('session sync helpers', () => {
     let resolveSession: ((value: Session) => void) | undefined;
     let shouldApply = true;
     const upsertSession = vi.fn();
-    const syncing = syncSessionWithStateDependencies(
+    const syncing = syncSessionWithDependencies(
       {
         loadSession: () =>
           new Promise<Session>((resolve) => {

@@ -340,6 +340,7 @@ export class OpenCodeTransport {
       const decoder = new TextDecoder();
       let buffer = '';
       let cursor = 0;
+      let boundarySearchIndex = 0;
       // Buffered reads resolve as microtasks. Carry the budget across chunks so
       // a burst of individually cheap events still yields to timers and host IPC.
       let yieldedAt = Date.now();
@@ -367,9 +368,10 @@ export class OpenCodeTransport {
         }
         buffer += decoder.decode(value, { stream: true });
         let boundary: { index: number; length: number } | null;
-        while ((boundary = findSseChunkBoundary(buffer, cursor))) {
+        while ((boundary = findSseChunkBoundary(buffer, boundarySearchIndex))) {
           this.processSseChunk(buffer.slice(cursor, boundary.index), controller, generation);
           cursor = boundary.index + boundary.length;
+          boundarySearchIndex = cursor;
           if (Date.now() - yieldedAt >= OpenCodeTransport.EVENT_PROCESSING_YIELD_MS) {
             await new Promise<void>((resolve) => setTimeout(resolve, 0));
             if (!isCurrentStream()) return;
@@ -380,6 +382,9 @@ export class OpenCodeTransport {
           buffer = buffer.slice(cursor);
           cursor = 0;
         }
+        // The longest delimiter is CRLF CRLF. Only its last three characters
+        // can overlap the next chunk; the preceding data has already been scanned.
+        boundarySearchIndex = Math.max(0, buffer.length - 3);
         if (buffer.length > OpenCodeTransport.EVENT_MAX_BUFFER_CHARS) {
           abortForReconnect(
             'Event stream buffer exceeded safety limit; reconnecting',

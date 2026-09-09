@@ -68,8 +68,9 @@ export function normalizePermissionEvent<T>(props: T): Permission | null {
     : isString(patternValue)
       ? patternValue
       : undefined;
-  const always = Array.isArray(source.always)
-    ? source.always.filter((pattern): pattern is string => isString(pattern))
+  const alwaysValue = source.always ?? source.save;
+  const always = Array.isArray(alwaysValue)
+    ? alwaysValue.filter((pattern): pattern is string => isString(pattern))
     : undefined;
   const title =
     isString(source.title) && source.title.trim().length > 0

@@ -1924,6 +1924,97 @@ describe('RestProxy handleRequest', () => {
     mocks.vscode.workspace.fs.writeFile.mockClear();
   });
 
+  it('persists scalar-only project permissions as action strings', async () => {
+    const existingConfig = JSON.stringify({
+      permission: { webfetch: { '*': 'ask' } },
+    });
+    mocks.vscode.workspace.textDocuments = [];
+    mocks.vscode.workspace.fs.readFile.mockImplementation((uri: { fsPath: string }) => {
+      if (uri.fsPath === '/repo/opencode.json') {
+        return Promise.resolve(new TextEncoder().encode(existingConfig));
+      }
+      return Promise.reject({ code: 'FileNotFound' });
+    });
+    mocks.vscode.workspace.fs.stat.mockResolvedValue({ mtime: 1, size: existingConfig.length });
+    mocks.vscode.workspace.fs.writeFile.mockClear();
+    const serverRequest = vi.fn((method: string, path: string) =>
+      Promise.resolve(
+        method === 'GET' && path === '/permission'
+          ? [
+              {
+                id: 'perm-webfetch',
+                sessionID: 'session-1',
+                permission: 'webfetch',
+                always: ['*'],
+              },
+            ]
+          : undefined
+      )
+    );
+    const { proxy } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(
+      makePayload(856, 'POST', '/varro/permission/project-allow?directory=%2Frepo', {
+        sessionId: 'session-1',
+        permissionId: 'perm-webfetch',
+      })
+    );
+
+    const [, encoded] = mocks.vscode.workspace.fs.writeFile.mock.calls[0]!;
+    expect(JSON.parse(new TextDecoder().decode(encoded))).toMatchObject({
+      permission: { webfetch: 'allow' },
+    });
+    mocks.vscode.workspace.fs.writeFile.mockClear();
+  });
+
+  it('preserves a top-level scalar policy when adding a project permission', async () => {
+    const existingConfig = JSON.stringify({ permission: 'deny' });
+    mocks.vscode.workspace.textDocuments = [];
+    mocks.vscode.workspace.fs.readFile.mockImplementation((uri: { fsPath: string }) => {
+      if (uri.fsPath === '/repo/opencode.json') {
+        return Promise.resolve(new TextEncoder().encode(existingConfig));
+      }
+      return Promise.reject({ code: 'FileNotFound' });
+    });
+    mocks.vscode.workspace.fs.stat.mockResolvedValue({ mtime: 1, size: existingConfig.length });
+    mocks.vscode.workspace.fs.writeFile.mockClear();
+    const serverRequest = vi.fn((method: string, path: string) =>
+      Promise.resolve(
+        method === 'GET' && path === '/permission'
+          ? [
+              {
+                id: 'perm-bash',
+                sessionID: 'session-1',
+                permission: 'bash',
+                always: ['npm test *'],
+              },
+            ]
+          : undefined
+      )
+    );
+    const { proxy } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(
+      makePayload(857, 'POST', '/varro/permission/project-allow?directory=%2Frepo', {
+        sessionId: 'session-1',
+        permissionId: 'perm-bash',
+      })
+    );
+
+    const [, encoded] = mocks.vscode.workspace.fs.writeFile.mock.calls[0]!;
+    expect(JSON.parse(new TextDecoder().decode(encoded))).toMatchObject({
+      permission: {
+        '*': 'deny',
+        bash: { 'npm test *': 'allow' },
+      },
+    });
+    mocks.vscode.workspace.fs.writeFile.mockClear();
+  });
+
   it('passes authoritative always patterns to the session permission updater', async () => {
     const serverRequest = vi.fn((method: string, path: string) =>
       Promise.resolve(
@@ -2830,6 +2921,29 @@ describe('RestProxy handleRequest', () => {
       )
     ).toHaveLength(1);
   });
+
+  it.each(['', '?revision=123'])(
+    'shares a pending summary beyond its cache TTL (%s)',
+    async (query) => {
+      const summary = deferred<{ messages: unknown[]; descendants: [] }>();
+      const readLocalSessionSummary = vi.fn(() => summary.promise);
+      const { proxy } = createProxy({ readLocalSessionSummary });
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000);
+      const path = `/varro/session/session-1/diff-summary${query}`;
+      try {
+        const first = proxy.handleRequest(makePayload(84, 'GET', path));
+        await vi.waitFor(() => expect(readLocalSessionSummary).toHaveBeenCalledTimes(1));
+        clock.mockReturnValue(4_000);
+        const second = proxy.handleRequest(makePayload(85, 'GET', path));
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        summary.resolve({ messages: [], descendants: [] });
+        await Promise.all([first, second]);
+        expect(readLocalSessionSummary).toHaveBeenCalledTimes(1);
+      } finally {
+        clock.mockRestore();
+      }
+    }
+  );
 
   it('refreshes an unversioned diff summary after the previous request settles', async () => {
     const serverRequest = vi.fn<RestProxyCallbacks['server']['request']>(async () => []);

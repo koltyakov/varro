@@ -585,6 +585,82 @@ describe('SidebarProvider local config routing', () => {
     expect(written).toContain('"git status*": "allow"');
   });
 
+  it('writes scalar-only project permissions as action strings', async () => {
+    vscodeMock.workspace.fs.readFile.mockImplementation((uri: { fsPath: string }) =>
+      uri.fsPath === '/repo/opencode.json'
+        ? Promise.resolve(new TextEncoder().encode('{}'))
+        : Promise.reject({ code: 'FileNotFound' })
+    );
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ mtime: 1, size: 2, type: 0, ctime: 0 });
+
+    const { provider } = await createSidebarProviderInstance();
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: {
+        id: 14,
+        method: 'POST',
+        path: '/varro/opencode-config/permissions',
+        body: {
+          rules: [
+            { permission: 'todowrite', pattern: '*', action: 'allow' },
+            { permission: 'question', pattern: '*', action: 'ask' },
+            { permission: 'webfetch', pattern: '*', action: 'allow' },
+            { permission: 'websearch', pattern: '*', action: 'deny' },
+            { permission: 'doom_loop', pattern: '*', action: 'ask' },
+            { permission: 'bash', pattern: '*', action: 'deny' },
+          ],
+        },
+      },
+    });
+
+    const [, encoded] = vscodeMock.workspace.fs.writeFile.mock.lastCall as unknown as [
+      { fsPath: string },
+      Uint8Array,
+    ];
+    expect(JSON.parse(new TextDecoder().decode(encoded))).toMatchObject({
+      permission: {
+        todowrite: 'allow',
+        question: 'ask',
+        webfetch: 'allow',
+        websearch: 'deny',
+        doom_loop: 'ask',
+        bash: { '*': 'deny' },
+      },
+    });
+  });
+
+  it('rejects scoped rules for scalar-only project permissions', async () => {
+    vscodeMock.workspace.fs.readFile.mockImplementation((uri: { fsPath: string }) =>
+      uri.fsPath === '/repo/opencode.json'
+        ? Promise.resolve(new TextEncoder().encode('{}'))
+        : Promise.reject({ code: 'FileNotFound' })
+    );
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ mtime: 1, size: 2, type: 0, ctime: 0 });
+
+    const { provider } = await createSidebarProviderInstance();
+    const { posted } = attachTestView(provider);
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: {
+        id: 16,
+        method: 'POST',
+        path: '/varro/opencode-config/permissions',
+        body: {
+          rules: [{ permission: 'webfetch', pattern: 'https://example.com/*', action: 'allow' }],
+        },
+      },
+    });
+
+    expect(vscodeMock.workspace.fs.writeFile).not.toHaveBeenCalled();
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: {
+        id: 16,
+        error: 'Project permission webfetch only supports the wildcard pattern in OpenCode config',
+      },
+    });
+  });
+
   it('recalculates effective permission rules from the updated project config', async () => {
     const projectConfig = JSON.stringify({
       permission: {
@@ -688,5 +764,36 @@ describe('SidebarProvider local config routing', () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it('normalizes a top-level scalar permission policy', async () => {
+    vscodeMock.workspace.fs.readFile.mockImplementation((uri: { fsPath: string }) =>
+      uri.fsPath === '/repo/opencode.json'
+        ? Promise.resolve(new TextEncoder().encode('{ "permission": "deny" }'))
+        : Promise.reject({ code: 'FileNotFound' })
+    );
+    const server = createServer({
+      request: vi.fn(async (_method: string, path: string) =>
+        path === '/config' ? { permission: 'deny' } : path === '/session/status' ? {} : []
+      ),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const { posted } = attachTestView(provider);
+
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: { id: 15, method: 'GET', path: '/varro/opencode-config/permissions' },
+    });
+
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: {
+        id: 15,
+        data: expect.objectContaining({
+          projectRules: [{ permission: '*', pattern: '*', action: 'deny' }],
+          effectiveRules: [{ permission: '*', pattern: '*', action: 'deny' }],
+        }),
+      },
+    });
   });
 });

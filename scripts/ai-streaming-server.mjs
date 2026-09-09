@@ -274,7 +274,7 @@ export async function createStreamingServer({ capture, timeline, directory }) {
     sandboxes: [],
   };
   const bootstrap = new Map([
-    ['/global/health', { healthy: true, version: '1.18.29' }],
+    ['/global/health', { healthy: true, version: '1.18.30' }],
     ['/config', {}],
     ['/global/config', {}],
     ['/config/providers', { providers: [], default: {} }],
