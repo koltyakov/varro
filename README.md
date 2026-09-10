@@ -1,3 +1,5 @@
+![Varro](https://raw.githubusercontent.com/koltyakov/varro/main/assets/banner.jpg)
+
 # Varro: OpenCode Workbench
 
 [![Visual Studio Marketplace](https://badgen.net/vs-marketplace/v/koltyakov.varro?color=0078d4)](https://marketplace.visualstudio.com/items?itemName=koltyakov.varro)
