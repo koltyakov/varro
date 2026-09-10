@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   inputText,
   resetDefaultAppState,
@@ -16,6 +16,7 @@ import {
   setSessionHistoryCursor,
 } from '../../lib/message-window';
 import { editingMessage, startEditingMessage } from '../../lib/message-edit-state';
+import { flushInputDraft } from '../../lib/input-draft-persistence';
 import { sessionStore } from '../../lib/stores/session-store';
 import type { Session, SessionStatus } from '../../types';
 import { SessionMcpOperations } from '../session/session-mcp';
@@ -36,6 +37,10 @@ function deferred<T>() {
 describe('open code runtime synchronization', () => {
   beforeEach(() => {
     resetDefaultAppState();
+  });
+
+  afterEach(() => {
+    flushInputDraft();
   });
 
   it('retains the original request timestamp for cached status snapshots', async () => {

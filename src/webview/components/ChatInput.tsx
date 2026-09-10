@@ -1196,6 +1196,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     for (const file of composerFiles()) {
       const label = getLeafPathName(file.relativePath || file.path);
       const marker = `@${file.relativePath || file.path}`;
+      const directoryMarker = marker.endsWith('/') ? marker : `${marker}/`;
+      const hasDirectorySlash = file.type === 'directory' && text.includes(directoryMarker);
       if (text.includes(marker)) {
         const lineRange = formatContextLineRanges(file.lineRanges);
         const title = lineRange
@@ -1204,12 +1206,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         chips.push({
           id: `file:${file.path}`,
           type: 'mention-file',
-          label,
+          label: hasDirectorySlash ? `${label}/` : label,
           path: file.relativePath || file.path,
           title,
           detail: lineRange || undefined,
           icon: file.type === 'directory' ? 'folder' : 'file',
-          textMarker: marker,
+          textMarker: hasDirectorySlash ? directoryMarker : marker,
         });
       }
     }
