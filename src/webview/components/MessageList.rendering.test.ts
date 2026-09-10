@@ -2571,10 +2571,11 @@ describe('MessageList empty state', () => {
     expect(logo?.width).toBe(256);
     expect(logo?.height).toBe(256);
     const hints = container?.querySelectorAll('.chat-empty-hint');
-    expect(hints).toHaveLength(4);
+    expect(hints).toHaveLength(5);
     expect([...hints!].map((hint) => hint.textContent)).toEqual([
       '@ add files and agents',
       '/ run commands',
+      '$ select skills',
       '& link sessions',
       'ShiftEnter new line',
     ]);
@@ -2598,7 +2599,7 @@ describe('MessageList empty state', () => {
 
     expect(container?.querySelector('.chat-empty-state')).toBeInstanceOf(HTMLDivElement);
     expect(container?.querySelector('.chat-empty-logo')).toBeNull();
-    expect(container?.querySelectorAll('.chat-empty-hint')).toHaveLength(4);
+    expect(container?.querySelectorAll('.chat-empty-hint')).toHaveLength(5);
   });
 
   it('does not show the starter logo while switching to an existing chat with no loaded messages yet', () => {

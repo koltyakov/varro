@@ -2,7 +2,7 @@ import type { Provider } from '../types';
 
 type ProviderModel = Provider['models'][string];
 
-const GPT_MODEL_TIER_ORDER = ['sol', 'terra', 'luna'] as const;
+const GPT_MODEL_TIER_ORDER = ['astra', 'sol', 'terra', 'luna'] as const;
 const PROVIDER_PRIORITY = ['openai', 'anthropic', 'github-copilot', 'groq', 'google'] as const;
 
 export function compareProviders(

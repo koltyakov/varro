@@ -8118,6 +8118,9 @@ export function MessageList() {
                       <kbd>/</kbd> run commands
                     </span>
                     <span class="chat-empty-hint">
+                      <kbd>$</kbd> select skills
+                    </span>
+                    <span class="chat-empty-hint">
                       <kbd>&amp;</kbd> link sessions
                     </span>
                     <span class="chat-empty-hint">
