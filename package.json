@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: OpenCode Workbench",
-  "version": "0.28.17",
+  "version": "0.28.18",
   "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
@@ -50,7 +50,9 @@
     "test:scripts:browser": "node --test scripts/browser/*.test.mjs",
     "test:compatibility": "node scripts/opencode-compatibility/run.mjs --check-floor --report artifacts/opencode-compatibility.json --summary scripts/opencode-compatibility/verified.json",
     "compatibility:discover": "node scripts/opencode-compatibility/run.mjs --report artifacts/opencode-compatibility.json",
+    "pretest:e2e": "playwright install chromium",
     "test:e2e": "playwright test",
+    "pretest:e2e:raster": "playwright install chromium",
     "test:e2e:raster": "VARRO_E2E_MODE=raster playwright test",
     "test:vscode-sandbox": "npm run build && node scripts/vscode-sandbox/run.mjs",
     "ai:vscode": "npm run build && node scripts/launch-ai-vscode.mjs",
@@ -72,7 +74,7 @@
     "highlight.js": "11.12.0",
     "jsonc-parser": "3.3.1",
     "marked": "18.0.12",
-    "mermaid": "11.17.2",
+    "mermaid": "^11.17.2",
     "solid-js": "1.9.15"
   },
   "devDependencies": {
@@ -94,7 +96,7 @@
     "rolldown": "1.2.8",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
-    "vite": "8.2.2",
+    "vite": "8.3.0",
     "vite-plugin-solid": "2.11.14",
     "vitest": "5.0.0",
     "ws": "^8.21.3"
