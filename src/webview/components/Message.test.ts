@@ -2885,9 +2885,24 @@ describe('Message assistant final answer rendering', () => {
     resolveProviderAuthFailure('github-copilot');
 
     expect(errorBlock?.textContent).toContain(
-      'Authentication restored. Send a new prompt to continue.'
+      'Credentials updated. Retry to check whether authentication works.'
     );
-    expect(container?.querySelector('.assistant-message-flow-item-error-action')).toBeNull();
+    const retryButton = container?.querySelector<HTMLButtonElement>(
+      '.assistant-message-flow-item-error-action'
+    );
+    expect(retryButton?.textContent).toContain('Retry');
+    retryButton?.click();
+    expect(retryMessageMock).toHaveBeenCalledWith('message-3', 'session-1');
+
+    const { markProviderAuthFailure } = await import('../lib/provider-connection-state');
+    markProviderAuthFailure('github-copilot', 'message-4', assistant.time.created + 1);
+
+    expect(errorBlock?.textContent).toContain(
+      'You are signed out of this provider. Re-authenticate to continue.'
+    );
+    expect(
+      container?.querySelector('.assistant-message-flow-item-error-action')?.textContent
+    ).toContain('Re-authenticate');
   });
 
   it('shows provider credential validation details instead of a signed-out message', () => {

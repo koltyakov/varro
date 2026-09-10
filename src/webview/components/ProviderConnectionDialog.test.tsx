@@ -451,6 +451,41 @@ describe('ProviderConnectionDialog API key flow', () => {
     expect(primaryButton().textContent).toBe('Connect');
   });
 
+  it('keeps auth failures visible when saving credentials returns false', async () => {
+    markProviderAuthFailure('openai', 'message-1');
+    clientMocks.connectApiProvider.mockResolvedValue(false);
+    const onClose = renderDialog();
+    const keyInput = await startApiFlow();
+
+    type(keyInput, 'sk-test');
+    primaryButton().click();
+    await flush();
+
+    expect(alertText()).toContain('Provider credentials were not saved');
+    expect(providerRequiresReconnection('openai')).toBe(true);
+    expect(postMessageMock).not.toHaveBeenCalledWith({ type: 'providers/auth-changed' });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('ignores a successful credential save after the dialog is cancelled', async () => {
+    markProviderAuthFailure('openai', 'message-1');
+    const completion = deferred<boolean>();
+    clientMocks.connectApiProvider.mockImplementation(() => completion.promise);
+    const onClose = renderDialog();
+    const keyInput = await startApiFlow();
+
+    type(keyInput, 'sk-test');
+    primaryButton().click();
+    await flush();
+    dialog()!.querySelector<HTMLButtonElement>('[aria-label="Close"]')!.click();
+    completion.resolve(true);
+    await flush();
+
+    expect(providerRequiresReconnection('openai')).toBe(true);
+    expect(postMessageMock).not.toHaveBeenCalledWith({ type: 'providers/auth-changed' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('disables inputs and shows Connecting while the request is pending', async () => {
     const completion = deferred<boolean>();
     clientMocks.connectApiProvider.mockImplementation(() => completion.promise);
@@ -588,6 +623,38 @@ describe('ProviderConnectionDialog API key flow', () => {
 });
 
 describe('ProviderConnectionDialog OAuth flow', () => {
+  it.each(['auto', 'code'] as const)(
+    'keeps auth failures visible when the %s exchange returns false',
+    async (method) => {
+      markProviderAuthFailure('anthropic', 'message-1');
+      clientMocks.authorizeProvider.mockResolvedValue({
+        url: 'https://auth.example.com/oauth',
+        method,
+        instructions: 'Approve access in your browser',
+      });
+      clientMocks.completeProviderAuth.mockResolvedValue(false);
+      const onClose = renderDialog();
+      chooseProvider('Anthropic');
+      chooseMethod('Claude subscription');
+      primaryButton().click();
+      await flush();
+
+      if (method === 'code') {
+        const codeInput = dialog()!.querySelector<HTMLInputElement>(
+          '.provider-connect-authorization .provider-connect-input'
+        )!;
+        type(codeInput, 'test-code');
+        primaryButton().click();
+        await flush();
+      }
+
+      expect(alertText()).toContain('Provider authorization did not complete');
+      expect(providerRequiresReconnection('anthropic')).toBe(true);
+      expect(postMessageMock).not.toHaveBeenCalledWith({ type: 'providers/auth-changed' });
+      expect(onClose).not.toHaveBeenCalled();
+    }
+  );
+
   it('authorizes, opens the browser, and completes an automatic exchange', async () => {
     const completion = deferred<boolean>();
     clientMocks.completeProviderAuth.mockImplementation(() => completion.promise);

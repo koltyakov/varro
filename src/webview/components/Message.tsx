@@ -33,6 +33,7 @@ import { isWorkspaceDirectoryText, shouldShowAssistantPartInline } from '../lib/
 import {
   markProviderAuthFailure,
   providerAuthRestoredForMessage,
+  providerRequiresReconnection,
   requestProviderConnection,
 } from '../lib/provider-connection-state';
 import { getActiveUsageLimitNotice, isActiveSessionWorking, state } from '../lib/state';
@@ -275,7 +276,13 @@ export function Message(props: {
   });
   const providerAuthRestored = createMemo(() => {
     const info = assistant();
-    return !!info && providerAuthRestoredForMessage(info.id);
+    const providerID = providerAuthProviderID();
+    return (
+      !!info &&
+      !!providerID &&
+      !providerRequiresReconnection(providerID) &&
+      providerAuthRestoredForMessage(info.id)
+    );
   });
   const assistantErrorMessage = createMemo(() => {
     const error = assistant()?.error;
@@ -283,7 +290,7 @@ export function Message(props: {
     if (coveredByUsageLimitBanner()) return null;
     if (providerAuthRequired()) {
       if (providerAuthRestored()) {
-        return 'Authentication restored. Send a new prompt to continue.';
+        return 'Credentials updated. Retry to check whether authentication works.';
       }
       return 'You are signed out of this provider. Re-authenticate to continue.';
     }
@@ -310,8 +317,7 @@ export function Message(props: {
   });
   const assistantErrorAction = createMemo(() => {
     if (!(props.isLastAssistant ?? false) || !canRetryAssistant()) return undefined;
-    if (providerAuthRequired()) {
-      if (providerAuthRestored()) return undefined;
+    if (providerAuthRequired() && !providerAuthRestored()) {
       return {
         label: 'Re-authenticate',
         run: () => requestProviderConnection(providerAuthProviderID()!),

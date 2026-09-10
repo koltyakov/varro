@@ -183,7 +183,7 @@ export function ProviderConnectionDialog(props: {
     try {
       if (method.type === 'api') {
         if (!apiKey().trim()) return;
-        await client.config.connectApiProvider(
+        const connected = await client.config.connectApiProvider(
           {
             providerID: id,
             key: apiKey().trim(),
@@ -191,6 +191,8 @@ export function ProviderConnectionDialog(props: {
           },
           { signal: controller.signal }
         );
+        if (controller.signal.aborted) return;
+        if (connected !== true) throw new Error('Provider credentials were not saved. Try again.');
         finish();
         return;
       }
@@ -209,10 +211,13 @@ export function ProviderConnectionDialog(props: {
         postMessage({ type: 'vscode/open-external', payload: { url: nextAuthorization.url } });
       }
       if (nextAuthorization.method === 'auto') {
-        await client.config.completeProviderAuth(
+        const connected = await client.config.completeProviderAuth(
           { providerID: id, method: index },
           { signal: controller.signal }
         );
+        if (controller.signal.aborted) return;
+        if (connected !== true)
+          throw new Error('Provider authorization did not complete. Try again.');
         finish();
       }
     } catch (error) {
@@ -235,10 +240,13 @@ export function ProviderConnectionDialog(props: {
     const controller = new AbortController();
     authController = controller;
     try {
-      await client.config.completeProviderAuth(
+      const connected = await client.config.completeProviderAuth(
         { providerID: id, method: index, code },
         { signal: controller.signal }
       );
+      if (controller.signal.aborted) return;
+      if (connected !== true)
+        throw new Error('Provider authorization did not complete. Try again.');
       finish();
     } catch (error) {
       if (!controller.signal.aborted) {
