@@ -4,7 +4,7 @@ import { reconcile } from 'solid-js/store';
 import packageJson from '../../../package.json';
 import type * as UseOpenCodeModule from '../hooks/useOpenCode';
 import type { ProviderLimitStatus, WebviewMessage } from '../../shared/protocol';
-import type { MessageEntry, Session, TextPart, UserMessage } from '../types';
+import type { AssistantMessage, MessageEntry, Session, TextPart, UserMessage } from '../types';
 import { ChatInput, sendDroppedContent } from './ChatInput';
 import {
   state,
@@ -6769,6 +6769,42 @@ describe('ChatInput', () => {
     await Promise.resolve();
 
     expect(container?.querySelector('[aria-label="Stop"]')).toBeNull();
+  });
+
+  it('hides stale busy controls for a terminal response but keeps them for a continuation', () => {
+    const terminalAssistant: AssistantMessage = {
+      id: 'assistant-1',
+      sessionID: 'session-1',
+      role: 'assistant',
+      parentID: 'user-1',
+      time: { created: 2, completed: 3 },
+      modelID: 'gpt-5',
+      providerID: 'openai',
+      mode: 'build',
+      path: { cwd: '/repo', root: '/repo' },
+      cost: 0,
+      tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+      finish: 'stop',
+    };
+    setState('activeSessionId', 'session-1');
+    setState('messages', [
+      historyEntry('user-1', 'Prompt'),
+      { info: terminalAssistant, parts: [] },
+    ]);
+    setState('sessionStatus', { 'session-1': { type: 'busy' } });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    expect(container?.querySelector('[aria-label="Stop"]')).toBeNull();
+    expect(container?.querySelector('[aria-label="Send (Enter)"]')).not.toBeNull();
+
+    setState('messages', [
+      historyEntry('user-1', 'Prompt'),
+      { info: { ...terminalAssistant, finish: 'tool_calls' }, parts: [] },
+    ]);
+
+    expect(container?.querySelector('[aria-label="Stop"]')).not.toBeNull();
+    expect(container?.querySelector('[aria-label="Send (Enter)"]')).toBeNull();
   });
 
   it('shows send controls instead of stop while loading with sendable content', () => {

@@ -1396,6 +1396,21 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const skillCommands = createMemo(() =>
     state.commands.filter((command) => command.source === 'skill')
   );
+  const latestAssistantResponseIsTerminal = createMemo(() => {
+    const sessionId = composerSessionId();
+    if (!sessionId) return false;
+    for (let index = state.messages.length - 1; index >= 0; index -= 1) {
+      const message = state.messages[index];
+      if (!message || message.info.sessionID !== sessionId) continue;
+      if (message.info.role === 'user') return false;
+      if (!isAssistantMessage(message.info)) continue;
+      return (
+        (!!message.info.time.completed || !!message.info.error) &&
+        (!isContinuationAssistantFinish(message.info.finish) || !!message.info.error)
+      );
+    }
+    return false;
+  });
   const isComposerBusy = createMemo(() => !props.newSession && isActiveSessionWorking());
   const [composerBusyDisplayHold, setComposerBusyDisplayHold] = createSignal(
     !props.newSession && isActiveSessionWorking()
@@ -1421,7 +1436,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }, COMPOSER_BUSY_DISPLAY_SETTLE_DELAY_MS);
   });
   onCleanup(clearComposerBusyDisplayTimer);
-  const isComposerDisplayBusy = createMemo(() => isComposerBusy() || composerBusyDisplayHold());
+  const isComposerDisplayBusy = createMemo(
+    () => !latestAssistantResponseIsTerminal() && (isComposerBusy() || composerBusyDisplayHold())
+  );
 
   const slashCommands = createMemo(() =>
     getSlashCommands({

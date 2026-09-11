@@ -897,6 +897,8 @@ test('keeps the sent card and previous Worked summary stable through Thinking', 
   await expect(
     page.locator('.trailing-assistant-summary-row .assistant-dialog-summary')
   ).toContainText('Worked for');
+  await expect(page.getByLabel('Stop')).toHaveCount(0);
+  await expect(page.getByLabel('Send (Enter)')).toBeVisible();
   await delayPromptRequest(page, 2_000);
   await composer.fill(text);
   await page.evaluate((promptText) => {
