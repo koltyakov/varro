@@ -1,5 +1,7 @@
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: This E2E callback updates protocol-shaped tool state owned by the controlled harness fixture. */
 import { expect, test } from '@playwright/test';
+import type { ServerEvent } from '../../src/shared/protocol';
+import type { MessageEntry, Part } from '../../src/webview/types';
 import { getE2EState } from './helpers';
 
 test('renders read, edit, and bash tool cards', async ({ page }) => {
@@ -134,6 +136,56 @@ for (const theme of ['dark', 'light']) {
     const summary = page.locator('.assistant-activity-summary').first();
     await expect(summary).toHaveAttribute('aria-expanded', 'false');
     await expect(page.locator('.assistant-activity-details')).toHaveCount(0);
+    await page.evaluate(() => {
+      const harness = (
+        window as typeof window & {
+          __varroE2E: {
+            getSessionMessages: (sessionId: string) => MessageEntry[];
+            replayServerEvent: (event: ServerEvent) => void;
+          };
+        }
+      ).__varroE2E;
+      const message = harness
+        .getSessionMessages('session-tool-cards')
+        .find((entry) => entry.info.role === 'assistant');
+      if (!message) throw new Error('Activity metadata fixture is missing');
+      const updateMessagePart = (part: Part) =>
+        harness.replayServerEvent({
+          type: 'message.part.updated',
+          properties: { part },
+        });
+      for (const part of message.parts) {
+        if (part.type !== 'tool' || part.state.status !== 'completed') continue;
+        if (part.tool === 'grep') {
+          updateMessagePart({
+            ...part,
+            state: { ...part.state, metadata: { ...part.state.metadata, matches: 2 } },
+          });
+        }
+        if (part.tool !== 'read' && part.tool !== 'bash') continue;
+        updateMessagePart({
+          ...part,
+          state: {
+            ...part.state,
+            time: { ...part.state.time, end: part.state.time.start + 4_000 },
+          },
+        });
+      }
+      for (const [index, text] of [
+        '**Reviewing test results**\nThe command completed successfully.',
+        '**Checking the final diff**',
+      ].entries()) {
+        updateMessagePart({
+          id: `metadata-thought-${index}`,
+          messageID: message.info.id,
+          sessionID: message.info.sessionID,
+          type: 'reasoning',
+          text,
+          time: { start: 0, end: index === 0 ? 6_000 : 12_000 },
+        });
+      }
+    });
+    await expect(summary).toContainText('2 thoughts');
 
     await summary.focus();
     await expect(summary).toHaveCSS('outline-style', 'solid');
@@ -161,6 +213,42 @@ for (const theme of ['dark', 'light']) {
       const gap = row.top - rows[index - 1]!.bottom;
       expect(gap).toBeGreaterThanOrEqual(0);
       expect(gap).toBeLessThanOrEqual(2);
+    }
+
+    const metadataAlignment = await details
+      .locator(
+        '.tool-invocation-header, .thinking-header, .file-read-card-header, .file-change-card-header'
+      )
+      .evaluateAll((headers) =>
+        headers.flatMap((header) => {
+          const metadata = [
+            ...header.querySelectorAll(
+              '.tool-invocation-duration, .thinking-duration, .tool-invocation-search-count, .file-edit-diff-stats'
+            ),
+          ].at(-1);
+          if (!metadata) return [];
+          const bounds = metadata.getBoundingClientRect();
+          const headerBounds = header.getBoundingClientRect();
+          const chevron = header.querySelector('.tool-invocation-chevron, .thinking-chevron');
+          return [
+            {
+              right: bounds.right,
+              centerOffset:
+                bounds.top + bounds.height / 2 - headerBounds.top - headerBounds.height / 2,
+              chevronGap: chevron ? chevron.getBoundingClientRect().left - bounds.right : null,
+            },
+          ];
+        })
+      );
+    expect(metadataAlignment.some((item) => item.chevronGap === null)).toBe(true);
+    expect(metadataAlignment.some((item) => item.chevronGap !== null)).toBe(true);
+    expect(
+      Math.max(...metadataAlignment.map((item) => item.right)) -
+        Math.min(...metadataAlignment.map((item) => item.right))
+    ).toBeLessThanOrEqual(0.5);
+    for (const item of metadataAlignment) {
+      expect(Math.abs(item.centerOffset)).toBeLessThanOrEqual(0.5);
+      if (item.chevronGap !== null) expect(item.chevronGap).toBeCloseTo(2, 1);
     }
 
     const command = cards.last();

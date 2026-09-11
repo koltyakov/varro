@@ -1625,12 +1625,14 @@ function GenericToolCall(props: {
           </Show>
           <Show when={searchResultCount()}>
             {(result) => {
+              const unit = () =>
+                result().count === 1 && !result().truncated ? 'result' : 'results';
               const label = () =>
-                `${result().count}${result().truncated ? ' or more' : ''} search ${result().count === 1 && !result().truncated ? 'result' : 'results'}`;
+                `${result().count}${result().truncated ? ' or more' : ''} search ${unit()}`;
               return (
                 <span class="tool-invocation-search-count" title={label()} aria-label={label()}>
                   {result().count}
-                  {result().truncated ? '+' : ''}
+                  {result().truncated ? '+' : ''} {unit()}
                 </span>
               );
             }}

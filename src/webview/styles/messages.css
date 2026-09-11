@@ -762,6 +762,77 @@
   gap: 2px;
 }
 
+/* A fixed disclosure slot keeps metadata aligned with or without a chevron. */
+.assistant-activity-detail :is(.tool-invocation-chevron, .thinking-chevron) {
+  --ui-icon-width: 12px;
+  --ui-icon-height: 12px;
+}
+
+.assistant-activity-details
+  .assistant-activity-detail
+  :is(.tool-invocation-header, .thinking-header, .file-read-card-header, .file-change-card-header) {
+  position: relative;
+  padding-right: calc(var(--space-5) + 14px);
+}
+
+.assistant-activity-details
+  .assistant-activity-detail
+  :is(.tool-invocation-header, .thinking-header, .file-change-card-header)
+  > :is(.tool-invocation-chevron, .thinking-chevron, .file-edit-error-toggle) {
+  position: absolute;
+  top: 50%;
+  right: var(--space-5);
+  margin: 0;
+  padding: 0;
+  transform: translateY(-50%);
+}
+
+.assistant-activity-details
+  .assistant-activity-detail
+  :is(.tool-invocation-header, .thinking-header)
+  > :is(.tool-invocation-chevron, .thinking-chevron).expanded {
+  transform: translateY(-50%) rotate(90deg);
+}
+
+.assistant-activity-details
+  .assistant-activity-detail
+  :is(
+    .tool-invocation-duration,
+    .thinking-duration,
+    .tool-invocation-search-count,
+    .file-edit-diff-stats
+  ) {
+  display: inline-flex;
+  align-items: center;
+  align-self: stretch;
+  justify-content: flex-end;
+  min-width: 0;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--color-vscode-fg-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-align: right;
+  word-spacing: normal;
+  transform: none;
+}
+
+.assistant-activity-detail
+  :is(.tool-invocation-duration, .thinking-duration, .tool-invocation-search-count) {
+  opacity: 0.55;
+  transition: opacity 120ms ease;
+}
+
+.assistant-activity-detail
+  :is(.chat-tool-invocation-part, .chat-thinking-box):is(:hover, :has(:focus-visible))
+  :is(.tool-invocation-duration, .thinking-duration, .tool-invocation-search-count) {
+  opacity: 1;
+}
+
 body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-details {
   --assistant-activity-contrast-border: var(--color-vscode-contrast-border);
 }

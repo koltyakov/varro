@@ -1365,6 +1365,7 @@ kbd {
   font-size: 9.5px;
   font-variant-numeric: tabular-nums;
   line-height: 1.4;
+  white-space: nowrap;
   flex-shrink: 0;
 }
 

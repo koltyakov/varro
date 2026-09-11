@@ -724,7 +724,7 @@ describe('ToolCall', () => {
     expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(searchIcon));
   });
 
-  it('extracts the completed search result count into a header pill', () => {
+  it('labels the completed search result count in the header', () => {
     const part: ToolPart = {
       id: 'tool-1',
       sessionID: 'session-1',
@@ -742,7 +742,7 @@ describe('ToolCall', () => {
     cleanup = render(() => ToolCall({ part }), container!);
 
     const count = container?.querySelector('.tool-invocation-search-count');
-    expect(count?.textContent).toBe('2');
+    expect(count?.textContent).toBe('2 results');
     expect(count?.getAttribute('aria-label')).toBe('2 search results');
   });
 
@@ -767,7 +767,7 @@ describe('ToolCall', () => {
     cleanup = render(() => ToolCall({ part }), container!);
 
     const count = container?.querySelector('.tool-invocation-search-count');
-    expect(count?.textContent).toBe('100+');
+    expect(count?.textContent).toBe('100+ results');
     expect(count?.getAttribute('aria-label')).toBe('100 or more search results');
   });
 
@@ -868,7 +868,9 @@ describe('ToolCall', () => {
       inputRows.every((row) => row.querySelector('.structured-tool-value-line') !== null)
     ).toBe(true);
     expect(inputRows[0]?.querySelector('.structured-tool-value-single')?.textContent).toBe(pattern);
-    expect(container?.querySelector('.tool-invocation-search-count')?.textContent).toBe('0');
+    expect(container?.querySelector('.tool-invocation-search-count')?.textContent).toBe(
+      '0 results'
+    );
   });
 
   it('renders web fetch details and errors in the structured table', () => {
