@@ -10,6 +10,37 @@ const SESSION_ID = 'session-rapid-streaming-jitter';
 const MESSAGE_ID = 'message-rapid-assistant-streaming';
 const ROW = `[data-msg-id="${MESSAGE_ID}"]`;
 
+test('hides streamed inline commands until the closing backtick arrives', async ({ page }) => {
+  await page.setViewportSize({ width: 908, height: 720 });
+  await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
+  const markdown = page.locator(`${ROW} .rendered-markdown`);
+  await expect(markdown).toHaveText('Starting...');
+  let text = 'Starting...\n\n**Verification**\n\n- Run ';
+  await appendDeltaToRapidStreaming(page, text.slice('Starting...'.length));
+  const commands = ['npm run test', 'npm run test:e2e', 'npm run lint'];
+  for (const [index, command] of commands.entries()) {
+    for (const delta of ['`', ...command.split(/(?= )/)]) {
+      text += delta;
+      await appendDeltaToRapidStreaming(page, delta);
+      const pending = markdown.locator('.streaming-markdown-pending');
+      await expect(pending).toHaveText(text.slice(text.lastIndexOf('`')));
+      await expect(pending).toBeHidden();
+      await expect(markdown.locator('code')).toHaveText(commands.slice(0, index));
+      expect(await markdown.innerText()).not.toContain('`');
+    }
+    const delta = `\`, passed.${index < commands.length - 1 ? '\n- Run ' : ''}`;
+    text += delta;
+    await appendDeltaToRapidStreaming(page, delta);
+    await expect(markdown.locator('code')).toHaveText(commands.slice(0, index + 1));
+    await expect(markdown.locator('code').last()).toBeVisible();
+    await expect(markdown.locator('.streaming-markdown-pending')).toHaveCount(0);
+  }
+  await completeResponse(page, text);
+  await expect(page.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0);
+  await expect(markdown.locator('code')).toHaveText(commands);
+  await expect(markdown.locator('.streaming-markdown-pending')).toHaveCount(0);
+});
+
 test('keeps filename links inside narrow table cells throughout streaming and completion', async ({
   page,
 }) => {

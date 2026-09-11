@@ -318,9 +318,9 @@ export class WebviewSession {
     });
   }
 
-  async handleReady(documentId?: number): Promise<boolean> {
+  async handleReady(requestGeneration?: number): Promise<boolean> {
     const generation = this.webviewLoadGeneration;
-    if (documentId !== undefined && documentId !== generation) return false;
+    if (requestGeneration !== undefined && requestGeneration !== generation) return false;
     if (this.readyGeneration === generation) return true;
     this.bridge.markViewReady();
     const status = this.deps.renderStatus();
@@ -465,7 +465,8 @@ export class WebviewSession {
       );
     return {
       webviewContext: this.webviewContext,
-      documentId: this.webviewLoadGeneration,
+      // VS Code recreates hidden editors from the same HTML, even after requests are invalidated.
+      documentId: this.webviewRenderGeneration,
       theme: this.deps.currentTheme(),
       serverStatus,
       editorContext,
@@ -669,12 +670,13 @@ export class WebviewSession {
       if (message.type === 'ready') {
         const documentId = message.payload?.documentId;
         if (
-          (documentId !== undefined && documentId !== generation) ||
-          (this.deliveryRecoveryInProgress && documentId !== generation)
+          (documentId !== undefined && documentId !== this.webviewRenderGeneration) ||
+          (this.deliveryRecoveryInProgress && documentId !== this.webviewRenderGeneration)
         ) {
           return;
         }
       }
+      // Deferred ready handlers must still belong to this request generation after validation.
       const routedMessage: WebviewMessage =
         message.type === 'ready' ? { type: 'ready', payload: { documentId: generation } } : message;
       void this.deps.handleMessage(routedMessage);

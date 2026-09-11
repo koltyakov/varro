@@ -79,6 +79,11 @@ function createPanel() {
     panel,
     registeredDisposables,
     receive: (message: unknown) => messageListeners.at(-1)?.(message),
+    ready: () => {
+      const documentId = panel.webview.html.match(/"documentId":(\d+)/)?.[1];
+      expect(documentId).toBeDefined();
+      messageListeners.at(-1)?.({ type: 'ready', payload: { documentId: Number(documentId) } });
+    },
     setVisible: (visible: boolean) => {
       panel.visible = visible;
       for (const listener of viewStateListeners) listener({ webviewPanel: panel });
@@ -1684,7 +1689,8 @@ describe('SidebarProvider editor panels', () => {
     expect(editor.panel.webview.html).toBe(visibleHtml);
     expect(editor.panel.webview.onDidReceiveMessage).toHaveBeenCalledTimes(2);
 
-    editor.receive({ type: 'ready' });
+    editor.panel.webview.postMessage.mockClear();
+    editor.ready();
     await vi.waitFor(() =>
       expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
         type: 'server/status',
@@ -3480,5 +3486,34 @@ describe('SidebarProvider editor panels', () => {
     panel.setVisible(true);
     await vi.waitFor(() => expect(panel.panel.webview.html).toContain('type="module"'));
     expect(panel.panel.webview.onDidReceiveMessage).toHaveBeenCalledTimes(2);
+
+    panel.panel.webview.postMessage.mockClear();
+    panel.ready();
+    await vi.waitFor(() =>
+      expect(panel.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'server/status',
+        payload: expect.anything(),
+      })
+    );
+  });
+
+  it('initializes a new editor whose panel starts hidden', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const editor = createPanel();
+    editor.panel.visible = false;
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+
+    await provider.openNewEditor();
+    await vi.waitFor(() => expect(editor.panel.webview.html).toContain('type="module"'));
+    editor.setVisible(true);
+    editor.panel.webview.postMessage.mockClear();
+    editor.ready();
+
+    await vi.waitFor(() =>
+      expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'server/status',
+        payload: expect.anything(),
+      })
+    );
   });
 });

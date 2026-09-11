@@ -161,6 +161,11 @@ the shared invariants below remain true.
   sticky navigation or bottom-follow.
 - Expanding a compact activity disclosure takes ownership from bottom-follow so the clicked summary
   stays fixed while its details grow below it.
+- Once expansion geometry is restored, return to bottom-follow if it was active before the click and
+  the viewport is still at the physical bottom. Opening Explored while its details fit must not leave
+  later tool activity and streamed text unfollowed. An expansion that hides newer content stays detached.
+  Direct input cancels this one-shot handoff with the expansion anchor; already-detached reading, editing,
+  and diff focus must not re-enable follow.
 - Expansion ownership is bounded and yields to direct outer wheel, transcript-scrolling keyboard, touch,
   scrollbar, or pointer movement. A stale expansion owner must not suppress a later view-change anchor.
   Wheel events consumed by a nested scroller do not transfer outer expansion ownership.
@@ -220,9 +225,11 @@ Direct input acquires ownership only when it can affect the transcript:
 - Bottom follow remains active frame by frame while streaming or geometry is unsettled. It may stop
   only after track height, bottom target, and distance from bottom stabilize; stream observation
   requires consecutive stable frames.
-- Detached follow reattaches only after genuine downward movement reaches the reattachment threshold.
-  Zero-delta and resize-generated scroll events cannot reattach. Downward input at the physical bottom
-  does not interrupt follow.
+- User-detached follow reattaches after genuine downward movement reaches the reattachment threshold, or
+  an explicit outer downward wheel at the physical bottom. That wheel resumes disclosure-paused follow
+  even when the expanded transcript still fits and the browser cannot emit a scroll event. It respects
+  edit and diff-focus ownership and does not interrupt active follow. Zero-delta and resize-generated
+  scroll events cannot reattach.
 - Pure bottom-followed assistant appends below the virtualization threshold may claim a one-time row
   entrance. Sent user rows and image rows mount at their final geometry immediately: a user card must
   remain continuously painted through optimistic acknowledgement and the Thinking handoff. Once

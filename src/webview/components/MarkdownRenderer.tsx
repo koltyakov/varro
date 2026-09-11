@@ -1103,14 +1103,6 @@ function isEscapedMarkdownDelimiter(content: string, index: number, lineStart: n
   return backslashCount % 2 === 1;
 }
 
-function isPotentialStreamingFileReference(raw: string) {
-  const candidate = raw.trim();
-  if (!candidate) return false;
-  if (/[\\/]/.test(candidate)) return true;
-  if (/^(?:[\w@+-]+\.)+[A-Za-z0-9]*$/.test(candidate)) return true;
-  return SPECIAL_FILE_NAMES.has(candidate.toLowerCase());
-}
-
 function renderIncompleteStreamingMarkdown(content: string): IncompleteStreamingMarkdown {
   let index = 0;
   let openFence: MarkdownFenceState | null = null;
@@ -1215,23 +1207,14 @@ function renderIncompleteStreamingMarkdown(content: string): IncompleteStreaming
   const visibleContent = content.slice(0, pendingStart);
   const blockSafeContent = hideIncompleteStreamingBlock(visibleContent);
   pendingStart = Math.min(pendingStart, blockSafeContent.length);
-  const visiblePendingStarts: number[] = [];
-  if (
-    inlineStart !== null &&
-    !isPotentialStreamingFileReference(content.slice(inlineStart + inlineDelimiterLength))
-  ) {
-    visiblePendingStarts.push(inlineStart);
-  }
-  const trailingOrderedListMarker = blockSafeContent.match(/(?:^|\r?\n)([ \t]{0,3}\d+[.)][ \t]*)$/);
-  if (trailingOrderedListMarker) {
-    visiblePendingStarts.push(
-      trailingOrderedListMarker.index! +
-        trailingOrderedListMarker[0].length -
-        trailingOrderedListMarker[1]!.length
-    );
-  }
-  const visiblePendingStart =
-    visiblePendingStarts.length > 0 ? Math.min(...visiblePendingStarts) : null;
+  // Only a trailing list marker may paint as pending text. A marker before
+  // unclosed inline code must not reveal that code as plain text.
+  const trailingOrderedListMarker = content.match(/(?:^|\r?\n)([ \t]{0,3}\d+[.)][ \t]*)$/);
+  const visiblePendingStart = trailingOrderedListMarker
+    ? trailingOrderedListMarker.index! +
+      trailingOrderedListMarker[0].length -
+      trailingOrderedListMarker[1]!.length
+    : null;
   if (visiblePendingStart !== null) pendingStart = Math.min(pendingStart, visiblePendingStart);
   const trailingPath = blockSafeContent.match(TRAILING_BARE_PATH_CANDIDATE_RE);
   if (trailingPath) {

@@ -594,7 +594,9 @@ export function MessageList() {
   let turnNavigationAnimationEpoch = 0;
   let editRevealEpoch = 0;
   let historyOwnedEdit: { messageId: string; sessionId: string } | null = null;
-  let pendingExpansionScrollAnchor: ExpansionScrollAnchor | null = null;
+  let pendingExpansionScrollAnchor:
+    | (ExpansionScrollAnchor & { resumeBottomFollow: boolean })
+    | null = null;
   let stickyPreviewDebounceTimer: ReturnType<typeof setTimeout> | 0 = 0;
   let firstVisibleMessageObserver: IntersectionObserver | null = null;
   let measuredRowObserver: ResizeObserver | null = null;
@@ -3653,6 +3655,20 @@ export function MessageList() {
     setScrollTop(nextScrollTop);
     lastObservedScrollTop = nextScrollTop;
     refreshPendingHistoryAnchor({ advanceOwnership: true });
+    if (
+      anchor?.resumeBottomFollow &&
+      distanceFromBottom() <= 1 &&
+      !stickyNavigationOwnsScroll() &&
+      !editingMessage() &&
+      !diffFocusPauseActive
+    ) {
+      // If the disclosure leaves the latest content visible, keep following later output.
+      // Direct input cancels this one-shot handoff by clearing the expansion anchor.
+      pinnedToBottom = true;
+      setAutoScroll(true);
+      const sessionId = state.activeSessionId;
+      if (sessionId) startFollowLoop(sessionId);
+    }
     return true;
   }
 
@@ -5217,9 +5233,14 @@ export function MessageList() {
         event.stopPropagation();
         return;
       }
-      // A downward wheel at the physical bottom cannot move the transcript. Treating it as an
-      // interruption pauses bottom-follow until a later resize snaps the viewport forward.
-      if (distanceFromBottom() <= 1) return;
+      // At the physical bottom there is no scroll event to reattach a disclosure-paused follow.
+      // Treat the downward wheel as an explicit request, without interrupting an active follow.
+      if (distanceFromBottom() <= 1) {
+        if (!autoScroll() && !editingMessage() && !diffFocusPauseActive) {
+          requestMessageListScrollToBottom();
+        }
+        return;
+      }
     }
     lastWheelAt = performance.now();
     directScrollInputEpoch += 1;
@@ -5546,22 +5567,27 @@ export function MessageList() {
     const expandsCompactActivity =
       control.matches('.assistant-activity-summary') &&
       control.getAttribute('aria-expanded') === 'false';
+    const resumeBottomFollow =
+      expandsCompactActivity && (autoScroll() || pinnedToBottom || followModeLocked);
 
     if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
     if (isDiffToggle) {
       resumeAutoScrollAfterDiffFocus = false;
       disengageBottomFollow();
-    } else if (expandsCompactActivity && (autoScroll() || pinnedToBottom || followModeLocked)) {
+    } else if (resumeBottomFollow) {
       // The disclosure owns this geometry change so its details open below the clicked summary.
       disengageBottomFollow();
     }
 
-    pendingExpansionScrollAnchor = captureExpansionScrollAnchor({
-      anchor,
-      container: containerRef,
-      now: performance.now(),
-      windowMs: EXPANSION_SCROLL_ANCHOR_WINDOW_MS,
-    });
+    pendingExpansionScrollAnchor = {
+      ...captureExpansionScrollAnchor({
+        anchor,
+        container: containerRef,
+        now: performance.now(),
+        windowMs: EXPANSION_SCROLL_ANCHOR_WINDOW_MS,
+      }),
+      resumeBottomFollow,
+    };
   }
 
   function reserveExternalBottomCollapse(collapseHeight: number) {

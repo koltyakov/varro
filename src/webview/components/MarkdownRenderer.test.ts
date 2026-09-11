@@ -1853,17 +1853,93 @@ describe('MarkdownRenderer', () => {
     expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
   });
 
-  it('paints unfinished inline code when it is not a file reference', async () => {
+  it.each([
+    { delimiter: '`', chunks: ['npm', ' run', ' test'] },
+    { delimiter: '``', chunks: ['npm', ' `run`', ' test', '`'] },
+  ])(
+    'holds unfinished $delimiter inline code until its matching closer arrives',
+    async ({ delimiter, chunks }) => {
+      const prefix = 'Stable paragraph.\n\n- Passed `npm run lint`, now run ';
+      const [content, setContent] = createSignal(`${prefix}${delimiter}`);
+      cleanup = render(
+        () =>
+          createComponent(MarkdownRenderer, {
+            get content() {
+              return content();
+            },
+            forceStreaming: true,
+          }),
+        container!
+      );
+
+      for (const chunk of ['', ...chunks]) {
+        setContent(content() + chunk);
+        await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+        const pending = container?.querySelector('.streaming-markdown-pending');
+        expect(pending?.textContent).toBe(content().slice(prefix.length));
+        expect(pending?.getAttribute('aria-hidden')).toBe('true');
+        expect(pending?.classList).toContain('streaming-markdown-pending-hidden');
+        expect(Array.from(container!.querySelectorAll('code'), (code) => code.textContent)).toEqual(
+          ['npm run lint']
+        );
+      }
+
+      // The double-backtick case receives the first closing backtick in a separate delta.
+      setContent(`${content()}\` now.`);
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
+      expect(Array.from(container!.querySelectorAll('code'), (code) => code.textContent)).toEqual([
+        'npm run lint',
+        delimiter.length === 2 ? 'npm `run` test' : 'npm run test',
+      ]);
+      expect(container?.querySelector('li')?.textContent).toContain(' now.');
+    }
+  );
+
+  it('holds unfinished inline code at the start of an ordered-list item', async () => {
+    const [content, setContent] = createSignal('1. `npm run test');
     cleanup = render(
-      () => MarkdownRenderer({ content: 'Current value: `still streaming token by token' }),
+      () =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+        }),
       container!
     );
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
-
     const pending = container?.querySelector('.streaming-markdown-pending');
-    expect(pending?.textContent).toBe('`still streaming token by token');
-    expect(pending?.getAttribute('aria-hidden')).toBeNull();
-    expect(pending?.classList).not.toContain('streaming-markdown-pending-hidden');
+    expect(pending?.getAttribute('aria-hidden')).toBe('true');
+    expect(pending?.textContent).toBe('`npm run test');
+
+    setContent(`${content()}\``);
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
+    expect(container?.querySelector('ol li code')?.textContent).toBe('npm run test');
+  });
+
+  it('reveals an unmatched backtick suffix when streaming completes', async () => {
+    const [completed, setCompleted] = createSignal(false);
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          content: 'Malformed `inline content',
+          get cacheByContent() {
+            return completed();
+          },
+        }),
+      container!
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    expect(
+      container?.querySelector('.streaming-markdown-pending')?.getAttribute('aria-hidden')
+    ).toBe('true');
+
+    setCompleted(true);
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
+    expect(container?.querySelector('code')).toBeNull();
+    expect(container?.textContent).toContain('Malformed `inline content');
   });
 
   it('reserves an unfinished Markdown link until its destination closes', async () => {

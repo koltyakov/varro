@@ -1042,17 +1042,19 @@ describe('WebviewSession', () => {
   });
 
   it('ignores a message queued by an editor document before suspension', async () => {
-    const { session, deps } = createSession({ editorSurface: true });
+    const { session, bridge, deps } = createSession({ editorSurface: true });
     const view = createWebviewView(true);
     await session.resolve(view as never);
+    await flushMicrotasks();
+    const documentId = bridge.renderHtml.mock.calls[0]![0].documentId;
     const staleListener = view.listeners.message;
 
     session.suspend();
-    staleListener?.({ type: 'ready' });
+    staleListener?.({ type: 'ready', payload: { documentId } });
     expect(deps.handleMessage).not.toHaveBeenCalled();
 
     session.resume();
-    view.listeners.message?.({ type: 'ready' });
+    view.listeners.message?.({ type: 'ready', payload: { documentId } });
     expect(deps.handleMessage).toHaveBeenCalledWith({
       type: 'ready',
       payload: { documentId: session.getRequestGeneration() },
@@ -1061,7 +1063,7 @@ describe('WebviewSession', () => {
 
   it('finishes preparing editor HTML when the panel is suspended during rendering', async () => {
     const html = createDeferred<string>();
-    const { session } = createSession({
+    const { session, bridge, deps } = createSession({
       editorSurface: true,
       renderHtml: () => html.promise,
     });
@@ -1074,7 +1076,63 @@ describe('WebviewSession', () => {
     await flushMicrotasks();
 
     expect(view.webview.html).toBe('<html>prepared while hidden</html>');
+
+    session.resume();
+    const documentId = bridge.renderHtml.mock.calls[0]![0].documentId;
+    view.listeners.message?.({ type: 'ready', payload: { documentId } });
+    expect(deps.handleMessage).toHaveBeenCalledWith({
+      type: 'ready',
+      payload: { documentId: session.getRequestGeneration() },
+    });
   });
+
+  it.each(['reload', 'delivery recovery'])(
+    'accepts editor startup across tab switches and %s',
+    async (replacement) => {
+      const { session, bridge, deps } = createSession({ editorSurface: true });
+      const view = createWebviewView(true);
+      await session.resolve(view as never);
+      await flushMicrotasks();
+      const originalDocumentId = bridge.renderHtml.mock.calls[0]![0].documentId;
+
+      for (let cycle = 0; cycle < 2; cycle += 1) {
+        const previousGeneration = session.getRequestGeneration();
+        session.suspend();
+        session.resume();
+        deps.handleMessage.mockClear();
+        bridge.post.mockClear();
+
+        view.listeners.message?.({ type: 'ready', payload: { documentId: originalDocumentId } });
+        expect(deps.handleMessage).toHaveBeenCalledWith({
+          type: 'ready',
+          payload: { documentId: session.getRequestGeneration() },
+        });
+        await expect(session.handleReady(previousGeneration)).resolves.toBe(false);
+        session.postApiResponse({ id: 1, data: 'stale' }, previousGeneration);
+        expect(bridge.post).not.toHaveBeenCalled();
+        await expect(session.handleReady(session.getRequestGeneration())).resolves.toBe(true);
+      }
+
+      if (replacement === 'reload') {
+        await session.reload();
+      } else {
+        const onDeliveryFailure = bridge.onDeliveryFailure.mock.calls[0]?.[0] as () => void;
+        onDeliveryFailure();
+      }
+      await flushMicrotasks();
+      const replacementDocumentId = bridge.renderHtml.mock.calls.at(-1)![0].documentId;
+      expect(replacementDocumentId).not.toBe(originalDocumentId);
+      deps.handleMessage.mockClear();
+
+      view.listeners.message?.({ type: 'ready', payload: { documentId: originalDocumentId } });
+      expect(deps.handleMessage).not.toHaveBeenCalled();
+      view.listeners.message?.({ type: 'ready', payload: { documentId: replacementDocumentId } });
+      expect(deps.handleMessage).toHaveBeenCalledWith({
+        type: 'ready',
+        payload: { documentId: session.getRequestGeneration() },
+      });
+    }
+  );
 
   it('logs ready and visible side-effect failures without duplicating server-start reporting', async () => {
     const { session, deps } = createSession();
