@@ -125,170 +125,77 @@ test('scales only bordered pairs in compact file-edit stacks', async ({ page }) 
   });
 });
 
-test('connects expanded activity rows to the underlined summary', async ({ page }) => {
-  await page.goto('/e2e/harness/index.html?scenario=tool-cards&expandedActivity=1');
+for (const theme of ['dark', 'light']) {
+  test(`${theme} shows a compact activity log and frames only opened tool details`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 496, height: 850 });
+    await page.goto(`/e2e/harness/index.html?scenario=tool-cards&theme=${theme}`);
+    const summary = page.locator('.assistant-activity-summary').first();
+    await expect(summary).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('.assistant-activity-details')).toHaveCount(0);
 
-  const summary = page.locator('.assistant-activity-summary').first();
-  const summaryText = summary.locator('.assistant-activity-summary-text');
-  const details = page.locator('.assistant-activity-details').first();
-  const firstDetail = details.locator(':scope > .assistant-activity-detail').first();
-  const firstCard = firstDetail.locator('.chat-tool-invocation-part, .chat-thinking-box').first();
-  const firstIcon = firstCard.locator('.tool-call-icon, .thinking-topic-icon').first();
+    await summary.focus();
+    await expect(summary).toHaveCSS('outline-style', 'solid');
+    await page.keyboard.press('Enter');
+    await expect(summary).toHaveAttribute('aria-expanded', 'true');
 
-  const connector = await firstDetail.evaluate((element) => {
-    const style = getComputedStyle(element, '::before');
-    const bounds = element.getBoundingClientRect();
-    return {
-      content: style.content,
-      width: style.width,
-      height: style.height,
-      color: style.backgroundColor,
-      center: bounds.left + Number.parseFloat(style.left) + Number.parseFloat(style.width) / 2,
-      top: bounds.top + Number.parseFloat(style.top),
-      bottom: bounds.top + Number.parseFloat(style.top) + Number.parseFloat(style.height),
-    };
-  });
-  const underline = await summaryText.evaluate((element) => {
-    const style = getComputedStyle(element, '::after');
-    const main = element.querySelector('.assistant-activity-summary-main');
-    if (!(main instanceof HTMLElement)) throw new Error('Activity summary label is missing');
-    const bounds = element.getBoundingClientRect();
-    return {
-      content: style.content,
-      height: style.height,
-      color: style.backgroundColor,
-      bottom: bounds.bottom,
-      textGap:
-        bounds.bottom - Number.parseFloat(style.height) - main.getBoundingClientRect().bottom,
-    };
-  });
-  const iconCenter = await firstIcon.evaluate((element) => {
-    const bounds = element.getBoundingClientRect();
-    return bounds.left + bounds.width / 2;
-  });
-  const [activityGap, detailTop, cardBorderColor] = await Promise.all([
-    details.evaluate((element) => getComputedStyle(element).gap),
-    firstDetail.evaluate((element) => element.getBoundingClientRect().top),
-    firstCard.evaluate((element) => getComputedStyle(element).borderTopColor),
-  ]);
-
-  expect(connector.content).toBe('""');
-  expect(connector.width).toBe('1px');
-  expect(activityGap).toBe('9px');
-  expect(connector.height).toBe('12px');
-  expect(Math.abs(connector.center - iconCenter)).toBeLessThanOrEqual(0.5);
-  expect(Math.abs(connector.top - underline.bottom)).toBeLessThanOrEqual(0.5);
-  expect(Math.abs(connector.bottom - detailTop)).toBeLessThanOrEqual(0.5);
-  expect(underline.content).toBe('""');
-  expect(underline.height).toBe('1px');
-  expect(underline.color).toBe(cardBorderColor);
-  expect(underline.textGap).toBeGreaterThanOrEqual(3);
-
-  const detailConnectors = await details
-    .locator(':scope > .assistant-activity-detail')
-    .evaluateAll((elements) =>
-      elements.map((element) => getComputedStyle(element, '::before').content)
+    const details = page.locator('.assistant-activity-details').first();
+    const cards = details.locator('.chat-tool-invocation-part');
+    await expect(cards).toHaveCount(7);
+    const rows = await cards.evaluateAll((elements) =>
+      elements.map((element) => {
+        const bounds = element.getBoundingClientRect();
+        return {
+          top: bounds.top,
+          bottom: bounds.bottom,
+          border: getComputedStyle(element).borderTopColor,
+          connector: getComputedStyle(element, '::before').content,
+        };
+      })
     );
-  expect(detailConnectors.every((content) => content === '""')).toBe(true);
-
-  const editRows = page.locator('.file-change-card-list > .file-change-card');
-  const internalConnector = await editRows.nth(1).evaluate((element) => {
-    const previous = element.previousElementSibling;
-    if (!(previous instanceof HTMLElement)) throw new Error('Previous file edit row is missing');
-    const style = getComputedStyle(element, '::before');
-    const bounds = element.getBoundingClientRect();
-    return {
-      content: style.content,
-      top: bounds.top + Number.parseFloat(style.top),
-      bottom: bounds.top + Number.parseFloat(style.top) + Number.parseFloat(style.height),
-      previousBottom: previous.getBoundingClientRect().bottom,
-      rowTop: bounds.top,
-    };
-  });
-
-  expect(internalConnector.content).toBe('""');
-  expect(Math.abs(internalConnector.top - internalConnector.previousBottom)).toBeLessThanOrEqual(
-    0.5
-  );
-  expect(Math.abs(internalConnector.bottom - internalConnector.rowTop)).toBeLessThanOrEqual(0.5);
-
-  const virtualizedBoundary = await page.evaluate(() => {
-    const sourceGroup = document.querySelector('.assistant-activity-group');
-    if (!(sourceGroup instanceof HTMLElement)) throw new Error('Activity group is missing');
-
-    const track = document.createElement('div');
-    track.className = 'interactive-list-track virtualized';
-    track.style.position = 'fixed';
-    track.style.visibility = 'hidden';
-
-    const createRow = (continues: boolean) => {
-      const row = document.createElement('div');
-      row.className = `interactive-item-container interactive-response${continues ? ' interactive-response-continues-activity-group interactive-item-follows-bordered-block' : ''}`;
-      const flow = document.createElement('div');
-      flow.className = 'assistant-message-flow';
-      const item = document.createElement('div');
-      item.className = 'assistant-message-flow-item';
-      item.append(sourceGroup.cloneNode(true));
-      flow.append(item);
-      row.append(flow);
-      return row;
-    };
-
-    const previousRow = createRow(false);
-    const continuingRow = createRow(true);
-    continuingRow.querySelector('.assistant-activity-summary')?.remove();
-    track.append(previousRow, continuingRow);
-    document.body.append(track);
-
-    const trailingDetail = previousRow.querySelector(
-      '.assistant-activity-details > .assistant-activity-detail:last-child'
-    );
-    const continuingDetail = continuingRow.querySelector(
-      '.assistant-activity-details > .assistant-activity-detail:first-child'
-    );
-    if (!(trailingDetail instanceof HTMLElement) || !(continuingDetail instanceof HTMLElement)) {
-      throw new Error('Virtualized activity boundary is incomplete');
+    for (const [index, row] of rows.entries()) {
+      expect(row.border).toBe('rgba(0, 0, 0, 0)');
+      expect(row.connector).toBe('none');
+      if (index === 0) continue;
+      const gap = row.top - rows[index - 1]!.bottom;
+      expect(gap).toBeGreaterThanOrEqual(0);
+      expect(gap).toBeLessThanOrEqual(2);
     }
-    const style = getComputedStyle(continuingDetail, '::before');
-    const detailBounds = continuingDetail.getBoundingClientRect();
-    const top = detailBounds.top + Number.parseFloat(style.top);
-    const result = {
-      content: style.content,
-      width: style.width,
-      height: style.height,
-      color: style.backgroundColor,
-      top,
-      bottom: top + Number.parseFloat(style.height),
-      previousDetailBottom: trailingDetail.getBoundingClientRect().bottom,
-      continuingDetailTop: detailBounds.top,
-      containment: getComputedStyle(continuingRow).contain,
-    };
-    track.remove();
-    return result;
+
+    const command = cards.last();
+    await command.locator('.tool-invocation-header').click();
+    await expect(command.locator('.terminal-command-card')).toContainText('3 passed');
+    await expect(command).not.toHaveCSS('border-top-color', 'rgba(0, 0, 0, 0)');
+    await command.locator('.tool-invocation-header').click();
+    await page.mouse.move(0, 0);
+    const groupBounds = await page.locator('.assistant-activity-group').first().boundingBox();
+    if (!groupBounds) throw new Error('Expanded activity group is missing');
+    await page.screenshot({
+      path: testInfo.outputPath('explored-activity.png'),
+      animations: 'disabled',
+      clip: { x: 0, y: groupBounds.y, width: 496, height: groupBounds.height },
+    });
+
+    await page.setViewportSize({ width: 280, height: 850 });
+    const summaryText = summary.locator('.assistant-activity-summary-text');
+    await expect(summaryText.locator('.assistant-activity-kind-icon')).not.toHaveCount(0);
+    await expect
+      .poll(() =>
+        summary.evaluate((element) => {
+          const label = element.querySelector('.assistant-activity-summary-main')!;
+          const chevron = element.querySelector('.assistant-activity-chevron')!;
+          return label.getBoundingClientRect().right <= chevron.getBoundingClientRect().left;
+        })
+      )
+      .toBe(true);
+
+    await summary.focus();
+    await page.keyboard.press('Space');
+    await expect(summary).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('.assistant-activity-details')).toHaveCount(0);
   });
-
-  expect(virtualizedBoundary.content).toBe('""');
-  expect(virtualizedBoundary.width).toBe('1px');
-  expect(virtualizedBoundary.height).toBe('9px');
-  expect(virtualizedBoundary.color).toBe(connector.color);
-  expect(
-    Math.abs(virtualizedBoundary.top - virtualizedBoundary.previousDetailBottom)
-  ).toBeLessThanOrEqual(0.5);
-  expect(
-    Math.abs(virtualizedBoundary.bottom - virtualizedBoundary.continuingDetailTop)
-  ).toBeLessThanOrEqual(0.5);
-  expect(virtualizedBoundary.containment).toBe('layout style');
-
-  await page.goto('/e2e/harness/index.html?scenario=tool-cards');
-  const collapsedSummary = page.locator('.assistant-activity-summary').first();
-  await expect(collapsedSummary).toHaveAttribute('aria-expanded', 'false');
-  await expect(page.locator('.assistant-activity-details')).toHaveCount(0);
-  expect(
-    await collapsedSummary
-      .locator('.assistant-activity-summary-text')
-      .evaluate((element) => getComputedStyle(element, '::after').content)
-  ).toBe('none');
-});
+}
 
 test('prevents selection from starting on expandable tool headers', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=tool-cards&expandedActivity=1');

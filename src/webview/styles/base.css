@@ -589,7 +589,7 @@ body.vscode-light
     .chat-queue-container,
     .chat-tool-invocation-part,
     .chat-thinking-box
-  ) {
+  ):not(:where(.assistant-activity-details *)) {
   background: color-mix(in srgb, var(--color-vscode-fg) 2.5%, var(--color-vscode-sidebar));
   border-color: color-mix(in srgb, var(--color-vscode-fg) 10%, var(--color-vscode-sidebar));
 }

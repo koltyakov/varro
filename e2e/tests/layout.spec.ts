@@ -877,7 +877,7 @@ test('keeps the compact file-change-to-next-block gap consistent', async ({ page
       },
       await lastFileChange.elementHandle()
     )
-  ).toBeCloseTo(9, 0);
+  ).toBeCloseTo(2, 0);
 });
 
 test('keeps inline edits separated from a following Explored summary', async ({ page }) => {
@@ -1236,6 +1236,22 @@ test('tightens only bordered activity boundaries', async ({ page }) => {
         },
       },
     });
+    const thinkingInfo = {
+      ...original.info,
+      id: 'message-spacing-thinking-followup',
+      time: { created: Date.now() + 10, completed: Date.now() + 11 },
+    };
+    postEvent('message.updated', { info: thinkingInfo });
+    postEvent('message.part.updated', {
+      part: {
+        id: 'reasoning-spacing-followup',
+        sessionID: 'session-tool-cards',
+        messageID: thinkingInfo.id,
+        type: 'reasoning',
+        text: '**Inspecting CSS tools**\nChecking the spacing between activity rows.',
+        time: { start: Date.now(), end: Date.now() + 1 },
+      },
+    });
   });
   const crossMessageProse = page.getByText('Cross-message prose boundary.', { exact: true });
   const crossMessageSummary = page.locator('.assistant-activity-summary').last();
@@ -1312,6 +1328,17 @@ test('tightens only bordered activity boundaries', async ({ page }) => {
       currentRowClass: element.closest('.interactive-item-container')?.className,
     };
   });
+  const thinkingDetail = page.locator(
+    '[data-msg-id="message-spacing-thinking-followup"] .chat-thinking-box'
+  );
+  await expect(thinkingDetail).toBeVisible();
+  const thinkingGap = await thinkingDetail.evaluate((element) => {
+    const previous = document.querySelector<HTMLElement>(
+      '[data-msg-id="message-spacing-continued-activity-followup"] .chat-tool-invocation-part'
+    );
+    if (!previous) throw new Error('Previous thinking activity detail is missing');
+    return element.getBoundingClientRect().top - previous.getBoundingClientRect().bottom;
+  });
 
   await summary.click();
   const firstDetail = page.locator('.assistant-activity-detail .chat-tool-invocation-part').first();
@@ -1339,7 +1366,8 @@ test('tightens only bordered activity boundaries', async ({ page }) => {
   expect(continuedActivityGeometry.currentRowClass).toContain(
     'interactive-item-follows-bordered-block'
   );
-  expect(continuedActivityGeometry.gap).toBeCloseTo(9, 0);
+  expect(continuedActivityGeometry.gap).toBeCloseTo(2, 0);
+  expect(thinkingGap).toBeCloseTo(2, 0);
 });
 
 test('keeps Explored spacing consistent beside user blocks', async ({ page }) => {

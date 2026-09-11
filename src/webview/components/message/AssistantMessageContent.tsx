@@ -44,6 +44,7 @@ import {
   shouldShowAssistantPartInline,
 } from '../../lib/part-utils';
 import { getToolFileChangeSignature } from '../../lib/tool-file-change';
+import { getToolKind } from '../../lib/tool-normalization';
 import type { ToolCallPermissionMatch } from '../../lib/tool-call-matching';
 import {
   getAssistantErrorDetailsExpansionKey,
@@ -916,6 +917,22 @@ export function AssistantMessageContent(props: {
       const showSummary = () =>
         activityGroup().ownerMessageId === props.info.id &&
         item().parts.some((part) => part.id === getCompactActivitySummaryPartId(activityGroup()));
+      const continuesInNextMessage = createMemo(() => {
+        const group = activityGroup();
+        if (!isActivityGroupExpanded(group.key)) return false;
+        const lastPart = item().parts.at(-1)!;
+        const lastKey = getAssistantActivityPartKey(lastPart);
+        const lastIndex = group.parts.findIndex(
+          (part) => getAssistantActivityPartKey(part) === lastKey
+        );
+        const nextPart = group.parts[lastIndex + 1];
+        return (
+          lastIndex >= 0 &&
+          !!nextPart &&
+          nextPart.messageID !== props.info.id &&
+          !isActiveActivityTrayPart(nextPart)
+        );
+      });
       return (
         <div
           class={`assistant-message-flow-item${borderedFlowClasses(!showSummary() && isActivityGroupExpanded(activityGroup().key), isActivityGroupExpanded(activityGroup().key))}${showSummary() ? ' assistant-flow-block-starts-summary' : ''}${revealClass ? ' assistant-activity-group-settling' : ''}${!showSummary() && !isActivityGroupExpanded(activityGroup().key) ? ' assistant-message-flow-item-hidden' : ''}`}
@@ -923,6 +940,7 @@ export function AssistantMessageContent(props: {
             showSummary() ? encodeURIComponent(activityGroup().key) : undefined
           }
           data-assistant-render-key={entry.key}
+          data-activity-continues={continuesInNextMessage() ? 'true' : undefined}
         >
           <AssistantActivityGroup
             info={props.info}
@@ -1228,7 +1246,10 @@ function AssistantActivityGroup(props: {
         <div class="assistant-activity-details">
           <For each={props.parts}>
             {(part) => (
-              <div class="assistant-activity-detail">
+              <div
+                class="assistant-activity-detail"
+                data-tool-kind={part.type === 'tool' ? getToolKind(part.tool) : 'reasoning'}
+              >
                 <MessagePart
                   part={part}
                   messageInfo={props.info}

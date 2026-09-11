@@ -110,12 +110,13 @@
   z-index: var(--z-chrome-cover);
 }
 
-/* Final-answer rails paint into the track gutter, outside the row's paint box. */
+/* Final-answer markers and expanded activity guides paint into the track gutter. */
 .interactive-list-track.virtualized
   .interactive-item-container:has(
     .assistant-turn-content-highlighted,
     .assistant-turn-content-planning,
-    .assistant-message-flow-item-final
+    .assistant-message-flow-item-final,
+    .assistant-activity-details
   ) {
   contain: layout style;
 }
@@ -351,21 +352,36 @@
 }
 
 .assistant-activity-group {
-  --assistant-activity-connector-color: color-mix(
-    in srgb,
-    var(--color-vscode-fg-muted) 58%,
-    transparent
-  );
-  --assistant-activity-underline-color: var(--color-vscode-border-soft);
-  --assistant-activity-connector-width: 1px;
-  --assistant-activity-summary-line-offset: 4px;
-  /* Card border + horizontal padding + half of the 12px header icon. */
-  --assistant-activity-icon-center: calc(1px + var(--space-5) + 6px);
-
   position: relative;
   z-index: 1;
   min-width: 0;
   background: var(--color-vscode-sidebar);
+}
+
+.assistant-activity-group:has(> .assistant-activity-details)::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(1px - var(--chat-horizontal-padding));
+  width: 1px;
+  background: color-mix(in srgb, var(--color-vscode-fg-muted) 40%, transparent);
+  content: '';
+  pointer-events: none;
+}
+
+.interactive-response-continues-activity-group
+  .assistant-message-flow
+  > .assistant-message-flow-item:first-child
+  > .assistant-activity-group:has(> .assistant-activity-details:first-child)::before {
+  top: -2px;
+}
+
+/* The next segment covers the inter-row gap; this segment also owns the
+   fractional height correction appended to its row by virtualization. */
+.assistant-message-flow
+  > .assistant-message-flow-item[data-activity-continues='true']:last-child
+  > .assistant-activity-group:has(> .assistant-activity-details)::before {
+  bottom: calc(-1 * var(--interactive-item-block-correction, 0px));
 }
 
 .assistant-message-flow-item-hidden {
@@ -569,6 +585,11 @@
   animation: assistant-activity-group-settle 0.32s cubic-bezier(0.16, 0.72, 0.24, 1) both;
 }
 
+/* Expanded fragments share one guide, so they must not translate independently. */
+.assistant-activity-group-settling:has(> .assistant-activity-group > .assistant-activity-details) {
+  animation: none;
+}
+
 @keyframes assistant-activity-group-settle {
   from {
     transform: translateY(2px);
@@ -616,7 +637,8 @@
 }
 
 .assistant-activity-summary:focus-visible {
-  outline: none;
+  outline: 1px solid var(--color-vscode-accent);
+  outline-offset: 4px;
 }
 
 .assistant-activity-summary-placeholder {
@@ -631,25 +653,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.assistant-activity-summary[aria-expanded='true'] .assistant-activity-summary-text::after {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: var(--assistant-activity-connector-width);
-  background: var(--assistant-activity-underline-color);
-  content: '';
-  pointer-events: none;
-}
-
-.assistant-activity-summary[aria-expanded='true'] {
-  height: calc(14px + var(--assistant-activity-summary-line-offset));
-}
-
-.assistant-activity-summary[aria-expanded='true'] .assistant-activity-summary-text {
-  padding-bottom: var(--assistant-activity-summary-line-offset);
 }
 
 .assistant-activity-summary-item {
@@ -681,16 +684,6 @@
   width: 1.38em;
   height: 1.1em;
   align-self: center;
-}
-
-.assistant-activity-kind-icon::before {
-  position: absolute;
-  right: 0;
-  width: 1.1em;
-  height: 1.1em;
-  border-radius: 2px;
-  background: color-mix(in srgb, var(--color-vscode-fg-muted) 10%, transparent);
-  content: '';
 }
 
 .assistant-activity-kind-icon > .ui-icon {
@@ -726,13 +719,13 @@
 }
 
 .assistant-activity-chevron.expanded {
-  transform: translateY(calc(var(--assistant-activity-summary-line-offset) / -2)) rotate(90deg);
+  transform: rotate(90deg);
 }
 
 .assistant-activity-details {
   display: flex;
   flex-direction: column;
-  gap: var(--assistant-bordered-block-gap);
+  gap: 2px;
 }
 
 .assistant-activity-summary + .assistant-activity-details {
@@ -740,45 +733,60 @@
 }
 
 .assistant-activity-detail {
+  --assistant-activity-tint: var(--color-vscode-fg-muted);
+
   min-width: 0;
 }
 
-.assistant-activity-details > .assistant-activity-detail {
-  position: relative;
+.assistant-activity-detail[data-tool-kind='read'],
+.assistant-activity-detail[data-tool-kind='search'],
+.assistant-activity-detail[data-tool-kind='web'] {
+  --assistant-activity-tint: var(--color-vscode-accent);
 }
 
-.assistant-activity-details > .assistant-activity-detail::before,
-.assistant-activity-details .file-change-card-list > .file-change-card + .file-change-card::before {
-  position: absolute;
-  left: var(--assistant-activity-icon-center);
-  width: var(--assistant-activity-connector-width);
-  background: var(--assistant-activity-connector-color);
-  content: '';
-  pointer-events: none;
+.assistant-activity-detail[data-tool-kind='edit'] {
+  --assistant-activity-tint: var(--color-vscode-success);
 }
 
-.assistant-activity-details > .assistant-activity-detail::before {
-  top: calc(-1 * var(--assistant-bordered-block-gap));
-  height: var(--assistant-bordered-block-gap);
+.assistant-activity-detail[data-tool-kind='reasoning'],
+.assistant-activity-detail[data-tool-kind='skill'] {
+  --assistant-activity-tint: var(--color-vscode-warning);
 }
 
-.assistant-activity-summary
-  + .assistant-activity-details
-  > .assistant-activity-detail:first-child::before {
-  top: calc(-1 * var(--assistant-activity-item-gap));
-  height: var(--assistant-activity-item-gap);
+.assistant-activity-detail
+  .ui-icon:is(.tool-call-icon, .thinking-topic-icon):not(.tool-status-error) {
+  color: color-mix(in srgb, var(--assistant-activity-tint) 70%, var(--color-vscode-fg));
 }
 
-.assistant-activity-details .file-change-card-list > .file-change-card + .file-change-card::before {
-  top: calc(-1 * var(--assistant-bordered-block-gap));
-  height: var(--assistant-bordered-block-gap);
+.assistant-activity-details .file-change-card-list {
+  gap: 2px;
 }
 
-/* Let the continuing row's connector paint across the row boundary as one
-   segment. Two paint-contained half-segments can expose a raster seam. */
-.interactive-list-track.virtualized
-  .interactive-item-container.interactive-response-continues-activity-group {
-  contain: layout style;
+body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-details {
+  --assistant-activity-contrast-border: var(--color-vscode-contrast-border);
+}
+
+.assistant-activity-details
+  .assistant-activity-detail
+  :is(.chat-tool-invocation-part, .chat-thinking-box) {
+  border-color: var(--assistant-activity-contrast-border, transparent);
+  border-radius: var(--radius-control);
+  background: transparent;
+}
+
+.assistant-activity-details
+  .assistant-activity-detail
+  :is(.chat-tool-invocation-part, .chat-thinking-box):hover {
+  background: color-mix(in srgb, var(--color-vscode-fg) 3%, transparent);
+}
+
+.assistant-activity-details
+  .assistant-activity-detail
+  :is(.chat-tool-invocation-part, .chat-thinking-box):has(
+    :is(.tool-invocation-chevron, .thinking-chevron).expanded
+  ) {
+  border-color: var(--assistant-activity-contrast-border, var(--color-vscode-border-soft));
+  background: var(--color-vscode-surface-subtle-alt);
 }
 
 .assistant-message-flow-item-streamed.measured-entrance-active {
@@ -1164,6 +1172,24 @@ body.vscode-light
     .interactive-item-render-empty
   ) {
   padding-top: 3px;
+}
+
+/* Expanded activity stays one list across message rows. Its full group layout
+   signature already invalidates every owner when continuation or expansion changes. */
+.interactive-item-container.interactive-response:has(
+    .assistant-message-flow
+      > .assistant-message-flow-item[data-activity-continues='true']:last-child
+  ):not(.interactive-item-render-empty) {
+  padding-bottom: 0;
+}
+
+.interactive-item-container.interactive-response.interactive-response-continues-activity-group:has(
+    .assistant-message-flow
+      > .assistant-message-flow-item:first-child
+      > .assistant-activity-group
+      > .assistant-activity-details:first-child
+  ):not(.interactive-item-render-empty) {
+  padding-top: 2px;
 }
 
 .model-change-indicator.assistant-dialog-summary {
