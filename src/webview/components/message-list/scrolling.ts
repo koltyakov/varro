@@ -40,11 +40,16 @@ export function performScrollToBottom(args: {
   container: HTMLElement | null | undefined;
   now: number;
   programmaticScrollWindowMs: number;
+  elapsedMs?: number;
 }) {
   const { container } = args;
   if (!container) return null;
 
-  const nextScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+  const target = Math.max(0, container.scrollHeight - container.clientHeight);
+  const nextScrollTop =
+    args.elapsedMs === undefined
+      ? target
+      : getSmoothBottomFollowTop(container.scrollTop, target, args.elapsedMs);
   if (Math.abs(container.scrollTop - nextScrollTop) >= 1) {
     container.scrollTop = nextScrollTop;
   }
@@ -52,6 +57,13 @@ export function performScrollToBottom(args: {
     nextScrollTop,
     nextIgnoreScrollUntil: args.now + args.programmaticScrollWindowMs,
   };
+}
+
+export function getSmoothBottomFollowTop(top: number, target: number, elapsedMs: number): number {
+  const distance = target - top;
+  if (distance <= 1) return target;
+  const fraction = 1 - Math.exp(-Math.min(64, Math.max(1, elapsedMs)) / 55);
+  return Math.min(target, top + Math.max(1, distance * fraction));
 }
 
 export function captureExpansionScrollAnchor(args: {

@@ -313,6 +313,10 @@ type SessionHistoryScopeRequest = {
 export { scopeOpenCodeRequest, getOpenCodeDirectoryHeaders } from './util/opencode-request';
 
 export interface RestProxyCallbacks {
+  restoreStreamingText?(
+    info: Record<string, unknown>,
+    parts: Record<string, unknown>[]
+  ): Record<string, unknown>[];
   server: Pick<OpenCodeServer, 'getWorkspaceCwd' | 'request'>;
   contextProvider: Pick<
     ContextProvider,
@@ -3470,7 +3474,10 @@ export class RestProxy {
         droppedParts += 1;
       }
 
-      normalized.push({ info: projectSummaryDiffs(info), parts });
+      normalized.push({
+        info: projectSummaryDiffs(info),
+        parts: this.callbacks.restoreStreamingText?.(info, parts) ?? parts,
+      });
     }
 
     if (droppedEntries > 0 || droppedParts > 0) {

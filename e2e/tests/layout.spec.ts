@@ -61,6 +61,13 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
       )
     );
   });
+  await expect
+    .poll(() =>
+      trayItems.evaluate(
+        (element) => element.scrollHeight - element.clientHeight - element.scrollTop
+      )
+    )
+    .toBeLessThanOrEqual(1);
 
   const trayGeometry = await trayItems.evaluate((element) => {
     const viewport = element.getBoundingClientRect();
@@ -740,7 +747,7 @@ for (const delayedDelivery of [false, true]) {
       };
       harnessWindow.__varroE2E?.updateMessagePart?.(part);
       return new Promise<void>((resolve) => {
-        // Registered after the bridge: receipt follows its synchronous update and timer setup.
+        // Receipt confirms delivery; the frame-sized bridge batch is drained below.
         const onDelivered = (event: MessageEvent<ExtensionMessage>) => {
           const message = event.data;
           if (
@@ -762,6 +769,7 @@ for (const delayedDelivery of [false, true]) {
 
     await expect(details).toHaveCount(initialDetailCount);
     await expect(summary).toHaveText(initialSummary || '');
+    await page.clock.runFor(16);
     await page.clock.fastForward(500);
     const activeItem = page.locator('[data-activity-part-id="tool-expanded-running"]');
     await expect(page.locator('.assistant-active-activity-tray')).toHaveCount(1);
@@ -942,6 +950,7 @@ test('keeps inline edits separated from a following Explored summary', async ({ 
   const summary = row.locator('.assistant-activity-summary').last();
   await expect(edits).toHaveCount(2);
   await expect(edits.locator('.file-edit-path-link')).toHaveText(['src/first.ts', 'src/second.ts']);
+  await expect(row.locator('[data-activity-part-id="tool-read-after-edits"]')).toHaveCount(0);
   await expect(summary).toContainText('Explored');
   await summary.evaluate(async (element) => {
     const item = element.closest('.assistant-message-flow-item');
@@ -1354,7 +1363,7 @@ test('tightens only bordered activity boundaries', async ({ page }) => {
   expect(incomingGap).toBe(16);
   expect(collapsedGap).toBe(12);
   expect(borderedGap).toBe(9);
-  expect(expandedGap).toBe(12);
+  expect(expandedGap).toBe(8);
   expect(proseGaps).toEqual({ summaryToProse: 12, proseToEvent: 12 });
   expect(crossMessageGaps.eventToProse - crossMessageGaps.eventToProseRowCorrection).toBeCloseTo(
     12,

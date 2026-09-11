@@ -2,11 +2,33 @@ import { describe, expect, it } from 'vitest';
 import {
   captureExpansionScrollAnchor,
   getDistanceFromBottom,
+  getSmoothBottomFollowTop,
   performScrollToBottom,
   recoverScrollAnchorDescendant,
   resolveAutoScrollOnUserScroll,
   restoreExpansionScrollAnchor,
 } from './scrolling';
+
+describe('smooth bottom follow', () => {
+  it('converges on a moving target and preserves a newer downward user position', () => {
+    let top = 100;
+    for (let frame = 0; frame < 30; frame += 1) {
+      if (frame === 4) top = 350;
+      const target = frame < 4 ? 400 : 500;
+      const next = getSmoothBottomFollowTop(top, target, 16);
+      expect(next).toBeGreaterThanOrEqual(top);
+      expect(next).toBeLessThanOrEqual(target);
+      if (frame === 0) expect(next).toBeLessThan(200);
+      top = next;
+    }
+    expect(top).toBe(500);
+  });
+
+  it('bounds the step after a suspended frame instead of jumping to the target', () => {
+    expect(getSmoothBottomFollowTop(0, 1_000, 10_000)).toBeLessThan(700);
+    expect(getSmoothBottomFollowTop(999.5, 1_000, 16)).toBe(1_000);
+  });
+});
 
 describe('recoverScrollAnchorDescendant', () => {
   it('preserves the captured ordinal when repeated descendants have matching text', () => {

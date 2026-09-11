@@ -2,6 +2,7 @@ import type { Message, Part, Session, SessionStatus } from '../../types';
 import type { QueuedAttachmentSnapshot } from './session-send';
 import type { UsageLimitNotice } from '../../lib/usage-limit';
 import { resolveTaskSessionId } from '../../lib/task-session';
+import { flushMessagePresentation } from '../../lib/message-list-layout';
 
 type ResolvedModel = { providerID: string; modelID: string; variant?: string };
 type SessionUsageLimitSnapshot =
@@ -56,6 +57,7 @@ export async function abortSessionWithDependencies(
   );
 
   deps.markPendingAbortTree(sessionTreeIds);
+  for (const id of sessionTreeIds) flushMessagePresentation(id);
   for (const id of sessionTreeIds) {
     deps.setSessionStatusEntry(id, { type: 'idle' });
   }

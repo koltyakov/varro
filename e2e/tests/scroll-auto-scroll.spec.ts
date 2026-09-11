@@ -957,6 +957,101 @@ test.describe('auto-scroll', () => {
       .toBeLessThan(15);
   });
 
+  for (const change of ['clear', 'complete'] as const) {
+    test(`reserves todo space before an automatic ${change}`, async ({ page }, testInfo) => {
+      await page.goto('/e2e/harness/index.html?scenario=large-transcript');
+      const list = page.locator('.interactive-list');
+      await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+      await page.evaluate(() => {
+        window.postMessage(
+          {
+            type: 'server/event',
+            payload: {
+              type: 'todo.updated',
+              properties: {
+                sessionID: 'session-large-transcript',
+                todos: Array.from({ length: 7 }, (_, index) => ({
+                  content: `Automatic work item ${index}`,
+                  status: index === 0 ? 'in_progress' : 'pending',
+                  priority: 'medium',
+                })),
+              },
+            },
+          },
+          '*'
+        );
+      });
+      await expect(page.locator('.todo-block-list')).toBeVisible();
+      await expect
+        .poll(() =>
+          getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
+        )
+        .toBeLessThan(2);
+      await waitForAnimationFrames(page, 6);
+      const samples = await list.evaluate(async (element, finishTodos) => {
+        const marker = element.querySelector<HTMLElement>(
+          '[data-msg-id="message-large-assistant-239"] .rendered-markdown'
+        )!;
+        const input = document.querySelector('.interactive-input-part')!;
+        const result: Array<{
+          source: string;
+          top: number;
+          scrollTop: number;
+          height: number;
+          client: number;
+          connected: boolean;
+        }> = [];
+        const record = (source: string) =>
+          result.push({
+            source,
+            top: marker.getBoundingClientRect().top,
+            scrollTop: element.scrollTop,
+            height: element.scrollHeight,
+            client: element.clientHeight,
+            connected: marker.isConnected,
+          });
+        record('before');
+        const observer = new MutationObserver(() => record('mutation'));
+        observer.observe(input, { childList: true, subtree: true });
+        window.postMessage(
+          {
+            type: 'server/event',
+            payload: {
+              type: 'todo.updated',
+              properties: {
+                sessionID: 'session-large-transcript',
+                todos: finishTodos
+                  ? Array.from({ length: 7 }, (_, index) => ({
+                      content: `Automatic work item ${index}`,
+                      status: 'completed',
+                      priority: 'medium',
+                    }))
+                  : [],
+              },
+            },
+          },
+          '*'
+        );
+        for (let frame = 0; frame < 60; frame += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          record('frame');
+        }
+        observer.disconnect();
+        return result;
+      }, change === 'complete');
+      await testInfo.attach('automatic-todo-collapse.json', {
+        body: JSON.stringify(samples, null, 2),
+        contentType: 'application/json',
+      });
+      await expect(page.locator('.todo-block-list')).toHaveCount(0);
+      expect(samples.every((sample) => sample.connected)).toBe(true);
+      expect(
+        samples.filter((sample) => Math.abs(sample.top - samples[0]!.top) > 1.5),
+        JSON.stringify({ before: samples[0], after: samples.at(-1) })
+      ).toEqual([]);
+    });
+  }
+
   test('keeps the transcript anchored when the todo list collapses', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=large-transcript');
     const list = page.locator('.interactive-list');

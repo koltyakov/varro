@@ -87,6 +87,7 @@ import { FileSearchService } from './file-search-service';
 import { GeneratedDependencyTreeGuard } from './generated-dependency-tree-guard';
 import { HiddenSessionManager } from './hidden-session-manager';
 import { HostPersistence } from './host-persistence';
+import { StreamingTextCache } from './streaming-text-cache';
 import { readLocalSessionSummary } from './local-session-summary';
 import { logger } from './logger';
 import { MessageRouter } from './message-router';
@@ -219,6 +220,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly providerLimitService: ProviderLimitService;
   private readonly webviewSession: WebviewSession;
   private readonly serverEventBridge: ServerEventBridge;
+  private readonly streamingText: StreamingTextCache;
   private readonly droppedFilesService: DroppedFilesService;
   private readonly providerFileRefresh: ProviderFileRefreshController;
   private readonly sessionDiffProvider: SessionDiffDocumentProvider;
@@ -307,6 +309,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         ? (extensionPackageJson as { version: string }).version
         : 'unknown';
     const persistence = new HostPersistence(workspaceState);
+    this.streamingText = new StreamingTextCache(persistence);
     const globalPersistence = new HostPersistence(globalState);
     this.droppedFilesService = new DroppedFilesService(contextProvider);
     this.fileSearch = new FileSearchService();
@@ -396,7 +399,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       },
       this.providerLimitService,
       (message) => this.post(message),
-      () => this.updateStatusBarItem()
+      () => this.updateStatusBarItem(),
+      this.streamingText
     );
 
     this.ralphHost = new RalphHost({
@@ -573,6 +577,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         }),
     };
     const restProxy = new RestProxy({
+      restoreStreamingText: (info, parts) => this.streamingText.restore(info, parts),
       server: endpointServer,
       workspaceSessionStatusCoordinator: this.workspaceSessionStatusCoordinator,
       contextProvider: this.contextProvider,

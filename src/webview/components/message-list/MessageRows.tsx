@@ -26,10 +26,12 @@ import {
   shouldShowPlanImplementationAction,
 } from './plan-actions';
 import type { AssistantDialogSummaryInfo } from './assistant-dialog';
+import type { StreamingPresentation } from './streaming-presentation';
 
 const HOVER_INTENT_DELAY_MS = 300;
 
 export type MessageRowSharedProps = {
+  presentation?: StreamingPresentation;
   modelChangeMap: Map<string, ModelChangeInfo>;
   promptNumberMap: ReadonlyMap<string, number>;
   showPromptNumbers: boolean;
@@ -264,6 +266,7 @@ export function MessageRow(
             }
             streamingPartId={streamingPartId()}
             streamingText={streamingText()}
+            presentation={props.presentation}
             allowInitialAssistantItemReveal={allowInitialAssistantItemReveal}
             claimAssistantItemReveal={props.claimAssistantItemReveal}
             questionRequestForTool={props.questionRequestForTool}

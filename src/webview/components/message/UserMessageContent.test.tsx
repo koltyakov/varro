@@ -213,6 +213,36 @@ describe('UserMessageContent', () => {
     });
   });
 
+  it('keeps selected Markdown with nested fences out of the bubble and opens the full attachment', () => {
+    const send = installSendToExtension();
+    const content =
+      'Please share the repository paths:\n```text\nDockerfile\nsrc/\n```\nWe need:\n- Pinned versions.';
+    renderUserContent([
+      textPart('prompt', "Shorten, as it's duplication"),
+      textPart(
+        'selection',
+        `[Unsaved selection from LOADTESTS.md lines 25-41]\n\`\`\`\`markdown\n${content}\n\`\`\`\``
+      ),
+    ]);
+
+    expect(container?.querySelectorAll('.user-message-text')).toHaveLength(1);
+    expect(container?.querySelector('.user-message-text')?.textContent?.trim()).toBe(
+      "Shorten, as it's duplication"
+    );
+    expect(container?.textContent).not.toContain('We need:');
+    expect(container?.querySelector('.user-message-code-block')).toBeNull();
+    const chip = container?.querySelector<HTMLButtonElement>(
+      '.message-attachment-chip.message-attachment-chip-clickable'
+    );
+    expect(chip?.textContent).toContain('LOADTESTS.md');
+    expect(chip?.textContent).toContain('L25-41');
+    chip?.click();
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open-text',
+      payload: { content, title: 'LOADTESTS.md unsaved selection', language: 'markdown' },
+    });
+  });
+
   it('renders Markdown while preserving attachment chips outside code', () => {
     renderUserContent([
       textPart(

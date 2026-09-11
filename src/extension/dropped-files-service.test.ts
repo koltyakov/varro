@@ -80,6 +80,23 @@ describe('DroppedFilesService', () => {
     }
   });
 
+  it('preserves non-ASCII dropped filenames for display', async () => {
+    const service = new DroppedFilesService({ context: { workspacePath: '/repo' } } as never);
+    services.push(service);
+
+    const files = await service.fromContent([
+      {
+        name: '../Релиз начинается с улыбки.mp3',
+        content: Buffer.from('audio').toString('base64'),
+        size: 5,
+      },
+    ]);
+
+    expect(files).toHaveLength(1);
+    expect(files[0]?.relativePath).toBe('Релиз начинается с улыбки.mp3');
+    expect(files[0]?.path).toMatch(/[\\/]varro-drops[\\/]drop-[^\\/]+[\\/].+-\.mp3$/);
+  });
+
   it('writes the actual host owner marker and removes its directory on dispose', async () => {
     const service = new DroppedFilesService({ context: { workspacePath: '/repo' } } as never);
     services.push(service);

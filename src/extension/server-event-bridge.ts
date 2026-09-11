@@ -7,6 +7,7 @@ import { asRecord } from '../shared/type-utils';
 import type { OpenCodeServer } from './server';
 import type { HiddenSessionManager } from './hidden-session-manager';
 import { logger } from './logger';
+import type { StreamingTextCache } from './streaming-text-cache';
 import type { SessionStateManager } from './session-state-manager';
 import { getSessionIdsForEvent } from './sidebar-provider-utils';
 import {
@@ -84,7 +85,8 @@ export class ServerEventBridge {
       clearCache(): void;
     },
     private readonly post: PostMessage,
-    private readonly updateStatusBarItem: () => void
+    private readonly updateStatusBarItem: () => void,
+    private readonly streamingText?: StreamingTextCache
   ) {
     this.openCodeStatusBarItem = vscode.window.createStatusBarItem(
       'varro.opencode-version',
@@ -154,6 +156,7 @@ export class ServerEventBridge {
     this.flushPendingServerEvents();
     void this.sessionState.persist();
     await this.sessionState.flush();
+    await this.streamingText?.flush();
     this.unknownEventLoggedAt.clear();
     this.recentEvents.clear();
     this.attentionStatusBarItem.dispose();
@@ -206,6 +209,7 @@ export class ServerEventBridge {
       this.post({ type: 'server/event', payload: event });
     }
     this.sessionState.handleServerEvent(event);
+    this.streamingText?.observe(event);
     if (event.type === 'session.created' || event.type === 'session.updated') {
       this.updateStatusBarItem();
     }

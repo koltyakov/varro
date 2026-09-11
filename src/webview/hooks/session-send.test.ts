@@ -252,6 +252,66 @@ describe('session-send helpers', () => {
     ]);
   });
 
+  it.each(['selection', 'dirty-buffer', 'terminal'] as const)(
+    'keeps nested Markdown fences inside a %s attachment through send and display',
+    (kind) => {
+      const content = [
+        'Please share the repository and paths for:',
+        '',
+        '```text',
+        'Dockerfile',
+        'src/',
+        '```',
+        '',
+        'We need:',
+        '- A Dockerfile with pinned k6 and browser versions.',
+        '````markdown',
+        'More fenced content',
+        '````',
+        '- All supported configuration variables.',
+      ].join('\n');
+      const prompt = "Shorten, as it's duplication";
+      const result = buildSessionSendBody(
+        createState(
+          kind === 'terminal'
+            ? { terminalSelection: { terminalName: 'zsh', text: content } }
+            : {
+                editorContext: createEditorContext({
+                  editorText: {
+                    kind,
+                    path: '/repo/LOADTESTS.md',
+                    relativePath: 'LOADTESTS.md',
+                    language: 'markdown',
+                    range: { startLine: 25, endLine: 41 },
+                    text: content,
+                    truncated: false,
+                  },
+                }),
+              }
+        ),
+        'session-1',
+        prompt,
+        () => true
+      );
+      const parts: Part[] = (result?.body.parts ?? []).map((part, index) => ({
+        id: `part-${index}`,
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        type: 'text',
+        text: part.text ?? '',
+      }));
+      const parsed = parseUserMessageContent(parts);
+      expect(parsed.messageTexts).toEqual([prompt]);
+      expect(parsed.attachments).toHaveLength(1);
+      expect(parsed.attachments[0]).toMatchObject({ text: content });
+      expect(getUserMessageEditText(parts)).toBe(prompt);
+      const language = kind === 'terminal' ? 'text' : 'markdown';
+      expect(result?.body.parts[1]?.text).toContain(
+        `\n\`\`\`\`\`${language}\n${content}\n\`\`\`\`\``
+      );
+    }
+  );
+
   it('includes the open-root map and an absolute sibling editor path', () => {
     const result = buildSessionSendBody(
       createState({

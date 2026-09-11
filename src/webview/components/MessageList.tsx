@@ -9,7 +9,6 @@ import {
   onMount,
   untrack,
 } from 'solid-js';
-import type { Setter } from 'solid-js';
 import {
   isAbortedAssistantError,
   isPermissionRejectedToolError,
@@ -60,6 +59,9 @@ import {
 import {
   registerPermissionRemovalHandler,
   registerQueuedMessageRemovalHandler,
+  registerTodoCollapseHandler,
+  registerMessageBlockRemovalHandler,
+  registerPresentationFlushHandler,
 } from '../lib/message-list-layout';
 import {
   getFinalAssistantTextPartId,
@@ -177,6 +179,12 @@ import {
 } from './message-list/row-layout';
 import { isNumber, isFunction } from '../lib/runtime-values';
 import { onAfterChatFontConfigChange, onBeforeChatFontConfigChange } from '../lib/chat-font-config';
+import {
+  StreamingPresentation,
+  getPresentationPartKey,
+} from './message-list/streaming-presentation';
+import type { PresentationItem } from './message-list/streaming-presentation';
+import type { StreamingLayoutProjection } from './message-list/row-layout';
 
 function showTruncatedHistoryBanner() {
   return !editingMessage() && isSessionHistoryTruncated(state.activeSessionId);
@@ -200,10 +208,6 @@ const APPEND_SCROLL_TRANSITION_MS = 180;
 const EXPANSION_SCROLL_ANCHOR_WINDOW_MS = 250;
 const LOADING_ROW_REAPPEAR_DELAY_MS = 600;
 const LOADING_ROW_RESERVE_RELEASE_DELAY_MS = 600;
-const ACTIVITY_SHOW_DELAY_MS = 500;
-const ACTIVITY_MIN_VISIBLE_MS = 2_000;
-const ACTIVITY_EXIT_MS = 420;
-const ACTIVITY_EXIT_CLEANUP_GRACE_MS = 250;
 const THINKING_AUTO_EXPAND_DELAY_MS = 2_000;
 // Only offer "jump to latest" when at least this much content is hidden
 // below the viewport; a barely-scrolled list doesn't need the button.
@@ -245,16 +249,6 @@ export function canWidthResizeOwnAnchor(owners: {
   return !Object.values(owners).some(Boolean);
 }
 
-function setSetMembership(setter: Setter<ReadonlySet<string>>, key: string, included: boolean) {
-  setter((current) => {
-    if (current.has(key) === included) return current;
-    const next = new Set(current);
-    if (included) next.add(key);
-    else next.delete(key);
-    return next;
-  });
-}
-
 type VisibleScrollAnchor = {
   messageId: string;
   top: number;
@@ -274,6 +268,8 @@ type ActivityExitSummaryAnchor = {
   groupKey?: string;
   top: number;
 };
+
+type PresentationSourceReader = { read?: () => void };
 
 function visibleRangesEqual(previous: VisibleRange, next: VisibleRange) {
   return (
@@ -365,15 +361,48 @@ export function MessageList() {
   const [workedSummaryPromptMessageId, setWorkedSummaryPromptMessageId] = createSignal<
     string | null
   >(null);
-  const [retainedActivityPartKeys, setRetainedActivityPartKeys] = createSignal<ReadonlySet<string>>(
-    new Set()
+  const presentationSourceReader: PresentationSourceReader = {};
+  const presentation = new StreamingPresentation({
+    beforeRead: () => presentationSourceReader.read?.(),
+    beforeExit: (keys) => {
+      if (keys.size === 1) reserveActivityExitSpace([...keys][0]!);
+      else reserveCollapsedActivityTraySpace(keys, true);
+    },
+    beforeGroup: (keys) => reserveCollapsedActivityTraySpace(keys),
+    beforeLastExit: () => preserveActivityExitReserve(),
+    afterShow: (painted) => queueMicrotask(() => requestAnimationFrame(painted)),
+    afterExit: (key, complete) => {
+      queueMicrotask(() => {
+        const partId = key.slice(key.lastIndexOf('\u0000') + 1);
+        const item = containerRef?.querySelector<HTMLElement>(
+          `[data-activity-part-id="${CSS.escape(partId)}"]`
+        );
+        const animation =
+          globalThis.CSSAnimation === undefined
+            ? undefined
+            : item
+                ?.getAnimations()
+                .find(
+                  (candidate) =>
+                    candidate instanceof CSSAnimation &&
+                    candidate.animationName === 'assistant-active-activity-out'
+                );
+        if (animation) void animation.finished.then(complete, complete);
+      });
+    },
+  });
+  onCleanup(() => presentation.dispose());
+  onCleanup(
+    registerPresentationFlushHandler((sessionId) => {
+      if (sessionId === state.activeSessionId) presentation.flush();
+    })
   );
-  const [exitingActivityPartKeys, setExitingActivityPartKeys] = createSignal<ReadonlySet<string>>(
-    new Set()
-  );
-  const [visibleActiveActivityPartKeys, setVisibleActiveActivityPartKeys] = createSignal<
-    ReadonlySet<string>
-  >(new Set());
+  const retainedActivityPartKeys = presentation.retainedActivity;
+  const exitingActivityPartKeys = presentation.exitingActivity;
+  const visibleActiveActivityPartKeys = presentation.visibleActivity;
+  const renderedVisibleActiveActivityPartKeys = visibleActiveActivityPartKeys;
+  const renderedRetainedActivityPartKeys = retainedActivityPartKeys;
+  const renderedExitingActivityPartKeys = exitingActivityPartKeys;
   const hasVisibleActivityTrayRows = () =>
     visibleActiveActivityPartKeys().size > 0 ||
     retainedActivityPartKeys().size > 0 ||
@@ -850,9 +879,7 @@ export function MessageList() {
     return untrack(() => findStreamingPart(messages(), streamingPartId));
   });
   const streamingTextLength = createMemo(() => state.streamingText.length);
-  const hasStreamingText = createMemo(() => state.streamingText.length > 0);
-  const hasNonWhitespaceStreamingText = createMemo(() => state.streamingText.trim().length > 0);
-  const streamingLayoutProjection = createMemo<{ partId: string | null; text: string }>(
+  const streamingLayoutProjection = createMemo<StreamingLayoutProjection>(
     () => {
       const partId = state.streamingPartId;
       const text = state.streamingText;
@@ -862,16 +889,25 @@ export function MessageList() {
           : isWorkspaceDirectoryText(text)
             ? '[Working directory:'
             : 'x';
-      return { partId, text: projectedText };
+      return {
+        partId,
+        text: projectedText,
+        textByPartId: presentation.textGeometry(),
+        hiddenPartKeys: presentation.hiddenParts(),
+      };
     },
     { partId: null, text: '' },
     {
       equals: (previous, current) =>
-        previous.partId === current.partId && previous.text === current.text,
+        previous.partId === current.partId &&
+        previous.text === current.text &&
+        previous.textByPartId === current.textByPartId &&
+        previous.hiddenPartKeys === current.hiddenPartKeys,
     }
   );
   const visibleBlockingStreamingPart = createMemo(() => {
-    const streamingText = state.streamingText;
+    const part = streamingPart();
+    const streamingText = (part && presentation.textForPart(part)) ?? state.streamingText;
     return hasVisibleBlockingStreamingPart(streamingPart(), streamingText);
   });
   const visibleRunningToolPart = createMemo(() => {
@@ -1680,7 +1716,7 @@ export function MessageList() {
 
   function invalidateChangedZeroHeightRows(
     candidateMessageIds: Iterable<string>,
-    streaming: { partId: string | null; text: string }
+    streaming: StreamingLayoutProjection
   ) {
     let changed = false;
     for (const messageId of candidateMessageIds) {
@@ -1756,7 +1792,8 @@ export function MessageList() {
     return info && isAssistantMessage(info) && info.time.completed ? messageId : null;
   });
   const trailingFinalResponseMessageId = createMemo(() => {
-    if (state.streamingPartId || state.streamingText.length > 0) return null;
+    if (state.streamingPartId || state.streamingText.length > 0 || presentation.pending())
+      return null;
     return structurallyTrailingFinalResponseMessageId();
   });
   const explicitTerminalFinalResponseMessageId = createMemo(() => {
@@ -1802,14 +1839,15 @@ export function MessageList() {
     }
     return null;
   });
-  const trailingSummaryMessageId = createMemo(
-    () =>
-      structurallyTrailingInterruptedMessageId() ??
-      explicitTerminalFinalResponseMessageId() ??
-      (!activeSessionWorking() ? structurallyTrailingRejectedInteractionMessageId() : null) ??
-      trailingSummaryOwner()?.messageId ??
-      (!isLoading() && !activeSessionWorking() ? trailingFinalResponseMessageId() : null) ??
-      null
+  const trailingSummaryMessageId = createMemo(() =>
+    presentation.pending()
+      ? null
+      : (structurallyTrailingInterruptedMessageId() ??
+        explicitTerminalFinalResponseMessageId() ??
+        (!activeSessionWorking() ? structurallyTrailingRejectedInteractionMessageId() : null) ??
+        trailingSummaryOwner()?.messageId ??
+        (!isLoading() && !activeSessionWorking() ? trailingFinalResponseMessageId() : null) ??
+        null)
   );
 
   const loadingRowEligible = createMemo(
@@ -2360,6 +2398,7 @@ export function MessageList() {
     const infoProjection = `${message.info.role}:${summaryHasOmittedDiffs ? 1 : 0}:${errorProjection}:${isAssistantDiffEligible(message) ? 1 : 0}`;
     const partProjection = message.parts
       .map((part) => {
+        if (streaming.hiddenPartKeys?.has(getPresentationPartKey(part))) return `${part.id}:queued`;
         if (part.type === 'text') {
           return `${part.id}:text:${hasVisibleProjectedText(part, streaming) ? 1 : 0}`;
         }
@@ -3843,17 +3882,24 @@ export function MessageList() {
       const visibleFlowItems = flow
         ? [...flow.children].filter((element) => element.getClientRects().length > 0)
         : [];
-      if (
-        remainingItems?.length === 1 &&
-        remainingItems[0] === item &&
-        visibleFlowItems.length === 1
-      ) {
-        const row = tray.closest<HTMLElement>('.interactive-item-container');
-        if (row) {
-          reserve += Math.max(
-            0,
-            row.getBoundingClientRect().height - tray.getBoundingClientRect().height
+      if (remainingItems?.length === 1 && remainingItems[0] === item) {
+        // A separate Explored summary survives this tray. Reserve the disappearing flow gap
+        // before removal, rather than letting the browser clamp and a later frame restore it.
+        const flowGap = flow ? Number.parseFloat(getComputedStyle(flow).rowGap) || 0 : 0;
+        reserve +=
+          getAssistantFlowSpacingForElements(visibleFlowItems, flowGap) -
+          getAssistantFlowSpacingForElements(
+            visibleFlowItems.filter((element) => element !== tray),
+            flowGap
           );
+        if (visibleFlowItems.length === 1) {
+          const row = tray.closest<HTMLElement>('.interactive-item-container');
+          if (row) {
+            reserve += Math.max(
+              0,
+              row.getBoundingClientRect().height - tray.getBoundingClientRect().height
+            );
+          }
         }
       }
     }
@@ -3897,7 +3943,7 @@ export function MessageList() {
         activityExitHeldResponseContentSignature !== null &&
         activityExitBottomTarget === null &&
         exitingActivityPartKeys().size === 0 &&
-        isLoading() &&
+        (isLoading() || presentation.pending() || presentation.canSmoothFollow()) &&
         getResponseContentSignature() !== activityExitHeldResponseContentSignature
       ) {
         clearActivityExitSummaryAnchor();
@@ -4122,7 +4168,7 @@ export function MessageList() {
     reserveBottomCollapseSpace(reserve);
   }
 
-  function reserveCollapsedActivityTraySpace(keys: ReadonlySet<string>) {
+  function reserveCollapsedActivityTraySpace(keys: ReadonlySet<string>, animated = false) {
     if (
       keys.size === 0 ||
       !containerRef ||
@@ -4226,7 +4272,15 @@ export function MessageList() {
         }
       }
     }
-    reserveBottomCollapseSpace(reserve);
+    if (animated) {
+      activityExitBottomTarget ??= containerRef.scrollTop;
+      captureActivityExitSummaryAnchor();
+      if (activityExitSummaryAnchor) {
+        startActivityExitSummaryObserver(activityExitSummaryAnchor);
+        startActivityExitSummarySettle(activityExitSummaryAnchor);
+      }
+      setActivityExitBottomReserve((current) => current + reserve);
+    } else reserveBottomCollapseSpace(reserve);
   }
 
   function clearActivityExitReserve() {
@@ -4316,7 +4370,7 @@ export function MessageList() {
     }
   }
 
-  function performScroll(options?: { force?: boolean }) {
+  function performScroll(options?: { force?: boolean; immediate?: boolean; elapsedMs?: number }) {
     if (
       stickyNavigationOwnsScroll() ||
       activityExitBottomTarget !== null ||
@@ -4326,6 +4380,21 @@ export function MessageList() {
     if (appendScrollRafId) return;
     if (!options?.force && userScrollRecentlyActive() && !followModeLocked) return;
 
+    const smooth =
+      !options?.immediate &&
+      presentation.canSmoothFollow() &&
+      !reducedMotion() &&
+      autoScroll() &&
+      !editingMessage() &&
+      !diffFocusPauseActive &&
+      !pendingNewTurnMessageId &&
+      !pendingInitialScrollSessionId;
+    if (smooth && options?.elapsedMs === undefined) {
+      const sessionId = state.activeSessionId;
+      if (sessionId) startFollowLoop(sessionId);
+      return;
+    }
+
     reconcileAppendBottomReserve();
     const now = performance.now();
     const previousScrollTop = containerRef?.scrollTop ?? 0;
@@ -4334,6 +4403,7 @@ export function MessageList() {
       container: containerRef,
       now,
       programmaticScrollWindowMs: PROGRAMMATIC_SCROLL_WINDOW_MS,
+      elapsedMs: smooth ? options?.elapsedMs : undefined,
     });
     suppressSyncScrollTop = false;
     if (!result) return;
@@ -4671,7 +4741,8 @@ export function MessageList() {
       return;
     }
     bottomFollowSettleFrames = 0;
-    const currentlyStreaming = state.streamingText.length > 0 || !!state.streamingPartId;
+    const currentlyStreaming =
+      state.streamingText.length > 0 || !!state.streamingPartId || presentation.pending();
     if (activeFollowLoopSessionId === sessionId) {
       if (currentlyStreaming || options?.observedStreaming) bottomFollowObservedStreaming = true;
       if (options?.preserveNearBottomOffset) bottomFollowPreservesNearBottomOffset = true;
@@ -4680,6 +4751,7 @@ export function MessageList() {
     if (initialScrollRafId) cancelAnimationFrame(initialScrollRafId);
 
     activeFollowLoopSessionId = sessionId;
+    let lastFollowFrameAt = performance.now() - 16;
     bottomFollowObservedStreaming = currentlyStreaming || !!options?.observedStreaming;
     bottomFollowPreservesNearBottomOffset = !!options?.preserveNearBottomOffset;
 
@@ -4692,6 +4764,9 @@ export function MessageList() {
 
     function tick() {
       initialScrollRafId = 0;
+      const now = performance.now();
+      const elapsedMs = Math.max(1, now - lastFollowFrameAt);
+      lastFollowFrameAt = now;
       if (!containerRef || !trackRef || stickyNavigationOwnsScroll()) {
         activeFollowLoopSessionId = null;
         return;
@@ -4724,10 +4799,11 @@ export function MessageList() {
         distanceFromBottom() <= 2;
       if ((belowBottomTarget && !preservesNearBottomOffset) || trackGrew) {
         bottomFollowPreservesNearBottomOffset = false;
-        performScroll({ force: true });
+        performScroll({ force: true, elapsedMs });
       }
 
-      const isStreaming = !!state.streamingText.length || !!state.streamingPartId;
+      const isStreaming =
+        !!state.streamingText.length || !!state.streamingPartId || presentation.pending();
       const isWorking = !!visibleRunningToolPart() || activeSessionWorking();
       if (isStreaming) bottomFollowObservedStreaming = true;
       const stable =
@@ -5576,8 +5652,17 @@ export function MessageList() {
     const expandsCompactActivity =
       control.matches('.assistant-activity-summary') &&
       control.getAttribute('aria-expanded') === 'false';
+    const activityItem = control.closest<HTMLElement>('[data-activity-part-id]');
+    const activityMessageId = activityItem?.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+    const activityKey =
+      activityMessageId && activityItem?.dataset.activityPartId
+        ? `${activityMessageId}\u0000${activityItem.dataset.activityPartId}`
+        : null;
+    const expandsActiveActivity =
+      !!activityKey && control.getAttribute('aria-expanded') === 'false';
     const resumeBottomFollow =
-      expandsCompactActivity && (autoScroll() || pinnedToBottom || followModeLocked);
+      (expandsCompactActivity || expandsActiveActivity) &&
+      (autoScroll() || pinnedToBottom || followModeLocked);
 
     if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
     if (isDiffToggle) {
@@ -5597,6 +5682,7 @@ export function MessageList() {
       }),
       resumeBottomFollow,
     };
+    if (activityKey) presentation.inspectActivity(activityKey, expandsActiveActivity);
   }
 
   function reserveExternalBottomCollapse(collapseHeight: number) {
@@ -5717,7 +5803,6 @@ export function MessageList() {
       captureSummary: false,
     });
 
-    const now = Date.now();
     batch(() => {
       for (const part of removedParts) {
         if (
@@ -5732,11 +5817,8 @@ export function MessageList() {
           continue;
         }
         const key = getAssistantActivityPartKey(part);
-        clearActivityShowTimer(key);
-        settledActivityPartKeys.delete(key);
-        activityPartFirstSeenAt.set(key, now);
         claimAssistantItemReveal(part.messageID, `active-activity:${part.id}`);
-        setSetMembership(setVisibleActiveActivityPartKeys, key, true);
+        presentation.showActivity(key);
       }
     });
   }
@@ -5813,6 +5895,72 @@ export function MessageList() {
       reserveQueuedMessageRemoval
     );
     onCleanup(unregisterQueuedMessageRemoval);
+    onCleanup(
+      registerMessageBlockRemovalHandler((element) =>
+        untrack(() => {
+          if (
+            !containerRef?.isConnected ||
+            !containerRef.contains(element) ||
+            state.messagesLoading ||
+            !autoScroll() ||
+            !pinnedToBottom ||
+            editingMessage() ||
+            diffFocusPauseActive ||
+            stickyNavigationOwnsScroll()
+          )
+            return;
+          const bounds = element.getBoundingClientRect();
+          if (bounds.top < containerRef.getBoundingClientRect().top) return;
+          const styles = getComputedStyle(element);
+          const parentStyles = element.parentElement
+            ? getComputedStyle(element.parentElement)
+            : null;
+          const next = element.nextElementSibling;
+          const previewMargin =
+            element.classList.contains('file-change-card') &&
+            next?.classList.contains('file-change-inline-diffs')
+              ? Number.parseFloat(getComputedStyle(next).marginTop) || 0
+              : 0;
+          reserveBottomCollapseSpace(
+            bounds.height +
+              (Number.parseFloat(styles.marginTop) || 0) +
+              (Number.parseFloat(styles.marginBottom) || 0) +
+              (Number.parseFloat(parentStyles?.rowGap || '') || 0) +
+              previewMargin,
+            undefined,
+            { captureSummary: false }
+          );
+        })
+      )
+    );
+    onCleanup(
+      registerTodoCollapseHandler((element) =>
+        untrack(() => {
+          if (
+            !containerRef?.isConnected ||
+            state.messagesLoading ||
+            editingMessage() ||
+            diffFocusPauseActive
+          )
+            return;
+          if (
+            element.closest('.chat-main-column-shell') !==
+            containerRef.closest('.chat-main-column-shell')
+          )
+            return;
+          const styles = getComputedStyle(element);
+          const parentStyles = element.parentElement
+            ? getComputedStyle(element.parentElement)
+            : null;
+          reserveExternalBottomCollapse(
+            element.getBoundingClientRect().height +
+              (Number.parseFloat(styles.marginTop) || 0) +
+              (Number.parseFloat(styles.marginBottom) || 0) +
+              (Number.parseFloat(parentStyles?.rowGap || '') || 0)
+          );
+        })
+      )
+    );
     const unregisterPermissionRemoval = registerPermissionRemovalHandler(
       prepareForPermissionRemoval
     );
@@ -6327,10 +6475,12 @@ export function MessageList() {
   createEffect(() => {
     const sessionId = state.activeSessionId;
     const currentStreamingTextLength = streamingTextLength();
+    const presentationVersion = presentation.version();
     if (
       !sessionId ||
+      state.messagesLoading ||
       stickyNavigationOwnsScroll() ||
-      currentStreamingTextLength === 0 ||
+      (currentStreamingTextLength === 0 && presentationVersion === 0) ||
       (!autoScroll() && !pinnedToBottom)
     )
       return;
@@ -6338,13 +6488,14 @@ export function MessageList() {
     queueMicrotask(() => {
       if (
         state.activeSessionId !== sessionId ||
+        state.messagesLoading ||
         stickyNavigationOwnsScroll() ||
         (!autoScroll() && !pinnedToBottom)
       )
         return;
       followModeLocked = true;
       setAutoScroll(true);
-      startFollowLoop(sessionId, { immediate: true });
+      startFollowLoop(sessionId, { immediate: !presentation.canSmoothFollow() });
     });
   });
 
@@ -6437,7 +6588,9 @@ export function MessageList() {
     });
   });
   createEffect(() => {
-    const replacementStreaming = !!state.streamingPartId || state.streamingText.length > 0;
+    presentation.version();
+    const replacementStreaming =
+      !!state.streamingPartId || state.streamingText.length > 0 || presentation.canSmoothFollow();
     if (!replacementStreaming || exitingActivityPartKeys().size > 0) return;
     clearActivityExitSummaryAnchor();
   });
@@ -6830,70 +6983,6 @@ export function MessageList() {
         : message
     );
   });
-  const activityPartKeysBehindStreamingPartState = createMemo<{
-    sessionId: string | null;
-    userMessageId: string | null;
-    keys: ReadonlySet<string>;
-  }>(
-    (previous) => {
-      const sessionId = state.activeSessionId;
-      const turn = trailingAssistantTurn();
-      const userMessageId = turn?.userMessageId ?? null;
-      const retainedKeys =
-        previous.sessionId === sessionId && previous.userMessageId === userMessageId
-          ? previous.keys
-          : new Set<string>();
-      const trailingMessageIds = trailingAssistantTurn()?.assistantMessageIds;
-      const streamingPartId = state.streamingPartId;
-      if (!trailingMessageIds?.size || !streamingPartId || !hasNonWhitespaceStreamingText()) {
-        return { sessionId, userMessageId, keys: retainedKeys };
-      }
-      const precedingActivityPartKeys = new Set<string>();
-      for (const message of compactActivityMessages()) {
-        if (!trailingMessageIds.has(message.info.id)) continue;
-        for (const part of message.parts) {
-          if (part.id === streamingPartId) {
-            const keys =
-              part.type === 'text'
-                ? new Set([...retainedKeys, ...precedingActivityPartKeys])
-                : retainedKeys;
-            return { sessionId, userMessageId, keys };
-          }
-          if (isAssistantActivityPart(part) && !isAssistantActivityPartRunning(part)) {
-            precedingActivityPartKeys.add(getAssistantActivityPartKey(part));
-          }
-        }
-      }
-      return { sessionId, userMessageId, keys: retainedKeys };
-    },
-    { sessionId: null, userMessageId: null, keys: new Set<string>() }
-  );
-  const activityPartKeysBehindStreamingPart = createMemo(
-    () => activityPartKeysBehindStreamingPartState().keys
-  );
-  const filterActivityPartKeysBehindStream = (keys: ReadonlySet<string>) => {
-    const hiddenKeys = activityPartKeysBehindStreamingPart();
-    if (hiddenKeys.size === 0 || ![...keys].some((key) => hiddenKeys.has(key))) return keys;
-    return new Set([...keys].filter((key) => !hiddenKeys.has(key)));
-  };
-  createComputed<ReadonlySet<string>>((previousHiddenKeys) => {
-    const hiddenKeys = activityPartKeysBehindStreamingPart();
-    const newlyHiddenTransitionKeys = new Set<string>();
-    for (const key of hiddenKeys) {
-      if (!previousHiddenKeys.has(key)) newlyHiddenTransitionKeys.add(key);
-    }
-    reserveCollapsedActivityTraySpace(newlyHiddenTransitionKeys);
-    return hiddenKeys;
-  }, new Set<string>());
-  const renderedVisibleActiveActivityPartKeys = createMemo(() =>
-    filterActivityPartKeysBehindStream(visibleActiveActivityPartKeys())
-  );
-  const renderedRetainedActivityPartKeys = createMemo(() =>
-    filterActivityPartKeysBehindStream(retainedActivityPartKeys())
-  );
-  const renderedExitingActivityPartKeys = createMemo(() =>
-    filterActivityPartKeysBehindStream(exitingActivityPartKeys())
-  );
   const trailingActivityTurnState = createMemo<{
     sessionId: string | null;
     userMessageId: string | null;
@@ -6929,99 +7018,6 @@ export function MessageList() {
   createEffect(() => {
     if (exitingActivityPartKeys().size === 0) preserveActivityExitReserve();
   });
-  const activityPartFirstSeenAt = new Map<string, number>();
-  const settledActivityPartKeys = new Set<string>();
-  const activityCompletionTimers = new Map<
-    string,
-    { exitTimer?: ReturnType<typeof setTimeout>; finishTimer: ReturnType<typeof setTimeout> }
-  >();
-  const activityShowTimers = new Map<string, ReturnType<typeof setTimeout>>();
-
-  const getTrailingVisibleAssistantPartKey = () => {
-    let result: string | null = null;
-    const streaming = streamingLayoutProjection();
-    for (const message of compactActivityMessages()) {
-      if (!isAssistantMessage(message.info)) continue;
-      for (const part of message.parts) {
-        if (
-          !shouldShowAssistantPartInline(part) ||
-          (part.type === 'text' && !hasVisibleProjectedText(part, streaming))
-        ) {
-          continue;
-        }
-        result = `${part.messageID}\u0000${part.id}`;
-      }
-    }
-    return result;
-  };
-
-  const clearActivityCompletionTimer = (key: string) => {
-    const timers = activityCompletionTimers.get(key);
-    if (!timers) return;
-    if (timers.exitTimer) clearTimeout(timers.exitTimer);
-    clearTimeout(timers.finishTimer);
-    activityCompletionTimers.delete(key);
-  };
-
-  const clearActivityShowTimer = (key: string) => {
-    const timer = activityShowTimers.get(key);
-    if (!timer) return;
-    clearTimeout(timer);
-    activityShowTimers.delete(key);
-  };
-
-  const finishActivityExit = (key: string) => {
-    batch(() => {
-      const exitingKeys = untrack(exitingActivityPartKeys);
-      if (exitingKeys.has(key) && exitingKeys.size === 1) preserveActivityExitReserve();
-      setSetMembership(setExitingActivityPartKeys, key, false);
-    });
-  };
-
-  const completeActivityExit = (
-    key: string,
-    timers: {
-      exitTimer?: ReturnType<typeof setTimeout>;
-      finishTimer: ReturnType<typeof setTimeout>;
-    }
-  ) => {
-    if (activityCompletionTimers.get(key) !== timers) return;
-    clearActivityCompletionTimer(key);
-    activityPartFirstSeenAt.delete(key);
-    settledActivityPartKeys.add(key);
-    finishActivityExit(key);
-  };
-
-  const finishActivityExitAfterAnimation = (key: string) => {
-    queueMicrotask(() => {
-      const timers = activityCompletionTimers.get(key);
-      const partId = key.slice(key.lastIndexOf('\u0000') + 1);
-      const item = containerRef?.querySelector<HTMLElement>(
-        `[data-activity-part-id="${CSS.escape(partId)}"]`
-      );
-      const animation =
-        globalThis.CSSAnimation === undefined
-          ? undefined
-          : item
-              ?.getAnimations()
-              .find(
-                (candidate): candidate is CSSAnimation =>
-                  candidate instanceof globalThis.CSSAnimation &&
-                  candidate.animationName === 'assistant-active-activity-out'
-              );
-      if (!timers || !animation) return;
-
-      clearTimeout(timers.finishTimer);
-      timers.finishTimer = setTimeout(
-        () => completeActivityExit(key, timers),
-        ACTIVITY_EXIT_MS + ACTIVITY_EXIT_CLEANUP_GRACE_MS
-      );
-      void animation.finished.then(
-        () => completeActivityExit(key, timers),
-        () => undefined
-      );
-    });
-  };
 
   const canCompactActivityPart = (part: AssistantActivityPart) =>
     shouldShowAssistantPartInline(part) &&
@@ -7032,158 +7028,120 @@ export function MessageList() {
     (part.type !== 'tool' ||
       (!getQuestionRequestForTool(part) && !getPermissionMatchForTool(part)));
 
-  createComputed(() => {
-    const activityMessages = compactActivityMessages();
-    const candidates: AssistantActivityPart[] = [];
-    const currentKeys = new Set<string>();
-    const now = Date.now();
-    const sessionWorking = activeSessionWorking();
-    const activeMessageIds = activeActivityMessageIds();
-    const activeToolMessageIds = activeToolActivityMessageIds();
-    const isActiveActivityMessage = (part: AssistantActivityPart) =>
-      (part.type === 'reasoning' ? activeMessageIds : activeToolMessageIds).has(part.messageID);
-    const lastVisiblePartKey = getTrailingVisibleAssistantPartKey();
-
-    for (const message of activityMessages) {
-      if (!isAssistantMessage(message.info)) continue;
-      for (const part of message.parts) {
-        if (!isAssistantActivityPart(part) || !canCompactActivityPart(part)) {
-          continue;
-        }
-
-        candidates.push(part);
-      }
-    }
-    const abruptlyGroupedKeys = new Set(
-      candidates
-        .filter(
-          (part) =>
-            isAssistantActivityPartRunning(part) &&
-            !isActiveActivityMessage(part) &&
-            visibleActiveActivityPartKeys().has(getAssistantActivityPartKey(part))
-        )
-        .map(getAssistantActivityPartKey)
+  const presentationMessages = createMemo(() => {
+    const ids = trailingAssistantTurn()?.assistantMessageIds;
+    return compactActivityMessages().filter((message) => ids?.has(message.info.id));
+  });
+  let previousPresentationLayout: Map<string, readonly string[]> | null = null;
+  let previousPresentationStructureVersion = -1;
+  createEffect(() => {
+    const structureVersion = messageStructureVersion();
+    const hidden = presentation.hiddenParts();
+    const current = new Map(
+      presentationMessages().map((message) => [
+        message.info.id,
+        message.parts.flatMap((part) => [
+          `${part.id}:${hidden.has(getPresentationPartKey(part)) ? 'queued' : 'visible'}`,
+          presentation.textForPart(part) ?? '',
+        ]),
+      ])
     );
-    reserveCollapsedActivityTraySpace(abruptlyGroupedKeys);
-
-    for (let index = 0; index < candidates.length; index += 1) {
-      const part = candidates[index]!;
-      const key = getAssistantActivityPartKey(part);
-      currentKeys.add(key);
+    if (
+      previousPresentationLayout === null ||
+      previousPresentationStructureVersion !== structureVersion
+    ) {
+      // Canonical structural changes already have a row reconciliation owner.
+      previousPresentationStructureVersion = structureVersion;
+      previousPresentationLayout = current;
+      return;
+    }
+    const invalidated = new Map<string, string>();
+    for (const messageId of new Set([...previousPresentationLayout.keys(), ...current.keys()])) {
+      const before = previousPresentationLayout.get(messageId);
+      const after = current.get(messageId);
       if (
-        exitingActivityPartKeys().has(key) &&
-        settledActivityPartKeys.has(key) &&
-        (lastVisiblePartKey !== key || !sessionWorking)
+        before?.length === after?.length &&
+        before?.every((value, index) => value === after?.[index])
+      )
+        continue;
+      const row = mountedMessageRows.get(messageId);
+      // Mounted rows report actual Markdown commits through ResizeObserver. Offscreen caches must
+      // become provisional when a queued suffix or standalone part is released without a server event.
+      if (
+        measuredHeights.has(messageId) &&
+        (!row || row.classList.contains('interactive-item-virtual-placeholder'))
       ) {
-        setSetMembership(setExitingActivityPartKeys, key, false);
+        invalidated.set(messageId, 'presentation');
       }
-      if (isAssistantActivityPartRunning(part)) {
-        if (!isActiveActivityMessage(part)) {
-          clearActivityCompletionTimer(key);
-          clearActivityShowTimer(key);
-          activityPartFirstSeenAt.delete(key);
-          settledActivityPartKeys.add(key);
-          setSetMembership(setVisibleActiveActivityPartKeys, key, false);
-          setSetMembership(setRetainedActivityPartKeys, key, false);
-          setSetMembership(setExitingActivityPartKeys, key, false);
-          continue;
-        }
-        settledActivityPartKeys.delete(key);
-        clearActivityCompletionTimer(key);
-        setSetMembership(setRetainedActivityPartKeys, key, false);
-        setSetMembership(setExitingActivityPartKeys, key, false);
-        if (visibleActiveActivityPartKeys().has(key)) {
-          activityPartFirstSeenAt.set(key, activityPartFirstSeenAt.get(key) ?? now);
-        } else if (!activityShowTimers.has(key)) {
-          const timer = setTimeout(() => {
-            activityShowTimers.delete(key);
-            const currentPart = compactActivityMessages()
-              .flatMap((message) => message.parts)
-              .find(
-                (candidate): candidate is AssistantActivityPart =>
-                  isAssistantActivityPart(candidate) &&
-                  getAssistantActivityPartKey(candidate) === key
-              );
-            if (
-              !currentPart ||
-              !isAssistantActivityPartRunning(currentPart) ||
-              !(
-                currentPart.type === 'reasoning'
-                  ? untrack(activeActivityMessageIds)
-                  : untrack(activeToolActivityMessageIds)
-              ).has(currentPart.messageID)
-            ) {
-              return;
-            }
-            activityPartFirstSeenAt.set(key, Date.now());
-            setSetMembership(setVisibleActiveActivityPartKeys, key, true);
-          }, ACTIVITY_SHOW_DELAY_MS);
-          activityShowTimers.set(key, timer);
-        }
-        continue;
-      }
-
-      const completedBeforeShow = activityShowTimers.has(key);
-      clearActivityShowTimer(key);
-      setSetMembership(setVisibleActiveActivityPartKeys, key, false);
-      if (completedBeforeShow) {
-        settledActivityPartKeys.add(key);
-        activityPartFirstSeenAt.delete(key);
-        continue;
-      }
-      if (settledActivityPartKeys.has(key) || activityCompletionTimers.has(key)) continue;
-      const firstSeenAt = activityPartFirstSeenAt.get(key);
-      if (firstSeenAt === undefined) {
-        settledActivityPartKeys.add(key);
-        continue;
-      }
-
-      const holdMs =
-        state.streamingPartId && hasStreamingText()
-          ? 0
-          : Math.max(0, firstSeenAt + ACTIVITY_MIN_VISIBLE_MS - now);
-      setSetMembership(setRetainedActivityPartKeys, key, true);
-      const beginExit = () => {
-        reserveActivityExitSpace(key);
-        batch(() => {
-          setSetMembership(setRetainedActivityPartKeys, key, false);
-          setSetMembership(setExitingActivityPartKeys, key, true);
-        });
-        finishActivityExitAfterAnimation(key);
-      };
-      const exitTimer = holdMs > 0 ? setTimeout(beginExit, holdMs) : undefined;
-      if (holdMs === 0) beginExit();
-      const finishTimer = setTimeout(
-        () => {
-          const timers = activityCompletionTimers.get(key);
-          if (timers) completeActivityExit(key, timers);
-        },
-        holdMs + ACTIVITY_EXIT_MS + ACTIVITY_EXIT_CLEANUP_GRACE_MS
-      );
-      activityCompletionTimers.set(key, { finishTimer, exitTimer });
     }
-
-    for (const key of new Set([
-      ...activityPartFirstSeenAt.keys(),
-      ...settledActivityPartKeys,
-      ...activityCompletionTimers.keys(),
-      ...activityShowTimers.keys(),
-    ])) {
-      if (currentKeys.has(key)) continue;
-      clearActivityCompletionTimer(key);
-      clearActivityShowTimer(key);
-      activityPartFirstSeenAt.delete(key);
-      settledActivityPartKeys.delete(key);
-      setSetMembership(setVisibleActiveActivityPartKeys, key, false);
-      setSetMembership(setRetainedActivityPartKeys, key, false);
-      setSetMembership(setExitingActivityPartKeys, key, false);
-    }
+    previousPresentationLayout = current;
+    if (invalidated.size > 0)
+      untrack(() => scheduleChangedLayoutRowMeasurements(new Map(), invalidated));
   });
-
+  const [presentationHidden, setPresentationHidden] = createSignal(document.hidden);
+  const motionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+  const [reducedMotion, setReducedMotion] = createSignal(motionQuery?.matches ?? false);
+  const onVisibilityChange = () => setPresentationHidden(document.hidden);
+  const onMotionChange = () => setReducedMotion(motionQuery?.matches ?? false);
+  document.addEventListener('visibilitychange', onVisibilityChange);
+  motionQuery?.addEventListener?.('change', onMotionChange);
   onCleanup(() => {
-    for (const key of activityCompletionTimers.keys()) clearActivityCompletionTimer(key);
-    for (const key of activityShowTimers.keys()) clearActivityShowTimer(key);
+    document.removeEventListener('visibilitychange', onVisibilityChange);
+    motionQuery?.removeEventListener?.('change', onMotionChange);
   });
+  const presentationSource = createMemo(() => {
+    if (state.messagesLoading) {
+      presentation.reset();
+      return;
+    }
+    const turn = trailingActivityTurnState();
+    const sessionId = state.activeSessionId;
+    const entries = presentationMessages();
+    const items: PresentationItem[] = [];
+    trackMessageBlockExpansionState();
+    for (const message of entries) {
+      for (const part of message.parts) {
+        const key = getPresentationPartKey(part);
+        if (part.type === 'text') {
+          const text =
+            part.id === state.streamingPartId ? state.streamingText || part.text : part.text;
+          items.push({ key, partId: part.id, kind: 'text', text });
+        } else if (isAssistantActivityPart(part) && canCompactActivityPart(part)) {
+          const groupKey = `activity-segment\u0000${part.sessionID}\u0000${turn.userMessageId || message.info.id}\u0000${part.id}`;
+          items.push({
+            key,
+            partId: part.id,
+            kind: 'activity',
+            running: isAssistantActivityPartRunning(part),
+            active: (part.type === 'reasoning'
+              ? activeActivityMessageIds()
+              : activeToolActivityMessageIds()
+            ).has(part.messageID),
+            expanded: getMessageBlockExpanded(groupKey) ?? false,
+          });
+        } else if (shouldShowAssistantPartInline(part)) {
+          items.push({ key, partId: part.id, kind: 'instant' });
+        }
+      }
+    }
+    presentation.update({
+      scope: sessionId
+        ? `${sessionId}\u0000${getSessionMessageWindowStateVersion(sessionId)}`
+        : null,
+      turn: turn.userMessageId,
+      items,
+      live: turn.hasWorked || !!state.streamingPartId,
+      keepRunningVisible: hasActivePermission() || hasActiveQuestion(),
+      immediate:
+        presentationHidden() ||
+        reducedMotion() ||
+        hasActivePermission() ||
+        hasActiveQuestion() ||
+        entries.some((entry) => entry.info.role === 'assistant' && !!entry.info.error),
+    });
+  });
+  presentationSourceReader.read = () => presentationSource();
+  createComputed(() => presentationSource());
   const assistantActivityGroupMap = createMemo<Map<string, AssistantActivityGroupInfo[]>>(
     (previous) => {
       trackMessageBlockExpansionState();
@@ -7196,6 +7154,7 @@ export function MessageList() {
           : shouldShowAssistantPartInline(part);
       const isNormallyIncluded = (part: AssistantActivityPart) =>
         canCompactActivityPart(part) &&
+        !presentation.hiddenParts().has(getPresentationPartKey(part)) &&
         (!isAssistantActivityPartRunning(part) ||
           !activeMessageIds.has(part.messageID) ||
           visibleActiveActivityPartKeys().has(getAssistantActivityPartKey(part)));
@@ -7318,7 +7277,7 @@ export function MessageList() {
     trackMessageBlockExpansionState();
     const previous = knownZeroHeightMessageIds();
     const activityMessages = compactActivityMessages();
-    const delayedActivityPartKeys = new Set(activityShowTimers.keys());
+    const delayedActivityPartKeys = presentation.hiddenParts();
     const candidates = getRenderEmptyMessageIds(
       activityMessages,
       assistantActivityGroupMap(),
@@ -7384,7 +7343,7 @@ export function MessageList() {
       }
     }
     return getMessageBlockBoundaryMap(compactActivityMessages(), assistantActivityGroupMap(), {
-      delayedActivityPartKeys: new Set(activityShowTimers.keys()),
+      delayedActivityPartKeys: presentation.hiddenParts(),
       expandedActivityGroup: (key) => getMessageBlockExpanded(key) ?? false,
       renderEmptyMessageIds: knownZeroHeightMessageIds(),
       showThinking: showThinking(),
@@ -8193,6 +8152,7 @@ export function MessageList() {
               </Show>
             </Show>
             <VirtualizedContent
+              presentation={presentation}
               messages={messages()}
               modelChangeMap={modelChangeMap()}
               promptNumberMap={promptNumberMap()}

@@ -14,6 +14,14 @@ import {
 import { getToolInlineFileChangesLayoutSignature } from '../../lib/tool-file-change';
 import type { MessageEntry, Part } from '../../types';
 import { hasUserMessageContent, parseUserMessageContent } from '../message/UserMessageContent';
+import { getPresentationPartKey } from './streaming-presentation';
+
+export type StreamingLayoutProjection = {
+  partId: string | null;
+  text: string;
+  textByPartId?: ReadonlyMap<string, string>;
+  hiddenPartKeys?: ReadonlySet<string>;
+};
 
 export type MessageBlockBoundary = {
   startsBordered: boolean;
@@ -30,7 +38,7 @@ type MessageBlockBoundaryOptions = {
   renderEmptyMessageIds: ReadonlySet<string>;
   retainedActivityPartKeys?: ReadonlySet<string>;
   showThinking: boolean;
-  streaming?: { partId: string | null; text: string };
+  streaming?: StreamingLayoutProjection;
   trailingPermissionMessageIds?: ReadonlySet<string>;
   visibleActiveActivityPartKeys?: ReadonlySet<string>;
   waitingActivityPartKeys?: ReadonlySet<string>;
@@ -108,6 +116,7 @@ export function getMessageBlockBoundaryMap(
     const renderedActiveSummaryKeys = new Set<string>();
 
     for (const part of orderBoundaryParts(message.parts, options.waitingActivityPartKeys)) {
+      if (options.streaming?.hiddenPartKeys?.has(getPresentationPartKey(part))) continue;
       if (part.type === 'text') {
         if (hasVisibleProjectedText(part, options.streaming)) blocks.push(false);
         continue;
@@ -352,7 +361,7 @@ export function getRenderEmptyMessageIds(
     retained: ReadonlySet<string>;
     exiting: ReadonlySet<string>;
   },
-  streaming?: { partId: string | null; text: string }
+  streaming?: StreamingLayoutProjection
 ) {
   const result = new Set<string>();
   const groupByPartKey = new Map<string, AssistantActivityGroupInfo>();
@@ -387,6 +396,7 @@ export function getRenderEmptyMessageIds(
     let hasVisibleRowContent = false;
 
     for (const part of message.parts) {
+      if (streaming?.hiddenPartKeys?.has(getPresentationPartKey(part))) continue;
       const visible =
         part.type === 'text'
           ? hasVisibleProjectedText(part, streaming)
@@ -428,9 +438,11 @@ export function getRenderEmptyMessageIds(
 
 export function hasVisibleProjectedText(
   part: { id: string; text: string },
-  streaming?: { partId: string | null; text: string }
+  streaming?: StreamingLayoutProjection
 ) {
-  const text = part.id === streaming?.partId ? streaming.text || part.text : part.text;
+  const text =
+    streaming?.textByPartId?.get(part.id) ??
+    (part.id === streaming?.partId ? streaming.text || part.text : part.text);
   return text.trim().length > 0 && !isWorkspaceDirectoryText(text);
 }
 

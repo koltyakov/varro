@@ -36,6 +36,7 @@ import {
   xmarkIcon,
 } from '../../lib/ui-icons';
 import { prepareMeasuredEntrance } from '../../lib/measured-entrance';
+import { getSmoothBottomFollowTop } from '../message-list/scrolling';
 import { trapModalFocus } from '../../lib/modal-focus';
 import {
   getFinalAssistantTextPartId,
@@ -270,6 +271,60 @@ function prepareActiveActivityItemsViewport(element: HTMLDivElement) {
   let updateQueued = false;
   let previousItemSignature = '';
   const observedItems = new Set<Element>();
+  let followFrame = 0;
+  let followPaused = false;
+  let lastScrollTop = element.scrollTop;
+  let disposed = false;
+  const cancelFollow = () => {
+    if (followFrame) cancelAnimationFrame(followFrame);
+    followFrame = 0;
+  };
+  const followLatest = () => {
+    if (followFrame || followPaused || disposed || !element.isConnected) return;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      element.scrollTop = element.scrollHeight;
+      return;
+    }
+    let previousTime = performance.now() - 16;
+    const schedule = () => {
+      let scheduled = true;
+      const id = requestAnimationFrame((now) => {
+        scheduled = false;
+        followFrame = 0;
+        if (followPaused || disposed || !element.isConnected) return;
+        const target = Math.max(0, element.scrollHeight - element.clientHeight);
+        const elapsed = Math.min(32, Math.max(1, now - previousTime));
+        const top = element.scrollTop;
+        element.scrollTop = Math.min(
+          getSmoothBottomFollowTop(top, target, elapsed),
+          top + Math.max(1, elapsed / 2)
+        );
+        previousTime = now;
+        if (target - element.scrollTop > 1) schedule();
+      });
+      if (scheduled) followFrame = id;
+    };
+    schedule();
+  };
+  const pauseFollow = () => {
+    followPaused = true;
+    cancelFollow();
+  };
+  const onWheel = (event: WheelEvent) => {
+    if (event.deltaY !== 0) pauseFollow();
+  };
+  const onPointerDown = (event: PointerEvent) => {
+    if (event.pointerType === 'touch' || event.target === element) pauseFollow();
+  };
+  const onScroll = () => {
+    const top = element.scrollTop;
+    if (top > lastScrollTop && element.scrollHeight - element.clientHeight - top <= 1)
+      followPaused = false;
+    lastScrollTop = top;
+  };
+  element.addEventListener('wheel', onWheel, { passive: true });
+  element.addEventListener('pointerdown', onPointerDown);
+  element.addEventListener('scroll', onScroll, { passive: true });
 
   const update = () => {
     updateQueued = false;
@@ -319,13 +374,14 @@ function prepareActiveActivityItemsViewport(element: HTMLDivElement) {
     }
 
     const itemSignature = items.map((item) => item.dataset.activityPartId).join('\u0000');
-    if (itemSignature === previousItemSignature) return;
-    previousItemSignature = itemSignature;
     if (items.length <= 1) {
+      cancelFollow();
       element.scrollTop = 0;
     } else {
-      element.scrollTop = element.scrollHeight;
+      followLatest();
     }
+    if (itemSignature === previousItemSignature) return;
+    previousItemSignature = itemSignature;
     if (globalThis.CSSAnimation !== undefined) {
       const entranceAnimations = items.flatMap((item) =>
         item
@@ -340,7 +396,7 @@ function prepareActiveActivityItemsViewport(element: HTMLDivElement) {
         void Promise.allSettled(entranceAnimations.map((animation) => animation.finished)).then(
           () => {
             if (element.isConnected && previousItemSignature === itemSignature) {
-              element.scrollTop = element.scrollHeight;
+              if (items.length > 1) followLatest();
             }
           }
         );
@@ -364,6 +420,11 @@ function prepareActiveActivityItemsViewport(element: HTMLDivElement) {
   queueUpdate();
 
   return () => {
+    disposed = true;
+    cancelFollow();
+    element.removeEventListener('wheel', onWheel);
+    element.removeEventListener('pointerdown', onPointerDown);
+    element.removeEventListener('scroll', onScroll);
     mutationObserver.disconnect();
     resizeObserver?.disconnect();
   };

@@ -29,6 +29,7 @@ import { formatDisplayPath, getLeafPathName, normalizePath } from '../lib/path-d
 import { formatCommandDisplay } from '../lib/command-display';
 import { formatDuration, formatNumber } from '../lib/message-metrics';
 import { getToolFileChanges, getToolReadPath, isToolFileRead } from '../lib/tool-file-change';
+import { prepareForMessageBlockRemoval } from '../lib/message-list-layout';
 import type { FileChange } from '../lib/tool-file-change';
 import { getToolCallExpanded, setToolCallExpanded } from '../lib/tool-call-expansion-state';
 import type { ToolCallPermissionMatch } from '../lib/tool-call-matching';
@@ -1127,7 +1128,15 @@ function FileChangeCard(props: {
   return (
     <>
       <Show when={showCompactCard() && !splitCompletedChanges()}>
-        <div class="chat-tool-invocation-part file-change-card">
+        <div
+          class="chat-tool-invocation-part file-change-card"
+          ref={(element) =>
+            onCleanup(() => {
+              if (element.isConnected && isCompleted() && showInlinePreview())
+                prepareForMessageBlockRemoval(element);
+            })
+          }
+        >
           <div
             class={`file-change-card-header${props.compact ? '' : ' is-standalone'}${canExpandError() ? ' is-expandable' : ''}`}
             onClick={() => {

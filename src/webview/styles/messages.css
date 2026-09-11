@@ -402,6 +402,7 @@
   min-width: 0;
   overflow-x: hidden;
   overflow-y: auto;
+  overflow-anchor: none;
   overscroll-behavior: contain;
   scrollbar-width: none;
 }
@@ -467,7 +468,9 @@
    accounting in sync; scroll-activity-collapse.spec.ts protects simultaneous completions. */
 .assistant-active-activity-items
   > .assistant-active-activity-item:not(.is-exiting)
-  ~ .assistant-active-activity-item:not(.is-exiting)
+  ~ .assistant-active-activity-item:not(.is-exiting):not(
+    :has(:is(.tool-invocation-chevron.expanded, .thinking-chevron.expanded))
+  )
   .assistant-active-activity-item-content {
   padding-top: var(--assistant-bordered-block-gap);
 }
@@ -729,7 +732,7 @@
 }
 
 .assistant-activity-summary + .assistant-activity-details {
-  margin-top: var(--assistant-activity-item-gap);
+  margin-top: 8px;
 }
 
 .assistant-activity-detail {

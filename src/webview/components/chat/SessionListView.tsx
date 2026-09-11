@@ -409,6 +409,7 @@ export type SessionStatusIndicatorKind =
   | 'completed';
 
 const SESSION_SHOW_MORE_AGE_MS = 24 * 60 * 60 * 1000;
+const MIN_RECENT_SESSIONS = 50;
 const SESSION_ARCHIVE_PRELOAD_TARGET = 50;
 const SUBAGENT_SESSION_PAGE_SIZE = 100;
 const MAX_SUBAGENT_SESSION_LIMIT = 1_000_000;
@@ -658,7 +659,7 @@ export function groupSessions(
   const overflowOther: SessionGroups['overflowOther'] = [];
   const recentSessionCutoff = now - SESSION_SHOW_MORE_AGE_MS;
 
-  for (const session of primaries) {
+  for (const [index, session] of primaries.entries()) {
     if (isPinned(session.id)) {
       pinned.push(session);
       continue;
@@ -689,7 +690,8 @@ export function groupSessions(
         newlyCompleted.push(session);
         break;
       default:
-        if (session.time.updated >= recentSessionCutoff) surfacedOther.push(session);
+        if (index < MIN_RECENT_SESSIONS || session.time.updated >= recentSessionCutoff)
+          surfacedOther.push(session);
         else overflowOther.push(session);
         break;
     }

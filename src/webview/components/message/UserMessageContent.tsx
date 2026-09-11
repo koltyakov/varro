@@ -343,13 +343,16 @@ function parseUserMessageText(text: string): ParsedUserMessageText {
         flushTextBuffer();
         let terminalText = '';
 
-        if (lines[index + 1]?.trim().startsWith('```')) {
+        const openingFence = lines[index + 1]?.trim().match(/^(`{3,})([^`]*)$/);
+        if (openingFence) {
+          const fence = openingFence[1]!;
+          const content: string[] = [];
           index += 2;
-          while (index < lines.length) {
-            if (lines[index]!.trim() === '```') break;
-            terminalText += `${terminalText ? '\n' : ''}${lines[index]!}`;
+          while (index < lines.length && lines[index]!.trim() !== fence) {
+            content.push(lines[index]!);
             index += 1;
           }
+          terminalText = content.join('\n');
         }
         attachments.push({
           type: 'terminal-selection',

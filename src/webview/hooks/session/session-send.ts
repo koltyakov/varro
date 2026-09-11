@@ -192,6 +192,15 @@ export function getAttachmentReference(
   return normalizedPath;
 }
 
+function fenceAttachmentText(text: string, language: string): string {
+  let fenceLength = 3;
+  for (const match of text.matchAll(/`{3,}/g)) {
+    fenceLength = Math.max(fenceLength, match[0].length + 1);
+  }
+  const fence = '`'.repeat(fenceLength);
+  return `${fence}${language}\n${text}\n${fence}`;
+}
+
 export function buildSessionSendBody(
   composerState: ComposerState,
   sessionId: string,
@@ -257,7 +266,7 @@ export function buildSessionSendBody(
       : editorText.relativePath;
     parts.push({
       type: 'text',
-      text: `[${source} from ${editorTextPath} ${range}${truncation}]\n\`\`\`${editorText.language || 'text'}\n${editorText.text}\n\`\`\``,
+      text: `[${source} from ${editorTextPath} ${range}${truncation}]\n${fenceAttachmentText(editorText.text, editorText.language || 'text')}`,
     });
   } else if (activeFile && currentDocumentEnabled) {
     const activeFilePath = getAttachmentReference(
@@ -302,7 +311,7 @@ export function buildSessionSendBody(
   if (terminalSelection) {
     parts.push({
       type: 'text',
-      text: `[Selection from terminal ${terminalSelection.terminalName}]\n\`\`\`text\n${terminalSelection.text}\n\`\`\``,
+      text: `[Selection from terminal ${terminalSelection.terminalName}]\n${fenceAttachmentText(terminalSelection.text, 'text')}`,
     });
   }
 

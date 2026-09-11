@@ -246,6 +246,10 @@ Direct input acquires ownership only when it can affect the transcript:
 - The append reserve is general bottom-pinned flow geometry, not only activity-exit state. It may
   replace space lost from trays, todo collapse, external panels, or local container changes. Real
   appended growth consumes it while its original bottom target remains fixed.
+- Automatic todo completion and removal announce their disappearing block, margins, and parent gap
+  before changing the layout. A later ResizeObserver correction is insufficient: the September 11
+  editor replay briefly clamped the transcript backward by 139 px when its todo panel disappeared.
+  `scroll-auto-scroll.spec.ts` checks automatic completion and clearing at removal and frame boundaries.
 - The trailing Thinking, loading, empty-reserve, and Worked states share one post-message slot. The
   slot may remain invisibly reserved while visible streaming text or tools replace its label. Debounce
   label reappearance and reserve release so short transitions do not collapse and regrow the bottom.
@@ -261,9 +265,14 @@ Direct input acquires ownership only when it can affect the transcript:
 
 ### Animated Row Transitions
 
-- A compact activity part follows `delayed -> visible active -> retained -> exiting -> grouped`.
-  Completion before the display delay skips the tray. Once shown, retain it for the minimum visible
-  interval unless response text already provides the transition.
+- A compact activity part follows `delayed -> visible active/completed -> retained -> exiting -> grouped`.
+  Newly observed live tools share a 100 ms collection interval and a 1,200 ms preview deadline.
+  Admit them one at a time, at least 120 ms after the preceding admission's painted-frame callback.
+  Completed overflow joins Explored directly when there is less than 600 ms left for a readable preview;
+  all parts remain available in the disclosure. Running tools retain their actual state. Tools joining an
+  existing burst do not extend its deadline. Already-running activity discovered on initial hydration
+  keeps the 500 ms display delay and 2,000 ms retention, shortened to 1,200 ms when answer text arrives.
+  Completed history does not replay previews.
 - A height animation publishes intermediate row heights. If it runs above a detached viewport, every
   frame must preserve the same visible anchor; checking only the final grouped layout is insufficient.
 - Transition identity is part identity, not the current group owner or array position. Moving an
@@ -282,6 +291,12 @@ Direct input acquires ownership only when it can affect the transcript:
   becomes semantically empty and its Explored summary is rendered by another row. Keep the original
   bottom target fixed; raising it with later `scrollTop` growth prevents streamed content from
   consuming the reserve.
+- The single-item exit path must reserve the outer flow gap when a separate Explored summary survives
+  the tray. Reserving only the item height lets removal clamp the scroll range before a later anchor
+  correction.
+- Completing an inline file edit removes its running status card. Reserve that card, its parent gap,
+  and the preview's conditional leading margin before removal when bottom follow owns the visible
+  transition. Do not reserve removals above the viewport or override detached/edit/diff ownership.
 - Timer, CSS animation, and cleanup paths must share a bounded completion contract. Cleanup must still
   run when the row unmounts, the session changes, or user input takes ownership.
 - While an activity exit holds a fixed scroll target, summary-anchor restoration may restore that
@@ -299,7 +314,9 @@ Direct input acquires ownership only when it can affect the transcript:
   a one-frame duplicate tray.
 - The active tray is a bounded nested scroller. Limit visible items, follow the newest item after DOM
   mutation and entrance completion, and show the focused expanded item. Its wheel movement must remain
-  local while the tray can scroll.
+  local while the tray can scroll. Ease its following through one bounded frame loop, including height
+  growth during entrance. Disable native anchoring in that scroller and cancel its follow on direct
+  wheel or pointer input. Arrival must not snap the nested viewport to its new bottom.
 - Off-core activity stays semantically present but does not run height-affecting tray entrance or exit
   animation. Pause indefinite cosmetic activity animation outside the virtual core.
 - If an exiting tray item merely reveals another clipped item, freeze the bottom target for one frame
@@ -322,6 +339,45 @@ Direct input acquires ownership only when it can affect the transcript:
   includes inline edits and other standalone response parts, not only Markdown text. Bottom-follow
   must not write a competing position during that hold, and queued restore callbacks must verify the
   anchor is still current before scrolling.
+
+### Streaming presentation queue
+
+- `message-list/streaming-presentation.ts` owns presentation for the visible trailing turn. Canonical
+  parts, streaming deltas, and tool status stay separate from presentation delays. The webview bridge
+  groups consecutive part snapshots and projected tool events into batches of at most 64 events or
+  16 ms. Apply every event in order within one Solid batch, preserving IDs and durable sequences.
+  Flush before any other message, so permissions, questions, completion, and RPC replies remain
+  immediate ordering barriers. Cleanup discards buffered events.
+- A queued answer waits for the preceding activity preview and its exit. Each newly queued part has a
+  2,000 ms maximum admission wait; a still-running parallel tool cannot hold an answer indefinitely.
+  Subsequent standalone parts wait for preceding text to catch up so edits do not overtake prose.
+- Text uses a target string and displayed prefix. Release readable chunks every 32 ms and adapt their
+  size to catch up within 256 ms after admission. A shorter or divergent canonical correction discards
+  the queued suffix. Keep Markdown's streaming parser active while displayed text is behind.
+- Rendering, text visibility, hidden-part projection, and zero-height classification share the same
+  presentation. Mounted row observers measure actual Markdown commits; timed releases invalidate
+  offscreen height caches without starting a second structural reconciliation for canonical changes.
+  A presentation read first synchronizes its source memo so a new canonical part cannot briefly mount,
+  consume its entrance claim, and disappear before its first queued chunk.
+- Reserve simultaneous preview exits and direct tray collapses as one set. Measuring each disappearing
+  item against the same clipped tray can miss the complete tray's height and reverse the viewport.
+- The Worked summary waits for the presentation queue to drain. Permissions, questions, and errors
+  bypass pacing. An actionable prompt also keeps unrelated running tools visible. Stop flushes
+  available content before awaiting the remote abort. Hydration, session
+  replacement, and disposal invalidate old timers and animation completions. Hidden views and reduced
+  motion publish the available presentation immediately.
+- Opening an active tool's details takes scroll ownership and keeps that tool visible until closed.
+  It releases the answer gate and does not run a retention timer indefinitely.
+- Paced growth uses the existing bottom-follow owner, which eases toward the measured destination.
+  Each frame starts at the current position, including newer downward user movement. Direct input,
+  editing, disclosure ownership, and activity exit still take precedence. Content arriving after
+  canonical completion must release the old activity-summary anchor just like a live delta.
+- `MessageList.presentation.test.ts` and `streaming-presentation.test.ts` cover canonical/display
+  separation, grouped fast previews, completion, interruption, hydration, and cancellation.
+  `e2e/tests/scroll-streaming-presentation.spec.ts` records every-frame preview, text, anchor, and scroll
+  measurements for 3-, 32-, and 128-tool bursts at narrow and wide widths. It requires spaced admissions,
+  a bounded preview, smooth nested scrolling, readable retention, sequential handoff, paced text,
+  continued easing after height settles, complete disclosure contents, and no backward scroll frame.
 
 ### Sticky Prompts
 

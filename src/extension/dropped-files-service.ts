@@ -162,7 +162,8 @@ export class DroppedFilesService {
           chunk.map(async (file) => {
             try {
               const buffer = Buffer.from(file.content, 'base64');
-              const safeName = sanitizeDroppedFileName(file.name);
+              const displayName = getDroppedFileName(file.name);
+              const safeName = sanitizeDroppedFileName(displayName);
               const targetPath = join(
                 dropsDir,
                 `${Date.now()}-${randomBytes(16).toString('hex')}-${safeName}`
@@ -174,7 +175,7 @@ export class DroppedFilesService {
               const uri = vscode.Uri.file(targetPath);
               return {
                 path: uri.fsPath,
-                relativePath: safeName,
+                relativePath: displayName,
                 type: 'file' as const,
               } satisfies DroppedFileInput;
             } catch (err) {
@@ -570,9 +571,12 @@ function isProcessMissingError(value: unknown): boolean {
   return !!value && typeof value === 'object' && 'code' in value && value.code === 'ESRCH';
 }
 
+function getDroppedFileName(name: string): string {
+  return name.split(/[\\/]/).pop() || 'dropped';
+}
+
 function sanitizeDroppedFileName(name: string): string {
-  const base = name.split(/[\\/]/).pop() || 'dropped';
-  const sanitized = base.replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '');
+  const sanitized = name.replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '');
   return sanitized || 'dropped';
 }
 

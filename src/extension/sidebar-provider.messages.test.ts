@@ -511,11 +511,19 @@ describe('SidebarProvider session message responses', () => {
   });
 
   it('posts pending deltas before a canonical message API response', async () => {
+    const messages = [
+      {
+        info: { id: 'message-1', sessionID: 'session-1', role: 'assistant', time: { created: 1 } },
+        parts: [
+          { id: 'part-1', sessionID: 'session-1', messageID: 'message-1', type: 'text', text: '' },
+        ],
+      },
+    ];
     const server = createServer({
       request: vi.fn(async (_method: string, path: string) =>
         path === '/session/session-1?directory=%2Frepo'
           ? { id: 'session-1', directory: '/repo' }
-          : []
+          : messages
       ),
     });
     const { provider } = await createSidebarProviderInstance({ server });
@@ -560,6 +568,19 @@ describe('SidebarProvider session message responses', () => {
     });
 
     expect(posted.map((message) => (message as { type: string }).type)).toEqual(['api/response']);
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: {
+        id: 2,
+        data: [
+          {
+            info: messages[0]!.info,
+            parts: [{ ...messages[0]!.parts[0], text: 'latehidden' }],
+          },
+        ],
+      },
+    });
+    expect(messages[0]!.parts[0]!.text).toBe('');
   });
 
   it('filters malformed session message entries and parts from API responses', async () => {

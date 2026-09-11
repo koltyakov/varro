@@ -300,7 +300,7 @@ describe('groupSessions', () => {
     expect(groups.subagents.map((item) => item.id)).toEqual(['subagent-newer', 'subagent-older']);
   });
 
-  it('moves primary sessions older than one day into show more without affecting sub-agent ordering', () => {
+  it('keeps fewer than 50 primary sessions recent regardless of age without affecting sub-agent ordering', () => {
     const sessions = [
       session('other-recent-1', now - 1_000),
       session('subagent-1', now - 2_000, { parentID: 'parent-1' }),
@@ -322,8 +322,9 @@ describe('groupSessions', () => {
     expect(groups.surfacedOther.map((item) => item.id)).toEqual([
       'other-recent-1',
       'other-recent-2',
+      'other-old',
     ]);
-    expect(groups.overflowOther.map((item) => item.id)).toEqual(['other-old']);
+    expect(groups.overflowOther).toEqual([]);
     expect(groups.subagents.map((item) => item.id)).toEqual(['subagent-1', 'subagent-2']);
   });
 
@@ -357,8 +358,8 @@ describe('groupSessions', () => {
     ]);
     expect(groups.attention.map((item) => item.id)).toEqual(['attention-older', 'attention-newer']);
     expect(groups.running.map((item) => item.id)).toEqual(['running-newer']);
-    expect(groups.surfacedOther.map((item) => item.id)).toEqual(['other-newest']);
-    expect(groups.overflowOther.map((item) => item.id)).toEqual(['other-older']);
+    expect(groups.surfacedOther.map((item) => item.id)).toEqual(['other-newest', 'other-older']);
+    expect(groups.overflowOther).toEqual([]);
   });
 
   it('preserves recency order within each status group after age-only sorting', () => {
@@ -404,6 +405,42 @@ describe('groupSessions', () => {
 
     expect(groups.pinned.map((item) => item.id)).toEqual(['pinned-old']);
     expect(groups.surfacedOther.map((item) => item.id)).toEqual(['recent']);
+    expect(groups.overflowOther).toEqual([]);
+  });
+
+  it('keeps the top 50 old primary sessions recent and archives only the remainder', () => {
+    const primaries = Array.from({ length: 52 }, (_, index) =>
+      session(`old-${index}`, now - (index + 2) * 86_400_000)
+    );
+    const groups = groupSessions(
+      [session('subagent', now, { parentID: 'old-0' }), ...primaries.toReversed()],
+      () => false,
+      () => false,
+      () => false,
+      () => false,
+      () => false,
+      now
+    );
+
+    expect(groups.surfacedOther).toEqual(primaries.slice(0, 50));
+    expect(groups.overflowOther).toEqual(primaries.slice(50));
+  });
+
+  it('keeps sessions updated within one day recent beyond the top 50', () => {
+    const sessions = Array.from({ length: 51 }, (_, index) =>
+      session(`recent-${index}`, now - index * 1_000)
+    );
+    const groups = groupSessions(
+      sessions,
+      () => false,
+      () => false,
+      () => false,
+      () => false,
+      () => false,
+      now
+    );
+
+    expect(groups.surfacedOther).toEqual(sessions);
     expect(groups.overflowOther).toEqual([]);
   });
 });
@@ -1010,6 +1047,7 @@ describe('header status badges', () => {
       session('old-failed', oldUpdatedAt),
       session('old-plan', oldUpdatedAt),
       session('old-completed', oldUpdatedAt),
+      ...Array.from({ length: 44 }, (_, index) => session(`recent-${index}`, now - 1_000)),
       session('archived', oldUpdatedAt),
       session('deleted-running', now - 1_000),
     ]);
@@ -3111,6 +3149,7 @@ describe('header status badges', () => {
     const now = Date.now();
     setState('sessions', [
       session('recent-session', now - 1_000, { title: 'Recent session' }),
+      ...Array.from({ length: 49 }, (_, index) => session(`recent-${index}`, now - 2_000)),
       session('older-session', now - (24 * 60 * 60 * 1_000 + 1), { title: 'Older session' }),
     ]);
     setState('activeSessionId', 'recent-session');
@@ -3135,7 +3174,7 @@ describe('header status badges', () => {
       Array.from(scrollRegion?.querySelectorAll('.session-item-title') ?? []).map((item) =>
         item.textContent?.trim()
       )
-    ).toEqual(['Recent session']);
+    ).toEqual(['Recent session', ...Array.from({ length: 49 }, (_, index) => `recent-${index}`)]);
     expect(
       Array.from(sections?.querySelectorAll('.session-list-section-title') ?? []).map((item) =>
         item.textContent?.trim()
@@ -3173,6 +3212,7 @@ describe('header status badges', () => {
     const now = Date.now();
     setState('sessions', [
       session('recent-session', now - 1_000),
+      ...Array.from({ length: 49 }, (_, index) => session(`recent-${index}`, now - 2_000)),
       session('older-session', now - (24 * 60 * 60 * 1_000 + 1)),
     ]);
     setState('activeSessionId', 'recent-session');
@@ -3209,6 +3249,7 @@ describe('header status badges', () => {
     const now = Date.now();
     setState('sessions', [
       session('recent-session', now - 1_000, { title: 'Recent session' }),
+      ...Array.from({ length: 49 }, (_, index) => session(`recent-${index}`, now - 2_000)),
       session('older-session', now - (24 * 60 * 60 * 1_000 + 1), { title: 'Older session' }),
     ]);
     setState('activeSessionId', 'recent-session');
@@ -3256,7 +3297,10 @@ describe('header status badges', () => {
     ).map((item) => item.textContent?.trim());
 
     expect(expandedSectionTitles).toEqual(['Archive']);
-    expect(expandedSessionTitles).toEqual(['Recent session']);
+    expect(expandedSessionTitles).toEqual([
+      'Recent session',
+      ...Array.from({ length: 49 }, (_, index) => `recent-${index}`),
+    ]);
   });
 
   it('keeps group headers visible when recycle bin is expanded', async () => {

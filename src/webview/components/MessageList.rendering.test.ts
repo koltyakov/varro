@@ -1176,7 +1176,7 @@ describe('MessageList compact activity', () => {
     );
   });
 
-  it('hides completed active activity when response text is already streaming', async () => {
+  it('retains completed activity before releasing response text that is already available', async () => {
     const search = toolPart('search-streaming', 'assistant-1', 'call-search-streaming');
     search.tool = 'grep';
     search.state = {
@@ -1218,7 +1218,11 @@ describe('MessageList compact activity', () => {
     });
     await Promise.resolve();
 
+    expect(container?.querySelector('[data-activity-part-id="search-streaming"]')).not.toBeNull();
+    expect(container?.textContent).not.toContain('Streaming response');
+    await vi.advanceTimersByTimeAsync(2_200);
     expect(container?.querySelector('[data-activity-part-id="search-streaming"]')).toBeNull();
+    expect(container?.textContent).toContain('Streaming response');
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       'Explored: 1 search'
     );
@@ -1290,7 +1294,7 @@ describe('MessageList compact activity', () => {
       setState('streamingPartId', response.id);
       setState('streamingText', 'I found the relevant implementation.');
     });
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(300);
 
     expect(
       container?.querySelector('[data-activity-part-id="search-before-stream"]')
@@ -1554,7 +1558,7 @@ describe('MessageList compact activity', () => {
     );
   });
 
-  it('does not show active tools that complete inside the display debounce', async () => {
+  it('previews tools that complete inside the collection interval before grouping them', async () => {
     const read = toolPart('read-1', 'assistant-1', 'call-read-1');
     read.tool = 'read';
     read.state = {
@@ -1596,13 +1600,18 @@ describe('MessageList compact activity', () => {
     await Promise.resolve();
     replaceMessages([user, { info, parts: [read, command] }]);
     await Promise.resolve();
-    await vi.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(40);
     expect(container?.querySelector('[data-activity-part-id="command-fast"]')).toBeNull();
 
     replaceMessages([user, { info, parts: [read, completedCommand] }]);
     await Promise.resolve();
     await vi.advanceTimersByTimeAsync(400);
 
+    expect(container?.querySelector('[data-activity-part-id="command-fast"]')).not.toBeNull();
+    expect(
+      container?.querySelector('[data-activity-part-id="command-fast"] .tool-status-running')
+    ).toBeNull();
+    await vi.advanceTimersByTimeAsync(2_000);
     expect(container?.querySelector('[data-activity-part-id="command-fast"]')).toBeNull();
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       'Explored: 1 file, 1 command'
@@ -1646,7 +1655,7 @@ describe('MessageList compact activity', () => {
     expect(toolRow()?.classList).toContain('interactive-item-render-empty');
     expect(toolRow()?.classList).not.toContain('measured-entrance-active');
     expect(container?.querySelector('[data-activity-part-id="command-1"]')).toBeNull();
-    await vi.advanceTimersByTimeAsync(499);
+    await vi.advanceTimersByTimeAsync(99);
     expect(toolRow()?.classList).toContain('interactive-item-render-empty');
 
     await vi.advanceTimersByTimeAsync(1);
@@ -4210,7 +4219,7 @@ describe('MessageList loading row', () => {
       ]);
       setState('sessionStatus', reconcile({ 'session-1': { type: 'idle' } }));
     });
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(300);
 
     expect(container?.querySelectorAll('.assistant-dialog-summary')).toHaveLength(1);
     expect(container?.querySelector('.assistant-dialog-summary')?.textContent).toContain(

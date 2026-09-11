@@ -1,5 +1,6 @@
 import { For, Show, createEffect, createSignal, on, onCleanup, onMount } from 'solid-js';
 import { defaultAppState } from '../lib/state';
+import { prepareForTodoCollapse } from '../lib/message-list-layout';
 import { STORAGE_KEYS, readStored, writeStored } from '../lib/state-storage';
 import { navArrowDownIcon } from '../lib/ui-icons';
 import type { NormalizedTodo } from '../types';
@@ -61,9 +62,14 @@ export function TodoList() {
   };
 
   const setAutomaticCollapsed = (nextCollapsed: boolean) => {
+    if (nextCollapsed && !collapsed() && listRef?.isConnected) prepareForTodoCollapse(listRef);
     manuallyExpanded = false;
     setCollapsed(nextCollapsed);
   };
+
+  onCleanup(() => {
+    if (blockRef?.isConnected) prepareForTodoCollapse(blockRef);
+  });
 
   createEffect(() => {
     const runningCount = inProgressTodos().length;

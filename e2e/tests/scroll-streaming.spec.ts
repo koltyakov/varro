@@ -92,11 +92,21 @@ test.describe('scroll stability regressions', () => {
       const animation = element.getAnimations()[0];
       animation?.pause();
       if (animation) animation.currentTime = 90;
-      await new Promise<void>((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-      );
-
       const transcript = element.closest<HTMLElement>('.interactive-list')!;
+      let stableFrames = 0;
+      let previousHeight = -1;
+      for (let frame = 0; frame < 60 && stableFrames < 3; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const height = transcript.scrollHeight;
+        const complete = element.textContent?.includes('Streamed paragraph 6');
+        stableFrames =
+          complete &&
+          height === previousHeight &&
+          height - transcript.clientHeight - transcript.scrollTop <= 1
+            ? stableFrames + 1
+            : 0;
+        previousHeight = height;
+      }
       const paragraphs = element.querySelectorAll<HTMLElement>('.rendered-markdown p');
       const paragraph = paragraphs[paragraphs.length - 1]!;
       const viewport = transcript.getBoundingClientRect();
@@ -295,13 +305,21 @@ test.describe('rapid streaming bottom follow', () => {
     await expect(row).toContainText('VFZ-PENDING-MARKDOWN');
     await expect(row.locator('.streaming-markdown-pending')).toHaveCSS('visibility', 'hidden');
     await expect(row.locator('.streaming-markdown-pending')).toHaveAttribute('aria-hidden', 'true');
-    expect(
-      (await getScrollMetrics(page, '.interactive-list')).distanceFromBottom
-    ).toBeLessThanOrEqual(1);
+    await expect(row).toContainText('VFZ-PENDING-MARKDOWN '.repeat(24).trim());
+    await expect
+      .poll(() =>
+        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
+      )
+      .toBeLessThanOrEqual(1);
 
     await appendDeltaToRapidStreaming(page, '`');
     await expect(row.locator('.streaming-markdown-pending')).toHaveCount(0);
     await expect(row.locator('code').filter({ hasText: 'VFZ-PENDING-MARKDOWN' })).toBeVisible();
+    await expect
+      .poll(() =>
+        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
+      )
+      .toBeLessThanOrEqual(1);
     for (let frame = 0; frame < 4; frame += 1) {
       await waitForAnimationFrame(page);
       expect(

@@ -615,6 +615,10 @@ test.describe('diff preview anchoring', () => {
     await updateDiffPreviewWithPatch(page, messageId, makeWideDiffPatch(8));
 
     const preview = page.locator(`[data-msg-id="${messageId}"] .diff-view-lines`);
+    const toggle = page.locator(`[data-msg-id="${messageId}"] .diff-view-toggle`);
+    await expect(preview).toHaveAttribute('aria-label', 'Changes in src/wide-report.ts');
+    await expect(toggle).toHaveAttribute('title', 'Expand diff preview');
+
     const dimensions = await preview.evaluate((viewport) => {
       const viewportRect = viewport.getBoundingClientRect();
       const shell = viewport.closest<HTMLElement>('.diff-view-lines-shell')!;
@@ -623,7 +627,7 @@ test.describe('diff preview anchoring', () => {
         const rect = row.getBoundingClientRect();
         return rect.top < viewportRect.bottom && rect.bottom > viewportRect.top;
       });
-      const toggle = shell
+      const toggleButton = shell
         .closest<HTMLElement>('.diff-view-file')!
         .querySelector<HTMLElement>('.diff-view-toggle')!;
       const fadeHeight = Number.parseFloat(getComputedStyle(shell, '::after').height);
@@ -634,7 +638,7 @@ test.describe('diff preview anchoring', () => {
         hasHorizontalScrollbar: !!shell.querySelector('.diff-view-scrollbar-horizontal'),
         rowHeight: rows[0]!.getBoundingClientRect().height,
         shellHeight: shell.getBoundingClientRect().height,
-        toggleInHeader: toggle.parentElement?.classList.contains('diff-view-item-expandable'),
+        toggleInHeader: toggleButton.parentElement?.classList.contains('diff-view-item-expandable'),
         visibleRowCount: visibleRows.length,
       };
     });
@@ -646,8 +650,6 @@ test.describe('diff preview anchoring', () => {
     expect(dimensions.fadeHeight).toBeCloseTo(dimensions.rowHeight / 2, 0);
     expect(dimensions.toggleInHeader).toBe(true);
 
-    const toggle = page.locator(`[data-msg-id="${messageId}"] .diff-view-toggle`);
-    await expect(toggle).toHaveAttribute('title', 'Expand diff preview');
     await expect
       .poll(() => toggle.evaluate((button) => getComputedStyle(button).opacity))
       .toBe('0.35');

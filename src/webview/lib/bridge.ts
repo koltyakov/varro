@@ -1,3 +1,4 @@
+import { batch } from 'solid-js';
 import type { ExtensionMessage, WebviewMessage } from '../../shared/protocol';
 import { parseExtensionMessage } from '../../shared/extension-message';
 import { isString, type UnknownRecord, isObject } from './runtime-values';
@@ -37,14 +38,56 @@ const bridgeWindow = window as BridgeWindow;
 
 bridgeWindow[BRIDGE_CLEANUP_KEY]?.();
 
+const STREAM_BATCH_MS = 16;
+const MAX_STREAM_BATCH_SIZE = 64;
+let streamBatch: ExtensionMessage[] = [];
+let streamBatchTimer: ReturnType<typeof setTimeout> | undefined;
+
+function flushStreamBatch() {
+  if (streamBatchTimer !== undefined) clearTimeout(streamBatchTimer);
+  streamBatchTimer = undefined;
+  if (streamBatch.length === 0) return;
+  const messages = streamBatch;
+  streamBatch = [];
+  batch(() => {
+    for (const message of messages) {
+      try {
+        for (const handler of handlers) handler(message);
+      } catch (error) {
+        // Preserve normal uncaught-error reporting without losing subsequent packets in the batch.
+        queueMicrotask(() => {
+          throw error;
+        });
+      }
+    }
+  });
+}
+
 const messageListener = (event: MessageEvent) => {
   const msg = parseExtensionMessage(event.data);
   if (!msg) return;
-  for (const handler of handlers) handler(msg);
+  if (
+    msg.type === 'server/event' &&
+    (msg.payload.type === 'message.part.updated' ||
+      msg.payload.type.startsWith('session.next.tool.'))
+  ) {
+    streamBatch.push(msg);
+    if (streamBatch.length >= MAX_STREAM_BATCH_SIZE) flushStreamBatch();
+    else streamBatchTimer ??= setTimeout(flushStreamBatch, STREAM_BATCH_MS);
+    return;
+  }
+  // Permissions, questions, completion, and RPC messages are ordering barriers and remain immediate.
+  batch(() => {
+    flushStreamBatch();
+    for (const handler of handlers) handler(msg);
+  });
 };
 
 export function cleanupBridge() {
   if (!bridgeInitialized && disposed) return;
+  if (streamBatchTimer !== undefined) clearTimeout(streamBatchTimer);
+  streamBatchTimer = undefined;
+  streamBatch = [];
   window.removeEventListener('message', messageListener);
   bridgeInitialized = false;
   handlers.clear();

@@ -250,6 +250,7 @@ export function VirtualizedContent(
     });
     return (
       <MessageRow
+        presentation={props.presentation}
         msg={message()}
         nearViewport={nearViewport()}
         virtualHeight={virtualHeight()}

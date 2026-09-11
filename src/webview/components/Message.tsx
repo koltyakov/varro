@@ -70,6 +70,8 @@ import {
   parseUserMessageContent,
 } from './message/UserMessageContent';
 import { isString } from '../lib/runtime-values';
+import { getPresentationPartKey } from './message-list/streaming-presentation';
+import type { StreamingPresentation } from './message-list/streaming-presentation';
 
 export {
   getAssistantContainerVariant,
@@ -130,6 +132,7 @@ export function Message(props: {
   previousTrailingFileEventSignature?: string | null;
   streamingPartId?: string | null;
   streamingText?: string;
+  presentation?: StreamingPresentation;
   allowInitialAssistantItemReveal?: boolean;
   claimAssistantItemReveal?: (messageId: string, renderKey: string) => boolean;
   questionRequestForTool?: (part: ToolPart) => QuestionRequest | null;
@@ -341,11 +344,14 @@ export function Message(props: {
   const isCompactedSummaryMessage = createMemo(
     () => !!assistant()?.summary || normalizedParts().some((part) => part.type === 'compaction')
   );
-  const isPartStreaming = (part: Part) => part.id === props.streamingPartId;
+  const isPartStreaming = (part: Part) =>
+    part.id === props.streamingPartId || !!props.presentation?.isPartPending(part);
   const getEffectivePartText = (part: Part) => {
     if (part.type !== 'text' && part.type !== 'reasoning') return null;
 
-    const text = part.id === props.streamingPartId ? props.streamingText || part.text : part.text;
+    const text =
+      props.presentation?.textForPart(part) ??
+      (part.id === props.streamingPartId ? props.streamingText || part.text : part.text);
     return isCompactedSummaryMessage()
       ? stripCompactionBoundaryMarkdown(text, isPartStreaming(part))
       : text;
@@ -353,6 +359,7 @@ export function Message(props: {
   const visibleAssistantParts = createMemo(() =>
     assistant()
       ? normalizedParts().filter((part) => {
+          if (props.presentation?.hiddenParts().has(getPresentationPartKey(part))) return false;
           if (part.type === 'text') {
             const effectiveText = getEffectivePartText(part) || '';
             return effectiveText.trim().length > 0 && !isWorkspaceDirectoryText(effectiveText);

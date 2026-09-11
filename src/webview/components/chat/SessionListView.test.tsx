@@ -2351,20 +2351,25 @@ describe('SessionListView load errors', () => {
     await Promise.resolve();
     expect(list.classList).not.toContain('has-bottom-separator');
 
-    setState('sessions', [session('recent', now), session('archived', now - 2 * 86_400_000)]);
+    setState('sessions', [
+      ...Array.from({ length: 50 }, (_, index) => session(`recent-${index}`, now - index)),
+      session('archived', now - 2 * 86_400_000),
+    ]);
     await Promise.resolve();
     expect(list.classList).toContain('has-bottom-separator');
   });
 
   it('loads an archive session instead of showing an unknown zero count', async () => {
     const now = Date.now();
-    const recent = session('recent', now);
+    const recent = Array.from({ length: 50 }, (_, index) =>
+      session(`recent-${index}`, now - index)
+    );
     const archived = session('archived', now - 2 * 86_400_000);
     loadMoreSessionsMock.mockImplementationOnce(async () => {
-      setState('sessions', [recent, archived]);
+      setState('sessions', [...recent, archived]);
       setState('sessionsHasMore', false);
     });
-    setState('sessions', [recent]);
+    setState('sessions', recent);
     setState('sessionsHasMore', true);
     cleanup = render(() => <SessionListView />, container);
 
@@ -2468,7 +2473,10 @@ describe('SessionListView load errors', () => {
     const archivedSessions = Array.from({ length: 50 }, (_, index) =>
       session(`archived-${index}`, now - (index + 2) * 86_400_000)
     );
-    setState('sessions', [session('recent', now), ...archivedSessions]);
+    setState('sessions', [
+      ...Array.from({ length: 50 }, (_, index) => session(`recent-${index}`, now - index)),
+      ...archivedSessions,
+    ]);
     setState('sessionsHasMore', true);
     cleanup = render(() => <SessionListView />, container);
 
@@ -2501,7 +2509,10 @@ describe('SessionListView load errors', () => {
 
   it('searches all sessions without adding search-only sessions to the archive', async () => {
     const now = Date.now();
-    const loadedSessions = [session('recent', now), session('archived', now - 2 * 86_400_000)];
+    const loadedSessions = [
+      ...Array.from({ length: 50 }, (_, index) => session(`recent-${index}`, now - index)),
+      session('archived', now - 2 * 86_400_000),
+    ];
     const searchOnlySession = session('deep-archive', now - 30 * 86_400_000, {
       title: 'Flick through old notes',
     });

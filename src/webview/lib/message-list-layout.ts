@@ -3,7 +3,43 @@ type PermissionRemovalHandler = (permissionId: string, removeGroup: boolean) => 
 
 let queuedMessageRemovalHandler: QueuedMessageRemovalHandler | null = null;
 let permissionRemovalHandler: PermissionRemovalHandler | null = null;
+let presentationFlushHandler: ((sessionId: string) => void) | null = null;
+let todoCollapseHandler: ((element: HTMLElement) => void) | null = null;
+let messageBlockRemovalHandler: ((element: HTMLElement) => void) | null = null;
 const permissionRemovalIntents = new Map<string, { removeGroup: boolean; token: object }>();
+
+export function registerTodoCollapseHandler(handler: (element: HTMLElement) => void) {
+  todoCollapseHandler = handler;
+  return () => {
+    if (todoCollapseHandler === handler) todoCollapseHandler = null;
+  };
+}
+
+export function prepareForTodoCollapse(element: HTMLElement) {
+  todoCollapseHandler?.(element);
+}
+
+export function registerMessageBlockRemovalHandler(handler: (element: HTMLElement) => void) {
+  messageBlockRemovalHandler = handler;
+  return () => {
+    if (messageBlockRemovalHandler === handler) messageBlockRemovalHandler = null;
+  };
+}
+
+export function prepareForMessageBlockRemoval(element: HTMLElement) {
+  messageBlockRemovalHandler?.(element);
+}
+
+export function registerPresentationFlushHandler(handler: (sessionId: string) => void) {
+  presentationFlushHandler = handler;
+  return () => {
+    if (presentationFlushHandler === handler) presentationFlushHandler = null;
+  };
+}
+
+export function flushMessagePresentation(sessionId: string) {
+  presentationFlushHandler?.(sessionId);
+}
 
 export function registerQueuedMessageRemovalHandler(handler: QueuedMessageRemovalHandler) {
   queuedMessageRemovalHandler = handler;
