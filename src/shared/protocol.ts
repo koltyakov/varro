@@ -880,6 +880,7 @@ export type ExtensionMessage =
     }
   | { type: 'command/new-session'; payload?: { prefill: string } }
   | { type: 'command/open-session'; payload: { sessionId: string; directory?: string } }
+  | { type: 'command/highlight-session' }
   | { type: 'command/focus-input' }
   | { type: 'command/search-sessions' }
   | { type: 'command/open-attention-sessions' }

@@ -2044,6 +2044,48 @@ describe('SidebarProvider editor panels', () => {
     expect(draft.panel.reveal).toHaveBeenCalledOnce();
   });
 
+  it('highlights only the reselected editor once it is ready, including repeated selections', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const { posted } = attachTestView(provider);
+    const editor = createPanel();
+    const otherEditor = createPanel();
+    getVscodeMock()
+      .window.createWebviewPanel.mockReturnValueOnce(editor.panel)
+      .mockReturnValueOnce(otherEditor.panel);
+
+    await provider.openSessionInEditor('session-1');
+    await provider.openSessionInEditor('session-2');
+    const highlight = { type: 'command/highlight-session' };
+    expect(editor.panel.webview.postMessage).not.toHaveBeenCalledWith(highlight);
+
+    await provider.openSessionInEditor('session-1');
+    expect(editor.panel.reveal).toHaveBeenCalledWith(2, false);
+    expect(editor.panel.webview.postMessage).not.toHaveBeenCalledWith(highlight);
+    await vi.waitFor(() => expect(editor.panel.webview.html).toContain('type="module"'));
+    editor.ready();
+    editor.receive({
+      type: 'commands/state',
+      payload: { canAbort: false, canSwitchSessions: true, model: null },
+    });
+    await vi.waitFor(() =>
+      expect(editor.panel.webview.postMessage).toHaveBeenCalledWith(highlight)
+    );
+    const delivered = editor.panel.webview.postMessage.mock.calls
+      .map(([message]) => parseExtensionMessage(message))
+      .find((message) => message?.type === highlight.type);
+    expect(delivered).toEqual(highlight);
+
+    editor.panel.webview.postMessage.mockClear();
+    await provider.openSessionInEditor('session-1');
+    expect(editor.panel.webview.postMessage).toHaveBeenCalledWith(highlight);
+    expect(editor.panel.webview.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'command/open-session' })
+    );
+    expect(otherEditor.panel.webview.postMessage).not.toHaveBeenCalledWith(highlight);
+    expect(posted).not.toContainEqual(highlight);
+    expect(getVscodeMock().window.createWebviewPanel).toHaveBeenCalledTimes(2);
+  });
+
   it('reuses an editor for another session in the same conversation tree', async () => {
     const { provider } = await createSidebarProviderInstance();
     const editor = createPanel();

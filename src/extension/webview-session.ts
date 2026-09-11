@@ -46,7 +46,8 @@ export class WebviewSession {
           | 'command/new-session'
           | 'command/abort'
           | 'command/switch-session'
-          | 'command/open-session';
+          | 'command/open-session'
+          | 'command/highlight-session';
       }
     >
   > = [];
@@ -184,7 +185,8 @@ export class WebviewSession {
           | 'command/new-session'
           | 'command/abort'
           | 'command/switch-session'
-          | 'command/open-session';
+          | 'command/open-session'
+          | 'command/highlight-session';
       }
     >
   ) {

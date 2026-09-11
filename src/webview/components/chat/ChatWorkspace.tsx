@@ -1,4 +1,4 @@
-import { Show, Suspense, createSignal, lazy } from 'solid-js';
+import { Show, Suspense, createSignal, lazy, onCleanup, onMount } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { MessageList } from '../MessageList';
 import { ChatInput } from '../ChatInput';
@@ -8,6 +8,7 @@ import { ActiveChatHeader, SessionPickerHeader } from './ChatHeader';
 import { SessionListView } from './SessionListView';
 import type { SessionIndicatorSets, SessionListFilter } from './SessionListView';
 import type { SlowApiRequest } from '../../lib/bridge';
+import { onMessage } from '../../lib/bridge';
 import { editingMessage, inlineEditMount } from '../../lib/message-edit-state';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { state } from '../../lib/state';
@@ -118,6 +119,13 @@ export function ChatWorkspace(props: {
     void chatContentRef.offsetWidth;
     chatContentRef.classList.add('active-session-reselected');
   };
+  onMount(() => {
+    onCleanup(
+      onMessage((message) => {
+        if (message.type === 'command/highlight-session') showActiveSessionCue();
+      })
+    );
+  });
   const sidebarSubagentParentId = () =>
     props.showSessionPicker ? props.subagentParentId : props.sidebarSubagentParentId;
   const sidebarFilterLabel = () =>
@@ -212,18 +220,26 @@ export function ChatWorkspace(props: {
   );
 
   const mainShell = () => (
-    <div class="chat-main-shell">
+    <div
+      ref={(element) => {
+        chatContentRef = element;
+      }}
+      class="chat-main-shell"
+      onAnimationEnd={(event) => {
+        if (
+          event.target === event.currentTarget &&
+          event.animationName === 'active-session-reselected'
+        ) {
+          event.currentTarget.classList.remove('active-session-reselected');
+        }
+      }}
+    >
       <Show when={props.showSessionHeader}>
         <div class="chat-header chat-header-chat-desktop">
           <div class="chat-header-inner">{activeChatHeader(props.showDesktopBackButton)}</div>
         </div>
       </Show>
-      <div
-        ref={(element) => {
-          chatContentRef = element;
-        }}
-        class="chat-main-column-shell"
-      >
+      <div class="chat-main-column-shell">
         <Show
           when={activeRalphSessionId()}
           fallback={

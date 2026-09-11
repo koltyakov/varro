@@ -58,6 +58,7 @@ const KNOWN_TYPES = new Set<string>([
   'recovery/interrupted-sessions',
   'command/new-session',
   'command/open-session',
+  'command/highlight-session',
   'command/focus-input',
   'command/search-sessions',
   'command/open-attention-sessions',
@@ -97,6 +98,7 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
       return { type, payload: parsedPayload };
     }
 
+    case 'command/highlight-session':
     case 'command/focus-input':
     case 'command/search-sessions':
     case 'command/open-attention-sessions':

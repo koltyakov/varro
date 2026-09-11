@@ -1123,6 +1123,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           payload: workspacePath ? { sessionId, directory: workspacePath } : { sessionId },
         });
         this.reconcileQueuedMessageOwners();
+      } else {
+        existing.webviewSession.queueCommand({ type: 'command/highlight-session' });
       }
       return;
     }
