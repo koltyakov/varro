@@ -36,6 +36,7 @@ export function MessagePart(props: {
   renderPermissionPrompt?: boolean;
   lightweight?: boolean;
   compactFileChanges?: boolean;
+  diffPreviewStateKey?: string;
   expandReasoning?: boolean;
 }) {
   const p = () => props.part;
@@ -102,6 +103,7 @@ export function MessagePart(props: {
         renderPermissionPrompt={props.renderPermissionPrompt}
         lightweight={props.lightweight}
         compactFileChanges={props.compactFileChanges}
+        diffPreviewStateKey={props.diffPreviewStateKey}
       />
     </Show>
   );

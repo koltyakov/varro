@@ -435,6 +435,7 @@ export function ToolCall(props: {
   renderPermissionPrompt?: boolean;
   lightweight?: boolean;
   compactFileChanges?: boolean;
+  diffPreviewStateKey?: string;
 }) {
   const tool = () => props.part;
   const expansionKey = () => getToolCallExpansionKey(tool());
@@ -600,7 +601,7 @@ export function ToolCall(props: {
           changes={fileChanges()}
           animatePending={isApplyPatchTool(tool().tool)}
           waitingForPermission={isWaitingForPermission()}
-          previewStateKey={expansionKey()}
+          previewStateKey={props.diffPreviewStateKey ?? expansionKey()}
           expanded={expanded()}
           toggleExpand={toggleExpand}
           compact={!!props.compactFileChanges}

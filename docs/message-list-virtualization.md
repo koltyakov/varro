@@ -313,6 +313,11 @@ Direct input acquires ownership only when it can affect the transcript:
 - Animation identity is a one-time message/render-key claim, not current DOM position. Virtual remount,
   completed-history reopening, or appending to an existing file-edit stack must not replay a claimed
   entrance.
+- Deduplicating consecutive edits to the same file preserves the first edit's render and preview-state
+  keys while displaying the newest tool's unchanged ID and payload. Appending another edit must not
+  unmount an opened diff, restart its entrance, or reset its scroll position. The streaming diff
+  regression covers both a new edit arriving and an existing edit completing; completion alone does
+  not exercise deduplication's change of displayed tool.
 - A retained activity-summary anchor owns scrolling until replacement content arrives. Replacement
   includes inline edits and other standalone response parts, not only Markdown text. Bottom-follow
   must not write a competing position during that hold, and queued restore callbacks must verify the

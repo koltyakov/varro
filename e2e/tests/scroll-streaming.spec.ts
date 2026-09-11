@@ -275,7 +275,7 @@ test.describe('rapid streaming bottom follow', () => {
       .toBeLessThan(15);
   });
 
-  test('paints unfinished inline markdown while keeping bottom follow engaged', async ({
+  test('holds unfinished inline code until completion while keeping bottom follow engaged', async ({
     page,
   }) => {
     await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
@@ -293,13 +293,15 @@ test.describe('rapid streaming bottom follow', () => {
     await waitForAnimationFrames(page, 2);
 
     await expect(row).toContainText('VFZ-PENDING-MARKDOWN');
-    await expect(row.locator('.streaming-markdown-pending')).toHaveCSS('visibility', 'visible');
+    await expect(row.locator('.streaming-markdown-pending')).toHaveCSS('visibility', 'hidden');
+    await expect(row.locator('.streaming-markdown-pending')).toHaveAttribute('aria-hidden', 'true');
     expect(
       (await getScrollMetrics(page, '.interactive-list')).distanceFromBottom
     ).toBeLessThanOrEqual(1);
 
     await appendDeltaToRapidStreaming(page, '`');
     await expect(row.locator('.streaming-markdown-pending')).toHaveCount(0);
+    await expect(row.locator('code').filter({ hasText: 'VFZ-PENDING-MARKDOWN' })).toBeVisible();
     for (let frame = 0; frame < 4; frame += 1) {
       await waitForAnimationFrame(page);
       expect(

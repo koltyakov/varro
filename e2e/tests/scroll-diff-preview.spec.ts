@@ -94,201 +94,206 @@ async function updateDiffPreviewWithPatch(page: Page, messageId: string, patchTe
 }
 
 test.describe('diff preview anchoring', () => {
-  test('retains the same painted expanded diff when a second edit to the same file completes', async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width: 486, height: 794 });
-    await page.goto(
-      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&expandedActivity=1'
-    );
-    const messageId = 'message-diff-preview-streaming-edits';
-    const sendEdit = async (secondEdit: boolean, completeEdit: boolean) => {
-      await page.evaluate(
-        ({ messageId: targetMessageId, second, completed }) => {
-          const sessionID = 'session-diff-preview-large-transcript';
-          const harness = (
-            window as typeof window & {
-              __varroE2E: {
-                getSessionMessages: (id: string) => Array<{ info: Record<string, unknown> }>;
-                updateMessageInfo: (info: Record<string, unknown>) => void;
-                updateMessagePart: (part: unknown) => void;
-                updateSessionStatus: (id: string, status: { type: 'busy' }) => void;
+  for (const transition of ['completes', 'arrives'] as const) {
+    test(`retains the same painted expanded diff when ${transition === 'completes' ? 'a second edit to the same file completes' : 'another edit to the same file arrives'}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 486, height: 794 });
+      await page.goto(
+        '/e2e/harness/index.html?scenario=diff-preview-large-transcript&expandedActivity=1'
+      );
+      const messageId = 'message-diff-preview-streaming-edits';
+      const sendEdit = async (editIndex: number, completeEdit: boolean) => {
+        await page.evaluate(
+          ({ messageId: targetMessageId, editIndex: index, completed }) => {
+            const sessionID = 'session-diff-preview-large-transcript';
+            const harness = (
+              window as typeof window & {
+                __varroE2E: {
+                  getSessionMessages: (id: string) => Array<{ info: Record<string, unknown> }>;
+                  updateMessageInfo: (info: Record<string, unknown>) => void;
+                  updateMessagePart: (part: unknown) => void;
+                  updateSessionStatus: (id: string, status: { type: 'busy' }) => void;
+                };
+              }
+            ).__varroE2E;
+            const info = harness
+              .getSessionMessages(sessionID)
+              .find((entry) => entry.info.id === 'message-diff-preview-assistant-59')!.info;
+            if (index === 0) {
+              const activeInfo = {
+                ...info,
+                id: targetMessageId,
+                finish: undefined,
+                time: { created: Date.now() },
               };
+              harness.updateMessageInfo(activeInfo);
+              harness.updateSessionStatus(sessionID, { type: 'busy' });
+              window.postMessage(
+                {
+                  type: 'server/event',
+                  payload: {
+                    type: 'message.updated',
+                    properties: { info: activeInfo },
+                  },
+                },
+                '*'
+              );
+              window.postMessage(
+                {
+                  type: 'server/event',
+                  payload: {
+                    type: 'session.status',
+                    properties: { sessionID, status: { type: 'busy' } },
+                  },
+                },
+                '*'
+              );
             }
-          ).__varroE2E;
-          const info = harness
-            .getSessionMessages(sessionID)
-            .find((entry) => entry.info.id === 'message-diff-preview-assistant-59')!.info;
-          if (!second) {
-            const activeInfo = {
-              ...info,
-              id: targetMessageId,
-              finish: undefined,
-              time: { created: Date.now() },
+            const id = `${targetMessageId}-${index === 0 ? 'patch' : `edit-${index}`}`;
+            const part = {
+              id,
+              sessionID,
+              messageID: targetMessageId,
+              type: 'tool',
+              callID: `${id}-call`,
+              tool: 'edit',
+              state: {
+                status: completed ? 'completed' : 'running',
+                input: {
+                  filePath: 'src/streaming-preview.css',
+                  oldString: Array.from(
+                    { length: 80 },
+                    (_, i) => `.row-${i} { width: ${i}px; }`
+                  ).join('\n'),
+                  newString: Array.from(
+                    { length: 80 },
+                    (_, i) => `.row-${i} { width: ${i + index + 1}px; }`
+                  ).join('\n'),
+                },
+                title: 'Edit preview',
+                metadata: {},
+                output: completed ? 'Updated' : undefined,
+                time: completed ? { start: 2, end: 3 } : { start: 2 },
+              },
             };
-            harness.updateMessageInfo(activeInfo);
-            harness.updateSessionStatus(sessionID, { type: 'busy' });
+            harness.updateMessagePart(part);
             window.postMessage(
               {
                 type: 'server/event',
                 payload: {
-                  type: 'message.updated',
-                  properties: { info: activeInfo },
+                  type: 'message.part.updated',
+                  properties: { part },
                 },
               },
               '*'
             );
-            window.postMessage(
-              {
-                type: 'server/event',
-                payload: {
-                  type: 'session.status',
-                  properties: { sessionID, status: { type: 'busy' } },
-                },
-              },
-              '*'
-            );
-          }
-          const id = `${targetMessageId}-${second ? 'second-edit' : 'patch'}`;
-          const part = {
-            id,
-            sessionID,
-            messageID: targetMessageId,
-            type: 'tool',
-            callID: `${id}-call`,
-            tool: 'edit',
-            state: {
-              status: completed ? 'completed' : 'running',
-              input: {
-                filePath: 'src/streaming-preview.css',
-                oldString: Array.from(
-                  { length: 80 },
-                  (_, i) => `.row-${i} { width: ${i}px; }`
-                ).join('\n'),
-                newString: Array.from(
-                  { length: 80 },
-                  (_, i) => `.row-${i} { width: ${i + (second ? 2 : 1)}px; }`
-                ).join('\n'),
-              },
-              title: 'Edit preview',
-              metadata: {},
-              output: completed ? 'Updated' : undefined,
-              time: completed ? { start: 2, end: 3 } : { start: 2 },
-            },
-          };
-          harness.updateMessagePart(part);
-          window.postMessage(
-            {
-              type: 'server/event',
-              payload: {
-                type: 'message.part.updated',
-                properties: { part },
-              },
-            },
-            '*'
-          );
-        },
-        { messageId, second: secondEdit, completed: completeEdit }
-      );
-    };
-    await sendEdit(false, true);
-    await sendEdit(true, false);
-    await page.locator(`[data-msg-id="${messageId}"] .diff-view-toggle`).first().click();
-    const overlay = page.locator('.diff-view-overlay');
-    await expect(overlay).toBeVisible();
-    await overlay.evaluate(async (element) => {
-      await Promise.all(
-        element.getAnimations({ subtree: true }).map((animation) => animation.finished)
-      );
-    });
-    const lines = overlay.locator('.diff-view-overlay-lines');
-    await lines.hover();
-    await page.mouse.wheel(0, 240);
-    await expect.poll(() => lines.evaluate((element) => element.scrollTop)).toBeGreaterThan(100);
-    await waitForAnimationFrames(page, 6);
-
-    const observation = await overlay.evaluateHandle((element) => {
-      const viewport = element.querySelector<HTMLElement>('.diff-view-overlay-lines')!;
-      const before = { top: element.getBoundingClientRect().top, scrollTop: viewport.scrollTop };
-      const samples: Array<{
-        same: boolean;
-        connected: boolean;
-        opacity: string;
-        visible: boolean;
-        top: number;
-        scrollTop: number;
-      }> = [];
-      let removed = false;
-      let animations = 0;
-      let frame = 0;
-      const observer = new MutationObserver((records) => {
-        removed ||= records.some((record) =>
-          Array.from(record.removedNodes).some((node) => node === element || node.contains(element))
+          },
+          { messageId, editIndex, completed: completeEdit }
+        );
+      };
+      await sendEdit(0, true);
+      await sendEdit(1, false);
+      await page.locator(`[data-msg-id="${messageId}"] .diff-view-toggle`).first().click();
+      const overlay = page.locator('.diff-view-overlay');
+      await expect(overlay).toBeVisible();
+      await overlay.evaluate(async (element) => {
+        await Promise.all(
+          element.getAnimations({ subtree: true }).map((animation) => animation.finished)
         );
       });
-      observer.observe(document.body, { childList: true, subtree: true });
-      const onAnimation = (event: AnimationEvent) => {
-        if (event.target instanceof Element && event.target.closest('.diff-view-overlay'))
-          animations += 1;
-      };
-      document.addEventListener('animationstart', onAnimation, true);
-      const sample = () => {
-        samples.push({
-          same: document.querySelector('.diff-view-overlay') === element,
-          connected: element.isConnected,
-          opacity: getComputedStyle(element).opacity,
-          visible:
-            getComputedStyle(element).visibility === 'visible' &&
-            element.getBoundingClientRect().height > 0,
-          top: element.getBoundingClientRect().top,
-          scrollTop: viewport.scrollTop,
+      const lines = overlay.locator('.diff-view-overlay-lines');
+      await lines.hover();
+      await page.mouse.wheel(0, 240);
+      await expect.poll(() => lines.evaluate((element) => element.scrollTop)).toBeGreaterThan(100);
+      await waitForAnimationFrames(page, 6);
+
+      const observation = await overlay.evaluateHandle((element) => {
+        const viewport = element.querySelector<HTMLElement>('.diff-view-overlay-lines')!;
+        const before = { top: element.getBoundingClientRect().top, scrollTop: viewport.scrollTop };
+        const samples: Array<{
+          same: boolean;
+          connected: boolean;
+          opacity: string;
+          visible: boolean;
+          top: number;
+          scrollTop: number;
+        }> = [];
+        let removed = false;
+        let animations = 0;
+        let frame = 0;
+        const observer = new MutationObserver((records) => {
+          removed ||= records.some((record) =>
+            Array.from(record.removedNodes).some(
+              (node) => node === element || node.contains(element)
+            )
+          );
         });
-        frame = requestAnimationFrame(sample);
-      };
-      sample();
-      return {
-        finish: () => {
-          cancelAnimationFrame(frame);
-          observer.disconnect();
-          document.removeEventListener('animationstart', onAnimation, true);
-          return {
-            before,
-            samples,
-            removed,
-            animations,
-          };
-        },
-      };
+        observer.observe(document.body, { childList: true, subtree: true });
+        const onAnimation = (event: AnimationEvent) => {
+          if (event.target instanceof Element && event.target.closest('.diff-view-overlay'))
+            animations += 1;
+        };
+        document.addEventListener('animationstart', onAnimation, true);
+        const sample = () => {
+          samples.push({
+            same: document.querySelector('.diff-view-overlay') === element,
+            connected: element.isConnected,
+            opacity: getComputedStyle(element).opacity,
+            visible:
+              getComputedStyle(element).visibility === 'visible' &&
+              element.getBoundingClientRect().height > 0,
+            top: element.getBoundingClientRect().top,
+            scrollTop: viewport.scrollTop,
+          });
+          frame = requestAnimationFrame(sample);
+        };
+        sample();
+        return {
+          finish: () => {
+            cancelAnimationFrame(frame);
+            observer.disconnect();
+            document.removeEventListener('animationstart', onAnimation, true);
+            return {
+              before,
+              samples,
+              removed,
+              animations,
+            };
+          },
+        };
+      });
+      if (transition === 'arrives') await sendEdit(2, false);
+      await sendEdit(1, true);
+      await waitForAnimationFrames(page, 20);
+      const result = await observation.evaluate((tracker) => tracker.finish());
+      await observation.dispose();
+      await test.info().attach('portal-continuity', {
+        body: JSON.stringify(result),
+        contentType: 'application/json',
+      });
+      expect(result.removed, JSON.stringify(result)).toBe(false);
+      expect(result.samples.length).toBeGreaterThan(10);
+      expect(
+        result.samples.every(
+          (sample) =>
+            sample.same &&
+            sample.connected &&
+            sample.visible &&
+            sample.opacity === '1' &&
+            Math.abs(sample.top - result.before.top) < 1 &&
+            Math.abs(sample.scrollTop - result.before.scrollTop) < 1
+        ),
+        JSON.stringify(result)
+      ).toBe(true);
+      expect(result.animations).toBe(0);
+      await page.getByRole('button', { name: 'Close expanded diff' }).click();
+      await expect(page.locator(`[data-msg-id="${messageId}"] .diff-view-file`)).toHaveCount(1);
+      await expect(
+        page.locator(`[data-msg-id="${messageId}"] .diff-view-file`).last()
+      ).toContainText(`width: ${transition === 'arrives' ? 3 : 2}px`);
     });
-    await sendEdit(true, true);
-    await waitForAnimationFrames(page, 20);
-    const result = await observation.evaluate((tracker) => tracker.finish());
-    await observation.dispose();
-    await test.info().attach('portal-continuity', {
-      body: JSON.stringify(result),
-      contentType: 'application/json',
-    });
-    expect(result.removed, JSON.stringify(result)).toBe(false);
-    expect(result.samples.length).toBeGreaterThan(10);
-    expect(
-      result.samples.every(
-        (sample) =>
-          sample.same &&
-          sample.connected &&
-          sample.visible &&
-          sample.opacity === '1' &&
-          Math.abs(sample.top - result.before.top) < 1 &&
-          Math.abs(sample.scrollTop - result.before.scrollTop) < 1
-      ),
-      JSON.stringify(result)
-    ).toBe(true);
-    expect(result.animations).toBe(0);
-    await page.getByRole('button', { name: 'Close expanded diff' }).click();
-    await expect(page.locator(`[data-msg-id="${messageId}"] .diff-view-file`)).toHaveCount(1);
-    await expect(page.locator(`[data-msg-id="${messageId}"] .diff-view-file`).last()).toContainText(
-      'width: 2px'
-    );
-  });
+  }
 
   test('keeps a detached row anchored and its diff visible when the active turn completes', async ({
     page,

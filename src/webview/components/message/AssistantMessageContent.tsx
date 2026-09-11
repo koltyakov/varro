@@ -224,10 +224,14 @@ export function shouldShowReadModeToggle(text: string): boolean {
 }
 
 export function deduplicateFileEdits(parts: Part[]): Part[] {
-  const result: Part[] = [];
+  return getDeduplicatedPartEntries(parts).map((entry) => entry.part);
+}
+
+function getDeduplicatedPartEntries(parts: Part[]): Array<{ key: string; part: Part }> {
+  const result: Array<{ key: string; part: Part }> = [];
   for (let index = 0; index < parts.length; index += 1) {
     if (!isFileEditPart(parts[index]!)) {
-      result.push(parts[index]!);
+      result.push({ key: parts[index]!.id, part: parts[index]! });
       continue;
     }
     const currentChangeSignature = getToolFileChangeSignature(
@@ -249,7 +253,8 @@ export function deduplicateFileEdits(parts: Part[]): Part[] {
     ) {
       last += 1;
     }
-    result.push(parts[last]!);
+    // Keep the latest tool payload, but retain the first edit's preview identity.
+    result.push({ key: parts[index]!.id, part: parts[last]! });
     index = last;
   }
   return result;
@@ -364,9 +369,12 @@ function prepareActiveActivityItemsViewport(element: HTMLDivElement) {
   };
 }
 
-export function getFileEditStackRenderKey(parts: readonly ToolPart[]) {
+export function getFileEditStackRenderKey(
+  parts: readonly ToolPart[],
+  renderKeys?: ReadonlyMap<string, string>
+) {
   // Preview geometry is invalidated by row-layout, not by remounting the stack.
-  return `file-edit-stack:${parts[0]!.id}`;
+  return `file-edit-stack:${renderKeys?.get(parts[0]!.id) ?? parts[0]!.id}`;
 }
 
 export function AssistantMessageContent(props: {
@@ -396,7 +404,11 @@ export function AssistantMessageContent(props: {
   keepReasoningInline?: boolean;
   expandReasoning?: boolean;
 }) {
-  const dedupedParts = createMemo(() => deduplicateFileEdits(props.parts));
+  const partEntries = createMemo(() => getDeduplicatedPartEntries(props.parts));
+  const dedupedParts = createMemo(() => partEntries().map((entry) => entry.part));
+  const partRenderKeys = createMemo(
+    () => new Map(partEntries().map((entry) => [entry.part.id, entry.key]))
+  );
   const [readModeOpen, setReadModeOpen] = createSignal(false);
   const errorDetailsExpansionKey = () => getAssistantErrorDetailsExpansionKey(props.info.id);
   const [errorDetailsOpen, setErrorDetailsOpen] = createSignal(
@@ -656,7 +668,7 @@ export function AssistantMessageContent(props: {
           // SAFETY: The surrounding shape or discriminator check establishes the ToolPart contract used below.
           fileEditParts.push(parts[++index]! as ToolPart);
         }
-        const key = getFileEditStackRenderKey(fileEditParts);
+        const key = getFileEditStackRenderKey(fileEditParts, partRenderKeys());
         const previous = previousByKey.get(key);
         if (previous?.kind === 'file-edit-stack' && samePartList(previous.parts, fileEditParts)) {
           items.push(previous);
@@ -977,7 +989,9 @@ export function AssistantMessageContent(props: {
     if (initialItem.kind === 'file-edit-stack') {
       // SAFETY: The surrounding shape or discriminator check establishes the Extract<AssistantRenderItem, { kind: 'file-edit-stack' }> contract used below.
       const item = () => entry.item() as Extract<AssistantRenderItem, { kind: 'file-edit-stack' }>;
-      const partsById = createMemo(() => new Map(item().parts.map((part) => [part.id, part])));
+      const partsById = createMemo(
+        () => new Map(item().parts.map((part) => [partRenderKeys().get(part.id)!, part]))
+      );
       return (
         <div
           ref={(element) => {
@@ -1001,6 +1015,7 @@ export function AssistantMessageContent(props: {
                 return (
                   <MessagePart
                     part={part()}
+                    diffPreviewStateKey={`${props.info.sessionID}:${props.info.id}:file-edit:${id}`}
                     messageInfo={props.info}
                     streamedText={props.textForPart(part())}
                     streaming={props.isPartStreaming?.(part())}
