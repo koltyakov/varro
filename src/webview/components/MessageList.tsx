@@ -5560,6 +5560,15 @@ export function MessageList() {
     if (!control || !containerRef.contains(control)) return;
     // Explored mouse presses already dispatched their activation click on mousedown.
     if (control.matches('.assistant-activity-summary') && event.detail !== 0) return;
+    // Only opening Explored needs to pin its summary. Capturing its collapse adds a
+    // competing correction after bottom-follow has already settled the shorter row.
+    if (
+      control.matches('.assistant-activity-summary') &&
+      control.getAttribute('aria-expanded') === 'true'
+    ) {
+      pendingExpansionScrollAnchor = null;
+      return;
+    }
     const isDiffToggle = control.matches('.diff-view-toggle, .diff-view-item-expandable');
     const anchor = isDiffToggle
       ? (control.closest<HTMLElement>('.diff-view-item') ?? control)

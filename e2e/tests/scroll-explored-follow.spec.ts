@@ -288,6 +288,25 @@ for (const shortHistory of [false, true]) {
             (await getScrollMetrics(page, '.interactive-list')).distanceFromBottom
           ).toBeGreaterThan(200);
         }
+
+        if (shortHistory && followAction === 'none' && content === 'text') {
+          const collapseTops = await summary.evaluate(async (element) => {
+            if (!(element instanceof HTMLElement)) throw new Error('Explored summary is not HTML');
+            const tops = [element.getBoundingClientRect().top];
+            element.click();
+            tops.push(element.getBoundingClientRect().top);
+            for (let frame = 0; frame < 12; frame += 1) {
+              await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+              tops.push(element.getBoundingClientRect().top);
+            }
+            return tops;
+          });
+          await expect(summary).toHaveAttribute('aria-expanded', 'false');
+          const deltas = collapseTops.slice(1).map((top, index) => top - collapseTops[index]!);
+          const movedUp = deltas.some((delta) => delta < -0.5);
+          const movedDown = deltas.some((delta) => delta > 0.5);
+          expect(movedUp && movedDown, JSON.stringify({ collapseTops, deltas })).toBe(false);
+        }
       });
     }
   }
