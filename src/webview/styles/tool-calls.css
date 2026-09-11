@@ -1931,11 +1931,16 @@ kbd {
   font-weight: 400;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--color-vscode-fg) !important;
   line-height: 1.2;
   text-decoration: none;
+}
+
+.file-edit-path-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .file-edit-removed-path {
