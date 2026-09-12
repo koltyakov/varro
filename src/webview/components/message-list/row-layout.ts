@@ -380,6 +380,7 @@ export function getRenderEmptyMessageIds(
     if (message.info.role === 'user') {
       if (
         !hasUserMessageContent(parseUserMessageContent(message.parts)) &&
+        !message.parts.some((part) => part.type === 'compaction') &&
         message.info.summary?.diffsOmitted !== true
       ) {
         result.add(message.info.id);

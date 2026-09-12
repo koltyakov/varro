@@ -79,6 +79,8 @@ the shared invariants below remain true.
 - Removing a semantic zero-height classification makes any cached zero provisional. Delete the stale
   measurement, dirty the prefix from that row, and force bounded hydration so newly visible content
   cannot remain trapped behind a zero-height virtual range.
+- Compaction-only user messages paint a divider and must have a measured nonzero height. Treating
+  them as empty makes virtual unmounts briefly shrink the scroll range and clamp bottom follow.
 - `virtualMetrics.prefix[index]` must describe the same ordered ID list used by the renderer.
 - Cached prefix entries may only be reused while both the ID order and all earlier effective heights
   remain valid.
@@ -165,6 +167,8 @@ the shared invariants below remain true.
   sticky navigation or bottom-follow.
 - Expanding a compact activity disclosure takes ownership from bottom-follow so the clicked summary
   stays fixed while its details grow below it.
+- Collapsing that disclosure reserves any scroll-range shortfall before removing details below the
+  summary. A later correction cannot undo a frame already clamped by the browser.
 - Capture disclosure geometry before releasing bottom-follow. Transfer any active exit reserve to the
   append reserve at the current viewport target, and keep departing activity out of reserve-consumption
   calculations until its exit ends. Clearing that space during the handoff clamps the viewport before
@@ -180,6 +184,9 @@ the shared invariants below remain true.
 - A structural anchor correction is allowed during a slow user gesture. It preserves the result of
   that gesture; it does not replace it. An intervening user-owned movement epoch cancels the queued
   correction.
+- Preserve the direct-movement anchor's scroll coordinate when applying a structural correction.
+  Otherwise the next scroll event can count the same correction again as user movement and retain
+  a stale painted position for later layout invalidations.
 - History ownership covers layout-driven movement only. Native keyboard scrolling, scrollbar
   movement, and trackpad momentum can continue after a prepend without another input event. Actual
   movement while input is still active immediately transfers ownership back to the user.
@@ -193,6 +200,9 @@ the shared invariants below remain true.
   must never interpolate to a smaller `scrollTop` and visibly reverse the gesture.
 - Width-resize anchoring is established before applying the first resize measurement. Wheel,
   keyboard, or scrollbar input publishes pending measurements and releases that resize anchor.
+- A width correction can synchronously change the virtual core and reflow a remounted row. Recheck
+  the same anchor in a bounded synchronous settle before yielding, rather than exposing the first
+  correction until the next animation frame.
 - A bottom-pinned activity exit may temporarily reserve the disappearing flow space and freeze its
   existing bottom target. The reserve is a bounded geometry owner, must not compete with bottom-follow,
   and yields immediately to direct user movement, session replacement, or transition cancellation.

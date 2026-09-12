@@ -760,6 +760,26 @@ describe('MessageList compact activity', () => {
     ]);
   });
 
+  it('keeps compaction dividers in virtual height accounting for both message roles', () => {
+    const messages: MessageEntry[] = [
+      userMessage('compact-user'),
+      assistantMessage('compact-assistant'),
+    ].map((info) => ({
+      info,
+      parts: [
+        {
+          id: `part-${info.id}`,
+          messageID: info.id,
+          sessionID: info.sessionID,
+          type: 'compaction',
+          auto: true,
+        },
+      ],
+    }));
+
+    expect([...getRenderEmptyMessageIds(messages, new Map(), () => false)]).toEqual([]);
+  });
+
   it('derives bordered adjacency from collapsed file-edit rows', async () => {
     const firstEdit = toolPart('edit-1', 'assistant-1', 'call-edit-1');
     firstEdit.tool = 'edit';

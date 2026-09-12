@@ -69,7 +69,7 @@ test.describe('scroll stability regressions', () => {
       const totalMovement = samples[0]!.top - samples.at(-1)!.top;
       const steps = samples.slice(1).map((sample, index) => samples[index]!.top - sample.top);
       expect(samples.every((sample) => sample.connected)).toBe(true);
-      expect(totalMovement).toBeGreaterThan(100);
+      expect(totalMovement, JSON.stringify(samples)).toBeGreaterThan(100);
       if (reducedMotion === 'reduce') {
         // Separate Markdown commits can change geometry more than once. With reduced
         // motion, following must settle on the next frame rather than easing afterward.
@@ -85,12 +85,16 @@ test.describe('scroll stability regressions', () => {
         expect(Math.min(...steps)).toBeGreaterThanOrEqual(-1);
         expect(Math.max(...steps), JSON.stringify(samples)).toBeLessThan(totalMovement * 0.6);
         expect(steps.filter((step) => step > 1).length).toBeGreaterThan(3);
-        const speeds = steps.map(
-          (step, index) => step / Math.max(1, samples[index + 1]!.time - samples[index]!.time)
+        // This sampler is registered before the event starts the follow loop, so it
+        // observes the previous frame's scroll write. Use that frame's interval,
+        // especially when Markdown rendering causes a dropped frame at startup.
+        expect(steps[0], JSON.stringify(samples)).toBe(0);
+        const speeds = steps.map((step, index) =>
+          index === 0 ? 0 : step / Math.max(1, samples[index]!.time - samples[index - 1]!.time)
         );
         expect(Math.max(...speeds), JSON.stringify(samples)).toBeLessThan(1.4);
         const firstMovement = steps.findIndex((step) => step > 1);
-        expect(speeds[firstMovement]).toBeLessThan(0.5);
+        expect(speeds[firstMovement], JSON.stringify(samples)).toBeLessThan(0.5);
       }
       expect(samples.at(-1)!.bottomDistance).toBeLessThanOrEqual(1);
     });

@@ -1183,6 +1183,81 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
+  it('settles a resize correction that synchronously reflows its virtual core before returning', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    let width = 486;
+    let top = 0;
+    let offset = 0;
+    let reflowOnCorrection = false;
+    vi.spyOn(window, 'innerWidth', 'get').mockImplementation(() => width);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this.classList.contains('interactive-list')) return new DOMRect(0, 37, width, 631);
+        if (this.classList.contains('interactive-list-track'))
+          return new DOMRect(0, 37 - top, width, 18000);
+        const row = this.dataset.msgId ? this : this.closest<HTMLElement>('[data-msg-id]');
+        const id = row?.dataset.msgId;
+        if (id?.startsWith('assistant-')) {
+          const y = 37 + Number(id.slice('assistant-'.length)) * 300 + offset - top;
+          return this.matches('.rendered-markdown p')
+            ? new DOMRect(0, y + 24, width, 23)
+            : new DOMRect(0, y, width, 300);
+        }
+        return new DOMRect(0, 0, width, 40);
+      }
+    );
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 60 }, (_, index) => {
+        const id = `assistant-${index}`;
+        return {
+          info: assistantMessage(id),
+          parts: [{ ...textPart(`text-${index}`, `Paragraph ${index}.`), messageID: id }],
+        };
+      })
+    );
+    cleanup = render(() => MessageList(), container!);
+    const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
+    Object.defineProperties(list, {
+      clientHeight: { configurable: true, value: 631 },
+      clientWidth: { configurable: true, get: () => width },
+      offsetWidth: { configurable: true, get: () => width },
+      scrollHeight: { configurable: true, value: 18000 },
+      scrollTop: {
+        configurable: true,
+        get: () => top,
+        set: (value: number) => {
+          top = value;
+          if (reflowOnCorrection) {
+            reflowOnCorrection = false;
+            offset -= 22;
+          }
+        },
+      },
+    });
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -720 }));
+    top = 6000;
+    list.dispatchEvent(new Event('scroll'));
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+    const paragraph = container!.querySelector<HTMLElement>(
+      '[data-msg-id="assistant-20"] .rendered-markdown p'
+    )!;
+    const initialTop = paragraph.getBoundingClientRect().top;
+    width = 430;
+    offset = 178;
+    reflowOnCorrection = true;
+    window.dispatchEvent(new Event('resize'));
+    expect(paragraph.getBoundingClientRect().top).toBe(initialTop);
+    animationFrames.restore();
+  });
+
   it('does not refresh a fully visible resize anchor after local width reflow', async () => {
     vi.useFakeTimers();
     const animationFrames = installQueuedAnimationFrameMocks();

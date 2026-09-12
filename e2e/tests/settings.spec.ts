@@ -26,17 +26,31 @@ test('thinking visibility preserves a detached virtualized anchor', async ({ pag
     '/e2e/harness/index.html?scenario=heterogeneous-large-transcript&expandedActivity=1'
   );
   const list = page.locator('.interactive-list');
+  await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+  await expect
+    .poll(() =>
+      list.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop)
+    )
+    .toBeLessThanOrEqual(1);
   await list.evaluate((element) => {
     element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
     element.scrollTop = element.scrollHeight * 0.5;
     element.dispatchEvent(new Event('scroll'));
   });
-  await page.evaluate(
-    () =>
-      new Promise<void>((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-      )
-  );
+  // Capture the reading anchor after the newly mounted rows finish measuring.
+  await expect
+    .poll(() =>
+      list.evaluate(async (element) => {
+        const top = element.scrollTop;
+        const height = element.scrollHeight;
+        for (let frame = 0; frame < 4; frame += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          if (element.scrollTop !== top || element.scrollHeight !== height) return false;
+        }
+        return true;
+      })
+    )
+    .toBe(true);
   const anchor = await list.evaluate((element) => {
     const viewport = element.getBoundingClientRect();
     const candidates = Array.from(
@@ -68,15 +82,20 @@ test('thinking visibility preserves a detached virtualized anchor', async ({ pag
       element.style.maxWidth = 'none';
       element.style.width = `${nextWidth}px`;
     }, width);
-    await page.waitForTimeout(150);
+    // Each reflow must preserve the original anchor before the next resize starts.
+    await expect
+      .poll(() =>
+        anchorElement.evaluate(async (element, top) => {
+          let maxDrift = 0;
+          for (let frame = 0; frame < 4; frame += 1) {
+            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+            maxDrift = Math.max(maxDrift, Math.abs(element.getBoundingClientRect().top - top));
+          }
+          return maxDrift;
+        }, anchor.top)
+      )
+      .toBeLessThan(1.5);
   }
-  await expect
-    .poll(() =>
-      anchorElement.evaluate((element, top) => {
-        return Math.abs(element.getBoundingClientRect().top - top);
-      }, anchor.top)
-    )
-    .toBeLessThan(1.5);
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
 
   for (const expectedThinkingCount of [0, 1]) {

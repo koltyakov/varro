@@ -3,7 +3,9 @@ import { expect, test } from '@playwright/test';
 import type { MessageEntry, Part } from '../../src/webview/types';
 import { getScrollMetrics, waitForAnimationFrames } from './helpers';
 
-test('opening Explored during an activity exit preserves its painted summary', async ({ page }) => {
+test('opening and closing Explored during an activity exit preserves its painted summary', async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 504, height: 800 });
   await page.goto(
     '/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayPrefix=1&activeTrayCount=3'
@@ -93,6 +95,27 @@ test('opening Explored during an activity exit preserves its painted summary', a
   expect(
     tops.every((top) => top !== null && Math.abs(top - initial) <= 1),
     JSON.stringify(result)
+  ).toBe(true);
+
+  const collapseSamples = await summary.evaluateHandle((element) => {
+    const state = { running: true, tops: [element.getBoundingClientRect().top] };
+    const sample = () => {
+      state.tops.push(element.getBoundingClientRect().top);
+      if (state.running) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+    return state;
+  });
+  await summary.click();
+  await expect(summary).toHaveAttribute('aria-expanded', 'false');
+  await waitForAnimationFrames(page, 30);
+  const collapsedTops = await collapseSamples.evaluate((state) => {
+    state.running = false;
+    return state.tops;
+  });
+  expect(
+    collapsedTops.every((top) => Math.abs(top - collapsedTops[0]!) <= 1),
+    JSON.stringify(collapsedTops)
   ).toBe(true);
 });
 

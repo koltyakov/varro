@@ -1170,7 +1170,7 @@ export function MessageList() {
     if (!widthResizeAnchor && options?.anchor && canOwnScroll) {
       widthResizeAnchor = options.anchor;
       setWidthResizePinnedMessageId(widthResizeAnchor.messageId);
-      restoreVisibleScrollAnchor(widthResizeAnchor);
+      restoreWidthResizeAnchor();
     }
     if (!widthResizeAnchor && canOwnScroll) {
       const pendingWheelAnchor = pendingWheelResizeAnchor;
@@ -1237,7 +1237,7 @@ export function MessageList() {
         virtualAnchor ??
         captureWidthResizeVisibleScrollAnchor();
       setWidthResizePinnedMessageId(widthResizeAnchor?.messageId ?? null);
-      restoreVisibleScrollAnchor(widthResizeAnchor);
+      restoreWidthResizeAnchor();
     }
     widthResizeActive = true;
     widthResizeIncludesFontChange ||= !!options?.fontChanged;
@@ -1284,6 +1284,17 @@ export function MessageList() {
       stickyNavigation: stickyNavigationOwnsScroll(),
       structuralReconciliation: !!pendingStructuralScrollAnchor,
     });
+  }
+
+  function restoreWidthResizeAnchor() {
+    if (!containerRef || !widthResizeAnchor || !widthResizeCanOwnScroll()) return;
+    // Publishing a corrected position can synchronously change the virtual core and
+    // reflow a remounted row. Settle that feedback before yielding to the next paint.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const previousTop = containerRef.scrollTop;
+      restoreVisibleScrollAnchor(widthResizeAnchor);
+      if (Math.abs(containerRef.scrollTop - previousTop) <= 0.5) break;
+    }
   }
 
   function finishWidthResizeNow() {
@@ -3796,6 +3807,11 @@ export function MessageList() {
     suppressSyncScrollTop = true;
     containerRef.scrollTop = Math.max(0, nextScrollTop);
     suppressSyncScrollTop = false;
+    if (directMovementAnchor) {
+      // Row measurement compensation preserves the user's painted destination. Do not
+      // count its scroll-coordinate change as another gesture on the next scroll event.
+      directMovementAnchor.scrollTop = containerRef.scrollTop;
+    }
     lastObservedScrollTop = containerRef.scrollTop;
     batch(() => {
       setScrollTop(containerRef!.scrollTop);
@@ -5649,13 +5665,24 @@ export function MessageList() {
     if (!control || !containerRef.contains(control)) return;
     // Explored mouse presses already dispatched their activation click on mousedown.
     if (control.matches('.assistant-activity-summary') && event.detail !== 0) return;
-    // Only opening Explored needs to pin its summary. Capturing its collapse adds a
-    // competing correction after bottom-follow has already settled the shorter row.
+    // Details disappear below their summary. Keep the current destination reachable
+    // before removal so Chromium cannot clamp it backward while collapsing.
     if (
       control.matches('.assistant-activity-summary') &&
       control.getAttribute('aria-expanded') === 'true'
     ) {
       pendingExpansionScrollAnchor = null;
+      const group = control.closest<HTMLElement>('.assistant-activity-group');
+      const disappearingHeight = group
+        ? Math.max(0, group.getBoundingClientRect().bottom - control.getBoundingClientRect().bottom)
+        : 0;
+      const shortfall =
+        containerRef.scrollTop -
+        (containerRef.scrollHeight - containerRef.clientHeight - disappearingHeight);
+      if (containerRef.scrollTop > 0.5 && shortfall > 0.5) {
+        appendBottomReserveTarget = containerRef.scrollTop;
+        setAppendBottomReserve((reserve) => reserve + shortfall);
+      }
       return;
     }
     const isDiffToggle = control.matches('.diff-view-toggle, .diff-view-item-expandable');
