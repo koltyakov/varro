@@ -824,6 +824,10 @@
   transform: none;
 }
 
+.assistant-activity-details .assistant-activity-detail .tool-invocation-duration {
+  word-spacing: -0.2em;
+}
+
 .assistant-activity-detail
   :is(.tool-invocation-duration, .thinking-duration, .tool-invocation-search-count) {
   opacity: 0.55;
@@ -1703,10 +1707,10 @@ body.vscode-light
   text-wrap: wrap;
 }
 
-.rendered-markdown p:has(+ p),
+.rendered-markdown p:not(.markdown-bold-heading):has(+ p),
 .rendered-markdown
   > [data-markdown-segment='stable']:has(+ [data-markdown-segment='tail'] > p:first-child)
-  > p:last-child {
+  > p:last-child:not(.markdown-bold-heading) {
   margin-bottom: 12px;
 }
 
@@ -1736,7 +1740,7 @@ body.vscode-light
   margin-right: 0.3em;
 }
 
-.rendered-markdown p:has(> strong:only-child) {
+.rendered-markdown p.markdown-bold-heading {
   margin-top: 14px;
   margin-bottom: 8px;
 }

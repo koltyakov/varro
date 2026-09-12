@@ -164,6 +164,8 @@ the shared invariants below remain true.
   history anchoring, edit visibility, or a direct user gesture.
 - Programmatic settling must be bounded and conditional. Do not repeatedly call `scrollIntoView()`
   when the target is already aligned.
+- Deferred bottom corrections retain the direct-input epoch as well as the session/request identity.
+  A newer gesture cancels a queued forced correction even when the original request ID is unchanged.
 - User interaction with the destination cancels navigation settling before editing or attachment
   actions change its geometry.
 - Inline editing may keep its panel visible, but edit visibility corrections must not reactivate
@@ -287,6 +289,9 @@ Direct input acquires ownership only when it can affect the transcript:
 - Focused diff content owns local interaction geometry and pauses bottom follow. Resume only if follow
   was active before focus and no user movement superseded it. Expanding or collapsing a diff
   disengages follow before capturing disclosure geometry.
+- Diff blur decides whether to resume follow after the current native event finishes propagating.
+  Blur can occur during wheel capture, before the transcript receives the same upward input. Cancel
+  that resume on outer upward-wheel intent even when diff focus has already disabled auto-scroll.
 
 ### Animated Row Transitions
 
@@ -408,6 +413,11 @@ Direct input acquires ownership only when it can affect the transcript:
   partial paint through promotion into the stable segment. Otherwise new paragraphs shift upward by
   2, 6, or 10 px as later blocks arrive. The streaming regressions measure the inter-block gap every
   frame, independently of scrolling and word wrapping.
+- Bold-only paragraph styling uses a parser-assigned class. CSS `:only-child` ignores text nodes
+  and misclassifies prose with inline emphasis as a heading. Keep ordinary paragraph gaps fixed
+  when emphasis arrives, through stable-segment promotion and completion. The verification prose
+  regression in `markdown-streaming-append.spec.ts` covers both gaps reported in
+  `ses_f6c4e6120ffehkoebwhpaN9ye6`.
 - Opening an active tool's details takes scroll ownership and keeps that tool visible until closed.
   It releases the answer gate and does not run a retention timer indefinitely.
 - Bottom growth uses the existing bottom-follow owner, which eases toward the measured destination

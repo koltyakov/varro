@@ -49,6 +49,62 @@ installMessageListTestEnvironment({
 });
 
 describe('MessageList auto-scroll', () => {
+  for (const cause of ['queued request', 'reattach', 'diff blur']) {
+    it(`cancels ${cause} when an upward wheel takes ownership`, async () => {
+      const animationFrames = installQueuedAnimationFrameMocks();
+      setState('activeSessionId', 'session-1');
+      replaceMessages([
+        { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
+        { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
+      ]);
+      cleanup = render(() => MessageList(), container!);
+      const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
+      let top = 0;
+      Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+      Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 1200 });
+      Object.defineProperty(list, 'scrollTop', {
+        configurable: true,
+        get: () => top,
+        set: (value: number) => {
+          top = value;
+        },
+      });
+      await Promise.resolve();
+      animationFrames.flush();
+      expect(top).toBe(800);
+
+      let diff: HTMLDivElement | undefined;
+      if (cause === 'queued request') requestMessageListScrollToBottom();
+      else if (cause === 'reattach') {
+        list.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, bubbles: true }));
+        top = 600;
+        list.dispatchEvent(new Event('scroll'));
+        list.dispatchEvent(new WheelEvent('wheel', { deltaY: 195, bubbles: true }));
+        top = 795;
+        list.dispatchEvent(new Event('scroll'));
+      } else {
+        diff = document.createElement('div');
+        diff.className = 'diff-view-lines';
+        diff.tabIndex = 0;
+        list.append(diff);
+        diff.focus();
+      }
+      list.dispatchEvent(new WheelEvent('wheel', { deltaY: -96, bubbles: true }));
+      diff?.blur();
+      const destination = top - 96;
+      top = destination;
+      // Diff blur can run before Chromium reports the wheel's resulting scroll event.
+      if (cause === 'diff blur') await Promise.resolve();
+      list.dispatchEvent(new Event('scroll'));
+      for (let frame = 0; frame < 4; frame += 1) {
+        await Promise.resolve();
+        animationFrames.flush();
+        expect(top).toBe(destination);
+      }
+      animationFrames.restore();
+    });
+  }
+
   it('cancels a pending first-turn alignment frame on unmount', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     setState('activeSessionId', 'session-1');
@@ -4164,6 +4220,10 @@ describe('MessageList auto-scroll', () => {
     const diffViewport = document.createElement('div');
     diffViewport.className = 'diff-view-lines';
     diffViewport.tabIndex = 0;
+    diffViewport.style.overflowY = 'auto';
+    Object.defineProperty(diffViewport, 'clientHeight', { configurable: true, value: 100 });
+    Object.defineProperty(diffViewport, 'scrollHeight', { configurable: true, value: 400 });
+    diffViewport.scrollTop = 120;
     list?.appendChild(diffViewport);
     const externalButton = document.createElement('button');
     container?.appendChild(externalButton);
@@ -4174,6 +4234,7 @@ describe('MessageList auto-scroll', () => {
 
     diffViewport.focus();
     diffViewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true }));
+    diffViewport.scrollTop = 0;
     externalButton.focus();
     await Promise.resolve();
     await Promise.resolve();

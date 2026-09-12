@@ -94,6 +94,51 @@ async function updateDiffPreviewWithPatch(page: Page, messageId: string, patchTe
 }
 
 test.describe('diff preview anchoring', () => {
+  test('upward wheel wins when a focused diff blurs before its scroll event', async ({ page }) => {
+    await page.setViewportSize({ width: 486, height: 794 });
+    await page.goto(
+      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&expandedActivity=1'
+    );
+    const list = page.locator('.interactive-list');
+    const messageId = 'message-diff-preview-assistant-59';
+    await updateDiffPreviewWithPatch(page, messageId, makeWideDiffPatch(8));
+    await expect
+      .poll(() =>
+        getScrollMetrics(page, '.interactive-list').then((value) => value.distanceFromBottom)
+      )
+      .toBeLessThanOrEqual(1);
+    const diff = page.locator(`[data-msg-id="${messageId}"] .diff-view-lines`);
+    await diff.focus();
+    await expect(diff).toBeFocused();
+    await waitForAnimationFrames(page, 4);
+    const before = await getScrollMetrics(page, '.interactive-list');
+    // Reproduce a blur from a reflow/remount before the browser reports native wheel movement.
+    await diff.evaluate((element) => {
+      window.addEventListener('wheel', () => element.blur(), { capture: true, once: true });
+    });
+    const bounds = await list.boundingBox();
+    await page.mouse.move(bounds!.x + 4, bounds!.y + bounds!.height / 2);
+    expect(
+      await page.evaluate(
+        ({ x, y }) => !!document.elementFromPoint(x, y)?.closest('.interactive-list'),
+        { x: bounds!.x + 4, y: bounds!.y + bounds!.height / 2 }
+      )
+    ).toBe(true);
+    await page.mouse.wheel(0, -96);
+    await expect
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((value) => value.scrollTop))
+      .toBeLessThan(before.scrollTop - 90);
+    const anchor = await getVisibleMessageAnchor(list);
+    const samples = await sampleMessageTopAcrossFrames(list, anchor.id, 24);
+    expect(
+      samples.every((top) => top !== null && Math.abs(top - anchor.top) < 1.5),
+      JSON.stringify({ anchor, samples })
+    ).toBe(true);
+    expect((await getScrollMetrics(page, '.interactive-list')).distanceFromBottom).toBeGreaterThan(
+      90
+    );
+  });
+
   for (const transition of ['completes', 'arrives'] as const) {
     test(`retains the same painted expanded diff when ${transition === 'completes' ? 'a second edit to the same file completes' : 'another edit to the same file arrives'}`, async ({
       page,

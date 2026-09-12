@@ -706,6 +706,7 @@ export function MessageList() {
   let pointerScrollOwnershipActive = false;
   let diffFocusPauseActive = false;
   let resumeAutoScrollAfterDiffFocus = false;
+  let diffFocusResumeRafId = 0;
   let widthResizeActive = false;
   let widthResizeIncludesFontChange = false;
   let widthResizeSettleTimer: ReturnType<typeof setTimeout> | 0 = 0;
@@ -5190,9 +5191,15 @@ export function MessageList() {
     if (decision.nextAutoScroll !== null) setAutoScroll(decision.nextAutoScroll);
     if (shouldReattachToBottom) {
       const sessionId = state.activeSessionId;
+      const inputEpoch = directScrollInputEpoch;
       setAutoScroll(true);
       queueMicrotask(() => {
-        if (sessionId && state.activeSessionId !== sessionId) return;
+        if (
+          (sessionId && state.activeSessionId !== sessionId) ||
+          directScrollInputEpoch !== inputEpoch ||
+          !autoScroll()
+        )
+          return;
         performScroll({ force: true });
         if (sessionId) startFollowLoop(sessionId);
       });
@@ -5371,13 +5378,14 @@ export function MessageList() {
     }
     if (deltaY < -0.5) {
       lastWheelUpAt = lastWheelAt;
+      // Diff focus has already paused follow; wheel intent must cancel its deferred resume too.
+      resumeAutoScrollAfterDiffFocus = false;
       if (upwardStickyHandoff) {
         upwardStickyHandoff.lastInputAt = lastWheelAt;
         scheduleUpwardStickyHandoffRelease();
       }
       if (autoScroll() || pinnedToBottom || followModeLocked) {
         disengageBottomFollow();
-        resumeAutoScrollAfterDiffFocus = false;
       }
       if (
         containerRef &&
@@ -5651,7 +5659,14 @@ export function MessageList() {
     const target = event.target;
     if (!(target instanceof Element) || !target.closest('.diff-view-lines')) return;
 
-    queueMicrotask(() => {
+    const sessionId = state.activeSessionId;
+    const inputEpoch = directScrollInputEpoch;
+    if (diffFocusResumeRafId) cancelAnimationFrame(diffFocusResumeRafId);
+    // Native blur can occur in a wheel's capture phase, before the list sees that input.
+    // Wait until the event finishes propagating before deciding whether to resume follow.
+    diffFocusResumeRafId = requestAnimationFrame(() => {
+      diffFocusResumeRafId = 0;
+      if (disposed || state.activeSessionId !== sessionId) return;
       const activeElement = document.activeElement;
       if (
         containerRef &&
@@ -5663,7 +5678,7 @@ export function MessageList() {
       }
 
       diffFocusPauseActive = false;
-      const shouldResume = resumeAutoScrollAfterDiffFocus;
+      const shouldResume = resumeAutoScrollAfterDiffFocus && directScrollInputEpoch === inputEpoch;
       resumeAutoScrollAfterDiffFocus = false;
       if (shouldResume) requestMessageListScrollToBottom();
     });
@@ -6258,6 +6273,8 @@ export function MessageList() {
       containerRef?.removeEventListener('click', handleClickCapture as EventListener, true);
       containerRef?.removeEventListener('focusin', handleFocusIn);
       containerRef?.removeEventListener('focusout', handleFocusOut);
+      if (diffFocusResumeRafId) cancelAnimationFrame(diffFocusResumeRafId);
+      diffFocusResumeRafId = 0;
       containerRef?.removeEventListener('pointerdown', handlePointerDown);
       document.removeEventListener('click', handleExternalLayoutClickCapture, true);
       document.removeEventListener('keydown', handleKeyDown);
@@ -6601,11 +6618,14 @@ export function MessageList() {
     lastUserScrollAt = Number.NEGATIVE_INFINITY;
     lastWheelUpAt = Number.NEGATIVE_INFINITY;
     lastScrollInputAt = Number.NEGATIVE_INFINITY;
+    const inputEpoch = directScrollInputEpoch;
     setAutoScroll(true);
     queueMicrotask(() => {
       if (
         state.activeSessionId !== sessionId ||
         messageListScrollRequestKey() !== requestKey ||
+        directScrollInputEpoch !== inputEpoch ||
+        !autoScroll() ||
         (shouldAlignNewTurn && pendingNewTurnMessageId !== targetMessageId)
       ) {
         return;

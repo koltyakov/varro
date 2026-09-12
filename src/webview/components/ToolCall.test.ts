@@ -327,6 +327,8 @@ describe('ToolCall', () => {
   });
 
   it('animates pending apply_patch calls as in-progress tools', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
     const part: ToolPart = {
       id: 'tool-1',
       sessionID: 'session-1',
@@ -349,6 +351,11 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.tool-invocation-title')?.classList).toContain(
       'shimmer-progress'
     );
+    expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('0ms');
+
+    vi.advanceTimersByTime(69_000);
+
+    expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('1m 9s');
   });
 
   it('shows files from running apply_patch input in the compact edit card', () => {
@@ -1730,33 +1737,39 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.tool-invocation-token-stats')?.textContent).toBe('↑ 0 ↓ 0');
   });
 
-  it('updates the elapsed duration while a subagent task is running', () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(10_000);
-    const part: ToolPart = {
-      id: 'tool-1',
-      sessionID: 'session-1',
-      messageID: 'message-1',
-      type: 'tool',
-      callID: 'call-1',
-      tool: 'task',
-      state: {
-        status: 'running',
-        input: { description: 'Inspect the repository' },
-        title: 'Inspect the repository',
-        metadata: {},
-        time: { start: 5_000 },
-      },
-    };
+  it.each(['task', 'bash', 'apply_patch'])(
+    'updates the elapsed duration while %s is running',
+    (tool) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(10_000);
+      const part: ToolPart = {
+        id: 'tool-1',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        type: 'tool',
+        callID: 'call-1',
+        tool,
+        state: {
+          status: 'running',
+          input: { description: 'Inspect the repository', command: 'npm run test' },
+          title: 'Inspect the repository',
+          metadata: {},
+          time: { start: 5_000 },
+        },
+      };
 
-    cleanup = render(() => ToolCall({ part }), container!);
+      cleanup = render(() => ToolCall({ part }), container!);
 
-    expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('5s');
+      expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('5s');
 
-    vi.advanceTimersByTime(2_000);
+      vi.advanceTimersByTime(2_000);
 
-    expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('7s');
-  });
+      expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('7s');
+      vi.advanceTimersByTime(62_000);
+
+      expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('1m 9s');
+    }
+  );
 
   it('shows the running subagent session activity age only while Alt is held', () => {
     vi.useFakeTimers();

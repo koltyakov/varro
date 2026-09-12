@@ -1550,18 +1550,29 @@ function GenericToolCall(props: {
   const completedDurationLabel = () => formatVisibleToolDuration(completedDurationMs());
   const searchResultCount = () => getSearchResultCount(props.tool.tool, props.state);
   const [now, setNow] = createSignal(Date.now());
+  const pendingStartedAt = Date.now();
+  const hasRunningDuration = () => isTask() || isBash() || isApplyPatchTool(props.tool.tool);
+  const durationStartedAt = () => {
+    if (!hasRunningDuration()) return null;
+    if (props.state.status === 'running') return props.state.time.start;
+    if (props.state.status === 'pending' && isApplyPatchTool(props.tool.tool)) {
+      return pendingStartedAt;
+    }
+    return null;
+  };
   onMount(() => {
     if (isTask()) onCleanup(retainTaskActivityAltListener());
   });
   createEffect(() => {
-    if (!isTask() || props.state.status !== 'running') return;
+    if (durationStartedAt() === null) return;
     setNow(Date.now());
     const timer = setInterval(() => setNow(Date.now()), 1000);
     onCleanup(() => clearInterval(timer));
   });
   const runningDurationLabel = () => {
-    if (!isTask() || props.state.status !== 'running') return null;
-    return formatDuration(Math.max(0, now() - props.state.time.start)) || '0ms';
+    const startedAt = durationStartedAt();
+    if (startedAt === null) return null;
+    return formatDuration(Math.max(0, now() - startedAt)) || '0ms';
   };
   const taskActivityAgeDuration = () => {
     if (!taskActivityAltPressed() || !isTask() || props.state.status !== 'running') return null;

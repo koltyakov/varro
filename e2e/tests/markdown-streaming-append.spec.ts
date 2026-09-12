@@ -10,6 +10,70 @@ const SESSION_ID = 'session-rapid-streaming-jitter';
 const MESSAGE_ID = 'message-rapid-assistant-streaming';
 const ROW = `[data-msg-id="${MESSAGE_ID}"]`;
 
+test('keeps verification paragraph gaps fixed as inline emphasis streams and settles', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 464, height: 900 });
+  await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
+  const markdown = page.locator(`${ROW} .rendered-markdown`);
+  await expect(markdown).toHaveText('Starting...');
+  let text =
+    'Starting...\n\n**Verification**\n\n- Build, lint, formatting, typecheck, and TypeScript suggestion checks passed.\n\nThe full AI-08 run could not start because AI-07 preparation exhausted its running-tool and control-visibility retries.';
+  await appendDeltaToRapidStreaming(page, text.slice('Starting...'.length));
+  await expect(markdown).toContainText('control-visibility retries.');
+  const collector = await markdown.evaluateHandle(() => {
+    const state = { running: true, listGaps: [] as number[], paragraphGaps: [] as number[] };
+    const sample = () => {
+      const element = document.querySelector(
+        '[data-msg-id="message-rapid-assistant-streaming"] .rendered-markdown'
+      );
+      if (!element) throw new Error('Missing verification Markdown');
+      const list = element.querySelector('ul');
+      const paragraphs = [...element.querySelectorAll('p')];
+      const report = paragraphs.find((p) => p.textContent?.startsWith('The full AI-08'));
+      const cleanup = paragraphs.find((p) => p.textContent?.startsWith('Cleanup is complete:'));
+      if (list && report)
+        state.listGaps.push(
+          report.getBoundingClientRect().top - list.getBoundingClientRect().bottom
+        );
+      if (report && cleanup)
+        state.paragraphGaps.push(
+          cleanup.getBoundingClientRect().top - report.getBoundingClientRect().bottom
+        );
+      if (state.running) requestAnimationFrame(sample);
+    };
+    sample();
+    return state;
+  });
+  for (const delta of [
+    ' Therefore, the full AI-suite result remains ',
+    '**FAIL/blocked**',
+    ', rather than a claimed complete pass.',
+    '\n\nCleanup is complete: fixture restored, temporary session deleted, test editor/server stopped, and test credential copy removed.',
+    ' Unrelated changes were preserved.',
+    '\n\n[Fix and verification ledger](https://example.test/ledger)',
+  ]) {
+    text += delta;
+    await appendDeltaToRapidStreaming(page, delta);
+    await waitForAnimationFrames(page, 20);
+  }
+  await completeResponse(page, text);
+  await expect(page.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0);
+  await waitForAnimationFrames(page, 6);
+  const samples = await collector.evaluate((state) => {
+    state.running = false;
+    return { listGaps: state.listGaps, paragraphGaps: state.paragraphGaps };
+  });
+  for (const [gaps, expected] of [
+    [samples.listGaps, 8],
+    [samples.paragraphGaps, 12],
+  ] as const) {
+    expect(gaps.length).toBeGreaterThan(5);
+    expect(Math.max(...gaps) - Math.min(...gaps), JSON.stringify(samples)).toBeLessThan(1);
+    expect(gaps.at(-1)).toBeCloseTo(expected, 0);
+  }
+});
+
 test('hides streamed inline commands until the closing backtick arrives', async ({ page }) => {
   await page.setViewportSize({ width: 908, height: 720 });
   await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');

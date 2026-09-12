@@ -561,6 +561,13 @@ renderer.listitem = function (item: Tokens.ListItem) {
   return `<li${className}>${this.parser.parse(item.tokens)}</li>\n`;
 };
 
+renderer.paragraph = function ({ tokens }: Tokens.Paragraph) {
+  // CSS :only-child ignores text nodes, so inline emphasis cannot identify a heading.
+  const className =
+    tokens.length === 1 && tokens[0]?.type === 'strong' ? ' class="markdown-bold-heading"' : '';
+  return `<p${className}>${this.parser.parseInline(tokens)}</p>\n`;
+};
+
 renderer.checkbox = function ({ checked }: { checked: boolean }) {
   const label = checked ? 'Completed task' : 'Incomplete task';
   const check = checked

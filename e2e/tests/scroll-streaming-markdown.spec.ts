@@ -224,6 +224,7 @@ for (const block of [
 
 for (const pair of [
   { name: 'paragraph to paragraph', before: 'Previous block.', next: 'New block', gap: 12 },
+  { name: 'bold heading to paragraph', before: '**Previous block.**', next: 'New block', gap: 8 },
   { name: 'paragraph to list', before: 'Previous block.', next: '- New block', gap: 8 },
   { name: 'list to paragraph', before: '- Previous block.', next: 'New block', gap: 8 },
   { name: 'ordered list to paragraph', before: '1. Previous block.', next: 'New block', gap: 8 },
