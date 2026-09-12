@@ -588,18 +588,18 @@
   animation: assistant-activity-group-settle 0.32s cubic-bezier(0.16, 0.72, 0.24, 1) both;
 }
 
-/* Expanded fragments share one guide, so they must not translate independently. */
+/* Expanded fragments share one guide, so they must not fade independently. */
 .assistant-activity-group-settling:has(> .assistant-activity-group > .assistant-activity-details) {
   animation: none;
 }
 
 @keyframes assistant-activity-group-settle {
   from {
-    transform: translateY(2px);
+    opacity: 0.82;
   }
 
   to {
-    transform: translateY(0);
+    opacity: 1;
   }
 }
 

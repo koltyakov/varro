@@ -296,6 +296,9 @@ Direct input acquires ownership only when it can affect the transcript:
 - Transition identity is part identity, not the current group owner or array position. Moving an
   activity part from running to retained, exiting, and grouped must not hide its source row before the
   exit completes.
+- Exploring and Explored share the same painted top, including when idle arrives before the final
+  reasoning snapshot and the tray groups directly. Summary entrance may fade but must not translate.
+  `activity-summary-settle.spec.ts` samples both event orders frame by frame at the reported width.
 - Tool-state object replacement and tray splits must preserve the active item's DOM and animation
   progress. A fading sibling must not restart its exit when a completed middle item splits the tray.
   Flush pending animation styles before moving a connected item with `moveBefore`; keep its source
