@@ -57,7 +57,9 @@ for (const { width, toolCount } of [
         ).join('\n\n');
         const started = performance.now();
         const result = [];
-        for (let frame = 0; frame < 190; frame += 1) {
+        // A speed-limited follow can take longer than the text queue. Record its full
+        // settling path, including every frame after the answer stops growing.
+        for (let frame = 0; frame < 360; frame += 1) {
           if (frame === 0) {
             for (const part of tools)
               harness.replayServerEvent({ type: 'message.part.updated', properties: { part } });
@@ -129,6 +131,12 @@ for (const { width, toolCount } of [
             textLength: answer?.textContent?.length ?? 0,
             distance: list.scrollHeight - list.clientHeight - list.scrollTop,
           });
+          if (
+            frame >= 190 &&
+            answer?.textContent?.includes('Readable paragraph 19.') &&
+            result.slice(-3).every((sample) => sample.distance <= 2)
+          )
+            break;
         }
         return result;
       },

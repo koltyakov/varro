@@ -316,22 +316,44 @@ for (const width of [1280, 390]) {
         .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
         .toBeLessThan(15);
       const before = await getScrollMetrics(page, '.interactive-list');
+      const followWatcher = await list.evaluateHandle((element) => {
+        const state = { running: true, tops: [] as number[] };
+        const sample = () => {
+          state.tops.push(element.scrollTop);
+          if (state.running) requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+        return state;
+      });
       for (let index = 0; index < 5; index += 1) {
         const text = `Following paragraph ${index} ${'Fresh prose must stay in view. '.repeat(8)}`;
         await appendDeltaToRapidStreaming(page, `\n\n${text}`);
         await expect(page.locator(ROW)).toContainText(text.trim());
-        await waitForAnimationFrames(page, 4);
-        expect((await getScrollMetrics(page, '.interactive-list')).distanceFromBottom).toBeLessThan(
-          15
-        );
+        // The viewport follows with the same bounded easing as standalone blocks.
+        // Keep the bottom-distance contract while observing every intermediate frame.
+        await expect
+          .poll(
+            () => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom),
+            { timeout: 1500 }
+          )
+          .toBeLessThan(15);
       }
+      const followTops = await followWatcher.evaluate((state) => {
+        state.running = false;
+        return state.tops;
+      });
+      expect(followTops.length).toBeGreaterThan(5);
+      expect(
+        followTops.every((top, index) => index === 0 || top >= followTops[index - 1]! - 1),
+        JSON.stringify(followTops)
+      ).toBe(true);
       const after = await getScrollMetrics(page, '.interactive-list');
       expect(after.scrollTop).toBeGreaterThan(before.scrollTop);
       expect(after.scrollHeight).toBeGreaterThan(before.scrollHeight);
       await attachEvidence(
         testInfo,
         'bottom-follow.json',
-        JSON.stringify({ width, before, after, errors }, null, 2)
+        JSON.stringify({ width, before, after, followTops, errors }, null, 2)
       );
       expect(errors).toEqual([]);
     });

@@ -30,6 +30,19 @@ export class SessionModelSelectionStore {
     return { ...this.models };
   }
 
+  restore(sessionId: string, model: ChatModelSelection): boolean {
+    if (!isSafePersistedSessionId(sessionId)) return false;
+    const current = this.models[sessionId];
+    if (
+      current?.providerID === model.providerID &&
+      current.modelID === model.modelID &&
+      current.variant === model.variant
+    )
+      return false;
+    this.models = { ...this.models, [sessionId]: model };
+    return true;
+  }
+
   set(
     sessionId: string,
     model: ChatModelSelection | null

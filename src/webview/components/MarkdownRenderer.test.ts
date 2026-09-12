@@ -129,6 +129,34 @@ afterEach(() => {
 });
 
 describe('MarkdownRenderer', () => {
+  it.each([false, true])(
+    'preserves compact file links across lightweight transitions starting at %s',
+    async (initialLightweight) => {
+      const [lightweight, setLightweight] = createSignal(initialLightweight);
+      cleanup = render(
+        () =>
+          createComponent(MarkdownRenderer, {
+            content:
+              'See `/repo/src/webview/components/MarkdownRenderer.tsx:100-120`.\n\n' +
+              'Also /repo/src/webview/components/MessageList.tsx:200-220.',
+            cacheByContent: true,
+            get lightweight() {
+              return lightweight();
+            },
+          }),
+        container!
+      );
+      for (const value of [initialLightweight, !initialLightweight, initialLightweight]) {
+        setLightweight(value);
+        await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+        expect(
+          [...container!.querySelectorAll('a.file-path-link')].map((link) => link.textContent)
+        ).toEqual(['MarkdownRenderer.tsx (line 100-120)', 'MessageList.tsx (line 200-220)']);
+        expect(container!.textContent).not.toContain('/repo/src/webview/components/');
+      }
+    }
+  );
+
   it('does not create inline roots after disposal before queued hydration', async () => {
     const [value, setValue] = createSignal(0);
     const mounted = vi.fn();

@@ -655,9 +655,11 @@ test.describe('diff preview anchoring', () => {
       .toBe('0.35');
 
     const header = page.locator(`[data-msg-id="${messageId}"] .diff-view-item`);
-    const headerBounds = await header.boundingBox();
-    expect(headerBounds).not.toBeNull();
-    await page.mouse.move(headerBounds!.x + 4, headerBounds!.y + 4);
+    // Wait for layout stability so bottom-follow cannot move the header away from the pointer.
+    await expect
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+      .toBeLessThanOrEqual(1);
+    await header.hover({ position: { x: 4, y: 4 } });
     await expect
       .poll(() => toggle.evaluate((button) => getComputedStyle(button).opacity))
       .toBe('0.7');

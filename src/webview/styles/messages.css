@@ -1690,24 +1690,35 @@ body.vscode-light
 }
 
 .rendered-markdown .streaming-markdown-pending-hidden {
+  /* An unfinished path or URL can become a much shorter link. Its raw text must
+     not grow invisible lines that collapse and clamp the viewport on completion. */
+  display: none;
   visibility: hidden;
 }
 
 .rendered-markdown p {
   margin: 0 0 14px 0;
-  text-wrap: pretty;
+  /* Rebalancing an unfinished block moves words that were already painted.
+     Keep the same wrapping policy while streaming and after completion. */
+  text-wrap: wrap;
 }
 
-.rendered-markdown p:has(+ p) {
+.rendered-markdown p:has(+ p),
+.rendered-markdown
+  > [data-markdown-segment='stable']:has(+ [data-markdown-segment='tail'] > p:first-child)
+  > p:last-child {
   margin-bottom: 12px;
 }
 
-.rendered-markdown p:has(+ :is(ul, ol)) {
+.rendered-markdown p:has(+ :is(ul, ol)),
+.rendered-markdown
+  > [data-markdown-segment='stable']:has(+ [data-markdown-segment='tail'] > :is(ul, ol):first-child)
+  > p:last-child {
   margin-bottom: 8px;
 }
 
 .rendered-markdown li {
-  text-wrap: pretty;
+  text-wrap: wrap;
 }
 
 .rendered-markdown > :first-child {
@@ -1770,7 +1781,7 @@ body.vscode-light
   line-height: 1.3;
   letter-spacing: -0.01em;
   margin: 1.4em 0 0.7em;
-  text-wrap: balance;
+  text-wrap: wrap;
 }
 .rendered-markdown h2 {
   font-size: 17px;
@@ -1778,14 +1789,14 @@ body.vscode-light
   line-height: 1.35;
   letter-spacing: -0.01em;
   margin: 1.35em 0 0.68em;
-  text-wrap: balance;
+  text-wrap: wrap;
 }
 .rendered-markdown h3 {
   font-size: 15px;
   font-weight: 600;
   line-height: 1.4;
   margin: 1.25em 0 0.65em;
-  text-wrap: balance;
+  text-wrap: wrap;
 }
 
 .rendered-markdown ul {
@@ -1829,7 +1840,12 @@ body.vscode-light
   margin: 0 0 18px 0;
 }
 .rendered-markdown ul:has(+ p),
-.rendered-markdown ol:has(+ p) {
+.rendered-markdown ol:has(+ p),
+.rendered-markdown
+  > [data-markdown-segment='stable']:has(+ [data-markdown-segment='tail'] > p:first-child)
+  > :is(ul, ol):last-child {
+  /* The display:contents segment boundary must not change logical sibling spacing
+     when a partial tail becomes stable Markdown. */
   margin-bottom: 8px;
 }
 .rendered-markdown ol > li {

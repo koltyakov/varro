@@ -5,6 +5,7 @@ import type { Locator, Page } from '@playwright/test';
 import type { ExtensionMessage } from '../../src/shared/protocol';
 import {
   getE2EState,
+  getScrollMetrics,
   getStickyMessageAlignment,
   getVisibleMessageAnchor,
   installOuterScrollSentinel,
@@ -141,6 +142,12 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
   ).toBeCloseTo(12, 0);
   await completedItem.evaluate(async (element) => {
     await Promise.all(element.getAnimations().map((animation) => animation.finished));
+  });
+  // Establish the pinned baseline before completing the tool. Viewport easing can
+  // outlast its CSS entrance, and waiting also consumes the tool's preview deadline.
+  await page.locator('.interactive-list').evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+    element.dispatchEvent(new Event('scroll'));
   });
   const placeholderTop = (await placeholder.boundingBox())!.y;
   const loadingRow = page.locator('.interactive-loading-row');
@@ -306,6 +313,19 @@ test('keeps active-tray wheel input local before outer transcript movement', asy
       )
     );
   });
+
+  await expect
+    .poll(() =>
+      getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
+    )
+    .toBeLessThanOrEqual(1);
+  await expect
+    .poll(() =>
+      trayItems.evaluate(
+        (element) => element.scrollHeight - element.clientHeight - element.scrollTop
+      )
+    )
+    .toBeLessThanOrEqual(1);
 
   const initial = await page.evaluate(() => {
     const transcript = document.querySelector<HTMLElement>('.interactive-list')!;

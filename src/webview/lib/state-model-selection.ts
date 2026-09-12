@@ -204,7 +204,7 @@ export function setSelectedAgent(
       }
       writeStored(STORAGE_KEYS.sessionSelectedAgents, { ...state.sessionSelectedAgents });
     }
-    if (agent && sessionAgentChanged && options?.publishHost !== false) {
+    if (agent && options?.publishHost !== false) {
       postMessage({
         type: 'session-plan-state/update',
         payload: { sessionId, agent },

@@ -5,6 +5,7 @@ import {
   type PermissionMode,
 } from '../shared/protocol';
 import { asRecord } from '../shared/type-utils';
+import type { UnknownRecord } from '../shared/type-utils';
 
 const SESSION_PERMISSION_MODES_KEY = 'varro.sessionPermissionModes';
 const SESSION_PERMISSION_MODE_FALLBACKS_KEY = 'varro.sessionPermissionModeFallbacks';
@@ -52,6 +53,16 @@ export class SessionPermissionModeStore {
     // Suppress automatic approvals until recovery confirms the remote rules.
     for (const sessionId of this.fallbackSessionIds) modes[sessionId] = 'default';
     return modes;
+  }
+
+  restoreSessionMetadata(session: UnknownRecord): boolean {
+    const sessionId = session.id;
+    const mode = asRecord(session.metadata)?.varroPermissionMode;
+    if (!isSafePersistedSessionId(sessionId) || !isPermissionMode(mode)) return false;
+    if (this.modes[sessionId] === mode) return false;
+    // Remote metadata is authoritative. Reads must not patch sessions or advance their timestamps.
+    this.modes = { ...this.modes, [sessionId]: mode };
+    return true;
   }
 
   pendingSafeFallbackSessionIds(): string[] {

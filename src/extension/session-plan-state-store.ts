@@ -42,6 +42,13 @@ export class SessionPlanStateStore {
     return { ...this.agents };
   }
 
+  restoreAgent(sessionId: string, agent: string): boolean {
+    if (!isSafePersistedSessionId(sessionId) || !agent.trim() || this.agents[sessionId] === agent)
+      return false;
+    this.agents = { ...this.agents, [sessionId]: agent };
+    return true;
+  }
+
   set(sessionId: string, skippedAt: number | null): Promise<SessionPlanState> {
     if (
       !isSafePersistedSessionId(sessionId) ||

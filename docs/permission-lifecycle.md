@@ -68,12 +68,15 @@ ownership still controls mode inheritance, grouping, decision history, and UI pl
 
 Effective mode resolution follows these rules:
 
-- A session with an explicit stored mode uses it.
+- A session with a valid `metadata.varroPermissionMode` uses that explicit mode. Session reads and
+  updates restore it in every extension instance, overriding local selections without inferring a mode
+  from permission rules. Reading metadata does not patch the session or advance its timestamp.
+- Sessions without valid mode metadata retain their legacy local selection, if present.
 - Otherwise, a child recursively inherits its parent's effective mode.
 - A root without a stored mode falls back to `default`.
 - A new-chat draft uses the workspace-specific saved draft mode, then the configured default.
-- A fork is a new root, so Varro copies the source session's effective non-default mode into local
-  session-mode storage. The fork operation itself does not issue a second OpenCode rule update.
+- A fork is a new root, so Varro saves the source session's effective non-default mode in the fork's metadata
+  and local session-mode storage. This metadata update does not append permission rules.
 - Prompts and attention are scoped to the complete session tree, not just the active root ID.
 
 Permission events can arrive before a new sub-session appears in the local session list. In that
@@ -421,10 +424,15 @@ permission and question reconciliation independent.
 ## Mode Changes
 
 Mode updates use the host-owned `/varro/session/{id}/permission-mode` endpoint. The host serializes
-updates for each session, patches OpenCode rules, persists the confirmed mode, and broadcasts the
-complete confirmed mode snapshot. Stale successes or failures must not overwrite the latest user
+updates for each session, patches OpenCode rules and `metadata.varroPermissionMode` together, persists
+the confirmed mode locally, and broadcasts the complete confirmed mode snapshot. Stale successes or
+failures must not overwrite the latest user
 selection. A webview may present the selected mode while its request is pending, but failure rolls
 that selection back to the last confirmed snapshot.
+
+Metadata writes preserve unrelated session metadata. Preconfigured sessions save the explicit mode
+without appending rules again. Local fallback recovery still suppresses automation until confirmed;
+incoming metadata cannot bypass an active local mode update or recovery.
 
 - Switching to auto installs Varro's ask-based auto rules, invalidates the authority of older mode
   work, and syncs pending requests into the judge flow.

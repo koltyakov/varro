@@ -40,6 +40,7 @@ import {
   installControllableIntersectionObserver,
   installMessageListTestEnvironment,
   installQueuedAnimationFrameMocks,
+  settleBottomFollow,
   session,
   textPart,
   toolPart,
@@ -2086,6 +2087,7 @@ describe('MessageList sticky prompt preview', () => {
     requestMessageListScrollToBottom();
     await Promise.resolve();
     animationFrames.flush();
+    settleBottomFollow(animationFrames, list!);
     expect(scrollTopValue).toBe(1200);
     animationFrames.restore();
   });

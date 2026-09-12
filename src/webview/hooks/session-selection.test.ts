@@ -108,6 +108,29 @@ function createSelectionDependencies(
 }
 
 describe('session-selection helpers', () => {
+  it('restores metadata ahead of stale local and message selections even while busy', async () => {
+    const model = { providerID: 'openai', modelID: 'saved-model' };
+    const oldModel = { providerID: 'openai', modelID: 'old-model', variant: 'high' };
+    const deps = createSelectionDependencies({
+      getActiveSessionId: () => 'session-1',
+      resolvePersistedAgent: () => ({ persistedAgent: 'build', fallbackAgent: 'build' }),
+      resolvePersistedModel: () => oldModel,
+      deriveSelectedAgentFromMessages: () => 'build',
+      deriveSelectedModelFromMessages: () => oldModel,
+      loadSession: async (id) => ({
+        ...loadedSession(id),
+        session: {
+          ...loadedSession(id).session,
+          metadata: { varroModel: model, varroAgent: 'plan' },
+        },
+      }),
+      loadSessionStatuses: async () => ({ 'session-1': { type: 'busy' } }),
+    });
+    await selectSessionWithDependencies(deps, { next: () => 1 }, 'session-1');
+    expect(deps.applySelectedModel).toHaveBeenLastCalledWith(model, 'session-1');
+    expect(deps.applySelectedAgent).toHaveBeenLastCalledWith('plan', 'session-1');
+  });
+
   it('keeps a persisted selection over session and message models', async () => {
     // SAFETY: The fixture provides the string | null fields read by this statement.
     const activeSession = { value: 'session-0' as string | null };

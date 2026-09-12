@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BottomFollowMotion,
   captureExpansionScrollAnchor,
   getDistanceFromBottom,
   getSmoothBottomFollowTop,
@@ -8,6 +9,75 @@ import {
   resolveAutoScrollOnUserScroll,
   restoreExpansionScrollAnchor,
 } from './scrolling';
+
+describe('bottom follow motion', () => {
+  it('starts gently, bounds speed, and settles without reversing', () => {
+    const motion = new BottomFollowMotion();
+    let top = 0;
+    const steps: number[] = [];
+    for (let frame = 0; frame < 90; frame += 1) {
+      const next = motion.next(top, 600, 16);
+      steps.push(next - top);
+      top = next;
+    }
+    expect(steps[0]).toBeLessThan(6);
+    expect(steps[1]).toBeGreaterThan(steps[0]!);
+    expect(Math.max(...steps)).toBeLessThanOrEqual(1.1 * 16);
+    expect(Math.min(...steps)).toBeGreaterThanOrEqual(0);
+    expect(top).toBe(600);
+  });
+
+  it('retains velocity when another block extends the destination', () => {
+    const motion = new BottomFollowMotion();
+    let top = 0;
+    let previousStep = 0;
+    for (let frame = 0; frame < 30; frame += 1) {
+      const next = motion.next(top, frame < 10 ? 300 : 900, 16);
+      const step = next - top;
+      expect(Math.abs(step - previousStep)).toBeLessThan(4);
+      previousStep = step;
+      top = next;
+    }
+  });
+
+  it('keeps fractional progress at high refresh rates', () => {
+    const motion = new BottomFollowMotion();
+    let top = 0;
+    for (let frame = 0; frame < 180; frame += 1) {
+      const next = motion.next(top, 40, 8);
+      if (Math.abs(next - top) >= 1) top = Math.round(next);
+    }
+    expect(top).toBe(40);
+  });
+
+  it('keeps the same timing at 60 and 120 Hz', () => {
+    const positions = [8, 16].map((elapsed) => {
+      const motion = new BottomFollowMotion();
+      let top = 0;
+      for (let time = 0; time < 240; time += elapsed) {
+        top = motion.next(top, 200, elapsed);
+      }
+      return top;
+    });
+    expect(positions[0]).toBeCloseTo(positions[1]!, 5);
+  });
+
+  it('discards old momentum after direct movement or cancellation', () => {
+    const motion = new BottomFollowMotion();
+    let top = 0;
+    for (let frame = 0; frame < 10; frame += 1) top = motion.next(top, 600, 16);
+    const userTop = top + 100;
+    expect(motion.next(userTop, 600, 16) - userTop).toBeLessThan(6);
+    motion.reset();
+    expect(motion.next(userTop, 600, 16) - userTop).toBeLessThan(6);
+    expect(motion.next(userTop, userTop - 10, 16)).toBe(userTop - 10);
+  });
+
+  it('limits movement after a suspended frame', () => {
+    const motion = new BottomFollowMotion();
+    expect(motion.next(0, 1_000, 10_000)).toBeLessThan(12);
+  });
+});
 
 describe('smooth bottom follow', () => {
   it('converges on a moving target and preserves a newer downward user position', () => {
@@ -27,6 +97,10 @@ describe('smooth bottom follow', () => {
   it('bounds the step after a suspended frame instead of jumping to the target', () => {
     expect(getSmoothBottomFollowTop(0, 1_000, 10_000)).toBeLessThan(700);
     expect(getSmoothBottomFollowTop(999.5, 1_000, 16)).toBe(1_000);
+  });
+
+  it('lands on the destination before the follow loop considers it settled', () => {
+    expect(getSmoothBottomFollowTop(998.5, 1_000, 16)).toBe(1_000);
   });
 });
 

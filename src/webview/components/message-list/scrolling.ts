@@ -41,15 +41,17 @@ export function performScrollToBottom(args: {
   now: number;
   programmaticScrollWindowMs: number;
   elapsedMs?: number;
+  motion?: BottomFollowMotion;
 }) {
   const { container } = args;
   if (!container) return null;
 
   const target = Math.max(0, container.scrollHeight - container.clientHeight);
+  if (args.elapsedMs === undefined) args.motion?.reset();
   const nextScrollTop =
-    args.elapsedMs === undefined
-      ? target
-      : getSmoothBottomFollowTop(container.scrollTop, target, args.elapsedMs);
+    args.motion && args.elapsedMs !== undefined
+      ? args.motion.next(container.scrollTop, target, args.elapsedMs)
+      : target;
   if (Math.abs(container.scrollTop - nextScrollTop) >= 1) {
     container.scrollTop = nextScrollTop;
   }
@@ -59,9 +61,53 @@ export function performScrollToBottom(args: {
   };
 }
 
+export class BottomFollowMotion {
+  private position: number | null = null;
+  private velocity = 0;
+
+  reset(): void {
+    this.position = null;
+    this.velocity = 0;
+  }
+
+  next(top: number, target: number, elapsedMs: number): number {
+    // Keep fractional progress when Chromium rounds scrollTop, but discard momentum
+    // when another scroll owner moves the viewport.
+    if (this.position === null || Math.abs(top - this.position) > 1.5) {
+      this.position = top;
+      this.velocity = 0;
+    }
+    const distance = target - this.position;
+    if (distance <= 2) {
+      this.reset();
+      return target;
+    }
+
+    // Critically damped motion starts gently and retains velocity across new targets.
+    // Limit the spring's distance so a tall new block cannot cause a high-speed surge.
+    const smoothTimeMs = 220;
+    const maxSpeedPxPerMs = 1.1;
+    const elapsed = Math.min(32, Math.max(1, elapsedMs));
+    const omega = 2 / smoothTimeMs;
+    const offset = -Math.min(distance, maxSpeedPxPerMs * smoothTimeMs);
+    const destination = this.position - offset;
+    const decay = Math.exp(-omega * elapsed);
+    const change = (this.velocity + omega * offset) * elapsed;
+    this.velocity = (this.velocity - omega * change) * decay;
+    this.position = Math.max(top, Math.min(target, destination + (offset + change) * decay));
+    if (target - this.position <= 1) {
+      this.reset();
+      return target;
+    }
+    return this.position;
+  }
+}
+
 export function getSmoothBottomFollowTop(top: number, target: number, elapsedMs: number): number {
   const distance = target - top;
-  if (distance <= 1) return target;
+  // The follow loop settles within one pixel; finish before a minimum one-pixel step
+  // would leave a fractional remainder that the loop no longer corrects.
+  if (distance <= 2) return target;
   const fraction = 1 - Math.exp(-Math.min(64, Math.max(1, elapsedMs)) / 55);
   return Math.min(target, top + Math.max(1, distance * fraction));
 }

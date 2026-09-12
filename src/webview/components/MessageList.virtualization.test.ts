@@ -39,6 +39,7 @@ import {
   filePart,
   installMessageListTestEnvironment,
   installQueuedAnimationFrameMocks,
+  settleBottomFollow,
   reasoningPart,
   textPart,
   toolPart,
@@ -1505,6 +1506,7 @@ describe('MessageList history pagination', () => {
 
     await harness.resolveLoad();
 
+    settleBottomFollow(harness.animationFrames, harness.list);
     expect(harness.getScrollTop()).toBe(1000);
     harness.animationFrames.restore();
   });
@@ -1548,6 +1550,7 @@ describe('MessageList history pagination', () => {
     await harness.resolveLoad();
 
     expect(staleLoadShown).toBe(false);
+    settleBottomFollow(harness.animationFrames, harness.list);
     expect(harness.getScrollTop()).toBe(1000);
     harness.animationFrames.restore();
   });
@@ -1963,6 +1966,7 @@ describe('MessageList history pagination', () => {
   });
 
   it('does not treat provisional virtual overflow as a filled initial viewport', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
     const currentMessages = Array.from({ length: 60 }, (_, index) => ({
       info: userMessage(`current-user-${index}`),
       parts: [textPart(`current-text-${index}`, `Current prompt ${index}`)],
@@ -2003,13 +2007,23 @@ describe('MessageList history pagination', () => {
     });
     Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 0 });
 
-    await vi.waitFor(() => expect(messagesSpy).toHaveBeenCalledTimes(2));
+    for (let frame = 0; frame < 120; frame += 1) {
+      await vi.advanceTimersByTimeAsync(16);
+      animationFrames.flush(performance.now());
+      if (
+        messagesSpy.mock.calls.length === 2 &&
+        container!.querySelectorAll('[data-msg-id]').length < 50
+      )
+        break;
+    }
+    expect(messagesSpy).toHaveBeenCalledTimes(2);
 
     expect(messagesSpy).toHaveBeenNthCalledWith(2, 'session-1', {
       limit: 200,
       before: 'cursor-oldest',
     });
     expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(50);
+    animationFrames.restore();
   });
 
   it('stops initial fill when one hydrated page exactly fills the viewport', async () => {

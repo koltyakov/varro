@@ -46,6 +46,10 @@ the shared invariants below remain true.
 - `start/end` define the mounted overscan range. `coreStart/coreEnd` define the rows near the painted
   viewport. Off-core overscan rows remain real message rows; lightweight mode may suppress expensive
   presentation and animation but must not remove assistant parts or change identity.
+- Lightweight Markdown preserves compact file-link labels. Replacing them with full paths changes
+  wrapping and can repeatedly move a row into and out of the core. The September 12 replay exposed
+  alternating 1,320 px height changes from this cycle. `scroll-streaming-markdown.spec.ts` preserves
+  the streamed core-boundary regression and its every-frame link-count and row-height assertions.
 - A distant history anchor may extend the mounted range beyond ordinary overscan. Only the viewport,
   forced rows, and pinned anchor require full content; the intervening gap may use prefix-sized inert
   placeholders.
@@ -161,6 +165,10 @@ the shared invariants below remain true.
   sticky navigation or bottom-follow.
 - Expanding a compact activity disclosure takes ownership from bottom-follow so the clicked summary
   stays fixed while its details grow below it.
+- Capture disclosure geometry before releasing bottom-follow. Transfer any active exit reserve to the
+  append reserve at the current viewport target, and keep departing activity out of reserve-consumption
+  calculations until its exit ends. Clearing that space during the handoff clamps the viewport before
+  the expansion anchor can restore it. `scroll-expansion-reserve.spec.ts` checks this transition.
 - Once expansion geometry is restored, return to bottom-follow if it was active before the click and
   the viewport is still at the physical bottom. Opening Explored while its details fit must not leave
   later tool activity and streamed text unfollowed. An expansion that hides newer content stays detached.
@@ -366,9 +374,31 @@ Direct input acquires ownership only when it can affect the transcript:
   available content before awaiting the remote abort. Hydration, session
   replacement, and disposal invalidate old timers and animation completions. Hidden views and reduced
   motion publish the available presentation immediately.
+- Hidden incomplete Markdown tokens must not reserve their raw-text height. A long path or URL can
+  become a short link on completion; invisible wrapped lines would then collapse the scroll range and
+  move already-painted content backward. Reveal the completed token at its parsed geometry and let
+  bottom-follow own its growth. `scroll-streaming-markdown.spec.ts` checks every-frame same-paragraph
+  geometry for inline file paths and Markdown link destinations.
+- Prose, list items, and headings use ordinary wrapping during streaming and after completion.
+  `text-wrap: pretty` and `balance` redistribute earlier words whenever the unfinished block grows.
+  Do not switch wrapping policy on settlement or virtual remount. The Markdown streaming regressions
+  compare each already-delivered word's position relative to its block after every appended word.
+- Markdown adjacency crosses its `display: contents` stable/tail boundary. Paragraph-to-paragraph,
+  paragraph-to-list, and list-to-paragraph margins must match their ordinary sibling rules from first
+  partial paint through promotion into the stable segment. Otherwise new paragraphs shift upward by
+  2, 6, or 10 px as later blocks arrive. The streaming regressions measure the inter-block gap every
+  frame, independently of scrolling and word wrapping.
 - Opening an active tool's details takes scroll ownership and keeps that tool visible until closed.
   It releases the answer gate and does not run a retention timer indefinitely.
-- Paced growth uses the existing bottom-follow owner, which eases toward the measured destination.
+- Bottom growth uses the existing bottom-follow owner, which eases toward the measured destination
+  even without a recent paced text release. Standalone blocks and delayed layout must not snap the
+  preceding content upward. Initial positioning, browser clamp corrections, and reduced motion remain
+  immediate. The final easing step reaches the destination before the one-pixel settle threshold.
+  The viewport follower uses critically damped motion with a 220 ms smoothing time and a
+  1,100 px/s speed limit. Preserve velocity across incoming blocks, retain fractional progress between
+  painted frames, and reset momentum after interruption. Use animation-frame timestamps so rendering
+  work does not turn a late callback into a sudden speed change. Do not replay an ease-out curve at
+  full initial speed for each arrival.
   Each frame starts at the current position, including newer downward user movement. Direct input,
   editing, disclosure ownership, and activity exit still take precedence. Content arriving after
   canonical completion must release the old activity-summary anchor just like a live delta.

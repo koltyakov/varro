@@ -3,10 +3,16 @@
 import * as vscode from 'vscode';
 import { replacesOpenCodeBinary } from '../shared/opencode-install';
 import { MAX_NATIVE_PDF_TOTAL_BYTES } from '../shared/native-pdf';
+import {
+  readSessionAgentMetadata,
+  readSessionModelMetadata,
+} from '../shared/session-selection-metadata';
+import type { SessionSelectionMetadata } from '../shared/session-selection-metadata';
 import type {
   OpenCodeModelRouting,
   OpenCodeServerMemoryPermission,
   PermissionRule,
+  Session,
 } from '../shared/opencode-types';
 import {
   getSafeDefaultPermissionRules,
@@ -346,6 +352,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       persistence,
       {
         onStatusChange: () => this.updateStatusBarItem(),
+        onSessionMetadata: (session) => {
+          if (typeof session.id !== 'string' || this.permissionModeQueues.has(session.id)) return;
+          if (this.sessionPermissionModes.restoreSessionMetadata(session))
+            this.postPermissionModes();
+          this.restoreSessionSelections(session.id, asRecord(session.metadata) ?? undefined);
+        },
         onSessionDirectoryChange: () => this.scheduleSessionDirectoryReconciliation(),
       },
       {
@@ -965,6 +977,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           );
         },
         updateSessionModel: async ({ sessionId, model }) => {
+          if (model) {
+            await this.updateSessionSelections(
+              sessionId,
+              { varroModel: model },
+              this.sessionState.directoryFor(sessionId) ?? endpointServer.getWorkspaceCwd()
+            );
+            return;
+          }
           const models = await this.sessionSelectedModels.set(sessionId, model);
           this.post({ type: 'session-models/sync', payload: { models } });
         },
@@ -973,20 +993,25 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.post({ type: 'session-models/sync', payload: { models: migrated } });
         },
         updateSessionPlanState: async (payload) => {
-          if (payload.skippedAt !== undefined || payload.agent) {
-            await this.sessionPlanState.update(payload.sessionId, payload);
+          if (payload.agent) {
+            await this.updateSessionSelections(
+              payload.sessionId,
+              { varroAgent: payload.agent },
+              this.sessionState.directoryFor(payload.sessionId) ?? endpointServer.getWorkspaceCwd()
+            );
           }
-          if (payload.agent) this.sessionState.setSessionAgent(payload.sessionId, payload.agent);
+          if (payload.skippedAt !== undefined) {
+            await this.sessionPlanState.set(payload.sessionId, payload.skippedAt);
+          }
           if (typeof payload.skippedAt === 'number') {
             this.sessionState.acknowledgePlanSession(payload.sessionId);
           }
-          if (payload.skippedAt !== undefined || payload.agent) {
+          if (payload.skippedAt !== undefined) {
             const update: Extract<
               ExtensionMessage,
               { type: 'session-plan-state/update' }
             >['payload'] = { sessionId: payload.sessionId };
             if (payload.skippedAt !== undefined) update.skippedAt = payload.skippedAt;
-            if (payload.agent) update.agent = payload.agent;
             this.post({
               type: 'session-plan-state/update',
               payload: update,
@@ -2160,12 +2185,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             mode === 'default'
               ? (defaultPermission ?? getSafeDefaultPermissionRules())
               : getSessionPermissionRulesForMode(mode, 'update');
-          session = await this.server.request(
-            'PATCH',
-            `/session/${encodeURIComponent(sessionID)}`,
-            { permission },
-            { directory }
-          );
+          session = await this.patchSessionPermissionMode(sessionID, mode, directory, permission);
         } catch (err) {
           this.postPermissionModes();
           this.schedulePermissionModeFallbackRecovery();
@@ -2180,11 +2200,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           );
           this.postPermissionModes();
           try {
-            await this.server.request(
-              'PATCH',
-              `/session/${encodeURIComponent(sessionID)}`,
-              { permission: getSafeDefaultPermissionRules() },
-              { directory }
+            await this.patchSessionPermissionMode(
+              sessionID,
+              'default',
+              directory,
+              getSafeDefaultPermissionRules()
             );
             await this.sessionPermissionModes.set(sessionID, 'default');
             this.postPermissionModes();
@@ -2208,6 +2228,91 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     };
     void operation.then(clearQueue, clearQueue);
     return operation;
+  }
+
+  private restoreSessionSelections(sessionId: string, metadata: Session['metadata']) {
+    const model = readSessionModelMetadata(metadata);
+    if (model && this.sessionSelectedModels.restore(sessionId, model)) {
+      this.post({
+        type: 'session-models/sync',
+        payload: { models: this.sessionSelectedModels.list() },
+      });
+    }
+    const agent = readSessionAgentMetadata(metadata);
+    if (agent && this.sessionPlanState.restoreAgent(sessionId, agent)) {
+      this.post({ type: 'session-plan-state/update', payload: { sessionId, agent } });
+    }
+  }
+
+  private updateSessionSelections(
+    sessionId: string,
+    selection: SessionSelectionMetadata,
+    directory?: string
+  ): Promise<void> {
+    // Share the permission update queue so concurrent selections cannot overwrite each other's metadata.
+    const previous = this.permissionModeQueues.get(sessionId) ?? Promise.resolve();
+    const operation = previous
+      .catch(() => undefined)
+      .then(async () => {
+        const path = `/session/${encodeURIComponent(sessionId)}`;
+        const session = asRecord(await this.server.request('GET', path, undefined, { directory }));
+        if (session?.id !== sessionId) throw new Error('Cannot verify session selection metadata');
+        const metadata = { ...asRecord(session.metadata), ...selection };
+        const currentModel = readSessionModelMetadata(session.metadata);
+        const model = selection.varroModel;
+        const modelChanged =
+          model &&
+          (currentModel?.providerID !== model.providerID ||
+            currentModel.modelID !== model.modelID ||
+            currentModel.variant !== model.variant);
+        const agentChanged =
+          selection.varroAgent &&
+          readSessionAgentMetadata(session.metadata) !== selection.varroAgent;
+        if (modelChanged || agentChanged) {
+          await this.server.request('PATCH', path, { metadata }, { directory });
+        }
+        if (selection.varroModel) {
+          await this.sessionSelectedModels.set(sessionId, selection.varroModel);
+          this.post({
+            type: 'session-models/sync',
+            payload: { models: this.sessionSelectedModels.list() },
+          });
+        }
+        if (selection.varroAgent) {
+          await this.sessionPlanState.setAgent(sessionId, selection.varroAgent);
+          this.sessionState.setSessionAgent(sessionId, selection.varroAgent);
+          this.post({
+            type: 'session-plan-state/update',
+            payload: { sessionId, agent: selection.varroAgent },
+          });
+        }
+        this.restoreSessionSelections(sessionId, metadata);
+      });
+    this.permissionModeQueues.set(sessionId, operation);
+    const clearQueue = () => {
+      if (this.permissionModeQueues.get(sessionId) === operation)
+        this.permissionModeQueues.delete(sessionId);
+    };
+    void operation.then(clearQueue, clearQueue);
+    return operation;
+  }
+
+  private async patchSessionPermissionMode(
+    sessionID: string,
+    mode: PermissionMode,
+    directory?: string,
+    permission?: PermissionRule[]
+  ) {
+    const path = `/session/${encodeURIComponent(sessionID)}`;
+    const session = asRecord(await this.server.request('GET', path, undefined, { directory }));
+    if (session?.id !== sessionID) throw new Error('Cannot verify session permission metadata');
+    const metadata = asRecord(session.metadata) ?? {};
+    if (!permission && metadata.varroPermissionMode === mode) return session;
+    const body: Pick<Session, 'metadata' | 'permission'> = {
+      metadata: { ...metadata, varroPermissionMode: mode },
+    };
+    if (permission) body.permission = permission;
+    return this.server.request('PATCH', path, body, { directory });
   }
 
   private allowPermissionForSession(
@@ -2296,16 +2401,32 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       .catch(() => undefined)
       .then(async () => {
         if (ifAbsent && Object.hasOwn(this.sessionPermissionModes.list(), sessionID)) return;
+        if (ifAbsent) {
+          const session = asRecord(
+            await this.server.request(
+              'GET',
+              `/session/${encodeURIComponent(sessionID)}`,
+              undefined,
+              { directory }
+            )
+          );
+          if (session?.id !== sessionID)
+            throw new Error('Cannot verify session permission metadata');
+          if (this.sessionPermissionModes.restoreSessionMetadata(session)) {
+            this.postPermissionModes();
+            return;
+          }
+        }
         try {
           await this.sessionPermissionModes.stageSafeFallback(sessionID);
         } catch (err) {
           this.postPermissionModes();
           try {
-            await this.server.request(
-              'PATCH',
-              `/session/${encodeURIComponent(sessionID)}`,
-              { permission: getSafeDefaultPermissionRules() },
-              { directory }
+            await this.patchSessionPermissionMode(
+              sessionID,
+              'default',
+              directory,
+              getSafeDefaultPermissionRules()
             );
           } catch (recoveryError) {
             logger.warn(
@@ -2343,7 +2464,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 );
               });
             if (!alreadyApplied) {
-              await this.server.request('PATCH', path, { permission }, { directory });
+              await this.server.request(
+                'PATCH',
+                path,
+                {
+                  permission,
+                  metadata: { ...asRecord(session.metadata), varroPermissionMode: mode },
+                },
+                { directory }
+              );
             }
           } catch (err) {
             this.postPermissionModes();
@@ -2352,6 +2481,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           }
         }
         try {
+          if (!resetRemoteRules) {
+            await this.patchSessionPermissionMode(sessionID, mode, directory);
+          }
           const modes = await this.sessionPermissionModes.set(sessionID, mode);
           this.postPermissionModes(modes);
         } catch (err) {

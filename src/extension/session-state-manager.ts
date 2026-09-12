@@ -119,6 +119,7 @@ export interface SessionStateListener {
   onStatusChange(): void;
   /** Called when routing learns or changes a session's workspace directory. */
   onSessionDirectoryChange?(): void;
+  onSessionMetadata?(session: Record<string, unknown>): void;
 }
 
 export interface NotificationGate {
@@ -613,6 +614,8 @@ export class SessionStateManager {
     switch (type) {
       case 'session.created':
       case 'session.updated': {
+        const session = asRecord(props?.info);
+        if (session) this.listener.onSessionMetadata?.(session);
         changed =
           this.rememberSessionMetadata(
             asRecord(props?.info) ?? undefined,

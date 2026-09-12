@@ -22,6 +22,7 @@ import {
   hasAssistantModelChangeBetween,
   installMessageListTestEnvironment,
   installQueuedAnimationFrameMocks,
+  settleBottomFollow,
   reasoningPart,
   testDiffOverlayOwner,
   textPart,
@@ -328,10 +329,12 @@ describe('MessageList auto-scroll', () => {
         animationFrames.flush();
       };
       await resume();
+      settleBottomFollow(animationFrames, list);
       expect(list.scrollTop).toBe(trackHeight - viewportHeight);
       // Deferred layout must still be followed before the next resize notification.
       trackHeight += 100;
       animationFrames.flush();
+      settleBottomFollow(animationFrames, list);
       expect(list.scrollTop).toBe(trackHeight - viewportHeight);
       for (let frame = 0; frame < 8; frame += 1) animationFrames.flush();
       const resumedRequestCount = requestFrame.mock.calls.length;
@@ -3060,6 +3063,7 @@ describe('MessageList auto-scroll', () => {
     animationFrames.flush();
     await Promise.resolve();
 
+    settleBottomFollow(animationFrames, list!);
     expect(scrollTopValue).toBe(7040);
     animationFrames.restore();
   });
@@ -3112,6 +3116,7 @@ describe('MessageList auto-scroll', () => {
     trackHeight = 1200;
     animationFrames.flush();
 
+    settleBottomFollow(animationFrames, list!);
     expect(scrollTopValue).toBe(1300);
     animationFrames.restore();
   });
@@ -3165,6 +3170,7 @@ describe('MessageList auto-scroll', () => {
     scrollHeightValue = 1600;
     animationFrames.flush();
 
+    settleBottomFollow(animationFrames, list!);
     expect(scrollTopValue).toBe(1200);
     animationFrames.restore();
   });
@@ -3217,12 +3223,14 @@ describe('MessageList auto-scroll', () => {
     setState('streamingText', 'Streaming growth');
     await Promise.resolve();
 
+    settleBottomFollow(animationFrames, list!);
     expect(scrollTopValue).toBe(1200);
     animationFrames.flush();
     animationFrames.restore();
   });
 
   it('keeps the latest message fully visible when the last response grows', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
     setState('activeSessionId', 'session-1');
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
@@ -3259,10 +3267,12 @@ describe('MessageList auto-scroll', () => {
     await Promise.resolve();
     await Promise.resolve();
 
+    settleBottomFollow(animationFrames, list!);
     expect(scrollTopValue).toBe(1300);
+    animationFrames.restore();
   });
 
-  it('corrects bottom scroll immediately when rendered content resizes', async () => {
+  it('eases bottom scroll to the new destination when rendered content resizes', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     const resizeCallbacks: ResizeObserverCallback[] = [];
     let trackHeight = 1200;
@@ -3326,8 +3336,11 @@ describe('MessageList auto-scroll', () => {
       // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       callback([], {} as ResizeObserver);
     }
-    animationFrames.flush();
+    animationFrames.flush(performance.now() + 16);
 
+    expect(scrollTopValue).toBeGreaterThan(800);
+    expect(scrollTopValue).toBeLessThan(1300);
+    settleBottomFollow(animationFrames, list!);
     expect(scrollTopValue).toBe(1300);
     animationFrames.restore();
   });
@@ -3378,6 +3391,7 @@ describe('MessageList auto-scroll', () => {
     scrollHeightValue = 1700;
     animationFrames.flush();
 
+    settleBottomFollow(animationFrames, list!);
     expect(scrollTopValue).toBe(1300);
     animationFrames.restore();
   });
@@ -3452,6 +3466,7 @@ describe('MessageList auto-scroll', () => {
     scrollHeightValue = 1800;
     animationFrames.flush();
 
+    settleBottomFollow(animationFrames, list!);
     expect(scrollTopValue).toBe(1400);
     animationFrames.restore();
   });
@@ -3503,6 +3518,7 @@ describe('MessageList auto-scroll', () => {
     scrollHeightValue = 1800;
     animationFrames.flush();
 
+    settleBottomFollow(animationFrames, list!);
     expect(scrollTopValue).toBe(1400);
     animationFrames.restore();
   });
@@ -3559,6 +3575,7 @@ describe('MessageList auto-scroll', () => {
     scrollHeightValue = 1800;
     animationFrames.flush();
 
+    settleBottomFollow(animationFrames, list!);
     expect(scrollTopValue).toBe(1400);
     animationFrames.restore();
   });
@@ -3645,6 +3662,7 @@ describe('MessageList auto-scroll', () => {
     scrollHeightValue = 5500;
     requestMessageListScrollToBottom();
     await Promise.resolve();
+    settleBottomFollow(animationFrames, list!);
     expect(scrollTopValue).toBe(5100);
 
     trackHeight = 1000;
@@ -3732,6 +3750,7 @@ describe('MessageList auto-scroll', () => {
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
+    settleBottomFollow(animationFrames, list!);
     expect(scrollTopValue).toBe(1300);
 
     const assignmentCountAfterGrowth = assignedScrollTops.length;
@@ -3836,6 +3855,7 @@ describe('MessageList auto-scroll', () => {
     }
     animationFrames.flush();
 
+    settleBottomFollow(animationFrames, list!);
     expect(scrollTopValue).toBe(1000);
     animationFrames.restore();
   });
@@ -3911,6 +3931,7 @@ describe('MessageList auto-scroll', () => {
     }
     animationFrames.flush();
 
+    settleBottomFollow(animationFrames, list!);
     expect(scrollTopValue).toBe(1000);
 
     list?.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', shiftKey: true, bubbles: true }));
@@ -4090,6 +4111,7 @@ describe('MessageList auto-scroll', () => {
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
+    settleBottomFollow(animationFrames, list!);
     expect(scrollTopValue).toBe(1000);
 
     diffViewport.focus();
@@ -4387,6 +4409,7 @@ describe('MessageList auto-scroll', () => {
     }
     animationFrames.flush();
 
+    settleBottomFollow(animationFrames, list!);
     expect(assignedScrollTops.at(-1)).toBe(840);
     expect(scrollTopValue).toBe(840);
     animationFrames.restore();
@@ -4460,6 +4483,7 @@ describe('MessageList auto-scroll', () => {
     requestMessageListScrollToBottom();
     await Promise.resolve();
     animationFrames.flush();
+    settleBottomFollow(animationFrames, list!);
     expect(scrollTopValue).toBe(800);
 
     animationFrames.flush();
@@ -4619,6 +4643,7 @@ describe('MessageList auto-scroll', () => {
     requestMessageListScrollToBottom();
     await Promise.resolve();
     animationFrames.flush();
+    settleBottomFollow(animationFrames, list!);
     expect(scrollTopValue).toBe(800);
 
     animationFrames.flush();
@@ -4635,6 +4660,7 @@ describe('MessageList auto-scroll', () => {
     await Promise.resolve();
     animationFrames.flush();
 
+    settleBottomFollow(animationFrames, list!);
     expect(assignedScrollTops.at(-1)).toBe(1200);
     expect(scrollTopValue).toBe(1200);
     animationFrames.restore();
@@ -4720,6 +4746,7 @@ describe('MessageList auto-scroll', () => {
     animationFrames.flush();
 
     expect(assignedScrollTops).toHaveLength(assignmentCountAfterNearBottomScroll + 1);
+    settleBottomFollow(animationFrames, list!);
     expect(assignedScrollTops.at(-1)).toBe(800);
     expect(scrollTopValue).toBe(800);
     animationFrames.restore();
@@ -4915,6 +4942,7 @@ describe('MessageList auto-scroll', () => {
     await Promise.resolve();
     animationFrames.flush();
 
+    settleBottomFollow(animationFrames, list!);
     expect(scrollTopValue).toBe(800);
     expect(container?.querySelector('.jump-to-latest-button')).toBeNull();
     animationFrames.restore();

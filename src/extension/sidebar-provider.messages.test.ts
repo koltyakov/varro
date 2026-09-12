@@ -1,6 +1,9 @@
 /* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-object-parameters, anti-slop/no-unknown-parameters, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: These tests call private message handlers with protocol-shaped fixtures and untyped persistence values. */
 import { describe, expect, it, vi, type Mock } from 'vitest';
 import { getSafeDefaultPermissionRules } from '../shared/permission-rules';
+import type { PermissionMode } from '../shared/protocol';
+import type { Session } from '../shared/opencode-types';
+import { asRecord } from '../shared/type-utils';
 import {
   attachTestView,
   createContextProvider,
@@ -10,6 +13,74 @@ import {
 } from './sidebar-provider.test-support';
 
 describe('SidebarProvider session message responses', () => {
+  it.each(['auto', 'full', 'default'] as const)(
+    'restores explicit %s metadata in another extension instance and follows remote changes',
+    async (mode) => {
+      let session = {
+        id: 'session-shared',
+        directory: '/repo',
+        metadata: {
+          custom: 'preserved',
+          varro: { workspaceScope: 'folder' },
+        } as Session['metadata'],
+      };
+      const request = vi.fn(async (method: string, path: string, body?: unknown) => {
+        if (method === 'PATCH') {
+          session = { ...session, metadata: asRecord(asRecord(body)?.metadata) ?? {} };
+        }
+        return path.startsWith('/session?') ? [session] : session;
+      });
+      const first = await createSidebarProviderInstance({ server: createServer({ request }) });
+      attachTestView(first.provider);
+      await (
+        first.provider as unknown as {
+          updateConfirmedPermissionMode(id: string, mode: PermissionMode): Promise<void>;
+        }
+      ).updateConfirmedPermissionMode(session.id, mode);
+      expect(session.metadata).toEqual({
+        custom: 'preserved',
+        varro: { workspaceScope: 'folder' },
+        varroPermissionMode: mode,
+      });
+      expect(request).toHaveBeenCalledWith(
+        'PATCH',
+        '/session/session-shared',
+        {
+          metadata: session.metadata,
+          permission: expect.any(Array),
+        },
+        { directory: undefined }
+      );
+
+      const server = createServer({ request });
+      const second = await createSidebarProviderInstance({ server });
+      const { posted } = attachTestView(second.provider);
+      request.mockClear();
+      await second.provider.handleMessage({
+        type: 'api/request',
+        payload: { id: 1, method: 'GET', path: '/session/session-shared' },
+      });
+      expect(posted).toContainEqual({
+        type: 'permission-modes/sync',
+        payload: { modes: { 'session-shared': mode } },
+      });
+      expect(request.mock.calls.every(([method]) => method === 'GET')).toBe(true);
+
+      const eventHandler = server.on.mock.calls.find(([event]) => event === 'event')?.[1];
+      const changedMode = mode === 'default' ? 'auto' : 'default';
+      eventHandler?.({
+        type: 'session.updated',
+        properties: {
+          info: { ...session, metadata: { ...session.metadata, varroPermissionMode: changedMode } },
+        },
+      });
+      expect(posted).toContainEqual({
+        type: 'permission-modes/sync',
+        payload: { modes: { 'session-shared': changedMode } },
+      });
+    }
+  );
+
   it('blocks automation when a server-confirmed permission mode is not durable', async () => {
     const workspaceState = {
       get: vi.fn(() => undefined),
@@ -43,7 +114,53 @@ describe('SidebarProvider session message responses', () => {
         recoveringSessionIds: ['session-1'],
       },
     });
-    expect(server.request).toHaveBeenCalledTimes(2);
+    expect(server.request).toHaveBeenCalledTimes(4);
+  });
+
+  it('keeps remote metadata authoritative over a stale local migration', async () => {
+    const server = createServer({
+      request: vi.fn(async () => ({ id: 'session-1', metadata: { varroPermissionMode: 'auto' } })),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const { posted } = attachTestView(provider);
+    await provider.handleMessage({
+      type: 'permission-modes/migrate',
+      payload: { modes: { 'session-1': 'default' } },
+    });
+    expect(server.request).toHaveBeenCalledOnce();
+    expect(server.request).toHaveBeenCalledWith('GET', '/session/session-1', undefined, {
+      directory: '/repo',
+    });
+    expect(posted).toContainEqual({
+      type: 'permission-modes/sync',
+      payload: { modes: { 'session-1': 'auto' } },
+    });
+  });
+
+  it('does not confirm a preconfigured mode when its metadata write fails', async () => {
+    const server = createServer({
+      request: vi.fn(async (method: string) => {
+        if (method === 'PATCH') throw new Error('metadata write failed');
+        return { id: 'session-1' };
+      }),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const { posted } = attachTestView(provider);
+    await expect(
+      (
+        provider as unknown as {
+          persistPreconfiguredPermissionMode(id: string, mode: PermissionMode): Promise<void>;
+        }
+      ).persistPreconfiguredPermissionMode('session-1', 'full')
+    ).rejects.toThrow('Permission mode was not saved');
+    expect(posted).toContainEqual({
+      type: 'permission-modes/sync',
+      payload: { modes: { 'session-1': 'default' }, recoveringSessionIds: ['session-1'] },
+    });
+    expect(posted).not.toContainEqual({
+      type: 'permission-modes/sync',
+      payload: { modes: { 'session-1': 'full' } },
+    });
   });
 
   it('resets a staged fallback remotely before publishing default after restart', async () => {
@@ -65,10 +182,14 @@ describe('SidebarProvider session message responses', () => {
         if (method === 'GET' && path === '/session?limit=1000000') {
           return [{ id: 'session-1', directory: '/repo' }];
         }
+        if (method === 'GET' && path === '/session/session-1') {
+          return { id: 'session-1', directory: '/repo' };
+        }
         if (method === 'PATCH' && path === '/session/session-1') {
           patchAttempts += 1;
           expect(serverMode).toBe('full');
           expect(body).toEqual({
+            metadata: { varroPermissionMode: 'default' },
             permission: [
               { permission: '*', pattern: '*', action: 'ask' },
               { permission: 'todowrite', pattern: '*', action: 'allow' },
@@ -126,7 +247,9 @@ describe('SidebarProvider session message responses', () => {
         return Promise.resolve();
       }),
     };
-    const server = createServer();
+    const server = createServer({
+      request: vi.fn(async () => ({ id: 'fork-1', metadata: { custom: 'preserved' } })),
+    });
     const { provider } = await createSidebarProviderInstance({
       server,
       workspaceState: workspaceState as never,
@@ -143,7 +266,14 @@ describe('SidebarProvider session message responses', () => {
       }
     ).persistPreconfiguredPermissionMode('fork-1', 'full', '/repo');
 
-    expect(server.request).not.toHaveBeenCalled();
+    expect(server.request).toHaveBeenCalledWith(
+      'PATCH',
+      '/session/fork-1',
+      {
+        metadata: { custom: 'preserved', varroPermissionMode: 'full' },
+      },
+      { directory: '/repo' }
+    );
     expect(values.get('varro.sessionPermissionModes')).toEqual({ 'fork-1': 'full' });
     expect(values.get('varro.sessionPermissionModeFallbacks')).toEqual([]);
     expect(posted).toContainEqual({
@@ -167,6 +297,7 @@ describe('SidebarProvider session message responses', () => {
     });
     const server = createServer({
       request: vi.fn(async (method: string, path: string) => {
+        if (method === 'GET' && path === '/session/fork-1') return { id: 'fork-1' };
         if (method === 'PATCH' && path === '/session/fork-1') {
           await patchPending;
           return { id: 'fork-1', directory: '/repo' };
@@ -194,7 +325,7 @@ describe('SidebarProvider session message responses', () => {
     };
 
     const newerUpdate = internals.updateConfirmedPermissionMode('fork-1', 'auto', '/repo');
-    await vi.waitFor(() => expect(server.request).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(server.request).toHaveBeenCalledTimes(2));
     const staleAcknowledgement = internals.persistPreconfiguredPermissionMode(
       'fork-1',
       'full',
@@ -205,7 +336,7 @@ describe('SidebarProvider session message responses', () => {
     await Promise.all([newerUpdate, staleAcknowledgement]);
 
     expect(values.get('varro.sessionPermissionModes')).toEqual({ 'fork-1': 'auto' });
-    expect(server.request).toHaveBeenCalledOnce();
+    expect(server.request).toHaveBeenCalledTimes(2);
   });
 
   it('clears fallback IDs only after every session catalog is authoritative', async () => {
@@ -295,8 +426,10 @@ describe('SidebarProvider session message responses', () => {
           if (method === 'GET' && path === catalogPath) {
             return [{ id: 'extant', projectID: 'project-1', directory }];
           }
+          if (method === 'GET' && path === '/session/extant') return { id: 'extant', directory };
           if (method === 'PATCH' && path === '/session/extant') {
             expect(body).toEqual({
+              metadata: { varroPermissionMode: 'default' },
               permission: [
                 { permission: '*', pattern: '*', action: 'ask' },
                 { permission: 'todowrite', pattern: '*', action: 'allow' },
@@ -326,6 +459,7 @@ describe('SidebarProvider session message responses', () => {
         'PATCH',
         '/session/extant',
         {
+          metadata: { varroPermissionMode: 'default' },
           permission: [
             { permission: '*', pattern: '*', action: 'ask' },
             { permission: 'todowrite', pattern: '*', action: 'allow' },
@@ -406,7 +540,10 @@ describe('SidebarProvider session message responses', () => {
       }),
     };
     const server = createServer({
-      request: vi.fn(async () => ({ id: 'session-legacy', permission: [] })),
+      request: vi.fn(async (_method: string, path: string) => ({
+        id: path.split('/').at(-1),
+        permission: [],
+      })),
     });
     const { provider } = await createSidebarProviderInstance({
       server,
@@ -435,6 +572,7 @@ describe('SidebarProvider session message responses', () => {
       'PATCH',
       '/session/session-legacy',
       {
+        metadata: { varroPermissionMode: 'default' },
         permission: [
           { permission: '*', pattern: '*', action: 'ask' },
           { permission: 'todowrite', pattern: '*', action: 'allow' },
@@ -505,7 +643,7 @@ describe('SidebarProvider session message responses', () => {
     expect(server.request).toHaveBeenCalledWith(
       'PATCH',
       '/session/session-old',
-      { permission: getSafeDefaultPermissionRules() },
+      { permission: getSafeDefaultPermissionRules(), metadata: { varroPermissionMode: 'default' } },
       { directory: '/repo' }
     );
   });

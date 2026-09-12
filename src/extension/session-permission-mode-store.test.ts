@@ -4,6 +4,35 @@ import type { Persistence } from '../shared/persistence';
 import { SessionPermissionModeStore } from './session-permission-mode-store';
 
 describe('SessionPermissionModeStore', () => {
+  it('uses valid metadata over local selections without guessing from rules', async () => {
+    const persistence: Persistence = { get: vi.fn(), set: vi.fn(), remove: vi.fn() };
+    const store = new SessionPermissionModeStore(persistence);
+    await store.set('session-1', 'full');
+    expect(
+      store.restoreSessionMetadata({
+        id: 'session-1',
+        metadata: { varroPermissionMode: 'auto' },
+      })
+    ).toBe(true);
+    expect(store.list()).toEqual({ 'session-1': 'auto' });
+    for (const metadata of [
+      undefined,
+      {},
+      { varroPermissionMode: 'edits' },
+      { varroPermissionMode: 'unknown' },
+    ]) {
+      expect(store.restoreSessionMetadata({ id: 'session-1', metadata })).toBe(false);
+    }
+    store.restoreSessionMetadata({
+      id: 'session-2',
+      permission: [{ permission: '*', pattern: '*', action: 'allow' }],
+    });
+    expect(store.list()).toEqual({ 'session-1': 'auto' });
+    await store.stageSafeFallback('session-1');
+    store.restoreSessionMetadata({ id: 'session-1', metadata: { varroPermissionMode: 'full' } });
+    expect(store.list()).toEqual({ 'session-1': 'default' });
+  });
+
   it('restores valid modes and persists updates', async () => {
     const persistence: Persistence = {
       get<T>() {

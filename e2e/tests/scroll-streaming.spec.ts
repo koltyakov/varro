@@ -14,6 +14,88 @@ import {
 } from './scroll-helpers';
 
 test.describe('scroll stability regressions', () => {
+  for (const reducedMotion of ['no-preference', 'reduce'] as const) {
+    test(`follows a bottom block without paced text with ${reducedMotion} motion`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ reducedMotion });
+      await page.goto('/e2e/harness/index.html?scenario=large-transcript');
+      const list = page.locator('.interactive-list');
+      await expect
+        .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+        .toBeLessThan(2);
+      await waitForAnimationFrames(page, 4);
+
+      const samples = await list.evaluate(async (element) => {
+        const anchor = element.querySelector<HTMLElement>(
+          '[data-msg-id="message-large-assistant-239"]'
+        )!;
+        const read = (time = performance.now()) => ({
+          time,
+          top: anchor.getBoundingClientRect().top,
+          connected: anchor.isConnected,
+          height: element.scrollHeight,
+          bottomDistance: element.scrollHeight - element.clientHeight - element.scrollTop,
+        });
+        const frames = [read()];
+        window.postMessage(
+          {
+            type: 'server/event',
+            payload: {
+              type: 'message.part.updated',
+              properties: {
+                part: {
+                  id: 'bottom-standalone-block',
+                  sessionID: 'session-large-transcript',
+                  messageID: 'message-large-assistant-239',
+                  type: 'text',
+                  text: Array.from(
+                    { length: 8 },
+                    (_, index) => `New bottom paragraph ${index}.`
+                  ).join('\n\n'),
+                },
+              },
+            },
+          },
+          '*'
+        );
+        for (let frame = 0; frame < 60; frame += 1) {
+          const time = await new Promise<number>((resolve) => requestAnimationFrame(resolve));
+          frames.push(read(time));
+        }
+        return frames;
+      });
+
+      const totalMovement = samples[0]!.top - samples.at(-1)!.top;
+      const steps = samples.slice(1).map((sample, index) => samples[index]!.top - sample.top);
+      expect(samples.every((sample) => sample.connected)).toBe(true);
+      expect(totalMovement).toBeGreaterThan(100);
+      if (reducedMotion === 'reduce') {
+        // Separate Markdown commits can change geometry more than once. With reduced
+        // motion, following must settle on the next frame rather than easing afterward.
+        for (let index = 2; index < samples.length; index += 1) {
+          if (
+            samples[index]!.height === samples[index - 1]!.height &&
+            samples[index]!.height === samples[index - 2]!.height
+          ) {
+            expect(samples[index]!.bottomDistance, JSON.stringify(samples)).toBeLessThanOrEqual(1);
+          }
+        }
+      } else {
+        expect(Math.min(...steps)).toBeGreaterThanOrEqual(-1);
+        expect(Math.max(...steps), JSON.stringify(samples)).toBeLessThan(totalMovement * 0.6);
+        expect(steps.filter((step) => step > 1).length).toBeGreaterThan(3);
+        const speeds = steps.map(
+          (step, index) => step / Math.max(1, samples[index + 1]!.time - samples[index]!.time)
+        );
+        expect(Math.max(...speeds), JSON.stringify(samples)).toBeLessThan(1.4);
+        const firstMovement = steps.findIndex((step) => step > 1);
+        expect(speeds[firstMovement]).toBeLessThan(0.5);
+      }
+      expect(samples.at(-1)!.bottomDistance).toBeLessThanOrEqual(1);
+    });
+  }
+
   test('rapid streaming remains within the bottom-follow threshold', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=large-transcript');
     const list = page.locator('.interactive-list');

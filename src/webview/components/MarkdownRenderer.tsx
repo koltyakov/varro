@@ -1946,7 +1946,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
   let lastAppliedStableHtml = initialSegments.stableContent
     ? parseMarkdown(initialSegments.stableContent, {
         cacheByContent: false,
-        disablePathLinkify: lw() || !!props.disablePathLinkify,
+        disablePathLinkify: !!props.disablePathLinkify,
         disableCodeHighlighting: lw(),
         allowMermaidHydration: lw(),
         escapeHtml: !!props.escapeHtml,
@@ -1954,7 +1954,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
     : '';
   const initialTailParseOptions = {
     cacheByContent: initialSegments.stableContent.length === 0 && initialCacheByContent,
-    disablePathLinkify: lw() || !!props.disablePathLinkify,
+    disablePathLinkify: !!props.disablePathLinkify,
     disableCodeHighlighting: initialSegments.hasUnclosedFence || lw(),
     allowMermaidHydration: lw() && !initialSegments.hasUnclosedFence,
     escapeHtml: !!props.escapeHtml,
@@ -2084,7 +2084,8 @@ export function MarkdownRenderer(props: MarkdownProps) {
       cancelIdleWork(idleHighlightId);
       idleHighlightId = null;
       const isLightweight = lw();
-      const disablePathLinkify = isLightweight || !!props.disablePathLinkify;
+      // Compact link labels determine wrapping, so off-core rendering must preserve them.
+      const disablePathLinkify = !!props.disablePathLinkify;
       const escapeRawHtml = !!props.escapeHtml;
       // Completion can briefly regress while the final message events reconcile.
       // Keep final rendering enabled once observed so links and highlighting do not flicker.

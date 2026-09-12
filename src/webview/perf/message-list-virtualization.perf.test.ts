@@ -91,7 +91,7 @@ import { buildVirtualMetrics } from '../components/message-list/virtualization';
 import { resetMessageEditState, startEditingMessage } from '../lib/message-edit-state';
 import { replaceMessages, resetDefaultAppState, setState, upsertMessageInfo } from '../lib/state';
 import type { AssistantMessage, Message, Part, TextPart, UserMessage } from '../types';
-import { settlePerfEffects } from './harness';
+import { settlePerfEffects as settleMicrotasks } from './harness';
 import { fixture } from '../test-fixtures';
 
 describe('Virtual metrics perf guards', () => {
@@ -131,6 +131,21 @@ let originalRequestAnimationFrame: typeof globalThis.requestAnimationFrame | und
 let originalWindowRequestAnimationFrame: typeof window.requestAnimationFrame | undefined;
 let originalCancelAnimationFrame: typeof globalThis.cancelAnimationFrame | undefined;
 let originalWindowCancelAnimationFrame: typeof window.cancelAnimationFrame | undefined;
+const pendingAnimationFrames = new Map<number, FrameRequestCallback>();
+let nextAnimationFrameId = 1;
+let animationFrameTime = 0;
+
+async function settlePerfEffects() {
+  await settleMicrotasks();
+  // Frames requested during a callback belong to the next frame, never the same call stack.
+  animationFrameTime += 16;
+  const frames = [...pendingAnimationFrames];
+  for (const [id, callback] of frames) {
+    if (!pendingAnimationFrames.delete(id)) continue;
+    callback(animationFrameTime);
+  }
+  await settleMicrotasks();
+}
 
 function createUserMessage(id: string): UserMessage {
   return {
@@ -218,11 +233,15 @@ describe('MessageList virtualization perf guards', () => {
       disconnect() {}
     }
 
-    const requestAnimationFrameStub = vi.fn().mockImplementation((cb: FrameRequestCallback) => {
-      cb(0);
-      return 1;
+    pendingAnimationFrames.clear();
+    nextAnimationFrameId = 1;
+    animationFrameTime = performance.now();
+    const requestAnimationFrameStub = vi.fn((cb: FrameRequestCallback) => {
+      const id = nextAnimationFrameId++;
+      pendingAnimationFrames.set(id, cb);
+      return id;
     });
-    const cancelAnimationFrameStub = vi.fn();
+    const cancelAnimationFrameStub = vi.fn((id: number) => pendingAnimationFrames.delete(id));
 
     Object.defineProperty(globalThis, 'ResizeObserver', {
       configurable: true,
@@ -259,6 +278,7 @@ describe('MessageList virtualization perf guards', () => {
   afterEach(() => {
     cleanup?.();
     cleanup = undefined;
+    pendingAnimationFrames.clear();
     container?.remove();
     container = null;
 
@@ -334,17 +354,6 @@ describe('MessageList virtualization perf guards', () => {
   });
 
   it('does not regroup the transcript as visible streaming text grows', async () => {
-    const requestAnimationFrameStub = vi.fn(() => 1);
-    Object.defineProperty(globalThis, 'requestAnimationFrame', {
-      configurable: true,
-      writable: true,
-      value: requestAnimationFrameStub,
-    });
-    Object.defineProperty(window, 'requestAnimationFrame', {
-      configurable: true,
-      writable: true,
-      value: requestAnimationFrameStub,
-    });
     const messageId = 'message-1';
     replaceMessages([
       entry(createUserMessage('prompt-1'), [createTextPart('prompt-text', 'prompt-1', 'Inspect')]),
@@ -504,44 +513,12 @@ describe('MessageList virtualization perf guards', () => {
     list.dispatchEvent(new Event('scroll'));
     await settlePerfEffects();
 
-    let nextFrameId = 1;
-    const pendingFrames = new Map<number, FrameRequestCallback>();
-    const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
-      const id = nextFrameId++;
-      pendingFrames.set(id, callback);
-      return id;
-    });
-    const cancelAnimationFrameMock = vi.fn((id: number) => pendingFrames.delete(id));
-    Object.defineProperty(globalThis, 'requestAnimationFrame', {
-      configurable: true,
-      writable: true,
-      value: requestAnimationFrameMock,
-    });
-    Object.defineProperty(window, 'requestAnimationFrame', {
-      configurable: true,
-      writable: true,
-      value: requestAnimationFrameMock,
-    });
-    Object.defineProperty(globalThis, 'cancelAnimationFrame', {
-      configurable: true,
-      writable: true,
-      value: cancelAnimationFrameMock,
-    });
-    Object.defineProperty(window, 'cancelAnimationFrame', {
-      configurable: true,
-      writable: true,
-      value: cancelAnimationFrameMock,
-    });
-
     stickyPreviewSelectionPasses.value = 0;
     stickyPreviewMessageReads.value = 0;
     list.scrollTop = 7_320;
     list.dispatchEvent(new Event('scroll'));
-    await settlePerfEffects();
-
-    const frames = [...pendingFrames.entries()];
-    pendingFrames.clear();
-    for (const [, callback] of frames) callback(0);
+    await settleMicrotasks();
+    expect(stickyPreviewSelectionPasses.value).toBe(0);
     await settlePerfEffects();
 
     expect(stickyPreviewSelectionPasses.value).toBe(1);

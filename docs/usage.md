@@ -278,6 +278,18 @@ The `"*": "deny"` rule is the read-only boundary. The prompt describes expected 
 
 Omit `model` to use the configured global model, or add a provider-qualified model such as `"model": "openai/gpt-5.6-sol"` inside the agent. Add `"default_agent": "ask"` at the top level if new sessions should select it by default.
 
+### Session selections across editor instances
+
+Varro saves explicit model, reasoning variant, and agent selections in OpenCode session metadata.
+Opening the same session in another extension instance, including VS Code Insiders, restores those
+selections ahead of local preferences and historical messages. Session updates also refresh them in
+open views. Restoring a session does not write metadata or change its last-updated timestamp.
+
+The stored fields are `metadata.varroModel`, containing `providerID`, `modelID`, and an optional
+`variant`, and `metadata.varroAgent`, containing the agent name. A model selection without a variant
+clears the previous reasoning selection. Existing sessions without these fields retain the previous
+local and history-based fallback behavior until an explicit selection is saved.
+
 ### Provider Connections
 
 The Models view reads OpenCode's provider catalog and authentication methods. Depending on the provider plugin, the connection dialog can accept an API key, collect provider-specific fields, or open an OAuth authorization page in your browser. Some OAuth flows finish automatically; others ask you to paste an authorization code back into Varro. OpenCode stores the resulting credential.

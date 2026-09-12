@@ -139,6 +139,7 @@ import {
   captureExpansionScrollAnchor,
   getDistanceFromBottom,
   performScrollToBottom,
+  BottomFollowMotion,
   recoverScrollAnchorDescendant,
   resolveAutoScrollOnUserScroll,
   restoreExpansionScrollAnchor as restoreExpansionScrollAnchorFromState,
@@ -4370,25 +4371,35 @@ export function MessageList() {
     }
   }
 
+  const bottomFollowMotion = new BottomFollowMotion();
+
   function performScroll(options?: { force?: boolean; immediate?: boolean; elapsedMs?: number }) {
     if (
       stickyNavigationOwnsScroll() ||
       activityExitBottomTarget !== null ||
       activityExitSummaryAnchor
-    )
+    ) {
+      bottomFollowMotion.reset();
       return;
-    if (appendScrollRafId) return;
-    if (!options?.force && userScrollRecentlyActive() && !followModeLocked) return;
+    }
+    if (appendScrollRafId || (!options?.force && userScrollRecentlyActive() && !followModeLocked)) {
+      bottomFollowMotion.reset();
+      return;
+    }
 
+    // Ease new bottom growth even when no text was paced recently. Position restoration
+    // and browser clamp corrections still synchronize immediately.
     const smooth =
       !options?.immediate &&
-      presentation.canSmoothFollow() &&
+      bottomScrollTop() > lastAutoScrolledBottomScrollTop + 1 &&
+      !userScrollRecentlyActive() &&
       !reducedMotion() &&
       autoScroll() &&
       !editingMessage() &&
       !diffFocusPauseActive &&
       !pendingNewTurnMessageId &&
-      !pendingInitialScrollSessionId;
+      !pendingInitialScrollSessionId &&
+      !pendingInitialHistoryFillSessionId;
     if (smooth && options?.elapsedMs === undefined) {
       const sessionId = state.activeSessionId;
       if (sessionId) startFollowLoop(sessionId);
@@ -4404,6 +4415,7 @@ export function MessageList() {
       now,
       programmaticScrollWindowMs: PROGRAMMATIC_SCROLL_WINDOW_MS,
       elapsedMs: smooth ? options?.elapsedMs : undefined,
+      motion: bottomFollowMotion,
     });
     suppressSyncScrollTop = false;
     if (!result) return;
@@ -4435,7 +4447,7 @@ export function MessageList() {
     const reserve = untrack(appendBottomReserve);
     if (reserve <= 0) return;
     // Exit space temporarily overlaps the departing tray; it is not replacement content.
-    if (activityExitBottomTarget !== null) return;
+    if (activityExitBottomTarget !== null || untrack(exitingActivityPartKeys).size > 0) return;
     if (
       activityExitSummaryAnchor &&
       isLoading() &&
@@ -4751,7 +4763,8 @@ export function MessageList() {
     if (initialScrollRafId) cancelAnimationFrame(initialScrollRafId);
 
     activeFollowLoopSessionId = sessionId;
-    let lastFollowFrameAt = performance.now() - 16;
+    bottomFollowMotion.reset();
+    let lastFollowFrameAt = performance.now();
     bottomFollowObservedStreaming = currentlyStreaming || !!options?.observedStreaming;
     bottomFollowPreservesNearBottomOffset = !!options?.preserveNearBottomOffset;
 
@@ -4762,9 +4775,9 @@ export function MessageList() {
 
     initialScrollRafId = requestAnimationFrame(tick);
 
-    function tick() {
+    function tick(frameTime = performance.now()) {
       initialScrollRafId = 0;
-      const now = performance.now();
+      const now = frameTime;
       const elapsedMs = Math.max(1, now - lastFollowFrameAt);
       lastFollowFrameAt = now;
       if (!containerRef || !trackRef || stickyNavigationOwnsScroll()) {
@@ -4839,7 +4852,7 @@ export function MessageList() {
               return;
             }
             pendingInitialHistoryFillSessionId = null;
-            performScroll({ force: true });
+            performScroll({ force: true, immediate: true });
             startFollowLoop(sessionId);
           });
           return;
@@ -5663,6 +5676,12 @@ export function MessageList() {
     const resumeBottomFollow =
       (expandsCompactActivity || expandsActiveActivity) &&
       (autoScroll() || pinnedToBottom || followModeLocked);
+    const expansionAnchor = captureExpansionScrollAnchor({
+      anchor,
+      container: containerRef,
+      now: performance.now(),
+      windowMs: EXPANSION_SCROLL_ANCHOR_WINDOW_MS,
+    });
 
     if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
     if (isDiffToggle) {
@@ -5670,16 +5689,14 @@ export function MessageList() {
       disengageBottomFollow();
     } else if (resumeBottomFollow) {
       // The disclosure owns this geometry change so its details open below the clicked summary.
+      const expansionScrollTop = containerRef.scrollTop;
+      preserveActivityExitReserve();
+      if (untrack(appendBottomReserve) > 0.5) appendBottomReserveTarget = expansionScrollTop;
       disengageBottomFollow();
     }
 
     pendingExpansionScrollAnchor = {
-      ...captureExpansionScrollAnchor({
-        anchor,
-        container: containerRef,
-        now: performance.now(),
-        windowMs: EXPANSION_SCROLL_ANCHOR_WINDOW_MS,
-      }),
+      ...expansionAnchor,
       resumeBottomFollow,
     };
     if (activityKey) presentation.inspectActivity(activityKey, expandsActiveActivity);
@@ -6452,7 +6469,7 @@ export function MessageList() {
       if (stickyNavigationOwnsScroll()) return;
       if (sessionId && pendingInitialScrollSessionId === sessionId) {
         pendingInitialScrollSessionId = null;
-        performScroll();
+        performScroll({ immediate: true });
         startFollowLoop(sessionId);
         return;
       }
@@ -6495,7 +6512,7 @@ export function MessageList() {
         return;
       followModeLocked = true;
       setAutoScroll(true);
-      startFollowLoop(sessionId, { immediate: !presentation.canSmoothFollow() });
+      startFollowLoop(sessionId);
     });
   });
 

@@ -212,6 +212,18 @@ export function installQueuedAnimationFrameMocks() {
   };
 }
 
+export function settleBottomFollow(
+  animationFrames: ReturnType<typeof installQueuedAnimationFrameMocks>,
+  list: HTMLElement
+) {
+  // Follow now eases over multiple frames. Keep exact destination assertions after settling.
+  const startedAt = performance.now();
+  for (let frame = 1; frame <= 120; frame += 1) {
+    animationFrames.flush(startedAt + frame * 16);
+    if (Math.abs(list.scrollHeight - list.clientHeight - list.scrollTop) < 0.01) return;
+  }
+}
+
 export function installControllableIntersectionObserver() {
   let callback: IntersectionObserverCallback | undefined;
   let observer: IntersectionObserver | undefined;

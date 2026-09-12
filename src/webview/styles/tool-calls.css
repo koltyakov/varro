@@ -3095,7 +3095,9 @@ kbd {
   background: transparent;
 }
 
-.user-message-card:has(.message-file-attachments.message-attachments-leading) {
+.user-message-card:has(.message-file-attachments.message-attachments-leading):not(
+    :has(.user-message-leading-content)
+  ) {
   margin-top: 33px;
   border-top-right-radius: var(--radius-chip);
 }

@@ -2269,7 +2269,11 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           routingStore.getPersistedSelectedAgent() || getDefaultPrimaryAgentNameFromState(),
       }),
       applySelectedAgent: (agent, sessionId) =>
-        routingStore.setSelectedAgent(agent, { sessionId, persistGlobal: false }),
+        routingStore.setSelectedAgent(agent, {
+          sessionId,
+          persistGlobal: false,
+          publishHost: false,
+        }),
       getSession: (sessionId) =>
         appStore.state.sessions.find((session) => session.id === sessionId),
       resolveSessionModel: deriveSelectedModelFromSession,

@@ -85,6 +85,15 @@ for (const scenario of exitCases) {
             Number.parseFloat(getComputedStyle(element.firstElementChild!).paddingTop)
           )
       ).toBe(gap);
+    // Tray entrance completion can precede the final bottom-follow easing frames.
+    // Settle before capturing the exit anchor, while the early case still retains its tools.
+    await expect
+      .poll(() =>
+        page
+          .locator('.interactive-list')
+          .evaluate((list) => list.scrollHeight - list.clientHeight - list.scrollTop)
+      )
+      .toBeLessThanOrEqual(1);
     const geometry = await page.locator('.interactive-list').evaluate((list) => {
       const viewport = list.querySelector<HTMLElement>('.assistant-active-activity-items')!;
       return {

@@ -1421,6 +1421,17 @@ describe('state helpers', () => {
       payload: { sessionId: 'session-1', agent: 'plan' },
     });
 
+    sent.length = 0;
+    stateModule.setSelectedAgent('plan', { sessionId: 'session-1', publishHost: false });
+    expect(sent).toEqual([]);
+    stateModule.setSelectedAgent('plan', { sessionId: 'session-1' });
+    expect(sent).toEqual([
+      {
+        type: 'session-plan-state/update',
+        payload: { sessionId: 'session-1', agent: 'plan' },
+      },
+    ]);
+
     stateModule.clearSelectedAgentForSession('session-1');
     expect(stateModule.getSelectedAgentForSession('session-1')).toBeNull();
     delete bridgeWindow.__sendToExtension;
@@ -1441,7 +1452,7 @@ describe('state helpers', () => {
     expect(stateModule.getPersistedSelectedAgent()).toBe('build');
   });
 
-  it('skips no-op session agent, model, and MCP persistence writes', async () => {
+  it('skips no-op local writes while publishing an explicit agent selection', async () => {
     const stateModule = await loadState();
     const sent: unknown[] = [];
     const bridgeWindow = getTestBridgeWindow();
@@ -1461,7 +1472,12 @@ describe('state helpers', () => {
     stateModule.applySessionSelectedModelsSnapshot({ 'session-1': { ...model } });
 
     expect(setItem).not.toHaveBeenCalled();
-    expect(sent).toEqual([]);
+    expect(sent).toEqual([
+      {
+        type: 'session-plan-state/update',
+        payload: { sessionId: 'session-1', agent: 'build' },
+      },
+    ]);
     delete bridgeWindow.__sendToExtension;
   });
 

@@ -1,4 +1,8 @@
 import { batch } from 'solid-js';
+import {
+  readSessionAgentMetadata,
+  readSessionModelMetadata,
+} from '../../../shared/session-selection-metadata';
 import type { SelectedModel, SessionSelectionOptions } from '../../lib/app-state-types';
 import {
   captureSessionStatusSnapshotTime,
@@ -153,11 +157,15 @@ export async function selectSessionWithDependencies(
   deps.syncFailedSessionsFromMessages(messages);
 
   const inferredAgent = deps.deriveSelectedAgentFromMessages(messages);
-  if (!persistedAgent && inferredAgent) {
+  const metadataAgent = readSessionAgentMetadata(session.metadata);
+  if (metadataAgent) {
+    deps.applySelectedAgent(metadataAgent, id);
+  } else if (!persistedAgent && inferredAgent) {
     deps.applySelectedAgent(inferredAgent, id);
   }
 
   const loadedModel =
+    readSessionModelMetadata(session.metadata) ??
     options?.selectedModel ??
     persistedModel ??
     deps.deriveSelectedModelFromMessages(messages) ??
@@ -182,6 +190,7 @@ export async function selectSessionWithDependencies(
     const statusType = status?.type;
     if (
       persistedAgent &&
+      !metadataAgent &&
       inferredAgent &&
       statusType !== 'idle' &&
       !latestAssistantFinished(messages)
