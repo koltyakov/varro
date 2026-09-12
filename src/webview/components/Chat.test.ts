@@ -50,6 +50,7 @@ import {
   setMessagesIncremental,
   removeResolvedQuestion,
   setConnectionInitialized,
+  setInputText,
   setState,
   skipPlanSession,
 } from '../lib/state';
@@ -2459,6 +2460,35 @@ describe('header status badges', () => {
     expect(container?.querySelector('.chat-header .chat-header-title-text')?.textContent).toBe(
       'New Chat'
     );
+  });
+
+  it('keeps the created session active when sending from the restored sessions screen', async () => {
+    setConnectionInitialized(true);
+    setState('sessions', [session('existing', 500)]);
+    setState('activeSessionId', null);
+    setState('messagesLoading', false);
+    setShowSessionPicker(true);
+    setInputText('Continue work in this workspace');
+    const send = vi
+      .spyOn(openCodeModule, 'sendMessage')
+      .mockImplementation(async (_text, options) => {
+        // A server update can advance the timestamp before optimistic publication.
+        setState('sessions', [session('created', Date.now()), session('existing', 500)]);
+        setState('activeSessionId', 'created');
+        options?.onOptimisticPublish?.();
+        return true;
+      });
+
+    cleanup = render(() => Chat(), container!);
+    const button = container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]');
+    expect(button).toBeInstanceOf(HTMLButtonElement);
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await vi.waitFor(() => expect(send).toHaveBeenCalledOnce());
+
+    expect(state.activeSessionId).toBe('created');
+    expect(container?.querySelector('.session-list-new-session')).toBeNull();
+    expect(container?.querySelector('.chat-main-shell')).not.toBeNull();
+    setInputText('');
   });
 
   it('removes a busy streaming transcript when the new-chat button receives a pointer click', async () => {

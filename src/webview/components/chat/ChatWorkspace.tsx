@@ -106,7 +106,7 @@ export function ChatWorkspace(props: {
   onOpenPlanReadySessions: () => void;
   onOpenCompletedSessions: () => void;
   onOpenRunningSessions: () => void;
-  onCreateSessionFromPicker: () => void;
+  onSendFromPicker: () => void;
   onCreateSession: () => void;
 }) {
   let chatContentRef: HTMLDivElement | undefined;
@@ -170,7 +170,7 @@ export function ChatWorkspace(props: {
       onOpenPlanReadySessions={props.onOpenPlanReadySessions}
       onOpenCompletedSessions={props.onOpenCompletedSessions}
       onOpenRunningSessions={props.onOpenRunningSessions}
-      onCreateSession={props.onCreateSessionFromPicker}
+      onCreateSession={props.onCreateSession}
     />
   );
 
@@ -338,7 +338,7 @@ export function ChatWorkspace(props: {
               onPrimarySessionsCountChange={setVisiblePrimarySessionsCount}
             />
             <div class="session-list-new-session">
-              <ChatInput newSession onBeforeSend={props.onCreateSessionFromPicker} />
+              <ChatInput newSession onBeforeSend={props.onSendFromPicker} />
             </div>
           </>
         }

@@ -269,7 +269,7 @@ test('running tool updates preserve the node and its current entrance animation'
     return snapshot;
   });
   await expect(item.locator('.tool-invocation-title')).toHaveText('Check updated sources');
-  await item.getByRole('button', { name: 'Check updated sources', exact: true }).click();
+  await item.getByRole('button', { name: /^Check updated sources\b/ }).click();
   await expect(item.locator('.terminal-command-row-input')).toContainText('npm run check-updated');
   await expect(item).toHaveCount(1);
   expect
