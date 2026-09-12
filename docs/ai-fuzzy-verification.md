@@ -196,8 +196,16 @@ OPENCODE_DB="$PWD/artifacts/ai-test-data/data/opencode/opencode.db" \
 opencode serve --hostname 127.0.0.1 --port 49001
 ```
 
-Provision model credentials in this isolated environment before preparing history. Do not move the
-production database into it. Use `VARRO_AI_SERVER_URL=http://127.0.0.1:49001` for both
+Reuse the user's existing OpenCode provider connection during isolated setup. A fresh `XDG_DATA_HOME`
+also isolates `auth.json`, so provision only the required provider entry into the verified test data
+directory with owner-only permissions, without printing its contents. Record the test copy for removal
+during cleanup. This is routine test setup; do not ask the user to authenticate again when an existing
+connection is available. Never modify the source credential or copy production session storage.
+Select the required model in the isolated editor and verify it with a small marked request. A missing
+provider in `/provider`'s `connected` list alone does not establish an authentication failure. If selection
+or the request fails, inspect the isolated setup and exact error before asking the user for a missing
+prerequisite. Preserve database isolation throughout.
+Use `VARRO_AI_SERVER_URL=http://127.0.0.1:49001` for both
 `ai:preconditions` and `ai:vscode`, or pass `--server` to preparation. The launcher pins the host's
 transport to that verified origin, isolates CLI storage, and disables automatic server startup and
 updates. Record the dedicated server PID and stop it during cleanup along with the test editor.

@@ -47,6 +47,52 @@ function renameOperations(
 }
 
 describe('session management helpers', () => {
+  it('coalesces repeated fork actions until the fork has opened and allows a later fork', async () => {
+    const remoteFork = deferred<Session>();
+    const selection = deferred<void>();
+    const forkRemoteSession = vi.fn(() => remoteFork.promise);
+    const selectSession = vi.fn(() => selection.promise);
+    const deps: Parameters<typeof forkSessionWithDependencies>[0] = {
+      getActiveSessionId: () => 'session-1',
+      getNewChatDraftGeneration: () => 0,
+      forkRemoteSession,
+      getEffectiveSessionModel: () => null,
+      setSelectedModel: vi.fn(),
+      publishSessionModel: vi.fn(),
+      getPermissionModeForSession: () => 'default',
+      setPermissionModeForSession: vi.fn(),
+      upsertSession: vi.fn(),
+      selectSession,
+      setError: vi.fn(),
+    };
+    // SAFETY: Only forkSession is invoked, and all of its dependencies are supplied.
+    const operations = new SessionManagementOperations(deps as OperationsDependencies);
+
+    const first = operations.forkSession('session-1', 'message-2');
+    const repeated = operations.forkSession('session-1', 'message-2');
+    expect(forkRemoteSession).toHaveBeenCalledTimes(1);
+
+    remoteFork.resolve(session('fork-1'));
+    await vi.waitFor(() => expect(selectSession).toHaveBeenCalledWith('fork-1'));
+    const whileOpening = operations.forkSession('session-1', 'message-2');
+    expect(forkRemoteSession).toHaveBeenCalledTimes(1);
+    selection.resolve();
+    expect(await Promise.all([first, repeated, whileOpening])).toEqual([
+      'fork-1',
+      'fork-1',
+      'fork-1',
+    ]);
+    expect(selectSession).toHaveBeenCalledTimes(1);
+
+    await operations.forkSession('session-1', 'message-2');
+    expect(forkRemoteSession).toHaveBeenCalledTimes(2);
+
+    forkRemoteSession.mockRejectedValueOnce(new Error('fork failed'));
+    await expect(operations.forkSession('session-1', 'message-2')).resolves.toBeNull();
+    await expect(operations.forkSession('session-1', 'message-2')).resolves.toBe('fork-1');
+    expect(forkRemoteSession).toHaveBeenCalledTimes(4);
+  });
+
   it('creates a session and restores draft routing selections', async () => {
     const setSelectedModel = vi.fn();
     const publishSessionModel = vi.fn();

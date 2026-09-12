@@ -989,6 +989,47 @@ test('keeps shared-row direction authoritative over height-driven scroll coordin
   );
 });
 
+test('verifies disjoint viewport movement from stable mounted message order', () => {
+  const before = {
+    focusOwner: 'transcript',
+    transcript: {
+      sessionId: 'session-1',
+      scrollTop: 60760,
+      scrollHeight: 61480,
+      clientHeight: 514,
+      mountedMessageIds: ['older', 'middle', 'newer'],
+      visibleRows: [{ messageId: 'newer', top: 0 }],
+    },
+  };
+  const after = {
+    ...before,
+    transcript: {
+      ...before.transcript,
+      scrollTop: 60290,
+      scrollHeight: 61524,
+      visibleRows: [{ messageId: 'older', top: -78 }],
+    },
+  };
+  const action = { action: 'key on transcript', key: 'Shift+Space' };
+  assert.deepEqual(
+    verifyActionEffect(action, before, after, { dispatched: true, settledAfter: after }),
+    { verified: true }
+  );
+  assert.equal(
+    verifyActionEffect({ ...action, key: 'Space' }, before, after, { dispatched: true }).verified,
+    false
+  );
+  for (const transcript of [
+    { ...after.transcript, sessionId: 'other-session' },
+    { ...after.transcript, mountedMessageIds: ['newer', 'middle', 'older'] },
+  ]) {
+    assert.equal(
+      verifyActionEffect(action, before, { ...after, transcript }, { dispatched: true }).verified,
+      false
+    );
+  }
+});
+
 test('requires settle evidence when height changes without a shared visible row', () => {
   const before = {
     focusOwner: 'transcript',
@@ -1018,6 +1059,31 @@ test('requires settle evidence when height changes without a shared visible row'
     }),
     { verified: false, reason: 'settled transcript movement direction could not be verified' }
   );
+});
+
+test('reads canonical order when Home leaves both mounted windows', async () => {
+  const before = {
+    focusOwner: 'transcript',
+    transcript: { sessionId: 'session', scrollTop: 19000, scrollHeight: 20825, clientHeight: 514, mountedMessageIds: ['new'], visibleRows: [{ messageId: 'new', top: -16 }] },
+  };
+  const after = {
+    focusOwner: 'transcript',
+    transcript: { sessionId: 'session', scrollTop: 9309, scrollHeight: 29924, clientHeight: 514, mountedMessageIds: ['old'], visibleRows: [{ messageId: 'old', top: -34 }] },
+  };
+  let capture = 0;
+  let reads = 0;
+  const actions = await executeActionPlan({
+    captureActionState: async () => capture++ === 0 ? before : after,
+    key: async () => true,
+  }, [{ step: 45, action: 'key on transcript', key: 'Home' }], 'session', 0, {
+    readMessageOrder: async () => { reads += 1; return ['old', 'middle', 'new']; },
+  });
+  assert.equal(actions[0].executed, true);
+  assert.equal(reads, 1);
+  assert.deepEqual(actions[0].messageOrder, ['old', 'middle', 'new']);
+  assert.equal(verifyActionEffect({ action: 'key on transcript', key: 'Home' }, before, after, {
+    dispatched: true, messageOrder: ['new', 'middle', 'old'],
+  }).verified, false);
 });
 
 test('uses the current editor action label', async () => {
@@ -1119,6 +1185,35 @@ test('scopes AI-08 disclosure actions to current-turn message identities', async
     ],
   ]);
   assert.equal(results[0].executed, true);
+});
+
+test('targets a visible current-turn disclosure before a hidden retained disclosure', async () => {
+  let expanded = false;
+  const clicks = [];
+  const scope = { messageIds: ['current'] };
+  const results = await executeActionPlan(
+    {
+      captureActionState: async () => ({
+        disclosures: [
+          { messageId: 'current', key: 'hidden', expanded: false, visible: false },
+          { messageId: 'current', key: 'visible', expanded, visible: true },
+        ],
+      }),
+      click: async (selector, receivedScope) => {
+        assert.deepEqual(receivedScope, scope);
+        clicks.push(selector);
+        if (!selector.includes('="visible"')) return false;
+        expanded = true;
+        return true;
+      },
+    },
+    [{ step: 9, action: 'expand disclosure' }],
+    'session',
+    0,
+    { scope }
+  );
+  assert.equal(results[0].executed, true);
+  assert.equal(clicks.length, 1);
 });
 
 test('inventories transitive descendants without including unrelated sessions', () => {

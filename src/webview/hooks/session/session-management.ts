@@ -83,13 +83,15 @@ type SessionManagementDependencies = {
 export class SessionManagementOperations {
   private readonly renameGenerations = new Map<string, number>();
   private nextRenameGeneration = 0;
+  private readonly pendingForks = new Map<string, Promise<string | null>>();
 
   constructor(private readonly deps: SessionManagementDependencies) {}
 
   readonly createSession = async (
     title?: string,
     initialPermissionMode: PermissionMode = 'default',
-    workspaceTarget?: SessionWorkspaceTarget
+    workspaceTarget?: SessionWorkspaceTarget,
+    selectedModel?: SelectedModel | null
   ) => {
     return createSessionWithDependencies(
       {
@@ -107,7 +109,8 @@ export class SessionManagementOperations {
         setSessionUsageLimit: this.deps.setSessionUsageLimit,
         persistActiveSessionId: this.deps.persistActiveSessionId,
         markSessionSeen: this.deps.markSessionSeen,
-        getDefaultSelectedModel: this.deps.getDefaultSelectedModel,
+        getDefaultSelectedModel: () =>
+          selectedModel === undefined ? this.deps.getDefaultSelectedModel() : selectedModel,
         setSelectedModel: this.deps.setSelectedModel,
         publishSessionModel: this.deps.publishSessionModel,
         resolveDefaultAgent: this.deps.resolveDefaultAgent,
@@ -131,8 +134,12 @@ export class SessionManagementOperations {
     );
   };
 
-  readonly forkSession = async (id: string, messageID?: string) => {
-    return forkSessionWithDependencies(
+  readonly forkSession = (id: string, messageID?: string): Promise<string | null> => {
+    const key = JSON.stringify([this.deps.getWorkspaceGeneration?.() ?? 0, id, messageID]);
+    const pending = this.pendingForks.get(key);
+    if (pending) return pending;
+
+    const fork = forkSessionWithDependencies(
       {
         getActiveSessionId: this.deps.getActiveSessionId,
         getWorkspaceGeneration: this.deps.getWorkspaceGeneration,
@@ -154,7 +161,11 @@ export class SessionManagementOperations {
       },
       id,
       messageID
-    );
+    ).finally(() => {
+      this.pendingForks.delete(key);
+    });
+    this.pendingForks.set(key, fork);
+    return fork;
   };
 
   readonly renameSession = async (id: string, title: string) => {

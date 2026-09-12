@@ -200,6 +200,79 @@ test('thinking visibility keeps a distant user-card anchor mounted across large 
   ).toBeLessThan(1.5);
 });
 
+test('Thinking invalidation keeps one painted anchor through every measurement frame', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await page.goto(
+    '/e2e/harness/index.html?scenario=heterogeneous-large-transcript&expandedActivity=1&tallThinkingAnchor=1'
+  );
+  await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+  await page.getByRole('button', { name: /^Go to turn 61:/ }).click();
+  const list = page.locator('.interactive-list');
+  const bounds = await list.boundingBox();
+  await page.mouse.move(bounds!.x + bounds!.width - 20, bounds!.y + bounds!.height / 2);
+  await page.mouse.wheel(0, 420);
+  for (const width of [486, 360, 720, 486]) {
+    await page.setViewportSize({ width, height: 900 });
+    await list.evaluate(async () => {
+      for (let frame = 0; frame < 24; frame += 1) await new Promise(requestAnimationFrame);
+    });
+  }
+  const composer = page.getByRole('textbox', { name: 'Message composer' });
+  for (let toggle = 0; toggle < 2; toggle += 1) {
+    await composer.fill('/thinking');
+    const anchor = await list.evaluate((element) => {
+      const viewport = element.getBoundingClientRect();
+      const candidates = [
+        ...element.querySelectorAll<HTMLElement>(
+          '[data-assistant-render-key] :is(p,li,pre,table), .user-message-card'
+        ),
+      ]
+        .filter((node) => {
+          const rect = node.getBoundingClientRect();
+          return (
+            !node.closest('.chat-thinking-box') &&
+            rect.top >= viewport.top + 8 &&
+            rect.bottom <= viewport.bottom - 8 &&
+            rect.height > 8
+          );
+        })
+        .toSorted((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+      const node = candidates[0]!;
+      const row = node.closest<HTMLElement>('[data-msg-id]')!;
+      const item = node.closest<HTMLElement>('[data-assistant-render-key]');
+      return {
+        messageId: row.dataset.msgId!,
+        renderKey: item?.dataset.assistantRenderKey,
+        tag: node.tagName,
+        ordinal: item ? [...item.querySelectorAll(node.tagName)].indexOf(node) : 0,
+        top: node.getBoundingClientRect().top,
+      };
+    });
+    const node = anchor.renderKey
+      ? page
+          .locator(`[data-assistant-render-key="${anchor.renderKey}"] ${anchor.tag}`)
+          .nth(anchor.ordinal)
+      : page.locator(`[data-msg-id="${anchor.messageId}"] .user-message-card`);
+    const sampling = node.evaluate(async (element, top) => {
+      const frames = [];
+      for (let frame = 0; frame < 48; frame += 1) {
+        await new Promise(requestAnimationFrame);
+        frames.push(element.isConnected ? element.getBoundingClientRect().top - top : null);
+      }
+      return frames;
+    }, anchor.top);
+    await page.keyboard.press('Enter');
+    const frames = await sampling;
+    expect(frames).not.toContain(null);
+    expect(
+      Math.max(...frames.map((delta) => Math.abs(delta!))),
+      JSON.stringify({ anchor, frames })
+    ).toBeLessThan(1.5);
+  }
+});
+
 test('chat font changes preserve main typography proportions and a detached anchor', async ({
   page,
 }) => {

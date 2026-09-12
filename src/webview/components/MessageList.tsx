@@ -1673,7 +1673,8 @@ export function MessageList() {
     }
 
     const publishChangedLayout = () => {
-      publishMeasurementVersion();
+      // This batch already owns an exact anchor; do not queue a competing row-level correction.
+      publishMeasurementVersion({ preserveVisibleAnchor: !invalidatedAnchor });
       if (!invalidatedAnchor) return;
       queueMicrotask(() => {
         if (
@@ -3429,13 +3430,13 @@ export function MessageList() {
       return;
     }
 
-    const anchor = captureVisibleScrollAnchor();
+    const anchor = pendingThinkingLayoutAnchor ?? captureVisibleScrollAnchor();
 
     setMeasurementVersion((version) => version + 1);
 
     queueMicrotask(() => {
       if (!stickyNavigationOwnsScroll() && !userScrollRecentlyActive()) {
-        restoreVisibleScrollAnchor(anchor);
+        restoreVisibleScrollAnchor(pendingThinkingLayoutAnchor ?? anchor);
       }
     });
   }
@@ -5196,6 +5197,18 @@ export function MessageList() {
         if (sessionId) startFollowLoop(sessionId);
       });
     }
+    if (
+      autoScroll() &&
+      pinnedToBottom &&
+      distance <= 1 &&
+      activityExitBottomTarget === null &&
+      !editingMessage() &&
+      !diffFocusPauseActive
+    ) {
+      // An exit that began while detached has no reserve. Protect its remaining height when
+      // native input reaches the bottom before the animation finishes.
+      reserveCollapsedActivityTraySpace(exitingActivityPartKeys(), true);
+    }
     if (!autoScroll() && !widthResizeActive && !stickyNavigationOwnsScroll() && !editingMessage()) {
       if (mountedDetachedAnchor) {
         rememberDetachedVisibleAnchor(
@@ -5475,6 +5488,9 @@ export function MessageList() {
     pendingExpansionScrollAnchor = null;
     historyAnchorSettleOwner = null;
     if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
+    // Keyboard movement must release an old exit target without collapsing its reserved range.
+    preserveActivityExitReserve();
+    clearActivityExitSummaryAnchor();
     pendingWheelResizeAnchor = null;
     if (widthResizeActive) {
       publishPendingWidthMeasurements({ preserveVisibleAnchor: false });
@@ -6981,14 +6997,16 @@ export function MessageList() {
     );
     requestAnimationFrame(() => {
       if (pendingThinkingLayoutAnchor === preferredAnchor) {
-        pendingThinkingLayoutAnchor = null;
         if (
           !widthResizeActive &&
           preferredAnchor &&
           untrack(widthResizePinnedMessageId) === preferredAnchor.messageId
         ) {
           setWidthResizePinnedMessageId(null);
+          // Releasing the pin can hydrate a different virtual range in this same frame.
+          restoreVisibleScrollAnchor(preferredAnchor);
         }
+        pendingThinkingLayoutAnchor = null;
       }
     });
 

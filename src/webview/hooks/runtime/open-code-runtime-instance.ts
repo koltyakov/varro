@@ -2198,8 +2198,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   const sessionSendOperations = new SessionSendOperations({
     getWorkspaceGeneration: () => workspaceGeneration,
-    createSession: (initialPermissionMode, workspaceTarget) =>
-      createSession(undefined, initialPermissionMode, workspaceTarget),
+    createSession: (initialPermissionMode, workspaceTarget, selectedModel) =>
+      createSession(undefined, initialPermissionMode, workspaceTarget, selectedModel),
     ensureSessionPermission: (sessionId, options) =>
       ensureSessionPermissionWithDependencies(
         {
@@ -2717,12 +2717,14 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   async function createSession(
     title?: string,
     initialPermissionMode = permissionsStore.getPermissionModeForSession(null),
-    workspaceTarget?: SessionWorkspaceTarget
+    workspaceTarget?: SessionWorkspaceTarget,
+    selectedModel?: SelectedModel | null
   ): Promise<string | null> {
     const sessionId = await sessionManagementOperations.createSession(
       title,
       initialPermissionMode,
-      workspaceTarget
+      workspaceTarget,
+      selectedModel
     );
     if (sessionId) {
       const directory = getSessionDirectory(sessionId);
@@ -2845,14 +2847,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   }
 
   async function forkSession(id: string, messageID?: string): Promise<string | null> {
-    const sessionId = await sessionManagementOperations.forkSession(id, messageID);
-    if (sessionId) {
-      const directory = getSessionDirectory(sessionId);
-      sessionStore.persistLastOpenedView(
-        directory ? { type: 'session', sessionId, directory } : { type: 'session', sessionId }
-      );
-    }
-    return sessionId;
+    return sessionManagementOperations.forkSession(id, messageID);
   }
 
   async function renameSession(id: string, title: string): Promise<boolean> {

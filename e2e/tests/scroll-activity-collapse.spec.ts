@@ -15,6 +15,8 @@ const exitCases: Array<{
   virtual?: boolean;
   detached?: boolean;
   detachDuring?: boolean;
+  reattachDuring?: boolean;
+  keyDuring?: boolean;
   animation?: 'cancel' | 'fallback';
 }> = [
   { name: 'three simultaneous', count: 3, gap: 9, early: false, stagger: false },
@@ -39,6 +41,24 @@ const exitCases: Array<{
     animation: 'fallback',
   },
   { name: 'wheel during exit', count: 3, gap: 9, early: false, stagger: false, detachDuring: true },
+  {
+    name: 'downward key during exit',
+    count: 3,
+    gap: 9,
+    early: false,
+    stagger: false,
+    keyDuring: true,
+  },
+  {
+    name: 'return to bottom during exit',
+    count: 3,
+    gap: 9,
+    early: false,
+    stagger: false,
+    virtual: true,
+    detached: true,
+    reattachDuring: true,
+  },
   { name: 'one', count: 1, gap: 9, early: false, stagger: false },
   { name: 'two', count: 2, gap: 9, early: false, stagger: false },
   { name: 'eight clipped', count: 8, gap: 9, early: false, stagger: false },
@@ -123,12 +143,13 @@ for (const scenario of exitCases) {
         .toBeGreaterThan(100);
       await page.waitForTimeout(150);
     }
-    const pauseExit = scenario.detachDuring
-      ? await page.addStyleTag({
-          content:
-            '.assistant-active-activity-item.is-exiting { animation-play-state: paused !important; }',
-        })
-      : null;
+    const pauseExit =
+      scenario.detachDuring || scenario.reattachDuring || scenario.keyDuring
+        ? await page.addStyleTag({
+            content:
+              '.assistant-active-activity-item.is-exiting { animation-play-state: paused !important; }',
+          })
+        : null;
     const sampling = page.locator('.interactive-list').evaluate(
       async (list, options) => {
         const containerTop = list.getBoundingClientRect().top;
@@ -254,7 +275,7 @@ for (const scenario of exitCases) {
       },
       { count, stagger, sessionId, targetMessageId, animation: scenario.animation }
     );
-    if (scenario.detachDuring) {
+    if (scenario.detachDuring || scenario.reattachDuring || scenario.keyDuring) {
       await expect(items.first()).toHaveClass(/is-exiting/);
       const list = page.locator('.interactive-list');
       await list.evaluate((element) => {
@@ -263,40 +284,47 @@ for (const scenario of exitCases) {
       const bounds = await list.boundingBox();
       if (!bounds) throw new Error('Transcript viewport is missing');
       await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + 100);
-      await page.mouse.wheel(0, -180);
-      await expect
-        .poll(() =>
-          list.evaluate(
-            (element) => element.scrollHeight - element.clientHeight - element.scrollTop
-          )
-        )
-        .toBeGreaterThan(100);
+      if (scenario.keyDuring) {
+        const beforeKey = await list.evaluate((element) => element.scrollTop);
+        await page.mouse.click(bounds.x + bounds.width / 2, bounds.y + 100);
+        await page.keyboard.press('ArrowDown');
+        await expect
+          .poll(() => list.evaluate((element) => element.scrollTop))
+          .toBeGreaterThan(beforeKey + 1);
+      } else await page.mouse.wheel(0, scenario.reattachDuring ? 420 : -180);
+      const distance = () =>
+        list.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop);
+      if (scenario.reattachDuring) await expect.poll(distance).toBeLessThanOrEqual(1);
+      else if (!scenario.keyDuring) await expect.poll(distance).toBeGreaterThan(100);
       await page.waitForTimeout(100);
       // The new anchor is established by genuine native movement. Later animation/timer cleanup
       // must preserve this destination, not restore the pre-gesture bottom target.
-      await list.evaluate((element) => {
-        const summary = element.querySelector('.assistant-activity-summary')!;
+      await list.evaluate((element, messageId) => {
+        const summary = element.querySelector(
+          `[data-msg-id="${messageId}"] .assistant-activity-summary`
+        )!;
         element.dataset.exitTestAnchor = String(
           summary.getBoundingClientRect().top - element.getBoundingClientRect().top
         );
-      });
+      }, targetMessageId);
       await pauseExit?.evaluate((element) => element.parentNode?.removeChild(element));
     }
     const result = await sampling;
-    if (scenario.detachDuring) {
+    if (scenario.detachDuring || scenario.reattachDuring) {
       expect(
         result.samples.filter(
           (sample) => sample.expectedTop !== null && sample.expectedTop !== result.before
         ).length
       ).toBeGreaterThan(10);
       expect(result.samples.at(-1)?.exit).toBe(0);
-      expect(result.samples.at(-1)?.append).toBe(0);
+      if (scenario.detachDuring) expect(result.samples.at(-1)?.append).toBe(0);
+      else expect(result.samples.at(-1)?.append).toBeGreaterThan(0);
     }
     expect(result.samples.some((sample) => sample.exiting === (stagger ? 1 : count))).toBe(true);
     expect(result.samples.at(-1)?.active).toBe(0);
     expect(result.samples.at(-1)?.thinking).toBe(true);
     expect(result.samples.at(-1)?.exit).toBe(0);
-    if (scenario.detached) {
+    if (scenario.detached && !scenario.reattachDuring) {
       expect(result.samples.every((sample) => sample.append === 0 && sample.exit === 0)).toBe(true);
       expect(result.samples.at(-1)?.scrollTop).toBeCloseTo(result.samples[0]!.scrollTop, 0);
     } else if (!scenario.detachDuring) expect(result.samples.at(-1)?.append).toBeGreaterThan(0);

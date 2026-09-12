@@ -109,6 +109,9 @@ the shared invariants below remain true.
   before mutating the preference. That explicit anchor remains available to every layout-signature
   invalidation caused by the same synchronous state change; one pass must not consume it and let a
   second pass restore a competing generic anchor.
+- A layout invalidation that already owns an exact anchor must not queue a second generic row anchor
+  while publishing measurements. Generic measurement callbacks queued around `/thinking` defer to its
+  pending exact anchor. Releasing the temporary virtual pin reconciles that same marker before paint.
 - A resize batch is a pure width reflow only when every reported inline size changed or the container
   font changed. Concurrent streaming, expansion, or content mutation makes it a content resize and
   uses normal height-correction ownership.
@@ -206,6 +209,10 @@ the shared invariants below remain true.
 - A bottom-pinned activity exit may temporarily reserve the disappearing flow space and freeze its
   existing bottom target. The reserve is a bounded geometry owner, must not compete with bottom-follow,
   and yields immediately to direct user movement, session replacement, or transition cancellation.
+- Reaching the physical bottom during an exit that began while detached reserves the remaining
+  animated tray height. Otherwise the shrinking scroll range reverses the just-completed gesture.
+- Transcript-scrolling keys release the old activity-exit target and summary anchor while handing its
+  reserved space to the append reserve. The old exit target must not undo a downward key destination.
 - Non-append insertion, removal, filtering, or view replacement may use a bounded structural owner.
   Capture before publishing the changed visible collection and restore after row reconciliation only
   when no stronger owner exists. Pure appends belong to bottom-follow or append-transition ownership.

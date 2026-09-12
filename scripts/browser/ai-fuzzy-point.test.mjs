@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { after as afterAll, before as beforeAll, test } from 'node:test';
 import { chromium } from '@playwright/test';
 
-import { CdpController } from '../ai-fuzzy-live.mjs';
+import { CdpController, executeActionPlan } from '../ai-fuzzy-live.mjs';
 
 let browser;
 beforeAll(async () => {
@@ -238,4 +238,47 @@ test('bounds native reveal attempts when wheel input is canceled', async (t) => 
   assert.equal(await controller.point('#marker-45'), null);
   assert.equal(wheels.length, 24);
   assert.deepEqual(await state(), before);
+});
+
+test('expands a painted disclosure instead of a hidden retained summary in the same turn', async (t) => {
+  const { page, controller, wheels } = await fixture(t);
+  await page.evaluate(() => {
+    document.querySelector('.content').innerHTML = `
+      <div data-msg-id="current">
+        <button class="assistant-activity-summary" style="display:none" data-activity-summary-group-key="retained" aria-expanded="false">Retained</button>
+        <button class="assistant-activity-summary" data-activity-summary-group-key="painted" aria-expanded="false" onclick="this.setAttribute('aria-expanded','true')">Explored</button>
+      </div>`;
+  });
+  const session = await page.context().newCDPSession(page);
+  controller.call = (method, params) => session.send(method, params);
+  const before = await controller.captureActionState({ messageIds: ['current'] });
+  assert.deepEqual(before.disclosures.map((item) => item.visible), [false, true]);
+  const actions = await executeActionPlan(controller, [{ step: 9, action: 'expand disclosure' }], 'test', 0, {
+    scope: { messageIds: ['current'] },
+  });
+  assert.equal(actions[0].executed, true);
+  assert.equal(await page.locator('[data-activity-summary-group-key="painted"]').getAttribute('aria-expanded'), 'true');
+  assert.equal(wheels.length, 0);
+});
+
+test('refreshes disclosure targeting when the first retained summary is occluded', async (t) => {
+  const { page, controller } = await fixture(t);
+  await page.evaluate(() => {
+    document.querySelector('.content').innerHTML = `
+      <div data-msg-id="current">
+        <button class="assistant-activity-summary" data-activity-summary-group-key="occluded" aria-expanded="false">Occluded</button>
+        <div style="height:1000px"></div>
+        <button class="assistant-activity-summary" data-activity-summary-group-key="reachable" aria-expanded="false" onclick="this.setAttribute('aria-expanded','true')">Explored</button>
+      </div>`;
+    document.body.insertAdjacentHTML('beforeend', '<div style="position:fixed;inset:0 0 auto;height:100px;z-index:100">Sticky overlay</div>');
+  });
+  const session = await page.context().newCDPSession(page);
+  controller.call = (method, params) => session.send(method, params);
+  const actions = await executeActionPlan(controller, [{ step: 9, action: 'expand disclosure' }], 'test', 0, { scope: { messageIds: ['current'] } });
+  assert.equal(actions[0].executed, true);
+  assert.deepEqual(actions[0].targetingAttempts, [
+    { key: 'occluded', dispatched: false },
+    { key: 'reachable', dispatched: true },
+  ]);
+  assert.equal(await page.locator('[data-activity-summary-group-key="occluded"]').getAttribute('aria-expanded'), 'false');
 });

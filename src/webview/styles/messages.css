@@ -2425,6 +2425,10 @@ body.vscode-light
     box-shadow 0.15s;
 }
 
+body:is(.vscode-light, .vscode-high-contrast-light) .interactive-session .chat-input-container {
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--color-vscode-widget-shadow) 34%, transparent);
+}
+
 body.vscode-dark .interactive-session .chat-input-container {
   background: linear-gradient(
     to bottom,
@@ -2434,6 +2438,113 @@ body.vscode-dark .interactive-session .chat-input-container {
   border-color: color-mix(in srgb, var(--color-vscode-fg) 10%, var(--color-vscode-border));
 }
 
+body.vscode-dark:is(
+    [data-vscode-theme-id='Dark+'],
+    [data-vscode-theme-id='Default Dark+'],
+    [data-vscode-theme-id='Dark Modern'],
+    [data-vscode-theme-id='Visual Studio Dark']
+  )
+  .interactive-session
+  .chat-input-container {
+  --color-vscode-input-bg: color-mix(
+    in srgb,
+    var(--vscode-input-background, #3c3c3c) 15%,
+    var(--color-vscode-bg)
+  );
+  --color-vscode-input-surface: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 4%,
+    var(--color-vscode-input-bg)
+  );
+  --color-vscode-input-surface-hover: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 9%,
+    var(--color-vscode-input-bg)
+  );
+  --color-vscode-chat-input-toolbar-surface: color-mix(
+    in srgb,
+    var(--color-vscode-input-bg) 84%,
+    black 16%
+  );
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--color-vscode-fg) 12%, var(--color-vscode-input-bg)),
+    color-mix(in srgb, var(--color-vscode-fg) 8%, var(--color-vscode-input-bg))
+  );
+  border-color: color-mix(in srgb, var(--color-vscode-fg) 14%, var(--color-vscode-input-bg));
+}
+
+body.vscode-dark:is(
+    [data-vscode-theme-id='Dark+'],
+    [data-vscode-theme-id='Default Dark+'],
+    [data-vscode-theme-id='Dark Modern'],
+    [data-vscode-theme-id='Visual Studio Dark'],
+    [data-vscode-theme-id='Dark 2026']
+  )
+  .interactive-session
+  .chat-input-container
+  :is(.chat-attachment-chip, .inline-chip) {
+  background: color-mix(in srgb, var(--color-vscode-fg) var(--composer-chip-fill, 0%), transparent);
+}
+
+body.vscode-dark:is(
+    [data-vscode-theme-id='Dark+'],
+    [data-vscode-theme-id='Default Dark+'],
+    [data-vscode-theme-id='Dark Modern'],
+    [data-vscode-theme-id='Visual Studio Dark'],
+    [data-vscode-theme-id='Dark 2026']
+  )
+  .interactive-session
+  .chat-input-container
+  :is(.chat-attachment-chip, .inline-chip):hover {
+  background: color-mix(
+    in srgb,
+    var(--color-vscode-fg) calc(var(--composer-chip-fill, 0%) + 3%),
+    transparent
+  );
+}
+
+body.vscode-dark:is(
+    [data-vscode-theme-id='Dark+'],
+    [data-vscode-theme-id='Default Dark+'],
+    [data-vscode-theme-id='Dark Modern'],
+    [data-vscode-theme-id='Visual Studio Dark'],
+    [data-vscode-theme-id='Dark 2026']
+  )
+  .interactive-session
+  .chat-input-container
+  .inline-chip {
+  --composer-chip-fill: 6%;
+  border-color: color-mix(in srgb, var(--color-vscode-fg) 18%, transparent);
+}
+
+body.vscode-dark:is(
+    [data-vscode-theme-id='Dark+'],
+    [data-vscode-theme-id='Default Dark+'],
+    [data-vscode-theme-id='Dark Modern'],
+    [data-vscode-theme-id='Visual Studio Dark'],
+    [data-vscode-theme-id='Dark 2026']
+  )
+  .interactive-session
+  .chat-input-container
+  .chat-attachment-chip {
+  --color-vscode-border-strong: color-mix(in srgb, var(--color-vscode-fg) 30%, transparent);
+  --color-vscode-border-soft: color-mix(in srgb, var(--color-vscode-fg) 20%, transparent);
+}
+
+body.vscode-dark:is(
+    [data-vscode-theme-id='Dark+'],
+    [data-vscode-theme-id='Default Dark+'],
+    [data-vscode-theme-id='Dark Modern'],
+    [data-vscode-theme-id='Visual Studio Dark'],
+    [data-vscode-theme-id='Dark 2026']
+  )
+  .interactive-session
+  .chat-input-container
+  .chip-remove {
+  color: var(--color-vscode-fg);
+}
+
 body.vscode-dark.varro-flat-dark .interactive-session .chat-input-container {
   background: linear-gradient(
     to bottom,
@@ -2441,6 +2552,14 @@ body.vscode-dark.varro-flat-dark .interactive-session .chat-input-container {
     color-mix(in srgb, var(--color-vscode-fg) 2%, var(--color-vscode-input-bg))
   );
   border-color: color-mix(in srgb, var(--color-vscode-fg) 14%, var(--color-vscode-border));
+}
+
+body.vscode-dark[data-vscode-theme-id='Dark 2026'] .interactive-session .chat-input-container {
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--color-vscode-fg) 12%, var(--color-vscode-input-bg)),
+    color-mix(in srgb, var(--color-vscode-fg) 8%, var(--color-vscode-input-bg))
+  );
 }
 
 .interactive-session .chat-input-container.showing-context-popup {

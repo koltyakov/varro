@@ -1,6 +1,34 @@
 /* oxlint-disable unicorn/consistent-function-scoping -- Browser-side contrast helpers must stay inside the serialized page.evaluate callback. */
 import { expect, test } from '@playwright/test';
 
+for (const themeId of ['Dark+', 'Default Dark+', 'Dark Modern', 'Visual Studio Dark']) {
+  test(`${themeId} darkens the composer and toolbar controls`, async ({ page }) => {
+    await page.goto('/e2e/harness/index.html?scenario=blank&theme=dark');
+    const composer = page.locator('.chat-input-container').first();
+    await expect(composer).toBeVisible();
+    const background = await composer.evaluate(
+      (element) => getComputedStyle(element).backgroundImage
+    );
+    const picker = composer.getByRole('button', { name: 'Select agent', exact: true });
+    await expect(picker).toBeVisible();
+    const pickerBackground = await picker.evaluate(
+      (element) => getComputedStyle(element).backgroundColor
+    );
+
+    await page.evaluate((id) => {
+      document.body.dataset.vscodeThemeId = id;
+    }, themeId);
+
+    await expect(composer).not.toHaveCSS('background-image', background);
+    await expect(picker).not.toHaveCSS('background-color', pickerBackground);
+    await page.evaluate(() => {
+      document.body.dataset.vscodeThemeId = '';
+    });
+    await expect(composer).toHaveCSS('background-image', background);
+    await expect(picker).toHaveCSS('background-color', pickerBackground);
+  });
+}
+
 for (const theme of ['dark', 'light']) {
   test(`${theme} completion selection keeps readable text`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 500, height: 800 });

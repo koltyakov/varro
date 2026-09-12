@@ -315,7 +315,11 @@ export function ContextPopup(props: {
       </Show>
 
       <Show
-        when={props.showCompactAction !== false && shouldShowContextCompact(props.usage.percent)}
+        when={
+          props.showCompactAction !== false &&
+          !props.compactDisabled &&
+          shouldShowContextCompact(props.usage.percent)
+        }
       >
         <div class="context-popup-actions">
           <button

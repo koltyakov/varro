@@ -653,6 +653,41 @@ describe('sendMessage', () => {
     });
   });
 
+  it('publishes the draft model when the first send creates a session', async () => {
+    const { stateModule, hookModule } = await loadModules();
+    const draftModel = { providerID: 'openai', modelID: 'draft-model' };
+    stateModule.setState('providers', [
+      provider('openai', {
+        'draft-model': {
+          id: 'draft-model',
+          name: 'Draft model',
+          capabilities: { toolcall: true },
+          cost: { input: 0, output: 0 },
+        },
+      }),
+    ]);
+    stateModule.setSelectedModel({ providerID: 'openai', modelID: 'saved-default' });
+    stateModule.setSelectedModel(draftModel, { persistGlobal: false });
+    clientMocks.sessionCreate.mockResolvedValue(session('session-2'));
+    clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+    clientMocks.sessionGet.mockResolvedValue(session('session-2'));
+    clientMocks.sessionMessages.mockResolvedValue([]);
+    clientMocks.sessionStatus.mockResolvedValue({});
+
+    await hookModule.sendMessage('Keep this model');
+
+    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
+      'session-2',
+      expect.objectContaining({ model: draftModel }),
+      { directory: '/repo' }
+    );
+    expect(bridgeMocks.postMessage).toHaveBeenCalledWith({
+      type: 'session-model/update',
+      payload: { sessionId: 'session-2', model: draftModel },
+    });
+    expect(stateModule.state.selectedModel).toEqual(draftModel);
+  });
+
   it('defaults new sessions to the build agent', async () => {
     const { stateModule, hookModule } = await loadModules();
 

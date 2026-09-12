@@ -1413,14 +1413,37 @@ export class CdpController {
         ? [...transcript.querySelectorAll('[data-msg-id]')].filter((element) => {
             const row = element.getBoundingClientRect();
             const viewport = transcript.getBoundingClientRect();
-            return row.bottom > viewport.top && row.top < viewport.bottom;
+            return row.height > 0 && row.bottom > viewport.top && row.top < viewport.bottom;
           })
         : [];
       const firstVisible = visibleRows[0] ?? null;
+      const visibleControl = (element) => {
+        const rect = element.getBoundingClientRect();
+        let left = Math.max(0, rect.left), right = Math.min(innerWidth, rect.right);
+        let top = Math.max(0, rect.top), bottom = Math.min(innerHeight, rect.bottom);
+        for (let parent = element; parent; parent = parent.parentElement) {
+          const style = getComputedStyle(parent);
+          if (style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity) === 0) return false;
+          const bounds = parent.getBoundingClientRect();
+          if (style.overflowX !== 'visible') {
+            left = Math.max(left, bounds.left + parent.clientLeft);
+            right = Math.min(right, bounds.left + parent.clientLeft + parent.clientWidth);
+          }
+          if (style.overflowY !== 'visible') {
+            top = Math.max(top, bounds.top + parent.clientTop);
+            bottom = Math.min(bottom, bounds.top + parent.clientTop + parent.clientHeight);
+          }
+        }
+        if (bottom <= top || right <= left) return false;
+        const hit = document.elementFromPoint((left + right) / 2, (top + bottom) / 2);
+        return !!hit && element.contains(hit);
+      };
       return {
         width: innerWidth,
         focusOwner,
         transcript: transcript ? {
+          sessionId: document.querySelector('.session-item.active[data-session-id]')?.getAttribute('data-session-id') ?? null,
+          mountedMessageIds: [...transcript.querySelectorAll('[data-msg-id]')].map((element) => element.getAttribute('data-msg-id')),
           scrollTop: transcript.scrollTop,
           scrollHeight: transcript.scrollHeight,
           clientHeight: transcript.clientHeight,
@@ -1437,6 +1460,7 @@ export class CdpController {
           ...identity(element),
           key: element.getAttribute('data-activity-summary-group-key'),
           expanded: element.getAttribute('aria-expanded') === 'true',
+          visible: visibleControl(element),
         })),
         diffs: scoped('[aria-label^="Expand changes in"], [aria-label^="Collapse changes in"]').map((element) => ({
           ...identity(element),
@@ -1902,7 +1926,7 @@ function transcriptMoved(before, after) {
   );
 }
 
-function transcriptMovementDirection(before, after) {
+function transcriptMovementDirection(before, after, messageOrder = []) {
   if (!before?.transcript || !after?.transcript) return 0;
   const afterRows = new Map(
     (after.transcript.visibleRows ?? []).map((row) => [row.messageId, row.top])
@@ -1916,6 +1940,26 @@ function transcriptMovementDirection(before, after) {
     if (Math.abs(delta) > 1.5) return Math.sign(delta);
   }
   if (hasSharedPaintedRow) return 0;
+  if (
+    before.transcript.sessionId &&
+    before.transcript.sessionId === after.transcript.sessionId
+  ) {
+    const beforeId = before.transcript.visibleRows?.[0]?.messageId;
+    const afterId = after.transcript.visibleRows?.[0]?.messageId;
+    const directions = [
+      before.transcript.mountedMessageIds ?? [],
+      after.transcript.mountedMessageIds ?? [],
+      messageOrder,
+    ].flatMap((ids) => {
+      const from = ids.indexOf(beforeId);
+      const to = ids.indexOf(afterId);
+      return from >= 0 && to >= 0 && from !== to ? [Math.sign(to - from)] : [];
+    });
+    // Compare stable message identities in an observed DOM or canonical ordering, not virtual indexes.
+    if (directions.length && directions.every((direction) => direction === directions[0])) {
+      return directions[0];
+    }
+  }
   // A changed coordinate system cannot prove input direction without a shared row.
   if (
     ['scrollHeight', 'clientHeight'].some(
@@ -2018,7 +2062,7 @@ export function verifyActionEffect(action, before, after, details = {}) {
       return { verified: false, reason: 'transcript destination did not move' };
     }
     const expectedDirection = expectedTranscriptDirection(action);
-    const movementDirection = transcriptMovementDirection(before, after);
+    const movementDirection = transcriptMovementDirection(before, after, details.messageOrder);
     if (expectedDirection !== null && movementDirection === null) {
       return { verified: false, reason: 'transcript movement direction could not be verified' };
     }
@@ -2026,7 +2070,7 @@ export function verifyActionEffect(action, before, after, details = {}) {
       return { verified: false, reason: 'transcript moved opposite the requested direction' };
     }
     if (expectedDirection !== null && details.settledAfter) {
-      const settledDirection = transcriptMovementDirection(after, details.settledAfter);
+      const settledDirection = transcriptMovementDirection(after, details.settledAfter, details.messageOrder);
       if (settledDirection === null) {
         return {
           verified: false,
@@ -2075,27 +2119,23 @@ export async function executeActionPlan(cdp, plan, currentTitle, port, options =
       dispatched = true;
     } else if (action.action === 'expand disclosure' || action.action === 'collapse disclosure') {
       const expected = action.action === 'expand disclosure';
-      const target = before.disclosures?.find(
-        (entry) => entry.key && entry.expanded !== expected
-      );
-      const selector = target
-        ? `.assistant-activity-summary[data-activity-summary-group-key=${JSON.stringify(target.key)}]`
-        : null;
-      if (selector) {
-        for (let attempt = 0; attempt < 3; attempt += 1) {
-          dispatched = (await cdp.click(selector, options.scope)) || dispatched;
-          if (!dispatched) break;
-          await new Promise((resolve) => setTimeout(resolve, 100));
-          const state = await cdp.captureActionState(options.scope);
-          if (
-            state.disclosures?.some(
-              (entry) => entry.key === target.key && entry.expanded === expected
-            )
-          ) {
-            details.after = state;
-            break;
-          }
-        }
+      const tried = new Set();
+      details.targetingAttempts = [];
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const current = attempt === 0 ? before : await cdp.captureActionState(options.scope);
+        const target = current.disclosures
+          ?.filter((entry) => entry.key && !tried.has(entry.key) && entry.expanded !== expected)
+          .toSorted((left, right) => Number(right.visible === true) - Number(left.visible === true))[0];
+        if (!target) break;
+        tried.add(target.key);
+        const selector = `.assistant-activity-summary[data-activity-summary-group-key=${JSON.stringify(target.key)}]`;
+        dispatched = await cdp.click(selector, options.scope);
+        details.targetingAttempts.push({ key: target.key, dispatched });
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        if (!dispatched) continue;
+        details.after = await cdp.captureActionState(options.scope);
+        // A dispatched click is judged once. Only unavailable targets get the geometry retry.
+        break;
       }
     } else if (action.action === 'open file card and diff') {
       for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -2157,11 +2197,19 @@ export async function executeActionPlan(cdp, plan, currentTitle, port, options =
       await new Promise((resolve) => setTimeout(resolve, settleDelayMs));
       settledAfter = await cdp.captureActionState(options.scope);
     }
-    const effect = verifyActionEffect(action, before, after, {
+    let effect = verifyActionEffect(action, before, after, {
       ...details,
       dispatched,
       settledAfter,
     });
+    if (
+      !effect.verified &&
+      /^(settled )?transcript movement direction could not be verified$/.test(effect.reason) &&
+      options.readMessageOrder
+    ) {
+      details.messageOrder = await options.readMessageOrder();
+      effect = verifyActionEffect(action, before, after, { ...details, dispatched, settledAfter });
+    }
     const result = {
       ...action,
       dispatched,
@@ -2170,6 +2218,8 @@ export async function executeActionPlan(cdp, plan, currentTitle, port, options =
       after,
     };
     if (settledAfter) result.settledAfter = settledAfter;
+    if (details.messageOrder) result.messageOrder = details.messageOrder;
+    if (details.targetingAttempts) result.targetingAttempts = details.targetingAttempts;
     if (effect.reason) result.reason = effect.reason;
     results.push(result);
     if (!effect.verified) break;
@@ -4017,6 +4067,7 @@ async function runLive(options) {
         launch.remoteDebuggingPort,
         {
           isActive: () => client.isBusy(tracked.id),
+          readMessageOrder: async () => (await client.messages(tracked.id, 1000)).map((message) => message.info.id),
           marker: gate.marker,
           sessionId: tracked.id,
           scope,

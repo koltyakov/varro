@@ -150,7 +150,8 @@ type StateBoundSendDependencies = {
   getWorkspaceGeneration?(): number;
   createSession(
     initialPermissionMode: PermissionMode,
-    workspaceTarget?: SessionWorkspaceTarget
+    workspaceTarget?: SessionWorkspaceTarget,
+    selectedModel?: SelectedModel | null
   ): Promise<string | null>;
   ensureSessionPermission?(sessionId: string, options?: { directory?: string }): Promise<boolean>;
   clearPendingAbort(sessionId: string): void;
@@ -776,7 +777,8 @@ export class SessionSendOperations {
     initialPermissionMode: PermissionMode,
     draftGeneration: number,
     workspaceGeneration: number,
-    workspaceTarget?: SessionWorkspaceTarget
+    workspaceTarget?: SessionWorkspaceTarget,
+    selectedModel?: SelectedModel | null
   ) => {
     if (
       this.pendingLazySessionCreation?.draftGeneration === draftGeneration &&
@@ -786,7 +788,7 @@ export class SessionSendOperations {
       return this.pendingLazySessionCreation.promise;
     }
 
-    const creation = this.deps.createSession(initialPermissionMode, workspaceTarget);
+    const creation = this.deps.createSession(initialPermissionMode, workspaceTarget, selectedModel);
     const pending = { draftGeneration, workspaceGeneration, workspaceTarget, promise: creation };
     this.pendingLazySessionCreation = pending;
     void creation.then(
@@ -882,7 +884,8 @@ export class SessionSendOperations {
               initialPermissionMode,
               draftGeneration,
               workspaceGeneration,
-              newSessionWorkspace
+              newSessionWorkspace,
+              capturedComposerState.selectedModel
             ),
           ensureSessionPermission,
           clearPendingAbort: this.deps.clearPendingAbort,
