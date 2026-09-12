@@ -68,7 +68,7 @@ ownership still controls mode inheritance, grouping, decision history, and UI pl
 
 Effective mode resolution follows these rules:
 
-- A session with a valid `metadata.varroPermissionMode` uses that explicit mode. Session reads and
+- A session with a valid `metadata.varro.permissionMode` uses that explicit mode. Session reads and
   updates restore it in every extension instance, overriding local selections without inferring a mode
   from permission rules. Reading metadata does not patch the session or advance its timestamp.
 - Sessions without valid mode metadata retain their legacy local selection, if present.
@@ -424,7 +424,7 @@ permission and question reconciliation independent.
 ## Mode Changes
 
 Mode updates use the host-owned `/varro/session/{id}/permission-mode` endpoint. The host serializes
-updates for each session, patches OpenCode rules and `metadata.varroPermissionMode` together, persists
+updates for each session, patches OpenCode rules and `metadata.varro.permissionMode` together, persists
 the confirmed mode locally, and broadcasts the complete confirmed mode snapshot. Stale successes or
 failures must not overwrite the latest user
 selection. A webview may present the selected mode while its request is pending, but failure rolls

@@ -285,10 +285,30 @@ Opening the same session in another extension instance, including VS Code Inside
 selections ahead of local preferences and historical messages. Session updates also refresh them in
 open views. Restoring a session does not write metadata or change its last-updated timestamp.
 
-The stored fields are `metadata.varroModel`, containing `providerID`, `modelID`, and an optional
-`variant`, and `metadata.varroAgent`, containing the agent name. A model selection without a variant
+The stored fields are `metadata.varro.model`, containing `provider`, `model`, and an optional
+`variant`, and `metadata.varro.agent`, containing the agent name. A model selection without a variant
 clears the previous reasoning selection. Existing sessions without these fields retain the previous
 local and history-based fallback behavior until an explicit selection is saved.
+
+Varro merges its fields under `metadata.varro`, preserving workspace scope and unrelated metadata:
+
+```json
+{
+  "metadata": {
+    "varro": {
+      "schemaVersion": 1,
+      "workspaceScope": "folder",
+      "permissionMode": "auto",
+      "model": {
+        "provider": "openai",
+        "model": "your-model-id",
+        "variant": "high"
+      },
+      "agent": "build"
+    }
+  }
+}
+```
 
 ### Provider Connections
 

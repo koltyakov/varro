@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import { replacesOpenCodeBinary } from '../shared/opencode-install';
 import { MAX_NATIVE_PDF_TOTAL_BYTES } from '../shared/native-pdf';
 import {
+  mergeVarroSessionMetadata,
   readSessionAgentMetadata,
   readSessionModelMetadata,
 } from '../shared/session-selection-metadata';
@@ -980,7 +981,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           if (model) {
             await this.updateSessionSelections(
               sessionId,
-              { varroModel: model },
+              { model },
               this.sessionState.directoryFor(sessionId) ?? endpointServer.getWorkspaceCwd()
             );
             return;
@@ -996,7 +997,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           if (payload.agent) {
             await this.updateSessionSelections(
               payload.sessionId,
-              { varroAgent: payload.agent },
+              { agent: payload.agent },
               this.sessionState.directoryFor(payload.sessionId) ?? endpointServer.getWorkspaceCwd()
             );
           }
@@ -2257,33 +2258,32 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         const path = `/session/${encodeURIComponent(sessionId)}`;
         const session = asRecord(await this.server.request('GET', path, undefined, { directory }));
         if (session?.id !== sessionId) throw new Error('Cannot verify session selection metadata');
-        const metadata = { ...asRecord(session.metadata), ...selection };
+        const metadata = mergeVarroSessionMetadata(session.metadata, selection);
         const currentModel = readSessionModelMetadata(session.metadata);
-        const model = selection.varroModel;
+        const model = selection.model;
         const modelChanged =
           model &&
           (currentModel?.providerID !== model.providerID ||
             currentModel.modelID !== model.modelID ||
             currentModel.variant !== model.variant);
         const agentChanged =
-          selection.varroAgent &&
-          readSessionAgentMetadata(session.metadata) !== selection.varroAgent;
+          selection.agent && readSessionAgentMetadata(session.metadata) !== selection.agent;
         if (modelChanged || agentChanged) {
           await this.server.request('PATCH', path, { metadata }, { directory });
         }
-        if (selection.varroModel) {
-          await this.sessionSelectedModels.set(sessionId, selection.varroModel);
+        if (selection.model) {
+          await this.sessionSelectedModels.set(sessionId, selection.model);
           this.post({
             type: 'session-models/sync',
             payload: { models: this.sessionSelectedModels.list() },
           });
         }
-        if (selection.varroAgent) {
-          await this.sessionPlanState.setAgent(sessionId, selection.varroAgent);
-          this.sessionState.setSessionAgent(sessionId, selection.varroAgent);
+        if (selection.agent) {
+          await this.sessionPlanState.setAgent(sessionId, selection.agent);
+          this.sessionState.setSessionAgent(sessionId, selection.agent);
           this.post({
             type: 'session-plan-state/update',
-            payload: { sessionId, agent: selection.varroAgent },
+            payload: { sessionId, agent: selection.agent },
           });
         }
         this.restoreSessionSelections(sessionId, metadata);
@@ -2307,9 +2307,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const session = asRecord(await this.server.request('GET', path, undefined, { directory }));
     if (session?.id !== sessionID) throw new Error('Cannot verify session permission metadata');
     const metadata = asRecord(session.metadata) ?? {};
-    if (!permission && metadata.varroPermissionMode === mode) return session;
+    if (!permission && asRecord(metadata.varro)?.permissionMode === mode) return session;
     const body: Pick<Session, 'metadata' | 'permission'> = {
-      metadata: { ...metadata, varroPermissionMode: mode },
+      metadata: mergeVarroSessionMetadata(metadata, { permissionMode: mode }),
     };
     if (permission) body.permission = permission;
     return this.server.request('PATCH', path, body, { directory });
@@ -2469,7 +2469,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 path,
                 {
                   permission,
-                  metadata: { ...asRecord(session.metadata), varroPermissionMode: mode },
+                  metadata: mergeVarroSessionMetadata(session.metadata, { permissionMode: mode }),
                 },
                 { directory }
               );

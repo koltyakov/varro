@@ -11,15 +11,15 @@ describe('SessionPermissionModeStore', () => {
     expect(
       store.restoreSessionMetadata({
         id: 'session-1',
-        metadata: { varroPermissionMode: 'auto' },
+        metadata: { varro: { permissionMode: 'auto' } },
       })
     ).toBe(true);
     expect(store.list()).toEqual({ 'session-1': 'auto' });
     for (const metadata of [
       undefined,
       {},
-      { varroPermissionMode: 'edits' },
-      { varroPermissionMode: 'unknown' },
+      { varro: { permissionMode: 'edits' } },
+      { varro: { permissionMode: 'unknown' } },
     ]) {
       expect(store.restoreSessionMetadata({ id: 'session-1', metadata })).toBe(false);
     }
@@ -29,7 +29,10 @@ describe('SessionPermissionModeStore', () => {
     });
     expect(store.list()).toEqual({ 'session-1': 'auto' });
     await store.stageSafeFallback('session-1');
-    store.restoreSessionMetadata({ id: 'session-1', metadata: { varroPermissionMode: 'full' } });
+    store.restoreSessionMetadata({
+      id: 'session-1',
+      metadata: { varro: { permissionMode: 'full' } },
+    });
     expect(store.list()).toEqual({ 'session-1': 'default' });
   });
 

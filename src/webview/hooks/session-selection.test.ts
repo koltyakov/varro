@@ -121,7 +121,13 @@ describe('session-selection helpers', () => {
         ...loadedSession(id),
         session: {
           ...loadedSession(id).session,
-          metadata: { varroModel: model, varroAgent: 'plan' },
+          metadata: {
+            varro: {
+              schemaVersion: 1,
+              model: { provider: model.providerID, model: model.modelID },
+              agent: 'plan',
+            },
+          },
         },
       }),
       loadSessionStatuses: async () => ({ 'session-1': { type: 'busy' } }),

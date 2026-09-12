@@ -49,10 +49,13 @@ describe('session selection metadata', () => {
     ]);
     expect(session.metadata).toEqual({
       custom: 'preserved',
-      varro: { workspaceScope: 'folder' },
-      varroModel: model,
-      varroAgent: 'plan',
-      varroPermissionMode: 'auto',
+      varro: {
+        schemaVersion: 1,
+        workspaceScope: 'folder',
+        model: { provider: 'openai', model: 'test-model', variant: 'high' },
+        agent: 'plan',
+        permissionMode: 'auto',
+      },
     });
     const secondServer = createServer({ request });
     const second = await createSidebarProviderInstance({ server: secondServer });
@@ -83,7 +86,10 @@ describe('session selection metadata', () => {
       type: 'session-model/update',
       payload: { sessionId: session.id, model: modelWithoutVariant },
     });
-    expect(session.metadata?.varroModel).toEqual(modelWithoutVariant);
+    expect(asRecord(session.metadata?.varro)?.model).toEqual({
+      provider: 'openai',
+      model: 'test-model',
+    });
     request.mockClear();
     await first.provider.handleMessage({
       type: 'session-model/update',
@@ -100,7 +106,10 @@ describe('session selection metadata', () => {
       properties: {
         info: {
           ...session,
-          metadata: { ...session.metadata, varroAgent: 'build' },
+          metadata: {
+            ...session.metadata,
+            varro: { ...asRecord(session.metadata?.varro), agent: 'build' },
+          },
         },
       },
     });

@@ -39,8 +39,7 @@ describe('SidebarProvider session message responses', () => {
       ).updateConfirmedPermissionMode(session.id, mode);
       expect(session.metadata).toEqual({
         custom: 'preserved',
-        varro: { workspaceScope: 'folder' },
-        varroPermissionMode: mode,
+        varro: { schemaVersion: 1, workspaceScope: 'folder', permissionMode: mode },
       });
       expect(request).toHaveBeenCalledWith(
         'PATCH',
@@ -71,7 +70,13 @@ describe('SidebarProvider session message responses', () => {
       eventHandler?.({
         type: 'session.updated',
         properties: {
-          info: { ...session, metadata: { ...session.metadata, varroPermissionMode: changedMode } },
+          info: {
+            ...session,
+            metadata: {
+              ...session.metadata,
+              varro: { ...asRecord(session.metadata?.varro), permissionMode: changedMode },
+            },
+          },
         },
       });
       expect(posted).toContainEqual({
@@ -119,7 +124,10 @@ describe('SidebarProvider session message responses', () => {
 
   it('keeps remote metadata authoritative over a stale local migration', async () => {
     const server = createServer({
-      request: vi.fn(async () => ({ id: 'session-1', metadata: { varroPermissionMode: 'auto' } })),
+      request: vi.fn(async () => ({
+        id: 'session-1',
+        metadata: { varro: { schemaVersion: 1, permissionMode: 'auto' } },
+      })),
     });
     const { provider } = await createSidebarProviderInstance({ server });
     const { posted } = attachTestView(provider);
@@ -189,7 +197,7 @@ describe('SidebarProvider session message responses', () => {
           patchAttempts += 1;
           expect(serverMode).toBe('full');
           expect(body).toEqual({
-            metadata: { varroPermissionMode: 'default' },
+            metadata: { varro: { schemaVersion: 1, permissionMode: 'default' } },
             permission: [
               { permission: '*', pattern: '*', action: 'ask' },
               { permission: 'todowrite', pattern: '*', action: 'allow' },
@@ -270,7 +278,7 @@ describe('SidebarProvider session message responses', () => {
       'PATCH',
       '/session/fork-1',
       {
-        metadata: { custom: 'preserved', varroPermissionMode: 'full' },
+        metadata: { custom: 'preserved', varro: { schemaVersion: 1, permissionMode: 'full' } },
       },
       { directory: '/repo' }
     );
@@ -429,7 +437,7 @@ describe('SidebarProvider session message responses', () => {
           if (method === 'GET' && path === '/session/extant') return { id: 'extant', directory };
           if (method === 'PATCH' && path === '/session/extant') {
             expect(body).toEqual({
-              metadata: { varroPermissionMode: 'default' },
+              metadata: { varro: { schemaVersion: 1, permissionMode: 'default' } },
               permission: [
                 { permission: '*', pattern: '*', action: 'ask' },
                 { permission: 'todowrite', pattern: '*', action: 'allow' },
@@ -459,7 +467,7 @@ describe('SidebarProvider session message responses', () => {
         'PATCH',
         '/session/extant',
         {
-          metadata: { varroPermissionMode: 'default' },
+          metadata: { varro: { schemaVersion: 1, permissionMode: 'default' } },
           permission: [
             { permission: '*', pattern: '*', action: 'ask' },
             { permission: 'todowrite', pattern: '*', action: 'allow' },
@@ -572,7 +580,7 @@ describe('SidebarProvider session message responses', () => {
       'PATCH',
       '/session/session-legacy',
       {
-        metadata: { varroPermissionMode: 'default' },
+        metadata: { varro: { schemaVersion: 1, permissionMode: 'default' } },
         permission: [
           { permission: '*', pattern: '*', action: 'ask' },
           { permission: 'todowrite', pattern: '*', action: 'allow' },
@@ -643,7 +651,10 @@ describe('SidebarProvider session message responses', () => {
     expect(server.request).toHaveBeenCalledWith(
       'PATCH',
       '/session/session-old',
-      { permission: getSafeDefaultPermissionRules(), metadata: { varroPermissionMode: 'default' } },
+      {
+        permission: getSafeDefaultPermissionRules(),
+        metadata: { varro: { schemaVersion: 1, permissionMode: 'default' } },
+      },
       { directory: '/repo' }
     );
   });

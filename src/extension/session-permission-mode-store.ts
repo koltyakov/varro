@@ -57,7 +57,7 @@ export class SessionPermissionModeStore {
 
   restoreSessionMetadata(session: UnknownRecord): boolean {
     const sessionId = session.id;
-    const mode = asRecord(session.metadata)?.varroPermissionMode;
+    const mode = asRecord(asRecord(session.metadata)?.varro)?.permissionMode;
     if (!isSafePersistedSessionId(sessionId) || !isPermissionMode(mode)) return false;
     if (this.modes[sessionId] === mode) return false;
     // Remote metadata is authoritative. Reads must not patch sessions or advance their timestamps.
