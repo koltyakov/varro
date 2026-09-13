@@ -14,6 +14,7 @@ type AttachmentStripItem =
   | { type: 'native-pdf'; value: NativePdfAttachment };
 
 type ActiveContextAttachment = {
+  icon?: 'table';
   filename: string;
   lineRange: string | null;
 };
@@ -64,6 +65,7 @@ export function AttachmentStrip(props: {
             return (
               <AttachmentChip
                 label={item.value.filename}
+                icon={item.value.icon}
                 path={item.value.filename}
                 detail={item.value.lineRange}
                 disabled={!props.activeContextEnabled}

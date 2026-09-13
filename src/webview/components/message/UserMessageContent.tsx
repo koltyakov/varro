@@ -1,5 +1,8 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import { Portal } from 'solid-js/web';
+import type { DatabaseContext } from '../../../shared/protocol';
+import { databaseContextDetail, isDatabaseContext } from '../../../shared/database-context';
+import { formatDatabaseContext } from '../../lib/database-context';
 import {
   formatDisplayPath,
   getLeafPathName,
@@ -45,6 +48,7 @@ import { UiIcon } from '../UiIcon';
 import { formatSkillReference, parseSkillAttachment } from '../../lib/skill-reference';
 
 export type MessageAttachment =
+  | { type: 'database'; context: DatabaseContext }
   | { type: 'skill'; name: string }
   | {
       type: 'file-selection';
@@ -338,6 +342,28 @@ function parseUserMessageText(text: string): ParsedUserMessageText {
         continue;
       }
 
+      if (trimmedLine === '[Database context]') {
+        const openingFence = lines[index + 1]?.trim().match(/^(`{3,})json$/);
+        if (openingFence) {
+          const end = lines.findIndex(
+            (candidate, position) => position > index + 1 && candidate.trim() === openingFence[1]
+          );
+          if (end !== -1) {
+            try {
+              const context: unknown = JSON.parse(lines.slice(index + 2, end).join('\n'));
+              if (isDatabaseContext(context)) {
+                flushTextBuffer();
+                attachments.push({ type: 'database', context });
+                index = end;
+                continue;
+              }
+            } catch {
+              // Malformed context remains visible as ordinary message text.
+            }
+          }
+        }
+      }
+
       const terminalMatch = trimmedLine.match(/^\[Selection from terminal (.+?)\]/);
       if (terminalMatch) {
         flushTextBuffer();
@@ -492,6 +518,7 @@ export function getUserMessageEditContext(parts: Part[]): MessageEditContext {
     if (
       attachment.type === 'terminal-selection' ||
       attachment.type === 'editor-text' ||
+      attachment.type === 'database' ||
       attachment.type === 'skill'
     )
       continue;
@@ -562,6 +589,8 @@ export function getUserMessagePreviewText(parts: Part[]): string {
   const firstAttachment = parsed.attachments[0];
   if (firstAttachment) {
     switch (firstAttachment.type) {
+      case 'database':
+        return `Database: ${firstAttachment.context.name}`;
       case 'file-selection':
         return `Selection: ${getLeafPathName(firstAttachment.filename)}`;
       case 'editor-text':
@@ -1294,6 +1323,7 @@ function getAttachmentTextMarker(attachment: MessageAttachment): string | null {
       return `@${attachment.filename}`;
     case 'editor-text':
     case 'terminal-selection':
+    case 'database':
       return null;
   }
 }
@@ -1696,6 +1726,17 @@ function InlineMessageAttachmentChip(props: { attachment: MessageAttachment }) {
 }
 
 function openAttachment(value: MessageAttachment) {
+  if (value.type === 'database') {
+    postMessage({
+      type: 'vscode/open-text',
+      payload: {
+        content: JSON.stringify(value.context, null, 2),
+        title: `${value.context.name} database context`,
+        language: 'json',
+      },
+    });
+    return;
+  }
   if (value.type === 'skill') return;
   if (value.type === 'editor-text') {
     if (value.text === undefined) return;
@@ -1760,6 +1801,8 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
   const handleClick = () => openAttachment(attachment());
 
   const iconSvg = () => {
+    if (attachment().type === 'database')
+      return <MaterialChipIcon kind="table" class="chip-icon" />;
     if (attachment().type === 'skill') return <MaterialChipIcon kind="skill" class="chip-icon" />;
     if (isFolder()) {
       return <FolderIcon class="chip-icon" width="12" height="12" />;
@@ -1772,6 +1815,8 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
 
   const detail = () => {
     const value = attachment();
+    if (value.type === 'database')
+      return <span class="chip-detail">{databaseContextDetail(value.context)}</span>;
     if (value.type === 'file-selection') {
       return <span class="chip-detail">{formatContextLineRanges(value.lineRanges)}</span>;
     }
@@ -1988,7 +2033,16 @@ function MessageAttachmentRail(props: {
             >
               <Show
                 when={attachment.type === 'agent'}
-                fallback={<FileTypeIcon path={getDisplayMessageAttachmentPath(attachment)} />}
+                fallback={
+                  <Show
+                    when={
+                      attachment.type === 'message' && attachment.attachment.type === 'database'
+                    }
+                    fallback={<FileTypeIcon path={getDisplayMessageAttachmentPath(attachment)} />}
+                  >
+                    <MaterialChipIcon kind="table" class="chip-icon" />
+                  </Show>
+                }
               >
                 <MaterialChipIcon kind="agent" class="chip-icon" />
               </Show>
@@ -2022,6 +2076,8 @@ function getDisplayMessageAttachmentLabel(attachment: DisplayMessageAttachment):
 
 function getDisplayMessageAttachmentDetail(attachment: DisplayMessageAttachment): string | null {
   if (attachment.type !== 'message') return null;
+  if (attachment.attachment.type === 'database')
+    return databaseContextDetail(attachment.attachment.context);
   if (attachment.attachment.type === 'file-selection') {
     return formatContextLineRanges(attachment.attachment.lineRanges);
   }
@@ -2066,6 +2122,8 @@ function getTerminalLineCountLabel(text: string | undefined): string | null {
 
 function getAttachmentLabel(attachment: MessageAttachment): string {
   switch (attachment.type) {
+    case 'database':
+      return attachment.context.name;
     case 'skill':
       return attachment.name;
     case 'file-selection':
@@ -2088,6 +2146,8 @@ function getMessageAttachmentPath(attachment: MessageAttachment): string | undef
 
 function getAttachmentTitle(attachment: MessageAttachment): string {
   switch (attachment.type) {
+    case 'database':
+      return `${attachment.context.name} · ${databaseContextDetail(attachment.context)}`;
     case 'skill':
       return `Skill: ${attachment.name}`;
     case 'file-selection':
@@ -2107,6 +2167,8 @@ function getInlineAttachmentCopyMarker(attachment: MessageAttachment): string {
 
 function getStandaloneAttachmentCopyText(attachment: MessageAttachment): string {
   switch (attachment.type) {
+    case 'database':
+      return formatDatabaseContext(attachment.context);
     case 'skill':
       return formatSkillReference(attachment.name);
     case 'file-selection':

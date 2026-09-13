@@ -14,7 +14,7 @@ export function AttachmentChip(props: {
   path?: string;
   detail?: string | null;
   disabled?: boolean;
-  icon?: 'file' | 'folder' | 'image' | 'terminal' | 'warning';
+  icon?: 'file' | 'folder' | 'image' | 'terminal' | 'warning' | 'table';
   toggle?: boolean;
   onClick?: () => void;
   onRemove?: () => void;
@@ -121,6 +121,9 @@ export function AttachmentChip(props: {
       </Show>
       <Show when={props.icon === 'terminal'}>
         <MaterialChipIcon kind="terminal" class="chip-icon" />
+      </Show>
+      <Show when={props.icon === 'table'}>
+        <MaterialChipIcon kind="table" class="chip-icon" />
       </Show>
       <Show when={props.icon === 'warning'}>
         <WarningIcon class="chip-icon" width={12} height={12} />

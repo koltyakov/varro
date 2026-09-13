@@ -255,6 +255,7 @@ afterEach(() => {
   setState('terminalSelection', null);
   setState('attachedDiagnostics', null);
   setState('editorContext', {
+    databaseContext: undefined,
     workspacePath: null,
     activeWorkspacePath: null,
     activeFile: null,
@@ -8677,6 +8678,69 @@ describe('ChatInput', () => {
 
     expect(container?.querySelector('.rich-composer .inline-chip')).not.toBeNull();
     expect(container?.querySelector('.chat-attachments-container')).toBeNull();
+  });
+
+  it('shows a DDL editor as table context without a local file', async () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+      databaseContext: {
+        name: 'users',
+        dataSource: 'Demo SQLite',
+        dialect: 'SQLite',
+        filter: '',
+        columns: [],
+        rows: [],
+        selectedRowCount: 0,
+        scope: 'ddl',
+        ddl: 'create table users (id INT primary key);',
+        pendingChanges: false,
+        cellEditing: false,
+        pageStart: 0,
+        truncated: false,
+      },
+    });
+    cleanup = render(() => ChatInput(), container!);
+    await flushAsyncWork();
+    const chip = container?.querySelector('.chat-attachments-container .chat-attachment-chip');
+    expect(chip?.textContent).toContain('users');
+    expect(chip?.textContent).toContain('DDL');
+    expect(chip?.querySelector('[data-chip-icon="table"]')).not.toBeNull();
+  });
+
+  it('shows database selection context and can disable it', async () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+      databaseContext: {
+        name: 'public.orders',
+        dataSource: 'local',
+        dialect: 'PostgreSQL',
+        filter: '',
+        columns: [{ name: 'id', type: 'integer' }],
+        rows: [['1']],
+        selectedRowCount: 3,
+        scope: 'selected-rows',
+        pendingChanges: false,
+        cellEditing: false,
+        pageStart: 0,
+        truncated: true,
+      },
+    });
+    cleanup = render(() => ChatInput(), container!);
+    await flushAsyncWork();
+    const chip = container?.querySelector<HTMLButtonElement>(
+      '.chat-attachments-container .chat-attachment-chip'
+    );
+    expect(chip?.textContent).toContain('public.orders');
+    expect(chip?.textContent).toContain('1 of 3 rows; truncated');
+    chip?.click();
+    await flushAsyncWork();
+    expect(chip?.title).toContain('database context is disabled');
   });
 
   it('shows captured context from an unsaved editor selection', async () => {

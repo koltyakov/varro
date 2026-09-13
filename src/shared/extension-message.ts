@@ -1,3 +1,4 @@
+import { isDatabaseContext } from './database-context';
 import {
   isPermissionMode,
   isSafePersistedSessionId,
@@ -716,6 +717,7 @@ export function isEditorContext<T>(value: T): value is T & EditorContext {
     return false;
   }
   if (record.editorText !== undefined && !isEditorText(record.editorText)) return false;
+  if (record.databaseContext != null && !isDatabaseContext(record.databaseContext)) return false;
   if (!Array.isArray(record.diagnostics)) return false;
   if (
     record.diagnosticsTotal !== undefined &&

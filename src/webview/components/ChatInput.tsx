@@ -1,3 +1,4 @@
+import { cloneDatabaseContext, databaseContextDetail } from '../../shared/database-context';
 import {
   Show,
   Suspense,
@@ -1342,6 +1343,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   );
 
   const activeContext = createMemo(() => {
+    const database = state.editorContext.databaseContext;
+    if (database && !composerEditingMessage())
+      return {
+        filename: database.name,
+        icon: 'table' as const,
+        lineRange: databaseContextDetail(database),
+      };
     const file = composerActiveFile();
     const editorText = state.editorContext.editorText;
     if (!file && !editorText) return null;
@@ -1368,10 +1376,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const context = activeContext();
     if (!context) return null;
     const label = context.lineRange ? `${context.filename} ${context.lineRange}` : context.filename;
+    const source = state.editorContext.databaseContext ? 'database' : 'document';
     return `${label}${
       activeContextEnabled(composerSessionId())
-        ? ' · Click to disable current document context'
-        : ' · Current document context is disabled. Click to enable it again'
+        ? ` · Click to disable current ${source} context`
+        : ` · Current ${source} context is disabled. Click to enable it again`
     }`;
   });
   const hasAttachmentStripItems = () =>
@@ -2260,6 +2269,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         queuedContext: {
           editorContext: {
             ...state.editorContext,
+            databaseContext: cloneDatabaseContext(state.editorContext.databaseContext),
             workspaceFolders: state.editorContext.workspaceFolders?.map((folder) => ({
               ...folder,
             })),

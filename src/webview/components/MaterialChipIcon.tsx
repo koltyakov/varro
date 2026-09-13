@@ -4,10 +4,14 @@ import sessionIcon from 'material-icon-theme/icons/changelog.svg';
 import imageIcon from 'material-icon-theme/icons/image.svg';
 import externalLinkIcon from 'material-icon-theme/icons/url.svg';
 import gitIcon from 'material-icon-theme/icons/git.svg';
+import tableIcon from 'iconoir/icons/table.svg';
+import { Show } from 'solid-js';
+import { UiIcon } from './UiIcon';
 import agentIcon from '../assets/agent.svg';
 
 export type MaterialChipIconKind =
   | 'agent'
+  | 'table'
   | 'skill'
   | 'terminal'
   | 'image'
@@ -19,6 +23,7 @@ type MaterialChipIconMap = Record<MaterialChipIconKind, string>;
 
 const ICONS = {
   agent: agentIcon,
+  table: tableIcon,
   skill: skillIcon,
   terminal: terminalIcon,
   image: imageIcon,
@@ -47,13 +52,20 @@ export function createMaterialChipIconElement(
 
 export function MaterialChipIcon(props: { kind: MaterialChipIconKind; class?: string }) {
   return (
-    <img
-      class={props.class ? `material-chip-icon ${props.class}` : 'material-chip-icon'}
-      src={getMaterialChipIcon(props.kind)}
-      data-chip-icon={props.kind}
-      alt=""
-      aria-hidden="true"
-      draggable={false}
-    />
+    <Show
+      when={props.kind === 'table'}
+      fallback={
+        <img
+          class={props.class ? `material-chip-icon ${props.class}` : 'material-chip-icon'}
+          src={getMaterialChipIcon(props.kind)}
+          data-chip-icon={props.kind}
+          alt=""
+          aria-hidden="true"
+          draggable={false}
+        />
+      }
+    >
+      <UiIcon source={tableIcon} class={props.class} data-chip-icon="table" />
+    </Show>
   );
 }

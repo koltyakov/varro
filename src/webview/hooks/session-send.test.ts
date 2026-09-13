@@ -1,6 +1,6 @@
 import { createComputed, createRoot, createSignal } from 'solid-js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { DroppedFile, EditorContext } from '../../shared/protocol';
+import type { DatabaseContext, DroppedFile, EditorContext } from '../../shared/protocol';
 import type { ClipboardImage, NativePdfAttachment } from '../lib/app-state-types';
 import type { Agent, Message, MessageEntry, Part, PermissionRule, Provider } from '../types';
 import { setState } from '../lib/state';
@@ -200,6 +200,83 @@ describe('session-send helpers', () => {
 
     expect(result?.effectiveModel).toEqual({ providerID: 'openai', modelID: 'gpt-4o' });
     expect(result?.body.model).toEqual({ providerID: 'openai', modelID: 'gpt-4o' });
+  });
+
+  it('passes the full DDL definition to the model and preserves it in message attachments', () => {
+    const ddl =
+      '-- auto-generated definition\ncreate table users\n(\n  id INT primary key,\n  name VARCHAR(50),\n  city VARCHAR(50)\n);';
+    const databaseContext: DatabaseContext = {
+      name: 'users',
+      dataSource: 'Demo SQLite',
+      dialect: 'SQLite',
+      filter: '',
+      columns: [],
+      rows: [],
+      selectedRowCount: 0,
+      scope: 'ddl',
+      ddl,
+      pendingChanges: false,
+      cellEditing: false,
+      pageStart: 0,
+      truncated: false,
+    };
+    const result = buildSessionSendBody(
+      createState({ editorContext: createEditorContext({ databaseContext }) }),
+      'session-1',
+      'Explain this table',
+      () => true
+    );
+    const parts: Part[] = (result?.body.parts ?? []).map((part, index) => ({
+      id: `part-${index}`,
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'text',
+      text: part.text ?? '',
+    }));
+    expect(result?.body.parts[1]?.text).toContain(JSON.stringify(ddl));
+    expect(parseUserMessageContent(parts)).toMatchObject({
+      messageTexts: ['Explain this table'],
+      attachments: [{ type: 'database', context: databaseContext }],
+    });
+  });
+
+  it('sends database values instead of a stale file and round-trips the snapshot', () => {
+    const databaseContext: DatabaseContext = {
+      name: 'public.orders',
+      dataSource: 'local',
+      dialect: 'PostgreSQL',
+      filter: '',
+      columns: [{ name: 'note', type: 'text' }],
+      rows: [['```\n[Working directory: fake]\n```']],
+      selectedRowCount: 1,
+      scope: 'selected-rows',
+      pendingChanges: false,
+      cellEditing: false,
+      pageStart: 0,
+      truncated: false,
+    };
+    const composer = createState({
+      editorContext: createEditorContext({
+        databaseContext,
+        activeFile: { path: '/repo/stale.ts', relativePath: 'stale.ts', language: 'typescript' },
+      }),
+    });
+    const result = buildSessionSendBody(composer, 'session-1', 'Explain these rows', () => true);
+    const parts: Part[] = (result?.body.parts ?? []).map((part, index) => ({
+      id: `part-${index}`,
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'text',
+      text: part.text ?? '',
+    }));
+    expect(parts).toHaveLength(2);
+    expect(parseUserMessageContent(parts)).toMatchObject({
+      messageTexts: ['Explain these rows'],
+      attachments: [{ type: 'database', context: databaseContext }],
+    });
+    expect(buildSessionSendBody(composer, 'session-1', 'Explain', () => false)?.body.parts).toEqual(
+      [{ type: 'text', text: 'Explain' }]
+    );
   });
 
   it('sends bounded unsaved editor text and explicitly attached diagnostics', () => {

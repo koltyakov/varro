@@ -1,4 +1,6 @@
 import { batch } from 'solid-js';
+import { cloneDatabaseContext } from '../../../shared/database-context';
+import { formatDatabaseContext } from '../../lib/database-context';
 import type {
   DroppedFile,
   EditorContext,
@@ -258,7 +260,10 @@ export function buildSessionSendBody(
   const activeFile = composerState.editorContext.activeFile;
   const currentDocumentEnabled = isCurrentDocumentEnabled(sessionId);
   const editorText = composerState.editorContext.editorText;
-  if (editorText && currentDocumentEnabled) {
+  const databaseContext = composerState.editorContext.databaseContext;
+  if (databaseContext && currentDocumentEnabled) {
+    parts.push({ type: 'text', text: formatDatabaseContext(databaseContext) });
+  } else if (editorText && currentDocumentEnabled) {
     const range = `lines ${editorText.range.startLine}-${editorText.range.endLine}`;
     const source = editorText.kind === 'selection' ? 'Unsaved selection' : 'Unsaved buffer';
     const truncation = editorText.truncated ? '; truncated' : '';
@@ -834,6 +839,7 @@ export class SessionSendOperations {
       modelVariantSelections,
       editorContext: {
         ...sourceEditorContext,
+        databaseContext: cloneDatabaseContext(sourceEditorContext.databaseContext),
         workspaceFolders: sourceEditorContext.workspaceFolders?.map((folder) => ({ ...folder })),
         activeFile: sourceEditorContext.activeFile ? { ...sourceEditorContext.activeFile } : null,
         selection: sourceEditorContext.selection ? { ...sourceEditorContext.selection } : null,

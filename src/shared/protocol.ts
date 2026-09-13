@@ -34,6 +34,23 @@ export interface EditorDiagnostic {
   line: number;
 }
 
+/** A detached snapshot of a loaded database grid. Values use strings to preserve SQL precision. */
+export interface DatabaseContext {
+  name: string;
+  dataSource: string | null;
+  dialect: string | null;
+  filter: string;
+  columns: Array<{ name: string; type: string }>;
+  rows: Array<Array<string | null>>;
+  selectedRowCount: number;
+  scope: 'table' | 'selected-rows' | 'ddl';
+  ddl?: string;
+  pendingChanges: boolean;
+  cellEditing: boolean;
+  pageStart: number;
+  truncated: boolean;
+}
+
 export interface EditorContext {
   workspacePath: string | null;
   workspaceDirectory?: string | null;
@@ -49,6 +66,7 @@ export interface EditorContext {
     endLine: number;
   } | null;
   editorText?: EditorTextContext | null;
+  databaseContext?: DatabaseContext | null;
   diagnostics: EditorDiagnostic[];
   diagnosticsTotal?: number;
 }
