@@ -1,3 +1,4 @@
+import type { DroppedFile } from '../../shared/protocol';
 import {
   getRelativePathWithinWorkspace,
   isAbsoluteWorkspacePath,
@@ -48,7 +49,8 @@ export function formatDisplayPath(path: string, workspacePath: string | null | u
   return path;
 }
 
-export function getDroppedFileLabel(file: { path: string; relativePath: string }) {
+export function getDroppedFileLabel(file: Pick<DroppedFile, 'path' | 'relativePath' | 'database'>) {
+  if (file.database) return file.database.name;
   if (!file.relativePath || file.relativePath === '.') {
     return getLeafPathName(file.path);
   }

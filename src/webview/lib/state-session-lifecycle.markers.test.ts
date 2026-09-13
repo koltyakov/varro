@@ -9,6 +9,66 @@ beforeEach(() => vi.resetModules());
 afterEach(() => vi.restoreAllMocks());
 
 describe('catalog marker restoration', () => {
+  it('imports folder reads and restores them in a workspace with separate browser storage', async () => {
+    const bridge = await import('./bridge');
+    const post = vi.spyOn(bridge, 'postMessage');
+    window.localStorage.setItem(
+      'varro.lastSeenSessions',
+      JSON.stringify({ '/repo': { chat: 200 } })
+    );
+    const folder = await import('./state');
+    folder.syncSessionMarkersForWorkspace('/repo', ['/repo']);
+    folder.setSessions([session('chat', '/repo')]);
+    expect(post).toHaveBeenCalledWith({
+      type: 'session-read-state/update',
+      payload: { sessionId: 'chat', seenAt: 200 },
+    });
+
+    vi.resetModules();
+    window.localStorage.clear();
+    Object.assign(window, {
+      __initialWebviewState: { sessionReadState: { chat: 200, closed: 999 } },
+    });
+    try {
+      const workspace = await import('./state');
+      workspace.syncSessionMarkersForWorkspace('/second', ['/second', '/repo']);
+      workspace.setSessions([session('chat', '/repo'), session('other', '/second')]);
+      workspace.markSessionResponseCompleted('chat', 100);
+      expect(workspace.isSessionUnread('chat', 100)).toBe(false);
+      expect(workspace.isSessionCompletedResponseUnread('chat')).toBe(false);
+      expect(workspace.state.lastSeenSessions.closed).toBeUndefined();
+      expect(workspace.isSessionUnread('chat', 300)).toBe(true);
+      workspace.syncSessionMarkersForWorkspace('/repo', ['/repo', '/second']);
+      expect(workspace.state.lastSeenSessions.chat).toBe(200);
+      expect(JSON.parse(window.localStorage.getItem('varro.lastSeenSessions')!)).toEqual({
+        '/repo': { chat: 200 },
+      });
+    } finally {
+      Reflect.deleteProperty(window, '__initialWebviewState');
+    }
+  });
+
+  it('keeps newer local reads when the shared snapshot is older', async () => {
+    Object.assign(window, { __initialWebviewState: { sessionReadState: { chat: 100 } } });
+    window.localStorage.setItem(
+      'varro.lastSeenSessions',
+      JSON.stringify({ '/repo': { chat: 200 } })
+    );
+    try {
+      const bridge = await import('./bridge');
+      const post = vi.spyOn(bridge, 'postMessage');
+      const state = await import('./state');
+      state.setSessions([session('chat', '/repo')]);
+      expect(state.state.lastSeenSessions.chat).toBe(200);
+      expect(post).toHaveBeenCalledWith({
+        type: 'session-read-state/update',
+        payload: { sessionId: 'chat', seenAt: 200 },
+      });
+    } finally {
+      Reflect.deleteProperty(window, '__initialWebviewState');
+    }
+  });
+
   it('reads persisted markers once per update without copying unrelated in-memory markers', async () => {
     const state = await import('./state');
     const { BrowserPersistence } = await import('./browser-persistence');

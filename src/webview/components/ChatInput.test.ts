@@ -53,6 +53,7 @@ import {
 import { sendQueuedAsSteer } from './chat-input/queued-steer';
 import { databaseBackupIcon, databaseScriptPlusIcon, runningIcon } from '../lib/ui-icons';
 import { toCssUrl } from './UiIcon';
+import { getMaterialChipIcon } from './MaterialChipIcon';
 
 interface SessionEventProperties extends UnknownRecord {
   sessionID: string;
@@ -2730,6 +2731,85 @@ describe('ChatInput', () => {
     });
     expect(searches[1]?.payload.requestId).not.toBe(searches[0]?.payload.requestId);
   });
+
+  it.each(['success', 'error', 'switched'] as const)(
+    'attaches @ table selections with guarded %s replies',
+    async (outcome) => {
+      const messages: WebviewMessage[] = [];
+      fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
+        (message) => messages.push(message);
+      setState('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      });
+      setInputText('@users');
+      cleanup = render(() => ChatInput(), container!);
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor?.firstChild) throw new Error('Expected populated composer');
+      editor.focus();
+      setCollapsedSelection(editor.firstChild, 6);
+      editor.dispatchEvent(new KeyboardEvent('keyup', { key: 's', bubbles: true }));
+      await vi.waitFor(() =>
+        expect(messages.some((message) => message.type === 'files/search')).toBe(true)
+      );
+      const search = messages.find((message) => message.type === 'files/search');
+      if (search?.type !== 'files/search') throw new Error('Expected file search');
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: {
+            type: 'files/search-results',
+            payload: {
+              requestId: search.payload.requestId,
+              query: 'users',
+              files: [],
+              tables: [{ id: 'users-table', name: 'main.users', dataSource: 'Demo SQLite' }],
+            },
+          },
+        })
+      );
+      await flushAsyncWork();
+      const item = container?.querySelector<HTMLButtonElement>('.completion-table');
+      expect(item?.textContent).toContain('main.users');
+      expect(item?.querySelector('[data-chip-icon="table"]')).not.toBeNull();
+      item?.click();
+      await flushAsyncWork();
+      const request = messages.find((message) => message.type === 'database/attach');
+      if (request?.type !== 'database/attach') throw new Error('Expected table attachment request');
+      expect(request.payload.id).toBe('users-table');
+      expect(inputText()).not.toContain('@users');
+      expect(state.droppedFiles).toHaveLength(0);
+      setInputText('Explain');
+      await flushAsyncWork();
+      editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await flushAsyncWork();
+      expect(sendMessageMock).not.toHaveBeenCalled();
+      if (outcome === 'switched') setState('editorContext', 'workspacePath', '/another-repo');
+      const file = {
+        path: '/snapshots/main.users-context.json',
+        relativePath: 'main.users-context.json',
+        type: 'file',
+      };
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: {
+            type: 'database/attached',
+            payload:
+              outcome === 'error'
+                ? { requestId: request.payload.requestId, error: 'Table removed' }
+                : { requestId: request.payload.requestId, file },
+          },
+        })
+      );
+      await flushAsyncWork();
+      expect(state.droppedFiles.map((attachment) => attachment.path)).toEqual(
+        outcome === 'success' ? [file.path] : []
+      );
+      if (outcome === 'error')
+        expect(showSessionActionFeedbackMock).toHaveBeenCalledWith('Table removed', 'warning');
+    }
+  );
 
   it.each([
     { trigger: '@', initial: '@hel', shortened: '@he' },
@@ -8678,6 +8758,34 @@ describe('ChatInput', () => {
 
     expect(container?.querySelector('.rich-composer .inline-chip')).not.toBeNull();
     expect(container?.querySelector('.chat-attachments-container')).toBeNull();
+  });
+
+  it('renders an inline table attachment without exposing the snapshot filename', async () => {
+    addContextFile({
+      path: '/snapshots/users-context.json',
+      relativePath: 'users-context.json',
+      type: 'file',
+      database: {
+        name: 'users',
+        dataSource: 'Demo SQLite',
+        scope: 'selected-rows',
+        rowCount: 2,
+        selectedRowCount: 2,
+        truncated: false,
+        pendingChanges: false,
+        cellEditing: false,
+      },
+    });
+    setInputText('@users-context.json');
+    cleanup = render(() => ChatInput(), container!);
+    await flushAsyncWork();
+    const chip = container?.querySelector('.rich-composer .inline-chip');
+    expect(chip?.textContent).toContain('users');
+    expect(chip?.textContent).toContain('2 rows');
+    expect(chip?.textContent).not.toContain('context.json');
+    expect(
+      chip?.querySelector<HTMLElement>('.ui-icon')?.style.getPropertyValue('--ui-icon-mask')
+    ).toBe(toCssUrl(getMaterialChipIcon('table')));
   });
 
   it('shows a DDL editor as table context without a local file', async () => {

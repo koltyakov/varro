@@ -1,5 +1,8 @@
 import { batch } from 'solid-js';
-import { cloneDatabaseContext } from '../../../shared/database-context';
+import {
+  cloneDatabaseContext,
+  formatDatabaseAttachmentReference,
+} from '../../../shared/database-context';
 import { formatDatabaseContext } from '../../lib/database-context';
 import type {
   DroppedFile,
@@ -354,6 +357,13 @@ export function buildSessionSendBody(
 
   for (const attachment of orderedAttachments) {
     if (attachment.kind === 'file') {
+      if (attachment.file.database) {
+        parts.push({
+          type: 'text',
+          text: formatDatabaseAttachmentReference(attachment.file.path, attachment.file.database),
+        });
+        continue;
+      }
       if (currentDocumentEnabled && isSamePath(attachment.file.path, activeFile?.path)) continue;
       const fileReference = getAttachmentReference(attachment.file, workspacePath);
       const isExternalFile =
@@ -462,6 +472,7 @@ export function getQueuedAttachmentSnapshot(composerState: {
       path: file.path,
       relativePath: file.relativePath,
       type: file.type,
+      database: file.database ? { ...file.database } : undefined,
       attachmentSequence: file.attachmentSequence ?? getContextFileAttachmentSequence(file.path),
       lineRanges: file.lineRanges?.map((range) => ({
         startLine: range.startLine,

@@ -9,7 +9,7 @@ type MockAttachmentChipProps = {
   path?: string;
   detail?: string | null;
   disabled?: boolean;
-  icon?: 'file' | 'folder' | 'image' | 'terminal';
+  icon?: 'file' | 'folder' | 'image' | 'terminal' | 'table';
   onClick?: () => void;
   onRemove?: () => void;
   previewImage?: { url: string; alt: string };
@@ -89,6 +89,34 @@ function renderAttachmentStrip(props: Partial<AttachmentStripProps> = {}) {
   cleanup = render(() => AttachmentStrip(merged), container!);
   return merged;
 }
+
+it('displays a database snapshot as a table rather than its manifest filename', () => {
+  const file = createDroppedFile({
+    path: '/snapshots/users-context.json',
+    relativePath: 'users-context.json',
+    database: {
+      name: 'users',
+      dataSource: 'Demo SQLite',
+      scope: 'selected-rows',
+      rowCount: 2,
+      selectedRowCount: 2,
+      truncated: false,
+      pendingChanges: false,
+      cellEditing: false,
+    },
+  });
+  const onOpenFile = vi.fn();
+  const props = renderAttachmentStrip({ files: [file], onOpenFile });
+  const chip = container?.querySelector<HTMLElement>('.attachment-chip-mock');
+  expect(chip?.dataset.label).toBe('users');
+  expect(chip?.dataset.detail).toBe('2 rows');
+  expect(chip?.dataset.icon).toBe('table');
+  expect(chip?.dataset.title).not.toContain('context.json');
+  chip?.querySelector<HTMLButtonElement>('.attachment-chip-mock-click')?.click();
+  expect(onOpenFile).toHaveBeenCalledWith(file);
+  chip?.querySelector<HTMLButtonElement>('.attachment-chip-mock-remove')?.click();
+  expect(props.onRemoveFile).toHaveBeenCalledWith(file.path);
+});
 
 function getChips() {
   return Array.from(container?.querySelectorAll('.attachment-chip-mock') ?? []);

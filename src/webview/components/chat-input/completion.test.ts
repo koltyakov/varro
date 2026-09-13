@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Agent, Session } from '../../types';
 import {
   applySlashCompletion,
+  createMentionCompletionSource,
   getActiveCompletion,
   getCompletionSelection,
   getInlineInsertionSuffix,
@@ -16,6 +17,26 @@ import {
 } from './completion';
 
 describe('getMentionCompletionItems', () => {
+  it('offers distinct tables alongside files and resolves selections by identity', () => {
+    const tables = [
+      { id: 'dev-users', name: 'main.users', dataSource: 'Development' },
+      { id: 'test-users', name: 'main.users', dataSource: 'Test' },
+    ];
+    const source = createMentionCompletionSource({
+      agents: [],
+      files: [{ path: '/repo/users.sql', relativePath: 'users.sql', type: 'file' }],
+      tables,
+    });
+    const items = getMentionCompletionItems({ rawQuery: 'users', source });
+    expect(items.map((item) => item.type)).toEqual(['table', 'table', 'file']);
+    expect(items[0]?.detail).toBe('Development · Table');
+    expect(items[1]?.key).not.toBe(items[0]?.key);
+    expect(getCompletionSelection(getActiveCompletion('@users', 6), items[0], true)).toEqual({
+      type: 'apply-mention',
+      value: '',
+      table: tables[0],
+    });
+  });
   const agents: Agent[] = [
     {
       name: 'helper',

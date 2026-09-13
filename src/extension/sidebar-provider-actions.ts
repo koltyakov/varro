@@ -38,6 +38,7 @@ export interface SidebarProviderActionDeps {
   setActiveChatModel(model: ChatModelSelection | null): void;
   setActiveRoute(sessionId: string | null | undefined): void;
   acknowledgeSessionSeen(sessionId: string): void;
+  updateSessionReadState(sessionId: string, seenAt: number): Promise<void>;
   setWebviewFocus(focused: boolean): void;
   revealPermission(permissionId: string): void;
   contextFilesState: SidebarProviderContextFiles;
@@ -134,6 +135,7 @@ export function createSidebarProviderActions(
       deps.setActiveRoute(sessionId);
     },
     acknowledgeSessionSeen: (sessionId) => deps.acknowledgeSessionSeen(sessionId),
+    updateSessionReadState: (sessionId, seenAt) => deps.updateSessionReadState(sessionId, seenAt),
     setWebviewFocus: (focused) => deps.setWebviewFocus(focused),
     revealPermission: (permissionId) => deps.revealPermission(permissionId),
     setMermaidPreviewOpen: (open) => deps.setMermaidPreviewOpen(open),

@@ -16,6 +16,7 @@ import { fixture } from '../../test-fixtures';
 import type { UnknownRecord } from '../../../shared/type-utils';
 import { clearDirectSessionReturn, getDirectSessionReturnId } from '../../lib/session-navigation';
 import { formatSkillAttachment } from '../../lib/skill-reference';
+import { formatDatabaseAttachmentReference } from '../../../shared/database-context';
 
 const selectSessionMock = vi.hoisted(() => vi.fn());
 const retryMessageMock = vi.hoisted(() => vi.fn());
@@ -78,6 +79,36 @@ function agentPart(id: string, name: string, marker = `@${name}`): AgentPart {
 function renderUserContent(parts: Part[]) {
   cleanup = render(() => UserMessageContent({ parts }), container!);
 }
+
+it('renders saved table attachments with their table identity and keeps the snapshot openable', () => {
+  const send = installSendToExtension();
+  const path = '/snapshots/users-context.json';
+  renderUserContent([
+    textPart(
+      'table',
+      formatDatabaseAttachmentReference(path, {
+        name: 'users',
+        dataSource: 'Demo SQLite',
+        scope: 'selected-rows',
+        rowCount: 2,
+        selectedRowCount: 2,
+        truncated: false,
+        pendingChanges: false,
+        cellEditing: false,
+      })
+    ),
+  ]);
+  const chip = container?.querySelector<HTMLButtonElement>('.message-attachment-chip');
+  expect(chip?.textContent).toContain('users');
+  expect(chip?.textContent).toContain('2 rows');
+  expect(container?.textContent).not.toContain('context.json');
+  expect(chip?.querySelector('[data-chip-icon="table"]')).not.toBeNull();
+  chip?.click();
+  expect(send).toHaveBeenCalledWith({
+    type: 'vscode/open',
+    payload: { path, line: undefined, kind: 'file' },
+  });
+});
 
 function installSendToExtension() {
   const send = vi.fn();

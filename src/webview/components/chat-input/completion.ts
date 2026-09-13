@@ -1,6 +1,10 @@
 import type { CompletionItem, MentionCompletionItem } from './CompletionMenu';
 import type { Agent, Session } from '../../types';
-import type { DroppedFile, WorkspaceFolderContext } from '../../../shared/protocol';
+import type {
+  DroppedFile,
+  WorkspaceFolderContext,
+  DatabaseTableReference,
+} from '../../../shared/protocol';
 import { normalizeSessionTitle } from '../../../shared/session-title';
 import { getWorkspaceFolderLabel } from '../../../shared/workspace-folders';
 import { formatSkillReference } from '../../lib/skill-reference';
@@ -26,6 +30,7 @@ type MentionFileEntry = {
 };
 
 export type MentionCompletionSource = {
+  tableItems: Array<Extract<MentionCompletionItem, { type: 'table' }>>;
   agentEntries: MentionAgentEntry[];
   fileEntries: MentionFileEntry[];
   exactAgentNames: ReadonlySet<string>;
@@ -35,7 +40,13 @@ export type MentionCompletionSource = {
 export type CompletionSelection =
   | { type: 'set-slash'; value: string }
   | { type: 'run-slash'; value: string }
-  | { type: 'apply-mention'; value: string; file?: DroppedFile; session?: Session };
+  | {
+      type: 'apply-mention';
+      value: string;
+      file?: DroppedFile;
+      session?: Session;
+      table?: DatabaseTableReference;
+    };
 
 export function getActiveCompletion(text: string, cursor: number) {
   if (cursor < 0 || cursor > text.length) return null;
@@ -193,6 +204,7 @@ export function getCompletionSelection(
   if (!('value' in item)) return null;
 
   const file = item.type === 'file' ? item.file : undefined;
+  if (item.type === 'table') return { type: 'apply-mention', value: '', table: item.table };
   const session = item.type === 'session' ? item.session : undefined;
 
   return {
@@ -270,15 +282,17 @@ export function getMentionCompletionItems({
     return agentItems.slice(0, 10);
   }
 
-  return [...agentItems, ...fileItems].slice(0, 10);
+  return [...agentItems, ...(rawQuery ? mentionSource.tableItems : []), ...fileItems].slice(0, 10);
 }
 
 export function createMentionCompletionSource({
   agents,
   files,
+  tables = [],
 }: {
   agents: Agent[];
   files: DroppedFile[];
+  tables?: DatabaseTableReference[];
 }): MentionCompletionSource {
   const exactAgentNames = new Set<string>();
   const exactFilePaths = new Set<string>();
@@ -321,6 +335,14 @@ export function createMentionCompletionSource({
   });
 
   return {
+    tableItems: tables.map((table) => ({
+      key: `table:${table.id}`,
+      type: 'table',
+      label: table.name,
+      detail: `${table.dataSource} · Table`,
+      value: '',
+      table,
+    })),
     agentEntries,
     fileEntries,
     exactAgentNames,

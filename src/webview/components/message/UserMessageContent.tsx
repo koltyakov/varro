@@ -1,7 +1,13 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import { Portal } from 'solid-js/web';
-import type { DatabaseContext } from '../../../shared/protocol';
-import { databaseContextDetail, isDatabaseContext } from '../../../shared/database-context';
+import type { DatabaseContext, DatabaseAttachment } from '../../../shared/protocol';
+import {
+  databaseAttachmentDetail,
+  databaseContextDetail,
+  isDatabaseContext,
+  formatDatabaseAttachmentReference,
+  parseDatabaseAttachmentReference,
+} from '../../../shared/database-context';
 import { formatDatabaseContext } from '../../lib/database-context';
 import {
   formatDisplayPath,
@@ -65,7 +71,7 @@ export type MessageAttachment =
       truncated: boolean;
     }
   | { type: 'terminal-selection'; terminalName: string; text?: string }
-  | { type: 'file-reference'; path: string; isDirectory: boolean };
+  | { type: 'file-reference'; path: string; isDirectory: boolean; database?: DatabaseAttachment };
 
 type UserMessageSegment =
   | { type: 'text'; content: string }
@@ -451,6 +457,14 @@ function parseUserMessageAttachmentLine(
   allowStandaloneFileReference: boolean
 ): MessageAttachment | null {
   if (!line) return null;
+  const database = parseDatabaseAttachmentReference(line);
+  if (database)
+    return {
+      type: 'file-reference',
+      path: database.path,
+      database: database.database,
+      isDirectory: false,
+    };
 
   if (line.startsWith('[Selection from ') && !line.startsWith('[Selection from terminal')) {
     const selectionRef = parseSelectionReference(line);
@@ -529,6 +543,10 @@ export function getUserMessageEditContext(parts: Part[]): MessageEditContext {
       relativePath: path,
       type: attachment.type === 'file-reference' && attachment.isDirectory ? 'directory' : 'file',
       lineRanges: attachment.type === 'file-selection' ? attachment.lineRanges : undefined,
+      database:
+        attachment.type === 'file-reference' && attachment.database
+          ? { ...attachment.database }
+          : undefined,
     };
     const key = normalizePath(path);
     filesByPath.set(key, mergeContextFile(filesByPath.get(key), file));
@@ -600,7 +618,9 @@ export function getUserMessagePreviewText(parts: Part[]): string {
         return `Terminal: ${firstAttachment.terminalName}${lineCount ? ` (${lineCount})` : ''}`;
       }
       case 'file-reference':
-        return `${firstAttachment.isDirectory ? 'Folder' : 'File'}: ${getLeafPathName(firstAttachment.path)}`;
+        return firstAttachment.database
+          ? `Table: ${firstAttachment.database.name}`
+          : `${firstAttachment.isDirectory ? 'Folder' : 'File'}: ${getLeafPathName(firstAttachment.path)}`;
     }
   }
 
@@ -1697,6 +1717,10 @@ function InlineMessageAttachmentChip(props: { attachment: MessageAttachment }) {
       ? (attachment() as Extract<MessageAttachment, { type: 'file-selection' }>)
       : null;
   const copyMarker = () => getInlineAttachmentCopyMarker(attachment());
+  const database = () => {
+    const value = attachment();
+    return value.type === 'file-reference' ? value.database : undefined;
+  };
   const filePath = () => getMessageAttachmentPath(attachment());
 
   const handleClick = () => openAttachment(attachment());
@@ -1711,11 +1735,21 @@ function InlineMessageAttachmentChip(props: { attachment: MessageAttachment }) {
     >
       <Show
         when={isFolder()}
-        fallback={<FileTypeIcon path={filePath()} class="inline-chip-icon" />}
+        fallback={
+          <Show
+            when={database()}
+            fallback={<FileTypeIcon path={filePath()} class="inline-chip-icon" />}
+          >
+            <MaterialChipIcon kind="table" class="inline-chip-icon" />
+          </Show>
+        }
       >
         <FolderIcon class="inline-chip-icon" width="11" height="11" />
       </Show>
       <span class="inline-chip-label">{getAttachmentLabel(attachment())}</span>
+      <Show when={database()}>
+        {(table) => <span class="inline-chip-detail">{databaseAttachmentDetail(table())}</span>}
+      </Show>
       <Show when={fileSelection()}>
         {(selection) => (
           <span class="inline-chip-detail">{formatContextLineRanges(selection().lineRanges)}</span>
@@ -1801,6 +1835,9 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
   const handleClick = () => openAttachment(attachment());
 
   const iconSvg = () => {
+    const value = attachment();
+    if (value.type === 'file-reference' && value.database)
+      return <MaterialChipIcon kind="table" class="chip-icon" />;
     if (attachment().type === 'database')
       return <MaterialChipIcon kind="table" class="chip-icon" />;
     if (attachment().type === 'skill') return <MaterialChipIcon kind="skill" class="chip-icon" />;
@@ -1815,6 +1852,8 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
 
   const detail = () => {
     const value = attachment();
+    if (value.type === 'file-reference' && value.database)
+      return <span class="chip-detail">{databaseAttachmentDetail(value.database)}</span>;
     if (value.type === 'database')
       return <span class="chip-detail">{databaseContextDetail(value.context)}</span>;
     if (value.type === 'file-selection') {
@@ -2036,7 +2075,10 @@ function MessageAttachmentRail(props: {
                 fallback={
                   <Show
                     when={
-                      attachment.type === 'message' && attachment.attachment.type === 'database'
+                      attachment.type === 'message' &&
+                      (attachment.attachment.type === 'database' ||
+                        (attachment.attachment.type === 'file-reference' &&
+                          !!attachment.attachment.database))
                     }
                     fallback={<FileTypeIcon path={getDisplayMessageAttachmentPath(attachment)} />}
                   >
@@ -2076,6 +2118,8 @@ function getDisplayMessageAttachmentLabel(attachment: DisplayMessageAttachment):
 
 function getDisplayMessageAttachmentDetail(attachment: DisplayMessageAttachment): string | null {
   if (attachment.type !== 'message') return null;
+  if (attachment.attachment.type === 'file-reference' && attachment.attachment.database)
+    return databaseAttachmentDetail(attachment.attachment.database);
   if (attachment.attachment.type === 'database')
     return databaseContextDetail(attachment.attachment.context);
   if (attachment.attachment.type === 'file-selection') {
@@ -2133,7 +2177,7 @@ function getAttachmentLabel(attachment: MessageAttachment): string {
     case 'terminal-selection':
       return attachment.terminalName;
     case 'file-reference':
-      return getLeafPathName(attachment.path);
+      return attachment.database?.name ?? getLeafPathName(attachment.path);
   }
 }
 
@@ -2157,7 +2201,9 @@ function getAttachmentTitle(attachment: MessageAttachment): string {
     case 'terminal-selection':
       return `Terminal: ${attachment.terminalName}`;
     case 'file-reference':
-      return attachment.path;
+      return attachment.database
+        ? `${attachment.database.name} · ${attachment.database.dataSource ?? ''} · ${databaseAttachmentDetail(attachment.database)}`
+        : attachment.path;
   }
 }
 
@@ -2181,7 +2227,9 @@ function getStandaloneAttachmentCopyText(attachment: MessageAttachment): string 
     case 'terminal-selection':
       return `[Selection from terminal ${attachment.terminalName}]`;
     case 'file-reference':
-      return attachment.path;
+      return attachment.database
+        ? formatDatabaseAttachmentReference(attachment.path, attachment.database)
+        : attachment.path;
   }
 }
 

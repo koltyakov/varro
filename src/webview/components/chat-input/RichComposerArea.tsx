@@ -3,7 +3,11 @@ import { Portal } from 'solid-js/web';
 import { splitExternalLinkText } from '../../lib/external-link';
 import { emptyPageIcon, folderIcon } from '../../lib/ui-icons';
 import { getFileTypeIcon } from '../FileTypeIcon';
-import { createMaterialChipIconElement, type MaterialChipIconKind } from '../MaterialChipIcon';
+import {
+  createMaterialChipIconElement,
+  getMaterialChipIcon,
+  type MaterialChipIconKind,
+} from '../MaterialChipIcon';
 import { createUiIconElement } from '../UiIcon';
 import { CompletionMenu, type CompletionItem } from './CompletionMenu';
 import { registerComposerOverlayDismiss } from './composer-overlay-dismiss';
@@ -29,6 +33,7 @@ export type RichComposerChip = {
   detail?: string;
   icon?:
     | 'file'
+    | 'table'
     | 'folder'
     | 'image'
     | 'terminal'
@@ -1086,11 +1091,18 @@ export function extractText(el: HTMLElement): string {
 }
 
 function getChipIcon(icon?: string): HTMLSpanElement {
-  return createUiIconElement(icon === 'folder' ? folderIcon : emptyPageIcon, {
-    className: 'inline-chip-icon',
-    width: 11,
-    height: 11,
-  });
+  return createUiIconElement(
+    icon === 'table'
+      ? getMaterialChipIcon('table')
+      : icon === 'folder'
+        ? folderIcon
+        : emptyPageIcon,
+    {
+      className: 'inline-chip-icon',
+      width: 11,
+      height: 11,
+    }
+  );
 }
 
 function getMaterialIconKind(icon?: string): MaterialChipIconKind | null {

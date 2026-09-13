@@ -50,6 +50,7 @@ export function areContextFilesEqual(a: DroppedFile, b: DroppedFile) {
   ) {
     return false;
   }
+  if (JSON.stringify(a.database) !== JSON.stringify(b.database)) return false;
 
   const aRanges = normalizeContextLineRanges(a.lineRanges);
   const bRanges = normalizeContextLineRanges(b.lineRanges);

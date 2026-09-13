@@ -202,6 +202,50 @@ describe('session-send helpers', () => {
     expect(result?.body.model).toEqual({ providerID: 'openai', modelID: 'gpt-4o' });
   });
 
+  it('preserves table attachment display metadata through queueing sending and editing', () => {
+    const file: DroppedFile = {
+      path: '/snapshots/users-context.json',
+      relativePath: 'users-context.json',
+      type: 'file',
+      database: {
+        name: 'users',
+        dataSource: 'Demo SQLite',
+        scope: 'selected-rows',
+        rowCount: 2,
+        selectedRowCount: 2,
+        truncated: false,
+        pendingChanges: false,
+        cellEditing: false,
+      },
+    };
+    const queued = getQueuedAttachmentSnapshot(createState({ droppedFiles: [file] }));
+    file.database!.name = 'changed after queueing';
+    expect(queued.droppedFiles?.[0]?.database?.name).toBe('users');
+    const result = buildSessionSendBody(
+      createState({ droppedFiles: queued.droppedFiles }),
+      'session-1',
+      'Explain',
+      () => false
+    );
+    const parts: Part[] = (result?.body.parts ?? []).map((part, index) => ({
+      id: `part-${index}`,
+      sessionID: 'session-1',
+      messageID: 'msg-1',
+      type: 'text',
+      text: part.text ?? '',
+    }));
+    const parsed = parseUserMessageContent(parts);
+    expect(parsed.messageTexts).toEqual(['Explain']);
+    expect(parsed.attachments[0]).toMatchObject({
+      type: 'file-reference',
+      database: { name: 'users', rowCount: 2 },
+    });
+    expect(getUserMessageEditContext(parts).files[0]).toMatchObject({
+      path: file.path,
+      database: queued.droppedFiles?.[0]?.database,
+    });
+  });
+
   it('passes the full DDL definition to the model and preserves it in message attachments', () => {
     const ddl =
       '-- auto-generated definition\ncreate table users\n(\n  id INT primary key,\n  name VARCHAR(50),\n  city VARCHAR(50)\n);';

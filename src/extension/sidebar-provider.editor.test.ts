@@ -5,6 +5,7 @@ import {
   createContextProvider,
   createServer,
   createSidebarProviderInstance,
+  createWorkspaceState,
   getVscodeMock,
 } from './sidebar-provider.test-support';
 import type {
@@ -92,6 +93,35 @@ function createPanel() {
 }
 
 describe('SidebarProvider editor panels', () => {
+  it('loads folder read status from global storage in a separate multi-root workspace', async () => {
+    const values = new Map<string, unknown>();
+    const globalState = createWorkspaceState();
+    globalState.get.mockImplementation((key, fallback) => values.get(key) ?? fallback);
+    globalState.update.mockImplementation(async (key, value) => {
+      values.set(key, value);
+    });
+    const folder = await createSidebarProviderInstance({ globalState });
+    await folder.provider.handleMessage({
+      type: 'session-read-state/update',
+      payload: { sessionId: 'project-chat', seenAt: 200 },
+    });
+    const contextProvider = createContextProvider();
+    contextProvider.context.workspacePath = '/repo-b';
+    contextProvider.context.workspaceFolders = [
+      { name: 'Repo A', path: '/repo-a' },
+      { name: 'Repo B', path: '/repo-b' },
+    ];
+    const workspace = await createSidebarProviderInstance({
+      globalState: folder.globalState,
+      contextProvider,
+    });
+    expect(workspace.workspaceState).not.toBe(folder.workspaceState);
+    const editor = createPanel();
+    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+    await workspace.provider.openNewEditor();
+    expect(editor.panel.webview.html).toContain('"sessionReadState":{"project-chat":200}');
+  });
+
   it('routes external context to the last focused chat and clears only that workspace draft', async () => {
     const contextProvider = createContextProvider();
     contextProvider.context.workspacePath = '/repo-a';

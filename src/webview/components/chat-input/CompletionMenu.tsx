@@ -7,13 +7,21 @@ import {
   flipPopupDownIfNeeded,
   observePopupViewport,
 } from '../../lib/popup-position';
-import type { DroppedFile } from '../../../shared/protocol';
+import type { DroppedFile, DatabaseTableReference } from '../../../shared/protocol';
 import type { Session } from '../../types';
 import { formatRelativeAge } from '../../lib/message-metrics';
 
 const COMPLETION_MENU_EDGE_INSET = 4;
 
 export type MentionCompletionItem =
+  | {
+      key: string;
+      type: 'table';
+      label: string;
+      detail: string;
+      value: string;
+      table: DatabaseTableReference;
+    }
   | {
       key: string;
       type: 'agent';
@@ -146,6 +154,8 @@ export function CompletionMenu(props: {
                         <MaterialChipIcon kind="skill" class="completion-skill-icon" />
                       ) : item.type === 'session' ? (
                         <MaterialChipIcon kind="session" class="completion-session-icon" />
+                      ) : item.type === 'table' ? (
+                        <MaterialChipIcon kind="table" class="completion-file-type-icon" />
                       ) : item.type === 'file' && item.file.type === 'directory' ? (
                         <FolderIcon width={12} height={12} />
                       ) : (

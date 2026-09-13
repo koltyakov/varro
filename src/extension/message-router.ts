@@ -61,6 +61,7 @@ export interface MessageRouterCallbacks {
     sessionId?: string | null
   ): void;
   acknowledgeSessionSeen(sessionId: string): void;
+  updateSessionReadState(sessionId: string, seenAt: number): Promise<void>;
   setWebviewFocus(focused: boolean): void;
   revealPermission(permissionId: string): void;
   setProviderWatchActive(active: boolean): void;
@@ -197,6 +198,9 @@ export class MessageRouter {
         case 'session/seen':
           this.callbacks.acknowledgeSessionSeen(msg.payload.sessionId);
           break;
+        case 'session-read-state/update':
+          await this.callbacks.updateSessionReadState(msg.payload.sessionId, msg.payload.seenAt);
+          break;
         case 'webview/focus':
           this.handleWebviewFocusMessage(msg);
           break;
@@ -309,6 +313,9 @@ export class MessageRouter {
           break;
         case 'files/search':
           this.handleFilesSearchMessage(msg);
+          break;
+        case 'database/attach':
+          // Database search entries are supplied and resolved by the JetBrains host.
           break;
         case 'file/read':
           await this.handleFileReadMessage(msg);

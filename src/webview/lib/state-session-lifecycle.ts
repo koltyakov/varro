@@ -33,6 +33,7 @@ import {
 } from './state-session-markers';
 import { STORAGE_KEYS, readStored, writeStored } from './state-storage';
 import { isNumber } from './runtime-values';
+import { readInitialWebviewState } from './state-stored-values';
 
 const EMPTY_SESSION_TREE_IDS: string[] = [];
 const markerStorage = { readStored, writeStored };
@@ -57,6 +58,23 @@ function restoreCatalogSessionMarkers(sessions: readonly Session[]) {
     });
   }
   for (const session of unrestored) restoredMarkerDirectories.set(session.id, session.directory);
+  const shared = readInitialWebviewState().sessionReadState ?? {};
+  for (const session of unrestored) {
+    const localSeenAt = state.lastSeenSessions[session.id];
+    const sharedSeenAt = shared[session.id];
+    if (sharedSeenAt !== undefined && (localSeenAt === undefined || sharedSeenAt > localSeenAt)) {
+      setState('lastSeenSessions', session.id, sharedSeenAt);
+      writeMarkerForSession(STORAGE_KEYS.lastSeenSessions, session.id, sharedSeenAt);
+    } else if (
+      localSeenAt !== undefined &&
+      (sharedSeenAt === undefined || localSeenAt > sharedSeenAt)
+    ) {
+      postMessage({
+        type: 'session-read-state/update',
+        payload: { sessionId: session.id, seenAt: localSeenAt },
+      });
+    }
+  }
 }
 
 function writeMarkerForSession(key: string, sessionId: string, timestamp: number | undefined) {
@@ -94,6 +112,7 @@ export function markSessionSeen(id: string, updatedAt?: number) {
   if (timestamp === null) return false;
   setState('lastSeenSessions', id, timestamp);
   writeMarkerForSession(STORAGE_KEYS.lastSeenSessions, id, timestamp);
+  postMessage({ type: 'session-read-state/update', payload: { sessionId: id, seenAt: timestamp } });
   postMessage({ type: 'session/seen', payload: { sessionId: id } });
   return true;
 }

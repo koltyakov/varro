@@ -117,6 +117,7 @@ export const WEBVIEW_MESSAGE_TYPES = {
   'workspace/select': true,
   'commands/state': true,
   'session/seen': true,
+  'session-read-state/update': true,
   'session-model/update': true,
   'session-models/migrate': true,
   'session-plan-state/update': true,
@@ -158,6 +159,7 @@ export const WEBVIEW_MESSAGE_TYPES = {
   'composer/images-update': true,
   'files/pick': true,
   'files/search': true,
+  'database/attach': true,
   'file/read': true,
   'vscode/open': true,
   'vscode/open-text': true,
@@ -238,6 +240,20 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       const payload = asRecord(message?.payload);
       const sessionId = payload?.sessionId;
       return isSafePersistedSessionId(sessionId) ? { type, payload: { sessionId } } : null;
+    }
+
+    case 'session-read-state/update': {
+      const payload = asRecord(message?.payload);
+      const sessionId = payload?.sessionId;
+      const seenAt = payload?.seenAt;
+      if (
+        !isSafePersistedSessionId(sessionId) ||
+        typeof seenAt !== 'number' ||
+        !Number.isFinite(seenAt) ||
+        seenAt < 0
+      )
+        return null;
+      return { type, payload: { sessionId, seenAt } };
     }
 
     case 'vscode/mermaid-preview': {
@@ -724,6 +740,15 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
         type,
         payload: limit == null ? { requestId, query } : { requestId, query, limit },
       };
+    }
+
+    case 'database/attach': {
+      const payload = asRecord(message?.payload);
+      const requestId = getString(payload?.requestId);
+      const id = getString(payload?.id);
+      return requestId && id && requestId.length <= 128 && id.length <= 128
+        ? { type, payload: { requestId, id } }
+        : null;
     }
 
     case 'vscode/open': {

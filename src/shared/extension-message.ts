@@ -1,4 +1,8 @@
-import { isDatabaseContext } from './database-context';
+import {
+  isDatabaseAttachment,
+  isDatabaseContext,
+  isDatabaseTableReference,
+} from './database-context';
 import {
   isPermissionMode,
   isSafePersistedSessionId,
@@ -39,6 +43,7 @@ const KNOWN_TYPES = new Set<string>([
   'composer/images-sync',
   'files/removed',
   'files/search-results',
+  'database/attached',
   'config/update',
   'session/catalog-invalidated',
   'theme/update',
@@ -237,18 +242,32 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
         !isNumber(payload.requestId) ||
         !isString(payload.query) ||
         !Array.isArray(payload.files) ||
-        !payload.files.every(isDroppedFile)
+        !payload.files.every(isDroppedFile) ||
+        (payload.tables !== undefined &&
+          (!Array.isArray(payload.tables) ||
+            payload.tables.length > 30 ||
+            !payload.tables.every(isDatabaseTableReference)))
       ) {
         return null;
       }
-      return {
-        type,
-        payload: {
+      const parsedPayload: Extract<ExtensionMessage, { type: 'files/search-results' }>['payload'] =
+        {
           requestId: payload.requestId,
           query: payload.query,
           files: payload.files,
-        },
-      };
+        };
+      if (payload.tables !== undefined) parsedPayload.tables = payload.tables;
+      return { type, payload: parsedPayload };
+    }
+
+    case 'database/attached': {
+      const payload = asRecord(record.payload);
+      if (!payload || !isString(payload.requestId)) return null;
+      if (isDroppedFile(payload.file))
+        return { type, payload: { requestId: payload.requestId, file: payload.file } };
+      if (isString(payload.error))
+        return { type, payload: { requestId: payload.requestId, error: payload.error } };
+      return null;
     }
 
     case 'config/update': {
@@ -845,6 +864,11 @@ function isDroppedFile<T>(value: T): value is T & DroppedFile {
   ) {
     return false;
   }
+  if (
+    record.database !== undefined &&
+    (record.type !== 'file' || !isDatabaseAttachment(record.database))
+  )
+    return false;
   if (record.lineRanges === undefined) return true;
   return Array.isArray(record.lineRanges) && record.lineRanges.every(isLineRange);
 }

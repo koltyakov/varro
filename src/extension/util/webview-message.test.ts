@@ -1831,6 +1831,23 @@ describe('parseWebviewMessage rejection paths', () => {
     });
   });
 
+  it('rejects invalid shared read timestamps', () => {
+    for (const seenAt of [-1, NaN, Infinity, '100', null, undefined]) {
+      expect(
+        parseWebviewMessage({
+          type: 'session-read-state/update',
+          payload: { sessionId: 'chat', seenAt },
+        })
+      ).toBeNull();
+    }
+    expect(
+      parseWebviewMessage({
+        type: 'session-read-state/update',
+        payload: { sessionId: '', seenAt: 100 },
+      })
+    ).toBeNull();
+  });
+
   it('parses bounded session unread state updates', () => {
     expect(
       parseWebviewMessage({

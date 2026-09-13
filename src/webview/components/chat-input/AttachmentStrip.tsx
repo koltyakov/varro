@@ -2,6 +2,7 @@ import { For } from 'solid-js';
 import type { ClipboardImage, NativePdfAttachment } from '../../lib/app-state-types';
 import type { DroppedFile } from '../../../shared/protocol';
 import { formatContextLineRanges } from '../../../shared/context-files';
+import { databaseAttachmentDetail } from '../../../shared/database-context';
 import { getDroppedFileLabel } from '../../lib/path-display';
 import { AttachmentChip } from './AttachmentChip';
 
@@ -101,17 +102,22 @@ export function AttachmentStrip(props: {
           }
 
           if (item.type === 'file') {
-            const lineRange = formatContextLineRanges(item.value.lineRanges);
+            const database = item.value.database;
+            const lineRange = database
+              ? databaseAttachmentDetail(database)
+              : formatContextLineRanges(item.value.lineRanges);
             return (
               <AttachmentChip
                 label={getDroppedFileLabel(item.value)}
                 path={item.value.relativePath || item.value.path}
                 detail={lineRange}
-                icon={item.value.type === 'directory' ? 'folder' : 'file'}
+                icon={database ? 'table' : item.value.type === 'directory' ? 'folder' : 'file'}
                 title={
-                  lineRange
-                    ? `${item.value.relativePath || item.value.path} ${lineRange}`
-                    : item.value.relativePath || item.value.path
+                  database
+                    ? `${database.name}${database.dataSource ? ` · ${database.dataSource}` : ''} · ${lineRange}`
+                    : lineRange
+                      ? `${item.value.relativePath || item.value.path} ${lineRange}`
+                      : item.value.relativePath || item.value.path
                 }
                 onClick={props.onOpenFile ? () => props.onOpenFile?.(item.value) : undefined}
                 onRemove={() => props.onRemoveFile(item.value.path)}

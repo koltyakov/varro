@@ -82,6 +82,27 @@ export interface DroppedFile {
   type: 'file' | 'directory';
   lineRanges?: ContextLineRange[];
   attachmentSequence?: number;
+  database?: DatabaseAttachment;
+}
+
+/** Display metadata for a durable database snapshot attachment. */
+export interface DatabaseAttachment extends Pick<
+  DatabaseContext,
+  | 'name'
+  | 'dataSource'
+  | 'scope'
+  | 'selectedRowCount'
+  | 'truncated'
+  | 'pendingChanges'
+  | 'cellEditing'
+> {
+  rowCount: number;
+}
+
+export interface DatabaseTableReference {
+  id: string;
+  name: string;
+  dataSource: string;
 }
 
 export interface TerminalSelection {
@@ -783,6 +804,7 @@ export type InitialWebviewState = {
   permissionModeRecoverySessionIds?: string[];
   sessionSelectedModels?: Record<string, ChatModelSelection>;
   sessionPlanState?: Record<string, number | null>;
+  sessionReadState?: Record<string, number>;
   sessionModelMigrationPending?: boolean;
   modelPreferences?: ModelPreferences;
   modelPreferencesMigrationPending?: boolean;
@@ -839,7 +861,16 @@ export type ExtensionMessage =
   | { type: 'files/removed'; payload: { path: string } }
   | {
       type: 'files/search-results';
-      payload: { requestId: number; query: string; files: DroppedFile[] };
+      payload: {
+        requestId: number;
+        query: string;
+        files: DroppedFile[];
+        tables?: DatabaseTableReference[];
+      };
+    }
+  | {
+      type: 'database/attached';
+      payload: { requestId: string; file: DroppedFile } | { requestId: string; error: string };
     }
   | {
       type: 'config/update';
@@ -920,6 +951,7 @@ export type WebviewMessage =
       };
     }
   | { type: 'session/seen'; payload: { sessionId: string } }
+  | { type: 'session-read-state/update'; payload: { sessionId: string; seenAt: number } }
   | { type: 'webview/focus'; payload: { focused: boolean } }
   | { type: 'permission/reveal'; payload: { permissionId: string } }
   | { type: 'providers/watch'; payload: { active: boolean } }
@@ -1022,6 +1054,7 @@ export type WebviewMessage =
     }
   | { type: 'files/pick' }
   | { type: 'files/search'; payload: { requestId: number; query: string; limit?: number } }
+  | { type: 'database/attach'; payload: { requestId: string; id: string } }
   | { type: 'file/read'; payload: { path: string } }
   | {
       type: 'vscode/open';

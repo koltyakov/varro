@@ -84,6 +84,35 @@ beforeEach(() => {
 });
 
 describe('state helpers', () => {
+  it('restores database attachment labels from saved draft files', async () => {
+    const { readStoredDroppedFiles } = await import('./state-stored-values');
+    const database = {
+      name: 'users',
+      dataSource: 'Demo SQLite',
+      scope: 'selected-rows',
+      rowCount: 2,
+      selectedRowCount: 2,
+      truncated: false,
+      pendingChanges: false,
+      cellEditing: false,
+    };
+    window.localStorage.setItem(
+      'test.table-files',
+      JSON.stringify([
+        {
+          path: '/snapshots/users-context.json',
+          relativePath: 'users-context.json',
+          type: 'file',
+          database,
+        },
+      ])
+    );
+    try {
+      expect(readStoredDroppedFiles('test.table-files')[0]?.database).toEqual(database);
+    } finally {
+      window.localStorage.removeItem('test.table-files');
+    }
+  });
   it('manages queued messages and loading timestamps', async () => {
     const stateModule = await loadState();
 
@@ -495,7 +524,9 @@ describe('state helpers', () => {
 
     expect(stateModule.state.lastSeenSessions).toEqual({ 'session-1': 1_000, 'session-2': 1_000 });
     expect(sent).toEqual([
+      { type: 'session-read-state/update', payload: { sessionId: 'session-1', seenAt: 1_000 } },
       { type: 'session/seen', payload: { sessionId: 'session-1' } },
+      { type: 'session-read-state/update', payload: { sessionId: 'session-2', seenAt: 1_000 } },
       { type: 'session/seen', payload: { sessionId: 'session-2' } },
     ]);
     expect(stateModule.isSessionUnread('session-1', 1_000)).toBe(false);
@@ -508,7 +539,10 @@ describe('state helpers', () => {
       stateModule.markSessionSeen('session-1', 1_500);
     }
     expect(stateModule.state.lastSeenSessions['session-1']).toBe(1_500);
-    expect(sent).toEqual([{ type: 'session/seen', payload: { sessionId: 'session-1' } }]);
+    expect(sent).toEqual([
+      { type: 'session-read-state/update', payload: { sessionId: 'session-1', seenAt: 1_500 } },
+      { type: 'session/seen', payload: { sessionId: 'session-1' } },
+    ]);
     expect(stateModule.isSessionUnread('session-1', 1_500)).toBe(false);
     expect(window.localStorage.getItem('varro.lastSeenSessions')).toBe(
       JSON.stringify({

@@ -21,6 +21,7 @@ function createCallbacks(): MessageRouterCallbacks {
     ready: vi.fn(() => Promise.resolve()),
     updateCommandState: vi.fn(),
     acknowledgeSessionSeen: vi.fn(),
+    updateSessionReadState: vi.fn(),
     setWebviewFocus: vi.fn(),
     revealPermission: vi.fn(),
     migrateSessionModels: vi.fn(() => Promise.resolve()),
@@ -480,6 +481,7 @@ const DISPATCH_EXPECTATIONS = {
     },
   ],
   'session/seen': [{ callback: 'acknowledgeSessionSeen', args: ['session-1'] }],
+  'session-read-state/update': [{ callback: 'updateSessionReadState', args: ['session-1', 100] }],
   'webview/focus': [{ callback: 'setWebviewFocus', args: [true] }],
   'permission/reveal': [{ callback: 'revealPermission', args: ['permission-1'] }],
   'providers/watch': [{ callback: 'setProviderWatchActive', args: [true] }],
@@ -591,6 +593,7 @@ const DISPATCH_EXPECTATIONS = {
     { callback: 'migratePermissionModes', args: [{ modes: { 'session-1': 'full' } }] },
   ],
   'files/search': [{ callback: 'searchFiles', args: [5, 'src', 20] }],
+  'database/attach': [],
   'file/read': [{ callback: 'readContextFile', args: ['/workspace/a.ts'] }],
   'vscode/open': [{ callback: 'openPath', args: [{ path: '/workspace/a.ts', line: 12 }] }],
   'vscode/open-text': [

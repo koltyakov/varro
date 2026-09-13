@@ -101,6 +101,7 @@ export class WebviewSession {
       permissionModeRecoverySessionIds(): string[];
       sessionSelectedModels(): InitialWebviewState['sessionSelectedModels'];
       sessionPlanState(): InitialWebviewState['sessionPlanState'];
+      sessionReadState(): InitialWebviewState['sessionReadState'];
       sessionPlanAgents(): Record<string, string>;
       sessionModelMigrationPending(): boolean;
       modelPreferences(): InitialWebviewState['modelPreferences'];
@@ -490,6 +491,7 @@ export class WebviewSession {
       permissionModeRecoverySessionIds: this.deps.permissionModeRecoverySessionIds(),
       sessionSelectedModels: this.deps.sessionSelectedModels(),
       sessionPlanState: this.deps.sessionPlanState(),
+      sessionReadState: this.deps.sessionReadState(),
       sessionModelMigrationPending: this.deps.sessionModelMigrationPending(),
       modelPreferences: this.deps.modelPreferences(),
       modelPreferencesMigrationPending: this.deps.modelPreferencesMigrationPending(),

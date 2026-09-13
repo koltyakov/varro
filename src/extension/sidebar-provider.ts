@@ -99,6 +99,7 @@ import { readLocalSessionSummary } from './local-session-summary';
 import { logger } from './logger';
 import { MessageRouter } from './message-router';
 import { ModelPreferencesStore } from './model-preferences-store';
+import { SessionReadStateStore } from './session-read-state-store';
 import {
   nodeProviderSignatureFileSystem,
   ProviderFileRefreshController,
@@ -210,6 +211,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly sessionPlanState: SessionPlanStateStore;
   private readonly sessionHistoryScopes: SessionHistoryScopeStore;
   private readonly modelPreferences: ModelPreferencesStore;
+  private readonly sessionReadState: SessionReadStateStore;
   private readonly draftImages: DraftImageStore;
   private readonly hiddenSessions: HiddenSessionManager;
   private readonly internalHelperCleanupCoordinator = new InternalHelperCleanupCoordinator();
@@ -338,6 +340,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.sessionPlanState = new SessionPlanStateStore(persistence);
     this.sessionHistoryScopes = new SessionHistoryScopeStore(persistence);
     this.modelPreferences = new ModelPreferencesStore(globalPersistence, persistence);
+    this.sessionReadState = new SessionReadStateStore(globalPersistence);
     this.draftImages = new DraftImageStore(persistence);
     this.hiddenSessions = new HiddenSessionManager();
     this.autoApproveJudge = new AutoApproveJudge(server, this.hiddenSessions, isOpenAIPro, () =>
@@ -548,6 +551,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.sessionPermissionModes.pendingSafeFallbackSessionIds(),
         sessionSelectedModels: () => this.sessionSelectedModels.list(),
         sessionPlanState: () => this.sessionPlanState.list(),
+        sessionReadState: () => this.sessionReadState.list(),
         sessionPlanAgents: () => this.sessionPlanState.listAgents(),
         sessionModelMigrationPending: () => this.sessionSelectedModels.needsMigration(),
         modelPreferences: () =>
@@ -811,6 +815,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         },
         acknowledgeSessionSeen: (sessionId) =>
           this.sessionState.acknowledgeCompletedSession(sessionId),
+        updateSessionReadState: (sessionId, seenAt) => this.sessionReadState.set(sessionId, seenAt),
         setWebviewFocus: (focused) => {
           if (focused) this.lastFocusedContextViewId = webviewContext.viewId;
         },
@@ -2748,6 +2753,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await this.sessionSelectedModels.dispose();
     await this.sessionPlanState.dispose();
     await this.modelPreferences.dispose();
+    await this.sessionReadState.dispose();
     this.configDisposable.dispose();
     this.windowStateDisposable.dispose();
     this.providerFileRefresh.dispose();

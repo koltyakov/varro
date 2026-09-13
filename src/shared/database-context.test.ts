@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { cloneDatabaseContext, databaseContextDetail, isDatabaseContext } from './database-context';
+import {
+  cloneDatabaseContext,
+  databaseContextDetail,
+  isDatabaseContext,
+  isDatabaseAttachment,
+  formatDatabaseAttachmentReference,
+  parseDatabaseAttachmentReference,
+} from './database-context';
 import { isEditorContext } from './extension-message';
 import type { DatabaseContext } from './protocol';
 
@@ -22,6 +29,25 @@ const context: DatabaseContext = {
 };
 
 describe('database context', () => {
+  it('round-trips table references with escaped names and validates display metadata', () => {
+    const database = {
+      name: 'public."us]ers"',
+      dataSource: 'Demo',
+      scope: 'selected-rows' as const,
+      rowCount: 2,
+      selectedRowCount: 2,
+      truncated: false,
+      pendingChanges: false,
+      cellEditing: false,
+    };
+    const path = '/snapshots/table with spaces.json';
+    expect(
+      parseDatabaseAttachmentReference(formatDatabaseAttachmentReference(path, database))
+    ).toEqual({ path, database });
+    expect(isDatabaseAttachment({ ...database, rowCount: '2' })).toBe(false);
+    expect(isDatabaseAttachment({ ...database, rowCount: 201 })).toBe(false);
+    expect(parseDatabaseAttachmentReference('[Attached database table: invalid]')).toBeNull();
+  });
   it('accepts DDL editors and rejects missing or oversized definitions', () => {
     const ddl = 'create table users (id INT primary key);';
     const definition: DatabaseContext = {

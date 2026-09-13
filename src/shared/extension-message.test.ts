@@ -850,6 +850,40 @@ describe('parseExtensionMessage', () => {
     });
   });
 
+  it('preserves table search results and validates attachment replies', () => {
+    const table = { id: 'table-1', name: 'main.users', dataSource: 'Demo SQLite' };
+    const message = {
+      type: 'files/search-results',
+      payload: { requestId: 1, query: 'users', files: [], tables: [table] },
+    };
+    expect(parseExtensionMessage(message)).toEqual(message);
+    expect(
+      parseExtensionMessage({
+        ...message,
+        payload: { ...message.payload, tables: [{ ...table, id: 42 }] },
+      })
+    ).toBeNull();
+    expect(
+      parseExtensionMessage({
+        type: 'database/attached',
+        payload: { requestId: 'pick-1', error: 'Table removed' },
+      })
+    ).toEqual({
+      type: 'database/attached',
+      payload: { requestId: 'pick-1', error: 'Table removed' },
+    });
+    const file = { path: '/snapshots/users.json', relativePath: 'users.json', type: 'file' };
+    expect(
+      parseExtensionMessage({ type: 'database/attached', payload: { requestId: 'pick-1', file } })
+    ).toEqual({ type: 'database/attached', payload: { requestId: 'pick-1', file } });
+    expect(
+      parseExtensionMessage({
+        type: 'database/attached',
+        payload: { requestId: 'pick-1', file: { path: 'users' } },
+      })
+    ).toBeNull();
+  });
+
   it('rejects malformed theme/update payloads', () => {
     expect(parseExtensionMessage({ type: 'theme/update', payload: { theme: 'dark' } })).toEqual({
       type: 'theme/update',

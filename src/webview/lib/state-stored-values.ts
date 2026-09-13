@@ -17,6 +17,7 @@ import { isEditorContext } from '../../shared/extension-message';
 import { MAX_NATIVE_PDF_TOTAL_BYTES, isNativePdfAttachment } from '../../shared/native-pdf';
 import { normalizeWorkspaceIdentity } from '../../shared/workspace-path';
 import { STORAGE_KEYS, readStored, writeStored } from './state-storage';
+import { isDatabaseAttachment } from '../../shared/database-context';
 import {
   asRecord,
   isBoolean,
@@ -196,6 +197,8 @@ function normalizeStoredDroppedFile<T>(value: T): DroppedFile | null {
   }
 
   const file: DroppedFile = { path, relativePath, type: record.type };
+  if (file.type === 'file' && isDatabaseAttachment(record.database))
+    file.database = { ...record.database };
   if (Array.isArray(record.lineRanges)) {
     file.lineRanges = record.lineRanges.flatMap((item) => {
       const range = asStoredRecord(item);

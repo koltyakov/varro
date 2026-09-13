@@ -200,6 +200,7 @@ function createSession(options?: {
     permissionModeRecoverySessionIds: vi.fn(() => []),
     sessionSelectedModels: vi.fn<() => InitialWebviewState['sessionSelectedModels']>(() => ({})),
     sessionPlanState: vi.fn<() => InitialWebviewState['sessionPlanState']>(() => ({})),
+    sessionReadState: vi.fn<() => InitialWebviewState['sessionReadState']>(() => ({})),
     sessionPlanAgents: vi.fn(() => ({})),
     sessionModelMigrationPending: vi.fn(() => false),
     modelPreferences: vi.fn<() => InitialWebviewState['modelPreferences']>(() => ({

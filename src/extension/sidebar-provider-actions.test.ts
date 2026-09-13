@@ -146,6 +146,7 @@ function createActionFixture() {
     setProviderWatchActive: vi.fn(),
     setActiveChatModel: vi.fn(),
     acknowledgeSessionSeen: vi.fn(),
+    updateSessionReadState: vi.fn(),
     setWebviewFocus: vi.fn(),
     revealPermission: vi.fn(),
     setMermaidPreviewOpen: vi.fn(),

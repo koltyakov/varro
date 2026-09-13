@@ -55,6 +55,10 @@ export const VALID_WEBVIEW_MESSAGES = {
     },
   },
   'session/seen': { type: 'session/seen', payload: { sessionId: 'session-1' } },
+  'session-read-state/update': {
+    type: 'session-read-state/update',
+    payload: { sessionId: 'session-1', seenAt: 100 },
+  },
   'webview/focus': { type: 'webview/focus', payload: { focused: true } },
   'permission/reveal': { type: 'permission/reveal', payload: { permissionId: 'permission-1' } },
   'providers/watch': { type: 'providers/watch', payload: { active: true } },
@@ -166,6 +170,10 @@ export const VALID_WEBVIEW_MESSAGES = {
     payload: { modes: { 'session-1': 'full' } },
   },
   'files/search': { type: 'files/search', payload: { requestId: 5, query: 'src', limit: 20 } },
+  'database/attach': {
+    type: 'database/attach',
+    payload: { requestId: 'table-request', id: 'table-id' },
+  },
   'file/read': { type: 'file/read', payload: { path: '/workspace/a.ts' } },
   'vscode/open': { type: 'vscode/open', payload: { path: '/workspace/a.ts', line: 12 } },
   'vscode/open-text': {
