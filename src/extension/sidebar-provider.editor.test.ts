@@ -1533,18 +1533,23 @@ describe('SidebarProvider editor panels', () => {
     const { provider } = await createSidebarProviderInstance({ contextProvider });
     const { posted } = attachTestView(provider);
     await provider.handleMessage({ type: 'ready' });
+    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
+      .sessionState;
+    const consumeRecoverySnapshot = vi.spyOn(sessionState, 'consumeRecoverySnapshot');
     const editor = createPanel();
     getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
     await provider.openNewEditor();
+    // Finish recovery before ready so its boot replay cannot race the reconciliation assertions.
+    expect(consumeRecoverySnapshot).toHaveBeenCalledOnce();
+    await consumeRecoverySnapshot.mock.results[0]!.value;
     editor.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 1 } });
     editor.receive({ type: 'ready' });
     await vi.waitFor(() =>
-      expect(editor.panel.webview.postMessage).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'permission-automation/update' })
-      )
+      expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'permission-automation/update',
+        payload: expect.objectContaining({ owner: true }),
+      })
     );
-    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
-      .sessionState;
     sessionState.handleServerEvent({
       type: 'permission.asked',
       properties: {

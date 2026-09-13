@@ -632,6 +632,48 @@ describe('ModelsPanel', () => {
     expect(JSON.parse(window.localStorage.getItem(STORAGE_KEYS.hiddenProviders)!)).toEqual([]);
   });
 
+  it('deselects all models without hiding or collapsing the provider', async () => {
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    const section = container?.querySelector<HTMLElement>('.models-provider');
+    const checkbox = section?.querySelector<HTMLInputElement>(
+      '.models-provider-header .models-checkbox'
+    );
+    expect(checkbox?.checked).toBe(true);
+    checkbox?.click();
+    await Promise.resolve();
+
+    expect(state.hiddenProviders).toEqual([]);
+    expect(state.hiddenModels).toEqual(['openai:gpt-5', 'openai:gpt-5-mini']);
+    expect(section?.querySelector('.models-provider-hidden-marker')).toBeNull();
+    expect(section?.querySelector('.models-provider-count')?.textContent).toBe('0/2');
+    expect(section?.querySelector('.models-chevron')?.classList.contains('expanded')).toBe(true);
+    expect(section?.querySelectorAll('.models-model-row')).toHaveLength(2);
+    expect(checkbox?.checked).toBe(false);
+
+    checkbox?.click();
+    await Promise.resolve();
+
+    expect(state.hiddenProviders).toEqual([]);
+    expect(state.hiddenModels).toEqual([]);
+    expect(checkbox?.checked).toBe(true);
+  });
+
+  it('keeps an explicitly hidden provider hidden when selecting all models', async () => {
+    setState('hiddenProviders', ['openai']);
+    setState('hiddenModels', ['openai:gpt-5', 'openai:gpt-5-mini']);
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    container?.querySelector<HTMLInputElement>('.models-provider-header .models-checkbox')?.click();
+    await Promise.resolve();
+
+    expect(state.hiddenModels).toEqual([]);
+    expect(state.hiddenProviders).toEqual(['openai']);
+    expect(container?.querySelector('.models-provider-hidden-marker')?.textContent).toBe('Hidden');
+  });
+
   it('resets a provider model order from its context menu', async () => {
     setState('modelOrder', ['openai:gpt-5-mini', 'openai:gpt-5']);
     cleanup = render(() => ModelsPanel(), container!);

@@ -1308,14 +1308,10 @@ function ProviderSection(props: {
 
   const allEnabled = () => props.models.length > 0 && enabledCount() === props.models.length;
   const someEnabled = () => enabledCount() > 0 && !allEnabled();
-  const isFullProviderView = () => !isLargeModelCatalog(props.provider);
   const isExpanded = () => props.forceExpanded || props.reconnectRequired || expanded();
   function toggleProvider() {
     const visible = !allEnabled();
 
-    if (isFullProviderView()) {
-      setProviderVisible(props.provider.id, visible);
-    }
     setModelsVisible(
       props.provider.id,
       props.models.map((model) => model.id),
