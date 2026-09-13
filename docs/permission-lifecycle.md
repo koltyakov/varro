@@ -446,12 +446,13 @@ incoming metadata cannot bypass an active local mode update or recovery.
   selection.
 
 Persisted `edits` selections from versions that exposed Auto-accept edits migrate to `default`.
-Session migrations must also clear the removed mode's OpenCode session rules before recovery ends.
-Before appending migration rules, read the session and check whether its rules already end with the
-required fallback. An authoritative matching suffix confirms that migration is already applied.
-Skip the PATCH in that case: OpenCode appends duplicate rules and advances `time.updated` even when
-the permission policy is unchanged, making old sessions appear recently active in another workspace.
-An earlier matching sequence is insufficient if later rules override it.
+Legacy browser-selection imports update local storage only. Never backfill session metadata or
+permission rules while opening a workspace or loading history. Browser storage can contain sessions
+from every workspace, and every OpenCode PATCH advances `time.updated`.
+Startup fallback recovery is read-only and must not delay the webview ready handshake. A matching
+rule suffix can confirm recovery; otherwise retain the pending-recovery flag and actionable prompts
+until the user explicitly selects a mode. An earlier matching sequence is insufficient if later
+rules override it. Only explicit mode changes may patch those pending rules.
 
 Do not optimistically clear permission prompts as part of a mode selection. Full mode may own them
 automatically only after its rule update succeeds, and unresolved requests must remain discoverable

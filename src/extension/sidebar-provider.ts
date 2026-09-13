@@ -868,7 +868,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         postConfigState: () => this.postConfigState(),
         handleReadyMessage: async (documentId) => {
           try {
-            await this.recoverPendingPermissionModeFallbacks();
             const ready = await webviewSession.handleReady(documentId);
             if (!ready) return;
             if (endpointRef.endpoint) {
@@ -883,6 +882,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             throw err;
           }
           this.providerFileRefresh.postStatus();
+          void this.recoverPendingPermissionModeFallbacks();
         },
         handleDroppedPaths: (paths) =>
           contextFilesState.handleDroppedPaths(paths, (message) => post(message)),
@@ -963,19 +963,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           );
         },
         migratePermissionModes: async ({ modes: legacyModes }) => {
-          await Promise.all(
-            Object.entries(legacyModes).map(([sessionId, mode]) => {
-              const directory =
-                this.sessionState.directoryFor(sessionId) ?? endpointServer.getWorkspaceCwd();
-              return this.persistPreconfiguredPermissionMode(
-                sessionId,
-                mode,
-                directory,
-                true,
-                mode === 'default'
-              );
-            })
-          );
+          // Browser storage is shared across workspaces. Import local selections only;
+          // opening a workspace must never backfill metadata or rules into session history.
+          this.postPermissionModes(await this.sessionPermissionModes.setIfAbsent(legacyModes));
         },
         updateSessionModel: async ({ sessionId, model }) => {
           if (model) {
@@ -2186,7 +2176,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             mode === 'default'
               ? (defaultPermission ?? getSafeDefaultPermissionRules())
               : getSessionPermissionRulesForMode(mode, 'update');
-          session = await this.patchSessionPermissionMode(sessionID, mode, directory, permission);
+          session = await this.patchSessionPermissionMode(
+            sessionID,
+            mode,
+            directory,
+            permission,
+            recoverFallback
+          );
         } catch (err) {
           this.postPermissionModes();
           this.schedulePermissionModeFallbackRecovery();
@@ -2205,7 +2201,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
               sessionID,
               'default',
               directory,
-              getSafeDefaultPermissionRules()
+              getSafeDefaultPermissionRules(),
+              recoverFallback
             );
             await this.sessionPermissionModes.set(sessionID, 'default');
             this.postPermissionModes();
@@ -2301,12 +2298,31 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     sessionID: string,
     mode: PermissionMode,
     directory?: string,
-    permission?: PermissionRule[]
+    permission?: PermissionRule[],
+    readOnly = false
   ) {
     const path = `/session/${encodeURIComponent(sessionID)}`;
     const session = asRecord(await this.server.request('GET', path, undefined, { directory }));
     if (session?.id !== sessionID) throw new Error('Cannot verify session permission metadata');
     const metadata = asRecord(session.metadata) ?? {};
+    if (readOnly) {
+      const existing = Array.isArray(session.permission) ? session.permission : [];
+      const confirmed =
+        permission &&
+        existing.length >= permission.length &&
+        permission.every((rule, index) => {
+          const current = asRecord(existing[existing.length - permission.length + index]);
+          return (
+            current?.permission === rule.permission &&
+            current.pattern === rule.pattern &&
+            current.action === rule.action
+          );
+        });
+      if (!confirmed) {
+        throw new Error('Select a permission mode to resolve the pending session rules');
+      }
+      return session;
+    }
     if (!permission && asRecord(metadata.varro)?.permissionMode === mode) return session;
     const body: Pick<Session, 'metadata' | 'permission'> = {
       metadata: mergeVarroSessionMetadata(metadata, { permissionMode: mode }),
@@ -2393,8 +2409,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     sessionID: string,
     mode: PermissionMode,
     directory?: string,
-    ifAbsent = false,
-    resetRemoteRules = false
+    ifAbsent = false
   ): Promise<void> {
     const previous = this.permissionModeQueues.get(sessionID) ?? Promise.resolve();
     const operation = previous
@@ -2437,53 +2452,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           throw err;
         }
         this.postPermissionModes();
-        if (resetRemoteRules) {
-          try {
-            const path = `/session/${encodeURIComponent(sessionID)}`;
-            const session = asRecord(
-              await this.server.request('GET', path, undefined, { directory })
-            );
-            if (session?.id !== sessionID)
-              throw new Error('Cannot verify session permission rules');
-            const permission =
-              mode === 'default'
-                ? getSafeDefaultPermissionRules()
-                : getSessionPermissionRulesForMode(mode, 'update');
-            const existing = Array.isArray(session.permission) ? session.permission : [];
-            // OpenCode appends rules and bumps time.updated on every PATCH. A new
-            // workspace can migrate the same selections, so confirm the suffix
-            // before writing. Earlier matches do not override later rules.
-            const alreadyApplied =
-              existing.length >= permission.length &&
-              permission.every((rule, index) => {
-                const current = asRecord(existing[existing.length - permission.length + index]);
-                return (
-                  current?.permission === rule.permission &&
-                  current.pattern === rule.pattern &&
-                  current.action === rule.action
-                );
-              });
-            if (!alreadyApplied) {
-              await this.server.request(
-                'PATCH',
-                path,
-                {
-                  permission,
-                  metadata: mergeVarroSessionMetadata(session.metadata, { permissionMode: mode }),
-                },
-                { directory }
-              );
-            }
-          } catch (err) {
-            this.postPermissionModes();
-            this.schedulePermissionModeFallbackRecovery();
-            throw err;
-          }
-        }
         try {
-          if (!resetRemoteRules) {
-            await this.patchSessionPermissionMode(sessionID, mode, directory);
-          }
+          await this.patchSessionPermissionMode(sessionID, mode, directory);
           const modes = await this.sessionPermissionModes.set(sessionID, mode);
           this.postPermissionModes(modes);
         } catch (err) {
