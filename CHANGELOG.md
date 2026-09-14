@@ -4,9 +4,15 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 
 ## 0.28.x - September 2026
 
+- Added VS Code Problems context with workspace and individual diagnostic selection through the composer, slash command, and editor code actions. Captured diagnostics persist across queued messages, history, and message edits, with settings to disable inclusion.
+- Added inline `$` skill references with completion and attachments, preserving skill references in message history and edits.
+- Added database context and table-attachment support in the shared chat interface, including persistent snapshots and message rendering for sessions with database attachments.
+- Synchronized session read state across folder and multi-root views so read conversations stay read when switching workspaces.
 - Improved Windows server startup and recovery, event handling, and OpenCode update support while limiting background work under heavy load.
 - Added layered permission controls for session and project rules, inherited configuration, and server-memory allowances. Simplified session choices to Default, Auto, and Full access.
+- Let agents continue permitted work after a rejected permission request, required scope selection when saving an always-allow rule, and prevented startup permission recovery from changing session history or recency.
 - Added provider visibility and ordering controls, shared model preferences across workspaces, and usage-limit reporting for Claude Code. OpenAI and Z.ai limits now include reset details.
+- Coordinated provider quota polling across instances, added available Grok quota reset times, kept authentication failures visible until credentials are verified, and fixed providers disappearing when all their models are deselected.
 - Added drag-and-drop and keyboard reordering for pinned sessions, with custom order preserved across session lists and navigation.
 - Expanded redacted diagnostics and Ralph verification evidence, with clearer provider failures and reconnect feedback.
 - Opened plans in VS Code's Markdown preview while keeping them available as editor context.
@@ -14,6 +20,8 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 - Improved pasted images, draft and queued-message persistence, and attachment cleanup.
 - Strengthened sidebar and editor-chat recovery across delayed state, stalled delivery, stale documents, cross-folder prompts, concurrent session-scope changes, and asynchronous session transitions.
 - Stabilized long conversations, scrolling during activity transitions, prompt navigation, streaming Markdown, and deeply nested session lists.
+- Smoothed streamed text and activity updates, preserved scroll anchors during resizing and collapsed activity, and kept file-change previews stable across repeated edits.
+- Fixed session-picker sends losing newly created sessions, highlighted reselected editor sessions, and removed stale Stop controls after completed responses.
 - Fixed custom-answer submission and kept active auto-approve reviews visible.
 
 ## 0.27.x - August 2026
