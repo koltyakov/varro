@@ -1256,8 +1256,11 @@ export class CdpController {
     const shifted = key === 'Shift+Space';
     const normalized = shifted ? ' ' : key === 'Space' ? ' ' : key;
     const code = shifted || key === 'Space' ? 'Space' : key;
-    const virtualKeyCode =
-      normalized === 'Enter' ? 13 : normalized === 'Tab' ? 9 : normalized === ' ' ? 32 : undefined;
+    const virtualKeyCode = {
+      Enter: 13, Tab: 9, ' ': 32,
+      PageUp: 33, PageDown: 34, End: 35, Home: 36,
+      ArrowUp: 38, ArrowDown: 40,
+    }[normalized];
     for (const type of ['keyDown', 'keyUp']) {
       const event = {
         type,
@@ -3601,7 +3604,9 @@ export async function executeActivityScenario({
       .filter((part) => part.type === 'tool')
       .map((part) => ({ id: part.id, status: part.state?.status }));
     const transcript = snapshot.transcript;
-    const detached = snapshot.jumpToLatest === true && !!transcript &&
+    // The native upward wheel establishes detachment. The jump button has its own
+    // visibility threshold, so it can disappear while the viewport stays detached.
+    const detached = !!transcript &&
       transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop > 2;
     const sample = { at: Date.now(), busy, detached, tools, snapshot };
     evidence.observations.push(sample);
@@ -3643,7 +3648,21 @@ export async function executeActivityScenario({
       if (!sample.detached) throw new Error('Transcript reattached before the return action');
     }
     if (!sample.busy || !sample.tools.some((tool) => tool.status === 'running')) throw new Error('No running tool remained for return to bottom');
-    const dispatched = await cdp.click('[aria-label="Scroll to latest message"]');
+    const returnAction = {
+      step: 3, action: 'return while tool active', inputs: [],
+      dispatched: false, executed: false, before: sample,
+    };
+    evidence.actions.push(returnAction);
+    let dispatched = false;
+    if (sample.snapshot.jumpToLatest) {
+      returnAction.inputs.push('jump-to-latest');
+      dispatched = await cdp.click('[aria-label="Scroll to latest message"]');
+    }
+    if (!dispatched) {
+      returnAction.inputs.push('End');
+      dispatched = await cdp.key('.interactive-list', 'End');
+    }
+    returnAction.dispatched = dispatched;
     if (!dispatched) throw new Error('Native return-to-bottom control was unavailable');
     let after = await read();
     while (after.busy && after.snapshot.transcript &&
@@ -3657,7 +3676,7 @@ export async function executeActivityScenario({
     const transcript = after.snapshot.transcript;
     const executed = dispatched && after.busy && evidence.runningAtReturn.length > 0 &&
       !!transcript && transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop <= 2;
-    evidence.actions.push({ step: 3, action: 'return while tool active', dispatched, executed, before: sample, after });
+    Object.assign(returnAction, { executed, after });
     if (!executed) throw new Error('Return did not reach bottom while a tool was still running');
     evidence.executed = true;
   } catch (error) {

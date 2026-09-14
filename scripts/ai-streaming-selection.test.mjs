@@ -7,8 +7,9 @@ import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import http from 'node:http';
 
-import { readPlaybackCapture } from './ai-session-playback.mjs';
+import { buildReplayTimeline, readPlaybackCapture } from './ai-session-playback.mjs';
 import { prepareStreamingRun, readActiveSessions } from './ai-streaming-selection.mjs';
+import { createStreamingServer } from './ai-streaming-server.mjs';
 
 // Real listener/database ownership checks require lsof. Mocked discovery tests run everywhere.
 const ownershipTest = process.platform === 'win32' ? test.skip : test;
@@ -101,115 +102,196 @@ async function fixture(t) {
   };
 }
 
-ownershipTest('selects diverse history deterministically, imports captures, and leaves source unchanged', async (t) => {
-  const f = await fixture(t);
-  f.add(
-    'prose',
-    [
-      { type: 'reasoning', text: 'Think' },
-      { type: 'text', text: '# Result\n' + 'long '.repeat(900) },
-    ],
-    { baseline: 1 }
-  );
-  f.add('edit', [
-    {
-      type: 'tool',
-      tool: 'apply_patch',
-      callID: 'call',
-      state: {
-        status: 'completed',
-        input: { patchText: 'patch' },
-        output: 'updated',
-        time: { start: 210, end: 250 },
+ownershipTest(
+  'selects diverse history deterministically, imports captures, and leaves source unchanged',
+  async (t) => {
+    const f = await fixture(t);
+    f.add(
+      'prose',
+      [
+        { type: 'reasoning', text: 'Think' },
+        { type: 'text', text: '# Result\n' + 'long '.repeat(900) },
+      ],
+      { baseline: 1 }
+    );
+    f.add('edit', [
+      {
+        type: 'tool',
+        tool: 'apply_patch',
+        callID: 'call',
+        state: {
+          status: 'completed',
+          input: { patchText: 'patch' },
+          output: 'updated',
+          time: { start: 210, end: 250 },
+        },
       },
-    },
-  ]);
-  f.add('baseline', [{ type: 'text', text: 'short' }], { baseline: 130 });
-  f.add('plain', [{ type: 'text', text: 'plain' }]);
-  const before = await readFile(f.sourceDatabase);
-  const first = await prepareStreamingRun(f.options());
-  const second = await prepareStreamingRun(f.options());
-  assert.deepEqual(
-    first.selected.map((item) => item.sourceSessionId),
-    ['prose', 'edit', 'baseline']
-  );
-  assert.equal(first.selectionHash, second.selectionHash);
-  assert.deepEqual(
-    first.selected.map((item) => item.selection),
-    second.selected.map((item) => item.selection)
-  );
-  assert.equal(first.coverage.missing.length, 0);
-  assert.equal(first.provenance.scenario, 'HISTORY');
-  assert.equal(first.provenance.cadence, 'reconstructed');
-  assert.ok(
-    first.rejected.some(
-      (item) => item.sourceSessionId === 'plain' && item.reason === 'outside-longest-session-subset'
-    )
-  );
-  assert.deepEqual(JSON.parse(await readFile(first.manifestPath, 'utf8')), first);
-  for (const item of first.selected) {
-    const capture = readPlaybackCapture(first.playbackDatabase, item.capture.id);
-    const bytes = await readFile(item.capture.path);
-    assert.deepEqual(JSON.parse(bytes), capture);
-    assert.equal(item.capture.sha256, createHash('sha256').update(bytes).digest('hex'));
-    assert.equal(capture.finalMessages.at(-1).info.id, item.sourceMessageId);
-    assert.equal(capture.finalMessages.at(-2).info.id, item.sourceUserMessageId);
-    assert.equal(capture.initialMessages.length, item.metrics.baselineMessages);
-    assert.equal(capture.scenario, 'HISTORY');
-    assert.ok(item.timing.eventCount > 0);
-    assert.ok(item.timing.reconstructedDurationMs > 0);
-  }
-  assert.deepEqual(await readFile(f.sourceDatabase), before);
-});
-
-ownershipTest('excludes controller, incomplete sessions, wrong directories, and invalid user links', async (t) => {
-  const f = await fixture(t);
-  for (const id of [
-    'controller',
-    'active',
-    'null-completion',
-    'bad-parent',
-    'cross-parent',
-    'good',
-  ]) {
-    f.add(id);
-  }
-  f.add('child-directory', [], { directory: '/workspace/child' });
-  f.add('case-directory', [], { directory: '/Workspace' });
-  f.message('unfinished', 'active', 1, { role: 'assistant', time: { created: 1 } });
-  f.message('null-time', 'null-completion', 1, { role: 'assistant', time: { completed: null } });
-  f.db
-    .prepare("UPDATE message SET data = ? WHERE id = 'bad-parent-user'")
-    .run(JSON.stringify({ role: 'system' }));
-  f.db.prepare("UPDATE message SET data = ? WHERE id = 'cross-parent-assistant'").run(
-    JSON.stringify({
-      role: 'assistant',
-      parentID: 'good-user',
-      time: { created: 200, completed: 500 },
-    })
-  );
-  const result = await prepareStreamingRun(f.options());
-  assert.deepEqual(
-    result.selected.map((item) => item.sourceSessionId),
-    ['good']
-  );
-  assert.equal(result.shortfall, 2);
-  for (const [id, reason] of [
-    ['controller', 'controller-session'],
-    ['active', 'session-has-incomplete-assistant'],
-    ['null-completion', 'session-has-incomplete-assistant'],
-    ['bad-parent', 'not-linked-to-user'],
-    ['cross-parent', 'not-linked-to-user'],
-  ]) {
+    ]);
+    f.add('baseline', [{ type: 'text', text: 'short' }], { baseline: 130 });
+    f.add('plain', [{ type: 'text', text: 'plain' }]);
+    const before = await readFile(f.sourceDatabase);
+    const first = await prepareStreamingRun(f.options());
+    const second = await prepareStreamingRun(f.options());
+    assert.deepEqual(
+      first.selected.map((item) => item.sourceSessionId),
+      ['prose', 'edit', 'baseline']
+    );
+    assert.equal(first.selectionHash, second.selectionHash);
+    assert.deepEqual(
+      first.selected.map((item) => item.selection),
+      second.selected.map((item) => item.selection)
+    );
+    assert.equal(first.coverage.missing.length, 0);
+    assert.equal(first.provenance.scenario, 'HISTORY');
+    assert.equal(first.provenance.cadence, 'reconstructed');
     assert.ok(
-      result.rejected.some((item) => item.sourceSessionId === id && item.reason === reason)
+      first.rejected.some(
+        (item) =>
+          item.sourceSessionId === 'plain' && item.reason === 'outside-longest-session-subset'
+      )
+    );
+    assert.deepEqual(JSON.parse(await readFile(first.manifestPath, 'utf8')), first);
+    for (const item of first.selected) {
+      const capture = readPlaybackCapture(first.playbackDatabase, item.capture.id);
+      const bytes = await readFile(item.capture.path);
+      assert.deepEqual(JSON.parse(bytes), capture);
+      assert.equal(item.capture.sha256, createHash('sha256').update(bytes).digest('hex'));
+      assert.equal(capture.finalMessages.at(-1).info.id, item.sourceMessageId);
+      assert.equal(capture.finalMessages.at(-2).info.id, item.sourceUserMessageId);
+      assert.equal(capture.initialMessages.length, item.metrics.baselineMessages);
+      assert.equal(capture.scenario, 'HISTORY');
+      assert.ok(item.timing.eventCount > 0);
+      assert.ok(item.timing.reconstructedDurationMs > 0);
+    }
+    assert.deepEqual(await readFile(f.sourceDatabase), before);
+  }
+);
+
+ownershipTest(
+  'excludes foreign references throughout imported history before ranking sessions',
+  async (t) => {
+    const f = await fixture(t);
+    for (const [id, target] of [
+      ['response', 'assistant'],
+      ['parent', 'user'],
+      ['baseline', 'baseline-0'],
+    ]) {
+      f.add(id, [{ type: 'text', text: '# Selected answer' }], { baseline: 4 });
+      f.db.prepare('INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)').run(
+        `${id}-task`,
+        `${id}-${target}`,
+        id,
+        10,
+        20,
+        JSON.stringify({
+          type: 'tool',
+          tool: 'task',
+          callID: `${id}-call`,
+          state: {
+            status: 'completed',
+            input: {},
+            output: 'retained result',
+            metadata: { tasks: [{ sessionId: 'foreign-child' }] },
+            time: { start: 10, end: 20 },
+          },
+        })
+      );
+    }
+    f.add('info', [], { baseline: 4 });
+    f.db
+      .prepare("UPDATE message SET data = ? WHERE id = 'info-baseline-0'")
+      .run(JSON.stringify({ role: 'user', metadata: { sessionID: 'foreign-child' } }));
+    f.add(
+      'good',
+      [
+        {
+          type: 'text',
+          text: 'Historical prose mentions foreign-child.',
+          metadata: { sessionId: 'good' },
+        },
+      ],
+      { baseline: 1 }
+    );
+    // Foreign metadata outside the exact 120-message baseline must not disqualify a response.
+    f.add('older', [{ type: 'text', text: 'Valid recent response' }], { baseline: 121 });
+    f.db
+      .prepare("UPDATE message SET data = ? WHERE id = 'older-baseline-0'")
+      .run(JSON.stringify({ role: 'user', metadata: { sessionId: 'foreign-child' } }));
+    const before = await readFile(f.sourceDatabase);
+    const result = await prepareStreamingRun(f.options({ count: 2 }));
+    assert.deepEqual(result.policy.sessionSubset, ['older', 'good']);
+    assert.equal(result.shortfall, 0);
+    for (const id of ['response', 'parent', 'baseline', 'info']) {
+      assert.ok(
+        result.rejected.some(
+          (entry) => entry.sourceSessionId === id && entry.reason === 'foreign-session-reference'
+        )
+      );
+    }
+    for (const selected of result.selected) {
+      const capture = readPlaybackCapture(result.playbackDatabase, selected.capture.id);
+      const server = await createStreamingServer({
+        capture,
+        timeline: buildReplayTimeline(capture.events),
+        directory: '/replay',
+      });
+      await server.close();
+    }
+    assert.deepEqual(await readFile(f.sourceDatabase), before);
+  }
+);
+
+ownershipTest(
+  'excludes controller, incomplete sessions, wrong directories, and invalid user links',
+  async (t) => {
+    const f = await fixture(t);
+    for (const id of [
+      'controller',
+      'active',
+      'null-completion',
+      'bad-parent',
+      'cross-parent',
+      'good',
+    ]) {
+      f.add(id);
+    }
+    f.add('child-directory', [], { directory: '/workspace/child' });
+    f.add('case-directory', [], { directory: '/Workspace' });
+    f.message('unfinished', 'active', 1, { role: 'assistant', time: { created: 1 } });
+    f.message('null-time', 'null-completion', 1, { role: 'assistant', time: { completed: null } });
+    f.db
+      .prepare("UPDATE message SET data = ? WHERE id = 'bad-parent-user'")
+      .run(JSON.stringify({ role: 'system' }));
+    f.db.prepare("UPDATE message SET data = ? WHERE id = 'cross-parent-assistant'").run(
+      JSON.stringify({
+        role: 'assistant',
+        parentID: 'good-user',
+        time: { created: 200, completed: 500 },
+      })
+    );
+    const result = await prepareStreamingRun(f.options());
+    assert.deepEqual(
+      result.selected.map((item) => item.sourceSessionId),
+      ['good']
+    );
+    assert.equal(result.shortfall, 2);
+    for (const [id, reason] of [
+      ['controller', 'controller-session'],
+      ['active', 'session-has-incomplete-assistant'],
+      ['null-completion', 'session-has-incomplete-assistant'],
+      ['bad-parent', 'not-linked-to-user'],
+      ['cross-parent', 'not-linked-to-user'],
+    ]) {
+      assert.ok(
+        result.rejected.some((item) => item.sourceSessionId === id && item.reason === reason)
+      );
+    }
+    assert.ok(result.rejected.every((item) => !item.sourceSessionId.includes('directory')));
+    assert.ok(
+      result.coverage.missing.every((item) => item.reason === 'unavailable-in-eligible-scan')
     );
   }
-  assert.ok(result.rejected.every((item) => !item.sourceSessionId.includes('directory')));
-  assert.ok(
-    result.coverage.missing.every((item) => item.reason === 'unavailable-in-eligible-scan')
-  );
-});
+);
 
 ownershipTest('seed breaks equal-score ties and session scan is bounded', async (t) => {
   const f = await fixture(t);
@@ -234,88 +316,102 @@ ownershipTest('seed breaks equal-score ties and session scan is bounded', async 
   assert.equal(new Set(a.selected.map((item) => item.sourceSessionId)).size, 5);
 });
 
-ownershipTest('reports unavailable and count-limited coverage, including empty history', async (t) => {
-  const f = await fixture(t);
-  const empty = await prepareStreamingRun(f.options());
-  assert.equal(empty.selectedCount, 0);
-  assert.equal(empty.shortfall, 3);
-  assert.equal(empty.coverage.missing.length, 7);
-  f.add('prose', [
-    { type: 'text', text: '# Heading' },
-    { type: 'reasoning', text: 'Think' },
-  ]);
-  f.add('tool', [
-    { type: 'tool', tool: 'bash', state: { status: 'completed', input: {}, output: 'ok' } },
-  ]);
-  const result = await prepareStreamingRun(f.options({ count: 1 }));
-  assert.ok(
-    result.coverage.missing.some(
-      (item) => item.feature === 'tools' && item.reason === 'outside-longest-session-subset'
-    )
-  );
-});
-
-ownershipTest('requires baseline history above the production virtualization threshold', async (t) => {
-  const f = await fixture(t);
-  f.add('below', [], { baseline: 40 });
-  f.add('boundary', [], { baseline: 50 });
-  f.add('above', [], { baseline: 51 });
-  const result = await prepareStreamingRun(f.options());
-  for (const candidate of result.selected) {
-    assert.equal(
-      candidate.features.includes('baseline_virtualization'),
-      candidate.sourceSessionId === 'above'
+ownershipTest(
+  'reports unavailable and count-limited coverage, including empty history',
+  async (t) => {
+    const f = await fixture(t);
+    const empty = await prepareStreamingRun(f.options());
+    assert.equal(empty.selectedCount, 0);
+    assert.equal(empty.shortfall, 3);
+    assert.equal(empty.coverage.missing.length, 7);
+    f.add('prose', [
+      { type: 'text', text: '# Heading' },
+      { type: 'reasoning', text: 'Think' },
+    ]);
+    f.add('tool', [
+      { type: 'tool', tool: 'bash', state: { status: 'completed', input: {}, output: 'ok' } },
+    ]);
+    const result = await prepareStreamingRun(f.options({ count: 1 }));
+    assert.ok(
+      result.coverage.missing.some(
+        (item) => item.feature === 'tools' && item.reason === 'outside-longest-session-subset'
+      )
     );
   }
-  assert.equal(result.policy.baselineMessages, 51);
-});
+);
 
-ownershipTest('validates options and refuses to overwrite source aliases or previous output', async (t) => {
-  const f = await fixture(t);
-  for (const key of ['sourceDatabase', 'directory', 'outputDirectory']) {
-    for (const value of [undefined, '', ' ', 1]) {
-      await assert.rejects(prepareStreamingRun(f.options({ [key]: value })), new RegExp(key));
+ownershipTest(
+  'requires baseline history above the production virtualization threshold',
+  async (t) => {
+    const f = await fixture(t);
+    f.add('below', [], { baseline: 40 });
+    f.add('boundary', [], { baseline: 50 });
+    f.add('above', [], { baseline: 51 });
+    const result = await prepareStreamingRun(f.options());
+    for (const candidate of result.selected) {
+      assert.equal(
+        candidate.features.includes('baseline_virtualization'),
+        candidate.sourceSessionId === 'above'
+      );
     }
+    assert.equal(result.policy.baselineMessages, 51);
   }
-  for (const count of [0, -1, 1.5, '3', 501, NaN, Infinity]) {
-    await assert.rejects(prepareStreamingRun(f.options({ count })), /count/);
-  }
-  for (const seed of [undefined, '', ' ', {}, null, NaN, Infinity, 1.5]) {
-    await assert.rejects(prepareStreamingRun(f.options({ seed })), /seed/);
-  }
-  f.add('good');
-  const options = f.options();
-  await prepareStreamingRun(options);
-  await assert.rejects(prepareStreamingRun(options), /EEXIST/);
-  const before = await readFile(f.sourceDatabase);
-  await link(f.sourceDatabase, path.join(f.root, 'playback.db'));
-  await assert.rejects(prepareStreamingRun(f.options({ outputDirectory: f.root })), /EEXIST/);
-  assert.deepEqual(await readFile(f.sourceDatabase), before);
-});
+);
 
-ownershipTest('automatically excludes busy and retry sessions even with complete stored history', async (t) => {
-  const f = await fixture(t);
-  f.add('busy', [], { baseline: 100 });
-  f.add('retry', [], { baseline: 90 });
-  f.add('long', [{ type: 'text', text: 'long history' }], { baseline: 80 });
-  f.add('short', [{ type: 'reasoning', text: 'richer response' }]);
-  f.status.busy = { type: 'busy' };
-  f.status.retry = { type: 'retry' };
-  const result = await prepareStreamingRun(f.options({ controllerSessionId: undefined, count: 1 }));
-  assert.deepEqual(
-    result.selected.map((item) => item.sourceSessionId),
-    ['long']
-  );
-  assert.deepEqual(result.activity.activeSessionIds, ['busy', 'retry']);
-  assert.equal(result.controllerSessionId, null);
-  assert.equal(result.rejected.filter((item) => item.reason === 'active-session').length, 2);
-  const filtered = await prepareStreamingRun(f.options({ sourceSessionId: 'short' }));
-  assert.deepEqual(
-    filtered.selected.map((item) => item.sourceSessionId),
-    ['short']
-  );
-  assert.equal(filtered.shortfall, 2);
-});
+ownershipTest(
+  'validates options and refuses to overwrite source aliases or previous output',
+  async (t) => {
+    const f = await fixture(t);
+    for (const key of ['sourceDatabase', 'directory', 'outputDirectory']) {
+      for (const value of [undefined, '', ' ', 1]) {
+        await assert.rejects(prepareStreamingRun(f.options({ [key]: value })), new RegExp(key));
+      }
+    }
+    for (const count of [0, -1, 1.5, '3', 501, NaN, Infinity]) {
+      await assert.rejects(prepareStreamingRun(f.options({ count })), /count/);
+    }
+    for (const seed of [undefined, '', ' ', {}, null, NaN, Infinity, 1.5]) {
+      await assert.rejects(prepareStreamingRun(f.options({ seed })), /seed/);
+    }
+    f.add('good');
+    const options = f.options();
+    await prepareStreamingRun(options);
+    await assert.rejects(prepareStreamingRun(options), /EEXIST/);
+    const before = await readFile(f.sourceDatabase);
+    await link(f.sourceDatabase, path.join(f.root, 'playback.db'));
+    await assert.rejects(prepareStreamingRun(f.options({ outputDirectory: f.root })), /EEXIST/);
+    assert.deepEqual(await readFile(f.sourceDatabase), before);
+  }
+);
+
+ownershipTest(
+  'automatically excludes busy and retry sessions even with complete stored history',
+  async (t) => {
+    const f = await fixture(t);
+    f.add('busy', [], { baseline: 100 });
+    f.add('retry', [], { baseline: 90 });
+    f.add('long', [{ type: 'text', text: 'long history' }], { baseline: 80 });
+    f.add('short', [{ type: 'reasoning', text: 'richer response' }]);
+    f.status.busy = { type: 'busy' };
+    f.status.retry = { type: 'retry' };
+    const result = await prepareStreamingRun(
+      f.options({ controllerSessionId: undefined, count: 1 })
+    );
+    assert.deepEqual(
+      result.selected.map((item) => item.sourceSessionId),
+      ['long']
+    );
+    assert.deepEqual(result.activity.activeSessionIds, ['busy', 'retry']);
+    assert.equal(result.controllerSessionId, null);
+    assert.equal(result.rejected.filter((item) => item.reason === 'active-session').length, 2);
+    const filtered = await prepareStreamingRun(f.options({ sourceSessionId: 'short' }));
+    assert.deepEqual(
+      filtered.selected.map((item) => item.sourceSessionId),
+      ['short']
+    );
+    assert.equal(filtered.shortfall, 2);
+  }
+);
 
 ownershipTest('chooses response coverage within the longest distinct session subset', async (t) => {
   const f = await fixture(t);
@@ -389,38 +485,41 @@ test('status discovery uses only PID listeners and fails closed on missing or in
   );
 });
 
-ownershipTest('IPv6 discovery preserves the listener host and verifies the canonical database path', async (t) => {
-  const f = await fixture(t);
-  const server = http.createServer((_request, response) => response.end('{}'));
-  await new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(0, '::1', resolve);
-  });
-  t.after(() => new Promise((resolve) => server.close(resolve)));
-  const alias = path.join(f.root, 'alias.db');
-  await symlink(f.sourceDatabase, alias);
-  const canonicalDatabase = await realpath(f.sourceDatabase);
-  const result = await readActiveSessions(
-    { sourceDatabase: alias, directory: '/workspace', pid: '123' },
-    async (_command, args) => {
-      if (args.includes('--')) {
-        assert.equal(args.at(-1), canonicalDatabase);
-        assert.deepEqual(args.slice(0, -1), ['-nP', '-a', '-p', '123', '-Fpf', '--']);
-        return { stdout: 'p123\nf10\n' };
+ownershipTest(
+  'IPv6 discovery preserves the listener host and verifies the canonical database path',
+  async (t) => {
+    const f = await fixture(t);
+    const server = http.createServer((_request, response) => response.end('{}'));
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '::1', resolve);
+    });
+    t.after(() => new Promise((resolve) => server.close(resolve)));
+    const alias = path.join(f.root, 'alias.db');
+    await symlink(f.sourceDatabase, alias);
+    const canonicalDatabase = await realpath(f.sourceDatabase);
+    const result = await readActiveSessions(
+      { sourceDatabase: alias, directory: '/workspace', pid: '123' },
+      async (_command, args) => {
+        if (args.includes('--')) {
+          assert.equal(args.at(-1), canonicalDatabase);
+          assert.deepEqual(args.slice(0, -1), ['-nP', '-a', '-p', '123', '-Fpf', '--']);
+          return { stdout: 'p123\nf10\n' };
+        }
+        return { stdout: `p123\nn[::1]:${server.address().port}\n` };
       }
-      return { stdout: `p123\nn[::1]:${server.address().port}\n` };
-    }
-  );
-  assert.equal(result.serverUrl, `http://[::1]:${server.address().port}`);
-  assert.equal(result.sourceDatabase, canonicalDatabase);
-  assert.equal(result.serverPid, 123);
-  const explicit = await readActiveSessions({
-    sourceDatabase: alias,
-    directory: '/workspace',
-    serverUrl: result.serverUrl,
-  });
-  assert.equal(explicit.serverPid, process.pid);
-});
+    );
+    assert.equal(result.serverUrl, `http://[::1]:${server.address().port}`);
+    assert.equal(result.sourceDatabase, canonicalDatabase);
+    assert.equal(result.serverPid, 123);
+    const explicit = await readActiveSessions({
+      sourceDatabase: alias,
+      directory: '/workspace',
+      serverUrl: result.serverUrl,
+    });
+    assert.equal(explicit.serverPid, process.pid);
+  }
+);
 
 test('automatic and explicit status endpoints fail closed without matching open database ownership', async (t) => {
   const f = await fixture(t);
@@ -493,20 +592,23 @@ ownershipTest('real status ownership verifies open databases and their aliases',
   assert.equal(hardLinked.serverPid, process.pid);
 });
 
-ownershipTest('records response truncation and checks incompleteness beyond the response scan', async (t) => {
-  const f = await fixture(t);
-  f.add('long');
-  for (let i = 0; i < 51; i++)
-    f.message(`extra-${i}`, 'long', 1_000 + i, {
-      role: 'assistant',
-      parentID: 'long-user',
-      time: { created: 1_000 + i, completed: 2_000 },
-    });
-  const result = await prepareStreamingRun(f.options());
-  assert.equal(result.scan.truncated, true);
-  assert.equal(result.scan.eligible, 50);
-  f.message('old-incomplete', 'long', 1, { role: 'assistant', time: { created: 1 } });
-  const excluded = await prepareStreamingRun(f.options());
-  assert.equal(excluded.selectedCount, 0);
-  assert.equal(excluded.rejected.length, 50);
-});
+ownershipTest(
+  'records response truncation and checks incompleteness beyond the response scan',
+  async (t) => {
+    const f = await fixture(t);
+    f.add('long');
+    for (let i = 0; i < 51; i++)
+      f.message(`extra-${i}`, 'long', 1_000 + i, {
+        role: 'assistant',
+        parentID: 'long-user',
+        time: { created: 1_000 + i, completed: 2_000 },
+      });
+    const result = await prepareStreamingRun(f.options());
+    assert.equal(result.scan.truncated, true);
+    assert.equal(result.scan.eligible, 50);
+    f.message('old-incomplete', 'long', 1, { role: 'assistant', time: { created: 1 } });
+    const excluded = await prepareStreamingRun(f.options());
+    assert.equal(excluded.selectedCount, 0);
+    assert.equal(excluded.rejected.length, 50);
+  }
+);

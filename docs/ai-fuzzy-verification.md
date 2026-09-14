@@ -741,6 +741,12 @@ stress. The deterministic layout suite always verifies native-style nested-to-ou
 5. Return to the bottom before the final tool completes and observe the transition into Explored or
    Worked.
 
+After verifying the native upward wheel, the controller checks detachment using the measured distance
+from the bottom. Jump-to-latest visibility is not a follow-state indicator: the button intentionally
+hides near the bottom. Return uses that button when available, otherwise native `End` on the
+transcript. A dispatched input counts only after measurements confirm the bottom was reached while
+a tool was still running. The action record includes the attempted inputs even when return fails.
+
 Pass invariants:
 
 - The sticky prompt remains the same marked prompt throughout unrelated activity height changes.

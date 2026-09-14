@@ -2254,7 +2254,7 @@ kbd {
 .chat-thinking-box .thinking-text.rendered-markdown > [data-markdown-segment='tail'] > :last-child,
 .chat-thinking-box
   .thinking-text.rendered-markdown
-  > [data-markdown-segment='stable']:not(:has(+ [data-markdown-segment='tail'] > :first-child))
+  > [data-markdown-segment='stable'][data-markdown-tail-tag='']
   > :last-child {
   margin-bottom: 0;
 }

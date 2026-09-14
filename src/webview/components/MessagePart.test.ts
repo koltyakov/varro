@@ -5,7 +5,7 @@ import { createStore } from 'solid-js/store';
 import { resetDefaultAppState, setShowFileDiffs, setShowThinking, setState } from '../lib/state';
 import { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
 import { lightBulbIcon } from '../lib/ui-icons';
-import type { AssistantMessage, Part, ReasoningPart, ToolPart } from '../types';
+import type { AssistantMessage, Part, ReasoningPart, TextPart, ToolPart } from '../types';
 import { ToolCall } from './ToolCall';
 import {
   MessagePart,
@@ -69,6 +69,37 @@ function reasoningPart(text: string, overrides: Partial<ReasoningPart> = {}): Re
 function nextFrame() {
   return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 }
+
+it('retains the Markdown renderer when a text part snapshot is replaced', async () => {
+  const [part, setPart] = createSignal<TextPart>({
+    id: 'text-1',
+    messageID: 'message-1',
+    sessionID: 'session-1',
+    type: 'text',
+    text: 'Stable paragraph.\n\nLive paragraph.',
+  });
+  cleanup = render(
+    () =>
+      MessagePart({
+        get part() {
+          return part();
+        },
+      }),
+    container!
+  );
+  await nextFrame();
+  const renderer = container!.querySelector('.rendered-markdown');
+  const first = renderer!.querySelector('p');
+  setPart({ ...part() });
+  await nextFrame();
+  expect(container!.querySelector('.rendered-markdown')).toBe(renderer);
+  expect(renderer!.querySelector('p')).toBe(first);
+  setPart({ ...part(), text: 'Stable paragraph.\n\nLive paragraph. More content.' });
+  await nextFrame();
+  expect(container!.querySelector('.rendered-markdown')).toBe(renderer);
+  expect(renderer!.querySelector('p')).toBe(first);
+  expect(renderer!.textContent).toContain('More content.');
+});
 
 it.each([
   { name: 'MessagePart', Component: MessagePart },

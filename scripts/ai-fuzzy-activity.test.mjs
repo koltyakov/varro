@@ -26,6 +26,7 @@ function harness({ stale = false, settledEarly = false, attached = false } = {})
   const cdp = {
     snapshot: async () => ({ jumpToLatest: !attached, transcript: { scrollTop: attached ? 900 : 500, scrollHeight: 1000, clientHeight: 100 } }),
     click: async (selector) => { calls.push(selector); attached = true; return true; },
+    key: async (selector, key) => { calls.push(`${selector}: ${key}`); attached = true; return true; },
   };
   return {
     calls,
@@ -61,6 +62,91 @@ test('AI07 waits for measured bottom when the jump control disappears before scr
   assert.equal(returningSamples, 2);
   assert.equal(result.actions.at(-1).after.snapshot.transcript.scrollTop, 900);
   assert.deepEqual(result.runningAtReturn, ['final']);
+});
+
+test('AI07 keeps the recorded 238px detachment after the jump button hides and returns with End', async () => {
+  const { options, calls } = harness();
+  let snapshots = 0;
+  let returned = false;
+  options.cdp.snapshot = async () => ({
+    jumpToLatest: ++snapshots === 1,
+    transcript: {
+      scrollTop: returned ? 18793 : 18555,
+      scrollHeight: snapshots === 1 ? 19382 : 19307,
+      clientHeight: 514,
+    },
+  });
+  const key = options.cdp.key;
+  options.cdp.key = async (...args) => { returned = true; return key(...args); };
+  const result = await executeActivityScenario(options);
+  assert.equal(result.executed, true, result.reason);
+  assert.deepEqual(result.completedWhileDetached, ['one', 'two']);
+  assert.equal(result.observations[1].detached, true);
+  assert.equal(result.observations[1].snapshot.transcript.scrollTop, 18555);
+  assert.deepEqual(calls, ['expand disclosure', 'wheel transcript', '.interactive-list: End']);
+  assert.deepEqual(result.actions.at(-1).inputs, ['End']);
+  assert.deepEqual(result.runningAtReturn, ['final']);
+});
+
+test('AI07 accepts initial detachment below the jump-button threshold', async () => {
+  const { options } = harness();
+  const snapshot = options.cdp.snapshot;
+  options.cdp.snapshot = async () => {
+    const state = await snapshot();
+    if (state.jumpToLatest) state.transcript.scrollTop = 804;
+    state.jumpToLatest = false;
+    return state;
+  };
+  const result = await executeActivityScenario(options);
+  assert.equal(result.executed, true, result.reason);
+  assert.equal(result.observations[0].detached, true);
+});
+
+test('AI07 falls back to native End if the jump button disappears before dispatch', async () => {
+  const { options } = harness();
+  options.cdp.click = async () => false;
+  const result = await executeActivityScenario(options);
+  assert.equal(result.executed, true, result.reason);
+  assert.deepEqual(result.actions.at(-1).inputs, ['jump-to-latest', 'End']);
+});
+
+test('AI07 still fails when the transcript actually reaches bottom before detached completions', async () => {
+  const { options, calls } = harness();
+  const snapshot = options.cdp.snapshot;
+  let samples = 0;
+  options.cdp.snapshot = async () => {
+    const state = await snapshot();
+    if (++samples > 1) state.transcript.scrollTop = 899;
+    return state;
+  };
+  const result = await executeActivityScenario(options);
+  assert.equal(result.executed, false);
+  assert.equal(result.failurePhase, 'detached-completions');
+  assert.deepEqual(result.completedWhileDetached, []);
+  assert.deepEqual(calls, ['expand disclosure', 'wheel transcript']);
+});
+
+test('AI07 verifies native End reaches bottom rather than trusting dispatch', async () => {
+  const { options } = harness();
+  const snapshot = options.cdp.snapshot;
+  options.cdp.snapshot = async () => ({ ...await snapshot(), jumpToLatest: false });
+  options.cdp.key = async () => true;
+  const result = await executeActivityScenario(options);
+  assert.equal(result.executed, false);
+  assert.equal(result.failurePhase, 'return-while-tool-active');
+  assert.equal(result.actions.at(-1).dispatched, true);
+  assert.equal(result.actions.at(-1).executed, false);
+});
+
+test('AI07 preserves failed native return evidence when neither input is available', async () => {
+  const { options } = harness();
+  options.cdp.click = async () => false;
+  options.cdp.key = async () => false;
+  const result = await executeActivityScenario(options);
+  assert.equal(result.executed, false);
+  assert.equal(result.failurePhase, 'return-while-tool-active');
+  assert.deepEqual(result.actions.at(-1).inputs, ['jump-to-latest', 'End']);
+  assert.equal(result.actions.at(-1).dispatched, false);
 });
 
 test('AI07 does not count already completed or unrelated tools', async () => {

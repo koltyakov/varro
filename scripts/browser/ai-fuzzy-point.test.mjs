@@ -61,6 +61,54 @@ async function fixture(t, nested = false) {
   return { page, controller, wheels, state };
 }
 
+test('native End returns a slightly detached transcript to bottom without a jump button', async (t) => {
+  const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
+  t.after(() => page.close());
+  await page.setContent(`
+    <style>
+      .interactive-list { position: absolute; inset: 20px; overflow: auto; }
+    </style>
+    <div class="interactive-list" tabindex="0"><div style="height: 2000px">Transcript</div></div>
+  `);
+  const session = await page.context().newCDPSession(page);
+  const controller = Object.create(CdpController.prototype);
+  controller.evaluate = (expression) => page.evaluate(expression);
+  const keys = [];
+  controller.call = (method, params) => {
+    if (method === 'Input.dispatchKeyEvent') keys.push(params);
+    return session.send(method, params);
+  };
+  const atBottom = () => page.waitForFunction(() => {
+    const list = document.querySelector('.interactive-list');
+    return list.scrollHeight - list.clientHeight - list.scrollTop <= 2;
+  });
+  assert.equal(await controller.key('.interactive-list', 'End'), true);
+  await atBottom();
+  assert.equal(await controller.wheel('.interactive-list', -96, 'right'), true);
+  await page.waitForFunction(() => {
+    const list = document.querySelector('.interactive-list');
+    const distance = list.scrollHeight - list.clientHeight - list.scrollTop;
+    return distance > 2 && distance < 240;
+  });
+  assert.equal(await page.locator('[aria-label="Scroll to latest message"]').count(), 0);
+  assert.equal(await controller.key('.interactive-list', 'End'), true);
+  await atBottom();
+  assert.deepEqual(keys.map(({ type, key }) => ({ type, key })), [
+    { type: 'keyDown', key: 'End' }, { type: 'keyUp', key: 'End' },
+    { type: 'keyDown', key: 'End' }, { type: 'keyUp', key: 'End' },
+  ]);
+  assert.equal(await controller.key('.interactive-list', 'Home'), true);
+  await page.waitForFunction(() => document.querySelector('.interactive-list').scrollTop === 0);
+  assert.equal(await controller.key('.interactive-list', 'PageDown'), true);
+  await page.waitForFunction(() => document.querySelector('.interactive-list').scrollTop > 100);
+  assert.equal(await controller.key('.interactive-list', 'PageUp'), true);
+  await page.waitForFunction(() => document.querySelector('.interactive-list').scrollTop === 0);
+  assert.equal(await controller.key('.interactive-list', 'ArrowDown'), true);
+  await page.waitForFunction(() => document.querySelector('.interactive-list').scrollTop > 0);
+  assert.equal(await controller.key('.interactive-list', 'ArrowUp'), true);
+  await page.waitForFunction(() => document.querySelector('.interactive-list').scrollTop === 0);
+});
+
 for (const nested of [false, true]) {
   test(`reveals clipped navigation markers in both directions without moving the transcript (${nested ? 'nested' : 'sibling'})`, async (t) => {
     const { page, controller, wheels, state } = await fixture(t, nested);

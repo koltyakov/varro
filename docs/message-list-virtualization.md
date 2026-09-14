@@ -413,6 +413,10 @@ Direct input acquires ownership only when it can affect the transcript:
   partial paint through promotion into the stable segment. Otherwise new paragraphs shift upward by
   2, 6, or 10 px as later blocks arrive. The streaming regressions measure the inter-block gap every
   frame, independently of scrolling and word wrapping.
+- Cross-segment spacing reads `data-markdown-tail-tag` from the stable segment. The renderer updates
+  it from the tail's first element after DOM publication, only when that tag changes. Do not replace
+  this with sibling `:has()` queries: Chromium 144 in JCEF invalidates unrelated transcript blocks
+  on each append. Preserve empty-tail final margins and paragraph/list spacing when updating it.
 - Bold-only paragraph styling uses a parser-assigned class. CSS `:only-child` ignores text nodes
   and misclassifies prose with inline emphasis as a heading. Keep ordinary paragraph gaps fixed
   when emphasis arrives, through stable-segment promotion and completion. The verification prose

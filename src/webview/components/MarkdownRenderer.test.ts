@@ -2241,6 +2241,47 @@ describe('MarkdownRenderer', () => {
     expect(links?.[1]).toBe(streamingLinks?.[1]);
   });
 
+  it('tracks tail block type without restyling stable content on every text append', async () => {
+    const [content, setContent] = createSignal('Stable paragraph.\n\nLive paragraph.');
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+          cacheByContent: false,
+        }),
+      container!
+    );
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const stable = container!.querySelector<HTMLElement>('[data-markdown-segment="stable"]')!;
+    const first = stable.firstElementChild;
+    expect(stable.dataset.markdownTailTag).toBe('p');
+    const mutations: MutationRecord[] = [];
+    const observer = new MutationObserver((records) => mutations.push(...records));
+    observer.observe(stable, { attributes: true, attributeFilter: ['data-markdown-tail-tag'] });
+    try {
+      setContent('Stable paragraph.\n\nLive paragraph. More text.');
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      expect(stable.firstElementChild).toBe(first);
+      expect(mutations).toHaveLength(0);
+      for (const [tail, tag] of [
+        ['- A list item', 'ul'],
+        ['1. An ordered item', 'ol'],
+        ['# Heading', 'h1'],
+      ]) {
+        setContent(`Stable paragraph.\n\n${tail}`);
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        expect(stable.dataset.markdownTailTag).toBe(tag);
+      }
+      setContent('');
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      expect(stable.dataset.markdownTailTag).toBe('');
+    } finally {
+      observer.disconnect();
+    }
+  });
+
   it('preserves stable markdown DOM when streaming completes', async () => {
     const [completed, setCompleted] = createSignal(false);
     const content = 'Stable paragraph.\n\nReview `src/shared/protocol.ts`.';

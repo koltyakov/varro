@@ -24,6 +24,15 @@ const WEIGHTS = {
 };
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
+function hasForeignSessionReference(value, sessionId) {
+  if (!value || typeof value !== 'object') return false;
+  return Object.entries(value).some(([key, child]) =>
+    key === 'sessionID' || key === 'sessionId'
+      ? child !== sessionId
+      : hasForeignSessionReference(child, sessionId)
+  );
+}
+
 export async function readActiveSessions(
   { serverUrl, sourceDatabase, directory, pid = process.env.OPENCODE_PID },
   execute = promisify(execFile)
@@ -193,10 +202,23 @@ export async function prepareStreamingRun({
       'SELECT data FROM part WHERE message_id = ? AND session_id = ? ORDER BY time_created, id'
     );
     const baselineQuery = source.prepare(`
-      SELECT id FROM message WHERE session_id = ? AND time_created < ?
+      SELECT id, data, session_id FROM message WHERE session_id = ? AND time_created < ?
       ORDER BY time_created DESC, id DESC LIMIT 120
     `);
     const complete = new Map();
+    const foreignReferences = new Map();
+    const hasForeignMessageReference = (message) => {
+      if (!foreignReferences.has(message.id)) {
+        foreignReferences.set(
+          message.id,
+          hasForeignSessionReference(JSON.parse(message.data), message.session_id) ||
+            partsQuery
+              .all(message.id, message.session_id)
+              .some((part) => hasForeignSessionReference(JSON.parse(part.data), message.session_id))
+        );
+      }
+      return foreignReferences.get(message.id);
+    };
     for (const row of rows) {
       const ids = { sourceSessionId: row.session_id, sourceMessageId: row.id };
       const data = JSON.parse(row.data);
@@ -218,6 +240,11 @@ export async function prepareStreamingRun({
         rejected.push({ ...ids, reason });
         continue;
       }
+      const baseline = baselineQuery.all(row.session_id, user.time_created);
+      if ([row, user, ...baseline].some(hasForeignMessageReference)) {
+        rejected.push({ ...ids, reason: 'foreign-session-reference' });
+        continue;
+      }
       const parts = partsQuery.all(row.id, row.session_id).map((part) => JSON.parse(part.data));
       const text = parts
         .filter((part) => part.type === 'text' && typeof part.text === 'string')
@@ -232,7 +259,7 @@ export async function prepareStreamingRun({
             total + (typeof part.state?.output === 'string' ? part.state.output.length : 0),
           0
         );
-      const baselineMessages = baselineQuery.all(row.session_id, user.time_created).length;
+      const baselineMessages = baseline.length;
       const flags = {
         reasoning,
         text: text.length > 0,

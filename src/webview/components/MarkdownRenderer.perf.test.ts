@@ -53,12 +53,14 @@ describe('MarkdownRenderer performance regressions', () => {
     const marker = 'VARROPENDINGMARKDOWNPLACEHOLDER';
     const originalIncludes = String.prototype.includes;
     const markerChecks: string[] = [];
-    vi.spyOn(String.prototype, 'includes').mockImplementation(
-      function (this: string, search, position) {
-        if (String(search).startsWith(marker)) markerChecks.push(String(search));
-        return originalIncludes.call(this, search, position);
-      }
-    );
+    vi.spyOn(String.prototype, 'includes').mockImplementation(function (
+      this: string,
+      search,
+      position
+    ) {
+      if (String(search).startsWith(marker)) markerChecks.push(String(search));
+      return originalIncludes.call(this, search, position);
+    });
 
     cleanup = render(
       () => MarkdownRenderer({ content: `${marker}${'X'.repeat(2_000)}[unfinished` }),

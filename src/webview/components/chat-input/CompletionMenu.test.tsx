@@ -156,32 +156,32 @@ describe('CompletionMenu', () => {
   });
 
   it('scrolls the selected item into view without animating long file names', async () => {
-    vi.spyOn(HTMLButtonElement.prototype, 'offsetTop', 'get').mockImplementation(
-      function (this: HTMLButtonElement) {
-        return this.textContent?.includes('/plan') ? 0 : 60;
-      }
-    );
+    vi.spyOn(HTMLButtonElement.prototype, 'offsetTop', 'get').mockImplementation(function (
+      this: HTMLButtonElement
+    ) {
+      return this.textContent?.includes('/plan') ? 0 : 60;
+    });
     vi.spyOn(HTMLButtonElement.prototype, 'offsetHeight', 'get').mockReturnValue(20);
-    vi.spyOn(HTMLDivElement.prototype, 'clientHeight', 'get').mockImplementation(
-      function (this: HTMLDivElement) {
-        return this.classList.contains('composer-completion-menu') ? 40 : 0;
-      }
-    );
-    vi.spyOn(HTMLDivElement.prototype, 'offsetWidth', 'get').mockImplementation(
-      function (this: HTMLDivElement) {
-        return this.classList.contains('composer-completion-menu') ? 100 : 0;
-      }
-    );
-    vi.spyOn(HTMLDivElement.prototype, 'clientWidth', 'get').mockImplementation(
-      function (this: HTMLDivElement) {
-        return this.classList.contains('composer-completion-menu') ? 90 : 0;
-      }
-    );
-    vi.spyOn(HTMLDivElement.prototype, 'clientLeft', 'get').mockImplementation(
-      function (this: HTMLDivElement) {
-        return this.classList.contains('composer-completion-menu') ? 1 : 0;
-      }
-    );
+    vi.spyOn(HTMLDivElement.prototype, 'clientHeight', 'get').mockImplementation(function (
+      this: HTMLDivElement
+    ) {
+      return this.classList.contains('composer-completion-menu') ? 40 : 0;
+    });
+    vi.spyOn(HTMLDivElement.prototype, 'offsetWidth', 'get').mockImplementation(function (
+      this: HTMLDivElement
+    ) {
+      return this.classList.contains('composer-completion-menu') ? 100 : 0;
+    });
+    vi.spyOn(HTMLDivElement.prototype, 'clientWidth', 'get').mockImplementation(function (
+      this: HTMLDivElement
+    ) {
+      return this.classList.contains('composer-completion-menu') ? 90 : 0;
+    });
+    vi.spyOn(HTMLDivElement.prototype, 'clientLeft', 'get').mockImplementation(function (
+      this: HTMLDivElement
+    ) {
+      return this.classList.contains('composer-completion-menu') ? 1 : 0;
+    });
 
     const [selectedIndex, setSelectedIndex] = createSignal(1);
 

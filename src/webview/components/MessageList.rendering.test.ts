@@ -306,14 +306,14 @@ describe('MessageList entrance animation', () => {
           scrollTopValue = value;
         },
       });
-      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-        function (this: HTMLElement) {
-          if (this.classList.contains('interactive-item-container')) {
-            return new DOMRect(0, 0, 500, 120);
-          }
-          return new DOMRect(0, 0, 500, 400);
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+        this: HTMLElement
+      ) {
+        if (this.classList.contains('interactive-item-container')) {
+          return new DOMRect(0, 0, 500, 120);
         }
-      );
+        return new DOMRect(0, 0, 500, 400);
+      });
 
       await Promise.resolve();
       await Promise.resolve();
@@ -1065,11 +1065,11 @@ describe('MessageList compact activity', () => {
       observers.push(observer);
       return observer;
     });
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        return new DOMRect(0, 0, 500, this.dataset.activityPartId ? 24 : 0);
-      }
-    );
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      return new DOMRect(0, 0, 500, this.dataset.activityPartId ? 24 : 0);
+    });
 
     const read = toolPart('read-teardown', 'assistant-teardown', 'call-read-teardown');
     read.tool = 'read';

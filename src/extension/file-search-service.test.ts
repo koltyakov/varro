@@ -14,19 +14,17 @@ const vscodeMock = vi.hoisted(() => ({
     getWorkspaceFolder: vi.fn(),
     workspaceFolders: [] as Array<{ name: string; uri: { fsPath: string } }>,
   },
-  CancellationTokenSource: vi.fn(
-    function (this: {
-      token: { isCancellationRequested: boolean };
-      cancel: ReturnType<typeof vi.fn>;
-      dispose: ReturnType<typeof vi.fn>;
-    }) {
-      this.token = { isCancellationRequested: false };
-      this.cancel = vi.fn(() => {
-        this.token.isCancellationRequested = true;
-      });
-      this.dispose = vi.fn();
-    }
-  ),
+  CancellationTokenSource: vi.fn(function (this: {
+    token: { isCancellationRequested: boolean };
+    cancel: ReturnType<typeof vi.fn>;
+    dispose: ReturnType<typeof vi.fn>;
+  }) {
+    this.token = { isCancellationRequested: false };
+    this.cancel = vi.fn(() => {
+      this.token.isCancellationRequested = true;
+    });
+    this.dispose = vi.fn();
+  }),
   RelativePattern: vi.fn(function (
     this: { base: unknown; pattern: string },
     base: unknown,

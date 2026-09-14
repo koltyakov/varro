@@ -47,16 +47,6 @@ export function MessagePart(props: {
   const render = () => {
     const part = p();
     switch (part.type) {
-      case 'text':
-        return (
-          <MarkdownRenderer
-            // SAFETY: The surrounding shape or discriminator check establishes the TextPart contract used below.
-            content={props.streamedText ?? (part as TextPart).text}
-            cacheByContent={cacheMarkdownByContent()}
-            forceStreaming={props.streaming}
-            lightweight={props.lightweight}
-          />
-        );
       case 'reasoning':
         return (
           <Show when={showThinking()}>
@@ -94,7 +84,20 @@ export function MessagePart(props: {
   };
 
   return (
-    <Show when={p().type === 'tool'} fallback={render()}>
+    <Show
+      when={p().type === 'tool'}
+      fallback={
+        <Show when={p().type === 'text'} fallback={render()}>
+          <MarkdownRenderer
+            // SAFETY: The Show branch only renders text parts. Read the current snapshot without remounting the renderer.
+            content={props.streamedText ?? (p() as TextPart).text}
+            cacheByContent={cacheMarkdownByContent()}
+            forceStreaming={props.streaming}
+            lightweight={props.lightweight}
+          />
+        </Show>
+      }
+    >
       <ToolCall
         // SAFETY: The Show branch only renders tool parts.
         part={p() as ToolPart}

@@ -1179,7 +1179,7 @@ body.vscode-light
 .assistant-turn-content.assistant-turn-content-plain
   .assistant-message-flow-item
   > .rendered-markdown
-  > [data-markdown-segment='stable']:not(:has(+ [data-markdown-segment='tail'] > :first-child))
+  > [data-markdown-segment='stable'][data-markdown-tail-tag='']
   > :last-child {
   /* Flow-item spacing is owned by `.assistant-message-flow { gap }`; only
      remove the final block margin so paragraphs within an item keep theirs. */
@@ -1557,7 +1557,7 @@ body.vscode-light
 .chat-turn-content > :last-child.rendered-markdown > [data-markdown-segment='tail'] > :last-child,
 .chat-turn-content
   > :last-child.rendered-markdown
-  > [data-markdown-segment='stable']:not(:has(+ [data-markdown-segment='tail'] > :first-child))
+  > [data-markdown-segment='stable'][data-markdown-tail-tag='']
   > :last-child,
 .chat-turn-content
   .assistant-message-flow
@@ -1569,7 +1569,7 @@ body.vscode-light
   .assistant-message-flow
   > :last-child
   .rendered-markdown:last-child
-  > [data-markdown-segment='stable']:not(:has(+ [data-markdown-segment='tail'] > :first-child))
+  > [data-markdown-segment='stable'][data-markdown-tail-tag='']
   > :last-child {
   margin-bottom: 0;
 }
@@ -1709,14 +1709,17 @@ body.vscode-light
 
 .rendered-markdown p:not(.markdown-bold-heading):has(+ p),
 .rendered-markdown
-  > [data-markdown-segment='stable']:has(+ [data-markdown-segment='tail'] > p:first-child)
+  > [data-markdown-segment='stable'][data-markdown-tail-tag='p']
   > p:last-child:not(.markdown-bold-heading) {
   margin-bottom: 12px;
 }
 
 .rendered-markdown p:has(+ :is(ul, ol)),
 .rendered-markdown
-  > [data-markdown-segment='stable']:has(+ [data-markdown-segment='tail'] > :is(ul, ol):first-child)
+  > [data-markdown-segment='stable']:is(
+    [data-markdown-tail-tag='ul'],
+    [data-markdown-tail-tag='ol']
+  )
   > p:last-child {
   margin-bottom: 8px;
 }
@@ -1846,7 +1849,7 @@ body.vscode-light
 .rendered-markdown ul:has(+ p),
 .rendered-markdown ol:has(+ p),
 .rendered-markdown
-  > [data-markdown-segment='stable']:has(+ [data-markdown-segment='tail'] > p:first-child)
+  > [data-markdown-segment='stable'][data-markdown-tail-tag='p']
   > :is(ul, ol):last-child {
   /* The display:contents segment boundary must not change logical sibling spacing
      when a partial tail becomes stable Markdown. */

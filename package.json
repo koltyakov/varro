@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: OpenCode Workbench",
-  "version": "0.28.23",
+  "version": "0.28.24",
   "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
@@ -90,8 +90,8 @@
     "iconoir": "7.12.1",
     "jsdom": "30.0.1",
     "material-icon-theme": "5.38.1",
-    "oxfmt": "0.67.0",
-    "oxlint": "1.82.0",
+    "oxfmt": "0.68.0",
+    "oxlint": "1.83.0",
     "oxlint-plugin-anti-slop": "github:dmmulroy/anti-slop#e8c4880471b23ab7f216fba7b27d173a6ef07d4c",
     "rolldown": "1.2.8",
     "tailwindcss": "4.3.3",

@@ -219,17 +219,17 @@ describe('MessageList auto-scroll', () => {
       },
     });
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-item-container')) {
-          return new DOMRect(0, 0, 500, 120);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, 7200);
-        }
-        return new DOMRect(0, 0, 500, 400);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-item-container')) {
+        return new DOMRect(0, 0, 500, 120);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, 7200);
+      }
+      return new DOMRect(0, 0, 500, 400);
+    });
 
     await Promise.resolve();
     await Promise.resolve();
@@ -246,18 +246,18 @@ describe('MessageList auto-scroll', () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     let rowMeasurementCount = 0;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-item-container')) {
-          rowMeasurementCount += 1;
-          return new DOMRect(0, 0, 500, this.dataset.msgId === 'assistant-0' ? 0 : 120);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, 7200);
-        }
-        return new DOMRect(0, 0, 500, 400);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-item-container')) {
+        rowMeasurementCount += 1;
+        return new DOMRect(0, 0, 500, this.dataset.msgId === 'assistant-0' ? 0 : 120);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, 7200);
+      }
+      return new DOMRect(0, 0, 500, 400);
+    });
 
     setState('activeSessionId', 'session-1');
     setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
@@ -287,14 +287,14 @@ describe('MessageList auto-scroll', () => {
   it('stops the follow loop while a busy tool has no geometry changes', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, 800);
-        }
-        return new DOMRect(0, 0, 500, 400);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, 800);
       }
-    );
+      return new DOMRect(0, 0, 500, 400);
+    });
 
     setState('activeSessionId', 'session-1');
     setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
@@ -333,16 +333,16 @@ describe('MessageList auto-scroll', () => {
       };
       let trackHeight = 1200;
       let viewportHeight = 400;
-      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-        function (this: HTMLElement) {
-          return new DOMRect(
-            0,
-            0,
-            500,
-            this.classList.contains('interactive-list-track') ? trackHeight : viewportHeight
-          );
-        }
-      );
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+        this: HTMLElement
+      ) {
+        return new DOMRect(
+          0,
+          0,
+          500,
+          this.classList.contains('interactive-list-track') ? trackHeight : viewportHeight
+        );
+      });
       setState('activeSessionId', 'session-1');
       setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
       replaceMessages([
@@ -434,26 +434,21 @@ describe('MessageList auto-scroll', () => {
       const totalHeight = () =>
         layoutIds.reduce((total, id) => total + (heightById.get(id) ?? 0), 0);
 
-      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-        function (this: HTMLElement) {
-          if (this === list || this.classList.contains('interactive-list')) {
-            return new DOMRect(0, 0, 500, 400);
-          }
-          if (this.classList.contains('interactive-list-track')) {
-            return new DOMRect(0, 0, 500, totalHeight());
-          }
-          const messageId = this.dataset.msgId;
-          if (messageId && heightById.has(messageId)) {
-            return new DOMRect(
-              0,
-              rowTop(messageId) - scrollTopValue,
-              500,
-              heightById.get(messageId)
-            );
-          }
-          return new DOMRect(0, 0, 500, 40);
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+        this: HTMLElement
+      ) {
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 0, 500, 400);
         }
-      );
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(0, 0, 500, totalHeight());
+        }
+        const messageId = this.dataset.msgId;
+        if (messageId && heightById.has(messageId)) {
+          return new DOMRect(0, rowTop(messageId) - scrollTopValue, 500, heightById.get(messageId));
+        }
+        return new DOMRect(0, 0, 500, 40);
+      });
 
       setState('activeSessionId', 'session-1');
       replaceMessages(baseMessages);
@@ -557,26 +552,26 @@ describe('MessageList auto-scroll', () => {
       rowHeights.slice(0, index).reduce((total, height) => total + height, 0);
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 400);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(
-            0,
-            0,
-            500,
-            rowHeights.reduce((total, height) => total + height, 0)
-          );
-        }
-        if (this.dataset.msgId?.startsWith('assistant-')) {
-          const index = Number(this.dataset.msgId.replace('assistant-', ''));
-          return new DOMRect(0, rowTop(index) - scrollTopValue, 500, rowHeights[index]);
-        }
-        return new DOMRect(0, 0, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(
+          0,
+          0,
+          500,
+          rowHeights.reduce((total, height) => total + height, 0)
+        );
+      }
+      if (this.dataset.msgId?.startsWith('assistant-')) {
+        const index = Number(this.dataset.msgId.replace('assistant-', ''));
+        return new DOMRect(0, rowTop(index) - scrollTopValue, 500, rowHeights[index]);
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages(
@@ -691,21 +686,21 @@ describe('MessageList auto-scroll', () => {
     const rowHeight = 100;
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 400);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, 50 * rowHeight);
-        }
-        if (this.dataset.msgId?.startsWith('assistant-')) {
-          const index = Number(this.dataset.msgId.replace('assistant-', ''));
-          return new DOMRect(0, index * rowHeight - scrollTopValue, 500, rowHeight);
-        }
-        return new DOMRect(0, 0, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, 50 * rowHeight);
+      }
+      if (this.dataset.msgId?.startsWith('assistant-')) {
+        const index = Number(this.dataset.msgId.replace('assistant-', ''));
+        return new DOMRect(0, index * rowHeight - scrollTopValue, 500, rowHeight);
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages(
@@ -801,26 +796,26 @@ describe('MessageList auto-scroll', () => {
       rowHeights.slice(0, index).reduce((total, height) => total + height, 0);
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 400);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(
-            0,
-            0,
-            500,
-            rowHeights.reduce((total, height) => total + height, 0)
-          );
-        }
-        if (this.dataset.msgId?.startsWith('assistant-')) {
-          const index = Number(this.dataset.msgId.replace('assistant-', ''));
-          return new DOMRect(0, rowTop(index) - scrollTopValue, 500, rowHeights[index]);
-        }
-        return new DOMRect(0, 0, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(
+          0,
+          0,
+          500,
+          rowHeights.reduce((total, height) => total + height, 0)
+        );
+      }
+      if (this.dataset.msgId?.startsWith('assistant-')) {
+        const index = Number(this.dataset.msgId.replace('assistant-', ''));
+        return new DOMRect(0, rowTop(index) - scrollTopValue, 500, rowHeights[index]);
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages(
@@ -940,26 +935,26 @@ describe('MessageList auto-scroll', () => {
       rowHeights.slice(0, index).reduce((total, height) => total + height, 0);
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 400);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(
-            0,
-            0,
-            500,
-            rowHeights.reduce((total, height) => total + height, 0)
-          );
-        }
-        if (this.dataset.msgId?.startsWith('assistant-')) {
-          const index = Number(this.dataset.msgId.replace('assistant-', ''));
-          return new DOMRect(0, rowTop(index) - scrollTopValue, 500, rowHeights[index]);
-        }
-        return new DOMRect(0, 0, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(
+          0,
+          0,
+          500,
+          rowHeights.reduce((total, height) => total + height, 0)
+        );
+      }
+      if (this.dataset.msgId?.startsWith('assistant-')) {
+        const index = Number(this.dataset.msgId.replace('assistant-', ''));
+        return new DOMRect(0, rowTop(index) - scrollTopValue, 500, rowHeights[index]);
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages(
@@ -1047,30 +1042,28 @@ describe('MessageList auto-scroll', () => {
     let markerOffset = 140;
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, hostWidth, 400);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, hostWidth, 50 * rowHeight);
-        }
-        const row = this.dataset.msgId
-          ? this
-          : (this.closest<HTMLElement>('[data-msg-id]') ?? null);
-        const messageId = row?.dataset.msgId;
-        if (messageId?.startsWith('assistant-')) {
-          const index = Number(messageId.replace('assistant-', ''));
-          const rowTop = index * rowHeight - scrollTopValue;
-          if (this.matches('.rendered-markdown p')) {
-            const offset = this.textContent?.startsWith('Earlier block') ? 20 : markerOffset;
-            return new DOMRect(0, rowTop + offset, hostWidth, 20);
-          }
-          return new DOMRect(0, rowTop, hostWidth, rowHeight);
-        }
-        return new DOMRect(0, 0, hostWidth, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, hostWidth, 400);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, hostWidth, 50 * rowHeight);
+      }
+      const row = this.dataset.msgId ? this : (this.closest<HTMLElement>('[data-msg-id]') ?? null);
+      const messageId = row?.dataset.msgId;
+      if (messageId?.startsWith('assistant-')) {
+        const index = Number(messageId.replace('assistant-', ''));
+        const rowTop = index * rowHeight - scrollTopValue;
+        if (this.matches('.rendered-markdown p')) {
+          const offset = this.textContent?.startsWith('Earlier block') ? 20 : markerOffset;
+          return new DOMRect(0, rowTop + offset, hostWidth, 20);
+        }
+        return new DOMRect(0, rowTop, hostWidth, rowHeight);
+      }
+      return new DOMRect(0, 0, hostWidth, 40);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages(
@@ -1151,27 +1144,27 @@ describe('MessageList auto-scroll', () => {
     let scrollTopValue = 0;
     vi.spyOn(window, 'innerWidth', 'get').mockImplementation(() => hostWidth);
     vi.spyOn(window, 'devicePixelRatio', 'get').mockImplementation(() => pixelRatio);
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list')) {
-          return new DOMRect(0, listTop, hostWidth, 631);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, listTop - scrollTopValue, hostWidth, 15000);
-        }
-        const row = this.dataset.msgId ? this : this.closest<HTMLElement>('[data-msg-id]');
-        const messageId = row?.dataset.msgId;
-        if (messageId?.startsWith('assistant-')) {
-          const index = Number(messageId.replace('assistant-', ''));
-          const top = listTop + index * 300 + reflowOffset - scrollTopValue;
-          if (this.matches('.rendered-markdown p')) {
-            return new DOMRect(0, top + 24, hostWidth, 22.28);
-          }
-          return new DOMRect(0, top, hostWidth, 300);
-        }
-        return new DOMRect(0, 0, hostWidth, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list')) {
+        return new DOMRect(0, listTop, hostWidth, 631);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, listTop - scrollTopValue, hostWidth, 15000);
+      }
+      const row = this.dataset.msgId ? this : this.closest<HTMLElement>('[data-msg-id]');
+      const messageId = row?.dataset.msgId;
+      if (messageId?.startsWith('assistant-')) {
+        const index = Number(messageId.replace('assistant-', ''));
+        const top = listTop + index * 300 + reflowOffset - scrollTopValue;
+        if (this.matches('.rendered-markdown p')) {
+          return new DOMRect(0, top + 24, hostWidth, 22.28);
+        }
+        return new DOMRect(0, top, hostWidth, 300);
+      }
+      return new DOMRect(0, 0, hostWidth, 40);
+    });
     setState('activeSessionId', 'session-1');
     replaceMessages(
       Array.from({ length: 50 }, (_, index) => {
@@ -1246,22 +1239,22 @@ describe('MessageList auto-scroll', () => {
     let offset = 0;
     let reflowOnCorrection = false;
     vi.spyOn(window, 'innerWidth', 'get').mockImplementation(() => width);
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list')) return new DOMRect(0, 37, width, 631);
-        if (this.classList.contains('interactive-list-track'))
-          return new DOMRect(0, 37 - top, width, 18000);
-        const row = this.dataset.msgId ? this : this.closest<HTMLElement>('[data-msg-id]');
-        const id = row?.dataset.msgId;
-        if (id?.startsWith('assistant-')) {
-          const y = 37 + Number(id.slice('assistant-'.length)) * 300 + offset - top;
-          return this.matches('.rendered-markdown p')
-            ? new DOMRect(0, y + 24, width, 23)
-            : new DOMRect(0, y, width, 300);
-        }
-        return new DOMRect(0, 0, width, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list')) return new DOMRect(0, 37, width, 631);
+      if (this.classList.contains('interactive-list-track'))
+        return new DOMRect(0, 37 - top, width, 18000);
+      const row = this.dataset.msgId ? this : this.closest<HTMLElement>('[data-msg-id]');
+      const id = row?.dataset.msgId;
+      if (id?.startsWith('assistant-')) {
+        const y = 37 + Number(id.slice('assistant-'.length)) * 300 + offset - top;
+        return this.matches('.rendered-markdown p')
+          ? new DOMRect(0, y + 24, width, 23)
+          : new DOMRect(0, y, width, 300);
       }
-    );
+      return new DOMRect(0, 0, width, 40);
+    });
     setState('activeSessionId', 'session-1');
     replaceMessages(
       Array.from({ length: 60 }, (_, index) => {
@@ -1358,35 +1351,33 @@ describe('MessageList auto-scroll', () => {
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
     let listWidth = 486;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, listWidth, 631);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(
-            0,
-            0,
-            listWidth,
-            rowHeights.reduce((total, _height, index) => total + rowHeight(index), 0)
-          );
-        }
-        const row = this.dataset.msgId
-          ? this
-          : (this.closest<HTMLElement>('[data-msg-id]') ?? null);
-        const messageId = row?.dataset.msgId;
-        if (messageId?.startsWith('user-') || messageId?.startsWith('assistant-')) {
-          const index = Number(messageId.slice(messageId.lastIndexOf('-') + 1));
-          const top = rowTop(index) - scrollTopValue;
-          if (this.dataset.assistantRenderKey) return new DOMRect(0, top + 6, listWidth, 22);
-          if (this.classList.contains('user-message-card')) {
-            return new DOMRect(0, top + 6, listWidth, Math.max(1, rowHeights[index]! - 12));
-          }
-          return new DOMRect(0, top, listWidth, rowHeight(index));
-        }
-        return new DOMRect(0, 0, listWidth, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, listWidth, 631);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(
+          0,
+          0,
+          listWidth,
+          rowHeights.reduce((total, _height, index) => total + rowHeight(index), 0)
+        );
+      }
+      const row = this.dataset.msgId ? this : (this.closest<HTMLElement>('[data-msg-id]') ?? null);
+      const messageId = row?.dataset.msgId;
+      if (messageId?.startsWith('user-') || messageId?.startsWith('assistant-')) {
+        const index = Number(messageId.slice(messageId.lastIndexOf('-') + 1));
+        const top = rowTop(index) - scrollTopValue;
+        if (this.dataset.assistantRenderKey) return new DOMRect(0, top + 6, listWidth, 22);
+        if (this.classList.contains('user-message-card')) {
+          return new DOMRect(0, top + 6, listWidth, Math.max(1, rowHeights[index]! - 12));
+        }
+        return new DOMRect(0, top, listWidth, rowHeight(index));
+      }
+      return new DOMRect(0, 0, listWidth, 40);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages(
@@ -1534,33 +1525,31 @@ describe('MessageList auto-scroll', () => {
       rowHeights.slice(0, index).reduce((total, height) => total + height, 0);
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 786);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(
-            0,
-            0,
-            500,
-            rowHeights.reduce((total, height) => total + height, 0)
-          );
-        }
-        const row = this.dataset.msgId
-          ? this
-          : (this.closest<HTMLElement>('[data-msg-id]') ?? null);
-        const messageId = row?.dataset.msgId;
-        if (messageId?.startsWith('user-') || messageId?.startsWith('assistant-')) {
-          const index = Number(messageId.slice(messageId.lastIndexOf('-') + 1));
-          const top = rowTop(index) - scrollTopValue;
-          return this.classList.contains('user-message-card')
-            ? new DOMRect(0, top + 6, 500, 40)
-            : new DOMRect(0, top, 500, rowHeights[index]);
-        }
-        return new DOMRect(0, 0, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 786);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(
+          0,
+          0,
+          500,
+          rowHeights.reduce((total, height) => total + height, 0)
+        );
+      }
+      const row = this.dataset.msgId ? this : (this.closest<HTMLElement>('[data-msg-id]') ?? null);
+      const messageId = row?.dataset.msgId;
+      if (messageId?.startsWith('user-') || messageId?.startsWith('assistant-')) {
+        const index = Number(messageId.slice(messageId.lastIndexOf('-') + 1));
+        const top = rowTop(index) - scrollTopValue;
+        return this.classList.contains('user-message-card')
+          ? new DOMRect(0, top + 6, 500, 40)
+          : new DOMRect(0, top, 500, rowHeights[index]);
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages(
@@ -1680,33 +1669,31 @@ describe('MessageList auto-scroll', () => {
       rowHeights.slice(0, index).reduce((total, height) => total + height, 0);
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 720, 514);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(
-            0,
-            0,
-            720,
-            rowHeights.reduce((total, height) => total + height, 0)
-          );
-        }
-        const row = this.dataset.msgId
-          ? this
-          : (this.closest<HTMLElement>('[data-msg-id]') ?? null);
-        const messageId = row?.dataset.msgId;
-        if (messageId?.startsWith('user-') || messageId?.startsWith('assistant-')) {
-          const index = Number(messageId.slice(messageId.lastIndexOf('-') + 1));
-          const top = rowTop(index) - scrollTopValue;
-          return this.classList.contains('user-message-card')
-            ? new DOMRect(0, top, 720, 40)
-            : new DOMRect(0, top, 720, rowHeights[index]);
-        }
-        return new DOMRect(0, 0, 720, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 720, 514);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(
+          0,
+          0,
+          720,
+          rowHeights.reduce((total, height) => total + height, 0)
+        );
+      }
+      const row = this.dataset.msgId ? this : (this.closest<HTMLElement>('[data-msg-id]') ?? null);
+      const messageId = row?.dataset.msgId;
+      if (messageId?.startsWith('user-') || messageId?.startsWith('assistant-')) {
+        const index = Number(messageId.slice(messageId.lastIndexOf('-') + 1));
+        const top = rowTop(index) - scrollTopValue;
+        return this.classList.contains('user-message-card')
+          ? new DOMRect(0, top, 720, 40)
+          : new DOMRect(0, top, 720, rowHeights[index]);
+      }
+      return new DOMRect(0, 0, 720, 40);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages(
@@ -1816,22 +1803,22 @@ describe('MessageList auto-scroll', () => {
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 400);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, -scrollTopValue, 500, 6000);
-        }
-        const row = this.dataset.msgId ? this : this.closest<HTMLElement>('[data-msg-id]');
-        const index = row?.dataset.msgId ? rowIndex.get(row.dataset.msgId) : undefined;
-        if (index !== undefined) {
-          return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
-        }
-        return new DOMRect(0, 0, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, -scrollTopValue, 500, 6000);
+      }
+      const row = this.dataset.msgId ? this : this.closest<HTMLElement>('[data-msg-id]');
+      const index = row?.dataset.msgId ? rowIndex.get(row.dataset.msgId) : undefined;
+      if (index !== undefined) {
+        return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
 
     const completed = toolPart('grep-completed', 'assistant-completed', 'call-grep-completed');
     completed.tool = 'grep';
@@ -1976,24 +1963,24 @@ describe('MessageList auto-scroll', () => {
       chromeHeight + rowHeights.reduce((total, height) => total + height, 0);
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 400);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, -scrollTopValue, 500, totalHeight());
-        }
-        if (this.classList.contains('message-history-banner')) {
-          return new DOMRect(0, 14 - scrollTopValue, 500, 22);
-        }
-        if (this.dataset.msgId?.startsWith('assistant-')) {
-          const index = Number(this.dataset.msgId.replace('assistant-', ''));
-          return new DOMRect(0, rowTop(index) - scrollTopValue, 500, rowHeights[index]);
-        }
-        return new DOMRect(0, 0, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, -scrollTopValue, 500, totalHeight());
+      }
+      if (this.classList.contains('message-history-banner')) {
+        return new DOMRect(0, 14 - scrollTopValue, 500, 22);
+      }
+      if (this.dataset.msgId?.startsWith('assistant-')) {
+        const index = Number(this.dataset.msgId.replace('assistant-', ''));
+        return new DOMRect(0, rowTop(index) - scrollTopValue, 500, rowHeights[index]);
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
     setState('activeSessionId', 'session-1');
     setSessionHistoryCursor('session-1', 'cursor-older');
     replaceMessages(
@@ -2064,21 +2051,21 @@ describe('MessageList auto-scroll', () => {
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 400);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, 5000);
-        }
-        if (this.dataset.msgId?.startsWith('assistant-')) {
-          const index = Number(this.dataset.msgId.replace('assistant-', ''));
-          return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
-        }
-        return new DOMRect(0, 0, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, 5000);
+      }
+      if (this.dataset.msgId?.startsWith('assistant-')) {
+        const index = Number(this.dataset.msgId.replace('assistant-', ''));
+        return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages(
@@ -2145,21 +2132,21 @@ describe('MessageList auto-scroll', () => {
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 400);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, 5000);
-        }
-        if (this.dataset.msgId?.startsWith('assistant-')) {
-          const index = Number(this.dataset.msgId.replace('assistant-', ''));
-          return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
-        }
-        return new DOMRect(0, 0, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, 5000);
+      }
+      if (this.dataset.msgId?.startsWith('assistant-')) {
+        const index = Number(this.dataset.msgId.replace('assistant-', ''));
+        return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
 
     const editMessageId = 'assistant-0';
     const edit = toolPart('edit-0', editMessageId, 'call-edit-0');
@@ -2236,41 +2223,41 @@ describe('MessageList auto-scroll', () => {
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 400);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(
-            0,
-            0,
-            500,
-            rowHeights.reduce((sum, height) => sum + height, 0)
-          );
-        }
-        if (this.dataset.msgId?.startsWith('assistant-')) {
-          const index = Number(this.dataset.msgId.replace('assistant-', ''));
-          const mountedIndexes = [
-            ...(container?.querySelectorAll<HTMLElement>('[data-msg-id^="assistant-"]') || []),
-          ].map((row) => Number(row.dataset.msgId!.replace('assistant-', '')));
-          const firstMountedIndex = Math.min(...mountedIndexes, index);
-          const topPad = Number.parseFloat(
-            container?.querySelector<HTMLElement>('.virtual-spacer-top')?.style.height || '0'
-          );
-          const mountedHeightBefore = rowHeights
-            .slice(firstMountedIndex, index)
-            .reduce((sum, height) => sum + height, 0);
-          return new DOMRect(
-            0,
-            topPad + mountedHeightBefore - scrollTopValue,
-            500,
-            rowHeights[index]
-          );
-        }
-        return new DOMRect(0, 0, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(
+          0,
+          0,
+          500,
+          rowHeights.reduce((sum, height) => sum + height, 0)
+        );
+      }
+      if (this.dataset.msgId?.startsWith('assistant-')) {
+        const index = Number(this.dataset.msgId.replace('assistant-', ''));
+        const mountedIndexes = [
+          ...(container?.querySelectorAll<HTMLElement>('[data-msg-id^="assistant-"]') || []),
+        ].map((row) => Number(row.dataset.msgId!.replace('assistant-', '')));
+        const firstMountedIndex = Math.min(...mountedIndexes, index);
+        const topPad = Number.parseFloat(
+          container?.querySelector<HTMLElement>('.virtual-spacer-top')?.style.height || '0'
+        );
+        const mountedHeightBefore = rowHeights
+          .slice(firstMountedIndex, index)
+          .reduce((sum, height) => sum + height, 0);
+        return new DOMRect(
+          0,
+          topPad + mountedHeightBefore - scrollTopValue,
+          500,
+          rowHeights[index]
+        );
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages(
@@ -2357,40 +2344,40 @@ describe('MessageList auto-scroll', () => {
       return top;
     };
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, hostWidth, 400);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(
-            0,
-            0,
-            hostWidth,
-            Array.from({ length: 50 }, (_, index) => rowHeight(index)).reduce(
-              (sum, height) => sum + height,
-              0
-            )
-          );
-        }
-        const row = this.dataset.msgId ? this : this.closest<HTMLElement>('[data-msg-id]');
-        const messageId = row?.dataset.msgId;
-        if (!row || !messageId) return new DOMRect(0, 0, hostWidth, 40);
-        const index =
-          messageId === 'assistant-anchor'
-            ? 20
-            : messageId === 'user-anchor'
-              ? 21
-              : Number(messageId.replace('assistant-', ''));
-        const top = rowTop(index);
-        if (this === row) return new DOMRect(0, top, hostWidth, rowHeight(index));
-        if (this.classList.contains('user-message-card')) {
-          return new DOMRect(0, top + 6, hostWidth, 69);
-        }
-        if (this.tagName === 'P') return new DOMRect(0, top + paragraphOffset, hostWidth, 39);
-        return new DOMRect(0, top, hostWidth, rowHeight(index));
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, hostWidth, 400);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(
+          0,
+          0,
+          hostWidth,
+          Array.from({ length: 50 }, (_, index) => rowHeight(index)).reduce(
+            (sum, height) => sum + height,
+            0
+          )
+        );
+      }
+      const row = this.dataset.msgId ? this : this.closest<HTMLElement>('[data-msg-id]');
+      const messageId = row?.dataset.msgId;
+      if (!row || !messageId) return new DOMRect(0, 0, hostWidth, 40);
+      const index =
+        messageId === 'assistant-anchor'
+          ? 20
+          : messageId === 'user-anchor'
+            ? 21
+            : Number(messageId.replace('assistant-', ''));
+      const top = rowTop(index);
+      if (this === row) return new DOMRect(0, top, hostWidth, rowHeight(index));
+      if (this.classList.contains('user-message-card')) {
+        return new DOMRect(0, top + 6, hostWidth, 69);
+      }
+      if (this.tagName === 'P') return new DOMRect(0, top + paragraphOffset, hostWidth, 39);
+      return new DOMRect(0, top, hostWidth, rowHeight(index));
+    });
 
     setShowThinkingPreference(true);
     setState('activeSessionId', 'session-1');
@@ -2491,22 +2478,22 @@ describe('MessageList auto-scroll', () => {
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 400);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, 4900);
-        }
-        if (this.dataset.msgId) {
-          const index = Number(this.dataset.msgId.replace('assistant-', ''));
-          const height = index === 0 ? 0 : 100;
-          return new DOMRect(0, index * 100 - scrollTopValue, 500, height);
-        }
-        return new DOMRect(0, 0, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, 4900);
+      }
+      if (this.dataset.msgId) {
+        const index = Number(this.dataset.msgId.replace('assistant-', ''));
+        const height = index === 0 ? 0 : 100;
+        return new DOMRect(0, index * 100 - scrollTopValue, 500, height);
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
     setState('activeSessionId', 'session-1');
     replaceMessages(
       Array.from({ length: 50 }, (_, index) => {
@@ -2581,21 +2568,21 @@ describe('MessageList auto-scroll', () => {
     globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 400);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, 5000);
-        }
-        if (this.dataset.msgId) {
-          const index = Number(this.dataset.msgId.replace('assistant-', ''));
-          return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
-        }
-        return new DOMRect(0, 0, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, 5000);
+      }
+      if (this.dataset.msgId) {
+        const index = Number(this.dataset.msgId.replace('assistant-', ''));
+        return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
     setState('activeSessionId', 'session-1');
     replaceMessages(
       Array.from({ length: 50 }, (_, index) => {
@@ -2656,27 +2643,26 @@ describe('MessageList auto-scroll', () => {
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        const zeroRowHasContent =
-          state.messages.find((message) => message.info.id === 'assistant-30')?.parts.length !== 0;
-        const trackHeight = zeroRowHasContent ? 5000 : 4900;
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 400);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, trackHeight);
-        }
-        if (this.dataset.msgId) {
-          const index = Number(this.dataset.msgId.replace('assistant-', ''));
-          const height = index === 30 && !zeroRowHasContent ? 0 : 100;
-          const documentTop =
-            index <= 30 ? index * 100 : index * 100 - (zeroRowHasContent ? 0 : 100);
-          return new DOMRect(0, documentTop - scrollTopValue, 500, height);
-        }
-        return new DOMRect(0, 0, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      const zeroRowHasContent =
+        state.messages.find((message) => message.info.id === 'assistant-30')?.parts.length !== 0;
+      const trackHeight = zeroRowHasContent ? 5000 : 4900;
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
+      }
+      if (this.dataset.msgId) {
+        const index = Number(this.dataset.msgId.replace('assistant-', ''));
+        const height = index === 30 && !zeroRowHasContent ? 0 : 100;
+        const documentTop = index <= 30 ? index * 100 : index * 100 - (zeroRowHasContent ? 0 : 100);
+        return new DOMRect(0, documentTop - scrollTopValue, 500, height);
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
     setState('activeSessionId', 'session-1');
     replaceMessages(
       Array.from({ length: 50 }, (_, index) => {
@@ -2766,25 +2752,25 @@ describe('MessageList auto-scroll', () => {
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        const hasModelChange = hasAssistantModelChangeBetween('assistant-29', 'assistant-30');
-        const trackHeight = hasModelChange ? 5000 : 4900;
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 400);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, trackHeight);
-        }
-        if (this.dataset.msgId) {
-          const index = Number(this.dataset.msgId.replace('assistant-', ''));
-          const height = index === 30 && !hasModelChange ? 0 : 100;
-          const documentTop = index <= 30 ? index * 100 : index * 100 - (hasModelChange ? 0 : 100);
-          return new DOMRect(0, documentTop - scrollTopValue, 500, height);
-        }
-        return new DOMRect(0, 0, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      const hasModelChange = hasAssistantModelChangeBetween('assistant-29', 'assistant-30');
+      const trackHeight = hasModelChange ? 5000 : 4900;
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
+      }
+      if (this.dataset.msgId) {
+        const index = Number(this.dataset.msgId.replace('assistant-', ''));
+        const height = index === 30 && !hasModelChange ? 0 : 100;
+        const documentTop = index <= 30 ? index * 100 : index * 100 - (hasModelChange ? 0 : 100);
+        return new DOMRect(0, documentTop - scrollTopValue, 500, height);
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
     setState('activeSessionId', 'session-1');
     replaceMessages(
       Array.from({ length: 50 }, (_, index) => {
@@ -2855,28 +2841,27 @@ describe('MessageList auto-scroll', () => {
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        const zeroRowHasContent = !!state.messages
-          .find((message) => message.info.id === 'assistant-30')
-          ?.parts.find((part) => part.id === 'text-30' && part.type === 'text' && part.text.trim());
-        const trackHeight = zeroRowHasContent ? 5000 : 4900;
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 400);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, trackHeight);
-        }
-        if (this.dataset.msgId) {
-          const index = Number(this.dataset.msgId.replace('assistant-', ''));
-          const height = index === 30 && !zeroRowHasContent ? 0 : 100;
-          const documentTop =
-            index <= 30 ? index * 100 : index * 100 - (zeroRowHasContent ? 0 : 100);
-          return new DOMRect(0, documentTop - scrollTopValue, 500, height);
-        }
-        return new DOMRect(0, 0, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      const zeroRowHasContent = !!state.messages
+        .find((message) => message.info.id === 'assistant-30')
+        ?.parts.find((part) => part.id === 'text-30' && part.type === 'text' && part.text.trim());
+      const trackHeight = zeroRowHasContent ? 5000 : 4900;
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
+      }
+      if (this.dataset.msgId) {
+        const index = Number(this.dataset.msgId.replace('assistant-', ''));
+        const height = index === 30 && !zeroRowHasContent ? 0 : 100;
+        const documentTop = index <= 30 ? index * 100 : index * 100 - (zeroRowHasContent ? 0 : 100);
+        return new DOMRect(0, documentTop - scrollTopValue, 500, height);
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
     setState('activeSessionId', 'session-1');
     replaceMessages(
       Array.from({ length: 50 }, (_, index) => {
@@ -2957,23 +2942,23 @@ describe('MessageList auto-scroll', () => {
         },
       ];
     });
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 400);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, diffRequested ? 5000 : 4900);
-        }
-        if (this.dataset.msgId) {
-          const index = Number(this.dataset.msgId.replace('message-', ''));
-          const height = index === 30 && !diffRequested ? 0 : 100;
-          const documentTop = index <= 30 ? index * 100 : index * 100 - (diffRequested ? 0 : 100);
-          return new DOMRect(0, documentTop - scrollTopValue, 500, height);
-        }
-        return new DOMRect(0, 0, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, diffRequested ? 5000 : 4900);
+      }
+      if (this.dataset.msgId) {
+        const index = Number(this.dataset.msgId.replace('message-', ''));
+        const height = index === 30 && !diffRequested ? 0 : 100;
+        const documentTop = index <= 30 ? index * 100 : index * 100 - (diffRequested ? 0 : 100);
+        return new DOMRect(0, documentTop - scrollTopValue, 500, height);
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
     setState('activeSessionId', 'session-1');
     replaceMessages(
       Array.from({ length: 50 }, (_, index) => {
@@ -3069,17 +3054,17 @@ describe('MessageList auto-scroll', () => {
     globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
 
     let listWidth = 500;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-item-container')) {
-          return new DOMRect(0, 0, listWidth, 120);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, listWidth, 6000);
-        }
-        return new DOMRect(0, 0, listWidth, 500);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-item-container')) {
+        return new DOMRect(0, 0, listWidth, 120);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, listWidth, 6000);
+      }
+      return new DOMRect(0, 0, listWidth, 500);
+    });
 
     setState('activeSessionId', 'session-1');
     cleanup = render(() => MessageList(), container!);
@@ -3203,14 +3188,14 @@ describe('MessageList auto-scroll', () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     let trackHeight = 1200;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, trackHeight);
-        }
-        return new DOMRect(0, 0, 500, 400);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
       }
-    );
+      return new DOMRect(0, 0, 500, 400);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages([
@@ -3256,14 +3241,14 @@ describe('MessageList auto-scroll', () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     let trackHeight = 1200;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, trackHeight);
-        }
-        return new DOMRect(0, 0, 500, 400);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
       }
-    );
+      return new DOMRect(0, 0, 500, 400);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages([
@@ -3310,14 +3295,14 @@ describe('MessageList auto-scroll', () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     let trackHeight = 1200;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, trackHeight);
-        }
-        return new DOMRect(0, 0, 500, 400);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
       }
-    );
+      return new DOMRect(0, 0, 500, 400);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages([
@@ -3420,14 +3405,14 @@ describe('MessageList auto-scroll', () => {
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, trackHeight);
-        }
-        return new DOMRect(0, 0, 500, 400);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
       }
-    );
+      return new DOMRect(0, 0, 500, 400);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages([
@@ -3480,14 +3465,14 @@ describe('MessageList auto-scroll', () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     let trackHeight = 1200;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, trackHeight);
-        }
-        return new DOMRect(0, 0, 500, 400);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
       }
-    );
+      return new DOMRect(0, 0, 500, 400);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages([
@@ -3531,14 +3516,14 @@ describe('MessageList auto-scroll', () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     let trackHeight = 1200;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, trackHeight);
-        }
-        return new DOMRect(0, 0, 500, 400);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
       }
-    );
+      return new DOMRect(0, 0, 500, 400);
+    });
 
     const userEntry = {
       info: userMessage('user-1'),
@@ -3606,14 +3591,14 @@ describe('MessageList auto-scroll', () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     let trackHeight = 1200;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, trackHeight);
-        }
-        return new DOMRect(0, 0, 500, 400);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
       }
-    );
+      return new DOMRect(0, 0, 500, 400);
+    });
 
     setState('activeSessionId', 'session-1');
     setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
@@ -3658,14 +3643,14 @@ describe('MessageList auto-scroll', () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     let trackHeight = 1200;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, trackHeight);
-        }
-        return new DOMRect(0, 0, 500, 400);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
       }
-    );
+      return new DOMRect(0, 0, 500, 400);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages([
@@ -3732,21 +3717,21 @@ describe('MessageList auto-scroll', () => {
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 400);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, trackHeight);
-        }
-        if (this.dataset.msgId?.startsWith('assistant-')) {
-          const index = Number(this.dataset.msgId.replace('assistant-', ''));
-          return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
-        }
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list || this.classList.contains('interactive-list')) {
         return new DOMRect(0, 0, 500, 400);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
+      }
+      if (this.dataset.msgId?.startsWith('assistant-')) {
+        const index = Number(this.dataset.msgId.replace('assistant-', ''));
+        return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
+      }
+      return new DOMRect(0, 0, 500, 400);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages(
@@ -3831,14 +3816,14 @@ describe('MessageList auto-scroll', () => {
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, trackHeight);
-        }
-        return new DOMRect(0, 0, 500, 400);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
       }
-    );
+      return new DOMRect(0, 0, 500, 400);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages([
@@ -3925,14 +3910,14 @@ describe('MessageList auto-scroll', () => {
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, trackHeight);
-        }
-        return new DOMRect(0, 0, 500, 400);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
       }
-    );
+      return new DOMRect(0, 0, 500, 400);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages([
@@ -4008,14 +3993,14 @@ describe('MessageList auto-scroll', () => {
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, trackHeight);
-        }
-        return new DOMRect(0, 0, 500, 400);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
       }
-    );
+      return new DOMRect(0, 0, 500, 400);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages([
@@ -4103,14 +4088,14 @@ describe('MessageList auto-scroll', () => {
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, trackHeight);
-        }
-        return new DOMRect(0, 0, 500, 400);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
       }
-    );
+      return new DOMRect(0, 0, 500, 400);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages([
@@ -4181,14 +4166,14 @@ describe('MessageList auto-scroll', () => {
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, trackHeight);
-        }
-        return new DOMRect(0, 0, 500, 400);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
       }
-    );
+      return new DOMRect(0, 0, 500, 400);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages([
@@ -4287,14 +4272,14 @@ describe('MessageList auto-scroll', () => {
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, trackHeight);
-        }
-        return new DOMRect(0, 0, 500, 400);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
       }
-    );
+      return new DOMRect(0, 0, 500, 400);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages([
@@ -4362,14 +4347,14 @@ describe('MessageList auto-scroll', () => {
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, trackHeight);
-        }
-        return new DOMRect(0, 0, 500, 400);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
       }
-    );
+      return new DOMRect(0, 0, 500, 400);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages([
@@ -4490,14 +4475,14 @@ describe('MessageList auto-scroll', () => {
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, trackHeight);
-        }
-        return new DOMRect(0, 0, 500, 400);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
       }
-    );
+      return new DOMRect(0, 0, 500, 400);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages([
@@ -4568,14 +4553,14 @@ describe('MessageList auto-scroll', () => {
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, trackHeight);
-        }
-        return new DOMRect(0, 0, 500, 400);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
       }
-    );
+      return new DOMRect(0, 0, 500, 400);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages([
@@ -4656,25 +4641,25 @@ describe('MessageList auto-scroll', () => {
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
     let scrollHeightValue = 5000;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 400);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, scrollHeightValue);
-        }
-        if (this.dataset.msgId) {
-          const index =
-            this.dataset.msgId === 'assistant-appended'
-              ? 50
-              : Number(this.dataset.msgId.replace('assistant-', ''));
-          const height = index === 50 ? 200 : 100;
-          return new DOMRect(0, index * 100 - scrollTopValue, 500, height);
-        }
-        return new DOMRect(0, 0, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, scrollHeightValue);
+      }
+      if (this.dataset.msgId) {
+        const index =
+          this.dataset.msgId === 'assistant-appended'
+            ? 50
+            : Number(this.dataset.msgId.replace('assistant-', ''));
+        const height = index === 50 ? 200 : 100;
+        return new DOMRect(0, index * 100 - scrollTopValue, 500, height);
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
     setState('activeSessionId', 'session-1');
     replaceMessages(baseMessages);
 
@@ -4730,14 +4715,14 @@ describe('MessageList auto-scroll', () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     let trackHeight = 1200;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, trackHeight);
-        }
-        return new DOMRect(0, 0, 500, 400);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
       }
-    );
+      return new DOMRect(0, 0, 500, 400);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages([
@@ -4819,14 +4804,14 @@ describe('MessageList auto-scroll', () => {
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, trackHeight);
-        }
-        return new DOMRect(0, 0, 500, 400);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
       }
-    );
+      return new DOMRect(0, 0, 500, 400);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages([
@@ -4918,21 +4903,21 @@ describe('MessageList auto-scroll', () => {
     let trailingHeight = 0;
     const messageHeight = 100;
     const messageTrackHeight = 50 * messageHeight;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 400);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, messageTrackHeight + trailingHeight);
-        }
-        if (this.dataset.msgId?.startsWith('assistant-')) {
-          const index = Number(this.dataset.msgId.replace('assistant-', ''));
-          return new DOMRect(0, index * messageHeight - scrollTopValue, 500, messageHeight);
-        }
-        return new DOMRect(0, 0, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, messageTrackHeight + trailingHeight);
+      }
+      if (this.dataset.msgId?.startsWith('assistant-')) {
+        const index = Number(this.dataset.msgId.replace('assistant-', ''));
+        return new DOMRect(0, index * messageHeight - scrollTopValue, 500, messageHeight);
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages(
@@ -5003,14 +4988,14 @@ describe('MessageList auto-scroll', () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     const trackHeight = 1200;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, trackHeight);
-        }
-        return new DOMRect(0, 0, 500, 400);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
       }
-    );
+      return new DOMRect(0, 0, 500, 400);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages([

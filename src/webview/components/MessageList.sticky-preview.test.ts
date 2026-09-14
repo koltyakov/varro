@@ -380,11 +380,11 @@ describe('shouldShowStickyUserMessagePreview', () => {
 
     const rectMap = new Map<Element, DOMRect>();
     const defaultRect = new DOMRect(0, -600, 500, 40);
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        return rectMap.get(this) || defaultRect;
-      }
-    );
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      return rectMap.get(this) || defaultRect;
+    });
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
@@ -451,24 +451,24 @@ describe('shouldShowStickyUserMessagePreview', () => {
       },
     ]);
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 500);
-        }
-        const row = this.classList.contains('interactive-item-container')
-          ? this
-          : this.closest<HTMLElement>('[data-msg-id]');
-        if (row?.dataset.msgId === 'boundary-user') {
-          const documentTop = this.classList.contains('user-message-card')
-            ? boundaryCardDocumentTop
-            : boundaryRowDocumentTop;
-          return new DOMRect(0, documentTop - scrollTopValue, 500, 52);
-        }
-        if (row?.dataset.msgId === 'assistant-1') return new DOMRect(0, 20, 500, 320);
-        return new DOMRect(0, 20, 500, 320);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 500);
       }
-    );
+      const row = this.classList.contains('interactive-item-container')
+        ? this
+        : this.closest<HTMLElement>('[data-msg-id]');
+      if (row?.dataset.msgId === 'boundary-user') {
+        const documentTop = this.classList.contains('user-message-card')
+          ? boundaryCardDocumentTop
+          : boundaryRowDocumentTop;
+        return new DOMRect(0, documentTop - scrollTopValue, 500, 52);
+      }
+      if (row?.dataset.msgId === 'assistant-1') return new DOMRect(0, 20, 500, 320);
+      return new DOMRect(0, 20, 500, 320);
+    });
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
@@ -568,13 +568,13 @@ describe('shouldShowStickyUserMessagePreview', () => {
         parts: [textPart('assistant-text', 'Visible response')],
       },
     ]);
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
-        if (this.dataset.msgId === 'assistant-1') return new DOMRect(0, 20, 500, 320);
-        return new DOMRect(0, -600, 500, 40);
-      }
-    );
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+      if (this.dataset.msgId === 'assistant-1') return new DOMRect(0, 20, 500, 320);
+      return new DOMRect(0, -600, 500, 40);
+    });
 
     cleanup = render(() => MessageList(), container!);
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
@@ -637,13 +637,13 @@ describe('shouldShowStickyUserMessagePreview', () => {
         parts: [textPart('assistant-text', 'Visible response')],
       },
     ]);
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
-        if (this.dataset.msgId === 'assistant-1') return new DOMRect(0, 20, 500, 320);
-        return new DOMRect(0, -600, 500, 40);
-      }
-    );
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+      if (this.dataset.msgId === 'assistant-1') return new DOMRect(0, 20, 500, 320);
+      return new DOMRect(0, -600, 500, 40);
+    });
 
     cleanup = render(() => MessageList(), container!);
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
@@ -715,13 +715,13 @@ describe('shouldShowStickyUserMessagePreview', () => {
         parts: [textPart('assistant-text', 'Visible response')],
       },
     ]);
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
-        if (this.dataset.msgId === 'assistant-1') return new DOMRect(0, 20, 500, 320);
-        return new DOMRect(0, -600, 500, 40);
-      }
-    );
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+      if (this.dataset.msgId === 'assistant-1') return new DOMRect(0, 20, 500, 320);
+      return new DOMRect(0, -600, 500, 40);
+    });
 
     cleanup = render(() => MessageList(), container!);
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
@@ -752,16 +752,16 @@ describe('shouldShowStickyUserMessagePreview', () => {
       },
     ]);
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
-        if (this.classList.contains('latest-user-message-sticky-overlay')) {
-          return new DOMRect(0, 10, 500, 74);
-        }
-        if (this.dataset.msgId === 'assistant-1') return new DOMRect(0, 20, 500, 320);
-        return new DOMRect(0, -600, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+      if (this.classList.contains('latest-user-message-sticky-overlay')) {
+        return new DOMRect(0, 10, 500, 74);
       }
-    );
+      if (this.dataset.msgId === 'assistant-1') return new DOMRect(0, 20, 500, 320);
+      return new DOMRect(0, -600, 500, 40);
+    });
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
@@ -822,11 +822,11 @@ describe('shouldShowStickyUserMessagePreview', () => {
       },
     ]);
     const rectMap = new Map<Element, DOMRect>();
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        return rectMap.get(this) || new DOMRect(0, 20, 500, 320);
-      }
-    );
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      return rectMap.get(this) || new DOMRect(0, 20, 500, 320);
+    });
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
@@ -907,11 +907,11 @@ describe('shouldShowStickyUserMessagePreview', () => {
       },
     ]);
     const rectMap = new Map<Element, DOMRect>();
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        return rectMap.get(this) || new DOMRect(0, 20, 500, 320);
-      }
-    );
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      return rectMap.get(this) || new DOMRect(0, 20, 500, 320);
+    });
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
@@ -1874,11 +1874,11 @@ describe('MessageList sticky prompt preview', () => {
     startEditingMessage('user-2', 'session-1', 'Prompt 2');
 
     const rectMap = new Map<Element, DOMRect>();
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        return rectMap.get(this) || new DOMRect(0, 0, 500, 40);
-      }
-    );
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      return rectMap.get(this) || new DOMRect(0, 0, 500, 40);
+    });
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
@@ -1915,15 +1915,15 @@ describe('MessageList sticky prompt preview', () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     let scrollTopValue = 500;
     let editedRowDocumentTop = 380;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
-        if (this.dataset.msgId === 'user-2') {
-          return new DOMRect(0, editedRowDocumentTop - scrollTopValue, 500, 180);
-        }
-        return new DOMRect(0, 0, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+      if (this.dataset.msgId === 'user-2') {
+        return new DOMRect(0, editedRowDocumentTop - scrollTopValue, 500, 180);
       }
-    );
+      return new DOMRect(0, 0, 500, 40);
+    });
     setState('activeSessionId', 'session-1');
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
@@ -1962,15 +1962,15 @@ describe('MessageList sticky prompt preview', () => {
   it('clamps an aligned sticky destination before the first editing frame', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     let scrollTopValue = 500;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
-        if (this.dataset.msgId === 'user-2') {
-          return new DOMRect(0, 502 - scrollTopValue, 500, 180);
-        }
-        return new DOMRect(0, 0, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+      if (this.dataset.msgId === 'user-2') {
+        return new DOMRect(0, 502 - scrollTopValue, 500, 180);
       }
-    );
+      return new DOMRect(0, 0, 500, 40);
+    });
     setState('activeSessionId', 'session-1');
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
@@ -2011,20 +2011,20 @@ describe('MessageList sticky prompt preview', () => {
     let trackHeight = 1200;
     const assignedScrollTops: number[] = [];
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 400);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, trackHeight);
-        }
-        if (this.dataset.msgId === 'user-2') {
-          return new DOMRect(0, 700 - scrollTopValue, 500, 80);
-        }
-        return new DOMRect(0, 0, 500, 100);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
+      }
+      if (this.dataset.msgId === 'user-2') {
+        return new DOMRect(0, 700 - scrollTopValue, 500, 80);
+      }
+      return new DOMRect(0, 0, 500, 100);
+    });
     setState('activeSessionId', 'session-1');
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
@@ -2106,11 +2106,11 @@ describe('MessageList sticky prompt preview', () => {
 
     const rectMap = new Map<Element, DOMRect>();
     const defaultRect = new DOMRect(0, -600, 500, 40);
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        return rectMap.get(this) || defaultRect;
-      }
-    );
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      return rectMap.get(this) || defaultRect;
+    });
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
@@ -2188,17 +2188,17 @@ describe('MessageList sticky prompt preview', () => {
       ]).flat()
     );
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
 
-        const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
-        if (messageId === 'user-17') return new DOMRect(0, -100, 500, 52);
-        if (messageId === 'assistant-17') return new DOMRect(0, 20, 500, 160);
-        if (this.dataset.msgId) return new DOMRect(0, -600, 500, 160);
-        return new DOMRect(0, -600, 500, 40);
-      }
-    );
+      const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+      if (messageId === 'user-17') return new DOMRect(0, -100, 500, 52);
+      if (messageId === 'assistant-17') return new DOMRect(0, 20, 500, 160);
+      if (this.dataset.msgId) return new DOMRect(0, -600, 500, 160);
+      return new DOMRect(0, -600, 500, 40);
+    });
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
@@ -2238,16 +2238,16 @@ describe('MessageList sticky prompt preview', () => {
       ]).flat()
     );
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
 
-        const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
-        if (messageId === 'user-20') return new DOMRect(0, 280, 500, 52);
-        if (this.dataset.msgId) return new DOMRect(0, -600, 500, 160);
-        return new DOMRect(0, -600, 500, 40);
-      }
-    );
+      const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+      if (messageId === 'user-20') return new DOMRect(0, 280, 500, 52);
+      if (this.dataset.msgId) return new DOMRect(0, -600, 500, 160);
+      return new DOMRect(0, -600, 500, 40);
+    });
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
@@ -2292,22 +2292,22 @@ describe('MessageList sticky prompt preview', () => {
       { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
     ]);
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, 1_200);
-        }
-        if (this.classList.contains('latest-user-message-sticky-overlay')) {
-          return new DOMRect(0, 10, 500, 74);
-        }
-
-        const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
-        if (messageId === 'user-1') return new DOMRect(0, -100, 500, 52);
-        if (messageId === 'assistant-1') return new DOMRect(0, assistantTop, 500, 320);
-        return new DOMRect(0, -600, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, 1_200);
       }
-    );
+      if (this.classList.contains('latest-user-message-sticky-overlay')) {
+        return new DOMRect(0, 10, 500, 74);
+      }
+
+      const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+      if (messageId === 'user-1') return new DOMRect(0, -100, 500, 52);
+      if (messageId === 'assistant-1') return new DOMRect(0, assistantTop, 500, 320);
+      return new DOMRect(0, -600, 500, 40);
+    });
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
@@ -2385,27 +2385,27 @@ describe('MessageList sticky prompt preview', () => {
       { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
     ]);
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
-        if (this.classList.contains('latest-user-message-sticky-overlay')) {
-          return new DOMRect(0, 10, 500, 74);
-        }
-        if (this.classList.contains('latest-user-message-sticky')) {
-          return new DOMRect(0, 18, 500, 50);
-        }
-        if (this.classList.contains('latest-user-message-sticky-text')) {
-          return new DOMRect(0, 22, 500, 18);
-        }
-
-        const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
-        if (messageId === 'user-1') return new DOMRect(0, -700, 500, 52);
-        if (messageId === 'assistant-1') return new DOMRect(0, assistant1Top, 500, 90);
-        if (messageId === 'user-2') return new DOMRect(0, user2Top, 500, 52);
-        if (messageId === 'assistant-2') return new DOMRect(0, 20, 500, 320);
-        return new DOMRect(0, -600, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+      if (this.classList.contains('latest-user-message-sticky-overlay')) {
+        return new DOMRect(0, 10, 500, 74);
       }
-    );
+      if (this.classList.contains('latest-user-message-sticky')) {
+        return new DOMRect(0, 18, 500, 50);
+      }
+      if (this.classList.contains('latest-user-message-sticky-text')) {
+        return new DOMRect(0, 22, 500, 18);
+      }
+
+      const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+      if (messageId === 'user-1') return new DOMRect(0, -700, 500, 52);
+      if (messageId === 'assistant-1') return new DOMRect(0, assistant1Top, 500, 90);
+      if (messageId === 'user-2') return new DOMRect(0, user2Top, 500, 52);
+      if (messageId === 'assistant-2') return new DOMRect(0, 20, 500, 320);
+      return new DOMRect(0, -600, 500, 40);
+    });
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
@@ -2504,24 +2504,24 @@ describe('MessageList sticky prompt preview', () => {
       { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
     ]);
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
-        if (this.classList.contains('latest-user-message-sticky-overlay')) {
-          return new DOMRect(0, 10, 500, 74);
-        }
-        if (this.classList.contains('latest-user-message-sticky')) {
-          return new DOMRect(0, 10, 500, 50);
-        }
-
-        const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
-        if (messageId === 'user-1') return new DOMRect(0, -100, 500, 52);
-        if (messageId === 'assistant-1') return new DOMRect(0, 20, 500, 280);
-        if (messageId === 'user-2') return new DOMRect(0, nextUserTop, 500, 52);
-        if (messageId === 'assistant-2') return new DOMRect(0, nextUserTop + 80, 500, 160);
-        return new DOMRect(0, -600, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+      if (this.classList.contains('latest-user-message-sticky-overlay')) {
+        return new DOMRect(0, 10, 500, 74);
       }
-    );
+      if (this.classList.contains('latest-user-message-sticky')) {
+        return new DOMRect(0, 10, 500, 50);
+      }
+
+      const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+      if (messageId === 'user-1') return new DOMRect(0, -100, 500, 52);
+      if (messageId === 'assistant-1') return new DOMRect(0, 20, 500, 280);
+      if (messageId === 'user-2') return new DOMRect(0, nextUserTop, 500, 52);
+      if (messageId === 'assistant-2') return new DOMRect(0, nextUserTop + 80, 500, 160);
+      return new DOMRect(0, -600, 500, 40);
+    });
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
@@ -2583,24 +2583,24 @@ describe('MessageList sticky prompt preview', () => {
       { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
     ]);
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, 1_700);
-        }
-        if (this.classList.contains('latest-user-message-sticky-overlay')) {
-          return new DOMRect(0, 10, 500, 74);
-        }
-
-        const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
-        if (messageId === 'user-1') return new DOMRect(0, -100, 500, 52);
-        if (messageId === 'assistant-1') return new DOMRect(0, 20, 500, 280);
-        if (messageId === 'user-2') return new DOMRect(0, nextUserTop, 500, 52);
-        if (messageId === 'assistant-2') return new DOMRect(0, nextUserTop + 80, 500, 160);
-        return new DOMRect(0, -600, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, 1_700);
       }
-    );
+      if (this.classList.contains('latest-user-message-sticky-overlay')) {
+        return new DOMRect(0, 10, 500, 74);
+      }
+
+      const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+      if (messageId === 'user-1') return new DOMRect(0, -100, 500, 52);
+      if (messageId === 'assistant-1') return new DOMRect(0, 20, 500, 280);
+      if (messageId === 'user-2') return new DOMRect(0, nextUserTop, 500, 52);
+      if (messageId === 'assistant-2') return new DOMRect(0, nextUserTop + 80, 500, 160);
+      return new DOMRect(0, -600, 500, 40);
+    });
 
     cleanup = render(() => MessageList(), container!);
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
@@ -2649,24 +2649,24 @@ describe('MessageList sticky prompt preview', () => {
       { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
     ]);
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
-        if (this.classList.contains('latest-user-message-sticky-overlay')) {
-          return new DOMRect(0, 10, 500, 74);
-        }
-        if (this.classList.contains('latest-user-message-sticky')) {
-          return new DOMRect(0, 10, 500, 50);
-        }
-
-        const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
-        if (messageId === 'user-1') return new DOMRect(0, -100, 500, 52);
-        if (messageId === 'assistant-1') return new DOMRect(0, 0, 500, 500);
-        if (messageId === 'user-2') return new DOMRect(0, nextUserTop, 500, 52);
-        if (messageId === 'assistant-2') return new DOMRect(0, nextUserTop + 80, 500, 160);
-        return new DOMRect(0, -600, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+      if (this.classList.contains('latest-user-message-sticky-overlay')) {
+        return new DOMRect(0, 10, 500, 74);
       }
-    );
+      if (this.classList.contains('latest-user-message-sticky')) {
+        return new DOMRect(0, 10, 500, 50);
+      }
+
+      const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+      if (messageId === 'user-1') return new DOMRect(0, -100, 500, 52);
+      if (messageId === 'assistant-1') return new DOMRect(0, 0, 500, 500);
+      if (messageId === 'user-2') return new DOMRect(0, nextUserTop, 500, 52);
+      if (messageId === 'assistant-2') return new DOMRect(0, nextUserTop + 80, 500, 160);
+      return new DOMRect(0, -600, 500, 40);
+    });
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
@@ -2733,24 +2733,24 @@ describe('MessageList sticky prompt preview', () => {
       { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
     ]);
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
-        if (this.classList.contains('latest-user-message-sticky-overlay')) {
-          return new DOMRect(0, 10, 500, 74);
-        }
-        if (this.classList.contains('latest-user-message-sticky')) {
-          return new DOMRect(0, 10, 500, 50);
-        }
-
-        const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
-        if (messageId === 'user-1') return new DOMRect(0, -100, 500, 52);
-        if (messageId === 'assistant-1') return new DOMRect(0, 0, 500, 500);
-        if (messageId === 'user-2') return new DOMRect(0, nextUserTop, 500, 52);
-        if (messageId === 'assistant-2') return new DOMRect(0, nextUserTop + 80, 500, 160);
-        return new DOMRect(0, -600, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+      if (this.classList.contains('latest-user-message-sticky-overlay')) {
+        return new DOMRect(0, 10, 500, 74);
       }
-    );
+      if (this.classList.contains('latest-user-message-sticky')) {
+        return new DOMRect(0, 10, 500, 50);
+      }
+
+      const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+      if (messageId === 'user-1') return new DOMRect(0, -100, 500, 52);
+      if (messageId === 'assistant-1') return new DOMRect(0, 0, 500, 500);
+      if (messageId === 'user-2') return new DOMRect(0, nextUserTop, 500, 52);
+      if (messageId === 'assistant-2') return new DOMRect(0, nextUserTop + 80, 500, 160);
+      return new DOMRect(0, -600, 500, 40);
+    });
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
@@ -2812,21 +2812,21 @@ describe('MessageList sticky prompt preview', () => {
       { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
     ]);
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 500);
-        }
-        const row = this.classList.contains('interactive-item-container')
-          ? this
-          : this.closest<HTMLElement>('[data-msg-id]');
-        const top = row?.dataset.msgId ? messageTop.get(row.dataset.msgId) : undefined;
-        const height = row?.dataset.msgId?.startsWith('user-') ? 80 : 420;
-        return top === undefined
-          ? new DOMRect(0, -600, 500, 40)
-          : new DOMRect(0, top - scrollTopValue, 500, height);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 500);
       }
-    );
+      const row = this.classList.contains('interactive-item-container')
+        ? this
+        : this.closest<HTMLElement>('[data-msg-id]');
+      const top = row?.dataset.msgId ? messageTop.get(row.dataset.msgId) : undefined;
+      const height = row?.dataset.msgId?.startsWith('user-') ? 80 : 420;
+      return top === undefined
+        ? new DOMRect(0, -600, 500, 40)
+        : new DOMRect(0, top - scrollTopValue, 500, height);
+    });
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
@@ -2945,11 +2945,11 @@ describe('MessageList sticky prompt preview', () => {
     ]);
 
     const rectMap = new Map<Element, DOMRect>();
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        return rectMap.get(this) || new DOMRect(0, -600, 500, 40);
-      }
-    );
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      return rectMap.get(this) || new DOMRect(0, -600, 500, 40);
+    });
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
@@ -3022,26 +3022,26 @@ describe('MessageList sticky prompt preview', () => {
         { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
       ]);
 
-      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-        function (this: HTMLElement) {
-          if (this === list || this.classList.contains('interactive-list')) {
-            return new DOMRect(0, 100, 500, 500);
-          }
-          const row = this.classList.contains('interactive-item-container')
-            ? this
-            : this.closest<HTMLElement>('[data-msg-id]');
-          if (row?.dataset.msgId === 'user-2') {
-            const documentTop = this.classList.contains('user-message-card')
-              ? cardDocumentTop
-              : rowDocumentTop;
-            return new DOMRect(0, 100 + documentTop - scrollTopValue, 500, 52);
-          }
-          if (row?.dataset.msgId === 'assistant-2') {
-            return new DOMRect(0, 120, 500, 320);
-          }
-          return new DOMRect(0, -600, 500, 40);
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+        this: HTMLElement
+      ) {
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 100, 500, 500);
         }
-      );
+        const row = this.classList.contains('interactive-item-container')
+          ? this
+          : this.closest<HTMLElement>('[data-msg-id]');
+        if (row?.dataset.msgId === 'user-2') {
+          const documentTop = this.classList.contains('user-message-card')
+            ? cardDocumentTop
+            : rowDocumentTop;
+          return new DOMRect(0, 100 + documentTop - scrollTopValue, 500, 52);
+        }
+        if (row?.dataset.msgId === 'assistant-2') {
+          return new DOMRect(0, 120, 500, 320);
+        }
+        return new DOMRect(0, -600, 500, 40);
+      });
 
       cleanup = render(() => MessageList(), container!);
       await Promise.resolve();
@@ -3112,11 +3112,11 @@ describe('MessageList sticky prompt preview', () => {
     ]);
 
     const rectMap = new Map<Element, DOMRect>();
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        return rectMap.get(this) || new DOMRect(0, -600, 500, 40);
-      }
-    );
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      return rectMap.get(this) || new DOMRect(0, -600, 500, 40);
+    });
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
@@ -3166,22 +3166,22 @@ describe('MessageList sticky prompt preview', () => {
       { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Running response')] },
     ]);
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 500);
-        }
-        const row = this.classList.contains('interactive-item-container')
-          ? this
-          : this.closest<HTMLElement>('[data-msg-id]');
-        if (row?.dataset.msgId === 'user-1') {
-          const documentTop = this.classList.contains('user-message-card') ? 4 : 0;
-          return new DOMRect(0, documentTop - scrollTopValue, 500, 52);
-        }
-        if (row?.dataset.msgId === 'assistant-1') return new DOMRect(0, 20, 500, 320);
-        return new DOMRect(0, -600, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 500);
       }
-    );
+      const row = this.classList.contains('interactive-item-container')
+        ? this
+        : this.closest<HTMLElement>('[data-msg-id]');
+      if (row?.dataset.msgId === 'user-1') {
+        const documentTop = this.classList.contains('user-message-card') ? 4 : 0;
+        return new DOMRect(0, documentTop - scrollTopValue, 500, 52);
+      }
+      if (row?.dataset.msgId === 'assistant-1') return new DOMRect(0, 20, 500, 320);
+      return new DOMRect(0, -600, 500, 40);
+    });
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
@@ -3232,20 +3232,20 @@ describe('MessageList sticky prompt preview', () => {
     const targetIndex = 40;
     const targetScrollTop = targetIndex * 120;
     const stickyTopInset = 13;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list) return new DOMRect(0, 0, 500, 500);
-        const row = this.classList.contains('interactive-item-container')
-          ? this
-          : this.closest<HTMLElement>('.interactive-item-container');
-        const messageIndex = Number(row?.dataset.msgId?.replace('message-', ''));
-        if (Number.isFinite(messageIndex)) {
-          const layoutShift = messageIndex === targetIndex ? targetLayoutShift : 0;
-          return new DOMRect(0, messageIndex * 120 - scrollTopValue + layoutShift, 500, 120);
-        }
-        return new DOMRect(0, 0, 500, 500);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list) return new DOMRect(0, 0, 500, 500);
+      const row = this.classList.contains('interactive-item-container')
+        ? this
+        : this.closest<HTMLElement>('.interactive-item-container');
+      const messageIndex = Number(row?.dataset.msgId?.replace('message-', ''));
+      if (Number.isFinite(messageIndex)) {
+        const layoutShift = messageIndex === targetIndex ? targetLayoutShift : 0;
+        return new DOMRect(0, messageIndex * 120 - scrollTopValue + layoutShift, 500, 120);
       }
-    );
+      return new DOMRect(0, 0, 500, 500);
+    });
 
     setState('activeSessionId', 'session-1');
     replaceMessages(
@@ -3400,11 +3400,11 @@ describe('MessageList sticky prompt preview', () => {
     ]);
 
     const rectMap = new Map<Element, DOMRect>();
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        return rectMap.get(this) || new DOMRect(0, -600, 500, 40);
-      }
-    );
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      return rectMap.get(this) || new DOMRect(0, -600, 500, 40);
+    });
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
@@ -3490,11 +3490,11 @@ describe('MessageList sticky prompt preview', () => {
     ]);
 
     const rectMap = new Map<Element, DOMRect>();
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        return rectMap.get(this) || new DOMRect(0, -600, 500, 40);
-      }
-    );
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      return rectMap.get(this) || new DOMRect(0, -600, 500, 40);
+    });
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
@@ -3572,11 +3572,11 @@ describe('MessageList sticky prompt preview', () => {
 
     const rectMap = new Map<Element, DOMRect>();
     const defaultRect = new DOMRect(0, -600, 500, 40);
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        return rectMap.get(this) || defaultRect;
-      }
-    );
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      return rectMap.get(this) || defaultRect;
+    });
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();

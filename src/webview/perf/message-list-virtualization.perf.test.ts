@@ -322,17 +322,17 @@ describe('MessageList virtualization perf guards', () => {
   it('renders only a bounded row window for large transcripts', async () => {
     // Principle: once the exact-height bootstrap completes, large transcripts must return to a
     // bounded DOM window with virtual spacers. Rendering the whole transcript is a regression.
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-item-container')) {
-          return new DOMRect(0, 0, 500, 120);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, 24_000);
-        }
-        return new DOMRect(0, 0, 500, 500);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-item-container')) {
+        return new DOMRect(0, 0, 500, 120);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, 24_000);
+      }
+      return new DOMRect(0, 0, 500, 500);
+    });
 
     replaceMessages(
       Array.from({ length: 200 }, (_, index) => {
@@ -394,17 +394,17 @@ describe('MessageList virtualization perf guards', () => {
   });
 
   it('keeps the rendered row window bounded while inline editing', async () => {
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-item-container')) {
-          return new DOMRect(0, 0, 500, 120);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, 120_000);
-        }
-        return new DOMRect(0, 0, 500, 500);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-item-container')) {
+        return new DOMRect(0, 0, 500, 120);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, 120_000);
+      }
+      return new DOMRect(0, 0, 500, 500);
+    });
 
     replaceMessages(
       Array.from({ length: 1_000 }, (_, index) => {
@@ -428,17 +428,17 @@ describe('MessageList virtualization perf guards', () => {
   }, 10_000);
 
   it('does not rebuild assistant dialog summaries as the virtual window scrolls', async () => {
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-item-container')) {
-          return new DOMRect(0, 0, 500, 120);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, 24_000);
-        }
-        return new DOMRect(0, 0, 500, 500);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-item-container')) {
+        return new DOMRect(0, 0, 500, 120);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, 24_000);
+      }
+      return new DOMRect(0, 0, 500, 500);
+    });
 
     replaceMessages(
       Array.from({ length: 200 }, (_, index) => {
@@ -481,17 +481,17 @@ describe('MessageList virtualization perf guards', () => {
   }, 10_000);
 
   it('coalesces sticky viewport and virtual-range work into one frame pass', async () => {
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-item-container')) {
-          return new DOMRect(0, 0, 500, 120);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, 24_000);
-        }
-        return new DOMRect(0, 0, 500, 500);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-item-container')) {
+        return new DOMRect(0, 0, 500, 120);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, 24_000);
+      }
+      return new DOMRect(0, 0, 500, 500);
+    });
 
     replaceMessages(
       Array.from({ length: 200 }, (_, index) => {
@@ -564,24 +564,24 @@ describe('MessageList virtualization perf guards', () => {
     let listWidth = 500;
     let fontHeightAdjustment = 0;
     const getRowHeight = () => 120 + Math.round((500 - listWidth) * 0.5) + fontHeightAdjustment;
-    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(
-      function (this: HTMLElement) {
-        return this.classList.contains('interactive-list') ? listWidth : 500;
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      return this.classList.contains('interactive-list') ? listWidth : 500;
+    });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-item-container')) {
+        const index = Number(this.getAttribute('data-msg-id')?.replace('message-', '') ?? 0);
+        const rowHeight = getRowHeight();
+        return new DOMRect(0, index * rowHeight, listWidth, rowHeight);
       }
-    );
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-item-container')) {
-          const index = Number(this.getAttribute('data-msg-id')?.replace('message-', '') ?? 0);
-          const rowHeight = getRowHeight();
-          return new DOMRect(0, index * rowHeight, listWidth, rowHeight);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, listWidth, getRowHeight() * 200);
-        }
-        return new DOMRect(0, 0, listWidth, 500);
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, listWidth, getRowHeight() * 200);
       }
-    );
+      return new DOMRect(0, 0, listWidth, 500);
+    });
 
     replaceMessages(
       Array.from({ length: 200 }, (_, index) => {

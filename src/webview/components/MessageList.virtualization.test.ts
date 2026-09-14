@@ -537,13 +537,13 @@ describe('removed virtual rows', () => {
 
 describe('virtualized editing', () => {
   it('pins a distant edited row with full content in a bounded range', async () => {
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 400);
-        if (this.dataset.msgId) return new DOMRect(0, 0, 500, 100);
-        return new DOMRect(0, 0, 500, 0);
-      }
-    );
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 400);
+      if (this.dataset.msgId) return new DOMRect(0, 0, 500, 100);
+      return new DOMRect(0, 0, 500, 0);
+    });
     setState('activeSessionId', 'session-1');
     replaceMessages(
       Array.from({ length: 60 }, (_, index) => ({
@@ -582,29 +582,29 @@ describe('virtualized editing', () => {
         }
       );
       vi.spyOn(client.session, 'diff').mockReturnValue(pendingDiff);
-      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-        function (this: HTMLElement) {
-          if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 400);
-          if (this.classList.contains('interactive-list-track')) {
-            const targetHasContent = state.messages
-              .find((message) => message.info.id === 'message-30')
-              ?.parts.some((part) => part.type === 'text' && part.text.trim());
-            return new DOMRect(0, 0, 500, targetHasContent ? 6000 : 5900);
-          }
-          if (this.dataset.msgId) {
-            const targetHasContent = state.messages
-              .find((message) => message.info.id === 'message-30')
-              ?.parts.some((part) => part.type === 'text' && part.text.trim());
-            return new DOMRect(
-              0,
-              0,
-              500,
-              this.dataset.msgId === 'message-30' && !targetHasContent ? 0 : 100
-            );
-          }
-          return new DOMRect(0, 0, 500, 0);
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+        this: HTMLElement
+      ) {
+        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 400);
+        if (this.classList.contains('interactive-list-track')) {
+          const targetHasContent = state.messages
+            .find((message) => message.info.id === 'message-30')
+            ?.parts.some((part) => part.type === 'text' && part.text.trim());
+          return new DOMRect(0, 0, 500, targetHasContent ? 6000 : 5900);
         }
-      );
+        if (this.dataset.msgId) {
+          const targetHasContent = state.messages
+            .find((message) => message.info.id === 'message-30')
+            ?.parts.some((part) => part.type === 'text' && part.text.trim());
+          return new DOMRect(
+            0,
+            0,
+            500,
+            this.dataset.msgId === 'message-30' && !targetHasContent ? 0 : 100
+          );
+        }
+        return new DOMRect(0, 0, 500, 0);
+      });
       setState('activeSessionId', 'session-1');
       replaceMessages(
         Array.from({ length: 60 }, (_, index) => {
@@ -705,18 +705,18 @@ describe('virtualized editing', () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     const pendingDiff = new Promise<Awaited<ReturnType<typeof client.session.diff>>>(() => {});
     const diffSpy = vi.spyOn(client.session, 'diff').mockReturnValue(pendingDiff);
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 400);
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, 5900);
-        }
-        if (this.dataset.msgId) {
-          return new DOMRect(0, 0, 500, this.dataset.msgId === 'message-30' ? 0 : 100);
-        }
-        return new DOMRect(0, 0, 500, 0);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 400);
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, 5900);
       }
-    );
+      if (this.dataset.msgId) {
+        return new DOMRect(0, 0, 500, this.dataset.msgId === 'message-30' ? 0 : 100);
+      }
+      return new DOMRect(0, 0, 500, 0);
+    });
     setState('activeSessionId', 'session-1');
     replaceMessages(
       Array.from({ length: 60 }, (_, index) => {
@@ -823,30 +823,28 @@ describe('MessageList history pagination', () => {
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 400);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, state.messages.length * 100);
-        }
-        if (this.dataset.assistantRenderKey) {
-          const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
-          const index = state.messages.findIndex((message) => message.info.id === messageId);
-          const documentTop = index * 100 + getMessageLayoutOffset(messageId || '');
-          return new DOMRect(0, documentTop + 6 - scrollTopValue, 500, 40);
-        }
-        if (this.dataset.msgId) {
-          const index = state.messages.findIndex(
-            (message) => message.info.id === this.dataset.msgId
-          );
-          const documentTop = index * 100 + getMessageLayoutOffset(this.dataset.msgId);
-          return new DOMRect(0, documentTop - scrollTopValue, 500, 100);
-        }
-        return new DOMRect(0, 0, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, state.messages.length * 100);
+      }
+      if (this.dataset.assistantRenderKey) {
+        const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+        const index = state.messages.findIndex((message) => message.info.id === messageId);
+        const documentTop = index * 100 + getMessageLayoutOffset(messageId || '');
+        return new DOMRect(0, documentTop + 6 - scrollTopValue, 500, 40);
+      }
+      if (this.dataset.msgId) {
+        const index = state.messages.findIndex((message) => message.info.id === this.dataset.msgId);
+        const documentTop = index * 100 + getMessageLayoutOffset(this.dataset.msgId);
+        return new DOMRect(0, documentTop - scrollTopValue, 500, 100);
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
 
     setState('activeSessionId', 'session-1');
     setSessionHistoryCursor('session-1', 'cursor-1');
@@ -950,15 +948,15 @@ describe('MessageList history pagination', () => {
   });
 
   it('keeps the visible message fixed when a prepended activity group moves to an older owner', async () => {
-    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(
-      function (this: HTMLElement) {
-        if (!this.dataset.assistantRenderKey)
-          // SAFETY: The fixture provides the unknown fields read by this statement.
-          if (!this.dataset.assistantRenderKey) return fixture<DOMRectList>([]);
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (!this.dataset.assistantRenderKey)
         // SAFETY: The fixture provides the unknown fields read by this statement.
-        return fixture<DOMRectList>([this.getBoundingClientRect()]);
-      }
-    );
+        if (!this.dataset.assistantRenderKey) return fixture<DOMRectList>([]);
+      // SAFETY: The fixture provides the unknown fields read by this statement.
+      return fixture<DOMRectList>([this.getBoundingClientRect()]);
+    });
     const thought: Part = {
       id: 'current-thought',
       sessionID: 'session-1',
@@ -1051,39 +1049,37 @@ describe('MessageList history pagination', () => {
     let hydratedRowRectReads = 0;
     let misreportVirtualPlaceholderHeight = false;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 400);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, -scrollTopValue, 500, state.messages.length * 100);
-        }
-        if (this.classList.contains('message-history-banner')) {
-          return new DOMRect(0, 0, 500, 0);
-        }
-        if (this.dataset.msgId) {
-          rowRectReads += 1;
-          if (
-            this.dataset.msgId === 'older-49' &&
-            !this.classList.contains('interactive-item-virtual-placeholder')
-          ) {
-            hydratedRowRectReads += 1;
-          }
-          const index = state.messages.findIndex(
-            (message) => message.info.id === this.dataset.msgId
-          );
-          const height =
-            misreportVirtualPlaceholderHeight &&
-            (this.dataset.msgId === 'older-30' || this.dataset.msgId === 'older-49') &&
-            this.classList.contains('interactive-item-virtual-placeholder')
-              ? 123
-              : 100;
-          return new DOMRect(0, index * 100 - scrollTopValue, 500, height);
-        }
-        return new DOMRect(0, 0, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, -scrollTopValue, 500, state.messages.length * 100);
+      }
+      if (this.classList.contains('message-history-banner')) {
+        return new DOMRect(0, 0, 500, 0);
+      }
+      if (this.dataset.msgId) {
+        rowRectReads += 1;
+        if (
+          this.dataset.msgId === 'older-49' &&
+          !this.classList.contains('interactive-item-virtual-placeholder')
+        ) {
+          hydratedRowRectReads += 1;
+        }
+        const index = state.messages.findIndex((message) => message.info.id === this.dataset.msgId);
+        const height =
+          misreportVirtualPlaceholderHeight &&
+          (this.dataset.msgId === 'older-30' || this.dataset.msgId === 'older-49') &&
+          this.classList.contains('interactive-item-virtual-placeholder')
+            ? 123
+            : 100;
+        return new DOMRect(0, index * 100 - scrollTopValue, 500, height);
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
 
     setState('activeSessionId', 'session-1');
     setSessionHistoryCursor('session-1', 'cursor-1');
@@ -1600,25 +1596,25 @@ describe('MessageList history pagination', () => {
     const olderBoundaryId = olderPage[0]!.info.id;
     const olderLoaded = () => state.messages[0]?.info.id === olderBoundaryId;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 400);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, olderLoaded() ? 5200 : 4900);
-        }
-        if (this.dataset.msgId === 'older-boundary') {
-          return new DOMRect(0, -scrollTopValue, 500, 300);
-        }
-        if (this.dataset.msgId?.startsWith('current-')) {
-          const index = Number(this.dataset.msgId.replace('current-', ''));
-          const documentTop = index * 100 + (olderLoaded() ? 300 : 0);
-          return new DOMRect(0, documentTop - scrollTopValue, 500, 100);
-        }
-        return new DOMRect(0, 0, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, olderLoaded() ? 5200 : 4900);
+      }
+      if (this.dataset.msgId === 'older-boundary') {
+        return new DOMRect(0, -scrollTopValue, 500, 300);
+      }
+      if (this.dataset.msgId?.startsWith('current-')) {
+        const index = Number(this.dataset.msgId.replace('current-', ''));
+        const documentTop = index * 100 + (olderLoaded() ? 300 : 0);
+        return new DOMRect(0, documentTop - scrollTopValue, 500, 100);
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
     setState('activeSessionId', 'session-1');
     setSessionHistoryCursor('session-1', 'cursor-49');
     replaceMessages(
@@ -1745,23 +1741,21 @@ describe('MessageList history pagination', () => {
 
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 400);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, state.messages.length * 100);
-        }
-        if (this.dataset.msgId) {
-          const index = state.messages.findIndex(
-            (message) => message.info.id === this.dataset.msgId
-          );
-          return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
-        }
-        return new DOMRect(0, 0, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, state.messages.length * 100);
+      }
+      if (this.dataset.msgId) {
+        const index = state.messages.findIndex((message) => message.info.id === this.dataset.msgId);
+        return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
 
     setState('activeSessionId', 'session-1');
     setSessionHistoryCursor('session-1', 'cursor-1');
@@ -1985,13 +1979,13 @@ describe('MessageList history pagination', () => {
       .spyOn(client.session, 'messages')
       .mockResolvedValueOnce(firstPage)
       .mockResolvedValueOnce(secondPage);
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.dataset.msgId) return new DOMRect(0, 0, 500, 1);
-        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
-        return new DOMRect(0, 0, 500, 60);
-      }
-    );
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.dataset.msgId) return new DOMRect(0, 0, 500, 1);
+      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+      return new DOMRect(0, 0, 500, 60);
+    });
     setState('activeSessionId', 'session-1');
     setSessionHistoryCursor('session-1', 'cursor-older');
     replaceMessages(currentMessages);
@@ -2039,20 +2033,20 @@ describe('MessageList history pagination', () => {
     })) as Awaited<ReturnType<typeof client.session.messages>>;
     fillingPage.nextCursor = 'cursor-must-not-load';
     const messagesSpy = vi.spyOn(client.session, 'messages').mockResolvedValueOnce(fillingPage);
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this.dataset.msgId) {
-          const height = this.dataset.msgId.startsWith('filling-user-12')
-            ? 20
-            : this.dataset.msgId.startsWith('filling-user-')
-              ? 40
-              : 1;
-          return new DOMRect(0, 0, 500, height);
-        }
-        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
-        return new DOMRect(0, 0, 500, 60);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this.dataset.msgId) {
+        const height = this.dataset.msgId.startsWith('filling-user-12')
+          ? 20
+          : this.dataset.msgId.startsWith('filling-user-')
+            ? 40
+            : 1;
+        return new DOMRect(0, 0, 500, height);
       }
-    );
+      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+      return new DOMRect(0, 0, 500, 60);
+    });
     setState('activeSessionId', 'session-1');
     setSessionHistoryCursor('session-1', 'cursor-filling');
     replaceMessages(currentMessages);
@@ -2231,21 +2225,21 @@ describe('MessageList history pagination', () => {
     const messagesSpy = vi.spyOn(client.session, 'messages').mockReturnValue(pendingStalePage);
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 400);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, 6000);
-        }
-        if (this.dataset.msgId?.startsWith('assistant-')) {
-          const index = Number(this.dataset.msgId.replace('assistant-', ''));
-          return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
-        }
-        return new DOMRect(0, 0, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
       }
-    );
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, 6000);
+      }
+      if (this.dataset.msgId?.startsWith('assistant-')) {
+        const index = Number(this.dataset.msgId.replace('assistant-', ''));
+        return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
     setState('activeSessionId', 'session-1');
     setSessionHistoryCursor('session-1', 'cursor-stale');
     replaceMessages(

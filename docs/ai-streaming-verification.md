@@ -84,6 +84,12 @@ session. It checks for incomplete assistant messages across each entire session 
 sessions, plus responses without a same-session user parent. Scan limits and truncation are recorded;
 the longest-history claim applies only to eligible histories within these bounds.
 
+Eligibility also checks the response, its user parent, and the exact imported baseline for recursive
+`sessionID`/`sessionId` references to another session, including completed task metadata. These
+responses are rejected as `foreign-session-reference` before choosing the longest eligible subset.
+Historical prose that mentions another session is preserved. The replay server independently rejects
+foreign routing in supplied captures; preparation does not rewrite existing captures or source data.
+
 The longest `--count` eligible sessions form the subset first. Selection then greedily adds weighted
 response coverage within that subset for reasoning, text, tools, edits, large output, Markdown,
 and baseline history above 50 messages, choosing one response per session. Seeded hashes break

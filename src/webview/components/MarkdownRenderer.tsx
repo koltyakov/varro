@@ -2053,6 +2053,16 @@ export function MarkdownRenderer(props: MarkdownProps) {
   const [stableHtml, setStableHtml] = createSignal(lastAppliedStableHtml);
   const [tailHtml, setTailHtml] = createSignal(lastAppliedTailHtml);
 
+  // Keep cross-segment spacing local. Looking through the tail with :has() makes
+  // older Chromium invalidate unrelated transcript content on each append.
+  createEffect(() => {
+    tailHtml();
+    const tag = tailRef?.firstElementChild?.localName ?? '';
+    if (stableRef && stableRef.dataset.markdownTailTag !== tag) {
+      stableRef.dataset.markdownTailTag = tag;
+    }
+  });
+
   function scheduleDeferredTailHighlight(
     content: string,
     workspacePath: string,
