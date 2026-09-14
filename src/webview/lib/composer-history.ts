@@ -1,5 +1,6 @@
-import type { DroppedFile } from '../../shared/protocol';
-import type { ClipboardImage, NativePdfAttachment } from './app-state-types';
+import type { DroppedFile, InlineProblemAttachment } from '../../shared/protocol';
+import { cloneInlineProblems } from './editor-problems';
+import type { AttachedDiagnostics, ClipboardImage, NativePdfAttachment } from './app-state-types';
 
 export type ComposerSnapshot = {
   text: string;
@@ -7,6 +8,8 @@ export type ComposerSnapshot = {
   files: DroppedFile[];
   images: ClipboardImage[];
   pdfs?: NativePdfAttachment[];
+  problems?: AttachedDiagnostics | null;
+  inlineProblems?: InlineProblemAttachment[];
 };
 
 export type ComposerHistoryAction = 'undo' | 'redo';
@@ -40,7 +43,7 @@ function getAttachmentSignature(snapshot: ComposerSnapshot): string {
     .join('\u0001');
   const imageSignature = snapshot.images.map((image) => image.id).join('\u0001');
   const pdfSignature = (snapshot.pdfs ?? []).map((pdf) => pdf.id).join('\u0001');
-  return `${fileSignature}\u0001${imageSignature}\u0001${pdfSignature}`;
+  return `${fileSignature}\u0001${imageSignature}\u0001${pdfSignature}\u0001${JSON.stringify(snapshot.problems ?? null)}\u0001${JSON.stringify(snapshot.inlineProblems ?? [])}`;
 }
 
 function cloneSnapshot(snapshot: ComposerSnapshot): ComposerSnapshot {
@@ -50,10 +53,16 @@ function cloneSnapshot(snapshot: ComposerSnapshot): ComposerSnapshot {
   }));
   return {
     text: snapshot.text,
+    inlineProblems: snapshot.inlineProblems?.length
+      ? cloneInlineProblems(snapshot.inlineProblems)
+      : undefined,
     caret: snapshot.caret,
     files: snapshot.files.map((file) => ({ ...file })),
     images: snapshot.images.map((image) => ({ ...image })),
     pdfs: pdfs?.length ? pdfs : undefined,
+    problems: snapshot.problems
+      ? { ...snapshot.problems, diagnostics: snapshot.problems.diagnostics.map((d) => ({ ...d })) }
+      : undefined,
   };
 }
 

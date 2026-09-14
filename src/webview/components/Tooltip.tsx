@@ -23,7 +23,9 @@ type TooltipPosition = {
 
 export function Tooltip(props: {
   content: JSX.Element;
-  children: JSX.Element;
+  children?: JSX.Element;
+  /** Attach to an existing editor-owned element without reparenting it. */
+  target?: HTMLElement;
   placement?: 'top' | 'bottom' | 'left';
   delay?: number;
   disabled?: boolean;
@@ -127,7 +129,7 @@ export function Tooltip(props: {
   });
 
   onMount(() => {
-    const resolved = resolvedChildren();
+    const resolved = props.target ?? resolvedChildren();
     if (!(resolved instanceof HTMLElement)) {
       throw new Error('Tooltip requires a single HTML element child');
     }
@@ -178,7 +180,7 @@ export function Tooltip(props: {
 
   return (
     <>
-      {resolvedChildren()}
+      {props.target ? null : resolvedChildren()}
       <Show when={visible()}>
         <Portal>
           <div

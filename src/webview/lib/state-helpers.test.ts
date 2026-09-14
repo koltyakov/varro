@@ -311,6 +311,7 @@ describe('state helpers', () => {
           terminalSelection: null,
           queuedContext: {
             currentDocumentEnabled: true,
+            issuesEnabled: false,
             editorContext: {
               workspacePath: '/repo',
               workspaceFolders: [{ name: 'repo', path: '/repo' }],
@@ -362,6 +363,7 @@ describe('state helpers', () => {
       ]);
       expect(stateModule.state.queuedMessages[0]?.queuedContext).toEqual({
         currentDocumentEnabled: true,
+        issuesEnabled: false,
         editorContext: {
           workspacePath: '/repo',
           workspaceFolders: [{ name: 'repo', path: '/repo' }],
@@ -396,6 +398,67 @@ describe('state helpers', () => {
       // SAFETY: The fixture provides the unknown fields read by this statement.
       delete (window as { __initialWebviewState?: unknown }).__initialWebviewState;
     }
+  });
+
+  it('restores queued per-problem inline links independently of bulb attachments', async () => {
+    const reference = {
+      id: 'one',
+      diagnostic: { path: '/repo/a.ts', line: 4, severity: 'error', message: 'Inline problem' },
+    };
+    const attachedDiagnostics = {
+      total: 1,
+      diagnostics: [
+        {
+          path: '/repo/b.ts',
+          line: 9,
+          column: 4,
+          endLine: 9,
+          endColumn: 8,
+          source: 'ts',
+          code: 2307,
+          severity: 'warning',
+          message: 'Bulb problem',
+        },
+      ],
+    };
+    window.localStorage.setItem(
+      'varro.queuedMessages',
+      JSON.stringify([
+        {
+          id: 'problems',
+          sessionId: 'session-1',
+          text: 'Explain [Problem one]',
+          inlineProblems: [reference],
+          attachedDiagnostics,
+        },
+      ])
+    );
+    const stateModule = await loadState();
+    expect(stateModule.state.queuedMessages[0]?.inlineProblems).toEqual([reference]);
+    expect(stateModule.state.queuedMessages[0]?.attachedDiagnostics).toEqual(attachedDiagnostics);
+  });
+
+  it('restores all explicitly attached workspace problems beyond the automatic file limit', async () => {
+    const diagnostics = Array.from({ length: 30 }, (_, index) => ({
+      path: `/repo/file-${index}.ts`,
+      line: 1,
+      severity: 'error',
+      message: `Problem ${index}`,
+    }));
+    window.localStorage.setItem(
+      'varro.queuedMessages',
+      JSON.stringify([
+        {
+          id: 'all-problems',
+          sessionId: 'session-1',
+          text: 'Explain [Problems]',
+          attachedDiagnostics: { total: 30, diagnostics, inline: true },
+        },
+      ])
+    );
+    const stateModule = await loadState();
+    expect(stateModule.state.queuedMessages[0]?.attachedDiagnostics?.diagnostics).toHaveLength(30);
+    expect(stateModule.state.queuedMessages[0]?.attachedDiagnostics?.inline).toBe(true);
   });
 
   it('keeps queued images live without serializing them', async () => {
@@ -902,6 +965,24 @@ describe('state helpers', () => {
 
     expect(stateModule.getPermissionModeForSession('session-a')).toBe('default');
     expect(stateModule.getPermissionModeForSession('session-b')).toBe('default');
+  });
+
+  it('persists problem context independently by project and restores it after reload', async () => {
+    let stateModule = await loadState();
+    stateModule.setState('editorContext', 'workspacePath', '/repo/');
+    stateModule.syncCurrentDocumentForWorkspace('/repo/');
+    expect(stateModule.state.issuesEnabled).toBe(true);
+    stateModule.toggleIssuesEnabled();
+    expect(stateModule.state.issuesEnabled).toBe(false);
+    expect(stateModule.getCurrentDocumentEnabled()).toBe(true);
+    stateModule.syncCurrentDocumentForWorkspace('/other');
+    expect(stateModule.state.issuesEnabled).toBe(true);
+    stateModule.syncCurrentDocumentForWorkspace('/repo');
+    expect(stateModule.state.issuesEnabled).toBe(false);
+    vi.resetModules();
+    stateModule = await loadState();
+    stateModule.syncCurrentDocumentForWorkspace('/repo');
+    expect(stateModule.state.issuesEnabled).toBe(false);
   });
 
   it('persists current document auto-context by project', async () => {

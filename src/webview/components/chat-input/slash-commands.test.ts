@@ -39,6 +39,7 @@ describe('getSlashCommands', () => {
       'compact',
       'connect',
       'init',
+      'problems',
       'ralph',
       'review',
       'settings',

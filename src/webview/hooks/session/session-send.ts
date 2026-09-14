@@ -4,9 +4,22 @@ import {
   formatDatabaseAttachmentReference,
 } from '../../../shared/database-context';
 import { formatDatabaseContext } from '../../lib/database-context';
+import {
+  formatAttachedDiagnostics,
+  formatEditorProblems,
+  PROBLEMS_REFERENCE,
+  cloneInlineProblems,
+  formatInlineProblem,
+  problemReferenceMarker,
+  uniqueProblems,
+  deduplicateInlineProblems,
+  hasInlineProblemsForFile,
+} from '../../lib/editor-problems';
+import type { IssueAttachment } from '../../lib/editor-problems';
 import type {
   DroppedFile,
   EditorContext,
+  InlineProblemAttachment,
   PermissionMode,
   QueuedContextSnapshot,
   SessionWorkspaceTarget,
@@ -80,6 +93,10 @@ type ComposerState = {
   clipboardImages: ClipboardImage[];
   nativePdfs?: NativePdfAttachment[];
   attachedDiagnostics?: AttachedDiagnostics | null;
+  issuesEnabled?: boolean;
+  enableProblemsContext?: boolean;
+  issuesAttachment?: IssueAttachment | null;
+  inlineProblems?: InlineProblemAttachment[];
   allAgents?: Agent[];
   visionDelegationTexts?: string[];
   visionDelegationAvailable?: boolean;
@@ -106,8 +123,13 @@ type SendFlowOptions = { noReply?: boolean; delivery?: 'steer' | 'queue' };
 
 export type QueuedAttachmentSnapshot = Pick<
   QueuedMessage,
-  'droppedFiles' | 'clipboardImages' | 'nativePdfs' | 'terminalSelection' | 'attachedDiagnostics'
->;
+  | 'droppedFiles'
+  | 'clipboardImages'
+  | 'nativePdfs'
+  | 'terminalSelection'
+  | 'attachedDiagnostics'
+  | 'inlineProblems'
+> & { issuesAttachment?: IssueAttachment | null };
 
 type SessionSendOptions = SendFlowOptions & {
   messageId?: string;
@@ -135,12 +157,15 @@ type CapturedComposerAttachments = {
     nativePdfs: NativePdfAttachment[];
     terminalSelection: { text: string; terminalName: string } | null;
     attachedDiagnostics?: AttachedDiagnostics | null;
+    issuesAttachment?: IssueAttachment | null;
+    inlineProblems: InlineProblemAttachment[];
   };
   droppedFileIdentities: Map<string, DroppedFile>;
   clipboardImageIdentities: Map<string, ClipboardImage>;
   nativePdfIdentities: Map<string, NativePdfAttachment>;
   terminalSelectionIdentity: { text: string; terminalName: string } | null;
   attachedDiagnosticsIdentity: AttachedDiagnostics | null;
+  inlineProblemIdentities: Map<string, InlineProblemAttachment>;
 };
 
 type ClearedComposerAttachments = {
@@ -149,6 +174,7 @@ type ClearedComposerAttachments = {
   nativePdfs: NativePdfAttachment[];
   terminalSelection: { text: string; terminalName: string } | null;
   attachedDiagnostics: AttachedDiagnostics | null;
+  inlineProblems: InlineProblemAttachment[];
 };
 
 type StateBoundSendDependencies = {
@@ -243,8 +269,48 @@ export function buildSessionSendBody(
       )) &&
     composerState.clipboardImages.every((image) => image.contextFile);
   const includeClipboardImages = includeNativeClipboardImages || delegateClipboardImages;
-  const promptText = getPromptTextForClipboardImages(
+  const hasProblemReference = text.includes(PROBLEMS_REFERENCE);
+  const sourceAttached =
+    composerState.attachedDiagnostics?.inline && !hasProblemReference
+      ? null
+      : composerState.attachedDiagnostics;
+  const attachedDiagnostics = uniqueProblems(sourceAttached?.diagnostics ?? []);
+  const attachedProblems = sourceAttached
+    ? {
+        ...sourceAttached,
+        diagnostics: attachedDiagnostics,
+        total: Math.max(
+          attachedDiagnostics.length,
+          sourceAttached.total - (sourceAttached.diagnostics.length - attachedDiagnostics.length)
+        ),
+      }
+    : sourceAttached;
+  const normalized = deduplicateInlineProblems(
     text,
+    composerState.inlineProblems ?? [],
+    attachedDiagnostics
+  );
+  const inlineProblems = normalized.references;
+  const problemText =
+    composerState.enableProblemsContext === false
+      ? inlineProblems.reduce(
+          (value, reference) => value.replaceAll(problemReferenceMarker(reference), ''),
+          normalized.text
+        )
+      : normalized.text;
+  const capturedProblems =
+    composerState.issuesAttachment?.inline && !hasProblemReference
+      ? null
+      : composerState.issuesAttachment;
+  const includeProblemReference =
+    composerState.enableProblemsContext !== false &&
+    (!!attachedProblems ||
+      (!!capturedProblems && (capturedProblems.inline || composerState.issuesEnabled !== false)));
+  const promptText = getPromptTextForClipboardImages(
+    !includeProblemReference &&
+      (composerState.attachedDiagnostics?.inline || composerState.issuesAttachment?.inline)
+      ? problemText.replaceAll(PROBLEMS_REFERENCE, '')
+      : problemText,
     composerState.clipboardImages,
     includeClipboardImages
   );
@@ -317,6 +383,21 @@ export function buildSessionSendBody(
   }
 
   const terminalSelection = composerState.terminalSelection;
+  if (
+    composerState.enableProblemsContext !== false &&
+    (capturedProblems?.inline || composerState.issuesEnabled !== false) &&
+    !attachedProblems &&
+    !(
+      capturedProblems === undefined &&
+      hasInlineProblemsForFile(problemText, inlineProblems, activeFile?.path)
+    )
+  ) {
+    const problems =
+      capturedProblems !== undefined
+        ? capturedProblems?.text
+        : formatEditorProblems(composerState.editorContext);
+    if (problems) parts.push({ type: 'text', text: problems });
+  }
   if (terminalSelection) {
     parts.push({
       type: 'text',
@@ -324,17 +405,17 @@ export function buildSessionSendBody(
     });
   }
 
-  if (composerState.attachedDiagnostics) {
-    const attached = composerState.attachedDiagnostics;
-    const rows = attached.diagnostics.map((diagnostic) => {
-      const path = getWorkspaceRelativePath(diagnostic.path, workspacePath) ?? diagnostic.path;
-      const message = diagnostic.message.replace(/\s+/g, ' ').slice(0, 500);
-      return `${diagnostic.severity.toUpperCase()} ${path}:${diagnostic.line} - ${message}`;
-    });
+  if (composerState.enableProblemsContext !== false && attachedProblems) {
+    const attached = attachedProblems;
     parts.push({
       type: 'text',
-      text: `[Attached diagnostics: ${attached.diagnostics.length} of ${attached.total}]\n${rows.join('\n')}`,
+      text: formatAttachedDiagnostics(attached.diagnostics, attached.total, workspacePath),
     });
+  }
+
+  if (composerState.enableProblemsContext !== false) {
+    for (const reference of inlineProblems)
+      parts.push({ type: 'text', text: formatInlineProblem(reference) });
   }
 
   const orderedAttachments = [
@@ -466,8 +547,13 @@ export function getQueuedAttachmentSnapshot(composerState: {
   nativePdfs?: NativePdfAttachment[];
   terminalSelection: { text: string; terminalName: string } | null;
   attachedDiagnostics?: AttachedDiagnostics | null;
+  issuesAttachment?: IssueAttachment | null;
+  inlineProblems?: InlineProblemAttachment[];
 }): QueuedAttachmentSnapshot {
   return {
+    inlineProblems: composerState.inlineProblems?.length
+      ? cloneInlineProblems(composerState.inlineProblems)
+      : undefined,
     droppedFiles: composerState.droppedFiles.map((file) => ({
       path: file.path,
       relativePath: file.relativePath,
@@ -505,8 +591,12 @@ export function getQueuedAttachmentSnapshot(composerState: {
             ...diagnostic,
           })),
           total: composerState.attachedDiagnostics.total,
+          inline: composerState.attachedDiagnostics.inline,
         }
       : undefined,
+    issuesAttachment: composerState.issuesAttachment
+      ? { ...composerState.issuesAttachment }
+      : composerState.issuesAttachment,
   };
 }
 
@@ -518,6 +608,7 @@ function captureComposerAttachments(
   const liveNativePdfs = [...appStore.state.nativePdfs];
   const liveTerminalSelection = appStore.state.terminalSelection;
   const liveAttachedDiagnostics = appStore.state.attachedDiagnostics;
+  const liveInlineProblems = [...appStore.state.inlineProblems];
   const source = queuedAttachments
     ? {
         droppedFiles: queuedAttachments.droppedFiles ?? [],
@@ -525,6 +616,8 @@ function captureComposerAttachments(
         nativePdfs: queuedAttachments.nativePdfs ?? [],
         terminalSelection: queuedAttachments.terminalSelection ?? null,
         attachedDiagnostics: queuedAttachments.attachedDiagnostics ?? null,
+        issuesAttachment: queuedAttachments.issuesAttachment,
+        inlineProblems: queuedAttachments.inlineProblems ?? [],
       }
     : {
         droppedFiles: liveDroppedFiles,
@@ -532,13 +625,16 @@ function captureComposerAttachments(
         nativePdfs: liveNativePdfs,
         terminalSelection: liveTerminalSelection,
         attachedDiagnostics: liveAttachedDiagnostics,
+        inlineProblems: liveInlineProblems,
       };
   const queuedSnapshot = getQueuedAttachmentSnapshot(source);
   const snapshot = {
+    inlineProblems: queuedSnapshot.inlineProblems ?? [],
     droppedFiles: queuedSnapshot.droppedFiles ?? [],
     clipboardImages: queuedSnapshot.clipboardImages ?? [],
     nativePdfs: queuedSnapshot.nativePdfs ?? [],
     terminalSelection: queuedSnapshot.terminalSelection ?? null,
+    issuesAttachment: queuedSnapshot.issuesAttachment,
     attachedDiagnostics: queuedSnapshot.attachedDiagnostics
       ? queuedSnapshot.attachedDiagnostics
       : undefined,
@@ -565,6 +661,9 @@ function captureComposerAttachments(
 
   return {
     snapshot,
+    inlineProblemIdentities: new Map(
+      liveInlineProblems.map((reference) => [reference.id, reference])
+    ),
     droppedFileIdentities,
     clipboardImageIdentities,
     nativePdfIdentities,
@@ -592,6 +691,7 @@ function clearCapturedComposerAttachments(
     nativePdfs: [],
     terminalSelection: null,
     attachedDiagnostics: null,
+    inlineProblems: [],
   };
   for (const sent of captured.snapshot.droppedFiles) {
     const current = appStore.state.droppedFiles.find((file) => file.path === sent.path);
@@ -631,6 +731,23 @@ function clearCapturedComposerAttachments(
     cleared.nativePdfs.push(sent);
     composerStore.removeNativePdf(current.id);
   }
+
+  const removedProblemIds = new Set<string>();
+  for (const sent of captured.snapshot.inlineProblems) {
+    const current = appStore.state.inlineProblems.find((reference) => reference.id === sent.id);
+    if (
+      current &&
+      current === captured.inlineProblemIdentities.get(sent.id) &&
+      JSON.stringify(current) === JSON.stringify(sent)
+    ) {
+      cleared.inlineProblems.push(sent);
+      removedProblemIds.add(sent.id);
+    }
+  }
+  if (removedProblemIds.size > 0)
+    appStore.setState('inlineProblems', (references) =>
+      references.filter((reference) => !removedProblemIds.has(reference.id))
+    );
 
   const currentTerminalSelection = appStore.state.terminalSelection;
   const terminalSelectionCleared =
@@ -674,6 +791,14 @@ function commitClearedComposerAttachments(cleared: ClearedComposerAttachments) {
 }
 
 function restoreClearedComposerAttachments(cleared: ClearedComposerAttachments) {
+  const restored = cleared.inlineProblems.filter(
+    (reference) => !appStore.state.inlineProblems.some((current) => current.id === reference.id)
+  );
+  if (restored.length > 0)
+    appStore.setState('inlineProblems', [
+      ...appStore.state.inlineProblems,
+      ...cloneInlineProblems(restored),
+    ]);
   for (const file of cleared.droppedFiles) {
     if (!appStore.state.droppedFiles.some((current) => current.path === file.path)) {
       composerStore.addContextFile({
@@ -699,6 +824,7 @@ function restoreClearedComposerAttachments(cleared: ClearedComposerAttachments) 
     appStore.setState('attachedDiagnostics', {
       diagnostics: cleared.attachedDiagnostics.diagnostics.map((diagnostic) => ({ ...diagnostic })),
       total: cleared.attachedDiagnostics.total,
+      inline: cleared.attachedDiagnostics.inline,
     });
   }
 }
@@ -865,6 +991,8 @@ export class SessionSendOperations {
         })),
       },
       ...capturedAttachments.snapshot,
+      issuesEnabled: options?.queuedContext?.issuesEnabled ?? appStore.state.issuesEnabled,
+      enableProblemsContext: appStore.state.enableProblemsContext,
       allAgents: appStore.state.allAgents.map((agent) => ({
         ...agent,
         model: agent.model ? { ...agent.model } : undefined,

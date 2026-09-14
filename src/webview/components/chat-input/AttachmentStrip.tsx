@@ -5,9 +5,12 @@ import { formatContextLineRanges } from '../../../shared/context-files';
 import { databaseAttachmentDetail } from '../../../shared/database-context';
 import { getDroppedFileLabel } from '../../lib/path-display';
 import { AttachmentChip } from './AttachmentChip';
+import { ProblemsTooltip } from '../ProblemsTooltip';
+import { getProblemsSeverity } from '../../lib/editor-problems';
 
 type AttachmentStripItem =
   | { type: 'active-context'; value: ActiveContextAttachment }
+  | { type: 'issues'; value: number }
   | { type: 'terminal-selection'; value: TerminalSelectionAttachment }
   | { type: 'diagnostics'; value: { count: number; total: number } }
   | { type: 'file'; value: DroppedFile }
@@ -28,6 +31,10 @@ export function AttachmentStrip(props: {
   activeContext: ActiveContextAttachment | null;
   activeContextEnabled: boolean;
   activeContextTitle: string | null;
+  issueCount?: number;
+  problemDetails?: string | null;
+  issuesEnabled?: boolean;
+  onToggleIssues?: () => void;
   terminalSelection: TerminalSelectionAttachment | null;
   diagnostics: { count: number; total: number } | null;
   files: DroppedFile[];
@@ -49,6 +56,7 @@ export function AttachmentStrip(props: {
       ...(props.activeContext
         ? [{ type: 'active-context' as const, value: props.activeContext }]
         : []),
+      ...(props.issueCount ? [{ type: 'issues' as const, value: props.issueCount }] : []),
       ...(props.terminalSelection
         ? [{ type: 'terminal-selection' as const, value: props.terminalSelection }]
         : []),
@@ -89,15 +97,47 @@ export function AttachmentStrip(props: {
             );
           }
 
+          if (item.type === 'issues') {
+            return (
+              <ProblemsTooltip
+                text={props.problemDetails ?? null}
+                action={
+                  props.issuesEnabled === false
+                    ? 'Not included in context. Click to enable.'
+                    : 'Included in context. Click to disable.'
+                }
+              >
+                <AttachmentChip
+                  label="Problems"
+                  detail={String(item.value)}
+                  icon="warning"
+                  severity={
+                    props.problemDetails ? getProblemsSeverity(props.problemDetails) : undefined
+                  }
+                  disabled={props.issuesEnabled === false}
+                  toggle
+                  onClick={props.onToggleIssues}
+                />
+              </ProblemsTooltip>
+            );
+          }
+
           if (item.type === 'diagnostics') {
             return (
-              <AttachmentChip
-                label="Problems"
-                detail={`${item.value.count}${item.value.total > item.value.count ? ` of ${item.value.total}` : ''}`}
-                icon="warning"
-                title={`${item.value.count} attached diagnostics`}
-                onRemove={props.onClearDiagnostics}
-              />
+              <ProblemsTooltip
+                text={props.problemDetails ?? null}
+                action="Attached problem snapshot"
+              >
+                <AttachmentChip
+                  label="Problems"
+                  detail={`${item.value.count}${item.value.total > item.value.count ? ` of ${item.value.total}` : ''}`}
+                  icon="warning"
+                  severity={
+                    props.problemDetails ? getProblemsSeverity(props.problemDetails) : undefined
+                  }
+                  onRemove={props.onClearDiagnostics}
+                />
+              </ProblemsTooltip>
             );
           }
 
@@ -177,6 +217,8 @@ function getAttachmentSequence(item: AttachmentStripItem) {
   switch (item.type) {
     case 'active-context':
       return -2;
+    case 'issues':
+      return -1.5;
     case 'terminal-selection':
       return -1;
     case 'diagnostics':

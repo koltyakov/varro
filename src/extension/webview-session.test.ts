@@ -352,6 +352,18 @@ describe('WebviewSession', () => {
     const view = createWebviewView(true);
 
     session.queueCommand({ type: 'command/new-session', payload: { prefill: '/init' } });
+    const problemsCommand = {
+      type: 'command/attach-problems',
+      payload: {
+        diagnostics: [
+          { path: '/repo/a.ts', line: 1, severity: 'error', message: 'Missing module' },
+        ],
+      },
+    } as const;
+    session.queueCommand({
+      ...problemsCommand,
+      payload: { diagnostics: [...problemsCommand.payload.diagnostics] },
+    });
     session.queueCommand({
       type: 'command/switch-session',
       payload: { direction: 'next' },
@@ -371,6 +383,7 @@ describe('WebviewSession', () => {
         .filter((message) => (message as { type: string }).type.startsWith('command/'))
     ).toEqual([
       { type: 'command/new-session', payload: { prefill: '/init' } },
+      problemsCommand,
       { type: 'command/switch-session', payload: { direction: 'next' } },
     ]);
     expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith(

@@ -73,6 +73,7 @@ import warningTriangleSolidIcon from 'iconoir/icons/warning-triangle-solid.svg';
 import wifiIcon from 'iconoir/icons/wifi.svg';
 import wrenchIcon from 'iconoir/icons/wrench.svg';
 import xmarkIcon from 'iconoir/icons/xmark.svg';
+import xmarkCircleIcon from 'iconoir/icons/xmark-circle.svg';
 
 export {
   archiveIcon,
@@ -150,4 +151,5 @@ export {
   wifiIcon,
   wrenchIcon,
   xmarkIcon,
+  xmarkCircleIcon,
 };

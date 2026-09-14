@@ -16,6 +16,35 @@ import {
 } from 'solid-js';
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../../shared/workspace-path';
 import { requestWorkspaceSelection } from '../lib/workspace-selection';
+import { toggleIssuesEnabled } from '../lib/state-attachments';
+import { STORAGE_KEYS, writeStored } from '../lib/state-storage';
+import type {
+  EditorDiagnostic,
+  WorkspaceProblemsSnapshot,
+  ChatModelSelection,
+  DroppedFile,
+  DatabaseTableReference,
+  ExtensionMessage,
+  InitialWebviewState,
+  SessionTokenBreakdown,
+  SessionWorkspaceTarget,
+} from '../../shared/protocol';
+import {
+  formatAttachedDiagnostics,
+  formatEditorProblems,
+  getEditorIssueCount,
+  getProblemsSeverity,
+  PROBLEMS_REFERENCE,
+  cloneInlineProblems,
+  problemReferenceMarker,
+  problemReferenceLocation,
+  problemReferenceLabel,
+  problemReferenceDetails,
+  problemReferenceSeverity,
+  uniqueProblems,
+  attachedProblemKeys,
+  hasInlineProblemsForFile,
+} from '../lib/editor-problems';
 import {
   state,
   inputText,
@@ -198,15 +227,6 @@ import {
   estimateContextBreakdown,
   estimateNestedContextBreakdown,
 } from '../../shared/context-breakdown';
-import type {
-  ChatModelSelection,
-  DroppedFile,
-  DatabaseTableReference,
-  ExtensionMessage,
-  InitialWebviewState,
-  SessionTokenBreakdown,
-  SessionWorkspaceTarget,
-} from '../../shared/protocol';
 import {
   MAX_DROPPED_CONTENT_FILES,
   MAX_DROPPED_CONTENT_FILE_BYTES,
@@ -241,6 +261,8 @@ import { planMessageHistoryNavigation } from './chat-input/message-history-navig
 import { queuedMessageWasAdmitted } from './chat-input/queued-message-history';
 import {
   SKILLS_COMMAND_NAME,
+  PROBLEMS_COMMAND_NAME,
+  getProblemCompletionItems,
   applySlashCompletion,
   createMentionCompletionSource,
   getActiveCompletion,
@@ -427,10 +449,21 @@ function captureEditDraftBackup(): MessageEditContext & { text: string } {
     images: state.clipboardImages.map((image) => ({ ...image })),
     pdfs: state.nativePdfs.map((pdf) => ({ ...pdf })),
     terminalSelection: state.terminalSelection ? { ...state.terminalSelection } : null,
+    inlineProblems: state.inlineProblems.length
+      ? cloneInlineProblems(state.inlineProblems)
+      : undefined,
+    attachedDiagnostics: state.attachedDiagnostics
+      ? {
+          ...state.attachedDiagnostics,
+          diagnostics: state.attachedDiagnostics.diagnostics.map((d) => ({ ...d })),
+        }
+      : undefined,
   };
 }
 
 function applyEditContext(context: MessageEditContext, mergeWholeFileIntoActiveContext = false) {
+  setState('attachedDiagnostics', context.attachedDiagnostics ?? null);
+  setState('inlineProblems', cloneInlineProblems(context.inlineProblems));
   const activeFile = state.editorContext.activeFile;
   replaceContextFiles(
     context.files.flatMap((file) => {
@@ -651,6 +684,10 @@ async function readPdfFile(file: File) {
 }
 
 function attachCurrentDiagnostics() {
+  if (!state.enableProblemsContext) {
+    showSessionActionFeedback('Problems context is disabled in settings');
+    return;
+  }
   if (state.editorContext.diagnostics.length === 0) {
     showSessionActionFeedback('No issues found');
     return;
@@ -956,6 +993,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
   >();
   const [pendingTableCount, setPendingTableCount] = createSignal(0);
+  const [pendingProblems, setPendingProblems] = createSignal(false);
+  const [workspaceProblems, setWorkspaceProblems] = createSignal<WorkspaceProblemsSnapshot | null>(
+    null
+  );
+  const [problemsError, setProblemsError] = createSignal<string | null>(null);
+  let problemsRequest: AbortController | undefined;
+  onCleanup(() => problemsRequest?.abort());
   const clearPendingTableAttachments = () => {
     for (const request of pendingTableAttachments.values()) clearTimeout(request.timer);
     pendingTableAttachments.clear();
@@ -1049,10 +1093,18 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       files: state.droppedFiles.map((file) => ({ ...file })),
       images: state.clipboardImages.map((image) => ({ ...image })),
       pdfs: state.nativePdfs.map((pdf) => ({ ...pdf })),
+      problems: state.attachedDiagnostics,
+      inlineProblems: state.inlineProblems,
     };
   }
 
   const composerHistory = createComposerHistory();
+  createEffect(() => {
+    writeStored(
+      STORAGE_KEYS.inputDraftProblems,
+      state.inlineProblems.length ? cloneInlineProblems(state.inlineProblems) : null
+    );
+  });
   let applyingComposerHistory = false;
   composerHistory.reset(untrack(captureComposerSnapshot));
 
@@ -1074,6 +1126,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         replaceContextFiles(snapshot.files);
         replaceClipboardImages(snapshot.images);
         replaceNativePdfs(snapshot.pdfs ?? []);
+        setState('attachedDiagnostics', snapshot.problems ?? null);
+        setState('inlineProblems', cloneInlineProblems(snapshot.inlineProblems));
         setCompletionIndex(0);
         setSuppressCompletion(false);
       });
@@ -1212,9 +1266,53 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
   });
 
+  const explicitProblemAttachment = createMemo(() => {
+    const attached = state.attachedDiagnostics;
+    return attached
+      ? {
+          count: attached.total,
+          inline: attached.inline,
+          text: formatAttachedDiagnostics(
+            attached.diagnostics,
+            attached.total,
+            state.editorContext.workspacePath
+          ),
+        }
+      : (composerEditingMessage()?.context.issues ?? null);
+  });
+
   const inlineChips = createMemo((): RichComposerChip[] => {
     const chips: RichComposerChip[] = [];
     const text = inputText();
+    const problems = explicitProblemAttachment();
+    for (const reference of state.inlineProblems) {
+      const marker = problemReferenceMarker(reference);
+      if (!text.includes(marker)) continue;
+      chips.push({
+        id: `problem:${reference.id}`,
+        type: 'mention-problems',
+        label: problemReferenceLabel(reference),
+        detail: problemReferenceLocation(reference),
+        icon: 'problems',
+        severity: problemReferenceSeverity(reference),
+        problemDetails: problemReferenceDetails(reference, state.editorContext.workspacePath),
+        disabled: !state.enableProblemsContext,
+        textMarker: marker,
+      });
+    }
+    if (problems && text.includes(PROBLEMS_REFERENCE)) {
+      chips.push({
+        id: 'problems',
+        type: 'mention-problems',
+        label: 'Problems',
+        detail: String(problems.count),
+        icon: 'problems',
+        severity: getProblemsSeverity(problems.text),
+        problemDetails: problems.text,
+        disabled: !state.enableProblemsContext,
+        textMarker: PROBLEMS_REFERENCE,
+      });
+    }
 
     for (const name of getSkillReferences(text)) {
       chips.push({
@@ -1422,9 +1520,44 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   });
   const hasAttachmentStripItems = () =>
     !!activeContext() ||
+    composerIssueCount() > 0 ||
     !!composerTerminalSelection() ||
-    !!state.attachedDiagnostics ||
+    (state.enableProblemsContext &&
+      !!state.attachedDiagnostics &&
+      !state.attachedDiagnostics.inline) ||
     hasMentions();
+
+  const composerIssueCount = createMemo(() => {
+    if (!state.enableProblemsContext) return 0;
+    if (state.attachedDiagnostics) return 0;
+    const editing = composerEditingMessage();
+    return editing
+      ? editing.context.issues?.inline
+        ? 0
+        : (editing.context.issues?.count ?? 0)
+      : hasInlineProblemsForFile(
+            inputText(),
+            state.inlineProblems,
+            state.editorContext.activeFile?.path
+          )
+        ? 0
+        : getEditorIssueCount(state.editorContext);
+  });
+
+  const composerProblemDetails = createMemo(() => {
+    if (!state.enableProblemsContext) return null;
+    const attached = state.attachedDiagnostics;
+    if (attached)
+      return formatAttachedDiagnostics(
+        attached.diagnostics,
+        attached.total,
+        state.editorContext.workspacePath
+      );
+    const editing = composerEditingMessage();
+    return editing
+      ? (editing.context.issues?.text ?? null)
+      : formatEditorProblems(state.editorContext);
+  });
 
   const mentionAgents = createMemo(() =>
     state.allAgents
@@ -1683,11 +1816,45 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     );
   });
 
+  const problemsPickerScope = createMemo(() => {
+    const completion = activeCompletion();
+    return state.enableProblemsContext &&
+      completion?.type === 'slash' &&
+      completion.query.toLowerCase().startsWith(`${PROBLEMS_COMMAND_NAME} `)
+      ? JSON.stringify([getFileSearchScopeKey(), composerSessionId(), getNewChatDraftGeneration()])
+      : null;
+  });
+  createEffect(() => {
+    const scope = problemsPickerScope();
+    problemsRequest?.abort();
+    problemsRequest = undefined;
+    setPendingProblems(false);
+    setWorkspaceProblems(null);
+    setProblemsError(null);
+    if (scope) untrack(() => void requestWorkspaceProblems());
+  });
+
+  const selectedProblemKeys = createMemo(() =>
+    attachedProblemKeys(
+      inputText(),
+      state.inlineProblems,
+      state.attachedDiagnostics?.diagnostics ?? []
+    )
+  );
+
   const slashCompletions = createMemo(() => {
     const completion = activeCompletion();
     if (completion?.type !== 'slash') return [];
 
     const query = completion.query.toLowerCase();
+    if (query.startsWith(`${PROBLEMS_COMMAND_NAME} `)) {
+      return getProblemCompletionItems(
+        workspaceProblems(),
+        query.slice(PROBLEMS_COMMAND_NAME.length + 1),
+        state.editorContext.workspacePath,
+        selectedProblemKeys()
+      );
+    }
     if (query.startsWith(`${SKILLS_COMMAND_NAME} `)) {
       const skillQuery = query.slice(SKILLS_COMMAND_NAME.length + 1).trim();
       return skillSlashCompletionEntries()
@@ -1703,7 +1870,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
 
     const commandItems = slashCompletionEntries()
-      .filter((entry) => completion.start === 0 || entry.name === SKILLS_COMMAND_NAME)
+      .filter(
+        (entry) =>
+          completion.start === 0 ||
+          entry.name === SKILLS_COMMAND_NAME ||
+          entry.name === PROBLEMS_COMMAND_NAME
+      )
       .filter((entry) => {
         if (!query) return true;
         return (
@@ -1747,6 +1919,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   });
 
   const completionHeader = createMemo(() => {
+    if (problemsPickerScope()) return 'Problems';
     const completion = activeCompletion();
     if (completion?.type === 'skill') return 'Skills';
     if (completion?.type === 'session') return undefined;
@@ -1760,12 +1933,41 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     return undefined;
   });
 
+  const completionEmptyMessage = createMemo(() => {
+    if (!problemsPickerScope()) return undefined;
+    if (pendingProblems()) return 'Loading problems…';
+    if (problemsError()) return problemsError()!;
+    if (!workspaceProblems()?.total) return 'No problems in this workspace';
+    if (
+      getProblemCompletionItems(
+        workspaceProblems(),
+        '',
+        state.editorContext.workspacePath,
+        selectedProblemKeys()
+      ).length === 0
+    )
+      return 'All problems already added to context';
+    return slashCompletions().length === 0 ? 'No matching problems' : undefined;
+  });
+
+  createEffect(() => {
+    const completion = activeCompletion();
+    if (!problemsPickerScope() || completion?.type !== 'slash') return;
+    const searching = completion.query.slice(PROBLEMS_COMMAND_NAME.length + 1).trim().length > 0;
+    const items = slashCompletions();
+    const match = searching
+      ? items.findIndex((item) => item.type === 'problems' && item.diagnostic !== null)
+      : 0;
+    setCompletionIndex(Math.max(0, match));
+  });
+
   const showCompletionMenu = () => {
     if (suppressCompletion()) return false;
     const completion = activeCompletion();
     if (!completion) return false;
     return (
       composerCompletions().length > 0 ||
+      !!problemsPickerScope() ||
       (completion.type === 'mention' && showFileSearchHint()) ||
       completion.type === 'session'
     );
@@ -1883,7 +2085,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         const items = composerCompletions();
         const item = items[Math.min(completionIndex(), items.length - 1)];
         void applyActiveCompletion(item?.type === 'slash' && !item.acceptsArguments);
-        setSuppressCompletion(item?.type !== 'slash' || item.name !== SKILLS_COMMAND_NAME);
+        setSuppressCompletion(
+          item?.type !== 'slash' ||
+            (item.name !== SKILLS_COMMAND_NAME && item.name !== PROBLEMS_COMMAND_NAME)
+        );
         return;
       }
     }
@@ -1966,6 +2171,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const item = items[Math.min(completionIndex(), items.length - 1)];
     const completionSelection = getCompletionSelection(completion, item, confirm);
     if (!completionSelection) return;
+    if (completionSelection.type === 'attach-problems') {
+      attachPickedProblems(completionSelection.diagnostic);
+      return;
+    }
 
     if (completionSelection.type === 'run-slash') {
       await runSlashCommand(completionSelection.value);
@@ -2019,6 +2228,90 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     postMessage({ type: 'database/attach', payload: { requestId, id: table.id } });
   }
 
+  async function requestWorkspaceProblems(): Promise<boolean> {
+    if (!state.enableProblemsContext || pendingProblems()) return false;
+    const scope = getFileSearchScopeKey();
+    const sessionId = composerSessionId();
+    const generation = getNewChatDraftGeneration();
+    const controller = new AbortController();
+    problemsRequest = controller;
+    setPendingProblems(true);
+    const isCurrent = () =>
+      !controller.signal.aborted &&
+      scope === getFileSearchScopeKey() &&
+      sessionId === composerSessionId() &&
+      generation === getNewChatDraftGeneration() &&
+      state.enableProblemsContext;
+    try {
+      const snapshot = await client.varro.workspaceProblems({ signal: controller.signal });
+      if (!isCurrent()) return false;
+      setWorkspaceProblems(snapshot);
+      return true;
+    } catch (error) {
+      if (isCurrent())
+        setProblemsError(
+          error instanceof Error ? error.message : 'Could not load workspace problems'
+        );
+      return false;
+    } finally {
+      if (problemsRequest === controller) {
+        problemsRequest = undefined;
+        setPendingProblems(false);
+      }
+    }
+  }
+
+  function attachPickedProblems(diagnostic: EditorDiagnostic | null) {
+    const snapshot = workspaceProblems();
+    const completion = activeCompletion();
+    if (!state.enableProblemsContext || !snapshot || completion?.type !== 'slash') return;
+    if (snapshot.diagnostics.length === 0) return;
+    const references = [...state.inlineProblems];
+    const text = inputText();
+    const added = uniqueProblems(
+      diagnostic ? [diagnostic] : snapshot.diagnostics,
+      attachedProblemKeys(text, references, state.attachedDiagnostics?.diagnostics ?? [])
+    );
+    let insertion = '';
+    if (added.length > 0) {
+      const reference = cloneInlineProblems([
+        {
+          id: createAttachmentID(),
+          diagnostic: added[0]!,
+          group: diagnostic ? undefined : added,
+        },
+      ])[0]!;
+      references.push(reference);
+      const marker = problemReferenceMarker(reference);
+      insertion = `${marker}${getMentionInsertionTrailingSpace(marker, text[completion.end])}`;
+    }
+    batch(() => {
+      setState('inlineProblems', references);
+      setInputText(text.slice(0, completion.start) + insertion + text.slice(completion.end));
+      setCaretPosition(completion.start + insertion.length);
+      setCompletionIndex(0);
+    });
+    if (added.length === 0) showSessionActionFeedback('Problems already added to context');
+    queueMicrotask(() => richEditorRef?.focus());
+  }
+
+  function attachProblemsFromEditor(added: EditorDiagnostic[]) {
+    if (!state.enableProblemsContext || added.length === 0) return;
+    const existing = uniqueProblems(state.attachedDiagnostics?.diagnostics ?? []);
+    const additions = uniqueProblems(
+      added,
+      attachedProblemKeys(inputText(), state.inlineProblems, existing)
+    );
+    if (additions.length === 0) {
+      showSessionActionFeedback('Problems already added to context');
+      queueMicrotask(() => richEditorRef?.focus());
+      return;
+    }
+    const diagnostics = [...existing, ...additions];
+    setState('attachedDiagnostics', { diagnostics, total: diagnostics.length, inline: false });
+    queueMicrotask(() => richEditorRef?.focus());
+  }
+
   function applyCompletionValue(
     completion: Extract<
       ReturnType<typeof getActiveCompletion>,
@@ -2052,6 +2345,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (!parsed) return false;
 
     const { name, args } = parsed;
+    if ((name === PROBLEMS_COMMAND_NAME || name === 'promlems') && state.enableProblemsContext) {
+      setComposerValue(`/${PROBLEMS_COMMAND_NAME} ${args}`);
+      return true;
+    }
     if (name === SKILLS_COMMAND_NAME) {
       setComposerValue(`/${SKILLS_COMMAND_NAME} `);
       return true;
@@ -2143,6 +2440,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       requestAbortSession();
       return;
     }
+    if (pendingProblems() || problemsPickerScope()) return;
+    if (/^\/(?:problems|promlems)(?:\s|$)/i.test(text.trim()) && state.enableProblemsContext) {
+      await runSlashCommand(text);
+      return;
+    }
     if (pendingTableCount() > 0) {
       showSessionActionFeedback('Preparing table attachments', 'warning');
       return;
@@ -2178,6 +2480,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       nativePdfs: state.nativePdfs,
       terminalSelection: state.terminalSelection,
       attachedDiagnostics: state.attachedDiagnostics,
+      inlineProblems: state.inlineProblems,
     });
     const selectedPath = selectedWorkspacePath();
     const workspaceFolders = state.editorContext.workspaceFolders ?? [];
@@ -2198,7 +2501,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       queuedAttachments.clipboardImages?.length ||
       queuedAttachments.nativePdfs?.length ||
       queuedAttachments.terminalSelection ||
-      queuedAttachments.attachedDiagnostics;
+      queuedAttachments.attachedDiagnostics ||
+      queuedAttachments.inlineProblems?.length;
 
     const editing = composerEditingMessage();
     if (editing) {
@@ -2212,6 +2516,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             }
           : editing.model || undefined;
       const submittedEdit = captureEditDraftBackup();
+      submittedEdit.issues = editing.context.issues;
       const previousDraft = getMessageEditDraftBackup();
       const hasEditableAttachments =
         state.droppedFiles.length > 0 ||
@@ -2235,7 +2540,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         clearUsageLimitsForSessionTree(composerSessionId());
         sent = await editMessage(editing.messageId, text, {
           allowEmptyText: hasEditableAttachments,
-          queuedAttachments,
+          queuedAttachments: {
+            ...queuedAttachments,
+            issuesAttachment: editing.context.issues ?? null,
+          },
           selectedModel,
           onOptimisticPublish: () => {
             optimisticPublished = true;
@@ -2244,7 +2552,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         });
       } else {
         clearUsageLimitsForSessionTree(composerSessionId());
-        sent = await sendMessage(text);
+        sent = await sendMessage(text, {
+          queuedAttachments: {
+            ...queuedAttachments,
+            issuesAttachment: editing.context.issues ?? null,
+          },
+        });
       }
       if (sent) {
         if (selectedModel) {
@@ -2329,6 +2642,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         nativePdfs: queuedAttachments.nativePdfs,
         terminalSelection: queuedAttachments.terminalSelection,
         attachedDiagnostics: queuedAttachments.attachedDiagnostics,
+        inlineProblems: queuedAttachments.inlineProblems,
         queuedContext: {
           editorContext: {
             ...state.editorContext,
@@ -2350,6 +2664,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             ...captureQueuedModelSnapshot(sessionId),
           },
           currentDocumentEnabled: activeContextEnabled(sessionId),
+          issuesEnabled: state.issuesEnabled,
           visionDelegationAvailable: canDelegateCurrentImages(text),
         },
       };
@@ -2365,6 +2680,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       clearContextFiles();
       setState('terminalSelection', null);
       setState('attachedDiagnostics', null);
+      setState('inlineProblems', []);
       clearClipboardImages();
       clearNativePdfs();
       resetPastedImageIndex();
@@ -2500,6 +2816,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             nativePdfs: item.nativePdfs,
             terminalSelection: item.terminalSelection,
             attachedDiagnostics: item.attachedDiagnostics ? item.attachedDiagnostics : undefined,
+            inlineProblems: item.inlineProblems,
           },
           queuedContext: item.queuedContext ?? {
             editorContext: {
@@ -2881,6 +3198,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       clearContextFiles();
       setState('terminalSelection', null);
       setState('attachedDiagnostics', null);
+      setState('inlineProblems', []);
       clearClipboardImages();
       clearNativePdfs();
       invalidatePendingPdfAttachments();
@@ -2915,6 +3233,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           images: queued.clipboardImages ?? [],
           pdfs: queued.nativePdfs ?? [],
           terminalSelection: queued.terminalSelection ?? null,
+          inlineProblems: queued.inlineProblems,
         },
         queued.text
       );
@@ -3440,6 +3759,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   onMount(() => {
     const disposeBridge = onMessage((msg: ExtensionMessage) => {
+      if (msg.type === 'command/attach-problems') {
+        attachProblemsFromEditor(msg.payload.diagnostics);
+        return;
+      }
       if (msg.type === 'queued-messages/session-status') {
         if (msg.payload.status === 'busy') {
           observeQueuedSessionStatus(msg.payload.sessionId, 'busy');
@@ -3843,6 +4166,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         !pendingWorkspacePath() &&
         !hasPendingPdfFallback() &&
         pendingTableCount() === 0 &&
+        !pendingProblems() &&
         !hasPendingDelegatedImages() &&
         (!hasPendingApproval() || !composerEditingMessage()) &&
         (getSendableInputText().trim().length > 0 ||
@@ -3869,7 +4193,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
     const pendingWorkspace = pendingWorkspacePath();
     if (pendingWorkspace) return `Waiting for the workspace to switch to ${pendingWorkspace}`;
-    if (hasPendingPdfFallback() || hasPendingDelegatedImages() || pendingTableCount() > 0)
+    if (
+      hasPendingPdfFallback() ||
+      hasPendingDelegatedImages() ||
+      pendingTableCount() > 0 ||
+      pendingProblems()
+    )
       return 'Preparing attachments';
     return null;
   };
@@ -4594,9 +4923,15 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               activeContext={activeContext()}
               activeContextEnabled={activeContextEnabled(composerSessionId())}
               activeContextTitle={activeContextTitle()}
+              issueCount={composerIssueCount()}
+              problemDetails={composerProblemDetails()}
+              issuesEnabled={state.issuesEnabled}
+              onToggleIssues={toggleIssuesEnabled}
               terminalSelection={composerTerminalSelection()}
               diagnostics={
-                state.attachedDiagnostics
+                state.enableProblemsContext &&
+                state.attachedDiagnostics &&
+                !state.attachedDiagnostics.inline
                   ? {
                       count: state.attachedDiagnostics.diagnostics.length,
                       total: state.attachedDiagnostics.total,
@@ -4643,8 +4978,19 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             completionItems={composerCompletions()}
             completionSelectedIndex={completionIndex()}
             completionHeader={completionHeader()}
+            completionEmptyMessage={completionEmptyMessage()}
             onInput={(text, cursorOffset) => {
               batch(() => {
+                setState('inlineProblems', (references) =>
+                  references.filter((reference) => text.includes(problemReferenceMarker(reference)))
+                );
+                if (
+                  state.attachedDiagnostics?.inline &&
+                  inputText().includes(PROBLEMS_REFERENCE) &&
+                  !text.includes(PROBLEMS_REFERENCE)
+                ) {
+                  setState('attachedDiagnostics', null);
+                }
                 closePopups();
                 dismissComposerOverlays();
                 setHistoryIndex(null);
@@ -4680,6 +5026,18 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               if (cursorOffset === selectionEnd) setCaretPosition(cursorOffset);
             }}
             onRemoveChip={(chipId) => {
+              if (chipId.startsWith('problem:')) {
+                setState('inlineProblems', (references) =>
+                  references.filter(
+                    (reference) =>
+                      reference.id !== chipId.slice(8) ||
+                      inputText().includes(problemReferenceMarker(reference))
+                  )
+                );
+              }
+              if (chipId === 'problems' && !inputText().includes(PROBLEMS_REFERENCE)) {
+                setState('attachedDiagnostics', null);
+              }
               if (chipId.startsWith('file:')) {
                 const path = chipId.slice(5);
                 removeContextFile(path);
@@ -4690,6 +5048,46 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               }
             }}
             onChipClick={(chipId) => {
+              if (chipId.startsWith('problem:')) {
+                const reference = state.inlineProblems.find((item) => item.id === chipId.slice(8));
+                if (reference?.group) {
+                  postMessage({
+                    type: 'vscode/open-text',
+                    payload: {
+                      content: problemReferenceDetails(
+                        reference,
+                        state.editorContext.workspacePath
+                      ),
+                      title: `Problems ${reference.group.length}`,
+                      language: 'plaintext',
+                    },
+                  });
+                  return;
+                }
+                if (reference)
+                  postMessage({
+                    type: 'vscode/open',
+                    payload: {
+                      path: reference.diagnostic.path,
+                      line: reference.diagnostic.line,
+                      kind: 'file',
+                    },
+                  });
+                return;
+              }
+              if (chipId === 'problems') {
+                const problems = explicitProblemAttachment();
+                if (problems)
+                  postMessage({
+                    type: 'vscode/open-text',
+                    payload: {
+                      content: problems.text,
+                      title: `Problems ${problems.count}`,
+                      language: 'plaintext',
+                    },
+                  });
+                return;
+              }
               if (chipId.startsWith('file:')) {
                 const path = chipId.slice(5);
                 const file = composerFiles().find((f) => f.path === path);
@@ -4705,6 +5103,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               const completion = activeCompletion();
               const completionSelection = getCompletionSelection(completion, item, true);
               if (!completionSelection) return;
+              if (completionSelection.type === 'attach-problems') {
+                attachPickedProblems(completionSelection.diagnostic);
+                return;
+              }
 
               if (completionSelection.type === 'run-slash') {
                 void runSlashCommand(completionSelection.value);

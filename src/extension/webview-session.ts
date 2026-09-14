@@ -44,6 +44,7 @@ export class WebviewSession {
       {
         type:
           | 'command/new-session'
+          | 'command/attach-problems'
           | 'command/abort'
           | 'command/switch-session'
           | 'command/open-session'
@@ -184,6 +185,7 @@ export class WebviewSession {
       {
         type:
           | 'command/new-session'
+          | 'command/attach-problems'
           | 'command/abort'
           | 'command/switch-session'
           | 'command/open-session'
@@ -482,6 +484,7 @@ export class WebviewSession {
       expandThinking: config.expandThinking,
       showChangedFiles: config.showChangedFiles,
       showTurnTimer: config.showTurnTimer,
+      enableProblemsContext: config.enableProblemsContext,
       desktopSessionPaneSide: config.desktopSessionPaneSide,
       defaultPermissionMode: config.defaultPermissionMode,
       chatFontSize: config.chatFontSize,

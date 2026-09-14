@@ -185,6 +185,7 @@ export async function sendQueuedAsSteer(item: (typeof state.queuedMessages)[numb
           nativePdfs: item.nativePdfs,
           terminalSelection: item.terminalSelection,
           attachedDiagnostics: item.attachedDiagnostics ? item.attachedDiagnostics : undefined,
+          inlineProblems: item.inlineProblems,
         },
         queuedContext: item.queuedContext,
         preserveComposer: true,

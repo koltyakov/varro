@@ -127,6 +127,7 @@ const LOCAL_STORAGE_FAILURES_STATE_KEY = '__varroLocalStorageFailures';
 const EDITOR_INSTANCE_KEYS = new Set([
   'varro.inputDraft',
   'varro.inputDraftFiles',
+  'varro.inputDraftProblems',
   'varro.queuedMessageEdit',
   'varro.queuedMessages',
   'varro.editorViewId',
@@ -139,6 +140,7 @@ const EDITOR_INSTANCE_KEYS = new Set([
 const WEBVIEW_INSTANCE_KEYS = new Set([
   'varro.inputDraft',
   'varro.inputDraftFiles',
+  'varro.inputDraftProblems',
   'varro.queuedMessageEdit',
   'varro.queuedMessages',
 ]);

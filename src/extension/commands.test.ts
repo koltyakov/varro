@@ -1,5 +1,6 @@
 /* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-module-mocking, anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/require-safety-comment-for-type-assertion -- These tests exercise command import boundaries with malformed VS Code and process results. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type * as VSCode from 'vscode';
 
 const { configInspectMock, configUpdateMock, registeredCommands, vscodeMock } = vi.hoisted(() => {
   const commands = new Map<string, (...args: unknown[]) => unknown>();
@@ -7,6 +8,17 @@ const { configInspectMock, configUpdateMock, registeredCommands, vscodeMock } = 
   const configUpdate = vi.fn(() => Promise.resolve());
   const vscode = {
     version: '1.120.0',
+    languages: {
+      registerCodeActionsProvider: vi.fn(
+        (
+          _selector: VSCode.DocumentSelector,
+          _provider: VSCode.CodeActionProvider,
+          _metadata?: VSCode.CodeActionProviderMetadata
+        ) => ({ dispose: vi.fn() })
+      ),
+    },
+    CodeActionKind: { QuickFix: { value: 'quickfix' } },
+    DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
     commands: {
       registerCommand: vi.fn((id: string, handler: (...args: unknown[]) => unknown) => {
         commands.set(id, handler);
@@ -115,6 +127,7 @@ function register(
     openSiblingWorkspaceSessions: vi.fn(() => Promise.resolve()),
     postDroppedFiles: vi.fn(),
     postTerminalSelection: vi.fn(),
+    postProblems: vi.fn(),
     captureContextTarget: vi.fn(() => 'sidebar'),
     revealContextTarget: vi.fn(async (_target: string, reveal: () => Promise<unknown>) => reveal()),
     generateCommitMessage: vi.fn(() => Promise.resolve()),
@@ -149,6 +162,79 @@ function register(
   )(context, sidebar, contextProvider, server, revealSidebar);
   return { contextProvider, sidebar };
 }
+
+describe('Problems Add to Context action', () => {
+  it('contributes a quick fix and routes its captured details to the original chat target', async () => {
+    const { sidebar } = register();
+    sidebar.captureContextTarget.mockReturnValue('editor-one');
+    sidebar.revealContextTarget.mockImplementationOnce(async () => {
+      sidebar.captureContextTarget.mockReturnValue('sidebar');
+    });
+    const registration = vscodeMock.languages.registerCodeActionsProvider.mock.calls.at(-1)!;
+    expect(registration[2]).toEqual({
+      providedCodeActionKinds: [vscodeMock.CodeActionKind.QuickFix],
+    });
+    const diagnostic = {
+      severity: 0,
+      message: 'Missing module',
+      source: 'ts',
+      code: 2307,
+      range: { start: { line: 1, character: 3 }, end: { line: 1, character: 9 } },
+    } as VSCode.Diagnostic;
+    const actions = await registration[1].provideCodeActions(
+      { uri: { fsPath: '/repo/a.ts' } } as VSCode.TextDocument,
+      diagnostic.range,
+      { diagnostics: [diagnostic], triggerKind: 1, only: undefined },
+      { isCancellationRequested: false } as VSCode.CancellationToken
+    );
+    expect(actions).toHaveLength(1);
+    const action = actions![0] as VSCode.CodeAction;
+    expect(action.title).toBe('Varro: Add to Context');
+    expect(action.kind).toBe(vscodeMock.CodeActionKind.QuickFix);
+    diagnostic.message = 'Changed after the action was created';
+    await registeredCommands.get(action.command!.command)!(...action.command!.arguments!);
+    expect(sidebar.postProblems).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          path: '/repo/a.ts',
+          line: 2,
+          column: 4,
+          message: 'Missing module',
+          source: 'ts',
+          code: 2307,
+        }),
+      ],
+      'editor-one'
+    );
+    expect(sidebar.postCommand).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed diagnostic command arguments', async () => {
+    const { sidebar } = register();
+    await registeredCommands.get('varro.chat.addProblemsToContext')!({ diagnostics: [{}] });
+    expect(sidebar.postProblems).not.toHaveBeenCalled();
+    expect(vscodeMock.window.showWarningMessage).toHaveBeenCalledWith(
+      'No valid problem details were provided'
+    );
+  });
+
+  it('does not offer the action when the Problems integration is disabled', async () => {
+    register();
+    vscodeMock.workspace.getConfiguration.mockReturnValueOnce({
+      get: vi.fn(() => false),
+      inspect: configInspectMock,
+      update: configUpdateMock,
+    });
+    const provider = vscodeMock.languages.registerCodeActionsProvider.mock.calls.at(-1)![1];
+    const actions = await provider.provideCodeActions(
+      {} as VSCode.TextDocument,
+      {} as VSCode.Range,
+      { diagnostics: [{} as VSCode.Diagnostic], triggerKind: 1, only: undefined },
+      { isCancellationRequested: false } as VSCode.CancellationToken
+    );
+    expect(actions).toEqual([]);
+  });
+});
 
 describe('About command', () => {
   it('previews and exports the same redacted snapshot with optional local paths', async () => {

@@ -114,6 +114,7 @@ function commitQueuedMessages(messages: QueuedMessage[]) {
       nativePdfs = [],
       terminalSelection = null,
       attachedDiagnostics,
+      inlineProblems,
       queuedContext,
     }) => ({
       id,
@@ -128,6 +129,7 @@ function commitQueuedMessages(messages: QueuedMessage[]) {
       nativePdfs: nativePdfs.length > 0 ? nativePdfs : undefined,
       terminalSelection,
       attachedDiagnostics: attachedDiagnostics || undefined,
+      inlineProblems,
       queuedContext,
     })
   );

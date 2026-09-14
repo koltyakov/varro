@@ -16,6 +16,7 @@ export function readExtensionConfigState(
     expandThinking: config.get<boolean>('chat.expandThinking', false),
     showChangedFiles: config.get<boolean>('chat.showChangedFiles', false),
     showTurnTimer: config.get<boolean>('chat.showTurnTimer', true),
+    enableProblemsContext: config.get<boolean>('chat.enableProblemsContext', true),
     desktopSessionPaneSide: config.get<'left' | 'right'>('chat.desktopSessionPaneSide', 'left'),
     defaultPermissionMode: readDefaultPermissionMode(config),
     chatFontSize: readChatFontSize(config, chatConfig),

@@ -12,6 +12,21 @@ import { getOpenCodeConfigPaths } from './open-code-process';
 const vscodeMock = getVscodeMock();
 
 describe('SidebarProvider local config routing', () => {
+  it('broadcasts the Problems context opt-out without reloading the webview', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const { posted } = attachTestView(provider);
+    const listener = vscodeMock.workspace.onDidChangeConfiguration.mock.calls.at(-1)?.[0];
+    await vscodeMock.workspace
+      .getConfiguration('varro')
+      .update('chat.enableProblemsContext', false);
+    listener?.({
+      affectsConfiguration: (key: string) => key === 'varro.chat.enableProblemsContext',
+    });
+    expect(posted).toContainEqual({
+      type: 'config/update',
+      payload: expect.objectContaining({ enableProblemsContext: false }),
+    });
+  });
   it.each(['varro.chat.fontSize', 'chat.fontSize', 'chat.editor.fontSize', 'chat.fontFamily'])(
     'broadcasts font configuration when %s changes',
     async (changedKey) => {

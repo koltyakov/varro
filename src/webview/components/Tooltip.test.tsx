@@ -21,6 +21,28 @@ afterEach(() => {
 });
 
 describe('Tooltip', () => {
+  it('attaches to an editor-owned element without moving or removing it', async () => {
+    const editor = document.createElement('div');
+    const chip = document.createElement('span');
+    chip.textContent = 'Problems 1';
+    editor.appendChild(chip);
+    container.appendChild(editor);
+    const tooltipRoot = document.createElement('div');
+    container.appendChild(tooltipRoot);
+    cleanup = render(
+      () => <Tooltip target={chip} content="Captured problem" delay={0} />,
+      tooltipRoot
+    );
+    expect(chip.parentNode).toBe(editor);
+    chip.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe('Captured problem');
+    cleanup();
+    cleanup = undefined;
+    expect(chip.parentNode).toBe(editor);
+    expect(chip.hasAttribute('aria-describedby')).toBe(false);
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+  });
   it('does not install global composer-dismiss listeners while dormant', () => {
     const addEventListener = vi.spyOn(window, 'addEventListener');
     try {

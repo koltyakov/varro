@@ -31,6 +31,7 @@ import type {
   SessionTitleFallbackResponse,
   WorkspaceStatusEventSummary,
   WorkspaceFilePick,
+  WorkspaceProblemsSnapshot,
   OpenCodePermissionConfig,
   OpenCodeServerMemoryPermissions,
 } from '../../shared/protocol';
@@ -624,6 +625,11 @@ export const client = {
     },
     async pickWorkspaceFile(): Promise<WorkspaceFilePick | null> {
       return apiCall('GET', VARRO_API_ENDPOINTS.workspaceFilePick);
+    },
+    async workspaceProblems(options?: {
+      signal?: AbortSignal;
+    }): Promise<WorkspaceProblemsSnapshot> {
+      return apiCall('GET', VARRO_API_ENDPOINTS.workspaceProblems, undefined, options);
     },
     async readWorkspaceFile(path: string): Promise<string | null> {
       const params = new URLSearchParams({ path });

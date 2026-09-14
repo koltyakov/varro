@@ -4,12 +4,70 @@ import type {
   DroppedFile,
   WorkspaceFolderContext,
   DatabaseTableReference,
+  EditorDiagnostic,
+  WorkspaceProblemsSnapshot,
 } from '../../../shared/protocol';
 import { normalizeSessionTitle } from '../../../shared/session-title';
 import { getWorkspaceFolderLabel } from '../../../shared/workspace-folders';
 import { formatSkillReference } from '../../lib/skill-reference';
+import { getWorkspaceRelativePath } from '../../lib/path-display';
+import { problemIdentity, uniqueProblems } from '../../lib/editor-problems';
 
 export const SKILLS_COMMAND_NAME = 'skills';
+export const PROBLEMS_COMMAND_NAME = 'problems';
+
+export function getProblemCompletionItems(
+  snapshot: WorkspaceProblemsSnapshot | null,
+  query: string,
+  workspacePath: string | null,
+  excluded?: ReadonlySet<string>
+): CompletionItem[] {
+  if (!snapshot?.total) return [];
+  const available = uniqueProblems(snapshot.diagnostics).filter(
+    (diagnostic) => !excluded?.has(problemIdentity(diagnostic))
+  );
+  if (available.length === 0) return [];
+  const normalized = query.trim().toLowerCase().replace(/\\/g, '/');
+  const terms = normalized.split(/\s+/).filter(Boolean);
+  const all: CompletionItem = {
+    key: 'problems:all',
+    type: 'problems',
+    label: 'All',
+    detail: `${available.length} workspace ${available.length === 1 ? 'problem' : 'problems'}`,
+    diagnostic: null,
+    severity: available.some((diagnostic) => diagnostic.severity === 'error')
+      ? 'error'
+      : available.some((diagnostic) => diagnostic.severity === 'warning')
+        ? 'warning'
+        : 'info',
+  };
+  if (normalized === 'all') return [all];
+  const matches = available
+    .map((diagnostic, index) => ({ diagnostic, index }))
+    .filter(({ diagnostic }) => {
+      const searchable = [
+        diagnostic.message,
+        diagnostic.path,
+        diagnostic.source,
+        diagnostic.code,
+        diagnostic.severity,
+        diagnostic.line,
+        `${diagnostic.source ?? ''}${diagnostic.code ?? ''}`,
+      ]
+        .join(' ')
+        .toLowerCase()
+        .replace(/\\/g, '/');
+      return terms.every((term) => searchable.includes(term));
+    })
+    .map(({ diagnostic, index }) => ({
+      key: `problems:${index}`,
+      type: 'problems' as const,
+      label: diagnostic.message.replace(/\s+/g, ' ').slice(0, 180),
+      detail: `${diagnostic.severity} · ${getWorkspaceRelativePath(diagnostic.path, workspacePath) ?? diagnostic.path}:${diagnostic.line}${diagnostic.code !== undefined ? ` · ${diagnostic.code}` : ''}`,
+      diagnostic,
+    }));
+  return matches.length > 0 ? [all, ...matches] : [];
+}
 
 export type MentionCompletionMeta = {
   showFileSearchHint: boolean;
@@ -38,6 +96,7 @@ export type MentionCompletionSource = {
 };
 
 export type CompletionSelection =
+  | { type: 'attach-problems'; diagnostic: EditorDiagnostic | null }
   | { type: 'set-slash'; value: string }
   | { type: 'run-slash'; value: string }
   | {
@@ -52,6 +111,16 @@ export function getActiveCompletion(text: string, cursor: number) {
   if (cursor < 0 || cursor > text.length) return null;
 
   const prefix = text.slice(0, cursor);
+  const problemsMatch = prefix.match(/(?:^|\s)(\/problems[ \t]+[^\r\n]*)$/i);
+  if (problemsMatch) {
+    const value = problemsMatch[1]!;
+    return {
+      type: 'slash' as const,
+      query: value.slice(1).replace(/^problems[ \t]+/i, 'problems '),
+      start: cursor - value.length,
+      end: cursor,
+    };
+  }
   const tokenStart = Math.max(prefix.lastIndexOf(' '), prefix.lastIndexOf('\n')) + 1;
   const token = prefix.slice(tokenStart);
   if (token.startsWith('$')) {
@@ -107,7 +176,7 @@ export function applySlashCompletion(
   completion: { query: string; start: number; end: number },
   value: string
 ) {
-  if (value === `/${SKILLS_COMMAND_NAME} `) {
+  if (value === `/${SKILLS_COMMAND_NAME} ` || value === `/${PROBLEMS_COMMAND_NAME} `) {
     const suffix = text.slice(completion.end).replace(/^[ \t]+/, '');
     const nextValue = `${text.slice(0, completion.start)}${value}${suffix}`;
     return {
@@ -174,6 +243,9 @@ export function getCompletionSelection(
   confirm = false
 ): CompletionSelection | null {
   if (!completion || !item) return null;
+  if (item.type === 'problems' && completion.type === 'slash') {
+    return { type: 'attach-problems', diagnostic: item.diagnostic };
+  }
 
   if (completion.type === 'skill') {
     if (item.type !== 'skill') return null;
@@ -190,6 +262,9 @@ export function getCompletionSelection(
     }
     if (item.name === SKILLS_COMMAND_NAME) {
       return { type: 'set-slash', value: `/${SKILLS_COMMAND_NAME} ` };
+    }
+    if (item.name === PROBLEMS_COMMAND_NAME) {
+      return { type: 'set-slash', value: `/${PROBLEMS_COMMAND_NAME} ` };
     }
     const normalizedQuery = completion.query.trim().toLowerCase();
     const selectsExactCommand =

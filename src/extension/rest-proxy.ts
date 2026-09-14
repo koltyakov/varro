@@ -43,6 +43,7 @@ import type { AutoApproveJudge } from './auto-approve-judge';
 import type { HiddenSessionManager } from './hidden-session-manager';
 import { isAllowedApiRequest } from './util/webview-message';
 import type { ContextProvider } from './context-provider';
+import { getWorkspaceProblems } from './workspace-problems';
 import type { LocalSessionSummaryData } from './local-session-summary';
 import { sessionSummary } from './session-summary';
 import { logger } from './logger';
@@ -1006,6 +1007,11 @@ export class RestProxy {
       // workspace - the extension host must not be a read primitive for
       // arbitrary local files.
       const workspaceFileRequest = this.parseWorkspaceFileRequest(method, payload.path);
+      if (method === 'GET' && payload.path === VARRO_API_ENDPOINTS.workspaceProblems) {
+        const data = getWorkspaceProblems(this.getCurrentWorkspaceResolutionRoot());
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
       if (workspaceFileRequest) {
         const data = await this.callbacks.contextProvider.readFile(workspaceFileRequest.path, {
           restrictToWorkspace: true,

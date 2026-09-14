@@ -9,7 +9,7 @@ import {
   runSlashCommandByName,
 } from '../../hooks/useOpenCode';
 import { ralphStore } from '../../lib/stores/ralph-store';
-import { SKILLS_COMMAND_NAME } from './completion';
+import { PROBLEMS_COMMAND_NAME, SKILLS_COMMAND_NAME } from './completion';
 import type { SlashCommand } from './CompletionMenu';
 import type { Command } from '../../types';
 
@@ -41,6 +41,8 @@ export function getSlashCommands(props: {
     'attach',
     'files',
     'diagnostics',
+    PROBLEMS_COMMAND_NAME,
+    'promlems',
     'settings',
     'export',
     'stats',
@@ -60,6 +62,17 @@ export function getSlashCommands(props: {
   ]);
 
   const commands: SlashCommand[] = [
+    ...(state.enableProblemsContext
+      ? [
+          {
+            name: PROBLEMS_COMMAND_NAME,
+            aliases: ['promlems'],
+            description: 'Attach all workspace problems or choose individual problems',
+            acceptsArguments: true,
+            action: () => {},
+          },
+        ]
+      : []),
     {
       name: SKILLS_COMMAND_NAME,
       aliases: [],

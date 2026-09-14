@@ -20,6 +20,7 @@ import { routingStore } from '../lib/stores/routing-store';
 import { startNewChatDraft } from '../lib/new-chat-draft';
 import { replaceClipboardImages, replaceContextFiles } from '../lib/state';
 import { SessionSendOperations } from './session/session-send';
+import { parseInlineProblem, problemReferenceMarker } from '../lib/editor-problems';
 
 type SendAsync = ConstructorParameters<typeof SessionSendOperations>[0]['sendAsync'];
 
@@ -58,6 +59,69 @@ function createOperations(
 }
 
 describe('SessionSendOperations', () => {
+  it.each([false, true])(
+    'clears sent inline problems and restores them on failure=%s',
+    async (fail) => {
+      appStore.setState('activeSessionId', 'session-1');
+      const reference = {
+        id: 'captured',
+        diagnostic: {
+          path: '/repo/a.ts',
+          line: 2,
+          severity: 'error' as const,
+          message: 'Captured problem',
+        },
+      };
+      appStore.setState('inlineProblems', [reference]);
+      const sendAsync = vi.fn<SendAsync>(async () => {
+        if (fail) throw new Error('Send failed');
+      });
+      const operations = createOperations(sendAsync);
+      expect(await operations.sendMessage(`Explain ${problemReferenceMarker(reference)}`)).toBe(
+        !fail
+      );
+      expect(
+        sendAsync.mock.calls[0]![1].parts.flatMap((part) =>
+          part.text ? [parseInlineProblem(part.text)] : []
+        ).filter(Boolean)
+      ).toEqual([reference]);
+      expect(appStore.state.inlineProblems).toEqual(fail ? [reference] : []);
+    }
+  );
+
+  it('sends queued inline problem snapshots without consuming the current draft', async () => {
+    appStore.setState('activeSessionId', 'session-1');
+    const queued = {
+      id: 'queued-problem',
+      diagnostic: {
+        path: '/repo/old.ts',
+        line: 1,
+        severity: 'error' as const,
+        message: 'Queued problem',
+      },
+    };
+    const live = {
+      id: 'live-problem',
+      diagnostic: {
+        path: '/repo/live.ts',
+        line: 4,
+        severity: 'warning' as const,
+        message: 'Live problem',
+      },
+    };
+    appStore.setState('inlineProblems', [live]);
+    const sendAsync = vi.fn<SendAsync>(async () => {});
+    await createOperations(sendAsync).sendMessage(`Explain ${problemReferenceMarker(queued)}`, {
+      queuedAttachments: { inlineProblems: [queued] },
+      preserveComposer: true,
+    });
+    expect(
+      sendAsync.mock.calls[0]![1].parts.flatMap((part) =>
+        part.text ? [parseInlineProblem(part.text)] : []
+      ).filter(Boolean)
+    ).toEqual([queued]);
+    expect(appStore.state.inlineProblems).toEqual([live]);
+  });
   beforeEach(() => {
     window.localStorage.clear();
     appStore.resetDefaultAppState();
@@ -629,6 +693,45 @@ describe('SessionSendOperations', () => {
       terminalName: 'zsh',
     });
   });
+
+  it.each([
+    { enabled: true, integrationEnabled: true },
+    { enabled: false, integrationEnabled: true },
+    { enabled: true, integrationEnabled: false },
+  ])(
+    'uses the queued problem-context toggle %s instead of the live toggle',
+    async ({ enabled, integrationEnabled }) => {
+      appStore.setState('activeSessionId', 'session-1');
+      appStore.setState('issuesEnabled', !enabled);
+      appStore.setState('enableProblemsContext', integrationEnabled);
+      const sendAsync = vi.fn<SendAsync>(async () => {});
+      const operations = createOperations(sendAsync);
+      await operations.sendMessage('queued problem question', {
+        queuedContext: {
+          currentDocumentEnabled: false,
+          issuesEnabled: enabled,
+          editorContext: {
+            workspacePath: '/repo',
+            activeFile: {
+              path: '/repo/original.ts',
+              relativePath: 'original.ts',
+              language: 'typescript',
+            },
+            selection: null,
+            diagnostics: [
+              { path: '/repo/original.ts', line: 1, severity: 'error', message: 'Original error' },
+            ],
+          },
+        },
+        preserveComposer: true,
+      });
+      expect(sendAsync).toHaveBeenCalledOnce();
+      const parts = sendAsync.mock.calls[0]![1].parts;
+      expect(parts.some((part) => part.text?.includes('Original error'))).toBe(
+        enabled && integrationEnabled
+      );
+    }
+  );
 
   it('builds a queued prompt from its captured editor context instead of live editor state', async () => {
     appStore.setState('activeSessionId', 'session-1');

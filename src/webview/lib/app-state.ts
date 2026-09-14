@@ -29,6 +29,7 @@ import type {
   AutoApproveActivity,
   DesktopSessionPaneSide,
   EditorContext,
+  InlineProblemAttachment,
   DroppedFile,
   LspStatus,
   McpStatus,
@@ -42,6 +43,7 @@ import type {
   WorkspaceStatusEventSummary,
 } from '../../shared/protocol';
 import { isPermissionMode } from '../../shared/protocol';
+import { isInlineProblem } from './editor-problems';
 import { mergeContextFile } from '../../shared/context-files';
 import { isSameWorkspacePath } from '../../shared/workspace-path';
 import type {
@@ -114,8 +116,11 @@ export interface AppState {
   editorContext: EditorContext;
   terminalSelection: { text: string; terminalName: string } | null;
   attachedDiagnostics: AttachedDiagnostics | null;
+  inlineProblems: InlineProblemAttachment[];
   emptyStateLogoUri: string;
   currentDocumentEnabled: boolean;
+  issuesEnabled: boolean;
+  enableProblemsContext: boolean;
   draftCurrentDocumentEnabled: boolean | null;
   droppedFiles: DroppedFile[];
   clipboardImages: ClipboardImage[];
@@ -293,7 +298,9 @@ export function createAppState(): AppStateInstance {
     writeStored(STORAGE_KEYS.queuedMessageEdit, null);
     writeInputDraft('');
     writeStored(STORAGE_KEYS.inputDraftFiles, null);
+    writeStored(STORAGE_KEYS.inputDraftProblems, null);
   }
+  const storedInlineProblems = readStored<unknown>(STORAGE_KEYS.inputDraftProblems);
   const initialDroppedFiles = discardQueuedEditDraft
     ? []
     : mergeInitialDroppedFiles(
@@ -360,11 +367,20 @@ export function createAppState(): AppStateInstance {
       ? null
       : (initialWebviewState.terminalSelection ?? null),
     attachedDiagnostics: null,
+    inlineProblems:
+      !discardQueuedEditDraft && Array.isArray(storedInlineProblems)
+        ? storedInlineProblems.filter(isInlineProblem)
+        : [],
+    enableProblemsContext: initialWebviewState.enableProblemsContext ?? true,
     emptyStateLogoUri: initialWebviewState.emptyStateLogoUri ?? '',
     currentDocumentEnabled: currentDocumentWorkspace
       ? (projectCurrentDocumentEnabled[currentDocumentWorkspace] ?? true)
       : true,
     draftCurrentDocumentEnabled: null,
+    issuesEnabled: currentDocumentWorkspace
+      ? (readStoredBooleanRecord(STORAGE_KEYS.projectIssuesEnabled)[currentDocumentWorkspace] ??
+        true)
+      : true,
     droppedFiles: initialDroppedFiles,
     clipboardImages: initialClipboardImages,
     nativePdfs: [],

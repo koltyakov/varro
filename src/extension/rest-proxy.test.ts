@@ -41,6 +41,7 @@ import {
   scopeOpenCodeRequest,
 } from './rest-proxy';
 import type { RestProxyCallbacks } from './rest-proxy';
+import * as workspaceProblems from './workspace-problems';
 import { OpenCodeResponseTooLargeError } from './open-code-transport';
 import { HiddenSessionManager } from './hidden-session-manager';
 import { QueuedMessageStore } from './queued-message-store';
@@ -395,6 +396,28 @@ describe('getOpenCodeDirectoryHeaders', () => {
 });
 
 describe('RestProxy handleRequest', () => {
+  it('reads problems from the endpoint workspace without contacting OpenCode', async () => {
+    const snapshot = {
+      total: 1,
+      diagnostics: [
+        { path: '/repo/a.ts', line: 1, severity: 'error' as const, message: 'Bad type' },
+      ],
+    };
+    const collect = vi.spyOn(workspaceProblems, 'getWorkspaceProblems').mockReturnValue(snapshot);
+    try {
+      const callbacks = createCallbacks();
+      const proxy = new RestProxy(callbacks);
+      await proxy.handleRequest(makePayload(990, 'GET', '/varro/workspace-problems'));
+      expect(collect).toHaveBeenCalledWith('/repo');
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(expect.any(Number), {
+        id: 990,
+        data: snapshot,
+      });
+      expect(callbacks.server.request).not.toHaveBeenCalled();
+    } finally {
+      collect.mockRestore();
+    }
+  });
   it('opens plans in Markdown preview', async () => {
     mocks.vscode.commands.executeCommand.mockClear();
     mocks.vscode.workspace.openTextDocument.mockClear();

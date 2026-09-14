@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { Agent, Session } from '../../types';
+import { problemIdentity } from '../../lib/editor-problems';
 import {
   applySlashCompletion,
   createMentionCompletionSource,
   getActiveCompletion,
   getCompletionSelection,
+  getProblemCompletionItems,
   getInlineInsertionSuffix,
   getLeadingSlashCommand,
   getMentionCompletionItems,
@@ -17,6 +19,85 @@ import {
 } from './completion';
 
 describe('getMentionCompletionItems', () => {
+  it('hides already-added problems and counts only remaining choices in All', () => {
+    const a = { path: '/repo/a.ts', line: 1, severity: 'error' as const, message: 'First problem' };
+    const b = { ...a, path: '/repo/b.ts', message: 'Second problem' };
+    const snapshot = { total: 2, diagnostics: [a, b] };
+    const excluded = new Set([problemIdentity(a)]);
+    const items = getProblemCompletionItems(snapshot, '', '/repo', excluded);
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({ label: 'All', detail: '1 workspace problem' });
+    expect(items[1]).toMatchObject({ diagnostic: b });
+    excluded.add(problemIdentity(b));
+    expect(getProblemCompletionItems(snapshot, '', '/repo', excluded)).toEqual([]);
+  });
+  it('keeps multi-word and absolute-path searches inside the Problems picker', () => {
+    const text = 'Explain /problems cannot find /repo/a.ts ts2307';
+    expect(getActiveCompletion(text, text.length)).toEqual({
+      type: 'slash',
+      query: 'problems cannot find /repo/a.ts ts2307',
+      start: 8,
+      end: text.length,
+    });
+    expect(getActiveCompletion(`${text}\nordinary text`, text.length + 14)).toBeNull();
+  });
+
+  it('matches separate terms against full diagnostic text, paths, sources, and codes', () => {
+    const diagnostic = {
+      path: '/repo/playwright.config.ts',
+      line: 1,
+      severity: 'error' as const,
+      source: 'ts',
+      code: 2307,
+      message: `${'Long message '.repeat(30)}cannot find module`,
+    };
+    const snapshot = {
+      total: 2,
+      diagnostics: [
+        diagnostic,
+        {
+          path: '/repo/other.ts',
+          line: 2,
+          severity: 'warning' as const,
+          message: 'Unused variable',
+        },
+      ],
+    };
+    const items = getProblemCompletionItems(snapshot, 'CANNOT module playwright TS2307', '/repo');
+    expect(items).toHaveLength(2);
+    expect(items[1]).toMatchObject({ diagnostic });
+    expect(getProblemCompletionItems(snapshot, 'warning unused other.ts', '/repo')).toHaveLength(2);
+    expect(getProblemCompletionItems(snapshot, 'all', '/repo')).toEqual([
+      expect.objectContaining({ label: 'All', diagnostic: null }),
+    ]);
+  });
+
+  it('keeps All first and filters individual /problems entries', () => {
+    const diagnostic = {
+      path: '/repo/a.ts',
+      line: 1,
+      severity: 'error' as const,
+      message: 'Missing value',
+    };
+    const items = getProblemCompletionItems({ total: 1, diagnostics: [diagnostic] }, '', '/repo');
+    expect(items.map((item) => ('label' in item ? item.label : ''))).toEqual([
+      'All',
+      'Missing value',
+    ]);
+    const completion = getActiveCompletion('/problems ', 10);
+    expect(completion).toMatchObject({ type: 'slash', query: 'problems ' });
+    expect(getCompletionSelection(completion, items[0], true)).toEqual({
+      type: 'attach-problems',
+      diagnostic: null,
+    });
+    expect(getCompletionSelection(completion, items[1], true)).toEqual({
+      type: 'attach-problems',
+      diagnostic,
+    });
+    expect(
+      getProblemCompletionItems({ total: 1, diagnostics: [diagnostic] }, 'other', '/repo')
+    ).toHaveLength(0);
+  });
   it('offers distinct tables alongside files and resolves selections by identity', () => {
     const tables = [
       { id: 'dev-users', name: 'main.users', dataSource: 'Development' },

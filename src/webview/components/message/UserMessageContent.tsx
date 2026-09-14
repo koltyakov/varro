@@ -1,6 +1,10 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import { Portal } from 'solid-js/web';
-import type { DatabaseContext, DatabaseAttachment } from '../../../shared/protocol';
+import type {
+  DatabaseContext,
+  DatabaseAttachment,
+  InlineProblemAttachment,
+} from '../../../shared/protocol';
 import {
   databaseAttachmentDetail,
   databaseContextDetail,
@@ -52,8 +56,24 @@ import { isFunction } from '../../lib/runtime-values';
 import { navArrowLeftIcon, navArrowRightIcon } from '../../lib/ui-icons';
 import { UiIcon } from '../UiIcon';
 import { formatSkillReference, parseSkillAttachment } from '../../lib/skill-reference';
+import {
+  getProblemsSeverity,
+  parseIssueAttachment,
+  PROBLEMS_REFERENCE,
+  parseInlineProblem,
+  problemReferenceMarker,
+  problemReferenceLocation,
+  problemReferenceLabel,
+  problemReferenceDetails,
+  problemReferenceSeverity,
+} from '../../lib/editor-problems';
+import type { IssueAttachment } from '../../lib/editor-problems';
+import { ProblemsIcon } from '../ProblemsIcon';
+import { ProblemsTooltip } from '../ProblemsTooltip';
 
 export type MessageAttachment =
+  | { type: 'problem-reference'; reference: InlineProblemAttachment }
+  | ({ type: 'issues' } & IssueAttachment)
   | { type: 'database'; context: DatabaseContext }
   | { type: 'skill'; name: string }
   | {
@@ -263,6 +283,16 @@ export function parseUserMessageContent(parts: Part[]): ParsedUserMessageContent
     // SAFETY: The surrounding shape or discriminator check establishes the TextPart contract used below.
     const text = (part as TextPart).text;
     if (!text || isVisionDelegationContextText(text)) continue;
+    const problemReference = parseInlineProblem(text);
+    if (problemReference) {
+      attachments.push({ type: 'problem-reference', reference: problemReference });
+      continue;
+    }
+    const issues = parseIssueAttachment(text);
+    if (issues) {
+      attachments.push({ type: 'issues', ...issues });
+      continue;
+    }
     const skill = parseSkillAttachment(text);
     if (skill) {
       if (
@@ -531,6 +561,8 @@ export function getUserMessageEditContext(parts: Part[]): MessageEditContext {
   for (const attachment of parsed.attachments) {
     if (
       attachment.type === 'terminal-selection' ||
+      attachment.type === 'issues' ||
+      attachment.type === 'problem-reference' ||
       attachment.type === 'editor-text' ||
       attachment.type === 'database' ||
       attachment.type === 'skill'
@@ -576,8 +608,21 @@ export function getUserMessageEditContext(parts: Part[]): MessageEditContext {
 
   return {
     files,
+    inlineProblems: parsed.attachments.some((attachment) => attachment.type === 'problem-reference')
+      ? parsed.attachments.flatMap((attachment) =>
+          attachment.type === 'problem-reference' ? [attachment.reference] : []
+        )
+      : undefined,
     images,
     pdfs: pdfs.length > 0 ? pdfs : undefined,
+    issues: (() => {
+      const problems = parsed.attachments.find((attachment) => attachment.type === 'issues');
+      return problems &&
+        getAttachmentTextMarker(problems) === PROBLEMS_REFERENCE &&
+        parsed.messageTexts.some((text) => text.includes(PROBLEMS_REFERENCE))
+        ? { ...problems, inline: true }
+        : problems;
+    })(),
     terminalSelection:
       terminalAttachment?.type === 'terminal-selection' && terminalAttachment.text
         ? { terminalName: terminalAttachment.terminalName, text: terminalAttachment.text }
@@ -593,13 +638,26 @@ export function hasUserMessageEditableContent(parts: Part[]): boolean {
     context.files.length > 0 ||
     context.images.length > 0 ||
     (context.pdfs?.length ?? 0) > 0 ||
-    context.terminalSelection !== null
+    context.terminalSelection !== null ||
+    !!context.issues
   );
 }
 
 export function getUserMessagePreviewText(parts: Part[]): string {
   const parsed = parseUserMessageContent(parts);
   const firstText = parsed.messageTexts
+    .map((text) =>
+      parsed.attachments.reduce(
+        (value, attachment) =>
+          attachment.type === 'problem-reference'
+            ? value.replaceAll(
+                problemReferenceMarker(attachment.reference),
+                `${problemReferenceLabel(attachment.reference)} ${problemReferenceLocation(attachment.reference)}`
+              )
+            : value,
+        text
+      )
+    )
     .map((text) => text.replace(/\s+/g, ' ').trim())
     .find((text) => text.length > 0);
   if (firstText) return firstText;
@@ -607,6 +665,10 @@ export function getUserMessagePreviewText(parts: Part[]): string {
   const firstAttachment = parsed.attachments[0];
   if (firstAttachment) {
     switch (firstAttachment.type) {
+      case 'problem-reference':
+        return `${problemReferenceLabel(firstAttachment.reference)} ${problemReferenceLocation(firstAttachment.reference)}`;
+      case 'issues':
+        return `Problems ${firstAttachment.count}`;
       case 'database':
         return `Database: ${firstAttachment.context.name}`;
       case 'file-selection':
@@ -1335,6 +1397,8 @@ function isStandaloneFileReference(text: string): boolean {
 
 function getAttachmentTextMarker(attachment: MessageAttachment): string | null {
   switch (attachment.type) {
+    case 'problem-reference':
+      return problemReferenceMarker(attachment.reference);
     case 'skill':
       return formatSkillReference(attachment.name);
     case 'file-reference':
@@ -1345,6 +1409,8 @@ function getAttachmentTextMarker(attachment: MessageAttachment): string | null {
     case 'terminal-selection':
     case 'database':
       return null;
+    case 'issues':
+      return attachment.text.startsWith('[Attached diagnostics:') ? PROBLEMS_REFERENCE : null;
   }
 }
 
@@ -1694,6 +1760,24 @@ function InlineAgentChip(props: { part: AgentPart; marker: string }) {
 }
 
 function InlineMessageAttachmentChip(props: { attachment: MessageAttachment }) {
+  if (props.attachment.type === 'problem-reference')
+    return <ProblemReferenceChip reference={props.attachment.reference} inline />;
+  if (props.attachment.type === 'issues') {
+    return (
+      <ProblemsTooltip text={props.attachment.text} action="Click to view captured details">
+        <button
+          type="button"
+          class="inline-chip inline-chip-clickable"
+          data-copy-marker={PROBLEMS_REFERENCE}
+          onClick={() => openAttachment(props.attachment)}
+        >
+          <ProblemsIcon severity={getProblemsSeverity(props.attachment.text)} />
+          <span class="inline-chip-label">Problems</span>
+          <span class="inline-chip-detail">{props.attachment.count}</span>
+        </button>
+      </ProblemsTooltip>
+    );
+  }
   if (props.attachment.type === 'skill') {
     return (
       <span
@@ -1759,7 +1843,64 @@ function InlineMessageAttachmentChip(props: { attachment: MessageAttachment }) {
   );
 }
 
+function ProblemReferenceChip(props: { reference: InlineProblemAttachment; inline?: boolean }) {
+  return (
+    <ProblemsTooltip
+      text={problemReferenceDetails(props.reference, state.editorContext.workspacePath)}
+      action={props.reference.group ? 'Click to view captured details' : 'Open problem in editor'}
+    >
+      <button
+        type="button"
+        class={
+          props.inline
+            ? 'inline-chip inline-chip-clickable'
+            : 'chat-attachment-chip message-attachment-chip clickable'
+        }
+        data-copy-marker={problemReferenceMarker(props.reference)}
+        onClick={() => openAttachment({ type: 'problem-reference', reference: props.reference })}
+      >
+        <ProblemsIcon severity={problemReferenceSeverity(props.reference)} />
+        <span class={props.inline ? 'inline-chip-label' : 'chip-label'}>
+          {problemReferenceLabel(props.reference)}
+        </span>
+        <span class={props.inline ? 'inline-chip-detail' : 'chip-detail'}>
+          {problemReferenceLocation(props.reference)}
+        </span>
+      </button>
+    </ProblemsTooltip>
+  );
+}
+
 function openAttachment(value: MessageAttachment) {
+  if (value.type === 'problem-reference') {
+    if (value.reference.group) {
+      postMessage({
+        type: 'vscode/open-text',
+        payload: {
+          content: problemReferenceDetails(value.reference, state.editorContext.workspacePath),
+          title: `Problems ${value.reference.group.length}`,
+          language: 'plaintext',
+        },
+      });
+      return;
+    }
+    postMessage({
+      type: 'vscode/open',
+      payload: {
+        path: value.reference.diagnostic.path,
+        line: value.reference.diagnostic.line,
+        kind: 'file',
+      },
+    });
+    return;
+  }
+  if (value.type === 'issues') {
+    postMessage({
+      type: 'vscode/open-text',
+      payload: { content: value.text, title: `Problems ${value.count}`, language: 'plaintext' },
+    });
+    return;
+  }
   if (value.type === 'database') {
     postMessage({
       type: 'vscode/open-text',
@@ -1818,6 +1959,23 @@ function openAttachment(value: MessageAttachment) {
 }
 
 function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
+  if (props.attachment.type === 'problem-reference')
+    return <ProblemReferenceChip reference={props.attachment.reference} />;
+  if (props.attachment.type === 'issues') {
+    return (
+      <ProblemsTooltip text={props.attachment.text} action="Click to view captured details">
+        <button
+          class="chat-attachment-chip message-attachment-chip message-attachment-chip-clickable clickable"
+          data-copy-marker={getStandaloneAttachmentCopyText(props.attachment)}
+          onClick={() => openAttachment(props.attachment)}
+        >
+          <ProblemsIcon severity={getProblemsSeverity(props.attachment.text)} />
+          <AttachmentLabel label="Problems" />
+          <span class="chip-detail">{props.attachment.count}</span>
+        </button>
+      </ProblemsTooltip>
+    );
+  }
   const attachment = () => props.attachment;
   const isFolder = () =>
     attachment().type === 'file-reference' &&
@@ -2118,6 +2276,9 @@ function getDisplayMessageAttachmentLabel(attachment: DisplayMessageAttachment):
 
 function getDisplayMessageAttachmentDetail(attachment: DisplayMessageAttachment): string | null {
   if (attachment.type !== 'message') return null;
+  if (attachment.attachment.type === 'problem-reference')
+    return problemReferenceLocation(attachment.attachment.reference);
+  if (attachment.attachment.type === 'issues') return String(attachment.attachment.count);
   if (attachment.attachment.type === 'file-reference' && attachment.attachment.database)
     return databaseAttachmentDetail(attachment.attachment.database);
   if (attachment.attachment.type === 'database')
@@ -2166,6 +2327,10 @@ function getTerminalLineCountLabel(text: string | undefined): string | null {
 
 function getAttachmentLabel(attachment: MessageAttachment): string {
   switch (attachment.type) {
+    case 'problem-reference':
+      return problemReferenceLabel(attachment.reference);
+    case 'issues':
+      return 'Problems';
     case 'database':
       return attachment.context.name;
     case 'skill':
@@ -2182,6 +2347,8 @@ function getAttachmentLabel(attachment: MessageAttachment): string {
 }
 
 function getMessageAttachmentPath(attachment: MessageAttachment): string | undefined {
+  if (attachment.type === 'problem-reference')
+    return attachment.reference.group ? undefined : attachment.reference.diagnostic.path;
   if (attachment.type === 'file-selection') return attachment.filename;
   if (attachment.type === 'editor-text') return attachment.filename;
   if (attachment.type === 'file-reference') return attachment.path;
@@ -2190,6 +2357,12 @@ function getMessageAttachmentPath(attachment: MessageAttachment): string | undef
 
 function getAttachmentTitle(attachment: MessageAttachment): string {
   switch (attachment.type) {
+    case 'problem-reference':
+      return attachment.reference.group
+        ? `Problems ${attachment.reference.group.length}`
+        : `${attachment.reference.diagnostic.path}:${attachment.reference.diagnostic.line}: ${attachment.reference.diagnostic.message}`;
+    case 'issues':
+      return `Problems ${attachment.count}: click to view details`;
     case 'database':
       return `${attachment.context.name} · ${databaseContextDetail(attachment.context)}`;
     case 'skill':
@@ -2213,6 +2386,10 @@ function getInlineAttachmentCopyMarker(attachment: MessageAttachment): string {
 
 function getStandaloneAttachmentCopyText(attachment: MessageAttachment): string {
   switch (attachment.type) {
+    case 'problem-reference':
+      return problemReferenceMarker(attachment.reference);
+    case 'issues':
+      return `[Problems ${attachment.count}]`;
     case 'database':
       return formatDatabaseContext(attachment.context);
     case 'skill':

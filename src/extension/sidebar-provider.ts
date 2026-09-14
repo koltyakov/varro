@@ -23,6 +23,7 @@ import type {
   ChatModelSelection,
   DroppedFile,
   EditorContext,
+  EditorDiagnostic,
   ExtensionMessage,
   QueuedMessageSnapshot,
   PermissionMode,
@@ -476,6 +477,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         event.affectsConfiguration('varro.chat.fontSize') ||
         event.affectsConfiguration('varro.chat.showChangedFiles') ||
         event.affectsConfiguration('varro.chat.showTurnTimer') ||
+        event.affectsConfiguration('varro.chat.enableProblemsContext') ||
         event.affectsConfiguration('varro.chat.desktopSessionPaneSide') ||
         event.affectsConfiguration('varro.chat.defaultPermissionMode') ||
         event.affectsConfiguration('chat.fontSize') ||
@@ -2630,6 +2632,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const endpoint = this.resolveContextEndpoint(targetViewId);
     endpoint.contextFilesState.setTerminalSelection(selection);
     endpoint.bridge.post({ type: 'terminal-selection/update', payload: selection });
+  }
+
+  postProblems(diagnostics: EditorDiagnostic[], targetViewId?: string) {
+    this.resolveContextEndpoint(targetViewId).webviewSession.queueCommand({
+      type: 'command/attach-problems',
+      payload: { diagnostics },
+    });
   }
 
   async revealContextTarget(targetViewId: string, revealSidebar: () => PromiseLike<void>) {

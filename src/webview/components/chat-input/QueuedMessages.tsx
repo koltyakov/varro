@@ -13,6 +13,11 @@ import {
 import { observeSettledResize } from '../../lib/settled-resize-observer';
 import { UiIcon } from '../UiIcon';
 import { RefreshIcon } from '../ControlIcons';
+import {
+  problemReferenceMarker,
+  problemReferenceLocation,
+  problemReferenceLabel,
+} from '../../lib/editor-problems';
 
 export const QUEUED_MESSAGE_DRAG_TYPE = 'application/x-varro-queued-message';
 
@@ -26,6 +31,8 @@ export type QueuedMessageItem = Pick<
   | 'droppedFiles'
   | 'clipboardImages'
   | 'terminalSelection'
+  | 'inlineProblems'
+  | 'attachedDiagnostics'
 >;
 
 function bindQueueOverflowFade(element: HTMLElement, trackItemCount: () => number) {
@@ -105,9 +112,19 @@ export function QueuedMessages(props: {
             let labelRef: HTMLSpanElement | undefined;
             const imageCount = item.clipboardImages?.length || 0;
             const attachmentCount =
-              (item.droppedFiles?.length || 0) + (item.terminalSelection ? 1 : 0);
+              (item.droppedFiles?.length || 0) +
+              (item.terminalSelection ? 1 : 0) +
+              (item.inlineProblems?.length ?? 0) +
+              (item.attachedDiagnostics ? 1 : 0);
             const label =
-              item.text ||
+              (item.inlineProblems ?? []).reduce(
+                (text, reference) =>
+                  text.replaceAll(
+                    problemReferenceMarker(reference),
+                    `${problemReferenceLabel(reference)} ${problemReferenceLocation(reference)}`
+                  ),
+                item.text
+              ) ||
               [
                 imageCount > 0 ? `${imageCount} ${imageCount === 1 ? 'image' : 'images'}` : '',
                 attachmentCount > 0

@@ -11,12 +11,15 @@ import {
   getUserMessageMarkupSuffix,
   getUserMessagePreviewText,
   hasUserMessageEditableContent,
+  getUserMessageEditText,
+  getUserMessageEditContext,
 } from './UserMessageContent';
 import { fixture } from '../../test-fixtures';
 import type { UnknownRecord } from '../../../shared/type-utils';
 import { clearDirectSessionReturn, getDirectSessionReturnId } from '../../lib/session-navigation';
 import { formatSkillAttachment } from '../../lib/skill-reference';
 import { formatDatabaseAttachmentReference } from '../../../shared/database-context';
+import { formatInlineProblem, problemReferenceMarker } from '../../lib/editor-problems';
 
 const selectSessionMock = vi.hoisted(() => vi.fn());
 const retryMessageMock = vi.hoisted(() => vi.fn());
@@ -79,6 +82,132 @@ function agentPart(id: string, name: string, marker = `@${name}`): AgentPart {
 function renderUserContent(parts: Part[]) {
   cleanup = render(() => UserMessageContent({ parts }), container!);
 }
+
+it('renders independent problem links with file and line labels and restores them for editing', () => {
+  const send = installSendToExtension();
+  const references = [
+    {
+      id: 'first',
+      diagnostic: {
+        path: '/repo/a.ts',
+        line: 3,
+        column: 7,
+        severity: 'error' as const,
+        message: 'First error',
+      },
+    },
+    {
+      id: 'second',
+      diagnostic: {
+        path: '/repo/b.ts',
+        line: 9,
+        severity: 'warning' as const,
+        message: 'Second warning',
+      },
+    },
+  ];
+  const text = `Explain ${references.map(problemReferenceMarker).join(' and ')}`;
+  const parts = [
+    textPart('prompt', text),
+    ...references.map((reference) => textPart(reference.id, formatInlineProblem(reference))),
+  ];
+  renderUserContent(parts);
+  const chips = container!.querySelectorAll<HTMLButtonElement>(
+    '.user-message-text-scroll .inline-chip'
+  );
+  expect(chips).toHaveLength(2);
+  expect(chips[0]?.querySelector('.inline-chip-label')?.textContent).toBe('a.ts');
+  expect(chips[0]?.querySelector('.inline-chip-detail')?.textContent).toBe('L3:7');
+  expect(chips[1]?.querySelector('.inline-chip-label')?.textContent).toBe('b.ts');
+  expect(container?.textContent).not.toContain('First error');
+  expect(container?.textContent).not.toContain('Problem first');
+  expect(getUserMessageEditContext(parts).inlineProblems).toEqual(references);
+  expect(getUserMessageEditText(parts)).toBe(text);
+  expect(getUserMessagePreviewText(parts)).toBe('Explain a.ts L3:7 and b.ts L9');
+  chips[0]!.click();
+  expect(send).toHaveBeenCalledWith({
+    type: 'vscode/open',
+    payload: { path: '/repo/a.ts', line: 3, kind: 'file' },
+  });
+});
+
+it('renders an All snapshot as one inline Problems count chip', () => {
+  const send = installSendToExtension();
+  const error = { path: '/repo/a.ts', line: 1, severity: 'error' as const, message: 'First error' };
+  const warning = {
+    path: '/repo/b.ts',
+    line: 2,
+    severity: 'warning' as const,
+    message: 'Second warning',
+  };
+  const reference = { id: 'all', diagnostic: error, group: [error, warning] };
+  const parts = [
+    textPart('prompt', `Explain ${problemReferenceMarker(reference)}`),
+    textPart('all', formatInlineProblem(reference)),
+  ];
+  renderUserContent(parts);
+  const chips = container!.querySelectorAll<HTMLButtonElement>(
+    '.user-message-text-scroll .inline-chip'
+  );
+  expect(chips).toHaveLength(1);
+  expect(chips[0]?.querySelector('.inline-chip-label')?.textContent).toBe('Problems');
+  expect(chips[0]?.querySelector('.inline-chip-detail')?.textContent).toBe('2');
+  expect(getUserMessageEditContext(parts).inlineProblems).toEqual([reference]);
+  chips[0]!.click();
+  expect(send).toHaveBeenCalledWith({
+    type: 'vscode/open-text',
+    payload: {
+      title: 'Problems 2',
+      language: 'plaintext',
+      content: expect.stringContaining('Second warning'),
+    },
+  });
+});
+
+it('renders problems as a count chip without leaking details into visible or editable prompt text', () => {
+  const send = installSendToExtension();
+  const details =
+    '[VS Code problems for playwright.config.ts: 1 errors, 0 warnings]\nCannot find module @playwright/test';
+  const parts = [textPart('prompt', 'Explain this problem'), textPart('problems', details)];
+  renderUserContent(parts);
+  const chip = container?.querySelector<HTMLButtonElement>('.message-attachment-chip');
+  expect(chip?.querySelector('.chip-label')?.textContent).toBe('Problems');
+  expect(chip?.querySelector('.chip-detail')?.textContent).toBe('1');
+  expect(chip?.textContent).not.toContain('·');
+  expect(container?.textContent).toContain('Explain this problem');
+  expect(container?.textContent).not.toContain('Cannot find module');
+  expect(container?.textContent).not.toContain('[VS Code problems');
+  expect(getUserMessageEditText(parts)).toBe('Explain this problem');
+  expect(getUserMessageEditContext(parts).issues).toMatchObject({ count: 1, text: details });
+  chip?.click();
+  expect(send).toHaveBeenCalledWith({
+    type: 'vscode/open-text',
+    payload: {
+      content: details,
+      title: 'Problems 1',
+      language: 'plaintext',
+    },
+  });
+  expect(getUserMessagePreviewText([textPart('problems-only', details)])).toBe('Problems 1');
+});
+
+it('renders explicit Problems references inline and restores their captured context for editing', () => {
+  const details = '[Attached diagnostics: 1 of 1]\nERROR app.ts:3 - Missing declaration';
+  const parts = [textPart('prompt', 'Explain [Problems] please'), textPart('problems', details)];
+  renderUserContent(parts);
+  const chip = container?.querySelector('.user-message-text-scroll .inline-chip');
+  expect(chip?.querySelector('.inline-chip-label')?.textContent).toBe('Problems');
+  expect(chip?.querySelector('.inline-chip-detail')?.textContent).toBe('1');
+  expect(container?.querySelector('.message-attachment-chip')).toBeNull();
+  expect(container?.textContent).not.toContain('[Problems]');
+  expect(container?.textContent).not.toContain('Missing declaration');
+  expect(getUserMessageEditText(parts)).toBe('Explain [Problems] please');
+  expect(getUserMessageEditContext(parts).issues).toMatchObject({
+    count: 1,
+    text: details,
+    inline: true,
+  });
+});
 
 it('renders saved table attachments with their table identity and keeps the snapshot openable', () => {
   const send = installSendToExtension();

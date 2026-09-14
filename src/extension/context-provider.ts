@@ -4,6 +4,7 @@ import { readdir, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, join, parse, relative, sep } from 'path';
 import type { EditorContext, EditorTextContext } from '../shared/protocol';
 import { isSameWorkspacePath } from '../shared/workspace-path';
+import { toEditorDiagnostic } from './workspace-problems';
 import { logger } from './logger';
 import {
   getRelativePath,
@@ -50,6 +51,7 @@ export class ContextProvider implements vscode.Disposable {
     editorText: null,
     diagnostics: [],
     diagnosticsTotal: 0,
+    diagnosticCounts: { errors: 0, warnings: 0 },
   };
   private _terminalSelection: { text: string; terminalName: string } | null = null;
   private terminalCaptureQueue: Promise<void> = Promise.resolve();
@@ -423,9 +425,11 @@ export class ContextProvider implements vscode.Disposable {
     }
     this._context.editorText = this.createEditorTextContext(editor, doc.uri.fsPath, relativePath);
 
-    if (!this.captureContextSnapshot()) return;
+    if (!this.captureContextSnapshot()) {
+      this.refreshDiagnosticsIfNeeded();
+      return;
+    }
 
-    this.emitContextIfChanged();
     this.refreshDiagnosticsIfNeeded();
   }
 
@@ -452,23 +456,52 @@ export class ContextProvider implements vscode.Disposable {
     if (!editor) {
       this._context.diagnostics = [];
       this._context.diagnosticsTotal = 0;
+      this._context.diagnosticCounts = { errors: 0, warnings: 0 };
       this.emitContextIfChanged();
       return;
     }
 
     const diags = vscode.languages.getDiagnostics(editor.document.uri);
     this._context.diagnosticsTotal = diags.length;
-    this._context.diagnostics = diags.slice(0, 20).map((d) => ({
-      path: editor.document.uri.fsPath,
-      severity:
-        d.severity === vscode.DiagnosticSeverity.Error
-          ? 'error'
-          : d.severity === vscode.DiagnosticSeverity.Warning
-            ? 'warning'
-            : 'info',
-      message: d.message,
-      line: d.range.start.line + 1,
+    this._context.diagnosticCounts = {
+      errors: diags.filter((d) => d.severity === vscode.DiagnosticSeverity.Error).length,
+      warnings: diags.filter((d) => d.severity === vscode.DiagnosticSeverity.Warning).length,
+    };
+    const intersectsSelection = (d: vscode.Diagnostic) => {
+      const selection = editor.selection;
+      if (selection.isEmpty) return false;
+      const start = d.range.start;
+      const end = d.range.end ?? d.range.start;
+      return (
+        comparePositions(start, selection.end) < 0 &&
+        (comparePositions(end, selection.start) > 0 ||
+          (comparePositions(start, end) === 0 && comparePositions(start, selection.start) >= 0))
+      );
+    };
+    const ranked = diags.map((diagnostic) => ({
+      diagnostic,
+      selected: intersectsSelection(diagnostic),
     }));
+    ranked.sort(
+      (a, b) =>
+        Number(a.diagnostic.severity > vscode.DiagnosticSeverity.Warning) -
+          Number(b.diagnostic.severity > vscode.DiagnosticSeverity.Warning) ||
+        Number(b.selected) - Number(a.selected) ||
+        a.diagnostic.severity - b.diagnostic.severity ||
+        Math.abs(
+          a.diagnostic.range.start.line -
+            (editor.selection.active?.line ?? editor.selection.start.line)
+        ) -
+          Math.abs(
+            b.diagnostic.range.start.line -
+              (editor.selection.active?.line ?? editor.selection.start.line)
+          )
+    );
+    this._context.diagnostics = ranked
+      .slice(0, 20)
+      .map(({ diagnostic, selected }) =>
+        toEditorDiagnostic(editor.document.uri.fsPath, diagnostic, selected)
+      );
     this.emitContextIfChanged();
   }
 
@@ -507,7 +540,8 @@ export class ContextProvider implements vscode.Disposable {
 
   private getDiagnosticsSourceKey() {
     const uri = vscode.window.activeTextEditor?.document.uri.toString();
-    return uri ? `${this._context.workspacePath ?? ''}:${uri}` : null;
+    const editor = vscode.window.activeTextEditor;
+    return uri ? JSON.stringify([this._context.workspacePath, uri, editor?.selection]) : null;
   }
 
   private emitContextIfChanged() {
@@ -943,6 +977,10 @@ function hasRawParentTraversal(path: string): boolean {
   return path.replace(/\\/g, '/').split('/').includes('..');
 }
 
+function comparePositions(a: vscode.Position, b: vscode.Position): number {
+  return a.line - b.line || (a.character ?? 0) - (b.character ?? 0);
+}
+
 type GitChange = { uri: vscode.Uri };
 type GitRepository = {
   state: {
@@ -1035,6 +1073,7 @@ function areEditorContextsEqual(a: EditorContext, b: EditorContext | null) {
     areSelectionsEqual(a.selection, b?.selection ?? null) &&
     areEditorTextContextsEqual(a.editorText ?? null, b?.editorText ?? null) &&
     a.diagnosticsTotal === b?.diagnosticsTotal &&
+    JSON.stringify(a.diagnosticCounts) === JSON.stringify(b?.diagnosticCounts) &&
     areDiagnosticsEqual(a.diagnostics, b?.diagnostics ?? null)
   );
 }
@@ -1067,7 +1106,7 @@ function areDiagnosticsEqual(
       left?.path !== right?.path ||
       left?.severity !== right?.severity ||
       left?.message !== right?.message ||
-      left?.line !== right?.line
+      JSON.stringify(left) !== JSON.stringify(right)
     ) {
       return false;
     }
@@ -1086,6 +1125,7 @@ function cloneEditorContext(context: EditorContext): EditorContext {
     editorText: context.editorText ? { ...context.editorText } : null,
     diagnostics: context.diagnostics.map((diagnostic) => ({ ...diagnostic })),
     diagnosticsTotal: context.diagnosticsTotal,
+    diagnosticCounts: context.diagnosticCounts ? { ...context.diagnosticCounts } : undefined,
   };
 }
 

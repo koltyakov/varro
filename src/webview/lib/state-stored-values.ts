@@ -7,13 +7,13 @@ import type {
 import type {
   DesktopSessionPaneSide,
   DroppedFile,
-  EditorDiagnostic,
   InitialWebviewState,
   PermissionMode,
   WebviewInstanceContext,
 } from '../../shared/protocol';
 import { isPermissionMode } from '../../shared/protocol';
-import { isEditorContext } from '../../shared/extension-message';
+import { isEditorContext, isEditorDiagnostic } from '../../shared/extension-message';
+import { isInlineProblem, uniqueProblems } from './editor-problems';
 import { MAX_NATIVE_PDF_TOTAL_BYTES, isNativePdfAttachment } from '../../shared/native-pdf';
 import { normalizeWorkspaceIdentity } from '../../shared/workspace-path';
 import { STORAGE_KEYS, readStored, writeStored } from './state-storage';
@@ -239,33 +239,17 @@ function normalizeStoredTerminalSelection<T>(value: T): QueuedMessage['terminalS
 function normalizeStoredDiagnostics<T>(value: T): QueuedMessage['attachedDiagnostics'] {
   const record = asStoredRecord(value);
   if (!record || !Array.isArray(record.diagnostics)) return null;
-  const diagnostics = record.diagnostics.slice(0, 20).flatMap<EditorDiagnostic>((item) => {
-    const diagnostic = asStoredRecord(item);
-    if (
-      !isString(diagnostic?.path) ||
-      (diagnostic.severity !== 'error' &&
-        diagnostic.severity !== 'warning' &&
-        diagnostic.severity !== 'info') ||
-      !isString(diagnostic.message) ||
-      !Number.isFinite(diagnostic.line)
-    ) {
-      return [];
-    }
-    return [
-      {
-        path: diagnostic.path,
-        severity: diagnostic.severity,
-        message: diagnostic.message.slice(0, 500),
-        line: Number(diagnostic.line),
-      },
-    ];
-  });
+  const valid = record.diagnostics.filter(isEditorDiagnostic);
+  const diagnostics = uniqueProblems(valid).map((diagnostic) => ({
+    ...diagnostic,
+    relatedInformation: diagnostic.relatedInformation?.map((related) => ({ ...related })),
+  }));
   if (diagnostics.length === 0) return null;
   const total =
     isNumber(record.total) && Number.isInteger(record.total)
-      ? Math.max(diagnostics.length, record.total)
+      ? Math.max(diagnostics.length, record.total - (valid.length - diagnostics.length))
       : diagnostics.length;
-  return { diagnostics, total };
+  return { diagnostics, total, inline: record.inline === true ? true : undefined };
 }
 
 function normalizeStoredQueuedMessage<T>(value: T): QueuedMessage | null {
@@ -297,6 +281,9 @@ function normalizeStoredQueuedMessage<T>(value: T): QueuedMessage | null {
   }
   const terminalSelection = normalizeStoredTerminalSelection(record.terminalSelection);
   const attachedDiagnostics = normalizeStoredDiagnostics(record.attachedDiagnostics);
+  const inlineProblems = Array.isArray(record.inlineProblems)
+    ? record.inlineProblems.filter(isInlineProblem)
+    : [];
   const queuedContextRecord = asStoredRecord(record.queuedContext);
   const queuedContext =
     queuedContextRecord &&
@@ -305,6 +292,9 @@ function normalizeStoredQueuedMessage<T>(value: T): QueuedMessage | null {
       ? {
           editorContext: queuedContextRecord.editorContext,
           currentDocumentEnabled: queuedContextRecord.currentDocumentEnabled,
+          issuesEnabled: isBoolean(queuedContextRecord.issuesEnabled)
+            ? queuedContextRecord.issuesEnabled
+            : undefined,
         }
       : undefined;
   if (
@@ -331,6 +321,7 @@ function normalizeStoredQueuedMessage<T>(value: T): QueuedMessage | null {
     nativePdfs: nativePdfs.length > 0 ? nativePdfs : undefined,
     terminalSelection,
     attachedDiagnostics: attachedDiagnostics || undefined,
+    inlineProblems: inlineProblems.length > 0 ? inlineProblems : undefined,
     queuedContext,
   };
 }

@@ -1,6 +1,12 @@
 import { createComputed, createRoot, createSignal } from 'solid-js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { DatabaseContext, DroppedFile, EditorContext } from '../../shared/protocol';
+import type {
+  DatabaseContext,
+  DroppedFile,
+  EditorContext,
+  InlineProblemAttachment,
+} from '../../shared/protocol';
+import { parseInlineProblem, problemReferenceMarker } from '../lib/editor-problems';
 import type { ClipboardImage, NativePdfAttachment } from '../lib/app-state-types';
 import type { Agent, Message, MessageEntry, Part, PermissionRule, Provider } from '../types';
 import { setState } from '../lib/state';
@@ -75,6 +81,10 @@ function createState(overrides?: {
   providerDefaults?: Record<string, string>;
   modelVariantSelections?: Record<string, string | null>;
   editorContext?: EditorContext;
+  inlineProblems?: InlineProblemAttachment[];
+  issuesEnabled?: boolean;
+  enableProblemsContext?: boolean;
+  issuesAttachment?: { count: number; text: string; inline?: boolean } | null;
   terminalSelection?: { text: string; terminalName: string } | null;
   droppedFiles?: DroppedFile[];
   clipboardImages?: ClipboardImage[];
@@ -82,6 +92,7 @@ function createState(overrides?: {
   attachedDiagnostics?: {
     total: number;
     diagnostics: EditorContext['diagnostics'];
+    inline?: boolean;
   } | null;
   allAgents?: Agent[];
   visionDelegationTexts?: string[];
@@ -112,6 +123,242 @@ function createState(overrides?: {
 }
 
 describe('session-send helpers', () => {
+  it('does not repeat explicitly selected problems in automatic or bulb context', () => {
+    const diagnostic = {
+      path: '/repo/a.ts',
+      line: 1,
+      severity: 'error' as const,
+      message: 'One diagnostic',
+    };
+    const reference = { id: 'one', diagnostic };
+    const editorContext = createEditorContext({
+      activeFile: { path: '/repo/a.ts', relativePath: 'a.ts', language: 'typescript' },
+      diagnostics: [diagnostic],
+      diagnosticCounts: { errors: 1, warnings: 0 },
+    });
+    const source = createState({ editorContext, inlineProblems: [reference] });
+    const send = () =>
+      buildSessionSendBody(
+        source,
+        'session-1',
+        `Explain ${problemReferenceMarker(reference)}`,
+        () => false
+      )!;
+    expect(send().body.parts.some((part) => part.text?.startsWith('[VS Code problems'))).toBe(
+      false
+    );
+    expect(send().body.parts.filter((part) => part.text?.includes('One diagnostic'))).toHaveLength(
+      1
+    );
+    source.attachedDiagnostics = { diagnostics: [diagnostic, diagnostic], total: 2 };
+    const parts = send().body.parts;
+    expect(parts.filter((part) => part.text?.includes('One diagnostic'))).toHaveLength(1);
+    expect(parts.some((part) => part.text?.includes(problemReferenceMarker(reference)))).toBe(
+      false
+    );
+    expect(parts.some((part) => part.text?.includes('[Attached diagnostics: 1 of 1]'))).toBe(true);
+  });
+  it('sends bulb attachments and only referenced inline problems independently', () => {
+    const references: InlineProblemAttachment[] = [
+      {
+        id: 'one',
+        diagnostic: { path: '/repo/one.ts', line: 1, severity: 'error', message: 'Inline one' },
+      },
+      {
+        id: 'two',
+        diagnostic: { path: '/repo/two.ts', line: 2, severity: 'warning', message: 'Inline two' },
+      },
+    ];
+    const state = createState({
+      inlineProblems: references,
+      issuesEnabled: false,
+      attachedDiagnostics: {
+        total: 1,
+        diagnostics: [
+          { path: '/repo/bulb.ts', line: 3, severity: 'error', message: 'Bulb detail' },
+        ],
+      },
+    });
+    const result = buildSessionSendBody(
+      state,
+      'session-1',
+      `Explain ${problemReferenceMarker(references[0]!)}`,
+      () => false
+    )!;
+    const texts = result.body.parts.flatMap((part) => (part.text ? [part.text] : []));
+    expect(texts.some((text) => text.includes('Bulb detail'))).toBe(true);
+    expect(texts.map(parseInlineProblem).filter(Boolean)).toEqual([references[0]]);
+    expect(texts.some((text) => text.includes('Inline two'))).toBe(false);
+    const queued = getQueuedAttachmentSnapshot(state);
+    references[0]!.diagnostic.message = 'Changed later';
+    expect(queued.inlineProblems?.[0]?.diagnostic.message).toBe('Inline one');
+  });
+  it('sends inline Problems snapshots only while their reference is present', () => {
+    const attachedDiagnostics = {
+      total: 1,
+      inline: true,
+      diagnostics: [
+        { path: '/repo/a.ts', line: 1, severity: 'error' as const, message: 'Captured error' },
+      ],
+    };
+    const composer = createState({ attachedDiagnostics, issuesEnabled: false });
+    const send = (text: string) => buildSessionSendBody(composer, 'session-1', text, () => false);
+    expect(send('Explain [Problems]')?.body.parts).toEqual([
+      { type: 'text', text: 'Explain [Problems]' },
+      { type: 'text', text: '[Attached diagnostics: 1 of 1]\nERROR a.ts:1 - Captured error' },
+    ]);
+    expect(send('Explain')?.body.parts).toEqual([{ type: 'text', text: 'Explain' }]);
+    composer.enableProblemsContext = false;
+    expect(send('Explain [Problems]')?.body.parts).toEqual([{ type: 'text', text: 'Explain ' }]);
+  });
+  it('excludes explicit problem attachments when the integration is disabled', () => {
+    const result = buildSessionSendBody(
+      createState({
+        enableProblemsContext: false,
+        attachedDiagnostics: {
+          total: 1,
+          diagnostics: [
+            { path: '/repo/app.ts', severity: 'error', line: 1, message: 'Excluded diagnostic' },
+          ],
+        },
+      }),
+      'session-1',
+      'Explain this',
+      () => false
+    );
+    expect(result?.body.parts).toEqual([{ type: 'text', text: 'Explain this' }]);
+  });
+  it('automatically sends bounded problems with full selected details and total counts', () => {
+    const selectedMessage = `Selected issue\n${'detail '.repeat(100)}`;
+    const editorContext = createEditorContext({
+      activeFile: { path: '/repo/app.ts', relativePath: 'app.ts', language: 'typescript' },
+      diagnosticCounts: { errors: 30, warnings: 1 },
+      diagnostics: [
+        ...Array.from({ length: 20 }, (_, index) => ({
+          path: '/repo/app.ts',
+          line: index + 1,
+          severity: 'error' as const,
+          message: `Error ${index}`,
+        })),
+        {
+          path: '/repo/app.ts',
+          line: 41,
+          column: 13,
+          endLine: 41,
+          endColumn: 17,
+          severity: 'warning',
+          source: 'eslint',
+          code: 'rule-name',
+          message: selectedMessage,
+          intersectsSelection: true,
+          relatedInformation: [
+            { path: '/repo/types.ts', line: 2, column: 3, message: 'Declared here' },
+          ],
+        },
+      ],
+    });
+    const state = createState({ editorContext });
+    const send = (enabled: boolean) =>
+      buildSessionSendBody(state, 'session-1', 'Explain this', () => enabled);
+    const parts = send(true)!.body.parts;
+    const problems = parts.find((part) => part.text?.startsWith('[VS Code problems'))!.text!;
+    expect(problems).toContain('30 errors, 1 warnings');
+    expect(problems).toContain(selectedMessage);
+    expect(problems).toContain('app.ts:41:13-41:17 (eslint rule-name) [intersects selection]');
+    expect(problems).toContain('Related: types.ts:2:3: Declared here');
+    expect(problems.indexOf(selectedMessage)).toBeLessThan(problems.indexOf('Error 0'));
+    expect(problems).toContain('26 additional problems omitted');
+    expect(problems).not.toContain('Error 4');
+    expect(send(false)!.body.parts.some((part) => part.text === problems)).toBe(true);
+    expect(
+      buildSessionSendBody(
+        createState({ editorContext, issuesEnabled: false }),
+        'session-1',
+        'Explain this',
+        () => false
+      )!.body.parts
+    ).toEqual([{ type: 'text', text: 'Explain this' }]);
+    expect(
+      getUserMessageEditText(
+        parts.flatMap((part, index) =>
+          part.type === 'text'
+            ? [
+                {
+                  type: 'text' as const,
+                  text: part.text ?? '',
+                  id: `part-${index}`,
+                  sessionID: 'session-1',
+                  messageID: 'message-1',
+                },
+              ]
+            : []
+        )
+      )
+    ).toBe('Explain this');
+    const explicit = buildSessionSendBody(
+      createState({
+        editorContext,
+        attachedDiagnostics: { total: 31, diagnostics: editorContext.diagnostics },
+      }),
+      'session-1',
+      'Explain this',
+      () => true
+    );
+    expect(explicit!.body.parts.some((part) => part.text?.startsWith('[VS Code problems'))).toBe(
+      false
+    );
+  });
+
+  it('omits automatic context for clean files and bounds oversized selected diagnostics', () => {
+    const editorContext = createEditorContext({
+      activeFile: { path: '/repo/app.ts', relativePath: 'app.ts', language: 'typescript' },
+    });
+    const send = () =>
+      buildSessionSendBody(createState({ editorContext }), 'session-1', 'Explain', () => true)!;
+    expect(send().body.parts.some((part) => part.text?.startsWith('[VS Code problems'))).toBe(
+      false
+    );
+    editorContext.diagnostics = Array.from({ length: 5 }, () => ({
+      path: '/repo/app.ts',
+      line: 1,
+      severity: 'error',
+      message: 'x'.repeat(10000),
+      intersectsSelection: true,
+    }));
+    const problems = send().body.parts.find((part) =>
+      part.text?.startsWith('[VS Code problems')
+    )!.text!;
+    expect(problems.length).toBeLessThan(12500);
+    expect(problems).toContain('[Problem details truncated]');
+  });
+
+  it('preserves the problem attachment snapshot while editing instead of using live diagnostics', () => {
+    const snapshot = {
+      count: 1,
+      text: '[VS Code problems for original.ts: 1 errors, 0 warnings]\nOriginal error',
+    };
+    const composer = createState({
+      issuesAttachment: snapshot,
+      editorContext: createEditorContext({
+        activeFile: { path: '/repo/other.ts', relativePath: 'other.ts', language: 'typescript' },
+        diagnostics: [
+          { path: '/repo/other.ts', line: 1, severity: 'error', message: 'Unrelated error' },
+        ],
+      }),
+    });
+    const send = () =>
+      buildSessionSendBody(composer, 'session-1', 'Revised prompt', () => false)!.body.parts;
+    expect(send()).toEqual([
+      { type: 'text', text: 'Revised prompt' },
+      { type: 'text', text: snapshot.text },
+    ]);
+    composer.issuesEnabled = false;
+    expect(send()).toEqual([{ type: 'text', text: 'Revised prompt' }]);
+    composer.issuesEnabled = true;
+    composer.issuesAttachment = null;
+    expect(send()).toEqual([{ type: 'text', text: 'Revised prompt' }]);
+  });
+
   it('sends multiple skill tool requests once each and preserves editable prompt and attachments', () => {
     const text = 'Use $[browser-bridge] here and finish with $[unslop]. Again $[browser-bridge]';
     const result = buildSessionSendBody(

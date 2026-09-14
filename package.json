@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: OpenCode Workbench",
-  "version": "0.28.22",
+  "version": "0.28.23",
   "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
@@ -227,6 +227,11 @@
         "title": "Varro: Add to Context"
       },
       {
+        "command": "varro.chat.addProblemsToContext",
+        "title": "Varro: Add to Context",
+        "enablement": "config.varro.chat.enableProblemsContext"
+      },
+      {
         "command": "varro.chat.addSelectionToContext",
         "title": "Varro: Add to Context"
       },
@@ -320,6 +325,10 @@
       ],
       "commandPalette": [
         {
+          "command": "varro.chat.addProblemsToContext",
+          "when": "false"
+        },
+        {
           "command": "varro.chat.showFileDiffs",
           "when": "!varro:showFileDiffs"
         },
@@ -405,6 +414,11 @@
           "type": "boolean",
           "default": false,
           "description": "Show the changed-files panel above the chat input."
+        },
+        "varro.chat.enableProblemsContext": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable VS Code Problems context in chat. Disable to hide the Problems attachment chip and exclude diagnostics from prompts, including queued messages."
         },
         "varro.chat.showTurnTimer": {
           "type": "boolean",

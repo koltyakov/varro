@@ -81,6 +81,21 @@ export function syncCurrentDocumentForWorkspace(workspacePath: string | null) {
   );
   setState('draftCurrentDocumentEnabled', null);
   setState('currentDocumentEnabledBySession', {});
+  const issueValues = readStoredBooleanRecord(STORAGE_KEYS.projectIssuesEnabled);
+  setState(
+    'issuesEnabled',
+    normalizedWorkspace ? (issueValues[normalizedWorkspace] ?? true) : true
+  );
+}
+
+export function toggleIssuesEnabled() {
+  const enabled = !state.issuesEnabled;
+  setState('issuesEnabled', enabled);
+  const workspacePath = normalizeWorkspacePath(state.editorContext.workspacePath);
+  if (!workspacePath) return;
+  const values = readStoredBooleanRecord(STORAGE_KEYS.projectIssuesEnabled);
+  values[workspacePath] = enabled;
+  writeStored(STORAGE_KEYS.projectIssuesEnabled, values);
 }
 
 function saveProjectCurrentDocumentEnabled(enabled: boolean) {

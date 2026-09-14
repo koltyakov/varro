@@ -138,6 +138,7 @@ vi.mock('../lib/client', () => ({
       status: vi.fn(async () => ({})),
     },
     varro: {
+      workspaceProblems: vi.fn(async () => ({ total: 0, diagnostics: [] })),
       session: {
         diffSummary: vi.fn(async () => ({
           files: 0,
@@ -255,6 +256,9 @@ afterEach(() => {
   setState('droppedFiles', []);
   setState('terminalSelection', null);
   setState('attachedDiagnostics', null);
+  setState('inlineProblems', []);
+  setState('issuesEnabled', true);
+  setState('enableProblemsContext', true);
   setState('editorContext', {
     databaseContext: undefined,
     workspacePath: null,
@@ -262,6 +266,7 @@ afterEach(() => {
     activeFile: null,
     selection: null,
     diagnostics: [],
+    diagnosticCounts: undefined,
   });
   setState('queuedMessages', []);
   setState('queuedMessageDispatchingId', null);
@@ -316,6 +321,8 @@ afterEach(() => {
     activeStartedAt: null,
   });
   vi.mocked(client.varro.resolveWorkspacePath).mockClear();
+  vi.mocked(client.varro.workspaceProblems).mockReset();
+  vi.mocked(client.varro.workspaceProblems).mockResolvedValue({ total: 0, diagnostics: [] });
   vi.mocked(client.session.list).mockReset();
   vi.mocked(client.session.list).mockResolvedValue({ items: [], hasMore: false });
   vi.mocked(client.session.get).mockReset();
@@ -3598,6 +3605,7 @@ describe('ChatInput', () => {
         diagnostics: [],
       },
       currentDocumentEnabled: true,
+      issuesEnabled: true,
       visionDelegationAvailable: false,
     });
     expect(container?.querySelector('.chat-queue-meta-item')?.getAttribute('aria-label')).toBe(
@@ -7016,6 +7024,207 @@ describe('ChatInput', () => {
     expect(providerConnectionRequest()?.providerID).toBeNull();
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(inputText()).toBe('');
+  });
+
+  it('shows a Problems count chip with an independent keyboard-accessible context toggle', async () => {
+    setState('issuesEnabled', true);
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: { path: '/repo/app.ts', relativePath: 'app.ts', language: 'typescript' },
+      selection: null,
+      diagnostics: [
+        { path: '/repo/app.ts', line: 1, severity: 'error', message: 'Private diagnostic detail' },
+      ],
+      diagnosticCounts: { errors: 1, warnings: 2 },
+    });
+    cleanup = render(() => ChatInput(), container!);
+    const problemChip = () =>
+      Array.from(
+        container!.querySelectorAll<HTMLElement>(
+          '.chat-attachments-container .chat-attachment-chip'
+        )
+      ).find((chip) => chip.querySelector('.chip-label')?.textContent === 'Problems')!;
+    expect(problemChip().querySelector('.chip-detail')?.textContent).toBe('3');
+    expect(problemChip().textContent).not.toContain('·');
+    expect(problemChip().getAttribute('aria-pressed')).toBe('true');
+    const currentDocumentEnabled = state.currentDocumentEnabled;
+    problemChip().click();
+    await flushAsyncWork();
+    expect(state.issuesEnabled).toBe(false);
+    expect(state.currentDocumentEnabled).toBe(currentDocumentEnabled);
+    expect(problemChip().getAttribute('aria-pressed')).toBe('false');
+    expect(problemChip().classList.contains('disabled')).toBe(true);
+    expect(JSON.parse(window.localStorage.getItem('varro.projectIssuesEnabled') || '{}')).toEqual({
+      '/repo': false,
+    });
+    problemChip().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flushAsyncWork();
+    expect(state.issuesEnabled).toBe(true);
+    expect(problemChip().getAttribute('aria-pressed')).toBe('true');
+    expect(container?.querySelector('.rich-composer')?.textContent).not.toContain(
+      'Private diagnostic detail'
+    );
+    setState('enableProblemsContext', false);
+    await flushAsyncWork();
+    expect(problemChip()).toBeUndefined();
+    expect(state.issuesEnabled).toBe(true);
+    setState('enableProblemsContext', true);
+    await flushAsyncWork();
+    expect(problemChip().getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('accumulates bulb-menu problems as attachments without changing the draft', async () => {
+    setInputText('Explain this');
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container!.querySelector<HTMLElement>('.rich-composer')!;
+    editor.focus();
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'End', bubbles: true }));
+    const diagnostics = [
+      { path: '/repo/a.ts', line: 2, severity: 'error', message: 'Selected problem' },
+    ];
+    const message = { type: 'command/attach-problems', payload: { diagnostics } };
+    window.dispatchEvent(new MessageEvent('message', { data: message }));
+    await flushAsyncWork();
+    expect(inputText()).toBe('Explain this');
+    expect(state.attachedDiagnostics).toEqual({ diagnostics, total: 1, inline: false });
+    expect(container!.querySelectorAll('[data-chip-type="mention-problems"]')).toHaveLength(0);
+    expect(container!.querySelector('.chat-attachments-container')?.textContent).toContain(
+      'Problems'
+    );
+    window.dispatchEvent(new MessageEvent('message', { data: message }));
+    await flushAsyncWork();
+    expect(state.attachedDiagnostics?.total).toBe(1);
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: {
+          type: 'command/attach-problems',
+          payload: {
+            diagnostics: [
+              { path: '/repo/b.ts', line: 3, severity: 'warning', message: 'Another problem' },
+            ],
+          },
+        },
+      })
+    );
+    await flushAsyncWork();
+    expect(state.attachedDiagnostics?.total).toBe(2);
+    expect(inputText()).toBe('Explain this');
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('opens /problems and attaches All without replacing automatic editor context', async () => {
+    const snapshot = {
+      total: 2,
+      diagnostics: [
+        { path: '/repo/a.ts', line: 1, severity: 'error' as const, message: 'A error' },
+        { path: '/repo/b.ts', line: 2, severity: 'warning' as const, message: 'B warning' },
+      ],
+    };
+    vi.mocked(client.varro.workspaceProblems).mockResolvedValue(snapshot);
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: { path: '/repo/a.ts', relativePath: 'a.ts', language: 'typescript' },
+      selection: null,
+      diagnostics: [snapshot.diagnostics[0]!],
+      diagnosticCounts: { errors: 1, warnings: 0 },
+    });
+    setInputText('/problems');
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container!.querySelector<HTMLElement>('.rich-composer')!;
+    editor.focus();
+    await flushAsyncWork();
+    editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flushAsyncWork();
+    expect(inputText()).toBe('/problems ');
+    const completion = container!.querySelector<HTMLButtonElement>('.completion-problems');
+    expect(completion?.textContent).toContain('All');
+    expect(container!.querySelectorAll('.completion-problems')).toHaveLength(3);
+    completion!.click();
+    await flushAsyncWork();
+    expect(client.varro.workspaceProblems).toHaveBeenCalledOnce();
+    expect(state.attachedDiagnostics).toBeNull();
+    expect(state.inlineProblems).toHaveLength(1);
+    expect(state.inlineProblems[0]?.group).toEqual(snapshot.diagnostics);
+    expect(state.editorContext.diagnostics).toEqual([snapshot.diagnostics[0]]);
+    const problemChips = container!.querySelectorAll<HTMLElement>(
+      '[data-chip-type="mention-problems"]'
+    );
+    expect(problemChips).toHaveLength(1);
+    expect(problemChips[0]?.querySelector('.inline-chip-label')?.textContent).toBe('Problems');
+    expect(problemChips[0]?.querySelector('.inline-chip-detail')?.textContent).toBe('2');
+    expect(problemChips[0]?.closest('.rich-composer')).toBe(editor);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('ignores a workspace problem response after switching sessions', async () => {
+    let resolve!: (value: Awaited<ReturnType<typeof client.varro.workspaceProblems>>) => void;
+    vi.mocked(client.varro.workspaceProblems).mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        })
+    );
+    setInputText('/problems ');
+    cleanup = render(() => ChatInput(), container!);
+    container!.querySelector<HTMLElement>('.rich-composer')!.focus();
+    await flushAsyncWork();
+    setInputText('A different draft');
+    setState('activeSessionId', 'other-session');
+    resolve({
+      total: 1,
+      diagnostics: [{ path: '/repo/a.ts', line: 1, severity: 'error', message: 'Stale' }],
+    });
+    await flushAsyncWork();
+    expect(state.attachedDiagnostics).toBeNull();
+  });
+
+  it('attaches an individual problem without sending the command text', async () => {
+    const diagnostics = [
+      { path: '/repo/a.ts', line: 1, severity: 'error' as const, message: 'First error' },
+      { path: '/repo/b.ts', line: 2, severity: 'warning' as const, message: 'Second warning' },
+    ];
+    vi.mocked(client.varro.workspaceProblems).mockResolvedValue({ total: 2, diagnostics });
+    setInputText('Explain /problems ');
+    cleanup = render(() => ChatInput(), container!);
+    container!.querySelector<HTMLElement>('.rich-composer')!.focus();
+    await flushAsyncWork();
+    const choices = container!.querySelectorAll<HTMLButtonElement>('.completion-problems');
+    expect(choices).toHaveLength(3);
+    choices[2]!.click();
+    await flushAsyncWork();
+    expect(state.attachedDiagnostics).toBeNull();
+    expect(state.inlineProblems).toHaveLength(1);
+    expect(state.inlineProblems[0]?.diagnostic).toEqual(diagnostics[1]);
+    expect(inputText()).toMatch(/^Explain \[Problem [\w-]+\] $/);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'command/attach-problems', payload: { diagnostics: [diagnostics[0]] } },
+      })
+    );
+    await flushAsyncWork();
+    const chip = container!.querySelector<HTMLElement>('[data-chip-type="mention-problems"]')!;
+    const range = document.createRange();
+    range.setStartAfter(chip);
+    range.collapse(true);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    const editor = container!.querySelector<HTMLElement>('.rich-composer')!;
+    editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true }));
+    await flushAsyncWork();
+    expect(state.attachedDiagnostics?.diagnostics).toEqual([diagnostics[0]]);
+    expect(inputText()).not.toContain('[Problem ');
+    expect(state.inlineProblems).toHaveLength(0);
+    editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }));
+    await flushAsyncWork();
+    expect(state.inlineProblems).toHaveLength(1);
+    expect(container!.querySelector('[data-chip-type="mention-problems"]')).not.toBeNull();
+    expect(state.attachedDiagnostics?.diagnostics).toEqual([diagnostics[0]]);
   });
 
   it('attaches active-file diagnostics with the diagnostics slash command', async () => {

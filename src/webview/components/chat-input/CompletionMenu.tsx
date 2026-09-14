@@ -2,12 +2,17 @@ import { For, Show, createEffect, onCleanup, onMount } from 'solid-js';
 import { FileTypeIcon } from '../FileTypeIcon';
 import { FolderIcon } from '../FolderIcon';
 import { MaterialChipIcon } from '../MaterialChipIcon';
+import { ProblemsIcon } from '../ProblemsIcon';
 import {
   clampPopupToViewport,
   flipPopupDownIfNeeded,
   observePopupViewport,
 } from '../../lib/popup-position';
-import type { DroppedFile, DatabaseTableReference } from '../../../shared/protocol';
+import type {
+  DroppedFile,
+  DatabaseTableReference,
+  EditorDiagnostic,
+} from '../../../shared/protocol';
 import type { Session } from '../../types';
 import { formatRelativeAge } from '../../lib/message-metrics';
 
@@ -56,6 +61,14 @@ export type SlashCommand = {
 };
 
 export type CompletionItem =
+  | {
+      key: string;
+      type: 'problems';
+      label: string;
+      detail: string;
+      diagnostic: EditorDiagnostic | null;
+      severity?: EditorDiagnostic['severity'];
+    }
   | (SlashCommand & { key: string; type: 'slash' | 'skill' })
   | MentionCompletionItem;
 
@@ -64,6 +77,7 @@ export function CompletionMenu(props: {
   selectedIndex: number;
   onSelect: (item: CompletionItem) => void;
   header?: string;
+  emptyMessage?: string;
 }) {
   // oxlint-disable-next-line no-unassigned-vars
   let menuRef: HTMLDivElement | undefined;
@@ -123,6 +137,11 @@ export function CompletionMenu(props: {
       <Show when={props.header}>
         <div class="composer-completion-header">{props.header}</div>
       </Show>
+      <Show when={props.items.length === 0 && props.emptyMessage}>
+        <div class="composer-completion-empty" role="status">
+          {props.emptyMessage}
+        </div>
+      </Show>
       <For each={props.items}>
         {(item, index) => {
           const isSlash = item.type === 'slash' || item.type === 'skill';
@@ -154,6 +173,8 @@ export function CompletionMenu(props: {
                         <MaterialChipIcon kind="skill" class="completion-skill-icon" />
                       ) : item.type === 'session' ? (
                         <MaterialChipIcon kind="session" class="completion-session-icon" />
+                      ) : item.type === 'problems' ? (
+                        <ProblemsIcon severity={item.diagnostic?.severity ?? item.severity} />
                       ) : item.type === 'table' ? (
                         <MaterialChipIcon kind="table" class="completion-file-type-icon" />
                       ) : item.type === 'file' && item.file.type === 'directory' ? (

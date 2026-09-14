@@ -7,6 +7,7 @@ import {
   MAX_DROPPED_CONTENT_TOTAL_BYTES,
 } from '../../shared/dropped-content-policy';
 import { OPENCODE_TERMINAL_COMMANDS } from '../../shared/opencode-install';
+import { isInlineProblemAttachment } from '../../shared/extension-message';
 import {
   isPermissionMode,
   isSafePersistedSessionId,
@@ -1385,6 +1386,12 @@ function isValidQueuedMessageRouting(record: UnknownRecord) {
   if (!Array.isArray(record.droppedFiles) || !Array.isArray(record.clipboardImages)) return false;
   if (record.attachedDiagnostics !== undefined && !asRecord(record.attachedDiagnostics))
     return false;
+  if (
+    record.inlineProblems !== undefined &&
+    (!Array.isArray(record.inlineProblems) ||
+      !record.inlineProblems.every(isInlineProblemAttachment))
+  )
+    return false;
   const queuedContext = asRecord(record.queuedContext);
   if (record.queuedContext !== undefined && !queuedContext) return false;
   if (
@@ -1772,6 +1779,7 @@ const API_ROUTES: ApiRoute[] = [
     ({ method, url }) => method === 'GET' && onlyQuery(url, 'path') && requiredQuery(url, 'path')
   ),
   route(VARRO_API_ENDPOINTS.workspaceFilePick, methodsNoQuery('GET')),
+  route(VARRO_API_ENDPOINTS.workspaceProblems, methodsNoQuery('GET')),
   route(
     VARRO_API_ENDPOINTS.sessionHistoryScope,
     ({ method, url }) =>

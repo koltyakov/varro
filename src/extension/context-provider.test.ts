@@ -1,6 +1,7 @@
 /* oxlint-disable anti-slop/no-known-value-widening, anti-slop/no-module-mocking, anti-slop/no-unknown-parameters, anti-slop/require-safety-comment-for-type-assertion -- These tests exercise the VS Code import boundary with partial editor, terminal, and workspace fixtures. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as FsPromises from 'node:fs/promises';
+import type { Diagnostic } from 'vscode';
 
 const loggerMock = vi.hoisted(() => ({
   warn: vi.fn(),
@@ -68,7 +69,15 @@ const vscodeMock = vi.hoisted(() => ({
   languages: {
     onDidChangeDiagnostics: vi.fn((_listener?: () => void) => ({ dispose: vi.fn() })),
     getDiagnostics: vi.fn(
-      () => [] as Array<{ severity: number; message: string; range: { start: { line: number } } }>
+      () =>
+        [] as Array<
+          Pick<Diagnostic, 'severity' | 'message' | 'source' | 'code' | 'relatedInformation'> & {
+            range: {
+              start: { line: number; character?: number };
+              end?: { line: number; character: number };
+            };
+          }
+        >
     ),
   },
   workspace: {
@@ -1363,6 +1372,7 @@ describe('ContextProvider', () => {
         editorText: null,
         diagnostics: [],
         diagnosticsTotal: 0,
+        diagnosticCounts: { errors: 0, warnings: 0 },
       });
     } finally {
       provider.dispose();
@@ -1406,6 +1416,7 @@ describe('ContextProvider', () => {
         editorText: null,
         diagnostics: [],
         diagnosticsTotal: 0,
+        diagnosticCounts: { errors: 0, warnings: 0 },
       });
       expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
     } finally {
@@ -1453,6 +1464,68 @@ describe('ContextProvider', () => {
     }
   });
 
+  it('counts all problems and reranks exact selection intersections before truncating', async () => {
+    vi.useFakeTimers();
+    const editor = {
+      document: {
+        uri: { fsPath: '/repo/app.ts', scheme: 'file', toString: () => 'file:///repo/app.ts' },
+        languageId: 'typescript',
+      },
+      selection: {
+        isEmpty: false,
+        start: { line: 40, character: 10 },
+        end: { line: 40, character: 20 },
+        active: { line: 40, character: 20 },
+      },
+    };
+    vscodeMock.window.activeTextEditor = editor;
+    const selectedMessage = 'Selected warning\nwith full detail';
+    vscodeMock.languages.getDiagnostics.mockReturnValue([
+      ...Array.from({ length: 25 }, (_, line) => ({
+        severity: 0,
+        message: `Error ${line}`,
+        range: { start: { line, character: 0 }, end: { line, character: 1 } },
+      })),
+      {
+        severity: 1,
+        message: selectedMessage,
+        source: 'eslint',
+        code: 'rule-name',
+        range: { start: { line: 40, character: 12 }, end: { line: 40, character: 16 } },
+      },
+    ]);
+    let onSelectionChange: (() => void) | undefined;
+    vscodeMock.window.onDidChangeTextEditorSelection.mockImplementation((listener) => {
+      onSelectionChange = listener!;
+      return { dispose: vi.fn() };
+    });
+    const provider = new ContextProvider(vi.fn());
+    try {
+      expect(provider.context.diagnosticCounts).toEqual({ errors: 25, warnings: 1 });
+      expect(provider.context.diagnostics).toHaveLength(20);
+      expect(provider.context.diagnostics[0]).toMatchObject({
+        message: selectedMessage,
+        source: 'eslint',
+        code: 'rule-name',
+        line: 41,
+        column: 13,
+        endLine: 41,
+        endColumn: 17,
+        intersectsSelection: true,
+      });
+      // A selection ending exactly at the diagnostic start does not intersect it.
+      editor.selection.start.character = 0;
+      editor.selection.end.character = 12;
+      onSelectionChange?.();
+      await vi.advanceTimersByTimeAsync(150);
+      expect(provider.context.diagnostics.some((d) => d.intersectsSelection)).toBe(false);
+      expect(provider.context.diagnostics[0]?.severity).toBe('error');
+    } finally {
+      provider.dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it('does not emit duplicate context updates for unchanged editor state', async () => {
     const onChange = vi.fn();
     const activeTextEditorListener = vi.fn();
@@ -1493,11 +1566,11 @@ describe('ContextProvider', () => {
     const provider = new ContextProvider(onChange);
 
     try {
-      expect(onChange).toHaveBeenCalledTimes(2);
+      expect(onChange).toHaveBeenCalledTimes(1);
 
       activeTextEditorListener();
 
-      expect(onChange).toHaveBeenCalledTimes(2);
+      expect(onChange).toHaveBeenCalledTimes(1);
       expect(onChange).toHaveBeenLastCalledWith({
         workspacePath: '/repo',
         workspaceDirectory: '/repo',
@@ -1519,9 +1592,14 @@ describe('ContextProvider', () => {
             severity: 'error',
             message: 'bad',
             line: 7,
+            column: 1,
+            endLine: 7,
+            endColumn: 1,
+            intersectsSelection: false,
           },
         ],
         diagnosticsTotal: 1,
+        diagnosticCounts: { errors: 1, warnings: 0 },
       });
     } finally {
       provider.dispose();

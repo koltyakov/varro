@@ -1,4 +1,4 @@
-import { Show, createEffect, createSignal, onMount, onCleanup } from 'solid-js';
+import { For, Show, createEffect, createSignal, onMount, onCleanup } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { splitExternalLinkText } from '../../lib/external-link';
 import { emptyPageIcon, folderIcon } from '../../lib/ui-icons';
@@ -11,6 +11,9 @@ import {
 import { createUiIconElement } from '../UiIcon';
 import { CompletionMenu, type CompletionItem } from './CompletionMenu';
 import { registerComposerOverlayDismiss } from './composer-overlay-dismiss';
+import type { EditorDiagnostic } from '../../../shared/protocol';
+import { getProblemsIconSource } from '../ProblemsIcon';
+import { ProblemsTooltip } from '../ProblemsTooltip';
 
 type ComposerClipboardEvent = ClipboardEvent & {
   __varroPasteText?: string;
@@ -24,6 +27,7 @@ export type RichComposerChip = {
     | 'mention-file'
     | 'mention-agent'
     | 'mention-skill'
+    | 'mention-problems'
     | 'mention-session'
     | 'external-link'
     | 'image';
@@ -41,7 +45,10 @@ export type RichComposerChip = {
     | 'skill'
     | 'session'
     | 'external-link'
-    | 'git';
+    | 'git'
+    | 'problems';
+  severity?: EditorDiagnostic['severity'];
+  problemDetails?: string;
   disabled?: boolean;
   previewImage?: { url: string; alt: string };
   textMarker: string;
@@ -65,6 +72,7 @@ export function RichComposerArea(props: {
   completionItems: CompletionItem[];
   completionSelectedIndex: number;
   completionHeader?: string;
+  completionEmptyMessage?: string;
   onInput: (text: string, cursorOffset: number) => void;
   onKeyDown: (e: KeyboardEvent) => void;
   onPaste: (e: ClipboardEvent) => void;
@@ -85,6 +93,9 @@ export function RichComposerArea(props: {
   let revealCaretAfterControlledInput = false;
   let nativeInputSync: { value: string; cursorOffset: number } | undefined;
   let unregisterComposerDismiss: (() => void) | undefined;
+  const [problemTooltipTargets, setProblemTooltipTargets] = createSignal<
+    Array<{ element: HTMLElement; text: string }>
+  >([]);
   const [preview, setPreview] = createSignal<{
     chipId: string;
     image: { url: string; alt: string };
@@ -121,6 +132,8 @@ export function RichComposerArea(props: {
 
   function buildDom(text: string, chips: Map<string, RichComposerChip>): DocumentFragment {
     const frag = document.createDocumentFragment();
+    const tooltipTargets: Array<{ element: HTMLElement; text: string }> = [];
+    setProblemTooltipTargets([]);
     if (!text) return frag;
 
     const sortedMarkers = Array.from(chips.keys()).toSorted((a, b) => b.length - a.length);
@@ -140,7 +153,9 @@ export function RichComposerArea(props: {
         if (isAtomicChip && previousNode instanceof HTMLBRElement) {
           frag.appendChild(document.createTextNode(CARET_SPACER));
         }
-        frag.appendChild(createChipElement(chip));
+        const element = createChipElement(chip);
+        frag.appendChild(element);
+        if (chip.problemDetails) tooltipTargets.push({ element, text: chip.problemDetails });
         if (chip.type !== 'external-link') {
           frag.appendChild(document.createTextNode(CARET_SPACER));
         }
@@ -148,6 +163,7 @@ export function RichComposerArea(props: {
         appendTextWithLineBreaks(frag, part, index === parts.length - 1);
       }
     }
+    setProblemTooltipTargets(tooltipTargets);
     return frag;
   }
 
@@ -168,12 +184,22 @@ export function RichComposerArea(props: {
     if (!isInlineReference) span.dataset.chipId = chip.id;
     span.dataset.chipType = chip.type;
     if (chip.previewImage) span.dataset.previewImage = 'true';
-    span.setAttribute('title', chip.title || chip.label);
+    if (!chip.problemDetails) span.setAttribute('title', chip.title || chip.label);
 
     const hasFormatIcon =
       chip.icon === 'file' || (chip.icon === 'image' && /\.[^./]+$/.test(chip.path || chip.label));
     const materialIconKind = getMaterialIconKind(chip.icon);
-    const icon = hasFormatIcon || materialIconKind ? null : getChipIcon(chip.icon);
+    const icon =
+      chip.icon === 'problems'
+        ? createUiIconElement(getProblemsIconSource(chip.severity), {
+            className: 'inline-chip-icon problems-icon',
+            width: 12,
+            height: 12,
+          })
+        : hasFormatIcon || materialIconKind
+          ? null
+          : getChipIcon(chip.icon);
+    if (icon && chip.icon === 'problems') icon.dataset.severity = chip.severity ?? 'warning';
     let iconWrapper: HTMLSpanElement | undefined;
     if (icon || hasFormatIcon || materialIconKind) {
       iconWrapper = document.createElement('span');
@@ -650,6 +676,8 @@ export function RichComposerArea(props: {
           chip.icon,
           chip.disabled,
           chip.textMarker,
+          chip.severity,
+          chip.problemDetails,
         ])
     );
     if (!editorEl) return;
@@ -1036,9 +1064,19 @@ export function RichComposerArea(props: {
           items={props.completionItems}
           selectedIndex={props.completionSelectedIndex}
           header={props.completionHeader}
+          emptyMessage={props.completionEmptyMessage}
           onSelect={props.onSelectCompletion}
         />
       </Show>
+      <For each={problemTooltipTargets()}>
+        {(target) => (
+          <ProblemsTooltip
+            target={target.element}
+            text={target.text}
+            action="Click to view captured details"
+          />
+        )}
+      </For>
     </div>
   );
 }

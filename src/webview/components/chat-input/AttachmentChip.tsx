@@ -5,9 +5,10 @@ import { AttachmentLabel } from '../AttachmentLabel';
 import { FileTypeIcon } from '../FileTypeIcon';
 import { FolderIcon } from '../FolderIcon';
 import { MaterialChipIcon } from '../MaterialChipIcon';
-import { WarningIcon } from '../WarningIcon';
+import { ProblemsIcon } from '../ProblemsIcon';
 import { UiIcon } from '../UiIcon';
 import { registerComposerOverlayDismiss } from './composer-overlay-dismiss';
+import type { EditorDiagnostic } from '../../../shared/protocol';
 
 export function AttachmentChip(props: {
   label: string;
@@ -15,6 +16,7 @@ export function AttachmentChip(props: {
   detail?: string | null;
   disabled?: boolean;
   icon?: 'file' | 'folder' | 'image' | 'terminal' | 'warning' | 'table';
+  severity?: EditorDiagnostic['severity'];
   toggle?: boolean;
   onClick?: () => void;
   onRemove?: () => void;
@@ -126,7 +128,7 @@ export function AttachmentChip(props: {
         <MaterialChipIcon kind="table" class="chip-icon" />
       </Show>
       <Show when={props.icon === 'warning'}>
-        <WarningIcon class="chip-icon" width={12} height={12} />
+        <ProblemsIcon severity={props.severity} />
       </Show>
       <Show when={hasFormatIcon()}>
         <FileTypeIcon path={props.path || props.label} class="chip-icon" />

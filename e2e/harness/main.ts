@@ -5172,6 +5172,26 @@ async function handleApiRequest(
     return state.recycleBinEntries;
   }
 
+  if (method === 'GET' && path === '/varro/workspace-problems') {
+    return {
+      total: 2,
+      diagnostics: [
+        {
+          path: `${WORKSPACE_PATH}/playwright.config.ts`,
+          line: 1,
+          severity: 'error',
+          message: 'Missing playwright dependency',
+        },
+        {
+          path: `${WORKSPACE_PATH}/src/other.ts`,
+          line: 9,
+          severity: 'warning',
+          message: 'Unused workspace variable',
+        },
+      ],
+    };
+  }
+
   if (method === 'GET' && path === '/varro/session-history-scope') {
     return { scope: 'directory', git: true };
   }

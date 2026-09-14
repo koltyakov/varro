@@ -32,6 +32,25 @@ export interface EditorDiagnostic {
   severity: 'error' | 'warning' | 'info';
   message: string;
   line: number;
+  column?: number;
+  endLine?: number;
+  endColumn?: number;
+  source?: string;
+  code?: string | number;
+  intersectsSelection?: boolean;
+  relatedInformation?: Array<{ path: string; line: number; column: number; message: string }>;
+}
+
+export interface WorkspaceProblemsSnapshot {
+  diagnostics: EditorDiagnostic[];
+  total: number;
+}
+
+export interface InlineProblemAttachment {
+  id: string;
+  diagnostic: EditorDiagnostic;
+  /** All-selection snapshot; diagnostic remains a representative entry. */
+  group?: EditorDiagnostic[];
 }
 
 /** A detached snapshot of a loaded database grid. Values use strings to preserve SQL precision. */
@@ -69,6 +88,7 @@ export interface EditorContext {
   databaseContext?: DatabaseContext | null;
   diagnostics: EditorDiagnostic[];
   diagnosticsTotal?: number;
+  diagnosticCounts?: { errors: number; warnings: number };
 }
 
 export interface ContextLineRange {
@@ -409,6 +429,7 @@ export const VARRO_API_ENDPOINTS = {
   sessionHistoryScope: `${VARRO_API_NAMESPACE}/session-history-scope`,
   workspaceFile: `${VARRO_API_NAMESPACE}/workspace-file`,
   workspaceFilePick: `${VARRO_API_NAMESPACE}/workspace-file/pick`,
+  workspaceProblems: `${VARRO_API_NAMESPACE}/workspace-problems`,
   workspacePathResolve: `${VARRO_API_NAMESPACE}/workspace-path/resolve`,
   permissionJudge: `${VARRO_API_NAMESPACE}/permission/judge`,
   permissionJudgeModel: `${VARRO_API_NAMESPACE}/permission/judge/model`,
@@ -752,6 +773,7 @@ export type QueuedContextSnapshot = {
     };
   };
   currentDocumentEnabled: boolean;
+  issuesEnabled?: boolean;
   visionDelegationAvailable?: boolean;
 };
 
@@ -767,7 +789,8 @@ export type QueuedMessageSnapshot = {
   clipboardImages: ClipboardImageSnapshot[];
   nativePdfs?: NativePdfAttachment[];
   terminalSelection: TerminalSelection | null;
-  attachedDiagnostics?: { diagnostics: EditorDiagnostic[]; total: number };
+  attachedDiagnostics?: { diagnostics: EditorDiagnostic[]; total: number; inline?: boolean };
+  inlineProblems?: InlineProblemAttachment[];
   queuedContext?: QueuedContextSnapshot;
 };
 
@@ -795,6 +818,7 @@ export type InitialWebviewState = {
   expandThinking?: boolean;
   showChangedFiles?: boolean;
   showTurnTimer?: boolean;
+  enableProblemsContext?: boolean;
   desktopSessionPaneSide?: DesktopSessionPaneSide;
   defaultPermissionMode?: PermissionMode;
   chatFontSize: number;
@@ -931,6 +955,7 @@ export type ExtensionMessage =
   | { type: 'command/open-session'; payload: { sessionId: string; directory?: string } }
   | { type: 'command/highlight-session' }
   | { type: 'command/focus-input' }
+  | { type: 'command/attach-problems'; payload: { diagnostics: EditorDiagnostic[] } }
   | { type: 'command/search-sessions' }
   | { type: 'command/open-attention-sessions' }
   | { type: 'command/open-completed-sessions' }

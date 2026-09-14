@@ -15,6 +15,8 @@ import { logger } from './logger';
 import { compareVersions, extractVersion } from './server-utils';
 import { renderAboutHtml } from './about-view';
 import { diagnosticTimeline } from './diagnostics';
+import { parseExtensionMessage } from '../shared/extension-message';
+import { toEditorDiagnostic } from './workspace-problems';
 
 type ExtensionPackageJson = {
   name?: unknown;
@@ -45,6 +47,67 @@ export function registerCommands(
   let aboutDiagnosticsWithPaths = '';
 
   context.subscriptions.push(
+    vscode.languages.registerCodeActionsProvider(
+      { scheme: 'file' },
+      {
+        provideCodeActions(document, _range, actionContext, token) {
+          if (
+            token.isCancellationRequested ||
+            actionContext.diagnostics.length === 0 ||
+            !vscode.workspace
+              .getConfiguration('varro')
+              .get<boolean>('chat.enableProblemsContext', true)
+          )
+            return [];
+          // The Problems view includes contributed quick fixes in its context menu.
+          return [
+            {
+              title: 'Varro: Add to Context',
+              kind: vscode.CodeActionKind.QuickFix,
+              diagnostics: [...actionContext.diagnostics],
+              command: {
+                title: 'Varro: Add to Context',
+                command: 'varro.chat.addProblemsToContext',
+                arguments: [
+                  {
+                    diagnostics: actionContext.diagnostics.map((diagnostic) =>
+                      toEditorDiagnostic(document.uri.fsPath, diagnostic)
+                    ),
+                  },
+                ],
+              },
+            },
+          ];
+        },
+      },
+      { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] }
+    ),
+
+    vscode.commands.registerCommand('varro.chat.addProblemsToContext', async (payload: unknown) => {
+      const targetViewId = sidebar.captureContextTarget();
+      try {
+        if (
+          !vscode.workspace
+            .getConfiguration('varro')
+            .get<boolean>('chat.enableProblemsContext', true)
+        ) {
+          throw new Error('Problems context is disabled in settings');
+        }
+        const message = parseExtensionMessage({ type: 'command/attach-problems', payload });
+        if (!message || message.type !== 'command/attach-problems') {
+          throw new Error('No valid problem details were provided');
+        }
+        await sidebar.revealContextTarget(targetViewId, async () => {
+          await revealSidebar();
+        });
+        sidebar.postProblems(message.payload.diagnostics, targetViewId);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error(`varro.chat.addProblemsToContext: ${message}`);
+        void vscode.window.showWarningMessage(message);
+      }
+    }),
+
     vscode.commands.registerCommand('varro.chat.focus', async () => {
       try {
         await revealSidebar();

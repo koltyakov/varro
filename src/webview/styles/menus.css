@@ -27,6 +27,51 @@
   transform: translateY(0);
 }
 
+.problems-tooltip-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(260px, calc(100vw - 34px));
+  max-height: min(400px, calc(100vh - 40px));
+  overflow: hidden;
+  white-space: normal;
+}
+
+.problems-tooltip-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.problems-tooltip-location,
+.problems-tooltip-note {
+  color: var(--color-vscode-fg-muted);
+}
+
+.problems-tooltip-location {
+  display: flex;
+  gap: 8px;
+}
+
+.problems-tooltip-severity.error {
+  color: var(--vscode-problemsErrorIcon-foreground, var(--vscode-editorError-foreground, #f14c4c));
+}
+
+.problems-tooltip-severity.warning {
+  color: var(
+    --vscode-problemsWarningIcon-foreground,
+    var(--vscode-editorWarning-foreground, #cca700)
+  );
+}
+
+.problems-tooltip-message {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  white-space: pre-line;
+}
+
 .themed-tooltip-arrow {
   position: absolute;
   width: 7px;

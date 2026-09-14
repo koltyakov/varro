@@ -1,7 +1,65 @@
 import { describe, expect, it } from 'vitest';
-import { parseExtensionMessage } from './extension-message';
+import { isEditorContext, parseExtensionMessage } from './extension-message';
 
 describe('parseExtensionMessage', () => {
+  it('validates problem-context commands', () => {
+    const message = {
+      type: 'command/attach-problems',
+      payload: {
+        diagnostics: [
+          { path: '/repo/a.ts', line: 2, column: 3, severity: 'error', message: 'Invalid type' },
+        ],
+      },
+    };
+    expect(parseExtensionMessage(message)).toEqual(message);
+    expect(parseExtensionMessage({ type: message.type, payload: { diagnostics: [] } })).toBeNull();
+    expect(
+      parseExtensionMessage({
+        type: message.type,
+        payload: { diagnostics: [{ message: 'Incomplete' }] },
+      })
+    ).toBeNull();
+  });
+  it('validates rich editor diagnostics and full-file counts', () => {
+    const diagnostic = {
+      path: '/repo/app.ts',
+      severity: 'error',
+      line: 1,
+      column: 2,
+      endLine: 1,
+      endColumn: 4,
+      message: 'Invalid type',
+      source: 'ts',
+      code: 2322,
+      intersectsSelection: true,
+      relatedInformation: [
+        { path: '/repo/types.ts', line: 3, column: 1, message: 'Declared here' },
+      ],
+    };
+    const context = {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [diagnostic],
+      diagnosticCounts: { errors: 30, warnings: 1 },
+    };
+    expect(isEditorContext(context)).toBe(true);
+    expect(isEditorContext({ ...context, diagnosticCounts: { errors: -1, warnings: 0 } })).toBe(
+      false
+    );
+    for (const invalid of [
+      { column: 0 },
+      { intersectsSelection: 'true' },
+      { source: {} },
+      { relatedInformation: [{}] },
+      { code: {} },
+    ]) {
+      expect(isEditorContext({ ...context, diagnostics: [{ ...diagnostic, ...invalid }] })).toBe(
+        false
+      );
+    }
+  });
+
   it('parses workspace-scoped provider quota snapshots', () => {
     const message = {
       type: 'provider-limit/updated',
@@ -910,6 +968,7 @@ describe('parseExtensionMessage', () => {
           expandThinking: true,
           showChangedFiles: true,
           showTurnTimer: true,
+          enableProblemsContext: false,
           desktopSessionPaneSide: 'left',
           defaultPermissionMode: 'full',
           chatFontSize: 13,
@@ -924,6 +983,7 @@ describe('parseExtensionMessage', () => {
         expandThinking: true,
         showChangedFiles: true,
         showTurnTimer: true,
+        enableProblemsContext: false,
         desktopSessionPaneSide: 'left',
         defaultPermissionMode: 'full',
         chatFontSize: 13,

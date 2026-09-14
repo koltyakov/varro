@@ -42,6 +42,7 @@ describe('readExtensionConfigState', () => {
     expect(readExtensionConfigState()).toMatchObject({
       expandThinking: false,
       showTurnTimer: true,
+      enableProblemsContext: true,
       chatFontSize: 13,
       chatEditorFontSize: 12,
       chatFontFamily: 'default',
@@ -58,6 +59,11 @@ describe('readExtensionConfigState', () => {
     mocks.values.set('varro.chat.showTurnTimer', false);
 
     expect(readExtensionConfigState().showTurnTimer).toBe(false);
+  });
+
+  it('reads the Problems context opt-out', () => {
+    mocks.values.set('varro.chat.enableProblemsContext', false);
+    expect(readExtensionConfigState().enableProblemsContext).toBe(false);
   });
 
   it('prefers the Varro chat font size override', () => {

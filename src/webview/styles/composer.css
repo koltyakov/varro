@@ -439,6 +439,15 @@
     color 0.08s;
 }
 
+.composer-completion-empty {
+  padding: 7px 8px 10px;
+  color: var(--color-vscode-fg-muted);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
 .composer-completion-item:hover {
   background: var(--color-vscode-hover);
   box-shadow: var(--color-vscode-hover) var(--composer-completion-scrollbar-inset) 0 0;
@@ -2684,6 +2693,30 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+}
+
+.problems-icon,
+.chat-attachment-chip .problems-icon,
+.inline-chip .problems-icon[data-severity='warning'] {
+  color: var(
+    --vscode-problemsWarningIcon-foreground,
+    var(--vscode-editorWarning-foreground, #cca700)
+  );
+}
+
+.problems-icon[data-severity='error'],
+.inline-chip .problems-icon[data-severity='error'] {
+  color: var(--vscode-problemsErrorIcon-foreground, var(--vscode-editorError-foreground, #f14c4c));
+}
+
+.problems-icon[data-severity='info'],
+.inline-chip .problems-icon[data-severity='info'] {
+  color: var(--vscode-problemsInfoIcon-foreground, var(--vscode-editorInfo-foreground, #3794ff));
+}
+
+.chat-attachment-chip.disabled .problems-icon,
+.inline-chip.disabled .problems-icon {
+  color: var(--color-vscode-fg-muted);
 }
 
 .chat-attachment-chip .chip-label-with-extension {

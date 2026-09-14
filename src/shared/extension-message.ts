@@ -13,6 +13,7 @@ import {
   type DesktopSessionPaneSide,
   type DroppedFile,
   type EditorContext,
+  type InlineProblemAttachment,
   type ExtensionMessage,
   type ProviderLimitStatus,
   type RalphStatePayload,
@@ -66,6 +67,7 @@ const KNOWN_TYPES = new Set<string>([
   'command/open-session',
   'command/highlight-session',
   'command/focus-input',
+  'command/attach-problems',
   'command/search-sessions',
   'command/open-attention-sessions',
   'command/open-completed-sessions',
@@ -87,6 +89,17 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
   if (!isKnownExtensionMessageType(type)) return null;
 
   switch (type) {
+    case 'command/attach-problems': {
+      const payload = asRecord(record.payload);
+      if (
+        !payload ||
+        !Array.isArray(payload.diagnostics) ||
+        payload.diagnostics.length === 0 ||
+        !payload.diagnostics.every(isDiagnostic)
+      )
+        return null;
+      return { type, payload: { diagnostics: payload.diagnostics } };
+    }
     case 'command/new-session': {
       if (record.payload === undefined) return { type };
       const payload = asRecord(record.payload);
@@ -295,6 +308,8 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
       if (isBoolean(payload.expandThinking)) config.expandThinking = payload.expandThinking;
       if (isBoolean(payload.showChangedFiles)) config.showChangedFiles = payload.showChangedFiles;
       if (isBoolean(payload.showTurnTimer)) config.showTurnTimer = payload.showTurnTimer;
+      if (isBoolean(payload.enableProblemsContext))
+        config.enableProblemsContext = payload.enableProblemsContext;
       return { type, payload: config };
     }
 
@@ -337,12 +352,19 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
         const item = asRecord(message);
         const queuedContext = asRecord(item?.queuedContext);
         if (
+          item?.inlineProblems !== undefined &&
+          (!Array.isArray(item.inlineProblems) ||
+            !item.inlineProblems.every(isInlineProblemAttachment))
+        )
+          return null;
+        if (
           !item ||
           !isString(item.id) ||
           !isString(item.sessionId) ||
           !isString(item.text) ||
           (item.ownerViewId !== undefined && !isString(item.ownerViewId)) ||
           (item.queuedContext !== undefined && !queuedContext) ||
+          (queuedContext?.issuesEnabled !== undefined && !isBoolean(queuedContext.issuesEnabled)) ||
           (queuedContext?.visionDelegationAvailable !== undefined &&
             !isBoolean(queuedContext.visionDelegationAvailable))
         ) {
@@ -746,6 +768,16 @@ export function isEditorContext<T>(value: T): value is T & EditorContext {
   ) {
     return false;
   }
+  if (record.diagnosticCounts !== undefined) {
+    const counts = asRecord(record.diagnosticCounts);
+    if (
+      !counts ||
+      ![counts.errors, counts.warnings].every(
+        (count) => isNumber(count) && Number.isSafeInteger(count) && count >= 0
+      )
+    )
+      return false;
+  }
   return record.diagnostics.every(isDiagnostic);
 }
 
@@ -830,6 +862,20 @@ function isSelection<T>(value: T): value is T & ({ startLine: number; endLine: n
   );
 }
 
+export function isInlineProblemAttachment<T>(value: T): value is T & InlineProblemAttachment {
+  const record = asRecord(value);
+  return (
+    !!record &&
+    isString(record.id) &&
+    /^[\w-]+$/.test(record.id) &&
+    isDiagnostic(record.diagnostic) &&
+    (record.group === undefined ||
+      (Array.isArray(record.group) && record.group.length > 0 && record.group.every(isDiagnostic)))
+  );
+}
+
+export { isDiagnostic as isEditorDiagnostic };
+
 function isDiagnostic<T>(value: T): value is T & EditorContext['diagnostics'][number] {
   const record = asRecord(value);
   return (
@@ -838,7 +884,31 @@ function isDiagnostic<T>(value: T): value is T & EditorContext['diagnostics'][nu
     (record.severity === 'error' || record.severity === 'warning' || record.severity === 'info') &&
     isString(record.message) &&
     isNumber(record.line) &&
-    Number.isFinite(record.line)
+    Number.isFinite(record.line) &&
+    [record.column, record.endLine, record.endColumn].every(
+      (coordinate) =>
+        coordinate === undefined ||
+        (isNumber(coordinate) && Number.isSafeInteger(coordinate) && coordinate >= 1)
+    ) &&
+    (record.source === undefined || isString(record.source)) &&
+    (record.code === undefined ||
+      isString(record.code) ||
+      (isNumber(record.code) && Number.isFinite(record.code))) &&
+    (record.intersectsSelection === undefined || isBoolean(record.intersectsSelection)) &&
+    (record.relatedInformation === undefined ||
+      (Array.isArray(record.relatedInformation) &&
+        record.relatedInformation.every((item) => {
+          const related = asRecord(item);
+          return (
+            related &&
+            isString(related.path) &&
+            isString(related.message) &&
+            [related.line, related.column].every(
+              (coordinate) =>
+                isNumber(coordinate) && Number.isSafeInteger(coordinate) && coordinate >= 1
+            )
+          );
+        })))
   );
 }
 
