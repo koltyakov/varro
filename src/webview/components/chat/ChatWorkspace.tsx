@@ -115,6 +115,8 @@ export function ChatWorkspace(props: {
   );
   const showActiveSessionCue = () => {
     if (!chatContentRef) return;
+    const header = chatContentRef.querySelector<HTMLElement>(':scope > .chat-header-chat-desktop');
+    chatContentRef.style.setProperty('--chat-reselect-top', `${header?.offsetHeight ?? 0}px`);
     chatContentRef.classList.remove('active-session-reselected');
     void chatContentRef.offsetWidth;
     chatContentRef.classList.add('active-session-reselected');

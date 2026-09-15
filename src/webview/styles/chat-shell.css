@@ -75,13 +75,8 @@ input:focus-visible {
   margin-inline: auto;
 }
 
-@property --chat-reselect-tint {
-  syntax: '<percentage>';
-  inherits: false;
-  initial-value: 0%;
-}
-
 .chat-main-shell {
+  position: relative;
   background-color: var(--color-vscode-list-bg);
   display: flex;
   flex: 1;
@@ -105,30 +100,37 @@ input:focus-visible {
   position: relative;
 }
 
-.chat-main-shell.active-session-reselected {
-  --color-vscode-list-bg: color-mix(
-    in srgb,
-    var(--color-vscode-fg) var(--chat-reselect-tint),
-    var(--chat-resting-list-bg)
+.chat-main-shell.active-session-reselected::after {
+  /* Tint opaque tool and composer surfaces along with the shared chat background. */
+  content: '';
+  position: absolute;
+  inset: var(--chat-reselect-top, 0px) 0 0;
+  z-index: var(--z-chrome-top);
+  pointer-events: none;
+  background-image: linear-gradient(
+    to bottom,
+    transparent,
+    var(--color-vscode-fg) 45%,
+    var(--color-vscode-fg) 55%,
+    transparent
   );
-  animation: active-session-reselected 720ms ease-out;
+  background-size: 100% 30%;
+  background-repeat: no-repeat;
+  opacity: 0.08;
+  animation: active-session-reselected 900ms linear;
 }
 
 @keyframes active-session-reselected {
-  0%,
-  100% {
-    --chat-reselect-tint: 0%;
+  from {
+    background-position: 0 -45%;
   }
 
-  18%,
-  32% {
-    --chat-reselect-tint: 8%;
+  to {
+    background-position: 0 145%;
   }
 }
 
 .chat-workspace {
-  /* Capture the theme color before the main chat overrides it for its shared background layers. */
-  --chat-resting-list-bg: var(--color-vscode-list-bg);
   display: flex;
   flex: 1;
   min-height: 0;
