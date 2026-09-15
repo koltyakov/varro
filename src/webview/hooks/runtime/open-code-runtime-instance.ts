@@ -2431,7 +2431,6 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         selectedModel,
         optimisticModel: selectedModel,
         preserveModelSelection: true,
-        preserveScrollPosition: true,
       }),
     unrevertSession: (sessionId) =>
       client.session.unrevert(sessionId, { directory: getSessionDirectory(sessionId) }),

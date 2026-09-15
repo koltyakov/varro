@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
     sessionDelete: vi.fn(),
     sessionGet: vi.fn(),
     sessionMessages: vi.fn(),
+    sessionDeleteMessage: vi.fn(),
     sessionTodos: vi.fn(),
     sessionSendAsync: vi.fn(),
     sessionCommand: vi.fn(),
@@ -78,6 +79,7 @@ vi.mock('../lib/client', () => ({
       delete: clientMocks.sessionDelete,
       get: clientMocks.sessionGet,
       messages: clientMocks.sessionMessages,
+      deleteMessage: clientMocks.sessionDeleteMessage,
       todos: clientMocks.sessionTodos,
       sendAsync: clientMocks.sessionSendAsync,
       command: clientMocks.sessionCommand,
@@ -231,6 +233,7 @@ beforeEach(() => {
   clientMocks.sessionDelete.mockReset();
   clientMocks.sessionGet.mockReset();
   clientMocks.sessionMessages.mockReset();
+  clientMocks.sessionDeleteMessage.mockReset();
   clientMocks.sessionTodos.mockReset();
   clientMocks.sessionSendAsync.mockReset();
   clientMocks.sessionCommand.mockReset();

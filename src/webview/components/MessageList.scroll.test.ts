@@ -49,6 +49,42 @@ installMessageListTestEnvironment({
 });
 
 describe('MessageList auto-scroll', () => {
+  it('restores bottom follow on send after scrolling up and follows subsequent growth', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
+    ]);
+    cleanup = render(() => MessageList(), container!);
+    const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
+    let height = 1200;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => height });
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(list.scrollTop).toBe(800);
+
+    list.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+    list.scrollTop = 400;
+    list.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(list.scrollTop).toBe(400);
+
+    requestMessageListScrollToBottom('user-2');
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(list.scrollTop).toBe(800);
+
+    height = 1400;
+    startLoading();
+    await Promise.resolve();
+    settleBottomFollow(animationFrames, list);
+    expect(list.scrollTop).toBe(1000);
+    animationFrames.restore();
+  });
+
   for (const cause of ['queued request', 'reattach', 'diff blur']) {
     it(`cancels ${cause} when an upward wheel takes ownership`, async () => {
       const animationFrames = installQueuedAnimationFrameMocks();

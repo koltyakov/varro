@@ -311,7 +311,9 @@ test.describe('auto-scroll', () => {
     await expect(page.locator('.trailing-assistant-summary-row')).toContainText('Worked for');
   });
 
-  test('keeps the transcript fixed while an edited message is replaced', async ({ page }) => {
+  test('keeps the transcript fixed until edit replacement then resumes bottom follow', async ({
+    page,
+  }) => {
     await page.goto('/e2e/harness/index.html?scenario=large-transcript');
     await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
     await expect
@@ -327,7 +329,7 @@ test.describe('auto-scroll', () => {
       '.inline-edit-composer-slot [role="textbox"][aria-multiline="true"]'
     );
     await expect(inlineComposer).toBeVisible();
-    await inlineComposer.fill('Corrected final prompt without a viewport jump.');
+    await inlineComposer.fill('Corrected final prompt with bottom follow restored.');
     await waitForAnimationFrames(page, 6);
 
     await page.evaluate(() => {
@@ -452,7 +454,9 @@ test.describe('auto-scroll', () => {
         ).editReplacementSamples ?? []
     );
     expect(
-      samples.every((sample) => Math.abs(sample.top - samples[0]!.top) <= 1),
+      samples
+        .filter((sample) => sample.editing)
+        .every((sample) => Math.abs(sample.top - samples[0]!.top) <= 1),
       JSON.stringify(samples)
     ).toBe(true);
     expect(samples[0]?.editing).toBe(true);
@@ -465,7 +469,7 @@ test.describe('auto-scroll', () => {
       JSON.stringify(samples)
     ).toBe(true);
     await expect(
-      page.getByText('Corrected final prompt without a viewport jump.', { exact: true })
+      page.getByText('Corrected final prompt with bottom follow restored.', { exact: true })
     ).toBeVisible();
     await expect(page.locator('.interactive-list')).not.toHaveClass(/editing-message/);
     await expect(page.locator('.append-scroll-bottom-reserve')).toHaveCount(0);

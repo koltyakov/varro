@@ -35,6 +35,29 @@ function sessionInWorkspace(id: string) {
 }
 
 describe('sendMessage', () => {
+  it('requests bottom follow when an edited replacement is published before send completes', async () => {
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.replaceMessages([{ info: userMessage('user-1'), parts: [] }]);
+    clientMocks.sessionDeleteMessage.mockResolvedValue(undefined);
+    clientMocks.sessionGet.mockResolvedValue(session());
+    clientMocks.sessionMessages.mockResolvedValue([]);
+    const pendingSend = deferred<void>();
+    clientMocks.sessionSendAsync.mockReturnValue(pendingSend.promise);
+    const onOptimisticPublish = vi.fn();
+
+    const sent = hookModule.editMessage('user-1', 'Revised prompt', { onOptimisticPublish });
+    await vi.waitFor(() => expect(clientMocks.sessionSendAsync).toHaveBeenCalledTimes(1));
+
+    expect(onOptimisticPublish).toHaveBeenCalledOnce();
+    expect(stateModule.messageListScrollRequestKey()).toBe(1);
+    expect(stateModule.messageListScrollTargetMessageId()).toBe(
+      stateModule.state.messages.at(-1)?.info.id
+    );
+    pendingSend.resolve();
+    expect(await sent).toBe(true);
+  });
+
   it('requests scrolling to the latest message when sending', async () => {
     const { stateModule, hookModule } = await loadModules();
 
