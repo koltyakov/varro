@@ -1473,13 +1473,14 @@ describe('ChatInput', () => {
     expect(chip?.getAttribute('aria-label')).toContain(
       'Refresh failed; showing last known limits.'
     );
-    expect(chip?.getAttribute('aria-label')).toContain('Snapshot age: 2m');
+    expect(chip?.getAttribute('aria-label')).not.toContain('Snapshot age:');
     container?.querySelector<HTMLButtonElement>('.toolbar-limit-chip')?.click();
     await flushAsyncWork();
     const popup = container?.querySelector('.provider-limit-popup');
     expect(popup).not.toBeNull();
     expect(popup?.textContent).not.toContain('Refresh failed; showing last known limits.');
     expect(popup?.textContent).not.toContain('Snapshot age:');
+    expect(popup?.querySelector('.provider-limit-row-meta')?.textContent).toBe('41 left');
     expect(state.providerLimits['openai:gpt-4o']?.checkedAt).toBe(checkedAt);
   });
 
@@ -1563,9 +1564,11 @@ describe('ChatInput', () => {
     expect(popup?.textContent).toContain('5 Hours Quota');
     expect(popup?.textContent).toContain('Weekly Quota');
     expect(popup?.textContent).toContain('MCP Quota');
-    expect(popup?.textContent).toContain('87/100 left');
-    expect(popup?.textContent).toContain('98/100 left');
-    expect(popup?.textContent).toContain('1,000/1,000 left');
+    expect(popup?.textContent).toContain('13% used');
+    expect(popup?.textContent).toContain('2% used');
+    expect(popup?.textContent).not.toContain('87 left');
+    expect(popup?.textContent).not.toContain('98 left');
+    expect(popup?.textContent).toContain('1,000 left');
     const resetToggle = popup?.querySelector<HTMLButtonElement>('.provider-limit-reset-toggle');
     expect(resetToggle?.textContent).toContain('Usage limit resets (1)');
 

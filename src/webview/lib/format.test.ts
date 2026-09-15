@@ -103,15 +103,31 @@ describe('format helpers', () => {
     expect(formatLabelWithProvider('   ', 'OpenAI')).toBe('');
   });
 
-  it('includes stale snapshot metadata in available limit tooltips', () => {
+  it('keeps refresh failures without snapshot ages in available limit tooltips', () => {
     const limit = {
       ...availableLimit([]),
       checkedAt: 1_000,
       note: 'Refresh failed; showing last known limits.',
     };
-    expect(formatProviderLimitTitle(limit, 121_000)).toContain(`${limit.note}\nSnapshot age: 2m`);
-    expect(formatProviderLimitTitle(limit, 0)).toContain('Snapshot age: 0s');
+    expect(formatProviderLimitTitle(limit, 121_000)).toBe(`\n${limit.note}`);
+    expect(formatProviderLimitTitle(limit, 0)).not.toContain('Snapshot age:');
     expect(limit.checkedAt).toBe(1_000);
+  });
+
+  it('omits routine polling metadata from available limit tooltips', () => {
+    const limit = availableLimit([
+      {
+        id: 'requests',
+        label: 'Requests',
+        unit: 'requests',
+        remaining: 70,
+        limit: 100,
+        resetAt: null,
+      },
+    ]);
+    expect(formatProviderLimitTitle({ ...limit, note: 'Polled provider quota endpoint' })).toBe(
+      'Requests: 30% used'
+    );
   });
 
   it('selects the most constrained provider limit window', () => {

@@ -196,10 +196,8 @@ function ProviderLimitRow(props: { window: ProviderLimitWindow }) {
   const reset = () =>
     props.window.resetAt ? formatProviderLimitWindowReset(props.window.resetAt) : null;
   const remainingLabel = () => formatProviderLimitWindowValue(props.window, props.window.remaining);
-  const limitLabel = () =>
-    props.window.limit != null
-      ? formatProviderLimitWindowValue(props.window, props.window.limit)
-      : null;
+  const percentageOnly = () =>
+    props.window.unit === 'unknown' && props.window.limit === 100 && props.window.percent != null;
 
   return (
     <div class="provider-limit-row">
@@ -222,12 +220,17 @@ function ProviderLimitRow(props: { window: ProviderLimitWindow }) {
       </Show>
       <div class="provider-limit-row-meta">
         <span>
-          {remainingLabel()}
-          <Show when={limitLabel()}>
-            <span class="provider-limit-row-sep">/</span>
-            {limitLabel()}
+          <Show
+            when={percentageOnly()}
+            fallback={
+              <>
+                {remainingLabel()}
+                <span class="provider-limit-row-unit"> left</span>
+              </>
+            }
+          >
+            {usedPercent()}%<span class="provider-limit-row-unit"> used</span>
           </Show>
-          <span class="provider-limit-row-unit"> left</span>
         </span>
         <Show when={reset()}>
           <span class="provider-limit-row-reset">resets in {reset()}</span>
