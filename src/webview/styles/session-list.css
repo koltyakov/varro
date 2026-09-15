@@ -12,6 +12,39 @@
   padding-top: 6px;
 }
 
+@media (min-width: 960px) {
+  .interactive-session > .session-list-view > .session-list-workspace-selector,
+  .interactive-session > .session-list-view > .session-list-search,
+  .interactive-session > .session-list-view .session-list-section-header,
+  .interactive-session > .session-list-view .session-list-scroll > * {
+    width: min(100%, var(--chat-content-max-width));
+    margin-inline: auto;
+  }
+
+  .interactive-session > .session-list-view .session-list-scroll {
+    scrollbar-gutter: stable both-edges;
+  }
+
+  .interactive-session > .session-list-view .session-list-scroll > .session-item {
+    width: min(100%, calc(var(--chat-content-max-width) - 2 * var(--chat-horizontal-padding)));
+    border-radius: var(--radius-control);
+  }
+
+  .interactive-session > .session-list-view .session-item.is-pinned:has(+ .session-item.is-pinned) {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+
+  .interactive-session > .session-list-view .session-item.is-pinned + .session-item.is-pinned {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+  }
+
+  .interactive-session > .session-list-view .session-item.starts-unpinned-group {
+    border-top: none;
+  }
+}
+
 .session-list-workspace-selector {
   display: flex;
   align-items: center;

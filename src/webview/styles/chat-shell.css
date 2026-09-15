@@ -254,7 +254,8 @@ input:focus-visible {
     padding: 14px var(--chat-horizontal-padding) 24px;
   }
 
-  .interactive-session .chat-main-column-shell .interactive-input-part {
+  .interactive-session .chat-main-column-shell .interactive-input-part,
+  .interactive-session .session-list-new-session .interactive-input-part {
     width: min(100%, var(--chat-content-max-width));
     margin: 0 auto 4px;
   }
