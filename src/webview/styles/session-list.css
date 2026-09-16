@@ -638,19 +638,20 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   border-top: 1px solid var(--color-vscode-border-soft);
 }
 
-@media (min-width: 1400px) {
-  .chat-workspace .session-list-view-sidebar .session-item.active {
-    background: color-mix(in srgb, var(--color-vscode-accent) 8%, transparent);
-  }
+.session-item.active {
+  --session-item-foreground: var(--vscode-list-inactiveSelectionForeground, var(--color-vscode-fg));
+  background: var(--vscode-list-inactiveSelectionBackground, var(--color-vscode-hover));
+}
 
-  .chat-workspace .session-list-view-sidebar .session-item.active:hover {
-    background: color-mix(in srgb, var(--color-vscode-accent) 12%, var(--color-vscode-hover));
-  }
+.session-item.active:focus-within {
+  --session-item-foreground: var(--vscode-list-activeSelectionForeground, var(--color-vscode-fg));
+  background: var(--vscode-list-activeSelectionBackground, var(--color-vscode-hover));
 }
 
 .session-item.is-context-selected,
 .session-item.is-context-selected:hover {
-  background: color-mix(in srgb, var(--color-vscode-fg) 11%, transparent);
+  --session-item-foreground: var(--vscode-list-inactiveSelectionForeground, var(--color-vscode-fg));
+  background: var(--vscode-list-inactiveSelectionBackground, var(--color-vscode-hover));
 }
 
 .session-item.is-context-obscured {
@@ -1008,7 +1009,7 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   min-width: 0;
   font-size: 12px;
   font-weight: 350;
-  color: var(--color-vscode-fg);
+  color: var(--session-item-foreground, var(--color-vscode-fg));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

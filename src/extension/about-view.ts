@@ -36,11 +36,16 @@ export function renderAboutHtml(data: AboutViewData, cspSource: string): string 
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${escapeHtmlAttribute(cspSource)}; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';" />
   <title>About ${escapeHtml(data.name)}</title>
   <style nonce="${nonce}">
-    :root { color-scheme: light dark; }
+    :root {
+      color-scheme: light dark;
+      --about-border: var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 12%, transparent));
+      --about-surface: color-mix(in srgb, var(--vscode-foreground) 3%, var(--vscode-editor-background));
+      --about-inset: color-mix(in srgb, var(--vscode-foreground) 5%, var(--vscode-editor-background));
+    }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      color: var(--vscode-badge-foreground);
+      color: var(--vscode-foreground);
       background: var(--vscode-editor-background);
       font-family: var(--vscode-font-family);
       font-size: var(--vscode-font-size);
@@ -48,41 +53,44 @@ export function renderAboutHtml(data: AboutViewData, cspSource: string): string 
     }
     main { width: min(820px, 100%); margin: 0 auto; padding: 48px 44px 40px; }
     .hero { display: grid; grid-template-columns: 1fr auto; gap: 44px; align-items: center; padding-bottom: 34px; }
-    h1 { max-width: 580px; margin: 0; font-size: clamp(32px, 5vw, 46px); font-weight: 650; line-height: 1.04; letter-spacing: -.025em; }
+    h1 { max-width: 580px; margin: 0; font-size: clamp(26px, 3.5vw, 32px); font-weight: 650; line-height: 1.15; letter-spacing: -.025em; }
     .description { max-width: 570px; margin: 16px 0 0; color: var(--vscode-descriptionForeground); font-size: 15px; line-height: 1.6; }
     .brand-mark { display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 92px; }
     .brand-mark img { display: block; width: 82px; height: 82px; }
     .brand-mark span { color: var(--vscode-descriptionForeground); font-family: var(--vscode-editor-font-family); font-size: 11px; }
     .status-bar {
       display: flex;
-      gap: 24px;
+      gap: 20px;
       align-items: center;
       justify-content: space-between;
-      padding: 18px 20px;
-      border-top: 1px solid var(--vscode-widget-border, var(--vscode-contrastBorder));
-      border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-contrastBorder));
-      background: var(--vscode-editorWidget-background);
+      padding: 16px 20px;
+      border: 1px solid var(--about-border);
+      border-radius: 10px;
+      background: var(--about-surface);
     }
-    .status { display: flex; align-items: center; gap: 10px; font-weight: 700; }
-    .status-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--vscode-testing-iconFailed); }
+    .status { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+    .status-dot { flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--vscode-testing-iconFailed); }
     .healthy .status-dot { background: var(--vscode-testing-iconPassed); }
-    .status-detail { color: var(--vscode-descriptionForeground); font-family: var(--vscode-editor-font-family); font-size: 12px; text-align: right; }
-    .notice { margin-top: 16px; padding: 14px 18px; border-left: 3px solid var(--vscode-notificationsWarningIcon-foreground); background: var(--vscode-textBlockQuote-background); }
+    .status-detail { color: var(--vscode-descriptionForeground); font-size: 12px; text-align: right; }
+    .notice { margin-top: 16px; padding: 14px 20px; border: 1px solid var(--vscode-contrastBorder, var(--vscode-notificationsWarningIcon-foreground)); border-radius: 10px; background: var(--vscode-textBlockQuote-background); }
     .notice strong { display: block; margin-bottom: 3px; }
     .notice span { color: var(--vscode-descriptionForeground); }
-    .cards { display: grid; gap: 12px; margin: 12px 0; }
-    .card { min-width: 0; padding: 22px 24px; border: 1px solid var(--vscode-widget-border, var(--vscode-contrastBorder)); background: var(--vscode-sideBar-background); }
-    .card-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
-    .card h2 { margin: 0; font-size: 15px; font-weight: 650; }
-    .card-version { color: var(--vscode-textLink-foreground); font-size: 13px; font-weight: 500; }
-    dl { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 10px 18px; margin: 0; }
+    .cards { display: grid; gap: 16px; margin: 16px 0; }
+    .card { min-width: 0; padding: 20px; border: 1px solid var(--about-border); border-radius: 10px; background: var(--about-surface); }
+    .card-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--about-border); }
+    .card h2 { margin: 0; font-size: 14px; font-weight: 600; }
+    #diagnostics-result { display: block; margin-top: 8px; color: var(--vscode-descriptionForeground); font-size: 12px; }
+    #diagnostics-result:empty { display: none; }
+    .card-version { display: inline-flex; align-items: center; justify-content: center; min-height: 24px; padding: 0 8px; border: 1px solid var(--about-border); border-radius: 6px; background: var(--about-inset); color: var(--vscode-foreground); font-family: var(--vscode-editor-font-family); font-size: 11px; font-weight: 500; line-height: 1; }
+    dl { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px 18px; margin: 0; }
     dt { color: var(--vscode-descriptionForeground); }
     dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
-    code { font-family: var(--vscode-editor-font-family); font-size: 12px; }
-    .runtime { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--vscode-widget-border, var(--vscode-contrastBorder)); }
-    .runtime-item { padding: 17px 20px; }
-    .runtime-item + .runtime-item { border-left: 1px solid var(--vscode-widget-border, var(--vscode-contrastBorder)); }
-    .runtime-label { display: block; margin-bottom: 3px; color: var(--vscode-descriptionForeground); font-size: 12px; }
+    code { padding: 0; color: inherit; background: transparent; font-family: var(--vscode-editor-font-family); font-size: 12px; }
+    dd code { padding: 2px 6px; border-radius: 4px; background: var(--about-inset); box-decoration-break: clone; }
+    .runtime { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--about-border); border-radius: 10px; background: var(--about-surface); }
+    .runtime-item { min-width: 0; padding: 16px 20px; overflow-wrap: anywhere; }
+    .runtime-item + .runtime-item { border-left: 1px solid var(--about-border); }
+    .runtime-label { display: block; margin-bottom: 6px; color: var(--vscode-descriptionForeground); font-size: 12px; }
     footer { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-top: 32px; }
     .links { display: flex; flex-wrap: wrap; gap: 7px; }
     a { color: var(--vscode-textLink-foreground); text-decoration: none; }
@@ -93,8 +101,8 @@ export function renderAboutHtml(data: AboutViewData, cspSource: string): string 
       align-items: center;
       min-height: 30px;
       padding: 5px 10px;
-      border: 1px solid var(--vscode-widget-border, var(--vscode-contrastBorder));
-      border-radius: 4px;
+      border: 1px solid var(--about-border);
+      border-radius: 6px;
       color: var(--vscode-descriptionForeground);
       background: transparent;
       font-size: 12px;
@@ -129,9 +137,14 @@ export function renderAboutHtml(data: AboutViewData, cspSource: string): string 
       .brand-mark { align-items: flex-start; }
       .brand-mark img { width: 70px; height: 70px; }
       .runtime { grid-template-columns: 1fr; }
-      .runtime-item + .runtime-item { border-left: 0; border-top: 1px solid var(--vscode-widget-border, var(--vscode-contrastBorder)); }
+      .runtime-item + .runtime-item { border-left: 0; border-top: 1px solid var(--about-border); }
       .status-bar { align-items: flex-start; flex-direction: column; gap: 8px; }
       .status-detail { text-align: left; }
+    }
+    @media (max-width: 420px) {
+      main { padding: 24px 16px; }
+      dl { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+      dd + dt { margin-top: 10px; }
     }
   </style>
 </head>
@@ -179,16 +192,6 @@ export function renderAboutHtml(data: AboutViewData, cspSource: string): string 
       <div class="runtime-item"><span class="runtime-label">Platform</span><code>${escapeHtml(data.platform)}</code></div>
     </section>
 
-    <details class="card" style="margin-top: 16px">
-      <summary>Preview diagnostics</summary>
-      <p>Recent lifecycle events are included. Credentials and URL query values are removed.</p>
-      <label><input id="include-paths" type="checkbox"> Include local paths</label>
-      <pre id="diagnostics-preview" style="white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto">${escapeHtml(data.diagnostics ?? '')}</pre>
-      <template id="diagnostics-redacted">${escapeHtml(data.diagnostics ?? '')}</template>
-      <template id="diagnostics-with-paths">${escapeHtml(data.diagnosticsWithPaths ?? '')}</template>
-      <button id="save-diagnostics" type="button">Save diagnostics</button>
-      <span id="diagnostics-result" role="status" aria-live="polite"></span>
-    </details>
     <footer>
       <nav class="links" aria-label="Varro links">
         <a href="https://github.com/koltyakov/varro"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 13.5c-3 .9-3-1.5-4-2m8 4v-2.3c0-.7-.2-1.2-.5-1.5 1.8-.2 3.7-.9 3.7-4A3.1 3.1 0 0 0 12.4 5c.1-.5.1-1.3-.3-2.1 0 0-.7-.2-2.4.9a8.2 8.2 0 0 0-4.4 0c-1.7-1.1-2.4-.9-2.4-.9C2.5 3.7 2.5 4.5 2.6 5a3.1 3.1 0 0 0-.8 2.2c0 3.1 1.9 3.8 3.7 4-.3.3-.5.7-.5 1.4v2.9" /></svg>GitHub</a>
@@ -197,21 +200,13 @@ export function renderAboutHtml(data: AboutViewData, cspSource: string): string 
       </nav>
       <button id="copy-diagnostics" type="button"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="8" height="8" rx="1" /><path d="M3 11H2.5A1.5 1.5 0 0 1 1 9.5v-7A1.5 1.5 0 0 1 2.5 1h7A1.5 1.5 0 0 1 11 2.5V3" /></svg><span>Copy diagnostics</span></button>
     </footer>
+    <span id="diagnostics-result" role="status" aria-live="polite"></span>
   </main>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const copyButton = document.getElementById('copy-diagnostics');
-    const includePaths = document.getElementById('include-paths');
-    includePaths.addEventListener('change', () => {
-      const source = document.getElementById(includePaths.checked ? 'diagnostics-with-paths' : 'diagnostics-redacted');
-      document.getElementById('diagnostics-preview').textContent = source.content.textContent;
-      document.getElementById('diagnostics-result').textContent = '';
-    });
     copyButton.addEventListener('click', () => {
-      vscode.postMessage({ action: 'copyDiagnostics', includePaths: includePaths.checked });
-    });
-    document.getElementById('save-diagnostics').addEventListener('click', () => {
-      vscode.postMessage({ action: 'saveDiagnostics', includePaths: includePaths.checked });
+      vscode.postMessage({ action: 'copyDiagnostics', includePaths: false });
     });
     window.addEventListener('message', (event) => {
       if (event.data?.type === 'diagnostics-result' && typeof event.data.text === 'string') {
