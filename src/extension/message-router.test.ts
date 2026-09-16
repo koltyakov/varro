@@ -473,6 +473,7 @@ const DISPATCH_EXPECTATIONS = {
   'vscode/show-output': [{ callback: 'showOutput', args: [] }],
   'chat/new-editor': [{ callback: 'openNewEditor', args: [] }],
   'chat/new-window': [{ callback: 'openNewWindow', args: [] }],
+  'window-chat-theme/set-reversed': [], // Consumed by the owning WebviewSession.
   'workspace/select': [
     { callback: 'selectWorkspace', args: [{ path: '/workspace', requestId: 7 }] },
   ],

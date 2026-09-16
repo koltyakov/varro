@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: OpenCode Workbench",
-  "version": "0.28.24",
+  "version": "0.28.25",
   "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
@@ -81,7 +81,7 @@
     "@playwright/test": "1.63.0",
     "@tailwindcss/vite": "4.3.3",
     "@types/css.escape": "1.5.2",
-    "@types/node": "26.6.0",
+    "@types/node": "26.6.1",
     "@types/vscode": "1.120.0",
     "@vitest/coverage-v8": "5.0.1",
     "@vscode/vsce": "4.0.0",

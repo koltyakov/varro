@@ -45,6 +45,10 @@ export const VALID_WEBVIEW_MESSAGES = {
   'vscode/show-output': { type: 'vscode/show-output' },
   'chat/new-editor': { type: 'chat/new-editor' },
   'chat/new-window': { type: 'chat/new-window' },
+  'window-chat-theme/set-reversed': {
+    type: 'window-chat-theme/set-reversed',
+    payload: { reversed: true },
+  },
   'workspace/select': { type: 'workspace/select', payload: { path: '/workspace', requestId: 7 } },
   'commands/state': {
     type: 'commands/state',

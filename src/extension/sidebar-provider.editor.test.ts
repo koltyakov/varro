@@ -93,6 +93,135 @@ function createPanel() {
 }
 
 describe('SidebarProvider editor panels', () => {
+  it('restores only the saved reverse flag when window chats are reopened', async () => {
+    const values = new Map<string, unknown>();
+    const globalState = createWorkspaceState();
+    globalState.get.mockImplementation((key, fallback) => values.get(key) ?? fallback);
+    globalState.update.mockImplementation(async (key, value) => {
+      values.set(key, value);
+    });
+    const vscode = getVscodeMock();
+    for (const [source, reversed] of [
+      ['Dark Modern', false],
+      ['Light+', true],
+      ['Dark 2026', false],
+    ] as const) {
+      const { provider } = await createSidebarProviderInstance({ globalState });
+      await vscode.workspace.getConfiguration('workbench').update('colorTheme', source);
+      const editor = createPanel();
+      vscode.window.createWebviewPanel.mockReturnValue(editor.panel);
+      await provider.openNewWindow();
+      await vi.waitFor(() => expect(editor.panel.webview.html).toContain('documentId'));
+      editor.ready();
+      await vi.waitFor(() =>
+        expect(editor.panel.webview.postMessage).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: 'theme/update',
+            payload: expect.objectContaining({
+              windowChatTheme: expect.objectContaining({ source, reversed }),
+            }),
+          })
+        )
+      );
+      editor.receive({ type: 'window-chat-theme/set-reversed', payload: { reversed: !reversed } });
+      expect(values.get('varro.windowChatThemeReversed')).toBe(!reversed);
+      expect(globalState.update).toHaveBeenCalledWith('varro.windowChatThemeReversed', !reversed);
+      editor.panel.dispose();
+      await provider.dispose();
+    }
+  });
+
+  it('refreshes an open window counterpart after the configured theme catches up with its kind', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const editor = createPanel();
+    const vscode = getVscodeMock();
+    await vscode.workspace.getConfiguration('workbench').update('colorTheme', 'Dark Modern');
+    vscode.window.createWebviewPanel.mockReturnValue(editor.panel);
+    await provider.openNewWindow();
+    await vi.waitFor(() => expect(editor.panel.webview.html).toContain('documentId'));
+    editor.ready();
+    await vi.waitFor(() =>
+      expect(editor.panel.webview.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'theme/update',
+          payload: expect.objectContaining({
+            windowChatTheme: expect.objectContaining({ source: 'Dark Modern' }),
+          }),
+        })
+      )
+    );
+    const listener = vscode.workspace.onDidChangeConfiguration.mock.calls.at(-1)?.[0];
+    expect(listener).toBeTypeOf('function');
+    try {
+      vscode.window.activeColorTheme.kind = vscode.ColorThemeKind.Light;
+      await vscode.workspace.getConfiguration('workbench').update('colorTheme', 'Light Modern');
+      editor.panel.webview.postMessage.mockClear();
+      listener?.({ affectsConfiguration: (key) => key === 'workbench.colorTheme' });
+      await vi.waitFor(() =>
+        expect(editor.panel.webview.postMessage).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: 'theme/update',
+            payload: expect.objectContaining({
+              theme: 'light',
+              windowChatTheme: expect.objectContaining({ source: 'Light Modern' }),
+            }),
+          })
+        )
+      );
+      // A same-kind change has no active-color-theme event, but still changes the pair.
+      await vscode.workspace.getConfiguration('workbench').update('colorTheme', 'Light+');
+      editor.panel.webview.postMessage.mockClear();
+      listener?.({ affectsConfiguration: (key) => key === 'workbench.colorTheme' });
+      await vi.waitFor(() =>
+        expect(editor.panel.webview.postMessage).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: 'theme/update',
+            payload: expect.objectContaining({
+              theme: 'light',
+              windowChatTheme: expect.objectContaining({ source: 'Light+' }),
+            }),
+          })
+        )
+      );
+    } finally {
+      vscode.window.activeColorTheme.kind = vscode.ColorThemeKind.Dark;
+      editor.panel.dispose();
+    }
+  });
+
+  it('offers a local theme toggle only to window chats and drops it when that panel closes', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const windowEditor = createPanel();
+    const regularEditor = createPanel();
+    const vscode = getVscodeMock();
+    vscode.window.createWebviewPanel
+      .mockReturnValueOnce(windowEditor.panel)
+      .mockReturnValueOnce(regularEditor.panel);
+    await provider.openNewWindow();
+    await vi.waitFor(() => expect(windowEditor.panel.webview.html).toContain('documentId'));
+    windowEditor.ready();
+    await vi.waitFor(() =>
+      expect(windowEditor.panel.webview.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'theme/update',
+          payload: expect.objectContaining({ windowChatTheme: expect.any(Object) }),
+        })
+      )
+    );
+    windowEditor.panel.dispose();
+    await provider.openNewEditor();
+    await vi.waitFor(() => expect(regularEditor.panel.webview.html).toContain('documentId'));
+    regularEditor.ready();
+    await vi.waitFor(() =>
+      expect(regularEditor.panel.webview.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'theme/update',
+          payload: { theme: 'dark', windowChatTheme: undefined },
+        })
+      )
+    );
+  });
+
   it('moves an existing session editor into a compact window without duplicating it', async () => {
     const { provider } = await createSidebarProviderInstance();
     const editor = createPanel();

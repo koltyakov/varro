@@ -193,6 +193,8 @@ function createSession(options?: {
     handleVisibleSideEffects: vi.fn(() => Promise.resolve()),
     updateStatusBarItem: vi.fn(),
     postThemeUpdate: vi.fn(),
+    readWindowChatThemeReversed: vi.fn(() => false),
+    saveWindowChatThemeReversed: vi.fn(() => Promise.resolve()),
     onHidden: vi.fn(),
     resetStatusBarCache: vi.fn(),
     queuedMessages: vi.fn<() => InitialWebviewState['queuedMessages']>(() => undefined),

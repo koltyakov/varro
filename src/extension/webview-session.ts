@@ -14,6 +14,7 @@ import type { SidebarProviderContextFiles } from './sidebar-provider-context-fil
 import type { SessionTrashManager } from './session-trash-manager';
 import type { PinnedSessionManager } from './pinned-session-manager';
 import { logger } from './logger';
+import { readWindowChatTheme } from './window-chat-theme';
 import { parseWebviewMessage } from './util/webview-message';
 import { renderEditorWebviewPlaceholderHtml, renderWebviewLoadingHtml } from './webview-html';
 import type {
@@ -96,6 +97,8 @@ export class WebviewSession {
       handleVisibleSideEffects(): Promise<void>;
       updateStatusBarItem(): void;
       postThemeUpdate(): void;
+      readWindowChatThemeReversed(): boolean;
+      saveWindowChatThemeReversed(reversed: boolean): PromiseLike<void>;
       onHidden(): void;
       resetStatusBarCache(): void;
       queuedMessages(): InitialWebviewState['queuedMessages'];
@@ -142,6 +145,26 @@ export class WebviewSession {
   }
 
   private deliveryRecoveryInProgress = false;
+  private windowChat = false;
+  private windowChatThemeReversed = false;
+
+  enableWindowChatTheme() {
+    if (!this.windowChat) this.windowChatThemeReversed = this.deps.readWindowChatThemeReversed();
+    this.windowChat = true;
+    this.postThemeUpdate();
+  }
+
+  postThemeUpdate() {
+    this.bridge.post({
+      type: 'theme/update',
+      payload: {
+        theme: this.deps.currentTheme(),
+        windowChatTheme: this.windowChat
+          ? { ...readWindowChatTheme(), reversed: this.windowChatThemeReversed }
+          : undefined,
+      },
+    });
+  }
 
   getRequestGeneration() {
     return this.webviewLoadGeneration;
@@ -475,6 +498,9 @@ export class WebviewSession {
       // VS Code recreates hidden editors from the same HTML, even after requests are invalidated.
       documentId: this.webviewRenderGeneration,
       theme: this.deps.currentTheme(),
+      windowChatTheme: this.windowChat
+        ? { ...readWindowChatTheme(), reversed: this.windowChatThemeReversed }
+        : undefined,
       serverStatus,
       editorContext,
       terminalSelection: this.contextFilesState.getTerminalSelection(),
@@ -544,7 +570,7 @@ export class WebviewSession {
       payload: this.deps.readConfig(),
     });
     this.bridge.post({ type: 'server/status', payload: status });
-    this.bridge.post({ type: 'theme/update', payload: { theme: this.deps.currentTheme() } });
+    this.postThemeUpdate();
     this.bridge.post({
       type: 'queued-messages/sync',
       payload: { messages: this.deps.queuedMessages() ?? [] },
@@ -677,6 +703,18 @@ export class WebviewSession {
         return;
       }
       let requestGeneration = generation;
+      if (message.type === 'window-chat-theme/set-reversed') {
+        if (!this.windowChat) return;
+        this.windowChatThemeReversed = message.payload.reversed;
+        void Promise.resolve(this.deps.saveWindowChatThemeReversed(message.payload.reversed)).catch(
+          (error: unknown) => {
+            logger.error(
+              `Failed to save window chat theme preference: ${error instanceof Error ? error.message : String(error)}`
+            );
+          }
+        );
+        return;
+      }
       if (message.type === 'ready') {
         const documentId = message.payload?.documentId;
         if (

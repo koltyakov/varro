@@ -303,7 +303,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   constructor(
     private readonly extensionUri: vscode.Uri,
     workspaceState: vscode.Memento,
-    globalState: vscode.Memento,
+    private readonly globalState: vscode.Memento,
     contextProvider: ContextProvider,
     private readonly server: OpenCodeServer,
     private readonly extensionId: string,
@@ -468,6 +468,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.updateStatusBarItem();
     });
     this.configDisposable = vscode.workspace.onDidChangeConfiguration((event) => {
+      // VS Code can announce the theme kind before it updates the configured theme name.
+      // Also refresh the per-view counterpart after the name changes, including same-kind switches.
+      if (
+        event.affectsConfiguration('workbench.colorTheme') ||
+        event.affectsConfiguration('workbench.preferredLightColorTheme') ||
+        event.affectsConfiguration('workbench.preferredDarkColorTheme') ||
+        event.affectsConfiguration('workbench.preferredHighContrastColorTheme') ||
+        event.affectsConfiguration('workbench.preferredHighContrastLightColorTheme')
+      ) {
+        for (const endpoint of this.endpoints) endpoint.webviewSession.postThemeUpdate();
+      }
       if (event.affectsConfiguration('varro.server.autoUpdate')) {
         this.updateStatusBarItem();
       }
@@ -536,13 +547,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         ensureServerStarted: () => this.runtime.ensureServerStarted(),
         readConfig: () => this.readConfig(),
         currentTheme: () => this.currentTheme(),
+        readWindowChatThemeReversed: () =>
+          this.globalState.get('varro.windowChatThemeReversed', false),
+        saveWindowChatThemeReversed: (reversed) =>
+          this.globalState.update('varro.windowChatThemeReversed', reversed),
         renderStatus: () => this.serverEventBridge.getStatus(),
         handleReadySideEffects: () => this.cleanupExpiredRecycleBin(),
         handleRecoveryLoadedSideEffects: () => this.reconcilePermissionAutomationOwners(true),
         handleVisibleSideEffects: () => this.cleanupExpiredRecycleBin(),
         updateStatusBarItem: () => this.updateStatusBarItem(),
-        postThemeUpdate: () =>
-          this.post({ type: 'theme/update', payload: { theme: this.currentTheme() } }),
+        postThemeUpdate: () => webviewSession.postThemeUpdate(),
         onHidden: () => undefined,
         resetStatusBarCache: () => {
           this.lastStatusBarStateKey = '';
@@ -1205,6 +1219,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     // The move command focuses the auxiliary window before it resolves.
     await vscode.commands.executeCommand('workbench.action.moveEditorToNewWindow');
     await vscode.commands.executeCommand('workbench.action.enableCompactAuxiliaryWindow');
+    const endpoint = [...this.editorPanels.values()].find((item) => item.panel === panel);
+    endpoint?.webviewSession.enableWindowChatTheme();
   }
 
   openNewTerminalEditor() {

@@ -717,6 +717,12 @@ function getVersionedServerEventName<T>(value: T): ServerEventName | null {
 
 export type WebviewThemeKind = 'light' | 'dark' | 'high-contrast' | 'high-contrast-light';
 
+export type WindowChatTheme = {
+  source: string;
+  reversed?: boolean;
+  counterpart: { name: string; kind: WebviewThemeKind; colors: Record<string, string> } | null;
+};
+
 export type DesktopSessionPaneSide = 'left' | 'right';
 export type SessionHistoryScope = 'directory' | 'descendants' | 'project';
 
@@ -807,6 +813,7 @@ export type InitialWebviewState = {
   documentId?: number;
   webviewContext?: WebviewInstanceContext;
   theme: WebviewThemeKind;
+  windowChatTheme?: WindowChatTheme;
   serverStatus: ServerStatus;
   editorContext: EditorContext;
   terminalSelection: TerminalSelection | null;
@@ -901,7 +908,10 @@ export type ExtensionMessage =
       payload: ExtensionConfigSnapshot;
     }
   | { type: 'session/catalog-invalidated' }
-  | { type: 'theme/update'; payload: { theme: WebviewThemeKind } }
+  | {
+      type: 'theme/update';
+      payload: { theme: WebviewThemeKind; windowChatTheme?: WindowChatTheme };
+    }
   | {
       type: 'vscode/open-result';
       payload: { requestId: number; status: 'opened' | 'unavailable' };
@@ -999,6 +1009,7 @@ export type WebviewMessage =
   | { type: 'session/open-in-opencode'; payload: { sessionId: string; directory?: string } }
   | { type: 'chat/new-editor' }
   | { type: 'chat/new-window' }
+  | { type: 'window-chat-theme/set-reversed'; payload: { reversed: boolean } }
   | { type: 'editor/route-changed'; payload: { route: WebviewRoute } }
   | {
       type: 'session-model/update';

@@ -319,6 +319,46 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
     case 'theme/update': {
       const payload = asRecord(record.payload);
       if (!payload || !isWebviewThemeKind(payload.theme)) return null;
+      if (payload.windowChatTheme !== undefined) {
+        const windowTheme = asRecord(payload.windowChatTheme);
+        if (!windowTheme || !isString(windowTheme.source)) return null;
+        if (windowTheme.reversed !== undefined && !isBoolean(windowTheme.reversed)) return null;
+        const reversed = isBoolean(windowTheme.reversed) ? windowTheme.reversed : undefined;
+        if (windowTheme.counterpart === null) {
+          return {
+            type,
+            payload: {
+              theme: payload.theme,
+              windowChatTheme: { source: windowTheme.source, reversed, counterpart: null },
+            },
+          };
+        }
+        const counterpart = asRecord(windowTheme.counterpart);
+        const colors = asRecord(counterpart?.colors);
+        if (
+          !counterpart ||
+          !isString(counterpart.name) ||
+          !isWebviewThemeKind(counterpart.kind) ||
+          !colors
+        )
+          return null;
+        const parsedColors: Record<string, string> = {};
+        for (const [key, color] of Object.entries(colors)) {
+          if (!isString(color)) return null;
+          parsedColors[key] = color;
+        }
+        return {
+          type,
+          payload: {
+            theme: payload.theme,
+            windowChatTheme: {
+              source: windowTheme.source,
+              reversed,
+              counterpart: { name: counterpart.name, kind: counterpart.kind, colors: parsedColors },
+            },
+          },
+        };
+      }
       return { type, payload: { theme: payload.theme } };
     }
 

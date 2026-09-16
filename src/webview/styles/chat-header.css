@@ -408,3 +408,27 @@
   width: 10px;
   height: 10px;
 }
+.window-chat-theme-toolbar {
+  position: absolute;
+  top: var(--latest-user-message-sticky-gap, 8px);
+  right: 8px;
+  z-index: 20;
+  display: flex;
+  border-radius: var(--radius-control);
+  background: var(--color-vscode-sidebar);
+}
+
+.window-chat-theme-toolbar.is-occluded {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.window-chat-theme-toolbar .chat-header-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+  background: transparent;
+}
+
+.window-chat-theme-toolbar .chat-header-btn[aria-pressed='true'] {
+  background: var(--color-vscode-toolbar-hover);
+}

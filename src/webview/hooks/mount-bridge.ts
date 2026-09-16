@@ -1,4 +1,5 @@
 import { reconcile } from 'solid-js/store';
+import { syncWindowChatTheme } from '../lib/window-chat-theme';
 import type {
   ExtensionMessage,
   WebviewThemeKind,
@@ -80,8 +81,9 @@ export function createMountBridgeOperations(deps: {
           appStore.setState('providerLimits', reconcile({}));
         },
         setTheme: (payload) => {
-          uiStore.setTheme(payload.theme);
-          deps.applyTheme(payload.theme);
+          const theme = syncWindowChatTheme(payload);
+          uiStore.setTheme(theme);
+          deps.applyTheme(theme);
         },
         setConfig: (payload) => {
           applyChatFontConfig(payload);

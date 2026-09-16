@@ -137,6 +137,7 @@ export const WEBVIEW_MESSAGE_TYPES = {
   'session/open-in-opencode': true,
   'chat/new-editor': true,
   'chat/new-window': true,
+  'window-chat-theme/set-reversed': true,
   'editor/route-changed': true,
   'session/export': true,
   'usage/report': true,
@@ -215,6 +216,13 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       const payload = asRecord(message?.payload);
       return typeof payload?.includeAllTime === 'boolean'
         ? { type, payload: { includeAllTime: payload.includeAllTime } }
+        : null;
+    }
+
+    case 'window-chat-theme/set-reversed': {
+      const payload = asRecord(message?.payload);
+      return typeof payload?.reversed === 'boolean'
+        ? { type, payload: { reversed: payload.reversed } }
         : null;
     }
 

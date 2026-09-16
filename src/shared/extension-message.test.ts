@@ -943,6 +943,33 @@ describe('parseExtensionMessage', () => {
   });
 
   it('rejects malformed theme/update payloads', () => {
+    const windowChatTheme = {
+      source: 'Dark Modern',
+      reversed: true,
+      counterpart: {
+        name: 'Light Modern',
+        kind: 'light',
+        colors: { 'editor.background': '#ffffff' },
+      },
+    };
+    expect(
+      parseExtensionMessage({ type: 'theme/update', payload: { theme: 'dark', windowChatTheme } })
+    ).toEqual({
+      type: 'theme/update',
+      payload: { theme: 'dark', windowChatTheme },
+    });
+    expect(
+      parseExtensionMessage({
+        type: 'theme/update',
+        payload: {
+          theme: 'dark',
+          windowChatTheme: {
+            ...windowChatTheme,
+            counterpart: { ...windowChatTheme.counterpart, colors: { 'editor.background': 123 } },
+          },
+        },
+      })
+    ).toBeNull();
     expect(parseExtensionMessage({ type: 'theme/update', payload: { theme: 'dark' } })).toEqual({
       type: 'theme/update',
       payload: { theme: 'dark' },

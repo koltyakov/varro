@@ -5,6 +5,7 @@ import { ChatInput } from '../ChatInput';
 import { ModelsPanel } from '../ModelsPanel';
 import { PermissionSettingsPanel } from '../PermissionSettingsPanel';
 import { ActiveChatHeader, SessionPickerHeader } from './ChatHeader';
+import { WindowChatThemeToggle } from './WindowChatThemeToggle';
 import { SessionListView } from './SessionListView';
 import type { SessionIndicatorSets, SessionListFilter } from './SessionListView';
 import type { SlowApiRequest } from '../../lib/bridge';
@@ -270,6 +271,7 @@ export function ChatWorkspace(props: {
     <div
       class={`interactive-session${props.showModels ? ' interactive-session-showing-models' : ''}`}
     >
+      <WindowChatThemeToggle />
       <Show when={props.showSessionHeader}>
         <div
           class={`chat-header ${props.shouldRenderWorkspace ? 'chat-header-centered chat-header-chat-layout' : ''}`}

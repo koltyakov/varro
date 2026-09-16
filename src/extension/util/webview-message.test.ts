@@ -1716,6 +1716,17 @@ describe('parseWebviewMessage protocol coverage', () => {
 });
 
 describe('parseWebviewMessage rejection paths', () => {
+  it('accepts only a boolean window-theme preference', () => {
+    expect(
+      parseWebviewMessage({ type: 'window-chat-theme/set-reversed', payload: { reversed: false } })
+    ).toEqual({
+      type: 'window-chat-theme/set-reversed',
+      payload: { reversed: false },
+    });
+    expect(
+      parseWebviewMessage({ type: 'window-chat-theme/set-reversed', payload: { reversed: 'true' } })
+    ).toBeNull();
+  });
   it('rejects files/drop with unusable or oversized path lists', () => {
     expect(parseWebviewMessage({ type: 'files/drop', payload: { paths: '/a.ts' } })).toBeNull();
     expect(
