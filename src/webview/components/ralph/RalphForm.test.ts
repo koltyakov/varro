@@ -73,6 +73,7 @@ vi.mock('../../lib/state', () => ({
     (_providerID: string, _modelID: string, fallbackName: string) => fallbackName
   ),
   getStoredVariantForModel: vi.fn(() => undefined),
+  getProviderLimit: vi.fn(() => null),
   getVisibleProviders: vi.fn((providers: Provider[]) => providers),
   isModelPinned: vi.fn(() => false),
   isSessionAwaitingInput: vi.fn(() => false),
@@ -82,6 +83,7 @@ vi.mock('../../lib/state', () => ({
 }));
 
 vi.mock('../../hooks/useOpenCode', () => ({
+  refreshProviderLimit: vi.fn(async () => {}),
   deleteSession: openCodeMocks.deleteSession,
   deleteSessionImmediately: openCodeMocks.deleteSessionImmediately,
   selectSession: openCodeMocks.selectSession,

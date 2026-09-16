@@ -42,6 +42,7 @@ describe('AssistantDialogSummaryForMessage', () => {
   it('shows the completion clock time and reports its prompt while hovered', () => {
     vi.useFakeTimers();
     const completedAt = new Date(2026, 0, 2, 13, 45).getTime();
+    vi.setSystemTime(completedAt);
     const onWorkedSummaryHoverChange = vi.fn();
     cleanup = render(
       () => (
@@ -94,9 +95,10 @@ describe('AssistantDialogSummaryForMessage', () => {
     expect(onWorkedSummaryHoverChange).toHaveBeenLastCalledWith('user-1', false);
   });
 
-  it('shows the completion clock time for interrupted summaries', () => {
+  it('shows the relative completion age for older interrupted summaries', () => {
     vi.useFakeTimers();
     const completedAt = new Date(2026, 0, 2, 13, 45).getTime();
+    vi.setSystemTime(new Date(2026, 0, 16, 13, 45));
     const onWorkedSummaryHoverChange = vi.fn();
     cleanup = render(
       () => (
@@ -121,7 +123,7 @@ describe('AssistantDialogSummaryForMessage', () => {
 
     const summary = container.querySelector<HTMLElement>('.assistant-dialog-summary');
     expect(summary?.textContent).toContain('Interrupted');
-    expect(summary?.querySelector('time')?.textContent).toBe(formatClockTime(completedAt));
+    expect(summary?.querySelector('time')?.textContent).toBe('2 weeks ago');
 
     summary?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
     vi.advanceTimersByTime(300);

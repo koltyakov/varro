@@ -5958,6 +5958,23 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
+  it('serves model catalog pricing through the host without forwarding to OpenCode', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      Response.json({
+        openai: { models: { 'gpt-6-astra': { cost: { input: 10, output: 50 } } } },
+      })
+    );
+    const { proxy, callbacks } = createProxy();
+    await proxy.handleRequest(
+      makePayload(25, 'GET', '/varro/model-pricing?providerID=openai&modelID=gpt-6-astra')
+    );
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 25,
+      data: { input: 10, output: 50 },
+    });
+    expect(callbacks.server.request).not.toHaveBeenCalled();
+  });
+
   it('optimistically marks a session busy before forwarding prompt_async', async () => {
     const order: string[] = [];
     const serverRequest = vi.fn(() => {

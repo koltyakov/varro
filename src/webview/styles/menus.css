@@ -495,6 +495,18 @@
   text-transform: none;
 }
 
+.model-picker-provider-limit {
+  margin-left: 6px;
+  opacity: 0.5;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.model-picker-provider-limit-left,
+.model-picker-provider-limit-prefix {
+  opacity: 0.65;
+}
+
 .model-picker-list-frame {
   position: relative;
   flex: 1 1 auto;
@@ -694,6 +706,13 @@ body.vscode-high-contrast-light .model-picker-item.selected {
   display: grid;
   gap: 5px;
   margin: 0;
+}
+
+.model-picker-cost-heading {
+  margin: 9px 0 5px;
+  color: var(--color-vscode-muted);
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .model-picker-details dl > div {

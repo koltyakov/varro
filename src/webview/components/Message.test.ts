@@ -1418,7 +1418,7 @@ describe('Message user rendering', () => {
     expect(timestamp?.classList.contains('is-transition-active')).toBe(false);
   });
 
-  it('includes the system-formatted date for messages sent before today', () => {
+  it('shows the relative age for messages sent before today', () => {
     const now = new Date();
     const created = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 2, 13, 45);
     cleanup = render(
@@ -1431,9 +1431,7 @@ describe('Message user rendering', () => {
       container!
     );
 
-    expect(container?.querySelector('.message-sent-time')?.textContent).toBe(
-      new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'short' }).format(created)
-    );
+    expect(container?.querySelector('.message-sent-time')?.textContent).toBe('2 days ago');
   });
 
   it('reveals the timestamp on the last message in a consecutive user series', () => {

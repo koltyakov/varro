@@ -1,5 +1,8 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
+import type { ModelPricing } from '../../shared/protocol';
+import { client } from '../lib/client';
 import {
+  getProviderLimit,
   getVisibleProviders,
   getModelDisplayName,
   isModelPinned,
@@ -8,7 +11,16 @@ import {
   setShowModels,
   state,
 } from '../lib/state';
-import { formatVariantLabel as formatThinkingLabel, formatContextLimit } from '../lib/format';
+import {
+  formatVariantLabel as formatThinkingLabel,
+  formatContextLimit,
+  formatProviderLimitTitle,
+  formatProviderLimitCompact,
+  formatProviderLimitCompactPrefix,
+  getOrderedProviderLimitWindows,
+  getProviderLimitWindowRemainingPercent,
+} from '../lib/format';
+import { refreshProviderLimit } from '../hooks/useOpenCode';
 import {
   observePopupViewport,
   PICKER_DETAILS_HOVER_DELAY_MS,
@@ -20,6 +32,7 @@ import { compareProviders, sortProviderModels } from '../lib/model-ordering';
 import { STORAGE_KEYS, readStored, writeStored } from '../lib/state-storage';
 import { checkIcon, pinIcon, searchIcon, xmarkIcon } from '../lib/ui-icons';
 import { FormattedModelName } from './chat-input/ToolbarPickers';
+import { filterCompactProviderLimitForModel } from './chat-input/toolbar-compact';
 import { Tooltip } from './Tooltip';
 import { UiIcon } from './UiIcon';
 
@@ -31,6 +44,23 @@ interface ModelSelection {
 
 const DEBUG_ANIMATE_MANAGE_MODELS = false; // set to true to always animate the "Manage models" button when opening the model picker
 const STACKED_DETAILS_MAX_WIDTH = 700;
+
+function providerHeaderLimit(providerID: string | undefined) {
+  return filterCompactProviderLimitForModel(getProviderLimit(providerID, null), null, null);
+}
+
+function providerHeaderBadges(providerID: string | undefined) {
+  const limit = providerHeaderLimit(providerID);
+  const badges = getOrderedProviderLimitWindows(limit)
+    .filter((window) => getProviderLimitWindowRemainingPercent(window) != null)
+    .map((window) => ({
+      prefix: formatProviderLimitCompactPrefix(limit, window).toLowerCase(),
+      value: formatProviderLimitCompact(limit, window),
+    }));
+  const preferred = badges.filter((badge) => ['5h', 'w', 'm'].includes(badge.prefix));
+  const visible = preferred.length > 0 ? preferred : badges.slice(0, 1);
+  return visible.length > 0 ? visible : null;
+}
 
 export function ModelPicker(props: {
   onSelect: (sel: ModelSelection) => void;
@@ -86,6 +116,30 @@ export function ModelPicker(props: {
     model: VisibleProvider['models'][string];
   } | null>(null);
   const [detailsPlacement, setDetailsPlacement] = createSignal<'right' | 'top' | null>(null);
+  const [catalogPricing, setCatalogPricing] = createSignal<ModelPricing | null>(null);
+  createEffect(() => {
+    const entry = hoveredEntry();
+    setCatalogPricing(null);
+    if (!entry) return;
+    let active = true;
+    onCleanup(() => {
+      active = false;
+    });
+    // A resource read would suspend the surrounding picker while optional pricing loads.
+    void client.config.modelPricing(entry.provider.id, entry.model.id).then(
+      (pricing) => {
+        if (active) setCatalogPricing(pricing);
+      },
+      () => {
+        // Catalog enrichment is optional; retain any nonzero OpenCode rates when offline.
+      }
+    );
+  });
+  const costRows = createMemo(() => {
+    const entry = hoveredEntry();
+    if (!entry) return [];
+    return modelCostRows(entry.model, catalogPricing());
+  });
   const [scrollMetrics, setScrollMetrics] = createSignal({
     clientHeight: 0,
     scrollHeight: 0,
@@ -161,8 +215,14 @@ export function ModelPicker(props: {
       }
     }
     return [
-      ...(pinnedModels.length > 0 ? [{ name: 'Pinned', models: pinnedModels }] : []),
-      ...filtered.map((entry) => ({ name: entry.provider.name, models: entry.models })),
+      ...(pinnedModels.length > 0
+        ? [{ name: 'Pinned', providerID: undefined, models: pinnedModels }]
+        : []),
+      ...filtered.map((entry) => ({
+        name: entry.provider.name,
+        providerID: entry.provider.id,
+        models: entry.models,
+      })),
     ];
   });
 
@@ -230,6 +290,10 @@ export function ModelPicker(props: {
   }
 
   onMount(() => {
+    for (const provider of visibleProviders()) {
+      void refreshProviderLimit(provider.id);
+    }
+
     if (props.showManageModels ?? true) {
       const isFirstOpen = readStored<boolean>(STORAGE_KEYS.modelPickerOpened) !== true;
       if (isFirstOpen) writeStored(STORAGE_KEYS.modelPickerOpened, true);
@@ -419,9 +483,40 @@ export function ModelPicker(props: {
                 }
               >
                 <For each={filteredGroups()}>
-                  {({ name, models }) => (
+                  {({ name, providerID, models }) => (
                     <>
-                      <div class="dropdown-group-header">{name}</div>
+                      <div class="dropdown-group-header">
+                        <span>{name}</span>
+                        <Show when={providerHeaderBadges(providerID)}>
+                          {(remaining) => (
+                            <Tooltip
+                              content={formatProviderLimitTitle(providerHeaderLimit(providerID))}
+                            >
+                              <span
+                                class="model-picker-provider-limit"
+                                aria-label={`${name} limits remaining: ${remaining()
+                                  .map((badge) => `${badge.prefix} ${badge.value}`.trim())
+                                  .join(', ')}`}
+                              >
+                                <For each={remaining()}>
+                                  {(badge, index) => (
+                                    <>
+                                      {index() > 0 ? ' ' : ''}
+                                      <Show when={badge.prefix}>
+                                        <span class="model-picker-provider-limit-prefix">
+                                          {badge.prefix}{' '}
+                                        </span>
+                                      </Show>
+                                      {badge.value}
+                                    </>
+                                  )}
+                                </For>
+                                <span class="model-picker-provider-limit-left"> left</span>
+                              </span>
+                            </Tooltip>
+                          )}
+                        </Show>
+                      </div>
                       <For each={models}>
                         {(entry) => {
                           const provider = entry.provider;
@@ -473,6 +568,7 @@ export function ModelPicker(props: {
                               }}
                               onMouseLeave={() => {
                                 clearTimeout(detailsHoverTimer);
+                                setFocusIndex(-1);
                                 setHoveredEntry(null);
                                 setDetailsPlacement(null);
                                 queueMicrotask(() => repositionPopup?.());
@@ -621,6 +717,24 @@ export function ModelPicker(props: {
                 )}
               </Show>
             </dl>
+            <Show when={costRows().length > 0}>
+              <div
+                class="model-picker-cost-heading"
+                title="Catalog API rates, not subscription charges"
+              >
+                Cost ($/1M tokens)
+              </div>
+              <dl>
+                <For each={costRows()}>
+                  {(row) => (
+                    <div>
+                      <dt>{row.label}</dt>
+                      <dd>{row.value}</dd>
+                    </div>
+                  )}
+                </For>
+              </dl>
+            </Show>
           </div>
         )}
       </Show>
@@ -640,5 +754,41 @@ function formatModelInputs(input: VisibleProviderModel['capabilities']['input'])
 }
 
 type VisibleProviderModel = ReturnType<typeof getVisibleProviders>[number]['models'][string];
+
+const modelCostFormatter = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 6,
+});
+
+function modelCostRows(
+  model: VisibleProviderModel,
+  pricing?: ModelPricing | null
+): { label: string; value: string }[] {
+  const cost = model.cost;
+  const rates = pricing ?? {
+    input: cost?.input,
+    output: cost?.output,
+    cache_read: cost?.cache?.read,
+    cache_write: cost?.cache?.write,
+  };
+  if (
+    !Object.values(rates).some(
+      (value) => value !== undefined && Number.isFinite(value) && value > 0
+    )
+  )
+    return [];
+  return [
+    { label: 'Input', value: rates.input },
+    { label: 'Output', value: rates.output },
+    { label: 'Cache read', value: rates.cache_read },
+    { label: 'Cache write', value: rates.cache_write },
+  ].flatMap(({ label, value }) =>
+    value !== undefined && Number.isFinite(value) && value >= 0
+      ? [{ label, value: modelCostFormatter.format(value) }]
+      : []
+  );
+}
 
 export { formatThinkingLabel, formatContextLimit };

@@ -1,8 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
+import { createComponent, Suspense } from 'solid-js';
+import type { ModelPricing } from '../../shared/protocol';
 import type { Provider } from '../types';
 import { ModelPicker } from './ModelPicker';
-import { resetDefaultAppState, setShowModels, setState, showModels } from '../lib/state';
+import { client } from '../lib/client';
+import {
+  resetDefaultAppState,
+  setProviderLimit,
+  setShowModels,
+  setState,
+  showModels,
+} from '../lib/state';
+import {
+  createOpenCodeRuntime,
+  installOpenCodeRuntime,
+} from '../hooks/runtime/useOpenCode.runtime';
 import { STORAGE_KEYS } from '../lib/state-storage';
 import {
   markProviderAuthFailure,
@@ -12,6 +25,9 @@ import {
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
 let originalScrollIntoView: typeof HTMLElement.prototype.scrollIntoView | undefined;
+
+const refreshProviderLimit = vi.fn(async (_providerID: string) => {});
+let restoreRuntime: (() => void) | undefined;
 
 function createModel(
   id: string,
@@ -47,6 +63,9 @@ async function flushMicrotasks(count = 2) {
 }
 
 beforeEach(() => {
+  vi.spyOn(client.config, 'modelPricing').mockResolvedValue(null);
+  refreshProviderLimit.mockClear();
+  restoreRuntime = installOpenCodeRuntime({ ...createOpenCodeRuntime(), refreshProviderLimit });
   window.localStorage.removeItem(STORAGE_KEYS.pinnedModels);
   window.localStorage.removeItem(STORAGE_KEYS.modelDisplayNames);
   resetDefaultAppState();
@@ -59,6 +78,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  restoreRuntime?.();
   vi.useRealTimers();
   cleanup?.();
   cleanup = undefined;
@@ -75,6 +95,170 @@ afterEach(() => {
 });
 
 describe('ModelPicker', () => {
+  it('clears the model highlight when the pointer leaves and restores keyboard navigation', async () => {
+    setState('providers', [
+      createProvider('openai', 'OpenAI', {
+        alpha: createModel('alpha', 'Alpha'),
+        beta: createModel('beta', 'Beta'),
+      }),
+    ]);
+    cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    await flushMicrotasks();
+
+    const row = container!.querySelector<HTMLElement>('.model-picker-row')!;
+    row.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(row.querySelector('.keyboard-focus')).not.toBeNull();
+
+    row.dispatchEvent(new MouseEvent('mouseleave'));
+    container!.querySelector('.dropdown-group-header')!.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(container!.querySelector('.keyboard-focus')).toBeNull();
+    expect(container!.querySelector('.model-picker-details')).toBeNull();
+
+    container!
+      .querySelector('.dropdown-menu')!
+      .dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect(row.querySelector('.keyboard-focus')).not.toBeNull();
+  });
+
+  it('keeps the dropdown visible inside Suspense while hover pricing loads', async () => {
+    vi.useFakeTimers();
+    let resolvePricing!: (pricing: ModelPricing | null) => void;
+    const pending = new Promise<ModelPricing | null>((resolve) => {
+      resolvePricing = resolve;
+    });
+    vi.mocked(client.config.modelPricing).mockReturnValue(pending);
+    setState('providers', [
+      createProvider('openai', 'OpenAI', {
+        sol: createModel('sol', 'Sol', { cost: { input: 0, output: 0 } }),
+      }),
+    ]);
+    const onSelect = vi.fn();
+    cleanup = render(
+      () =>
+        createComponent(Suspense, {
+          fallback: 'Loading picker',
+          get children() {
+            return ModelPicker({ onSelect, onClose: vi.fn() });
+          },
+        }),
+      container!
+    );
+    await flushMicrotasks();
+    container
+      ?.querySelector<HTMLElement>('.model-picker-row')
+      ?.dispatchEvent(new MouseEvent('mouseenter'));
+    vi.advanceTimersByTime(2_000);
+    await flushMicrotasks(6);
+
+    expect(client.config.modelPricing).toHaveBeenCalledWith('openai', 'sol');
+    expect(container?.querySelector('.model-picker-menu')).not.toBeNull();
+    expect(container?.textContent).not.toContain('Loading picker');
+    expect(container?.querySelector('.model-picker-cost-heading')).toBeNull();
+    container?.querySelector<HTMLButtonElement>('.model-picker-item')?.click();
+    expect(onSelect).toHaveBeenCalledWith({ providerID: 'openai', modelID: 'sol' });
+
+    resolvePricing({ input: 4, output: 20 });
+    await flushMicrotasks(6);
+    expect(container?.querySelector('.model-picker-menu')).not.toBeNull();
+    expect(container?.querySelector('.model-picker-details')?.textContent).toContain('$4.00');
+  });
+
+  it('loads provider quotas and updates remaining percentages without labeling pinned groups', async () => {
+    setState('providers', [
+      createProvider('openai', 'OpenAI', {
+        alpha: createModel('alpha', 'Alpha'),
+        beta: createModel('beta', 'Beta'),
+      }),
+      createProvider('custom', 'Custom', { custom: createModel('custom', 'Custom') }),
+    ]);
+    setState('pinnedModels', ['openai:alpha']);
+    cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    await flushMicrotasks();
+
+    expect(refreshProviderLimit).toHaveBeenCalledWith('openai', undefined);
+    expect(refreshProviderLimit).toHaveBeenCalledWith('custom', undefined);
+    expect(container?.querySelector('.model-picker-provider-limit')).toBeNull();
+
+    setProviderLimit('openai', null, {
+      providerID: 'openai',
+      status: 'available',
+      source: 'provider',
+      checkedAt: 1,
+      windows: [
+        {
+          id: 'five_hour',
+          label: '5 hour',
+          unit: 'requests',
+          remaining: 82,
+          limit: 100,
+          resetAt: null,
+        },
+        {
+          id: 'weekly',
+          label: 'Weekly',
+          unit: 'tokens',
+          remaining: 640,
+          limit: 1000,
+          resetAt: null,
+        },
+        {
+          id: 'spark_five_hour',
+          label: '5-Hour Limit (Spark)',
+          unit: 'requests',
+          remaining: 100,
+          limit: 100,
+          resetAt: null,
+        },
+        {
+          id: 'spark_weekly',
+          label: 'Weekly Limit (Spark)',
+          unit: 'requests',
+          remaining: 100,
+          limit: 100,
+          resetAt: null,
+        },
+      ],
+    });
+    await flushMicrotasks();
+
+    const limits = container!.querySelectorAll('.model-picker-provider-limit');
+    expect(limits).toHaveLength(1);
+    expect(limits[0]?.textContent).toBe('5h 82% w 64% left');
+    expect(limits[0]?.getAttribute('aria-label')).toBe('OpenAI limits remaining: 5h 82%, w 64%');
+    expect(container?.querySelector('.dropdown-group-header')?.textContent).toBe('Pinned');
+
+    setProviderLimit('openai', null, {
+      providerID: 'openai',
+      status: 'available',
+      source: 'provider',
+      checkedAt: 2,
+      windows: [
+        {
+          id: 'five_hour',
+          label: '5 hour',
+          unit: 'requests',
+          remaining: 0,
+          limit: 100,
+          resetAt: null,
+        },
+      ],
+    });
+    await flushMicrotasks();
+    expect(container?.querySelector('.model-picker-provider-limit')?.textContent).toBe(
+      '5h 0% left'
+    );
+
+    setProviderLimit('openai', null, {
+      providerID: 'openai',
+      status: 'unsupported',
+      source: 'provider',
+      checkedAt: 3,
+      note: 'No quota available',
+    });
+    await flushMicrotasks();
+    expect(container?.querySelector('.model-picker-provider-limit')).toBeNull();
+  });
+
   it('uses manually ordered providers and models', async () => {
     setState('providers', [
       createProvider('openai', 'OpenAI', {
@@ -248,6 +432,92 @@ describe('ModelPicker', () => {
     expect(details?.compareDocumentPosition(container!.querySelector('.model-picker-menu')!)).toBe(
       Node.DOCUMENT_POSITION_PRECEDING
     );
+  });
+
+  it.each([
+    {
+      name: 'all supplied rates',
+      cost: { input: 4, output: 20, cache: { read: 0.4, write: 5 } },
+      expected: ['Input$4.00', 'Output$20.00', 'Cache read$0.40', 'Cache write$5.00'],
+    },
+    {
+      name: 'zero and fractional rates without cache pricing',
+      cost: { input: 0, output: 0.025 },
+      expected: ['Input$0.00', 'Output$0.025'],
+    },
+    {
+      name: 'missing pricing',
+      cost: undefined,
+      expected: [],
+    },
+    {
+      name: 'invalid rates',
+      cost: { input: Number.NaN, output: Number.POSITIVE_INFINITY, cache: { read: -1, write: 0 } },
+      expected: [],
+    },
+    {
+      name: 'all-zero OpenCode pricing',
+      cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+      expected: [],
+    },
+  ])('shows only available model pricing: $name', async ({ cost, expected }) => {
+    vi.useFakeTimers();
+    setState('providers', [
+      createProvider('openai', 'OpenAI', {
+        detailed: createModel('detailed', 'Detailed', { cost }),
+      }),
+    ]);
+    cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    await flushMicrotasks();
+
+    container
+      ?.querySelector<HTMLElement>('.model-picker-row')
+      ?.dispatchEvent(new MouseEvent('mouseenter'));
+    vi.advanceTimersByTime(2_000);
+    await flushMicrotasks();
+
+    const heading = container?.querySelector('.model-picker-cost-heading');
+    if (expected.length === 0) {
+      expect(heading).toBeNull();
+    } else {
+      expect(heading?.textContent).toBe('Cost ($/1M tokens)');
+      expect(Array.from(heading!.nextElementSibling!.children, (row) => row.textContent)).toEqual(
+        expected
+      );
+    }
+  });
+
+  it('shows catalog rates when OpenCode zeroes subscription model costs', async () => {
+    vi.useFakeTimers();
+    vi.mocked(client.config.modelPricing).mockResolvedValue({
+      input: 4,
+      output: 20,
+      cache_read: 0.4,
+      cache_write: 5,
+    });
+    setState('providers', [
+      createProvider('openai', 'OpenAI', {
+        sol: createModel('sol', 'Sol', {
+          cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+        }),
+      }),
+    ]);
+    cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    await flushMicrotasks();
+    container
+      ?.querySelector<HTMLElement>('.model-picker-row')
+      ?.dispatchEvent(new MouseEvent('mouseenter'));
+    vi.advanceTimersByTime(2_000);
+    await flushMicrotasks(6);
+
+    expect(client.config.modelPricing).toHaveBeenCalledWith('openai', 'sol');
+    const heading = container?.querySelector('.model-picker-cost-heading');
+    expect(Array.from(heading!.nextElementSibling!.children, (row) => row.textContent)).toEqual([
+      'Input$4.00',
+      'Output$20.00',
+      'Cache read$0.40',
+      'Cache write$5.00',
+    ]);
   });
 
   it('orders models by release date without prioritizing the provider default', async () => {

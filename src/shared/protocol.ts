@@ -419,6 +419,7 @@ export type WorkspaceStatusEventSummary = {
 export const VARRO_API_NAMESPACE = '/varro' as const;
 
 export const VARRO_API_ENDPOINTS = {
+  modelPricing: `${VARRO_API_NAMESPACE}/model-pricing`,
   providerLimit: `${VARRO_API_NAMESPACE}/provider-limit`,
   planOpen: `${VARRO_API_NAMESPACE}/plan/open`,
   openCodeConfig: `${VARRO_API_NAMESPACE}/opencode-config`,
@@ -438,6 +439,13 @@ export const VARRO_API_ENDPOINTS = {
   permissionServerMemory: `${VARRO_API_NAMESPACE}/permission/server-memory`,
   permissionProjectAllow: `${VARRO_API_NAMESPACE}/permission/project-allow`,
 } as const;
+
+export interface ModelPricing {
+  input?: number;
+  output?: number;
+  cache_read?: number;
+  cache_write?: number;
+}
 
 export type VarroSessionEndpointAction =
   | 'activate'

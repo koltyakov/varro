@@ -21,6 +21,7 @@ import type {
   ChatModelSelection,
   LspStatus,
   McpStatus,
+  ModelPricing,
   PermissionMode,
   ProviderLimitStatus,
   RecycleBinEntry,
@@ -404,6 +405,12 @@ export const client = {
   },
 
   config: {
+    modelPricing(providerID: string, modelID: string): Promise<ModelPricing | null> {
+      const params = new URLSearchParams({ providerID, modelID });
+      return apiCall('GET', `${VARRO_API_ENDPOINTS.modelPricing}?${params}`, undefined, {
+        retries: 0,
+      });
+    },
     async providers(): Promise<{
       providers: Provider[];
       default: Record<string, string>;

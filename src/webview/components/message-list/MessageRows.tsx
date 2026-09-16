@@ -10,7 +10,7 @@ import { isLoading, skipPlanSession, state } from '../../lib/state';
 import { prepareMeasuredEntrance } from '../../lib/measured-entrance';
 import type { AssistantActivityGroupInfo } from '../../lib/assistant-activity';
 import { formatNumber, formatTurnDuration, isAssistantMessage } from '../../lib/message-metrics';
-import { formatClockTime } from '../../lib/message-time';
+import { formatMessageSentTime } from '../../lib/message-time';
 import { checkIcon, copyIcon } from '../../lib/ui-icons';
 import { writeClipboard } from '../../lib/write-clipboard';
 import type { ToolCallPermissionMatch } from '../../lib/tool-call-matching';
@@ -392,7 +392,7 @@ function AssistantDialogSummary(props: {
   const hasCompletedSummary = () => !props.summary.collectingStats;
   const completedTime = () =>
     hasCompletedSummary() && props.summary.completedAt !== undefined
-      ? formatClockTime(props.summary.completedAt)
+      ? formatMessageSentTime(props.summary.completedAt)
       : null;
   const onWorkedSummaryHoverChange = props.onWorkedSummaryHoverChange;
   let hoveredPromptMessageId: string | null = null;

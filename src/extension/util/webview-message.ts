@@ -1779,6 +1779,14 @@ const API_ROUTES: ApiRoute[] = [
   route('/session/status', methodsNoQuery('GET')),
   route('/experimental/workspace/status', methodsNoQuery('GET')),
   route(
+    VARRO_API_ENDPOINTS.modelPricing,
+    ({ method, url }) =>
+      method === 'GET' &&
+      onlyQuery(url, 'providerID', 'modelID') &&
+      requiredQuery(url, 'providerID') &&
+      requiredQuery(url, 'modelID')
+  ),
+  route(
     VARRO_API_ENDPOINTS.providerLimit,
     ({ method, url }) =>
       method === 'GET' &&

@@ -426,7 +426,7 @@ function getPeriodLabel(periodType: string) {
   if (normalized.includes('WEEKLY')) return 'Weekly Credits';
   if (normalized.includes('MONTHLY')) return 'Monthly Credits';
   if (normalized.includes('DAILY')) return 'Daily Credits';
-  return 'Credits';
+  return 'Weekly Credits';
 }
 
 function parseXaiCreditsResponse(bytes: Uint8Array, checkedAt: number) {
@@ -526,7 +526,6 @@ function readVarint(bytes: Uint8Array, start: number): [number, number] {
 
 function getResetWindowLabel(resetAt: number, checkedAt: number) {
   const days = (resetAt - checkedAt) / 86_400_000;
-  if (days >= 4 && days <= 12) return 'Weekly Credits';
   if (days >= 20 && days <= 45) return 'Monthly Credits';
-  return 'Credits';
+  return 'Weekly Credits';
 }

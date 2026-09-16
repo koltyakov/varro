@@ -47,6 +47,7 @@ import { getWorkspaceProblems } from './workspace-problems';
 import type { LocalSessionSummaryData } from './local-session-summary';
 import { sessionSummary } from './session-summary';
 import { logger } from './logger';
+import { ModelPricingCatalog } from './model-pricing';
 import type { ProviderLimitService } from './provider-limit-service';
 import type { PinnedSessionManager } from './pinned-session-manager';
 import type { OpenCodeServer } from './server';
@@ -447,6 +448,7 @@ export interface RestProxyCallbacks {
 }
 
 export class RestProxy {
+  private readonly modelPricing = new ModelPricingCatalog();
   private readonly requestWorkspaceDirectory = new AsyncLocalStorage<string | undefined>();
   private sessionDirectories = new Map<string, string>();
   private authorizedSessionDirectories = new Map<string, AuthorizedSessionDirectory>();
@@ -1228,6 +1230,16 @@ export class RestProxy {
         const data = await this.callbacks.sessionTitleFallback.renameIfUntitled(
           renameSessionID,
           explicitWorkspaceDirectory ?? this.getCurrentWorkspaceResolutionRoot()
+        );
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
+
+      const pricingUrl = new URL(payload.path, 'http://localhost');
+      if (method === 'GET' && pricingUrl.pathname === VARRO_API_ENDPOINTS.modelPricing) {
+        const data = await this.modelPricing.get(
+          pricingUrl.searchParams.get('providerID') ?? '',
+          pricingUrl.searchParams.get('modelID') ?? ''
         );
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;

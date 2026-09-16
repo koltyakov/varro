@@ -87,6 +87,26 @@ describe('createXaiAdapter', () => {
     });
   });
 
+  it('treats SuperGrok credits without a period type as weekly even near reset', async () => {
+    const checkedAt = Date.parse('2026-09-01T02:00:00.000Z');
+    const resetAt = '2026-09-01T12:00:00.000Z';
+    vi.mocked(fetch).mockResolvedValue(
+      Response.json({ config: { creditUsagePercent: 0, currentPeriod: { end: resetAt } } })
+    );
+    const status = await adapter.fetch({
+      provider,
+      authStore: oauthStore,
+      modelID: null,
+      checkedAt,
+    });
+    expect(status).toMatchObject({
+      status: 'available',
+      windows: [
+        { id: 'credits', label: 'Weekly Credits', remaining: 100, resetAt: Date.parse(resetAt) },
+      ],
+    });
+  });
+
   it('refreshes an expired OAuth token before polling billing limits', async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(
@@ -306,47 +326,50 @@ describe('createXaiAdapter', () => {
     expect(status).not.toHaveProperty('usageLimitResets');
   });
 
-  it('falls back to the SuperGrok credits RPC when REST billing is unbounded', async () => {
-    const resetAt = Date.parse('2026-09-01T12:00:00.000Z');
-    vi.mocked(fetch)
-      .mockResolvedValueOnce(
-        Response.json({
-          config: {
-            currentPeriod: { type: 'WEEKLY', end: '2026-09-01T12:00:00.000Z' },
+  it.each(['2026-08-26T12:00:00.000Z', '2026-09-01T02:00:00.000Z'])(
+    'keeps fallback SuperGrok RPC credits weekly when checked at %s',
+    async (checkedAt) => {
+      const resetAt = Date.parse('2026-09-01T12:00:00.000Z');
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(
+          Response.json({
+            config: {
+              currentPeriod: { type: 'WEEKLY', end: '2026-09-01T12:00:00.000Z' },
+            },
+          })
+        )
+        .mockResolvedValueOnce(
+          Response.json({ config: { monthlyLimit: { val: 0 }, used: { val: 0 } } })
+        )
+        .mockResolvedValueOnce(new Response(createCreditsResponseFrame(resetAt)));
+
+      const status = await adapter.fetch({
+        provider,
+        authStore: oauthStore,
+        modelID: 'grok-code-fast-1',
+        checkedAt: Date.parse(checkedAt),
+      });
+
+      expect(fetch).toHaveBeenNthCalledWith(
+        3,
+        'https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig',
+        expect.objectContaining({ method: 'POST', body: new Uint8Array(5) })
+      );
+      expect(status).toMatchObject({
+        status: 'available',
+        windows: [
+          {
+            id: 'credits',
+            label: 'Weekly Credits',
+            remaining: 100,
+            limit: 100,
+            percent: 0,
+            resetAt,
           },
-        })
-      )
-      .mockResolvedValueOnce(
-        Response.json({ config: { monthlyLimit: { val: 0 }, used: { val: 0 } } })
-      )
-      .mockResolvedValueOnce(new Response(createCreditsResponseFrame(resetAt)));
-
-    const status = await adapter.fetch({
-      provider,
-      authStore: oauthStore,
-      modelID: 'grok-code-fast-1',
-      checkedAt: Date.parse('2026-08-26T12:00:00.000Z'),
-    });
-
-    expect(fetch).toHaveBeenNthCalledWith(
-      3,
-      'https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig',
-      expect.objectContaining({ method: 'POST', body: new Uint8Array(5) })
-    );
-    expect(status).toMatchObject({
-      status: 'available',
-      windows: [
-        {
-          id: 'credits',
-          label: 'Weekly Credits',
-          remaining: 100,
-          limit: 100,
-          percent: 0,
-          resetAt,
-        },
-      ],
-    });
-  });
+        ],
+      });
+    }
+  );
 
   it('reports rejected or unbounded billing responses as unsupported', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(new Response('', { status: 401 }));
