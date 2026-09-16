@@ -634,6 +634,15 @@ body.vscode-high-contrast-light
   margin-left: auto;
 }
 
+.permission-prompt-agent {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-vscode-muted);
+  font-size: 12px;
+}
+
 .permission-prompt-step {
   color: var(--color-vscode-muted);
   font-size: 11px;

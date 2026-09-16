@@ -1,4 +1,4 @@
-import { Show, createEffect, createSignal, onCleanup } from 'solid-js';
+import { Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import type { Permission } from '../types';
 import {
@@ -7,6 +7,8 @@ import {
   respondPermission,
 } from '../hooks/useOpenCode';
 import { getPermissionModeForSession } from '../lib/state-permission-modes';
+import { state } from '../lib/app-state';
+import { getToolKind } from '../lib/tool-normalization';
 import { cardShieldIcon } from '../lib/ui-icons';
 import { CopyIconButton } from './CopyIconButton';
 import { UiIcon } from './UiIcon';
@@ -27,6 +29,28 @@ export function PermissionPrompt(props: {
   queueTotal?: number;
 }) {
   const sessionId = () => props.permission.sessionID;
+  const sourceAgent = createMemo(() => {
+    const session = state.sessions.find((candidate) => candidate.id === sessionId());
+    const message = state.messages.find(
+      (entry) =>
+        entry.info.sessionID === sessionId() && entry.info.id === props.permission.messageID
+    );
+    let taskAgent: string | undefined;
+    for (const entry of state.messages) {
+      for (const part of entry.parts) {
+        if (part.type !== 'tool' || getToolKind(part.tool) !== 'task') continue;
+        const metadata = 'metadata' in part.state ? part.state.metadata : undefined;
+        const childId = metadata?.sessionId ?? metadata?.sessionID ?? part.state.input?.task_id;
+        const agent = part.state.input?.subagent_type;
+        if (childId === sessionId() && isString(agent) && agent.trim()) {
+          taskAgent = agent.trim();
+        }
+      }
+    }
+    if (!session?.parentID && !taskAgent) return undefined;
+    const messageAgent = message?.info.role === 'assistant' ? message.info.agent : undefined;
+    return messageAgent?.trim() || session?.agent?.trim() || taskAgent || 'subagent';
+  });
   const [alwaysMenuOpen, setAlwaysMenuOpen] = createSignal(false);
   const [alwaysMenuPosition, setAlwaysMenuPosition] = createSignal({ left: 0, top: 0 });
   let alwaysMenuButton: HTMLButtonElement | undefined;
@@ -117,6 +141,13 @@ export function PermissionPrompt(props: {
       <div class="permission-prompt-header">
         <UiIcon source={cardShieldIcon} class="permission-prompt-icon" width={16} height={16} />
         <span class="permission-prompt-label">Permission Required</span>
+        <Show when={sourceAgent()}>
+          {(agent) => (
+            <span class="permission-prompt-agent" title={`Requested by @${agent()}`}>
+              @{agent()}
+            </span>
+          )}
+        </Show>
         <Show when={(props.queueTotal ?? 0) > 1 || duplicateCount() > 1}>
           <div class="permission-prompt-indicators">
             <Show when={(props.queueTotal ?? 0) > 1}>

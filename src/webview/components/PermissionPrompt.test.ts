@@ -1,6 +1,7 @@
 import { render } from 'solid-js/web';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Permission } from '../types';
+import { setState } from '../lib/app-state';
 
 // SAFETY: The fixture provides the permission-mode fields read by this statement.
 const mocks = vi.hoisted(() => ({
@@ -49,6 +50,8 @@ beforeEach(() => {
   mocks.alwaysAllowPermissionForSession.mockReset();
   mocks.alwaysAllowPermissionForSession.mockResolvedValue(undefined);
   mocks.permissionMode = 'default';
+  setState('sessions', []);
+  setState('messages', []);
 });
 
 afterEach(() => {
@@ -60,6 +63,104 @@ afterEach(() => {
 });
 
 describe('PermissionPrompt', () => {
+  it('shows the owning subagent and updates when its identity arrives', () => {
+    setState('sessions', [
+      {
+        id: 'session-1',
+        parentID: 'child-parent',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'Inspect code',
+        version: '1',
+        time: { created: 0, updated: 0 },
+      },
+    ]);
+    cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
+
+    expect(container?.querySelector('.permission-prompt-agent')?.textContent).toBe('@subagent');
+    setState('sessions', 0, 'agent', 'explore');
+    expect(container?.querySelector('.permission-prompt-agent')?.textContent).toBe('@explore');
+    expect(container?.querySelector('.permission-prompt-agent')?.getAttribute('title')).toBe(
+      'Requested by @explore'
+    );
+  });
+
+  it('does not label a root session as a subagent', () => {
+    setState('sessions', [
+      {
+        id: 'session-1',
+        agent: 'build',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'Build',
+        version: '1',
+        time: { created: 0, updated: 0 },
+      },
+    ]);
+    cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
+
+    expect(container?.querySelector('.permission-prompt-agent')).toBeNull();
+  });
+
+  it.each([
+    { metadata: { sessionId: 'session-1' }, input: { subagent_type: 'explore' } },
+    { metadata: { sessionID: 'session-1' }, input: { subagent_type: 'explore' } },
+    { metadata: {}, input: { subagent_type: 'explore', task_id: 'session-1' } },
+  ])('uses the linked task before the child session is loaded: %j', ({ metadata, input }) => {
+    setState('messages', [
+      {
+        info: {
+          id: 'parent-message',
+          sessionID: 'root-session',
+          role: 'assistant',
+          parentID: 'user-message',
+          modelID: 'model',
+          providerID: 'provider',
+          mode: 'build',
+          agent: 'build',
+          path: { cwd: '/repo', root: '/repo' },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 0 },
+        },
+        parts: [
+          {
+            id: 'task-1',
+            sessionID: 'root-session',
+            messageID: 'parent-message',
+            type: 'tool',
+            tool: 'task',
+            callID: 'call-1',
+            state: {
+              status: 'running',
+              input,
+              metadata,
+              time: { start: 0 },
+            },
+          },
+        ],
+      },
+    ]);
+    cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
+
+    expect(container?.querySelector('.permission-prompt-agent')?.textContent).toBe('@explore');
+
+    // The requesting message takes precedence over the task's original agent.
+    setState('messages', (entries) => [
+      ...entries,
+      {
+        info: {
+          ...entries[0]!.info,
+          id: 'message-1',
+          sessionID: 'session-1',
+          agent: 'reviewer',
+        },
+        parts: [],
+      },
+    ]);
+    expect(container?.querySelector('.permission-prompt-agent')?.textContent).toBe('@reviewer');
+  });
+
   it('renders all permission response buttons', () => {
     cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
 
