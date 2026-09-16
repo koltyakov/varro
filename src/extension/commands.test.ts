@@ -74,7 +74,7 @@ const { configInspectMock, configUpdateMock, registeredCommands, vscodeMock } = 
       })),
     },
     env: {
-      clipboard: { writeText: vi.fn(() => Promise.resolve()) },
+      clipboard: { writeText: vi.fn((_text: string) => Promise.resolve()) },
       openExternal: vi.fn(() => Promise.resolve(true)),
     },
     FileType: { Directory: 2 },
@@ -117,6 +117,7 @@ function register(
     post: vi.fn(),
     postCommand: vi.fn(),
     openNewEditor: vi.fn(() => Promise.resolve()),
+    openNewWindow: vi.fn(() => Promise.resolve()),
     openNewTerminalEditor: vi.fn(),
     requestInputFocus: vi.fn(),
     searchSessions: vi.fn(),
@@ -237,7 +238,7 @@ describe('Problems Add to Context action', () => {
 });
 
 describe('About command', () => {
-  it('previews and exports the same redacted snapshot with optional local paths', async () => {
+  it('copies and saves the same redacted snapshot with optional local paths', async () => {
     register('/repo', {
       readServerInfo: vi.fn().mockResolvedValue({
         status: { state: 'running', url: 'http://localhost:4096' },
@@ -254,12 +255,12 @@ describe('About command', () => {
     const receive = panel.webview.onDidReceiveMessage.mock.calls[0]![0];
     const root = document.createElement('div');
     root.innerHTML = panel.webview.html;
-    const preview = root.querySelector('#diagnostics-preview')!.textContent;
-    expect(preview).toContain('Recent diagnostic events');
-    expect(preview).not.toContain('/Users/alex');
-    expect(preview).not.toContain('secret-credential');
+    expect(root.querySelector('#copy-diagnostics')?.textContent).toBe('Copy diagnostics');
     await receive({ action: 'copyDiagnostics' });
-    expect(vscodeMock.env.clipboard.writeText).toHaveBeenLastCalledWith(preview);
+    const report = vscodeMock.env.clipboard.writeText.mock.calls.at(-1)![0];
+    expect(report).toContain('Recent diagnostic events');
+    expect(report).not.toContain('/Users/alex');
+    expect(report).not.toContain('secret-credential');
     expect(panel.webview.postMessage).toHaveBeenLastCalledWith({
       type: 'diagnostics-result',
       text: 'Copied',
@@ -273,7 +274,7 @@ describe('About command', () => {
     await receive({ action: 'saveDiagnostics' });
     expect(vscodeMock.workspace.fs.writeFile).toHaveBeenLastCalledWith(
       destination,
-      new TextEncoder().encode(preview!)
+      new TextEncoder().encode(report)
     );
     expect(panel.webview.postMessage).toHaveBeenLastCalledWith({
       type: 'diagnostics-result',
@@ -921,6 +922,12 @@ describe('sidebar navigation commands', () => {
     await runCommand('varro.chat.newTerminalEditor');
 
     expect(sidebar.openNewTerminalEditor).toHaveBeenCalledOnce();
+  });
+
+  it('opens a compact chat window from the command palette', async () => {
+    const { sidebar } = register();
+    await runCommand('varro.chat.newWindow');
+    expect(sidebar.openNewWindow).toHaveBeenCalledOnce();
   });
 
   it('switches sessions in both directions', async () => {

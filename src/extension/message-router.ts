@@ -79,10 +79,12 @@ export interface MessageRouterCallbacks {
     title?: string,
     model?: Extract<WebviewMessage, { type: 'session/open-in-editor' }>['payload']['model'],
     rootSessionId?: string,
-    directory?: string
+    directory?: string,
+    inWindow?: boolean
   ): void | Promise<void>;
   openSessionInSidebar(sessionId: string, directory?: string): void | Promise<void>;
   openNewEditor(): void | Promise<void>;
+  openNewWindow(): void | Promise<void>;
   editorRouteChanged(
     route: Extract<WebviewMessage, { type: 'editor/route-changed' }>['payload']['route']
   ): void;
@@ -234,6 +236,17 @@ export class MessageRouter {
             : this.callbacks.openSessionInOpenCode(msg.payload.sessionId));
           break;
         case 'session/open-in-editor':
+          if (msg.payload.inWindow) {
+            await this.callbacks.openSessionInEditor(
+              msg.payload.sessionId,
+              msg.payload.title,
+              msg.payload.model,
+              msg.payload.rootSessionId,
+              msg.payload.directory,
+              true
+            );
+            break;
+          }
           await (msg.payload.directory
             ? this.callbacks.openSessionInEditor(
                 msg.payload.sessionId,
@@ -256,6 +269,9 @@ export class MessageRouter {
           break;
         case 'chat/new-editor':
           await this.callbacks.openNewEditor();
+          break;
+        case 'chat/new-window':
+          await this.callbacks.openNewWindow();
           break;
         case 'editor/route-changed':
           this.callbacks.editorRouteChanged(msg.payload.route);

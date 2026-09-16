@@ -93,6 +93,61 @@ function createPanel() {
 }
 
 describe('SidebarProvider editor panels', () => {
+  it('moves an existing session editor into a compact window without duplicating it', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const editor = createPanel();
+    const vscode = getVscodeMock();
+    vscode.window.createWebviewPanel.mockReturnValue(editor.panel);
+    await provider.openSessionInEditor('session-1');
+    await provider.openSessionInEditor(
+      'session-1',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true
+    );
+    expect(vscode.window.createWebviewPanel).toHaveBeenCalledOnce();
+    expect(editor.panel.reveal).toHaveBeenCalledWith(editor.panel.viewColumn, false);
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+      'workbench.action.moveEditorToNewWindow'
+    );
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+      'workbench.action.enableCompactAuxiliaryWindow'
+    );
+  });
+
+  it('enables compact mode only after moving the new editor into its window', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const editor = createPanel();
+    const vscode = getVscodeMock();
+    vscode.window.createWebviewPanel.mockReturnValue(editor.panel);
+    let finishMove!: () => void;
+    const moved = new Promise<void>((resolve) => {
+      finishMove = resolve;
+    });
+    vscode.commands.executeCommand.mockImplementation(async (command?: string) => {
+      if (command === 'workbench.action.moveEditorToNewWindow') await moved;
+      return undefined;
+    });
+
+    const opening = provider.openNewWindow();
+    await vi.waitFor(() => {
+      expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+        'workbench.action.moveEditorToNewWindow'
+      );
+    });
+    expect(editor.panel.reveal).toHaveBeenCalledWith(editor.panel.viewColumn, false);
+    expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith(
+      'workbench.action.enableCompactAuxiliaryWindow'
+    );
+    finishMove();
+    await opening;
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+      'workbench.action.enableCompactAuxiliaryWindow'
+    );
+  });
+
   it('loads folder read status from global storage in a separate multi-root workspace', async () => {
     const values = new Map<string, unknown>();
     const globalState = createWorkspaceState();

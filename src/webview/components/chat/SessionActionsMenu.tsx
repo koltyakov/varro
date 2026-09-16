@@ -87,6 +87,39 @@ export function SessionActionsMenu(props: {
   let menuRef: HTMLDivElement | undefined;
   let renameInputRef: HTMLInputElement | undefined;
 
+  const openAsEditor = (inWindow = false) => {
+    const sessionId = props.session.id;
+    const directory = props.session.directory;
+    const title = props.session.title;
+    const selectedModel = getSelectedModelForSession(sessionId);
+    const sessionModel = props.session.model;
+    const model = selectedModel
+      ? {
+          providerID: selectedModel.providerID,
+          modelID: selectedModel.modelID,
+          variant: selectedModel.variant,
+        }
+      : sessionModel
+        ? {
+            providerID: sessionModel.providerID,
+            modelID: sessionModel.id,
+            variant: sessionModel.variant,
+          }
+        : undefined;
+    props.state.close();
+    const posted = postMessage({
+      type: 'session/open-in-editor',
+      payload: {
+        sessionId,
+        directory,
+        title,
+        model,
+        inWindow: inWindow || undefined,
+      },
+    });
+    if (posted) props.onOpenAsEditor?.(sessionId);
+  };
+
   const beginRename = () => {
     props.state.beginRename(props.session.title);
     queueMicrotask(() => {
@@ -184,44 +217,13 @@ export function SessionActionsMenu(props: {
                 </button>
               </Show>
               <Show when={props.showOpenAsEditor}>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    const sessionId = props.session.id;
-                    const title = props.session.title;
-                    const directory = props.session.directory;
-                    const selectedModel = getSelectedModelForSession(sessionId);
-                    const sessionModel = props.session.model
-                      ? {
-                          providerID: props.session.model.providerID,
-                          modelID: props.session.model.id,
-                          variant: props.session.model.variant,
-                        }
-                      : undefined;
-                    const model = selectedModel
-                      ? {
-                          providerID: selectedModel.providerID,
-                          modelID: selectedModel.modelID,
-                          variant: selectedModel.variant,
-                        }
-                      : sessionModel;
-                    props.state.close();
-                    const posted = postMessage({
-                      type: 'session/open-in-editor',
-                      payload: {
-                        sessionId,
-                        directory,
-                        title,
-                        model,
-                      },
-                    });
-                    if (posted) props.onOpenAsEditor?.(sessionId);
-                  }}
-                >
+                <button type="button" role="menuitem" onClick={() => openAsEditor()}>
                   Open in Editor
                 </button>
               </Show>
+              <button type="button" role="menuitem" onClick={() => openAsEditor(true)}>
+                Open in Window
+              </button>
               <button
                 type="button"
                 role="menuitem"
@@ -235,7 +237,7 @@ export function SessionActionsMenu(props: {
                   });
                 }}
               >
-                Open in terminal
+                Open in Terminal
               </button>
               <Show when={!props.session.parentID}>
                 <div class="session-item-actions-separator" role="separator" />

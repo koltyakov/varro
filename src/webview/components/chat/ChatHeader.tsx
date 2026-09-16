@@ -142,7 +142,17 @@ function NewChatButton(props: { onCreateSession: () => void }) {
                   postMessage({ type: 'chat/new-editor' });
                 }}
               >
-                New Chat in Editor
+                New Chat Editor
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  closeMenu();
+                  postMessage({ type: 'chat/new-window' });
+                }}
+              >
+                New Chat Window
               </button>
             </div>
           </Portal>

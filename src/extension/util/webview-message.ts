@@ -136,6 +136,7 @@ export const WEBVIEW_MESSAGE_TYPES = {
   'session/open-in-sidebar': true,
   'session/open-in-opencode': true,
   'chat/new-editor': true,
+  'chat/new-window': true,
   'editor/route-changed': true,
   'session/export': true,
   'usage/report': true,
@@ -196,6 +197,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
     case 'vscode/open-folder':
     case 'vscode/show-output':
     case 'chat/new-editor':
+    case 'chat/new-window':
       return { type };
 
     case 'ready': {
@@ -463,6 +465,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
 
     case 'session/open-in-editor': {
       const payload = asRecord(message?.payload);
+      if (payload?.inWindow !== undefined && typeof payload.inWindow !== 'boolean') return null;
       const sessionId = getBoundedString(payload?.sessionId, 512);
       const directory = getBoundedString(payload?.directory, MAX_PATH_LENGTH);
       const rootSessionId = getBoundedString(payload?.rootSessionId, 512);
@@ -483,6 +486,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       if (rootSessionId) parsedPayload.rootSessionId = rootSessionId;
       if (title) parsedPayload.title = title;
       if (model) parsedPayload.model = model;
+      if (payload?.inWindow !== undefined) parsedPayload.inWindow = payload.inWindow;
       return { type, payload: parsedPayload };
     }
 

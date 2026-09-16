@@ -76,10 +76,12 @@ export interface SidebarProviderActionDeps {
     title?: string,
     model?: ChatModelSelection,
     rootSessionId?: string,
-    directory?: string
+    directory?: string,
+    inWindow?: boolean
   ): void | Promise<void>;
   openSessionInSidebar(sessionId: string, directory?: string): void | Promise<void>;
   openNewEditor(): void | Promise<void>;
+  openNewWindow(): void | Promise<void>;
   editorRouteChanged(route: WebviewRoute): void;
   handleRalphMessage: MessageRouterCallbacks['handleRalphMessage'];
   updateQueuedMessages: MessageRouterCallbacks['updateQueuedMessages'];
@@ -179,14 +181,28 @@ export function createSidebarProviderActions(
         ? deps.openSessionInTerminal(sessionId, directory)
         : deps.openSessionInTerminal(sessionId));
     },
-    openSessionInEditor: async (sessionId, title, model, rootSessionId, requestedDirectory) => {
+    openSessionInEditor: async (
+      sessionId,
+      title,
+      model,
+      rootSessionId,
+      requestedDirectory,
+      inWindow
+    ) => {
       const directory = await getAuthorizedSessionDirectory(sessionId, requestedDirectory);
       const validatedDirectory = await assertSessionInCurrentWorkspace(
         deps.sessionServer ?? deps.server,
         sessionId,
         directory ?? undefined
       );
-      await deps.openSessionInEditor(sessionId, title, model, rootSessionId, validatedDirectory);
+      await deps.openSessionInEditor(
+        sessionId,
+        title,
+        model,
+        rootSessionId,
+        validatedDirectory,
+        inWindow
+      );
     },
     openSessionInSidebar: async (sessionId, requestedDirectory) => {
       const directory = await getAuthorizedSessionDirectory(sessionId, requestedDirectory);
@@ -198,6 +214,7 @@ export function createSidebarProviderActions(
       await deps.openSessionInSidebar(sessionId, validatedDirectory);
     },
     openNewEditor: () => deps.openNewEditor(),
+    openNewWindow: () => deps.openNewWindow(),
     editorRouteChanged: (route) => deps.editorRouteChanged(route),
     handleRalphMessage: (msg) => deps.handleRalphMessage(msg),
     updateQueuedMessages: (payload) => deps.updateQueuedMessages(payload),

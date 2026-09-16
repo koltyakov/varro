@@ -172,6 +172,7 @@ function createActionFixture() {
     openSessionInEditor: vi.fn(),
     openSessionInSidebar: vi.fn(),
     openNewEditor: vi.fn(),
+    openNewWindow: vi.fn(),
     editorRouteChanged: vi.fn(),
     handleRalphMessage: vi.fn<SidebarProviderActionDeps['handleRalphMessage']>(),
     updateQueuedMessages: vi.fn<SidebarProviderActionDeps['updateQueuedMessages']>(() =>
@@ -248,7 +249,8 @@ const nestedSessionActionCases: Array<{
         'Nested session',
         undefined,
         undefined,
-        NESTED_SESSION_DIRECTORY
+        NESTED_SESSION_DIRECTORY,
+        true
       ),
     verify: ({ deps }) => {
       expect(deps.openSessionInEditor).toHaveBeenCalledWith(
@@ -256,7 +258,8 @@ const nestedSessionActionCases: Array<{
         'Nested session',
         undefined,
         undefined,
-        NESTED_SESSION_DIRECTORY
+        NESTED_SESSION_DIRECTORY,
+        true
       );
     },
   },
@@ -443,7 +446,8 @@ describe('createSidebarProviderActions', () => {
       'Editor session',
       undefined,
       undefined,
-      '/repo'
+      '/repo',
+      undefined
     );
 
     server.request.mockResolvedValueOnce({ id: 'session-foreign', directory: '/other-repo' });

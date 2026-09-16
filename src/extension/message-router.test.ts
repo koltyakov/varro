@@ -40,6 +40,7 @@ function createCallbacks(): MessageRouterCallbacks {
     openSessionInEditor: vi.fn(),
     openSessionInSidebar: vi.fn(),
     openNewEditor: vi.fn(),
+    openNewWindow: vi.fn(),
     editorRouteChanged: vi.fn(),
     exportSession: vi.fn(() => Promise.resolve()),
     generateUsageReport: vi.fn(() => Promise.resolve()),
@@ -471,6 +472,7 @@ const DISPATCH_EXPECTATIONS = {
   'vscode/open-folder': [{ callback: 'openFolder', args: [] }],
   'vscode/show-output': [{ callback: 'showOutput', args: [] }],
   'chat/new-editor': [{ callback: 'openNewEditor', args: [] }],
+  'chat/new-window': [{ callback: 'openNewWindow', args: [] }],
   'workspace/select': [
     { callback: 'selectWorkspace', args: [{ path: '/workspace', requestId: 7 }] },
   ],

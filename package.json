@@ -140,6 +140,11 @@
         "icon": "$(add)"
       },
       {
+        "command": "varro.chat.newWindow",
+        "title": "Varro: New Chat Window",
+        "shortTitle": "New Chat Window"
+      },
+      {
         "command": "varro.chat.newTerminalEditor",
         "title": "Varro: New Terminal Editor",
         "shortTitle": "New Terminal Editor",

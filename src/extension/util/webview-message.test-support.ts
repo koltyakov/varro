@@ -44,6 +44,7 @@ export const VALID_WEBVIEW_MESSAGES = {
   'vscode/open-folder': { type: 'vscode/open-folder' },
   'vscode/show-output': { type: 'vscode/show-output' },
   'chat/new-editor': { type: 'chat/new-editor' },
+  'chat/new-window': { type: 'chat/new-window' },
   'workspace/select': { type: 'workspace/select', payload: { path: '/workspace', requestId: 7 } },
   'commands/state': {
     type: 'commands/state',

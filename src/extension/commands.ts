@@ -146,6 +146,10 @@ export function registerCommands(
       await sidebar.openNewEditor();
     }),
 
+    vscode.commands.registerCommand('varro.chat.newWindow', async () => {
+      await sidebar.openNewWindow();
+    }),
+
     vscode.commands.registerCommand('varro.chat.newTerminalEditor', () => {
       sidebar.openNewTerminalEditor();
     }),

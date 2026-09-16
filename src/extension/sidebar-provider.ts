@@ -938,11 +938,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.runInTerminal(command, title, endpointServer.getWorkspaceCwd()),
         openSessionInTerminal: (sessionId, directory) =>
           this.openSessionInTerminal(sessionId, directory ?? endpointServer.getWorkspaceCwd()),
-        openSessionInEditor: (sessionId, title, model, rootSessionId, directory) =>
-          this.openSessionInEditor(sessionId, title, model, rootSessionId, directory),
+        openSessionInEditor: (sessionId, title, model, rootSessionId, directory, inWindow) =>
+          this.openSessionInEditor(sessionId, title, model, rootSessionId, directory, inWindow),
         openSessionInSidebar: (sessionId, directory) =>
           this.openSessionInSidebar(sessionId, directory),
         openNewEditor: () => this.openNewEditor(),
+        openNewWindow: () => this.openNewWindow(),
         editorRouteChanged: (route) => this.editorRouteChanged(webviewContext.viewId, route),
         handleRalphMessage: (msg) => this.ralphHost.handleMessage(msg),
         updateQueuedMessages: ({ messages }) =>
@@ -1115,7 +1116,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     title?: string,
     model?: ChatModelSelection,
     rootSessionId?: string,
-    directory?: string
+    directory?: string,
+    inWindow?: boolean
   ) {
     if (this.disposing) return;
     if (model) {
@@ -1154,15 +1156,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       } else {
         existing.webviewSession.queueCommand({ type: 'command/highlight-session' });
       }
+      if (inWindow) await this.moveEditorToCompactWindow(existing.panel);
       return;
     }
-    await this.openEditorPanel({
+    const panel = await this.openEditorPanel({
       type: 'session',
       sessionId,
       directory: workspacePath,
       rootSessionId: rootId,
       title,
     });
+    if (inWindow && panel) await this.moveEditorToCompactWindow(panel);
   }
 
   async openSessionInSidebar(sessionId: string, directory?: string) {
@@ -1187,6 +1191,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   async openNewEditor() {
     if (this.disposing) return;
     await this.openEditorPanel({ type: 'new-session' });
+  }
+
+  async openNewWindow() {
+    if (this.disposing) return;
+    const panel = await this.openEditorPanel({ type: 'new-session' });
+    if (panel) await this.moveEditorToCompactWindow(panel);
+  }
+
+  private async moveEditorToCompactWindow(panel: vscode.WebviewPanel) {
+    if (this.disposing) return;
+    panel.reveal(panel.viewColumn, false);
+    // The move command focuses the auxiliary window before it resolves.
+    await vscode.commands.executeCommand('workbench.action.moveEditorToNewWindow');
+    await vscode.commands.executeCommand('workbench.action.enableCompactAuxiliaryWindow');
   }
 
   openNewTerminalEditor() {
@@ -1219,6 +1237,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       { enableScripts: true, retainContextWhenHidden: false }
     );
     await this.attachEditorPanel(panel, route, `editor-${Date.now()}-${++this.nextEditorId}`);
+    return panel;
   }
 
   private async attachEditorPanel(

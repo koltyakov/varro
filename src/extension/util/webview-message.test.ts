@@ -1690,6 +1690,7 @@ describe('parseWebviewMessage protocol coverage', () => {
     'vscode/open-folder',
     'vscode/show-output',
     'chat/new-editor',
+    'chat/new-window',
     'vscode/open-settings',
     'server/restart',
   ]);

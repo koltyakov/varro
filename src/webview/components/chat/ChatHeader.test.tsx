@@ -286,7 +286,7 @@ describe('ActiveChatHeader', () => {
     expect(menu!.textContent).toContain('Pin session');
     expect(menu!.textContent).toContain('Copy session ID');
     expect(menu!.textContent).toContain('Open in Editor');
-    expect(menu!.textContent).toContain('Open in terminal');
+    expect(menu!.textContent).toContain('Open in Terminal');
     expect(menu!.textContent).toContain('Share session');
     expect(menu!.textContent).not.toContain('Unshare session');
     expect(menu!.textContent).toContain('Move to Recycle Bin');
@@ -296,7 +296,8 @@ describe('ActiveChatHeader', () => {
       )
     ).toEqual([
       'Open in Editor',
-      'Open in terminal',
+      'Open in Window',
+      'Open in Terminal',
       'Rename',
       'Pin session',
       'Copy session ID',
@@ -321,7 +322,7 @@ describe('ActiveChatHeader', () => {
     expect(menu?.textContent).not.toContain('Move to Recycle Bin');
     expect(menu?.textContent).toContain('Copy session ID');
     expect(menu?.textContent).toContain('Open in Editor');
-    expect(menu?.textContent).toContain('Open in terminal');
+    expect(menu?.textContent).toContain('Open in Terminal');
     expect(menu?.textContent).toContain('Share session');
   });
 
@@ -378,7 +379,7 @@ describe('ActiveChatHeader', () => {
       Array.from(menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).map((button) =>
         button.textContent?.trim()
       )
-    ).toEqual(['New Chat', 'New Chat in Editor']);
+    ).toEqual(['New Chat', 'New Chat Editor', 'New Chat Window']);
     expect(menu.style.left).toBe('30px');
     expect(menu.style.top).toBe('40px');
     menu.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click();
@@ -387,9 +388,17 @@ describe('ActiveChatHeader', () => {
     activePlus.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     menu = document.body.querySelector<HTMLElement>('[aria-label="New chat actions"]')!;
     Array.from(menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
-      .find((button) => button.textContent?.trim() === 'New Chat in Editor')!
+      .find((button) => button.textContent?.trim() === 'New Chat Editor')!
       .click();
     expect(send).toHaveBeenCalledWith({ type: 'chat/new-editor' });
+
+    activePlus.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    menu = document.body.querySelector<HTMLElement>('[aria-label="New chat actions"]')!;
+    Array.from(menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
+      .find((button) => button.textContent?.trim() === 'New Chat Window')!
+      .click();
+    expect(send).toHaveBeenCalledWith({ type: 'chat/new-window' });
+    expect(document.body.querySelector('[aria-label="New chat actions"]')).toBeNull();
 
     cleanup?.();
     cleanup = render(

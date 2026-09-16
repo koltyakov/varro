@@ -1855,7 +1855,7 @@ describe('SessionListView actions', () => {
     expect(menu?.textContent).not.toContain('Move to Recycle Bin');
     expect(menu?.textContent).toContain('Copy session ID');
     expect(menu?.textContent).toContain('Open in Editor');
-    expect(menu?.textContent).toContain('Open in terminal');
+    expect(menu?.textContent).toContain('Open in Terminal');
     expect(menu?.textContent).toContain('Share session');
   });
 
@@ -1877,7 +1877,7 @@ describe('SessionListView actions', () => {
 
     openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
     Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
-      .find((button) => button.textContent?.trim() === 'Open in terminal')!
+      .find((button) => button.textContent?.trim() === 'Open in Terminal')!
       .click();
 
     expect(send).toHaveBeenCalledWith({
@@ -1907,43 +1907,47 @@ describe('SessionListView actions', () => {
     expect(document.querySelector('[role="menu"]')).toBeNull();
   });
 
-  it('opens a session in an editor tab from its row menu', () => {
-    const send = vi.fn((message: TestRuntimeValue) => {
-      structuredClone(message);
-    });
-    // SAFETY: The fixture provides the unknown fields read by this statement.
-    (window as { __sendToExtension?: (message: TestRuntimeValue) => void }).__sendToExtension =
-      send;
-    vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
-      files: 0,
-      additions: 0,
-      deletions: 0,
-      tokens: 0,
-      durationMs: 0,
-      activeStartedAt: null,
-    });
-    setSessions([session('session-1', Date.now())]);
-    setState('sessionSelectedModels', {
-      'session-1': { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
-    });
-    cleanup = render(() => <SessionListView />, container);
+  it.each(['Open in Editor', 'Open in Window'])(
+    'opens a session using %s from its row menu',
+    (label) => {
+      const send = vi.fn((message: TestRuntimeValue) => {
+        structuredClone(message);
+      });
+      // SAFETY: The fixture provides the unknown fields read by this statement.
+      (window as { __sendToExtension?: (message: TestRuntimeValue) => void }).__sendToExtension =
+        send;
+      vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
+        files: 0,
+        additions: 0,
+        deletions: 0,
+        tokens: 0,
+        durationMs: 0,
+        activeStartedAt: null,
+      });
+      setSessions([session('session-1', Date.now())]);
+      setState('sessionSelectedModels', {
+        'session-1': { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
+      });
+      cleanup = render(() => <SessionListView />, container);
 
-    openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
-    Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
-      .find((button) => button.textContent?.trim() === 'Open in Editor')!
-      .click();
+      openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
+      Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
+        .find((button) => button.textContent?.trim() === label)!
+        .click();
 
-    expect(send).toHaveBeenCalledWith({
-      type: 'session/open-in-editor',
-      payload: {
-        sessionId: 'session-1',
-        directory: '/repo',
-        title: 'session-1',
-        model: { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
-      },
-    });
-    expect(document.querySelector('[role="menu"]')).toBeNull();
-  });
+      expect(send).toHaveBeenCalledWith({
+        type: 'session/open-in-editor',
+        payload: {
+          sessionId: 'session-1',
+          directory: '/repo',
+          title: 'session-1',
+          model: { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
+          inWindow: label === 'Open in Window' || undefined,
+        },
+      });
+      expect(document.querySelector('[role="menu"]')).toBeNull();
+    }
+  );
 
   it('shares, copies, and unshares a session from its row menu', async () => {
     const activityUpdatedAt = Date.now() - 60_000;
