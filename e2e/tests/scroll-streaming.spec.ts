@@ -26,7 +26,10 @@ test.describe('scroll stability regressions', () => {
         .toBeLessThan(2);
       await waitForAnimationFrames(page, 4);
 
-      const samples = await list.evaluate(async (element) => {
+      const { samples, errors: browserErrors } = await list.evaluate(async (element) => {
+        const errors: string[] = [];
+        const onError = (event: ErrorEvent) => errors.push(event.message);
+        window.addEventListener('error', onError);
         const anchor = element.querySelector<HTMLElement>(
           '[data-msg-id="message-large-assistant-239"]'
         )!;
@@ -63,9 +66,11 @@ test.describe('scroll stability regressions', () => {
           const time = await new Promise<number>((resolve) => requestAnimationFrame(resolve));
           frames.push(read(time));
         }
-        return frames;
+        window.removeEventListener('error', onError);
+        return { samples: frames, errors };
       });
 
+      expect(browserErrors).toEqual([]);
       const totalMovement = samples[0]!.top - samples.at(-1)!.top;
       const steps = samples.slice(1).map((sample, index) => samples[index]!.top - sample.top);
       expect(samples.every((sample) => sample.connected)).toBe(true);

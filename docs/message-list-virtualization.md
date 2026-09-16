@@ -43,11 +43,15 @@ the shared invariants below remain true.
 - Effective row heights, prefix entries, placeholder heights, and spacer heights are whole CSS pixels.
   Fractional natural layout must receive a matching row-box correction so CSS geometry and virtual
   geometry cannot drift apart.
-- Coalesce row-box correction writes into the next animation frame. Microtasks still run within
-  ResizeObserver delivery and resizing an observed row there invalidates both it and its shallower
-  track observer. Keep aligned prefix measurements and cancel pending correction writes on disposal.
-  Streamed entrance height updates follow the same rule. `scroll-resize-observer.spec.ts` checks
-  actual browser error events and forward-only bottom-follow in small and virtualized transcripts.
+- Coalesce observer-triggered row-box correction writes into the next animation frame. Microtasks
+  still run within ResizeObserver delivery and resizing an observed row there invalidates both it and
+  its shallower track observer. Mount and explicit layout measurements must instead align before
+  paint, so history and wheel anchors never see integer prefixes paired with fractional row boxes.
+  After applying corrections, reconcile the active bottom-follow target as well as width-resize
+  anchoring. Reduced-motion following must not oscillate between virtual ranges while those writes
+  settle. Cancel pending correction writes on disposal. Streamed entrance height updates also defer
+  observer-triggered writes. `scroll-resize-observer.spec.ts` and `scroll-streaming.spec.ts` check
+  browser error events and bottom-follow, including reduced motion.
 - `start/end` define the mounted overscan range. `coreStart/coreEnd` define the rows near the painted
   viewport. Off-core overscan rows remain real message rows; lightweight mode may suppress expensive
   presentation and animation but must not remove assistant parts or change identity.

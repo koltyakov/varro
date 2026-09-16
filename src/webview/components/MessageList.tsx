@@ -1394,9 +1394,16 @@ export function MessageList() {
     if (changed && widthResizeActive && widthResizeAnchor && widthResizeCanOwnScroll()) {
       restoreVisibleScrollAnchor(widthResizeAnchor);
     }
+    // A deferred correction can finish a virtual range change after the track observer followed.
+    // Reconcile its bottom target before the next paint, including immediate reduced-motion follow.
+    if (changed && shouldCorrectBottomAfterResize()) performScroll({ force: true });
   }
 
-  function alignMeasuredRowBlockSize(element: HTMLElement, measuredBlockSize: number) {
+  function alignMeasuredRowBlockSize(
+    element: HTMLElement,
+    measuredBlockSize: number,
+    deferCorrection = false
+  ) {
     const appliedCorrection = appliedRowHeightCorrections.get(element) ?? 0;
     const naturalBlockSize = Math.max(0, measuredBlockSize - appliedCorrection);
     const alignedBlockSize = alignBlockSizeToPixel(naturalBlockSize);
@@ -1409,6 +1416,15 @@ export function MessageList() {
       return alignedBlockSize;
     }
     pendingRowHeightCorrections.set(element, correction);
+    if (!deferCorrection && (!rowHeightCorrectionScheduled || rowHeightCorrectionFrame)) {
+      // Mount and explicit layout measurements must align before paint. Deferring these by a frame
+      // publishes integer prefixes while the mounted rows still have fractional heights.
+      if (rowHeightCorrectionFrame) cancelAnimationFrame(rowHeightCorrectionFrame);
+      rowHeightCorrectionFrame = 0;
+      rowHeightCorrectionScheduled = true;
+      queueMicrotask(flushRowHeightCorrections);
+      return alignedBlockSize;
+    }
     if (!rowHeightCorrectionScheduled) {
       rowHeightCorrectionScheduled = true;
       // A microtask still runs inside resize delivery. Correcting the observed row there
@@ -2667,7 +2683,7 @@ export function MessageList() {
         previousInlineSize !== undefined && Math.abs(previousInlineSize - inlineSize) > 0.5;
       measuredRowInlineSizes.set(element, inlineSize);
 
-      const height = alignMeasuredRowBlockSize(element, measuredHeight);
+      const height = alignMeasuredRowBlockSize(element, measuredHeight, true);
       if (!shouldAcceptRowHeight(element, messageId, height)) continue;
       const heightChanged = (measuredHeights.get(messageId) ?? -1) !== height;
       if (
