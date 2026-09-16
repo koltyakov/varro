@@ -84,6 +84,56 @@ describe('prepareMeasuredEntrance', () => {
     expect(onFinish).not.toHaveBeenCalled();
   });
 
+  it('coalesces resize growth outside observer delivery and cancels it on cleanup', async () => {
+    let notify: (() => void) | undefined;
+    let nextFrame = 0;
+    const frames = new Map<number, FrameRequestCallback>();
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frames.set(++nextFrame, callback);
+      return nextFrame;
+    });
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: () => void) {
+          notify = callback;
+        }
+        observe() {}
+        disconnect() {}
+      }
+    );
+    const element = document.createElement('div');
+    let height = 84;
+    Object.defineProperty(element, 'scrollHeight', { get: () => height });
+    document.body.appendChild(element);
+    const dispose = prepareMeasuredEntrance(element, {
+      animationName: 'test-entrance',
+      heightProperty: '--test-entrance-height',
+    });
+    await Promise.resolve();
+
+    height = 120;
+    notify!();
+    height = 160;
+    notify!();
+    await Promise.resolve();
+    expect(element.style.getPropertyValue('--test-entrance-height')).toBe('84px');
+    expect(frames.size).toBe(1);
+    const frame = frames.get(nextFrame)!;
+    frames.clear();
+    frame(16);
+    expect(element.style.getPropertyValue('--test-entrance-height')).toBe('160px');
+
+    height = 200;
+    notify!();
+    const cancelledFrame = frames.get(nextFrame)!;
+    dispose();
+    expect(frames.size).toBe(0);
+    cancelledFrame(32);
+    expect(element.style.getPropertyValue('--test-entrance-height')).toBe('');
+  });
+
   it('cleans up setup exactly once when manually disposed', async () => {
     const disconnect = vi.fn();
     vi.stubGlobal(

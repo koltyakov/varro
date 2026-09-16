@@ -14,12 +14,15 @@ export function prepareMeasuredEntrance(
   let observer: ResizeObserver | null = null;
   let finish: ((event: AnimationEvent) => void) | null = null;
   let cleanedUp = false;
+  let resizeFrame = 0;
 
   const cleanup = () => {
     if (cleanedUp) return;
     cleanedUp = true;
     observer?.disconnect();
     observer = null;
+    if (resizeFrame) cancelAnimationFrame(resizeFrame);
+    resizeFrame = 0;
     if (finish) {
       element.removeEventListener('animationend', finish);
       element.removeEventListener('animationcancel', finish);
@@ -49,7 +52,14 @@ export function prepareMeasuredEntrance(
     observer =
       globalThis.ResizeObserver === undefined
         ? null
-        : new globalThis.ResizeObserver(() => updateTargetHeight());
+        : new globalThis.ResizeObserver(() => {
+            if (resizeFrame || cleanedUp) return;
+            // Changing the animated height during resize delivery resizes this same observed box.
+            resizeFrame = requestAnimationFrame(() => {
+              resizeFrame = 0;
+              if (!cleanedUp && element.isConnected) updateTargetHeight();
+            });
+          });
     observer?.observe(element);
 
     finish = (event: AnimationEvent) => {

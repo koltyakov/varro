@@ -1317,6 +1317,7 @@ export function MessageList() {
   const appliedRowHeightCorrections = new WeakMap<HTMLElement, number>();
   const pendingRowHeightCorrections = new Map<HTMLElement, number>();
   let rowHeightCorrectionScheduled = false;
+  let rowHeightCorrectionFrame = 0;
   let lastTrackHeight = 0;
   let cachedVirtualMetrics: VirtualMetrics | null = null;
   let cachedVirtualMetricsItemIds: string[] | null = null;
@@ -1373,6 +1374,8 @@ export function MessageList() {
 
   function flushRowHeightCorrections() {
     rowHeightCorrectionScheduled = false;
+    rowHeightCorrectionFrame = 0;
+    if (disposed) return;
     let changed = false;
     for (const [element, correction] of pendingRowHeightCorrections) {
       if (!element.isConnected) continue;
@@ -1408,7 +1411,9 @@ export function MessageList() {
     pendingRowHeightCorrections.set(element, correction);
     if (!rowHeightCorrectionScheduled) {
       rowHeightCorrectionScheduled = true;
-      queueMicrotask(flushRowHeightCorrections);
+      // A microtask still runs inside resize delivery. Correcting the observed row there
+      // invalidates both its size and the shallower track observer in the same delivery loop.
+      rowHeightCorrectionFrame = requestAnimationFrame(flushRowHeightCorrections);
     }
     return alignedBlockSize;
   }
@@ -6286,6 +6291,9 @@ export function MessageList() {
       firstVisibleMessageObserver = null;
       measuredRowObserver?.disconnect();
       measuredRowObserver = null;
+      if (rowHeightCorrectionFrame) cancelAnimationFrame(rowHeightCorrectionFrame);
+      rowHeightCorrectionFrame = 0;
+      pendingRowHeightCorrections.clear();
       mountedMessageRows.clear();
       clearObservedVisibleMessages();
       if (stickyPreviewDebounceTimer) clearTimeout(stickyPreviewDebounceTimer);
