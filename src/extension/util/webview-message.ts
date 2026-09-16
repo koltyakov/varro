@@ -203,7 +203,10 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       const payload = asRecord(message.payload);
       if (payload?.documentId === undefined) return { type };
       const documentId = getSafeInteger(payload?.documentId);
-      return documentId === null ? null : { type, payload: { documentId } };
+      if (documentId === null) return null;
+      if (payload?.instanceId === undefined) return { type, payload: { documentId } };
+      const instanceId = getString(payload.instanceId);
+      return instanceId ? { type, payload: { documentId, instanceId } } : null;
     }
 
     case 'usage/report': {

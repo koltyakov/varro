@@ -29,6 +29,37 @@ function setupInterruptedRecoveryClientMocks() {
 }
 
 describe('useOpenCode initialization', () => {
+  it('identifies each recreated webview even when VS Code reuses its initial HTML', async () => {
+    // SAFETY: VS Code reuses this host state when moving an editor to another window.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      documentId: 7,
+      webviewContext: {
+        viewId: 'editor-1',
+        surface: 'editor',
+        initialRoute: { type: 'new-session' },
+      },
+    };
+
+    for (let windowIndex = 0; windowIndex < 2; windowIndex += 1) {
+      vi.resetModules();
+      const { hookModule } = await loadModules();
+      const dispose = createRoot((cleanup) => {
+        hookModule.useOpenCode();
+        return cleanup;
+      });
+      dispose();
+    }
+
+    const readyMessages = bridgeMocks.postMessage.mock.calls
+      .map(([message]) => message)
+      .filter((message) => message.type === 'ready');
+    expect(readyMessages).toHaveLength(2);
+    for (const message of readyMessages) {
+      expect(message.payload).toEqual({ documentId: 7, instanceId: expect.any(String) });
+    }
+    expect(readyMessages[0]?.payload?.instanceId).not.toBe(readyMessages[1]?.payload?.instanceId);
+  });
+
   it('does not overwrite an authoritative editor queue during startup', async () => {
     // SAFETY: The fixture provides the initial host state read by the runtime.
     (window as { __initialWebviewState?: unknown }).__initialWebviewState = {

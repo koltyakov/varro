@@ -1296,6 +1296,54 @@ describe('WebviewSession', () => {
     expect(deps.handleReadySideEffects).toHaveBeenCalledOnce();
   });
 
+  it('reboots a recreated editor without a visibility change and rejects old API responses', async () => {
+    const { session, bridge, deps } = createSession({ editorSurface: true });
+    const view = createWebviewView(true);
+    await session.resolve(view as never);
+    await flushMicrotasks();
+    const documentId = bridge.renderHtml.mock.calls[0]![0].documentId;
+
+    for (const instanceId of ['main-window', 'floating-window', 'main-window-return']) {
+      const oldGeneration = session.getRequestGeneration();
+      const oldListener = view.listeners.message;
+      deps.handleMessage.mockClear();
+      bridge.post.mockClear();
+      const ready = { type: 'ready', payload: { documentId, instanceId } };
+      view.listeners.message?.(ready);
+      const generation = session.getRequestGeneration();
+      expect(deps.handleMessage).toHaveBeenLastCalledWith({
+        type: 'ready',
+        payload: { documentId: generation },
+      });
+      if (instanceId !== 'main-window') {
+        expect(generation).toBe(oldGeneration + 1);
+        expect(deps.cancelApiRequestsBeforeGeneration).toHaveBeenLastCalledWith(generation);
+        session.postApiResponse({ id: 1, data: 'old document response' }, oldGeneration);
+        expect(bridge.post).not.toHaveBeenCalled();
+        await expect(session.handleReady(oldGeneration)).resolves.toBe(false);
+        deps.handleMessage.mockClear();
+        oldListener?.({ type: 'ready', payload: { documentId, instanceId: 'old-window' } });
+        expect(deps.handleMessage).not.toHaveBeenCalled();
+      }
+
+      await session.handleReady(generation);
+      expect(bridge.post).toHaveBeenCalledWith({ type: 'server/status', payload: RUNNING_STATUS });
+      session.postApiResponse({ id: 1, data: 'current document response' }, generation);
+      expect(bridge.post).toHaveBeenCalledWith({
+        type: 'api/response',
+        payload: { id: 1, data: 'current document response' },
+      });
+
+      bridge.post.mockClear();
+      view.listeners.message?.(ready);
+      await session.handleReady(session.getRequestGeneration());
+      expect(session.getRequestGeneration()).toBe(generation);
+      expect(bridge.post).not.toHaveBeenCalled();
+    }
+    expect(bridge.renderHtml).toHaveBeenCalledOnce();
+    expect(deps.handleReadySideEffects).toHaveBeenCalledTimes(3);
+  });
+
   it('does not let a delayed ready operation cross document generations', async () => {
     const { session, bridge } = createSession();
     const view = createWebviewView(true);

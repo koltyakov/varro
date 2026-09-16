@@ -1332,7 +1332,13 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       postMessage(
         initialWebviewState.documentId === undefined
           ? { type: 'ready' }
-          : { type: 'ready', payload: { documentId: initialWebviewState.documentId } }
+          : {
+              type: 'ready',
+              payload: {
+                documentId: initialWebviewState.documentId,
+                instanceId: crypto.randomUUID(),
+              },
+            }
       );
       if (
         webviewContext?.surface !== 'editor' &&

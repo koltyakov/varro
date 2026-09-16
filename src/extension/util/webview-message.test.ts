@@ -1637,6 +1637,14 @@ describe('webview message validation', () => {
       payload: { documentId: 7 },
     });
     expect(parseWebviewMessage({ type: 'ready', payload: { documentId: '7' } })).toBeNull();
+    expect(
+      parseWebviewMessage({ type: 'ready', payload: { documentId: 7, instanceId: 'window-2' } })
+    ).toEqual({ type: 'ready', payload: { documentId: 7, instanceId: 'window-2' } });
+    for (const instanceId of ['', 7, null]) {
+      expect(
+        parseWebviewMessage({ type: 'ready', payload: { documentId: 7, instanceId } })
+      ).toBeNull();
+    }
   });
 
   it('rejects malformed URLs and unsafe path traversal in helper guards', () => {

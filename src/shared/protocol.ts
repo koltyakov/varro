@@ -1114,7 +1114,7 @@ export type WebviewMessage =
       type: 'config/update';
       payload: WebviewConfigUpdatePayload;
     }
-  | { type: 'ready'; payload?: { documentId: number } }
+  | { type: 'ready'; payload?: { documentId: number; instanceId?: string } }
   | {
       type: 'api/request';
       payload: {

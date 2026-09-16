@@ -57,6 +57,7 @@ export class WebviewSession {
   private webviewLoadGeneration = 0;
   private webviewRenderGeneration = 0;
   private readyGeneration: number | null = null;
+  private webviewInstanceId: string | undefined;
   private recoverySnapshotLoad?: Promise<RecoverySnapshot>;
   private recoverySnapshotLoaded = false;
   private themeDisposable?: vscode.Disposable;
@@ -238,6 +239,7 @@ export class WebviewSession {
     this.bridge.setView(webviewView);
     this.webviewReady = false;
     this.readyGeneration = null;
+    this.webviewInstanceId = undefined;
     this.resetCommandState();
     const webviewLoadGeneration = ++this.webviewLoadGeneration;
     const webviewRenderGeneration = ++this.webviewRenderGeneration;
@@ -674,6 +676,7 @@ export class WebviewSession {
         logger.warn('Ignoring invalid webview message');
         return;
       }
+      let requestGeneration = generation;
       if (message.type === 'ready') {
         const documentId = message.payload?.documentId;
         if (
@@ -682,10 +685,28 @@ export class WebviewSession {
         ) {
           return;
         }
+        const instanceId = message.payload?.instanceId;
+        if (instanceId !== undefined) {
+          if (this.webviewInstanceId !== undefined && instanceId !== this.webviewInstanceId) {
+            // Moving between VS Code windows recreates the document from the same HTML
+            // without necessarily changing the panel's visibility or rendered document ID.
+            requestGeneration = ++this.webviewLoadGeneration;
+            this.deps.cancelApiRequestsBeforeGeneration(requestGeneration);
+            this.bridge.invalidatePendingDeliveries();
+            this.webviewReady = false;
+            this.readyGeneration = null;
+            this.resetCommandState();
+            this.deps.handleUnavailableSideEffects();
+            this.registerMessageListener(webviewView, requestGeneration);
+          }
+          this.webviewInstanceId = instanceId;
+        }
       }
       // Deferred ready handlers must still belong to this request generation after validation.
       const routedMessage: WebviewMessage =
-        message.type === 'ready' ? { type: 'ready', payload: { documentId: generation } } : message;
+        message.type === 'ready'
+          ? { type: 'ready', payload: { documentId: requestGeneration } }
+          : message;
       void this.deps.handleMessage(routedMessage);
     });
   }
