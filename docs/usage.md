@@ -46,7 +46,7 @@ For WSL, open the project in a VS Code WSL window, then install and authenticate
 
 | Version | Minimum supported | Tested with this release | npm package |
 | --- | --- | --- | --- |
-| v2, recommended | 2.0.5 | 2.0.6 | `@opencode/cli` |
+| v2, recommended | 2.0.5 | 2.0.7 | `@opencode/cli` |
 | v1, still supported | 1.16.0 | 1.18.31 | `opencode-ai` |
 
 To keep using v1, retain your installation or run `npm install -g opencode-ai`. Set `varro.server.command` to its executable path. Setting it to `opencode` selects v1 only if that command resolves to a v1 installation. Varro detects the API automatically.
@@ -58,6 +58,31 @@ If you previously used v1, installing v2 may leave Varro connected to the runnin
 Updates stay within the installed CLI family. For an npm installation, use `npm install -g @opencode/cli@latest` for v2 or `npm install -g opencode-ai@latest` for v1. Use the original installer for other installation methods. `varro.server.autoUpdate` does not switch v1 users to v2. Native Windows uses a prompt instead of replacing a running binary in the background; standalone installations should use the current download from their version's install page.
 
 Supported v1 configuration remains accepted by v2. Native v2 configuration uses fields such as `agents`, `permissions`, and `mcp.servers`; v1 cannot read those native-v2-only shapes. Keep compatible configuration if switching between versions. Plugins require a v2 port. See the [upstream migration guide](https://opencode.ai/v2/docs/migrate-v1/).
+
+### If restart does not switch to v2
+
+`Varro: Restart Server` may not be enough. An old OpenCode process can keep the port occupied, and Varro will not terminate a process it cannot identify as its own. This can also affect a leftover server from an earlier Varro run. On Windows, you may need to end the old `opencode.exe` process explicitly.
+
+1. Let active work finish in all clients using that server. Stop a manually launched server with `Ctrl+C` in its terminal. If another app or service keeps relaunching it, stop it there too.
+2. Identify the process listening on Varro's server port, `4096` by default. Use your configured `varro.server.port` if different. Run these steps on the host where Varro runs, such as the WSL distribution or SSH host for a remote workspace.
+3. Stop that old OpenCode process using the platform steps below, then run `Varro: Restart Server` again. For a manually managed server, start it with the v2 executable instead.
+4. Confirm that Varro's status bar shows OpenCode v2. If it still shows v1, check the executable rather than repeating the restart. Run your selected executable with `--version` and set `varro.server.command` to the full v2 executable path. An old `opencode2` takes precedence over `opencode` when this setting is empty. If you changed `PATH`, fully close and reopen VS Code so it picks up the new environment.
+
+On native Windows, find the listening process in PowerShell:
+
+```powershell
+Get-NetTCPConnection -LocalPort 4096 -State Listen | Select-Object LocalAddress, LocalPort, OwningProcess
+```
+
+Match `OwningProcess` to the PID in Task Manager's **Details** tab and confirm its executable path or command line belongs to the old OpenCode server. Use **End process tree** on that process. Alternatively, run the following command, replacing `12345` with the confirmed PID:
+
+```powershell
+taskkill /PID 12345 /T /F
+```
+
+Target the confirmed server PID rather than ending every OpenCode process. If Windows reports access denied, use an elevated Task Manager or PowerShell. Stopping the process also releases Windows' lock on `opencode.exe` if it prevented replacing the old executable; complete the v2 installation before restarting.
+
+On macOS or Linux, use `lsof -nP -iTCP:4096 -sTCP:LISTEN` to find the listener. After confirming it is the old OpenCode server, run `kill <PID>`. If it does not exit, use `kill -9 <PID>`, replacing `<PID>` with that process ID.
 
 ### Version differences and history
 
@@ -616,7 +641,7 @@ There are also deprecated debug-only settings used for development and recovery 
 ## Troubleshooting
 
 - OpenCode CLI missing: install v2 with `npm install -g @opencode/cli` on macOS, Linux, or WSL, or download the native Windows CLI from the [v2 install page](https://opencode.ai/v2/docs/). V1 remains available with `npm install -g opencode-ai`.
-- OpenCode CLI incompatible: Varro supports the v1 API from `1.16.0` and the v2 API from `2.0.5`. This release was tested with v1 `1.18.31` and v2 `2.0.6`. Varro selects the API automatically, including when `varro.server.command` points to a custom binary such as `opencode2`. Updates use the installed CLI's package family.
+- OpenCode CLI incompatible: Varro supports the v1 API from `1.16.0` and the v2 API from `2.0.5`. This release was tested with v1 `1.18.31` and v2 `2.0.7`. Varro selects the API automatically, including when `varro.server.command` points to a custom binary such as `opencode2`. Updates use the installed CLI's package family.
 - OpenCode v2 authentication: Varro captures managed-server credentials automatically and redacts them from output. Existing local services use their registered credentials. An externally managed server can also use `OPENCODE_SERVER_PASSWORD` and `OPENCODE_SERVER_USERNAME` from the extension host's environment.
 - OpenCode v2 session settings: Varro stores mutable session annotations locally because the released v2 API cannot update session metadata. Session sharing is unavailable through this API, so its menu action is disabled. Existing v1-format configuration remains supported.
 - CLI not on `PATH`: set `varro.server.command` to the executable path.

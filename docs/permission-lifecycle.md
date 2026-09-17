@@ -28,6 +28,10 @@ switching an existing session to default clears Varro's prior mode rules. OpenCo
 and agent configuration determines whether an action is allowed, denied, or asked. If OpenCode asks
 about `todowrite` or `question`, Varro replies once without installing a broader session rule.
 
+Ordinary sends in Default mode preserve existing session rules, including session-scoped `Always`
+approvals. Only an explicit mode change resets those rules. Sending an empty rule set is a no-op on
+v1's append-style API but clears saved approvals on v2's replacement API.
+
 `Auto` is not a broader OpenCode rule set. OpenCode must still emit an ask so Varro has a
 specific request ID and complete action context to judge. Giving `auto` allow-all rules would bypass
 the judge and silently turn it into `full`.

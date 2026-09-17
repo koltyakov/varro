@@ -46,6 +46,19 @@ describe('v2 Windows location paths', () => {
 });
 
 describe('v2 prompt delivery', () => {
+  it.each([undefined, 0, 1000])('uses the provider request start timestamp %s', (started) => {
+    expect(
+      projectV2Event({
+        id: 'evt_started',
+        type: 'session.step.started',
+        created: 2000,
+        data: { sessionID: 'ses_one', assistantMessageID: 'msg_one', started },
+      })
+    ).toMatchObject([
+      { type: 'session.next.step.started', properties: { timestamp: started ?? 2000 } },
+    ]);
+  });
+
   it.each([
     [undefined, 'steer'],
     ['steer', 'steer'],
@@ -123,6 +136,60 @@ describe('v2 session system instructions', () => {
     ).rejects.toThrow('Instruction update failed');
     expect(wire.mock.calls.map(([method]) => method)).toEqual(['GET', 'PUT']);
   });
+});
+
+describe('v2 hidden authentication fields', () => {
+  it.each([undefined, { server: 'https://custom.example' }])(
+    'omits hidden prompts and sends their defaults unless supplied: %j',
+    async (inputs) => {
+      const integration = {
+        id: 'opencode',
+        methods: [
+          {
+            id: 'login',
+            type: 'oauth',
+            label: 'Sign in',
+            form: [
+              { key: 'server', type: 'string', hidden: true, default: 'https://console.example' },
+              { key: 'account', type: 'string', title: 'Account' },
+              {
+                key: 'inactive',
+                type: 'boolean',
+                hidden: true,
+                default: true,
+                when: [{ key: 'account', op: 'eq', value: 'other' }],
+              },
+            ],
+          },
+        ],
+      };
+      const wire = vi.fn(async (_method: string, path: string) => {
+        if (path === '/api/provider') return { data: [] };
+        if (path === '/api/integration') return { data: [integration] };
+        if (path === '/api/provider/opencode') return { data: { integrationID: 'opencode' } };
+        if (path === '/api/integration/opencode') return { data: integration };
+        if (path.endsWith('/connect/oauth')) return { data: { attemptID: 'attempt-one' } };
+        throw new Error(`Unexpected request: ${path}`);
+      });
+      const adapter = new OpenCodeV2Adapter(wire);
+      expect(await adapter.request('GET', '/provider/auth', undefined)).toEqual({
+        opencode: [
+          {
+            type: 'oauth',
+            label: 'Sign in',
+            prompts: [{ key: 'account', message: 'Account', type: 'text' }],
+          },
+        ],
+      });
+      await adapter.request('POST', '/provider/opencode/oauth/authorize', { method: 0, inputs });
+      expect(wire).toHaveBeenLastCalledWith(
+        'POST',
+        '/api/integration/opencode/connect/oauth',
+        { methodID: 'login', answer: { server: inputs?.server ?? 'https://console.example' } },
+        expect.anything()
+      );
+    }
+  );
 });
 
 describe('v2 model release dates', () => {

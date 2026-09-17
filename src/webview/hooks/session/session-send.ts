@@ -1500,7 +1500,11 @@ export async function ensureSessionPermissionWithDependencies(
   sessionId: string
 ): Promise<boolean> {
   const session = deps.getSession(sessionId);
-  const permission = deps.buildPermissionRules(deps.getPermissionMode(sessionId));
+  const mode = deps.getPermissionMode(sessionId);
+  const permission = deps.buildPermissionRules(mode);
+  // Default-mode resets belong to explicit mode changes. V2 replaces the rules,
+  // so sending an empty set here would erase session-scoped Always approvals.
+  if (mode === 'default' && permission.length === 0) return true;
   if (hasPermissionRules(session?.permission, permission)) return true;
 
   try {

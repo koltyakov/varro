@@ -559,6 +559,22 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
     ).toBe(true);
     expect(asRecord(asRecord(await waiting)?.data)?.effect).toBe('ask');
     expect(await transport.request('GET', '/permission')).toEqual([]);
+    // Session-scoped Always uses a session rule plus a once reply, not the
+    // server's project-scoped native Always decision.
+    await transport.request('PATCH', `/session/${sessionID}`, {
+      permission: [{ permission: 'bash', pattern: 'fixture permission only', action: 'allow' }],
+    });
+    expect(asRecord(await transport.request('GET', `/session/${sessionID}`))?.permission).toEqual([
+      { permission: 'bash', pattern: 'fixture permission only', action: 'allow' },
+    ]);
+    const repeated = await transport.request('POST', `/api/session/${sessionID}/permission`, {
+      action: 'shell',
+      resources: ['fixture permission only'],
+      save: ['fixture permission only'],
+      metadata: {},
+    });
+    expect(asRecord(asRecord(repeated)?.data)?.effect).toBe('allow');
+    expect(await transport.request('GET', '/permission')).toEqual([]);
     const form = asRecord(
       asRecord(
         await transport.request('POST', `/api/session/${sessionID}/form`, {

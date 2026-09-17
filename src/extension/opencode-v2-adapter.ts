@@ -82,7 +82,7 @@ function v1AuthMethods(integration: IntegrationInfo | undefined): ProviderAuthMe
         type: item.type === 'key' ? 'api' : 'oauth',
         label: item.label ?? 'API key',
         prompts: item.form?.flatMap<NonNullable<ProviderAuthMethod['prompts']>[number]>((field) => {
-          if (field.type === 'external') return [];
+          if (field.type === 'external' || field.hidden) return [];
           const base = { key: field.key, message: field.title ?? field.description ?? field.key };
           if (field.type === 'string' && field.options)
             return [
@@ -957,11 +957,24 @@ export class OpenCodeV2Adapter {
       );
       const selected = methods[Number(input.method ?? 0)];
       if (selected?.type !== 'oauth') throw new Error('Unsupported OpenCode authentication method');
+      const answer = { ...asRecord(input.inputs) };
+      for (const field of selected.form ?? []) {
+        if (field.type === 'external' || !field.hidden || answer[field.key] !== undefined) continue;
+        if (
+          field.when?.some((condition) =>
+            condition.op === 'eq'
+              ? answer[condition.key] !== condition.value
+              : answer[condition.key] === condition.value
+          )
+        )
+          continue;
+        if (field.default !== undefined) answer[field.key] = field.default;
+      }
       const result = asRecord(
         asRecord(
           await raw('POST', `${base}/connect/oauth`, {
             methodID: selected.id,
-            answer: input.inputs,
+            answer: Object.keys(answer).length > 0 ? answer : input.inputs,
           })
         )?.data
       );

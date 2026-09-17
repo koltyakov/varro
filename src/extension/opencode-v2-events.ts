@@ -172,6 +172,10 @@ export function projectV2Event(value: unknown, context: V2MessageContext = {}): 
     const model = asRecord(data.model);
     return emit(event.type.replace('session.', 'session.next.'), {
       ...properties,
+      timestamp:
+        event.type === 'session.step.started' && isNumber(data.started)
+          ? data.started
+          : properties.timestamp,
       model: model ? { ...model, modelID: model.id } : undefined,
       executionContinues: true,
     });

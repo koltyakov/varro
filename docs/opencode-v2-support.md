@@ -13,7 +13,7 @@ V2 is recommended for new installations; v1 remains supported. See the [usage gu
 - `opencode-v2-session-state.ts` persists Varro-owned metadata and timestamp overrides that the released v2 API cannot patch. These annotations live under the user's XDG state directory in `varro/opencode-v2/`.
 - Native v2 agent and permission configuration keys are preserved when Varro edits a file already using them. V1-format files retain their format.
 
-`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. Its latest matrix passed for `opencode-ai@1.16.0`, `opencode-ai@1.18.31`, and `@opencode/cli@2.0.6`. The checks cover managed startup, credential recovery in a second window, restart, bootstrap, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
+`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. Its latest matrix passed 44 checks across `opencode-ai@1.16.0`, `opencode-ai@1.18.31`, `@opencode/cli@2.0.5`, and `@opencode/cli@2.0.7`. The checks cover managed startup, credential recovery in a second window, restart, bootstrap, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
 
 Fresh VS Code sandbox windows passed `v2-first-run` and the existing `healthy-first-run` scenario. These editor checks verify activation, ownership, health, and event-stream connection. `test:compatibility:ui` additionally exercises the actual composer, successful replies, pre-turn failures, HTTP 401 handling, recovery through a working provider, and reopening history. Full visual streaming performance remains a separate verification task.
 
@@ -28,6 +28,30 @@ VARRO_SANDBOX_V2_COMMAND=/absolute/path/to/opencode2 node scripts/vscode-sandbox
 The editor profile is disposable, and its OpenCode database is isolated under `artifacts/ai-test-data/`.
 
 The released v2 API has no session-sharing route or arbitrary single-message deletion. Varro disables sharing and implements inline-edit tail deletion through file-preserving staged revert and commit. V2 also has no LSP service. Metadata annotations are local to Varro; they are not synchronized to other OpenCode clients. Switching CLI families does not perform a data migration.
+
+### 2.0.7 compatibility fixes
+
+- Default-mode sends preserve session-scoped Always approvals. V2 replaces session permission rules,
+  so the previous pre-send empty-rule update erased saved allowances. Explicit mode changes still
+  apply their rule updates. The released permission engine does honor session rules; the older
+  `tmp/opencode` checkout did not represent that released behavior.
+- V2's `The user declined this tool call` error uses Varro's permission-rejected presentation and
+  remains outside compact completed-work groups.
+- Step-start events use the 2.0.7 `started` timestamp for provider-request timing, with the event
+  timestamp as a fallback for older releases.
+- Hidden authentication fields are omitted from interactive prompts and their defaults are submitted
+  unless the caller supplies a value. Inactive conditional defaults remain omitted.
+
+The v2.0.6 to v2.0.7 release diff also adds permission policy enforcement, waits for plugin activation
+before listing integrations, and removes server-side update polling. These use existing Varro APIs.
+The new experimental filesystem-write route and ACP/UI changes do not require adapter changes.
+
+V2.0.7 still interrupts a turn when a tool permission is rejected or a question is skipped. Its config
+normalizer explicitly drops v1's `experimental.continue_loop_on_deny` option. Varro preserves that
+server outcome. The earlier v1 immediate-rename overwrite remains a server-title-generation race
+observation, not a verified Varro regression. Neither behavior is changed by this compatibility patch.
+The earlier AI-07/08 scrolling blockers and full visual/performance acceptance remain open; the
+published-binary adapter matrix is not a replacement for those scenarios.
 
 ## Importing v1 conversations into v2
 

@@ -1690,7 +1690,7 @@ describe('session-send helpers', () => {
     expect(upsertSession).toHaveBeenCalledWith(expect.objectContaining({ id: 'session-1' }));
   });
 
-  it('clears session permission overrides in default mode', async () => {
+  it('preserves session-scoped Always approvals when sending in default mode', async () => {
     const updateSessionPermission = vi.fn(
       async (_sessionId: string, input: { permission: PermissionRule[] }) => ({
         id: 'session-1',
@@ -1706,7 +1706,7 @@ describe('session-send helpers', () => {
     const ok = await ensureSessionPermissionWithDependencies(
       {
         getSession: () => ({
-          permission: [{ permission: '*', pattern: '*', action: 'ask' }],
+          permission: [{ permission: 'read', pattern: '/repo/README.md', action: 'allow' }],
         }),
         buildPermissionRules: () => [],
         getPermissionMode: () => 'default',
@@ -1718,7 +1718,7 @@ describe('session-send helpers', () => {
     );
 
     expect(ok).toBe(true);
-    expect(updateSessionPermission).toHaveBeenCalledWith('session-1', { permission: [] });
+    expect(updateSessionPermission).not.toHaveBeenCalled();
   });
 
   it('appends resolved default rules after stale full-access rules', async () => {

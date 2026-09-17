@@ -24,7 +24,7 @@ OpenCode remains responsible for agents, providers, models, commands, skills, MC
 
 Already using v1? You can keep it, or install it with `npm install -g opencode-ai`. Set `varro.server.command` to your v1 executable to select it explicitly. With this setting empty, Varro searches for `opencode2` first, then `opencode`. Current v1 and v2 packages both install `opencode`, so the command name alone does not identify the version. Run `opencode --version` to check. See [choosing and updating OpenCode](https://github.com/koltyakov/varro/blob/main/docs/usage.md#choose-and-update-opencode) before switching versions.
 
-> After switching from v1 to v2, you may need to run `Varro: Restart Server` from the Command Palette. Installing v2 does not replace an already running v1 server. Let active work finish first, then check the OpenCode version in Varro's status bar. If you manage the server yourself, restart it in its terminal using the v2 executable.
+> After switching from v1 to v2, you may need to run `Varro: Restart Server` from the Command Palette. Installing v2 does not replace an already running v1 server. If restart fails or Varro still shows v1, stop the old OpenCode process explicitly, especially on Windows, then restart with the v2 executable. Let active work finish first. See [restart recovery steps](https://github.com/koltyakov/varro/blob/main/docs/usage.md#if-restart-does-not-switch-to-v2) and confirm the connected version in Varro's status bar.
 
 Install OpenCode on the host where Varro runs. A native Windows VS Code window needs the Windows CLI; add it to `PATH` or set `varro.server.command` to its executable path. A VS Code WSL window needs OpenCode installed inside that WSL distribution. Native OpenCode data is under `%USERPROFILE%\.local\share\opencode`; WSL uses the Linux data directory.
 
@@ -153,7 +153,7 @@ Varro reloads global OpenCode configuration when OpenCode is idle. Changes to pr
 
 - [VS Code](https://code.visualstudio.com/) or [VSCodium](https://vscodium.com/) 1.120 or newer
 - [Node.js](https://nodejs.org/) 22.22.2+ on Node 22, or Node 24.15.0+
-- [OpenCode v2 CLI](https://opencode.ai/v2/docs/) 2.0.5+ recommended, or [v1 CLI](https://opencode.ai/docs/) 1.16.0+, on `PATH` or configured through `varro.server.command`. Tested with v2 2.0.6 and v1 1.18.31
+- [OpenCode v2 CLI](https://opencode.ai/v2/docs/) 2.0.5+ recommended, or [v1 CLI](https://opencode.ai/docs/) 1.16.0+, on `PATH` or configured through `varro.server.command`. Tested with v2 2.0.7 and v1 1.18.31
 - A trusted, non-virtual workspace. Remote workspaces run Varro and OpenCode on the remote extension host
 
 ## Documentation

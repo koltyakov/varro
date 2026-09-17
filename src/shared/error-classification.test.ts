@@ -456,6 +456,18 @@ describe('isAbortedToolError', () => {
 });
 
 describe('isPermissionRejectedToolError', () => {
+  it('detects the v2 declined-tool error without counting it as completed work', () => {
+    expect(
+      isPermissionRejectedToolError({ status: 'error', error: 'The user declined this tool call' })
+    ).toBe(true);
+    expect(
+      isPermissionRejectedToolError({
+        status: 'completed',
+        error: 'The user declined this tool call',
+      })
+    ).toBe(false);
+  });
+
   it('detects the OpenCode permission rejection error', () => {
     expect(
       isPermissionRejectedToolError({
