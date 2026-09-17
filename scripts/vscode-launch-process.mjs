@@ -130,7 +130,11 @@ export async function verifyVscodeLaunchIdentity(launch) {
   }
   const [birthIdentity, commandResult] = await Promise.all([
     readProcessBirthIdentity(launch.pid),
-    execFileAsync('ps', ['-p', String(launch.pid), '-o', 'command=']),
+    process.platform === 'win32'
+      ? readWindowsProcess(launch.pid).then((processInfo) => ({
+          stdout: processInfo.command.replaceAll('"', ''),
+        }))
+      : execFileAsync('ps', ['-p', String(launch.pid), '-o', 'command=']),
   ]);
   if (birthIdentity !== launch.birthIdentity) {
     throw new Error(`VS Code process ${String(launch.pid)} no longer matches its launch identity`);
@@ -263,9 +267,10 @@ export async function executeVscodeCommand(remoteDebuggingPort, commandLabel) {
     for (const type of ['keyDown', 'keyUp']) {
       await requests.call('Input.dispatchKeyEvent', {
         type,
-        key: 'P',
-        code: 'KeyP',
-        modifiers: process.platform === 'darwin' ? 12 : 10,
+        key: process.platform === 'win32' ? 'F1' : 'P',
+        code: process.platform === 'win32' ? 'F1' : 'KeyP',
+        windowsVirtualKeyCode: process.platform === 'win32' ? 112 : 80,
+        modifiers: process.platform === 'win32' ? 0 : process.platform === 'darwin' ? 12 : 10,
       });
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
@@ -273,7 +278,9 @@ export async function executeVscodeCommand(remoteDebuggingPort, commandLabel) {
     // Filtering the command palette is asynchronous on a cold workbench.
     await new Promise((resolve) => setTimeout(resolve, 250));
     for (const type of ['keyDown', 'keyUp']) {
-      await requests.call('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter' });
+      await requests.call('Input.dispatchKeyEvent', {
+        type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13,
+      });
     }
   } finally {
     requests.dispose();
@@ -445,9 +452,23 @@ export async function reloadVscodeWindow(
 }
 
 async function readProcessBirthIdentity(pid) {
-  if (process.platform === 'win32') return `win32:${String(pid)}`;
+  if (process.platform === 'win32') {
+    const processInfo = await readWindowsProcess(pid);
+    return `win32:${processInfo.birthIdentity}`;
+  }
   const { stdout } = await execFileAsync('ps', ['-p', String(pid), '-o', 'lstart=']);
   const startedAt = stdout.trim();
   if (!startedAt) throw new Error(`Could not read start time for VS Code process ${String(pid)}`);
   return `${process.platform}:${startedAt}`;
+}
+
+async function readWindowsProcess(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('Invalid VS Code process ID');
+  const { stdout } = await execFileAsync('powershell.exe', [
+    '-NoProfile', '-NonInteractive', '-Command',
+    `$ErrorActionPreference = 'Stop'; $p = Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}'; ` +
+      "if (!$p) { throw 'VS Code process is unavailable' }; " +
+      '@{ command = $p.CommandLine; birthIdentity = $p.CreationDate.ToUniversalTime().Ticks.ToString() } | ConvertTo-Json -Compress',
+  ], { timeout: 10_000 });
+  return JSON.parse(stdout);
 }
