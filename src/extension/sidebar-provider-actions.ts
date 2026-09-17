@@ -65,8 +65,8 @@ export interface SidebarProviderActionDeps {
   storePdf: MessageRouterCallbacks['storePdf'];
   storeImage: MessageRouterCallbacks['storeImage'];
   releaseImages: MessageRouterCallbacks['releaseImages'];
-  removeContextFile(path: string): void;
-  clearContextFiles(): void;
+  removeContextFile(path: string, sentSessionId?: string): void;
+  clearContextFiles(sentSessionId?: string): void;
   pickFiles(): Promise<void>;
   searchFiles(requestId: number, query: string, limit?: number): void;
   runInTerminal(command: string, title?: string): void | Promise<void>;
@@ -265,8 +265,8 @@ export function createSidebarProviderActions(
     storePdf: (payload) => deps.storePdf(payload),
     storeImage: (payload) => deps.storeImage(payload),
     releaseImages: (payload) => deps.releaseImages(payload),
-    removeContextFile: (path) => deps.removeContextFile(path),
-    clearContextFiles: () => deps.clearContextFiles(),
+    removeContextFile: (path, sentSessionId) => deps.removeContextFile(path, sentSessionId),
+    clearContextFiles: (sentSessionId) => deps.clearContextFiles(sentSessionId),
     notifyContextFilesChanged: () => deps.contextFilesState.notifyContextFilesChanged(),
     pickFiles: () => deps.pickFiles(),
     searchFiles: (requestId, query, limit) => deps.searchFiles(requestId, query, limit),

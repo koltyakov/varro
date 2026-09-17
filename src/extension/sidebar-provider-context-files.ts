@@ -44,11 +44,14 @@ export class SidebarProviderContextFiles {
     this.terminalSelection = selection;
   }
 
-  clearContextFiles() {
+  clearContextFiles(sentSessionId?: string) {
     this.clearGeneration += 1;
     this.removedPaths.clear();
     const paths = this.contextFiles.map((file) => file.path);
     this.contextFiles = [];
+    if (sentSessionId) {
+      for (const path of paths) this.droppedFilesService.retainOwnedFile(path, sentSessionId);
+    }
     void this.droppedFilesService.removeOwnedFiles(paths);
   }
 
@@ -69,13 +72,18 @@ export class SidebarProviderContextFiles {
     await this.applyPendingFiles(normalized, clearGeneration, startedAt, post);
   }
 
-  removeContextFile(path: string, post: (message: ExtensionMessage) => void) {
+  removeContextFile(
+    path: string,
+    post: (message: ExtensionMessage) => void,
+    sentSessionId?: string
+  ) {
     const nextFiles = this.contextFiles.filter(
       (file) => file.path !== path && !isSameWorkspacePath(file.path, path)
     );
     if (nextFiles.length === this.contextFiles.length) return;
     this.removedPaths.set(contextPathKey(path), ++this.mutationSequence);
     this.contextFiles = nextFiles;
+    if (sentSessionId) this.droppedFilesService.retainOwnedFile(path, sentSessionId);
     void this.droppedFilesService.removeOwnedFile(path);
     post({ type: 'files/removed', payload: { path } });
     this.onContextFilesChanged?.();

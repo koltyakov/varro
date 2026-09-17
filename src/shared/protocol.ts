@@ -1073,8 +1073,8 @@ export type WebviewMessage =
       payload: { paths: string[]; deferred: boolean; sessionId?: string };
     }
   | { type: 'composer/images-update'; payload: { images: ClipboardImageSnapshot[] } }
-  | { type: 'files/remove'; payload: { path: string } }
-  | { type: 'files/clear' }
+  | { type: 'files/remove'; payload: { path: string; sentSessionId?: string } }
+  | { type: 'files/clear'; payload?: { sentSessionId: string } }
   | { type: 'queued-messages/update'; payload: { messages: QueuedMessageSnapshot[] } }
   | {
       type: 'queued-messages/claim';

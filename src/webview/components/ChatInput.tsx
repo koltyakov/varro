@@ -2684,7 +2684,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       clearClipboardImages();
       clearNativePdfs();
       resetPastedImageIndex();
-      postMessage({ type: 'files/clear' });
+      postMessage({ type: 'files/clear', payload: { sentSessionId: sessionId } });
       postMessage({ type: 'terminal-selection/clear' });
       return;
     }

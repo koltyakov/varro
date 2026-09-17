@@ -926,9 +926,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           );
         },
         releaseImages: (payload) => this.releaseImages(payload),
-        removeContextFile: (path) =>
-          contextFilesState.removeContextFile(path, (message) => post(message)),
-        clearContextFiles: () => contextFilesState.clearContextFiles(),
+        removeContextFile: (path, sentSessionId) =>
+          contextFilesState.removeContextFile(path, (message) => post(message), sentSessionId),
+        clearContextFiles: (sentSessionId) => contextFilesState.clearContextFiles(sentSessionId),
         pickFiles: () => contextFilesState.pickFiles((message) => post(message)),
         searchFiles: (requestId, query, limit) => {
           const generation = webviewSession.getRequestGeneration();

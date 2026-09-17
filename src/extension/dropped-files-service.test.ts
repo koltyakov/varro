@@ -30,6 +30,7 @@ vi.mock('./logger', () => ({ logger: loggerMock }));
 vi.mock('vscode', () => vscodeMock);
 
 import { DroppedFilesService } from './dropped-files-service';
+import { SidebarProviderContextFiles } from './sidebar-provider-context-files';
 
 let services: DroppedFilesService[] = [];
 
@@ -79,6 +80,39 @@ describe('DroppedFilesService', () => {
       expect(droppedStat.mode & 0o777).toBe(0o600);
     }
   });
+
+  it.each(['clear', 'remove'] as const)(
+    'keeps a sent HAR readable after composer %s and deletes it with its last session',
+    async (cleanup) => {
+      const service = new DroppedFilesService({ context: { workspacePath: '/repo' } } as never);
+      services.push(service);
+      const context = new SidebarProviderContextFiles(service);
+      const content = '{"log":{"entries":[]}}';
+      await context.handleDroppedContent(
+        [
+          {
+            name: 'health.har',
+            content: Buffer.from(content).toString('base64'),
+            size: Buffer.byteLength(content),
+          },
+        ],
+        () => {}
+      );
+      const path = context.getContextFiles()[0]!.path;
+
+      if (cleanup === 'clear') context.clearContextFiles('session-1');
+      else context.removeContextFile(path, () => {}, 'session-1');
+      await service.removeOwnedFiles([path]);
+
+      expect(context.getContextFiles()).toEqual([]);
+      expect(await readFile(path, 'utf8')).toBe(content);
+      service.retainOwnedFile(path, 'session-2');
+      await service.removeSessionOwnedFiles(['session-1']);
+      expect(await readFile(path, 'utf8')).toBe(content);
+      await service.removeSessionOwnedFiles(['session-2']);
+      await expect(access(path)).rejects.toMatchObject({ code: 'ENOENT' });
+    }
+  );
 
   it('preserves non-ASCII dropped filenames for display', async () => {
     const service = new DroppedFilesService({ context: { workspacePath: '/repo' } } as never);

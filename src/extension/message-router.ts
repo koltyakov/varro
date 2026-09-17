@@ -104,8 +104,8 @@ export interface MessageRouterCallbacks {
   releaseImages(
     payload: Extract<WebviewMessage, { type: 'images/release' }>['payload']
   ): Promise<void>;
-  removeContextFile(path: string): void;
-  clearContextFiles(): void;
+  removeContextFile(path: string, sentSessionId?: string): void;
+  clearContextFiles(sentSessionId?: string): void;
   notifyContextFilesChanged(): void;
   pickFiles(): Promise<void>;
   searchFiles(requestId: number, query: string, limit?: number): void;
@@ -322,7 +322,7 @@ export class MessageRouter {
           this.handleFilesRemoveMessage(msg);
           break;
         case 'files/clear':
-          this.handleFilesClearMessage();
+          this.handleFilesClearMessage(msg);
           break;
         case 'files/pick':
           await this.handleFilesPickMessage();
@@ -426,11 +426,11 @@ export class MessageRouter {
   }
 
   private handleFilesRemoveMessage(msg: Extract<WebviewMessage, { type: 'files/remove' }>) {
-    this.callbacks.removeContextFile(msg.payload.path);
+    this.callbacks.removeContextFile(msg.payload.path, msg.payload.sentSessionId);
   }
 
-  private handleFilesClearMessage() {
-    this.callbacks.clearContextFiles();
+  private handleFilesClearMessage(msg: Extract<WebviewMessage, { type: 'files/clear' }>) {
+    this.callbacks.clearContextFiles(msg.payload?.sentSessionId);
     this.callbacks.notifyContextFilesChanged();
   }
 

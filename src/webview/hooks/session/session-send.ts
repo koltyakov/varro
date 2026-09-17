@@ -771,17 +771,20 @@ function clearCapturedComposerAttachments(
   return cleared;
 }
 
-function commitClearedComposerAttachments(cleared: ClearedComposerAttachments) {
+function commitClearedComposerAttachments(
+  cleared: ClearedComposerAttachments,
+  sentSessionId: string
+) {
   const removedFilePaths = cleared.droppedFiles
     .map((file) => file.path)
     .filter((path) => !appStore.state.droppedFiles.some((file) => file.path === path));
 
   if (removedFilePaths.length > 0) {
     if (appStore.state.droppedFiles.length === 0) {
-      postMessage({ type: 'files/clear' });
+      postMessage({ type: 'files/clear', payload: { sentSessionId } });
     } else {
       for (const path of removedFilePaths) {
-        postMessage({ type: 'files/remove', payload: { path } });
+        postMessage({ type: 'files/remove', payload: { path, sentSessionId } });
       }
     }
   }
@@ -1081,7 +1084,7 @@ export class SessionSendOperations {
                 payload: { paths: imagePaths, deferred: true, sessionId: sentSessionId },
               });
             }
-            commitClearedComposerAttachments(clearedAttachments);
+            commitClearedComposerAttachments(clearedAttachments, sentSessionId);
             clearedAttachments = null;
           },
           restoreSentComposerAttachments: () => {

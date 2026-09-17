@@ -242,7 +242,10 @@ describe('SessionSendOperations', () => {
       { id: 'todo-1', content: 'Keep visible', status: 'completed', priority: 'high' },
     ]);
     expect(resetTodoSync).not.toHaveBeenCalled();
-    expect(postMessage).toHaveBeenCalledWith({ type: 'files/clear' });
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'files/clear',
+      payload: { sentSessionId: 'session-1' },
+    });
     expect(postMessage).toHaveBeenCalledWith({ type: 'terminal-selection/clear' });
     expect(postMessage).toHaveBeenCalledWith({
       type: 'images/release',
@@ -332,13 +335,16 @@ describe('SessionSendOperations', () => {
     expect(appStore.state.droppedFiles).toEqual([]);
     expect(appStore.state.clipboardImages).toEqual([]);
     expect(appStore.state.terminalSelection).toBeNull();
-    expect(postMessage).not.toHaveBeenCalledWith({ type: 'files/clear' });
+    expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'files/clear' }));
     expect(postMessage).not.toHaveBeenCalledWith({ type: 'terminal-selection/clear' });
 
     send.resolve();
     await pending;
 
-    expect(postMessage).toHaveBeenCalledWith({ type: 'files/clear' });
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'files/clear',
+      payload: { sentSessionId: 'session-1' },
+    });
     expect(postMessage).toHaveBeenCalledWith({ type: 'terminal-selection/clear' });
   });
 
@@ -381,7 +387,7 @@ describe('SessionSendOperations', () => {
       { id: 'retry-image', filename: 'retry.png' },
     ]);
     expect(appStore.state.terminalSelection).toEqual({ text: 'npm test', terminalName: 'zsh' });
-    expect(postMessage).not.toHaveBeenCalledWith({ type: 'files/clear' });
+    expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'files/clear' }));
     expect(postMessage).not.toHaveBeenCalledWith({ type: 'terminal-selection/clear' });
   });
 
@@ -499,7 +505,10 @@ describe('SessionSendOperations', () => {
 
     expect(appStore.state.droppedFiles).toEqual([]);
     expect(appStore.state.clipboardImages).toEqual([]);
-    expect(postMessage).toHaveBeenCalledWith({ type: 'files/clear' });
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'files/clear',
+      payload: { sentSessionId: 'session-1' },
+    });
   });
 
   it('clears matching composer attachments after sending to an inactive target session', async () => {
@@ -617,7 +626,7 @@ describe('SessionSendOperations', () => {
     });
     expect(postMessage).toHaveBeenCalledWith({
       type: 'files/remove',
-      payload: { path: '/repo/sent.ts' },
+      payload: { path: '/repo/sent.ts', sentSessionId: 'session-1' },
     });
     expect(postMessage).not.toHaveBeenCalledWith({ type: 'terminal-selection/clear' });
   });
@@ -658,7 +667,7 @@ describe('SessionSendOperations', () => {
     expect(appStore.state.droppedFiles.map((item) => item.path)).toEqual([file.path]);
     expect(appStore.state.clipboardImages.map((item) => item.id)).toEqual([image.id]);
     expect(appStore.state.terminalSelection).toEqual(terminalSelection);
-    expect(postMessage).not.toHaveBeenCalledWith({ type: 'files/clear' });
+    expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'files/clear' }));
     expect(postMessage).not.toHaveBeenCalledWith({ type: 'terminal-selection/clear' });
   });
 

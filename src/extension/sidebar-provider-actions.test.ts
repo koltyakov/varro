@@ -627,7 +627,7 @@ describe('createSidebarProviderActions', () => {
     expect(deps.handleDroppedContent).toHaveBeenCalledWith([
       { name: 'a.ts', content: 'QQ==', size: 1 },
     ]);
-    expect(deps.removeContextFile).toHaveBeenCalledWith('/repo/a.ts');
+    expect(deps.removeContextFile).toHaveBeenCalledWith('/repo/a.ts', undefined);
     expect(deps.clearContextFiles).toHaveBeenCalledOnce();
     expect(contextFilesState.notifyContextFilesChanged).toHaveBeenCalledOnce();
     expect(deps.pickFiles).toHaveBeenCalledOnce();

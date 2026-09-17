@@ -192,7 +192,6 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
     case 'providers/refresh':
     case 'providers/auth-changed':
     case 'terminal-selection/clear':
-    case 'files/clear':
     case 'files/pick':
     case 'webview/reload':
     case 'vscode/open-folder':
@@ -733,7 +732,23 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       };
     }
 
-    case 'files/remove':
+    case 'files/clear': {
+      if (message?.payload === undefined) return { type };
+      const payload = asRecord(message.payload);
+      if (payload?.sentSessionId === undefined) return { type };
+      const sentSessionId = getString(payload?.sentSessionId);
+      return sentSessionId ? { type, payload: { sentSessionId } } : null;
+    }
+
+    case 'files/remove': {
+      const payload = asRecord(message?.payload);
+      const path = getBoundedString(payload?.path, MAX_PATH_LENGTH);
+      if (!path) return null;
+      if (payload?.sentSessionId === undefined) return { type, payload: { path } };
+      const sentSessionId = getString(payload.sentSessionId);
+      return sentSessionId ? { type, payload: { path, sentSessionId } } : null;
+    }
+
     case 'file/read': {
       const payload = asRecord(message?.payload);
       const path = getBoundedString(payload?.path, MAX_PATH_LENGTH);

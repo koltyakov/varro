@@ -77,6 +77,7 @@ export class DroppedFilesService {
   private readonly deferredRemovalTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly sessionOwnedFiles = new Map<string, Set<string>>();
   private readonly fileSessionOwners = new Map<string, Set<string>>();
+  private readonly retainedContentFiles = new Set<string>();
   private ownedContentBytes = 0;
   private reservedContentBytes = 0;
   private nextOwnedRemovalLane = 0;
@@ -204,6 +205,7 @@ export class DroppedFilesService {
   }
 
   async removeOwnedFile(path: string): Promise<boolean> {
+    if (this.retainedContentFiles.has(path)) return false;
     const timer = this.deferredRemovalTimers.get(path);
     if (timer) {
       clearTimeout(timer);
@@ -240,6 +242,16 @@ export class DroppedFilesService {
     for (const [path, owned] of this.ownedContentFiles) {
       if (owned.queuedPdf && !this.deferredRemovalTimers.has(path)) yield path;
     }
+  }
+
+  retainOwnedFile(path: string, sessionId: string): void {
+    if (!this.ownedContentFiles.has(path)) return;
+    const timer = this.deferredRemovalTimers.get(path);
+    if (timer) clearTimeout(timer);
+    this.deferredRemovalTimers.delete(path);
+    this.retainedContentFiles.add(path);
+    getOrCreateSet(this.sessionOwnedFiles, sessionId).add(path);
+    getOrCreateSet(this.fileSessionOwners, path).add(sessionId);
   }
 
   deferOwnedFileRemoval(path: string, sessionId?: string): void {
@@ -294,6 +306,7 @@ export class DroppedFilesService {
         owners?.delete(sessionId);
         if (owners && owners.size > 0) continue;
         this.fileSessionOwners.delete(path);
+        this.retainedContentFiles.delete(path);
         orphanedPaths.add(path);
       }
     }
@@ -416,6 +429,9 @@ export class DroppedFilesService {
     await Promise.allSettled(this.activeContentWrites);
     if (dropsDir && (await this.removeDropsDir(dropsDir))) {
       this.ownedContentFiles.clear();
+      this.retainedContentFiles.clear();
+      this.sessionOwnedFiles.clear();
+      this.fileSessionOwners.clear();
       this.ownedContentBytes = 0;
     }
   }

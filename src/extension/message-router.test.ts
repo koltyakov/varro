@@ -13,7 +13,7 @@ vi.mock('./logger', () => ({ logger: mocks.logger }));
 import type { WebviewMessage } from '../shared/protocol';
 import type { MessageRouterCallbacks } from './message-router';
 import { MessageRouter } from './message-router';
-import { WEBVIEW_MESSAGE_TYPES } from './util/webview-message';
+import { parseWebviewMessage, WEBVIEW_MESSAGE_TYPES } from './util/webview-message';
 import { VALID_WEBVIEW_MESSAGES } from './util/webview-message.test-support';
 
 function createCallbacks(): MessageRouterCallbacks {
@@ -335,11 +335,30 @@ describe('MessageRouter', () => {
     expect(cb.handleDroppedContent).toHaveBeenCalledWith(files);
   });
 
+  it('preserves sent attachment ownership through parsing and dispatch', async () => {
+    const cb = createCallbacks();
+    const router = new MessageRouter(cb);
+    const clear = parseWebviewMessage({
+      type: 'files/clear',
+      payload: { sentSessionId: 'session-1' },
+    });
+    const remove = parseWebviewMessage({
+      type: 'files/remove',
+      payload: { path: '/tmp/health.har', sentSessionId: 'session-1' },
+    });
+    expect(clear).not.toBeNull();
+    expect(remove).not.toBeNull();
+    await router.handleMessage(clear!);
+    await router.handleMessage(remove!);
+    expect(cb.clearContextFiles).toHaveBeenCalledWith('session-1');
+    expect(cb.removeContextFile).toHaveBeenCalledWith('/tmp/health.har', 'session-1');
+  });
+
   it('dispatches files/remove', async () => {
     const cb = createCallbacks();
     const router = new MessageRouter(cb);
     await router.handleMessage({ type: 'files/remove', payload: { path: '/x.ts' } });
-    expect(cb.removeContextFile).toHaveBeenCalledWith('/x.ts');
+    expect(cb.removeContextFile).toHaveBeenCalledWith('/x.ts', undefined);
   });
 
   it('dispatches files/clear and notifies', async () => {
@@ -464,7 +483,7 @@ const DISPATCH_EXPECTATIONS = {
   'providers/auth-changed': [{ callback: 'providerAuthChanged', args: [] }],
   'terminal-selection/clear': [{ callback: 'clearTerminalSelection', args: [] }],
   'files/clear': [
-    { callback: 'clearContextFiles', args: [] },
+    { callback: 'clearContextFiles', args: [undefined] },
     { callback: 'notifyContextFilesChanged', args: [] },
   ],
   'files/pick': [{ callback: 'pickFiles', args: [] }],
@@ -564,7 +583,7 @@ const DISPATCH_EXPECTATIONS = {
     },
   ],
   'composer/images-update': [{ callback: 'updateDraftImages', args: [{ images: [] }] }],
-  'files/remove': [{ callback: 'removeContextFile', args: ['/workspace/a.ts'] }],
+  'files/remove': [{ callback: 'removeContextFile', args: ['/workspace/a.ts', undefined] }],
   'queued-messages/update': [
     {
       callback: 'updateQueuedMessages',
