@@ -1121,7 +1121,41 @@ export class SessionSendOperations {
         clearPendingAbort: this.deps.clearPendingAbort,
         clearSessionUsageLimit: clearSessionUsageLimitForSessionTree,
         setSessionFailed: sessionStore.setSessionFailed,
-        continueInterruptedSession: this.deps.continueInterruptedSession,
+        resendMessage: async (targetSessionId, targetMessageId) => {
+          const assistant = appStore.state.messages.find(
+            (entry) => entry.info.id === targetMessageId && entry.info.sessionID === targetSessionId
+          )?.info;
+          const original =
+            assistant?.role === 'assistant'
+              ? appStore.state.messages.find(
+                  (entry) =>
+                    entry.info.id === assistant.parentID && entry.info.sessionID === targetSessionId
+                )
+              : undefined;
+          if (!original || original.info.role !== 'user') {
+            throw new Error('The original request is not loaded. Reopen the session and retry.');
+          }
+          const parts = original.parts
+            .filter(
+              (part) =>
+                part.type === 'text' ||
+                part.type === 'file' ||
+                part.type === 'agent' ||
+                part.type === 'subtask'
+            )
+            .map(({ id: _id, sessionID: _sessionID, messageID: _messageID, ...part }) => part);
+          await this.deps.syncSessionMcps(targetSessionId);
+          await this.deps.sendAsync(targetSessionId, {
+            parts,
+            agent: original.info.agent,
+            model: original.info.model,
+            variant: original.info.model.variant,
+          });
+          await Promise.all([
+            this.deps.syncSession(targetSessionId),
+            this.deps.recheckSessionStatus(targetSessionId),
+          ]).catch(() => {});
+        },
         stopLoading: uiStore.stopLoading,
       },
       messageId,
@@ -1519,7 +1553,7 @@ export async function retryMessageWithDependencies(
     clearPendingAbort(sessionId: string): void;
     clearSessionUsageLimit(sessionId: string): void;
     setSessionFailed(sessionId: string, failed: boolean): void;
-    continueInterruptedSession(sessionId: string): Promise<void | boolean | object>;
+    resendMessage(sessionId: string, messageId: string): Promise<void | boolean | object>;
     stopLoading(): void;
   },
   messageId: string,
@@ -1535,7 +1569,7 @@ export async function retryMessageWithDependencies(
   deps.setSessionFailed(sessionId, false);
 
   try {
-    await deps.continueInterruptedSession(sessionId);
+    await deps.resendMessage(sessionId, messageId);
   } catch (err) {
     deps.stopLoading();
     deps.setSessionFailed(sessionId, true);

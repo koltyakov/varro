@@ -1373,7 +1373,7 @@ describe('sendMessage', () => {
     expect(stateModule.error()).toBe('Plan content is empty');
   });
 
-  it('continues the failed assistant turn with the interruption resume prompt', async () => {
+  it('retries the original request and attachments after an authentication failure', async () => {
     const { stateModule, hookModule } = await loadModules();
     const failedAssistant = assistantMessage('assistant-1', 'user-1');
     if (failedAssistant.role !== 'assistant') {
@@ -1406,7 +1406,10 @@ describe('sendMessage', () => {
       {
         info: {
           ...failedAssistant,
-          error: { name: 'server_error', data: { message: 'Request failed' } },
+          error: {
+            name: 'ProviderAuthError',
+            data: { providerID: 'openai', message: 'Unauthorized' },
+          },
         },
         parts: [],
       },
@@ -1423,9 +1426,34 @@ describe('sendMessage', () => {
       parts: [
         {
           type: 'text',
-          text: 'Continue from where you were interrupted by the server restart or extension reload. Review the existing conversation, do not repeat completed work, and proceed with the next unfinished step.',
+          text: 'Describe what to build',
+        },
+        {
+          type: 'file',
+          mime: 'image/png',
+          filename: 'image.png',
+          url: 'blob:1',
         },
       ],
+      agent: 'build',
+      model: { providerID: 'openai', modelID: 'gpt-4o' },
+      variant: undefined,
     });
+  });
+
+  it('reports a missing original request instead of sending a recovery prompt', async () => {
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('messages', [
+      { info: assistantMessage('assistant-1', 'unloaded-user'), parts: [] },
+    ]);
+
+    await hookModule.retryMessage('assistant-1');
+
+    expect(clientMocks.sessionSendAsync).not.toHaveBeenCalled();
+    expect(stateModule.error()).toBe(
+      'The original request is not loaded. Reopen the session and retry.'
+    );
+    expect(stateModule.isLoading()).toBe(false);
   });
 });

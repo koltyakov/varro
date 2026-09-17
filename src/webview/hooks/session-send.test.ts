@@ -2000,7 +2000,7 @@ describe('session-send helpers', () => {
   });
 
   it('retries only assistant messages in the active session', async () => {
-    const continueInterruptedSession = vi.fn(async () => {});
+    const resendMessage = vi.fn(async () => {});
 
     await retryMessageWithDependencies(
       {
@@ -2011,14 +2011,14 @@ describe('session-send helpers', () => {
         clearPendingAbort: vi.fn(),
         clearSessionUsageLimit: vi.fn(),
         setSessionFailed: vi.fn(),
-        continueInterruptedSession,
+        resendMessage,
         stopLoading: vi.fn(),
       },
       'assistant-1',
       'session-1'
     );
 
-    expect(continueInterruptedSession).toHaveBeenCalledWith('session-1');
+    expect(resendMessage).toHaveBeenCalledWith('session-1', 'assistant-1');
   });
 
   it('retries the latest active provider-auth failure after credentials refresh', () => {
