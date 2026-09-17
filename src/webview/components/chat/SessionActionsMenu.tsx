@@ -261,19 +261,15 @@ export function SessionActionsMenu(props: {
               <button type="button" role="menuitem" onClick={() => void copySessionId()}>
                 Copy session ID
               </button>
-              <button
-                type="button"
-                role="menuitem"
-                disabled={props.session.sharingSupported === false}
-                title={
-                  props.session.sharingSupported === false
-                    ? 'Session sharing is unavailable in this OpenCode backend'
-                    : undefined
-                }
-                onClick={() => (props.session.share?.url ? void unshare() : void copyShareLink())}
-              >
-                {props.session.share?.url ? 'Unshare session' : 'Share session'}
-              </button>
+              <Show when={props.session.sharingSupported !== false}>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => (props.session.share?.url ? void unshare() : void copyShareLink())}
+                >
+                  {props.session.share?.url ? 'Unshare session' : 'Share session'}
+                </button>
+              </Show>
               <Show when={!props.session.parentID}>
                 <div class="session-item-actions-separator" role="separator" />
                 <button

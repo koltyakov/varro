@@ -5,6 +5,7 @@ import { spawn } from 'child_process';
 import { randomBytes } from 'crypto';
 import crossSpawn from 'cross-spawn';
 import { Service } from '@opencode/client/service';
+import type { Endpoint } from '@opencode/client/service';
 import type { Dirent } from 'fs';
 import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs';
 import {
@@ -34,6 +35,7 @@ import {
   type OpenCodeUpgradeFailureKind,
 } from '../shared/opencode-install';
 import type { ServerStatus } from '../shared/protocol';
+import { asRecord } from '../shared/type-utils';
 import {
   parseManagedServerOwnershipLease,
   type ManagedServerOwnershipLease,
@@ -1036,7 +1038,8 @@ export class OpenCodeProcess {
     if (openCodeApiVersion(this.installedCliVersionCache?.value ?? '') !== 2) return false;
     return Service.discover({
       version: (version) => openCodeApiVersion(version) === 2,
-    }).then((endpoint) => {
+    }).then(async (discovered) => {
+      const endpoint = discovered ?? (await this.discoverLegacySharedServer());
       if (!endpoint) return false;
       const url = new URL(endpoint.url);
       if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !url.port) return false;
@@ -1045,6 +1048,55 @@ export class OpenCodeProcess {
       this.credentialUrl = this.url;
       return true;
     });
+  }
+
+  private async discoverLegacySharedServer(): Promise<Endpoint | undefined> {
+    // The 2.0.6 client rejects 2.0.5 registrations because that release uses /api/status.
+    const path = join(
+      process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'),
+      'opencode',
+      'service.json'
+    );
+    try {
+      const registration = asRecord(JSON.parse(await readFile(path, 'utf8')));
+      if (
+        registration?.version !== '2.0.5' ||
+        typeof registration.url !== 'string' ||
+        typeof registration.pid !== 'number' ||
+        !Number.isSafeInteger(registration.pid) ||
+        registration.pid <= 0 ||
+        typeof registration.password !== 'string' ||
+        !registration.password ||
+        registration.password.length > 4096
+      )
+        return undefined;
+      const url = new URL(registration.url);
+      if (
+        url.protocol !== 'http:' ||
+        url.hostname !== '127.0.0.1' ||
+        !url.port ||
+        url.username ||
+        url.password
+      )
+        return undefined;
+      process.kill(registration.pid, 0);
+      const response = await fetch(new URL('/api/status', url), {
+        headers: { Authorization: basicAuthorization(registration.password) },
+        redirect: 'error',
+        signal: AbortSignal.timeout(3000),
+      });
+      if (!response.ok) return undefined;
+      const status = asRecord(await response.json());
+      if (status?.pid !== registration.pid || status.version !== registration.version)
+        return undefined;
+      return {
+        url: url.origin,
+        auth: { type: 'basic', username: 'opencode', password: registration.password },
+      };
+    } catch {
+      // A missing, stale, or unhealthy legacy registration is not an attachable service.
+      return undefined;
+    }
   }
 
   get serverAuthorization(): string | undefined {

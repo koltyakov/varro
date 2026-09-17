@@ -4,7 +4,6 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { createServer } from 'node:net';
 import { spawnSync } from 'node:child_process';
-import { Service } from '@opencode/client/service';
 import { asRecord, isString } from '../shared/type-utils';
 import { OpenCodeServer } from './server';
 
@@ -72,9 +71,9 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
         expect(info.health.version).toBe(process.env.VARRO_OPENCODE_TEST_VERSION);
       const lease = asRecord(JSON.parse(await readFile(leasePath, 'utf8')));
       if (info.health.version?.startsWith('2.')) {
-        expect((await Service.discover())?.url).toBe(url);
         const registrationPath = join(root, 'state/opencode/service.json');
         const registration = await readFile(registrationPath, 'utf8');
+        expect(asRecord(JSON.parse(registration))?.url).toBe(url);
         const cli = spawnSync(binary, ['api', 'get', '/api/session?limit=1'], {
           cwd: editor.directory,
           encoding: 'utf8',

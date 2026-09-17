@@ -408,6 +408,91 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
     ).toBe('Adapter stream verified.');
   }, 30000);
 
+  it('executes a configured slash command through the common API', async () => {
+    const session = asRecord(
+      await transport.request('POST', '/session', { title: 'Command fixture' })
+    );
+    const id = String(session?.id);
+    try {
+      await transport.request('POST', `/session/${id}/command`, {
+        command: 'fixture-note',
+        arguments: '',
+        agent: 'build',
+        model: 'fixture/fixture',
+      });
+      await vi.waitFor(
+        async () => {
+          const messages = (await transport.request('GET', `/session/${id}/message`)) as Array<{
+            info: UnknownRecord;
+            parts: UnknownRecord[];
+          }>;
+          expect(messages.some((message) => message.info.role === 'user')).toBe(true);
+          expect(
+            messages.some(
+              (message) =>
+                message.info.role === 'assistant' &&
+                asRecord(message.info.time)?.completed &&
+                message.parts.some((part) => part.text === 'Adapter stream verified.')
+            )
+          ).toBe(true);
+        },
+        { timeout: 30000 }
+      );
+    } finally {
+      await transport.request('DELETE', `/session/${id}`);
+    }
+  }, 45000);
+
+  it('aborts an active provider request and accepts the next prompt', async () => {
+    const session = asRecord(
+      await transport.request('POST', '/session', { title: 'Abort fixture' })
+    );
+    const id = String(session?.id);
+    const start = modelRequests.length;
+    let release: (() => void) | undefined;
+    streamGate = new Promise<void>((complete) => {
+      release = complete;
+    });
+    try {
+      await transport.request('POST', `/session/${id}/prompt_async`, {
+        model: { providerID: 'fixture', modelID: 'fixture' },
+        parts: [{ type: 'text', text: 'Wait for cancellation.' }],
+      });
+      await vi.waitFor(() => expect(modelRequests.length).toBeGreaterThan(start), {
+        timeout: 30000,
+      });
+      expect(await transport.request('POST', `/session/${id}/abort`, {})).toBe(true);
+      await vi.waitFor(async () => {
+        const status = asRecord(await transport.request('GET', '/session/status'))?.[id];
+        expect(status === undefined || asRecord(status)?.type === 'idle').toBe(true);
+      });
+      release?.();
+      streamGate = undefined;
+      await transport.request('POST', `/session/${id}/prompt_async`, {
+        model: { providerID: 'fixture', modelID: 'fixture' },
+        parts: [{ type: 'text', text: 'Reply after cancellation.' }],
+      });
+      await vi.waitFor(
+        async () => {
+          const messages = (await transport.request('GET', `/session/${id}/message`)) as Array<{
+            info: UnknownRecord;
+            parts: UnknownRecord[];
+          }>;
+          const last = messages.at(-1);
+          expect(last?.info.role).toBe('assistant');
+          expect(asRecord(last?.info.time)?.completed).toBeTruthy();
+          expect(last?.parts.some((part) => part.text === 'Adapter stream verified.')).toBe(true);
+          expect(messages.filter((message) => message.info.role === 'user')).toHaveLength(2);
+        },
+        { timeout: 30000 }
+      );
+    } finally {
+      release?.();
+      streamGate = undefined;
+      await transport.request('DELETE', `/session/${id}`);
+    }
+  }, 45000);
+
   it('keeps native permission and form requests actionable through acknowledgement', async (context) => {
     const health = await transport.readHealthInfo();
     if (!health.version?.startsWith('2.')) {

@@ -111,6 +111,99 @@ describe('v2 shared service routing', () => {
     expect(Service.discover).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      name: 'matching legacy service',
+      host: '127.0.0.1',
+      pid: process.pid,
+      version: '2.0.5',
+      status: 200,
+      expected: true,
+    },
+    {
+      name: 'different process',
+      host: '127.0.0.1',
+      pid: process.pid + 1,
+      version: '2.0.5',
+      status: 200,
+      expected: false,
+    },
+    {
+      name: 'different version',
+      host: '127.0.0.1',
+      pid: process.pid,
+      version: '2.0.6',
+      status: 200,
+      expected: false,
+    },
+    {
+      name: 'rejected credentials',
+      host: '127.0.0.1',
+      pid: process.pid,
+      version: '2.0.5',
+      status: 401,
+      expected: false,
+    },
+    {
+      name: 'remote registration',
+      host: 'example.com',
+      pid: process.pid,
+      version: '2.0.5',
+      status: 200,
+      expected: false,
+    },
+  ])(
+    'validates $name when the newer client cannot discover it',
+    async ({ host, pid, version, status, expected }) => {
+      const root = await mkdtemp(join(tmpdir(), 'varro-legacy-discovery-'));
+      await mkdir(join(root, 'opencode'));
+      const registration = JSON.stringify({
+        url: `http://${host}:43123`,
+        pid: process.pid,
+        version: '2.0.5',
+        password: 'legacy-fixture-password',
+      });
+      const path = join(root, 'opencode/service.json');
+      await writeFile(path, registration);
+      vi.stubEnv('XDG_STATE_HOME', root);
+      vi.mocked(Service.discover).mockResolvedValue(undefined);
+      const fetchMock = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValue(new Response(JSON.stringify({ pid, version }), { status }));
+      try {
+        const manager = new OpenCodeProcess(
+          4096,
+          true,
+          'opencode2',
+          false,
+          undefined,
+          join(root, 'lease.json')
+        );
+        manager.rememberInstalledCliVersion('2.0.6');
+        expect(await manager.discoverSharedServer()).toBe(expected);
+        expect(manager.port).toBe(expected ? 43123 : 4096);
+        if (host === '127.0.0.1') {
+          expect(fetchMock).toHaveBeenCalledWith(
+            new URL('http://127.0.0.1:43123/api/status'),
+            expect.objectContaining({
+              headers: {
+                Authorization: `Basic ${Buffer.from('opencode:legacy-fixture-password').toString('base64')}`,
+              },
+              redirect: 'error',
+              signal: expect.any(AbortSignal),
+            })
+          );
+        } else expect(fetchMock).not.toHaveBeenCalled();
+        expect(await readFile(path, 'utf8')).toBe(registration);
+        expect(spawnMock).not.toHaveBeenCalled();
+        expect(manager.managedProcess).toBe(false);
+      } finally {
+        vi.unstubAllEnvs();
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
   it('registers a new v2 server for nested CLI discovery', () => {
     const child = Object.assign(new EventEmitter(), {
       stdout: new EventEmitter(),

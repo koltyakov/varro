@@ -27,7 +27,8 @@ const EXPECTATIONS = {
     '  - **Health:** healthy',
   ],
   'malformed-cli-version': [
-    '  - **Version:** `not found`',
+    // Managed startup recovers the version from the healthy server response.
+    '  - **Version:** `1.18.15`',
     '  - **Status:** `running, event stream healthy`',
     '  - **Health:** healthy',
   ],
