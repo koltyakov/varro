@@ -3304,6 +3304,72 @@ describe('registerSessionEventHandlers', () => {
     expect(syncSessionMessages).not.toHaveBeenCalled();
   });
 
+  it('loads the next v2 step after a completed tool step and streams its final answer', async () => {
+    const handlers = installHandlers();
+    const completed = createCompletedAssistantEntry(1, 2);
+    const next = createAssistantEntry({ id: 'assistant-2', time: { created: 3 } });
+    let messages = [completed];
+    const syncSessionMessages = vi.fn(async () => {
+      messages = [completed, next];
+    });
+    const cleanups = registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => messages,
+        syncSessionMessages,
+      })
+    );
+    loadingStartedAt.mockReturnValue(1);
+    applyMessagePartDelta.mockClear();
+
+    emitServerEvent(handlers, 'session.next.step.ended', {
+      seq: 10,
+      properties: {
+        sessionID: 'session-1',
+        assistantMessageID: 'assistant-1',
+        executionContinues: true,
+      },
+    });
+    emitServerEvent(handlers, 'session.next.step.started', {
+      seq: 11,
+      properties: {
+        sessionID: 'session-1',
+        assistantMessageID: 'assistant-2',
+        executionContinues: true,
+      },
+    });
+    await Promise.resolve();
+
+    expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+    emitServerEvent(handlers, 'session.next.text.delta', {
+      properties: {
+        sessionID: 'session-1',
+        assistantMessageID: 'assistant-2',
+        textID: 'text-final',
+        delta: 'Fixed.',
+      },
+    });
+    expect(applyMessagePartDelta).toHaveBeenCalledWith(
+      'assistant-2',
+      'text-final',
+      'Fixed.',
+      'session-1',
+      'text'
+    );
+    applyMessagePartDelta.mockClear();
+    emitServerEvent(handlers, 'session.next.text.delta', {
+      properties: {
+        sessionID: 'session-1',
+        assistantMessageID: 'assistant-1',
+        textID: 'text-old',
+        delta: 'Stale replay',
+      },
+    });
+    expect(applyMessagePartDelta).not.toHaveBeenCalled();
+    for (const cleanup of cleanups) cleanup();
+    loadingStartedAt.mockReturnValue(null);
+  });
+
   it('ignores stale active progress events after the assistant already completed', () => {
     const handlers = installHandlers();
     const setSessionStatusEntry = vi.fn();

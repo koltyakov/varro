@@ -14,3 +14,11 @@ Use this workflow when updating Varro's tested OpenCode version.
 10. Update user-facing tested-version references, currently in `docs/usage.md`. Search the repository for the previous version so stale references are not left behind.
 11. If the upstream diff changes a consumed contract, implement the smallest required adaptation and add targeted tests. Otherwise, do not churn local compatibility types merely to match SDK declarations that Varro does not consume.
 12. Finish with `npm run lint:check`, `npm run typecheck`, the focused compatibility test, and `npm run build`. Report compatibility check counts and any advisory caveats separately from required failures.
+
+## V2 releases
+
+V2 publishes `@opencode/cli` and `@opencode/client`. Keep the v1 SDK and support floor when updating the v2 client. Check both package families rather than interpreting the `opencode-ai` dist-tag as the latest v2 release.
+
+Run `npm run test:compatibility:adapters` after changing either adapter or the v2 dependency. It checks the actual published binaries and records observed versions. Use the served OpenAPI document and released package contracts when upstream `dev` or the documentation differs from the release. The v2.0.5 startup endpoint is `/api/status`; the newer documentation's `/api/info` is not available in that release.
+
+The optional real-editor startup check is `VARRO_SANDBOX_V2_COMMAND=/absolute/path/to/opencode node scripts/vscode-sandbox/run.mjs v2-first-run`. Update its expected version when changing the tested v2 release.

@@ -31,6 +31,7 @@ export const OPENCODE_UPGRADE_COMMAND = 'opencode upgrade';
 // This module is compiled into the webview bundle too, so it must not reach
 // for Node globals: callers pass the platform in.
 export type InstallPlatform = string;
+export type OpenCodeCliPackage = 'opencode-ai' | '@opencode/cli';
 
 function normalizeBinaryPath(command: string): string {
   return command.replace(/\\/g, '/').toLowerCase();
@@ -98,7 +99,8 @@ export function detectInstallMethod(options: {
  */
 export function getUpgradeCommand(
   method: OpenCodeInstallMethod,
-  platform: InstallPlatform
+  platform: InstallPlatform,
+  packageName: OpenCodeCliPackage = 'opencode-ai'
 ): string | null {
   switch (method) {
     case 'curl':
@@ -106,13 +108,13 @@ export function getUpgradeCommand(
       // at the package managers instead, so do not invent a command here.
       return platform === 'win32' ? null : 'curl -fsSL https://opencode.ai/install | bash';
     case 'npm':
-      return 'npm install -g opencode-ai@latest';
+      return `npm install -g ${packageName}@latest`;
     case 'pnpm':
-      return 'pnpm add -g opencode-ai@latest';
+      return `pnpm add -g ${packageName}@latest`;
     case 'yarn':
-      return 'yarn global add opencode-ai@latest';
+      return `yarn global add ${packageName}@latest`;
     case 'bun':
-      return 'bun add -g opencode-ai@latest';
+      return `bun add -g ${packageName}@latest`;
     case 'brew':
       // Unqualified on purpose: OpenCode now ships as the homebrew/core
       // `opencode` formula, and Homebrew resolves the bare name against
@@ -144,7 +146,10 @@ export const OPENCODE_TERMINAL_COMMANDS: readonly string[] = [
   OPENCODE_INSTALL_COMMAND,
   OPENCODE_UPGRADE_COMMAND,
   ...ALL_INSTALL_METHODS.flatMap((method) =>
-    ['darwin', 'linux', 'win32'].map((platform) => getUpgradeCommand(method, platform))
+    ['darwin', 'linux', 'win32'].flatMap((platform) => [
+      getUpgradeCommand(method, platform),
+      getUpgradeCommand(method, platform, '@opencode/cli'),
+    ])
   ).filter((command): command is string => command !== null),
 ];
 
@@ -228,10 +233,11 @@ export function classifyUpgradeFailure(
 export function getRecoveryCommand(
   kind: OpenCodeUpgradeFailureKind,
   method: OpenCodeInstallMethod,
-  platform: InstallPlatform
+  platform: InstallPlatform,
+  packageName: OpenCodeCliPackage = 'opencode-ai'
 ): string | null {
   if (kind === 'missing-package-manager') return null;
-  return getUpgradeCommand(method, platform);
+  return getUpgradeCommand(method, platform, packageName);
 }
 
 /**
@@ -241,9 +247,10 @@ export function getRecoveryCommand(
 export function describeUpgradeFailure(
   kind: OpenCodeUpgradeFailureKind,
   method: OpenCodeInstallMethod,
-  platform: InstallPlatform
+  platform: InstallPlatform,
+  packageName: OpenCodeCliPackage = 'opencode-ai'
 ): string {
-  const command = getUpgradeCommand(method, platform);
+  const command = getUpgradeCommand(method, platform, packageName);
   const fallback = command
     ? `Update it manually with: ${command}`
     : `Reinstall OpenCode using the method you originally used (${describeInstallMethod(method)}), then restart the server.`;

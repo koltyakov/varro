@@ -171,6 +171,7 @@ function createActionFixture() {
     openSessionInTerminal: vi.fn(),
     openSessionInEditor: vi.fn(),
     openSessionInSidebar: vi.fn(),
+    importLegacySession: vi.fn(() => Promise.resolve()),
     openNewEditor: vi.fn(),
     openNewWindow: vi.fn(),
     editorRouteChanged: vi.fn(),

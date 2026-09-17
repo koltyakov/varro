@@ -135,6 +135,7 @@ export const WEBVIEW_MESSAGE_TYPES = {
   'session/open-in-editor': true,
   'session/open-in-sidebar': true,
   'session/open-in-opencode': true,
+  'session/import-v1': true,
   'chat/new-editor': true,
   'chat/new-window': true,
   'window-chat-theme/set-reversed': true,
@@ -510,6 +511,14 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       >['payload'] = { sessionId };
       if (directory) parsedPayload.directory = directory;
       return { type, payload: parsedPayload };
+    }
+
+    case 'session/import-v1': {
+      const payload = asRecord(message?.payload);
+      const sessionId = getBoundedString(payload?.sessionId, 512);
+      const directory = getBoundedString(payload?.directory, MAX_PATH_LENGTH);
+      if (!sessionId || !/^[A-Za-z0-9_-]+$/.test(sessionId) || !directory) return null;
+      return { type, payload: { sessionId, directory } };
     }
 
     case 'editor/route-changed': {

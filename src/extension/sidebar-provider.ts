@@ -125,6 +125,7 @@ import { SessionHistoryScopeStore } from './session-history-scope-store';
 import { SessionTitleFallback } from './session-title-fallback';
 import { SessionTrashManager } from './session-trash-manager';
 import { createSidebarProviderActions } from './sidebar-provider-actions';
+import { LegacySessionImport } from './legacy-session-import';
 import { SidebarProviderBridge } from './sidebar-provider-bridge';
 import { SidebarProviderContextFiles } from './sidebar-provider-context-files';
 import { SidebarProviderRuntime } from './sidebar-provider-runtime';
@@ -956,6 +957,30 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.openSessionInEditor(sessionId, title, model, rootSessionId, directory, inWindow),
         openSessionInSidebar: (sessionId, directory) =>
           this.openSessionInSidebar(sessionId, directory),
+        importLegacySession: async (sessionId, directory) => {
+          try {
+            const workspacePath = this.contextProvider.getOpenWorkspaceRoot(directory);
+            if (!workspacePath) throw new Error('Session workspace folder is not open');
+            const importer = new LegacySessionImport((method, path, body) =>
+              endpointServer.request(method, path, body)
+            );
+            const importedSessionId = await vscode.window.withProgress(
+              {
+                location: vscode.ProgressLocation.Notification,
+                title: 'Importing v1 conversation into v2',
+              },
+              () => importer.importCopy({ id: sessionId, title: 'Untitled', directory })
+            );
+            post({
+              type: 'command/open-session',
+              payload: { sessionId: importedSessionId, directory },
+            });
+          } catch (error) {
+            void vscode.window.showErrorMessage(
+              `Could not import v1 history: ${error instanceof Error ? error.message : String(error)}`
+            );
+          }
+        },
         openNewEditor: () => this.openNewEditor(),
         openNewWindow: () => this.openNewWindow(),
         editorRouteChanged: (route) => this.editorRouteChanged(webviewContext.viewId, route),

@@ -36,6 +36,8 @@ opencode serve --port 4096
 
 If the CLI is installed somewhere that is not on `PATH`, set `varro.server.command` to the executable path.
 
+When `varro.server.command` is empty, Varro searches `PATH` and common install locations for `opencode2` first, then falls back to `opencode`. Set the command to `opencode` or your v1 executable's path to explicitly use v1.
+
 On native Windows, run the install and authentication commands in PowerShell, Command Prompt, or another Windows terminal. Varro runs on the local Windows extension host and looks for the Windows OpenCode CLI. OpenCode stores native Windows data, including credentials, logs, and sessions, under `%USERPROFILE%\.local\share\opencode`.
 
 OpenCode [recommends WSL for the best Windows experience](https://opencode.ai/docs/windows-wsl). Open the project in a VS Code WSL window, then install and authenticate OpenCode inside that distribution. A WSL window runs Varro and OpenCode on the Linux extension host, where data is under `~/.local/share/opencode`. A CLI installed only on Windows is not available to that host, and a CLI installed only in WSL is not available to a native VS Code window.
@@ -147,6 +149,7 @@ Commands offered in slash-command completion include:
 - `/settings` opens VS Code Settings filtered to Varro
 - `/export` opens a JSON export of the current session in the editor
 - `/stats` opens a Markdown token and assistant-duration report for the last 30 days across all OpenCode projects; `/stats all` also includes retained all-time usage
+- Usage reports include local V1 and V2 sessions. For migrated sessions, including Varro imports, only the session with the latest update time contributes usage. Equal update times prefer V2.
 - `/thinking` or `/reasoning` toggles thinking block visibility
 - `/compact` or `/summarize` compacts conversation context
 - `/fork` forks the current session
@@ -584,7 +587,9 @@ There are also deprecated debug-only settings used for development and recovery 
 ## Troubleshooting
 
 - OpenCode CLI missing: install it with `npm install -g opencode-ai`.
-- OpenCode CLI incompatible: `1.16.0` is the runtime floor. `1.18.31` is the version tested with this Varro release, not a runtime maximum. Newer versions are allowed to run and remain eligible for updates.
+- OpenCode CLI incompatible: Varro supports the v1 API from `1.16.0` and the v2 API from `2.0.5`. This release was tested with v1 `1.18.31` and v2 `2.0.6`. Varro selects the API automatically, including when `varro.server.command` points to a custom binary such as `opencode2`. Updates use the installed CLI's package family.
+- OpenCode v2 authentication: Varro captures managed-server credentials automatically and redacts them from output. Existing local services use their registered credentials. An externally managed server can also use `OPENCODE_SERVER_PASSWORD` and `OPENCODE_SERVER_USERNAME` from the extension host's environment.
+- OpenCode v2 session settings: Varro stores mutable session annotations locally because the released v2 API cannot update session metadata. Session sharing is unavailable through this API, so its menu action is disabled. Existing v1-format configuration remains supported.
 - CLI not on `PATH`: set `varro.server.command` to the executable path.
 - Windows host mismatch: install OpenCode in Windows for a native VS Code window, or inside the distribution for a VS Code WSL window. Run `Varro: About` and check `Platform` if the active extension host is unclear.
 - Windows update reports a locked file: finish active sessions and close the OpenCode update terminal before retrying. Stop any OpenCode server not managed by Varro yourself.

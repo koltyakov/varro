@@ -161,6 +161,12 @@ describe('formatToolTitle', () => {
     );
   });
 
+  it('uses the command preview for completed bash calls without a title', () => {
+    expect(formatToolTitle('bash', completedState({ command: 'npm run lint' }, ''))).toBe(
+      'npm run lint'
+    );
+  });
+
   it('uses the description as the task title', () => {
     expect(
       formatToolTitle('task', completedState({ description: 'Trace Varro diff logic' }, 'Working'))

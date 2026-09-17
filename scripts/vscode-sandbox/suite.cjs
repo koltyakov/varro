@@ -81,6 +81,12 @@ const EXPECTATIONS = {
     '  - **Status:** `running, event stream healthy`',
     '  - **Health:** healthy',
   ],
+  'v2-first-run': [
+    '- **Version:** `2.0.6`',
+    '- **Ownership:** managed by Varro',
+    '  - **Status:** `running, event stream healthy`',
+    '  - **Health:** healthy',
+  ],
 };
 
 function delay(milliseconds) {

@@ -400,6 +400,49 @@ describe('bridge', () => {
     expect(window.__sendToExtension).not.toHaveBeenCalled();
   });
 
+  it('sends reactive prompt data through a structured-clone transport', async () => {
+    const bridge = await loadBridge();
+    const { createStore } = await import('solid-js/store');
+    const [state] = createStore({
+      model: { providerID: 'openai', modelID: 'gpt-5.6-luna' },
+      parts: [{ type: 'text', text: 'A prompt from reactive session state' }],
+    });
+    expect(() => structuredClone(state.model)).toThrow();
+    const send = vi.fn((message: TestRuntimeValue) => {
+      const cloned = structuredClone(message);
+      const request = fixture<{ payload: { id: number } }>(cloned);
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'api/response', payload: { id: request.payload.id, data: null } },
+        })
+      );
+    });
+    window.__sendToExtension = send;
+
+    await expect(
+      bridge.apiCall(
+        'POST',
+        '/session/session-1/prompt_async',
+        {
+          model: state.model,
+          parts: state.parts,
+        },
+        { retries: 0 }
+      )
+    ).resolves.toBeNull();
+    expect(send).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        type: 'api/request',
+        payload: expect.objectContaining({
+          body: {
+            model: { providerID: 'openai', modelID: 'gpt-5.6-luna' },
+            parts: [{ type: 'text', text: 'A prompt from reactive session state' }],
+          },
+        }),
+      })
+    );
+  });
+
   it('rejects synchronous extension sender failures without leaving a pending request', async () => {
     const bridge = await loadBridge();
     window.__sendToExtension = vi.fn(() => {

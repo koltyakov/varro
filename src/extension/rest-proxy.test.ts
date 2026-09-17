@@ -2318,26 +2318,29 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 82, data: model });
   });
 
-  it('routes session title fallback requests after server startup', async () => {
-    const { proxy, callbacks } = createProxy({
-      sessionTitleFallback: {
-        renameIfUntitled: vi.fn(() => Promise.resolve({ id: 'session-1', title: 'Fix build' })),
-      },
-    });
+  it.each(['', '?directory=%2Frepo'])(
+    'routes session title fallback requests after server startup with query %s',
+    async (query) => {
+      const { proxy, callbacks } = createProxy({
+        sessionTitleFallback: {
+          renameIfUntitled: vi.fn(() => Promise.resolve({ id: 'session-1', title: 'Fix build' })),
+        },
+      });
 
-    await proxy.handleRequest(
-      makePayload(1, 'POST', '/varro/session/session-1/rename-if-untitled')
-    );
+      await proxy.handleRequest(
+        makePayload(1, 'POST', `/varro/session/session-1/rename-if-untitled${query}`)
+      );
 
-    expect(callbacks.sessionTitleFallback.renameIfUntitled).toHaveBeenCalledWith(
-      'session-1',
-      '/repo'
-    );
-    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
-      id: 1,
-      data: { id: 'session-1', title: 'Fix build' },
-    });
-  });
+      expect(callbacks.sessionTitleFallback.renameIfUntitled).toHaveBeenCalledWith(
+        'session-1',
+        '/repo'
+      );
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+        id: 1,
+        data: { id: 'session-1', title: 'Fix build' },
+      });
+    }
+  );
 
   it('returns only aggregate session edit and token data to the webview', async () => {
     const serverRequest = vi.fn((_method: string, path: string) => {
@@ -6618,6 +6621,92 @@ describe('RestProxy handleRequest', () => {
     await proxy.handleRequest(makePayload(35, 'POST', '/session/session-1/abort'));
 
     expect(markSessionBusy).not.toHaveBeenCalled();
+  });
+
+  it('reads and updates native v2 permission rules without adding a shadowed v1 key', async () => {
+    let raw = JSON.stringify({
+      permissions: [{ action: 'shell', resource: '*', effect: 'ask' }],
+      agents: { review: { model: 'openai/model#high' } },
+    });
+    mocks.vscode.workspace.fs.readFile.mockImplementation(async (uri: { fsPath: string }) => {
+      if (uri.fsPath !== '/repo/opencode.json') throw { code: 'FileNotFound' };
+      return new TextEncoder().encode(raw);
+    });
+    mocks.vscode.workspace.fs.stat.mockResolvedValue({ mtime: 1, size: 3, type: 0, ctime: 1 });
+    mocks.vscode.workspace.fs.writeFile.mockImplementation(
+      async (_uri: { fsPath: string }, encoded: Uint8Array) => {
+        raw = new TextDecoder().decode(encoded);
+      }
+    );
+    const { proxy, callbacks } = createProxy();
+    await proxy.handleRequest(makePayload(403, 'GET', '/varro/opencode-config/permissions'));
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        id: 403,
+        data: expect.objectContaining({
+          projectRules: [{ permission: 'bash', pattern: '*', action: 'ask' }],
+        }),
+      })
+    );
+    await proxy.handleRequest(
+      makePayload(404, 'POST', '/varro/opencode-config/permissions', {
+        rules: [
+          { permission: '*', pattern: '*', action: 'ask' },
+          { permission: 'bash', pattern: 'npm test', action: 'allow' },
+        ],
+      })
+    );
+    expect(JSON.parse(raw)).toMatchObject({
+      permissions: [
+        { action: '*', resource: '*', effect: 'ask' },
+        { action: 'shell', resource: 'npm test', effect: 'allow' },
+      ],
+      agents: { review: { model: 'openai/model#high' } },
+    });
+    expect(JSON.parse(raw).permission).toBeUndefined();
+  });
+
+  it('updates model routing in the existing native v2 agent map', async () => {
+    let raw = JSON.stringify({
+      agents: {
+        review: { model: { providerID: 'openai', model: 'old' }, system: 'Keep this prompt' },
+      },
+    });
+    mocks.vscode.workspace.fs.readFile.mockImplementation(async (uri: { fsPath: string }) => {
+      if (uri.fsPath !== '/repo/opencode.json') throw { code: 'FileNotFound' };
+      return new TextEncoder().encode(raw);
+    });
+    mocks.vscode.workspace.fs.stat.mockResolvedValue({ mtime: 1, size: 3, type: 0, ctime: 1 });
+    mocks.vscode.workspace.fs.writeFile.mockImplementation(
+      async (_uri: { fsPath: string }, encoded: Uint8Array) => {
+        raw = new TextDecoder().decode(encoded);
+      }
+    );
+    const { proxy } = createProxy();
+    await proxy.handleRequest(
+      makePayload(405, 'POST', '/varro/opencode-config/model-routing', {
+        target: 'agent',
+        agentName: 'review',
+        providerID: 'openai',
+        modelID: 'new',
+      })
+    );
+    await proxy.handleRequest(
+      makePayload(406, 'POST', '/varro/opencode-config/model-routing', {
+        target: 'small_model',
+        providerID: 'openai',
+        modelID: 'small',
+      })
+    );
+    expect(JSON.parse(raw)).toMatchObject({
+      agents: {
+        review: { model: 'openai/new', system: 'Keep this prompt' },
+        title: { model: 'openai/small' },
+      },
+    });
+    expect(JSON.parse(raw).agent).toBeUndefined();
+    expect(JSON.parse(raw).small_model).toBeUndefined();
   });
 
   it('serializes concurrent project model routing updates across proxy instances', async () => {

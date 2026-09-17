@@ -310,7 +310,8 @@ async function readLocalUsageDatabase(
   now = Date.now(),
   includeAllTime = false
 ): Promise<LocalUsageSnapshot | null> {
-  const databasePath = join(resolveOpenCodeDataDirectory(), 'opencode.db');
+  const databasePath =
+    process.env.OPENCODE_DB ?? join(resolveOpenCodeDataDirectory(), 'opencode.db');
   const windows = createReportWindows(now, includeAllTime);
 
   return new Promise((resolve, reject) => {
@@ -407,17 +408,37 @@ try {
   } else {
     const database = new DatabaseSync(workerData.databasePath, { readOnly: true });
     try {
-      const sessionCount = workerData.start === null
-        ? database.prepare('SELECT count(*) AS count FROM session').get().count
-        : database.prepare('SELECT count(*) AS count FROM session WHERE time_updated >= ?')
-            .get(workerData.start).count;
+      database.exec('BEGIN');
+      const tables = new Set(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name));
+      const sources = [];
+      if (tables.has('session') && tables.has('message')) {
+        sources.push("SELECT id, id AS identity, time_updated, 1 AS version FROM session");
+      }
+      if (tables.has('session_v2') && tables.has('session_message')) {
+        sources.push("SELECT id, coalesce(json_extract(metadata, '$.varroLegacyImport.sourceSessionID'), id) AS identity, time_updated, 2 AS version FROM session_v2");
+      }
+      if (!sources.length) throw new Error('No supported OpenCode usage tables found.');
+      // Select a complete session before filtering dates or reading messages. Equal timestamps prefer v2.
+      const selected = 'WITH ranked AS (SELECT *, row_number() OVER (PARTITION BY identity ORDER BY time_updated DESC, version DESC, id DESC) AS rank FROM (' + sources.join(' UNION ALL ') + ')), selected AS (SELECT * FROM ranked WHERE rank = 1' + (workerData.start === null ? '' : ' AND time_updated >= ?') + ') ';
+      const parameters = workerData.start === null ? [] : [workerData.start];
+      const sessionCount = database.prepare(selected + 'SELECT count(*) AS count FROM selected').get(...parameters).count;
+      const messages = [];
+      // Keep selected sessions as the outer loop. Otherwise SQLite can scan and decode
+      // every message in both versions before checking whether its session was selected.
+      if (tables.has('session') && tables.has('message')) {
+        messages.push("SELECT m.session_id, m.data, json_extract(m.data, '$.parentID') AS parentID FROM selected s CROSS JOIN message m ON s.id = m.session_id WHERE s.version = 1 AND length(m.data) <= ? AND json_extract(m.data, '$.role') = 'assistant'");
+      }
+      if (tables.has('session_v2') && tables.has('session_message')) {
+        messages.push("SELECT m.session_id, m.data, coalesce(json_extract(m.data, '$.parentID'), (SELECT u.id FROM session_message u WHERE u.session_id = m.session_id AND u.type = 'user' AND u.seq < m.seq ORDER BY u.seq DESC LIMIT 1)) AS parentID FROM selected s CROSS JOIN session_message m ON s.id = m.session_id WHERE s.version = 2 AND m.type = 'assistant' AND length(m.data) <= ?");
+      }
       const query = [
+        selected,
         'SELECT m.session_id AS sessionID,',
         "json_extract(m.data, '$.providerID') AS providerID,",
         "json_extract(m.data, '$.model.providerID') AS nestedProviderID,",
         "json_extract(m.data, '$.modelID') AS modelID,",
-        "json_extract(m.data, '$.model.modelID') AS nestedModelID,",
-        "json_extract(m.data, '$.parentID') AS parentID,",
+        "coalesce(json_extract(m.data, '$.model.id'), json_extract(m.data, '$.model.modelID')) AS nestedModelID,",
+        'm.parentID AS parentID,',
         "json_extract(m.data, '$.time.created') AS timeCreated,",
         "json_extract(m.data, '$.time.completed') AS timeCompleted,",
         "coalesce(json_extract(m.data, '$.time.completed'), json_extract(m.data, '$.time.created')) AS created,",
@@ -427,16 +448,11 @@ try {
         "json_extract(m.data, '$.tokens.reasoning') AS reasoning,",
         "json_extract(m.data, '$.tokens.cache.read') AS cacheRead,",
         "json_extract(m.data, '$.tokens.cache.write') AS cacheWrite",
-        'FROM message m',
-        workerData.start === null
-          ? "WHERE length(m.data) <= ? AND json_extract(m.data, '$.role') = 'assistant'"
-          : "WHERE m.session_id IN (SELECT id FROM session WHERE time_updated >= ?) AND length(m.data) <= ? AND json_extract(m.data, '$.role') = 'assistant'",
+        'FROM (' + messages.join(' UNION ALL ') + ') m',
         'LIMIT ?',
       ].join(' ');
       const statement = database.prepare(query);
-      const rows = workerData.start === null
-        ? statement.iterate(workerData.maxMessageDataBytes, workerData.maxScannedAssistantRows + 1)
-        : statement.iterate(workerData.start, workerData.maxMessageDataBytes, workerData.maxScannedAssistantRows + 1);
+      const rows = statement.iterate(...parameters, ...messages.map(() => workerData.maxMessageDataBytes), workerData.maxScannedAssistantRows + 1);
       const aggregates = workerData.windows.map(() => ({
         groups: new Map(),
         promptIDs: new Set(),

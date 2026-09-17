@@ -295,6 +295,13 @@ export function formatToolTitle(toolName: string, state: ToolPart['state']) {
     if (isString(description) && description.trim()) return description.trim();
   }
 
+  if (normalizedToolName === 'skill') {
+    for (const key of ['id', 'name']) {
+      const name = input[key];
+      if (isString(name) && name.trim()) return `Skill: ${name.trim()}`;
+    }
+  }
+
   if (normalizedToolName === 'webfetch') {
     const url = input.url;
     if (isString(url) && url.trim()) return url.trim();

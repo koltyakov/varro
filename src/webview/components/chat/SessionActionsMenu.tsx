@@ -264,6 +264,12 @@ export function SessionActionsMenu(props: {
               <button
                 type="button"
                 role="menuitem"
+                disabled={props.session.sharingSupported === false}
+                title={
+                  props.session.sharingSupported === false
+                    ? 'Session sharing is unavailable in this OpenCode backend'
+                    : undefined
+                }
                 onClick={() => (props.session.share?.url ? void unshare() : void copyShareLink())}
               >
                 {props.session.share?.url ? 'Unshare session' : 'Share session'}

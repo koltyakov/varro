@@ -127,6 +127,7 @@ describe('session.next.reasoning.started', () => {
         id: REASONING_ID,
         type: 'reasoning',
         text: '',
+        time: { start: 0 },
         messageID: MESSAGE_ID,
         sessionID: SESSION_ID,
       })
@@ -228,6 +229,7 @@ describe('session.next.reasoning.ended', () => {
         id: REASONING_ID,
         type: 'reasoning',
         text: 'the complete reasoning',
+        time: { start: 0, end: expect.any(Number) },
         messageID: MESSAGE_ID,
       })
     );
@@ -250,7 +252,12 @@ describe('session.next.reasoning.ended', () => {
       assistantMessageID: MESSAGE_ID,
     });
 
-    expect(upsertPart).not.toHaveBeenCalled();
+    expect(upsertPart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'streamed so far',
+        time: { start: 0, end: expect.any(Number) },
+      })
+    );
   });
 
   it('requires a reasoning id', () => {
@@ -301,8 +308,12 @@ describe('reasoning message resolution', () => {
     );
   });
 
-  it('falls back to the latest message when the named one is not loaded', () => {
-    const harness = install({ messages: [entry('assistant-latest')] });
+  it('loads the named message without attaching its reasoning to the previous step', async () => {
+    const messages = [entry('assistant-latest')];
+    const syncSessionMessages = vi.fn().mockImplementation(async () => {
+      messages.push(entry('assistant-missing'));
+    });
+    const harness = install({ messages, syncSessionMessages });
 
     harness.emit('session.next.reasoning.ended', {
       sessionID: SESSION_ID,
@@ -311,9 +322,13 @@ describe('reasoning message resolution', () => {
       text: 'recovered',
     });
 
-    expect(upsertPart).toHaveBeenCalledWith(
-      expect.objectContaining({ messageID: 'assistant-latest' })
+    expect(upsertPart).not.toHaveBeenCalled();
+    await vi.waitFor(() =>
+      expect(upsertPart).toHaveBeenCalledWith(
+        expect.objectContaining({ messageID: 'assistant-missing', text: 'recovered' })
+      )
     );
+    expect(messages[0]?.parts).toEqual([]);
   });
 
   it('syncs messages and retries when no assistant message is loaded yet', async () => {

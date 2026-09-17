@@ -48,6 +48,7 @@ import type { LocalSessionSummaryData } from './local-session-summary';
 import { sessionSummary } from './session-summary';
 import { logger } from './logger';
 import { ModelPricingCatalog } from './model-pricing';
+import { v1Action, v2Action } from './opencode-v2-projection';
 import type { ProviderLimitService } from './provider-limit-service';
 import type { PinnedSessionManager } from './pinned-session-manager';
 import type { OpenCodeServer } from './server';
@@ -3969,7 +3970,9 @@ export class RestProxy {
 
   private parseRenameIfUntitledRequest(method: string, path: string) {
     if (method !== 'POST') return null;
-    const match = path.match(/^\/varro\/session\/([^/?#]+)\/rename-if-untitled$/);
+    const match = new URL(path, 'http://localhost').pathname.match(
+      /^\/varro\/session\/([^/?#]+)\/rename-if-untitled$/
+    );
     return match?.[1] ? decodeURIComponent(match[1]) : null;
   }
 
@@ -4022,17 +4025,17 @@ export class RestProxy {
   }
 
   private normalizeOpenCodeModelRouting(config: Record<string, unknown>): OpenCodeModelRouting {
-    const smallModel = parseModelRoute(config.small_model);
+    const smallModel = parseModelRoute(
+      asRecord(asRecord(config.agents)?.title)?.model ?? config.small_model
+    );
     const agentModels: Record<string, { providerID: string; modelID: string }> = {};
-    const agents = asRecord(config.agent);
+    const agents = { ...asRecord(config.agent), ...asRecord(config.agents) };
 
-    if (agents) {
-      for (const [name, value] of Object.entries(agents)) {
-        const agentConfig = asRecord(value);
-        const route = parseModelRoute(agentConfig?.model);
-        if (route) {
-          agentModels[name] = route;
-        }
+    for (const [name, value] of Object.entries(agents)) {
+      const agentConfig = asRecord(value);
+      const route = parseModelRoute(agentConfig?.model);
+      if (route) {
+        agentModels[name] = route;
       }
     }
 
@@ -4077,7 +4080,7 @@ export class RestProxy {
         }
       }
 
-      const providers = asRecord(config.provider);
+      const providers = asRecord(config.providers) ?? asRecord(config.provider);
       if (!providers) continue;
       for (const providerID of Object.keys(providers)) {
         (providerConfigPaths[providerID] ??= []).push(path);
@@ -4152,31 +4155,33 @@ export class RestProxy {
         }
 
         const modelRef = `${request.providerID}/${request.modelID}`;
-        if (request.target === 'small_model') {
+        const agentKey = target.config.agents !== undefined ? 'agents' : 'agent';
+        const nativeTitle = request.target === 'small_model' && agentKey === 'agents';
+        if (request.target === 'small_model' && !nativeTitle) {
           nextRaw = applyJsoncChange(
             nextRaw,
             ['small_model'],
             request.unset ? undefined : modelRef
           );
         } else {
-          const agentName = request.agentName;
+          const agentName = nativeTitle ? 'title' : request.agentName;
           if (!agentName) {
             throw new Error('Agent name is required');
           }
           nextRaw = applyJsoncChange(
             nextRaw,
-            ['agent', agentName, 'model'],
+            [agentKey, agentName, 'model'],
             request.unset ? undefined : modelRef
           );
           if (request.unset) {
             let nextConfig = parseOpenCodeConfig(nextRaw, target.path);
-            const agentConfig = asRecord(asRecord(nextConfig.agent)?.[agentName]);
+            const agentConfig = asRecord(asRecord(nextConfig[agentKey])?.[agentName]);
             if (agentConfig && Object.keys(agentConfig).length === 0) {
-              nextRaw = applyJsoncChange(nextRaw, ['agent', agentName], undefined);
+              nextRaw = applyJsoncChange(nextRaw, [agentKey, agentName], undefined);
               nextConfig = parseOpenCodeConfig(nextRaw, target.path);
-              const agents = asRecord(nextConfig.agent);
+              const agents = asRecord(nextConfig[agentKey]);
               if (agents && Object.keys(agents).length === 0) {
-                nextRaw = applyJsoncChange(nextRaw, ['agent'], undefined);
+                nextRaw = applyJsoncChange(nextRaw, [agentKey], undefined);
               }
             }
           }
@@ -4245,7 +4250,11 @@ export class RestProxy {
         const targetPermissionConfig = target.config.permission;
         const effectivePermissionConfig = currentSnapshot.config.permission;
         const scalarConfigPermission = isScalarConfigPermission(permission);
-        if (scalarConfigPermission && patterns.some((pattern) => pattern !== '*')) {
+        if (
+          !Array.isArray(target.config.permissions) &&
+          scalarConfigPermission &&
+          patterns.some((pattern) => pattern !== '*')
+        ) {
           throw new Error(
             `Project permission ${permission} only supports the wildcard pattern in OpenCode config`
           );
@@ -4255,7 +4264,20 @@ export class RestProxy {
           : isPermissionAction(effectivePermissionConfig)
             ? effectivePermissionConfig
             : null;
-        if (fallbackAction) {
+        if (Array.isArray(target.config.permissions)) {
+          nextRaw = applyJsoncChange(
+            nextRaw,
+            ['permissions'],
+            [
+              ...target.config.permissions,
+              ...patterns.map((resource) => ({
+                action: v2Action(permission),
+                resource,
+                effect: 'allow',
+              })),
+            ]
+          );
+        } else if (fallbackAction) {
           const permissionConfig: Record<string, unknown> = { '*': fallbackAction };
           permissionConfig[permission] = scalarConfigPermission
             ? 'allow'
@@ -4294,6 +4316,18 @@ export class RestProxy {
   }
 
   private normalizeOpenCodePermissionRules(value: unknown): PermissionRule[] {
+    if (Array.isArray(value)) {
+      return value.flatMap((item) => {
+        const rule = asRecord(item);
+        if (
+          typeof rule?.action !== 'string' ||
+          typeof rule.resource !== 'string' ||
+          !isPermissionAction(rule.effect)
+        )
+          return [];
+        return [{ permission: v1Action(rule.action), pattern: rule.resource, action: rule.effect }];
+      });
+    }
     if (isPermissionAction(value)) {
       return [{ permission: '*', pattern: '*', action: value }];
     }
@@ -4513,14 +4547,18 @@ export class RestProxy {
     const effectiveConfig = mergeOpenCodeConfig(globalConfig.config, snapshot.config);
     return {
       targetPath: snapshot.target.path,
-      projectRules: this.normalizeOpenCodePermissionRules(snapshot.target.config.permission),
+      projectRules: this.normalizeOpenCodePermissionRules(
+        snapshot.target.config.permissions ?? snapshot.target.config.permission
+      ),
       inheritedSources: [
         ...globalConfig.sources,
         ...snapshot.files
           .filter((file) => getCanonicalOpenCodeConfigPath(file.path) !== targetPath)
           .map<OpenCodePermissionConfigSource>((file) => ({
             path: file.path,
-            rules: this.normalizeOpenCodePermissionRules(file.config.permission),
+            rules: this.normalizeOpenCodePermissionRules(
+              file.config.permissions ?? file.config.permission
+            ),
             scope: isSameWorkspacePath(
               getOpenCodePathApi(file.path).dirname(file.path),
               snapshot.workspacePath
@@ -4531,7 +4569,9 @@ export class RestProxy {
       ]
         .filter((source) => source.rules.length > 0)
         .toReversed(),
-      effectiveRules: this.normalizeOpenCodePermissionRules(effectiveConfig.permission),
+      effectiveRules: this.normalizeOpenCodePermissionRules(
+        effectiveConfig.permissions ?? effectiveConfig.permission
+      ),
     };
   }
 
@@ -4552,7 +4592,7 @@ export class RestProxy {
         effectiveConfig = mergeOpenCodeConfig(effectiveConfig, config);
         sources.push({
           path,
-          rules: this.normalizeOpenCodePermissionRules(config.permission),
+          rules: this.normalizeOpenCodePermissionRules(config.permissions ?? config.permission),
           scope: 'global',
         });
       } catch {
@@ -4595,8 +4635,9 @@ export class RestProxy {
           string,
           PermissionRule['action'] | Record<string, PermissionRule['action']>
         > = {};
+        const native = Array.isArray(target.config.permissions);
         for (const rule of rules) {
-          if (isScalarConfigPermission(rule.permission)) {
+          if (!native && isScalarConfigPermission(rule.permission)) {
             if (rule.pattern !== '*') {
               throw new Error(
                 `Project permission ${rule.permission} only supports the wildcard pattern in OpenCode config`
@@ -4613,8 +4654,16 @@ export class RestProxy {
         }
         nextRaw = applyJsoncChange(
           nextRaw,
-          ['permission'],
-          rules.length > 0 ? permissionConfig : undefined
+          [native ? 'permissions' : 'permission'],
+          native
+            ? rules.map((rule) => ({
+                action: v2Action(rule.permission),
+                resource: rule.pattern,
+                effect: rule.action,
+              }))
+            : rules.length > 0
+              ? permissionConfig
+              : undefined
         );
 
         const latestStat = await this.readConfigStat(target.uri);
@@ -4641,9 +4690,13 @@ export class RestProxy {
       snapshot.files.toReversed().find((file) => {
         const route =
           request.target === 'small_model'
-            ? parseModelRoute(file.config.small_model)
+            ? parseModelRoute(
+                asRecord(asRecord(file.config.agents)?.title)?.model ?? file.config.small_model
+              )
             : parseModelRoute(
-                asRecord(asRecord(file.config.agent)?.[request.agentName || ''])?.model
+                asRecord(
+                  asRecord(file.config.agents ?? file.config.agent)?.[request.agentName || '']
+                )?.model
               );
         return route?.providerID === request.providerID && route.modelID === request.modelID;
       }) ?? null

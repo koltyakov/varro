@@ -1,5 +1,6 @@
 import { createRoot } from 'solid-js';
 import { describe, expect, it, vi } from 'vitest';
+import type { PermissionRule } from '../../shared/opencode-types';
 import type { onMessage } from '../lib/bridge';
 import {
   assistantMessage,
@@ -35,6 +36,68 @@ function sessionInWorkspace(id: string) {
 }
 
 describe('sendMessage', () => {
+  it('updates permissions in the new workspace session directory before sending', async () => {
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setState('editorContext', {
+      workspacePath: '/repo-a',
+      workspaceDirectory: '/workspace',
+      workspaceFolders: [
+        { name: 'Repo A', path: '/repo-a' },
+        { name: 'Repo B', path: '/repo-b' },
+      ],
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    stateModule.setPermissionModeForSession(null, 'full');
+    stateModule.setState('providers', [
+      provider('openai', {
+        'gpt-4o': {
+          id: 'gpt-4o',
+          name: 'GPT-4o',
+          capabilities: { toolcall: true },
+          cost: { input: 0, output: 0 },
+        },
+      }),
+    ]);
+    stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
+    const created = { ...session('session-workspace'), directory: '/workspace' };
+    clientMocks.sessionCreate.mockImplementation(
+      async (body?: { permission?: PermissionRule[] }) => ({
+        ...created,
+        // V2 projects both shell aliases back to bash, triggering the pre-send rule update.
+        permission: body?.permission?.map((rule) => ({
+          ...rule,
+          permission: rule.permission === 'shell' ? 'bash' : rule.permission,
+        })),
+      })
+    );
+    clientMocks.sessionUpdate.mockImplementation(async (_id, body, options) => {
+      if (options?.directory !== created.directory) throw new Error('404 Session not found');
+      return { ...created, ...body };
+    });
+    clientMocks.varroSessionUpdatePermissionMode.mockResolvedValue(created);
+    clientMocks.sessionGet.mockResolvedValue(created);
+    clientMocks.sessionMessages.mockResolvedValue([]);
+    clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+
+    expect(
+      await hookModule.sendMessage('List workspace projects', {
+        newSessionWorkspace: { scope: 'workspace', directory: '/workspace' },
+      })
+    ).toBe(true);
+    expect(clientMocks.sessionUpdate).toHaveBeenCalledWith(
+      created.id,
+      expect.objectContaining({ permission: expect.any(Array) }),
+      { directory: '/workspace' }
+    );
+    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
+      created.id,
+      expect.objectContaining({ parts: [{ type: 'text', text: 'List workspace projects' }] }),
+      { directory: '/workspace' }
+    );
+  });
+
   it('requests bottom follow when an edited replacement is published before send completes', async () => {
     const { stateModule, hookModule } = await loadModules();
     stateModule.setState('activeSessionId', 'session-1');

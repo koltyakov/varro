@@ -387,6 +387,9 @@ describe('ModelPicker', () => {
 
     expect(container?.querySelector('.model-picker-details')?.textContent).toContain('OpenAI');
     expect(container?.querySelector('.model-picker-details')?.textContent).toContain(
+      'Released2026/01/01'
+    );
+    expect(container?.querySelector('.model-picker-details')?.textContent).toContain(
       'text, image, pdf'
     );
     expect(container?.querySelector('.model-picker-details')?.textContent).toContain(
@@ -426,6 +429,7 @@ describe('ModelPicker', () => {
 
     const anchor = container?.querySelector('.model-picker-anchor');
     const details = container?.querySelector('.model-picker-details');
+    expect(details?.textContent).not.toContain('Released');
     expect(anchor?.classList).toContain('details-on-top');
     expect(details?.classList).toContain('top');
     expect(details?.textContent).toContain('OpenAI');

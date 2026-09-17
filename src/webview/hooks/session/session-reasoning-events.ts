@@ -1,7 +1,8 @@
 import { serverEvents } from '../../lib/client';
 import { sessionStore } from '../../lib/stores/session-store';
 import { uiStore } from '../../lib/stores/ui-store';
-import type { MessageEntry, Part } from '../../types';
+import type { MessageEntry } from '../../types';
+import { isNumber } from '../../../shared/type-utils';
 import { getEventString, latestAssistantMessageForSession } from './session-event-utils';
 
 type ReasoningEventContext = {
@@ -16,9 +17,8 @@ type ReasoningEventContext = {
 };
 
 export function registerReasoningEventHandlers(ctx: ReasoningEventContext): Array<() => void> {
-  // v2 reasoning events carry the owning assistantMessageID. When that message is loaded
-  // we attach directly to it; otherwise we fall back to the "latest active assistant"
-  // heuristic, preserving the pre-v2 behavior for older servers / not-yet-synced messages.
+  // An explicit owner may not be loaded yet. Fetch it rather than attaching its
+  // reasoning to the previous step while the transcript catches up.
   const findReasoningMessage = (sessionId: string, assistantMessageID?: string) => {
     if (assistantMessageID) {
       const named = ctx
@@ -29,7 +29,7 @@ export function registerReasoningEventHandlers(ctx: ReasoningEventContext): Arra
             entry.info.sessionID === sessionId &&
             entry.info.role === 'assistant'
         );
-      if (named) return named;
+      return named ?? null;
     }
     return latestAssistantMessageForSession(ctx.getMessages(), sessionId);
   };
@@ -41,14 +41,14 @@ export function registerReasoningEventHandlers(ctx: ReasoningEventContext): Arra
     const message = findReasoningMessage(sessionId, assistantMessageID);
     if (!message) return null;
     if (!message.parts.some((part) => part.id === reasoningId)) {
-      // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
       sessionStore.upsertPart({
         id: reasoningId,
         sessionID: sessionId,
         messageID: message.info.id,
         type: 'reasoning',
         text: '',
-      } as Part);
+        time: { start: message.info.time.created },
+      });
     }
     return message.info.id;
   };
@@ -160,15 +160,20 @@ export function registerReasoningEventHandlers(ctx: ReasoningEventContext): Arra
         reasoningID,
         (messageID) => {
           ctx.recordSessionMessageSnapshotMutation(sessionID);
-          if (!text) return;
-          // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
+          const message = ctx.getMessages().find((entry) => entry.info.id === messageID);
+          const existing = message?.parts.find((part) => part.id === reasoningID);
+          const reasoning = existing?.type === 'reasoning' ? existing : undefined;
           sessionStore.upsertPart({
             id: reasoningID,
             sessionID,
             messageID,
             type: 'reasoning',
-            text,
-          } as Part);
+            text: text || reasoning?.text || '',
+            time: {
+              start: reasoning?.time.start ?? message?.info.time.created ?? Date.now(),
+              end: isNumber(p?.timestamp) ? p.timestamp : Date.now(),
+            },
+          });
         },
         assistantMessageID
       );

@@ -88,6 +88,10 @@ export const VALID_WEBVIEW_MESSAGES = {
     type: 'session/open-in-opencode',
     payload: { sessionId: 'session-1' },
   },
+  'session/import-v1': {
+    type: 'session/import-v1',
+    payload: { sessionId: 'session-1', directory: '/workspace' },
+  },
   'editor/route-changed': {
     type: 'editor/route-changed',
     payload: { route: { type: 'session', sessionId: 'session-1' } },

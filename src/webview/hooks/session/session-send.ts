@@ -1273,6 +1273,7 @@ export async function sendMessageWithDependencies(
   if (sendBody.variant === undefined) delete sendBody.variant;
 
   const expectsAssistantReply = !sendBody.noReply && sendBody.delivery !== 'steer';
+  const isSteerDelivery = sendBody.delivery === 'steer';
   const optimisticMessage = createOptimisticUserMessage(
     sessionId,
     messageId,
@@ -1337,9 +1338,10 @@ export async function sendMessageWithDependencies(
     if (isForeignQueuedDispatch) return true;
     const syncResults = await Promise.allSettled([
       deps.syncSession(sessionId),
-      deps.syncSessionMessages(sessionId),
+      ...(isSteerDelivery ? [] : [deps.syncSessionMessages(sessionId)]),
       deps.recheckSessionStatus(sessionId),
     ]);
+    if (isSteerDelivery) await retryPostSendMessageSync(deps, sessionId, true);
     if (deps.getMessageCount(sessionId) === 0) {
       if (optimisticMessage) deps.appendOptimisticMessage?.(optimisticMessage);
       await retryPostSendMessageSync(deps, sessionId);
@@ -1531,11 +1533,12 @@ async function retryPostSendMessageSync(
     syncSessionMessages(sessionId: string): Promise<void | boolean | object>;
     logError?(context: string, cause: unknown): void;
   },
-  sessionId: string
+  sessionId: string,
+  force = false
 ) {
   for (const delayMs of [250, 750]) {
     await new Promise((resolve) => setTimeout(resolve, delayMs));
-    if (deps.getMessageCount(sessionId) > 0) return;
+    if (!force && deps.getMessageCount(sessionId) > 0) return;
     try {
       await deps.syncSessionMessages(sessionId);
     } catch (err) {

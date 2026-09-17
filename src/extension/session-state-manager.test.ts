@@ -252,6 +252,26 @@ describe('SessionStateManager notifications', () => {
     );
   });
 
+  it('keeps v2 execution busy after a provider step ends', () => {
+    const manager = createManager();
+    manager.markSessionBusy('session-1');
+    manager.handleServerEvent({
+      type: 'session.next.step.started',
+      properties: { sessionID: 'session-1', assistantMessageID: 'message-1' },
+    });
+    manager.handleServerEvent({
+      type: 'session.next.step.ended',
+      properties: { sessionID: 'session-1', finish: 'stop', executionContinues: true },
+    });
+    expect(manager.busy.has('session-1')).toBe(true);
+    expect(manager.completed.has('session-1')).toBe(false);
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    });
+    expect(manager.busy.has('session-1')).toBe(false);
+  });
+
   it('clears a busy session on session.status idle', () => {
     const manager = createManager();
 

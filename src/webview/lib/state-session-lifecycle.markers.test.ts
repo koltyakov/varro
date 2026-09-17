@@ -96,6 +96,33 @@ describe('catalog marker restoration', () => {
     expect(state.state.lastSeenSessions.active).toBe(200);
   });
 
+  it('clears known unread markers on the first read when the server clock is ahead', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    const state = await import('./state');
+    state.setSessions([{ ...session('chat', '/repo'), time: { created: 1, updated: 2_000 } }]);
+    state.markSessionResponseCompleted('chat', 3_000);
+
+    state.markSessionSeen('chat');
+
+    expect(state.isSessionUnread('chat', 2_000)).toBe(false);
+    expect(state.isSessionCompletedResponseUnread('chat')).toBe(false);
+    expect(state.state.lastSeenSessions.chat).toBe(3_000);
+
+    state.markSessionResponseCompleted('chat', 3_001);
+    expect(state.isSessionCompletedResponseUnread('chat')).toBe(true);
+  });
+
+  it('does not acknowledge a newer completion when only an older message was seen', async () => {
+    const state = await import('./state');
+    state.setSessions([session('chat', '/repo')]);
+    state.markSessionResponseCompleted('chat', 300);
+
+    state.markSessionSeen('chat', 200);
+
+    expect(state.state.lastSeenSessions.chat).toBe(200);
+    expect(state.isSessionCompletedResponseUnread('chat')).toBe(true);
+  });
+
   it('keeps zero timestamps, skipped-plan updates, and selective removal synchronous', async () => {
     const state = await import('./state');
     state.setSessions([session('first', '/repo'), session('second', '/repo')]);

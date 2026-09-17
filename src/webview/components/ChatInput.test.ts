@@ -9594,6 +9594,44 @@ describe('ChatInput', () => {
     ).toContain('Default');
   });
 
+  it.each([undefined, '', 'default'])(
+    'does not warn for an unchanged default variant %j',
+    (variant) => {
+      setState('providers', [
+        {
+          id: 'meta',
+          name: 'Meta',
+          source: 'api',
+          models: {
+            'muse-1.3c': {
+              id: 'muse-1.3c',
+              name: 'Muse 1.3c',
+              capabilities: { toolcall: true, reasoning: true },
+              cost: { input: 0, output: 0 },
+              variants: { '': {}, high: {} },
+            },
+          },
+        },
+      ]);
+      setState('activeSessionId', 'session-1');
+      setState('selectedModel', { providerID: 'meta', modelID: 'muse-1.3c' });
+      const response = assistantMessageEntry({ input: 400, output: 100 });
+      setState('messages', [
+        {
+          ...response,
+          info: { ...response.info, providerID: 'meta', modelID: 'muse-1.3c', variant },
+        },
+      ]);
+
+      cleanup = render(() => ChatInput(), container!);
+
+      expect(container?.querySelector('.model-selection-cost-warning')).toBeNull();
+
+      setState('selectedModel', { providerID: 'meta', modelID: 'muse-1.3c', variant: 'high' });
+      expect(container?.querySelector('.model-selection-cost-warning')).not.toBeNull();
+    }
+  );
+
   it('warns when the model or reasoning level changes after a session request', async () => {
     vi.useFakeTimers();
     setState('providers', [

@@ -9,6 +9,7 @@ describe('normalizeModelVariant', () => {
   it('preserves other variants and normalizes empty values to null', () => {
     expect(normalizeModelVariant('gpt-5.4', 'minimal')).toBe('minimal');
     expect(normalizeModelVariant('gpt-5.5', '')).toBeNull();
+    expect(normalizeModelVariant('gpt-6-astra', 'default')).toBeNull();
     expect(normalizeModelVariant(null, undefined)).toBeNull();
   });
 });

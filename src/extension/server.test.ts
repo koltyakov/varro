@@ -45,6 +45,9 @@ const { getConfigurationMock, loggerMock, mkdirMock, spawnMock, vscodeMock, writ
 
 vi.mock('./logger', () => ({ logger: loggerMock }));
 vi.mock('vscode', () => vscodeMock);
+vi.mock('@opencode/client/service', () => ({
+  Service: { discover: vi.fn().mockResolvedValue(undefined) },
+}));
 vi.mock('child_process', () => ({ spawn: spawnMock, default: { spawn: spawnMock } }));
 vi.mock('cross-spawn', () => ({ default: spawnMock, spawn: spawnMock }));
 vi.mock('os', async () => {
@@ -1273,7 +1276,9 @@ describe('OpenCodeServer maintenance', () => {
 
     expect(readLatestCliVersion).toHaveBeenCalledTimes(1);
     expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledWith(
-      'OpenCode CLI 1.14.22 is available (installed: 1.14.20). Update with: opencode upgrade',
+      expect.stringMatching(
+        /OpenCode CLI 1\.14\.22 is available \(installed: 1\.14\.20\)\. Update with: .* upgrade 1\.14\.22$/
+      ),
       'Run Upgrade'
     );
   });
@@ -1326,7 +1331,10 @@ describe('OpenCodeServer maintenance', () => {
       cwd: undefined,
     });
     expect(terminal.show).toHaveBeenCalledWith(false);
-    expect(terminal.sendText).toHaveBeenCalledWith('opencode upgrade', true);
+    expect(terminal.sendText).toHaveBeenCalledWith(
+      expect.stringMatching(/^'.+' upgrade 1\.14\.22$/),
+      true
+    );
   });
 
   it('uses the running server upgrade endpoint when the notification action is selected', async () => {
@@ -1419,7 +1427,9 @@ describe('OpenCodeServer maintenance', () => {
 
     expect(spawnMock).not.toHaveBeenCalled();
     expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledWith(
-      `OpenCode CLI ${latestVersion} is available (installed: ${installedVersion}). Update with: opencode upgrade`,
+      expect.stringContaining(
+        `OpenCode CLI ${latestVersion} is available (installed: ${installedVersion}). Update with: `
+      ),
       'Run Upgrade'
     );
   });
@@ -1511,10 +1521,15 @@ describe('OpenCodeServer maintenance', () => {
     await flushMicrotasks();
 
     expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledWith(
-      'OpenCode CLI 1.14.22 is available (installed: 1.14.20). Update with: opencode upgrade',
+      expect.stringMatching(
+        /OpenCode CLI 1\.14\.22 is available \(installed: 1\.14\.20\)\. Update with: & '.+' upgrade 1\.14\.22$/
+      ),
       'Run Upgrade'
     );
-    expect(terminal.sendText).toHaveBeenCalledWith('opencode upgrade', true);
+    expect(terminal.sendText).toHaveBeenCalledWith(
+      expect.stringMatching(/^& '.+' upgrade 1\.14\.22$/),
+      true
+    );
   });
 
   it('stops the managed process before running a Windows CLI upgrade', async () => {
@@ -1572,7 +1587,10 @@ describe('OpenCodeServer maintenance', () => {
 
     expect(kill).not.toHaveBeenCalled();
     expect(statuses.some((status) => status.state === 'stopped')).toBe(true);
-    expect(terminal.sendText).toHaveBeenCalledWith('opencode upgrade', true);
+    expect(terminal.sendText).toHaveBeenCalledWith(
+      expect.stringMatching(/^& '.+' upgrade 1\.14\.22$/),
+      true
+    );
   });
 
   it('does not stop a managed Windows process while sessions are active', async () => {
@@ -1884,7 +1902,7 @@ describe('OpenCodeServer compatibility gate', () => {
     expect(requestMaintenanceCheck).toHaveBeenCalledOnce();
   });
 
-  it('uses a healthy server from a newer major version without a compatibility prompt', async () => {
+  it('uses a healthy supported v2 server without a compatibility prompt', async () => {
     const server = new OpenCodeServer(4096, true);
     const prepareForHealthyExistingServer = vi.fn().mockResolvedValue(undefined);
     const api = server as unknown as {
@@ -1895,7 +1913,7 @@ describe('OpenCodeServer compatibility gate', () => {
         prepareForHealthyExistingServer: typeof prepareForHealthyExistingServer;
       };
     };
-    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '2.0.0' });
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '2.0.5' });
     api.startEventStream = vi.fn(() => {
       expect(server.status.state).not.toBe('running');
     });
@@ -2255,14 +2273,14 @@ describe('OpenCodeServer compatibility gate', () => {
 });
 
 describe('OpenCodeServer startup health polling', () => {
-  it('does not launch a Windows CLI version probe before managed startup', async () => {
+  it('checks the Windows CLI major before choosing the managed startup mode', async () => {
     stubPlatform('win32');
     const server = new OpenCodeServer(4096, true);
     const { api } = configureManagedStartup(server);
 
     await expect(server.start()).resolves.toBe(server.url);
 
-    expect(api.readInstalledCliVersion).not.toHaveBeenCalled();
+    expect(api.readInstalledCliVersion).toHaveBeenCalledOnce();
   });
 
   it('keeps the original pollHealth callbacks across recursive retries', async () => {

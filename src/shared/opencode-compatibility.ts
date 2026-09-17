@@ -1,6 +1,7 @@
 // Bump this only when Varro starts relying on APIs from a newer OpenCode release.
 // Keeping it explicit avoids forcing a CLI update for SDK-only patch releases.
 export const MINIMUM_SUPPORTED_OPENCODE_VERSION = '1.16.0';
+export const MINIMUM_SUPPORTED_OPENCODE_V2_VERSION = '2.0.5';
 
 export const OPENCODE_SDK_PACKAGE_NAME = '@opencode-ai/sdk';
 
