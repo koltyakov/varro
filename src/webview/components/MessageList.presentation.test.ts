@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { batch } from 'solid-js';
 import { render } from 'solid-js/web';
 import { reconcile } from 'solid-js/store';
-import { replaceMessages, setState, state, upsertPart } from '../lib/state';
+import { replaceMessages, setShowFileDiffs, setState, state, upsertPart } from '../lib/state';
 import { flushMessagePresentation } from '../lib/message-list-layout';
 import type { ToolPart } from '../types';
 import { MessageList } from './MessageList';
@@ -65,6 +65,25 @@ function openChat(parts: ToolPart[] = []) {
 }
 
 describe('streaming presentation handoff', () => {
+  it.each([false, true])(
+    'shows a streaming v2 patch before its input arrives with diffs=%s',
+    async (diffs) => {
+      setShowFileDiffs(diffs);
+      openChat([completeSearch(searchPart())]);
+      upsertPart({
+        ...toolPart('patch-streaming', 'answer', 'patch-call'),
+        tool: 'patch',
+        state: { status: 'pending', input: {}, raw: '' },
+      });
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(
+        container?.querySelector('.tool-status-running'),
+        container?.textContent
+      ).not.toBeNull();
+      expect(container?.textContent).toContain('Editing');
+    }
+  );
+
   it('flushes available text when Stop interrupts an activity preview', async () => {
     openChat();
     upsertPart(completeSearch(searchPart()));

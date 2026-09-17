@@ -284,6 +284,13 @@ export function formatToolTitle(toolName: string, state: ToolPart['state']) {
   const title = getStateTitle(state);
   const normalizedToolName = normalizeToolName(toolName);
 
+  if (
+    isApplyPatchTool(normalizedToolName) &&
+    (state.status === 'pending' || state.status === 'running')
+  ) {
+    return 'Editing';
+  }
+
   if (getToolKind(normalizedToolName) === 'search') {
     const pattern = getSearchPattern(input);
     if (pattern) return `Search: ${pattern}`;

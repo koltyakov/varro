@@ -332,7 +332,7 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.tool-invocation-detail')).toBeNull();
   });
 
-  it('animates pending apply_patch calls as in-progress tools', () => {
+  it.each(['apply_patch', 'patch'])('animates pending %s calls as in-progress tools', (tool) => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
     const part: ToolPart = {
@@ -341,7 +341,7 @@ describe('ToolCall', () => {
       messageID: 'message-1',
       type: 'tool',
       callID: 'call-1',
-      tool: 'apply_patch',
+      tool,
       state: {
         status: 'pending',
         input: {},
@@ -364,18 +364,20 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('1m 9s');
   });
 
-  it('shows files from running apply_patch input in the compact edit card', () => {
-    const part: ToolPart = {
-      id: 'tool-1',
-      sessionID: 'session-1',
-      messageID: 'message-1',
-      type: 'tool',
-      callID: 'call-1',
-      tool: 'apply_patch',
-      state: {
-        status: 'running',
-        input: {
-          patchText: `*** Begin Patch
+  it.each(['apply_patch', 'patch'])(
+    'shows files from running %s input in the compact edit card',
+    (tool) => {
+      const part: ToolPart = {
+        id: 'tool-1',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        type: 'tool',
+        callID: 'call-1',
+        tool,
+        state: {
+          status: 'running',
+          input: {
+            patchText: `*** Begin Patch
 *** Update File: src/app.ts
 @@
 -old
@@ -385,37 +387,38 @@ describe('ToolCall', () => {
 -old
 +new
 *** End Patch`,
+          },
+          title: 'apply_patch',
+          metadata: {},
+          time: { start: 0 },
         },
-        title: 'apply_patch',
-        metadata: {},
-        time: { start: 0 },
-      },
-    };
+      };
 
-    cleanup = render(() => ToolCall({ part }), container!);
+      cleanup = render(() => ToolCall({ part }), container!);
 
-    expect(container?.querySelector('.file-change-card-header')?.textContent).not.toContain(
-      '2 files'
-    );
-    expect(
-      Array.from(container?.querySelectorAll('.file-edit-path-link') || []).map(
-        (link) => link.textContent
-      )
-    ).toEqual(['src/app.ts', 'src/theme.css']);
-    expect(container?.querySelector('.file-change-card-header')?.textContent).not.toContain(
-      'editing…'
-    );
-    expect(container?.querySelector('.tool-invocation-header')).toBeNull();
-  });
+      expect(container?.querySelector('.file-change-card-header')?.textContent).not.toContain(
+        '2 files'
+      );
+      expect(
+        Array.from(container?.querySelectorAll('.file-edit-path-link') || []).map(
+          (link) => link.textContent
+        )
+      ).toEqual(['src/app.ts', 'src/theme.css']);
+      expect(container?.querySelector('.file-change-card-header')?.textContent).not.toContain(
+        'editing…'
+      );
+      expect(container?.querySelector('.tool-invocation-header')).toBeNull();
+    }
+  );
 
-  it('animates a pending apply_patch file-change card', () => {
+  it.each(['apply_patch', 'patch'])('animates a pending %s file-change card', (tool) => {
     const part: ToolPart = {
       id: 'tool-1',
       sessionID: 'session-1',
       messageID: 'message-1',
       type: 'tool',
       callID: 'call-1',
-      tool: 'apply_patch',
+      tool,
       state: {
         status: 'pending',
         input: {

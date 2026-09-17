@@ -2366,113 +2366,122 @@ describe('MessageList compact activity', () => {
     );
   });
 
-  it('keeps pending apply_patch calls out of shared activity summaries', async () => {
-    const patch = toolPart('patch-pending', 'assistant-1', 'call-patch-pending');
-    patch.tool = 'apply_patch';
-    patch.state = { status: 'pending', input: {}, raw: '' };
-    const read = toolPart('read-1', 'assistant-1', 'call-read-1');
-    read.tool = 'read';
-    read.state = {
-      status: 'completed',
-      input: { filePath: 'src/app.ts' },
-      output: 'source',
-      title: 'src/app.ts',
-      metadata: {},
-      time: { start: 1, end: 2 },
-    };
-    setState('activeSessionId', 'session-1');
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Inspect and edit')] },
-      {
-        info: assistantMessage('assistant-1', { parentID: 'user-1' }),
-        parts: [patch, read],
-      },
-    ]);
+  it.each(['apply_patch', 'patch'])(
+    'keeps pending %s calls out of shared activity summaries',
+    async (tool) => {
+      const patch = toolPart('patch-pending', 'assistant-1', 'call-patch-pending');
+      patch.tool = tool;
+      patch.state = { status: 'pending', input: {}, raw: '' };
+      const read = toolPart('read-1', 'assistant-1', 'call-read-1');
+      read.tool = 'read';
+      read.state = {
+        status: 'completed',
+        input: { filePath: 'src/app.ts' },
+        output: 'source',
+        title: 'src/app.ts',
+        metadata: {},
+        time: { start: 1, end: 2 },
+      };
+      setState('activeSessionId', 'session-1');
+      replaceMessages([
+        { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Inspect and edit')] },
+        {
+          info: assistantMessage('assistant-1', { parentID: 'user-1' }),
+          parts: [patch, read],
+        },
+      ]);
 
-    cleanup = render(() => MessageList(), container!);
-    await Promise.resolve();
+      cleanup = render(() => MessageList(), container!);
+      await Promise.resolve();
 
-    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
-      'Explored: 1 file'
-    );
-    expect(container?.querySelector('.assistant-activity-summary')?.textContent).not.toContain(
-      'edit'
-    );
-    expect(container?.querySelector('.tool-invocation-title')?.textContent).toBe('apply_patch');
-  });
+      expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+        'Explored: 1 file'
+      );
+      expect(container?.querySelector('.assistant-activity-summary')?.textContent).not.toContain(
+        'edit'
+      );
+      expect(container?.querySelector('.tool-invocation-title')?.textContent).toBe('Editing');
+    }
+  );
 
-  it('renders an isolated pending apply_patch row immediately', async () => {
-    const patch = toolPart('patch-pending', 'assistant-2', 'call-patch-pending');
-    patch.tool = 'apply_patch';
-    patch.state = { status: 'pending', input: {}, raw: '' };
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Update the files')] },
-      {
-        info: assistantMessage('assistant-1', { parentID: 'user-1' }),
-        parts: [textPart('commentary-1', 'I will update the recovery path.')],
-      },
-      {
-        info: assistantMessage('assistant-2', {
-          parentID: 'user-1',
-          time: { created: 2 },
-        }),
-        parts: [patch],
-      },
-    ]);
+  it.each(['apply_patch', 'patch'])(
+    'renders an isolated pending %s row immediately',
+    async (tool) => {
+      const patch = toolPart('patch-pending', 'assistant-2', 'call-patch-pending');
+      patch.tool = tool;
+      patch.state = { status: 'pending', input: {}, raw: '' };
+      setState('activeSessionId', 'session-1');
+      setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+      replaceMessages([
+        { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Update the files')] },
+        {
+          info: assistantMessage('assistant-1', { parentID: 'user-1' }),
+          parts: [textPart('commentary-1', 'I will update the recovery path.')],
+        },
+        {
+          info: assistantMessage('assistant-2', {
+            parentID: 'user-1',
+            time: { created: 2 },
+          }),
+          parts: [patch],
+        },
+      ]);
 
-    cleanup = render(() => MessageList(), container!);
-    await Promise.resolve();
+      cleanup = render(() => MessageList(), container!);
+      await Promise.resolve();
 
-    const patchRow = container?.querySelector('[data-msg-id="assistant-2"]');
-    expect(patchRow?.classList).not.toContain('interactive-item-render-empty');
-    expect(patchRow?.querySelector('.tool-invocation-title')?.textContent).toBe('apply_patch');
-    expect(patchRow?.querySelector('.tool-status-running')).not.toBeNull();
-  });
+      const patchRow = container?.querySelector('[data-msg-id="assistant-2"]');
+      expect(patchRow?.classList).not.toContain('interactive-item-render-empty');
+      expect(patchRow?.querySelector('.tool-invocation-title')?.textContent).toBe('Editing');
+      expect(patchRow?.querySelector('.tool-status-running')).not.toBeNull();
+    }
+  );
 
-  it('removes a pending tool from Explored when it is identified as apply_patch', async () => {
-    const patch = toolPart('patch-pending', 'assistant-1', 'call-patch-pending');
-    patch.tool = '';
-    patch.state = { status: 'pending', input: {}, raw: '' };
-    const read = toolPart('read-1', 'assistant-1', 'call-read-1');
-    read.tool = 'read';
-    read.state = {
-      status: 'completed',
-      input: { filePath: 'src/app.ts' },
-      output: 'source',
-      title: 'src/app.ts',
-      metadata: {},
-      time: { start: 1, end: 2 },
-    };
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Inspect and edit')] },
-      {
-        info: assistantMessage('assistant-1', { parentID: 'user-1' }),
-        parts: [read, patch],
-      },
-    ]);
+  it.each(['apply_patch', 'patch'])(
+    'removes a pending tool from Explored when it is identified as %s',
+    async (tool) => {
+      const patch = toolPart('patch-pending', 'assistant-1', 'call-patch-pending');
+      patch.tool = '';
+      patch.state = { status: 'pending', input: {}, raw: '' };
+      const read = toolPart('read-1', 'assistant-1', 'call-read-1');
+      read.tool = 'read';
+      read.state = {
+        status: 'completed',
+        input: { filePath: 'src/app.ts' },
+        output: 'source',
+        title: 'src/app.ts',
+        metadata: {},
+        time: { start: 1, end: 2 },
+      };
+      setState('activeSessionId', 'session-1');
+      setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+      replaceMessages([
+        { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Inspect and edit')] },
+        {
+          info: assistantMessage('assistant-1', { parentID: 'user-1' }),
+          parts: [read, patch],
+        },
+      ]);
 
-    cleanup = render(() => MessageList(), container!);
-    await vi.advanceTimersByTimeAsync(500);
-    container?.querySelector<HTMLButtonElement>('.assistant-activity-summary')?.click();
+      cleanup = render(() => MessageList(), container!);
+      await vi.advanceTimersByTimeAsync(500);
+      container?.querySelector<HTMLButtonElement>('.assistant-activity-summary')?.click();
 
-    upsertPart({ ...patch, tool: 'functions.apply_patch' });
+      upsertPart({ ...patch, tool: `functions.${tool}` });
 
-    const patchTitle = [...(container?.querySelectorAll('.tool-invocation-title') || [])].find(
-      (element) => element.textContent?.endsWith('apply_patch')
-    );
-    expect(patchTitle).not.toBeUndefined();
-    expect(patchTitle?.closest('.assistant-activity-details')).toBeNull();
-    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
-      'Explored: 1 file'
-    );
-    expect(container?.querySelector('.assistant-activity-summary')?.textContent).not.toContain(
-      'tool call'
-    );
-  });
+      const patchTitle = [...(container?.querySelectorAll('.tool-invocation-title') || [])].find(
+        (element) => element.textContent === 'Editing'
+      );
+      expect(patchTitle).not.toBeUndefined();
+      expect(patchTitle?.closest('.assistant-activity-details')).toBeNull();
+      expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+        'Explored: 1 file'
+      );
+      expect(container?.querySelector('.assistant-activity-summary')?.textContent).not.toContain(
+        'tool call'
+      );
+    }
+  );
 
   it('keeps an expanded activity group open when history extends it backward', async () => {
     const command = toolPart('command-1', 'assistant-1', 'call-command-1');
