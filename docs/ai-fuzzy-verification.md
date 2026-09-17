@@ -64,6 +64,10 @@ For an unqualified **Run AI tests** or **Run fuzzy tests** request:
 9. A standard run is incomplete if it streams only synthetic prose or Markdown. It must include a
    realistic repository task in `tmp/opencode` that produces reasoning, separate tool calls, file edits,
    test output, diffs, and final response text while the UI is observed for frame-level flicker.
+10. Include the [action coverage matrix](ai-action-matrix.md). Exercise composer sends, queue changes,
+    steering, inline editing, tools, actual subagents, permissions, questions, cancellation, and
+    ownership recovery. For parity requests, report each action row for each backend version.
+    Independent lifecycle checks must still run when a scrolling scenario is blocked.
 
 ### Controller Session Safety
 

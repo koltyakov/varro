@@ -24,6 +24,8 @@ OpenCode remains responsible for agents, providers, models, commands, skills, MC
 
 Already using v1? You can keep it, or install it with `npm install -g opencode-ai`. Set `varro.server.command` to your v1 executable to select it explicitly. With this setting empty, Varro searches for `opencode2` first, then `opencode`. Current v1 and v2 packages both install `opencode`, so the command name alone does not identify the version. Run `opencode --version` to check. See [choosing and updating OpenCode](https://github.com/koltyakov/varro/blob/main/docs/usage.md#choose-and-update-opencode) before switching versions.
 
+> After switching from v1 to v2, you may need to run `Varro: Restart Server` from the Command Palette. Installing v2 does not replace an already running v1 server. Let active work finish first, then check the OpenCode version in Varro's status bar. If you manage the server yourself, restart it in its terminal using the v2 executable.
+
 Install OpenCode on the host where Varro runs. A native Windows VS Code window needs the Windows CLI; add it to `PATH` or set `varro.server.command` to its executable path. A VS Code WSL window needs OpenCode installed inside that WSL distribution. Native OpenCode data is under `%USERPROFILE%\.local\share\opencode`; WSL uses the Linux data directory.
 
 Varro supports VS Code and VSCodium. Support for other VS Code forks is limited; see [VS Code fork compatibility](https://github.com/koltyakov/varro/blob/main/docs/vscode-forks.md).
