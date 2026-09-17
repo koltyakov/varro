@@ -4,6 +4,8 @@ import type { ChildProcess, SpawnOptions } from 'child_process';
 import { spawn } from 'child_process';
 import { randomBytes } from 'crypto';
 import crossSpawn from 'cross-spawn';
+import { Service } from '@opencode/client/service';
+import type { Endpoint } from '@opencode/client/service';
 import type { Dirent } from 'fs';
 import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs';
 import {
@@ -29,15 +31,22 @@ import {
   describeUpgradeFailure,
   detectInstallMethod,
   getRecoveryCommand,
+  OPENCODE_INSTALL_COMMAND,
   type OpenCodeInstallMethod,
   type OpenCodeUpgradeFailureKind,
 } from '../shared/opencode-install';
 import type { ServerStatus } from '../shared/protocol';
+import { asRecord } from '../shared/type-utils';
 import {
   parseManagedServerOwnershipLease,
   type ManagedServerOwnershipLease,
 } from '../shared/server-ownership';
 import { logger } from './logger';
+import {
+  basicAuthorization,
+  OpenCodeStartupOutput,
+  openCodeApiVersion,
+} from './opencode-connection';
 import {
   compareVersions,
   extractVersion,
@@ -45,6 +54,7 @@ import {
   waitForProcessExit,
 } from './server-utils';
 import { buildServerEnv, getServerPathEntries } from './util/server-path';
+import { runWindowsCliUpdate } from './util/windows-cli-update';
 
 const CLI_OUTPUT_MAX_CHARS = 1024 * 1024;
 const CLI_OUTPUT_TRUNCATED_MARKER = '[earlier output truncated]\n';
@@ -936,8 +946,7 @@ export function sweepStaleInjectedConfigDirectories(now = Date.now()): Promise<v
 
 // Owns OpenCode spawn and termination mechanics; OpenCodeServer owns lifecycle and retry policy.
 export class OpenCodeProcess {
-  static readonly MISSING_CLI_MESSAGE =
-    'OpenCode CLI not found. Install it with: npm install -g opencode-ai';
+  static readonly MISSING_CLI_MESSAGE = `OpenCode CLI not found. Install OpenCode v2 with: ${OPENCODE_INSTALL_COMMAND}. OpenCode v1 is also supported; see Varro's setup guide for installation options.`;
 
   /** Unambiguous "the binary is not there": the spawn itself never got started. */
   static isMissingCliFailure(text: string): boolean {
@@ -963,7 +972,6 @@ export class OpenCodeProcess {
     );
   }
 
-  private static readonly CLI_UPGRADE_COMMAND = 'opencode upgrade';
   private static readonly CLI_UPGRADE_ACTION = 'Run Upgrade';
   private static readonly CLI_UPGRADE_IN_TERMINAL_ACTION = 'Update in Terminal';
   private static readonly SHOW_LOGS_ACTION = 'Show Logs';
@@ -1024,6 +1032,118 @@ export class OpenCodeProcess {
   private foreignActiveOwnership = false;
   private readonly hostOwner = randomBytes(16).toString('hex');
   private readonly ownershipLeasePath: string;
+  private serverPassword: string | undefined;
+  private credentialUrl: string | undefined;
+
+  discoverSharedServer(): false | Promise<boolean> {
+    if (openCodeApiVersion(this.installedCliVersionCache?.value ?? '') !== 2) return false;
+    return Service.discover({
+      version: (version) => openCodeApiVersion(version) === 2,
+    }).then(async (discovered) => {
+      const endpoint = discovered ?? (await this.discoverLegacySharedServer());
+      if (!endpoint) return false;
+      const url = new URL(endpoint.url);
+      if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !url.port) return false;
+      this._port = validateServerPort(Number(url.port));
+      this.serverPassword = endpoint.auth?.password;
+      this.credentialUrl = this.url;
+      return true;
+    });
+  }
+
+  private async discoverLegacySharedServer(): Promise<Endpoint | undefined> {
+    // The 2.0.6 client rejects 2.0.5 registrations because that release uses /api/status.
+    const path = join(
+      process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'),
+      'opencode',
+      'service.json'
+    );
+    try {
+      const registration = asRecord(JSON.parse(await readFile(path, 'utf8')));
+      if (
+        registration?.version !== '2.0.5' ||
+        typeof registration.url !== 'string' ||
+        typeof registration.pid !== 'number' ||
+        !Number.isSafeInteger(registration.pid) ||
+        registration.pid <= 0 ||
+        typeof registration.password !== 'string' ||
+        !registration.password ||
+        registration.password.length > 4096
+      )
+        return undefined;
+      const url = new URL(registration.url);
+      if (
+        url.protocol !== 'http:' ||
+        url.hostname !== '127.0.0.1' ||
+        !url.port ||
+        url.username ||
+        url.password
+      )
+        return undefined;
+      process.kill(registration.pid, 0);
+      const response = await fetch(new URL('/api/status', url), {
+        headers: { Authorization: basicAuthorization(registration.password) },
+        redirect: 'error',
+        signal: AbortSignal.timeout(3000),
+      });
+      if (!response.ok) return undefined;
+      const status = asRecord(await response.json());
+      if (status?.pid !== registration.pid || status.version !== registration.version)
+        return undefined;
+      return {
+        url: url.origin,
+        auth: { type: 'basic', username: 'opencode', password: registration.password },
+      };
+    } catch {
+      // A missing, stale, or unhealthy legacy registration is not an attachable service.
+      return undefined;
+    }
+  }
+
+  get serverAuthorization(): string | undefined {
+    if (this.serverPassword && this.credentialUrl === this.url)
+      return basicAuthorization(this.serverPassword);
+    const password = process.env.OPENCODE_SERVER_PASSWORD;
+    return password
+      ? basicAuthorization(password, process.env.OPENCODE_SERVER_USERNAME)
+      : undefined;
+  }
+
+  async discoverServerCredentials(): Promise<void> {
+    const lease = this.ownershipLeaseCandidate ?? this.ownershipLease;
+    if (lease?.password && lease.port === this._port && (await this.matchesOwnershipLease(lease))) {
+      this.serverPassword = lease.password;
+      this.credentialUrl = this.url;
+      return;
+    }
+    // The released v2 client discovers credentials from this registration file.
+    // Read only a registration for our target; never ensure/restart the user's service.
+    const path = join(
+      process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'),
+      'opencode',
+      'service.json'
+    );
+    try {
+      const registration = JSON.parse(await readFile(path, 'utf8')) as {
+        url?: unknown;
+        password?: unknown;
+        pid?: unknown;
+      };
+      if (
+        registration.url !== this.url ||
+        typeof registration.password !== 'string' ||
+        !registration.password ||
+        registration.password.length > 4096
+      )
+        return;
+      if (typeof registration.pid !== 'number' || registration.pid <= 0) return;
+      process.kill(registration.pid, 0);
+      this.serverPassword = registration.password;
+      this.credentialUrl = this.url;
+    } catch {
+      // No live registered service for this endpoint; managed launches provide their own credential.
+    }
+  }
   private readonly ownershipMarkerPath: string;
 
   constructor(
@@ -1521,6 +1641,8 @@ export class OpenCodeProcess {
       createdAt: Date.now(),
     };
     if (launch.configPath) lease.configPath = launch.configPath;
+    if (this.serverPassword && this.credentialUrl === this.url)
+      lease.password = this.serverPassword;
     try {
       await this.writeOwnershipMarker(lease);
       launch.ownershipMarkerWritten = true;
@@ -1787,7 +1909,18 @@ export class OpenCodeProcess {
     }
 
     const command = this.resolveCommand();
-    const args = ['serve', '--port', String(this._port)];
+    // Register v2 launches so a CLI invoked by a tool joins this server instead of
+    // starting another runner against the same session database.
+    const args = [
+      'serve',
+      ...(openCodeApiVersion(this.installedCliVersionCache?.value ?? '') === 2
+        ? ['--service']
+        : []),
+      '--port',
+      String(this._port),
+    ];
+    this.serverPassword = undefined;
+    this.credentialUrl = undefined;
     logger.info(`Starting OpenCode server with command: ${command}`);
 
     const configPath = this.injectedConfigPath;
@@ -1831,9 +1964,22 @@ export class OpenCodeProcess {
     }
     this._managedProcess = true;
 
+    const capturePassword = (password: string) => {
+      if (this._process !== proc) return;
+      this.serverPassword = password;
+      this.credentialUrl = this.url;
+    };
+    const stdout = new OpenCodeStartupOutput(capturePassword);
+    const stderr = new OpenCodeStartupOutput(capturePassword);
     const listeners: ProcessListeners = {
-      stdout: callbacks.onStdout,
-      stderr: callbacks.onStderr,
+      stdout: (data) => {
+        const text = stdout.write(data);
+        if (text.length) callbacks.onStdout(text);
+      },
+      stderr: (data) => {
+        const text = stderr.write(data);
+        if (text.length) callbacks.onStderr(text);
+      },
       exit: (code, signal) => callbacks.onExit(proc, code, signal),
       error: (err) => callbacks.onError(proc, err),
     };
@@ -2726,7 +2872,10 @@ export class OpenCodeProcess {
       return null;
     }
     this.lastCliUpdateCheckAt = now;
-    if (compareVersions(latestCliVersion, installedCliVersion) <= 0) {
+    if (
+      openCodeApiVersion(latestCliVersion) !== openCodeApiVersion(installedCliVersion) ||
+      compareVersions(latestCliVersion, installedCliVersion) <= 0
+    ) {
       return null;
     }
 
@@ -2758,7 +2907,7 @@ export class OpenCodeProcess {
       return null;
     }
 
-    const upgradeCommand = OpenCodeProcess.CLI_UPGRADE_COMMAND;
+    const upgradeCommand = this.cliUpgradeCommand(latestCliVersion);
     const message = `OpenCode CLI ${latestCliVersion} is available (installed: ${installedCliVersion}). Update with: ${upgradeCommand}`;
     logger.info(message);
     void Promise.resolve(
@@ -2789,12 +2938,16 @@ export class OpenCodeProcess {
     const cause = err instanceof Error ? err.message : String(err);
     const { installMethod } = this.getInstallInfo();
     const kind = classifyUpgradeFailure(cause, process.platform);
+    const packageName =
+      openCodeApiVersion(this.installedCliVersionCache?.value ?? '') === 2
+        ? '@opencode/cli'
+        : 'opencode-ai';
     return {
       cause,
       kind,
       installMethod,
-      guidance: describeUpgradeFailure(kind, installMethod, process.platform),
-      suggestedCommand: getRecoveryCommand(kind, installMethod, process.platform),
+      guidance: describeUpgradeFailure(kind, installMethod, process.platform, packageName),
+      suggestedCommand: getRecoveryCommand(kind, installMethod, process.platform, packageName),
     };
   }
 
@@ -2889,16 +3042,20 @@ export class OpenCodeProcess {
     }
   }
 
-  async readLatestCliVersion(): Promise<string | null> {
+  async readLatestCliVersion(installedVersion?: string | null): Promise<string | null> {
     try {
-      const res = await fetch('https://registry.npmjs.org/opencode-ai/latest', {
+      const version = installedVersion ?? (await this.readInstalledCliVersion());
+      if (!version) return null;
+      const packageName = openCodeApiVersion(version) === 2 ? '@opencode%2Fcli' : 'opencode-ai';
+      const res = await fetch(`https://registry.npmjs.org/${packageName}/latest`, {
         signal: AbortSignal.timeout(OpenCodeProcess.CLI_REGISTRY_TIMEOUT_MS),
       });
       if (!res.ok) {
         throw new Error(`Failed to fetch latest OpenCode CLI version: ${res.status}`);
       }
       const data = (await res.json()) as { version?: unknown };
-      return typeof data.version === 'string' ? extractVersion(data.version) : null;
+      const latest = typeof data.version === 'string' ? extractVersion(data.version) : null;
+      return latest && openCodeApiVersion(latest) === openCodeApiVersion(version) ? latest : null;
     } catch (err) {
       logger.warn(
         `Failed to check for OpenCode CLI updates: ${err instanceof Error ? err.message : String(err)}`
@@ -2977,7 +3134,18 @@ export class OpenCodeProcess {
     if (process.platform === 'win32') {
       await callbacks.prepareForWindowsCliUpgrade(targetVersion);
     }
-    await this.runInTerminal(OpenCodeProcess.CLI_UPGRADE_COMMAND, 'OpenCode Upgrade', callbacks);
+    await this.runInTerminal(
+      this.cliUpgradeCommand(targetVersion),
+      'OpenCode Upgrade',
+      callbacks,
+      true
+    );
+  }
+
+  private cliUpgradeCommand(targetVersion: string): string {
+    const command = this.resolveCommand();
+    const quoted = `'${command.replace(/'/g, process.platform === 'win32' ? "''" : "'\\''")}'`;
+    return `${process.platform === 'win32' ? '& ' : ''}${quoted} upgrade ${targetVersion}`;
   }
 
   resolveCommand(): string {
@@ -3033,17 +3201,18 @@ export class OpenCodeProcess {
       };
     }
 
-    const candidates =
-      process.platform === 'win32'
-        ? ['opencode.exe', 'opencode.cmd', 'opencode.bat']
-        : ['opencode'];
-
-    for (const dir of this.serverPathEntries()) {
-      for (const candidate of candidates) {
-        const fullPath = join(dir, candidate);
-        if (existsSync(fullPath)) {
-          this.resolvedCommandCache = { key: cacheKey, value: fullPath, found: true };
-          return { command: fullPath, found: true };
+    const directories = this.serverPathEntries();
+    // Prefer the v2 CLI across all install locations before falling back to v1.
+    for (const name of ['opencode2', 'opencode']) {
+      const candidates =
+        process.platform === 'win32' ? [`${name}.exe`, `${name}.cmd`, `${name}.bat`] : [name];
+      for (const dir of directories) {
+        for (const candidate of candidates) {
+          const fullPath = join(dir, candidate);
+          if (existsSync(fullPath)) {
+            this.resolvedCommandCache = { key: cacheKey, value: fullPath, found: true };
+            return { command: fullPath, found: true };
+          }
         }
       }
     }
@@ -3215,27 +3384,28 @@ export class OpenCodeProcess {
     callbacks: {
       getWorkspaceCwd: () => string | undefined;
       finishWindowsCliUpgrade?: () => void | Promise<void>;
-    }
+    },
+    usePowerShell = false
   ) {
     const text = command.trim();
     if (!text) return;
 
     try {
-      const terminal = vscode.window.createTerminal({
+      if (process.platform === 'win32' && callbacks.finishWindowsCliUpgrade) {
+        await runWindowsCliUpdate(
+          text,
+          title,
+          callbacks.getWorkspaceCwd(),
+          callbacks.finishWindowsCliUpgrade
+        );
+        return;
+      }
+      const options: vscode.TerminalOptions = {
         name: title,
         cwd: callbacks.getWorkspaceCwd(),
-      });
-      if (process.platform === 'win32' && callbacks.finishWindowsCliUpgrade) {
-        const disposable = vscode.window.onDidCloseTerminal((closedTerminal) => {
-          if (closedTerminal !== terminal) return;
-          disposable.dispose();
-          void Promise.resolve(callbacks.finishWindowsCliUpgrade?.()).catch((err: unknown) => {
-            logger.warn(
-              `Failed to finish Windows OpenCode CLI update: ${err instanceof Error ? err.message : String(err)}`
-            );
-          });
-        });
-      }
+      };
+      if (usePowerShell && process.platform === 'win32') options.shellPath = 'powershell.exe';
+      const terminal = vscode.window.createTerminal(options);
       terminal.show(false);
       terminal.sendText(text, true);
     } catch (err) {

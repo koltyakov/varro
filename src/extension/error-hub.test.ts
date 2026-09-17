@@ -145,9 +145,9 @@ describe('ErrorHub', () => {
     hub.reportCliMissing('CLI not found');
 
     await vi.waitFor(() => {
-      expect(vscodeMock.Uri.parse).toHaveBeenCalledWith('https://opencode.ai/');
+      expect(vscodeMock.Uri.parse).toHaveBeenCalledWith('https://opencode.ai/v2/docs/');
       expect(vscodeMock.env.openExternal).toHaveBeenCalledWith({
-        value: 'https://opencode.ai/',
+        value: 'https://opencode.ai/v2/docs/',
       });
     });
 

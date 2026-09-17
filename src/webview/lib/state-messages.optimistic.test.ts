@@ -263,6 +263,54 @@ describe('optimistic user message reconciliation', () => {
     expect(partIds()).toEqual([['server-part-0', 'server-part-1']]);
   });
 
+  it.each(['snapshot first', 'part first', 'metadata first'])(
+    'reconciles a combined v2 prompt and attachment reference with %s',
+    (timing) => {
+      const info = userMessage('msg-1');
+      const prompt =
+        'Check documentation, installation, update notes and embedded into the code instructions and align with the realms when we support OpenCode v1 and v2. Promote v2 by default, but also show an option, that v1 still can be used.';
+      const canonical = textPart('msg-1:content:0', 'msg-1', `${prompt}\nREADME.md`);
+      const image = imagePart('msg-1-part-2', 'msg-1');
+      upsertMessage({
+        info,
+        parts: [
+          textPart('msg-1-part-0', 'msg-1', prompt),
+          textPart('msg-1-part-1', 'msg-1', 'README.md'),
+          image,
+        ],
+      });
+
+      if (timing === 'metadata first') upsertMessageInfo(info);
+      if (timing !== 'snapshot first') upsertPart(canonical);
+      else setMessagesIncremental([{ info, parts: [canonical] }], { preserveExtraParts: true });
+
+      expect(state.messages[0]!.parts.filter((part) => part.type === 'text')).toEqual([canonical]);
+      expect(state.messages[0]!.parts.filter((part) => part.type === 'file')).toHaveLength(1);
+
+      const canonicalImage = { ...image, id: 'msg-1:content:1' };
+      upsertPart(canonicalImage);
+      upsertPart(canonical);
+      setMessagesIncremental([{ info, parts: [canonical, canonicalImage] }], {
+        preserveExtraParts: true,
+      });
+      expect(state.messages[0]!.parts).toEqual([canonical, canonicalImage]);
+    }
+  );
+
+  it('preserves unmatched local context when a snapshot only contains the prompt', () => {
+    const info = userMessage('msg-1');
+    const context = textPart('msg-1-part-1', 'msg-1', 'README.md');
+    const canonical = textPart('msg-1:content:0', 'msg-1', 'Review README.md');
+    upsertMessage({
+      info,
+      parts: [textPart('msg-1-part-0', 'msg-1', 'Review README.md'), context],
+    });
+
+    setMessagesIncremental([{ info, parts: [canonical] }], { preserveExtraParts: true });
+
+    expect(state.messages[0]!.parts).toEqual([canonical, context]);
+  });
+
   it('does not preserve an optimistic prompt beside its trimmed canonical part', () => {
     const info = userMessage('msg-1');
     upsertMessage({

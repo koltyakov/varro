@@ -11,6 +11,8 @@ export interface ManagedServerOwnershipLease {
   state: 'active' | 'relinquished';
   createdAt: number;
   configPath?: string;
+  /** Host-only credential, persisted in the private ownership file for window handoff. */
+  password?: string;
 }
 
 export function parseManagedServerOwnershipLease<T>(value: T): ManagedServerOwnershipLease | null {
@@ -48,6 +50,11 @@ export function parseManagedServerOwnershipLease<T>(value: T): ManagedServerOwne
   if (record.state !== 'active' && record.state !== 'relinquished') return null;
   if (!isNumber(record.createdAt) || !Number.isFinite(record.createdAt)) return null;
   if (record.configPath !== undefined && !isString(record.configPath)) return null;
+  if (
+    record.password !== undefined &&
+    (!isString(record.password) || !record.password || record.password.length > 4096)
+  )
+    return null;
 
   const lease: ManagedServerOwnershipLease = {
     version: 1,
@@ -65,6 +72,7 @@ export function parseManagedServerOwnershipLease<T>(value: T): ManagedServerOwne
     lease.hostBirthIdentity = record.hostBirthIdentity;
   }
   if (record.configPath) lease.configPath = record.configPath;
+  if (isString(record.password)) lease.password = record.password;
   return lease;
 }
 import { asRecord, isNumber, isString } from './type-utils';

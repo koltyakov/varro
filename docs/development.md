@@ -6,11 +6,13 @@ This document covers source setup, packaging, and debugging for the Varro VS Cod
 
 - [Node.js](https://nodejs.org/) 22.22.2+ on Node 22, or Node 24.15.0+
 - [VS Code](https://code.visualstudio.com/) 1.120 or newer
-- [OpenCode CLI](https://opencode.ai) installed globally
+- [OpenCode v2 CLI](https://opencode.ai/v2/docs/) 2.0.5+ recommended, or v1 1.16.0+
 
 ```sh
-npm install -g opencode-ai
+npm install -g @opencode/cli
 ```
+
+This npm command is for macOS, Linux, or WSL. On native Windows, use the standalone CLI from the v2 install page. For v1 development, use `npm install -g opencode-ai`. Both current packages install `opencode`; use separate installation directories and `varro.server.command` paths when testing both. See [choosing and updating OpenCode](usage.md#choose-and-update-opencode).
 
 ## Install Dependencies
 
@@ -155,14 +157,16 @@ See [architecture.md](architecture.md) for a deeper component-by-component break
 
 `src/extension/server.ts` orchestrates the bridge to the local OpenCode HTTP server. Process, update, and port behavior lives in `open-code-process.ts`; REST and SSE transport lives in `open-code-transport.ts`; and `server-lifecycle.ts` coordinates lifecycle state.
 
-- Checks `/global/health` before spawning anything
+- Detects the API through v2 `/api/info` or `/api/status`, or v1 `/global/health`, before spawning anything
 - Starts `opencode serve --port <port>` only when Varro first needs the server and auto-start is enabled
 - Scopes workspace-sensitive requests and filters deliberately unscoped responses
-- Opens an SSE connection to `/global/event` and routes events to workspace-scoped endpoints
+- Opens an SSE connection to v2 `/api/event` or v1 `/global/event` and normalizes events for workspace-scoped endpoints
 - Reconnects the event stream with backoff
 - Restarts the child process a limited number of times if it exits unexpectedly
 
 Important behavior:
+
+- The extension-host adapters normalize v1 and v2 into Varro's shared contracts. V2 uses authenticated requests and location-scoped APIs; the directory query/header behavior below describes the v1 transport. See [OpenCode v1 and v2 support](opencode-v2-support.md).
 
 - Workspace-sensitive non-global requests carry both a `directory` query param and `x-opencode-directory` header. Global paths omit the `directory` query param; health and `/global/event` are explicitly unscoped, while generic global REST calls can still carry the directory header. Session status and most session-child routes are deliberately unscoped; Windows leaves additional session reads unscoped to avoid path casing and separator regressions. Aggregate session lists, statuses, permissions, and questions are filtered locally to the active workspace. Direct session-child routes remain ID-addressed and are normally reached through IDs from filtered session state.
 - If the spawned server reports that the configured port is already in use, Varro can retry on nearby ports.

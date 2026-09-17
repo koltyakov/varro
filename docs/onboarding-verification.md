@@ -84,7 +84,8 @@ sandbox runs upload their isolated profiles as a `windows-vscode-sandbox-*` arti
 Verify native Windows and VS Code WSL separately. They are different extension hosts and must not
 share an assumed CLI installation.
 
-1. Open a normal local folder in VS Code on Windows. Install OpenCode from a Windows terminal, open
+1. Open a normal local folder in VS Code on Windows. Download the standalone v2 CLI from the
+   [install page](https://opencode.ai/v2/docs/) and set its path in `varro.server.command`, open
    Varro, and run `Varro: About`. Confirm `Platform` is `win32`, the resolved binary is a Windows path,
    and OpenCode data appears under `%USERPROFILE%\.local\share\opencode`.
 2. Open a folder in a VS Code WSL window. Install OpenCode inside that distribution, open Varro,
@@ -93,8 +94,9 @@ share an assumed CLI installation.
 3. Confirm a Windows-only CLI does not satisfy the WSL host and a WSL-only CLI does not satisfy the
    native host. `varro.server.command` must also name a path that exists on the active extension host.
 
-OpenCode recommends [WSL for the best Windows experience](https://opencode.ai/docs/windows-wsl), but
-the native flow remains supported.
+Verify both supported CLI families. V2 is the recommended first-run choice; the missing-CLI screen
+also offers v1. Confirm that each install action uses its own package and that update recovery keeps
+the installed family. For v1 Windows setup, see the [v1 Windows guide](https://opencode.ai/docs/windows-wsl).
 
 ## Native Windows Checks
 

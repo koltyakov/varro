@@ -333,6 +333,8 @@ export type CompactionPart = {
   messageID: string;
   type: 'compaction';
   auto: boolean;
+  status?: 'running' | 'completed' | 'failed';
+  error?: string;
   overflow?: boolean;
   tail_start_id?: string;
 };
@@ -358,6 +360,7 @@ export type PermissionRule = {
 };
 
 export type Session = {
+  sharingSupported?: boolean;
   id: string;
   slug?: string;
   projectID: string;
@@ -944,6 +947,7 @@ export type ServerEventPropertiesByName = {
     snapshot?: string;
   };
   'session.next.step.ended': {
+    executionContinues?: boolean;
     timestamp?: number;
     sessionID: string;
     assistantMessageID?: string;

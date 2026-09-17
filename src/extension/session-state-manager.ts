@@ -674,6 +674,7 @@ export class SessionStateManager {
         break;
       }
       case 'session.next.step.ended': {
+        if (props?.executionContinues === true) break;
         const sessionID = getString(props?.sessionID);
         if (!sessionID || isContinuationFinish(getString(props?.finish))) break;
         changed =

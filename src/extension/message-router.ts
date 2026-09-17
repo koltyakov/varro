@@ -83,6 +83,7 @@ export interface MessageRouterCallbacks {
     inWindow?: boolean
   ): void | Promise<void>;
   openSessionInSidebar(sessionId: string, directory?: string): void | Promise<void>;
+  importLegacySession(sessionId: string, directory: string): Promise<void>;
   openNewEditor(): void | Promise<void>;
   openNewWindow(): void | Promise<void>;
   editorRouteChanged(
@@ -266,6 +267,9 @@ export class MessageRouter {
           await (msg.payload.directory
             ? this.callbacks.openSessionInSidebar(msg.payload.sessionId, msg.payload.directory)
             : this.callbacks.openSessionInSidebar(msg.payload.sessionId));
+          break;
+        case 'session/import-v1':
+          await this.callbacks.importLegacySession(msg.payload.sessionId, msg.payload.directory);
           break;
         case 'chat/new-editor':
           await this.callbacks.openNewEditor();

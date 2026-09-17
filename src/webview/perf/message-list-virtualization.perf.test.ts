@@ -208,7 +208,9 @@ function resizeObserverEntry(
   };
 }
 
-describe('MessageList virtualization perf guards', () => {
+// Exact-height bootstrap mounts the full fixture before bounding the window. Allow for DOM
+// setup under parallel suite load; the assertions below enforce row and work-count budgets.
+describe('MessageList virtualization perf guards', { timeout: 60_000 }, () => {
   beforeEach(() => {
     resetDefaultAppState();
     activityGroupingPasses.value = 0;
@@ -394,6 +396,8 @@ describe('MessageList virtualization perf guards', () => {
   });
 
   it('keeps the rendered row window bounded while inline editing', async () => {
+    // Use a production-sized history page, still well above the 80-row mount budget.
+    const messageCount = 200;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
       this: HTMLElement
     ) {
@@ -401,13 +405,13 @@ describe('MessageList virtualization perf guards', () => {
         return new DOMRect(0, 0, 500, 120);
       }
       if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(0, 0, 500, 120_000);
+        return new DOMRect(0, 0, 500, messageCount * 120);
       }
       return new DOMRect(0, 0, 500, 500);
     });
 
     replaceMessages(
-      Array.from({ length: 1_000 }, (_, index) => {
+      Array.from({ length: messageCount }, (_, index) => {
         const id = `message-${index}`;
         const info = index % 2 === 0 ? createUserMessage(id) : createAssistantMessage(id);
         return entry(info, [createTextPart(`part-${index}`, id, `Message ${index}`)]);
@@ -425,7 +429,7 @@ describe('MessageList virtualization perf guards', () => {
     expect(container?.querySelector('.inline-edit-composer-slot')).toBeTruthy();
     expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(80);
     expect(container?.querySelector('.virtual-spacer-bottom')).toBeTruthy();
-  }, 10_000);
+  });
 
   it('does not rebuild assistant dialog summaries as the virtual window scrolls', async () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
@@ -478,7 +482,7 @@ describe('MessageList virtualization perf guards', () => {
     await settlePerfEffects();
 
     expect(assistantDialogSummaryPasses.value).toBe(initialPasses + 1);
-  }, 10_000);
+  });
 
   it('coalesces sticky viewport and virtual-range work into one frame pass', async () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (

@@ -190,7 +190,7 @@ describe('projected text events', () => {
     expect(upsertPart).not.toHaveBeenCalled();
   });
 
-  it('falls back to the loaded assistant when a projected text event uses its v2 id', () => {
+  it('waits for the named v2 assistant instead of putting its answer on the previous step', () => {
     const harness = createHarness();
 
     expect(
@@ -199,11 +199,21 @@ describe('projected text events', () => {
         textID: 'text-1',
         delta: 'hello',
       })
-    ).toBe(true);
-    expect(upsertPart).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'text-1', messageID: MESSAGE_ID, type: 'text' })
-    );
-    expect(harness.scheduleActiveMessageSync).not.toHaveBeenCalled();
+    ).toBe(false);
+    expect(upsertPart).not.toHaveBeenCalled();
+    expect(applyMessagePartDelta).not.toHaveBeenCalled();
+    expect(harness.scheduleActiveMessageSync).toHaveBeenCalledWith(SESSION_ID);
+
+    harness.messages.push({ info: assistantInfo('v2-assistant-1'), parts: [] });
+    emit(harness, 'session.next.text.ended', {
+      assistantMessageID: 'v2-assistant-1',
+      textID: 'text-1',
+      text: 'hello',
+    });
+    expect(harness.messages[0]?.parts).toEqual([]);
+    expect(harness.messages[1]?.parts).toEqual([
+      expect.objectContaining({ id: 'text-1', messageID: 'v2-assistant-1', text: 'hello' }),
+    ]);
   });
 });
 
@@ -446,7 +456,7 @@ describe('projected tool input lifecycle', () => {
     expect(currentToolPart(harness).messageID).toBe(MESSAGE_ID);
   });
 
-  it('falls back to the latest active assistant when the streamed assistant id does not match', () => {
+  it('does not attach a named tool to the previous assistant while its owner loads', () => {
     const harness = createHarness();
 
     expect(
@@ -454,13 +464,22 @@ describe('projected tool input lifecycle', () => {
         assistantMessageID: 'v2-assistant-1',
         name: 'apply_patch',
       })
+    ).toBe(false);
+    expect(upsertPart).not.toHaveBeenCalled();
+    expect(harness.messages[0]?.parts).toEqual([]);
+    expect(harness.scheduleActiveMessageSync).toHaveBeenCalledWith(SESSION_ID);
+  });
+
+  it('uses the latest assistant for legacy events without an explicit owner', () => {
+    const harness = createHarness();
+
+    expect(
+      emit(harness, 'session.next.tool.input.started', {
+        assistantMessageID: undefined,
+        name: 'bash',
+      })
     ).toBe(true);
-    expect(currentToolPart(harness)).toMatchObject({
-      messageID: MESSAGE_ID,
-      tool: 'apply_patch',
-      state: { status: 'pending' },
-    });
-    expect(harness.scheduleActiveMessageSync).not.toHaveBeenCalled();
+    expect(currentToolPart(harness).messageID).toBe(MESSAGE_ID);
   });
 
   it('schedules a resync when the owning assistant message is not loaded', () => {

@@ -1,6 +1,7 @@
 /* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns -- HTTP and SSE payloads remain untyped until endpoint-specific consumers validate them. */
 /* oxlint-disable anti-slop/no-known-value-widening -- Request headers intentionally use the Fetch API dictionary contract. */
 import { parseHealthResponse } from '../shared/health';
+import { isNumber, isString } from '../shared/type-utils';
 import { CURRENT_OPENCODE_ENDPOINTS } from '../shared/opencode-endpoints';
 import {
   MAX_SERVER_EVENT_ID_LENGTH,
@@ -12,8 +13,17 @@ import { logger } from './logger';
 import { diagnosticRoute, diagnosticTimeline } from './diagnostics';
 import { getOpenCodeDirectoryHeaders, scopeOpenCodeRequest } from './util/opencode-request';
 import { anySignal, asRecord, findSseChunkBoundary, getString } from './server-utils';
+import { OpenCodeV2Adapter } from './opencode-v2-adapter';
+import { OpenCodeV2SessionState } from './opencode-v2-session-state';
+import { projectV2Event } from './opencode-v2-events';
+import { openCodeApiVersion, type OpenCodeApiVersion } from './opencode-connection';
 
 type EventStreamState = 'healthy' | 'degraded';
+
+function isV2Session(value: unknown): boolean {
+  const version = asRecord(value)?.version;
+  return isString(version) && openCodeApiVersion(version) === 2;
+}
 
 export type OpenCodeResponseMetadata = {
   data: unknown;
@@ -49,6 +59,9 @@ export type OpenCodeRescopeResult = {
 const EVENT_STREAM_PATH = CURRENT_OPENCODE_ENDPOINTS.eventStream;
 
 interface OpenCodeTransportOptions {
+  openExternal?: (url: string) => Promise<boolean>;
+  sessionStateDirectory?: string;
+  getAuthorization?: () => string | undefined;
   getUrl: () => string;
   getWorkspaceCwd: () => string | undefined;
   getStatus: () => ServerStatus;
@@ -87,6 +100,14 @@ export class OpenCodeTransport {
   private readonly requestSettlementWaiters = new Set<() => void>();
   private readonly pendingAttentionRequests = new Map<string, string>();
   private readonly observedSessionDirectories = new Map<string, string>();
+  private apiVersion: OpenCodeApiVersion = 1;
+  private apiIdentityUrl: string | undefined;
+  private healthFailure: string | undefined;
+  private readonly v2: OpenCodeV2Adapter;
+
+  get healthError(): string | undefined {
+    return this.healthFailure;
+  }
 
   constructor(options: OpenCodeTransportOptions) {
     const testServerUrl = this.testServerUrl;
@@ -101,9 +122,55 @@ export class OpenCodeTransport {
       },
     };
     this.requestWorkspaceDirectory = options.getWorkspaceCwd();
+    this.v2 = new OpenCodeV2Adapter(
+      (method, path, body, requestOptions) => this.requestWire(method, path, body, requestOptions),
+      new OpenCodeV2SessionState(options.sessionStateDirectory),
+      options.openExternal
+    );
   }
 
   async request(
+    method: string,
+    path: string,
+    body?: unknown,
+    options?: OpenCodeRequestOptions
+  ): Promise<unknown> {
+    // Validate the caller path before any adapter can construct authenticated requests.
+    if (this.apiVersion === 2) {
+      scopeOpenCodeRequest(this.options.getUrl(), path);
+      const directory = options?.unscoped
+        ? undefined
+        : (options?.directory ?? this.getWorkspaceDirectoryForRequest(method, path));
+      const controller = new AbortController();
+      this.requestControllers.add(controller);
+      const signal = options?.signal
+        ? anySignal(options.signal, controller.signal)
+        : controller.signal;
+      try {
+        const result =
+          method === 'GET' && path === CURRENT_OPENCODE_ENDPOINTS.health
+            ? await this.readHealthInfo(signal)
+            : await this.v2.request(method, path, body, { ...options, directory, signal });
+        signal.throwIfAborted();
+        const maxBytes =
+          options?.maxProjectedResponseBytes ??
+          options?.maxResponseBytes ??
+          OpenCodeTransport.RESPONSE_MAX_BYTES;
+        if (result !== undefined && Buffer.byteLength(JSON.stringify(result)) > maxBytes)
+          throw new OpenCodeResponseTooLargeError(maxBytes);
+        return result;
+      } finally {
+        this.requestControllers.delete(controller);
+        if (!this.requestControllers.size) {
+          for (const resolve of this.requestSettlementWaiters) resolve();
+          this.requestSettlementWaiters.clear();
+        }
+      }
+    }
+    return this.requestWire(method, path, body, options);
+  }
+
+  private async requestWire(
     method: string,
     path: string,
     body?: unknown,
@@ -125,6 +192,7 @@ export class OpenCodeTransport {
     const timeoutSignal = AbortSignal.timeout(this.getRequestTimeoutMs(method, path));
     this.requestControllers.add(controller);
     const headers: Record<string, string> = {
+      ...this.authorizationHeaders(),
       ...getOpenCodeDirectoryHeaders(scoped.directory),
     };
     const init: RequestInit = {
@@ -157,6 +225,21 @@ export class OpenCodeTransport {
       if (!res.ok) {
         const msg = getResponseErrorMessage(data, res.statusText);
         throw new Error(`${res.status} ${msg}`);
+      }
+      if (
+        this.apiVersion === 2 &&
+        res.status !== 204 &&
+        res.headers.get('content-type')?.includes('text/html')
+      ) {
+        throw new Error(`OpenCode returned HTML instead of API data: ${path.split('?')[0]}`);
+      }
+      // V2 writes shared session headers, but v1 cannot read their transcript storage.
+      // Filter before wrapping pagination metadata so an empty page retains its cursor.
+      if (this.apiVersion === 1 && method === 'GET' && Array.isArray(data)) {
+        const pathname = new URL(scoped.url).pathname;
+        if (pathname === '/session' || /^\/session\/[^/]+\/children$/.test(pathname)) {
+          data = data.filter((session: unknown) => !isV2Session(session));
+        }
       }
       if (options?.captureNextCursor) {
         const nextCursor = res.headers.get('x-next-cursor')?.trim();
@@ -252,15 +335,58 @@ export class OpenCodeTransport {
     return this.requestWorkspaceDirectory;
   }
 
-  async readHealthInfo(): Promise<{ healthy: boolean; version?: string }> {
+  async readHealthInfo(signal?: AbortSignal): Promise<{ healthy: boolean; version?: string }> {
     let health: { healthy: boolean; version?: string } = { healthy: false };
+    this.healthFailure = undefined;
     try {
-      const res = await fetch(`${this.options.getUrl()}${CURRENT_OPENCODE_ENDPOINTS.health}`, {
-        redirect: 'error',
-        signal: AbortSignal.timeout(OpenCodeTransport.HEALTH_TIMEOUT_MS),
-      });
-      if (res.ok) health = parseHealthResponse(await res.json()) ?? { healthy: false };
+      const url = this.options.getUrl();
+      if (this.apiIdentityUrl !== url) {
+        this.apiVersion = 1;
+        this.v2.reset();
+        this.apiIdentityUrl = url;
+      }
+      const paths =
+        this.apiVersion === 2
+          ? ['/api/status', '/api/info', CURRENT_OPENCODE_ENDPOINTS.health]
+          : [CURRENT_OPENCODE_ENDPOINTS.health, '/api/status', '/api/info'];
+      for (const path of paths) {
+        signal?.throwIfAborted();
+        const timeout = AbortSignal.timeout(OpenCodeTransport.HEALTH_TIMEOUT_MS);
+        const res = await fetch(`${url}${path}`, {
+          redirect: 'error',
+          headers: this.authorizationHeaders(),
+          signal: signal ? anySignal(signal, timeout) : timeout,
+        });
+        if (res.status === 401 || res.status === 403) {
+          this.healthFailure =
+            'OpenCode server authentication failed. Supply the server credentials or restart the Varro-managed server.';
+          break;
+        }
+        if (!res.ok) {
+          if (res.status !== 404) break;
+          continue;
+        }
+        const contentType = res.headers?.get('content-type');
+        if (contentType?.includes('text/html')) continue;
+        const data = await res.json();
+        if (path === CURRENT_OPENCODE_ENDPOINTS.health)
+          health = parseHealthResponse(data) ?? health;
+        else {
+          const info = asRecord(data);
+          if (isString(info?.version) && (isNumber(info.pid) || info.ready === true))
+            health = { healthy: true, version: info.version };
+        }
+        if (health.healthy) {
+          const family = openCodeApiVersion(health.version ?? '');
+          if (!family) {
+            this.healthFailure = `Unsupported OpenCode server version: ${health.version ?? 'unknown'}`;
+            health = { healthy: false };
+          } else this.apiVersion = family;
+          break;
+        }
+      }
     } catch {
+      signal?.throwIfAborted();
       // A failed probe is represented by the unhealthy snapshot below.
     }
     if (this.diagnosticHealth !== health.healthy) {
@@ -271,6 +397,11 @@ export class OpenCodeTransport {
       this.diagnosticHealth = health.healthy;
     }
     return health;
+  }
+
+  private authorizationHeaders(): Record<string, string> {
+    const authorization = this.options.getAuthorization?.();
+    return authorization ? { Authorization: authorization } : {};
   }
 
   async checkHealth(): Promise<boolean> {
@@ -303,7 +434,11 @@ export class OpenCodeTransport {
     let continuityEstablished = false;
     let connectedAt = 0;
     let reconnectBackoffReset = false;
-    const eventStreamRequest = scopeOpenCodeRequest(serverUrl, EVENT_STREAM_PATH, undefined);
+    const eventStreamRequest = scopeOpenCodeRequest(
+      serverUrl,
+      this.apiVersion === 2 ? '/api/event' : EVENT_STREAM_PATH,
+      undefined
+    );
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
     let connectTimer: ReturnType<typeof setTimeout> | null = null;
     const isCurrentStream = () => this.isCurrentEventStream(controller, generation);
@@ -337,6 +472,7 @@ export class OpenCodeTransport {
 
     try {
       const headers: Record<string, string> = {
+        ...this.authorizationHeaders(),
         Accept: 'text/event-stream',
         ...getOpenCodeDirectoryHeaders(eventStreamRequest.directory),
       };
@@ -349,6 +485,8 @@ export class OpenCodeTransport {
       clearConnectTimer();
       if (!isCurrentStream()) return;
       if (!res.ok || !res.body) throw new Error(`Failed to open event stream: ${res.status}`);
+      if (this.apiVersion === 2 && !res.headers.get('content-type')?.includes('text/event-stream'))
+        throw new Error('OpenCode returned an invalid event stream content type');
       continuityEstablished = true;
       connectedAt = Date.now();
       diagnosticTimeline.record({ event: 'stream-healthy', operationId });
@@ -559,15 +697,39 @@ export class OpenCodeTransport {
       );
       return;
     }
-    try {
-      this.observeServerEvent(parsed);
-    } catch (err) {
-      logger.warn(`Event observation threw: ${err instanceof Error ? err.message : String(err)}`);
+    const record = asRecord(parsed);
+    if (this.apiVersion === 2 && isString(record?.type) && asRecord(record.data)) {
+      this.v2.observe(
+        record.type,
+        asRecord(record.data)!,
+        isString(record.id) ? record.id : undefined
+      );
     }
-    try {
-      this.options.emitEvent(parsed);
-    } catch (err) {
-      logger.warn(`Event listener threw: ${err instanceof Error ? err.message : String(err)}`);
+    const sessionID = asRecord(record?.data)?.sessionID;
+    const events =
+      this.apiVersion === 2
+        ? projectV2Event(parsed, isString(sessionID) ? this.v2.eventContext(sessionID) : undefined)
+        : [parsed];
+    for (const event of events) {
+      if (this.apiVersion === 1) {
+        const parsedEvent = parseServerEvent(event);
+        if (
+          (parsedEvent?.type === 'session.created' || parsedEvent?.type === 'session.updated') &&
+          isV2Session(asRecord(parsedEvent.properties)?.info)
+        ) {
+          continue;
+        }
+      }
+      try {
+        this.observeServerEvent(event);
+      } catch (err) {
+        logger.warn(`Event observation threw: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      try {
+        this.options.emitEvent(event);
+      } catch (err) {
+        logger.warn(`Event listener threw: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
   }
 

@@ -91,6 +91,7 @@ import { DroppedFilesService } from './dropped-files-service';
 import { DraftImageStore } from './draft-image-store';
 import { readExtensionConfigState } from './extension-config';
 import { readMaximumTestedOpenCodeVersion } from './extension-manifest';
+import { runWindowsCliUpdate } from './util/windows-cli-update';
 import { FileSearchService } from './file-search-service';
 import { GeneratedDependencyTreeGuard } from './generated-dependency-tree-guard';
 import { HiddenSessionManager } from './hidden-session-manager';
@@ -125,6 +126,7 @@ import { SessionHistoryScopeStore } from './session-history-scope-store';
 import { SessionTitleFallback } from './session-title-fallback';
 import { SessionTrashManager } from './session-trash-manager';
 import { createSidebarProviderActions } from './sidebar-provider-actions';
+import { LegacySessionImport } from './legacy-session-import';
 import { SidebarProviderBridge } from './sidebar-provider-bridge';
 import { SidebarProviderContextFiles } from './sidebar-provider-context-files';
 import { SidebarProviderRuntime } from './sidebar-provider-runtime';
@@ -133,8 +135,6 @@ import { WorkspaceSessionStatusCoordinator } from './workspace-session-status-co
 import { UsageReportService } from './usage-report-service';
 import { getWorkspaceSessionIdsForEvent } from './sidebar-provider-utils';
 import { resolveServerLaunch } from './util/server-launch';
-
-const maximumTestedOpenCodeVersion = readMaximumTestedOpenCodeVersion();
 
 function differsByMajorOrMinor(left: string, right: string) {
   const [leftMajor, leftMinor] = left.split('.').map(Number);
@@ -197,6 +197,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private attentionStatusBarItemVisible = false;
   private hiddenStatusBarState: Extract<StatusBarState, { visible: true }> | null = null;
   private openCodeVersionCheck: 'idle' | 'checking' | 'checked' = 'idle';
+  private openCodeVersionGeneration = 0;
   private openCodeUpdateAvailable = false;
   private openCodeCliVersion: string | null = null;
   private openCodeServerVersion: string | null = null;
@@ -956,6 +957,30 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.openSessionInEditor(sessionId, title, model, rootSessionId, directory, inWindow),
         openSessionInSidebar: (sessionId, directory) =>
           this.openSessionInSidebar(sessionId, directory),
+        importLegacySession: async (sessionId, directory) => {
+          try {
+            const workspacePath = this.contextProvider.getOpenWorkspaceRoot(directory);
+            if (!workspacePath) throw new Error('Session workspace folder is not open');
+            const importer = new LegacySessionImport((method, path, body) =>
+              endpointServer.request(method, path, body)
+            );
+            const importedSessionId = await vscode.window.withProgress(
+              {
+                location: vscode.ProgressLocation.Notification,
+                title: 'Importing v1 conversation into v2',
+              },
+              () => importer.importCopy({ id: sessionId, title: 'Untitled', directory })
+            );
+            post({
+              type: 'command/open-session',
+              payload: { sessionId: importedSessionId, directory },
+            });
+          } catch (error) {
+            void vscode.window.showErrorMessage(
+              `Could not import v1 history: ${error instanceof Error ? error.message : String(error)}`
+            );
+          }
+        },
         openNewEditor: () => this.openNewEditor(),
         openNewWindow: () => this.openNewWindow(),
         editorRouteChanged: (route) => this.editorRouteChanged(webviewContext.viewId, route),
@@ -3103,22 +3128,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     try {
-      const terminal = vscode.window.createTerminal({ name: title, cwd: workspacePath });
       if (replacesBinary && process.platform === 'win32') {
-        const disposable = vscode.window.onDidCloseTerminal((closedTerminal) => {
-          if (closedTerminal !== terminal) return;
-          disposable.dispose();
-          void (async () => {
-            try {
-              await this.server.finishWindowsCliUpgrade();
-            } catch (err) {
-              logger.warn(
-                `Failed to finish Windows OpenCode CLI update: ${err instanceof Error ? err.message : String(err)}`
-              );
-            }
-          })();
-        });
+        await runWindowsCliUpdate(text, title, workspacePath, () =>
+          this.server.finishWindowsCliUpgrade()
+        );
+        return;
       }
+      const terminal = vscode.window.createTerminal({ name: title, cwd: workspacePath });
       terminal.show(false);
       terminal.sendText(text, true);
     } catch (err) {
@@ -3190,6 +3206,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private refreshOpenCodeVersionStatus() {
     if (this.serverEventBridge.getStatus().state !== 'running') {
+      this.openCodeVersionGeneration += 1;
       this.openCodeVersionCheck = 'idle';
       this.openCodeUpdateAvailable = false;
       this.openCodeCliVersion = null;
@@ -3199,14 +3216,24 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (this.openCodeVersionCheck !== 'idle') return;
 
     this.openCodeVersionCheck = 'checking';
+    const generation = this.openCodeVersionGeneration;
     void this.server
       .readServerInfo()
       .then((info) => {
-        if (this.disposing || this.serverEventBridge.getStatus().state !== 'running') return;
+        if (
+          this.disposing ||
+          generation !== this.openCodeVersionGeneration ||
+          this.serverEventBridge.getStatus().state !== 'running'
+        )
+          return;
         this.openCodeCliVersion = info.cliVersion ? extractVersion(info.cliVersion) : null;
         this.openCodeServerVersion = info.health.version
           ? extractVersion(info.health.version)
           : null;
+        const maximumTestedOpenCodeVersion = readMaximumTestedOpenCodeVersion(
+          undefined,
+          this.openCodeCliVersion?.startsWith('2.') ? 2 : 1
+        );
         this.openCodeUpdateAvailable =
           (this.openCodeCliVersion !== null &&
             compareVersions(this.openCodeCliVersion, maximumTestedOpenCodeVersion) < 0) ||
@@ -3217,14 +3244,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.renderOpenCodeStatusBarItem();
       })
       .catch(() => {
+        if (generation !== this.openCodeVersionGeneration) return;
         this.openCodeVersionCheck = 'checked';
       });
   }
 
   private renderOpenCodeStatusBarItem() {
     const updateMarker = this.openCodeUpdateAvailable ? '*' : '';
-    const displayedVersion =
-      this.openCodeServerVersion ?? this.openCodeCliVersion ?? maximumTestedOpenCodeVersion;
+    const displayedVersion = this.openCodeServerVersion ?? this.openCodeCliVersion;
+    const maximumTestedOpenCodeVersion = readMaximumTestedOpenCodeVersion(
+      undefined,
+      (this.openCodeCliVersion ?? displayedVersion)?.startsWith('2.') ? 2 : 1
+    );
     const autoUpdatesEnabled = vscode.workspace
       .getConfiguration('varro')
       .get<boolean>('server.autoUpdate', true);
@@ -3264,7 +3295,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     const openCodeStatusBarItem = this.serverEventBridge.getOpenCodeStatusBarItem();
-    openCodeStatusBarItem.text = `$(robot) OpenCode ${displayedVersion}${updateMarker}`;
+    openCodeStatusBarItem.text = `$(robot) OpenCode${displayedVersion ? ` ${displayedVersion}${updateMarker}` : ''}`;
     openCodeStatusBarItem.tooltip = versionLines.join('\n');
     openCodeStatusBarItem.show();
   }

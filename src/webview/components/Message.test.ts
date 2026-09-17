@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { createSignal } from 'solid-js';
-import type { FilePart, Part, Session, ToolPart } from '../types';
+import type { FilePart, MessageEntry, Part, Session, ToolPart } from '../types';
 import { client } from '../lib/client';
 import { editingMessage, resetMessageEditState } from '../lib/message-edit-state';
 import {
@@ -24,6 +24,7 @@ import {
 import { resetToolCallExpansionState } from './ToolCall';
 import { fixture } from '../test-fixtures';
 import type { UnknownRecord } from '../../shared/type-utils';
+import { projectV2Message } from '../../extension/opencode-v2-projection';
 
 const retryMessageMock = vi.hoisted(() => vi.fn());
 const selectSessionMock = vi.hoisted(() => vi.fn());
@@ -117,6 +118,57 @@ function compactionPart(id: string, options?: { auto?: boolean; overflow?: boole
     overflow: options?.overflow,
   };
 }
+
+describe('V2 generated transcript rendering', () => {
+  it('renders a completed native summary as a context divider without a user card', () => {
+    const projected = projectV2Message(
+      {
+        id: 'msg_compaction',
+        type: 'compaction',
+        time: { created: 1_000 },
+        status: 'completed',
+        reason: 'auto',
+        summary: '## Objective\n\nGenerated context',
+        recent: '',
+      },
+      'session-1'
+    );
+    cleanup = render(() => Message(fixture<MessageEntry>(projected)), container!);
+    expect(container?.querySelector('.user-message-card')).toBeNull();
+    expect(container?.querySelector('.message-compaction-divider')?.textContent).toContain(
+      'Context compacted (auto)'
+    );
+    expect(container?.textContent).not.toContain('Generated context');
+  });
+
+  it.each([
+    {
+      id: 'msg_skill',
+      type: 'skill',
+      time: { created: 1_000 },
+      skill: 'review',
+      name: 'Review',
+      text: 'Internal instructions',
+    },
+    {
+      id: 'msg_shell',
+      type: 'shell',
+      time: { created: 1_000, completed: 2_000 },
+      shellID: 'shell_one',
+      command: 'pwd',
+      status: 'exited',
+    },
+  ] as const)('renders $type records as tool activity without a user card', (record) => {
+    const projected = projectV2Message(record, 'session-1');
+    cleanup = render(() => Message(fixture<MessageEntry>(projected)), container!);
+    expect(container?.querySelector('.user-message-card')).toBeNull();
+    const activity = container?.querySelector<HTMLButtonElement>('.assistant-activity-summary');
+    expect(activity?.textContent).toContain(record.type === 'skill' ? '1 skill' : '1 command');
+    activity?.click();
+    expect(container?.querySelector('.chat-tool-invocation-part')).not.toBeNull();
+    expect(container?.textContent).not.toContain('Internal instructions');
+  });
+});
 
 function userMessage(id: string) {
   return {

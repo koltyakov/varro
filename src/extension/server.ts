@@ -2,12 +2,15 @@
 /* oxlint-disable anti-slop/no-known-value-widening, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Server assertions follow lifecycle, process, and response validation. */
 import type { ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
+import * as vscode from 'vscode';
 import {
   MINIMUM_SUPPORTED_OPENCODE_VERSION,
+  MINIMUM_SUPPORTED_OPENCODE_V2_VERSION,
   OPENCODE_UPDATE_REQUIRED_PREFIX,
 } from '../shared/opencode-compatibility';
 import {
   getUpgradeCommand,
+  OPENCODE_INSTALL_COMMAND,
   OPENCODE_UPGRADE_COMMAND,
   type OpenCodeInstallMethod,
 } from '../shared/opencode-install';
@@ -40,6 +43,7 @@ import {
   normalizeRunningStatus,
 } from './server-utils';
 import { FULL_SESSION_LIST_LIMIT } from './util/session-list';
+import { openCodeApiVersion } from './opencode-connection';
 
 export type { OpenCodeCompactionSettings };
 
@@ -115,8 +119,16 @@ export class RestartBlockedError extends Error {
 function isSupportedOpenCodeVersion(version: string | undefined): boolean {
   const normalized = typeof version === 'string' ? extractVersion(version) : null;
   return (
-    normalized !== null && compareVersions(normalized, MINIMUM_SUPPORTED_OPENCODE_VERSION) >= 0
+    normalized !== null &&
+    openCodeApiVersion(normalized) !== null &&
+    compareVersions(normalized, minimumVersion(normalized)) >= 0
   );
+}
+
+function minimumVersion(version: string | undefined): string {
+  return openCodeApiVersion(extractVersion(version ?? '') ?? '') === 2
+    ? MINIMUM_SUPPORTED_OPENCODE_V2_VERSION
+    : MINIMUM_SUPPORTED_OPENCODE_VERSION;
 }
 
 /**
@@ -132,10 +144,15 @@ function createUpdateRequiredError(options: {
   installMethod?: OpenCodeInstallMethod;
   failure?: UpgradeFailureReport;
 }): { message: string; detail: ServerErrorDetail } {
-  const summary = `${OPENCODE_UPDATE_REQUIRED_PREFIX} Varro requires OpenCode ${MINIMUM_SUPPORTED_OPENCODE_VERSION} or newer, but ${options.observed}. ${options.reason}`;
+  const required = minimumVersion(options.observed);
+  const summary = `${OPENCODE_UPDATE_REQUIRED_PREFIX} Varro requires OpenCode ${required} or newer, but ${options.observed}. ${options.reason}`;
   const installMethod = options.failure?.installMethod ?? options.installMethod;
   const suggestedCommand = installMethod
-    ? getUpgradeCommand(installMethod, process.platform) || OPENCODE_UPGRADE_COMMAND
+    ? getUpgradeCommand(
+        installMethod,
+        process.platform,
+        openCodeApiVersion(required) === 2 ? '@opencode/cli' : 'opencode-ai'
+      ) || OPENCODE_UPGRADE_COMMAND
     : OPENCODE_UPGRADE_COMMAND;
   const canSuggestCommand =
     !options.blockedBy ||
@@ -171,7 +188,7 @@ function createUpdateRequiredError(options: {
       : options.blockedBy
         ? 'update-blocked'
         : 'update-required',
-    required: MINIMUM_SUPPORTED_OPENCODE_VERSION,
+    required,
     observed: options.observed,
   };
   if (installMethod) detail.installMethod = installMethod;
@@ -246,6 +263,13 @@ export class OpenCodeServer extends EventEmitter {
       isDisposing: () => this.isDisposing,
       updateEventStreamState: (eventStream) => this.updateEventStreamState(eventStream),
       emitEvent: (event) => this.handleServerEvent(event),
+      getAuthorization: () => this.processManager.serverAuthorization,
+      openExternal: async (value) => {
+        const url = new URL(value);
+        if (url.protocol !== 'http:' && url.protocol !== 'https:')
+          throw new Error('Unsupported OpenCode authentication URL');
+        return vscode.env.openExternal(vscode.Uri.parse(url.href));
+      },
     });
   }
 
@@ -445,7 +469,22 @@ export class OpenCodeServer extends EventEmitter {
         await this.processManager.stopServerForRestart();
         this.throwIfStartCancelled(disposeGeneration, signal);
       }
-      const health = await this.readHealthInfo();
+      let health = await this.readHealthInfo();
+      if (this.transport.healthError?.startsWith('Unsupported OpenCode')) {
+        const message = this.transport.healthError;
+        this.setStatus({ state: 'error', message });
+        throw new Error(message);
+      }
+      if (!health.healthy && this.transport.healthError?.includes('authentication')) {
+        await this.processManager.discoverServerCredentials();
+        this.throwIfStartCancelled(disposeGeneration, signal);
+        health = await this.readHealthInfo();
+        if (!health.healthy && this.transport.healthError?.includes('authentication')) {
+          const message = this.transport.healthError;
+          this.setStatus({ state: 'error', message });
+          throw new Error(message);
+        }
+      }
       this.throwIfStartCancelled(disposeGeneration, signal);
       if (health.healthy) {
         if (isSupportedOpenCodeVersion(health.version)) {
@@ -482,9 +521,8 @@ export class OpenCodeServer extends EventEmitter {
       }
 
       this.throwIfStartCancelled(disposeGeneration, signal);
-      if (process.platform !== 'win32') {
-        await this.ensureCompatibleCliForLaunch(undefined, disposeGeneration, signal);
-      }
+      // The CLI major determines whether startup must join/register the v2 service.
+      await this.ensureCompatibleCliForLaunch(undefined, disposeGeneration, signal);
       this.throwIfStartCancelled(disposeGeneration, signal);
 
       return this.launchManagedServer(disposeGeneration, preserveRetryCount, signal);
@@ -497,6 +535,19 @@ export class OpenCodeServer extends EventEmitter {
     signal: AbortSignal
   ): Promise<string> {
     this.throwIfStartCancelled(disposeGeneration, signal);
+    const sharedServer = this.processManager.discoverSharedServer();
+    if (sharedServer && (await sharedServer)) {
+      this.throwIfStartCancelled(disposeGeneration, signal);
+      const health = await this.readHealthInfo();
+      this.throwIfStartCancelled(disposeGeneration, signal);
+      if (!health.healthy || !isSupportedOpenCodeVersion(health.version)) {
+        throw new Error('The registered OpenCode service is unavailable or unsupported');
+      }
+      logger.info(`Found shared OpenCode service at ${this.url}`);
+      this.beginRunningEventStream();
+      this.startExistingServerPreparation(disposeGeneration, signal, health.version);
+      return this.url;
+    }
     await this.syncInjectedConfigFile();
     try {
       this.throwIfStartCancelled(disposeGeneration, signal);
@@ -1128,7 +1179,7 @@ export class OpenCodeServer extends EventEmitter {
     if (attempt > 50) {
       this.cancelPollHealth();
       this.setStatus({ state: 'error', message: 'Server failed to start within timeout' });
-      reject(new Error('Server health check timeout'));
+      reject(new Error(this.transport.healthError ?? 'Server health check timeout'));
       return;
     }
 
@@ -1144,6 +1195,10 @@ export class OpenCodeServer extends EventEmitter {
       let health: { healthy: boolean; version?: string };
       try {
         health = await readHealth();
+        if (!health.healthy && this.transport.healthError?.includes('authentication')) {
+          await this.processManager.discoverServerCredentials();
+          health = await readHealth();
+        }
       } catch (err) {
         reject(err instanceof Error ? err : new Error(String(err)));
         return;
@@ -1411,7 +1466,7 @@ export class OpenCodeServer extends EventEmitter {
       `OpenCode server ${serverVersion || 'unknown'} is older than required ${MINIMUM_SUPPORTED_OPENCODE_VERSION}; attempting a safe update`
     );
     this.throwIfStartCancelled(disposeGeneration, signal);
-    await this.upgradeRunningServer(MINIMUM_SUPPORTED_OPENCODE_VERSION);
+    await this.upgradeRunningServer(minimumVersion(serverVersion));
     this.throwIfStartCancelled(disposeGeneration, signal);
     // The upgrade request can take long enough for another client to start
     // work, so the initial check is not sufficient authorization to stop.
@@ -1442,6 +1497,11 @@ export class OpenCodeServer extends EventEmitter {
     }
 
     if (!installedVersion || isSupportedOpenCodeVersion(installedVersion)) return;
+    if (Number(installedVersion.split('.')[0]) > 2) {
+      const message = `Unsupported OpenCode CLI version: ${installedVersion}. Varro supports the v1 and v2 APIs.`;
+      this.setStatus({ state: 'error', message });
+      throw new Error(message);
+    }
 
     const observed = observedServer || `the installed CLI is ${installedVersion}`;
     if (!this.processManager.isAutoUpdateEnabled) {
@@ -1452,14 +1512,14 @@ export class OpenCodeServer extends EventEmitter {
     }
 
     logger.info(
-      `Updating OpenCode CLI ${installedVersion} to meet Varro's minimum ${MINIMUM_SUPPORTED_OPENCODE_VERSION}`
+      `Updating OpenCode CLI ${installedVersion} to meet Varro's minimum ${minimumVersion(installedVersion)}`
     );
     // Kept for the case below: `opencode upgrade` can print why it failed and
     // still exit 0, and that text is the only basis for actionable guidance.
     let upgradeDiagnostics = '';
     try {
       this.throwIfStartCancelled(disposeGeneration, signal);
-      upgradeDiagnostics = await this.processManager.upgradeCli(MINIMUM_SUPPORTED_OPENCODE_VERSION);
+      upgradeDiagnostics = await this.processManager.upgradeCli(minimumVersion(installedVersion));
       this.throwIfStartCancelled(disposeGeneration, signal);
     } catch (err) {
       this.throwIfStartCancelled(disposeGeneration, signal);
@@ -1546,7 +1606,7 @@ export class OpenCodeServer extends EventEmitter {
       message: OpenCodeProcess.MISSING_CLI_MESSAGE,
       detail: {
         kind: 'cli-missing',
-        suggestedCommand: 'npm i -g opencode-ai',
+        suggestedCommand: OPENCODE_INSTALL_COMMAND,
         settingId: 'varro.server.command',
         searchedPaths: install.searchedPaths,
       },
@@ -1802,7 +1862,7 @@ export class OpenCodeServer extends EventEmitter {
 
   private async maybeSuggestCliUpdate(installedCliVersion: string | null) {
     return this.processManager.maybeSuggestCliUpdate(installedCliVersion, {
-      readLatestCliVersion: () => this.readLatestCliVersion(),
+      readLatestCliVersion: () => this.readLatestCliVersion(installedCliVersion),
       upgradeRunningServer: (targetVersion) => this.upgradeRunningServer(targetVersion),
       requestMaintenanceCheck: () => this.requestMaintenanceCheck(true),
       getWorkspaceCwd: () => this.getWorkspaceCwd(),
@@ -1893,7 +1953,9 @@ export class OpenCodeServer extends EventEmitter {
     return (
       this.terminalCliUpgradePreparationOperation !== null ||
       this.pendingTerminalCliUpgrades > 0 ||
-      this.terminalCliUpgradeFinishOperation !== null
+      // Restoration publishes running before the finish operation resolves.
+      // Snapshot requests triggered by that status must reach the restored server.
+      (this.terminalCliUpgradeFinishOperation !== null && this._status.state !== 'running')
     );
   }
 
@@ -1966,8 +2028,8 @@ export class OpenCodeServer extends EventEmitter {
     return this.processManager.readInstalledCliVersion();
   }
 
-  private async readLatestCliVersion(): Promise<string | null> {
-    return this.processManager.readLatestCliVersion();
+  private async readLatestCliVersion(installedVersion?: string | null): Promise<string | null> {
+    return this.processManager.readLatestCliVersion(installedVersion);
   }
 
   private async readHealthInfo(): Promise<{ healthy: boolean; version?: string }> {

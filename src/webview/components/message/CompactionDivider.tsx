@@ -14,6 +14,10 @@ export function CompactionDivider(props: {
   const [isHoverIntentActive, setIsHoverIntentActive] = createSignal(false);
   const label = () => {
     const kind = props.part.auto ? 'auto' : 'manual';
+    if (props.part.status === 'running') return `Compacting context (${kind})`;
+    if (props.part.status === 'failed') {
+      return `Context compaction failed (${kind})${props.part.error ? `: ${props.part.error}` : ''}`;
+    }
     return props.part.overflow
       ? `Context compacted (${kind}, after overflow)`
       : `Context compacted (${kind})`;

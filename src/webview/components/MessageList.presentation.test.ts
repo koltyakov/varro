@@ -2,9 +2,21 @@ import { describe, expect, it, vi } from 'vitest';
 import { batch } from 'solid-js';
 import { render } from 'solid-js/web';
 import { reconcile } from 'solid-js/store';
-import { replaceMessages, setState, state, upsertPart } from '../lib/state';
+import type { SessionMessageAssistant } from '@opencode/client';
+import {
+  replaceMessages,
+  setMessagesIncremental,
+  setShowFileDiffs,
+  setState,
+  state,
+  upsertPart,
+} from '../lib/state';
 import { flushMessagePresentation } from '../lib/message-list-layout';
-import type { ToolPart } from '../types';
+import type { Part, ToolPart } from '../types';
+import { projectV2Event } from '../../extension/opencode-v2-events';
+import { projectV2Message } from '../../extension/opencode-v2-projection';
+import { parseServerEvent } from '../../shared/protocol';
+import { createProjectedSessionEventHandler } from '../hooks/session/session-projected-events';
 import { MessageList } from './MessageList';
 import {
   assistantMessage,
@@ -54,7 +66,7 @@ function completeSearch(part: ToolPart): ToolPart {
   };
 }
 
-function openChat(parts: ToolPart[] = []) {
+function openChat(parts: Part[] = []) {
   setState('activeSessionId', 'session-1');
   setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
   replaceMessages([
@@ -65,6 +77,105 @@ function openChat(parts: ToolPart[] = []) {
 }
 
 describe('streaming presentation handoff', () => {
+  it.each([false, true])(
+    'keeps a v2 answer visible through snapshot reconciliation with preserveExtraParts=%s',
+    async (preserveExtraParts) => {
+      const native: SessionMessageAssistant = {
+        id: 'answer',
+        type: 'assistant',
+        agent: 'build',
+        model: { providerID: 'provider', id: 'model' },
+        time: { created: 1 },
+        content: [
+          { type: 'reasoning', text: 'Inspecting the queue', time: { created: 1, completed: 2 } },
+          {
+            type: 'tool',
+            id: 'search',
+            name: 'grep',
+            time: { created: 2, completed: 3 },
+            state: {
+              status: 'completed',
+              input: { pattern: 'queue' },
+              content: [{ type: 'text', text: 'Found matches' }],
+            },
+          },
+        ],
+      };
+      // SAFETY: This typed native fixture projects into the legacy parts consumed by the webview.
+      const initialParts = projectV2Message(native, 'session-1').parts as Part[];
+      openChat(initialParts);
+      const handle = createProjectedSessionEventHandler({
+        isSessionInActiveTree: (sessionId) => sessionId === 'session-1',
+        getMessages: () => state.messages,
+        findAssistantMessage: (_sessionId, id) =>
+          state.messages.find((entry) => entry.info.id === id) ?? null,
+        findPart: (messageID, partID) =>
+          state.messages
+            .find((entry) => entry.info.id === messageID)
+            ?.parts.find((part) => part.id === partID) ?? null,
+        scheduleActiveMessageSync: vi.fn(),
+        syncTodosFromMessages: vi.fn(),
+      });
+      const answer = 'The queue is ready.';
+      const event = parseServerEvent(
+        projectV2Event({
+          id: 'evt_answer',
+          type: 'session.text.ended',
+          created: 4,
+          data: { sessionID: 'session-1', assistantMessageID: 'answer', ordinal: 0, text: answer },
+        })[0]
+      );
+      if (!event?.properties) throw new Error('Expected a projected v2 text event');
+      expect(handle(event.type, event.properties)).toBe(true);
+      await vi.advanceTimersByTimeAsync(350);
+      expect(container?.textContent).toContain(answer);
+
+      // SAFETY: The completed native snapshot uses the same projection as initial hydration.
+      const finalParts = projectV2Message(
+        { ...native, content: [...native.content, { type: 'text', text: answer }] },
+        'session-1'
+      ).parts as Part[];
+      setMessagesIncremental(
+        [state.messages[0]!, { info: state.messages[1]!.info, parts: finalParts }],
+        { preserveExtraParts }
+      );
+      for (let frame = 0; frame < 150; frame += 1) {
+        if (frame === 60) {
+          batch(() => {
+            setState('messages', 1, 'info', 'time', { created: 1, completed: 5 });
+            setState('sessionStatus', reconcile({ 'session-1': { type: 'idle' } }));
+          });
+        }
+        expect(container?.textContent).toContain(answer);
+        await vi.advanceTimersByTimeAsync(16);
+      }
+      expect(state.messages[1]?.parts.map((part) => part.type)).toEqual([
+        'reasoning',
+        'tool',
+        'text',
+      ]);
+    }
+  );
+
+  it.each([false, true])(
+    'shows a streaming v2 patch before its input arrives with diffs=%s',
+    async (diffs) => {
+      setShowFileDiffs(diffs);
+      openChat([completeSearch(searchPart())]);
+      upsertPart({
+        ...toolPart('patch-streaming', 'answer', 'patch-call'),
+        tool: 'patch',
+        state: { status: 'pending', input: {}, raw: '' },
+      });
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(
+        container?.querySelector('.tool-status-running'),
+        container?.textContent
+      ).not.toBeNull();
+      expect(container?.textContent).toContain('Editing');
+    }
+  );
+
   it('flushes available text when Stop interrupts an activity preview', async () => {
     openChat();
     upsertPart(completeSearch(searchPart()));

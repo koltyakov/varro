@@ -427,34 +427,38 @@ describe('About command', () => {
     );
   });
 
-  it('hides the update notice when OpenCode is at the tested update ceiling', async () => {
-    register('/repo', {
-      readServerInfo: vi.fn().mockResolvedValue({
-        status: { state: 'running', url: 'http://127.0.0.1:4096' },
-        url: 'http://127.0.0.1:4096',
-        port: 4096,
-        command: 'opencode',
-        managedProcess: true,
-        cliVersion: MAXIMUM_TESTED_OPENCODE_VERSION,
-        cliVersionError: null,
-        installMethod: 'bun',
-        resolvedCommand: '/home/me/.bun/bin/opencode',
-        searchedPaths: [],
-        activeAgentCount: 0,
-        activeAgentError: null,
-        health: { healthy: true, version: MAXIMUM_TESTED_OPENCODE_VERSION },
-        workspaceCwd: '/repo',
-      }),
-    });
+  it.each([1, 2] as const)(
+    'hides the update notice at the v%s tested update ceiling',
+    async (apiVersion) => {
+      const testedVersion = readMaximumTestedOpenCodeVersion(undefined, apiVersion);
+      register('/repo', {
+        readServerInfo: vi.fn().mockResolvedValue({
+          status: { state: 'running', url: 'http://127.0.0.1:4096' },
+          url: 'http://127.0.0.1:4096',
+          port: 4096,
+          command: 'opencode',
+          managedProcess: true,
+          cliVersion: testedVersion,
+          cliVersionError: null,
+          installMethod: 'bun',
+          resolvedCommand: '/home/me/.bun/bin/opencode',
+          searchedPaths: [],
+          activeAgentCount: 0,
+          activeAgentError: null,
+          health: { healthy: true, version: testedVersion },
+          workspaceCwd: '/repo',
+        }),
+      });
 
-    await runCommand('varro.about');
+      await runCommand('varro.about');
 
-    expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.not.stringContaining('is available'),
-      })
-    );
-  });
+      expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: expect.not.stringContaining('is available'),
+        })
+      );
+    }
+  );
 });
 
 function fileUri(fsPath: string) {

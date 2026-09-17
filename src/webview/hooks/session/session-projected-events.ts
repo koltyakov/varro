@@ -107,8 +107,9 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
   const pendingToolInput = new Map<string, PendingToolInput>();
   const runningToolProviders = new Map<string, UnknownRecord>();
   const findProjectedAssistant = (sessionId: string, assistantMessageID?: string) =>
-    ctx.findAssistantMessage(sessionId, assistantMessageID) ||
-    latestAssistantMessageForSession(ctx.getMessages(), sessionId);
+    assistantMessageID
+      ? ctx.findAssistantMessage(sessionId, assistantMessageID)
+      : latestAssistantMessageForSession(ctx.getMessages(), sessionId);
   const applyProjectedPart = (
     sessionId: string,
     assistantMessageID: string | undefined,

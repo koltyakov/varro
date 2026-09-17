@@ -151,6 +151,19 @@ export function upsertPart(part: Part) {
           return;
         }
         if (isOptimisticUserMessage(msgs[idx]!) && !isLocalOptimisticPartId(nextPart.id, msgId)) {
+          const combinedTextIds = getCombinedOptimisticTextPartIds(msgs[idx]!, [nextPart]);
+          if (combinedTextIds) {
+            const firstId = combinedTextIds.values().next().value;
+            msgs[idx]!.parts = msgs[idx]!.parts.flatMap((currentPart) =>
+              !combinedTextIds.has(currentPart.id)
+                ? [currentPart]
+                : currentPart.id === firstId
+                  ? [nextPart]
+                  : []
+            );
+            messageIndex.invalidate();
+            return;
+          }
           const optimisticPartIndex = findMatchingOptimisticPartIndex(msgs[idx]!, nextPart);
           if (optimisticPartIndex !== -1) {
             const currentPart = msgs[idx]!.parts[optimisticPartIndex];
@@ -216,6 +229,31 @@ function areMatchingOptimisticParts(left: Part, right: Part) {
   }
   if (left.type !== 'file' || right.type !== 'file') return false;
   return left.url === right.url && left.mime === right.mime && left.filename === right.filename;
+}
+
+function getCombinedOptimisticTextPartIds(entry: MessageEntry, incoming: Part[]) {
+  if (entry.info.role !== 'user') return null;
+  const localTextParts = entry.parts.filter(
+    (part): part is Extract<Part, { type: 'text' }> =>
+      part.type === 'text' && isLocalOptimisticPartId(part.id, entry.info.id)
+  );
+  if (localTextParts.length < 2) return null;
+
+  // V2 joins the prompt and text-based attachment references into one text part.
+  const combined = {
+    ...localTextParts[0]!,
+    text: localTextParts.map((part) => part.text).join('\n'),
+  };
+  if (
+    !incoming.some(
+      (part) =>
+        !isLocalOptimisticPartId(part.id, entry.info.id) &&
+        areMatchingOptimisticParts(combined, part)
+    )
+  ) {
+    return null;
+  }
+  return new Set(localTextParts.map((part) => part.id));
 }
 
 function isPartRenderVisibilityChanged(previous: Part | undefined, current: Part) {
@@ -878,10 +916,12 @@ function mergeMessageEntry(
   }
 
   const incomingPartIds = new Set(next.parts.map((part) => part.id));
+  const combinedTextIds = getCombinedOptimisticTextPartIds(current, next.parts);
   const matchedOptimisticPartIndexes = new Set<number>();
   for (const part of current.parts) {
     if (isOptimisticImageFilePart(part)) continue;
     if (incomingPartIds.has(part.id)) continue;
+    if (combinedTextIds?.has(part.id)) continue;
     if (current.info.role === 'user' && isLocalOptimisticPartId(part.id, current.info.id)) {
       const matchIndex = next.parts.findIndex(
         (incomingPart, index) =>

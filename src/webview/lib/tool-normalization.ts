@@ -40,7 +40,7 @@ const EDIT_TOOL_NAMES = new Set([
   'file_rename',
 ]);
 const TODO_TOOL_NAMES = new Set(['update_plan', 'updateplan']);
-const STRUCTURED_TOOL_NAMES = new Set(['task', 'apply_patch', 'webfetch']);
+const STRUCTURED_TOOL_NAMES = new Set(['task', 'apply_patch', 'patch', 'webfetch']);
 
 export function normalizeToolName(toolName: string): string {
   const normalized = toolName.trim().toLowerCase();
@@ -75,7 +75,8 @@ export function getToolKind(toolName: string): ToolKind {
 }
 
 export function isApplyPatchTool(toolName: string): boolean {
-  return normalizeToolName(toolName) === 'apply_patch';
+  const normalized = normalizeToolName(toolName);
+  return normalized === 'apply_patch' || normalized === 'patch';
 }
 
 export function isStructuredTool(toolName: string): boolean {

@@ -39,6 +39,7 @@ function createCallbacks(): MessageRouterCallbacks {
     openSessionInOpenCode: vi.fn(),
     openSessionInEditor: vi.fn(),
     openSessionInSidebar: vi.fn(),
+    importLegacySession: vi.fn(() => Promise.resolve()),
     openNewEditor: vi.fn(),
     openNewWindow: vi.fn(),
     editorRouteChanged: vi.fn(),
@@ -521,6 +522,7 @@ const DISPATCH_EXPECTATIONS = {
   ],
   'session/open-in-sidebar': [{ callback: 'openSessionInSidebar', args: ['session-1'] }],
   'session/open-in-opencode': [{ callback: 'openSessionInOpenCode', args: ['session-1'] }],
+  'session/import-v1': [{ callback: 'importLegacySession', args: ['session-1', '/workspace'] }],
   'editor/route-changed': [
     { callback: 'editorRouteChanged', args: [{ type: 'session', sessionId: 'session-1' }] },
   ],

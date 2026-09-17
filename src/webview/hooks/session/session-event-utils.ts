@@ -176,6 +176,8 @@ export const TRANSCRIPT_SYNC_SESSION_EVENTS = new Set<string>([
   'session.next.synthetic',
   'session.next.shell.started',
   'session.next.shell.ended',
+  'session.next.compaction.started',
+  'session.next.compaction.ended',
 ]);
 
 // After the final assistant text finishes streaming with no tools in flight, we

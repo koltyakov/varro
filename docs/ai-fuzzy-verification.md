@@ -64,6 +64,10 @@ For an unqualified **Run AI tests** or **Run fuzzy tests** request:
 9. A standard run is incomplete if it streams only synthetic prose or Markdown. It must include a
    realistic repository task in `tmp/opencode` that produces reasoning, separate tool calls, file edits,
    test output, diffs, and final response text while the UI is observed for frame-level flicker.
+10. Include the [action coverage matrix](ai-action-matrix.md). Exercise composer sends, queue changes,
+    steering, inline editing, tools, actual subagents, permissions, questions, cancellation, and
+    ownership recovery. For parity requests, report each action row for each backend version.
+    Independent lifecycle checks must still run when a scrolling scenario is blocked.
 
 ### Controller Session Safety
 
@@ -180,10 +184,12 @@ what was omitted.
 
 A separate VS Code profile does not isolate OpenCode storage. Live tests must use a dedicated
 OpenCode server with its database under `<varro-root>/artifacts/ai-test-data/`. The preparation,
-verification, live, cleanup, and editor-launch commands verify `/path` and use `lsof` to confirm
+verification, live, cleanup, and editor-launch commands verify `/path` and inspect native ownership to confirm
 that the listener owns that database. They reject production storage and symlink/hard-link aliases.
 Port 4096 is no longer a default. Missing isolation is a blocked test, never permission to use the
-production server. This verification currently requires macOS or Linux with `lsof`.
+production server. Verification uses `lsof` on macOS/Linux. On Windows it uses PowerShell
+`Get-NetTCPConnection` for listener ownership and the read-only Restart Manager resource query for
+database ownership; it never invokes shutdown or restart APIs.
 
 Start a dedicated server in a tracked terminal, for example with an available port:
 
@@ -746,6 +752,13 @@ from the bottom. Jump-to-latest visibility is not a follow-state indicator: the 
 hides near the bottom. Return uses that button when available, otherwise native `End` on the
 transcript. A dispatched input counts only after measurements confirm the bottom was reached while
 a tool was still running. The action record includes the attempted inputs even when return fails.
+
+Tool completion does not end scroll observation. Continue measuring until the viewport reaches the
+bottom or the scenario deadline expires. Record `reached-while-active`, `active-window-ended`, or
+`bottom-not-reached`, including the first sample where the running-tool window ended. Only the first
+outcome satisfies live coverage. `active-window-ended` means the timing precondition was exhausted,
+not that scrolling is broken; it must not be reported as a product scrolling failure or used to
+unlock AI-08. Smooth return can legitimately outlast a short tool call.
 
 Pass invariants:
 

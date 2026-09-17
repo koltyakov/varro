@@ -138,6 +138,7 @@ import {
   updatePermissionModeForSession,
 } from '../hooks/useOpenCode';
 import { deriveSelectedModelFromMessages } from '../hooks/routing-state';
+import { normalizeModelVariant } from '../../shared/model-variant';
 import {
   editingMessage,
   getMessageEditDraftBackup,
@@ -4484,7 +4485,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const changed =
       previous.providerID !== current.providerID ||
       previous.modelID !== current.modelID ||
-      (previous.variant ?? null) !== effectiveVariant();
+      normalizeModelVariant(previous.modelID, previous.variant) !==
+        normalizeModelVariant(current.modelID, effectiveVariant());
     if (!changed) return null;
 
     const provider = state.providers.find((item) => item.id === previous.providerID);

@@ -12,6 +12,7 @@ const projectRoot = path.resolve(scriptDirectory, '../..');
 const suitePath = path.join(scriptDirectory, 'suite.cjs');
 const fakeCliPath = path.join(scriptDirectory, 'fake-opencode.mjs');
 const keepSandboxes = process.env.VARRO_KEEP_VSCODE_SANDBOX === '1';
+const OPTIONAL_SCENARIOS = ['v2-first-run'];
 
 const SCENARIOS = [
   'clean-install-missing-cli',
@@ -33,12 +34,12 @@ const SCENARIOS = [
 function selectScenarios(args) {
   const requested = args.filter((arg) => !arg.startsWith('-'));
   if (args.includes('--list')) {
-    process.stdout.write(`${SCENARIOS.join('\n')}\n`);
+    process.stdout.write(`${[...SCENARIOS, ...OPTIONAL_SCENARIOS].join('\n')}\n`);
     process.exit(0);
   }
   if (requested.length === 0) return SCENARIOS;
   for (const scenario of requested) {
-    if (!SCENARIOS.includes(scenario)) {
+    if (![...SCENARIOS, ...OPTIONAL_SCENARIOS].includes(scenario)) {
       throw new Error(`Unknown VS Code sandbox scenario: ${scenario}`);
     }
   }
@@ -140,6 +141,7 @@ function getScenarioSettings(scenario, port, fakeCommand, missingCommand) {
     case 'auto-start-disabled':
       return { ...common, 'varro.server.autoStart': false };
     case 'required-update-disabled':
+    case 'v2-first-run':
       return {
         ...common,
         'varro.server.autoUpdate': false,
@@ -272,6 +274,12 @@ async function stopFakeCli(pidFile) {
 async function runScenario(scenario, vscodeExecutable) {
   // Keep this short: macOS limits local IPC socket paths to roughly 103 bytes.
   const root = await mkdtemp(path.join(os.tmpdir(), 'vr-'));
+  let dataRoot = root;
+  if (scenario === 'v2-first-run') {
+    const parent = path.join(projectRoot, 'artifacts', 'ai-test-data');
+    await mkdir(parent, { recursive: true });
+    dataRoot = await mkdtemp(path.join(parent, 'vscode-v2-'));
+  }
   const workspace = path.join(root, 'w');
   const settingsDirectory = path.join(workspace, '.vscode');
   const userData = path.join(root, 'u');
@@ -297,9 +305,23 @@ async function runScenario(scenario, vscodeExecutable) {
       );
     }
     const port = await reservePort();
-    const fakeCommand = await createFakeCliLauncher(root);
+    const fakeCommand = scenario === 'v2-first-run' ? process.env.VARRO_SANDBOX_V2_COMMAND : await createFakeCliLauncher(root);
+    if (!fakeCommand) throw new Error('Set VARRO_SANDBOX_V2_COMMAND to a released v2 binary');
+    await access(fakeCommand);
     const missingCommand = path.join(root, 'missing-opencode');
     const settings = getScenarioSettings(scenario, port, fakeCommand, missingCommand);
+    const environment = { ...process.env, ...getScenarioEnvironment(scenario, root) };
+    if (scenario === 'v2-first-run') {
+      for (const key of Object.keys(environment)) {
+        if (/^OPENCODE_|_API_KEY$|_TOKEN$|^AWS_|^AZURE_|^GOOGLE_|^ANTHROPIC_/.test(key)) delete environment[key];
+      }
+      environment.HOME = path.join(root, 'home');
+      environment.USERPROFILE = path.join(root, 'home');
+      environment.OPENCODE_TEST_HOME = path.join(root, 'home');
+      environment.VARRO_TEST_SERVER_URL = `http://127.0.0.1:${port}`;
+      environment.OPENCODE_CONFIG = path.join(dataRoot, 'opencode.json');
+      await writeFile(environment.OPENCODE_CONFIG, JSON.stringify({ enabled_providers: [] }));
+    }
     await writeFile(
       path.join(settingsDirectory, 'settings.json'),
       `${JSON.stringify(settings, null, 2)}\n`
@@ -331,13 +353,12 @@ async function runScenario(scenario, vscodeExecutable) {
         workspace,
       ],
       {
-        ...process.env,
-        ...getScenarioEnvironment(scenario, root),
-        XDG_DATA_HOME: path.join(root, 'data'),
-        XDG_STATE_HOME: path.join(root, 'state'),
-        XDG_CACHE_HOME: path.join(root, 'cache'),
-        XDG_CONFIG_HOME: path.join(root, 'config'),
-        OPENCODE_DB: path.join(root, 'opencode.db'),
+        ...environment,
+        XDG_DATA_HOME: path.join(dataRoot, 'data'),
+        XDG_STATE_HOME: path.join(dataRoot, 'state'),
+        XDG_CACHE_HOME: path.join(dataRoot, 'cache'),
+        XDG_CONFIG_HOME: path.join(dataRoot, 'config'),
+        OPENCODE_DB: path.join(dataRoot, 'opencode.db'),
         OPENCODE_PID: '',
         VARRO_SANDBOX_LAUNCH_FILE: launchFile,
         VARRO_SANDBOX_PID_FILE: pidFile,
@@ -355,6 +376,7 @@ async function runScenario(scenario, vscodeExecutable) {
       }
     );
     process.stdout.write(`VS Code sandbox scenario passed: ${scenario}\n`);
+    if (scenario === 'v2-first-run') await writeFile(path.join(dataRoot, 'result.json'), JSON.stringify({ scenario, passed: true, command: fakeCommand, database: path.join(dataRoot, 'opencode.db') }, null, 2));
   } finally {
     await stopFakeCli(pidFile);
     if (conflictServer) await new Promise((resolve) => conflictServer.close(resolve));

@@ -3,7 +3,7 @@ import type { ServerEvent } from '../../src/shared/protocol';
 import type { AssistantMessage, MessageEntry, Session, ToolPart } from '../../src/webview/types';
 
 for (const settleMs of [0, 600]) {
-  for (const replacement of ['edit', 'text'] as const) {
+  for (const replacement of ['edit', 'text', 'streaming-patch'] as const) {
     for (const shortHistory of [false, true]) {
       test(`activity exit anchoring yields to ${replacement} after ${settleMs} ms with ${shortHistory ? 'short' : 'overflowing'} history`, async ({
         page,
@@ -234,7 +234,12 @@ for (const settleMs of [0, 600]) {
                     properties: {
                       part: {
                         ...part,
-                        state: { status: 'pending' as const, input: part.state.input, raw: '' },
+                        tool: kind === 'streaming-patch' ? 'patch' : part.tool,
+                        state: {
+                          status: 'pending' as const,
+                          input: kind === 'streaming-patch' ? {} : part.state.input,
+                          raw: '',
+                        },
                       },
                     },
                   });
@@ -275,7 +280,14 @@ for (const settleMs of [0, 600]) {
         );
         if (replacement === 'edit')
           await expect(page.locator('.file-change-card-header').last()).toContainText('source.ts');
-        else
+        else if (replacement === 'streaming-patch') {
+          const editing = page.locator('[data-msg-id="handoff-edit-message"]');
+          await expect(editing.locator('.tool-invocation-title.shimmer-progress')).toHaveText(
+            'Editing'
+          );
+          await expect(editing.locator('.tool-status-running')).toBeVisible();
+          await expect(editing.locator('.assistant-activity-summary')).toHaveCount(0);
+        } else
           await expect(page.locator('.rendered-markdown').last()).toContainText(
             'Next step output.'
           );

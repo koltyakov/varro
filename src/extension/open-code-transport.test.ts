@@ -153,6 +153,51 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe('v1 session compatibility', () => {
+  it.each(['/session?limit=100', '/session/parent/children'])(
+    'hides v2 headers in %s without hiding empty or older sessions',
+    async (path) => {
+      const visible = [
+        { id: 'legacy', version: '1.18.31' },
+        { id: 'old', version: '0.15.0' },
+        { id: 'dev', version: 'dev' },
+        { id: 'empty' },
+      ];
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        Response.json([...visible, { id: 'v2', version: '2.0.6' }])
+      );
+      expect(await createTransport().request('GET', path)).toEqual(visible);
+    }
+  );
+
+  it('preserves the next cursor when an entire page is incompatible', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      Response.json([{ id: 'v2', version: '2.0.6' }], { headers: { 'x-next-cursor': 'next-page' } })
+    );
+    expect(
+      await createTransport().request('GET', '/session?limit=1', undefined, {
+        captureNextCursor: true,
+      })
+    ).toEqual({ data: [], nextCursor: 'next-page' });
+  });
+
+  it.each(['session.created', 'session.updated'])(
+    'does not reintroduce incompatible sessions through %s events',
+    async (type) => {
+      const transport = createTransport();
+      const event = { type, properties: { info: { id: 'v2', version: '2.0.6' } } };
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) =>
+        createEventResponse(init!.signal!, event)
+      );
+      const started = transport.startEventStream();
+      await vi.waitFor(() => expect(updateEventStreamStateMock).toHaveBeenCalledWith('healthy'));
+      transport.stopEventStream();
+      await started;
+      expect(emitEventMock).not.toHaveBeenCalled();
+    }
+  );
+});
+
 describe('AI test server isolation', () => {
   it('blocks metadata mutations, health checks, and event connections to an unverified server', async () => {
     vi.stubEnv('VARRO_TEST_SERVER_URL', 'http://127.0.0.1:49999');

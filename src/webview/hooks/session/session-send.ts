@@ -1273,6 +1273,7 @@ export async function sendMessageWithDependencies(
   if (sendBody.variant === undefined) delete sendBody.variant;
 
   const expectsAssistantReply = !sendBody.noReply && sendBody.delivery !== 'steer';
+  const isSteerDelivery = sendBody.delivery === 'steer';
   const optimisticMessage = createOptimisticUserMessage(
     sessionId,
     messageId,
@@ -1337,9 +1338,10 @@ export async function sendMessageWithDependencies(
     if (isForeignQueuedDispatch) return true;
     const syncResults = await Promise.allSettled([
       deps.syncSession(sessionId),
-      deps.syncSessionMessages(sessionId),
+      ...(isSteerDelivery ? [] : [deps.syncSessionMessages(sessionId)]),
       deps.recheckSessionStatus(sessionId),
     ]);
+    if (isSteerDelivery) await retryPostSendMessageSync(deps, sessionId, true);
     if (deps.getMessageCount(sessionId) === 0) {
       if (optimisticMessage) deps.appendOptimisticMessage?.(optimisticMessage);
       await retryPostSendMessageSync(deps, sessionId);
@@ -1498,7 +1500,11 @@ export async function ensureSessionPermissionWithDependencies(
   sessionId: string
 ): Promise<boolean> {
   const session = deps.getSession(sessionId);
-  const permission = deps.buildPermissionRules(deps.getPermissionMode(sessionId));
+  const mode = deps.getPermissionMode(sessionId);
+  const permission = deps.buildPermissionRules(mode);
+  // Default-mode resets belong to explicit mode changes. V2 replaces the rules,
+  // so sending an empty set here would erase session-scoped Always approvals.
+  if (mode === 'default' && permission.length === 0) return true;
   if (hasPermissionRules(session?.permission, permission)) return true;
 
   try {
@@ -1531,11 +1537,12 @@ async function retryPostSendMessageSync(
     syncSessionMessages(sessionId: string): Promise<void | boolean | object>;
     logError?(context: string, cause: unknown): void;
   },
-  sessionId: string
+  sessionId: string,
+  force = false
 ) {
   for (const delayMs of [250, 750]) {
     await new Promise((resolve) => setTimeout(resolve, delayMs));
-    if (deps.getMessageCount(sessionId) > 0) return;
+    if (!force && deps.getMessageCount(sessionId) > 0) return;
     try {
       await deps.syncSessionMessages(sessionId);
     } catch (err) {

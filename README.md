@@ -8,6 +8,8 @@
 
 Varro runs [OpenCode](https://opencode.ai) inside VS Code. It adds project-aware chat, parallel sessions, plan and change review, model and permission controls, commit-message generation, and usage reports.
 
+**OpenCode v1 and v2 are both supported.** Varro automatically detects the connected API and uses the same workbench for either version. OpenCode v2 is recommended for new installations. Supported versions start at v2 **2.0.5** and v1 **1.16.0**.
+
 OpenCode remains responsible for agents, providers, models, commands, skills, MCP servers, and their configuration. Varro reads that configuration and provides a VS Code interface for it.
 
 ![The Varro OpenCode workbench in VS Code](https://raw.githubusercontent.com/koltyakov/varro/main/assets/demo.png)
@@ -15,12 +17,16 @@ OpenCode remains responsible for agents, providers, models, commands, skills, MC
 ## Quick start
 
 1. [Install Varro](https://marketplace.visualstudio.com/items?itemName=koltyakov.varro) from the VS Code Marketplace.
-2. Install the OpenCode CLI with `npm install -g opencode-ai`.
+2. Install [OpenCode v2](https://opencode.ai/v2/docs/) with `npm install -g @opencode/cli` on macOS, Linux, or WSL. For native Windows, download the standalone CLI from that page.
 3. Run `opencode auth login`, or use `/connect` in Varro, if no provider is configured.
 4. Open a folder in VS Code and select `Varro` from the Activity Bar.
 5. Start a session. Varro starts or connects to OpenCode when needed.
 
-On native Windows, install OpenCode from a Windows terminal because Varro runs it on the local Windows extension host. In a VS Code WSL window, install OpenCode inside that WSL distribution instead. Varro and OpenCode then run on the Linux extension host. OpenCode [recommends WSL for the best Windows experience](https://opencode.ai/docs/windows-wsl), although native Windows is supported. Native OpenCode data, including `auth.json`, logs, and sessions, is under `%USERPROFILE%\.local\share\opencode`.
+Already using v1? You can keep it, or install it with `npm install -g opencode-ai`. Set `varro.server.command` to your v1 executable to select it explicitly. With this setting empty, Varro searches for `opencode2` first, then `opencode`. Current v1 and v2 packages both install `opencode`, so the command name alone does not identify the version. Run `opencode --version` to check. See [choosing and updating OpenCode](https://github.com/koltyakov/varro/blob/main/docs/usage.md#choose-and-update-opencode) before switching versions.
+
+> After switching from v1 to v2, you may need to run `Varro: Restart Server` from the Command Palette. Installing v2 does not replace an already running v1 server. If restart fails or Varro still shows v1, stop the old OpenCode process explicitly, especially on Windows, then restart with the v2 executable. Let active work finish first. See [restart recovery steps](https://github.com/koltyakov/varro/blob/main/docs/usage.md#if-restart-does-not-switch-to-v2) and confirm the connected version in Varro's status bar.
+
+Install OpenCode on the host where Varro runs. A native Windows VS Code window needs the Windows CLI; add it to `PATH` or set `varro.server.command` to its executable path. A VS Code WSL window needs OpenCode installed inside that WSL distribution. Native OpenCode data is under `%USERPROFILE%\.local\share\opencode`; WSL uses the Linux data directory.
 
 Varro supports VS Code and VSCodium. Support for other VS Code forks is limited; see [VS Code fork compatibility](https://github.com/koltyakov/varro/blob/main/docs/vscode-forks.md).
 
@@ -59,6 +65,8 @@ Varro supports VS Code and VSCodium. Support for other VS Code forks is limited;
 | LSP, formatters, and tools | Integrated | Show language-server status and tool activity. OpenCode owns definitions and execution. |
 | Configuration and TUI | Handoff | Edit instruction files or continue a session in the OpenCode TUI. |
 
+Coverage depends on the connected version. The supported v2 API has no session sharing or OpenCode LSP service. Varro disables sharing on v2; VS Code Problems can still be attached as context. V2 session annotations are stored locally by Varro. See [version differences and history import](https://github.com/koltyakov/varro/blob/main/docs/usage.md#version-differences-and-history).
+
 ## Sessions
 
 Varro filters sessions to the current workspace and groups them into `Recent`, `Archive`, and `Recycle Bin`. Filters identify `Running`, `Needs attention`, `Failed`, `Plan ready`, and `Completed` sessions. Rows can show queued prompts, changed files, added and removed lines, token use, duration, and current state.
@@ -95,7 +103,7 @@ Permission requests provide `Reject`, `Once`, and `Always` actions. Each session
 
 Child sessions inherit the nearest selected mode in their session tree. Manual child requests appear in the parent conversation while remaining owned by the child session.
 
-Varro initially selects `Auto` unless `varro.chat.defaultPermissionMode` or a saved project/global selection says otherwise. `Default` does not mean that every action requires approval. Without custom rules, OpenCode allows most permissions, asks for `doom_loop` and `external_directory`, and blocks reading `.env` files and variants while allowing `.env.example`. See [OpenCode permissions](https://opencode.ai/docs/permissions/) to configure global or per-agent `allow`, `ask`, and `deny` rules, including rules matched by tool, command, path, subagent, URL, and external directory.
+Varro initially selects `Auto` unless `varro.chat.defaultPermissionMode` or a saved project/global selection says otherwise. `Default` follows the connected OpenCode version's global and agent rules. V2 uses ordered `permissions` rules with `action`, `resource`, and `effect`; supported v1-format rules remain accepted. See [v2 permissions](https://opencode.ai/v2/docs/permissions/) or [v1 permissions](https://opencode.ai/docs/permissions/) for syntax and defaults.
 
 See the [Varro permissions guide](https://github.com/koltyakov/varro/blob/main/docs/permissions.md) for mode behavior, manual approvals, and automatic review details.
 
@@ -137,7 +145,7 @@ Varro never mixes staged and unstaged changes, stages files, or commits automati
 
 Varro connects to `http://127.0.0.1:4096` by default. Set `varro.server.port` to another port from 1 through 65535. For manual server management, disable the deprecated debug setting `varro.server.autoStart` and run `opencode serve --port 4096`.
 
-The status bar shows the active OpenCode version and available updates. On macOS and Linux, `varro.server.autoUpdate` installs the latest OpenCode CLI update. Native Windows does not replace the CLI in the background. It shows an update prompt, waits for active work to finish, and stops a Varro-managed server before opening the update command so Windows releases its lock on `opencode.exe`. Stop a separately managed server yourself before updating.
+The status bar shows the active OpenCode version and available updates. On macOS and Linux, `varro.server.autoUpdate` installs updates within the installed CLI family: `@opencode/cli` for v2 or `opencode-ai` for v1. Updating v1 does not migrate it to v2. Native Windows does not replace the CLI in the background. It shows an update prompt, waits for active work to finish, and stops a Varro-managed server before opening the update command so Windows releases its lock on `opencode.exe`. Stop a separately managed server yourself before updating.
 
 Varro reloads global OpenCode configuration when OpenCode is idle. Changes to project configuration may require `Varro: Restart Server`. This command waits for active work and only restarts a server managed by Varro. Restart a manually launched server in its terminal.
 
@@ -145,7 +153,7 @@ Varro reloads global OpenCode configuration when OpenCode is idle. Changes to pr
 
 - [VS Code](https://code.visualstudio.com/) or [VSCodium](https://vscodium.com/) 1.120 or newer
 - [Node.js](https://nodejs.org/) 22.22.2+ on Node 22, or Node 24.15.0+
-- [OpenCode CLI](https://opencode.ai/docs) 1.16.0 or newer on `PATH`, or configured through `varro.server.command`
+- [OpenCode v2 CLI](https://opencode.ai/v2/docs/) 2.0.5+ recommended, or [v1 CLI](https://opencode.ai/docs/) 1.16.0+, on `PATH` or configured through `varro.server.command`. Tested with v2 2.0.7 and v1 1.18.31
 - A trusted, non-virtual workspace. Remote workspaces run Varro and OpenCode on the remote extension host
 
 ## Documentation

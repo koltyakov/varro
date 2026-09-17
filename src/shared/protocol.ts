@@ -1015,6 +1015,7 @@ export type WebviewMessage =
     }
   | { type: 'session/open-in-sidebar'; payload: { sessionId: string; directory?: string } }
   | { type: 'session/open-in-opencode'; payload: { sessionId: string; directory?: string } }
+  | { type: 'session/import-v1'; payload: { sessionId: string; directory: string } }
   | { type: 'chat/new-editor' }
   | { type: 'chat/new-window' }
   | { type: 'window-chat-theme/set-reversed'; payload: { reversed: boolean } }

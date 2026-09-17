@@ -1008,6 +1008,8 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     return messageId;
   };
   const settleAssistantStepEnd = (sessionId: string, props: UnknownRecord) => {
+    // V2 has an explicit execution boundary; a provider turn can finish before queued input runs.
+    if (props.executionContinues === true) return false;
     if (isContinuationStepEnd('session.next.step.ended', props)) return false;
     return settleAssistantStepCompletion(
       sessionId,
@@ -1441,7 +1443,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const partialPart = asRecord(rawPart);
       const partSessionID = isString(partialPart?.sessionID) ? partialPart.sessionID : undefined;
       if (partSessionID && partialPart?.type === 'compaction') {
-        sessionStore.setSessionCompacting(partSessionID, false);
+        sessionStore.setSessionCompacting(partSessionID, partialPart.status === 'running');
       }
       if (!isSessionInActiveTree(partSessionID)) return;
 
@@ -1526,10 +1528,21 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         if (toolTimingUpdate?.ended) {
           updateExistingToolPartExecutionTime(toolTimingUpdate.sessionId, toolTimingUpdate.callId);
         }
+        const assistantMessageID = getEventString(p, 'assistantMessageID');
         if (
           !eventName.startsWith('session.next.compaction.') &&
-          ignoreStaleProgressAfterFinishedAssistant(sessionID)
+          (assistantMessageID
+            ? ignoreStaleProgressForCompletedMessage(sessionID, assistantMessageID)
+            : ignoreStaleProgressAfterFinishedAssistant(sessionID))
         ) {
+          // A completed assistant does not mean later shell or skill records are already loaded.
+          if (
+            TRANSCRIPT_SYNC_SESSION_EVENTS.has(eventName) &&
+            seqStatus !== 'gap' &&
+            isSessionInActiveTree(sessionID)
+          ) {
+            scheduleMessageSync(sessionID, true);
+          }
           return;
         }
         const activeTreeEvent = isSessionInActiveTree(sessionID);
@@ -1539,6 +1552,15 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
           return;
         }
         markSessionProgress(sessionID);
+        if (
+          eventName === 'session.next.compaction.started' ||
+          eventName === 'session.next.compaction.ended'
+        ) {
+          sessionStore.setSessionCompacting(
+            sessionID,
+            eventName === 'session.next.compaction.started'
+          );
+        }
         if (
           eventName === 'session.next.shell.started' ||
           eventName === 'session.next.tool.called'
@@ -1566,7 +1588,15 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
           // Synchronized events arrive in durable order, so a contiguous seq means we have
           // not missed anything. Events that create transcript records still need a fetch
           // because Varro does not project those record types directly.
-          const transcriptSync = TRANSCRIPT_SYNC_SESSION_EVENTS.has(eventName);
+          // V2 creates a separate assistant message for each step. A contiguous event
+          // sequence still needs a fetch when that new message is not loaded yet.
+          const transcriptSync =
+            TRANSCRIPT_SYNC_SESSION_EVENTS.has(eventName) ||
+            (eventName === 'session.next.step.started' &&
+              'executionContinues' in p &&
+              p.executionContinues === true &&
+              !!assistantMessageID &&
+              !findAssistantMessage(sessionID, assistantMessageID));
           if (seqStatus !== 'gap' && (transcriptSync || seqStatus !== 'ok')) {
             scheduleMessageSync(sessionID, transcriptSync);
           }

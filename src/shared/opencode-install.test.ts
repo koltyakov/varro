@@ -144,6 +144,19 @@ describe('getUpgradeCommand', () => {
     expect(getUpgradeCommand('curl', 'win32')).toBeNull();
   });
 
+  it.each([
+    ['npm', 'npm install -g @opencode/cli@latest'],
+    ['pnpm', 'pnpm add -g --allow-build=@opencode/cli @opencode/cli@latest'],
+    ['yarn', 'yarn global add @opencode/cli@latest'],
+    ['bun', 'bun add -g --trust @opencode/cli@latest'],
+    ['brew', 'brew upgrade anomalyco/tap/opencode-v2'],
+    ['curl', 'curl -fsSL https://opencode.ai/v2/install | bash'],
+  ] as const)('keeps v2 %s recovery in the v2 package family', (method, expected) => {
+    expect(getUpgradeCommand(method, 'darwin', '@opencode/cli')).toBe(expected);
+    expect(getRecoveryCommand('network', method, 'darwin', '@opencode/cli')).toBe(expected);
+    expect(OPENCODE_TERMINAL_COMMANDS).toContain(expected);
+  });
+
   it('recommends nothing for custom or unknown installs', () => {
     expect(getUpgradeCommand('custom', 'darwin')).toBeNull();
     expect(getUpgradeCommand('unknown', 'darwin')).toBeNull();
@@ -280,6 +293,7 @@ describe('OPENCODE_TERMINAL_COMMANDS', () => {
       }
     }
     expect(OPENCODE_TERMINAL_COMMANDS).toContain('npm i -g opencode-ai');
+    expect(OPENCODE_TERMINAL_COMMANDS).toContain('npm i -g @opencode/cli');
     expect(OPENCODE_TERMINAL_COMMANDS).toContain('opencode upgrade');
   });
 });

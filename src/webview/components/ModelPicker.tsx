@@ -14,6 +14,7 @@ import {
 import {
   formatVariantLabel as formatThinkingLabel,
   formatContextLimit,
+  formatModelReleaseDate,
   formatProviderLimitTitle,
   formatProviderLimitCompact,
   formatProviderLimitCompactPrefix,
@@ -695,6 +696,14 @@ export function ModelPicker(props: {
                 <dt>Provider</dt>
                 <dd>{entry().provider.name}</dd>
               </div>
+              <Show when={formatModelReleaseDate(entry().model.release_date)}>
+                {(releaseDate) => (
+                  <div>
+                    <dt>Released</dt>
+                    <dd>{releaseDate()}</dd>
+                  </div>
+                )}
+              </Show>
               <div>
                 <dt>Inputs</dt>
                 <dd>{formatModelInputs(entry().model.capabilities.input)}</dd>

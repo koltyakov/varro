@@ -16,6 +16,7 @@ import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as ServerUtils from './server-utils';
+import { Service } from '@opencode/client/service';
 
 const { loggerMock, spawnMock, vscodeMock, waitForProcessExitMock } = vi.hoisted(() => ({
   loggerMock: {
@@ -42,6 +43,7 @@ const { loggerMock, spawnMock, vscodeMock, waitForProcessExitMock } = vi.hoisted
 }));
 
 vi.mock('vscode', () => vscodeMock);
+vi.mock('@opencode/client/service', () => ({ Service: { discover: vi.fn() } }));
 vi.mock('./logger', () => ({ logger: loggerMock }));
 vi.mock('child_process', () => ({ spawn: spawnMock, default: { spawn: spawnMock } }));
 vi.mock('cross-spawn', () => ({ default: spawnMock, spawn: spawnMock }));
@@ -84,7 +86,151 @@ describe('appendBoundedCliOutput', () => {
   });
 });
 
+describe('v2 shared service routing', () => {
+  it('uses the registered service port and credentials without spawning a second runner', async () => {
+    const manager = new OpenCodeProcess(4096, true, 'opencode2');
+    manager.rememberInstalledCliVersion('2.0.6');
+    vi.mocked(Service.discover).mockResolvedValue({
+      url: 'http://127.0.0.1:43123',
+      auth: { type: 'basic', username: 'opencode', password: 'fixture-password' },
+    });
+
+    expect(await manager.discoverSharedServer()).toBe(true);
+    expect(manager.url).toBe('http://127.0.0.1:43123');
+    expect(manager.serverAuthorization).toBe(
+      `Basic ${Buffer.from('opencode:fixture-password').toString('base64')}`
+    );
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(manager.managedProcess).toBe(false);
+  });
+
+  it('does not discover a v2 service for a v1 CLI', async () => {
+    const manager = new OpenCodeProcess(4096, true, 'opencode');
+    manager.rememberInstalledCliVersion('1.18.31');
+    expect(await manager.discoverSharedServer()).toBe(false);
+    expect(Service.discover).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      name: 'matching legacy service',
+      host: '127.0.0.1',
+      pid: process.pid,
+      version: '2.0.5',
+      status: 200,
+      expected: true,
+    },
+    {
+      name: 'different process',
+      host: '127.0.0.1',
+      pid: process.pid + 1,
+      version: '2.0.5',
+      status: 200,
+      expected: false,
+    },
+    {
+      name: 'different version',
+      host: '127.0.0.1',
+      pid: process.pid,
+      version: '2.0.6',
+      status: 200,
+      expected: false,
+    },
+    {
+      name: 'rejected credentials',
+      host: '127.0.0.1',
+      pid: process.pid,
+      version: '2.0.5',
+      status: 401,
+      expected: false,
+    },
+    {
+      name: 'remote registration',
+      host: 'example.com',
+      pid: process.pid,
+      version: '2.0.5',
+      status: 200,
+      expected: false,
+    },
+  ])(
+    'validates $name when the newer client cannot discover it',
+    async ({ host, pid, version, status, expected }) => {
+      const root = await mkdtemp(join(tmpdir(), 'varro-legacy-discovery-'));
+      await mkdir(join(root, 'opencode'));
+      const registration = JSON.stringify({
+        url: `http://${host}:43123`,
+        pid: process.pid,
+        version: '2.0.5',
+        password: 'legacy-fixture-password',
+      });
+      const path = join(root, 'opencode/service.json');
+      await writeFile(path, registration);
+      vi.stubEnv('XDG_STATE_HOME', root);
+      vi.mocked(Service.discover).mockResolvedValue(undefined);
+      const fetchMock = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValue(new Response(JSON.stringify({ pid, version }), { status }));
+      try {
+        const manager = new OpenCodeProcess(
+          4096,
+          true,
+          'opencode2',
+          false,
+          undefined,
+          join(root, 'lease.json')
+        );
+        manager.rememberInstalledCliVersion('2.0.6');
+        expect(await manager.discoverSharedServer()).toBe(expected);
+        expect(manager.port).toBe(expected ? 43123 : 4096);
+        if (host === '127.0.0.1') {
+          expect(fetchMock).toHaveBeenCalledWith(
+            new URL('http://127.0.0.1:43123/api/status'),
+            expect.objectContaining({
+              headers: {
+                Authorization: `Basic ${Buffer.from('opencode:legacy-fixture-password').toString('base64')}`,
+              },
+              redirect: 'error',
+              signal: expect.any(AbortSignal),
+            })
+          );
+        } else expect(fetchMock).not.toHaveBeenCalled();
+        expect(await readFile(path, 'utf8')).toBe(registration);
+        expect(spawnMock).not.toHaveBeenCalled();
+        expect(manager.managedProcess).toBe(false);
+      } finally {
+        vi.unstubAllEnvs();
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it('registers a new v2 server for nested CLI discovery', () => {
+    const child = Object.assign(new EventEmitter(), {
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+      exitCode: null,
+      signalCode: null,
+    });
+    spawnMock.mockReturnValue(child);
+    const manager = new OpenCodeProcess(4096, true, 'opencode2');
+    manager.rememberInstalledCliVersion('2.0.6');
+    manager.launchServer({
+      getWorkspaceCwd: () => '/repo',
+      onStdout: vi.fn(),
+      onStderr: vi.fn(),
+      onExit: vi.fn(),
+      onError: vi.fn(),
+    });
+    expect(spawnMock).toHaveBeenCalledWith(
+      manager.resolveCommand(),
+      ['serve', '--service', '--port', '4096'],
+      expect.anything()
+    );
+  });
+});
+
 beforeEach(() => {
+  vi.mocked(Service.discover).mockReset();
   delete process.env.OPENCODE_CONFIG;
   delete process.env.OPENCODE_CONFIG_CONTENT;
   delete process.env.XDG_CONFIG_HOME;
@@ -439,6 +585,74 @@ describe('OpenCodeProcess Windows termination', () => {
 });
 
 describe('OpenCodeProcess update notification actions', () => {
+  it.each([
+    ['1.14.20', '1.14.22', 'opencode-ai'],
+    ['2.0.0', '2.0.1', '@opencode%2Fcli'],
+  ])('checks the registry for selected CLI %s', async (installed, latest, packageName) => {
+    const manager = new OpenCodeProcess(4096, false);
+    // A stale cache must not override the version passed by maintenance.
+    manager.rememberInstalledCliVersion(installed.startsWith('1.') ? '2.0.0' : '1.14.20');
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ version: latest })));
+
+    await expect(manager.readLatestCliVersion(installed)).resolves.toBe(latest);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://registry.npmjs.org/${packageName}/latest`,
+      expect.any(Object)
+    );
+  });
+
+  it('does not check for updates when no CLI is installed', async () => {
+    const manager = new OpenCodeProcess(4096, false);
+    vi.spyOn(manager, 'readInstalledCliVersion').mockResolvedValue(null);
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    await expect(manager.readLatestCliVersion()).resolves.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a registry release from another major version', async () => {
+    const manager = new OpenCodeProcess(4096, false);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ version: '2.0.1' }))
+    );
+    await expect(manager.readLatestCliVersion('1.14.20')).resolves.toBeNull();
+  });
+
+  it('does not promote or automatically upgrade v1 to v2', async () => {
+    const manager = new OpenCodeProcess(4096, false, '/custom/opencode-v1');
+    const upgradeRunningServer = vi.fn();
+    const upgradeCli = vi.spyOn(manager, 'upgradeCli');
+    await manager.maybeSuggestCliUpdate('1.14.20', {
+      readLatestCliVersion: vi.fn().mockResolvedValue('2.0.1'),
+      upgradeRunningServer,
+      requestMaintenanceCheck: vi.fn(),
+      getWorkspaceCwd: () => undefined,
+      prepareForWindowsCliUpgrade: vi.fn(),
+    });
+    expect(upgradeRunningServer).not.toHaveBeenCalled();
+    expect(upgradeCli).not.toHaveBeenCalled();
+    expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
+  });
+
+  it('automatically updates the selected v2 CLI', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    const manager = new OpenCodeProcess(4096, false, '/custom/opencode2');
+    const upgradeCli = vi.spyOn(manager, 'upgradeCli').mockResolvedValue('');
+    vi.spyOn(manager, 'readInstalledCliVersion').mockResolvedValue('2.0.1');
+    await expect(
+      manager.maybeSuggestCliUpdate('2.0.0', {
+        readLatestCliVersion: vi.fn().mockResolvedValue('2.0.1'),
+        upgradeRunningServer: vi.fn().mockResolvedValue(false),
+        requestMaintenanceCheck: vi.fn(),
+        getWorkspaceCwd: () => undefined,
+        prepareForWindowsCliUpgrade: vi.fn(),
+      })
+    ).resolves.toBe('2.0.1');
+    expect(upgradeCli).toHaveBeenCalledWith('2.0.1');
+    expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
+  });
+
   it('logs a rejected update action chain instead of leaving it unhandled', async () => {
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
     vscodeMock.window.showInformationMessage.mockResolvedValueOnce('Run Upgrade');
@@ -2666,6 +2880,55 @@ describe('OpenCodeProcess config ownership', () => {
 });
 
 describe('OpenCodeProcess install resolution', () => {
+  it.each([
+    ['darwin', ''],
+    ['linux', ''],
+    ['win32', '.exe'],
+    ['win32', '.cmd'],
+    ['win32', '.bat'],
+  ])('prefers v2 across search directories on %s with suffix %s', async (platform, suffix) => {
+    Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+    const directory = await mkdtemp(join(tmpdir(), 'varro-opencode-discovery-'));
+    const v1Directory = join(directory, 'v1');
+    const v2Directory = join(directory, 'v2');
+    await mkdir(v1Directory);
+    await mkdir(v2Directory);
+    const v1 = join(v1Directory, `opencode${suffix}`);
+    const v2 = join(v2Directory, `opencode2${suffix}`);
+    await writeFile(v1, '');
+    await writeFile(v2, '');
+    const manager = new OpenCodeProcess(4096, true, '  ');
+    vi.spyOn(
+      manager as unknown as { serverPathEntries(): string[] },
+      'serverPathEntries'
+    ).mockReturnValue([v1Directory, v2Directory]);
+    try {
+      expect(manager.resolveCommandInfo()).toEqual({ command: v2, found: true });
+
+      manager.updateLaunchSettings({ autoStart: true, command: 'opencode' });
+      expect(manager.resolveCommandInfo()).toEqual({ command: v1, found: true });
+
+      manager.updateLaunchSettings({ autoStart: true, command: v1 });
+      expect(manager.resolveCommandInfo()).toEqual({ command: v1, found: true });
+
+      manager.updateLaunchSettings({ autoStart: true, command: '' });
+      expect(manager.resolveCommandInfo()).toEqual({ command: v2, found: true });
+
+      await rm(v2);
+      manager.clearResolvedCommandCache();
+      expect(manager.resolveCommandInfo()).toEqual({ command: v1, found: true });
+
+      await rm(v1);
+      manager.clearResolvedCommandCache();
+      expect(manager.resolveCommandInfo()).toEqual({
+        command: platform === 'win32' ? 'opencode.cmd' : 'opencode',
+        found: false,
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('reports a configured path that does not exist as missing', () => {
     const missingPath = join(tmpdir(), 'varro-missing-opencode-binary');
     const manager = new OpenCodeProcess(4096, true, missingPath);

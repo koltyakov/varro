@@ -127,6 +127,20 @@ describe('assistant activity summaries', () => {
   });
 
   it('keeps actionable and delegated activity outside compact groups', () => {
+    expect(
+      shouldCompactAssistantActivityPart(
+        {
+          ...completedTool('read-rejected', 'read'),
+          state: {
+            status: 'error',
+            input: { path: '/repo/README.md' },
+            error: 'The user declined this tool call',
+            time: { start: 1, end: 2 },
+          },
+        },
+        { keepEditInline: false, keepReasoningInline: false }
+      )
+    ).toBe(false);
     expect(isAssistantActivityPart(completedTool('read-1', 'read'))).toBe(true);
     expect(isAssistantActivityPart(completedTool('question-1', 'question'))).toBe(false);
     expect(isAssistantActivityPart(completedTool('question-2', 'functions.question'))).toBe(false);

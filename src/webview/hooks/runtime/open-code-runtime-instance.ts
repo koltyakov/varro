@@ -531,10 +531,22 @@ function mergeSessionMessages(
   sessions: Session[] = appStore.state.sessions
 ): MessageEntry[] {
   const sessionMessages = incoming.filter((entry) => entry.info.sessionID === sessionId);
-  if (!current.some((entry) => entry.info.sessionID !== sessionId)) return incoming;
+  const pendingOptimisticMessages = current.filter(
+    (entry) =>
+      entry.info.sessionID === sessionId &&
+      entry.info.role === 'user' &&
+      entry.parts.some((part) => part.id.startsWith(`${entry.info.id}-part-`)) &&
+      !sessionMessages.some((candidate) => candidate.info.id === entry.info.id)
+  );
+  const incomingWithPendingOptimistic =
+    pendingOptimisticMessages.length > 0
+      ? [...sessionMessages, ...pendingOptimisticMessages]
+      : sessionMessages;
+  if (!current.some((entry) => entry.info.sessionID !== sessionId))
+    return incomingWithPendingOptimistic;
 
   const incomingIndexById = new Map(
-    sessionMessages.map((entry, index) => [entry.info.id, index] as const)
+    incomingWithPendingOptimistic.map((entry, index) => [entry.info.id, index] as const)
   );
   const hasOverlap = current.some(
     (entry) => entry.info.sessionID === sessionId && incomingIndexById.has(entry.info.id)
@@ -543,7 +555,11 @@ function mergeSessionMessages(
     const firstSessionIndex = current.findIndex((entry) => entry.info.sessionID === sessionId);
     const session = sessions.find((candidate) => candidate.id === sessionId);
     if (firstSessionIndex < 0 && !session?.parentID) {
-      return mergeParentSnapshotWithRecoveredSessions(sessionMessages, current, sessions);
+      return mergeParentSnapshotWithRecoveredSessions(
+        incomingWithPendingOptimistic,
+        current,
+        sessions
+      );
     }
     const insertionIndex =
       firstSessionIndex < 0
@@ -551,7 +567,7 @@ function mergeSessionMessages(
         : firstSessionIndex;
     return [
       ...current.slice(0, insertionIndex).filter((entry) => entry.info.sessionID !== sessionId),
-      ...sessionMessages,
+      ...incomingWithPendingOptimistic,
       ...current.slice(insertionIndex).filter((entry) => entry.info.sessionID !== sessionId),
     ];
   }
@@ -566,9 +582,11 @@ function mergeSessionMessages(
 
     const matchingIndex = incomingIndexById.get(entry.info.id);
     if (matchingIndex === undefined || matchingIndex < incomingIndex) continue;
-    while (incomingIndex <= matchingIndex) merged.push(sessionMessages[incomingIndex++]!);
+    while (incomingIndex <= matchingIndex)
+      merged.push(incomingWithPendingOptimistic[incomingIndex++]!);
   }
-  while (incomingIndex < sessionMessages.length) merged.push(sessionMessages[incomingIndex++]!);
+  while (incomingIndex < incomingWithPendingOptimistic.length)
+    merged.push(incomingWithPendingOptimistic[incomingIndex++]!);
   return merged;
 }
 
@@ -1978,8 +1996,23 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     await Promise.all([dataLoaders.refreshRoutingState(), loadCompatibilityState()]);
   }
 
+  function removeUnavailableSession(sessionId: string) {
+    // A missing record on another server is not a deletion of its saved drafts or settings.
+    batch(() => {
+      sessionStore.setSessions(
+        appStore.state.sessions.filter((session) => session.id !== sessionId)
+      );
+      if (appStore.state.activeSessionId === sessionId) {
+        sessionLifecycleOperations.clearActiveSessionState();
+        uiStore.setShowSessionPicker(true);
+      }
+    });
+  }
+
   async function reconcileServerState() {
     const activeSessionId = appStore.state.activeSessionId;
+    const connection = connectionGeneration;
+    const workspace = workspaceGeneration;
     const results = await Promise.allSettled([
       loadSessions(),
       loadRecycleBin(),
@@ -1990,7 +2023,22 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       loadLsps(),
       reloadWorkspaceCatalogs(),
       loadCompatibilityState(),
-      ...(activeSessionId ? [syncSession(activeSessionId)] : []),
+      ...(activeSessionId
+        ? [
+            syncSession(activeSessionId).catch((error) => {
+              if (
+                connection === connectionGeneration &&
+                workspace === workspaceGeneration &&
+                error instanceof Error &&
+                /^404\b.*session not found/i.test(error.message)
+              ) {
+                removeUnavailableSession(activeSessionId);
+                return;
+              }
+              throw error;
+            }),
+          ]
+        : []),
     ]);
     for (const result of results) {
       if (result.status === 'rejected') logError('reconcileServerState', result.reason);
@@ -2212,7 +2260,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           getSession: (id) => appStore.state.sessions.find((session) => session.id === id),
           buildPermissionRules: (mode) => getSessionPermissionRulesForMode(mode, 'update'),
           getPermissionMode: permissionsStore.getPermissionModeForSession,
-          updateSessionPermission: (id, input) => client.session.update(id, input, options),
+          updateSessionPermission: (id, input) =>
+            client.session.update(id, input, {
+              directory: options?.directory ?? getSessionDirectory(id),
+            }),
           upsertSession,
           setError: uiStore.setError,
         },
@@ -2262,6 +2313,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   const sessionSyncOperations = new SessionSyncOperations(
     {
+      removeUnavailableSession,
+      importLegacySession: (sessionId, directory) =>
+        postMessage({ type: 'session/import-v1', payload: { sessionId, directory } }),
       getActiveSessionId: () => appStore.state.activeSessionId,
       setActiveSessionId: sessionStore.setActiveSessionId,
       clearPendingAbort,

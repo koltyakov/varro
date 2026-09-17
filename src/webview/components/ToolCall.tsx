@@ -284,6 +284,13 @@ export function formatToolTitle(toolName: string, state: ToolPart['state']) {
   const title = getStateTitle(state);
   const normalizedToolName = normalizeToolName(toolName);
 
+  if (
+    isApplyPatchTool(normalizedToolName) &&
+    (state.status === 'pending' || state.status === 'running')
+  ) {
+    return 'Editing';
+  }
+
   if (getToolKind(normalizedToolName) === 'search') {
     const pattern = getSearchPattern(input);
     if (pattern) return `Search: ${pattern}`;
@@ -293,6 +300,13 @@ export function formatToolTitle(toolName: string, state: ToolPart['state']) {
   if (normalizedToolName === 'task') {
     const description = input.description;
     if (isString(description) && description.trim()) return description.trim();
+  }
+
+  if (normalizedToolName === 'skill') {
+    for (const key of ['id', 'name']) {
+      const name = input[key];
+      if (isString(name) && name.trim()) return `Skill: ${name.trim()}`;
+    }
   }
 
   if (normalizedToolName === 'webfetch') {

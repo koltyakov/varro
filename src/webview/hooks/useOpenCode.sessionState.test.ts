@@ -587,8 +587,8 @@ describe('useOpenCode session state flows', () => {
 
     const slowSession = Promise.resolve({ ...session('session-1'), title: 'Slow session' });
     const fastSession = Promise.resolve({ ...session('session-2'), title: 'Fast session' });
-    const slowMessages = Promise.resolve([{ info: userMessage('user-1'), parts: [] }]);
-    const fastMessages = Promise.resolve([{ info: userMessage('user-2'), parts: [] }]);
+    const slowMessages = Promise.resolve([userEntry('user-1', 'session-1')]);
+    const fastMessages = Promise.resolve([userEntry('user-2', 'session-2')]);
 
     clientMocks.sessionGet.mockImplementation(async (id: string) =>
       id === 'session-1' ? slowSession : fastSession

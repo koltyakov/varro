@@ -108,7 +108,16 @@ export function consumeInterruptedSessionIds() {
 }
 
 export function markSessionSeen(id: string, updatedAt?: number) {
-  const timestamp = nextSessionMarkerTimestamp(state.lastSeenSessions[id], updatedAt);
+  // Opening a session acknowledges its known markers even when the server clock is ahead.
+  // Explicit message timestamps acknowledge only that message, not newer activity.
+  const seenAt =
+    updatedAt ??
+    Math.max(
+      Date.now(),
+      state.sessions.find((session) => session.id === id)?.time.updated ?? 0,
+      state.completedSessionResponses[id] ?? 0
+    );
+  const timestamp = nextSessionMarkerTimestamp(state.lastSeenSessions[id], seenAt);
   if (timestamp === null) return false;
   setState('lastSeenSessions', id, timestamp);
   writeMarkerForSession(STORAGE_KEYS.lastSeenSessions, id, timestamp);

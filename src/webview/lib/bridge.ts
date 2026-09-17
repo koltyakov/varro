@@ -1,4 +1,5 @@
 import { batch } from 'solid-js';
+import { unwrap } from 'solid-js/store';
 import type { ExtensionMessage, WebviewMessage } from '../../shared/protocol';
 import { parseExtensionMessage } from '../../shared/extension-message';
 import { isString, type UnknownRecord, isObject } from './runtime-values';
@@ -135,7 +136,8 @@ function sendToExtension(msg: WebviewMessage): SendResult {
   const send = bridgeWindow.__sendToExtension;
   if (!send) return { sent: false };
   try {
-    send(msg);
+    // Solid store proxies cannot cross the host's structured-clone boundary.
+    send(unwrap(msg));
     return { sent: true };
   } catch (error) {
     return { sent: false, error };

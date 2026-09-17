@@ -24,12 +24,24 @@ export function normalizeCliOutput(value: unknown): string {
 }
 
 export function parseModelRoute(value: unknown): OpenCodeModelRoute | null {
+  const model = asRecord(value);
+  if (
+    model &&
+    typeof model.providerID === 'string' &&
+    typeof model.model === 'string' &&
+    model.providerID &&
+    model.model
+  ) {
+    return { providerID: model.providerID, modelID: model.model };
+  }
   if (typeof value !== 'string') return null;
   const separatorIndex = value.indexOf('/');
   if (separatorIndex <= 0 || separatorIndex === value.length - 1) return null;
+  const modelID = value.slice(separatorIndex + 1).split('#')[0]!;
+  if (!modelID) return null;
   return {
     providerID: value.slice(0, separatorIndex),
-    modelID: value.slice(separatorIndex + 1),
+    modelID,
   };
 }
 

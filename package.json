@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: OpenCode Workbench",
-  "version": "0.28.26",
+  "version": "0.29.0",
   "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
@@ -49,6 +49,8 @@
     "test:scripts": "node --test scripts/*.test.mjs",
     "test:scripts:browser": "node --test scripts/browser/*.test.mjs",
     "test:compatibility": "node scripts/opencode-compatibility/run.mjs --check-floor --report artifacts/opencode-compatibility.json --summary scripts/opencode-compatibility/verified.json",
+    "test:compatibility:adapters": "node scripts/opencode-compatibility/run-adapters.mjs",
+    "test:compatibility:ui": "npm run build && node scripts/opencode-compatibility/run-ui.mjs",
     "compatibility:discover": "node scripts/opencode-compatibility/run.mjs --report artifacts/opencode-compatibility.json",
     "pretest:e2e": "playwright install chromium",
     "test:e2e": "playwright test",
@@ -69,6 +71,7 @@
   },
   "dependencies": {
     "@opencode-ai/sdk": "^1.18.31",
+    "@opencode/client": "^2.0.7",
     "cross-spawn": "7.0.6",
     "dompurify": "3.4.15",
     "highlight.js": "11.12.0",
@@ -88,7 +91,7 @@
     "css.escape": "1.5.1",
     "esbuild": "0.28.2",
     "iconoir": "7.12.1",
-    "jsdom": "30.0.1",
+    "jsdom": "30.1.0",
     "material-icon-theme": "5.38.1",
     "oxfmt": "0.68.0",
     "oxlint": "1.83.0",
@@ -129,6 +132,10 @@
       ]
     },
     "commands": [
+      {
+        "command": "varro.session.importV1",
+        "title": "Varro: Import OpenCode v1 Session into v2"
+      },
       {
         "command": "varro.chat.newSession",
         "title": "Varro: New Session"
@@ -388,12 +395,12 @@
         "varro.server.command": {
           "type": "string",
           "default": "",
-          "description": "Optional path to the OpenCode CLI executable Varro uses for server startup and other CLI-backed actions"
+          "description": "Optional path to the OpenCode CLI executable used for startup and CLI actions. OpenCode v2 is recommended; v1 remains supported. When empty, Varro searches for opencode2 first, then opencode. Both current CLI families use opencode. Set an explicit v1 executable path to keep using v1."
         },
         "varro.server.autoUpdate": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically install OpenCode CLI updates"
+          "description": "Automatically install updates within the installed OpenCode CLI family on macOS and Linux: @opencode/cli for v2, opencode-ai for v1. Does not migrate v1 to v2. Native Windows uses an update prompt."
         },
         "varro.chat.showFileDiffs": {
           "type": "boolean",

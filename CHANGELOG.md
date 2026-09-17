@@ -2,25 +2,43 @@
 
 This changelog summarizes the main user-facing improvements in each Varro minor release line. Patch releases are consolidated into their parent minor version. Dates reflect the development history.
 
+## 0.29.x - September 2026
+
+- Added OpenCode v2.0.5+ support alongside v1.16.0+, with automatic API detection and authenticated connections.
+- Recommend v2 via `npm install -g @opencode/cli` or the standalone Windows CLI. V1 remains available via `npm install -g opencode-ai`; updates preserve the installed package family.
+- Prefer `opencode2`, falling back to `opencode`, unless `varro.server.command` is set. Both current packages use `opencode`.
+- After installing v2, let active work finish, run `Varro: Restart Server`, and confirm the version in the status bar. See [restart recovery steps](docs/usage.md#if-restart-does-not-switch-to-v2) if Varro stays on v1.
+- Added `Varro: Import OpenCode v1 Session into v2` to copy conversations and child sessions with history intact, leaving originals unchanged.
+- Included both versions in local usage reports without double-counting migrated or imported sessions.
+- Kept v2 provider failures visible in live chat and history, even before a response starts.
+- Updated tested OpenCode v2 support to 2.0.7, including request-start timing and hidden authentication defaults.
+- Preserved session-scoped Always approvals across Default-mode sends and kept declined v2 tools out of completed-work summaries.
+
 ## 0.28.x - September 2026
 
 - Added VS Code Problems context with workspace and individual diagnostic selection through the composer, slash command, and editor code actions. Captured diagnostics persist across queued messages, history, and message edits, with settings to disable inclusion.
 - Added inline `$` skill references with completion and attachments, preserving skill references in message history and edits.
+- Added compact auxiliary windows for new and existing chats, with a per-window light/dark theme toggle and a remembered preference.
 - Added database context and table-attachment support in the shared chat interface, including persistent snapshots and message rendering for sessions with database attachments.
 - Synchronized session read state across folder and multi-root views so read conversations stay read when switching workspaces.
 - Improved Windows server startup and recovery, event handling, and OpenCode update support while limiting background work under heavy load.
 - Added layered permission controls for session and project rules, inherited configuration, and server-memory allowances. Simplified session choices to Default, Auto, and Full access.
 - Let agents continue permitted work after a rejected permission request, required scope selection when saving an always-allow rule, and prevented startup permission recovery from changing session history or recency.
+- Show the requesting subagent in permission prompts.
 - Added provider visibility and ordering controls, shared model preferences across workspaces, and usage-limit reporting for Claude Code. OpenAI and Z.ai limits now include reset details.
+- Added model pricing details and provider quota percentages to the model picker, with clearer usage and polling details in provider-limit popups.
 - Coordinated provider quota polling across instances, added available Grok quota reset times, kept authentication failures visible until credentials are verified, and fixed providers disappearing when all their models are deselected.
 - Added drag-and-drop and keyboard reordering for pinned sessions, with custom order preserved across session lists and navigation.
-- Expanded redacted diagnostics and Ralph verification evidence, with clearer provider failures and reconnect feedback.
+- Expanded redacted diagnostics and Ralph verification evidence, with clearer provider failures and reconnect feedback. Simplified diagnostics export to copy or save reports directly.
 - Opened plans in VS Code's Markdown preview while keeping them available as editor context.
 - Sped up local usage reports for large histories with worker-based database aggregation and bounded fallbacks.
 - Improved pasted images, draft and queued-message persistence, and attachment cleanup.
+- Kept sent drag-and-drop files available for the lifetime of their sessions, and preserved the original attachments, agent, model, and reasoning variant when retrying failed turns.
 - Strengthened sidebar and editor-chat recovery across delayed state, stalled delivery, stale documents, cross-folder prompts, concurrent session-scope changes, and asynchronous session transitions.
+- Fixed editor-session initialization when VS Code recreates a webview while reusing its document identity.
 - Stabilized long conversations, scrolling during activity transitions, prompt navigation, streaming Markdown, and deeply nested session lists.
 - Smoothed streamed text and activity updates, preserved scroll anchors during resizing and collapsed activity, and kept file-change previews stable across repeated edits.
+- Reduced streaming Markdown rendering work and stabilized follow-to-bottom during row resizing and resending edited messages.
 - Fixed session-picker sends losing newly created sessions, highlighted reselected editor sessions, and removed stale Stop controls after completed responses.
 - Fixed custom-answer submission and kept active auto-approve reviews visible.
 

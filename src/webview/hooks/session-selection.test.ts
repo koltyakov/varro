@@ -108,6 +108,44 @@ function createSelectionDependencies(
 }
 
 describe('session-selection helpers', () => {
+  it('removes a confirmed unavailable catalog entry and explains how to import legacy history', async () => {
+    const removeUnavailableSession = vi.fn();
+    const deps = createSelectionDependencies({
+      getActiveSessionId: () => 'session-1',
+      loadSession: async () => {
+        throw new Error('404 Session not found: session-1');
+      },
+      removeUnavailableSession,
+    });
+    await selectSessionWithDependencies(deps, { next: () => 1 }, 'session-1');
+    expect(removeUnavailableSession).toHaveBeenCalledExactlyOnceWith('session-1');
+    expect(deps.setError).toHaveBeenCalledWith(
+      expect.stringContaining('Import OpenCode v1 Session into v2')
+    );
+    expect(deps.persistActiveSessionId).not.toHaveBeenCalled();
+  });
+
+  it('requests a copy import when v2 cannot load a cataloged v1 session', async () => {
+    const importLegacySession = vi.fn();
+    const removeUnavailableSession = vi.fn();
+    const legacy = loadedSession('session-1').session;
+    const deps = createSelectionDependencies({
+      getActiveSessionId: () => 'session-1',
+      getSession: () => legacy,
+      loadSession: async () => {
+        throw new Error('404 Session not found: session-1');
+      },
+      importLegacySession,
+      removeUnavailableSession,
+    });
+
+    await selectSessionWithDependencies(deps, { next: () => 1 }, 'session-1');
+
+    expect(removeUnavailableSession).toHaveBeenCalledExactlyOnceWith('session-1');
+    expect(importLegacySession).toHaveBeenCalledExactlyOnceWith('session-1', '/repo');
+    expect(deps.setError).not.toHaveBeenCalled();
+    expect(deps.persistActiveSessionId).not.toHaveBeenCalled();
+  });
   it('restores metadata ahead of stale local and message selections even while busy', async () => {
     const model = { providerID: 'openai', modelID: 'saved-model' };
     const oldModel = { providerID: 'openai', modelID: 'old-model', variant: 'high' };

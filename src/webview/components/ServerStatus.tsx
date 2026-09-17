@@ -4,6 +4,7 @@ import {
   OPENCODE_INSTALL_COMMAND,
   OPENCODE_INSTALL_DOCS_URL,
   OPENCODE_UPGRADE_COMMAND,
+  OPENCODE_V1_INSTALL_COMMAND,
 } from '../../shared/opencode-install';
 import type { ServerErrorDetail } from '../../shared/protocol';
 import { postMessage } from '../lib/bridge';
@@ -272,9 +273,16 @@ export function ServerStatus() {
           <button
             type="button"
             class="text-[11px] text-vscode-link hover:text-vscode-link-active hover:underline"
+            onClick={() => openExternal('https://opencode.ai/v2/docs/providers')}
+          >
+            Provider setup docs (v2)
+          </button>
+          <button
+            type="button"
+            class="text-[11px] text-vscode-link hover:text-vscode-link-active hover:underline"
             onClick={() => openExternal('https://opencode.ai/docs/providers')}
           >
-            Provider setup docs
+            Provider setup docs (v1)
           </button>
         </div>
       </Show>
@@ -299,10 +307,10 @@ function MissingCliState() {
           </button>{' '}
           a native UI.
           <br />
-          Install the CLI to get started.
+          Install OpenCode v2 to get started. V1 is also supported.
         </p>
       </div>
-      <SetupCommandCard label="Install" command={OPENCODE_INSTALL_COMMAND} />
+      <SetupCommandCard label="Install v2 (recommended)" command={OPENCODE_INSTALL_COMMAND} />
       <button
         type="button"
         class="server-status-action-button"
@@ -310,6 +318,24 @@ function MissingCliState() {
       >
         Open terminal and install
       </button>
+      <p class="px-4 text-[11px] leading-normal text-vscode-muted">
+        Use npm on macOS, Linux, or WSL. On native Windows, download the CLI from the install docs
+        below and set its path in varro.server.command.
+      </p>
+      <details class="w-full text-[11px] text-vscode-muted">
+        <summary class="cursor-pointer">Use OpenCode v1 instead</summary>
+        <div class="mt-3 flex flex-col items-center gap-3">
+          <SetupCommandCard label="Install v1" command={OPENCODE_V1_INSTALL_COMMAND} />
+          <SecondaryButton
+            label="Open terminal and install v1"
+            onClick={() => runInTerminal(OPENCODE_V1_INSTALL_COMMAND, 'OpenCode Install')}
+          />
+          <p>
+            Set varro.server.command to your v1 executable to keep using v1. Both versions now use
+            the opencode command; use separate executable paths if you keep both.
+          </p>
+        </div>
+      </details>
       <RecoveryActions />
       {/* Installs under a Node version manager land outside the directories
           Varro can scan, so point at the escape hatch instead of insisting

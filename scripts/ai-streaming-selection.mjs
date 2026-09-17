@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdir, open, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 
 import {
@@ -34,7 +35,7 @@ function hasForeignSessionReference(value, sessionId) {
 }
 
 export async function readActiveSessions(
-  { serverUrl, sourceDatabase, directory, pid = process.env.OPENCODE_PID },
+  { serverUrl, sourceDatabase, directory, pid = process.env.OPENCODE_PID, platform = process.platform },
   execute = promisify(execFile)
 ) {
   let explicit;
@@ -55,7 +56,14 @@ export async function readActiveSessions(
       throw new Error('Active-session status requires --server-url or OPENCODE_PID');
   }
   const canonicalDatabase = await realpath(sourceDatabase);
-  const { stdout } = await execute(
+  const windows = platform === 'win32'
+    ? JSON.parse((await execute('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-File',
+      fileURLToPath(new URL('./windows-database-ownership.ps1', import.meta.url)),
+      '-Database', canonicalDatabase,
+    ], { timeout: 30_000 })).stdout)
+    : undefined;
+  const { stdout } = windows ? { stdout: '' } : await execute(
     'lsof',
     explicit
       ? ['-nP', '-a', `-iTCP:${explicit.port || 80}`, '-sTCP:LISTEN', '-Fpn']
@@ -63,6 +71,26 @@ export async function readActiveSessions(
     { timeout: 5_000 }
   );
   const listeners = new Map();
+  if (windows) {
+    if (!Array.isArray(windows.listeners) || !Array.isArray(windows.databaseOwners) ||
+        windows.databaseOwners.some((owner) => !Number.isSafeInteger(owner) || owner <= 0)) {
+      throw new Error('Invalid Windows database ownership evidence');
+    }
+    for (const listener of windows.listeners) {
+      if (!Number.isSafeInteger(listener.pid) || listener.pid <= 0 ||
+          !Number.isInteger(listener.port) || listener.port < 1 || listener.port > 65535) {
+        throw new Error('Invalid Windows listener ownership evidence');
+      }
+      if (!['127.0.0.1', '::1', '0.0.0.0', '::'].includes(listener.address)) continue;
+      if (!explicit && String(listener.pid) !== String(pid)) continue;
+      const ipv6 = listener.address.includes(':');
+      const host = ipv6 ? '[::1]' : '127.0.0.1';
+      const url = new URL(`http://${host}:${listener.port}`).origin;
+      if (explicit && url !== explicit.origin) continue;
+      if (!listeners.has(url)) listeners.set(url, new Set());
+      listeners.get(url).add(String(listener.pid));
+    }
+  }
   let owner;
   for (const line of stdout.split('\n')) {
     if (/^p\d+$/.test(line)) owner = line.slice(1);
@@ -81,7 +109,7 @@ export async function readActiveSessions(
     if (owners.size !== 1) throw new Error('Ambiguous status listener ownership');
     const serverPid = [...owners][0];
     // lsof's path selection uses file identity, including symlink and hard-link aliases.
-    const held = await execute(
+    const held = windows ? undefined : await execute(
       'lsof',
       ['-nP', '-a', '-p', serverPid, '-Fpf', '--', canonicalDatabase],
       { timeout: 5_000 }
@@ -90,7 +118,8 @@ export async function readActiveSessions(
         `Cannot verify status server PID ${serverPid} holds source database: ${error.message}`
       );
     });
-    if (!held.stdout.split('\n').includes(`p${serverPid}`) || !/^f\d+/m.test(held.stdout))
+    if (windows ? !windows.databaseOwners.includes(Number(serverPid)) :
+        !held.stdout.split('\n').includes(`p${serverPid}`) || !/^f\d+/m.test(held.stdout))
       throw new Error(`Status server PID ${serverPid} does not hold source database`);
     try {
       const url = new URL(value);
@@ -113,7 +142,9 @@ export async function readActiveSessions(
         serverUrl: url.origin,
         serverPid: Number(serverPid),
         sourceDatabase: canonicalDatabase,
-        association: 'lsof-listener-owner-and-open-database',
+        association: windows
+          ? 'windows-listener-owner-and-restart-manager-database'
+          : 'lsof-listener-owner-and-open-database',
         checkedAt: new Date().toISOString(),
         activeSessionIds: Object.keys(status).filter((id) => status[id].type !== 'idle'),
       });

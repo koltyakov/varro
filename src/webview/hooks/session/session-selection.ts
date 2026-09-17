@@ -69,7 +69,13 @@ type SessionSelectionDeps = {
   startLoading(): void;
   stopLoading(): void;
   setError(message: string): void;
+  removeUnavailableSession?(sessionId: string): void;
+  importLegacySession?(sessionId: string, directory: string): void;
 };
+
+function isV1Session(session: Session | undefined): boolean {
+  return Boolean(session && /^v?1(?:\.|$)/i.test(session.version.trim()));
+}
 
 export async function selectSessionWithDependencies(
   deps: SessionSelectionDeps,
@@ -129,12 +135,25 @@ export async function selectSessionWithDependencies(
   let loaded: { session: Session; messages: MessageEntry[] };
   try {
     loaded = await deps.loadSession(id, isCurrentSelection);
-  } catch {
+  } catch (error) {
     if (!isCurrentSelection()) {
       clearMessagesLoadingIfOwned();
       return;
     }
     clearMessagesLoadingIfOwned();
+    if (error instanceof Error && /^404\b.*session not found/i.test(error.message)) {
+      const legacySession = deps.getSession(id);
+      const directory = options?.directory ?? legacySession?.directory;
+      deps.removeUnavailableSession?.(id);
+      if (directory && isV1Session(legacySession)) {
+        deps.importLegacySession?.(id, directory);
+        return;
+      }
+      deps.setError(
+        'This conversation is unavailable on the connected OpenCode server. For v1 history, run "Varro: Import OpenCode v1 Session into v2".'
+      );
+      return;
+    }
     deps.setError('Failed to load messages');
     return;
   }
