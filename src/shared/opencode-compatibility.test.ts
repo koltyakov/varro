@@ -8,6 +8,19 @@ import {
 } from './opencode-compatibility';
 
 describe('getMaximumTestedOpenCodeVersion', () => {
+  it('uses the v2 client dependency for v2 servers', () => {
+    expect(
+      getMaximumTestedOpenCodeVersion(
+        {
+          dependencies: {
+            '@opencode-ai/sdk': '^1.18.31',
+            '@opencode/client': '^2.0.7',
+          },
+        },
+        2
+      )
+    ).toBe('2.0.7');
+  });
   it('reads the exact version from the SDK dependency range', () => {
     expect(
       getMaximumTestedOpenCodeVersion({

@@ -5,7 +5,7 @@ export const MINIMUM_SUPPORTED_OPENCODE_V2_VERSION = '2.0.5';
 
 export const OPENCODE_SDK_PACKAGE_NAME = '@opencode-ai/sdk';
 
-export function getMaximumTestedOpenCodeVersion<T>(packageJson: T): string {
+export function getMaximumTestedOpenCodeVersion<T>(packageJson: T, apiVersion: 1 | 2 = 1): string {
   const packageRecord = asRecord(packageJson);
   if (!packageRecord) {
     throw new Error('Varro package.json is not an object');
@@ -16,14 +16,15 @@ export function getMaximumTestedOpenCodeVersion<T>(packageJson: T): string {
     throw new Error('Varro package.json does not declare dependencies');
   }
 
-  const declaredVersion = dependencies[OPENCODE_SDK_PACKAGE_NAME];
+  const packageName = apiVersion === 2 ? '@opencode/client' : OPENCODE_SDK_PACKAGE_NAME;
+  const declaredVersion = dependencies[packageName];
   if (!isString(declaredVersion)) {
-    throw new Error(`Varro package.json does not declare ${OPENCODE_SDK_PACKAGE_NAME}`);
+    throw new Error(`Varro package.json does not declare ${packageName}`);
   }
 
   const version = declaredVersion.match(/\d+\.\d+\.\d+/)?.[0];
   if (!version) {
-    throw new Error(`Invalid ${OPENCODE_SDK_PACKAGE_NAME} version: ${declaredVersion}`);
+    throw new Error(`Invalid ${packageName} version: ${declaredVersion}`);
   }
   return version;
 }

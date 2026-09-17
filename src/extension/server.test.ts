@@ -44,6 +44,7 @@ const { getConfigurationMock, loggerMock, mkdirMock, spawnMock, vscodeMock, writ
   }));
 
 vi.mock('./logger', () => ({ logger: loggerMock }));
+vi.mock('./util/windows-cli-update', () => ({ runWindowsCliUpdate: vi.fn() }));
 vi.mock('vscode', () => vscodeMock);
 vi.mock('@opencode/client/service', () => ({
   Service: { discover: vi.fn().mockResolvedValue(undefined) },
@@ -83,6 +84,7 @@ vi.mock('fs/promises', async () => {
 
 import { OpenCodeServer as RealOpenCodeServer } from './server';
 import { readMaximumTestedOpenCodeVersion } from './extension-manifest';
+import { runWindowsCliUpdate } from './util/windows-cli-update';
 
 let serverOwnershipPathSequence = 0;
 class OpenCodeServer extends RealOpenCodeServer {
@@ -1502,10 +1504,6 @@ describe('OpenCodeServer maintenance', () => {
 
     const server = new OpenCodeServer(4096, false);
     const readLatestCliVersion = vi.fn().mockResolvedValue('1.14.22');
-    const terminal = {
-      show: vi.fn(),
-      sendText: vi.fn(),
-    };
     const api = server as unknown as {
       readLatestCliVersion: () => Promise<string | null>;
       readHealthInfo: ReturnType<typeof vi.fn>;
@@ -1514,7 +1512,6 @@ describe('OpenCodeServer maintenance', () => {
     api.readLatestCliVersion = readLatestCliVersion;
     api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: false });
     vscodeMock.window.showInformationMessage.mockResolvedValueOnce('Run Upgrade');
-    vscodeMock.window.createTerminal.mockReturnValueOnce(terminal);
 
     await maybeSuggestCliUpdate(server, '1.14.20');
     await flushMicrotasks();
@@ -1526,9 +1523,11 @@ describe('OpenCodeServer maintenance', () => {
       ),
       'Run Upgrade'
     );
-    expect(terminal.sendText).toHaveBeenCalledWith(
+    expect(runWindowsCliUpdate).toHaveBeenCalledWith(
       expect.stringMatching(/^& '.+' upgrade 1\.14\.22$/),
-      true
+      'OpenCode Upgrade',
+      undefined,
+      expect.any(Function)
     );
   });
 
@@ -1537,10 +1536,6 @@ describe('OpenCodeServer maintenance', () => {
 
     const server = new OpenCodeServer(4096, false);
     const readLatestCliVersion = vi.fn().mockResolvedValue('1.14.22');
-    const terminal = {
-      show: vi.fn(),
-      sendText: vi.fn(),
-    };
     const kill = vi.fn();
     const statuses: ServerStatus[] = [];
     server.on('status', (status) => statuses.push(status));
@@ -1579,7 +1574,6 @@ describe('OpenCodeServer maintenance', () => {
     });
     setRunning(server);
     vscodeMock.window.showInformationMessage.mockResolvedValueOnce('Run Upgrade');
-    vscodeMock.window.createTerminal.mockReturnValueOnce(terminal);
 
     await maybeSuggestCliUpdate(server, '1.14.20');
     await flushMicrotasks();
@@ -1587,9 +1581,11 @@ describe('OpenCodeServer maintenance', () => {
 
     expect(kill).not.toHaveBeenCalled();
     expect(statuses.some((status) => status.state === 'stopped')).toBe(true);
-    expect(terminal.sendText).toHaveBeenCalledWith(
+    expect(runWindowsCliUpdate).toHaveBeenCalledWith(
       expect.stringMatching(/^& '.+' upgrade 1\.14\.22$/),
-      true
+      'OpenCode Upgrade',
+      undefined,
+      expect.any(Function)
     );
   });
 
@@ -1665,7 +1661,11 @@ describe('OpenCodeServer maintenance', () => {
   it('verifies the terminal update and restores a previously managed server after failure', async () => {
     stubPlatform('win32');
     const server = new OpenCodeServer(4096, true);
-    const startOperation = vi.fn().mockResolvedValue(server.url);
+    const startOperation = vi.fn(async () => {
+      setRunning(server);
+      await server.request('GET', '/session');
+      return server.url;
+    });
     const clearResolvedCommandCache = vi.fn();
     const api = server as unknown as {
       managedProcess: boolean;
@@ -1676,6 +1676,7 @@ describe('OpenCodeServer maintenance', () => {
       startOperation: typeof startOperation;
       getWorkspaceCwd: ReturnType<typeof vi.fn>;
       processManager: { clearResolvedCommandCache: typeof clearResolvedCommandCache };
+      transport: { request: ReturnType<typeof vi.fn> };
     };
     api.managedProcess = true;
     api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.17.0' });
@@ -1687,6 +1688,7 @@ describe('OpenCodeServer maintenance', () => {
     api.startOperation = startOperation;
     api.getWorkspaceCwd = vi.fn(() => '/repo');
     api.processManager.clearResolvedCommandCache = clearResolvedCommandCache;
+    api.transport.request = vi.fn().mockResolvedValue([]);
     setRunning(server);
 
     await server.prepareForWindowsCliUpgrade('1.18.0');
@@ -1698,6 +1700,7 @@ describe('OpenCodeServer maintenance', () => {
       'Windows OpenCode terminal update closed, but CLI 1.17.0 is older than requested 1.18.0'
     );
     expect(startOperation).toHaveBeenCalledOnce();
+    expect(api.transport.request).toHaveBeenCalledWith('GET', '/session', undefined, undefined);
   });
 
   it('releases a failed terminal update without restoring into a different workspace', async () => {

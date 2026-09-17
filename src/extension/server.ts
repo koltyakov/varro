@@ -1953,7 +1953,9 @@ export class OpenCodeServer extends EventEmitter {
     return (
       this.terminalCliUpgradePreparationOperation !== null ||
       this.pendingTerminalCliUpgrades > 0 ||
-      this.terminalCliUpgradeFinishOperation !== null
+      // Restoration publishes running before the finish operation resolves.
+      // Snapshot requests triggered by that status must reach the restored server.
+      (this.terminalCliUpgradeFinishOperation !== null && this._status.state !== 'running')
     );
   }
 

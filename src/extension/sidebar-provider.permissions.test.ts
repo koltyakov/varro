@@ -318,9 +318,7 @@ describe('SidebarProvider permission replay', () => {
     });
 
     expect(statusBarItem.show).not.toHaveBeenCalled();
-    expect(openCodeStatusBarItem.text).toBe(
-      `$(robot) OpenCode ${readMaximumTestedOpenCodeVersion()}`
-    );
+    expect(openCodeStatusBarItem.text).toBe('$(robot) OpenCode');
     expect(provider.getStatusBarClickAction()).toBe('focus');
 
     providerState.sessionState.handleServerEvent({
@@ -708,6 +706,46 @@ describe('SidebarProvider permission replay', () => {
     statusHandler?.({ state: 'running', url: 'http://127.0.0.1:4096' });
     await vi.waitFor(() => expect(item.text).toBe(`$(robot) OpenCode ${updatedVersion}`));
     expect(readServerInfo).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows no guessed version during startup and ignores version reads from before a restart', async () => {
+    const v2Version = readMaximumTestedOpenCodeVersion(undefined, 2);
+    let resolveOldInfo!: (info: {
+      cliVersion: string;
+      health: { healthy: boolean; version: string };
+    }) => void;
+    const oldInfo = new Promise<{
+      cliVersion: string;
+      health: { healthy: boolean; version: string };
+    }>((resolve) => {
+      resolveOldInfo = resolve;
+    });
+    const readServerInfo = vi
+      .fn()
+      .mockReturnValueOnce(oldInfo)
+      .mockResolvedValueOnce({
+        cliVersion: v2Version,
+        health: { healthy: true, version: v2Version },
+      });
+    const server = createServer({ readServerInfo });
+    await createSidebarProviderInstance({ server });
+    const statusHandler = server.on.mock.calls.findLast(([event]) => event === 'status')?.[1];
+    const createStatusBarItem = getVscodeMock().window.createStatusBarItem;
+    const itemIndex = createStatusBarItem.mock.calls.findIndex(
+      ([id]) => id === 'varro.opencode-version'
+    );
+    const item = createStatusBarItem.mock.results[itemIndex]?.value;
+    expect(item.text).toBe('$(robot) OpenCode');
+    statusHandler?.({ state: 'running', url: 'http://127.0.0.1:4096' });
+    statusHandler?.({ state: 'stopped' });
+    expect(item.text).toBe('$(robot) OpenCode');
+    statusHandler?.({ state: 'running', url: 'http://127.0.0.1:4096' });
+    await vi.waitFor(() => expect(item.text).toBe(`$(robot) OpenCode ${v2Version}`));
+    resolveOldInfo({ cliVersion: '1.18.31', health: { healthy: true, version: '1.18.31' } });
+    await oldInfo;
+    await Promise.resolve();
+    expect(item.text).toBe(`$(robot) OpenCode ${v2Version}`);
+    expect(item.tooltip).not.toContain('1.18.31');
   });
 
   it('describes an uninstalled patch update without repeating the verified version', async () => {

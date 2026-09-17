@@ -563,7 +563,8 @@ function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenC
   const description =
     getString(pkg.description) || 'An OpenCode agent workbench built for Visual Studio Code.';
   const version = getString(pkg.version) || 'unknown';
-  const maximumTestedVersion = readMaximumTestedOpenCodeVersion();
+  const apiVersion = serverInfo.cliVersion?.startsWith('2.') ? 2 : 1;
+  const maximumTestedVersion = readMaximumTestedOpenCodeVersion(undefined, apiVersion);
   const autoUpdate = vscode.workspace
     .getConfiguration('varro')
     .get<boolean>('server.autoUpdate', true);
@@ -577,7 +578,11 @@ function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenC
   const updateAvailable =
     installedVersion !== null && compareVersions(installedVersion, maximumTestedVersion) < 0;
   const updateCommand = updateAvailable
-    ? getUpgradeCommand(serverInfo.installMethod, process.platform)
+    ? getUpgradeCommand(
+        serverInfo.installMethod,
+        process.platform,
+        apiVersion === 2 ? '@opencode/cli' : 'opencode-ai'
+      )
     : null;
   const updateNoticeLines = !updateAvailable
     ? []
@@ -664,11 +669,16 @@ function createAboutViewData(
         ? `Error: ${serverInfo.status.message}`
         : serverInfo.status.state;
   const cliVersion = serverInfo.cliVersion ? extractVersion(serverInfo.cliVersion) : null;
-  const maximumTestedVersion = readMaximumTestedOpenCodeVersion();
+  const apiVersion = cliVersion?.startsWith('2.') ? 2 : 1;
+  const maximumTestedVersion = readMaximumTestedOpenCodeVersion(undefined, apiVersion);
   const updateAvailable =
     cliVersion !== null && compareVersions(cliVersion, maximumTestedVersion) < 0;
   const updateCommand = updateAvailable
-    ? getUpgradeCommand(serverInfo.installMethod, process.platform)
+    ? getUpgradeCommand(
+        serverInfo.installMethod,
+        process.platform,
+        apiVersion === 2 ? '@opencode/cli' : 'opencode-ai'
+      )
     : null;
 
   return {

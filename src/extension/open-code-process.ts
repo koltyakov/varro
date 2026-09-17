@@ -54,6 +54,7 @@ import {
   waitForProcessExit,
 } from './server-utils';
 import { buildServerEnv, getServerPathEntries } from './util/server-path';
+import { runWindowsCliUpdate } from './util/windows-cli-update';
 
 const CLI_OUTPUT_MAX_CHARS = 1024 * 1024;
 const CLI_OUTPUT_TRUNCATED_MARKER = '[earlier output truncated]\n';
@@ -3390,23 +3391,21 @@ export class OpenCodeProcess {
     if (!text) return;
 
     try {
+      if (process.platform === 'win32' && callbacks.finishWindowsCliUpgrade) {
+        await runWindowsCliUpdate(
+          text,
+          title,
+          callbacks.getWorkspaceCwd(),
+          callbacks.finishWindowsCliUpgrade
+        );
+        return;
+      }
       const options: vscode.TerminalOptions = {
         name: title,
         cwd: callbacks.getWorkspaceCwd(),
       };
       if (usePowerShell && process.platform === 'win32') options.shellPath = 'powershell.exe';
       const terminal = vscode.window.createTerminal(options);
-      if (process.platform === 'win32' && callbacks.finishWindowsCliUpgrade) {
-        const disposable = vscode.window.onDidCloseTerminal((closedTerminal) => {
-          if (closedTerminal !== terminal) return;
-          disposable.dispose();
-          void Promise.resolve(callbacks.finishWindowsCliUpgrade?.()).catch((err: unknown) => {
-            logger.warn(
-              `Failed to finish Windows OpenCode CLI update: ${err instanceof Error ? err.message : String(err)}`
-            );
-          });
-        });
-      }
       terminal.show(false);
       terminal.sendText(text, true);
     } catch (err) {

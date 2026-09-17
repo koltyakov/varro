@@ -5,12 +5,14 @@ import { getMaximumTestedOpenCodeVersion } from '../shared/opencode-compatibilit
 const maximumTestedVersionByManifestPath = new Map<string, string>();
 
 export function readMaximumTestedOpenCodeVersion(
-  packageJsonPath = join(__dirname, '..', '..', 'package.json')
+  packageJsonPath = join(__dirname, '..', '..', 'package.json'),
+  apiVersion: 1 | 2 = 1
 ) {
-  const cached = maximumTestedVersionByManifestPath.get(packageJsonPath);
+  const cacheKey = `${packageJsonPath}:${apiVersion}`;
+  const cached = maximumTestedVersionByManifestPath.get(cacheKey);
   if (cached) return cached;
   const packageJson: unknown = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
-  const version = getMaximumTestedOpenCodeVersion(packageJson);
-  maximumTestedVersionByManifestPath.set(packageJsonPath, version);
+  const version = getMaximumTestedOpenCodeVersion(packageJson, apiVersion);
+  maximumTestedVersionByManifestPath.set(cacheKey, version);
   return version;
 }

@@ -1,5 +1,5 @@
 /* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-object-parameters, anti-slop/no-unknown-parameters, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: These tests call private message handlers with protocol-shaped fixtures and untyped persistence values. */
-import { describe, expect, it, vi, type Mock } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { getSafeDefaultPermissionRules } from '../shared/permission-rules';
 import type { PermissionMode } from '../shared/protocol';
 import type { Session } from '../shared/opencode-types';
@@ -981,9 +981,11 @@ describe('SidebarProvider terminal commands', () => {
     expect(server.prepareForWindowsCliUpgrade).toHaveBeenCalledTimes(2);
   });
 
-  it('keeps a Windows update reserved until its terminal closes', async () => {
+  it('restores the server when the Windows update task finishes with its terminal still open', async () => {
+    const windowsCliUpdate = await import('./util/windows-cli-update');
     const originalPlatform = process.platform;
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    const update = vi.spyOn(windowsCliUpdate, 'runWindowsCliUpdate').mockResolvedValue();
     try {
       const server = createServer();
       const { provider } = await createSidebarProviderInstance({ server });
@@ -991,18 +993,19 @@ describe('SidebarProvider terminal commands', () => {
 
       await runInTerminal(provider, 'npm install -g opencode-ai@latest', 'OpenCode Update');
 
-      const terminal = getVscodeMock().window.createTerminal.mock.results[0]?.value;
-      const onDidCloseTerminal = getVscodeMock().window.onDidCloseTerminal as Mock<
-        (listener: (terminal: object) => void) => { dispose(): void }
-      >;
-      const closeListener = onDidCloseTerminal.mock.calls[0]?.[0];
-      expect(closeListener).toBeTypeOf('function');
+      expect(update).toHaveBeenCalledWith(
+        'npm install -g opencode-ai@latest',
+        'OpenCode Update',
+        '/repo',
+        expect.any(Function)
+      );
       expect(server.finishWindowsCliUpgrade).not.toHaveBeenCalled();
 
-      if (terminal) closeListener?.(terminal);
+      await update.mock.calls[0]?.[3]();
 
       expect(server.finishWindowsCliUpgrade).toHaveBeenCalledOnce();
     } finally {
+      update.mockRestore();
       Object.defineProperty(process, 'platform', {
         value: originalPlatform,
         configurable: true,
