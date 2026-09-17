@@ -23,6 +23,28 @@ import { normalizeRecycleBinSession } from '../shared/recycle-bin';
 vi.mock('./logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 afterEach(() => vi.unstubAllGlobals());
 
+describe('v2 Windows location paths', () => {
+  it.each([
+    ['c:\\Users\\Andrew\\Repo', 'C:\\Users\\Andrew\\Repo'],
+    ['d:/Projects/Repo', 'D:/Projects/Repo'],
+    ['C:\\Repo', 'C:\\Repo'],
+    ['/workspaces/repo', '/workspaces/repo'],
+    ['\\\\server\\share\\Repo', '\\\\server\\share\\Repo'],
+    ['c:relative', 'c:relative'],
+  ])('sends %s as %s in location queries', async (directory, expected) => {
+    const targets: string[] = [];
+    const adapter = new OpenCodeV2Adapter(async (_method, path) => {
+      targets.push(path);
+      return {};
+    });
+    for (const path of ['/path', `/path?directory=${encodeURIComponent(directory)}`]) {
+      await adapter.request('GET', path, undefined, { directory });
+      const target = new URL(targets.at(-1) ?? '', 'http://localhost');
+      expect(target.searchParams.get('location[directory]')).toBe(expected);
+    }
+  });
+});
+
 describe('v2 prompt delivery', () => {
   it.each([
     [undefined, 'steer'],

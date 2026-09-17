@@ -290,6 +290,46 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
     expect(JSON.stringify(prompts[0])).toContain(text);
   }, 60000);
 
+  it.skipIf(process.platform !== 'win32')(
+    'loads instructions for a lowercase Windows drive',
+    async () => {
+      const directory = join(root, 'workspace').replace(/^[A-Z]:/, (drive) => drive.toLowerCase());
+      const session = asRecord(
+        await transport.request(
+          'POST',
+          '/session',
+          { title: 'Windows instructions fixture' },
+          { directory }
+        )
+      );
+      const id = String(session?.id);
+      await transport.request(
+        'POST',
+        `/session/${id}/prompt_async`,
+        {
+          agent: 'build',
+          model: { providerID: 'fixture', modelID: 'fixture' },
+          parts: [{ type: 'text', text: 'Say the fixture response. Do not call tools.' }],
+        },
+        { directory }
+      );
+      await vi.waitFor(
+        async () => {
+          const messages = await transport.request(
+            'GET',
+            `/session/${id}/message?limit=20`,
+            undefined,
+            { directory }
+          );
+          expect(JSON.stringify(messages)).not.toContain('Instruction initialization blocked');
+          expect(JSON.stringify(messages)).toContain('Adapter stream verified.');
+        },
+        { timeout: 15000, interval: 200 }
+      );
+    },
+    30000
+  );
+
   it('streams a real prompt and projects stable history', async () => {
     let release: (() => void) | undefined;
     streamGate = new Promise<void>((complete) => {

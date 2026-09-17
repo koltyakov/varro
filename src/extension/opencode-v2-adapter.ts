@@ -180,7 +180,12 @@ export class OpenCodeV2Adapter {
   ): Promise<unknown> {
     const url = new URL(path, 'http://localhost');
     const route = url.pathname;
-    const directory = url.searchParams.get('directory') ?? options.directory;
+    // VS Code lowercases drive letters. OpenCode 2.0.6 can overflow its instruction
+    // discovery stack when that differs from the filesystem's uppercase drive.
+    const directory = (url.searchParams.get('directory') ?? options.directory)?.replace(
+      /^[a-z]:[\\/]/,
+      (drive) => drive.toUpperCase()
+    );
     const query = (targetPath: string, location = false) => {
       const target = new URL(targetPath, 'http://localhost');
       if (location && directory) target.searchParams.set('location[directory]', directory);
