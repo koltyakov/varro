@@ -414,8 +414,6 @@
   right: 8px;
   z-index: 20;
   display: flex;
-  border-radius: var(--radius-control);
-  background: var(--color-vscode-sidebar);
 }
 
 .window-chat-theme-toolbar.is-occluded {
@@ -423,12 +421,12 @@
   pointer-events: none;
 }
 
+.window-chat-theme-toolbar .chat-header-btn:hover {
+  background: transparent;
+}
+
 .window-chat-theme-toolbar .chat-header-btn:disabled {
   opacity: 0.45;
   cursor: default;
   background: transparent;
-}
-
-.window-chat-theme-toolbar .chat-header-btn[aria-pressed='true'] {
-  background: var(--color-vscode-toolbar-hover);
 }
