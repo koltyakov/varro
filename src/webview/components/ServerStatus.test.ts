@@ -91,7 +91,8 @@ describe('ServerStatus', () => {
     renderServerStatus();
 
     expect(container?.textContent).toContain('OpenCode is not installed');
-    expect(container?.textContent).toContain('npm i -g opencode-ai');
+    expect(container?.textContent).toContain('npm i -g @opencode/cli');
+    expect(container?.textContent).toContain('Use OpenCode v1 instead');
     // Recovery is a button now, not an instruction to open the Command Palette.
     expect(container?.textContent).toContain('Restart Server');
     expect(container?.textContent).toContain('varro.server.command');
@@ -105,11 +106,11 @@ describe('ServerStatus', () => {
 
     expect(postMessageMock).toHaveBeenNthCalledWith(1, {
       type: 'vscode/open-external',
-      payload: { url: 'https://opencode.ai' },
+      payload: { url: 'https://opencode.ai/v2/docs/' },
     });
     expect(postMessageMock).toHaveBeenNthCalledWith(2, {
       type: 'vscode/open-external',
-      payload: { url: 'https://opencode.ai' },
+      payload: { url: 'https://opencode.ai/v2/docs/' },
     });
   });
 
@@ -126,7 +127,7 @@ describe('ServerStatus', () => {
 
     expect(postMessageMock).toHaveBeenCalledWith({
       type: 'terminal/run',
-      payload: { command: 'npm i -g opencode-ai', title: 'OpenCode Install' },
+      payload: { command: 'npm i -g @opencode/cli', title: 'OpenCode Install' },
     });
   });
 
@@ -138,13 +139,13 @@ describe('ServerStatus', () => {
     renderServerStatus();
 
     const copyButton = container?.querySelector<HTMLButtonElement>(
-      'button[aria-label="Copy command: npm i -g opencode-ai"]'
+      'button[aria-label="Copy command: npm i -g @opencode/cli"]'
     );
     expect(copyButton).not.toBeNull();
     copyButton?.click();
     await Promise.resolve();
 
-    expect(writeText).toHaveBeenCalledWith('npm i -g opencode-ai');
+    expect(writeText).toHaveBeenCalledWith('npm i -g @opencode/cli');
   });
 
   it('shows actionable guidance when OpenCode must be updated', () => {
@@ -317,7 +318,7 @@ describe('ServerStatus', () => {
     expect(container?.textContent).toContain('/opt/nope/opencode');
     // Telling someone with a configured path to reinstall via npm is the wrong fix.
     expect(container?.textContent).not.toContain('OpenCode is not installed');
-    expect(container?.textContent).not.toContain('npm i -g opencode-ai');
+    expect(container?.textContent).not.toContain('npm i -g @opencode/cli');
   });
 
   it('restarts the server from any error state', () => {
@@ -357,7 +358,7 @@ describe('ServerStatus', () => {
     expect(openProviderSetupMock).toHaveBeenCalledTimes(1);
     expect(postMessageMock).toHaveBeenCalledWith({
       type: 'vscode/open-external',
-      payload: { url: 'https://opencode.ai/docs/providers' },
+      payload: { url: 'https://opencode.ai/v2/docs/providers' },
     });
   });
 });

@@ -9,7 +9,6 @@ import {
   projectV2Model,
   projectV2Permission,
   v2Action,
-  v2PartId,
   v2Rules,
 } from './opencode-v2-projection';
 import { projectV2Event } from './opencode-v2-events';
@@ -303,7 +302,23 @@ describe('v2 transcript and permission projection', () => {
       })[0]
     );
     expect(asRecord(text?.properties)?.textID).toBe(history.parts[0]?.id);
-    expect(history.parts[1]?.id).toBe(v2PartId(message.id, 1));
+    const reasoning = parseServerEvent(
+      projectV2Event({
+        id: 'evt_reasoning',
+        created: 10,
+        type: 'session.reasoning.delta',
+        data: {
+          sessionID: 'ses_one',
+          assistantMessageID: message.id,
+          ordinal: 0,
+          delta: 'Thinking',
+        },
+      })[0]
+    );
+    expect(asRecord(reasoning?.properties)?.reasoningID).toBe(history.parts[1]?.id);
+    expect(asRecord(reasoning?.properties)?.reasoningID).not.toBe(
+      asRecord(text?.properties)?.textID
+    );
     expect(history.parts[2]).toMatchObject({
       id: 'tool_call',
       callID: 'tool_call',
@@ -317,6 +332,49 @@ describe('v2 transcript and permission projection', () => {
       },
     });
   });
+
+  it.each(['started', 'delta', 'ended'])(
+    'matches type-local ordinals for interleaved text and reasoning %s events',
+    (phase) => {
+      const interleaved: SessionMessageAssistant = {
+        ...message,
+        content: [
+          { type: 'reasoning', text: 'Inspecting' },
+          message.content[2]!,
+          { type: 'text', text: '' },
+          { type: 'reasoning', text: 'Checked' },
+          { type: 'text', text: 'Final answer' },
+        ],
+      };
+      const history = projectV2Message(interleaved, 'ses_one');
+      const identities: unknown[] = [];
+      for (const [type, ordinal, index] of [
+        ['reasoning', 0, 0],
+        ['text', 0, 2],
+        ['reasoning', 1, 3],
+        ['text', 1, 4],
+      ] as const) {
+        const event = parseServerEvent(
+          projectV2Event({
+            id: `evt_${type}_${ordinal}`,
+            created: 10,
+            type: `session.${type}.${phase}`,
+            data: {
+              sessionID: 'ses_one',
+              assistantMessageID: message.id,
+              ordinal,
+              delta: 'chunk',
+              text: 'Final answer',
+            },
+          })[0]
+        );
+        const id = asRecord(event?.properties)?.[`${type}ID`];
+        expect(id).toBe(history.parts[index]?.id);
+        identities.push(id);
+      }
+      expect(new Set(identities).size).toBe(4);
+    }
+  );
 
   it('leaves untitled shell calls available for the command-preview fallback', () => {
     const untitled: SessionMessageAssistant = {

@@ -21,8 +21,9 @@ Changing modes affects pending requests as well as later actions. Switching to `
 When OpenCode asks for permission, Varro places the request beside the action that needs it. A standalone prompt appears if that action is not currently visible.
 
 - `Once` approves only the current request.
-- `Always` approves the request and remembers matching actions in OpenCode server memory until the
-  server restarts. Its menu also offers a session-only rule or a persistent project-config rule.
+- `Always` approves the request and saves matching actions through OpenCode. V1 keeps these allowances
+  in server memory; v2 saves durable project-scoped approvals. Its menu also offers a session-only
+  rule or a persistent project-config rule.
 - `Reject` denies the request.
 
 On Varro-managed servers, rejecting a request lets the agent continue without that action. The agent
@@ -30,10 +31,13 @@ is instructed not to retry or bypass the rejection, to continue permitted work, 
 the denied action blocks completion. Use Stop to end the run. OpenCode may also reject other pending
 requests in the same session. Skipping a question likewise lets the agent continue.
 
-This uses OpenCode's `experimental.continue_loop_on_deny: true` runtime default. Project or inline
+On v1, this uses OpenCode's `experimental.continue_loop_on_deny: true` runtime default. Project or inline
 config can override it. If you manage the server yourself or supply `OPENCODE_CONFIG`, enable that
 setting in your own OpenCode config. After updating Varro, restart its server once active work has
 finished to load the new default.
+
+V2 does not use `experimental.continue_loop_on_deny`; that legacy setting is ignored. Rejection and
+continuation follow the v2 server's behavior and the agent's instructions.
 
 Read the command, path, URL, or tool details before responding. `Always` can cover later matching actions, so use `Once` when the scope is unclear. Child-session requests appear in the parent conversation, but the permission still belongs to the child.
 
@@ -55,7 +59,7 @@ Commands, paths, URLs, tool metadata, and prior decisions may be sent to the sel
 
 ## Default mode and OpenCode rules
 
-`Default` means OpenCode decides. It does not mean every action asks for approval. Without custom rules, OpenCode allows most permissions, asks about `doom_loop` and `external_directory`, and denies reads of `.env` files and related variants while allowing files such as `.env.example`.
+`Default` means OpenCode decides. It does not mean every action asks for approval. V2's base policy allows most actions and asks for external-directory access and `.env` reads, with an allowance for `.env.example`. V1 asks about `doom_loop` and `external_directory` and denies `.env` reads except `.env.example`. V2 has no `doom_loop` or `lsp` permission action. Agent and user rules can override these defaults.
 
 The Permissions screen keeps rule sources separate and orders them from highest to lowest
 precedence. Project rules write only to the workspace `opencode.json` or `opencode.jsonc`.
@@ -68,7 +72,7 @@ OpenCode servers that do not expose saved permissions show that layer as unavail
 
 OpenCode supports `allow`, `ask`, and `deny` rules at global, project, and agent scopes. Rules can match tools, shell commands, paths, subagents, URLs, and external directories. OpenCode uses the last matching rule.
 
-See [OpenCode permissions](https://opencode.ai/docs/permissions/) for configuration syntax and examples.
+See [v2 permissions](https://opencode.ai/v2/docs/permissions/) for the recommended ordered `permissions` format with `action`, `resource`, and `effect`. Supported [v1 permissions](https://opencode.ai/docs/permissions/) remain accepted by v2, so shared configuration can keep the v1 `permission` format. Native v2 uses `shell` and `subagent` where v1 uses `bash` and `task`.
 
 ## Session behavior
 

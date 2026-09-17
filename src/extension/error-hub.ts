@@ -1,6 +1,7 @@
 /* oxlint-disable anti-slop/no-runtime-typeof -- Error causes cross an untyped JavaScript boundary and are checked before access. */
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Error records are checked for object shape before fields are read. */
 import * as vscode from 'vscode';
+import { OPENCODE_INSTALL_DOCS_URL } from '../shared/opencode-install';
 import { logger } from './logger';
 
 export type ErrorAction = {
@@ -96,7 +97,7 @@ export class ErrorHub {
       actions: [
         {
           title: 'Install instructions',
-          run: () => vscode.env.openExternal(vscode.Uri.parse('https://opencode.ai/')),
+          run: () => vscode.env.openExternal(vscode.Uri.parse(OPENCODE_INSTALL_DOCS_URL)),
         },
         {
           title: 'Show logs',

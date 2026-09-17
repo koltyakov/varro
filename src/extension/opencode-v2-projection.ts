@@ -13,8 +13,8 @@ import type {
 import { asRecord, isNumber, isString, type UnknownRecord } from '../shared/type-utils';
 import { formatSkillAttachment } from '../shared/skill-reference';
 
-export function v2PartId(messageID: string, ordinal: number): string {
-  return `${messageID}:content:${ordinal}`;
+export function v2PartId(messageID: string, type: string, ordinal: number): string {
+  return `${messageID}:${type}:${ordinal}`;
 }
 
 export function v2ModelRef(value: unknown): UnknownRecord | undefined {
@@ -240,7 +240,7 @@ export function projectV2Message(
 ): ProjectedV2Message {
   const base = { id: message.id, sessionID, time: message.time };
   const part = (ordinal: number, type: string, fields: UnknownRecord): UnknownRecord => ({
-    id: v2PartId(message.id, ordinal),
+    id: v2PartId(message.id, message.type === 'assistant' ? type : 'content', ordinal),
     sessionID,
     messageID: message.id,
     type,
@@ -281,7 +281,7 @@ export function projectV2Message(
         content: [
           {
             type: 'tool',
-            id: message.type === 'shell' ? message.shellID : v2PartId(message.id, 0),
+            id: message.type === 'shell' ? message.shellID : v2PartId(message.id, 'content', 0),
             name: message.type,
             time,
             state: error
@@ -329,6 +329,8 @@ export function projectV2Message(
     };
   }
   if (message.type === 'assistant') {
+    // V2 stream ordinals count within each content type, including empty blocks.
+    const ordinals = { text: 0, reasoning: 0 };
     return {
       info: {
         ...base,
@@ -355,10 +357,10 @@ export function projectV2Message(
             }
           : undefined,
       },
-      parts: message.content.map((content, ordinal) =>
+      parts: message.content.map((content) =>
         content.type === 'tool'
           ? projectTool(content, sessionID, message.id)
-          : part(ordinal, content.type, {
+          : part(ordinals[content.type]++, content.type, {
               text: content.text,
               time:
                 content.type === 'reasoning'

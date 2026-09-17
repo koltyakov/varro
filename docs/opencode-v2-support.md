@@ -1,6 +1,8 @@
-# OpenCode v1 and v2 support research
+# OpenCode v1 and v2 support
 
 Research date: September 17, 2026. The implementation supports v1 from 1.16.0 and v2 from 2.0.5 through automatic extension-host adapters.
+
+V2 is recommended for new installations; v1 remains supported. See the [usage guide](usage.md#choose-and-update-opencode) for installation, version selection, updates, and configuration compatibility. Current packages both install `opencode`. Varro also recognizes older or custom `opencode2` installations and prefers that name during automatic discovery.
 
 ## Implementation and verification
 
@@ -43,7 +45,11 @@ VARRO_OPENCODE_TEST_BINARY=/absolute/path/to/opencode2 npm run test:compatibilit
 
 V2 omits the legacy session `version` property; Varro supplies the protocol-family marker for its recycle-bin snapshots. Without that normalization, valid v2 sessions failed the snapshot validator and deletion misleadingly reported `404 Session not found`.
 
-## Findings
+## Historical research
+
+The remaining sections record the original startup investigation and implementation plan. They describe the pre-adapter failure and design requirements, not current limitations unless repeated in the implementation notes above.
+
+### Findings
 
 - The installed `/Users/andrew/.bun/bin/opencode2` reports `opencode v2.0.6`.
 - Published `@opencode/cli` and `@opencode/client` report `2.0.6`.
@@ -52,7 +58,7 @@ V2 omits the legacy session `version` property; Varro supplies the protocol-fami
 - `tmp/opencode` was clean and current on upstream `dev`, commit `5a8335857b0ebec44ef6aa1d52b339cf25c329ca`. Its CLI and protocol can differ from the released binary. Treat those sources as architectural references, not the released contract.
 - The 2.0.6 API uses `/api/info`; Varro also probes the 2.0.5 `/api/status` endpoint to preserve the supported v2 floor.
 
-## Reproduced startup failure
+### Reproduced startup failure on v2.0.5
 
 An isolated copy of the installed binary was launched with a fresh HOME, XDG directories, explicit database path, empty workspace, and ephemeral loopback port. The probe performed HTTP GETs and opened an event subscription. It did not use production sessions or provider credentials.
 
@@ -71,11 +77,11 @@ An isolated copy of the installed binary was launched with a fresh HOME, XDG dir
 
 The authenticated `/openapi.json` lists 111 paths. The local evidence is in `tmp/v2-api-probe-q0M2WV/results.json` and `tmp/v2-api-probe-q0M2WV/openapi.json`; the reproducible probe is `tmp/opencode-v2-probe.mjs` and uses the installed binary's absolute path.
 
-Varro currently sends unauthenticated health, REST, and SSE requests in `src/extension/open-code-transport.ts`. `src/shared/opencode-endpoints.ts` selects `/global/health` and `/global/event`. The health loop in `src/extension/server.ts` collapses failed probes into a timeout. These assumptions explain the screenshot even though the server has started successfully.
+Before the adapters, Varro sent unauthenticated health, REST, and SSE requests in `src/extension/open-code-transport.ts`. `src/shared/opencode-endpoints.ts` selected `/global/health` and `/global/event`. The health loop in `src/extension/server.ts` collapsed failed probes into a timeout even though the server had started successfully.
 
 Credentials alone will not fix the integration. The released server does not supply the tested v1 contracts. HTTP 200 alone is especially misleading because unknown non-API routes serve HTML.
 
-## Required compatibility design
+### Required compatibility design
 
 Keep one Varro UI and two extension-host protocol adapters. Select the adapter once per server connection and normalize both protocols into Varro-owned data and events before they reach session state, event batching, and the webview.
 
@@ -88,7 +94,7 @@ Keep one Varro UI and two extension-host protocol adapters. Select the adapter o
 
 The adapter should expose semantic operations where contracts differ. Avoid growing a global string-replacement table for v1 paths. `OpenCodeServer.request()` is a useful transition boundary, but some operations need multiple calls and stateful projections.
 
-## Contract work
+### Contract work
 
 | Area | Required adaptation |
 | --- | --- |
@@ -108,7 +114,7 @@ The adapter should expose semantic operations where contracts differ. Avoid grow
 
 Primary Varro integration points are `src/extension/open-code-process.ts`, `src/extension/open-code-transport.ts`, `src/extension/server.ts`, `src/extension/rest-proxy.ts`, `src/extension/server-event-bridge.ts`, and the shared protocol, compatibility, and install modules. Hidden helper sessions, automatic permission judging, exports, trash, and model-selection persistence also consume server behavior and need coverage.
 
-## Backward compatibility requirements
+### Backward compatibility requirements
 
 - Users keep the same Varro interface and settings when choosing either supported CLI family. No manual API-version switch should be necessary.
 - Keep version-specific behavior in the host adapters. Shared UI code consumes normalized models and declared capabilities.
@@ -118,7 +124,7 @@ Primary Varro integration points are `src/extension/open-code-process.ts`, `src/
 - API compatibility does not imply shared database compatibility. Verify v1 history visibility and v2 migration using imported copies, preserving original data. Never claim that switching binaries provides bidirectional session synchronization without evidence.
 - Missing backend features must be represented explicitly rather than returning fake success or silently dropping operations. The migration guide says v2 does not run LSP services, for example; editor-supplied diagnostics should be assessed separately.
 
-## Implementation and verification order
+### Implementation and verification order
 
 1. Add connection identity, authentication, adapter selection, and precise startup errors. Cover v1, v2, HTML fallback, 401, restart, existing-server attachment, and ownership handoff.
 2. Normalize discovery, sessions, messages, and pagination. Run the same Varro-facing contract assertions against both real backends.

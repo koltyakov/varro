@@ -31,6 +31,7 @@ import {
   describeUpgradeFailure,
   detectInstallMethod,
   getRecoveryCommand,
+  OPENCODE_INSTALL_COMMAND,
   type OpenCodeInstallMethod,
   type OpenCodeUpgradeFailureKind,
 } from '../shared/opencode-install';
@@ -944,8 +945,7 @@ export function sweepStaleInjectedConfigDirectories(now = Date.now()): Promise<v
 
 // Owns OpenCode spawn and termination mechanics; OpenCodeServer owns lifecycle and retry policy.
 export class OpenCodeProcess {
-  static readonly MISSING_CLI_MESSAGE =
-    'OpenCode CLI not found. Install it with: npm install -g opencode-ai';
+  static readonly MISSING_CLI_MESSAGE = `OpenCode CLI not found. Install OpenCode v2 with: ${OPENCODE_INSTALL_COMMAND}. OpenCode v1 is also supported; see Varro's setup guide for installation options.`;
 
   /** Unambiguous "the binary is not there": the spawn itself never got started. */
   static isMissingCliFailure(text: string): boolean {

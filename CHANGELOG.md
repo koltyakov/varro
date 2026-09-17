@@ -5,7 +5,8 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 ## 0.29.x - September 2026
 
 - Added OpenCode v2 support from version 2.0.5 while retaining v1 support from 1.16.0, with automatic API detection and authenticated server connections.
-- Prefer `opencode2` when no server command is configured, falling back to `opencode`. CLI updates now use the installed v1 or v2 package family.
+- Recommend OpenCode v2 for new installations with `npm install -g @opencode/cli`, while keeping v1 available through `npm install -g opencode-ai` and an explicit `varro.server.command` path. Native Windows v2 users can download the standalone CLI from the OpenCode v2 install page.
+- Prefer `opencode2` when no server command is configured, falling back to `opencode`. Current v1 and v2 packages both use the `opencode` command. CLI updates and recovery guidance use the installed package family; updating v1 does not migrate it to v2.
 - Added the `Varro: Import OpenCode v1 Session into v2` command to copy workspace conversations and their child sessions into v2. Imports preserve history and leave the original sessions unchanged, so users can continue work in the new copies.
 - Extended local usage reports to include v1 and v2 sessions without double-counting migrated or imported conversations.
 - Kept v2 provider failures visible in live chat and reopened history, including failures before an assistant response starts.

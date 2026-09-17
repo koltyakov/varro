@@ -6,32 +6,52 @@ test('shows the missing-cli error state and offers install actions', async ({ pa
   await page.goto('/e2e/harness/index.html?scenario=server-error-missing-cli');
 
   await expect(page.getByText('OpenCode is not installed', { exact: true })).toBeVisible();
-  await expect(page.getByText('npm i -g opencode-ai', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Open terminal and install' }).click();
+  await expect(page.getByText('npm i -g @opencode/cli', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Open terminal and install', exact: true }).click();
 
   await expect
     .poll(() =>
       getE2EState(page, () => {
-        const value = (window as Window & {
-          __varroE2E?: { terminalCommands?: Array<{ command: string; title?: string }> };
-        }).__varroE2E;
+        const value = (
+          window as Window & {
+            __varroE2E?: { terminalCommands?: Array<{ command: string; title?: string }> };
+          }
+        ).__varroE2E;
         return value?.terminalCommands?.[0] || null;
       })
     )
-    .toEqual({ command: 'npm i -g opencode-ai', title: 'OpenCode Install' });
+    .toEqual({ command: 'npm i -g @opencode/cli', title: 'OpenCode Install' });
 
   await page.getByRole('button', { name: 'Learn more at opencode.ai' }).click();
 
   await expect
     .poll(() =>
       getE2EState(page, () => {
-        const value = (window as Window & {
-          __varroE2E?: { externalUrls?: string[] };
-        }).__varroE2E;
+        const value = (
+          window as Window & {
+            __varroE2E?: { externalUrls?: string[] };
+          }
+        ).__varroE2E;
         return value?.externalUrls?.[0] || null;
       })
     )
-    .toBe('https://opencode.ai');
+    .toBe('https://opencode.ai/v2/docs/');
+
+  await page.getByText('Use OpenCode v1 instead', { exact: true }).click();
+  await expect(page.getByText('npm i -g opencode-ai', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Open terminal and install v1', exact: true }).click();
+  await expect
+    .poll(() =>
+      getE2EState(page, () => {
+        const value = (
+          window as Window & {
+            __varroE2E?: { terminalCommands?: Array<{ command: string; title?: string }> };
+          }
+        ).__varroE2E;
+        return value?.terminalCommands?.[1] || null;
+      })
+    )
+    .toEqual({ command: 'npm i -g opencode-ai', title: 'OpenCode Install' });
 });
 
 test('shows a generic startup error message', async ({ page }) => {
@@ -49,9 +69,11 @@ test('restarts the server from an error state without the command palette', asyn
   await expect
     .poll(() =>
       getE2EState(page, () => {
-        const value = (window as Window & {
-          __varroE2E?: { serverRestartCount?: number };
-        }).__varroE2E;
+        const value = (
+          window as Window & {
+            __varroE2E?: { serverRestartCount?: number };
+          }
+        ).__varroE2E;
         return value?.serverRestartCount || 0;
       })
     )
@@ -71,9 +93,11 @@ test('points at the setting when the configured CLI path is wrong', async ({ pag
   await expect
     .poll(() =>
       getE2EState(page, () => {
-        const value = (window as Window & {
-          __varroE2E?: { settingsQueries?: string[] };
-        }).__varroE2E;
+        const value = (
+          window as Window & {
+            __varroE2E?: { settingsQueries?: string[] };
+          }
+        ).__varroE2E;
         return value?.settingsQueries?.[0] || null;
       })
     )
@@ -94,9 +118,11 @@ test('recommends the install-specific command after a failed update', async ({ p
   await expect
     .poll(() =>
       getE2EState(page, () => {
-        const value = (window as Window & {
-          __varroE2E?: { terminalCommands?: Array<{ command: string; title?: string }> };
-        }).__varroE2E;
+        const value = (
+          window as Window & {
+            __varroE2E?: { terminalCommands?: Array<{ command: string; title?: string }> };
+          }
+        ).__varroE2E;
         return value?.terminalCommands?.[0] || null;
       })
     )
@@ -114,9 +140,11 @@ test('presents an update deferred by active sessions as a wait', async ({ page }
   await expect
     .poll(() =>
       getE2EState(page, () => {
-        const value = (window as Window & {
-          __varroE2E?: { serverRestartCount?: number };
-        }).__varroE2E;
+        const value = (
+          window as Window & {
+            __varroE2E?: { serverRestartCount?: number };
+          }
+        ).__varroE2E;
         return value?.serverRestartCount || 0;
       })
     )
@@ -133,9 +161,11 @@ test('opens the blocking setting when auto-update is disabled', async ({ page })
   await expect
     .poll(() =>
       getE2EState(page, () => {
-        const value = (window as Window & {
-          __varroE2E?: { settingsQueries?: string[] };
-        }).__varroE2E;
+        const value = (
+          window as Window & {
+            __varroE2E?: { settingsQueries?: string[] };
+          }
+        ).__varroE2E;
         return value?.settingsQueries?.[0] || null;
       })
     )

@@ -10,6 +10,7 @@ import {
 } from '../shared/opencode-compatibility';
 import {
   getUpgradeCommand,
+  OPENCODE_INSTALL_COMMAND,
   OPENCODE_UPGRADE_COMMAND,
   type OpenCodeInstallMethod,
 } from '../shared/opencode-install';
@@ -1605,7 +1606,7 @@ export class OpenCodeServer extends EventEmitter {
       message: OpenCodeProcess.MISSING_CLI_MESSAGE,
       detail: {
         kind: 'cli-missing',
-        suggestedCommand: 'npm i -g opencode-ai',
+        suggestedCommand: OPENCODE_INSTALL_COMMAND,
         settingId: 'varro.server.command',
         searchedPaths: install.searchedPaths,
       },

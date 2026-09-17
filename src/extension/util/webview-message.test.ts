@@ -433,6 +433,13 @@ describe('webview message validation', () => {
   // cover them the buttons silently did nothing in production while component
   // and e2e tests - which never run this parser - kept passing.
   it.each([
+    'npm i -g @opencode/cli',
+    'npm install -g @opencode/cli@latest',
+    'pnpm add -g --allow-build=@opencode/cli @opencode/cli@latest',
+    'yarn global add @opencode/cli@latest',
+    'bun add -g --trust @opencode/cli@latest',
+    'brew upgrade anomalyco/tap/opencode-v2',
+    'curl -fsSL https://opencode.ai/v2/install | bash',
     'npm i -g opencode-ai',
     'opencode upgrade',
     'npm install -g opencode-ai@latest',

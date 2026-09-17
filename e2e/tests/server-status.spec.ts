@@ -9,17 +9,19 @@ test('shows no-provider setup actions and triggers provider setup commands', asy
   await expect(page.getByText('opencode auth login', { exact: true })).toBeVisible();
 
   await page.getByRole('button', { name: 'Open terminal and add a provider' }).click();
-  await page.getByRole('button', { name: 'Provider setup docs' }).click();
+  await page.getByRole('button', { name: 'Provider setup docs (v2)', exact: true }).click();
 
   await expect
     .poll(() =>
       getE2EState(page, () => {
-        const value = (window as Window & {
-          __varroE2E?: {
-            terminalCommands?: Array<{ command: string; title?: string }>;
-            externalUrls?: string[];
-          };
-        }).__varroE2E;
+        const value = (
+          window as Window & {
+            __varroE2E?: {
+              terminalCommands?: Array<{ command: string; title?: string }>;
+              externalUrls?: string[];
+            };
+          }
+        ).__varroE2E;
         return {
           terminal: value?.terminalCommands?.[0] || null,
           url: value?.externalUrls?.[0] || null,
@@ -28,7 +30,7 @@ test('shows no-provider setup actions and triggers provider setup commands', asy
     )
     .toEqual({
       terminal: { command: 'opencode auth login', title: 'OpenCode Provider Setup' },
-      url: 'https://opencode.ai/docs/providers',
+      url: 'https://opencode.ai/v2/docs/providers',
     });
 });
 
@@ -40,7 +42,9 @@ test('recovers when the webview reloads while startup is still in progress', asy
   await page.reload();
 
   await expect(page.getByText('Starting OpenCode...', { exact: true })).toBeVisible();
-  await expect(page.getByLabel('Back to sessions').locator('..').getByText('Startup handoff')).toBeVisible();
+  await expect(
+    page.getByLabel('Back to sessions').locator('..').getByText('Startup handoff')
+  ).toBeVisible();
   await expect(
     page.getByText('Startup completed without losing the restored session.', { exact: true })
   ).toBeVisible();
@@ -53,12 +57,16 @@ test('recovers when the first startup connection attempt loses the race', async 
   await expect
     .poll(() =>
       page.evaluate(() => {
-        const value = (window as Window & {
-          __varroE2E?: { requests: Array<{ method: string; path: string }> };
-        }).__varroE2E;
-        return value?.requests.filter(
-          (request) => request.method === 'GET' && request.path === '/global/health'
-        ).length || 0;
+        const value = (
+          window as Window & {
+            __varroE2E?: { requests: Array<{ method: string; path: string }> };
+          }
+        ).__varroE2E;
+        return (
+          value?.requests.filter(
+            (request) => request.method === 'GET' && request.path === '/global/health'
+          ).length || 0
+        );
       })
     )
     .toBe(2);
@@ -66,9 +74,11 @@ test('recovers when the first startup connection attempt loses the race', async 
   await expect
     .poll(() =>
       page.evaluate(() => {
-        const value = (window as Window & {
-          __varroE2E?: { requests: Array<{ method: string; path: string }> };
-        }).__varroE2E;
+        const value = (
+          window as Window & {
+            __varroE2E?: { requests: Array<{ method: string; path: string }> };
+          }
+        ).__varroE2E;
         return (value?.requests || []).map((request) => `${request.method} ${request.path}`);
       })
     )
@@ -81,9 +91,13 @@ test('recovers when the first startup connection attempt loses the race', async 
       ])
     );
 
-  await expect(page.getByText('Failed to connect to OpenCode server', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Failed to connect to OpenCode server', { exact: true })).toHaveCount(
+    0
+  );
   await expect(page.getByLabel('Back to sessions')).toBeVisible();
-  await expect(page.getByLabel('Back to sessions').locator('..').getByText('Startup race recovery')).toBeVisible();
+  await expect(
+    page.getByLabel('Back to sessions').locator('..').getByText('Startup race recovery')
+  ).toBeVisible();
   await expect(
     page.getByText('The second startup attempt connected and restored the session state.', {
       exact: true,

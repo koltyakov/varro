@@ -12,10 +12,10 @@ VS Code forks have limited support. See [VS Code Fork Compatibility](vscode-fork
 
 ## First Run And Connection
 
-Install the OpenCode CLI:
+Install the recommended [OpenCode v2 CLI](https://opencode.ai/v2/docs/) on macOS, Linux, or WSL:
 
 ```sh
-npm install -g opencode-ai
+npm install -g @opencode/cli
 ```
 
 If OpenCode does not have any providers configured yet, either connect one from Varro's Models view or log in from a terminal:
@@ -24,7 +24,7 @@ If OpenCode does not have any providers configured yet, either connect one from 
 opencode auth login
 ```
 
-From inside Varro, `/connect` opens the provider connection dialog. The no-provider recovery screen offers the same embedded setup. Use `opencode auth login` when a provider does not expose a supported embedded method.
+From inside Varro, `/connect` opens the provider connection dialog. The no-provider recovery screen offers terminal setup. Use `opencode auth login` when a provider does not expose a supported embedded method. If you selected a custom executable such as `opencode2`, use that executable in terminal commands too.
 
 Varro connects to `http://127.0.0.1:4096` by default. It does not start OpenCode at extension activation time. Instead, it starts or attaches to the server the first time the chat view needs it.
 
@@ -36,11 +36,34 @@ opencode serve --port 4096
 
 If the CLI is installed somewhere that is not on `PATH`, set `varro.server.command` to the executable path.
 
-When `varro.server.command` is empty, Varro searches `PATH` and common install locations for `opencode2` first, then falls back to `opencode`. Set the command to `opencode` or your v1 executable's path to explicitly use v1.
+When `varro.server.command` is empty, Varro searches `PATH` and common install locations for `opencode2` first, then falls back to `opencode`. Current v1 and v2 packages both install `opencode`. Check the selected executable with `--version`; its name does not determine its API version.
 
-On native Windows, run the install and authentication commands in PowerShell, Command Prompt, or another Windows terminal. Varro runs on the local Windows extension host and looks for the Windows OpenCode CLI. OpenCode stores native Windows data, including credentials, logs, and sessions, under `%USERPROFILE%\.local\share\opencode`.
+On native Windows, download the standalone v2 CLI from the [install page](https://opencode.ai/v2/docs/), which does not currently support Windows package managers. Add the executable to `PATH` or set `varro.server.command` to its path. Run authentication commands in a Windows terminal. Varro runs on the local Windows extension host and looks for the Windows CLI. Native OpenCode data is under `%USERPROFILE%\.local\share\opencode`.
 
-OpenCode [recommends WSL for the best Windows experience](https://opencode.ai/docs/windows-wsl). Open the project in a VS Code WSL window, then install and authenticate OpenCode inside that distribution. A WSL window runs Varro and OpenCode on the Linux extension host, where data is under `~/.local/share/opencode`. A CLI installed only on Windows is not available to that host, and a CLI installed only in WSL is not available to a native VS Code window.
+For WSL, open the project in a VS Code WSL window, then install and authenticate OpenCode inside that distribution. A WSL window runs Varro and OpenCode on the Linux extension host, where data is under `~/.local/share/opencode`. A CLI installed only on Windows is not available to that host, and a CLI installed only in WSL is not available to a native VS Code window.
+
+### Choose and update OpenCode
+
+| Version | Minimum supported | Tested with this release | npm package |
+| --- | --- | --- | --- |
+| v2, recommended | 2.0.5 | 2.0.6 | `@opencode/cli` |
+| v1, still supported | 1.16.0 | 1.18.31 | `opencode-ai` |
+
+To keep using v1, retain your installation or run `npm install -g opencode-ai`. Set `varro.server.command` to its executable path. Setting it to `opencode` selects v1 only if that command resolves to a v1 installation. Varro detects the API automatically.
+
+Both package families now provide the same `opencode` command. When switching from a package-managed v1 installation to v2, remove the v1 package with its package manager first, then install `@opencode/cli`. For npm, use `npm uninstall -g opencode-ai`, then `npm install -g @opencode/cli`. This removes the package, not your history or configuration. If you keep both versions, use separate installation locations and explicit executable paths. After changing `varro.server.command`, let active work finish and restart the Varro-managed server. A server already listening on the configured port can belong to a different version; restart a manually managed server in its own terminal.
+
+Updates stay within the installed CLI family. For an npm installation, use `npm install -g @opencode/cli@latest` for v2 or `npm install -g opencode-ai@latest` for v1. Use the original installer for other installation methods. `varro.server.autoUpdate` does not switch v1 users to v2. Native Windows uses a prompt instead of replacing a running binary in the background; standalone installations should use the current download from their version's install page.
+
+Supported v1 configuration remains accepted by v2. Native v2 configuration uses fields such as `agents`, `permissions`, and `mcp.servers`; v1 cannot read those native-v2-only shapes. Keep compatible configuration if switching between versions. Plugins require a v2 port. See the [upstream migration guide](https://opencode.ai/v2/docs/migrate-v1/).
+
+### Version differences and history
+
+- V2 does not expose session sharing or an OpenCode LSP service. Sharing is disabled on v2. VS Code Problems remain available as explicit context.
+- V2 cannot patch arbitrary session metadata. Varro keeps session annotations under the user's XDG state directory in `varro/opencode-v2/`. These annotations are local to Varro and are not synchronized to other OpenCode clients.
+- Changing CLI versions does not migrate or synchronize history. While connected to v2, run `Varro: Import OpenCode v1 Session into v2` to copy a local workspace conversation and its child sessions. The copy has new IDs and a title ending in `(v1 copy)`. You can continue it without changing the original v1 history. Imports do not execute recorded tools or send a model request.
+
+See [OpenCode v1 and v2 support](opencode-v2-support.md) for adapter details and verification coverage.
 
 ## Workspace And Remote Environments
 
@@ -94,7 +117,7 @@ Varro keeps at most five pasted images, with a maximum size of 5 MiB per image. 
 
 ### Add Vision To A Text-Only Model
 
-Varro can delegate pasted images from a tool-capable text-only model, such as GLM, to an OpenCode subagent named `vision`. Add the agent to `opencode.json` and replace the example model with a model available from one of your configured providers:
+Varro can delegate pasted images from a tool-capable text-only model, such as GLM, to an OpenCode subagent named `vision`. Add the agent to `opencode.json` and replace the example model with a model available from one of your configured providers. This example uses supported v1-format configuration so it works with both v1 and v2:
 
 ```json
 {
@@ -176,7 +199,7 @@ Sessions from every open workspace root appear in one catalog. Use the folder fi
 - Search uses OpenCode's native root-session search across loaded and older history and returns up to 30 results. Matching fields depend on the installed OpenCode version. Run `Varro: Search Sessions` to open and focus search directly.
 - Filter or jump to `Running`, `Needs attention`, `Failed`, `Plan ready`, and `Completed` sessions from the header badges.
 - Open sub-agent sessions from the parent session row when they exist.
-- Top-level sessions can be renamed, pinned, or moved to the recycle bin. Drag a pinned session's handle, or focus it and press `ArrowUp` or `ArrowDown`, to reorder pinned sessions. Any session can open in the sidebar, an editor tab, or the OpenCode TUI; copy its ID; and be shared or unshared. Opening an editor session in the sidebar closes its matching editor tab. Sharing asks OpenCode to create a share link and copies it to the clipboard.
+- Top-level sessions can be renamed, pinned, or moved to the recycle bin. Drag a pinned session's handle, or focus it and press `ArrowUp` or `ArrowDown`, to reorder pinned sessions. Any session can open in the sidebar, an editor tab, or the OpenCode TUI, and its ID can be copied. Opening an editor session in the sidebar closes its matching editor tab. On v1, sharing asks OpenCode to create a share link and copies it to the clipboard; v2 sharing is unavailable.
 - Deleted session roots move into a recycle bin section where you can restore them or delete them permanently for 24 hours before they expire.
 - Stop the active run with `Varro: Abort Session`.
 - Use `/export` to open the current session as JSON in the editor.
@@ -250,7 +273,7 @@ Choose the config scope based on where you want the agent to appear:
 
 OpenCode merges global and project configuration. A project agent with the same name overrides the matching global agent fields. Keep provider credentials and other secrets in the global config, not in a committed project file.
 
-This example adds `ask`, a primary agent that can inspect local code and search documentation but cannot edit files, run commands, delegate to subagents, or call unlisted custom and MCP tools:
+This example uses supported v1-format configuration for both CLI families. It adds `ask`, a primary agent that can inspect local code and search documentation but cannot edit files, run commands, delegate to subagents, or call unlisted custom and MCP tools. The `lsp` allowance only has an effect on v1:
 
 ```json
 {
@@ -283,7 +306,7 @@ Omit `model` to use the configured global model, or add a provider-qualified mod
 
 ### Session selections across editor instances
 
-Varro saves explicit model, reasoning variant, and agent selections in OpenCode session metadata.
+On v1, Varro saves explicit model, reasoning variant, and agent selections in OpenCode session metadata.
 Opening the same session in another extension instance, including VS Code Insiders, restores those
 selections ahead of local preferences and historical messages. Session updates also refresh them in
 open views. Restoring a session does not write metadata or change its last-updated timestamp.
@@ -292,6 +315,8 @@ The stored fields are `metadata.varro.model`, containing `provider`, `model`, an
 `variant`, and `metadata.varro.agent`, containing the agent name. A model selection without a variant
 clears the previous reasoning selection. Existing sessions without these fields retain the previous
 local and history-based fallback behavior until an explicit selection is saved.
+
+On v2, the adapter stores these annotations locally in Varro's state directory rather than writing them to OpenCode session metadata. Other OpenCode clients do not receive them.
 
 Varro merges its fields under `metadata.varro`, preserving workspace scope and unrelated metadata:
 
@@ -372,7 +397,7 @@ This allows a flow where the main agent orchestrates work across different model
 
 In OpenCode, this is configured by assigning `model` per agent or subagent. If a subagent does not define its own model, it inherits the model of the primary agent that invoked it.
 
-Example:
+The following example uses the supported v1 format for compatibility with both versions. For native v2 configuration, use `agents` instead of `agent`, `agents.title.model` instead of `small_model`, and `request.body.temperature` instead of `temperature`. See the [v2 migration reference](https://opencode.ai/v2/docs/migrate-v1/#agents-and-modes).
 
 ```json
 {
@@ -427,7 +452,7 @@ Additional recommendations:
 - Explicitly pin important subagents to their own models.
 - Use project `opencode.json` or `.opencode/agents/` if you want team-shared routing.
 - Keep provider credentials and secrets in your user-level OpenCode config instead of project config.
-- Use `permission.task` if you want to control which subagents a primary agent is allowed to invoke.
+- Use rules with `action: "subagent"` in native v2 `permissions`, or `permission.task` in v1-format configuration, to control which subagents a primary agent may invoke.
 
 ## Permissions And Questions
 
@@ -446,12 +471,13 @@ parent conversation while keeping the request owned by the child session.
 agent determine which actions are allowed, denied, or sent to Varro for manual approval. Varro does
 not add session-level permission rules in this mode.
 
-Without custom OpenCode rules, most permissions are allowed. OpenCode asks before repeated identical
-tool calls (`doom_loop`) or access outside the working directory (`external_directory`), and its
-default read rules deny `.env` files and variants while allowing `.env.example`. These are OpenCode
-defaults, not additional Varro rules.
+OpenCode defaults depend on the version and agent. V2's base policy allows most actions and asks for
+external-directory access and `.env` reads, with an allowance for `.env.example`. V1 asks for
+`doom_loop` and external-directory access and denies `.env` reads except `.env.example`.
+V2 has no `doom_loop` or `lsp` permission action. Agent rules can further restrict these defaults.
 
-See [OpenCode permissions](https://opencode.ai/docs/permissions/) for the full list of permission keys
+See [v2 permissions](https://opencode.ai/v2/docs/permissions/) or
+[v1 permissions](https://opencode.ai/docs/permissions/) for the full list of permission keys
 and configuration examples for global and per-agent `allow`, `ask`, and `deny` rules. Rules can match
 tools, commands, paths, subagents, skills, URLs, and external directories. When multiple patterns
 match, the last matching rule wins.
@@ -532,6 +558,7 @@ Editable user messages expose an edit action. Sending the replacement removes th
 - `Varro: New Chat Editor`
 - `Varro: New Terminal Editor`
 - `Varro: Search Sessions`
+- `Varro: Import OpenCode v1 Session into v2`
 - `Varro: Open Settings`
 - `Varro: Show File Diffs` or `Varro: Hide File Diffs`
 - `Varro: Usage Stats`
@@ -556,8 +583,8 @@ Server:
 
 - `varro.server.autoStart` - auto-start `opencode serve` when Varro first needs it; defaults to `true` and is marked deprecated/debug-only in VS Code
 - `varro.server.port` - port used for the local OpenCode server (default `4096`); reload the VS Code window after changing it
-- `varro.server.command` - optional path to the OpenCode CLI executable
-- `varro.server.autoUpdate` - automatically install the latest OpenCode CLI update in the background on macOS and Linux. Native Windows uses an upgrade prompt instead because a running server can lock `opencode.exe`. Before opening a Windows update command, Varro waits for active work and stops its managed server; stop a manually launched server yourself. Failed automatic updates show tailored recovery guidance.
+- `varro.server.command` - optional path to the OpenCode CLI executable. Empty prefers `opencode2`, then `opencode`; use your v1 executable's path to keep v1 selected
+- `varro.server.autoUpdate` - automatically install updates within the installed CLI family in the background on macOS and Linux. V1 stays on v1; v2 stays on v2. Native Windows uses an upgrade prompt instead because a running server can lock `opencode.exe`. Before opening a Windows update command, Varro waits for active work and stops its managed server; stop a manually launched server yourself. Failed automatic updates show tailored recovery guidance.
 
 Chat view:
 
@@ -586,7 +613,7 @@ There are also deprecated debug-only settings used for development and recovery 
 
 ## Troubleshooting
 
-- OpenCode CLI missing: install it with `npm install -g opencode-ai`.
+- OpenCode CLI missing: install v2 with `npm install -g @opencode/cli` on macOS, Linux, or WSL, or download the native Windows CLI from the [v2 install page](https://opencode.ai/v2/docs/). V1 remains available with `npm install -g opencode-ai`.
 - OpenCode CLI incompatible: Varro supports the v1 API from `1.16.0` and the v2 API from `2.0.5`. This release was tested with v1 `1.18.31` and v2 `2.0.6`. Varro selects the API automatically, including when `varro.server.command` points to a custom binary such as `opencode2`. Updates use the installed CLI's package family.
 - OpenCode v2 authentication: Varro captures managed-server credentials automatically and redacts them from output. Existing local services use their registered credentials. An externally managed server can also use `OPENCODE_SERVER_PASSWORD` and `OPENCODE_SERVER_USERNAME` from the extension host's environment.
 - OpenCode v2 session settings: Varro stores mutable session annotations locally because the released v2 API cannot update session metadata. Session sharing is unavailable through this API, so its menu action is disabled. Existing v1-format configuration remains supported.

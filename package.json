@@ -395,12 +395,12 @@
         "varro.server.command": {
           "type": "string",
           "default": "",
-          "description": "Optional path to the OpenCode CLI executable Varro uses for server startup and other CLI-backed actions. When empty, Varro prefers opencode2 if installed, then falls back to opencode."
+          "description": "Optional path to the OpenCode CLI executable used for startup and CLI actions. OpenCode v2 is recommended; v1 remains supported. When empty, Varro searches for opencode2 first, then opencode. Both current CLI families use opencode. Set an explicit v1 executable path to keep using v1."
         },
         "varro.server.autoUpdate": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically install OpenCode CLI updates"
+          "description": "Automatically install updates within the installed OpenCode CLI family on macOS and Linux: @opencode/cli for v2, opencode-ai for v1. Does not migrate v1 to v2. Native Windows uses an update prompt."
         },
         "varro.chat.showFileDiffs": {
           "type": "boolean",

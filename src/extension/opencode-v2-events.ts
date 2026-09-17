@@ -147,7 +147,8 @@ export function projectV2Event(value: unknown, context: V2MessageContext = {}): 
     });
   if (/^session\.(text|reasoning)\./.test(event.type)) {
     if (!isString(data.assistantMessageID) || !isNumber(data.ordinal)) return [];
-    const partID = v2PartId(data.assistantMessageID, data.ordinal);
+    const type = event.type.startsWith('session.text.') ? 'text' : 'reasoning';
+    const partID = v2PartId(data.assistantMessageID, type, data.ordinal);
     return emit(event.type.replace('session.', 'session.next.'), {
       ...properties,
       textID: partID,
