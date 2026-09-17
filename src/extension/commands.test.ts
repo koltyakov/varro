@@ -1,5 +1,5 @@
 /* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-module-mocking, anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/require-safety-comment-for-type-assertion -- These tests exercise command import boundaries with malformed VS Code and process results. */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as VSCode from 'vscode';
 
 const { configInspectMock, configUpdateMock, registeredCommands, vscodeMock } = vi.hoisted(() => {
@@ -64,6 +64,7 @@ const { configInspectMock, configUpdateMock, registeredCommands, vscodeMock } = 
       showTextDocument: vi.fn(() => Promise.resolve()),
       showWarningMessage: vi.fn(() => Promise.resolve()),
       showErrorMessage: vi.fn(() => Promise.resolve()),
+      showInformationMessage: vi.fn(() => Promise.resolve()),
       showSaveDialog: vi.fn<() => Promise<{ fsPath: string } | undefined>>(async () => undefined),
     },
     Uri: {
@@ -104,6 +105,7 @@ vi.mock('./error-hub', () => ({ errorHub: errorHubMock }));
 import { registerCommands } from './commands';
 import { readMaximumTestedOpenCodeVersion } from './extension-manifest';
 import { RestartBlockedError } from './server';
+import { LegacySessionImport } from './legacy-session-import';
 
 const MAXIMUM_TESTED_OPENCODE_VERSION = readMaximumTestedOpenCodeVersion();
 
@@ -163,6 +165,57 @@ function register(
   )(context, sidebar, contextProvider, server, revealSidebar);
   return { contextProvider, sidebar };
 }
+
+describe('v1 session import command', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(LegacySessionImport.prototype, 'list').mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('uses normalized v2 health to reach the legacy session catalog', async () => {
+    const server = {
+      start: vi.fn().mockResolvedValue(undefined),
+      readServerInfo: vi.fn().mockResolvedValue({
+        health: { healthy: true, version: '2.0.7' },
+      }),
+      request: vi.fn().mockRejectedValue(new Error('Unsupported legacy route')),
+      getWorkspaceCwd: vi.fn(() => '/repo'),
+    };
+    register('/repo', server);
+
+    await runCommand('varro.session.importV1');
+
+    expect(server.start).toHaveBeenCalledOnce();
+    expect(server.readServerInfo).toHaveBeenCalledOnce();
+    expect(server.request).not.toHaveBeenCalled();
+    expect(LegacySessionImport.prototype.list).toHaveBeenCalledWith('/repo');
+    expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledWith(
+      'No local OpenCode v1 conversations were found for this workspace.'
+    );
+    expect(vscodeMock.window.showErrorMessage).not.toHaveBeenCalled();
+  });
+
+  it.each(['1.18.4', undefined, 'invalid'])(
+    'rejects server version %s before reading history',
+    async (version) => {
+      register('/repo', {
+        start: vi.fn().mockResolvedValue(undefined),
+        readServerInfo: vi.fn().mockResolvedValue({ health: { healthy: true, version } }),
+      });
+
+      await runCommand('varro.session.importV1');
+
+      expect(LegacySessionImport.prototype.list).not.toHaveBeenCalled();
+      expect(vscodeMock.window.showErrorMessage).toHaveBeenCalledWith(
+        'Could not import v1 history: Connect Varro to OpenCode v2 before importing v1 history'
+      );
+    }
+  );
+});
 
 describe('Problems Add to Context action', () => {
   it('contributes a quick fix and routes its captured details to the original chat target', async () => {

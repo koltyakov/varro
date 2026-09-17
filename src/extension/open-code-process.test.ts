@@ -2881,6 +2881,74 @@ describe('OpenCodeProcess config ownership', () => {
 
 describe('OpenCodeProcess install resolution', () => {
   it.each([
+    { name: 'idle managed server', configured: false, active: false, managed: true },
+    { name: 'busy managed server', configured: false, active: true, managed: true },
+    { name: 'explicit v1 CLI', configured: true, active: false, managed: true },
+    { name: 'unmanaged server', configured: false, active: false, managed: false },
+  ])('checks a newly installed v2 CLI for $name', async ({ configured, active, managed }) => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    const directory = await mkdtemp(join(tmpdir(), 'varro-opencode-discovery-'));
+    const v1 = join(directory, 'opencode');
+    const v2 = join(directory, 'opencode2');
+    await writeFile(v1, '');
+    const manager = new OpenCodeProcess(4096, true, configured ? v1 : '');
+    vi.spyOn(
+      manager as unknown as { serverPathEntries(): string[] },
+      'serverPathEntries'
+    ).mockReturnValue([directory]);
+    spawnMock.mockImplementation((command: string) => {
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+        kill: vi.fn(),
+      });
+      queueMicrotask(() => {
+        child.stdout.emit('data', Buffer.from(command === v2 ? '2.0.6\n' : '1.18.26\n'));
+        child.emit('close', 0, null);
+      });
+      return child;
+    });
+    const restartServerForCliUpdate = vi.fn().mockResolvedValue(undefined);
+    const callbacks = {
+      isDisposing: () => false,
+      getStatus: () => ({ state: 'running' as const, url: manager.url }),
+      readInstalledCliVersion: () => manager.readInstalledCliVersion(),
+      maybeSuggestCliUpdate: vi.fn().mockResolvedValue(null),
+      readHealthInfo: vi.fn().mockResolvedValue({ healthy: true, version: '1.18.26' }),
+      hasActiveSessions: vi.fn().mockResolvedValue(active),
+      takeOwnershipOfExistingServer: vi.fn().mockResolvedValue(false),
+      restartServerForCliUpdate,
+    };
+    manager.managedProcess = managed;
+    try {
+      await expect(manager.readInstalledCliVersion()).resolves.toBe('1.18.26');
+      expect(manager.resolveCommand()).toBe(v1);
+      await writeFile(v2, '');
+
+      // Routine reads retain the short-lived version cache.
+      await expect(manager.readInstalledCliVersion()).resolves.toBe('1.18.26');
+      expect(spawnMock).toHaveBeenCalledOnce();
+      vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 5 * 60_000);
+      await manager.runMaintenanceTick(callbacks);
+
+      expect(manager.resolveCommand()).toBe(configured ? v1 : v2);
+      if (!configured) expect(callbacks.maybeSuggestCliUpdate).not.toHaveBeenCalled();
+      if (!configured && managed && !active) {
+        expect(restartServerForCliUpdate).toHaveBeenCalledWith('1.18.26', '2.0.6');
+      } else {
+        expect(restartServerForCliUpdate).not.toHaveBeenCalled();
+      }
+      if (active) {
+        callbacks.hasActiveSessions.mockResolvedValue(false);
+        await manager.runMaintenanceTick(callbacks);
+        expect(restartServerForCliUpdate).toHaveBeenCalledWith('1.18.26', '2.0.6');
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
     ['darwin', ''],
     ['linux', ''],
     ['win32', '.exe'],

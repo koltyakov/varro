@@ -1014,37 +1014,41 @@ describe('OpenCodeServer maintenance', () => {
     expect(requestMaintenanceCheck).toHaveBeenCalledOnce();
   });
 
-  it('restarts a managed process without emitting a stopped status', async () => {
-    const server = new OpenCodeServer(4096, false);
-    const statuses: ServerStatus[] = [];
-    const api = server as unknown as {
-      process: { kill: ReturnType<typeof vi.fn>; exitCode: number; signalCode: null } | null;
-      managedProcess: boolean;
-      readHealthInfo: ReturnType<typeof vi.fn>;
-      hasActiveSessions: ReturnType<typeof vi.fn>;
-      stopServerForRestart: () => Promise<void>;
-      start: () => Promise<string>;
-      restartServerForCliUpdate: (
-        serverVersion: string,
-        installedCliVersion: string
-      ) => Promise<void>;
-    };
+  it.each(['1.14.22', '2.0.6'])(
+    'restarts a managed process for CLI %s without emitting a stopped status',
+    async (cliVersion) => {
+      const server = new OpenCodeServer(4096, false);
+      const statuses: ServerStatus[] = [];
+      const api = server as unknown as {
+        process: { kill: ReturnType<typeof vi.fn>; exitCode: number; signalCode: null } | null;
+        managedProcess: boolean;
+        readHealthInfo: ReturnType<typeof vi.fn>;
+        hasActiveSessions: ReturnType<typeof vi.fn>;
+        stopServerForRestart: () => Promise<void>;
+        start: () => Promise<string>;
+        restartServerForCliUpdate: (
+          serverVersion: string,
+          installedCliVersion: string
+        ) => Promise<void>;
+      };
 
-    setRunning(server);
-    server.on('status', (status) => statuses.push(status));
-    api.process = { kill: vi.fn(), exitCode: 0, signalCode: null };
-    api.managedProcess = true;
-    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.14.20' });
-    api.hasActiveSessions = vi.fn().mockResolvedValue(false);
-    api.stopServerForRestart = vi.fn().mockResolvedValue(undefined);
-    api.start = vi.fn().mockResolvedValue(server.url);
+      setRunning(server);
+      server.on('status', (status) => statuses.push(status));
+      api.process = { kill: vi.fn(), exitCode: 0, signalCode: null };
+      api.managedProcess = true;
+      api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.14.20' });
+      api.hasActiveSessions = vi.fn().mockResolvedValue(false);
+      api.stopServerForRestart = vi.fn().mockResolvedValue(undefined);
+      api.start = vi.fn().mockResolvedValue(server.url);
 
-    await api.restartServerForCliUpdate('1.14.20', '1.14.22');
+      await api.restartServerForCliUpdate('1.14.20', cliVersion);
 
-    expect(api.stopServerForRestart).toHaveBeenCalledTimes(1);
-    expect(api.start).toHaveBeenCalledTimes(1);
-    expect(statuses.some((status) => status.state === 'stopped')).toBe(false);
-  });
+      expect(api.stopServerForRestart).toHaveBeenCalledTimes(1);
+      expect(api.start).toHaveBeenCalledTimes(1);
+      expect(api.stopServerForRestart).toHaveBeenCalledBefore(vi.mocked(api.start));
+      expect(statuses.some((status) => status.state === 'stopped')).toBe(false);
+    }
+  );
 
   it('does not restart when there are active sessions', async () => {
     const server = new OpenCodeServer(4096, false);

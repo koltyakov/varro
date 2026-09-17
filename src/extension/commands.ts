@@ -18,7 +18,7 @@ import { diagnosticTimeline } from './diagnostics';
 import { parseExtensionMessage } from '../shared/extension-message';
 import { toEditorDiagnostic } from './workspace-problems';
 import { LegacySessionImport } from './legacy-session-import';
-import { asRecord, isString } from '../shared/type-utils';
+import { isString } from '../shared/type-utils';
 import { openCodeApiVersion } from './opencode-connection';
 
 type ExtensionPackageJson = {
@@ -53,8 +53,8 @@ export function registerCommands(
     vscode.commands.registerCommand('varro.session.importV1', async () => {
       try {
         await server.start();
-        const health = asRecord(await server.request('GET', '/global/health'));
-        if (!isString(health?.version) || openCodeApiVersion(health.version) !== 2) {
+        const health = (await server.readServerInfo()).health;
+        if (!isString(health.version) || openCodeApiVersion(health.version) !== 2) {
           throw new Error('Connect Varro to OpenCode v2 before importing v1 history');
         }
         const importer = new LegacySessionImport((method, path, body) =>

@@ -2798,16 +2798,25 @@ export class OpenCodeProcess {
     try {
       if (this.foreignActiveOwnership && !(await this.refreshManagedServerOwnership())) return;
       const installedCliVersion = await callbacks.readInstalledCliVersion();
-      const updatedCliVersion = await callbacks.maybeSuggestCliUpdate(installedCliVersion);
+      const health =
+        callbacks.getStatus().state === 'running' ? await callbacks.readHealthInfo() : null;
+      // Switch to the installed v2 CLI before checking for further updates. The
+      // v1 server's upgrade endpoint would update its own binary, not the v2 CLI.
+      const switchingToV2 =
+        health?.healthy &&
+        openCodeApiVersion(health.version ?? '') === 1 &&
+        openCodeApiVersion(installedCliVersion ?? '') === 2;
+      const updatedCliVersion = switchingToV2
+        ? null
+        : await callbacks.maybeSuggestCliUpdate(installedCliVersion);
       const restartCliVersion = updatedCliVersion || installedCliVersion;
 
       if (callbacks.getStatus().state !== 'running' || !restartCliVersion) {
         return;
       }
 
-      const health = await callbacks.readHealthInfo();
-      const serverVersion = typeof health.version === 'string' ? health.version.trim() : '';
-      if (!health.healthy || !serverVersion) {
+      const serverVersion = typeof health?.version === 'string' ? health.version.trim() : '';
+      if (!health?.healthy || !serverVersion) {
         return;
       }
 
@@ -3021,6 +3030,10 @@ export class OpenCodeProcess {
     if (this.simulateMissingCli) {
       return null;
     }
+
+    // Re-scan automatic discovery when the version cache expires so a newly
+    // installed v2 CLI can replace the cached v1 path on the next idle restart.
+    if (!this.command) this.resolvedCommandCache = null;
 
     try {
       const output = await this.runCliCommand(['--version']);

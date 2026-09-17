@@ -967,19 +967,44 @@ describe('SidebarProvider terminal commands', () => {
     }
   });
 
-  it('releases the binary before running an install or update command', async () => {
-    // Windows cannot overwrite a running opencode.exe, so the one-click update
-    // needs the same prerequisite as Varro's own upgrade path.
-    const server = createServer();
-    const { provider } = await createSidebarProviderInstance({ server });
-    attachTestView(provider);
+  it.each(['darwin', 'linux', 'win32'])(
+    'releases the binary before running an install or update command on %s',
+    async (platform) => {
+      const windowsCliUpdate = await import('./util/windows-cli-update');
+      const originalPlatform = process.platform;
+      Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+      const update = vi.spyOn(windowsCliUpdate, 'runWindowsCliUpdate').mockResolvedValue();
+      try {
+        // Windows cannot overwrite a running opencode.exe, so the one-click update
+        // needs the same prerequisite as Varro's own upgrade path.
+        const server = createServer();
+        const { provider } = await createSidebarProviderInstance({ server });
+        attachTestView(provider);
 
-    await runInTerminal(provider, 'npm install -g opencode-ai@latest', 'OpenCode Update');
-    expect(server.prepareForWindowsCliUpgrade).toHaveBeenCalledOnce();
+        await runInTerminal(provider, 'npm install -g opencode-ai@latest', 'OpenCode Update');
+        expect(server.prepareForWindowsCliUpgrade).toHaveBeenCalledOnce();
 
-    await runInTerminal(provider, 'npm i -g opencode-ai', 'OpenCode Install');
-    expect(server.prepareForWindowsCliUpgrade).toHaveBeenCalledTimes(2);
-  });
+        await runInTerminal(provider, 'npm i -g opencode-ai', 'OpenCode Install');
+        expect(server.prepareForWindowsCliUpgrade).toHaveBeenCalledTimes(2);
+
+        const createTerminal = getVscodeMock().window.createTerminal;
+        const launch = platform === 'win32' ? update : createTerminal;
+        expect(launch).toHaveBeenCalledTimes(2);
+        expect(platform === 'win32' ? createTerminal : update).not.toHaveBeenCalled();
+        for (let index = 0; index < 2; index++) {
+          expect(server.prepareForWindowsCliUpgrade.mock.invocationCallOrder[index]).toBeLessThan(
+            launch.mock.invocationCallOrder[index]!
+          );
+        }
+      } finally {
+        update.mockRestore();
+        Object.defineProperty(process, 'platform', {
+          value: originalPlatform,
+          configurable: true,
+        });
+      }
+    }
+  );
 
   it('restores the server when the Windows update task finishes with its terminal still open', async () => {
     const windowsCliUpdate = await import('./util/windows-cli-update');
