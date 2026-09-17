@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdir, mkdtemp, realpath, rm, symlink, link } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
@@ -16,8 +18,7 @@ test('live tests cannot silently select production or a redirect-capable remote 
   assert.equal(testServerOrigin('http://127.0.0.1:49001/'), 'http://127.0.0.1:49001');
 });
 
-// Real ownership verification uses lsof, which is unavailable on Windows.
-test('requires a distinct test database held by the actual listener and rejects production aliases', { skip: process.platform === 'win32' }, async (t) => {
+test('requires a distinct test database held by the actual listener and rejects production aliases', async (t) => {
   const temporary = await mkdtemp(path.join(os.tmpdir(), 'test-isolation-'));
   const root = await realpath(temporary);
   const testRoot = path.join(root, 'tests');
@@ -60,16 +61,35 @@ test('requires a distinct test database held by the actual listener and rejects 
   const unopenedData = path.join(testRoot, 'unopened');
   await mkdir(unopenedData);
   new DatabaseSync(path.join(unopenedData, 'opencode.db')).close();
-  await assert.rejects(requireIsolatedTestServer(url, '/fixture', testRoot, unopenedData), /holds source database/);
+  await assert.rejects(requireIsolatedTestServer(url, '/fixture', testRoot, unopenedData), /holds? source database/);
+  // An open database is insufficient when a different process owns the listener.
+  const holder = spawn(process.execPath, ['--input-type=module', '-e',
+    "import { DatabaseSync } from 'node:sqlite'; const db = new DatabaseSync(process.argv[1]); process.stdout.write('ready'); process.stdin.resume();",
+    path.join(unopenedData, 'opencode.db')], { stdio: ['pipe', 'pipe', 'pipe'] });
+  const holderExited = once(holder, 'exit');
+  t.after(async () => {
+    if (holder.exitCode === null && holder.signalCode === null) holder.kill();
+    await holderExited;
+  });
+  await Promise.race([
+    once(holder.stdout, 'data'),
+    holderExited.then(() => { throw new Error('Database holder exited before readiness'); }),
+  ]);
+  try {
+    await assert.rejects(requireIsolatedTestServer(url, '/fixture', testRoot, unopenedData), /holds? source database/);
+  } finally {
+    holder.kill();
+    await holderExited;
+  }
   await assert.rejects(requireIsolatedTestServer(url, '/fixture', testRoot, production), /separate OpenCode database/);
   reportedData = unopenedData;
-  await assert.rejects(requireIsolatedTestServer(url, '/fixture', testRoot, null), /holds source database/);
+  await assert.rejects(requireIsolatedTestServer(url, '/fixture', testRoot, null), /holds? source database/);
 
   reportedData = production;
   await assert.rejects(requireIsolatedTestServer(url, '/fixture', testRoot, data), /does not match/);
   await assert.rejects(requireIsolatedTestServer(url, '/fixture', testRoot, null), /separate OpenCode database/);
   const alias = path.join(testRoot, 'alias');
-  await symlink(production, alias);
+  await symlink(production, alias, process.platform === 'win32' ? 'junction' : 'dir');
   reportedData = alias;
   await assert.rejects(requireIsolatedTestServer(url, '/fixture', testRoot, null), /separate OpenCode database/);
   const hardAlias = path.join(testRoot, 'hard-alias');

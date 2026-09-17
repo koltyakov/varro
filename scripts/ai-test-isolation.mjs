@@ -46,7 +46,7 @@ export async function requireIsolatedTestServer(
   if (await realpath(database) !== database || (await stat(database)).nlink !== 1) {
     throw new Error('AI test database must not be a symlink or hard link');
   }
-  // A claimed /path alone is insufficient: verify the listener actually holds this database.
+  // A claimed /path alone is insufficient: verify native listener and database ownership.
   const evidence = await readActiveSessions({ serverUrl, sourceDatabase: database, directory });
   return { ...evidence, data, xdgDataHome: path.dirname(data) };
 }

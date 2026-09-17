@@ -184,10 +184,12 @@ what was omitted.
 
 A separate VS Code profile does not isolate OpenCode storage. Live tests must use a dedicated
 OpenCode server with its database under `<varro-root>/artifacts/ai-test-data/`. The preparation,
-verification, live, cleanup, and editor-launch commands verify `/path` and use `lsof` to confirm
+verification, live, cleanup, and editor-launch commands verify `/path` and inspect native ownership to confirm
 that the listener owns that database. They reject production storage and symlink/hard-link aliases.
 Port 4096 is no longer a default. Missing isolation is a blocked test, never permission to use the
-production server. This verification currently requires macOS or Linux with `lsof`.
+production server. Verification uses `lsof` on macOS/Linux. On Windows it uses PowerShell
+`Get-NetTCPConnection` for listener ownership and the read-only Restart Manager resource query for
+database ownership; it never invokes shutdown or restart APIs.
 
 Start a dedicated server in a tracked terminal, for example with an available port:
 

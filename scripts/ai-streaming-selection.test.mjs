@@ -8,8 +8,13 @@ import test from 'node:test';
 import http from 'node:http';
 
 import { buildReplayTimeline, readPlaybackCapture } from './ai-session-playback.mjs';
-import { prepareStreamingRun, readActiveSessions } from './ai-streaming-selection.mjs';
+import { prepareStreamingRun, readActiveSessions as readPlatformActiveSessions } from './ai-streaming-selection.mjs';
 import { createStreamingServer } from './ai-streaming-server.mjs';
+
+// Existing mocked discovery fixtures describe lsof output on every test host.
+const readActiveSessions = (options, execute) => readPlatformActiveSessions(
+  { ...options, platform: execute ? 'linux' : process.platform }, execute
+);
 
 // Real listener/database ownership checks require lsof. Mocked discovery tests run everywhere.
 const ownershipTest = process.platform === 'win32' ? test.skip : test;
@@ -520,6 +525,33 @@ ownershipTest(
     assert.equal(explicit.serverPid, process.pid);
   }
 );
+
+test('Windows status discovery requires one matching listener and database owner', async (t) => {
+  const f = await fixture(t);
+  const listener = { address: '127.0.0.1', port: Number(new URL(f.serverUrl).port), pid: 123 };
+  const options = { sourceDatabase: f.sourceDatabase, directory: '/workspace',
+    serverUrl: f.serverUrl, platform: 'win32' };
+  const evidence = { listeners: [listener], databaseOwners: [123] };
+  const execute = async (command, args) => {
+    assert.equal(command, 'powershell.exe');
+    assert.ok(args.includes('-NonInteractive'));
+    assert.equal(args.at(-1), await realpath(f.sourceDatabase));
+    return { stdout: JSON.stringify(evidence) };
+  };
+  const result = await readPlatformActiveSessions(options, execute);
+  assert.equal(result.serverPid, 123);
+  assert.equal(result.association, 'windows-listener-owner-and-restart-manager-database');
+  evidence.databaseOwners = [456];
+  await assert.rejects(readPlatformActiveSessions(options, execute), /does not hold source database/);
+  evidence.databaseOwners = [123];
+  evidence.listeners.push({ ...listener, pid: 456 });
+  await assert.rejects(readPlatformActiveSessions(options, execute), /one listener owner/);
+  evidence.listeners = [];
+  await assert.rejects(readPlatformActiveSessions(options, execute), /one listener owner/);
+  evidence.listeners = [listener];
+  evidence.databaseOwners = ['123'];
+  await assert.rejects(readPlatformActiveSessions(options, execute), /Invalid Windows database ownership/);
+});
 
 test('automatic and explicit status endpoints fail closed without matching open database ownership', async (t) => {
   const f = await fixture(t);
