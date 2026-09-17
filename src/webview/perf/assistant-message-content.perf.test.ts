@@ -60,7 +60,8 @@ function createReadPart(index: number): ToolPart {
   };
 }
 
-describe('AssistantMessageContent perf guards', () => {
+// These guards count observers and rendered parts, not wall-clock render time under suite load.
+describe('AssistantMessageContent perf guards', { timeout: 30_000 }, () => {
   beforeEach(() => {
     container = document.createElement('div');
     container.className = 'interactive-list';
