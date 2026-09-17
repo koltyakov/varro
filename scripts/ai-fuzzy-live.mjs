@@ -59,9 +59,7 @@ export function modelDisplayName(value) {
       .map((part) => (part ? `${part[0].toUpperCase()}${part.slice(1)}` : part))
       .join(' ')}`.trim();
   }
-  return parts
-    .map((part) => (part ? `${part[0].toUpperCase()}${part.slice(1)}` : part))
-    .join(' ');
+  return parts.map((part) => (part ? `${part[0].toUpperCase()}${part.slice(1)}` : part)).join(' ');
 }
 
 export function validateLiveModel(value) {
@@ -150,7 +148,13 @@ export function recordLivePreparationResult(manifest, scenario, result) {
   return record;
 }
 
-export function buildLivePrompt({ seed, scenario = 'AI-07', promptRun = 1, attempt, missing = [] }) {
+export function buildLivePrompt({
+  seed,
+  scenario = 'AI-07',
+  promptRun = 1,
+  attempt,
+  missing = [],
+}) {
   const marker = `[VFZ:${seed}:${scenario}:R${String(promptRun)}:TOOLS-A${String(attempt)}]`;
   const missingEmphasis =
     missing.length === 0
@@ -191,9 +195,12 @@ export function duplicateDeliveryFailures(observation, sawBusy) {
   if (!sawBusy) failures.push('active model stream was not observed');
   if (!observation?.userSeen) failures.push('sent user prompt was not observed');
   if (!observation?.assistantSeen) failures.push('assistant stream was not observed');
-  if (!observation?.tokenSeen?.every(Boolean)) failures.push('not every required stream token was observed');
-  if ((observation?.maxUserRows ?? 0) > 1) failures.push('sent user prompt rendered more than once');
-  if ((observation?.maxAssistantRows ?? 0) > 1) failures.push('assistant response rendered in multiple rows');
+  if (!observation?.tokenSeen?.every(Boolean))
+    failures.push('not every required stream token was observed');
+  if ((observation?.maxUserRows ?? 0) > 1)
+    failures.push('sent user prompt rendered more than once');
+  if ((observation?.maxAssistantRows ?? 0) > 1)
+    failures.push('assistant response rendered in multiple rows');
   if ((observation?.maxRawAssistantRows ?? 0) > 1) {
     failures.push('assistant response occupied multiple raw rows');
   }
@@ -279,8 +286,7 @@ export function promptModelFailures(messages, markers, requestedModel) {
     const assistants =
       users.length === 1
         ? messages.filter(
-            (entry) =>
-              entry?.info?.role === 'assistant' && entry.info.parentID === users[0].info.id
+            (entry) => entry?.info?.role === 'assistant' && entry.info.parentID === users[0].info.id
           )
         : [];
     const observed = assistants.map((entry) => ({
@@ -292,8 +298,7 @@ export function promptModelFailures(messages, markers, requestedModel) {
     if (
       observed.length === 0 ||
       observed.some(
-        (entry) =>
-          entry.providerID !== requested.providerID || entry.modelID !== requested.modelID
+        (entry) => entry.providerID !== requested.providerID || entry.modelID !== requested.modelID
       )
     ) {
       failures.push(`assistant model for ${marker} was not ${requestedModel}`);
@@ -399,7 +404,8 @@ class OpenCodeClient {
     if (body !== undefined) init.body = JSON.stringify(body);
     const response = await fetch(url, { ...init, redirect: 'error' });
     const text = await response.text();
-    if (!response.ok) throw new Error(`${method} ${route} failed (${String(response.status)}): ${text}`);
+    if (!response.ok)
+      throw new Error(`${method} ${route} failed (${String(response.status)}): ${text}`);
     return text ? JSON.parse(text) : null;
   }
 
@@ -478,7 +484,9 @@ export function selectVarroTargetDescriptor(descriptors, requested) {
     .filter(Boolean)
     .join(', ');
   if (matching.length === 0) {
-    throw new Error(`No Varro iframe matched ${wanted || 'the requested target'}; inspected: ${inspected}`);
+    throw new Error(
+      `No Varro iframe matched ${wanted || 'the requested target'}; inspected: ${inspected}`
+    );
   }
   throw new Error(
     `Varro iframe target is ambiguous for ${wanted || 'the requested target'}; matches: ${matching.map(describeTarget).join(', ')}`
@@ -512,8 +520,7 @@ async function inspectVarroTarget(port, target) {
     await controller.call('Runtime.enable');
     socket.removeEventListener('message', contextListener);
     const mainContext = contexts.find(
-      (context) =>
-        context.auxData?.frameId === frameId && context.auxData?.isDefault === true
+      (context) => context.auxData?.frameId === frameId && context.auxData?.isDefault === true
     );
     if (!mainContext) throw new Error('default content execution context is unavailable');
     controller.mainContextId = mainContext.id;
@@ -691,7 +698,9 @@ export class CdpController {
       result = await this.evaluateInCurrentContext(expression);
     }
     if (result.exceptionDetails) {
-      throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text);
+      throw new Error(
+        result.exceptionDetails.exception?.description ?? result.exceptionDetails.text
+      );
     }
     return result.result.value;
   }
@@ -1257,9 +1266,15 @@ export class CdpController {
     const normalized = shifted ? ' ' : key === 'Space' ? ' ' : key;
     const code = shifted || key === 'Space' ? 'Space' : key;
     const virtualKeyCode = {
-      Enter: 13, Tab: 9, ' ': 32,
-      PageUp: 33, PageDown: 34, End: 35, Home: 36,
-      ArrowUp: 38, ArrowDown: 40,
+      Enter: 13,
+      Tab: 9,
+      ' ': 32,
+      PageUp: 33,
+      PageDown: 34,
+      End: 35,
+      Home: 36,
+      ArrowUp: 38,
+      ArrowDown: 40,
     }[normalized];
     for (const type of ['keyDown', 'keyUp']) {
       const event = {
@@ -1311,7 +1326,8 @@ export class CdpController {
       throw new Error('The current composer model control is unavailable');
     }
     await new Promise((resolve) => setTimeout(resolve, 300));
-    if (!(await this.clickText(name))) throw new Error(`Model ${name} is not visible in the picker`);
+    if (!(await this.clickText(name)))
+      throw new Error(`Model ${name} is not visible in the picker`);
     await new Promise((resolve) => setTimeout(resolve, 300));
     const selected = await this.evaluate(`(() => {
       const button = [...document.querySelectorAll('button')].find((candidate) =>
@@ -1334,7 +1350,9 @@ export class CdpController {
       } : null;
     })()`);
     if (current?.providerID === providerID && current?.modelID === modelID) return current;
-    const modelButton = await this.evaluate(`document.querySelector('.model-picker-btn')?.getAttribute('aria-label') ?? null`);
+    const modelButton = await this.evaluate(
+      `document.querySelector('.model-picker-btn')?.getAttribute('aria-label') ?? null`
+    );
     if (!modelButton || !(await this.click('.model-picker-btn'))) {
       throw new Error('The current composer model control is unavailable');
     }
@@ -1372,7 +1390,8 @@ export class CdpController {
     const selected = await this.evaluate(
       `document.querySelector('.permission-mode-button')?.getAttribute('data-permission-mode') ?? null`
     );
-    if (selected !== mode) throw new Error(`Permission mode selection remained ${String(selected)}`);
+    if (selected !== mode)
+      throw new Error(`Permission mode selection remained ${String(selected)}`);
     return selected;
   }
 
@@ -1943,10 +1962,7 @@ function transcriptMovementDirection(before, after, messageOrder = []) {
     if (Math.abs(delta) > 1.5) return Math.sign(delta);
   }
   if (hasSharedPaintedRow) return 0;
-  if (
-    before.transcript.sessionId &&
-    before.transcript.sessionId === after.transcript.sessionId
-  ) {
+  if (before.transcript.sessionId && before.transcript.sessionId === after.transcript.sessionId) {
     const beforeId = before.transcript.visibleRows?.[0]?.messageId;
     const afterId = after.transcript.visibleRows?.[0]?.messageId;
     const directions = [
@@ -1981,7 +1997,8 @@ function transcriptMovementDirection(before, after, messageOrder = []) {
 
 function expectedTranscriptDirection(action) {
   if (action.action === 'wheel transcript') return Math.sign(action.delta ?? 0) || null;
-  if (!(action.action.endsWith('on transcript') || action.action === 'key on transcript')) return null;
+  if (!(action.action.endsWith('on transcript') || action.action === 'key on transcript'))
+    return null;
   const key = action.key ?? action.action.split(' ')[0];
   if (['ArrowDown', 'PageDown', 'Space', 'End'].includes(key)) return 1;
   if (['ArrowUp', 'PageUp', 'Shift+Space', 'Home'].includes(key)) return -1;
@@ -2073,7 +2090,11 @@ export function verifyActionEffect(action, before, after, details = {}) {
       return { verified: false, reason: 'transcript moved opposite the requested direction' };
     }
     if (expectedDirection !== null && details.settledAfter) {
-      const settledDirection = transcriptMovementDirection(after, details.settledAfter, details.messageOrder);
+      const settledDirection = transcriptMovementDirection(
+        after,
+        details.settledAfter,
+        details.messageOrder
+      );
       if (settledDirection === null) {
         return {
           verified: false,
@@ -2108,10 +2129,7 @@ export async function executeActionPlan(cdp, plan, currentTitle, port, options =
       details.handoff = await nestedHandoff(cdp, options.marker, options.scope);
       dispatched = !!details.handoff.before;
     } else if (action.action.endsWith('on transcript') || action.action === 'key on transcript') {
-      dispatched = await cdp.key(
-        '.interactive-list',
-        action.key ?? action.action.split(' ')[0]
-      );
+      dispatched = await cdp.key('.interactive-list', action.key ?? action.action.split(' ')[0]);
     } else if (action.action.endsWith('in composer')) {
       dispatched = await cdp.key(
         '[aria-label="Message composer"]',
@@ -2128,7 +2146,9 @@ export async function executeActionPlan(cdp, plan, currentTitle, port, options =
         const current = attempt === 0 ? before : await cdp.captureActionState(options.scope);
         const target = current.disclosures
           ?.filter((entry) => entry.key && !tried.has(entry.key) && entry.expanded !== expected)
-          .toSorted((left, right) => Number(right.visible === true) - Number(left.visible === true))[0];
+          .toSorted(
+            (left, right) => Number(right.visible === true) - Number(left.visible === true)
+          )[0];
         if (!target) break;
         tried.add(target.key);
         const selector = `.assistant-activity-summary[data-activity-summary-group-key=${JSON.stringify(target.key)}]`;
@@ -2142,7 +2162,8 @@ export async function executeActionPlan(cdp, plan, currentTitle, port, options =
       }
     } else if (action.action === 'open file card and diff') {
       for (let attempt = 0; attempt < 3; attempt += 1) {
-        dispatched = (await cdp.click('[aria-label^="Expand changes in"]', options.scope)) || dispatched;
+        dispatched =
+          (await cdp.click('[aria-label^="Expand changes in"]', options.scope)) || dispatched;
         if (!dispatched) break;
         await new Promise((resolve) => setTimeout(resolve, 100));
         const state = await cdp.captureActionState(options.scope);
@@ -2295,12 +2316,9 @@ export function multiWebviewScenarioFailures(evidence) {
       .map((sample) => sample.phase) ?? []
   );
   if (
-    ![
-      'sidebar-source',
-      'editor-root',
-      'editor-root-return',
-      'editor-reload',
-    ].every((phase) => synchronizedPhases.has(phase))
+    !['sidebar-source', 'editor-root', 'editor-root-return', 'editor-reload'].every((phase) =>
+      synchronizedPhases.has(phase)
+    )
   ) {
     failures.push('model and permission mode were not synchronized across views');
   }
@@ -2364,7 +2382,8 @@ export function multiWebviewScenarioFailures(evidence) {
     failures.push('cross-session content leakage was observed');
   }
   if (evidence?.counts?.accurate !== true) failures.push('queue counts were not accurate');
-  if (evidence?.focus?.usable !== true) failures.push('composer focus was not usable after handoff');
+  if (evidence?.focus?.usable !== true)
+    failures.push('composer focus was not usable after handoff');
   if ((evidence?.unexpectedDescendants?.length ?? 0) > 0) {
     failures.push('the bounded stream created uninventoryed descendants');
   }
@@ -2383,8 +2402,7 @@ export function summarizeQueuedDelivery(messages, turns) {
   const assistantEntries = userEntries.map((entries) =>
     entries.length === 1
       ? messages.filter(
-          (entry) =>
-            entry?.info?.role === 'assistant' && entry.info.parentID === entries[0].info.id
+          (entry) => entry?.info?.role === 'assistant' && entry.info.parentID === entries[0].info.id
         )
       : []
   );
@@ -2927,7 +2945,9 @@ async function runMultiWebviewScenario({
     evidence.editor.rootTitleRouted =
       openedRoot.title === tracked.title && openedRoot.routeSessionId === tracked.id;
     if (!(await restoreSidebarSessionFromPicker(sidebar, tracked.id, tracked.title))) {
-      throw new Error('AI-18 could not restore the root session in the sidebar after opening the editor');
+      throw new Error(
+        'AI-18 could not restore the root session in the sidebar after opening the editor'
+      );
     }
     await sampleConfiguration(editor, 'editor-root');
     await enqueueTurn(editor, editorViewId, queueTurns[1], 'editor-enqueue');
@@ -3519,8 +3539,7 @@ async function runLifecycleScenario({
         composerText: await editor.readComposerText(),
         row: await editor.readQueueRow(queued.item.id),
       }),
-      (sample) =>
-        sample?.row === null && !sample.composerText.includes(queueTurn.promptMarker)
+      (sample) => sample?.row === null && !sample.composerText.includes(queueTurn.promptMarker)
     );
     evidence.editor.revealed = visible === true && restored.routeSessionId === tracked.id;
     evidence.editor.sameViewId = editor.targetContext?.viewId === editorViewId;
@@ -3583,56 +3602,90 @@ async function runLifecycleScenario({
 }
 
 export async function executeActivityScenario({
-  cdp, client, sessionId, marker, scope, timeoutMs,
-  pollIntervalMs = 50, runActions = executeActionPlan,
+  cdp,
+  client,
+  sessionId,
+  marker,
+  scope,
+  timeoutMs,
+  pollIntervalMs = 50,
+  runActions = executeActionPlan,
 }) {
   const deadline = Date.now() + timeoutMs;
   const evidence = {
-    executed: false, actions: [], observations: [], completedWhileDetached: [],
-    runningAtReturn: [], visualVerification: 'NEEDS_AI_REVIEW',
+    executed: false,
+    actions: [],
+    observations: [],
+    completedWhileDetached: [],
+    runningAtReturn: [],
+    visualVerification: 'NEEDS_AI_REVIEW',
   };
   let phase = 'disclosure-and-wheel';
   const read = async () => {
     const [messages, snapshot, busy] = await Promise.all([
-      client.messages(sessionId), cdp.snapshot(marker), client.isBusy(sessionId),
+      client.messages(sessionId),
+      cdp.snapshot(marker),
+      client.isBusy(sessionId),
     ]);
-    const users = messages.filter((entry) => entry.info.role === 'user' &&
-      entry.parts?.some((part) => part.type === 'text' && part.text?.includes(marker)));
-    if (users.length !== 1) throw new Error('Marked prompt did not resolve to exactly one canonical user');
-    const tools = messages.filter((entry) => entry.info.role === 'assistant' &&
-      entry.info.parentID === users[0].info.id).flatMap((entry) => entry.parts ?? [])
+    const users = messages.filter(
+      (entry) =>
+        entry.info.role === 'user' &&
+        entry.parts?.some((part) => part.type === 'text' && part.text?.includes(marker))
+    );
+    if (users.length !== 1)
+      throw new Error('Marked prompt did not resolve to exactly one canonical user');
+    const tools = messages
+      .filter(
+        (entry) => entry.info.role === 'assistant' && entry.info.parentID === users[0].info.id
+      )
+      .flatMap((entry) => entry.parts ?? [])
       .filter((part) => part.type === 'tool')
       .map((part) => ({ id: part.id, status: part.state?.status }));
     const transcript = snapshot.transcript;
     // The native upward wheel establishes detachment. The jump button has its own
     // visibility threshold, so it can disappear while the viewport stays detached.
-    const detached = !!transcript &&
-      transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop > 2;
+    const detached =
+      !!transcript && transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop > 2;
     const sample = { at: Date.now(), busy, detached, tools, snapshot };
     evidence.observations.push(sample);
     return sample;
   };
   try {
     if (!scope?.messageIds?.length) throw new Error('Marked activity scope is unavailable');
-    evidence.actions = await runActions(cdp, [
-      { step: 1, action: 'expand disclosure' },
-      { step: 2, action: 'wheel transcript', delta: -96 },
-    ], '', null, { scope, marker, sessionId, isActive: () => client.isBusy(sessionId) });
+    evidence.actions = await runActions(
+      cdp,
+      [
+        { step: 1, action: 'expand disclosure' },
+        { step: 2, action: 'wheel transcript', delta: -96 },
+      ],
+      '',
+      null,
+      { scope, marker, sessionId, isActive: () => client.isBusy(sessionId) }
+    );
     if (evidence.actions.length !== 2 || evidence.actions.some((action) => !action.executed)) {
       throw new Error('Required disclosure or outer wheel action failed');
     }
     phase = 'detached-completions';
     const baseline = await read();
-    if (!baseline.detached || !baseline.busy) throw new Error('Live detachment was not established');
+    if (!baseline.detached || !baseline.busy)
+      throw new Error('Live detachment was not established');
     // Only tools observed unfinished after detachment can count as detached completions.
-    const unfinished = new Set(baseline.tools.filter((tool) => ['pending', 'running'].includes(tool.status)).map((tool) => tool.id));
+    const unfinished = new Set(
+      baseline.tools
+        .filter((tool) => ['pending', 'running'].includes(tool.status))
+        .map((tool) => tool.id)
+    );
     let sample = baseline;
     while (Date.now() < deadline) {
       sample = await read();
       if (!sample.detached) throw new Error('Transcript reattached before two tool completions');
       for (const tool of sample.tools) {
         if (['pending', 'running'].includes(tool.status)) unfinished.add(tool.id);
-        if (tool.status === 'completed' && unfinished.has(tool.id) && !evidence.completedWhileDetached.includes(tool.id)) {
+        if (
+          tool.status === 'completed' &&
+          unfinished.has(tool.id) &&
+          !evidence.completedWhileDetached.includes(tool.id)
+        ) {
           evidence.completedWhileDetached.push(tool.id);
         }
       }
@@ -3640,17 +3693,27 @@ export async function executeActivityScenario({
       if (!sample.busy) throw new Error('Stream settled before two detached tool completions');
       await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
     }
-    if (evidence.completedWhileDetached.length < 2) throw new Error('Timed out waiting for two detached tool completions');
+    if (evidence.completedWhileDetached.length < 2)
+      throw new Error('Timed out waiting for two detached tool completions');
     phase = 'return-while-tool-active';
-    while (sample.busy && !sample.tools.some((tool) => tool.status === 'running') && Date.now() < deadline) {
+    while (
+      sample.busy &&
+      !sample.tools.some((tool) => tool.status === 'running') &&
+      Date.now() < deadline
+    ) {
       await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
       sample = await read();
       if (!sample.detached) throw new Error('Transcript reattached before the return action');
     }
-    if (!sample.busy || !sample.tools.some((tool) => tool.status === 'running')) throw new Error('No running tool remained for return to bottom');
+    if (!sample.busy || !sample.tools.some((tool) => tool.status === 'running'))
+      throw new Error('No running tool remained for return to bottom');
     const returnAction = {
-      step: 3, action: 'return while tool active', inputs: [],
-      dispatched: false, executed: false, before: sample,
+      step: 3,
+      action: 'return while tool active',
+      inputs: [],
+      dispatched: false,
+      executed: false,
+      before: sample,
     };
     evidence.actions.push(returnAction);
     let dispatched = false;
@@ -3665,19 +3728,50 @@ export async function executeActivityScenario({
     returnAction.dispatched = dispatched;
     if (!dispatched) throw new Error('Native return-to-bottom control was unavailable');
     let after = await read();
-    while (after.busy && after.snapshot.transcript &&
-      after.snapshot.transcript.scrollHeight - after.snapshot.transcript.clientHeight - after.snapshot.transcript.scrollTop > 2 &&
-      Date.now() < deadline &&
-      after.tools.some((tool) => tool.status === 'running')) {
+    let activeWindowEnded = null;
+    const recordActiveWindow = () => {
+      if (
+        !activeWindowEnded &&
+        (!after.busy || !after.tools.some((tool) => tool.status === 'running'))
+      ) {
+        activeWindowEnded = after;
+      }
+    };
+    recordActiveWindow();
+    // Tool duration is not a scroll deadline. Keep observing the native return so
+    // a short tool window cannot be reported as a stuck viewport.
+    while (
+      after.snapshot.transcript &&
+      after.snapshot.transcript.scrollHeight -
+        after.snapshot.transcript.clientHeight -
+        after.snapshot.transcript.scrollTop >
+        2 &&
+      Date.now() < deadline
+    ) {
       await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
       after = await read();
+      recordActiveWindow();
     }
-    evidence.runningAtReturn = after.tools.filter((tool) => tool.status === 'running').map((tool) => tool.id);
+    evidence.runningAtReturn = after.tools
+      .filter((tool) => tool.status === 'running')
+      .map((tool) => tool.id);
     const transcript = after.snapshot.transcript;
-    const executed = dispatched && after.busy && evidence.runningAtReturn.length > 0 &&
+    const reachedBottom =
       !!transcript && transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop <= 2;
-    Object.assign(returnAction, { executed, after });
-    if (!executed) throw new Error('Return did not reach bottom while a tool was still running');
+    const executed = reachedBottom && !activeWindowEnded;
+    const outcome = !reachedBottom
+      ? 'bottom-not-reached'
+      : activeWindowEnded
+        ? 'active-window-ended'
+        : 'reached-while-active';
+    Object.assign(returnAction, { executed, reachedBottom, outcome, activeWindowEnded, after });
+    if (!executed) {
+      throw new Error(
+        reachedBottom
+          ? 'Return reached bottom after the running-tool window ended; active-stream coverage is incomplete'
+          : 'Return did not reach measured bottom before the scenario deadline'
+      );
+    }
     evidence.executed = true;
   } catch (error) {
     evidence.failurePhase = phase;
@@ -3782,107 +3876,361 @@ async function runLive(options) {
   let activityObservationStarted = false;
   try {
     await (async () => {
-    if (scenario === 'AI-17') {
-      for (let restart = 0; restart < restartCount; restart += 1) {
-        await reloadVscodeWindow(launch.remoteDebuggingPort, 20_000, cdp.targetId);
-        await cdp.rebind();
+      if (scenario === 'AI-17') {
+        for (let restart = 0; restart < restartCount; restart += 1) {
+          await reloadVscodeWindow(launch.remoteDebuggingPort, 20_000, cdp.targetId);
+          await cdp.rebind();
+        }
       }
-    }
-    if (scenario === 'AI-18') {
-      await openAi18SidebarSession(
-        cdp,
-        tracked.id,
-        tracked.title,
-        launch.remoteDebuggingPort,
-        manifest.runSessions.filter((session) => !session.deleted).map((session) => session.title)
-      );
-    } else {
-      await openRunSession(cdp, tracked.id, tracked.title);
-    }
-    if (scenario === 'AI-08' && manifest.hostState?.fileDiffsEnabled !== true) {
-      await executeVscodeCommand(launch.remoteDebuggingPort, 'Varro: Show File Diffs');
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      manifest.hostState = {
-        ...manifest.hostState,
-        fileDiffsEnabled: true,
-      };
-      await writeJsonAtomic(manifestPath, manifest);
-    }
-    await cdp.click('[aria-label="Scroll to latest message"]');
-    await cdp.key('.interactive-list', 'End');
-    const selectedModel = await cdp.selectExactModel(requestedModel);
-    const selectedPermissionMode = ['AI-07', 'AI-08'].includes(scenario)
-      ? await cdp.selectPermissionMode('full')
-      : null;
-    const pendingInput = await waitForNoPendingInput(client, tracked.id);
-    if (pendingInput.permissions.length > 0 || pendingInput.questions.length > 0) {
-      throw new Error(
-        `Run session has ${String(pendingInput.permissions.length)} pending permissions and ${String(pendingInput.questions.length)} pending questions`
-      );
-    }
-    const sessionsBefore = await client.listSessions();
-    descendantsBefore = new Set(
-      findSessionDescendants(sessionsBefore, tracked.id).map((session) => session.id)
-    );
-    if (playbackLabel) {
-      const [session, initialMessages] = await Promise.all([
-        client.getSession(tracked.id),
-        client.messages(tracked.id, 1000),
-      ]);
-      playbackSource = { session, initialMessages };
-      await cdp.startSessionEventCapture();
-    }
-    if (scenario === 'AI-17') {
-      const tokens = [
-        ...Array.from({ length: 20 }, (_, index) =>
-          `VFZ-DUP-${String(index + 1).padStart(2, '0')}`
-        ),
-        'VFZ-DUP-END',
-      ];
-      const marker = `[VFZ:${manifest.seed}:AI-17:R${String(promptRun)}:DUP]`;
-      const prompt = buildDuplicateDeliveryPrompt(manifest.seed, tokens, promptRun);
-      await cdp.startDuplicateDeliveryObservation(marker, tokens);
-      modelMayEdit = true;
-      const sent = await cdp.sendComposerPrompt(prompt);
-      const disposition = sent
-        ? await waitForPromptDisposition(client, cdp, tracked.id, marker)
-        : { status: 'unobserved', userIds: [], queuedItemIds: [] };
-      const sawBusy =
-        disposition.status === 'admitted' &&
-        (await waitForBusy(client, tracked.id, Math.min(timeoutMs, 15_000)));
-      const settled = sawBusy ? await waitForIdle(client, tracked.id, timeoutMs) : false;
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      const observation = await cdp.finishDuplicateDeliveryObservation();
-      let canonicalDelivery;
-      try {
-        canonicalDelivery = summarizeCanonicalDelivery(
-          await client.messages(tracked.id),
-          marker,
-          tokens
+      if (scenario === 'AI-18') {
+        await openAi18SidebarSession(
+          cdp,
+          tracked.id,
+          tracked.title,
+          launch.remoteDebuggingPort,
+          manifest.runSessions.filter((session) => !session.deleted).map((session) => session.title)
         );
-      } catch (error) {
-        canonicalDelivery = {
-          error: error instanceof Error ? error.message : String(error),
+      } else {
+        await openRunSession(cdp, tracked.id, tracked.title);
+      }
+      if (scenario === 'AI-08' && manifest.hostState?.fileDiffsEnabled !== true) {
+        await executeVscodeCommand(launch.remoteDebuggingPort, 'Varro: Show File Diffs');
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        manifest.hostState = {
+          ...manifest.hostState,
+          fileDiffsEnabled: true,
         };
+        await writeJsonAtomic(manifestPath, manifest);
       }
-      const failures = !sent
-        ? ['native composer input was unavailable']
-        : disposition.status !== 'admitted'
-          ? [`prompt submission was ${disposition.status}`]
-          : duplicateDeliveryFailures(observation, sawBusy);
-      if (!settled) failures.push('model stream did not settle');
-      if (canonicalDelivery.error) failures.push('canonical session messages could not be read');
-      else failures.push(...canonicalDeliveryFailures(canonicalDelivery));
-      const requestedModelParts = parseModel(requestedModel);
-      if (
-        canonicalDelivery.assistants?.some(
-          (assistant) =>
-            assistant.providerID !== requestedModelParts.providerID ||
-            assistant.modelID !== requestedModelParts.modelID
-        )
-      ) {
-        failures.push(`canonical assistant did not use ${requestedModel}`);
+      await cdp.click('[aria-label="Scroll to latest message"]');
+      await cdp.key('.interactive-list', 'End');
+      const selectedModel = await cdp.selectExactModel(requestedModel);
+      const selectedPermissionMode = ['AI-07', 'AI-08'].includes(scenario)
+        ? await cdp.selectPermissionMode('full')
+        : null;
+      const pendingInput = await waitForNoPendingInput(client, tracked.id);
+      if (pendingInput.permissions.length > 0 || pendingInput.questions.length > 0) {
+        throw new Error(
+          `Run session has ${String(pendingInput.permissions.length)} pending permissions and ${String(pendingInput.questions.length)} pending questions`
+        );
       }
+      const sessionsBefore = await client.listSessions();
+      descendantsBefore = new Set(
+        findSessionDescendants(sessionsBefore, tracked.id).map((session) => session.id)
+      );
+      if (playbackLabel) {
+        const [session, initialMessages] = await Promise.all([
+          client.getSession(tracked.id),
+          client.messages(tracked.id, 1000),
+        ]);
+        playbackSource = { session, initialMessages };
+        await cdp.startSessionEventCapture();
+      }
+      if (scenario === 'AI-17') {
+        const tokens = [
+          ...Array.from(
+            { length: 20 },
+            (_, index) => `VFZ-DUP-${String(index + 1).padStart(2, '0')}`
+          ),
+          'VFZ-DUP-END',
+        ];
+        const marker = `[VFZ:${manifest.seed}:AI-17:R${String(promptRun)}:DUP]`;
+        const prompt = buildDuplicateDeliveryPrompt(manifest.seed, tokens, promptRun);
+        await cdp.startDuplicateDeliveryObservation(marker, tokens);
+        modelMayEdit = true;
+        const sent = await cdp.sendComposerPrompt(prompt);
+        const disposition = sent
+          ? await waitForPromptDisposition(client, cdp, tracked.id, marker)
+          : { status: 'unobserved', userIds: [], queuedItemIds: [] };
+        const sawBusy =
+          disposition.status === 'admitted' &&
+          (await waitForBusy(client, tracked.id, Math.min(timeoutMs, 15_000)));
+        const settled = sawBusy ? await waitForIdle(client, tracked.id, timeoutMs) : false;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        const observation = await cdp.finishDuplicateDeliveryObservation();
+        let canonicalDelivery;
+        try {
+          canonicalDelivery = summarizeCanonicalDelivery(
+            await client.messages(tracked.id),
+            marker,
+            tokens
+          );
+        } catch (error) {
+          canonicalDelivery = {
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+        const failures = !sent
+          ? ['native composer input was unavailable']
+          : disposition.status !== 'admitted'
+            ? [`prompt submission was ${disposition.status}`]
+            : duplicateDeliveryFailures(observation, sawBusy);
+        if (!settled) failures.push('model stream did not settle');
+        if (canonicalDelivery.error) failures.push('canonical session messages could not be read');
+        else failures.push(...canonicalDeliveryFailures(canonicalDelivery));
+        const requestedModelParts = parseModel(requestedModel);
+        if (
+          canonicalDelivery.assistants?.some(
+            (assistant) =>
+              assistant.providerID !== requestedModelParts.providerID ||
+              assistant.modelID !== requestedModelParts.modelID
+          )
+        ) {
+          failures.push(`canonical assistant did not use ${requestedModel}`);
+        }
+        const descendantInventory = inventoryVerifiedDescendants(
+          manifest,
+          await client.listSessions(),
+          tracked.id,
+          descendantsBefore,
+          scenario
+        );
+        const descendantsObserved = descendantInventory.observed;
+        if (descendantsObserved.length > 0) {
+          failures.push('controlled stream created an unexpected descendant session');
+        }
+        const fixtureAfterPreparation = await fixtureStatus(manifest.workspace);
+        if (
+          fixtureAfterPreparation.status !== fixture.status ||
+          fixtureAfterPreparation.commit !== fixture.commit ||
+          fixtureAfterPreparation.contentHash !== fixture.contentHash ||
+          JSON.stringify(fixtureAfterPreparation.changedPaths) !==
+            JSON.stringify(fixture.changedPaths)
+        ) {
+          failures.push('controlled stream changed the repository fixture');
+        }
+        const result = {
+          scenario,
+          promptRun,
+          restartCount,
+          prepared: failures.length === 0,
+          prompt,
+          model: requestedModel,
+          selectedModel,
+          selectedPermissionMode,
+          target: { ...requestedTarget, boundViewId: cdp.targetContext?.viewId ?? null },
+          sent,
+          disposition,
+          sawBusy,
+          settled,
+          observation,
+          canonicalDelivery,
+          descendantsObserved,
+          failures,
+          fixtureAfterPreparation,
+        };
+        recordLivePreparationResult(manifest, scenario, result);
+        await writeJsonAtomic(manifestPath, manifest);
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        if (failures.length > 0) {
+          throw new Error(`AI-17 failed: ${failures.join('; ')}`);
+        }
+        return;
+      }
+      if (scenario === 'AI-18') {
+        return await runMultiWebviewScenario({
+          cdp,
+          client,
+          launch,
+          manifest,
+          manifestPath,
+          options,
+          requestedModel,
+          selectedModel,
+          tracked,
+          fixture,
+          descendantsBefore,
+          promptRun,
+          markModelMayEdit: () => {
+            modelMayEdit = true;
+          },
+        });
+      }
+      if (scenario === 'AI-19') {
+        return await runLifecycleScenario({
+          cdp,
+          client,
+          launch,
+          manifest,
+          manifestPath,
+          requestedModel,
+          selectedModel,
+          tracked,
+          fixture,
+          descendantsBefore,
+          promptRun,
+          timeoutMs,
+          markModelMayEdit: () => {
+            modelMayEdit = true;
+          },
+        });
+      }
+      let handoff = null;
+      let actions = [];
+      let scope = null;
+      let activityExecution = null;
+      if (scenario === 'AI-07') {
+        await cdp.evaluate(
+          `(() => { (${installObserver.toString()})(); globalThis.varroAiStreamingObserver.start(); })()`
+        );
+        activityObservationStarted = true;
+      }
+      for (let attempt = 1; attempt <= maxPrompts; attempt += 1) {
+        const idleDeadline = Date.now() + timeoutMs;
+        while (await client.isBusy(tracked.id)) {
+          if (Date.now() >= idleDeadline) {
+            throw new Error(
+              `Existing stream did not settle within ${String(timeoutMs)}ms; it was left running for controller-session safety`
+            );
+          }
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+        const missing = best?.missing ?? [];
+        const prompt = buildLivePrompt({
+          seed: manifest.seed,
+          scenario,
+          promptRun,
+          attempt,
+          missing,
+        });
+        const marker = prompt.match(/^\[VFZ:[^\]]+\]/)?.[0] ?? '';
+        await cdp.wheel('.interactive-list', -96, 'right');
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        const reattached = await cdp.click('[aria-label="Scroll to latest message"]');
+        if (!reattached) await cdp.key('.interactive-list', 'End');
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        modelMayEdit = true;
+        const sent = await cdp.sendComposerPrompt(prompt);
+        if (!sent) throw new Error('Native composer input was unavailable');
+        const disposition = await waitForPromptDisposition(client, cdp, tracked.id, marker);
+        const promptSeen = disposition.status === 'admitted';
+        const gate = promptSeen
+          ? await waitForLiveGate({
+              client,
+              cdp,
+              sessionId: tracked.id,
+              scenario,
+              timeoutMs,
+              marker,
+            })
+          : {
+              snapshot: await cdp.snapshot(marker),
+              bestSnapshot: null,
+              missing: [`prompt submission was ${disposition.status}`],
+              latestMissing: [`prompt submission was ${disposition.status}`],
+              sawBusy: false,
+              observations: [],
+            };
+        if (promptSeen && !gate.sawBusy && gate.missing.length === 0) {
+          gate.missing = ['active model stream'];
+        }
+        best = gate;
+        gate.marker = marker;
+        const attemptRecord = {
+          attempt,
+          prompt,
+          promptSeen,
+          disposition,
+          sawBusy: gate.sawBusy,
+          missingAfterAttempt: gate.missing,
+          latestMissing: gate.latestMissing,
+          snapshot: gate.snapshot,
+          bestSnapshot: gate.bestSnapshot,
+          observations: gate.observations,
+        };
+        attempts.push(attemptRecord);
+        if (!promptSeen) break;
+        if (gate.missing.length > 0) continue;
+
+        scope = gate.bestSnapshot?.turnMessageIds?.length
+          ? {
+              messageIds: gate.bestSnapshot.turnMessageIds,
+              partIds: gate.bestSnapshot.turnPartIds,
+              renderKeys: gate.bestSnapshot.turnRenderKeys,
+            }
+          : null;
+        if (scenario === 'AI-07') {
+          attemptRecord.fixtureBeforeExecution = await fixtureStatus(manifest.workspace);
+        }
+        if (gate.bestSnapshot?.nestedActivityScroller?.hasRange) {
+          handoff = await nestedHandoff(cdp, gate.marker, scope);
+          if (shouldRetryNestedHandoff(handoff)) {
+            const firstAttempt = handoff;
+            await new Promise((resolve) => setTimeout(resolve, 250));
+            const retry = await nestedHandoff(cdp, gate.marker, scope);
+            handoff = { ...retry, recoveryAttempts: [firstAttempt, retry] };
+          }
+        }
+        attemptRecord.handoff = handoff;
+        attemptRecord.actionScope = scope;
+        if (scenario === 'AI-07') {
+          if (handoff && !handoff.passed) {
+            activityExecution = {
+              executed: false,
+              actions: [],
+              failurePhase: 'nested-handoff',
+              reason: 'Nested-to-outer wheel ownership failed',
+            };
+            attemptRecord.activityExecution = activityExecution;
+            break;
+          }
+          activityExecution = await executeActivityScenario({
+            cdp,
+            client,
+            sessionId: tracked.id,
+            marker: gate.marker,
+            scope,
+            timeoutMs,
+          });
+          actions = activityExecution.actions;
+          attemptRecord.activityExecution = activityExecution;
+          break;
+        }
+
+        actions = await executeActionPlan(
+          cdp,
+          manifest.actionPlan,
+          tracked.title,
+          launch.remoteDebuggingPort,
+          {
+            isActive: () => client.isBusy(tracked.id),
+            readMessageOrder: async () =>
+              (await client.messages(tracked.id, 1000)).map((message) => message.info.id),
+            marker: gate.marker,
+            sessionId: tracked.id,
+            scope,
+          }
+        );
+        attemptRecord.actions = actions;
+        const attemptActionFailure = actions.find((action) => !action.executed);
+        if (!shouldRetryAi08WithFreshStream(attemptActionFailure, attempt, maxPrompts)) break;
+      }
+      const settled = await waitForIdle(client, tracked.id, timeoutMs);
+      let activityObservation = null;
+      if (activityObservationStarted) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        activityObservation = await cdp.evaluate('globalThis.varroAiStreamingObserver.stop()');
+        activityObservationStarted = false;
+      }
+      if (activityExecution) {
+        activityExecution.settled = settled;
+        activityExecution.finalSnapshot = await cdp.captureActionState(scope);
+        if (!settled || !activityExecution.finalSnapshot.disclosures?.length) {
+          activityExecution.executed = false;
+          activityExecution.failurePhase ??= 'settled-projection';
+          activityExecution.reason ??= 'Stream did not settle into a retained activity disclosure';
+        }
+      }
+      const fixtureAfterPreparation = await fixtureStatus(manifest.workspace);
+      const actionFailure = actions.find((action) => !action.executed);
+      const promptMarkers = attempts
+        .map((attempt) => attempt.prompt.match(/^\[VFZ:[^\]]+\]/)?.[0])
+        .filter(Boolean);
+      const modelEvidence = promptModelFailures(
+        await client.messages(tracked.id),
+        promptMarkers,
+        requestedModel
+      );
       const descendantInventory = inventoryVerifiedDescendants(
         manifest,
         await client.listSessions(),
@@ -3891,311 +4239,83 @@ async function runLive(options) {
         scenario
       );
       const descendantsObserved = descendantInventory.observed;
+      const failures = [...modelEvidence.failures];
       if (descendantsObserved.length > 0) {
-        failures.push('controlled stream created an unexpected descendant session');
-      }
-      const fixtureAfterPreparation = await fixtureStatus(manifest.workspace);
-      if (
-        fixtureAfterPreparation.status !== fixture.status ||
-        fixtureAfterPreparation.commit !== fixture.commit ||
-        fixtureAfterPreparation.contentHash !== fixture.contentHash ||
-        JSON.stringify(fixtureAfterPreparation.changedPaths) !== JSON.stringify(fixture.changedPaths)
-      ) {
-        failures.push('controlled stream changed the repository fixture');
+        failures.push('bounded live scenario created an unexpected descendant session');
       }
       const result = {
         scenario,
         promptRun,
-        restartCount,
-        prepared: failures.length === 0,
-        prompt,
+        prepared:
+          best?.missing.length === 0 &&
+          (handoff === null || handoff.passed === true) &&
+          !actionFailure &&
+          failures.length === 0,
         model: requestedModel,
         selectedModel,
         selectedPermissionMode,
+        modelEvidence,
         target: { ...requestedTarget, boundViewId: cdp.targetContext?.viewId ?? null },
-        sent,
-        disposition,
-        sawBusy,
-        settled,
-        observation,
-        canonicalDelivery,
+        attempts,
+        handoff,
+        actions,
+        actionScope: scope,
         descendantsObserved,
         failures,
+        terminalMissing: best?.missing ?? ['live gate was not sampled'],
+        actionFailure: actionFailure ?? null,
+        settled,
         fixtureAfterPreparation,
       };
+      if (scenario === 'AI-07') {
+        Object.assign(result, {
+          preparation: { passed: best?.missing.length === 0 },
+          activityExecution,
+          activityObservation,
+          scenarioVerification: 'NEEDS_AI_REVIEW',
+        });
+      }
       recordLivePreparationResult(manifest, scenario, result);
       await writeJsonAtomic(manifestPath, manifest);
       process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-      if (failures.length > 0) {
-        throw new Error(`AI-17 failed: ${failures.join('; ')}`);
+      if (scenario === 'AI-07' && activityExecution && !activityExecution.executed) {
+        throw new Error(
+          `AI-07 execution failed at ${activityExecution.failurePhase}: ${activityExecution.reason}`
+        );
       }
-      return;
-    }
-    if (scenario === 'AI-18') {
-      return await runMultiWebviewScenario({
-        cdp,
-        client,
-        launch,
-        manifest,
-        manifestPath,
-        options,
-        requestedModel,
-        selectedModel,
-        tracked,
-        fixture,
-        descendantsBefore,
-        promptRun,
-        markModelMayEdit: () => {
-          modelMayEdit = true;
-        },
-      });
-    }
-    if (scenario === 'AI-19') {
-      return await runLifecycleScenario({
-        cdp,
-        client,
-        launch,
-        manifest,
-        manifestPath,
-        requestedModel,
-        selectedModel,
-        tracked,
-        fixture,
-        descendantsBefore,
-        promptRun,
-        timeoutMs,
-        markModelMayEdit: () => {
-          modelMayEdit = true;
-        },
-      });
-    }
-    let handoff = null;
-    let actions = [];
-    let scope = null;
-    let activityExecution = null;
-    if (scenario === 'AI-07') {
-      await cdp.evaluate(`(() => { (${installObserver.toString()})(); globalThis.varroAiStreamingObserver.start(); })()`);
-      activityObservationStarted = true;
-    }
-    for (let attempt = 1; attempt <= maxPrompts; attempt += 1) {
-      const idleDeadline = Date.now() + timeoutMs;
-      while (await client.isBusy(tracked.id)) {
-        if (Date.now() >= idleDeadline) {
-          throw new Error(
-            `Existing stream did not settle within ${String(timeoutMs)}ms; it was left running for controller-session safety`
-          );
-        }
-        await new Promise((resolve) => setTimeout(resolve, 500));
+      if (!result.prepared) {
+        const reason = actionFailure
+          ? `native action ${String(actionFailure.step)} (${actionFailure.action}) was unavailable`
+          : `missing ${result.terminalMissing.join(', ')}`;
+        throw new Error(
+          `${scenario} preparation exhausted ${String(attempts.length)}/${String(maxPrompts)} prompt attempts: ${reason}`
+        );
       }
-      const missing = best?.missing ?? [];
-      const prompt = buildLivePrompt({
-        seed: manifest.seed,
-        scenario,
-        promptRun,
-        attempt,
-        missing,
-      });
-      const marker = prompt.match(/^\[VFZ:[^\]]+\]/)?.[0] ?? '';
-      await cdp.wheel('.interactive-list', -96, 'right');
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      const reattached = await cdp.click('[aria-label="Scroll to latest message"]');
-      if (!reattached) await cdp.key('.interactive-list', 'End');
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      modelMayEdit = true;
-      const sent = await cdp.sendComposerPrompt(prompt);
-      if (!sent) throw new Error('Native composer input was unavailable');
-      const disposition = await waitForPromptDisposition(client, cdp, tracked.id, marker);
-      const promptSeen = disposition.status === 'admitted';
-      const gate = promptSeen
-        ? await waitForLiveGate({
-            client,
-            cdp,
-            sessionId: tracked.id,
-            scenario,
-            timeoutMs,
-            marker,
-          })
-        : {
-            snapshot: await cdp.snapshot(marker),
-            bestSnapshot: null,
-            missing: [`prompt submission was ${disposition.status}`],
-            latestMissing: [`prompt submission was ${disposition.status}`],
-            sawBusy: false,
-            observations: [],
-          };
-      if (promptSeen && !gate.sawBusy && gate.missing.length === 0) {
-        gate.missing = ['active model stream'];
+      if (!settled) {
+        throw new Error(
+          `${scenario} actions ran, but the stream did not settle within ${String(timeoutMs)}ms; changed paths were recorded and the stream was left running`
+        );
       }
-      best = gate;
-      gate.marker = marker;
-      const attemptRecord = {
-        attempt,
-        prompt,
-        promptSeen,
-        disposition,
-        sawBusy: gate.sawBusy,
-        missingAfterAttempt: gate.missing,
-        latestMissing: gate.latestMissing,
-        snapshot: gate.snapshot,
-        bestSnapshot: gate.bestSnapshot,
-        observations: gate.observations,
-      };
-      attempts.push(attemptRecord);
-      if (!promptSeen) break;
-      if (gate.missing.length > 0) continue;
-
-      scope = gate.bestSnapshot?.turnMessageIds?.length
-        ? {
-            messageIds: gate.bestSnapshot.turnMessageIds,
-            partIds: gate.bestSnapshot.turnPartIds,
-            renderKeys: gate.bestSnapshot.turnRenderKeys,
-          }
-        : null;
-      if (scenario === 'AI-07') {
-        attemptRecord.fixtureBeforeExecution = await fixtureStatus(manifest.workspace);
+      if (scenario === 'AI-07' && !activityExecution?.executed) {
+        throw new Error(
+          `AI-07 execution failed at ${activityExecution?.failurePhase ?? 'preparation'}: ${activityExecution?.reason ?? 'execution was not reached'}`
+        );
       }
-      if (gate.bestSnapshot?.nestedActivityScroller?.hasRange) {
-        handoff = await nestedHandoff(cdp, gate.marker, scope);
-        if (shouldRetryNestedHandoff(handoff)) {
-          const firstAttempt = handoff;
-          await new Promise((resolve) => setTimeout(resolve, 250));
-          const retry = await nestedHandoff(cdp, gate.marker, scope);
-          handoff = { ...retry, recoveryAttempts: [firstAttempt, retry] };
-        }
-      }
-      attemptRecord.handoff = handoff;
-      attemptRecord.actionScope = scope;
-      if (scenario === 'AI-07') {
-        if (handoff && !handoff.passed) {
-          activityExecution = { executed: false, actions: [], failurePhase: 'nested-handoff', reason: 'Nested-to-outer wheel ownership failed' };
-          attemptRecord.activityExecution = activityExecution;
-          break;
-        }
-        activityExecution = await executeActivityScenario({
-          cdp, client, sessionId: tracked.id, marker: gate.marker, scope, timeoutMs,
-        });
-        actions = activityExecution.actions;
-        attemptRecord.activityExecution = activityExecution;
-        break;
-      }
-
-      actions = await executeActionPlan(
-        cdp,
-        manifest.actionPlan,
-        tracked.title,
-        launch.remoteDebuggingPort,
-        {
-          isActive: () => client.isBusy(tracked.id),
-          readMessageOrder: async () => (await client.messages(tracked.id, 1000)).map((message) => message.info.id),
-          marker: gate.marker,
-          sessionId: tracked.id,
-          scope,
-        }
-      );
-      attemptRecord.actions = actions;
-      const attemptActionFailure = actions.find((action) => !action.executed);
-      if (!shouldRetryAi08WithFreshStream(attemptActionFailure, attempt, maxPrompts)) break;
-    }
-    const settled = await waitForIdle(client, tracked.id, timeoutMs);
-    let activityObservation = null;
-    if (activityObservationStarted) {
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      activityObservation = await cdp.evaluate('globalThis.varroAiStreamingObserver.stop()');
-      activityObservationStarted = false;
-    }
-    if (activityExecution) {
-      activityExecution.settled = settled;
-      activityExecution.finalSnapshot = await cdp.captureActionState(scope);
-      if (!settled || !activityExecution.finalSnapshot.disclosures?.length) {
-        activityExecution.executed = false;
-        activityExecution.failurePhase ??= 'settled-projection';
-        activityExecution.reason ??= 'Stream did not settle into a retained activity disclosure';
-      }
-    }
-    const fixtureAfterPreparation = await fixtureStatus(manifest.workspace);
-    const actionFailure = actions.find((action) => !action.executed);
-    const promptMarkers = attempts.map((attempt) => attempt.prompt.match(/^\[VFZ:[^\]]+\]/)?.[0]).filter(Boolean);
-    const modelEvidence = promptModelFailures(
-      await client.messages(tracked.id),
-      promptMarkers,
-      requestedModel
-    );
-    const descendantInventory = inventoryVerifiedDescendants(
-      manifest,
-      await client.listSessions(),
-      tracked.id,
-      descendantsBefore,
-      scenario
-    );
-    const descendantsObserved = descendantInventory.observed;
-    const failures = [...modelEvidence.failures];
-    if (descendantsObserved.length > 0) {
-      failures.push('bounded live scenario created an unexpected descendant session');
-    }
-    const result = {
-      scenario,
-      promptRun,
-      prepared:
-        best?.missing.length === 0 &&
-        (handoff === null || handoff.passed === true) &&
-        !actionFailure &&
-        failures.length === 0,
-      model: requestedModel,
-      selectedModel,
-      selectedPermissionMode,
-      modelEvidence,
-      target: { ...requestedTarget, boundViewId: cdp.targetContext?.viewId ?? null },
-      attempts,
-      handoff,
-      actions,
-      actionScope: scope,
-      descendantsObserved,
-      failures,
-      terminalMissing: best?.missing ?? ['live gate was not sampled'],
-      actionFailure: actionFailure ?? null,
-      settled,
-      fixtureAfterPreparation,
-    };
-    if (scenario === 'AI-07') {
-      Object.assign(result, {
-        preparation: { passed: best?.missing.length === 0 },
-        activityExecution,
-        activityObservation,
-        scenarioVerification: 'NEEDS_AI_REVIEW',
-      });
-    }
-    recordLivePreparationResult(manifest, scenario, result);
-    await writeJsonAtomic(manifestPath, manifest);
-    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-    if (scenario === 'AI-07' && activityExecution && !activityExecution.executed) {
-      throw new Error(`AI-07 execution failed at ${activityExecution.failurePhase}: ${activityExecution.reason}`);
-    }
-    if (!result.prepared) {
-      const reason = actionFailure
-        ? `native action ${String(actionFailure.step)} (${actionFailure.action}) was unavailable`
-        : `missing ${result.terminalMissing.join(', ')}`;
-      throw new Error(
-        `${scenario} preparation exhausted ${String(attempts.length)}/${String(maxPrompts)} prompt attempts: ${reason}`
-      );
-    }
-    if (!settled) {
-      throw new Error(
-        `${scenario} actions ran, but the stream did not settle within ${String(timeoutMs)}ms; changed paths were recorded and the stream was left running`
-      );
-    }
-    if (scenario === 'AI-07' && !activityExecution?.executed) {
-      throw new Error(`AI-07 execution failed at ${activityExecution?.failurePhase ?? 'preparation'}: ${activityExecution?.reason ?? 'execution was not reached'}`);
-    }
     })();
   } catch (error) {
     controllerError = error;
   }
   if (activityObservationStarted) {
     try {
-      manifest.livePreparation[scenario].activityObservation = await cdp.evaluate('globalThis.varroAiStreamingObserver.stop()');
+      manifest.livePreparation[scenario].activityObservation = await cdp.evaluate(
+        'globalThis.varroAiStreamingObserver.stop()'
+      );
       await writeJsonAtomic(manifestPath, manifest);
     } catch (error) {
-      controllerError = new AggregateError([controllerError, error].filter(Boolean), 'AI-07 frame observation cleanup failed');
+      controllerError = new AggregateError(
+        [controllerError, error].filter(Boolean),
+        'AI-07 frame observation cleanup failed'
+      );
     }
   }
   if (playbackSource) {
@@ -4217,9 +4337,13 @@ async function runLive(options) {
       process.stdout.write(`${JSON.stringify({ playback }, null, 2)}\n`);
     } catch (error) {
       controllerError = controllerError
-        ? new AggregateError([controllerError, error], 'Live scenario and playback capture failed', {
-            cause: controllerError,
-          })
+        ? new AggregateError(
+            [controllerError, error],
+            'Live scenario and playback capture failed',
+            {
+              cause: controllerError,
+            }
+          )
         : error;
     }
   }

@@ -50,8 +50,12 @@ V2.0.7 still interrupts a turn when a tool permission is rejected or a question 
 normalizer explicitly drops v1's `experimental.continue_loop_on_deny` option. Varro preserves that
 server outcome. The earlier v1 immediate-rename overwrite remains a server-title-generation race
 observation, not a verified Varro regression. Neither behavior is changed by this compatibility patch.
-The earlier AI-07/08 scrolling blockers and full visual/performance acceptance remain open; the
-published-binary adapter matrix is not a replacement for those scenarios.
+The earlier AI-07 attempts exhausted the running-tool window during smooth return; all six reached
+the bottom afterward. This was incomplete live coverage, not an observed stuck-scroll defect or a
+backend compatibility failure. AI-08 was not executed because its AI-07 prerequisite did not pass.
+The controller now distinguishes a late successful return from failure to reach the bottom, and
+`scroll-return-tool-completion.spec.ts` checks tool completion during native return at 540 and 1,768 px.
+These browser regressions do not certify the separate full real-editor visual/performance suite.
 
 ## Importing v1 conversations into v2
 

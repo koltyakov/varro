@@ -753,6 +753,13 @@ hides near the bottom. Return uses that button when available, otherwise native 
 transcript. A dispatched input counts only after measurements confirm the bottom was reached while
 a tool was still running. The action record includes the attempted inputs even when return fails.
 
+Tool completion does not end scroll observation. Continue measuring until the viewport reaches the
+bottom or the scenario deadline expires. Record `reached-while-active`, `active-window-ended`, or
+`bottom-not-reached`, including the first sample where the running-tool window ended. Only the first
+outcome satisfies live coverage. `active-window-ended` means the timing precondition was exhausted,
+not that scrolling is broken; it must not be reported as a product scrolling failure or used to
+unlock AI-08. Smooth return can legitimately outlast a short tool call.
+
 Pass invariants:
 
 - The sticky prompt remains the same marked prompt throughout unrelated activity height changes.

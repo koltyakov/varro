@@ -14,26 +14,51 @@ function harness({ stale = false, settledEarly = false, attached = false } = {})
       reads++;
       return [
         { info: { id: 'user', role: 'user' }, parts: [{ type: 'text', text: '[marked]' }] },
-        { info: { id: 'old', role: 'assistant', parentID: 'other' }, parts: [tool('old-tool', 'completed')] },
-        { info: { id: 'assistant', role: 'assistant', parentID: 'user' }, parts: [
-          tool('one', stale || reads > 1 ? 'completed' : 'running'),
-          tool('two', stale || reads > 1 ? 'completed' : 'pending'),
-          tool('final', 'running'),
-        ] },
+        {
+          info: { id: 'old', role: 'assistant', parentID: 'other' },
+          parts: [tool('old-tool', 'completed')],
+        },
+        {
+          info: { id: 'assistant', role: 'assistant', parentID: 'user' },
+          parts: [
+            tool('one', stale || reads > 1 ? 'completed' : 'running'),
+            tool('two', stale || reads > 1 ? 'completed' : 'pending'),
+            tool('final', 'running'),
+          ],
+        },
       ];
     },
   };
   const cdp = {
-    snapshot: async () => ({ jumpToLatest: !attached, transcript: { scrollTop: attached ? 900 : 500, scrollHeight: 1000, clientHeight: 100 } }),
-    click: async (selector) => { calls.push(selector); attached = true; return true; },
-    key: async (selector, key) => { calls.push(`${selector}: ${key}`); attached = true; return true; },
+    snapshot: async () => ({
+      jumpToLatest: !attached,
+      transcript: { scrollTop: attached ? 900 : 500, scrollHeight: 1000, clientHeight: 100 },
+    }),
+    click: async (selector) => {
+      calls.push(selector);
+      attached = true;
+      return true;
+    },
+    key: async (selector, key) => {
+      calls.push(`${selector}: ${key}`);
+      attached = true;
+      return true;
+    },
   };
   return {
     calls,
     options: {
-      cdp, client, sessionId: 'session', marker: '[marked]', scope: { messageIds: ['assistant'] },
-      timeoutMs: 30, pollIntervalMs: 0,
-      runActions: async (_cdp, plan) => { calls.push(...plan.map((item) => item.action)); return plan.map((item) => ({ ...item, executed: true })); },
+      cdp,
+      client,
+      sessionId: 'session',
+      marker: '[marked]',
+      scope: { messageIds: ['assistant'] },
+      timeoutMs: 30,
+      pollIntervalMs: 0,
+      runActions: async (_cdp, plan) => {
+        calls.push(...plan.map((item) => item.action));
+        return plan.map((item) => ({ ...item, executed: true }));
+      },
     },
   };
 }
@@ -42,7 +67,11 @@ test('AI07 executes disclosure, outer wheel, two detached completions, and live 
   const { options, calls } = harness();
   const result = await executeActivityScenario(options);
   assert.equal(result.executed, true);
-  assert.deepEqual(calls, ['expand disclosure', 'wheel transcript', '[aria-label="Scroll to latest message"]']);
+  assert.deepEqual(calls, [
+    'expand disclosure',
+    'wheel transcript',
+    '[aria-label="Scroll to latest message"]',
+  ]);
   assert.deepEqual(result.completedWhileDetached, ['one', 'two']);
   assert.deepEqual(result.runningAtReturn, ['final']);
   assert.equal(result.visualVerification, 'NEEDS_AI_REVIEW');
@@ -77,7 +106,10 @@ test('AI07 keeps the recorded 238px detachment after the jump button hides and r
     },
   });
   const key = options.cdp.key;
-  options.cdp.key = async (...args) => { returned = true; return key(...args); };
+  options.cdp.key = async (...args) => {
+    returned = true;
+    return key(...args);
+  };
   const result = await executeActivityScenario(options);
   assert.equal(result.executed, true, result.reason);
   assert.deepEqual(result.completedWhileDetached, ['one', 'two']);
@@ -129,7 +161,7 @@ test('AI07 still fails when the transcript actually reaches bottom before detach
 test('AI07 verifies native End reaches bottom rather than trusting dispatch', async () => {
   const { options } = harness();
   const snapshot = options.cdp.snapshot;
-  options.cdp.snapshot = async () => ({ ...await snapshot(), jumpToLatest: false });
+  options.cdp.snapshot = async () => ({ ...(await snapshot()), jumpToLatest: false });
   options.cdp.key = async () => true;
   const result = await executeActivityScenario(options);
   assert.equal(result.executed, false);
@@ -168,7 +200,9 @@ test('AI07 fails rather than retrying around an ended stream or failed detachmen
 
 test('AI07 preserves action failure evidence and never proceeds to return', async () => {
   const { options, calls } = harness();
-  options.runActions = async () => [{ action: 'expand disclosure', executed: false, reason: 'missing target' }];
+  options.runActions = async () => [
+    { action: 'expand disclosure', executed: false, reason: 'missing target' },
+  ];
   const result = await executeActivityScenario(options);
   assert.equal(result.failurePhase, 'disclosure-and-wheel');
   assert.equal(result.actions[0].reason, 'missing target');
@@ -178,9 +212,11 @@ test('AI07 preserves action failure evidence and never proceeds to return', asyn
 test('AI07 does not count busy reasoning as a running tool at return', async () => {
   const { options } = harness();
   const messages = options.client.messages;
-  options.client.messages = async () => (await messages()).map((entry) => ({
-    ...entry, parts: entry.parts.filter((part) => part.id !== 'final'),
-  }));
+  options.client.messages = async () =>
+    (await messages()).map((entry) => ({
+      ...entry,
+      parts: entry.parts.filter((part) => part.id !== 'final'),
+    }));
   const result = await executeActivityScenario(options);
   assert.equal(result.executed, false);
   assert.equal(result.failurePhase, 'return-while-tool-active');
@@ -197,6 +233,54 @@ test('AI07 rejects tools completing during the native return action', async () =
   assert.equal(result.executed, false);
   assert.equal(result.failurePhase, 'return-while-tool-active');
   assert.equal(result.actions.at(-1).executed, false);
+  assert.equal(result.actions.at(-1).reachedBottom, true);
+  assert.equal(result.actions.at(-1).outcome, 'active-window-ended');
+  assert.match(result.reason, /coverage is incomplete/);
+});
+
+test('AI07 observes smooth return after a short tool finishes without awarding live coverage', async () => {
+  const { options } = harness();
+  const snapshot = options.cdp.snapshot;
+  let returningSamples = 0;
+  options.cdp.snapshot = async () => {
+    const state = await snapshot();
+    if (!state.jumpToLatest) {
+      returningSamples++;
+      state.transcript.scrollTop = returningSamples < 3 ? 600 + returningSamples * 50 : 900;
+    }
+    return state;
+  };
+  const messages = options.client.messages;
+  options.client.messages = async () => {
+    const entries = await messages();
+    if (returningSamples > 0) {
+      for (const entry of entries) {
+        for (const part of entry.parts) if (part.type === 'tool') part.state.status = 'completed';
+      }
+    }
+    return entries;
+  };
+  const result = await executeActivityScenario(options);
+  assert.equal(result.executed, false);
+  assert.equal(returningSamples, 3);
+  const action = result.actions.at(-1);
+  assert.equal(action.outcome, 'active-window-ended');
+  assert.equal(action.reachedBottom, true);
+  assert.ok(action.activeWindowEnded.snapshot.transcript.scrollTop < 900);
+  assert.equal(action.after.snapshot.transcript.scrollTop, 900);
+});
+
+test('AI07 still reports a stuck return when the tool ends and the viewport never reaches bottom', async () => {
+  const { options } = harness();
+  options.cdp.click = async () => {
+    options.client.isBusy = async () => false;
+    return true;
+  };
+  const result = await executeActivityScenario(options);
+  assert.equal(result.executed, false);
+  assert.equal(result.actions.at(-1).outcome, 'bottom-not-reached');
+  assert.equal(result.actions.at(-1).reachedBottom, false);
+  assert.match(result.reason, /scenario deadline/);
 });
 
 test('shipped AI07 controller installs telemetry before prompting and records execution separately', async () => {
@@ -208,5 +292,8 @@ test('shipped AI07 controller installs telemetry before prompting and records ex
   assert.ok(observer > 0 && prompt > observer && execute > prompt);
   assert.match(controller, /preparation: \{ passed: best\?\.missing.length === 0 \}/);
   assert.match(controller, /scenarioVerification: 'NEEDS_AI_REVIEW'/);
-  assert.match(controller, /activityObservation = await cdp.evaluate\('globalThis.varroAiStreamingObserver.stop\(\)'\)/);
+  assert.match(
+    controller,
+    /activityObservation = await cdp.evaluate\('globalThis.varroAiStreamingObserver.stop\(\)'\)/
+  );
 });
