@@ -76,7 +76,11 @@ describe('sendMessage', () => {
       if (options?.directory !== created.directory) throw new Error('404 Session not found');
       return { ...created, ...body };
     });
-    clientMocks.varroSessionUpdatePermissionMode.mockResolvedValue(created);
+    clientMocks.varroSessionUpdatePermissionMode.mockImplementation(async () => {
+      // The host confirms the mode through a snapshot before the update resolves.
+      stateModule.applySessionPermissionModesSnapshot({ [created.id]: 'full' });
+      return created;
+    });
     clientMocks.sessionGet.mockResolvedValue(created);
     clientMocks.sessionMessages.mockResolvedValue([]);
     clientMocks.sessionSendAsync.mockResolvedValue(undefined);
@@ -86,10 +90,20 @@ describe('sendMessage', () => {
         newSessionWorkspace: { scope: 'workspace', directory: '/workspace' },
       })
     ).toBe(true);
+    expect(clientMocks.varroSessionUpdatePermissionMode).toHaveBeenCalledWith(created.id, 'full', {
+      directory: '/workspace',
+      preconfigured: true,
+    });
+    expect(stateModule.getPermissionModeForSession(created.id)).toBe('full');
     expect(clientMocks.sessionUpdate).toHaveBeenCalledWith(
       created.id,
-      expect.objectContaining({ permission: expect.any(Array) }),
+      expect.objectContaining({
+        permission: expect.arrayContaining([{ permission: '*', pattern: '*', action: 'allow' }]),
+      }),
       { directory: '/workspace' }
+    );
+    expect(clientMocks.sessionUpdate.mock.invocationCallOrder[0]).toBeLessThan(
+      clientMocks.sessionSendAsync.mock.invocationCallOrder[0]!
     );
     expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
       created.id,
