@@ -1443,7 +1443,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const partialPart = asRecord(rawPart);
       const partSessionID = isString(partialPart?.sessionID) ? partialPart.sessionID : undefined;
       if (partSessionID && partialPart?.type === 'compaction') {
-        sessionStore.setSessionCompacting(partSessionID, false);
+        sessionStore.setSessionCompacting(partSessionID, partialPart.status === 'running');
       }
       if (!isSessionInActiveTree(partSessionID)) return;
 
@@ -1535,6 +1535,14 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
             ? ignoreStaleProgressForCompletedMessage(sessionID, assistantMessageID)
             : ignoreStaleProgressAfterFinishedAssistant(sessionID))
         ) {
+          // A completed assistant does not mean later shell or skill records are already loaded.
+          if (
+            TRANSCRIPT_SYNC_SESSION_EVENTS.has(eventName) &&
+            seqStatus !== 'gap' &&
+            isSessionInActiveTree(sessionID)
+          ) {
+            scheduleMessageSync(sessionID, true);
+          }
           return;
         }
         const activeTreeEvent = isSessionInActiveTree(sessionID);
@@ -1544,6 +1552,15 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
           return;
         }
         markSessionProgress(sessionID);
+        if (
+          eventName === 'session.next.compaction.started' ||
+          eventName === 'session.next.compaction.ended'
+        ) {
+          sessionStore.setSessionCompacting(
+            sessionID,
+            eventName === 'session.next.compaction.started'
+          );
+        }
         if (
           eventName === 'session.next.shell.started' ||
           eventName === 'session.next.tool.called'

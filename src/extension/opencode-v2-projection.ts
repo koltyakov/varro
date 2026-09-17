@@ -11,6 +11,7 @@ import type {
   SessionStructuredError,
 } from '@opencode/client';
 import { asRecord, isNumber, isString, type UnknownRecord } from '../shared/type-utils';
+import { formatSkillAttachment } from '../shared/skill-reference';
 
 export function v2PartId(messageID: string, ordinal: number): string {
   return `${messageID}:content:${ordinal}`;
@@ -221,12 +222,12 @@ export function normalizeV2Error(value: unknown): SessionStructuredError | undef
 
 export function isV2TranscriptMessage(message: SessionMessageInfo): boolean {
   return (
-    message.type !== 'system' &&
-    message.type !== 'synthetic' &&
-    message.type !== 'agent-switched' &&
-    message.type !== 'model-switched' &&
-    message.type !== 'location-switched' &&
-    (message.type !== 'idle' || message.outcome === 'failed')
+    message.type === 'user' ||
+    message.type === 'assistant' ||
+    message.type === 'compaction' ||
+    message.type === 'skill' ||
+    message.type === 'shell' ||
+    (message.type === 'idle' && message.outcome === 'failed')
   );
 }
 
@@ -245,6 +246,58 @@ export function projectV2Message(
     type,
     ...fields,
   });
+  if (message.type === 'skill' || message.type === 'shell') {
+    const completed = message.type === 'skill' || message.status !== 'running';
+    const time = {
+      created: message.time.created,
+      completed: completed
+        ? ((message.type === 'shell' ? message.time.completed : undefined) ?? message.time.created)
+        : undefined,
+    };
+    const input: Record<string, string> =
+      message.type === 'skill' ? { name: message.skill } : { command: message.command };
+    const output = message.type === 'skill' ? message.text : (message.output?.output ?? '');
+    const shellFailure =
+      message.type === 'shell'
+        ? message.status === 'timeout' || message.status === 'killed'
+          ? `Shell ${message.status}`
+          : message.status === 'exited' && message.exit !== undefined && message.exit !== 0
+            ? `Shell exited with code ${message.exit}`
+            : undefined
+        : undefined;
+    const error = shellFailure
+      ? {
+          type: 'ShellError',
+          message: [output, shellFailure].filter(Boolean).join('\n'),
+        }
+      : undefined;
+    return projectV2Message(
+      {
+        id: message.id,
+        type: 'assistant',
+        agent: context.agent ?? '',
+        model: context.model ?? { providerID: '', id: '' },
+        time,
+        content: [
+          {
+            type: 'tool',
+            id: message.type === 'shell' ? message.shellID : v2PartId(message.id, 0),
+            name: message.type,
+            time,
+            state: error
+              ? { status: 'error', input, error }
+              : completed
+                ? { status: 'completed', input, content: [{ type: 'text', text: output }] }
+                : { status: 'running', input, metadata: { output } },
+          },
+        ],
+      },
+      sessionID,
+      directory,
+      parentID,
+      context
+    );
+  }
   if (message.type === 'idle' && message.outcome === 'failed') {
     const error = normalizeV2Error(context.error);
     return {
@@ -346,6 +399,12 @@ export function projectV2Message(
         ...(message.agents ?? []).map((agent, index) =>
           part((message.files?.length ?? 0) + index + 1, 'agent', { name: agent.name })
         ),
+        ...(message.skills ?? []).map((skill, index) =>
+          part((message.files?.length ?? 0) + (message.agents?.length ?? 0) + index + 1, 'text', {
+            text: formatSkillAttachment(skill.name),
+            synthetic: true,
+          })
+        ),
       ],
     };
   }
@@ -353,30 +412,15 @@ export function projectV2Message(
     return {
       info,
       parts: [
-        part(0, 'compaction', { auto: message.reason === 'auto' }),
-        ...(message.status === 'completed'
-          ? [part(1, 'text', { text: message.summary, synthetic: true })]
-          : []),
-      ],
-    };
-  if (message.type === 'shell')
-    return {
-      info,
-      parts: [
-        part(0, 'text', {
-          text: `$ ${message.command}\n${message.output?.output ?? ''}`,
-          synthetic: true,
+        part(0, 'compaction', {
+          auto: message.reason === 'auto',
+          status: message.status,
+          error: message.status === 'failed' ? message.error.message : undefined,
         }),
       ],
     };
-  if (
-    message.type === 'idle' ||
-    message.type === 'agent-switched' ||
-    message.type === 'model-switched' ||
-    message.type === 'location-switched'
-  )
-    return { info, parts: [] };
-  return { info, parts: [part(0, 'text', { text: message.text, synthetic: true })] };
+  // Control records and internal instructions must stay invisible on direct reads too.
+  return { info, parts: [] };
 }
 
 export function projectV2Form(form: FormInfo): UnknownRecord {

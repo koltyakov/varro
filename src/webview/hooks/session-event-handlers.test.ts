@@ -2447,33 +2447,36 @@ describe('registerSessionEventHandlers', () => {
     expect(syncSessionMessages).not.toHaveBeenCalled();
   });
 
-  it.each(['session.next.prompted', 'session.next.synthetic', 'session.next.shell.started'])(
-    'resyncs transcript records for an in-order %s event',
-    async (eventName) => {
-      const handlers = installHandlers();
-      const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+  it.each([
+    'session.next.prompted',
+    'session.next.synthetic',
+    'session.next.shell.started',
+    'session.next.compaction.started',
+    'session.next.compaction.ended',
+  ])('resyncs transcript records for an in-order %s event', async (eventName) => {
+    const handlers = installHandlers();
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
 
-      registerSessionEventHandlers(
-        createDefaultDeps({
-          getActiveSessionId: () => 'session-1',
-          syncSessionMessages,
-        })
-      );
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        syncSessionMessages,
+      })
+    );
 
-      handlers.get(eventName)?.({
-        properties: {
-          sessionID: 'session-1',
-          messageID: 'message-1',
-          callID: 'call-1',
-        },
-        seq: 1,
-      });
+    handlers.get(eventName)?.({
+      properties: {
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        callID: 'call-1',
+      },
+      seq: 1,
+    });
 
-      await vi.waitFor(() => {
-        expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
-      });
-    }
-  );
+    await vi.waitFor(() => {
+      expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+    });
+  });
 
   it('runs a trailing transcript sync when shell completion arrives during a sync', async () => {
     const handlers = installHandlers();
@@ -2508,6 +2511,25 @@ describe('registerSessionEventHandlers', () => {
     resolveFirstSync?.();
     await vi.waitFor(() => expect(syncSessionMessages).toHaveBeenCalledTimes(2));
   });
+
+  it.each(['session.next.synthetic', 'session.next.shell.started', 'session.next.shell.ended'])(
+    'fetches %s records even when the loaded assistant has finished',
+    async (eventName) => {
+      const handlers = installHandlers();
+      const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+      loadingStartedAt.mockReturnValue(1);
+      registerSessionEventHandlers(
+        createDefaultDeps({
+          getActiveSessionId: () => 'session-1',
+          getMessages: () => [createCompletedAssistantEntry(1, 2)],
+          syncSessionMessages,
+        })
+      );
+      handlers.get(eventName)?.({ properties: { sessionID: 'session-1', timestamp: 3 }, seq: 1 });
+      await vi.waitFor(() => expect(syncSessionMessages).toHaveBeenCalledWith('session-1'));
+      loadingStartedAt.mockReturnValue(null);
+    }
+  );
 
   it('does not run a trailing transcript sync after cleanup', async () => {
     const handlers = installHandlers();

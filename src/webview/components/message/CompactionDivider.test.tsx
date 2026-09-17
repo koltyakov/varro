@@ -32,6 +32,26 @@ function compactionPart(overrides: Partial<CompactionPart> = {}): CompactionPart
 }
 
 describe('CompactionDivider', () => {
+  it.each([
+    ['running', 'Compacting context (auto)'],
+    ['failed', 'Context compaction failed (auto): Summary failed'],
+    ['completed', 'Context compacted (auto)'],
+  ] as const)('labels %s compaction accurately', (status, label) => {
+    cleanup = render(
+      () =>
+        CompactionDivider({
+          part: {
+            ...compactionPart({ auto: true }),
+            status,
+            error: status === 'failed' ? 'Summary failed' : undefined,
+          },
+          timestamp: 1_000,
+        }),
+      container!
+    );
+    expect(container?.textContent).toContain(label);
+  });
+
   it('renders the manual compaction label by default', () => {
     cleanup = render(
       () => CompactionDivider({ part: compactionPart(), timestamp: 1_000 }),

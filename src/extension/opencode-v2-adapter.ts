@@ -481,6 +481,8 @@ export class OpenCodeV2Adapter {
         const firstAssistant = ordered.findIndex(
           (message) =>
             message.type === 'assistant' ||
+            message.type === 'skill' ||
+            message.type === 'shell' ||
             (message.type === 'idle' && message.outcome === 'failed')
         );
         const firstUser = ordered.findIndex((message) => message.type === 'user');
@@ -531,7 +533,8 @@ export class OpenCodeV2Adapter {
             assistantFailed = false;
           }
           if (message.type === 'assistant' && message.error) assistantFailed = true;
-          if (message.type === 'assistant' && parent) this.messageParents.set(message.id, parent);
+          if (projected.info.role === 'assistant' && parent)
+            this.messageParents.set(message.id, parent);
           if (options.stripMessageParts) projected.parts = [];
           return [projected];
         });
@@ -557,12 +560,16 @@ export class OpenCodeV2Adapter {
         }
         return options.captureNextCursor ? { data: messages, nextCursor: cursor } : messages;
       }
-      if (action.startsWith('message/') && method === 'GET')
+      if (action.startsWith('message/') && method === 'GET') {
+        const message = await data<SessionMessageInfo>('GET', `${endpoint}/${action}`);
         return projectV2Message(
-          await data<SessionMessageInfo>('GET', `${endpoint}/${action}`),
+          message,
           sessionID,
-          directory
+          directory,
+          this.messageParents.get(message.id),
+          this.contexts.get(sessionID)
         );
+      }
       if (action.startsWith('message/') && method === 'DELETE') {
         const messageID = decodeURIComponent(action.slice('message/'.length));
         const page = await data<SessionMessageInfo[]>(

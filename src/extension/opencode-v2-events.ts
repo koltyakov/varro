@@ -122,6 +122,13 @@ export function projectV2Event(value: unknown, context: V2MessageContext = {}): 
     return emit('session.next.prompt.admitted', { ...properties, messageID: data.inboxID });
   if (event.type === 'session.inbox.delivered')
     return emit('session.next.prompted', { ...properties, messageID: data.inboxID });
+  if (event.type === 'session.skill.activated') return emit('session.next.synthetic');
+  if (event.type === 'session.shell.started' || event.type === 'session.shell.ended')
+    return emit(event.type.replace('session.', 'session.next.'), {
+      ...properties,
+      callID: asRecord(data.shell)?.id,
+      output: asRecord(data.output)?.output,
+    });
   if (event.type === 'session.agent.selected') return emit('session.next.agent.switched');
   if (event.type === 'session.model.selected')
     return emit('session.next.model.switched', {
@@ -173,13 +180,22 @@ export function projectV2Event(value: unknown, context: V2MessageContext = {}): 
     ['session.synthetic', 'session.moved'].includes(event.type)
   ) {
     if (event.type === 'session.compaction.failed')
-      return emit('session.error', {
-        sessionID,
-        error: {
-          name: 'APIError',
-          data: { message: asRecord(data.error)?.message ?? 'Compaction failed' },
+      return [
+        ...emit('session.next.compaction.ended'),
+        {
+          ...base,
+          id: `${event.id}:error`,
+          seq: undefined,
+          type: 'session.error',
+          properties: {
+            sessionID,
+            error: {
+              name: 'APIError',
+              data: { message: asRecord(data.error)?.message ?? 'Compaction failed' },
+            },
+          },
         },
-      });
+      ];
     return emit(event.type.replace('session.', 'session.next.'));
   }
   if (
