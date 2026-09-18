@@ -57,7 +57,7 @@ function SetupCommandCard(props: { label: string; command: string }) {
   };
 
   return (
-    <div class="w-full px-4">
+    <div class="w-full">
       <div class="w-full rounded-md border border-vscode-border-soft bg-vscode-card px-3 py-2 text-left">
         <div class="flex items-center justify-between gap-2">
           <p class="text-[10px] font-medium uppercase tracking-wide text-vscode-muted">
@@ -112,7 +112,7 @@ function RecoveryActions(props: {
   allowRestart?: boolean;
 }) {
   return (
-    <div class="flex flex-wrap items-center justify-center gap-2 px-4">
+    <div class="flex flex-wrap items-center justify-center gap-2">
       <Show when={props.allowRestart !== false}>
         <SecondaryButton label="Restart Server" onClick={restartServer} />
       </Show>
@@ -198,7 +198,7 @@ export function ServerStatus() {
   const errorKind = () => errorDetail().kind;
 
   return (
-    <div class="server-status-surface flex min-h-0 flex-1 flex-col items-center gap-4 overflow-y-auto px-8 py-10 text-center">
+    <div class="server-status-surface">
       <Show when={serverStatus().state === 'starting'}>
         <div class="flex items-center gap-2">
           <span class="h-2 w-2 rounded-full bg-vscode-accent animate-pulse-soft" />
@@ -250,14 +250,14 @@ export function ServerStatus() {
       </Show>
 
       <Show when={noProvidersConfigured()}>
-        <div class="flex w-full max-w-75 flex-col items-center gap-4 text-center">
+        <div class="server-status-content">
           <div
             class="flex shrink-0 items-center justify-center rounded-full bg-vscode-accent/10"
             style={{ width: '40px', height: '40px', 'aspect-ratio': '1 / 1' }}
           >
             <UiIcon source={brainWarningIcon} width={20} height={20} class="text-vscode-accent" />
           </div>
-          <div class="flex flex-col gap-1.5 px-4">
+          <div class="flex w-full flex-col gap-1.5">
             <p class="text-[13px] font-medium text-vscode-fg">No providers configured</p>
             <p class="text-[12px] leading-normal text-vscode-muted">
               OpenCode is running, but it does not have any providers configured yet.
@@ -292,9 +292,9 @@ export function ServerStatus() {
 
 function MissingCliState() {
   return (
-    <div class="flex w-full max-w-110 flex-col items-center gap-4 text-center">
+    <div class="server-status-content">
       <WarningIcon />
-      <div class="flex flex-col gap-1.5">
+      <div class="flex w-full flex-col gap-1.5">
         <p class="text-[13px] font-medium text-vscode-fg">OpenCode is not installed</p>
         <p class="text-[12px] leading-normal text-vscode-muted">
           Varro gives{' '}
@@ -318,7 +318,7 @@ function MissingCliState() {
       >
         Open terminal and install
       </button>
-      <p class="px-4 text-[11px] leading-normal text-vscode-muted">
+      <p class="text-[11px] leading-normal text-vscode-muted">
         Use npm on macOS, Linux, or WSL. On native Windows, download the CLI from the install docs
         below and set its path in varro.server.command.
       </p>
@@ -340,7 +340,7 @@ function MissingCliState() {
       {/* Installs under a Node version manager land outside the directories
           Varro can scan, so point at the escape hatch instead of insisting
           OpenCode is missing. */}
-      <p class="px-4 text-[11px] leading-normal text-vscode-muted">
+      <p class="text-[11px] leading-normal text-vscode-muted">
         Already installed? Varro could not find it on PATH - set the full path in{' '}
         <button
           type="button"
@@ -364,9 +364,9 @@ function MissingCliState() {
 
 function InvalidPathState(props: { message: string; detail: ServerErrorDetail }) {
   return (
-    <div class="flex w-full max-w-75 flex-col items-center gap-4 text-center">
+    <div class="server-status-content">
       <WarningIcon />
-      <div class="flex flex-col gap-1.5 px-4">
+      <div class="flex w-full flex-col gap-1.5">
         <p class="text-[13px] font-medium text-vscode-fg">Configured OpenCode path not found</p>
         <p class="text-[12px] leading-normal text-vscode-muted">{props.message}</p>
       </div>
@@ -399,11 +399,11 @@ function UpdateState(props: { message: string; detail: ServerErrorDetail }) {
         : 'OpenCode update required';
 
   return (
-    <div class="flex w-full max-w-90 flex-col items-center gap-4 text-center">
+    <div class="server-status-content">
       <Show when={isWaiting()} fallback={<UpdateIcon />}>
         <WaitingIcon />
       </Show>
-      <div class="flex flex-col gap-1.5 px-4">
+      <div class="flex w-full flex-col gap-1.5">
         <p class="text-[13px] font-medium text-vscode-fg">{title()}</p>
         <p class="text-[12px] leading-normal text-vscode-muted">{props.message}</p>
       </div>
@@ -420,7 +420,7 @@ function UpdateState(props: { message: string; detail: ServerErrorDetail }) {
       </Show>
 
       <Show when={isWaiting()}>
-        <p class="px-4 text-[11px] leading-normal text-vscode-muted">
+        <p class="text-[11px] leading-normal text-vscode-muted">
           Varro will check again and only restart after the server is idle.
         </p>
         <SecondaryButton label="Check Again" onClick={restartServer} />
@@ -433,7 +433,7 @@ function UpdateState(props: { message: string; detail: ServerErrorDetail }) {
 
 function GenericErrorState(props: { message: string }) {
   return (
-    <div class="flex w-full max-w-75 flex-col items-center gap-4 text-center">
+    <div class="server-status-content">
       <div class="flex h-10 w-10 items-center justify-center rounded-full bg-vscode-error/10">
         <UiIcon
           source={warningCircleSolidIcon}
@@ -442,7 +442,7 @@ function GenericErrorState(props: { message: string }) {
           height={20}
         />
       </div>
-      <div class="flex flex-col gap-1.5 px-4">
+      <div class="flex w-full flex-col gap-1.5">
         <p class="text-[13px] font-medium text-vscode-fg">OpenCode could not start</p>
         <p class="text-[12px] leading-normal text-vscode-muted">{props.message}</p>
       </div>

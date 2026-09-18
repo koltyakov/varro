@@ -130,38 +130,36 @@ export function App() {
 
 function NoFolderOpen() {
   return (
-    <div class="flex flex-1 flex-col items-center justify-center gap-4 px-8 py-10 text-center">
-      <UiIcon
-        source={folderIcon}
-        class="h-10 w-10 text-vscode-muted"
-        width={40}
-        height={40}
-        aria-hidden="true"
-      />
-      <div>
-        <p class="text-[13px] font-medium text-vscode-fg">Open a folder to use Varro</p>
-        <p class="mt-1.5 max-w-64 text-[12px] leading-relaxed text-vscode-muted">
-          Varro needs a workspace folder to understand and work with your project.
-        </p>
+    <div class="server-status-surface">
+      <div class="server-status-content">
+        <UiIcon
+          source={folderIcon}
+          class="h-10 w-10 text-vscode-muted"
+          width={40}
+          height={40}
+          aria-hidden="true"
+        />
+        <div class="w-full">
+          <p class="text-[13px] font-medium text-vscode-fg">Open a folder to use Varro</p>
+          <p class="mt-1.5 text-[12px] leading-relaxed text-vscode-muted">
+            Varro needs a workspace folder to understand and work with your project.
+          </p>
+        </div>
+        <button
+          type="button"
+          class="server-status-action-button"
+          onClick={() => postMessage({ type: 'vscode/open-folder' })}
+        >
+          Open Folder
+        </button>
       </div>
-      <button
-        type="button"
-        class="rounded bg-vscode-button-bg px-3 py-1.5 text-[12px] font-medium text-vscode-button-fg hover:bg-vscode-button-hover"
-        onClick={() => postMessage({ type: 'vscode/open-folder' })}
-      >
-        Open Folder
-      </button>
     </div>
   );
 }
 
 function WorkspaceLoading() {
   return (
-    <div
-      class="flex flex-1 flex-col items-center justify-center gap-4 px-8 py-10 text-center"
-      role="status"
-      aria-label="Loading workspace"
-    >
+    <div class="server-status-surface" role="status" aria-label="Loading workspace">
       <div class="flex items-center gap-[8px]" aria-hidden="true">
         <span class="h-[8px] w-[8px] rounded-full bg-vscode-accent animate-pulse-soft" />
         <span
@@ -179,21 +177,23 @@ function WorkspaceLoading() {
 
 function ErrorFallback(props: { err: Error }) {
   return (
-    <div class="flex flex-col items-center justify-center gap-3 p-6 text-center">
-      <UiIcon
-        source={warningCircleSolidIcon}
-        class="h-8 w-8 text-vscode-error"
-        width={32}
-        height={32}
-      />
-      <p class="text-sm text-vscode-error">Something went wrong</p>
-      <p class="max-w-full break-words text-xs text-vscode-muted">{getErrorMessage(props.err)}</p>
-      <button
-        class="rounded bg-vscode-button-bg px-3 py-1 text-xs text-vscode-button-fg hover:bg-vscode-button-hover"
-        onClick={() => postMessage({ type: 'webview/reload' })}
-      >
-        Reload sidebar
-      </button>
+    <div class="server-status-surface h-full">
+      <div class="server-status-content">
+        <UiIcon
+          source={warningCircleSolidIcon}
+          class="h-8 w-8 text-vscode-error"
+          width={32}
+          height={32}
+        />
+        <p class="text-sm text-vscode-error">Something went wrong</p>
+        <p class="text-xs text-vscode-muted">{getErrorMessage(props.err)}</p>
+        <button
+          class="server-status-action-button"
+          onClick={() => postMessage({ type: 'webview/reload' })}
+        >
+          Reload sidebar
+        </button>
+      </div>
     </div>
   );
 }

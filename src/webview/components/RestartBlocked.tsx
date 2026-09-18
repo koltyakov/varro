@@ -34,7 +34,7 @@ export function RestartBlocked() {
   };
 
   return (
-    <div class="server-status-surface relative flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-8">
+    <div class="server-status-surface relative">
       <button
         type="button"
         class="chat-image-preview-close server-status-close"
@@ -45,12 +45,12 @@ export function RestartBlocked() {
         <UiIcon source={xmarkIcon} width={14} height={14} />
       </button>
 
-      <div class="mx-auto flex w-full max-w-90 flex-col items-center gap-4 text-center">
+      <div class="server-status-content">
         <div class="flex h-10 w-10 items-center justify-center rounded-full bg-vscode-accent/10">
           <UiIcon source={clockIcon} class="h-5 w-5 text-vscode-accent" width={20} height={20} />
         </div>
 
-        <div class="px-3">
+        <div class="w-full">
           <p class="text-[13px] font-medium text-vscode-fg">Waiting to restart OpenCode</p>
           <p class="mt-1.5 text-[12px] leading-normal text-vscode-muted">
             {blockers()?.totalSessionCount ?? 0}{' '}
@@ -80,7 +80,7 @@ export function RestartBlocked() {
           </For>
         </div>
 
-        <p class="px-3 text-[11px] leading-normal text-vscode-muted">
+        <p class="text-[11px] leading-normal text-vscode-muted">
           Force restart stops the server immediately and may interrupt active work.
         </p>
         <button

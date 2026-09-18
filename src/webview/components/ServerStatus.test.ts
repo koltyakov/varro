@@ -296,7 +296,7 @@ describe('ServerStatus', () => {
 
     renderServerStatus();
 
-    expect(container?.firstElementChild?.classList).toContain('overflow-y-auto');
+    expect(container?.firstElementChild?.classList).toContain('server-status-surface');
     expect(container?.querySelector('code')?.classList).toContain('break-all');
   });
 
