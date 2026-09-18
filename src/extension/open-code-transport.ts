@@ -111,6 +111,10 @@ export class OpenCodeTransport {
     return this.healthFailure;
   }
 
+  get hasGlobalSessionStatus(): boolean {
+    return this.apiVersion === 2;
+  }
+
   constructor(options: OpenCodeTransportOptions) {
     const testServerUrl = this.testServerUrl;
     this.options = {

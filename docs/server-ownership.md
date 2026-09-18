@@ -30,7 +30,10 @@ nonce, and the extension host's identity. PID alone is insufficient because the
 OS can reuse it.
 
 - Windows uses process creation ticks and case-insensitive executable paths.
-- macOS uses the process start date and executable path.
+- macOS uses the process start date and executable path. If replacing the binary
+  leaves `lsof` reporting a nonexistent path, Varro resolves the launch path from
+  `ps` before comparing executable identities. The listening PID and process start
+  date must still match.
 - Linux uses process start ticks and the boot ID when available. Legacy tick-only
   records can match within the current boot. An executable's ` (deleted)` suffix
   after a binary replacement does not invalidate the running process.
@@ -48,6 +51,16 @@ Leases and markers are written through unique temporary files and atomic rename.
 Transient Windows replacement failures are retried without truncating the live
 record. A failed parse does not authorize a reader to delete the file. Failed
 process inspection preserves ownership evidence for a later retry.
+
+A surviving legacy temporary-directory marker remains a recovery source when its
+lease is missing. Recovery validates the marker's process identity before claiming
+the server.
+
+Restart preflight checks v2's process-global active sessions before inspecting
+location-scoped questions and permissions. It skips deleted historical directories
+that would fail location initialization. Running sessions and observed pending
+attention still block restart even when their directory has been deleted. Other
+inspection errors continue to block restart.
 
 ## Verification
 

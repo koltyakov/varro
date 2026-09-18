@@ -2,6 +2,7 @@
 /* oxlint-disable anti-slop/no-known-value-widening, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Server assertions follow lifecycle, process, and response validation. */
 import type { ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
+import { stat } from 'fs/promises';
 import * as vscode from 'vscode';
 import {
   MINIMUM_SUPPORTED_OPENCODE_VERSION,
@@ -1756,9 +1757,27 @@ export class OpenCodeServer extends EventEmitter {
     }
 
     const directories = [...probeDirectories.values()];
+    const readDirectorySnapshot = async (directory: string) => {
+      if (this.transport.hasGlobalSessionStatus) {
+        try {
+          await stat(directory);
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+          // V2's global status above still catches running sessions in deleted
+          // directories. Opening their old locations just to check attention
+          // can fail with HTTP 500 and permanently prevent an idle restart.
+          return null;
+        }
+      }
+      return readSnapshot(directory);
+    };
     for (let index = 0; index < directories.length; index += 8) {
-      const snapshots = await Promise.all(directories.slice(index, index + 8).map(readSnapshot));
-      for (const snapshot of snapshots) collectSnapshot(snapshot);
+      const snapshots = await Promise.all(
+        directories.slice(index, index + 8).map(readDirectorySnapshot)
+      );
+      for (const snapshot of snapshots) {
+        if (snapshot) collectSnapshot(snapshot);
+      }
     }
     for (const sessionID of this.transport.getPendingAttentionSessionIDs()) {
       blockingSessionIDs.add(sessionID);

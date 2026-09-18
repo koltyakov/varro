@@ -735,9 +735,14 @@ async function readProcessExecutable(pid: number, procRoot = '/proc') {
     .find((line) => line.startsWith('n'))
     ?.slice(1)
     .trim();
-  if (executable) return executable;
+  if (executable && (process.platform !== 'darwin' || existsSync(executable))) return executable;
 
-  return (await runProcess('ps', ['-p', String(pid), '-o', 'comm='])).stdout.trim();
+  // After a macOS binary replacement, lsof can report a synthetic path such as
+  // /opencode for the unlinked executable. ps retains the launch path; resolve
+  // its symlink to compare it with the executable recorded before the update.
+  const command = (await runProcess('ps', ['-p', String(pid), '-o', 'comm='])).stdout.trim();
+  if (process.platform !== 'darwin' || !command) return command;
+  return realpath(command).catch(() => command);
 }
 
 async function readLinuxProcessStat(pid: number, procRoot: string) {
@@ -899,6 +904,12 @@ function getManagedServerOwnershipLeasePath(port: number) {
         return legacyPath;
     } catch {
       // No readable legacy lease; new servers use the shared per-user directory.
+    }
+    try {
+      if (parseInjectedConfigOwner(JSON.parse(readFileSync(`${legacyPath}.managed`, 'utf-8'))))
+        return legacyPath;
+    } catch {
+      // A surviving legacy marker can recover a lost lease, but malformed data cannot.
     }
   }
   return path;

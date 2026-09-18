@@ -2419,6 +2419,66 @@ describe('OpenCodeServer restart blockers', () => {
     });
   });
 
+  it.each(['idle', 'busy', 'attention'])(
+    'handles a deleted v2 session directory while the session is %s',
+    async (state) => {
+      const server = new OpenCodeServer(4096, true);
+      const directory = join(process.cwd(), `missing-restart-directory-${process.pid}`);
+      const request = vi.fn(
+        async (
+          _method: string,
+          path: string,
+          _body?: unknown,
+          options?: { directory?: string }
+        ) => {
+          if (options?.directory === directory) throw new Error('500 Internal Server Error');
+          if (path.startsWith('/experimental/session')) return [{ id: 'old-session', directory }];
+          if (path === '/session/status')
+            return state === 'busy' ? { 'old-session': { type: 'busy' } } : {};
+          if (path === '/question' || path === '/permission') return [];
+          throw new Error(`Unexpected request: ${path}`);
+        }
+      );
+      const api = server as unknown as {
+        transport: {
+          apiVersion: number;
+          request: typeof request;
+          getPendingAttentionSessionIDs: () => string[];
+        };
+      };
+      api.transport.apiVersion = 2;
+      api.transport.request = request;
+      api.transport.getPendingAttentionSessionIDs = () =>
+        state === 'attention' ? ['old-session'] : [];
+
+      await expect(server.readRestartBlockers()).resolves.toEqual({
+        totalSessionCount: state === 'idle' ? 0 : 1,
+        directories: state === 'idle' ? [] : [{ directory, sessionCount: 1 }],
+      });
+      expect(request.mock.calls.every((call) => !call[3]?.directory)).toBe(true);
+    }
+  );
+
+  it('still blocks v2 restart when attention reads fail for an existing directory', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const request = vi.fn(
+      async (_method: string, path: string, _body?: unknown, options?: { directory?: string }) => {
+        if (path.startsWith('/experimental/session'))
+          return [{ id: 'session-1', directory: process.cwd() }];
+        if (path === '/session/status') return {};
+        if (options?.directory) throw new Error('500 Internal Server Error');
+        return [];
+      }
+    );
+    const api = server as unknown as {
+      transport: { apiVersion: number; request: typeof request };
+    };
+    api.transport.apiVersion = 2;
+    api.transport.request = request;
+
+    await expect(server.readRestartBlockers()).rejects.toThrow('500 Internal Server Error');
+  });
+
   it('groups unique blocking sessions by normalized directory', async () => {
     const server = new OpenCodeServer(4096, true);
     vi.mocked(fetch).mockImplementation(async (input) => {

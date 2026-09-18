@@ -6,6 +6,7 @@ import {
   mkdtemp,
   readFile,
   readlink,
+  realpath,
   rm,
   stat,
   symlink,
@@ -970,6 +971,61 @@ describe('OpenCodeProcess server ownership leases', () => {
       expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(lease);
     } finally {
       await rm(path);
+    }
+  });
+
+  it('recovers a legacy marker after macOS loses the replaced executable path', async () => {
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'ownership-macos-update-')));
+    const executable = join(root, 'opencode.exe');
+    const command = join(root, 'opencode2');
+    await writeFile(executable, 'updated binary');
+    await symlink(executable, command);
+    const path = join(tmpdir(), 'varro-opencode-server-49878.json');
+    const marker = {
+      pid: MOCK_LINUX_PID,
+      port: 49878,
+      executable,
+      birthIdentity: 'darwin:original-start',
+      owner: 'updated-server',
+      createdAt: Date.now(),
+    };
+    await writeFile(`${path}.managed`, JSON.stringify(marker));
+    let birthIdentity = 'original-start';
+    spawnMock.mockImplementation((tool: string, args: string[]) => {
+      const result = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+        kill: vi.fn(),
+      });
+      queueMicrotask(() => {
+        const output =
+          tool === 'lsof'
+            ? args.includes('txt')
+              ? 'p123\nftxt\nn/opencode'
+              : String(MOCK_LINUX_PID)
+            : args.includes('comm=')
+              ? command
+              : birthIdentity;
+        result.stdout.emit('data', Buffer.from(`${output}\n`));
+        result.emit('close', 0);
+      });
+      return result;
+    });
+    try {
+      const manager = new OpenCodeProcess(49878, true);
+      await expect(manager.takeOwnershipOfExistingServer()).resolves.toBe(true);
+      expect(manager.serverOwnership).toBe('current-host');
+      expect(JSON.parse(await readFile(path, 'utf8'))).toMatchObject(marker);
+      await expect(manager.refreshManagedServerOwnership()).resolves.toBe(true);
+
+      birthIdentity = 'reused-pid';
+      await expect(manager.refreshManagedServerOwnership()).resolves.toBe(false);
+      await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(path, { force: true });
+      await rm(`${path}.managed`, { force: true });
     }
   });
 
@@ -2392,6 +2448,8 @@ describe('OpenCodeProcess server ownership leases', () => {
           result.stdout.emit('data', Buffer.from(`p${pid}\nftxt\nn/usr/bin/opencode\n`));
         } else if (command === 'ps' && args.includes('lstart=')) {
           result.stdout.emit('data', Buffer.from('Fri Jul 10 12:00:00 2026\n'));
+        } else if (command === 'ps' && args.includes('comm=')) {
+          result.stdout.emit('data', Buffer.from('/usr/bin/opencode\n'));
         } else if (command === 'ps' && args.includes('command=')) {
           result.stdout.emit(
             'data',
