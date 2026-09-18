@@ -142,6 +142,8 @@ export type AssistantMessage = {
   role: 'assistant';
   time: { created: number; completed?: number };
   error?: AssistantMessageError;
+  /** Automatic retry recorded by the server for this interrupted response. */
+  retry?: { attempt: number; at: number };
   parentID: string;
   modelID: string;
   providerID: string;

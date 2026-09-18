@@ -34,7 +34,9 @@ import * as serverUtils from './server-utils';
 import { diagnosticTimeline } from './diagnostics';
 import { getOpenCodeDirectoryHeaders, scopeOpenCodeRequest } from './util/opencode-request';
 
-function createTransport() {
+function createTransport(
+  options: Partial<ConstructorParameters<typeof OpenCodeTransport>[0]> = {}
+) {
   return new OpenCodeTransport({
     getUrl: () => 'http://localhost:4096',
     getWorkspaceCwd: () => undefined,
@@ -42,6 +44,7 @@ function createTransport() {
     isDisposing: () => false,
     updateEventStreamState: updateEventStreamStateMock,
     emitEvent: emitEventMock,
+    ...options,
   });
 }
 
@@ -151,6 +154,120 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   vi.useRealTimers();
+});
+
+describe('credential recovery', () => {
+  it('shares refresh across REST, health, and event-stream authentication failures', async () => {
+    let authorization = 'Basic old-fixture';
+    let finishRefresh!: () => void;
+    const refreshAuthorization = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishRefresh = () => {
+            authorization = 'Basic new-fixture';
+            resolve();
+          };
+        })
+    );
+    const transport = createTransport({
+      getAuthorization: () => authorization,
+      refreshAuthorization,
+    });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      if (new Headers(init?.headers).get('Authorization') !== 'Basic new-fixture')
+        return new Response(null, { status: 401 });
+      const path = new URL(String(input)).pathname;
+      if (path === '/global/event') return createPendingEventResponse(init!.signal!);
+      if (path === '/global/health') return Response.json({ healthy: true, version: '1.18.31' });
+      return Response.json({ id: 'created-session' });
+    });
+    const request = transport.request('POST', '/session', { title: 'Fixture' });
+    const health = transport.readHealthInfo();
+    const stream = transport.startEventStream();
+    try {
+      await vi.waitFor(() => expect(refreshAuthorization).toHaveBeenCalledOnce());
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      finishRefresh();
+      await expect(request).resolves.toEqual({ id: 'created-session' });
+      await expect(health).resolves.toEqual({ healthy: true, version: '1.18.31' });
+      await vi.waitFor(() => expect(updateEventStreamStateMock).toHaveBeenCalledWith('healthy'));
+      expect(fetchMock).toHaveBeenCalledTimes(6);
+      const sends = fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST');
+      expect(sends).toHaveLength(2);
+      expect(sends[1]?.[1]?.body).toBe(JSON.stringify({ title: 'Fixture' }));
+      expect(sends[1]?.[1]?.signal).toBe(sends[0]?.[1]?.signal);
+      expect(new Headers(fetchMock.mock.calls.at(-1)?.[1]?.headers).get('Authorization')).toBe(
+        'Basic new-fixture'
+      );
+    } finally {
+      transport.stopEventStream();
+      await stream;
+    }
+  });
+
+  it.each([false, true])(
+    'bounds retries when refreshed credentials remain rejected: %s',
+    async (changed) => {
+      let authorization = 'Basic old-fixture';
+      const refreshAuthorization = vi.fn(async () => {
+        if (changed) authorization = 'Basic rejected-fixture';
+      });
+      const transport = createTransport({
+        getAuthorization: () => authorization,
+        refreshAuthorization,
+      });
+      const fetchMock = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValue(new Response(null, { status: 401 }));
+
+      await expect(transport.request('GET', '/session')).rejects.toThrow('401');
+
+      expect(refreshAuthorization).toHaveBeenCalledOnce();
+      expect(fetchMock).toHaveBeenCalledTimes(changed ? 2 : 1);
+    }
+  );
+
+  it('settles cancellation while credential discovery is still pending', async () => {
+    let finishRefresh!: () => void;
+    const refreshAuthorization = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishRefresh = resolve;
+        })
+    );
+    const transport = createTransport({ refreshAuthorization });
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(null, { status: 401 }));
+    const request = transport.request('POST', '/session', {});
+    const rejected = expect(request).rejects.toThrow();
+    await vi.waitFor(() => expect(refreshAuthorization).toHaveBeenCalledOnce());
+
+    transport.abortRequests();
+    await rejected;
+    await transport.waitForRequestsToSettle();
+    finishRefresh();
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('does not send refreshed credentials to a previous server endpoint', async () => {
+    let url = 'http://localhost:4096';
+    let authorization = 'Basic old-fixture';
+    const transport = createTransport({
+      getUrl: () => url,
+      getAuthorization: () => authorization,
+      refreshAuthorization: async () => {
+        url = 'http://localhost:4097';
+        authorization = 'Basic other-fixture';
+      },
+    });
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(null, { status: 401 }));
+
+    await expect(transport.request('GET', '/session')).rejects.toThrow('401');
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
 });
 
 describe('v1 session compatibility', () => {

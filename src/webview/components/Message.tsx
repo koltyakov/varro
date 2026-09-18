@@ -72,6 +72,7 @@ import {
 import { isString } from '../lib/runtime-values';
 import { getPresentationPartKey } from './message-list/streaming-presentation';
 import type { StreamingPresentation } from './message-list/streaming-presentation';
+import type { AssistantRetryState } from './message-list/assistant-retry';
 
 export {
   getAssistantContainerVariant,
@@ -125,6 +126,7 @@ export function Message(props: {
   onUserMessageHoverChange?: (messageId: string, hovering: boolean) => void;
   onAssistantDiffSettledEmpty?: (messageId: string) => void;
   isLastAssistant?: boolean;
+  retryState?: AssistantRetryState;
   nearViewport?: boolean;
   outerListVirtualized?: boolean;
   highlightFinalAnswer?: boolean;
@@ -291,6 +293,15 @@ export function Message(props: {
     const error = assistant()?.error;
     if (isAbortedAssistantError(error)) return null;
     if (coveredByUsageLimitBanner()) return null;
+    if (error && props.retryState) {
+      if (props.retryState === 'recovered') {
+        return 'Recovered after an automatic retry. Work continued.';
+      }
+      if (props.retryState === 'retrying') {
+        return 'Response interrupted. Retrying automatically…';
+      }
+      return 'Response interrupted. Retried automatically.';
+    }
     if (providerAuthRequired()) {
       if (providerAuthRestored()) {
         return 'Credentials updated. Retry to check whether authentication works.';
@@ -316,7 +327,7 @@ export function Message(props: {
   });
   const canRetryAssistant = createMemo(() => {
     const error = assistant()?.error;
-    return !!error && !isAbortedAssistantError(error);
+    return !!error && !props.retryState && !isAbortedAssistantError(error);
   });
   const assistantErrorAction = createMemo(() => {
     if (!(props.isLastAssistant ?? false) || !canRetryAssistant()) return undefined;
@@ -612,6 +623,7 @@ export function Message(props: {
                 parts={visibleAssistantParts()}
                 errorMessage={assistantErrorMessage()}
                 errorDetails={assistantErrorDetails()}
+                errorIsNotice={!!props.retryState}
                 errorAction={assistantErrorAction()}
                 highlightFinalAnswer={props.highlightFinalAnswer}
                 highlightPlanningAnswer={props.highlightPlanningAnswer}

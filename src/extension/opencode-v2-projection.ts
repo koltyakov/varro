@@ -350,6 +350,7 @@ export function projectV2Message(
           cache: { read: 0, write: 0 },
         },
         finish: message.finish,
+        retry: message.retry ? { attempt: message.retry.attempt, at: message.retry.at } : undefined,
         error: message.error
           ? {
               name: message.error.type,

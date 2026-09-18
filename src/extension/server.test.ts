@@ -1330,7 +1330,7 @@ describe('OpenCodeServer maintenance', () => {
     vscodeMock.window.createTerminal.mockReturnValueOnce(terminal);
 
     await maybeSuggestCliUpdate(server, '1.14.20');
-    await flushMicrotasks();
+    await vi.waitFor(() => expect(terminal.sendText).toHaveBeenCalledOnce());
 
     expect(vscodeMock.window.createTerminal).toHaveBeenCalledWith({
       name: 'OpenCode Upgrade',
@@ -1518,8 +1518,7 @@ describe('OpenCodeServer maintenance', () => {
     vscodeMock.window.showInformationMessage.mockResolvedValueOnce('Run Upgrade');
 
     await maybeSuggestCliUpdate(server, '1.14.20');
-    await flushMicrotasks();
-    await flushMicrotasks();
+    await vi.waitFor(() => expect(runWindowsCliUpdate).toHaveBeenCalledOnce());
 
     expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledWith(
       expect.stringMatching(
@@ -2595,6 +2594,49 @@ describe('OpenCodeServer restart blockers', () => {
     expect(takeOwnershipOfExistingServer).toHaveBeenCalledOnce();
     expect(stopServerForRestart).toHaveBeenCalledOnce();
     expect(start).toHaveBeenCalledOnce();
+  });
+
+  it('retries attachment after an error when the running server is not owned', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const takeOwnershipOfExistingServer = vi.fn().mockResolvedValue(false);
+    const stopServerForRestart = vi.fn();
+    const startEventStreamMock = vi.fn().mockResolvedValue(undefined);
+    const api = server as unknown as {
+      _status: ServerStatus;
+      startEventStream: typeof startEventStreamMock;
+      requestMaintenanceCheck: ReturnType<typeof vi.fn>;
+      processManager: {
+        takeOwnershipOfExistingServer: typeof takeOwnershipOfExistingServer;
+        stopServerForRestart: typeof stopServerForRestart;
+        discoverServerCredentials: ReturnType<typeof vi.fn>;
+      };
+    };
+    api._status = { state: 'error', message: 'OpenCode server authentication failed' };
+    api.startEventStream = startEventStreamMock;
+    api.requestMaintenanceCheck = vi.fn();
+    api.processManager.takeOwnershipOfExistingServer = takeOwnershipOfExistingServer;
+    api.processManager.stopServerForRestart = stopServerForRestart;
+    let authenticated = false;
+    api.processManager.discoverServerCredentials = vi.fn(async () => {
+      authenticated = true;
+    });
+    Object.defineProperty(api.processManager, 'serverAuthorization', {
+      get: () => (authenticated ? 'Basic fixture' : undefined),
+    });
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      if (!authenticated) return new Response(null, { status: 401 });
+      const pathname = new URL(String(input)).pathname;
+      return pathname === '/api/info'
+        ? new Response(JSON.stringify({ version: '2.0.7', pid: 1234 }), { status: 200 })
+        : new Response(null, { status: 404 });
+    });
+
+    await expect(server.restart()).resolves.toBe(server.url);
+
+    expect(api.processManager.discoverServerCredentials).toHaveBeenCalledOnce();
+    expect(stopServerForRestart).not.toHaveBeenCalled();
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(server.status.state).toBe('running');
   });
 });
 

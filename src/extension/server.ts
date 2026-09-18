@@ -264,6 +264,7 @@ export class OpenCodeServer extends EventEmitter {
       updateEventStreamState: (eventStream) => this.updateEventStreamState(eventStream),
       emitEvent: (event) => this.handleServerEvent(event),
       getAuthorization: () => this.processManager.serverAuthorization,
+      refreshAuthorization: () => this.processManager.discoverServerCredentials(),
       openExternal: async (value) => {
         const url = new URL(value);
         if (url.protocol !== 'http:' && url.protocol !== 'https:')
@@ -469,23 +470,18 @@ export class OpenCodeServer extends EventEmitter {
         await this.processManager.stopServerForRestart();
         this.throwIfStartCancelled(disposeGeneration, signal);
       }
-      let health = await this.readHealthInfo();
+      const health = await this.readHealthInfo();
+      this.throwIfStartCancelled(disposeGeneration, signal);
       if (this.transport.healthError?.startsWith('Unsupported OpenCode')) {
         const message = this.transport.healthError;
         this.setStatus({ state: 'error', message });
         throw new Error(message);
       }
       if (!health.healthy && this.transport.healthError?.includes('authentication')) {
-        await this.processManager.discoverServerCredentials();
-        this.throwIfStartCancelled(disposeGeneration, signal);
-        health = await this.readHealthInfo();
-        if (!health.healthy && this.transport.healthError?.includes('authentication')) {
-          const message = this.transport.healthError;
-          this.setStatus({ state: 'error', message });
-          throw new Error(message);
-        }
+        const message = this.transport.healthError;
+        this.setStatus({ state: 'error', message });
+        throw new Error(message);
       }
-      this.throwIfStartCancelled(disposeGeneration, signal);
       if (health.healthy) {
         if (isSupportedOpenCodeVersion(health.version)) {
           logger.info(`Found existing OpenCode server at ${this.url}`);
@@ -1195,10 +1191,6 @@ export class OpenCodeServer extends EventEmitter {
       let health: { healthy: boolean; version?: string };
       try {
         health = await readHealth();
-        if (!health.healthy && this.transport.healthError?.includes('authentication')) {
-          await this.processManager.discoverServerCredentials();
-          health = await readHealth();
-        }
       } catch (err) {
         reject(err instanceof Error ? err : new Error(String(err)));
         return;
@@ -2085,7 +2077,10 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private async recoverOwnershipAndRestart(options: { force?: boolean }): Promise<string> {
-    await this.processManager.takeOwnershipOfExistingServer();
+    const owned = await this.processManager.takeOwnershipOfExistingServer();
+    // An error can mean attachment failed, not that a managed process needs
+    // replacement. Retry startup so an existing service can authenticate and attach.
+    if (!owned && !this.managedProcess && !this.process) return this.start();
     return this.startRestart(options);
   }
 

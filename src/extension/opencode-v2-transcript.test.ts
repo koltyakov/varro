@@ -12,6 +12,43 @@ vi.mock('./logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.f
 describe('V2 generated transcript records', () => {
   const base = { id: 'msg_generated', time: { created: 10 } };
 
+  it('preserves automatic retry metadata on history and direct message reads', async () => {
+    const record: SessionMessageInfo = {
+      ...base,
+      type: 'assistant',
+      agent: 'build',
+      model: { providerID: 'openai', id: 'gpt-6-astra' },
+      content: [],
+      time: { created: 10, completed: 20 },
+      finish: 'error',
+      error: { type: 'provider.transport', message: 'WebSocket closed with code 1006' },
+      retry: {
+        attempt: 2,
+        at: 22,
+        error: { type: 'provider.transport', message: 'WebSocket closed with code 1006' },
+      },
+    };
+    const adapter = new OpenCodeV2Adapter(async (_method, path) => ({
+      data: path.endsWith('/inbox') ? [] : path.includes('/message/') ? record : [record],
+      cursor: {},
+    }));
+    const expected = {
+      info: {
+        retry: { attempt: 2, at: 22 },
+        error: {
+          name: 'provider.transport',
+          data: { message: 'WebSocket closed with code 1006' },
+        },
+      },
+    };
+    expect(await adapter.request('GET', '/session/ses_one/message', undefined)).toMatchObject([
+      expected,
+    ]);
+    expect(
+      await adapter.request('GET', '/session/ses_one/message/msg_generated', undefined)
+    ).toMatchObject(expected);
+  });
+
   it.each(['running', 'completed', 'failed'] as const)(
     'keeps %s compaction out of user text and preserves its status',
     async (status) => {

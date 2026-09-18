@@ -62,6 +62,7 @@ interface OpenCodeTransportOptions {
   openExternal?: (url: string) => Promise<boolean>;
   sessionStateDirectory?: string;
   getAuthorization?: () => string | undefined;
+  refreshAuthorization?: () => Promise<void>;
   getUrl: () => string;
   getWorkspaceCwd: () => string | undefined;
   getStatus: () => ServerStatus;
@@ -103,6 +104,7 @@ export class OpenCodeTransport {
   private apiVersion: OpenCodeApiVersion = 1;
   private apiIdentityUrl: string | undefined;
   private healthFailure: string | undefined;
+  private authorizationRefresh: Promise<void> | null = null;
   private readonly v2: OpenCodeV2Adapter;
 
   get healthError(): string | undefined {
@@ -208,7 +210,7 @@ export class OpenCodeTransport {
         headers['Content-Type'] = 'application/json';
         init.body = JSON.stringify(body);
       }
-      const res = await fetch(scoped.url, init);
+      const res = await this.fetchAuthenticated(scoped.url, init);
       responseStatus = res.status;
       const text = await readResponseText(
         res,
@@ -352,7 +354,7 @@ export class OpenCodeTransport {
       for (const path of paths) {
         signal?.throwIfAborted();
         const timeout = AbortSignal.timeout(OpenCodeTransport.HEALTH_TIMEOUT_MS);
-        const res = await fetch(`${url}${path}`, {
+        const res = await this.fetchAuthenticated(`${url}${path}`, {
           redirect: 'error',
           headers: this.authorizationHeaders(),
           signal: signal ? anySignal(signal, timeout) : timeout,
@@ -402,6 +404,57 @@ export class OpenCodeTransport {
   private authorizationHeaders(): Record<string, string> {
     const authorization = this.options.getAuthorization?.();
     return authorization ? { Authorization: authorization } : {};
+  }
+
+  private async fetchAuthenticated(url: string, init: RequestInit): Promise<Response> {
+    const serverUrl = this.options.getUrl();
+    const response = await fetch(url, init);
+    if (
+      (response.status !== 401 && response.status !== 403) ||
+      !this.options.refreshAuthorization ||
+      this.options.getUrl() !== serverUrl
+    )
+      return response;
+
+    init.signal?.throwIfAborted();
+    const previousAuthorization = new Headers(init.headers).get('Authorization');
+    if ((this.options.getAuthorization?.() ?? null) === previousAuthorization) {
+      // Share discovery across simultaneous health, REST, and stream failures.
+      this.authorizationRefresh ??= Promise.resolve()
+        .then(() => this.options.refreshAuthorization?.())
+        .finally(() => {
+          this.authorizationRefresh = null;
+        });
+      const refresh = this.authorizationRefresh;
+      const signal = init.signal;
+      if (signal) {
+        await new Promise<void>((resolve, reject) => {
+          const abort = () => reject(signal.reason);
+          signal.addEventListener('abort', abort, { once: true });
+          void refresh
+            .then(resolve, reject)
+            .finally(() => signal.removeEventListener('abort', abort));
+        });
+      } else await refresh;
+    }
+    init.signal?.throwIfAborted();
+    const authorization = this.options.getAuthorization?.();
+    if (
+      this.options.getUrl() !== serverUrl ||
+      !authorization ||
+      authorization === previousAuthorization
+    )
+      return response;
+
+    // Authentication rejected the original request. Retry it once with the new
+    // credential, retaining its body, scope, cancellation, and stream cursor.
+    await response.body?.cancel();
+    init.signal?.throwIfAborted();
+    if (this.options.getUrl() !== serverUrl)
+      throw new Error('OpenCode server changed during authentication');
+    const headers = new Headers(init.headers);
+    headers.set('Authorization', authorization);
+    return fetch(url, { ...init, headers });
   }
 
   async checkHealth(): Promise<boolean> {
@@ -477,7 +530,7 @@ export class OpenCodeTransport {
         ...getOpenCodeDirectoryHeaders(eventStreamRequest.directory),
       };
       if (this.lastEventId) headers['Last-Event-ID'] = this.lastEventId;
-      const res = await fetch(eventStreamRequest.url, {
+      const res = await this.fetchAuthenticated(eventStreamRequest.url, {
         redirect: 'error',
         signal: controller.signal,
         headers,

@@ -15,6 +15,8 @@ import {
   startLoading,
   stopLoading,
   upsertPart,
+  upsertMessage,
+  upsertMessageInfo,
 } from '../lib/state';
 import type { MessageEntry, Part, Permission, QuestionRequest, TextPart, ToolPart } from '../types';
 import type { AssistantActivityGroupInfo } from '../lib/assistant-activity';
@@ -59,6 +61,57 @@ describe('message entrance detection', () => {
   it('does not treat prepended history or a replaced transcript as new messages', () => {
     expect(getNewlyAppendedMessageIds(['message-2'], ['message-1', 'message-2'])).toEqual([]);
     expect(getNewlyAppendedMessageIds(['message-1'], ['other-message'])).toEqual([]);
+  });
+});
+
+describe('automatic retry notices', () => {
+  it('updates from retrying to recovered live and preserves diagnostics after reopening', async () => {
+    const frames = installQueuedAnimationFrameMocks();
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', 'session-1', { type: 'busy' });
+    const failed = {
+      ...assistantMessage('interrupted', { parentID: 'user-1' }),
+      finish: 'error',
+      error: {
+        name: 'provider.transport',
+        data: { message: 'WebSocket closed with code 1006' },
+      },
+      retry: { attempt: 2, at: 3 },
+    };
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [] },
+      { info: failed, parts: [] },
+    ]);
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    const notice = () => container!.querySelector('.assistant-message-flow-item-error-notice');
+    expect(notice()?.textContent).toContain('Retrying automatically');
+    expect(container!.querySelector('.assistant-message-flow-item-error-action')).toBeNull();
+
+    const continuation = assistantMessage('continuation', {
+      parentID: 'user-1',
+      time: { created: 4 },
+    });
+    upsertMessage({ info: continuation, parts: [] });
+    expect(notice()?.textContent).toContain('Retrying automatically');
+    upsertMessageInfo({
+      ...continuation,
+      time: { created: 4, completed: 5 },
+      finish: 'tool-calls',
+    });
+    expect(notice()?.textContent).toContain('Recovered after an automatic retry. Work continued.');
+    notice()?.querySelector<HTMLButtonElement>('button')?.click();
+    expect(notice()?.querySelector('pre')?.textContent).toContain(
+      'WebSocket closed with code 1006'
+    );
+
+    cleanup();
+    container!.replaceChildren();
+    setState('sessionStatus', 'session-1', { type: 'idle' });
+    cleanup = render(() => MessageList(), container!);
+    expect(notice()?.textContent).toContain('Recovered after an automatic retry. Work continued.');
+    expect(notice()?.querySelector('pre')?.textContent).toContain('provider.transport');
+    frames.restore();
   });
 });
 

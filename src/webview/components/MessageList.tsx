@@ -161,6 +161,7 @@ import {
   hasVisibleRunningToolPart,
 } from './message-list/thread-visibility';
 import { getLatestPlanImplementationMessageId } from './message-list/plan-actions';
+import { getAssistantRetryStates } from './message-list/assistant-retry';
 import {
   getAssistantDialogSummaryMap,
   type AssistantDialogSummaryInfo,
@@ -7056,6 +7057,10 @@ export function MessageList() {
 
     previousThinkingLayoutSignatures = new Map(current);
   });
+  const assistantRetryStates = createMemo(() => {
+    messageInfoVersion();
+    return getAssistantRetryStates(messages(), state.sessionStatus);
+  });
   const errorDetailsLayoutSignatures = createMemo(() => {
     trackMessageBlockExpansionState();
     const expandedMessageIds = new Set(
@@ -7065,7 +7070,12 @@ export function MessageList() {
           : []
       )
     );
-    return getErrorDetailsLayoutSignatures(messages(), expandedMessageIds);
+    const signatures = getErrorDetailsLayoutSignatures(messages(), expandedMessageIds);
+    const retries = assistantRetryStates();
+    for (const [id, signature] of signatures) {
+      signatures.set(id, `${signature}:${retries.get(id) ?? 'error'}`);
+    }
+    return signatures;
   });
   let previousErrorDetailsLayoutSignatures = new Map<string, string>();
   createEffect(() => {
@@ -8269,6 +8279,7 @@ export function MessageList() {
               showWorkedSummaryTimes={showPromptNumbers()}
               suppressTimestampAnimations={suppressTimestampAnimations()}
               lastAssistantID={lastAssistantID()}
+              assistantRetryStates={assistantRetryStates()}
               outerListVirtualized={shouldVirtualize()}
               previousTrailingFileEventSignatureMap={previousTrailingFileEventSignatureMap()}
               assistantDialogSummaryMap={rowAssistantDialogSummaryMap()}

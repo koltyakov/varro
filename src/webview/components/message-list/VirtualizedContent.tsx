@@ -270,6 +270,7 @@ export function VirtualizedContent(
         showWorkedSummaryTimes={props.showWorkedSummaryTimes}
         suppressTimestampAnimations={props.suppressTimestampAnimations}
         lastAssistantID={props.lastAssistantID}
+        assistantRetryStates={props.assistantRetryStates}
         previousTrailingFileEventSignatureMap={props.previousTrailingFileEventSignatureMap}
         assistantDialogSummaryMap={props.assistantDialogSummaryMap}
         isFinalAssistantMessage={props.isFinalAssistantMessage}

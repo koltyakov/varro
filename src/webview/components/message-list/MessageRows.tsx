@@ -27,6 +27,7 @@ import {
 } from './plan-actions';
 import type { AssistantDialogSummaryInfo } from './assistant-dialog';
 import type { StreamingPresentation } from './streaming-presentation';
+import type { AssistantRetryState } from './assistant-retry';
 
 const HOVER_INTENT_DELAY_MS = 300;
 
@@ -41,6 +42,7 @@ export type MessageRowSharedProps = {
   showWorkedSummaryTimes?: boolean;
   suppressTimestampAnimations?: boolean;
   lastAssistantID: string | null;
+  assistantRetryStates?: ReadonlyMap<string, AssistantRetryState>;
   nearViewport?: boolean;
   outerListVirtualized?: boolean;
   previousTrailingFileEventSignatureMap: Map<string, string | null>;
@@ -257,6 +259,7 @@ export function MessageRow(
             onUserMessageHoverChange={props.onUserMessageHoverChange}
             suppressTimestampAnimation={props.suppressTimestampAnimations}
             isLastAssistant={props.msg.info.id === props.lastAssistantID}
+            retryState={props.assistantRetryStates?.get(props.msg.info.id)}
             nearViewport={props.nearViewport}
             outerListVirtualized={props.outerListVirtualized}
             highlightFinalAnswer={highlightFinalAnswer()}

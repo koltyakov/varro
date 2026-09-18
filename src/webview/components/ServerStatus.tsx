@@ -292,7 +292,7 @@ export function ServerStatus() {
 
 function MissingCliState() {
   return (
-    <div class="flex w-full max-w-62.5 flex-col items-center gap-4 text-center">
+    <div class="flex w-full max-w-110 flex-col items-center gap-4 text-center">
       <WarningIcon />
       <div class="flex flex-col gap-1.5">
         <p class="text-[13px] font-medium text-vscode-fg">OpenCode is not installed</p>

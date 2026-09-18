@@ -1167,6 +1167,20 @@ body.vscode-light
   font: inherit;
 }
 
+.assistant-turn-content.assistant-turn-content-plain .assistant-message-flow-item-error-notice,
+body.vscode-light
+  .assistant-turn-content.assistant-turn-content-plain
+  .assistant-message-flow-item-error-notice {
+  color: var(--color-vscode-muted);
+  border-color: var(--color-vscode-border);
+  background: var(--color-vscode-surface-subtle-alt);
+  box-shadow: none;
+}
+
+.assistant-message-flow-item-error-notice .assistant-message-flow-item-error-details {
+  background: var(--color-vscode-surface-subtle);
+}
+
 .assistant-turn-content.assistant-turn-content-plain .assistant-message-flow-item {
   margin: 0;
 }

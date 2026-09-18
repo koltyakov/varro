@@ -7,10 +7,11 @@ import crossSpawn from 'cross-spawn';
 import { Service } from '@opencode/client/service';
 import type { Endpoint } from '@opencode/client/service';
 import type { Dirent } from 'fs';
-import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, realpathSync, writeFileSync } from 'fs';
 import {
   access,
   lstat,
+  mkdir,
   mkdtemp,
   open as openFile,
   readFile,
@@ -22,7 +23,7 @@ import {
   stat as readStat,
   writeFile,
 } from 'fs/promises';
-import { homedir, tmpdir } from 'os';
+import { homedir, tmpdir, uptime } from 'os';
 import { basename, dirname, isAbsolute, join, posix, resolve as resolvePath, win32 } from 'path';
 import { parse, type ParseError } from 'jsonc-parser';
 import * as vscode from 'vscode';
@@ -568,11 +569,13 @@ async function terminateCliProcessTree(proc: ChildProcess): Promise<void> {
 
 async function findLinuxListeningPids(port: number, procRoot: string) {
   const socketInodes = new Set<string>();
+  let readableTables = 0;
   await Promise.all(
     [join(procRoot, 'net/tcp'), join(procRoot, 'net/tcp6')].map(async (path) => {
       let table: string;
       try {
         table = await readFile(path, 'utf-8');
+        readableTables += 1;
       } catch {
         return;
       }
@@ -594,13 +597,17 @@ async function findLinuxListeningPids(port: number, procRoot: string) {
       }
     })
   );
+  if (readableTables === 0)
+    throw new Error(
+      `Cannot inspect the listener on port ${port}: Linux socket tables are unavailable`
+    );
   if (socketInodes.size === 0) return [];
 
   let processes: Dirent[];
   try {
     processes = await readdir(procRoot, { withFileTypes: true });
-  } catch {
-    return [];
+  } catch (cause) {
+    throw new Error(`Cannot inspect processes for the listener on port ${port}`, { cause });
   }
 
   const pids = new Set<number>();
@@ -629,6 +636,7 @@ async function findLinuxListeningPids(port: number, procRoot: string) {
       })
     );
   }
+  if (pids.size === 0) throw new Error(`Cannot identify the process listening on port ${port}`);
   return [...pids];
 }
 
@@ -653,8 +661,8 @@ async function findListeningPids(port: number, procRoot = '/proc') {
       WINDOWS_PROCESS_INSPECTION_TIMEOUT_MS
     );
     if (fallback.code !== 0) {
-      logger.warn(
-        `Windows listener inspection with netstat failed: ${fallback.stderr.trim() || `exit code ${String(fallback.code)}`}`
+      throw new Error(
+        `Cannot inspect the listener on port ${port}: Windows netstat failed (${fallback.stderr.trim() || `exit code ${String(fallback.code)}`})`
       );
     }
     return parseWindowsNetstatListeningPids(fallback.stdout, port);
@@ -662,6 +670,16 @@ async function findListeningPids(port: number, procRoot = '/proc') {
 
   const result = await runProcess('lsof', ['-nP', `-tiTCP:${port}`, '-sTCP:LISTEN']);
   const pids = parsePids(result.stdout);
+  if (
+    process.platform !== 'linux' &&
+    pids.length === 0 &&
+    result.code !== 0 &&
+    (result.code !== 1 || result.stderr.trim())
+  ) {
+    throw new Error(
+      `Cannot inspect the listener on port ${port}: ${result.stderr.trim() || 'lsof failed'}`
+    );
+  }
   if (
     pids.length > 0 ||
     process.platform !== 'linux' ||
@@ -751,13 +769,36 @@ async function readProcessBirthIdentity(pid: number, procRoot = '/proc') {
 
   if (process.platform === 'linux') {
     const startTime = (await readLinuxProcessStat(pid, procRoot))?.[19];
-    if (startTime && /^\d+$/.test(startTime)) return `linux:${startTime}`;
+    if (startTime && /^\d+$/.test(startTime)) {
+      try {
+        const bootId = (
+          await readFile(join(procRoot, 'sys/kernel/random/boot_id'), 'utf-8')
+        ).trim();
+        if (/^[a-f0-9-]{36}$/i.test(bootId)) return `linux:${bootId}:${startTime}`;
+      } catch {
+        // Restricted proc mounts may expose process start ticks without the boot ID.
+      }
+      return `linux:${startTime}`;
+    }
   }
 
   const value = (await runProcess('ps', ['-p', String(pid), '-o', 'lstart='])).stdout
     .trim()
     .replace(/\s+/g, ' ');
   return value ? `${process.platform}:${value}` : '';
+}
+
+function matchesBirthIdentity(expected: string, actual: string, createdAt: number): boolean {
+  if (expected === actual) return true;
+  // Older Linux leases only stored boot-relative ticks. Accept them within the
+  // current boot while new records also distinguish machine reboots.
+  return (
+    process.platform === 'linux' &&
+    /^linux:\d+$/.test(expected) &&
+    /^linux:[a-f0-9-]{36}:\d+$/i.test(actual) &&
+    expected === `linux:${actual.split(':').at(-1)}` &&
+    createdAt >= Date.now() - uptime() * 1000
+  );
 }
 
 async function readParentPid(pid: number, procRoot = '/proc') {
@@ -831,11 +872,36 @@ function signalProcessGroup(processGroupId: number, signal: NodeJS.Signals) {
 
 function normalizeExecutableIdentity(value: string) {
   const normalized = value.trim();
+  // Linux retains the running inode after an installer replaces the executable.
+  if (process.platform === 'linux') return normalized.replace(/ \(deleted\)$/, '');
   return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
 }
 
 function getManagedServerOwnershipLeasePath(port: number) {
-  return join(tmpdir(), `varro-opencode-server-${port}.json`);
+  const name = `varro-opencode-server-${port}.json`;
+  const directory =
+    process.platform === 'win32'
+      ? join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'Varro', 'servers')
+      : process.platform === 'darwin'
+        ? join(homedir(), 'Library', 'Application Support', 'Varro', 'servers')
+        : join(
+            process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'),
+            'varro',
+            'servers'
+          );
+  const path = join(directory, name);
+  // Keep coordinating at an existing legacy lease until that server is retired.
+  // Moving a live lease would split ownership from windows running older builds.
+  const legacyPath = join(tmpdir(), name);
+  if (!existsSync(path)) {
+    try {
+      if (parseManagedServerOwnershipLease(JSON.parse(readFileSync(legacyPath, 'utf-8'))))
+        return legacyPath;
+    } catch {
+      // No readable legacy lease; new servers use the shared per-user directory.
+    }
+  }
+  return path;
 }
 
 async function isSafeInjectedConfigPath(configPath: string) {
@@ -1029,30 +1095,41 @@ export class OpenCodeProcess {
   private ownershipLeaseCandidate: ManagedServerOwnershipLease | null = null;
   private ownershipOwner: string | null = null;
   private ownershipRefreshOperation: Promise<boolean> | null = null;
+  private restartOwnershipClaim: ManagedServerOwnershipClaimHandle | null = null;
   private foreignActiveOwnership = false;
   private readonly hostOwner = randomBytes(16).toString('hex');
   private readonly ownershipLeasePath: string;
   private serverPassword: string | undefined;
+  private serverUsername: string | undefined;
   private credentialUrl: string | undefined;
 
   discoverSharedServer(): false | Promise<boolean> {
     if (openCodeApiVersion(this.installedCliVersionCache?.value ?? '') !== 2) return false;
-    return Service.discover({
-      version: (version) => openCodeApiVersion(version) === 2,
-    }).then(async (discovered) => {
-      const endpoint = discovered ?? (await this.discoverLegacySharedServer());
+    return this.discoverSharedEndpoint().then((endpoint) => {
       if (!endpoint) return false;
       const url = new URL(endpoint.url);
       if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !url.port) return false;
       this._port = validateServerPort(Number(url.port));
       this.serverPassword = endpoint.auth?.password;
+      this.serverUsername = endpoint.auth?.username;
       this.credentialUrl = this.url;
       return true;
     });
   }
 
-  private async discoverLegacySharedServer(): Promise<Endpoint | undefined> {
-    // The 2.0.6 client rejects 2.0.5 registrations because that release uses /api/status.
+  private async discoverSharedEndpoint(targetUrl?: string): Promise<Endpoint | undefined> {
+    try {
+      const endpoint = await Service.discover({
+        version: (version) => openCodeApiVersion(version) === 2,
+      });
+      if (endpoint && (!targetUrl || endpoint.url === targetUrl)) return endpoint;
+    } catch {
+      // Client discovery may reject an older service contract; verify its registration directly.
+    }
+    return this.discoverRegisteredServer(targetUrl);
+  }
+
+  private async discoverRegisteredServer(targetUrl?: string): Promise<Endpoint | undefined> {
     const path = join(
       process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'),
       'opencode',
@@ -1061,8 +1138,10 @@ export class OpenCodeProcess {
     try {
       const registration = asRecord(JSON.parse(await readFile(path, 'utf8')));
       if (
-        registration?.version !== '2.0.5' ||
+        typeof registration?.version !== 'string' ||
+        openCodeApiVersion(registration.version) !== 2 ||
         typeof registration.url !== 'string' ||
+        (targetUrl !== undefined && registration.url !== targetUrl) ||
         typeof registration.pid !== 'number' ||
         !Number.isSafeInteger(registration.pid) ||
         registration.pid <= 0 ||
@@ -1081,11 +1160,14 @@ export class OpenCodeProcess {
       )
         return undefined;
       process.kill(registration.pid, 0);
-      const response = await fetch(new URL('/api/status', url), {
-        headers: { Authorization: basicAuthorization(registration.password) },
-        redirect: 'error',
-        signal: AbortSignal.timeout(3000),
-      });
+      const response = await fetch(
+        new URL(registration.version === '2.0.5' ? '/api/status' : '/api/info', url),
+        {
+          headers: { Authorization: basicAuthorization(registration.password) },
+          redirect: 'error',
+          signal: AbortSignal.timeout(3000),
+        }
+      );
       if (!response.ok) return undefined;
       const status = asRecord(await response.json());
       if (status?.pid !== registration.pid || status.version !== registration.version)
@@ -1095,14 +1177,14 @@ export class OpenCodeProcess {
         auth: { type: 'basic', username: 'opencode', password: registration.password },
       };
     } catch {
-      // A missing, stale, or unhealthy legacy registration is not an attachable service.
+      // A missing, stale, or unhealthy registration is not an attachable service.
       return undefined;
     }
   }
 
   get serverAuthorization(): string | undefined {
     if (this.serverPassword && this.credentialUrl === this.url)
-      return basicAuthorization(this.serverPassword);
+      return basicAuthorization(this.serverPassword, this.serverUsername);
     const password = process.env.OPENCODE_SERVER_PASSWORD;
     return password
       ? basicAuthorization(password, process.env.OPENCODE_SERVER_USERNAME)
@@ -1110,38 +1192,25 @@ export class OpenCodeProcess {
   }
 
   async discoverServerCredentials(): Promise<void> {
-    const lease = this.ownershipLeaseCandidate ?? this.ownershipLease;
-    if (lease?.password && lease.port === this._port && (await this.matchesOwnershipLease(lease))) {
-      this.serverPassword = lease.password;
-      this.credentialUrl = this.url;
+    const targetUrl = this.url;
+    const endpoint = await this.discoverSharedEndpoint(targetUrl);
+    if (this.url !== targetUrl) return;
+    if (endpoint?.auth?.password) {
+      this.serverPassword = endpoint.auth.password;
+      this.serverUsername = endpoint.auth.username;
+      this.credentialUrl = targetUrl;
       return;
     }
-    // The released v2 client discovers credentials from this registration file.
-    // Read only a registration for our target; never ensure/restart the user's service.
-    const path = join(
-      process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'),
-      'opencode',
-      'service.json'
-    );
-    try {
-      const registration = JSON.parse(await readFile(path, 'utf8')) as {
-        url?: unknown;
-        password?: unknown;
-        pid?: unknown;
-      };
-      if (
-        registration.url !== this.url ||
-        typeof registration.password !== 'string' ||
-        !registration.password ||
-        registration.password.length > 4096
-      )
-        return;
-      if (typeof registration.pid !== 'number' || registration.pid <= 0) return;
-      process.kill(registration.pid, 0);
-      this.serverPassword = registration.password;
-      this.credentialUrl = this.url;
-    } catch {
-      // No live registered service for this endpoint; managed launches provide their own credential.
+    const lease = this.ownershipLeaseCandidate ?? this.ownershipLease;
+    if (
+      lease?.password &&
+      lease.port === this._port &&
+      (await this.matchesOwnershipLease(lease)) &&
+      this.url === targetUrl
+    ) {
+      this.serverPassword = lease.password;
+      this.serverUsername = undefined;
+      this.credentialUrl = targetUrl;
     }
   }
   private readonly ownershipMarkerPath: string;
@@ -1172,13 +1241,6 @@ export class OpenCodeProcess {
         this.ownershipLeaseCandidate = parseManagedServerOwnershipLease(JSON.parse(rawLease));
       } catch {}
       if (this.ownershipLeaseCandidate) this._port = this.ownershipLeaseCandidate.port;
-      else {
-        try {
-          if (readFileSync(this.ownershipLeasePath, 'utf-8') === rawLease) {
-            rmSync(this.ownershipLeasePath, { force: true });
-          }
-        } catch {}
-      }
     } catch {}
   }
 
@@ -1347,7 +1409,6 @@ export class OpenCodeProcess {
   }
 
   refreshManagedServerOwnership(): Promise<boolean> {
-    if (this._managedProcess && this.ownershipLease) return Promise.resolve(true);
     if (this.ownershipRefreshOperation) return this.ownershipRefreshOperation;
     const operation = this.runManagedServerOwnershipRefresh();
     this.ownershipRefreshOperation = operation;
@@ -1371,7 +1432,11 @@ export class OpenCodeProcess {
       throw new Error('Another Varro window is already restarting the OpenCode server');
     }
 
-    const release = () => this.releaseOwnershipClaim(claim);
+    this.restartOwnershipClaim = claim;
+    const release = async () => {
+      if (this.restartOwnershipClaim === claim) this.restartOwnershipClaim = null;
+      await this.releaseOwnershipClaim(claim);
+    };
 
     try {
       const lease = await this.readOwnershipLease();
@@ -1485,6 +1550,19 @@ export class OpenCodeProcess {
     const lease = await this.readOwnershipLease();
     if (!lease) {
       this.foreignActiveOwnership = false;
+      const local = this.ownershipLease;
+      if (this._managedProcess && local?.host === this.hostOwner && local.state === 'active') {
+        const claim = await this.acquireOwnershipClaim();
+        if (!claim) return false;
+        try {
+          if (await this.readOwnershipLease()) return false;
+          if (!(await this.matchesOwnershipLease(local))) return false;
+          await this.writeOwnershipLease(local);
+          return true;
+        } finally {
+          await this.releaseOwnershipClaim(claim);
+        }
+      }
       if (!this._managedProcess) {
         this.ownershipLease = null;
         this.ownershipOwner = null;
@@ -1495,6 +1573,10 @@ export class OpenCodeProcess {
       await this.removeOwnershipLease(lease.owner, lease.host);
       this.foreignActiveOwnership = false;
       return false;
+    }
+    if (lease.host === this.hostOwner && lease.state === 'active') {
+      this.adoptManagedServerOwnership(lease);
+      return true;
     }
     if (lease.state === 'active' && (await this.isOwnershipHostAlive(lease))) {
       this.observeForeignManagedServer(lease);
@@ -1643,6 +1725,14 @@ export class OpenCodeProcess {
     if (launch.configPath) lease.configPath = launch.configPath;
     if (this.serverPassword && this.credentialUrl === this.url)
       lease.password = this.serverPassword;
+    const claim =
+      this.restartOwnershipClaim ?? (await this.acquireOwnershipClaim(ownershipHostIdentity));
+    if (!claim) {
+      this.markOwnershipConfirmationFailed(proc);
+      logger.warn('Another Varro window is changing OpenCode ownership during startup');
+      return false;
+    }
+    const releaseClaim = claim !== this.restartOwnershipClaim;
     try {
       await this.writeOwnershipMarker(lease);
       launch.ownershipMarkerWritten = true;
@@ -1669,22 +1759,24 @@ export class OpenCodeProcess {
         this.injectedConfigOwnerPid = lease.pid;
       }
       await this.writeOwnershipLease(lease);
+      if (this._process !== proc || this.processLaunches.get(proc)?.owner !== owner) {
+        await this.removeOwnershipLease(owner, this.hostOwner);
+        return false;
+      }
+      this.ownershipLease = lease;
+      this.ownershipOwner = owner;
+      launch.ownershipConfirmed = true;
+      this._managedProcess = true;
+      return true;
     } catch (err) {
       this.markOwnershipConfirmationFailed(proc);
       logger.warn(
         `Failed to persist managed OpenCode ownership: ${err instanceof Error ? err.message : String(err)}`
       );
       return false;
+    } finally {
+      if (releaseClaim) await this.releaseOwnershipClaim(claim);
     }
-    if (this._process !== proc || this.processLaunches.get(proc)?.owner !== owner) {
-      await this.removeOwnershipLease(owner, this.hostOwner);
-      return false;
-    }
-    this.ownershipLease = lease;
-    this.ownershipOwner = owner;
-    launch.ownershipConfirmed = true;
-    this._managedProcess = true;
-    return true;
   }
 
   private markOwnershipConfirmationFailed(proc: ChildProcess | null) {
@@ -1920,6 +2012,7 @@ export class OpenCodeProcess {
       String(this._port),
     ];
     this.serverPassword = undefined;
+    this.serverUsername = undefined;
     this.credentialUrl = undefined;
     logger.info(`Starting OpenCode server with command: ${command}`);
 
@@ -1967,6 +2060,7 @@ export class OpenCodeProcess {
     const capturePassword = (password: string) => {
       if (this._process !== proc) return;
       this.serverPassword = password;
+      this.serverUsername = undefined;
       this.credentialUrl = this.url;
     };
     const stdout = new OpenCodeStartupOutput(capturePassword);
@@ -2053,6 +2147,13 @@ export class OpenCodeProcess {
     this.detachProcessListeners(proc);
     const launch = this.processLaunches.get(proc);
     const operation = (async () => {
+      // Another window can acquire the lease while this host still holds its
+      // original ChildProcess. That reference no longer grants stop authority.
+      if (launch?.ownershipConfirmed && this.hasTransferredManagedServerOwnership(proc)) {
+        if (this._process === proc) this._process = null;
+        this.clearLocalOwnership(launch.owner, this.hostOwner);
+        return;
+      }
       await this.terminateManagedProcess(proc, launch);
       await this.cleanupLaunchResources(proc);
       if (this._process === proc) {
@@ -2338,13 +2439,15 @@ export class OpenCodeProcess {
     const listeners = await findListeningPids(lease.port, this.linuxProcRoot);
     if (!listeners.includes(lease.pid)) return false;
     const executable = await readProcessExecutable(lease.pid, this.linuxProcRoot);
-    if (
-      !executable ||
-      normalizeExecutableIdentity(executable) !== normalizeExecutableIdentity(lease.executable)
-    ) {
+    if (!executable)
+      throw new Error(`Cannot verify executable identity for managed OpenCode PID ${lease.pid}`);
+    if (normalizeExecutableIdentity(executable) !== normalizeExecutableIdentity(lease.executable)) {
       return false;
     }
-    return (await readProcessBirthIdentity(lease.pid, this.linuxProcRoot)) === lease.birthIdentity;
+    const birthIdentity = await readProcessBirthIdentity(lease.pid, this.linuxProcRoot);
+    if (!birthIdentity)
+      throw new Error(`Cannot verify process start identity for managed OpenCode PID ${lease.pid}`);
+    return matchesBirthIdentity(lease.birthIdentity, birthIdentity, lease.createdAt);
   }
 
   private async readOwnershipHostIdentity() {
@@ -2357,7 +2460,10 @@ export class OpenCodeProcess {
     if (!lease.hostPid || !lease.hostBirthIdentity) return true;
     if (!isProcessAlive(lease.hostPid)) return false;
     const birthIdentity = await readProcessBirthIdentity(lease.hostPid, this.linuxProcRoot);
-    return !birthIdentity || birthIdentity === lease.hostBirthIdentity;
+    return (
+      !birthIdentity ||
+      matchesBirthIdentity(lease.hostBirthIdentity, birthIdentity, lease.createdAt)
+    );
   }
 
   private async matchesInjectedConfigOwner(lease: ManagedServerOwnershipLease): Promise<boolean> {
@@ -2403,7 +2509,7 @@ export class OpenCodeProcess {
           owner.port === this._port &&
           normalizeExecutableIdentity(owner.executable!) ===
             normalizeExecutableIdentity(executable) &&
-          owner.birthIdentity === birthIdentity
+          matchesBirthIdentity(owner.birthIdentity!, birthIdentity, owner.createdAt)
         ) {
           return { ...owner, configPath };
         }
@@ -2436,7 +2542,7 @@ export class OpenCodeProcess {
       owner.pid !== pid ||
       owner.port !== this._port ||
       normalizeExecutableIdentity(owner.executable!) !== normalizeExecutableIdentity(executable) ||
-      owner.birthIdentity !== birthIdentity
+      !matchesBirthIdentity(owner.birthIdentity!, birthIdentity, owner.createdAt)
     ) {
       return null;
     }
@@ -2454,10 +2560,7 @@ export class OpenCodeProcess {
       birthIdentity: lease.birthIdentity,
     };
     if (lease.configPath) marker.configPath = lease.configPath;
-    await writeFile(this.ownershipMarkerPath, `${JSON.stringify(marker)}\n`, {
-      encoding: 'utf-8',
-      mode: 0o600,
-    });
+    await this.writeOwnershipFile(this.ownershipMarkerPath, marker);
   }
 
   private async removeOwnershipMarker(expectedOwner: string) {
@@ -2487,27 +2590,49 @@ export class OpenCodeProcess {
       const lease = parseManagedServerOwnershipLease(JSON.parse(raw));
       if (lease) return lease;
     } catch {}
-    await rm(this.ownershipLeasePath, { force: true }).catch(() => {});
+    // A reader must not delete a replacement written after its failed parse.
     return null;
   }
 
   private async writeOwnershipLease(lease: ManagedServerOwnershipLease) {
-    const temporaryPath = `${this.ownershipLeasePath}.${process.pid}.${lease.owner}.tmp`;
-    const serialized = `${JSON.stringify(lease)}\n`;
+    await this.writeOwnershipFile(this.ownershipLeasePath, lease);
+  }
+
+  private async writeOwnershipFile(
+    path: string,
+    value: ManagedServerOwnershipLease | InjectedConfigOwner
+  ) {
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    const temporaryPath = `${path}.${this.hostOwner}.${randomBytes(8).toString('hex')}.tmp`;
     try {
-      await writeFile(temporaryPath, serialized, { encoding: 'utf-8', mode: 0o600 });
-      try {
-        await rename(temporaryPath, this.ownershipLeasePath);
-      } catch (err) {
-        if (!['EEXIST', 'EPERM'].includes((err as NodeJS.ErrnoException)?.code || '')) throw err;
-        await writeFile(this.ownershipLeasePath, serialized, { encoding: 'utf-8', mode: 0o600 });
+      await writeFile(temporaryPath, `${JSON.stringify(value)}\n`, {
+        encoding: 'utf-8',
+        mode: 0o600,
+      });
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          await rename(temporaryPath, path);
+          break;
+        } catch (err) {
+          if (
+            attempt >= 3 ||
+            !['EEXIST', 'EPERM', 'EBUSY'].includes((err as NodeJS.ErrnoException)?.code || '')
+          )
+            throw err;
+          // Windows readers and antivirus software can briefly hold the target.
+          // Retry replacement rather than exposing a partially written lease.
+          await delay(25 * (attempt + 1));
+        }
       }
     } finally {
       await rm(temporaryPath, { force: true }).catch(() => {});
     }
   }
 
-  private async acquireOwnershipClaim(): Promise<ManagedServerOwnershipClaimHandle | null> {
+  private async acquireOwnershipClaim(
+    knownHostIdentity?: Pick<ManagedServerOwnershipLease, 'hostPid' | 'hostBirthIdentity'>
+  ): Promise<ManagedServerOwnershipClaimHandle | null> {
+    await mkdir(dirname(this.ownershipLeasePath), { recursive: true, mode: 0o700 });
     const path = `${this.ownershipLeasePath}.claim`;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       let handle: Awaited<ReturnType<typeof openFile>>;
@@ -2525,7 +2650,7 @@ export class OpenCodeProcess {
       }
 
       try {
-        const hostIdentity = await this.readOwnershipHostIdentity();
+        const hostIdentity = knownHostIdentity ?? (await this.readOwnershipHostIdentity());
         const claim: ManagedServerOwnershipClaim = {
           version: 1,
           host: this.hostOwner,
@@ -2557,7 +2682,11 @@ export class OpenCodeProcess {
       if (isProcessAlive(claim.hostPid)) {
         if (claim.hostBirthIdentity) {
           const birthIdentity = await readProcessBirthIdentity(claim.hostPid, this.linuxProcRoot);
-          if (!birthIdentity || birthIdentity === claim.hostBirthIdentity) return false;
+          if (
+            !birthIdentity ||
+            matchesBirthIdentity(claim.hostBirthIdentity, birthIdentity, claim.createdAt)
+          )
+            return false;
         } else if (Date.now() - claim.createdAt < OWNERSHIP_CLAIM_MAX_AGE_MS) {
           return false;
         }
@@ -2642,28 +2771,34 @@ export class OpenCodeProcess {
   private async relinquishManagedServerOwnership() {
     const lease = this.ownershipLease;
     if (!lease || lease.host !== this.hostOwner || lease.state !== 'active') return;
-    if (!(await this.matchesOwnershipLease(lease))) {
-      await this.removeOwnershipLease(lease.owner, lease.host);
-      return;
+    const claim = await this.acquireOwnershipClaim();
+    if (!claim) return;
+    try {
+      if (!(await this.matchesOwnershipLease(lease))) {
+        await this.removeOwnershipLease(lease.owner, lease.host);
+        return;
+      }
+      const current = await this.readOwnershipLease();
+      if (
+        !current ||
+        current.owner !== lease.owner ||
+        current.host !== lease.host ||
+        current.state !== 'active' ||
+        current.birthIdentity !== lease.birthIdentity
+      ) {
+        return;
+      }
+      const relinquished: ManagedServerOwnershipLease = {
+        ...current,
+        state: 'relinquished',
+      };
+      await this.writeOwnershipLease(relinquished);
+      this.ownershipLease = relinquished;
+      this._managedProcess = false;
+      this.foreignActiveOwnership = false;
+    } finally {
+      await this.releaseOwnershipClaim(claim);
     }
-    const current = await this.readOwnershipLease();
-    if (
-      !current ||
-      current.owner !== lease.owner ||
-      current.host !== lease.host ||
-      current.state !== 'active' ||
-      current.birthIdentity !== lease.birthIdentity
-    ) {
-      return;
-    }
-    const relinquished: ManagedServerOwnershipLease = {
-      ...current,
-      state: 'relinquished',
-    };
-    await this.writeOwnershipLease(relinquished);
-    this.ownershipLease = relinquished;
-    this._managedProcess = false;
-    this.foreignActiveOwnership = false;
   }
 
   private async removeOwnershipLease(expectedOwner?: string, expectedHost?: string) {
@@ -2796,7 +2931,11 @@ export class OpenCodeProcess {
     this.lastMaintenanceCheckAt = Date.now();
     this.maintenanceInFlight = true;
     try {
-      if (this.foreignActiveOwnership && !(await this.refreshManagedServerOwnership())) return;
+      if (
+        (this.ownershipLease || this.foreignActiveOwnership) &&
+        !(await this.refreshManagedServerOwnership())
+      )
+        return;
       const installedCliVersion = await callbacks.readInstalledCliVersion();
       const health =
         callbacks.getStatus().state === 'running' ? await callbacks.readHealthInfo() : null;

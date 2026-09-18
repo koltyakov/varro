@@ -314,9 +314,8 @@ export function formatToolTitle(toolName: string, state: ToolPart['state']) {
     if (isString(url) && url.trim()) return url.trim();
   }
 
-  // Error and pending states carry no server title; fall back to the command so
-  // failed bash calls keep the same title shape as completed ones.
-  if (normalizedToolName === 'bash' && !title) {
+  // Running calls can carry the tool name as a placeholder title before output arrives.
+  if (normalizedToolName === 'bash' && (!title || normalizeToolName(title) === 'bash')) {
     const command = input.command;
     if (isString(command) && command.trim()) return command.trim();
   }
