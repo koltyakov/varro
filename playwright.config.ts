@@ -1,7 +1,10 @@
+import { availableParallelism } from 'node:os';
 import { defineConfig, devices } from '@playwright/test';
 
 const playback = process.env.VARRO_E2E_MODE === 'playback';
 const raster = process.env.VARRO_E2E_MODE === 'raster';
+const port = process.env.VARRO_E2E_PORT ?? '4174';
+const baseURL = `http://127.0.0.1:${port}`;
 
 export default defineConfig({
   testDir: playback ? './e2e/local' : './e2e/tests',
@@ -14,7 +17,13 @@ export default defineConfig({
   grep: raster ? /native -720px|static native wheel raster diagnostic/ : undefined,
   metadata: { strictViewportRaster: raster },
   fullyParallel: true,
-  workers: playback || raster ? 1 : 2,
+  // Leave CPU headroom for Chromium's frame-sensitive scroll and layout checks.
+  workers:
+    playback || raster
+      ? 1
+      : process.env.CI
+        ? 2
+        : Math.min(4, Math.max(1, Math.floor(availableParallelism() / 2))),
   outputDir: playback
     ? './tmp/playwright-playback'
     : raster
@@ -26,7 +35,7 @@ export default defineConfig({
     timeout: 15_000,
   },
   use: {
-    baseURL: 'http://127.0.0.1:4174',
+    baseURL,
     trace: playback ? 'retain-on-failure' : 'on-first-retry',
   },
   projects: [
@@ -36,8 +45,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'npm exec vite -- --mode e2e --host 127.0.0.1 --port 4174 --strictPort',
-    url: 'http://127.0.0.1:4174/e2e/harness/index.html',
+    command: `npm exec vite -- --mode e2e --host 127.0.0.1 --port ${port} --strictPort`,
+    url: `${baseURL}/e2e/harness/index.html`,
     reuseExistingServer: playback,
     timeout: 120_000,
   },

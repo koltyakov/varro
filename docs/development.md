@@ -47,6 +47,10 @@ While iterating, run the narrowest relevant command for the area you changed. Us
 
 The Playwright suite is browser-level webview E2E coverage. It runs the real Solid webview in Chromium through `e2e/harness/index.html`, while the harness mocks the VS Code message bridge and the OpenCode/Varro request and event boundary. It does not launch VS Code, an extension host, or a real OpenCode CLI/server.
 
+Local E2E runs use half the available CPU cores, capped at four workers to leave room for frame-sensitive browser checks. Override this with `npm run test:e2e -- --workers=2` on a busy machine. Playback and raster diagnostics default to one worker. CI splits the suite across two jobs with two workers each.
+
+For shorter feedback loops, select a spec as above, filter test names with `npm run test:e2e -- --grep "composer"`, or rerun failures with `npm run test:e2e -- --last-failed`. If port 4174 is occupied, set `VARRO_E2E_PORT` to a free port, for example `VARRO_E2E_PORT=4184 npm run test:e2e` in macOS/Linux shells.
+
 For first-run and recovery checks in a disposable real Extension Host, run `npm run test:vscode-sandbox`. See [Onboarding Verification](onboarding-verification.md) for the scenario matrix and manual non-happy-path checks.
 
 For message-list scrolling, pagination, sticky prompts, row measurement, attachments, or inline
