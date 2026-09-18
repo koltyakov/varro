@@ -183,6 +183,33 @@ describe('SidebarProvider provider refresh', () => {
     await provider.dispose();
   });
 
+  it('refreshes OpenCode v2 authentication without restarting the server', async () => {
+    const server = createServer({
+      request: vi.fn(async (_method: string, path: string) =>
+        path === '/session/status' ? {} : []
+      ),
+      readServerInfo: vi.fn(async () => ({
+        managedProcess: true,
+        health: { healthy: true, version: '2.0.7' },
+      })),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const { posted } = attachTestView(provider);
+    const access = provider as unknown as ProviderRefreshAccess;
+    const clearCache = vi.spyOn(access.providerLimitService, 'clearCache');
+
+    await provider.handleMessage({ type: 'providers/auth-changed' });
+
+    expect(server.restart).not.toHaveBeenCalled();
+    expect(clearCache).toHaveBeenCalledOnce();
+    expect(posted).toContainEqual({
+      type: 'providers/refresh',
+      payload: { revalidateAuth: true },
+    });
+    expect(posted).not.toContainEqual({ type: 'providers/status', payload: { pending: true } });
+    await provider.dispose();
+  });
+
   it('defers an embedded auth reload until the active turn is idle', async () => {
     vi.useFakeTimers();
     let idle = false;

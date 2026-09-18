@@ -18,7 +18,7 @@ import type {
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { asRecord, isString, type UnknownRecord } from '../shared/type-utils';
-import type { ProviderAuthMethod } from '../shared/opencode-types';
+import type { ProviderAuthMethod, ProviderAuthPromptCondition } from '../shared/opencode-types';
 import { OpenCodeResponseTooLargeError, type OpenCodeRequestOptions } from './open-code-transport';
 import { OpenCodeV2SessionState } from './opencode-v2-session-state';
 import {
@@ -74,6 +74,13 @@ function mergeConfiguration(target: UnknownRecord, patch: UnknownRecord): void {
   }
 }
 
+type V1AuthPromptBase = {
+  key: string;
+  message: string;
+  required?: boolean;
+  when?: ProviderAuthPromptCondition[];
+};
+
 function v1AuthMethods(integration: IntegrationInfo | undefined): ProviderAuthMethod[] {
   return (
     integration?.methods
@@ -83,7 +90,17 @@ function v1AuthMethods(integration: IntegrationInfo | undefined): ProviderAuthMe
         label: item.label ?? 'API key',
         prompts: item.form?.flatMap<NonNullable<ProviderAuthMethod['prompts']>[number]>((field) => {
           if (field.type === 'external' || field.hidden) return [];
-          const base = { key: field.key, message: field.title ?? field.description ?? field.key };
+          const base: V1AuthPromptBase = {
+            key: field.key,
+            message: field.title ?? field.description ?? field.key,
+            required: field.required === true,
+          };
+          if (field.when?.length)
+            base.when = field.when.map((condition) => ({
+              key: condition.key,
+              op: condition.op,
+              value: String(condition.value),
+            }));
           if (field.type === 'string' && field.options)
             return [
               {
@@ -934,7 +951,10 @@ export class OpenCodeV2Adapter {
     }
     const base = `/api/integration/${encodeURIComponent(integrationID)}`;
     if (method === 'PUT' && input.type === 'api') {
-      await raw('POST', `${base}/connect/key`, { key: input.key });
+      await raw('POST', `${base}/connect/key`, {
+        key: input.key,
+        answer: input.metadata,
+      });
       return true;
     }
     if (method === 'DELETE') {
@@ -989,32 +1009,35 @@ export class OpenCodeV2Adapter {
     if (action === 'callback') {
       const attempt = this.oauth.get(providerID);
       if (!attempt) throw new Error('OpenCode OAuth attempt was not started');
-      if (input.code)
-        await raw(
-          'POST',
-          `/api/integration/${encodeURIComponent(attempt.integrationID)}/connect/oauth/${encodeURIComponent(attempt.attemptID)}/complete`,
-          { code: input.code }
-        );
-      const deadline = Date.now() + 5 * 60_000;
-      while (true) {
-        options.signal?.throwIfAborted();
-        const result = asRecord(
-          asRecord(
-            await raw(
-              'GET',
-              `/api/integration/${encodeURIComponent(attempt.integrationID)}/connect/oauth/${encodeURIComponent(attempt.attemptID)}`
-            )
-          )?.data
-        );
-        if (result?.status === 'complete') break;
-        if (result?.status !== 'pending' || Date.now() >= deadline)
-          throw new Error(
-            isString(result?.message) ? result.message : 'OpenCode authentication did not complete'
-          );
-        await delay(500, undefined, { signal: options.signal });
+      const attemptPath = `/api/integration/${encodeURIComponent(attempt.integrationID)}/connect/oauth/${encodeURIComponent(attempt.attemptID)}`;
+      let completed = false;
+      try {
+        if (input.code) await raw('POST', `${attemptPath}/complete`, { code: input.code });
+        const deadline = Date.now() + 5 * 60_000;
+        while (true) {
+          options.signal?.throwIfAborted();
+          const result = asRecord(asRecord(await raw('GET', attemptPath))?.data);
+          if (result?.status === 'complete') break;
+          if (result?.status !== 'pending' || Date.now() >= deadline)
+            throw new Error(
+              isString(result?.message)
+                ? result.message
+                : 'OpenCode authentication did not complete'
+            );
+          await delay(500, undefined, { signal: options.signal });
+        }
+        completed = true;
+        return true;
+      } finally {
+        if (this.oauth.get(providerID) === attempt) this.oauth.delete(providerID);
+        if (!completed) {
+          await this.wire('DELETE', attemptPath + suffix, undefined, {
+            ...options,
+            signal: undefined,
+            unscoped: true,
+          }).catch(() => undefined);
+        }
       }
-      this.oauth.delete(providerID);
-      return true;
     }
     throw new Error('This credential operation requires OpenCode v2 credential management');
   }

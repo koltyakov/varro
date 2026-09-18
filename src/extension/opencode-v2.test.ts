@@ -177,7 +177,7 @@ describe('v2 hidden authentication fields', () => {
           {
             type: 'oauth',
             label: 'Sign in',
-            prompts: [{ key: 'account', message: 'Account', type: 'text' }],
+            prompts: [{ key: 'account', message: 'Account', type: 'text', required: false }],
           },
         ],
       });
@@ -190,6 +190,107 @@ describe('v2 hidden authentication fields', () => {
       );
     }
   );
+
+  it('preserves conditional provider fields and sends key form answers', async () => {
+    const integration = {
+      id: 'github-copilot',
+      methods: [
+        {
+          type: 'key',
+          label: 'Token',
+          form: [{ key: 'organization', type: 'string', title: 'Organization' }],
+        },
+        {
+          id: 'device',
+          type: 'oauth',
+          label: 'Login with GitHub Copilot',
+          form: [
+            {
+              key: 'deploymentType',
+              type: 'string',
+              title: 'Deployment',
+              options: [{ value: 'github.com', label: 'GitHub.com' }],
+            },
+            {
+              key: 'enterpriseUrl',
+              type: 'string',
+              title: 'Enterprise URL',
+              required: true,
+              when: [{ key: 'deploymentType', op: 'eq', value: 'enterprise' }],
+            },
+          ],
+        },
+      ],
+    };
+    const wire = vi.fn(async (_method: string, path: string) => {
+      if (path === '/api/provider') return { data: [] };
+      if (path === '/api/integration') return { data: [integration] };
+      if (path === '/api/provider/github-copilot') return { data: {} };
+      if (path === '/api/integration/github-copilot/connect/key') return null;
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const adapter = new OpenCodeV2Adapter(wire);
+
+    expect(await adapter.request('GET', '/provider/auth', undefined)).toMatchObject({
+      'github-copilot': [
+        { type: 'api', prompts: [{ key: 'organization' }] },
+        {
+          type: 'oauth',
+          prompts: [
+            { key: 'deploymentType' },
+            {
+              key: 'enterpriseUrl',
+              when: [{ key: 'deploymentType', op: 'eq', value: 'enterprise' }],
+            },
+          ],
+        },
+      ],
+    });
+    await adapter.request('PUT', '/auth/github-copilot', {
+      type: 'api',
+      key: 'token',
+      metadata: { organization: 'acme' },
+    });
+    expect(wire).toHaveBeenLastCalledWith(
+      'POST',
+      '/api/integration/github-copilot/connect/key',
+      { key: 'token', answer: { organization: 'acme' } },
+      expect.anything()
+    );
+  });
+
+  it('cancels the server-side OAuth attempt when inline authentication is aborted', async () => {
+    const controller = new AbortController();
+    const wire = vi.fn(async (method: string, path: string) => {
+      if (path === '/api/provider/openai') return { data: {} };
+      if (path === '/api/integration/openai')
+        return {
+          data: {
+            methods: [{ id: 'browser', type: 'oauth', label: 'Browser login' }],
+          },
+        };
+      if (method === 'POST' && path === '/api/integration/openai/connect/oauth')
+        return { data: { attemptID: 'attempt-one', mode: 'auto' } };
+      if (method === 'GET' && path.endsWith('/connect/oauth/attempt-one')) {
+        controller.abort(new Error('Provider authorization cancelled'));
+        return { data: { status: 'pending' } };
+      }
+      if (method === 'DELETE' && path.endsWith('/connect/oauth/attempt-one')) return null;
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+    const adapter = new OpenCodeV2Adapter(wire);
+    await adapter.request('POST', '/provider/openai/oauth/authorize', { method: 0 });
+
+    await expect(
+      adapter.request('POST', '/provider/openai/oauth/callback', {}, { signal: controller.signal })
+    ).rejects.toThrow(/abort/i);
+    expect(wire).toHaveBeenLastCalledWith(
+      'DELETE',
+      '/api/integration/openai/connect/oauth/attempt-one',
+      undefined,
+      expect.objectContaining({ signal: undefined, unscoped: true })
+    );
+  });
 });
 
 describe('v2 model release dates', () => {

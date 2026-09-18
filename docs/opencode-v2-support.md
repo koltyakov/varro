@@ -1,6 +1,6 @@
 # OpenCode v1 and v2 support
 
-Research date: September 17, 2026. The implementation supports v1 from 1.16.0 and v2 from 2.0.5 through automatic extension-host adapters.
+Research date: September 18, 2026. The implementation supports v1 from 1.16.0 and v2 from 2.0.5 through automatic extension-host adapters.
 
 V2 is recommended for new installations; v1 remains supported. See the [usage guide](usage.md#choose-and-update-opencode) for installation, version selection, updates, and configuration compatibility. Current packages both install `opencode`. Varro also recognizes older or custom `opencode2` installations and prefers that name during automatic discovery.
 
@@ -13,7 +13,7 @@ V2 is recommended for new installations; v1 remains supported. See the [usage gu
 - `opencode-v2-session-state.ts` persists Varro-owned metadata and timestamp overrides that the released v2 API cannot patch. These annotations live under the user's XDG state directory in `varro/opencode-v2/`.
 - Native v2 agent and permission configuration keys are preserved when Varro edits a file already using them. V1-format files retain their format.
 
-`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. Its latest matrix passed 44 checks across `opencode-ai@1.16.0`, `opencode-ai@1.18.31`, `@opencode/cli@2.0.5`, and `@opencode/cli@2.0.7`. The checks cover managed startup, credential recovery in a second window, restart, bootstrap, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
+`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. Its latest matrix passed 44 checks across `opencode-ai@1.16.0`, `opencode-ai@1.18.31`, `@opencode/cli@2.0.5`, and `@opencode/cli@2.0.8`. The checks cover managed startup, credential recovery in a second window, restart, bootstrap, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
 
 Fresh VS Code sandbox windows passed `v2-first-run` and the existing `healthy-first-run` scenario. These editor checks verify activation, ownership, health, and event-stream connection. `test:compatibility:ui` additionally exercises the actual composer, successful replies, pre-turn failures, HTTP 401 handling, recovery through a working provider, and reopening history. Full visual streaming performance remains a separate verification task.
 
@@ -28,6 +28,14 @@ VARRO_SANDBOX_V2_COMMAND=/absolute/path/to/opencode2 node scripts/vscode-sandbox
 The editor profile is disposable, and its OpenCode database is isolated under `artifacts/ai-test-data/`.
 
 The released v2 API has no session-sharing route or arbitrary single-message deletion. Varro disables sharing and implements inline-edit tail deletion through file-preserving staged revert and commit. V2 also has no LSP service. Metadata annotations are local to Varro; they are not synchronized to other OpenCode clients. Switching CLI families does not perform a data migration.
+
+### 2.0.8 compatibility review
+
+The v2.0.7 to v2.0.8 release diff does not change the HTTP routes, event payloads,
+permissions and questions, or session, message, and part contracts consumed by Varro. Its generated
+client change expands an experimental configuration policy action, while its other client and core
+changes affect upstream UI tool reconciliation and attachment error labels. No Varro adapter change is
+required.
 
 ### 2.0.7 compatibility fixes
 

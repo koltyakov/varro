@@ -99,6 +99,7 @@ import { HostPersistence } from './host-persistence';
 import { StreamingTextCache } from './streaming-text-cache';
 import { readLocalSessionSummary } from './local-session-summary';
 import { logger } from './logger';
+import { openCodeApiVersion } from './opencode-connection';
 import { MessageRouter } from './message-router';
 import { ModelPreferencesStore } from './model-preferences-store';
 import { SessionReadStateStore } from './session-read-state-store';
@@ -3006,6 +3007,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async providerAuthChanged() {
+    const serverInfo = await this.server.readServerInfo().catch(() => null);
+    const version = serverInfo?.health?.version ?? serverInfo?.cliVersion ?? '';
+    if (openCodeApiVersion(version) === 2) {
+      this.providerLimitService.clearCache();
+      this.post({ type: 'providers/refresh', payload: { revalidateAuth: true } });
+      return;
+    }
     await this.providerFileRefresh.acknowledgeEmbeddedAuthChange();
   }
 

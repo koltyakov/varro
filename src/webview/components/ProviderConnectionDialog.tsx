@@ -167,7 +167,9 @@ export function ProviderConnectionDialog(props: {
   }
 
   function requiredInputsArePresent() {
-    return visiblePrompts().every((prompt) => Boolean(inputs()[prompt.key]?.trim()));
+    return visiblePrompts().every(
+      (prompt) => prompt.required === false || Boolean(inputs()[prompt.key]?.trim())
+    );
   }
 
   async function connect() {
@@ -440,7 +442,7 @@ export function ProviderConnectionDialog(props: {
                                       updateInput(prompt.key, event.currentTarget.value)
                                     }
                                     disabled={isSubmitting()}
-                                    required
+                                    required={prompt.required !== false}
                                   />
                                 }
                               >
@@ -817,8 +819,11 @@ function promptIsVisible(
   inputs: Record<string, string>
 ) {
   if (!prompt.when) return true;
-  const matches = inputs[prompt.when.key] === prompt.when.value;
-  return prompt.when.op === 'eq' ? matches : !matches;
+  const conditions = Array.isArray(prompt.when) ? prompt.when : [prompt.when];
+  return conditions.every((condition) => {
+    const matches = inputs[condition.key] === condition.value;
+    return condition.op === 'eq' ? matches : !matches;
+  });
 }
 
 function visiblePromptInputs(

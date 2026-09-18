@@ -785,11 +785,14 @@ export type ProviderAuthPromptText = {
   key: string;
   message: string;
   placeholder?: string;
-  when?: {
-    key: string;
-    op: 'eq' | 'neq';
-    value: string;
-  };
+  required?: boolean;
+  when?: ProviderAuthPromptCondition | ProviderAuthPromptCondition[];
+};
+
+export type ProviderAuthPromptCondition = {
+  key: string;
+  op: 'eq' | 'neq';
+  value: string;
 };
 
 export type ProviderAuthPromptSelect = {
@@ -801,11 +804,8 @@ export type ProviderAuthPromptSelect = {
     value: string;
     hint?: string;
   }>;
-  when?: {
-    key: string;
-    op: 'eq' | 'neq';
-    value: string;
-  };
+  required?: boolean;
+  when?: ProviderAuthPromptCondition | ProviderAuthPromptCondition[];
 };
 
 export type ProviderAuthMethod = {

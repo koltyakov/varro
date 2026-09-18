@@ -623,6 +623,55 @@ describe('ProviderConnectionDialog API key flow', () => {
 });
 
 describe('ProviderConnectionDialog OAuth flow', () => {
+  it('does not require a conditional enterprise field for GitHub.com re-authentication', async () => {
+    setState('providerAuthMethods', {
+      'github-copilot': [
+        {
+          type: 'oauth',
+          label: 'Login with GitHub Copilot',
+          prompts: [
+            {
+              type: 'select',
+              key: 'deploymentType',
+              message: 'Select GitHub deployment type',
+              options: [{ value: 'github.com', label: 'GitHub.com' }],
+            },
+            {
+              type: 'text',
+              key: 'enterpriseUrl',
+              message: 'GitHub Enterprise URL',
+              when: [{ key: 'deploymentType', op: 'eq', value: 'enterprise' }],
+            },
+          ],
+        },
+      ],
+    });
+    renderDialog({
+      catalogProviders: [catalogProvider('github-copilot', 'GitHub Copilot')],
+      initialProviderID: 'github-copilot',
+      lockProvider: true,
+      reauthentication: true,
+    });
+
+    chooseMethod('Login with GitHub Copilot');
+    expect(dialog()?.textContent).not.toContain('GitHub Enterprise URL');
+    const select = dialog()!.querySelector<HTMLButtonElement>('.provider-connect-select-trigger')!;
+    select.click();
+    findButton('GitHub.com')!.click();
+
+    expect(primaryButton().disabled).toBe(false);
+    primaryButton().click();
+    await flush();
+    expect(clientMocks.authorizeProvider).toHaveBeenCalledWith(
+      {
+        providerID: 'github-copilot',
+        method: 0,
+        inputs: { deploymentType: 'github.com' },
+      },
+      { signal: expect.any(AbortSignal) }
+    );
+  });
+
   it.each(['auto', 'code'] as const)(
     'keeps auth failures visible when the %s exchange returns false',
     async (method) => {

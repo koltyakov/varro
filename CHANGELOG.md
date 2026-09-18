@@ -11,7 +11,7 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 - Added `Varro: Import OpenCode v1 Session into v2` to copy conversations and child sessions with history intact, leaving originals unchanged.
 - Included both versions in local usage reports without double-counting migrated or imported sessions.
 - Kept v2 provider failures visible in live chat and history, even before a response starts.
-- Updated tested OpenCode v2 support to 2.0.7, including request-start timing and hidden authentication defaults.
+- Updated tested OpenCode v2 support through 2.0.8, including request-start timing and hidden authentication defaults.
 - Preserved session-scoped Always approvals across Default-mode sends and kept declined v2 tools out of completed-work summaries.
 
 ## 0.28.x - September 2026
