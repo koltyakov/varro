@@ -8,7 +8,7 @@
 
 Varro runs [OpenCode](https://opencode.ai) inside VS Code. It adds project-aware chat, parallel sessions, plan and change review, model and permission controls, commit-message generation, and usage reports.
 
-**OpenCode v1 and v2 are both supported.** Varro automatically detects the connected API and uses the same workbench for either version. OpenCode v2 is recommended for new installations. Supported versions start at v2 **2.0.5** and v1 **1.16.0**.
+**Supports OpenCode v2 and v1.** Varro automatically detects the connected API and uses the same workbench for either version. OpenCode v2 is recommended for new installations.
 
 OpenCode remains responsible for agents, providers, models, commands, skills, MCP servers, and their configuration. Varro reads that configuration and provides a VS Code interface for it.
 
