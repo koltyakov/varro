@@ -128,14 +128,16 @@ export async function verifyVscodeLaunchIdentity(launch) {
   if (!Number.isInteger(launch.remoteDebuggingPort) || launch.remoteDebuggingPort <= 0) {
     throw new Error('Launch metadata does not contain a valid remote debugging port');
   }
-  const [birthIdentity, commandResult] = await Promise.all([
-    readProcessBirthIdentity(launch.pid),
+  const [birthIdentity, commandResult] =
     process.platform === 'win32'
-      ? readWindowsProcess(launch.pid).then((processInfo) => ({
-          stdout: processInfo.command.replaceAll('"', ''),
-        }))
-      : execFileAsync('ps', ['-p', String(launch.pid), '-o', 'command=']),
-  ]);
+      ? await readWindowsProcess(launch.pid).then((processInfo) => [
+          `win32:${processInfo.birthIdentity}`,
+          { stdout: processInfo.command.replaceAll('"', '') },
+        ])
+      : await Promise.all([
+          readProcessBirthIdentity(launch.pid),
+          execFileAsync('ps', ['-p', String(launch.pid), '-o', 'command=']),
+        ]);
   if (birthIdentity !== launch.birthIdentity) {
     throw new Error(`VS Code process ${String(launch.pid)} no longer matches its launch identity`);
   }
@@ -464,11 +466,12 @@ async function readProcessBirthIdentity(pid) {
 
 async function readWindowsProcess(pid) {
   if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('Invalid VS Code process ID');
+  // PowerShell startup plus the first CIM query can exceed 10s on cold Windows CI runners.
   const { stdout } = await execFileAsync('powershell.exe', [
     '-NoProfile', '-NonInteractive', '-Command',
     `$ErrorActionPreference = 'Stop'; $p = Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}'; ` +
       "if (!$p) { throw 'VS Code process is unavailable' }; " +
       '@{ command = $p.CommandLine; birthIdentity = $p.CreationDate.ToUniversalTime().Ticks.ToString() } | ConvertTo-Json -Compress',
-  ], { timeout: 10_000 });
+  ], { timeout: 60_000 });
   return JSON.parse(stdout);
 }
