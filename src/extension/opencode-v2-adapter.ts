@@ -74,6 +74,10 @@ function mergeConfiguration(target: UnknownRecord, patch: UnknownRecord): void {
   }
 }
 
+function isNotFoundError(error: unknown) {
+  return error instanceof Error && /^404\b/.test(error.message);
+}
+
 type V1AuthPromptBase = {
   key: string;
   message: string;
@@ -945,7 +949,7 @@ export class OpenCodeV2Adapter {
         );
         if (isString(provider?.integrationID)) integrationID = provider.integrationID;
       } catch (error) {
-        if (!(error instanceof Error) || !error.message.startsWith('404 ')) throw error;
+        if (!isNotFoundError(error)) throw error;
         // Disconnected integrations need not have a registered provider yet.
       }
     }
@@ -958,11 +962,17 @@ export class OpenCodeV2Adapter {
       return true;
     }
     if (method === 'DELETE') {
-      const integration = asRecord(await raw('GET', base))?.data as IntegrationInfo;
-      const credentials = integration.connections.filter(
-        (connection) => connection.type === 'credential'
-      );
-      if (!credentials.length && integration.connections.length)
+      let integration: IntegrationInfo | undefined;
+      try {
+        integration = asRecord(await raw('GET', base))?.data as IntegrationInfo;
+      } catch (error) {
+        // Local discovery providers such as Ollama have no integration or saved credential.
+        if (isNotFoundError(error)) return true;
+        throw error;
+      }
+      const connections = integration?.connections ?? [];
+      const credentials = connections.filter((connection) => connection.type === 'credential');
+      if (!credentials.length && connections.length)
         throw new Error(
           'Remove the provider environment variable to disconnect this OpenCode integration'
         );

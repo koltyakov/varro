@@ -293,6 +293,77 @@ describe('v2 hidden authentication fields', () => {
   });
 });
 
+describe('v2 provider disconnect', () => {
+  it('treats a missing integration as having no credential to remove', async () => {
+    const wire = vi.fn(async (_method: string, path: string) => {
+      if (path === '/api/provider/ollama') return { data: { id: 'ollama' } };
+      if (path === '/api/integration/ollama') throw new Error('404 Integration not found: ollama');
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const adapter = new OpenCodeV2Adapter(wire);
+
+    await expect(adapter.request('DELETE', '/auth/ollama')).resolves.toBe(true);
+    expect(wire).toHaveBeenCalledWith(
+      'GET',
+      '/api/integration/ollama',
+      undefined,
+      expect.anything()
+    );
+    expect(wire.mock.calls.some(([method]) => method === 'DELETE')).toBe(false);
+  });
+
+  it('treats a provider without a registered integration the same way', async () => {
+    const wire = vi.fn(async (_method: string, path: string) => {
+      if (path === '/api/provider/ollama') throw new Error('404 Provider not found: ollama');
+      if (path === '/api/integration/ollama') throw new Error('404 Integration not found: ollama');
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const adapter = new OpenCodeV2Adapter(wire);
+
+    await expect(adapter.request('DELETE', '/auth/ollama')).resolves.toBe(true);
+  });
+
+  it('deletes saved integration credentials', async () => {
+    const wire = vi.fn(async (method: string, path: string) => {
+      if (path === '/api/provider/openai') return { data: { integrationID: 'openai' } };
+      if (path === '/api/integration/openai')
+        return {
+          data: {
+            connections: [
+              { id: 'cred-1', type: 'credential' },
+              { id: 'env-1', type: 'environment' },
+            ],
+          },
+        };
+      if (method === 'DELETE' && path === '/api/credential/cred-1') return true;
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+    const adapter = new OpenCodeV2Adapter(wire);
+
+    await expect(adapter.request('DELETE', '/auth/openai')).resolves.toBe(true);
+    expect(wire).toHaveBeenCalledWith(
+      'DELETE',
+      '/api/credential/cred-1',
+      undefined,
+      expect.anything()
+    );
+  });
+
+  it('still explains when only environment connections keep a provider available', async () => {
+    const wire = vi.fn(async (_method: string, path: string) => {
+      if (path === '/api/provider/amazon-bedrock') return { data: { id: 'amazon-bedrock' } };
+      if (path === '/api/integration/amazon-bedrock')
+        return { data: { connections: [{ id: 'env-1', type: 'environment' }] } };
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const adapter = new OpenCodeV2Adapter(wire);
+
+    await expect(adapter.request('DELETE', '/auth/amazon-bedrock')).rejects.toThrow(
+      'Remove the provider environment variable to disconnect this OpenCode integration'
+    );
+  });
+});
+
 describe('v2 model release dates', () => {
   const model: ModelInfo = {
     id: 'model',
