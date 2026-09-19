@@ -2787,6 +2787,28 @@ describe('Message assistant final answer rendering', () => {
     expect(container?.querySelector('.assistant-message-flow-item-error-details')).not.toBeNull();
   });
 
+  it('renders a historical failure as a neutral notice after a later successful response', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: {
+            ...assistantMessage('message-3'),
+            error: {
+              name: 'server_error',
+              data: { message: 'OpenCode failed before a response was recorded.' },
+            },
+          },
+          parts: [],
+          retryState: 'resolved',
+        }),
+      container!
+    );
+    const notice = container?.querySelector('.assistant-message-flow-item-error-notice');
+    expect(notice?.textContent).toBe('Provider reconnected.');
+    expect(notice?.querySelector('.assistant-message-flow-item-error-details-toggle')).toBeNull();
+    expect(notice?.querySelector('.assistant-message-flow-item-error-action')).toBeNull();
+  });
+
   it('renders a retry action for the latest assistant error and retries that turn', async () => {
     const { setState } = await import('../lib/state');
     const user = userMessage('message-2');
@@ -2885,6 +2907,7 @@ describe('Message assistant final answer rendering', () => {
 
   it('explains a logged-out provider and runs re-authentication', async () => {
     const { setState } = await import('../lib/state');
+    const [isLastAssistant, setIsLastAssistant] = createSignal(true);
     const assistant = {
       ...assistantMessage('message-3'),
       error: {
@@ -2908,7 +2931,9 @@ describe('Message assistant final answer rendering', () => {
         Message({
           info: assistant,
           parts: [reasoningPart('reason-1', 'Inspecting')],
-          isLastAssistant: true,
+          get isLastAssistant() {
+            return isLastAssistant();
+          },
         }),
       container!
     );
@@ -2934,9 +2959,11 @@ describe('Message assistant final answer rendering', () => {
 
     resolveProviderAuthFailure('github-copilot');
 
-    expect(errorBlock?.textContent).toContain(
-      'Credentials updated. Retry to check whether authentication works.'
-    );
+    expect(errorBlock?.textContent).toContain('Provider reconnected.');
+    expect(errorBlock?.classList.contains('assistant-message-flow-item-error-notice')).toBe(true);
+    expect(
+      errorBlock?.querySelector('.assistant-message-flow-item-error-details-toggle')
+    ).toBeNull();
     const retryButton = container?.querySelector<HTMLButtonElement>(
       '.assistant-message-flow-item-error-action'
     );
@@ -2944,15 +2971,57 @@ describe('Message assistant final answer rendering', () => {
     retryButton?.click();
     expect(retryMessageMock).toHaveBeenCalledWith('message-3', 'session-1');
 
+    setIsLastAssistant(false);
+    expect(errorBlock?.textContent).toBe('Provider reconnected.');
+    expect(errorBlock?.querySelector('.assistant-message-flow-item-error-action')).toBeNull();
+    setIsLastAssistant(true);
+
     const { markProviderAuthFailure } = await import('../lib/provider-connection-state');
     markProviderAuthFailure('github-copilot', 'message-4', assistant.time.created + 1);
 
     expect(errorBlock?.textContent).toContain(
       'You are signed out of this provider. Re-authenticate to continue.'
     );
+    expect(errorBlock?.classList.contains('assistant-message-flow-item-error-notice')).toBe(false);
+    expect(
+      errorBlock?.querySelector('.assistant-message-flow-item-error-details-toggle')
+    ).not.toBeNull();
     expect(
       container?.querySelector('.assistant-message-flow-item-error-action')?.textContent
     ).toContain('Re-authenticate');
+  });
+
+  it('preserves resolved authentication when history replaces the error with a generic failure', () => {
+    const [info, setInfo] = createSignal({
+      ...assistantMessage('resolved-auth'),
+      error: {
+        name: 'ProviderAuthError',
+        data: { message: 'Token refresh failed: 401' },
+      },
+    });
+    cleanup = render(
+      () =>
+        Message({
+          get info() {
+            return info();
+          },
+          parts: [],
+          retryState: 'resolved',
+        }),
+      container!
+    );
+    resolveProviderAuthFailure(info().providerID);
+    setInfo({
+      ...info(),
+      error: {
+        name: 'UnknownError',
+        data: { message: 'OpenCode failed before a response was recorded.' },
+      },
+    });
+    const notice = container?.querySelector('.assistant-message-flow-item-error-notice');
+    expect(notice?.textContent).toBe('Provider reconnected.');
+    expect(notice?.querySelector('.assistant-message-flow-item-error-details-toggle')).toBeNull();
+    expect(notice?.querySelector('.assistant-message-flow-item-error-action')).toBeNull();
   });
 
   it('shows provider credential validation details instead of a signed-out message', () => {

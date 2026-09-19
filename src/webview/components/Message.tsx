@@ -263,7 +263,10 @@ export function Message(props: {
   });
   const providerAuthRequired = createMemo(() => {
     const error = assistant()?.error;
-    return !isAbortedAssistantError(error) && isProviderAuthFailure(error);
+    return (
+      !isAbortedAssistantError(error) &&
+      (isProviderAuthFailure(error) || providerAuthRestoredForMessage(props.info.id))
+    );
   });
   const providerAuthProviderID = createMemo(() => {
     const info = assistant();
@@ -293,7 +296,13 @@ export function Message(props: {
     const error = assistant()?.error;
     if (isAbortedAssistantError(error)) return null;
     if (coveredByUsageLimitBanner()) return null;
+    if (providerAuthRequired() && (providerAuthRestored() || props.retryState === 'resolved')) {
+      return 'Provider reconnected.';
+    }
     if (error && props.retryState) {
+      if (props.retryState === 'resolved') {
+        return 'Provider reconnected.';
+      }
       if (props.retryState === 'recovered') {
         return 'Recovered after an automatic retry. Work continued.';
       }
@@ -303,9 +312,6 @@ export function Message(props: {
       return 'Response interrupted. Retried automatically.';
     }
     if (providerAuthRequired()) {
-      if (providerAuthRestored()) {
-        return 'Credentials updated. Retry to check whether authentication works.';
-      }
       return 'You are signed out of this provider. Re-authenticate to continue.';
     }
     const message = error?.data?.message?.trim();
@@ -318,7 +324,12 @@ export function Message(props: {
     return friendlyErrorName(error?.name);
   });
   const assistantErrorDetails = createMemo(() => {
-    if (!assistantErrorMessage()) return null;
+    if (
+      !assistantErrorMessage() ||
+      props.retryState === 'resolved' ||
+      (providerAuthRequired() && providerAuthRestored())
+    )
+      return null;
     const info = assistant();
     return formatProviderErrorDetails(info?.error, {
       providerID: info?.providerID,
@@ -623,7 +634,9 @@ export function Message(props: {
                 parts={visibleAssistantParts()}
                 errorMessage={assistantErrorMessage()}
                 errorDetails={assistantErrorDetails()}
-                errorIsNotice={!!props.retryState}
+                errorIsNotice={
+                  !!props.retryState || (providerAuthRequired() && providerAuthRestored())
+                }
                 errorAction={assistantErrorAction()}
                 highlightFinalAnswer={props.highlightFinalAnswer}
                 highlightPlanningAnswer={props.highlightPlanningAnswer}

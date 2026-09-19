@@ -1,13 +1,14 @@
 import type { MessageEntry, SessionStatus } from '../../types';
 
-export type AssistantRetryState = 'retrying' | 'retried' | 'recovered';
+export type AssistantRetryState = 'retrying' | 'retried' | 'recovered' | 'resolved';
 
-/** Derive recovery from completed provider responses in the same visible turn. */
+/** Distinguish automatic retries from failures followed by a later successful response. */
 export function getAssistantRetryStates(
   messages: readonly MessageEntry[],
   sessionStatus: Readonly<Record<string, SessionStatus>>
 ): Map<string, AssistantRetryState> {
   const states = new Map<string, AssistantRetryState>();
+  const successfulProviders = new Set<string>();
   const newerUserSessions = new Set<string>();
   const continuations = new Map<
     string,
@@ -21,6 +22,7 @@ export function getAssistantRetryStates(
       continue;
     }
     const next = continuations.get(info.sessionID);
+    const providerKey = JSON.stringify([info.sessionID, info.providerID, info.modelID]);
     const continuation = info.parentID && next?.parentID === info.parentID ? next : undefined;
     const status = sessionStatus[info.sessionID]?.type;
     const working =
@@ -33,13 +35,17 @@ export function getAssistantRetryStates(
     }
     // Generated activity rows have no provider finish and cannot prove recovery.
     const completed = info.time.completed !== undefined && !!info.finish;
+    const succeeded =
+      completed && !info.error && info.finish !== 'error' && info.finish !== 'aborted';
+    if (info.error && !states.has(info.id) && successfulProviders.has(providerKey)) {
+      states.set(info.id, 'resolved');
+    }
+    if (succeeded) successfulProviders.add(providerKey);
     if (!completed && info.time.completed !== undefined) continue;
     continuations.set(info.sessionID, {
       parentID: info.parentID,
       completed: completed || !!continuation?.completed,
-      recovered:
-        !!continuation?.recovered ||
-        (completed && !info.error && info.finish !== 'error' && info.finish !== 'aborted'),
+      recovered: !!continuation?.recovered || succeeded,
     });
   }
   return states;

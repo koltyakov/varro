@@ -49,10 +49,10 @@ describe('assistant automatic retry presentation', () => {
     ).toBe('retried');
   });
 
-  it('does not infer recovery from generated activity, another turn, or a child session', () => {
+  it('does not infer recovery from generated activity, another provider, or a child session', () => {
     for (const unrelated of [
       response('skill', { finish: undefined }),
-      response('another-turn', { parentID: 'another-user' }),
+      response('another-provider', { providerID: 'another-provider', parentID: 'another-user' }),
       response('child', { sessionID: 'child-session' }),
     ]) {
       expect(getAssistantRetryStates([interrupted, unrelated], {}).size).toBe(0);
@@ -61,11 +61,11 @@ describe('assistant automatic retry presentation', () => {
       getAssistantRetryStates(
         [interrupted, { info: userMessage('new-user'), parts: [] }, response('new-response')],
         { 'session-1': { type: 'busy' } }
-      ).size
-    ).toBe(0);
+      ).get('interrupted')
+    ).toBe('resolved');
   });
 
-  it('recovers earlier attempts in a retry chain and preserves unrelated errors', () => {
+  it('distinguishes automatic recovery from earlier ordinary failures', () => {
     const second = response('second', { finish: 'error', error, retry: { attempt: 3, at: 4 } });
     const ordinary = response('ordinary-error', { finish: 'error', error });
     expect(
@@ -74,7 +74,24 @@ describe('assistant automatic retry presentation', () => {
       new Map([
         ['second', 'recovered'],
         ['interrupted', 'recovered'],
+        ['ordinary-error', 'resolved'],
       ])
+    );
+  });
+
+  it('resolves a historical failure only after a successful response from the same model', () => {
+    const failed = response('failed', { finish: 'error', error });
+    const user = { info: userMessage('new-user'), parts: [] };
+    for (const later of [
+      response('pending', { time: { created: 4 }, finish: undefined }),
+      response('failed-again', { finish: 'error', error }),
+      response('cancelled', { finish: 'aborted' }),
+      response('other-model', { modelID: 'other-model' }),
+    ]) {
+      expect(getAssistantRetryStates([failed, user, later], {}).has('failed')).toBe(false);
+    }
+    expect(getAssistantRetryStates([failed, user, response('success')], {}).get('failed')).toBe(
+      'resolved'
     );
   });
 });
