@@ -25,6 +25,8 @@ const XAI_OAUTH_CLIENT_ID = 'b1a00492-073a-47ea-816f-4c329264a828';
 const XAI_OAUTH_EXPIRY_BUFFER_MS = 5 * 60_000;
 const EMPTY_GRPC_FRAME = new Uint8Array(5);
 
+class XaiRefreshCredentialsError extends Error {}
+
 export function createXaiAdapter(): ProviderLimitAdapter {
   return {
     id: 'xai',
@@ -215,7 +217,10 @@ export function createXaiAdapter(): ProviderLimitAdapter {
         };
         if (usageLimitResets) status.usageLimitResets = usageLimitResets;
         return status;
-      } catch {
+      } catch (error) {
+        if (error instanceof XaiRefreshCredentialsError) {
+          return unsupportedProviderStatus(provider.id, modelID, checkedAt, error.message);
+        }
         return {
           providerID: provider.id,
           modelID,
@@ -347,7 +352,17 @@ async function refreshXaiAccessToken(refreshToken: string) {
     }).toString(),
     signal: AbortSignal.timeout(10_000),
   });
-  if (!response.ok) throw new Error(`xAI OAuth token refresh returned ${response.status}`);
+  if (!response.ok) {
+    if (response.status === 400 || response.status === 401 || response.status === 403) {
+      const payload = asRecord(await readBoundedResponseJson(response));
+      if (getString(payload?.error) === 'invalid_grant') {
+        throw new XaiRefreshCredentialsError(
+          'SuperGrok OAuth refresh rejected credentials (invalid_grant). Reconnect xAI/SuperGrok to fetch limits.'
+        );
+      }
+    }
+    throw new Error(`xAI OAuth token refresh returned ${response.status}`);
+  }
 
   const payload = asRecord(await readBoundedResponseJson(response));
   const accessToken = getString(payload?.access_token);

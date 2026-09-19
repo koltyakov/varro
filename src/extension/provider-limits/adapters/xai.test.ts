@@ -200,6 +200,62 @@ describe('createXaiAdapter', () => {
     expect(status).toMatchObject({ status: 'available', windows: [{ remaining: 90 }] });
   });
 
+  it.each(['expired', 'rejected'] as const)(
+    'asks to reconnect when refresh credentials for an %s token are invalid',
+    async (tokenState) => {
+      if (tokenState === 'rejected') {
+        vi.mocked(fetch).mockResolvedValueOnce(new Response('', { status: 401 }));
+      }
+      vi.mocked(fetch).mockResolvedValueOnce(
+        Response.json(
+          { error: 'invalid_grant', error_description: 'Invalid or unknown refresh token' },
+          { status: 400 }
+        )
+      );
+      const setProviderAuth = vi.fn(async () => {});
+
+      const status = await adapter.fetch({
+        provider,
+        authStore: {
+          xai: {
+            type: 'oauth',
+            access: 'expired-access-token',
+            refresh: 'invalid-refresh-token',
+            expires: tokenState === 'expired' ? 1 : Date.now() + 3_600_000,
+          },
+        },
+        modelID: null,
+        checkedAt: 5_000,
+        setProviderAuth,
+      });
+
+      expect(status).toMatchObject({
+        status: 'unsupported',
+        note: 'SuperGrok OAuth refresh rejected credentials (invalid_grant). Reconnect xAI/SuperGrok to fetch limits.',
+      });
+      expect(setProviderAuth).not.toHaveBeenCalled();
+      expect(fetch).toHaveBeenCalledTimes(tokenState === 'expired' ? 1 : 2);
+    }
+  );
+
+  it('keeps transient refresh failures retryable', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response('Service unavailable', { status: 503 }));
+    const setProviderAuth = vi.fn(async () => {});
+
+    const status = await adapter.fetch({
+      provider,
+      authStore: {
+        xai: { type: 'oauth', access: 'expired', refresh: 'stored-refresh-token', expires: 1 },
+      },
+      modelID: null,
+      checkedAt: 5_000,
+      setProviderAuth,
+    });
+
+    expect(status.status).toBe('error');
+    expect(setProviderAuth).not.toHaveBeenCalled();
+  });
+
   it('falls back to absolute monthly credit accounting', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       Response.json({

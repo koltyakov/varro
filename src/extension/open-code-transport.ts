@@ -115,6 +115,10 @@ export class OpenCodeTransport {
     return this.apiVersion === 2;
   }
 
+  get version(): OpenCodeApiVersion {
+    return this.apiVersion;
+  }
+
   constructor(options: OpenCodeTransportOptions) {
     const testServerUrl = this.testServerUrl;
     this.options = {

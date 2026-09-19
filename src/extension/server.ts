@@ -289,6 +289,10 @@ export class OpenCodeServer extends EventEmitter {
     return this._status;
   }
 
+  get apiVersion() {
+    return this.transport.version;
+  }
+
   get url(): string {
     return this.processManager.url;
   }

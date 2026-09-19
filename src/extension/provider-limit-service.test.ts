@@ -7,11 +7,16 @@ import type { ProviderLimitStatus } from '../shared/protocol';
 
 const mocks = vi.hoisted(() => ({
   readFileMock: vi.fn(),
+  readV2AuthStoreMock: vi.fn(),
   extractOpenCodeConsoleLimitMock: vi.fn(),
   extractOpenCodeProviderLimitMock: vi.fn(),
   fetchProviderLimitFromAdapterMock: vi.fn(),
   getOpenCodeAuthFilePathMock: vi.fn(() => '/tmp/opencode/auth.json'),
   parseProviderAuthStoreMock: vi.fn((_raw: string) => ({})),
+}));
+
+vi.mock('./provider-v2-auth-store', () => ({
+  readOpenCodeV2AuthStore: mocks.readV2AuthStoreMock,
 }));
 
 vi.mock('fs/promises', async () => {
@@ -126,6 +131,7 @@ describe('ProviderLimitService', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-04-30T00:00:00.000Z'));
     mocks.readFileMock.mockResolvedValue('{}');
+    mocks.readV2AuthStoreMock.mockResolvedValue({});
     mocks.extractOpenCodeProviderLimitMock.mockReturnValue(null);
     mocks.extractOpenCodeConsoleLimitMock.mockReturnValue(null);
     mocks.fetchProviderLimitFromAdapterMock.mockResolvedValue(null);
@@ -136,6 +142,49 @@ describe('ProviderLimitService', () => {
     vi.unstubAllGlobals();
     vi.useRealTimers();
   });
+
+  it('uses active V2 credentials instead of stale V1 auth and leaves rotation to V2', async () => {
+    const server = {
+      ...createProviderServer([{ id: 'xai', models: { grok: {} } }]),
+      apiVersion: 2 as const,
+      url: 'http://127.0.0.1:4096',
+    };
+    const auth = { xai: { type: 'oauth', access: 'active-v2-token', refresh: 'v2-refresh' } };
+    mocks.readV2AuthStoreMock.mockResolvedValue(auth);
+    mocks.fetchProviderLimitFromAdapterMock.mockResolvedValue({
+      status: 'available',
+      providerID: 'xai',
+      source: 'provider',
+      checkedAt: Date.now(),
+      windows: [{ id: 'credits', remaining: 93, limit: 100 }],
+    });
+
+    const service = new ProviderLimitService(server);
+    await expect(service.get('xai', 'grok')).resolves.toMatchObject({ status: 'available' });
+    expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledWith(
+      expect.objectContaining({ authStore: auth, setProviderAuth: undefined })
+    );
+    expect(mocks.readFileMock).not.toHaveBeenCalled();
+    service.dispose();
+  });
+
+  it.each(['missing database', 'remote server'])(
+    'does not fall back to V1 credentials for V2 with a %s',
+    async (failure) => {
+      const server = {
+        ...createProviderServer([{ id: 'xai', models: { grok: {} } }]),
+        apiVersion: 2 as const,
+        url: failure === 'remote server' ? 'https://remote.example' : 'http://localhost:4096',
+      };
+      mocks.readV2AuthStoreMock.mockRejectedValue(new Error('Database unavailable'));
+      const service = new ProviderLimitService(server);
+      await expect(service.get('xai', 'grok')).resolves.toMatchObject({ status: 'error' });
+      expect(mocks.readFileMock).not.toHaveBeenCalled();
+      expect(mocks.fetchProviderLimitFromAdapterMock).not.toHaveBeenCalled();
+      if (failure === 'remote server') expect(mocks.readV2AuthStoreMock).not.toHaveBeenCalled();
+      service.dispose();
+    }
+  );
 
   it('deduplicates in-flight requests per provider/model key', async () => {
     const server = createServer();

@@ -6,6 +6,7 @@ import type { ProviderLimitStatus, ProviderLimitUpdate, ServerStatus } from '../
 import { asRecord } from '../shared/type-utils';
 import { fetchProviderLimitFromAdapter } from './provider-limits';
 import { ProviderQuotaCoordinator } from './provider-quota-coordinator';
+import { readOpenCodeV2AuthStore } from './provider-v2-auth-store';
 import type { OpenCodeServer } from './server';
 import {
   extractOpenCodeConsoleLimit,
@@ -48,7 +49,8 @@ export class ProviderLimitService {
   private readonly workspaceServices = new Map<string, ProviderLimitService>();
 
   constructor(
-    private readonly server: Pick<OpenCodeServer, 'request'>,
+    private readonly server: Pick<OpenCodeServer, 'request'> &
+      Partial<Pick<OpenCodeServer, 'apiVersion' | 'url'>>,
     private readonly coordinator = new ProviderQuotaCoordinator(),
     private readonly directory?: string,
     private readonly onUpdate?: (update: ProviderLimitUpdate) => void
@@ -219,7 +221,19 @@ export class ProviderLimitService {
     }
 
     const cachedAuthFailure = this.providerAuthFailureCache.get(provider.id);
-    const authStore = await this.readProviderAuthStore(canCoordinate || Boolean(cachedAuthFailure));
+    let authStore: Record<string, ProviderAuthRecord>;
+    try {
+      authStore = await this.readProviderAuthStore(canCoordinate || Boolean(cachedAuthFailure));
+    } catch {
+      return createProviderLimitLoadResult({
+        providerID,
+        modelID,
+        status: 'error',
+        source: 'provider',
+        checkedAt,
+        note: 'Failed to read active OpenCode provider credentials',
+      });
+    }
     const credentialFingerprint = getProviderCredentialFingerprint(provider, authStore);
     if (!canCoordinate && cachedAuthFailure?.credentialFingerprint === credentialFingerprint) {
       return createProviderLimitLoadResult(
@@ -284,11 +298,15 @@ export class ProviderLimitService {
             }
             return status;
           },
-          setProviderAuth: async (id, auth) => {
-            await this.server.request('PUT', `/auth/${encodeURIComponent(id)}`, auth, {
-              directory: this.directory,
-            });
-          },
+          // V2 owns OAuth rotation and has no API for replacing credential secrets.
+          setProviderAuth:
+            this.server.apiVersion === 2
+              ? undefined
+              : async (id, auth) => {
+                  await this.server.request('PUT', `/auth/${encodeURIComponent(id)}`, auth, {
+                    directory: this.directory,
+                  });
+                },
         }),
         ProviderLimitService.PROVIDER_LIMIT_ADAPTER_TIMEOUT_MS
       );
@@ -381,6 +399,13 @@ export class ProviderLimitService {
 
     const generation = this.providerSnapshotGeneration;
     const promise = (async () => {
+      if (this.server.apiVersion === 2) {
+        const hostname = this.server.url ? new URL(this.server.url).hostname : '';
+        if (!['localhost', '127.0.0.1', '[::1]'].includes(hostname)) {
+          throw new Error('OpenCode V2 credentials are only available for local servers');
+        }
+        return readOpenCodeV2AuthStore();
+      }
       try {
         const raw = await fs.readFile(getOpenCodeAuthFilePath(), 'utf-8');
         return parseProviderAuthStore(raw);
