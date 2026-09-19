@@ -12,6 +12,84 @@ import { getOpenCodeConfigPaths } from './open-code-process';
 const vscodeMock = getVscodeMock();
 
 describe('SidebarProvider local config routing', () => {
+  it.each([false, true])(
+    'persists local provider disabling and handles concurrent edits, conflict=%s',
+    async (conflict) => {
+      const raw =
+        '// Keep this comment\n' +
+        JSON.stringify({
+          model: 'openai/gpt-5',
+          providers: { ollama: { settings: { baseURL: 'http://localhost:11434/v1' } } },
+          experimental: {
+            policies: [{ action: 'provider.use', resource: 'other', effect: 'deny' }],
+          },
+        });
+      vscodeMock.workspace.fs.readFile.mockImplementation((uri: { fsPath: string }) =>
+        uri.fsPath === '/repo/opencode.json'
+          ? Promise.resolve(new TextEncoder().encode(raw))
+          : Promise.reject({ code: 'FileNotFound' })
+      );
+      vscodeMock.workspace.fs.stat.mockResolvedValueOnce({
+        mtime: 1,
+        size: raw.length,
+        type: 0,
+        ctime: 0,
+      });
+      vscodeMock.workspace.fs.stat.mockResolvedValueOnce({
+        mtime: conflict ? 2 : 1,
+        size: raw.length,
+        type: 0,
+        ctime: 0,
+      });
+      const server = createServer({
+        getWorkspaceCwd: vi.fn(() => '/repo'),
+        request: vi.fn(async (_method: string, path: string) =>
+          path === '/session/status' ? {} : []
+        ),
+      });
+      const { provider } = await createSidebarProviderInstance({ server });
+      const { posted } = attachTestView(provider);
+      await provider.handleMessage({
+        type: 'api/request',
+        payload: {
+          id: 301,
+          method: 'POST',
+          path: '/varro/opencode-config/disable-provider',
+          body: { providerID: 'ollama' },
+        },
+      });
+      if (conflict) {
+        expect(vscodeMock.workspace.fs.writeFile).not.toHaveBeenCalled();
+        expect(posted).toContainEqual(
+          expect.objectContaining({
+            type: 'api/response',
+            payload: expect.objectContaining({
+              id: 301,
+              error: expect.stringContaining('changed while disabling'),
+            }),
+          })
+        );
+      } else {
+        const write = vscodeMock.workspace.fs.writeFile.mock.lastCall as unknown[] | undefined;
+        expect(write?.[0]).toEqual(expect.objectContaining({ fsPath: '/repo/opencode.json' }));
+        const written = new TextDecoder().decode(write?.[1] as Uint8Array);
+        expect(written).toContain('// Keep this comment');
+        expect(JSON.parse(written.slice(written.indexOf('\n') + 1))).toEqual({
+          model: 'openai/gpt-5',
+          providers: { ollama: { settings: { baseURL: 'http://localhost:11434/v1' } } },
+          experimental: {
+            policies: [
+              { action: 'provider.use', resource: 'other', effect: 'deny' },
+              { action: 'provider.use', resource: 'ollama', effect: 'deny' },
+            ],
+          },
+        });
+        expect(server.request).toHaveBeenCalledWith('POST', '/instance/dispose', undefined, {
+          directory: '/repo',
+        });
+      }
+    }
+  );
   it('broadcasts the Problems context opt-out without reloading the webview', async () => {
     const { provider } = await createSidebarProviderInstance();
     const { posted } = attachTestView(provider);

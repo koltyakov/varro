@@ -294,7 +294,38 @@ describe('v2 hidden authentication fields', () => {
 });
 
 describe('v2 provider disconnect', () => {
-  it('treats a missing integration as having no credential to remove', async () => {
+  it('offers local-provider disabling and does not restore disabled configured models', async () => {
+    let disabled = false;
+    const adapter = new OpenCodeV2Adapter(async (_method, path) => {
+      if (path === '/api/provider')
+        return { data: disabled ? [] : [{ id: 'ollama', name: 'Ollama' }] };
+      if (path === '/api/model' || path === '/api/integration') return { data: [] };
+      if (path === '/api/config')
+        return [
+          {
+            info: {
+              providers: { ollama: { models: { qwen3: {} } } },
+              experimental: {
+                policies: disabled
+                  ? [{ action: 'provider.use', resource: 'ollama', effect: 'deny' }]
+                  : [],
+              },
+            },
+          },
+        ];
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    expect(await adapter.request('GET', '/provider', undefined)).toMatchObject({
+      all: [expect.objectContaining({ id: 'ollama', disconnectMode: 'disable' })],
+      connected: ['ollama'],
+    });
+    disabled = true;
+    expect(await adapter.request('GET', '/provider', undefined)).toMatchObject({
+      all: [],
+      connected: [],
+    });
+  });
+  it('does not report a missing integration as a successful disconnect', async () => {
     const wire = vi.fn(async (_method: string, path: string) => {
       if (path === '/api/provider/ollama') return { data: { id: 'ollama' } };
       if (path === '/api/integration/ollama') throw new Error('404 Integration not found: ollama');
@@ -302,7 +333,9 @@ describe('v2 provider disconnect', () => {
     });
     const adapter = new OpenCodeV2Adapter(wire);
 
-    await expect(adapter.request('DELETE', '/auth/ollama')).resolves.toBe(true);
+    await expect(adapter.request('DELETE', '/auth/ollama', undefined)).rejects.toThrow(
+      'Disable it in this workspace'
+    );
     expect(wire).toHaveBeenCalledWith(
       'GET',
       '/api/integration/ollama',
@@ -320,7 +353,9 @@ describe('v2 provider disconnect', () => {
     });
     const adapter = new OpenCodeV2Adapter(wire);
 
-    await expect(adapter.request('DELETE', '/auth/ollama')).resolves.toBe(true);
+    await expect(adapter.request('DELETE', '/auth/ollama', undefined)).rejects.toThrow(
+      'Disable it in this workspace'
+    );
   });
 
   it('deletes saved integration credentials', async () => {
@@ -340,7 +375,7 @@ describe('v2 provider disconnect', () => {
     });
     const adapter = new OpenCodeV2Adapter(wire);
 
-    await expect(adapter.request('DELETE', '/auth/openai')).resolves.toBe(true);
+    await expect(adapter.request('DELETE', '/auth/openai', undefined)).resolves.toBe(true);
     expect(wire).toHaveBeenCalledWith(
       'DELETE',
       '/api/credential/cred-1',
@@ -358,7 +393,7 @@ describe('v2 provider disconnect', () => {
     });
     const adapter = new OpenCodeV2Adapter(wire);
 
-    await expect(adapter.request('DELETE', '/auth/amazon-bedrock')).rejects.toThrow(
+    await expect(adapter.request('DELETE', '/auth/amazon-bedrock', undefined)).rejects.toThrow(
       'Remove the provider environment variable to disconnect this OpenCode integration'
     );
   });

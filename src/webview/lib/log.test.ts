@@ -29,15 +29,17 @@ afterEach(() => {
 });
 
 describe('log helpers', () => {
-  it('posts error-level log messages', () => {
+  it('preserves the stack in error-level log messages', () => {
     const send = vi.fn();
     window.__sendToExtension = send;
 
-    logError('loadSession', new Error('offline'));
+    const error = new Error('offline');
+    error.stack = 'Error: offline\n    at loadSession (session.ts:42:7)';
+    logError('loadSession', error);
 
     expect(send).toHaveBeenCalledWith({
       type: 'log',
-      payload: { msg: 'loadSession', error: 'offline', level: 'error' },
+      payload: { msg: 'loadSession', error: error.stack, level: 'error' },
     });
   });
 

@@ -569,6 +569,7 @@ export type Agent = {
 export type Provider = {
   id: string;
   name: string;
+  disconnectMode?: 'disable';
   source: 'env' | 'config' | 'custom' | 'api';
   env?: string[];
   key?: string;

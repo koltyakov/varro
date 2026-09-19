@@ -1073,7 +1073,12 @@ export function AssistantMessageContent(props: {
           <div class="assistant-file-edit-stack">
             <For each={Array.from(partsById().keys())}>
               {(id) => {
-                const part = () => partsById().get(id)!;
+                // A removed map entry still needs its last snapshot while the old
+                // card's cleanup reads completion state to preserve the scroll anchor.
+                const part = createMemo<ToolPart>(
+                  (previous) => partsById().get(id) ?? previous,
+                  partsById().get(id)!
+                );
                 return (
                   <MessagePart
                     part={part()}

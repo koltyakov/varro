@@ -386,8 +386,8 @@ export interface RestProxyCallbacks {
   internalHelperCleanupCoordinator?: InternalHelperCleanupCoordinator;
   confirmPromptAdmission(workspacePath: string): Promise<boolean>;
   refreshOpenCodeConfig?(
-    previousRouting: OpenCodeModelRouting,
-    currentRouting: OpenCodeModelRouting,
+    previousRouting: OpenCodeModelRouting | undefined,
+    currentRouting: OpenCodeModelRouting | undefined,
     workspacePath: string
   ): Promise<void>;
   cleanupExpiredRecycleBin(): Promise<void>;
@@ -922,6 +922,19 @@ export class RestProxy {
       if (planOpenRequest) {
         const data = await this.openPlanDocument(planOpenRequest.content);
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
+
+      if (method === 'POST' && payload.path === VARRO_API_ENDPOINTS.openCodeConfigDisableProvider) {
+        const providerID = asRecord(payload.body)?.providerID;
+        if (
+          typeof providerID !== 'string' ||
+          !['ollama', 'lmstudio', 'vllm'].includes(providerID)
+        ) {
+          throw new Error('Invalid local provider');
+        }
+        await this.disableOpenCodeProvider(providerID);
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data: true });
         return;
       }
 
@@ -4120,6 +4133,54 @@ export class RestProxy {
       return this.readOpenCodeModelRouting();
     }
     return this.updateOpenCodeModelRouting(request);
+  }
+
+  private async disableOpenCodeProvider(providerID: string): Promise<void> {
+    let snapshot = await this.readOpenCodeConfigObject();
+    while (true) {
+      const lockPath = getCanonicalOpenCodeConfigPath(snapshot.target.path);
+      const result = await withOpenCodeConfigUpdateLock(lockPath, async () => {
+        const current = await this.readOpenCodeConfigObject();
+        const { target } = current;
+        if (getCanonicalOpenCodeConfigPath(target.path) !== lockPath) return current;
+        if (
+          vscode.workspace.textDocuments.some(
+            (document) => document.isDirty && isSameWorkspacePath(document.uri.fsPath, target.path)
+          )
+        ) {
+          throw new Error(
+            `${target.path} has unsaved changes; save or revert before disabling a provider`
+          );
+        }
+        const initialStat = await this.readConfigStat(target.uri);
+        const experimental = asRecord(current.config.experimental);
+        const policies = experimental?.policies;
+        if (policies !== undefined && !Array.isArray(policies)) {
+          throw new Error('Invalid OpenCode provider policies');
+        }
+        const nextPolicies = [
+          ...(policies ?? []).filter((value: unknown) => {
+            const policy = asRecord(value);
+            return policy?.action !== 'provider.use' || policy.resource !== providerID;
+          }),
+          { action: 'provider.use', resource: providerID, effect: 'deny' },
+        ];
+        const raw = applyJsoncChange(
+          target.raw.trim() ? target.raw : '{}\n',
+          ['experimental', 'policies'],
+          nextPolicies
+        );
+        if (!this.areConfigStatsEqual(initialStat, await this.readConfigStat(target.uri))) {
+          throw new Error(`${target.path} changed while disabling the provider; please retry`);
+        }
+        await vscode.workspace.fs.writeFile(target.uri, new TextEncoder().encode(raw));
+        // Provider policies require a reload even when model routing is unchanged.
+        await this.callbacks.refreshOpenCodeConfig?.(undefined, undefined, current.workspacePath);
+        return undefined;
+      });
+      if (!result) return;
+      snapshot = result;
+    }
   }
 
   private async updateOpenCodeModelRouting(

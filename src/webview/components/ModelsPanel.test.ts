@@ -46,6 +46,7 @@ const clientMocks = vi.hoisted(() => ({
   completeProviderAuth: vi.fn(),
   connectApiProvider: vi.fn(),
   disconnectProvider: vi.fn(),
+  disableProvider: vi.fn(),
   workspaceStatus: vi.fn(),
 }));
 
@@ -74,6 +75,7 @@ vi.mock('../lib/client', () => ({
       completeProviderAuth: clientMocks.completeProviderAuth,
       connectApiProvider: clientMocks.connectApiProvider,
       disconnectProvider: clientMocks.disconnectProvider,
+      disableProvider: clientMocks.disableProvider,
       workspaceStatus: clientMocks.workspaceStatus,
     },
   },
@@ -957,6 +959,46 @@ describe('ModelsPanel', () => {
     expect(send).toHaveBeenCalledWith({ type: 'providers/auth-changed' });
     expect(document.body.querySelector('[role="dialog"]')).toBeNull();
   });
+
+  it.each([false, true])(
+    'disables local Ollama through configuration, failure=%s',
+    async (fails) => {
+      const send = vi.fn();
+      window.__sendToExtension = send;
+      clientMocks.providerCatalog.mockResolvedValue({
+        all: [
+          { id: 'ollama', name: 'Ollama', source: 'config', disconnectMode: 'disable', models: {} },
+        ],
+        connected: ['ollama'],
+        default: {},
+      });
+      if (fails)
+        clientMocks.disableProvider.mockRejectedValueOnce(new Error('Config is read-only'));
+      else clientMocks.disableProvider.mockResolvedValueOnce(true);
+      cleanup = render(() => ModelsPanel(), container!);
+      openProviderAction(container, 'Disconnect provider')?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+      const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
+      dialog?.querySelector<HTMLButtonElement>('.provider-connect-option')?.click();
+      expect(dialog?.textContent).toContain('discovers this local provider automatically');
+      expect(dialog?.textContent).not.toContain('Remove the saved credential');
+      findButton(dialog, 'Disable in this workspace')?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(clientMocks.disableProvider).toHaveBeenCalledWith('ollama');
+      expect(clientMocks.disconnectProvider).not.toHaveBeenCalled();
+      if (fails) {
+        expect(dialog?.querySelector('[role="alert"]')?.textContent).toContain(
+          'Config is read-only'
+        );
+        expect(send).not.toHaveBeenCalledWith({ type: 'providers/auth-changed' });
+      } else {
+        expect(send).toHaveBeenCalledWith({ type: 'providers/auth-changed' });
+        expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+      }
+    }
+  );
 
   it('opens immediately with a skeleton and shows providers only after loading', async () => {
     let resolveCatalog!: (value: {

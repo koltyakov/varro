@@ -519,6 +519,9 @@ export const client = {
     async disconnectProvider(providerID: string): Promise<boolean> {
       return apiCall('DELETE', `/auth/${encodeURIComponent(providerID)}`);
     },
+    async disableProvider(providerID: string): Promise<boolean> {
+      return apiCall('POST', VARRO_API_ENDPOINTS.openCodeConfigDisableProvider, { providerID });
+    },
     async workspaceStatus(): Promise<WorkspaceStatusEntry[]> {
       const path = '/experimental/workspace/status';
       return requireArray<WorkspaceStatusEntry>(await apiCall('GET', path), path);

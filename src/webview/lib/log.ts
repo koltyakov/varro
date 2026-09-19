@@ -5,7 +5,7 @@ export function logError<T>(context: string, err: T): void {
     type: 'log',
     payload: {
       msg: context,
-      error: err instanceof Error ? err.message : String(err),
+      error: err instanceof Error ? err.stack || err.message : String(err),
       level: 'error',
     },
   });

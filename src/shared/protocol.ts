@@ -445,6 +445,7 @@ export const VARRO_API_ENDPOINTS = {
   planOpen: `${VARRO_API_NAMESPACE}/plan/open`,
   openCodeConfig: `${VARRO_API_NAMESPACE}/opencode-config`,
   openCodeConfigModelRouting: `${VARRO_API_NAMESPACE}/opencode-config/model-routing`,
+  openCodeConfigDisableProvider: `${VARRO_API_NAMESPACE}/opencode-config/disable-provider`,
   openCodeConfigPermissions: `${VARRO_API_NAMESPACE}/opencode-config/permissions`,
   session: `${VARRO_API_NAMESPACE}/session`,
   sessionTrash: `${VARRO_API_NAMESPACE}/session-trash`,

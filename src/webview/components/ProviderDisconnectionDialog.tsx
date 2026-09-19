@@ -43,6 +43,7 @@ export function ProviderDisconnectionDialog(props: {
         id,
         name: catalog.get(id)?.name ?? formatProviderID(id),
         source: catalog.get(id)?.source,
+        disconnectMode: catalog.get(id)?.disconnectMode,
         env: catalog.get(id)?.env ?? [],
         connected: props.connectedProviderIDs.includes(id),
       }))
@@ -83,7 +84,8 @@ export function ProviderDisconnectionDialog(props: {
     setIsDeleting(true);
     setErrorMessage('');
     try {
-      await client.config.disconnectProvider(provider.id);
+      if (provider.disconnectMode === 'disable') await client.config.disableProvider(provider.id);
+      else await client.config.disconnectProvider(provider.id);
       postMessage({ type: 'providers/auth-changed' });
       props.onClose();
     } catch (error) {
@@ -203,19 +205,32 @@ export function ProviderDisconnectionDialog(props: {
                   </button>
                   <div class="provider-disconnect-confirmation">
                     <Show
-                      when={provider().connected}
+                      when={provider().disconnectMode !== 'disable'}
                       fallback={
                         <>
-                          <strong>{provider().name}</strong> has no saved credential to disconnect.
+                          Disable <strong>{provider().name}</strong> in this workspace? OpenCode
+                          discovers this local provider automatically. This saves a provider policy
+                          to remove its models from selection.
                         </>
                       }
                     >
-                      Remove the saved credential for <strong>{provider().name}</strong>?
+                      <Show
+                        when={provider().connected}
+                        fallback={
+                          <>
+                            <strong>{provider().name}</strong> has no saved credential to
+                            disconnect.
+                          </>
+                        }
+                      >
+                        Remove the saved credential for <strong>{provider().name}</strong>?
+                      </Show>
                     </Show>
                   </div>
                   <Show
                     when={
-                      provider().source === 'config' || selectedProviderConfigPaths().length > 0
+                      provider().disconnectMode !== 'disable' &&
+                      (provider().source === 'config' || selectedProviderConfigPaths().length > 0)
                     }
                   >
                     <div class="provider-disconnect-config-notice">
@@ -265,14 +280,20 @@ export function ProviderDisconnectionDialog(props: {
                     >
                       Cancel
                     </button>
-                    <Show when={provider().connected}>
+                    <Show when={provider().connected || provider().disconnectMode === 'disable'}>
                       <button
                         type="button"
                         class="provider-connect-danger"
                         onClick={() => void disconnect()}
                         disabled={isDeleting()}
                       >
-                        {isDeleting() ? 'Disconnecting...' : 'Disconnect'}
+                        {provider().disconnectMode === 'disable'
+                          ? isDeleting()
+                            ? 'Disabling...'
+                            : 'Disable in this workspace'
+                          : isDeleting()
+                            ? 'Disconnecting...'
+                            : 'Disconnect'}
                       </button>
                     </Show>
                   </div>

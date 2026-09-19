@@ -839,6 +839,10 @@ export class OpenCodeV2Adapter {
       throw new Error('Invalid OpenCode v2 provider catalog');
     const all = providers.map((provider) => ({
       ...provider,
+      disconnectMode:
+        !provider.integrationID && ['ollama', 'lmstudio', 'vllm'].includes(provider.id)
+          ? ('disable' as const)
+          : undefined,
       env: [],
       source: 'config',
       options: provider.settings ?? {},
@@ -858,6 +862,7 @@ export class OpenCodeV2Adapter {
       )
         all.push({
           id: integration.id,
+          disconnectMode: undefined,
           integrationID: integration.id,
           name: integration.name,
           package: '',
@@ -871,12 +876,23 @@ export class OpenCodeV2Adapter {
     // 2.0.5's catalog omits custom configuration entries even though prompt resolution accepts them.
     const configured = asRecord(asRecord(configResult)?.providers) ?? {};
     for (const [id, entry] of Object.entries(configured)) {
+      // Do not restore configured models that the native provider policy removed.
+      const policies = asRecord(asRecord(configResult)?.experimental)?.policies;
+      if (
+        Array.isArray(policies) &&
+        policies.findLast((value) => {
+          const policy = asRecord(value);
+          return policy?.action === 'provider.use' && policy.resource === id;
+        })?.effect === 'deny'
+      )
+        continue;
       const provider = asRecord(entry);
       if (!provider) continue;
       let target = all.find((item) => item.id === id);
       if (!target) {
         target = {
           id,
+          disconnectMode: ['ollama', 'lmstudio', 'vllm'].includes(id) ? 'disable' : undefined,
           name: isString(provider.name) ? provider.name : id,
           package: String(provider.package ?? ''),
           activation: 'enabled',
@@ -967,7 +983,11 @@ export class OpenCodeV2Adapter {
         integration = asRecord(await raw('GET', base))?.data as IntegrationInfo;
       } catch (error) {
         // Local discovery providers such as Ollama have no integration or saved credential.
-        if (isNotFoundError(error)) return true;
+        if (isNotFoundError(error))
+          throw new Error(
+            'This provider has no saved credential. Disable it in this workspace to remove its models.',
+            { cause: error }
+          );
         throw error;
       }
       const connections = integration?.connections ?? [];
