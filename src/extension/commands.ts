@@ -17,9 +17,6 @@ import { renderAboutHtml } from './about-view';
 import { diagnosticTimeline } from './diagnostics';
 import { parseExtensionMessage } from '../shared/extension-message';
 import { toEditorDiagnostic } from './workspace-problems';
-import { LegacySessionImport } from './legacy-session-import';
-import { isString } from '../shared/type-utils';
-import { openCodeApiVersion } from './opencode-connection';
 
 type ExtensionPackageJson = {
   name?: unknown;
@@ -50,53 +47,6 @@ export function registerCommands(
   let aboutDiagnosticsWithPaths = '';
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('varro.session.importV1', async () => {
-      try {
-        await server.start();
-        const health = (await server.readServerInfo()).health;
-        if (!isString(health.version) || openCodeApiVersion(health.version) !== 2) {
-          throw new Error('Connect Varro to OpenCode v2 before importing v1 history');
-        }
-        const importer = new LegacySessionImport((method, path, body) =>
-          server.request(method, path, body)
-        );
-        const directory = server.getWorkspaceCwd();
-        if (!directory) throw new Error('Open a workspace before importing v1 history');
-        const choices = await importer.list(directory);
-        if (!choices.length) {
-          await vscode.window.showInformationMessage(
-            'No local OpenCode v1 conversations were found for this workspace.'
-          );
-          return;
-        }
-        const selected = await vscode.window.showQuickPick(
-          choices.map((choice) => ({
-            label: choice.title,
-            description: choice.id,
-            detail: choice.directory,
-            choice,
-          })),
-          {
-            title: 'Import a v1 conversation into v2',
-            placeHolder: 'Select a conversation to copy. Its original v1 history is preserved.',
-          }
-        );
-        if (!selected) return;
-        const sessionID = await vscode.window.withProgress(
-          {
-            location: vscode.ProgressLocation.Notification,
-            title: 'Importing v1 conversation into v2',
-          },
-          () => importer.importCopy(selected.choice)
-        );
-        await revealSidebar();
-        await sidebar.openSessionInSidebar(sessionID, selected.choice.directory);
-      } catch (error) {
-        void vscode.window.showErrorMessage(
-          `Could not import v1 history: ${error instanceof Error ? error.message : String(error)}`
-        );
-      }
-    }),
     vscode.languages.registerCodeActionsProvider(
       { scheme: 'file' },
       {

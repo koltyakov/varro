@@ -88,7 +88,7 @@ On macOS or Linux, use `lsof -nP -iTCP:4096 -sTCP:LISTEN` to find the listener. 
 
 - V2 does not expose session sharing or an OpenCode LSP service. Sharing is disabled on v2. VS Code Problems remain available as explicit context.
 - V2 cannot patch arbitrary session metadata. Varro keeps session annotations under the user's XDG state directory in `varro/opencode-v2/`. These annotations are local to Varro and are not synchronized to other OpenCode clients.
-- Changing CLI versions does not migrate or synchronize history. While connected to v2, run `Varro: Import OpenCode v1 Session into v2` to copy a local workspace conversation and its child sessions. The copy has new IDs and a title ending in `(v1 copy)`. You can continue it without changing the original v1 history. Imports do not execute recorded tools or send a model request.
+- Changing CLI versions does not synchronize history. After switching to v2, opening a v1 conversation that is still in the session list imports a copy of it and its child sessions when v2 cannot load the original. The copy has new IDs and a title ending in `(v1 copy)`. You can continue it without changing the original v1 history. Imports do not execute recorded tools or send a model request.
 
 See [OpenCode v1 and v2 support](opencode-v2-support.md) for adapter details and verification coverage.
 
@@ -585,7 +585,6 @@ Editable user messages expose an edit action. Sending the replacement removes th
 - `Varro: New Chat Editor`
 - `Varro: New Terminal Editor`
 - `Varro: Search Sessions`
-- `Varro: Import OpenCode v1 Session into v2`
 - `Varro: Open Settings`
 - `Varro: Show File Diffs` or `Varro: Hide File Diffs`
 - `Varro: Usage Stats`

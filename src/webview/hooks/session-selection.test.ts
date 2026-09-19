@@ -108,7 +108,7 @@ function createSelectionDependencies(
 }
 
 describe('session-selection helpers', () => {
-  it('removes a confirmed unavailable catalog entry and explains how to import legacy history', async () => {
+  it('removes a confirmed unavailable catalog entry and reports it', async () => {
     const removeUnavailableSession = vi.fn();
     const deps = createSelectionDependencies({
       getActiveSessionId: () => 'session-1',
@@ -120,7 +120,7 @@ describe('session-selection helpers', () => {
     await selectSessionWithDependencies(deps, { next: () => 1 }, 'session-1');
     expect(removeUnavailableSession).toHaveBeenCalledExactlyOnceWith('session-1');
     expect(deps.setError).toHaveBeenCalledWith(
-      expect.stringContaining('Import OpenCode v1 Session into v2')
+      'This conversation is unavailable on the connected OpenCode server.'
     );
     expect(deps.persistActiveSessionId).not.toHaveBeenCalled();
   });

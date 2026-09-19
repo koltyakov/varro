@@ -149,9 +149,7 @@ export async function selectSessionWithDependencies(
         deps.importLegacySession?.(id, directory);
         return;
       }
-      deps.setError(
-        'This conversation is unavailable on the connected OpenCode server. For v1 history, run "Varro: Import OpenCode v1 Session into v2".'
-      );
+      deps.setError('This conversation is unavailable on the connected OpenCode server.');
       return;
     }
     deps.setError('Failed to load messages');

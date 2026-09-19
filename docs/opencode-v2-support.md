@@ -67,7 +67,7 @@ These browser regressions do not certify the separate full real-editor visual/pe
 
 ## Importing v1 conversations into v2
 
-While connected to v2, run **Varro: Import OpenCode v1 Session into v2** from the VS Code command palette. Select a local v1 conversation from the current workspace. Varro reads a consistent, read-only snapshot and imports a separate conversation titled `<original title> (v1 copy)`.
+After switching from v1 to v2, the session list can still show conversations loaded from v1. Opening one of them loads it from v2. If v2 reports that the session was not found, Varro imports a copy automatically. The conversation must belong to an open workspace folder. Varro reads a consistent, read-only snapshot and imports a separate conversation titled `<original title> (v1 copy)`.
 
 The copy receives new session and message IDs. Same-workspace child sessions and their references are copied together. Text, reasoning, completed tool results, model identities, and embedded image attachments are converted to v2 history. Original message records and session metadata are retained in import metadata, including v1-only parts. External attachment references remain references. Unfinished historical tools become interrupted results rather than active operations. Import does not execute recorded tools or start a model request; the user can send a new message after the copy opens. New copies use the destination server's permission defaults.
 
