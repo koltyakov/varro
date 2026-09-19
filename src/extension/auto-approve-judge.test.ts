@@ -1469,7 +1469,11 @@ describe('AutoApproveJudge', () => {
       approvedReferences: [{ type: 'bash', title: 'bash git status --short', response: 'once' }],
     });
 
-    expect(result).toEqual({ decision: 'allow', reason: 'Model-reviewed command.' });
+    expect(result).toEqual({
+      decision: 'allow',
+      reason: 'Model-reviewed command.',
+      reviewerModel: { providerID: 'openai', modelID: 'gpt-5-mini' },
+    });
     expect(hiddenSessions.isHidden('judge-session-1')).toBe(true);
     hiddenSessions.observeEvent({
       type: 'session.updated',
@@ -1923,7 +1927,9 @@ describe('AutoApproveJudge', () => {
       () => configuredModel
     );
 
-    await judge.judge({ permission: cargoBuildPermission('perm-model-1') });
+    await expect(
+      judge.judge({ permission: cargoBuildPermission('perm-model-1') })
+    ).resolves.toMatchObject({ reviewerModel: { providerID: 'openai', modelID: 'model-one' } });
     configuredModel = 'openai/model-two';
     await judge.judge({ permission: cargoBuildPermission('perm-model-2') });
 

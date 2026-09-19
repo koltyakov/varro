@@ -1380,6 +1380,12 @@
   opacity: 0.58;
 }
 
+.models-route-tag-overridden {
+  background: transparent;
+  text-decoration: line-through;
+  opacity: 0.58;
+}
+
 .models-route-tag-change {
   margin-left: 3px;
   font-size: 8px;
@@ -1463,5 +1469,116 @@
 
 .models-model-rename-hint {
   color: var(--color-vscode-muted);
+  font-size: 11px;
+}
+
+.decision-provider {
+  border-bottom: 1px solid var(--color-vscode-border);
+}
+
+.decision-provider-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: var(--space-3) var(--space-5);
+  background: color-mix(in srgb, var(--color-vscode-fg) 3%, transparent);
+}
+
+.decision-provider-header:hover {
+  background: var(--color-vscode-hover);
+}
+
+.decision-provider-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.decision-provider-name {
+  overflow: hidden;
+  color: var(--color-vscode-fg);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.decision-provider-button {
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border: 1px solid var(--color-vscode-border);
+  border-radius: var(--radius-control);
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--color-vscode-fg);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.decision-provider-button:hover:not(:disabled) {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.decision-provider-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.decision-provider-body {
+  padding: 4px 0 8px;
+}
+
+.decision-provider-description {
+  margin: 4px var(--space-5) 6px;
+  color: var(--color-vscode-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.decision-provider-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 3px var(--space-5);
+  cursor: pointer;
+}
+
+.decision-provider-option:hover {
+  background: var(--color-vscode-hover);
+}
+
+.decision-provider-checkbox {
+  margin-top: 2px;
+}
+
+.decision-provider-option-name {
+  font-size: 12px;
+}
+
+.decision-provider-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.decision-provider-option-hint {
+  color: var(--color-vscode-muted);
+  font-size: 11px;
+}
+
+.decision-provider-error {
+  margin: 6px var(--space-5) 0;
+  color: var(--vscode-errorForeground);
   font-size: 11px;
 }

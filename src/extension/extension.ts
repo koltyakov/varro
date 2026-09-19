@@ -217,7 +217,9 @@ export async function activate(context: vscode.ExtensionContext) {
     contextProvider,
     server,
     context.extension.id,
-    simulateNoProviders
+    simulateNoProviders,
+    undefined,
+    context.secrets
   );
 
   context.subscriptions.push(

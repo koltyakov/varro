@@ -19,15 +19,18 @@ import {
   type HiddenSessionManager,
 } from './hidden-session-manager';
 import { resolveHelperModel } from './helper-model-selection';
+import type { JevDecisions } from './jev-decisions';
 import { logger } from './logger';
 
 type OpenCodeRequest = Pick<OpenCodeServer, 'request'>;
+type JevPermissionJudge = Pick<JevDecisions, 'isAutoApproveEnabled' | 'judgePermission' | 'model'>;
 type JudgeModel = NonNullable<AutoApproveJudgeRequest['model']>;
 type GitWorkTree = { gitDirectory: string; commonDirectory: string };
 type CachedVerdict = {
   decision: 'allow' | 'reject';
   reason?: string;
   actionSummary?: string;
+  reviewerModel?: AutoApproveJudgeResponse['reviewerModel'];
   expiresAt: number;
 };
 
@@ -84,7 +87,8 @@ export class AutoApproveJudge {
     private readonly getConfiguredModel: () => unknown = () => null,
     private readonly resolveGitWorkTree: (
       workspacePath: string
-    ) => Promise<GitWorkTree | null> = probeGitWorkTree
+    ) => Promise<GitWorkTree | null> = probeGitWorkTree,
+    private readonly jev?: JevPermissionJudge
   ) {}
 
   async judge(
@@ -111,10 +115,34 @@ export class AutoApproveJudge {
       return { decision: 'ask', reason: 'Permission request lacks enough detail to judge safely.' };
     }
 
-    let decisionSource: 'cache' | 'judge' = 'judge';
+    let decisionSource = 'judge' as 'cache' | 'judge' | 'jev';
     let verdictCacheKey: string | null = null;
     const decision = await this.withTimeout(
       (async () => {
+        if (this.jev && (await this.jev.isAutoApproveEnabled())) {
+          verdictCacheKey = buildVerdictCacheKey(
+            permission,
+            approvedReferences,
+            workspacePath,
+            this.jev.model
+          );
+          const cached = this.readCachedVerdict(verdictCacheKey);
+          if (cached) {
+            decisionSource = 'cache';
+            return cached;
+          }
+          try {
+            const jevDecision = await this.jev.judgePermission(permission, approvedReferences);
+            decisionSource = 'jev';
+            return { ...jevDecision, reviewerModel: this.jev.model };
+          } catch (err) {
+            logger.warn(
+              `Jev permission judge failed; using model judge: ${
+                err instanceof Error ? err.message : String(err)
+              }`
+            );
+          }
+        }
         const model = await this.resolveModel(request.model, workspacePath);
         verdictCacheKey = buildVerdictCacheKey(
           permission,
@@ -135,7 +163,7 @@ export class AutoApproveJudge {
       logger.warn(`Auto-approve judge failed: ${err instanceof Error ? err.message : String(err)}`);
       return { decision: 'ask', reason: 'Judge failed; asking user.' };
     });
-    if (decisionSource === 'judge' && verdictCacheKey && decision.decision !== 'ask') {
+    if (decisionSource !== 'cache' && verdictCacheKey && decision.decision !== 'ask') {
       this.storeCachedVerdict(verdictCacheKey, decision);
     }
     this.audit(decisionSource, permission, decision);
@@ -156,6 +184,7 @@ export class AutoApproveJudge {
     };
     if (entry.reason) response.reason = entry.reason;
     if (entry.actionSummary) response.actionSummary = entry.actionSummary;
+    if (entry.reviewerModel) response.reviewerModel = entry.reviewerModel;
     return response;
   }
 
@@ -167,6 +196,7 @@ export class AutoApproveJudge {
     };
     if (decision.reason) entry.reason = decision.reason;
     if (decision.actionSummary) entry.actionSummary = decision.actionSummary;
+    if (decision.reviewerModel) entry.reviewerModel = decision.reviewerModel;
     this.verdictCache.set(key, entry);
     if (this.verdictCache.size > VERDICT_CACHE_LIMIT) {
       const oldest = this.verdictCache.keys().next().value;
@@ -175,7 +205,7 @@ export class AutoApproveJudge {
   }
 
   private audit(
-    source: 'local-rule' | 'cache' | 'judge',
+    source: 'local-rule' | 'cache' | 'judge' | 'jev',
     permission: NormalizedJudgePermission,
     response: AutoApproveJudgeResponse
   ) {
@@ -234,7 +264,9 @@ export class AutoApproveJudge {
         workspacePath
       );
 
-      return normalizeJudgeResponse(response);
+      const decision = normalizeJudgeResponse(response);
+      if (model) decision.reviewerModel = { providerID: model.providerID, modelID: model.modelID };
+      return decision;
     } finally {
       this.hiddenSessions.forgetPendingTitle(title);
       if (sessionID) {
@@ -267,6 +299,7 @@ export class AutoApproveJudge {
     fallbackModel: AutoApproveJudgeRequest['model'],
     workspacePath?: string
   ): Promise<JudgeModel | null> {
+    if (this.jev && (await this.jev.isAutoApproveEnabled())) return this.jev.model;
     return resolveHelperModel({
       configuredModel: this.getConfiguredModel(),
       loadSmallModel: async () => {

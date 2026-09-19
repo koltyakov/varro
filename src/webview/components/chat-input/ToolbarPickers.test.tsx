@@ -502,6 +502,7 @@ describe('ToolbarPickers', () => {
               status: 'approval-required',
               title: 'external_directory /tmp/*',
               detail: 'Outside the workspace.',
+              reviewer: 'TypeSafe / Jev latest',
               createdAt: 3,
             },
             {
@@ -548,7 +549,7 @@ describe('ToolbarPickers', () => {
     expect(dots[5]?.className).toContain('manually-rejected');
     expect(dots[1]?.title).toBe('Auto-approved: edit src/app.ts. Workspace file edit.');
     expect(dots[2]?.title).toBe(
-      'Manual approval requested: external_directory /tmp/*. Outside the workspace.'
+      'Manual approval requested: external_directory /tmp/*. Outside the workspace.\nReviewer: TypeSafe / Jev latest'
     );
     expect(toggleButton?.getAttribute('aria-label')).toBe(
       'Auto-approve permissions - OpenAI / GPT-5.6'

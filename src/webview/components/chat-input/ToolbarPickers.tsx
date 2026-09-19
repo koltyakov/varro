@@ -64,7 +64,8 @@ function getAutoApproveActivityTitle(activity: AutoApproveActivity) {
     'manually-approved': 'Manually approved',
     'manually-rejected': 'Manually rejected',
   }[activity.status];
-  return `${label}: ${activity.title}${activity.detail ? `. ${activity.detail}` : ''}`;
+  const summary = `${label}: ${activity.title}${activity.detail ? `. ${activity.detail}` : ''}`;
+  return activity.reviewer ? `${summary}\nReviewer: ${activity.reviewer}` : summary;
 }
 
 const WORKSPACE_NAME_WORD_PATTERN = /[A-Z]+(?=[A-Z][a-z]|[^A-Za-z0-9]|$)|[A-Z]?[a-z]+|[0-9]+/g;

@@ -1838,6 +1838,7 @@ const API_ROUTES: ApiRoute[] = [
   route(VARRO_API_ENDPOINTS.openCodeConfigModelRouting, methodsNoQuery('POST')),
   route(VARRO_API_ENDPOINTS.openCodeConfigPermissions, methodsNoQuery('GET', 'POST')),
   route(VARRO_API_ENDPOINTS.permissionJudge, methodsNoQuery('POST')),
+  route(VARRO_API_ENDPOINTS.decisionProviders, methodsNoQuery('GET', 'POST')),
   route(
     VARRO_API_ENDPOINTS.permissionProjectAllow,
     ({ method, url }) => method === 'POST' && optionalDirectoryQuery(url)

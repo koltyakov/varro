@@ -85,6 +85,8 @@ const UNSEQUENCED_TRANSCRIPT_DELTA_EVENT_TYPES = new Set<ServerEvent['type']>([
   'session.next.compaction.delta',
 ]);
 import { AutoApproveJudge } from './auto-approve-judge';
+import { DecisionProviders } from './decision-providers';
+import { JevClient, JevDecisions } from './jev-decisions';
 import { CommitMessageService } from './commit-message-service';
 import type { ContextProvider } from './context-provider';
 import { DroppedFilesService } from './dropped-files-service';
@@ -219,6 +221,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly hiddenSessions: HiddenSessionManager;
   private readonly internalHelperCleanupCoordinator = new InternalHelperCleanupCoordinator();
   private readonly autoApproveJudge: AutoApproveJudge;
+  private readonly decisionProviders: DecisionProviders;
+  private readonly jevDecisions: JevDecisions;
   private readonly commitMessageService: CommitMessageService;
   private readonly sessionTitleFallback: SessionTitleFallback;
   private readonly ralphHost: RalphHost;
@@ -310,7 +314,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private readonly server: OpenCodeServer,
     private readonly extensionId: string,
     private readonly simulateNoProviders = false,
-    providerSignatureFileSystem: ProviderSignatureFileSystem = nodeProviderSignatureFileSystem
+    providerSignatureFileSystem: ProviderSignatureFileSystem = nodeProviderSignatureFileSystem,
+    secrets?: vscode.SecretStorage
   ) {
     this.contextProvider = contextProvider;
     const extensionPackageJson: unknown = vscode.extensions.getExtension(extensionId)?.packageJSON;
@@ -346,8 +351,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.sessionReadState = new SessionReadStateStore(globalPersistence);
     this.draftImages = new DraftImageStore(persistence);
     this.hiddenSessions = new HiddenSessionManager();
-    this.autoApproveJudge = new AutoApproveJudge(server, this.hiddenSessions, isOpenAIPro, () =>
-      vscode.workspace.getConfiguration('varro').get<string>('chat.autoApproveModel', '')
+    this.decisionProviders = new DecisionProviders(secrets);
+    this.jevDecisions = new JevDecisions(
+      new JevClient(this.decisionProviders.getApiKey),
+      this.decisionProviders.readSettings,
+      this.decisionProviders.hasApiKey
+    );
+    this.autoApproveJudge = new AutoApproveJudge(
+      server,
+      this.hiddenSessions,
+      isOpenAIPro,
+      () => vscode.workspace.getConfiguration('varro').get<string>('chat.autoApproveModel', ''),
+      undefined,
+      this.jevDecisions
     );
     this.sessionTitleFallback = new SessionTitleFallback(server, this.hiddenSessions, () =>
       vscode.workspace
@@ -623,6 +639,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       hiddenSessions: this.hiddenSessions,
       internalHelperCleanupCoordinator: this.internalHelperCleanupCoordinator,
       autoApproveJudge: this.autoApproveJudge,
+      decisionProviders: this.decisionProviders,
       sessionTitleFallback: this.sessionTitleFallback,
       readLocalSessionSummary,
       simulateNoProviders: this.simulateNoProviders,

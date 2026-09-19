@@ -4,6 +4,7 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 
 ## 0.29.x - September 2026
 
+- Added TypeSafe Jev as an opt-in decision provider for auto-approve. Add it with **Add decision model** in the Models view menu, then turn it on to judge Auto-mode permission requests with a fast typed decision before the model judge runs.
 - Added OpenCode v2.0.5+ support alongside v1.16.0+, with automatic API detection and authenticated connections.
 - Recommend v2 via `npm install -g @opencode/cli` or the standalone Windows CLI. V1 remains available via `npm install -g opencode-ai`; updates preserve the installed package family.
 - Prefer `opencode2`, falling back to `opencode`, unless `varro.server.command` is set. Both current packages use `opencode`.

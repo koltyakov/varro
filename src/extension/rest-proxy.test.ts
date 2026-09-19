@@ -950,6 +950,31 @@ describe('RestProxy handleRequest', () => {
     );
   });
 
+  it('serves decision provider status and updates', async () => {
+    const status = { jev: { connected: true, autoApprove: true } };
+    const decisionProviders = {
+      status: vi.fn(async () => status),
+      handle: vi.fn(async () => status),
+    };
+    const { proxy, callbacks } = createProxy({ decisionProviders: decisionProviders as never });
+
+    await proxy.handleRequest(makePayload(935, 'GET', '/varro/decision-providers'));
+    await proxy.handleRequest(
+      makePayload(936, 'POST', '/varro/decision-providers', {
+        action: 'update',
+        autoApprove: true,
+        ignored: 'x',
+      })
+    );
+
+    expect(decisionProviders.handle).toHaveBeenCalledWith({
+      action: 'update',
+      autoApprove: true,
+    });
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 935, data: status });
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 936, data: status });
+  });
+
   it('allows a leased queued prompt to target another open workspace', async () => {
     const serverRequest = vi.fn(() => Promise.resolve({ ok: true }));
     const { proxy, callbacks } = createProxy({

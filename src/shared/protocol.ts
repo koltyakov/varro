@@ -213,7 +213,26 @@ export type AutoApproveJudgeResponse = {
   decision: AutoApproveJudgeDecision;
   reason?: string;
   actionSummary?: string;
+  /** Model that reached the verdict; absent for local rules. */
+  reviewerModel?: { providerID: string; modelID: string };
 };
+
+/** Provider ID reported for decisions made by TypeSafe's Jev instead of an OpenCode model. */
+export const JEV_DECISION_PROVIDER_ID = 'typesafe';
+
+export type DecisionProviderStatus = {
+  jev: {
+    connected: boolean;
+    credentialSource: 'secret' | 'environment' | null;
+    model: string;
+    autoApprove: boolean;
+  };
+};
+
+export type DecisionProviderRequest =
+  | { action: 'connect' }
+  | { action: 'disconnect' }
+  | { action: 'update'; autoApprove?: boolean };
 
 export type AutoApproveActivityStatus =
   | 'reviewing'
@@ -228,6 +247,8 @@ export type AutoApproveActivity = {
   status: AutoApproveActivityStatus;
   title: string;
   detail?: string;
+  /** Display name of the model that reviewed the request. */
+  reviewer?: string;
   createdAt: number;
 };
 
@@ -438,6 +459,7 @@ export const VARRO_API_ENDPOINTS = {
   permissionSessionRules: `${VARRO_API_NAMESPACE}/permission/session-rules`,
   permissionServerMemory: `${VARRO_API_NAMESPACE}/permission/server-memory`,
   permissionProjectAllow: `${VARRO_API_NAMESPACE}/permission/project-allow`,
+  decisionProviders: `${VARRO_API_NAMESPACE}/decision-providers`,
 } as const;
 
 export interface ModelPricing {

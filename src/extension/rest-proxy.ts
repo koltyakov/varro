@@ -25,6 +25,7 @@ import {
 import type {
   AutoApproveJudgeReference,
   AutoApproveJudgeRequest,
+  DecisionProviderRequest,
   OpenCodeModelRouting,
   PermissionMode,
   ServerStatus,
@@ -40,6 +41,7 @@ import {
   normalizeWorkspaceIdentity,
 } from '../shared/workspace-path';
 import type { AutoApproveJudge } from './auto-approve-judge';
+import type { DecisionProviders } from './decision-providers';
 import type { HiddenSessionManager } from './hidden-session-manager';
 import { isAllowedApiRequest } from './util/webview-message';
 import type { ContextProvider } from './context-provider';
@@ -364,6 +366,7 @@ export interface RestProxyCallbacks {
     | 'retainUntilDeleted'
   >;
   autoApproveJudge: Pick<AutoApproveJudge, 'judge' | 'resolveModel'>;
+  decisionProviders?: Pick<DecisionProviders, 'status' | 'handle'>;
   sessionTitleFallback: Pick<SessionTitleFallback, 'renameIfUntitled'>;
   readLocalSessionSummary?(sessionID: string): Promise<LocalSessionSummaryData | null>;
   simulateNoProviders: boolean;
@@ -1212,6 +1215,17 @@ export class RestProxy {
           judgePermissionRequest,
           workspacePath
         );
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
+
+      if (requestPathname === VARRO_API_ENDPOINTS.decisionProviders) {
+        const decisionProviders = this.callbacks.decisionProviders;
+        if (!decisionProviders) throw new Error('Decision providers are unavailable');
+        const data =
+          method === 'GET'
+            ? await decisionProviders.status()
+            : await decisionProviders.handle(parseDecisionProviderRequest(payload.body));
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
       }
@@ -4951,6 +4965,15 @@ function setExplicitWorkspaceDirectory(path: string, workspaceDirectory: string)
   const url = new URL(path, 'http://localhost');
   url.searchParams.set('directory', workspaceDirectory);
   return `${url.pathname}${url.search}`;
+}
+
+function parseDecisionProviderRequest(value: unknown): DecisionProviderRequest {
+  const body = asRecord(value);
+  if (body?.action === 'connect' || body?.action === 'disconnect') return { action: body.action };
+  if (body?.action !== 'update') throw new Error('Unsupported decision provider request');
+  const request: DecisionProviderRequest = { action: 'update' };
+  if (typeof body.autoApprove === 'boolean') request.autoApprove = body.autoApprove;
+  return request;
 }
 
 function parseApprovedPermissionReferences(value: unknown): AutoApproveJudgeReference[] {

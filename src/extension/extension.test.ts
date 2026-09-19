@@ -237,12 +237,14 @@ describe('extension activation', () => {
     const { activate } = await import('./extension');
     const workspaceState = {};
     const globalState = { get: vi.fn(), update: vi.fn(() => Promise.resolve()) };
+    const secrets = { get: vi.fn(), store: vi.fn(), delete: vi.fn() };
 
     await activate({
       extensionUri: {},
       extension: { id: 'koltyakov.varro' },
       workspaceState,
       globalState,
+      secrets,
       subscriptions: [],
     } as never);
 
@@ -253,7 +255,9 @@ describe('extension activation', () => {
       expect.anything(),
       expect.anything(),
       'koltyakov.varro',
-      false
+      false,
+      undefined,
+      secrets
     );
   });
 

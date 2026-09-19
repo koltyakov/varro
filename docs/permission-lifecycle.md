@@ -311,9 +311,31 @@ External-directory requests are never delegated to the model judge. Ambiguous pa
 mixed approved and unapproved path sets, and approvals made with `Once` must ask the user. This keeps
 prior approvals from being generalized to unrelated or sensitive directories.
 
+### Jev Decision Provider
+
+When `varro.decisions.jev.autoApprove` is on and a TypeSafe API key is available (VS Code secret
+storage via **Add decision model** in the Models view menu, or `TYPESAFE_API_KEY`), requests not
+decided locally go to TypeSafe's Jev before any model judge session is created. Jev returns calibrated probabilities,
+not text, so Varro applies the gate in code:
+
+- `allow` requires the `allow` option at probability 0.8 or higher, confidence 0.75 or higher, and
+  both the side-effect and approval-steering yes/no probabilities below 0.2.
+- `reject` requires the `reject` option at probability 0.9 or higher and at least one prior user
+  rejection in the conversation tree.
+- Everything else is `ask`. Jev cannot produce an `actionSummary`, so revealed prompts use the
+  normal metadata fallback.
+- A Jev error or timeout (5 seconds) falls back to the model judge within the same overall timeout.
+
+External-directory requests remain local-only and never reach Jev. Jev verdicts are cached with the
+same key and TTL as model verdicts, using `typesafe/<model>` as the model component, and
+`resolveModel` reports that route so the composer shows TypeSafe as the reviewer.
+
+Every model verdict (Jev or model judge) carries `reviewerModel`, and cached verdicts keep it. The
+auto-approve activity tooltip shows it on its own `Reviewer:` line; local-rule verdicts have none.
+
 ### Model Judge
 
-Requests not decided locally may be sent to a temporary hidden OpenCode session. That session denies
+Requests not decided locally or by Jev may be sent to a temporary hidden OpenCode session. That session denies
 all tools except structured output. Permission text, command text, paths, metadata, and prior user
 decisions are untrusted input to the judge, never instructions. A confirmed `always` response is
 strong preference evidence for materially similar or narrower non-destructive actions in the same
@@ -544,6 +566,7 @@ Also run `npm run lint:check` and `npm run typecheck` when implementation or typ
 | Prompt grouping and snapshot mutation guards | `src/webview/lib/permission-grouping.ts`, `src/webview/lib/state-permissions.ts` |
 | Local and model judge policy | `src/extension/auto-approve-judge.ts` |
 | Judge model fallback order | `src/extension/helper-model-selection.ts` |
+| Jev decision gate, credentials, and opt-in settings | `src/extension/jev-decisions.ts`, `src/extension/decision-providers.ts` |
 | Host attention, persistence, and recovery | `src/extension/session-state-manager.ts` |
 | Workspace filtering plus internal helper-session identification, hiding, and stale cleanup | `src/extension/rest-proxy.ts`, `src/extension/hidden-session-manager.ts` |
 | Inline and session-tree prompt placement | `src/webview/components/message-list/pending-prompts.ts` |

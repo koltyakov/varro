@@ -35,6 +35,8 @@ declare global {
 }
 
 const clientMocks = vi.hoisted(() => ({
+  decisionProviderStatus: vi.fn(),
+  updateDecisionProvider: vi.fn(),
   openCodeConfig: vi.fn(),
   saveModelRouting: vi.fn(),
   providers: vi.fn(),
@@ -59,6 +61,10 @@ vi.mock('../lib/client', () => ({
     varro: {
       openCodeConfig: clientMocks.openCodeConfig,
       saveModelRouting: clientMocks.saveModelRouting,
+      decisionProviders: {
+        status: clientMocks.decisionProviderStatus,
+        update: clientMocks.updateDecisionProvider,
+      },
     },
     config: {
       providers: clientMocks.providers,
@@ -149,6 +155,14 @@ beforeEach(() => {
     unobserve() {}
     disconnect() {}
   } as typeof ResizeObserver;
+  clientMocks.decisionProviderStatus.mockResolvedValue({
+    jev: {
+      connected: false,
+      credentialSource: null,
+      model: 'jev-latest',
+      autoApprove: false,
+    },
+  });
   clientMocks.openCodeConfig.mockResolvedValue({
     smallModel: { providerID: 'openai', modelID: 'gpt-5-mini' },
     agentModels: { build: { providerID: 'openai', modelID: 'gpt-5' } },
@@ -441,6 +455,79 @@ describe('ModelsPanel', () => {
 
     expect(dialog?.textContent).toContain('Search 541 available models');
     expect(Object.keys(state.providers[0]?.models ?? {})).toHaveLength(541);
+  });
+
+  it('adds Jev from the provider actions menu and shows it above providers', async () => {
+    const disconnected = {
+      jev: {
+        connected: false,
+        credentialSource: null,
+        model: 'jev-latest',
+        autoApprove: false,
+      },
+    };
+    const connected = { jev: { ...disconnected.jev, connected: true, credentialSource: 'secret' } };
+    clientMocks.decisionProviderStatus.mockResolvedValue(disconnected);
+    clientMocks.updateDecisionProvider
+      .mockResolvedValueOnce(connected)
+      .mockResolvedValueOnce({ jev: { ...connected.jev, autoApprove: true } })
+      .mockResolvedValueOnce(disconnected);
+    cleanup = render(() => ModelsPanel(), container!);
+    await vi.waitFor(() => expect(clientMocks.decisionProviderStatus).toHaveBeenCalled());
+    expect(container?.querySelector('.decision-provider')).toBeNull();
+
+    const addDecisionModel = await vi.waitFor(() => {
+      const button = openProviderAction(container, 'Add decision model');
+      expect(button).toBeInstanceOf(HTMLButtonElement);
+      return button!;
+    });
+    addDecisionModel.click();
+    await vi.waitFor(() =>
+      expect(clientMocks.updateDecisionProvider).toHaveBeenCalledWith({ action: 'connect' })
+    );
+
+    const section = await vi.waitFor(() => {
+      const element = container?.querySelector<HTMLElement>('.decision-provider');
+      expect(element).toBeInstanceOf(HTMLElement);
+      return element!;
+    });
+    const firstProvider = container!.querySelector('.models-provider');
+    expect(
+      section.compareDocumentPosition(firstProvider!) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(openProviderAction(container, 'Add decision model')).toBeUndefined();
+
+    const autoApprove = container!.querySelector<HTMLInputElement>('.decision-provider-checkbox')!;
+    autoApprove.click();
+    await vi.waitFor(() => expect(autoApprove.checked).toBe(true));
+    expect(clientMocks.updateDecisionProvider).toHaveBeenLastCalledWith({
+      action: 'update',
+      autoApprove: true,
+    });
+
+    findButton(container, 'Disconnect')?.click();
+    await vi.waitFor(() => expect(container?.querySelector('.decision-provider')).toBeNull());
+  });
+
+  it('strikes through the auto-approve model tag while Jev handles auto-approve', async () => {
+    clientMocks.decisionProviderStatus.mockResolvedValue({
+      jev: {
+        connected: true,
+        credentialSource: 'secret',
+        model: 'jev-latest',
+        autoApprove: true,
+      },
+    });
+    cleanup = render(() => ModelsPanel(), container!);
+
+    await vi.waitFor(() =>
+      expect(container?.querySelector('.models-route-tag-approve')?.classList).toContain(
+        'models-route-tag-overridden'
+      )
+    );
+    expect(container?.querySelector('.models-route-tag-approve')?.getAttribute('aria-label')).toBe(
+      'Auto-approve model (TypeSafe Jev decides first; used only if Jev fails)'
+    );
   });
 
   it('labels the Claude Fast lightning symbol on hover', async () => {

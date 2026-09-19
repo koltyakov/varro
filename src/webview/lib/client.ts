@@ -19,6 +19,8 @@ import type {
   AutoApproveJudgeRequest,
   AutoApproveJudgeResponse,
   ChatModelSelection,
+  DecisionProviderRequest,
+  DecisionProviderStatus,
   LspStatus,
   McpStatus,
   ModelPricing,
@@ -700,6 +702,18 @@ export const client = {
         : apiCall('POST', VARRO_API_ENDPOINTS.permissionJudge, body, {
             permissionAutomationLease: options.permissionAutomationLease,
           });
+    },
+    decisionProviders: {
+      async status(): Promise<DecisionProviderStatus> {
+        return apiCall('GET', VARRO_API_ENDPOINTS.decisionProviders);
+      },
+      async update(request: DecisionProviderRequest): Promise<DecisionProviderStatus> {
+        // Connecting waits on a VS Code input box, so allow the user time to paste a key.
+        return apiCall('POST', VARRO_API_ENDPOINTS.decisionProviders, request, {
+          timeoutMs: 315_000,
+          retries: 0,
+        });
+      },
     },
     async resolveJudgeModel(model?: ChatModelSelection): Promise<ChatModelSelection | null> {
       const params = new URLSearchParams();

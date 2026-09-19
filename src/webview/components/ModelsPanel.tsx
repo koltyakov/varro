@@ -42,6 +42,7 @@ import { postMessage } from '../lib/bridge';
 import { refreshRoutingState } from '../hooks/useOpenCode';
 import type { OpenCodeModelRouting, Provider } from '../types';
 import { FormattedModelName } from './chat-input/ToolbarPickers';
+import { DecisionProviderSection, type JevStatus } from './DecisionProviderSection';
 import { ProviderConnectionDialog } from './ProviderConnectionDialog';
 import { ProviderDisconnectionDialog } from './ProviderDisconnectionDialog';
 import { Tooltip } from './Tooltip';
@@ -80,7 +81,7 @@ type ModelRouteTag = {
   kind: 'agent' | 'small' | 'approve' | 'commit';
   text: string;
   label: string;
-  change?: 'old' | 'new' | 'removed';
+  change?: 'old' | 'new' | 'removed' | 'overridden';
 };
 
 const MIN_RELOAD_INDICATOR_MS = 500;
@@ -123,6 +124,7 @@ function getOrderedProviderModels(provider: ModelProvider) {
 export function ModelsPanel() {
   onMount(() => {
     void refreshRoutingState();
+    void loadJevStatus();
   });
 
   const [query, setQuery] = createSignal('');
@@ -136,6 +138,24 @@ export function ModelsPanel() {
   const [renameDialog, setRenameDialog] = createSignal<ModelRenameState | null>(null);
   const [modelCatalogProvider, setModelCatalogProvider] = createSignal<ModelProvider | null>(null);
   const [showProviderActions, setShowProviderActions] = createSignal(false);
+  const [jevStatus, setJevStatus] = createSignal<JevStatus | null>(null);
+  const jevHandlesAutoApprove = () => !!jevStatus()?.connected && !!jevStatus()?.autoApprove;
+
+  async function loadJevStatus() {
+    try {
+      setJevStatus((await client.varro.decisionProviders.status()).jev);
+    } catch {
+      // Decision providers are optional; without a status the section stays hidden.
+    }
+  }
+
+  async function connectDecisionModel() {
+    try {
+      setJevStatus((await client.varro.decisionProviders.update({ action: 'connect' })).jev);
+    } catch {
+      // The extension host reports connection failures with a VS Code notification.
+    }
+  }
   const [isSaving, setIsSaving] = createSignal(false);
   const [isReloading, setIsReloading] = createSignal(false);
   const [providerConnectionData, setProviderConnectionData] = createSignal<{
@@ -572,6 +592,19 @@ export function ModelsPanel() {
                 >
                   Add provider
                 </button>
+                <Show when={jevStatus() && !jevStatus()?.connected}>
+                  <button
+                    type="button"
+                    class="models-context-menu-item"
+                    role="menuitem"
+                    onClick={() => {
+                      setShowProviderActions(false);
+                      void connectDecisionModel();
+                    }}
+                  >
+                    Add decision model
+                  </button>
+                </Show>
                 <button
                   type="button"
                   class="models-context-menu-item"
@@ -683,6 +716,14 @@ export function ModelsPanel() {
       <div class="models-body" ref={(el) => (bodyRef = el)}>
         <div class="models-body-inner">
           <Show
+            when={
+              jevStatus()?.connected &&
+              (!normalizedQuery() || /typesafe|jev|decision/.test(normalizedQuery()))
+            }
+          >
+            <DecisionProviderSection status={jevStatus()!} onStatusChange={setJevStatus} />
+          </Show>
+          <Show
             when={state.providers.length > 0}
             fallback={<div class="models-empty">No providers configured</div>}
           >
@@ -701,6 +742,7 @@ export function ModelsPanel() {
                       reconnectRequired={providerRequiresReconnection(providerID)}
                       forceExpanded={normalizedQuery().length > 0}
                       routing={routing()}
+                      jevHandlesAutoApprove={jevHandlesAutoApprove()}
                       previousRouting={state.providerRefreshPending ? previousRouting() : null}
                       reorderable={!normalizedQuery() && activeProviderIDs().includes(providerID)}
                       modelsReorderable={!normalizedQuery()}
@@ -1267,6 +1309,7 @@ function ProviderSection(props: {
   reconnectRequired: boolean;
   forceExpanded: boolean;
   routing: OpenCodeModelRouting;
+  jevHandlesAutoApprove: boolean;
   previousRouting: OpenCodeModelRouting | null;
   reorderable: boolean;
   modelsReorderable: boolean;
@@ -1500,7 +1543,8 @@ function ProviderSection(props: {
                     props.routing,
                     props.provider.id,
                     model.id,
-                    props.previousRouting
+                    props.previousRouting,
+                    props.jevHandlesAutoApprove
                   );
                 const releaseDate = () => formatModelReleaseDate(model.release_date);
 
@@ -1745,7 +1789,8 @@ function getModelRouteTags(
   routing: OpenCodeModelRouting,
   providerID: string,
   modelID: string,
-  previousRouting: OpenCodeModelRouting | null
+  previousRouting: OpenCodeModelRouting | null,
+  jevHandlesAutoApprove = false
 ) {
   const tags: ModelRouteTag[] = [];
 
@@ -1780,7 +1825,16 @@ function getModelRouteTags(
     routing.autoApproveModel?.providerID === providerID &&
     routing.autoApproveModel.modelID === modelID
   ) {
-    tags.push({ kind: 'approve', text: 'approve', label: 'Auto-approve model' });
+    tags.push(
+      jevHandlesAutoApprove
+        ? {
+            kind: 'approve',
+            text: 'approve',
+            label: 'Auto-approve model (TypeSafe Jev decides first; used only if Jev fails)',
+            change: 'overridden',
+          }
+        : { kind: 'approve', text: 'approve', label: 'Auto-approve model' }
+    );
   }
 
   const agentNames = new Set([
@@ -1843,7 +1897,13 @@ function ModelRouteBadge(props: { tag: ModelRouteTag }) {
         aria-label={props.tag.label}
       >
         {props.tag.text}
-        <Show when={props.tag.change !== 'removed' ? props.tag.change : undefined}>
+        <Show
+          when={
+            props.tag.change !== 'removed' && props.tag.change !== 'overridden'
+              ? props.tag.change
+              : undefined
+          }
+        >
           {(change) => <span class="models-route-tag-change">{change()}</span>}
         </Show>
       </span>

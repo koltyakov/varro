@@ -115,6 +115,7 @@ import {
   loadingLastActivityAt,
   loadingStartedAt,
   showTurnTimer,
+  getReviewerModelNames,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
 import { readWebviewInstanceContext } from '../lib/state-stored-values';
@@ -4549,15 +4550,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   });
   const autoApproveJudgeModel = createMemo(() => {
     const route = resolvedAutoApproveJudgeModel();
-    if (!route) return null;
-    const provider = state.providers.find((item) => item.id === route.providerID);
-    const model = provider
-      ? Object.values(provider.models).find((item) => item.id === route.modelID)
-      : null;
-    return {
-      providerName: provider?.name || route.providerID,
-      modelName: model?.name || route.modelID,
-    };
+    return route ? getReviewerModelNames(route) : null;
   });
   let judgeModelRequestId = 0;
   createEffect(() => {

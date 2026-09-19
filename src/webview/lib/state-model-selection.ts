@@ -2,6 +2,7 @@ import { produce, reconcile } from 'solid-js/store';
 import type { Command, Provider } from '../types';
 import type { SelectedModel } from './app-state-types';
 import type { McpStatus, ProviderLimitStatus } from '../../shared/protocol';
+import { JEV_DECISION_PROVIDER_ID } from '../../shared/protocol';
 import type { ProviderAuthMethodsByProvider } from '../../shared/opencode-types';
 import { setState, showSessionPicker, state } from './app-state';
 import { postMessage } from './bridge';
@@ -253,6 +254,21 @@ export function modelVisibilityKey(providerID: string, modelID: string) {
 
 export function getModelDisplayName(providerID: string, modelID: string, fallbackName: string) {
   return state.modelDisplayNames[modelVisibilityKey(providerID, modelID)] || fallbackName;
+}
+
+/** Provider and model names for a permission reviewer route, including TypeSafe Jev. */
+export function getReviewerModelNames(route: { providerID: string; modelID: string }) {
+  if (route.providerID === JEV_DECISION_PROVIDER_ID) {
+    return { providerName: 'TypeSafe', modelName: route.modelID.replace(/^jev-/, 'Jev ') };
+  }
+  const provider = state.providers.find((item) => item.id === route.providerID);
+  const model = provider
+    ? Object.values(provider.models).find((item) => item.id === route.modelID)
+    : null;
+  return {
+    providerName: provider?.name || route.providerID,
+    modelName: getModelDisplayName(route.providerID, route.modelID, model?.name || route.modelID),
+  };
 }
 
 export function setModelDisplayName(providerID: string, modelID: string, name: string) {

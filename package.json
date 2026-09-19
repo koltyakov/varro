@@ -496,6 +496,12 @@
           "patternErrorMessage": "Use provider/model, or leave the setting empty.",
           "markdownDescription": "Provider/model used to generate commit messages. Leave empty to let Varro select a suitable model automatically. Select a configured model from Varro's Models view."
         },
+        "varro.decisions.jev.autoApprove": {
+          "type": "boolean",
+          "scope": "application",
+          "default": false,
+          "markdownDescription": "Use TypeSafe's Jev to judge permission requests in Auto mode before the model judge. Only confident answers approve; anything else asks you. Connect it with **Add decision model** in the Varro Models view menu, or set `TYPESAFE_API_KEY`. Permission details are sent to TypeSafe."
+        },
         "varro.debug.simulateMissingCli": {
           "deprecationMessage": "Debug only setting. Not intended for regular use.",
           "type": "boolean",
