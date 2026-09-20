@@ -25,11 +25,12 @@ export class OpenCodeV2SessionState {
     }
   }
 
-  async update(sessionID: string, patch: UnknownRecord): Promise<void> {
-    const previous = this.operations.get(sessionID);
-    const operation = (async () => {
-      await previous?.catch(() => {});
+  async update(sessionID: string, patch: UnknownRecord, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
+    return this.mutate(sessionID, async () => {
+      signal?.throwIfAborted();
       const current = await this.read(sessionID);
+      signal?.throwIfAborted();
       const next = {
         ...current,
         ...patch,
@@ -39,11 +40,25 @@ export class OpenCodeV2SessionState {
       const path = this.path(sessionID);
       const temporary = `${path}.${randomUUID()}.tmp`;
       try {
-        await writeFile(temporary, JSON.stringify(next), { mode: 0o600 });
+        await writeFile(temporary, JSON.stringify(next), { mode: 0o600, signal });
+        signal?.throwIfAborted();
         await rename(temporary, path);
       } finally {
         await rm(temporary, { force: true });
       }
+    });
+  }
+
+  async remove(sessionID: string): Promise<void> {
+    return this.mutate(sessionID, () => rm(this.path(sessionID), { force: true }));
+  }
+
+  private async mutate(sessionID: string, run: () => Promise<void>): Promise<void> {
+    const previous = this.operations.get(sessionID);
+    const operation = (async () => {
+      // A failed operation must not block a later update or cleanup.
+      await previous?.catch(() => {});
+      await run();
     })();
     this.operations.set(sessionID, operation);
     try {
@@ -51,11 +66,6 @@ export class OpenCodeV2SessionState {
     } finally {
       if (this.operations.get(sessionID) === operation) this.operations.delete(sessionID);
     }
-  }
-
-  async remove(sessionID: string): Promise<void> {
-    await this.operations.get(sessionID);
-    await rm(this.path(sessionID), { force: true });
   }
 
   private path(sessionID: string): string {

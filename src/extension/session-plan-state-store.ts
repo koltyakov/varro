@@ -100,14 +100,17 @@ export class SessionPlanStateStore {
       if (Object.hasOwn(this.state, sessionId)) {
         const next = { ...this.state };
         delete next[sessionId];
-        this.state = next;
         await this.persistence.set(SESSION_PLAN_STATE_KEY, next);
+        this.state = next;
       }
       if (Object.hasOwn(this.agents, sessionId)) {
         const next = { ...this.agents };
         delete next[sessionId];
-        this.agents = next;
         await this.persistence.set(SESSION_PLAN_AGENT_STATE_KEY, next);
+        // Agent restoration can run while persistence is pending. Keep other sessions.
+        const current = { ...this.agents };
+        delete current[sessionId];
+        this.agents = current;
       }
     });
   }

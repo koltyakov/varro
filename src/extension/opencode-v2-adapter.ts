@@ -271,6 +271,7 @@ export class OpenCodeV2Adapter {
     body: unknown,
     options: OpenCodeRequestOptions = {}
   ): Promise<unknown> {
+    options.signal?.throwIfAborted();
     const url = new URL(path, 'http://localhost');
     const route = url.pathname;
     // VS Code lowercases drive letters. OpenCode 2.0.6 can overflow its instruction
@@ -534,7 +535,8 @@ export class OpenCodeV2Adapter {
           const patch: UnknownRecord = {};
           if (input.metadata !== undefined) patch.metadata = input.metadata;
           if (input.time !== undefined) patch.time = input.time;
-          if (Object.keys(patch).length) await this.annotations.update(sessionID, patch);
+          if (Object.keys(patch).length)
+            await this.annotations.update(sessionID, patch, options.signal);
           return this.session(await data<SessionInfo>('GET', endpoint));
         }
       }

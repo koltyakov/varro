@@ -1,6 +1,6 @@
 /* oxlint-disable anti-slop/no-module-mocking -- Tests exercise HTTP boundaries with deterministic wire responses and typed fixture assertions. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, mkdir, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { ModelInfo, SessionMessageAssistant, SessionInfo } from '@opencode/client';
 import { OpenCodeStartupOutput, openCodeApiVersion } from './opencode-connection';
@@ -1386,6 +1386,49 @@ describe('v2 transcript and permission projection', () => {
     expect(await adapter.request('POST', '/mcp/fixture/auth/authenticate', {})).toBe(true);
     expect(opened).toHaveBeenCalledWith('https://example.com/fixture-auth');
   });
+
+  it.each(['before-request', 'during-read'])(
+    'does not save local annotations when cancelled %s',
+    async (when) => {
+      const parent = resolve('artifacts/ai-test-data');
+      await mkdir(parent, { recursive: true });
+      const directory = await mkdtemp(join(parent, 'cancelled-annotations-'));
+      try {
+        const state = new OpenCodeV2SessionState(directory);
+        const wire = vi.fn();
+        const adapter = new OpenCodeV2Adapter(wire, state);
+        await state.update('ses_fixture', { metadata: { label: 'original' } });
+        const controller = new AbortController();
+        if (when === 'before-request') controller.abort(new Error('Cancelled fixture request'));
+        else {
+          const read = state.read.bind(state);
+          vi.spyOn(state, 'read').mockImplementationOnce(async (id) => {
+            controller.abort(new Error('Cancelled fixture request'));
+            return read(id);
+          });
+        }
+
+        await expect(
+          adapter.request(
+            'PATCH',
+            '/session/ses_fixture',
+            {
+              metadata: { label: 'cancelled' },
+            },
+            { signal: controller.signal }
+          )
+        ).rejects.toThrow('Cancelled fixture request');
+
+        expect(await state.read('ses_fixture')).toEqual({
+          metadata: { label: 'original' },
+          time: {},
+        });
+        expect(wire).not.toHaveBeenCalled();
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  );
 
   it('persists host annotations without issuing unsupported native patches', async () => {
     const parent = resolve('artifacts/ai-test-data');

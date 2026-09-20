@@ -68,6 +68,32 @@ describe('SessionPlanStateStore', () => {
     expect(persistence.set).toHaveBeenCalledWith('varro.sessionPlanAgentState', {});
   });
 
+  it('keeps agent restoration for another session while deletion is saving', async () => {
+    const persistence: Persistence = { get: vi.fn(), set: vi.fn(async () => {}), remove: vi.fn() };
+    const store = new SessionPlanStateStore(persistence);
+    await store.setAgent('session-1', 'build');
+    let resume!: () => void;
+    let begin!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      begin = resolve;
+    });
+    vi.mocked(persistence.set).mockImplementationOnce(() => {
+      begin();
+      return pending;
+    });
+
+    const removal = store.removeSession('session-1');
+    await started;
+    store.restoreAgent('session-2', 'plan');
+    resume();
+    await removal;
+
+    expect(store.listAgents()).toEqual({ 'session-2': 'plan' });
+  });
+
   it('drops invalid persisted entries', () => {
     const persistence: Persistence = {
       get<T>() {
@@ -83,4 +109,37 @@ describe('SessionPlanStateStore', () => {
 
     expect(new SessionPlanStateStore(persistence).list()).toEqual({ 'session-1': 200 });
   });
+
+  it.each(['varro.sessionPlanState', 'varro.sessionPlanAgentState'])(
+    'retries deletion after saving %s fails',
+    async (failedKey) => {
+      const saved = new Map<string, unknown>();
+      const persistence: Persistence = {
+        get<T>(key: string) {
+          return saved.get(key) as T | undefined;
+        },
+        set: vi.fn<Persistence['set']>(async (key, value) => {
+          saved.set(key, value);
+        }),
+        remove: vi.fn(),
+      };
+      const store = new SessionPlanStateStore(persistence);
+      await store.update('session-1', { skippedAt: 100, agent: 'build' });
+      let failed = false;
+      vi.mocked(persistence.set).mockImplementation(async (key, value) => {
+        if (key === failedKey && !failed) {
+          failed = true;
+          throw new Error('Storage unavailable');
+        }
+        saved.set(key, value);
+      });
+
+      await expect(store.removeSession('session-1')).rejects.toThrow('Storage unavailable');
+      await store.removeSession('session-1');
+
+      const restored = new SessionPlanStateStore(persistence);
+      expect(restored.list()).toEqual({});
+      expect(restored.listAgents()).toEqual({});
+    }
+  );
 });
