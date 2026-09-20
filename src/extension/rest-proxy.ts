@@ -322,7 +322,8 @@ export interface RestProxyCallbacks {
     info: Record<string, unknown>,
     parts: Record<string, unknown>[]
   ): Record<string, unknown>[];
-  server: Pick<OpenCodeServer, 'apiVersion' | 'getWorkspaceCwd' | 'request'>;
+  server: Pick<OpenCodeServer, 'apiVersion' | 'getWorkspaceCwd' | 'request'> &
+    Partial<Pick<OpenCodeServer, 'isAttachOnly'>>;
   contextProvider: Pick<
     ContextProvider,
     'context' | 'getOpenWorkspaceRoot' | 'readFile' | 'resolvePath'
@@ -4012,6 +4013,11 @@ export class RestProxy {
   }
 
   private async readOpenCodeConfigObject(): Promise<OpenCodeConfigSnapshot> {
+    if (this.callbacks.server.isAttachOnly) {
+      throw new Error(
+        'File-based OpenCode configuration is not supported in attach-only mode. Edit model, provider, and project permission settings on the server host or inside the container. Session permissions remain available through the API.'
+      );
+    }
     const workspacePath = this.getOpenCodeWorkspacePath();
     const files: OpenCodeConfigFile[] = [];
     const pathApi = getOpenCodePathApi(workspacePath);
@@ -4085,6 +4091,11 @@ export class RestProxy {
   }
 
   private async readOpenCodeModelRouting(): Promise<OpenCodeModelRouting> {
+    if (this.callbacks.server.isAttachOnly) {
+      const config = asRecord(await this.requestServer('GET', '/config'));
+      if (!config) throw new Error('OpenCode returned an invalid server configuration');
+      return this.normalizeOpenCodeModelRouting(config);
+    }
     const { config, files } = await this.readOpenCodeConfigObject();
     const routing = this.normalizeOpenCodeModelRouting(config);
     const providerConfigPaths = await this.readOpenCodeProviderConfigPaths(files);

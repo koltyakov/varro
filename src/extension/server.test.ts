@@ -1108,9 +1108,8 @@ describe('OpenCodeServer maintenance', () => {
     await runMaintenanceTick(server);
 
     expect(restartServerForCliUpdate).not.toHaveBeenCalled();
-    expect(loggerMock.info).toHaveBeenCalledWith(
-      'OpenCode CLI 1.14.22 is newer than running server 1.14.20, but Varro server auto-start is disabled; skipping automatic restart'
-    );
+    expect(api.readInstalledCliVersion).not.toHaveBeenCalled();
+    expect(api.maybeSuggestCliUpdate).not.toHaveBeenCalled();
   });
 
   it('keeps using an unmanaged running server when the installed CLI is newer', async () => {
@@ -1868,6 +1867,55 @@ describe('OpenCodeServer maintenance', () => {
 });
 
 describe('OpenCodeServer compatibility gate', () => {
+  it.each(['1.18.31', '2.0.10'])(
+    'attaches to %s without local ownership, CLI checks, or process control',
+    async (version) => {
+      const server = new OpenCodeServer(4096, false);
+      const api = server as unknown as {
+        readHealthInfo: () => Promise<{ healthy: boolean; version: string }>;
+        readInstalledCliVersion: () => Promise<string | null>;
+        startEventStream: () => Promise<void>;
+        processManager: {
+          recoverManagedServerOwnership: () => Promise<boolean>;
+          prepareForHealthyExistingServer: () => Promise<void>;
+          stopServerForRestart: () => Promise<void>;
+        };
+      };
+      api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version });
+      api.readInstalledCliVersion = vi.fn();
+      api.startEventStream = vi.fn().mockResolvedValue(undefined);
+      api.processManager.recoverManagedServerOwnership = vi.fn();
+      api.processManager.prepareForHealthyExistingServer = vi.fn();
+      api.processManager.stopServerForRestart = vi.fn();
+
+      await expect(server.start()).resolves.toBe('http://127.0.0.1:4096');
+      await expect(server.restart({ force: true })).rejects.toThrow('attach-only mode');
+      await runMaintenanceTick(server);
+      expect(server.status.state).toBe('running');
+      expect(api.readInstalledCliVersion).not.toHaveBeenCalled();
+      expect(api.processManager.recoverManagedServerOwnership).not.toHaveBeenCalled();
+      expect(api.processManager.prepareForHealthyExistingServer).not.toHaveBeenCalled();
+      expect(api.processManager.stopServerForRestart).not.toHaveBeenCalled();
+      expect(spawnMock).not.toHaveBeenCalled();
+      await server.disconnect();
+    }
+  );
+
+  it('retries a failed attach without trying to claim or stop the server', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const api = server as unknown as {
+      _status: ServerStatus;
+      start: () => Promise<string>;
+      processManager: { takeOwnershipOfExistingServer: () => Promise<boolean> };
+    };
+    api._status = { state: 'error', message: 'connection refused' };
+    api.start = vi.fn().mockResolvedValue(server.url);
+    api.processManager.takeOwnershipOfExistingServer = vi.fn();
+    await expect(server.restart()).resolves.toBe(server.url);
+    expect(api.start).toHaveBeenCalledOnce();
+    expect(api.processManager.takeOwnershipOfExistingServer).not.toHaveBeenCalled();
+  });
+
   it('does not block a healthy existing server on ownership recovery', async () => {
     const server = new OpenCodeServer(4096, true);
     const recovery = deferred<boolean>();

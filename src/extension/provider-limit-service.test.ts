@@ -126,6 +126,28 @@ function createStatus(status: ProviderLimitStatus['status']): ProviderLimitStatu
 }
 
 describe('ProviderLimitService', () => {
+  it.each([1, 2] as const)(
+    'does not read local credentials for a v%s Docker port',
+    async (apiVersion) => {
+      const server = {
+        ...createServer(),
+        apiVersion,
+        url: 'http://127.0.0.1:4096',
+        isAttachOnly: true,
+      };
+      const service = new ProviderLimitService(server);
+      await expect(service.get('openai', 'gpt-5.4')).resolves.toMatchObject({
+        status: 'unsupported',
+        note: expect.stringContaining('attach-only mode'),
+      });
+      expect(mocks.readFileMock).not.toHaveBeenCalled();
+      expect(mocks.readV2AuthStoreMock).not.toHaveBeenCalled();
+      expect(mocks.fetchProviderLimitFromAdapterMock).not.toHaveBeenCalled();
+      expect(server.request).not.toHaveBeenCalled();
+      service.dispose();
+    }
+  );
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();

@@ -89,6 +89,7 @@ function createHarness(
   const fileSystem = createFileSystemMock(options.files);
   let idle = true;
   const server = {
+    isAttachOnly: false,
     status: { state: 'running', url: 'http://127.0.0.1:4096' } as ServerStatus,
     on: vi.fn(),
     off: vi.fn(),
@@ -210,6 +211,20 @@ function globalDisposeCallCount(h: Harness) {
 }
 
 describe('ProviderFileRefreshController', () => {
+  it('does not watch host credentials or invalidate an attach-only server', async () => {
+    const h = createHarness({ persisted: { version: 1, revalidateAuth: true } });
+    h.server.isAttachOnly = true;
+    await activateWatching(h);
+    emitStatusEvent(h.server, h.server.status);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(vscodeMock.workspace.createFileSystemWatcher).not.toHaveBeenCalled();
+    expect(h.fileSystem.stat).not.toHaveBeenCalled();
+    expect(h.fileSystem.readFile).not.toHaveBeenCalled();
+    expect(h.server.request).not.toHaveBeenCalled();
+    expect(h.server.restart).not.toHaveBeenCalled();
+    h.controller.dispose();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();

@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   openTextDocument: vi.fn(),
   showTextDocument: vi.fn(),
   showErrorMessage: vi.fn(),
+  showInformationMessage: vi.fn(),
 }));
 
 vi.mock('child_process', () => ({
@@ -66,6 +67,7 @@ vi.mock('vscode', () => ({
   window: {
     showTextDocument: mocks.showTextDocument,
     showErrorMessage: mocks.showErrorMessage,
+    showInformationMessage: mocks.showInformationMessage,
   },
 }));
 
@@ -127,6 +129,19 @@ function createSpawnResult() {
 }
 
 describe('SessionExportService', () => {
+  it('explains external exports without invoking the local CLI or creating files', async () => {
+    const server = { ...createServer(), isAttachOnly: true };
+    await expect(
+      new SessionExportService(server, 1000).exportSession('remote')
+    ).resolves.toBeUndefined();
+    expect(mocks.showInformationMessage).toHaveBeenCalledWith(
+      expect.stringContaining('attach-only mode')
+    );
+    expect(mocks.spawn).not.toHaveBeenCalled();
+    expect(mocks.mkdtemp).not.toHaveBeenCalled();
+    expect(server.request).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.mkdtemp.mockResolvedValue('/tmp/varro-opencode-export-123');

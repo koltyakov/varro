@@ -898,6 +898,21 @@ function openNewTerminalEditor(provider: object) {
 }
 
 describe('SidebarProvider terminal commands', () => {
+  it('explains attach-only terminal actions without launching a local process', async () => {
+    const server = createServer({ isAttachOnly: true });
+    const { provider } = await createSidebarProviderInstance({ server });
+    await runInTerminal(provider, 'opencode auth login');
+    await runInTerminal(provider, 'npm install -g @opencode/cli');
+    await openSessionInTerminal(provider, 'remote-session');
+    expect(getVscodeMock().window.showInformationMessage).toHaveBeenCalledTimes(3);
+    expect(getVscodeMock().window.showInformationMessage).toHaveBeenCalledWith(
+      expect.stringContaining('attach-only mode')
+    );
+    expect(getVscodeMock().window.createTerminal).not.toHaveBeenCalled();
+    expect(server.resolveCommand).not.toHaveBeenCalled();
+    expect(server.prepareForWindowsCliUpgrade).not.toHaveBeenCalled();
+  });
+
   it('opens the default shell in an editor tab at the workspace root', async () => {
     const { provider } = await createSidebarProviderInstance();
 

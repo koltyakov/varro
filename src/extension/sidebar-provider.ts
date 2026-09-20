@@ -627,6 +627,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       get apiVersion() {
         return server.apiVersion;
       },
+      get isAttachOnly() {
+        return server.isAttachOnly;
+      },
       getWorkspaceCwd: () =>
         endpointRef.endpoint
           ? (endpointRef.endpoint.workspacePath ?? undefined)
@@ -3052,6 +3055,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (this.server.isAttachOnly) {
       this.providerLimitService.clearCache();
       this.post({ type: 'providers/refresh', payload: { revalidateAuth: true } });
+      if (this.server.apiVersion === 1) {
+        await vscode.window.showInformationMessage(
+          'Provider credentials changed on the external OpenCode v1 server. If the provider list has not updated, restart OpenCode on its server host or inside the container, then refresh providers.'
+        );
+      }
       return;
     }
     const serverInfo = await this.server.readServerInfo().catch(() => null);

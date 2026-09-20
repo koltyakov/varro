@@ -2006,6 +2006,10 @@ describe('OpenCodeProcess server ownership leases', () => {
     const manager = new OpenCodeProcess(4096, true, 'opencode', false, undefined, leasePath);
     expect(manager.port).toBe(4100);
 
+    const attached = new OpenCodeProcess(4096, false, 'opencode', false, undefined, leasePath);
+    expect(attached.url).toBe('http://127.0.0.1:4096');
+    expect(attached.managedProcess).toBe(false);
+
     await expect(manager.recoverManagedServerOwnership()).resolves.toBe(false);
 
     expect(manager.port).toBe(4096);

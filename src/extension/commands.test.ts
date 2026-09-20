@@ -96,7 +96,7 @@ vi.mock('./open-code-process', () => ({
 }));
 const { errorHubMock, loggerMock } = vi.hoisted(() => ({
   errorHubMock: { report: vi.fn() },
-  loggerMock: { error: vi.fn(), info: vi.fn(), show: vi.fn() },
+  loggerMock: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), show: vi.fn() },
 }));
 
 vi.mock('./logger', () => ({ logger: loggerMock }));
@@ -473,6 +473,17 @@ async function runCommand(id: string, ...args: unknown[]) {
 }
 
 describe('AGENTS.md commands', () => {
+  it('explains external global configuration without touching local files', async () => {
+    register('/repo', { isAttachOnly: true });
+    await expect(runCommand('varro.agents.openGlobal')).resolves.toBeUndefined();
+    expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledWith(
+      expect.stringContaining('attach-only mode')
+    );
+    expect(vscodeMock.workspace.fs.stat).not.toHaveBeenCalled();
+    expect(vscodeMock.workspace.fs.writeFile).not.toHaveBeenCalled();
+    expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 1 });
@@ -881,6 +892,13 @@ describe('sidebar navigation commands', () => {
     await runCommand('varro.chat.openStats');
 
     expect(sidebar.generateUsageReport).toHaveBeenCalledOnce();
+  });
+
+  it('contains a usage-report rejection after the service displays its error', async () => {
+    const { sidebar } = register();
+    sidebar.generateUsageReport.mockRejectedValueOnce(new Error('API report limit exceeded'));
+    await expect(runCommand('varro.chat.openStats')).resolves.toBeUndefined();
+    expect(loggerMock.warn).toHaveBeenCalledWith('Usage report failed: API report limit exceeded');
   });
 
   it('opens the Varro GitHub repository', async () => {

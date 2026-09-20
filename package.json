@@ -520,7 +520,7 @@
           "deprecationMessage": "Debug only setting. Not intended for regular use.",
           "type": "boolean",
           "default": true,
-          "description": "Automatically start the OpenCode server when Varro first needs it"
+          "description": "Automatically start the OpenCode server when Varro first needs it. Disable for attach-only connections to a manually managed, Docker, or tunneled server; local CLI and file-based server configuration actions are unavailable in this mode."
         }
       }
     }

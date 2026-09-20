@@ -12,6 +12,104 @@ import { getOpenCodeConfigPaths } from './open-code-process';
 const vscodeMock = getVscodeMock();
 
 describe('SidebarProvider local config routing', () => {
+  it.each([1, 2] as const)(
+    'reads v%s attach-only model routing from the server',
+    async (apiVersion) => {
+      const server = createServer({
+        apiVersion,
+        isAttachOnly: true,
+        request: vi.fn(async () => ({
+          small_model: 'remote/model',
+          agent: { build: { model: 'remote/build' } },
+        })),
+      });
+      const { provider } = await createSidebarProviderInstance({ server });
+      const { posted } = attachTestView(provider);
+      await provider.handleMessage({
+        type: 'api/request',
+        payload: { id: 901, method: 'GET', path: '/varro/opencode-config' },
+      });
+      expect(posted).toContainEqual({
+        type: 'api/response',
+        payload: {
+          id: 901,
+          data: expect.objectContaining({
+            smallModel: { providerID: 'remote', modelID: 'model' },
+            agentModels: { build: { providerID: 'remote', modelID: 'build' } },
+          }),
+        },
+      });
+      expect(vscodeMock.workspace.fs.readFile).not.toHaveBeenCalled();
+    }
+  );
+
+  it('returns actionable errors for external file-based settings without reading or writing host config', async () => {
+    const server = createServer({ isAttachOnly: true });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const { posted } = attachTestView(provider);
+    const requests = [
+      { id: 901, method: 'GET', path: '/varro/opencode-config/permissions' },
+      { id: 902, method: 'POST', path: '/varro/opencode-config/permissions', body: { rules: [] } },
+      {
+        id: 903,
+        method: 'POST',
+        path: '/varro/opencode-config/model-routing',
+        body: { target: 'small_model', providerID: 'remote', modelID: 'model' },
+      },
+      {
+        id: 904,
+        method: 'POST',
+        path: '/varro/opencode-config/disable-provider',
+        body: { providerID: 'ollama' },
+      },
+    ];
+    for (const payload of requests) {
+      await expect(
+        provider.handleMessage({ type: 'api/request', payload })
+      ).resolves.toBeUndefined();
+      expect(posted).toContainEqual({
+        type: 'api/response',
+        payload: {
+          id: payload.id,
+          error: expect.stringContaining('not supported in attach-only mode'),
+        },
+      });
+    }
+    expect(vscodeMock.workspace.fs.readFile).not.toHaveBeenCalled();
+    expect(vscodeMock.workspace.fs.writeFile).not.toHaveBeenCalled();
+    expect(server.request).not.toHaveBeenCalled();
+  });
+
+  it('keeps a project approval pending when external project configuration is unavailable', async () => {
+    const server = createServer({
+      isAttachOnly: true,
+      request: vi.fn(async (_method: string, path: string) => {
+        if (path === '/permission')
+          return [
+            { id: 'permission-1', sessionID: 'session-1', permission: 'edit', always: ['src/*'] },
+          ];
+        return { id: 'session-1', directory: '/repo' };
+      }),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const { posted } = attachTestView(provider);
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: {
+        id: 905,
+        method: 'POST',
+        path: '/varro/permission/project-allow',
+        body: { sessionId: 'session-1', permissionId: 'permission-1' },
+      },
+    });
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: { id: 905, error: expect.stringContaining('attach-only mode') },
+    });
+    expect(server.request.mock.calls.every(([method]) => method === 'GET')).toBe(true);
+    expect(vscodeMock.workspace.fs.writeFile).not.toHaveBeenCalled();
+  });
+
   it.each([false, true])(
     'persists local provider disabling and handles concurrent edits, conflict=%s',
     async (conflict) => {

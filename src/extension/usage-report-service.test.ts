@@ -117,6 +117,45 @@ afterEach(() => {
 });
 
 describe('UsageReportService', () => {
+  it('uses external API history even when an unrelated local database is available', async () => {
+    const request = vi.fn<Request>().mockResolvedValue([]);
+    const readLocalUsage = vi.fn(async () => ({ sessionCount: 99, usage: [] }));
+    const ensureServerStarted = vi.fn(async () => undefined);
+    const service = new UsageReportService(
+      { request, isAttachOnly: true },
+      ensureServerStarted,
+      readLocalUsage
+    );
+    await service.openReport();
+    expect(readLocalUsage).not.toHaveBeenCalled();
+    expect(ensureServerStarted).toHaveBeenCalledOnce();
+    expect(request).toHaveBeenCalledWith(
+      'GET',
+      expect.stringContaining('/experimental/session'),
+      undefined,
+      expect.objectContaining({ unscoped: true })
+    );
+    expect(mocks.openTextDocument).toHaveBeenCalledOnce();
+  });
+
+  it('explains the API report limit for attach-only servers', async () => {
+    const request = vi
+      .fn<Request>()
+      .mockResolvedValue(
+        Array.from({ length: 251 }, (_, index) =>
+          session(`remote-${index}`, '/repo', NOW.getTime())
+        )
+      );
+    const service = new UsageReportService({ request, isAttachOnly: true }, async () => undefined);
+    await expect(service.openReport()).rejects.toThrow(
+      'attach-only mode support up to 250 sessions'
+    );
+    expect(mocks.showErrorMessage).toHaveBeenCalledWith(
+      expect.stringContaining('Run usage reporting on the server host')
+    );
+    expect(workerMocks.instances).toHaveLength(0);
+  });
+
   it('opens the report as a named Markdown preview', async () => {
     const uri = {
       scheme: 'varro-tool-output',
