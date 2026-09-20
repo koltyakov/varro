@@ -717,6 +717,7 @@ function ReadToolCard(props: {
   const s = () => props.toolState;
   const isError = () => s().status === 'error';
   const isAborted = () => isAbortedToolError(s());
+  const isPermissionRejected = () => isPermissionRejectedToolError(s());
   const statusClass = () => {
     if (props.waitingForPermission) return 'tool-status-pending';
     switch (s().status) {
@@ -793,7 +794,13 @@ function ReadToolCard(props: {
         <ToolCallIcon
           kind="read"
           statusClass={statusClass()}
-          statusLabel={props.waitingForPermission ? 'Waiting for permission' : undefined}
+          statusLabel={
+            props.waitingForPermission
+              ? 'Waiting for permission'
+              : isPermissionRejected()
+                ? 'Rejected'
+                : undefined
+          }
           waiting={props.waitingForPermission}
         />
         <span
@@ -831,7 +838,7 @@ function ReadToolCard(props: {
         </Show>
         <Show when={isError()}>
           <span class={`file-read-error-label${isAborted() ? ' is-aborted' : ''}`}>
-            {isAborted() ? 'aborted' : 'failed'}
+            {isPermissionRejected() ? 'rejected' : isAborted() ? 'aborted' : 'failed'}
           </span>
         </Show>
       </div>
@@ -865,6 +872,7 @@ function FileChangeCard(props: {
   const isRunning = () => s().status === 'running';
   const isError = () => s().status === 'error';
   const isAborted = () => isAbortedToolError(s());
+  const isPermissionRejected = () => isPermissionRejectedToolError(s());
   const summaries = () => props.changes.filter((item) => item.isSummary);
   const changes = () => props.changes.filter((item) => !item.isSummary);
   const change = () => changes()[0];
@@ -996,7 +1004,7 @@ function FileChangeCard(props: {
     if (props.waitingForPermission) return 'Pending';
     if (isPending()) return props.animatePending ? 'Running' : 'Pending';
     if (isRunning()) return 'Running';
-    if (isError()) return isAborted() ? 'Aborted' : 'Failed';
+    if (isError()) return isPermissionRejected() ? 'Rejected' : isAborted() ? 'Aborted' : 'Failed';
     return 'Completed';
   };
 
@@ -1291,11 +1299,13 @@ function FileChangeCard(props: {
             </Show>
             <Show when={isError()}>
               <span class={`file-edit-error-label${isAborted() ? ' is-aborted' : ''}`}>
-                {isAborted()
-                  ? 'aborted'
-                  : props.compact
-                    ? 'failed'
-                    : `${action().toLowerCase()} failed`}
+                {isPermissionRejected()
+                  ? 'rejected'
+                  : isAborted()
+                    ? 'aborted'
+                    : props.compact
+                      ? 'failed'
+                      : `${action().toLowerCase()} failed`}
               </span>
             </Show>
             <Show when={canExpandError()}>

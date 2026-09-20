@@ -505,6 +505,36 @@ describe('ToolCall', () => {
     ).toBe(false);
   });
 
+  it.each([
+    ['read', 'The user declined this tool call'],
+    ['read', 'The user rejected permission to use this specific tool call.'],
+    ['edit', 'The user declined this tool call'],
+    ['edit', 'The user rejected permission to use this specific tool call.'],
+  ])('labels a rejected %s permission separately from a tool failure: %s', (tool, error) => {
+    const part: ToolPart = {
+      id: 'tool-rejected',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-rejected',
+      tool,
+      state: {
+        status: 'error',
+        input: { filePath: 'packages/core/package.json', oldString: 'old', newString: 'new' },
+        error,
+        time: { start: 0, end: 1 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    const label = container?.querySelector('.file-read-error-label, .file-edit-error-label');
+    expect(label?.textContent).toBe('rejected');
+    if (tool === 'read') {
+      expect(container?.querySelector('[aria-label="Rejected"]')).not.toBeNull();
+    }
+  });
+
   it('treats whitespace-only output as empty rather than rendering a blank box', () => {
     const part: ToolPart = {
       id: 'tool-1',

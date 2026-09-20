@@ -1189,7 +1189,7 @@ body.vscode-light
   .assistant-message-flow-item
   > .rendered-markdown
   > [data-markdown-segment='tail']
-  > :last-child,
+  > :nth-last-child(1 of :not(.streaming-markdown-pending-block)),
 .assistant-turn-content.assistant-turn-content-plain
   .assistant-message-flow-item
   > .rendered-markdown
@@ -1568,7 +1568,10 @@ body.vscode-light
 }
 
 .chat-turn-content > :last-child,
-.chat-turn-content > :last-child.rendered-markdown > [data-markdown-segment='tail'] > :last-child,
+.chat-turn-content
+  > :last-child.rendered-markdown
+  > [data-markdown-segment='tail']
+  > :nth-last-child(1 of :not(.streaming-markdown-pending-block)),
 .chat-turn-content
   > :last-child.rendered-markdown
   > [data-markdown-segment='stable'][data-markdown-tail-tag='']
@@ -1578,7 +1581,7 @@ body.vscode-light
   > :last-child
   .rendered-markdown:last-child
   > [data-markdown-segment='tail']
-  > :last-child,
+  > :nth-last-child(1 of :not(.streaming-markdown-pending-block)),
 .chat-turn-content
   .assistant-message-flow
   > :last-child
@@ -1707,7 +1710,8 @@ body.vscode-light
   pointer-events: none;
 }
 
-.rendered-markdown .streaming-markdown-pending-hidden {
+.rendered-markdown .streaming-markdown-pending-hidden,
+.rendered-markdown .streaming-markdown-pending-block {
   /* An unfinished path or URL can become a much shorter link. Its raw text must
      not grow invisible lines that collapse and clamp the viewport on completion. */
   display: none;

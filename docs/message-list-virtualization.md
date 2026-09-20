@@ -426,6 +426,12 @@ Direct input acquires ownership only when it can affect the transcript:
   it from the tail's first element after DOM publication, only when that tag changes. Do not replace
   this with sibling `:has()` queries: Chromium 144 in JCEF invalidates unrelated transcript blocks
   on each append. Preserve empty-tail final margins and paragraph/list spacing when updating it.
+- Blank lines inside a list are not stable/tail boundaries. Keep the whole list in the streaming
+  segment until a separate block follows, including when a numbered marker arrives in pieces.
+  Otherwise the unfinished item gains an 18 px list margin that collapses to 1 px on promotion.
+  Hidden-only pending paragraphs contribute no margins and do not count as the tail's first visible
+  block or displace the final visible block's margin reset. `markdown-streaming-append.spec.ts`
+  measures both list-item gaps and the trailing Thinking gap every frame.
 - Bold-only paragraph styling uses a parser-assigned class. CSS `:only-child` ignores text nodes
   and misclassifies prose with inline emphasis as a heading. Keep ordinary paragraph gaps fixed
   when emphasis arrives, through stable-segment promotion and completion. The verification prose

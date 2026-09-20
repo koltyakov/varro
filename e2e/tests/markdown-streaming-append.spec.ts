@@ -10,6 +10,92 @@ const SESSION_ID = 'session-rapid-streaming-jitter';
 const MESSAGE_ID = 'message-rapid-assistant-streaming';
 const ROW = `[data-msg-id="${MESSAGE_ID}"]`;
 
+for (const numbered of [false, true]) {
+  test(`keeps blank-separated ${numbered ? 'numbered' : 'bullet'} gaps fixed while the last item streams`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 441, height: 900 });
+    await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
+    const markdown = page.locator(`${ROW} .rendered-markdown`);
+    await expect(markdown).toHaveText('Starting...');
+    const marker = (index: number) => (numbered ? `${index}.` : '-');
+    let text = `Starting...\n\n${marker(1)} Assert the smallest useful result. Overly broad snapshot comparisons can fail because of irrelevant formatting, while focused assertions identify the actual broken contract.\n\n${marker(2)} Error messages deserve tests when users or callers rely on them.`;
+    await appendDeltaToRapidStreaming(page, text.slice('Starting...'.length));
+    await expect(markdown).toContainText('callers rely on them.');
+    const collector = await markdown.evaluateHandle((element) => {
+      const state = { running: true, gaps: [] as number[] };
+      const sample = () => {
+        const items = element.querySelectorAll('li');
+        for (let index = 1; index < items.length; index += 1) {
+          state.gaps.push(
+            items[index]!.getBoundingClientRect().top -
+              items[index - 1]!.getBoundingClientRect().bottom
+          );
+        }
+        if (state.running) requestAnimationFrame(sample);
+      };
+      sample();
+      return state;
+    });
+    for (const delta of [
+      ' Otherwise, assert stable error types or codes instead of fragile wording that may legitimately change.',
+      `\n\n${marker(3)} Mutation testing evaluates whether tests detect deliberate code changes.`,
+      ' Surviving mutations often reveal weak assertions, missing edge cases, or untested paths.',
+      '\n\nFollowing paragraph.',
+    ]) {
+      text += delta;
+      await appendDeltaToRapidStreaming(page, delta);
+      await waitForAnimationFrames(page, 20);
+    }
+    await completeResponse(page, text);
+    await expect(page.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0);
+    await waitForAnimationFrames(page, 6);
+    const gaps = await collector.evaluate((state) => {
+      state.running = false;
+      return state.gaps;
+    });
+    expect(gaps.length).toBeGreaterThan(5);
+    expect(Math.max(...gaps) - Math.min(...gaps), JSON.stringify(gaps)).toBeLessThan(1);
+    expect(gaps.at(-1)).toBeCloseTo(1, 0);
+  });
+}
+
+test('keeps the Thinking gap fixed while a following markdown block is incomplete', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 464, height: 900 });
+  await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
+  const markdown = page.locator(`${ROW} .rendered-markdown`);
+  await expect(markdown).toHaveText('Starting...');
+  await appendDeltaToRapidStreaming(page, '\n\n- Last visible bullet.');
+  await expect(markdown.locator('li')).toHaveText('Last visible bullet.');
+  await expect(page.locator('.interactive-loading-row .loading-indicator')).toBeVisible();
+  const collector = await markdown.evaluateHandle((element) => {
+    const state = { running: true, gaps: [] as number[] };
+    const sample = () => {
+      const item = element.querySelector('li');
+      const thinking = document.querySelector('.interactive-loading-row .loading-verb');
+      if (item && thinking) {
+        state.gaps.push(thinking.getBoundingClientRect().top - item.getBoundingClientRect().bottom);
+      }
+      if (state.running) requestAnimationFrame(sample);
+    };
+    sample();
+    return state;
+  });
+  for (const delta of ['\n\n', '`', 'npm run', ' test']) {
+    await appendDeltaToRapidStreaming(page, delta);
+    await waitForAnimationFrames(page, 20);
+  }
+  await expect(page.locator('.interactive-loading-row .loading-indicator')).toBeVisible();
+  const gaps = await collector.evaluate((state) => {
+    state.running = false;
+    return state.gaps;
+  });
+  expect(gaps.length).toBeGreaterThan(5);
+  expect(Math.max(...gaps) - Math.min(...gaps), JSON.stringify(gaps)).toBeLessThan(1);
+});
+
 test('keeps verification paragraph gaps fixed as inline emphasis streams and settles', async ({
   page,
 }) => {

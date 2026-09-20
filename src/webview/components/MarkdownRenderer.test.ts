@@ -752,6 +752,44 @@ describe('MarkdownRenderer', () => {
     });
   });
 
+  it.each(['\n', '\r\n'])(
+    'keeps loose and nested lists in one streaming block with %j newlines',
+    async (newline) => {
+      const [content, setContent] = createSignal(`Introduction.${newline}${newline}1. First item.`);
+      cleanup = render(
+        () =>
+          createComponent(MarkdownRenderer, {
+            get content() {
+              return content();
+            },
+            cacheByContent: false,
+          }),
+        container!
+      );
+      for (const delta of [
+        `${newline}${newline}2`,
+        '.',
+        ' Second item.',
+        `${newline}${newline}   Another paragraph in the second item.`,
+        `${newline}${newline}   - Nested item.`,
+        `${newline}${newline}3. Third item.`,
+        `${newline}${newline}Following paragraph.`,
+      ]) {
+        setContent((previous) => previous + delta);
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        expect(container!.querySelectorAll('ol')).toHaveLength(1);
+        expect(container!.querySelector('ol > li')?.textContent?.trim()).toBe('First item.');
+      }
+      expect(container!.querySelectorAll('ol > li')).toHaveLength(3);
+      expect(container!.querySelector('ol > li:nth-child(2) > ul > li')?.textContent).toBe(
+        'Nested item.'
+      );
+      expect(container!.querySelector('[data-markdown-segment="tail"]')?.textContent?.trim()).toBe(
+        'Following paragraph.'
+      );
+    }
+  );
+
   it('sanitizes html while blocking remote images and keeping external links routable', () => {
     const send = vi.fn();
     window.__sendToExtension = send;
