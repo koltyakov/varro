@@ -52,7 +52,8 @@ const testServerUrl = testServerOrigin(replayUrl ?? process.env.VARRO_AI_SERVER_
 let isolation;
 if (replayUrl) {
   const response = await fetch(new URL('/varro/test-isolation', testServerUrl), {
-    redirect: 'error', signal: AbortSignal.timeout(5_000),
+    redirect: 'error',
+    signal: AbortSignal.timeout(5_000),
   });
   if (!response.ok || (await response.json()).kind !== 'read-only-replay') {
     throw new Error('The replay endpoint is not a read-only replay server');
@@ -67,11 +68,14 @@ const extensions = path.join(profileRoot, 'e');
 await mkdir(userData);
 await mkdir(extensions);
 await mkdir(path.join(userData, 'User'));
-await writeFile(path.join(userData, 'User/settings.json'), JSON.stringify({
-  'varro.server.port': Number(new URL(testServerUrl).port),
-  'varro.server.autoStart': false,
-  'varro.server.autoUpdate': false,
-}));
+await writeFile(
+  path.join(userData, 'User/settings.json'),
+  JSON.stringify({
+    'varro.server.port': Number(new URL(testServerUrl).port),
+    'varro.server.autoStart': false,
+    'varro.server.autoUpdate': false,
+  })
+);
 const remoteDebuggingPort = await reserveLoopbackPort();
 const configuredSidebarWidth = Number(process.env.VARRO_AI_SIDEBAR_WIDTH ?? 486);
 if (!Number.isFinite(configuredSidebarWidth) || configuredSidebarWidth < 300) {
@@ -112,10 +116,22 @@ const vscodeArgs = [
 const launchExecutable = process.platform === 'darwin' ? '/usr/bin/open' : executable;
 const launchArgs =
   process.platform === 'darwin'
-    ? ['-n', '-a', path.resolve(executable, '../../..'),
-      ...['VARRO_TEST_SERVER_URL', 'XDG_DATA_HOME', 'XDG_STATE_HOME', 'XDG_CACHE_HOME', 'XDG_CONFIG_HOME', 'OPENCODE_DB', 'OPENCODE_PID'].flatMap(
-        (key) => ['--env', `${key}=${environment[key]}`]
-      ), '--args', ...vscodeArgs]
+    ? [
+        '-n',
+        '-a',
+        path.resolve(executable, '../../..'),
+        ...[
+          'VARRO_TEST_SERVER_URL',
+          'XDG_DATA_HOME',
+          'XDG_STATE_HOME',
+          'XDG_CACHE_HOME',
+          'XDG_CONFIG_HOME',
+          'OPENCODE_DB',
+          'OPENCODE_PID',
+        ].flatMap((key) => ['--env', `${key}=${environment[key]}`]),
+        '--args',
+        ...vscodeArgs,
+      ]
     : vscodeArgs;
 // Preserve recovery identifiers before macOS hands the launch to LaunchServices.
 if (process.env.VARRO_AI_LAUNCH_INTENT) {
@@ -169,7 +185,7 @@ const focusDeadline = Date.now() + 30_000;
 let sidebarWidth;
 while (true) {
   try {
-    await executeVscodeCommand(remoteDebuggingPort, 'View: Focus on Varro View');
+    await executeVscodeCommand(remoteDebuggingPort, 'Varro: Focus on Varro View');
     sidebarWidth = await resizeVscodeSidebar(remoteDebuggingPort, configuredSidebarWidth, 2_000);
     break;
   } catch (error) {

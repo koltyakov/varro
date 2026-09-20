@@ -1137,10 +1137,14 @@ function isEscapedMarkdownDelimiter(content: string, index: number, lineStart: n
   return backslashCount % 2 === 1;
 }
 
-function renderIncompleteStreamingMarkdown(content: string): IncompleteStreamingMarkdown {
+function renderIncompleteStreamingMarkdown(
+  content: string,
+  escapeRawHtml: boolean
+): IncompleteStreamingMarkdown {
   let index = 0;
   let openFence: MarkdownFenceState | null = null;
   let inlineStart: number | null = null;
+  let htmlTagStart: number | null = null;
   let inlineDelimiterLength = 0;
   const linkLabelStarts: number[] = [];
   let linkDestinationStart: number | null = null;
@@ -1198,7 +1202,15 @@ function renderIncompleteStreamingMarkdown(content: string): IncompleteStreaming
         }
 
         if (inlineStart === null && !isEscapedMarkdownDelimiter(content, cursor, index)) {
-          if (character === '[') {
+          if (
+            !escapeRawHtml &&
+            character === '<' &&
+            /^<\/?(?:[A-Za-z][\w:-]*(?:\s[^<>]*|\/)?)?$/.test(content.slice(cursor))
+          ) {
+            // A partial tag paints as prose until its closing angle bracket arrives.
+            // Keep that temporary text out of layout, including standalone closing tags.
+            htmlTagStart = cursor;
+          } else if (character === '[') {
             linkLabelStarts.push(cursor);
           } else if (character === ']') {
             const labelStart = linkLabelStarts.pop();
@@ -1221,7 +1233,7 @@ function renderIncompleteStreamingMarkdown(content: string): IncompleteStreaming
     index = nextBreak === -1 ? content.length : nextBreak + 1;
   }
 
-  const hiddenStarts = [inlineStart, linkDestinationStart, ...linkLabelStarts].filter(
+  const hiddenStarts = [inlineStart, htmlTagStart, linkDestinationStart, ...linkLabelStarts].filter(
     (start): start is number => start !== null
   );
   let suppressedFenceSuffixStart: number | null = null;
@@ -1278,6 +1290,17 @@ function renderIncompleteStreamingMarkdown(content: string): IncompleteStreaming
   }
   if (pendingStart >= content.length) {
     return { content, marker: null, pendingText: null, hidePendingText: false };
+  }
+
+  if (pendingStart === htmlTagStart) {
+    // Raw HTML can leave the marker at the segment root. Even a hidden inline
+    // marker there changes trailing-block spacing, so omit the unfinished tag.
+    return {
+      content: content.slice(0, pendingStart),
+      marker: null,
+      pendingText: null,
+      hidePendingText: false,
+    };
   }
 
   const marker = getStreamingMarkdownPendingMarker(content);
@@ -1427,7 +1450,7 @@ function isAppendOnlySafeMarkdown(content: string) {
 }
 
 function parseIncompleteStreamingMarkdown(content: string, options: ParseMarkdownOptions) {
-  const prepared = renderIncompleteStreamingMarkdown(content);
+  const prepared = renderIncompleteStreamingMarkdown(content, options.escapeHtml === true);
   const html = parseMarkdown(prepared.content, options);
   if (!prepared.marker || prepared.pendingText === null) return html;
 

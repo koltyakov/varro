@@ -1962,6 +1962,57 @@ describe('MarkdownRenderer', () => {
     }
   );
 
+  it.each(['<', '</', '<details', '</details', '<span title="more'])(
+    'hides an unfinished HTML tag %s until streaming settles',
+    async (tag) => {
+      const [completed, setCompleted] = createSignal(false);
+      cleanup = render(
+        () =>
+          createComponent(MarkdownRenderer, {
+            content: `Stable paragraph.\n\n${tag}`,
+            get cacheByContent() {
+              return completed();
+            },
+          }),
+        container!
+      );
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      expect(container?.textContent).not.toContain(tag);
+      expect(container?.textContent).toContain('Stable paragraph.');
+      setCompleted(true);
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
+    }
+  );
+
+  it.each(['a < 3', '\\<details', '`<details`', '```html\n<details'])(
+    'preserves literal HTML-like content %s during streaming',
+    async (content) => {
+      cleanup = render(
+        () => createComponent(MarkdownRenderer, { content, forceStreaming: true }),
+        container!
+      );
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
+      expect(container?.textContent).toContain(content === 'a < 3' ? 'a < 3' : '<details');
+    }
+  );
+
+  it('keeps explicitly escaped HTML visible while the tag is incomplete', async () => {
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          content: 'Literal <details',
+          forceStreaming: true,
+          escapeHtml: true,
+        }),
+      container!
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    expect(container?.textContent).toBe('Literal <details\n');
+    expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
+  });
+
   it('holds unfinished inline code at the start of an ordered-list item', async () => {
     const [content, setContent] = createSignal('1. `npm run test');
     cleanup = render(

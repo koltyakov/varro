@@ -432,6 +432,11 @@ Direct input acquires ownership only when it can affect the transcript:
   move already-painted content backward. Reveal the completed token at its parsed geometry and let
   bottom-follow own its growth. `scroll-streaming-markdown.spec.ts` checks every-frame same-paragraph
   geometry for inline file paths and Markdown link destinations.
+- Incomplete HTML tag suffixes must not paint as temporary prose. Opening and closing tags such as
+  `<details` and `</summary` otherwise lose a line when `>` arrives. Omit these suffixes before parsing;
+  a hidden marker at the root of a raw HTML segment can itself change trailing-block spacing.
+  `markdown-streaming-append.spec.ts` streams the complete disclosure response one character at a time
+  and checks the preceding paragraph on every frame. Escaped tags, comparisons, and code remain literal.
 - Prose, list items, and headings use ordinary wrapping during streaming and after completion.
   `text-wrap: pretty` and `balance` redistribute earlier words whenever the unfinished block grows.
   Do not switch wrapping policy on settlement or virtual remount. The Markdown streaming regressions

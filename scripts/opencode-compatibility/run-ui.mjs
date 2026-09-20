@@ -255,7 +255,7 @@ try {
   assert.ok(browser, `Could not connect to the isolated editor: ${codeLog}`);
   for (let attempt = 0; ; attempt++) {
     try {
-      await executeVscodeCommand(debugPort, 'View: Focus on Varro View');
+      await executeVscodeCommand(debugPort, 'Varro: Focus on Varro View');
       break;
     } catch (error) {
       if (attempt >= 100) throw error;

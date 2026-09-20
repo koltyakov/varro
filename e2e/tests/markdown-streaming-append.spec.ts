@@ -248,6 +248,57 @@ test('keeps filename links inside narrow table cells throughout streaming and co
   ]);
 });
 
+test('keeps preceding content stable while a streamed HTML disclosure forms', async ({ page }) => {
+  await page.setViewportSize({ width: 486, height: 900 });
+  await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
+  const markdown = page.locator(`${ROW} .rendered-markdown`);
+  await expect(markdown).toHaveText('Starting...');
+  const collector = await markdown.evaluateHandle((element) => {
+    const state = {
+      running: true,
+      samples: [] as Array<{ top: number; height: number; text: string | null; html: string }>,
+    };
+    const sample = () => {
+      const anchor = element.querySelector('p');
+      if (anchor)
+        state.samples.push({
+          top: anchor.getBoundingClientRect().top,
+          height: element.getBoundingClientRect().height,
+          text: element.textContent,
+          html: element.innerHTML,
+        });
+      if (state.running) requestAnimationFrame(sample);
+    };
+    sample();
+    return state;
+  });
+  const text =
+    'Starting...\n\nAdded coverage for valid empty shell environment values.\n\n- `bun test src/main/shell-env.test.ts`: 5 passed\n- `bun run typecheck`: passed\n\n<details>\n<summary>Explored</summary>\n\nInspected `shell-env.ts`, its tests, related utility usage, and nearby state utilities. Reviewed the focused diff with `git diff --check`.\n\n</details>\n\nVFZ-TOOLS-END';
+  for (let index = 'Starting...'.length; index < text.length; index += 1) {
+    await appendDeltaToRapidStreaming(page, text.slice(index, index + 1));
+    await waitForAnimationFrames(page, 4);
+  }
+  await completeResponse(page, text);
+  await expect(page.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0);
+  await waitForAnimationFrames(page, 10);
+  const samples = await collector.evaluate((state) => {
+    state.running = false;
+    return state.samples;
+  });
+  const reversals = samples.filter(
+    (sample, index) => index > 0 && sample.top - samples[index - 1]!.top > 2
+  );
+  await attachEvidence(
+    test.info(),
+    'disclosure-frames.json',
+    JSON.stringify({ samples, reversals })
+  );
+  await expect(markdown).toContainText('Reviewed the focused diff with git diff --check.');
+  await expect(markdown).toContainText('VFZ-TOOLS-END');
+  expect(samples.length).toBeGreaterThan(20);
+  expect(reversals).toEqual([]);
+});
+
 async function attachEvidence(testInfo: TestInfo, name: string, json: string) {
   const path = testInfo.outputPath(name);
   await writeFile(path, json);
