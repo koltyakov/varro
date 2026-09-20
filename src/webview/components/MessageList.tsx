@@ -6862,8 +6862,11 @@ export function MessageList() {
     let userMessageId: string | null = null;
 
     for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
-      const info = visibleMessages[index]!.info;
+      const { info, parts } = visibleMessages[index]!;
       if (info.role === 'user') {
+        // Compaction dividers do not start a new turn. Switching away and back would
+        // discard presentation state and replay already-visible assistant content.
+        if (parts.length > 0 && parts.every((part) => part.type === 'compaction')) continue;
         userMessageId = info.id;
         break;
       }

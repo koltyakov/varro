@@ -1171,13 +1171,71 @@ body.vscode-light
 body.vscode-light
   .assistant-turn-content.assistant-turn-content-plain
   .assistant-message-flow-item-error-notice {
+  padding: 0;
+  border-radius: var(--radius-card);
+  font-size: 12.5px;
+  line-height: 1.2;
   color: var(--color-vscode-muted);
-  border-color: var(--color-vscode-border);
-  background: var(--color-vscode-surface-subtle-alt);
+  border-color: var(--color-vscode-border-soft);
+  background: transparent;
   box-shadow: none;
 }
 
+.assistant-message-flow-item-notice-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-4) var(--space-5);
+  border: none;
+  border-radius: inherit;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.assistant-message-flow-item-notice-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-message-flow-item-notice-chevron {
+  flex: 0 0 12px;
+  opacity: 0.35;
+  transition:
+    transform 0.1s,
+    opacity 0.1s;
+}
+
+.assistant-message-flow-item-notice-header:hover .assistant-message-flow-item-notice-chevron {
+  opacity: 0.7;
+}
+
+.assistant-message-flow-item-notice-chevron.expanded {
+  transform: rotate(90deg);
+  opacity: 0.7;
+}
+
+.assistant-message-flow-item-notice-header:disabled {
+  cursor: default;
+}
+
+.assistant-message-flow-item-notice-header:focus-visible {
+  outline: 1px solid var(--color-vscode-accent);
+  outline-offset: -1px;
+}
+
 .assistant-message-flow-item-error-notice .assistant-message-flow-item-error-details {
+  margin: 0;
+  border-top: 1px solid var(--color-vscode-border-soft);
+  border-radius: 0;
   background: var(--color-vscode-surface-subtle);
 }
 

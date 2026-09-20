@@ -1185,17 +1185,39 @@ export function AssistantMessageContent(props: {
           class="assistant-message-flow-item-error assistant-message-flow-item-error-rendered-markdown assistant-flow-block-starts-bordered assistant-flow-block-ends-bordered rendered-markdown"
           classList={{ 'assistant-message-flow-item-error-notice': props.errorIsNotice }}
         >
-          <p>{props.errorMessage!}</p>
-          <Show when={props.errorDetails}>
+          <Show when={props.errorIsNotice} fallback={<p>{props.errorMessage!}</p>}>
             <button
               type="button"
-              class="assistant-message-flow-item-error-details-toggle"
-              aria-expanded={errorDetailsOpen()}
-              aria-controls={errorDetailsId()}
+              class="assistant-message-flow-item-notice-header"
+              disabled={!props.errorDetails}
+              aria-expanded={props.errorDetails ? errorDetailsOpen() : undefined}
+              aria-controls={props.errorDetails ? errorDetailsId() : undefined}
               onClick={toggleErrorDetails}
             >
-              {errorDetailsOpen() ? 'Hide details' : 'Details'}
+              <span class="assistant-message-flow-item-notice-label">{props.errorMessage!}</span>
+              <Show when={props.errorDetails}>
+                <UiIcon
+                  source={navArrowRightIcon}
+                  class={`assistant-message-flow-item-notice-chevron${errorDetailsOpen() ? ' expanded' : ''}`}
+                  width="12"
+                  height="12"
+                  aria-hidden="true"
+                />
+              </Show>
             </button>
+          </Show>
+          <Show when={props.errorDetails}>
+            <Show when={!props.errorIsNotice}>
+              <button
+                type="button"
+                class="assistant-message-flow-item-error-details-toggle"
+                aria-expanded={errorDetailsOpen()}
+                aria-controls={errorDetailsId()}
+                onClick={toggleErrorDetails}
+              >
+                {errorDetailsOpen() ? 'Hide details' : 'Details'}
+              </button>
+            </Show>
             <Show when={errorDetailsOpen()}>
               <pre id={errorDetailsId()} class="assistant-message-flow-item-error-details">
                 {props.errorDetails!}

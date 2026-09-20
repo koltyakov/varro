@@ -401,6 +401,9 @@ Direct input acquires ownership only when it can affect the transcript:
 - A queued answer waits for the preceding activity preview and its exit. Each newly queued part has a
   2,000 ms maximum admission wait; a still-running parallel tool cannot hold an answer indefinitely.
   Subsequent standalone parts wait for preceding text to catch up so edits do not overtake prose.
+- Compaction-only user records paint dividers but do not replace the active prompt identity. Keep
+  presentation and active-turn activity attached to the real prompt through compaction and continuation,
+  so already-visible assistant content never re-enters the streaming queue.
 - Text uses a target string and displayed prefix. Release readable chunks every 32 ms and adapt their
   size to catch up within 256 ms after admission. A shorter or divergent canonical correction discards
   the queued suffix. Keep Markdown's streaming parser active while displayed text is behind.

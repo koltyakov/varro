@@ -12,7 +12,7 @@ import {
   upsertPart,
 } from '../lib/state';
 import { flushMessagePresentation } from '../lib/message-list-layout';
-import type { Part, ToolPart } from '../types';
+import type { CompactionPart, MessageEntry, Part, ToolPart } from '../types';
 import { projectV2Event } from '../../extension/opencode-v2-events';
 import { projectV2Message } from '../../extension/opencode-v2-projection';
 import { parseServerEvent } from '../../shared/protocol';
@@ -77,6 +77,55 @@ function openChat(parts: Part[] = []) {
 }
 
 describe('streaming presentation handoff', () => {
+  it.each([true, false])(
+    'keeps presented content visible through compaction and continuation with auto=%s',
+    async (auto) => {
+      const answer = 'This answer was already visible before compaction.';
+      openChat([
+        completeSearch(searchPart()),
+        { ...textPart('answer-text', answer), messageID: 'answer' },
+      ]);
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(container?.textContent).toContain(answer);
+      const compactionPart: CompactionPart = {
+        id: 'compaction-part',
+        messageID: 'compaction',
+        sessionID: 'session-1',
+        type: 'compaction',
+        auto,
+        status: 'running',
+      };
+      const compaction: MessageEntry = {
+        info: userMessage('compaction'),
+        parts: [compactionPart],
+      };
+      setMessagesIncremental([...state.messages, compaction]);
+      for (let frame = 0; frame < 20; frame += 1) {
+        expect(container?.textContent).toContain(answer);
+        await vi.advanceTimersByTimeAsync(16);
+      }
+      expect(container?.textContent).toContain('Compacting context');
+
+      upsertPart({ ...compactionPart, status: 'completed' });
+      expect(container?.textContent).toContain('Context compacted');
+      setMessagesIncremental([
+        ...state.messages,
+        {
+          info: assistantMessage('continuation', { parentID: 'prompt', time: { created: 5 } }),
+          parts: [
+            { ...textPart('continuation-text', 'Continuing the work.'), messageID: 'continuation' },
+          ],
+        },
+      ]);
+      for (let frame = 0; frame < 150; frame += 1) {
+        expect(container?.textContent).toContain(answer);
+        await vi.advanceTimersByTimeAsync(16);
+      }
+      expect(container?.textContent).toContain('Continuing the work.');
+      expect(container?.textContent).toContain('Explored: 1 search');
+    }
+  );
+
   it.each([false, true])(
     'keeps a v2 answer visible through snapshot reconciliation with preserveExtraParts=%s',
     async (preserveExtraParts) => {
