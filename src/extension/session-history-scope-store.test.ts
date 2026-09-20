@@ -101,4 +101,43 @@ describe('SessionHistoryScopeStore', () => {
       'project:two': 'descendants',
     });
   });
+
+  it('keeps the latest association when queued changes return to the current project', async () => {
+    const persistence: Persistence = { get: vi.fn(), set: vi.fn(async () => {}), remove: vi.fn() };
+    const store = new SessionHistoryScopeStore(persistence);
+    await store.set('project:one', 'project');
+    await store.set('project:two', 'descendants');
+    await store.associate('/repo', 'project:one');
+
+    await Promise.all([
+      store.associate('/repo', 'project:two'),
+      store.associate('/repo', 'project:one'),
+    ]);
+
+    expect(store.getForRoot('/repo')).toBe('project');
+    expect(persistence.set).toHaveBeenLastCalledWith('varro.sessionHistoryScopeProjects', {
+      '/repo': 'project:one',
+    });
+  });
+
+  it('retries an association after persistence fails', async () => {
+    const saved = new Map<string, unknown>();
+    const persistence: Persistence = {
+      get<T>(key: string) {
+        return saved.get(key) as T | undefined;
+      },
+      set: vi.fn<Persistence['set']>(async (key, value) => {
+        saved.set(key, value);
+      }),
+      remove: vi.fn(),
+    };
+    const store = new SessionHistoryScopeStore(persistence);
+    await store.set('project:one', 'project');
+    vi.mocked(persistence.set).mockRejectedValueOnce(new Error('Storage unavailable'));
+
+    await expect(store.associate('/repo', 'project:one')).rejects.toThrow('Storage unavailable');
+    await store.associate('/repo', 'project:one');
+
+    expect(new SessionHistoryScopeStore(persistence).getForRoot('/repo')).toBe('project');
+  });
 });

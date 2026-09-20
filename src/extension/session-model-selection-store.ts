@@ -78,8 +78,19 @@ export class SessionModelSelectionStore {
     }
     return this.mutate(async () => {
       if (Object.hasOwn(this.models, sessionId)) return this.list();
-      this.models = { ...this.models, [sessionId]: model };
-      await this.persistence.set(SESSION_SELECTED_MODELS_KEY, this.models);
+      const selection = { ...model };
+      this.models = { ...this.models, [sessionId]: selection };
+      try {
+        await this.persistence.set(SESSION_SELECTED_MODELS_KEY, this.models);
+      } catch (error) {
+        // Only roll back this initialization, not a newer user choice or restored selection.
+        if (this.models[sessionId] === selection) {
+          const next = { ...this.models };
+          delete next[sessionId];
+          this.models = next;
+        }
+        throw error;
+      }
       return this.list();
     });
   }

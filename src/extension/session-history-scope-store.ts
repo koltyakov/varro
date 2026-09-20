@@ -57,11 +57,12 @@ export class SessionHistoryScopeStore {
 
   associate(root: string, key: string): Promise<void> {
     const identity = normalizeWorkspaceIdentity(root);
-    if (!identity || this.projects[identity] === key) return this.mutationQueue;
+    if (!identity) return this.mutationQueue;
     const update = this.mutationQueue.then(async () => {
+      if (this.projects[identity] === key) return;
       const next = { ...this.projects, [identity]: key };
-      this.projects = next;
       await this.persistence.set(SESSION_HISTORY_SCOPE_PROJECTS_KEY, next);
+      this.projects = next;
     });
     this.mutationQueue = update.catch(() => undefined);
     return update;

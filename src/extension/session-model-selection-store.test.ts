@@ -89,6 +89,67 @@ describe('SessionModelSelectionStore', () => {
     expect(persistence.set).not.toHaveBeenCalled();
   });
 
+  it('retries an initial model selection after persistence fails', async () => {
+    const saved = new Map<string, unknown>();
+    const persistence: Persistence = {
+      get<T>(key: string) {
+        return saved.get(key) as T | undefined;
+      },
+      set: vi.fn<Persistence['set']>(async (key, value) => {
+        saved.set(key, value);
+      }),
+      remove: vi.fn(),
+    };
+    const store = new SessionModelSelectionStore(persistence);
+    const model = { providerID: 'openai', modelID: 'fixture-model', variant: 'high' };
+    vi.mocked(persistence.set).mockRejectedValueOnce(new Error('Storage unavailable'));
+
+    await expect(store.setIfAbsent('session-1', model)).rejects.toThrow('Storage unavailable');
+    await store.setIfAbsent('session-1', model);
+
+    expect(new SessionModelSelectionStore(persistence).list()).toEqual({ 'session-1': model });
+  });
+
+  it.each(['session-1', 'session-2'])(
+    'preserves a newer selection for %s when initialization fails',
+    async (sessionId) => {
+      const saved = new Map<string, unknown>();
+      let fail!: (error: Error) => void;
+      let begin!: () => void;
+      const pending = new Promise<void>((_resolve, reject) => {
+        fail = reject;
+      });
+      const started = new Promise<void>((resolve) => {
+        begin = resolve;
+      });
+      const persistence: Persistence = {
+        get<T>(key: string) {
+          return saved.get(key) as T | undefined;
+        },
+        set: vi.fn<Persistence['set']>(async (key, value) => {
+          saved.set(key, value);
+        }),
+        remove: vi.fn(),
+      };
+      vi.mocked(persistence.set).mockImplementationOnce(() => {
+        begin();
+        return pending;
+      });
+      const store = new SessionModelSelectionStore(persistence);
+      const model = { providerID: 'openai', modelID: 'fixture-model' };
+      const initialization = store.setIfAbsent('session-1', model);
+      await started;
+      // Reuse the same input object to distinguish a newer write from initialization.
+      const selection = store.set(sessionId, model);
+      fail(new Error('Storage unavailable'));
+      await expect(initialization).rejects.toThrow('Storage unavailable');
+      await selection;
+
+      expect(store.list()).toEqual({ [sessionId]: model });
+      expect(new SessionModelSelectionStore(persistence).list()).toEqual({ [sessionId]: model });
+    }
+  );
+
   it('does not lose updates queued while legacy models migrate', async () => {
     const persistence: Persistence = {
       get: vi.fn(),
