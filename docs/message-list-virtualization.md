@@ -392,6 +392,10 @@ Direct input acquires ownership only when it can affect the transcript:
   Bottom-follow owns their reveal, as it does for measured message-row appends. Animating those inner
   heights leaves fractional row corrections after the content settles and briefly increases the
   Thinking gap. `thinking-file-edit.spec.ts` checks that gap at every frame.
+- Standalone tool cards follow the same measured-entrance rule, including the early Editing card before
+  patch input identifies any files. Animating that card's height can briefly reverse bottom-follow
+  by one pixel as row rounding and activity reserves reconcile. `thinking-file-edit.spec.ts` tracks
+  the preceding paragraph through the reasoning-to-Editing handoff in short and measured transcripts.
 - Deduplicating consecutive edits to the same file preserves the first edit's render and preview-state
   keys while displaying the newest tool's unchanged ID and payload. Appending another edit must not
   unmount an opened diff, restart its entrance, or reset its scroll position. The streaming diff

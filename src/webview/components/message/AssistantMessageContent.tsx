@@ -1106,7 +1106,9 @@ export function AssistantMessageContent(props: {
     return (
       <div
         ref={(element) => {
-          if (revealClass) {
+          // Standalone tools can appear before their file metadata forms an edit stack.
+          // Let measured bottom-follow reveal them without fractional height animation.
+          if (revealClass && (!props.outerListVirtualized || item().part.type !== 'tool')) {
             onCleanup(
               prepareMeasuredEntrance(element, {
                 animationName: 'streamed-assistant-item-in',
