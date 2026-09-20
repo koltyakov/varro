@@ -1,6 +1,11 @@
 /* oxlint-disable anti-slop/no-module-mocking, anti-slop/no-unknown-parameters, anti-slop/require-safety-comment-for-type-assertion -- These provider tests verify VS Code URI integration with partial document and event fixtures. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+type MockDocument = {
+  uri: { scheme: string; toString(): string };
+  languageId: string;
+};
+
 const vscodeMock = vi.hoisted(() => ({
   provider: undefined as { provideTextDocumentContent(uri: unknown): string } | undefined,
   workspace: {
@@ -10,14 +15,30 @@ const vscodeMock = vi.hoisted(() => ({
         return { dispose: vi.fn() };
       }
     ),
-    onDidCloseTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
-    openTextDocument: vi.fn((uri: unknown) => Promise.resolve({ uri })),
+    textDocuments: [] as MockDocument[],
+    onDidCloseTextDocument: vi.fn((_listener: (document: MockDocument) => void) => ({
+      dispose: vi.fn(),
+    })),
+    openTextDocument: vi.fn(async (uri: MockDocument['uri']) => {
+      const document = { uri, languageId: 'plaintext' };
+      vscodeMock.workspace.textDocuments.push(document);
+      return document;
+    }),
   },
   window: {
     showTextDocument: vi.fn(() => Promise.resolve(undefined)),
   },
   languages: {
-    setTextDocumentLanguage: vi.fn(() => Promise.resolve(undefined)),
+    setTextDocumentLanguage: vi.fn(async (document: MockDocument, languageId: string) => {
+      if (document.languageId === languageId) return document;
+      const updated = { ...document, languageId };
+      vscodeMock.workspace.textDocuments = vscodeMock.workspace.textDocuments.filter(
+        (candidate) => candidate !== document
+      );
+      vscodeMock.workspace.onDidCloseTextDocument.mock.calls.at(-1)?.[0](document);
+      vscodeMock.workspace.textDocuments.push(updated);
+      return updated;
+    }),
   },
   Uri: {
     from: vi.fn((value: { scheme: string; path: string }) => ({
@@ -35,6 +56,7 @@ describe('ToolOutputDocumentProvider', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vscodeMock.provider = undefined;
+    vscodeMock.workspace.textDocuments = [];
   });
 
   it('serves the opened text back through the virtual scheme', async () => {
@@ -73,6 +95,48 @@ describe('ToolOutputDocumentProvider', () => {
         expect.anything(),
         'markdown'
       );
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('preserves content across language changes and shows the updated document', async () => {
+    const provider = new ToolOutputDocumentProvider();
+
+    try {
+      await provider.open({
+        content: 'const value = 42;',
+        title: 'Unsaved selection',
+        language: 'typescript',
+      });
+
+      const document = vscodeMock.workspace.textDocuments[0]!;
+      expect(document.languageId).toBe('typescript');
+      expect(vscodeMock.window.showTextDocument).toHaveBeenCalledWith(document, { preview: true });
+      expect(vscodeMock.provider?.provideTextDocumentContent(document.uri)).toBe(
+        'const value = 42;'
+      );
+
+      await vscodeMock.languages.setTextDocumentLanguage(document, 'javascript');
+      expect(vscodeMock.provider?.provideTextDocumentContent(document.uri)).toBe(
+        'const value = 42;'
+      );
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('releases content when a document closes without reopening', async () => {
+    const provider = new ToolOutputDocumentProvider();
+
+    try {
+      await provider.open({ content: 'tool output', title: 'Results' });
+      const document = vscodeMock.workspace.textDocuments[0]!;
+      vscodeMock.workspace.textDocuments = [];
+      vscodeMock.workspace.onDidCloseTextDocument.mock.calls.at(-1)?.[0](document);
+      await Promise.resolve();
+
+      expect(vscodeMock.provider?.provideTextDocumentContent(document.uri)).toBe('');
     } finally {
       provider.dispose();
     }

@@ -163,6 +163,12 @@ const vscodeMock = vi.hoisted(() => ({
   TabInputText: class TabInputText {
     constructor(public readonly uri: unknown) {}
   },
+  TabInputTextDiff: class TabInputTextDiff {
+    constructor(
+      public readonly original: unknown,
+      public readonly modified: unknown
+    ) {}
+  },
   TabInputCustom: class TabInputCustom {
     constructor(
       public readonly uri: unknown,
@@ -1291,10 +1297,16 @@ describe('ContextProvider', () => {
     }
   });
 
-  it('opens the file when the Git diff command does not activate a tab', async () => {
+  it('opens the file when the Git diff command leaves an unrelated diff active', async () => {
     const provider = new ContextProvider(vi.fn());
     const uri = { fsPath: '/repo/src/stale-change.ts' };
     const document = { uri };
+    vscodeMock.window.tabGroups.activeTabGroup.activeTab = {
+      input: new vscodeMock.TabInputTextDiff(
+        { fsPath: '/repo/src/other.ts', scheme: 'git' },
+        { fsPath: '/repo/src/other.ts', scheme: 'file' }
+      ),
+    };
 
     vscodeMock.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' } }];
     vscodeMock.workspace.getWorkspaceFolder.mockReturnValue({ uri: { fsPath: '/repo' } });
@@ -1324,6 +1336,45 @@ describe('ContextProvider', () => {
       provider.dispose();
     }
   });
+
+  it.each([false, true])(
+    'keeps an already-active Git diff open when the file is deleted: %s',
+    async (deleted) => {
+      const provider = new ContextProvider(vi.fn());
+      const uri = { fsPath: '/repo/src/changed.ts' };
+      vscodeMock.window.tabGroups.activeTabGroup.activeTab = {
+        input: new vscodeMock.TabInputTextDiff(
+          { ...uri, scheme: 'git' },
+          { ...uri, scheme: deleted ? 'git' : 'file' }
+        ),
+      };
+      vscodeMock.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' } }];
+      vscodeMock.workspace.getWorkspaceFolder.mockReturnValue(
+        vscodeMock.workspace.workspaceFolders[0]
+      );
+      if (deleted) vscodeMock.workspace.fs.stat.mockRejectedValue(new Error('File not found'));
+      else vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 0 });
+      vscodeMock.extensions.getExtension.mockReturnValue({
+        isActive: true,
+        exports: {
+          getAPI: () => ({
+            repositories: [
+              { state: { workingTreeChanges: [{ uri }], indexChanges: [], mergeChanges: [] } },
+            ],
+          }),
+        },
+      });
+
+      try {
+        await expect(provider.openPath(uri.fsPath, { view: 'diff' })).resolves.toBe('opened');
+        expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith('git.openChange', uri);
+        expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
+        expect(vscodeMock.window.showTextDocument).not.toHaveBeenCalled();
+      } finally {
+        provider.dispose();
+      }
+    }
+  );
 
   it('captures editor context after the active editor settles back in', async () => {
     vi.useFakeTimers();

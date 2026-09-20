@@ -18,7 +18,14 @@ export class ToolOutputDocumentProvider implements vscode.TextDocumentContentPro
     this.disposables = [
       vscode.workspace.registerTextDocumentContentProvider(SCHEME, this),
       vscode.workspace.onDidCloseTextDocument((document) => {
-        if (document.uri.scheme === SCHEME) this.contents.delete(document.uri.toString());
+        if (document.uri.scheme !== SCHEME) return;
+        const key = document.uri.toString();
+        // A language change closes and reopens the document in the same event turn.
+        queueMicrotask(() => {
+          if (!vscode.workspace.textDocuments.some((open) => open.uri.toString() === key)) {
+            this.contents.delete(key);
+          }
+        });
       }),
     ];
   }
@@ -47,8 +54,8 @@ export class ToolOutputDocumentProvider implements vscode.TextDocumentContentPro
     this.contents.set(uri.toString(), payload.content);
 
     try {
-      const document = await vscode.workspace.openTextDocument(uri);
-      await vscode.languages.setTextDocumentLanguage(document, language);
+      const opened = await vscode.workspace.openTextDocument(uri);
+      const document = await vscode.languages.setTextDocumentLanguage(opened, language);
       if (payload.show ?? true) {
         await vscode.window.showTextDocument(document, { preview: payload.preview ?? true });
       }

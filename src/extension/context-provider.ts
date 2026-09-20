@@ -660,7 +660,14 @@ export class ContextProvider implements vscode.Disposable {
         if (await hasGitChange(uri)) {
           const activeTab = vscode.window.tabGroups.activeTabGroup.activeTab;
           await vscode.commands.executeCommand('git.openChange', uri);
-          if (vscode.window.tabGroups.activeTabGroup.activeTab !== activeTab) return 'opened';
+          const currentTab = vscode.window.tabGroups.activeTabGroup.activeTab;
+          if (
+            currentTab !== activeTab ||
+            (currentTab?.input instanceof vscode.TabInputTextDiff &&
+              isSameWorkspacePath(currentTab.input.modified.fsPath, uri.fsPath))
+          ) {
+            return 'opened';
+          }
         }
       }
 

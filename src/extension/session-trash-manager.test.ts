@@ -117,6 +117,31 @@ describe('SessionTrashManager', () => {
     expect(manager.list()).toEqual([]);
   });
 
+  it('persists completed deletions when emptying fails on a later entry', async () => {
+    const manager = new SessionTrashManager(workspaceState as never);
+    await manager.moveToTrash('first', [session('first', 1_000)], 6_000);
+    await manager.moveToTrash('second', [session('second', 2_000)], 5_000);
+    const deleteSession = vi.fn(async ({ id }: SessionDeleteTarget) => {
+      if (id === 'second') throw new Error('503 temporary failure');
+    });
+
+    await expect(manager.empty(deleteSession)).rejects.toThrow('503 temporary failure');
+
+    expect(deleteSession.mock.calls.map(([target]) => target.id)).toEqual(['first', 'second']);
+    expect(manager.list().map(({ rootID }) => rootID)).toEqual(['second']);
+    expect(manager.isHidden('first')).toBe(false);
+    expect(manager.isHidden('second')).toBe(true);
+    await expect(manager.restore('first')).resolves.toBeNull();
+
+    const reloaded = new SessionTrashManager(workspaceState as never);
+    expect(reloaded.list().map(({ rootID }) => rootID)).toEqual(['second']);
+    deleteSession.mockClear();
+    deleteSession.mockResolvedValue(undefined);
+    await reloaded.empty(deleteSession);
+    expect(deleteSession.mock.calls.map(([target]) => target.id)).toEqual(['second']);
+    expect(reloaded.list()).toEqual([]);
+  });
+
   it('replaces a child-first trash entry with its ancestor and restores the merged tree', async () => {
     const manager = new SessionTrashManager(workspaceState as never);
     const sessions = [session('root', 3_000), session('child', 2_000, { parentID: 'root' })];

@@ -181,15 +181,16 @@ export class SessionTrashManager {
   ) {
     return this.mutate(async () => {
       const removed: RecycleBinEntry[] = [];
-      const next = new Map(this.entries);
       for (const entry of this.list(workspaceDirectory)) {
         await deleteEntrySessions(entry, deleteSession);
+        const next = new Map(this.entries);
         next.delete(entry.rootID);
+        // Keep completed deletions durable even if a later entry cannot be deleted.
+        await this.persist(next);
+        this.entries = next;
+        this.hiddenIds = collectHiddenSessionIds(next);
         removed.push(entry);
       }
-      await this.persist(next);
-      this.entries = next;
-      this.hiddenIds = collectHiddenSessionIds(next);
       return removed;
     });
   }
