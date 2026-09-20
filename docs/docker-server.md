@@ -2,7 +2,7 @@
 
 Varro can attach to a separately managed OpenCode server through `http://127.0.0.1:<port>`. Setting `varro.server.autoStart` to `false` disables launching a server; it still allows Varro to connect to one that is already running.
 
-This guide uses OpenCode v2 with VS Code running on a macOS or Linux host and Docker publishing the server port on that host. For WSL, run the commands and open the workspace from the WSL environment where Varro runs.
+This guide includes OpenCode v1 and v2 samples, with VS Code running on a macOS or Linux host and Docker publishing the server port on that host. For WSL, run the commands and open the workspace from the WSL environment where Varro runs.
 
 ## Connection requirements
 
@@ -16,7 +16,26 @@ For example, a workspace opened as `/Users/alex/projects/app` must also be mount
 
 ## Build a server image
 
-Save this as `Dockerfile.opencode` in a directory of your choice:
+Choose one API family. Complete samples are included in the repository:
+
+| Family | Package and example version | Dockerfile | Compose sample | Health endpoint |
+| --- | --- | --- | --- | --- |
+| v1 | `opencode-ai@1.18.31` | [Dockerfile.v1](../examples/docker/Dockerfile.v1) | [compose.v1.yaml](../examples/docker/compose.v1.yaml) | `/global/health` |
+| v2 | `@opencode/cli@2.0.10` | [Dockerfile.v2](../examples/docker/Dockerfile.v2) | [compose.v2.yaml](../examples/docker/compose.v2.yaml) | `/api/info` |
+
+From the Varro repository root, build the selected image:
+
+```sh
+# v1
+docker build -f examples/docker/Dockerfile.v1 -t varro-opencode:v1 examples/docker
+```
+
+```sh
+# v2
+docker build -f examples/docker/Dockerfile.v2 -t varro-opencode:v2 examples/docker
+```
+
+Both Dockerfiles use the same base image and tools. The v2 sample is:
 
 ```dockerfile
 FROM node:24-bookworm-slim
@@ -32,13 +51,14 @@ EXPOSE 4096
 CMD ["opencode", "serve", "--hostname", "0.0.0.0", "--port", "4096"]
 ```
 
-Build it from that directory:
+The v1 sample replaces the package installation with:
 
-```sh
-docker build -f Dockerfile.opencode -t varro-opencode .
+```dockerfile
+ARG OPENCODE_VERSION=1.18.31
+RUN npm install --global "opencode-ai@${OPENCODE_VERSION}"
 ```
 
-The example pins a version tested with Varro. See the [supported versions](usage.md#choose-and-update-opencode) before selecting another version with `--build-arg OPENCODE_VERSION=...`. Add any tools your project needs to the image.
+The examples pin versions tested with Varro. See the [supported versions](usage.md#choose-and-update-opencode) before selecting another version with `--build-arg OPENCODE_VERSION=...`. Keep the version in the selected package's API family. Add any tools your project needs to the image.
 
 ## Start the container
 
@@ -48,6 +68,7 @@ In a terminal, change to the workspace directory you will open in VS Code. Gener
 export OPENCODE_SERVER_USERNAME=opencode
 export OPENCODE_SERVER_PASSWORD="$(openssl rand -hex 24)"
 export VARRO_WORKSPACE="$(pwd -P)"
+export VARRO_OPENCODE_FAMILY=v2
 
 docker run -d \
   --name varro-opencode \
@@ -55,11 +76,13 @@ docker run -d \
   --env OPENCODE_SERVER_USERNAME \
   --env OPENCODE_SERVER_PASSWORD \
   --mount "type=bind,source=$VARRO_WORKSPACE,target=$VARRO_WORKSPACE" \
-  --mount type=volume,source=varro-opencode-config,target=/root/.config/opencode \
-  --mount type=volume,source=varro-opencode-data,target=/root/.local/share/opencode \
+  --mount "type=volume,source=varro-opencode-$VARRO_OPENCODE_FAMILY-config,target=/root/.config/opencode" \
+  --mount "type=volume,source=varro-opencode-$VARRO_OPENCODE_FAMILY-data,target=/root/.local/share/opencode" \
   --workdir "$VARRO_WORKSPACE" \
-  varro-opencode
+  "varro-opencode:$VARRO_OPENCODE_FAMILY"
 ```
+
+Use `VARRO_OPENCODE_FAMILY=v1` for the v1 image. Run only one sample at a time with the default container name and port. Each family uses separate named volumes so trying v2 does not reuse the v1 database.
 
 The bind mount lets OpenCode work on the same files as VS Code. The named volumes retain configuration, provider authentication, and session data when you replace the container. For a multi-root workspace, mount every folder at its matching absolute path.
 
@@ -73,6 +96,18 @@ docker exec -it varro-opencode opencode auth login
 
 Alternatively, connect a provider from Varro after completing the connection setup. The container does not automatically inherit provider credentials from the host.
 
+### Docker Compose alternative
+
+Instead of `docker run`, export the same workspace and credential variables, then select the sample with an absolute path:
+
+```sh
+export COMPOSE_FILE=/absolute/path/to/varro/examples/docker/compose.v2.yaml
+docker compose up --build -d
+docker compose exec opencode opencode auth login
+```
+
+For v1, select `compose.v1.yaml`. Set `VARRO_SERVER_PORT` before starting Compose to publish a different host port. Both samples name the container `varro-opencode`, so the checks below also work with Compose. Compose uses its own family-specific volumes; switching between `docker run` and Compose does not reuse data automatically.
+
 ## Configure VS Code
 
 Add these settings to VS Code:
@@ -84,7 +119,7 @@ Add these settings to VS Code:
 }
 ```
 
-VS Code marks `varro.server.autoStart` as deprecated and debug-only, but the setting remains available for manual server management. Changing the port requires a window reload. `varro.server.command` selects a local executable; it does not set an API address or Docker command.
+VS Code marks `varro.server.autoStart` as deprecated and debug-only, but the setting remains available for manual server management. With auto-start disabled and no Varro-managed process, Varro uses attach-only mode and does not assume the server shares its CLI, database, or global configuration. Changing the port requires a window reload. `varro.server.command` selects a local executable; it does not set an API address or Docker command.
 
 Varro reads server authentication from `OPENCODE_SERVER_PASSWORD` and optional `OPENCODE_SERVER_USERNAME` in the extension host's environment. These must match the container. They are separate from model-provider API keys.
 
@@ -118,7 +153,15 @@ curl --fail --show-error \
   http://127.0.0.1:4096/api/info
 ```
 
-For the v2 version in this example, the response should contain the server version. This checks the Docker endpoint directly. `opencode api` can discover or start a different local service, so it is not a substitute for this check.
+For v1, use its health endpoint instead:
+
+```sh
+curl --fail --show-error \
+  --user "$OPENCODE_SERVER_USERNAME:$OPENCODE_SERVER_PASSWORD" \
+  http://127.0.0.1:4096/global/health
+```
+
+Both responses should contain the server version; v1 also returns `healthy: true`. These commands check the Docker endpoint directly. In v2, `opencode api` can discover or start a different local service, so it is not a substitute for this check.
 
 Check the container and workspace mount:
 
@@ -133,6 +176,14 @@ After connecting, create a session in Varro and ask it to read a known file in t
 ## Remote hosts and Dev Containers
 
 For Remote SSH, publish the Docker port on the SSH host where Varro runs, and use that host's workspace path for the bind mount.
+
+If VS Code runs locally but OpenCode runs on another machine, forward its port to the extension host:
+
+```sh
+ssh -N -L 127.0.0.1:4096:127.0.0.1:4096 user@server-host
+```
+
+Use attach-only mode and the remote server's credentials. A tunnel forwards HTTP only; it does not synchronize files. The remote workspace must contain the same files at the same absolute path. A Remote SSH workspace usually avoids this mismatch.
 
 For Dev Containers, `127.0.0.1` refers to the development container. Publishing OpenCode's port on the Docker host or running it in a sibling container does not make it available at the development container's loopback address. Run OpenCode in the development container, or arrange forwarding so the configured port is reachable at `127.0.0.1` from that container.
 
@@ -156,3 +207,21 @@ If the connection still fails, include your Varro and OpenCode versions, Docker 
 Docker owns this server's lifecycle. Use `docker stop varro-opencode`, `docker start varro-opencode`, or `docker restart varro-opencode` to manage it. Varro's restart command only restarts a server it manages.
 
 To update OpenCode, rebuild the image with a supported version and recreate the container with the same mounts and credentials. Varro does not update the OpenCode installation inside this container. Varro settings that require injecting configuration into a managed server, such as its auto-compaction settings, must instead be configured in OpenCode for this setup.
+
+## Feature availability in attach-only mode
+
+These limits apply to both API families when `varro.server.autoStart` is `false` and Varro does not own a running process. Varro cannot distinguish a local manual server from a Docker port or SSH tunnel, so it treats all of them the same way.
+
+| Feature | Behavior |
+| --- | --- |
+| Chat, tools, session history, and embedded provider connection | Use the connected server's API. Workspace paths and provider setup must be valid on that server. OAuth flows that need a server-side browser callback may require additional forwarding or login inside the container. |
+| Server restart and automatic CLI updates | Varro does not restart or update the external server. Restart actions explain where to manage it; retry after a connection error reconnects without claiming ownership. |
+| Terminal provider login/logout and local installation commands | Show a message to run the command on the server host or inside the container. |
+| Open session in Terminal and CLI session export | Show an unsupported-setup message instead of launching an unrelated local CLI. |
+| Edit global AGENTS.md and import local v1 history | Show a message directing you to the server host. Project AGENTS.md remains available through the shared workspace. |
+| Usage report | Reads the connected server through the API instead of the local database. The API fallback supports up to 250 sessions; larger reports show an explanatory error. |
+| Provider quota checks | Report that server-side credentials are unavailable in attach-only mode. Session token and cost information reported by OpenCode remains available. |
+| Global configuration and credential-file watching | Local files are not watched or applied to the external server. Refresh providers after changing the server configuration, and restart it externally when needed. |
+| Varro auto-compaction and injected Ask agent settings | Configure these on the OpenCode server. Varro cannot inject a startup configuration into an external process. |
+
+File opening, diffs, and project context still use the VS Code workspace. Files created only in the container outside the shared mounts will not be available in the editor.

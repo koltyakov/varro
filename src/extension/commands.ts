@@ -178,7 +178,12 @@ export function registerCommands(
     }),
 
     vscode.commands.registerCommand('varro.chat.openStats', async () => {
-      await sidebar.generateUsageReport();
+      try {
+        await sidebar.generateUsageReport();
+      } catch (err) {
+        // The report service has already displayed the actionable failure.
+        logger.warn(`Usage report failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }),
 
     vscode.commands.registerCommand('varro.chat.abort', async () => {
@@ -302,6 +307,12 @@ export function registerCommands(
 
     vscode.commands.registerCommand('varro.agents.openGlobal', async () => {
       try {
+        if (server.isAttachOnly) {
+          await vscode.window.showInformationMessage(
+            'Editing global AGENTS.md is not supported in attach-only mode. Edit it in the OpenCode configuration directory on the server host or inside the container.'
+          );
+          return;
+        }
         await openAgentsFile(vscode.Uri.file(getOpenCodeConfigDirectory()));
       } catch (err) {
         showAgentsFileError('global', err);

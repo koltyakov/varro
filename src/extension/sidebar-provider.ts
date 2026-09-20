@@ -500,6 +500,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       if (event.affectsConfiguration('varro.server.autoUpdate')) {
         this.updateStatusBarItem();
       }
+      if (event.affectsConfiguration('varro.server.autoStart')) {
+        // Activation's configuration listener applies launch settings after this listener.
+        queueMicrotask(() => {
+          if (this.disposing) return;
+          this.providerLimitService.clearCache();
+          this.providerFileRefresh.setActive(!this.server.isAttachOnly);
+          this.openCodeVersionGeneration += 1;
+          this.openCodeVersionCheck = 'idle';
+          this.updateStatusBarItem();
+        });
+      }
       if (
         event.affectsConfiguration('varro.chat.showFileDiffs') ||
         event.affectsConfiguration('varro.chat.expandThinking') ||
@@ -645,7 +656,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       autoApproveJudge: this.autoApproveJudge,
       decisionProviders: this.decisionProviders,
       sessionTitleFallback: this.sessionTitleFallback,
-      readLocalSessionSummary,
+      readLocalSessionSummary: (sessionId) =>
+        this.server.isAttachOnly ? Promise.resolve(null) : readLocalSessionSummary(sessionId),
       simulateNoProviders: this.simulateNoProviders,
       getRequestGeneration: () => webviewSession.getRequestGeneration(),
       getStatus: () => this.serverEventBridge.getStatus(),
@@ -867,6 +879,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 {
                   ...endpointServer,
                   resolveCommand: () => this.server.resolveCommand(),
+                  get isAttachOnly() {
+                    return server.isAttachOnly;
+                  },
                 },
                 SidebarProvider.EXPORT_TIMEOUT_MS
               ),
@@ -981,6 +996,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.openSessionInSidebar(sessionId, directory),
         importLegacySession: async (sessionId, directory) => {
           try {
+            if (this.server.isAttachOnly) {
+              await vscode.window.showInformationMessage(
+                'Importing local v1 history is not supported in attach-only mode. Import the history on the OpenCode server host.'
+              );
+              return;
+            }
             const workspacePath = this.contextProvider.getOpenWorkspaceRoot(directory);
             if (!workspacePath) throw new Error('Session workspace folder is not open');
             const importer = new LegacySessionImport((method, path, body) =>
@@ -3028,6 +3049,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async providerAuthChanged() {
+    if (this.server.isAttachOnly) {
+      this.providerLimitService.clearCache();
+      this.post({ type: 'providers/refresh', payload: { revalidateAuth: true } });
+      return;
+    }
     const serverInfo = await this.server.readServerInfo().catch(() => null);
     const version = serverInfo?.health?.version ?? serverInfo?.cliVersion ?? '';
     if (openCodeApiVersion(version) === 2) {
@@ -3147,6 +3173,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   ) {
     const text = command.trim();
     if (!text) return;
+    if (this.server.isAttachOnly) {
+      await vscode.window.showInformationMessage(
+        'Local OpenCode setup commands are not supported in attach-only mode. Run installation, updates, and provider login on the server host or inside the OpenCode container.'
+      );
+      return;
+    }
     const replacesBinary = replacesOpenCodeBinary(text);
 
     // Same prerequisite as Varro's own upgrade path: on Windows a managed
@@ -3176,6 +3208,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     sessionId: string,
     workspacePath = this.contextProvider.context.workspacePath || undefined
   ) {
+    if (this.server.isAttachOnly) {
+      void vscode.window.showInformationMessage(
+        'Opening a session with the local CLI is not supported in attach-only mode. Open it using OpenCode on the server host or inside the container.'
+      );
+      return;
+    }
     const launch = resolveServerLaunch(this.server.resolveCommand(), ['--session', sessionId]);
     const terminal = vscode.window.createTerminal({
       name: 'OpenCode Session',

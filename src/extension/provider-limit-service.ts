@@ -50,7 +50,7 @@ export class ProviderLimitService {
 
   constructor(
     private readonly server: Pick<OpenCodeServer, 'request'> &
-      Partial<Pick<OpenCodeServer, 'apiVersion' | 'url'>>,
+      Partial<Pick<OpenCodeServer, 'apiVersion' | 'url' | 'isAttachOnly'>>,
     private readonly coordinator = new ProviderQuotaCoordinator(),
     private readonly directory?: string,
     private readonly onUpdate?: (update: ProviderLimitUpdate) => void
@@ -186,6 +186,16 @@ export class ProviderLimitService {
       JSON.stringify([this.directory ?? null, providerID, modelID])
     );
     const checkedAt = Date.now();
+    if (this.server.isAttachOnly) {
+      return createProviderLimitLoadResult({
+        providerID,
+        modelID,
+        status: 'unsupported',
+        source: 'provider',
+        checkedAt,
+        note: 'Provider quota checks need server-side credentials and are not supported in attach-only mode. Check usage with your provider or on the OpenCode server host.',
+      });
+    }
     // Provider limits are best-effort metadata: no failure in this subsystem
     // may surface as a rejected request. Metadata and adapter errors are
     // contained into `error` statuses so callers always get a renderable

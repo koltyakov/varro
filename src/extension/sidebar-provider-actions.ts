@@ -108,6 +108,10 @@ export function createSidebarProviderActions(
   const checkServerRestart = (checkId: number) => {
     if (restartCheckOperation) return restartCheckOperation;
     const operation = (async () => {
+      if (deps.server.isAttachOnly) {
+        await vscode.commands.executeCommand('varro.server.restart');
+        return;
+      }
       const blockers = await deps.server.readRestartBlockers();
       if (blockers.totalSessionCount > 0) {
         deps.post({ type: 'server/restart-blocked', payload: { ...blockers, checkId } });

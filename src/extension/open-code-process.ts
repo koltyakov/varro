@@ -1254,7 +1254,8 @@ export class OpenCodeProcess {
       try {
         this.ownershipLeaseCandidate = parseManagedServerOwnershipLease(JSON.parse(rawLease));
       } catch {}
-      if (this.ownershipLeaseCandidate) this._port = this.ownershipLeaseCandidate.port;
+      if (this.ownershipLeaseCandidate && this.autoStart)
+        this._port = this.ownershipLeaseCandidate.port;
     } catch {}
   }
 
@@ -1946,6 +1947,11 @@ export class OpenCodeProcess {
       logger.warn(
         'Varro Ask agent changes can only be reapplied automatically for a Varro-managed OpenCode server'
       );
+      if (!this.autoStart) {
+        await vscode.window.showInformationMessage(
+          'The Varro Ask agent cannot be injected in attach-only mode. Configure the agent on the OpenCode server host or inside the container.'
+        );
+      }
       return;
     }
     if (!this.injectedConfigPath) {
@@ -1992,6 +1998,11 @@ export class OpenCodeProcess {
       logger.warn(
         'Varro chat auto-compaction settings can only be reapplied automatically for a Varro-managed OpenCode server'
       );
+      if (!this.autoStart) {
+        await vscode.window.showInformationMessage(
+          'Varro auto-compaction settings cannot be applied in attach-only mode. Configure compaction on the OpenCode server host or inside the container.'
+        );
+      }
       return;
     }
     try {

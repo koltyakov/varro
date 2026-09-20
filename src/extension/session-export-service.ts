@@ -17,11 +17,21 @@ const MAX_EXPORT_STDERR_BYTES = 64 * 1024;
 
 export class SessionExportService {
   constructor(
-    private readonly server: Pick<OpenCodeServer, 'getWorkspaceCwd' | 'request' | 'resolveCommand'>,
+    private readonly server: Pick<
+      OpenCodeServer,
+      'getWorkspaceCwd' | 'request' | 'resolveCommand'
+    > &
+      Partial<Pick<OpenCodeServer, 'isAttachOnly'>>,
     private readonly exportTimeoutMs: number
   ) {}
 
   async exportSession(sessionId: string, directory?: string) {
+    if (this.server.isAttachOnly) {
+      await vscode.window.showInformationMessage(
+        'Session export through the local CLI is not supported in attach-only mode. Run opencode export on the server host or inside the OpenCode container.'
+      );
+      return;
+    }
     try {
       const workspacePath = directory ?? this.server.getWorkspaceCwd();
       const workspaceIdentity = normalizeWorkspaceIdentity(workspacePath);

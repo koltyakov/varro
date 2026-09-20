@@ -1,0 +1,22 @@
+name: varro-opencode-v2
+services:
+  opencode:
+    container_name: varro-opencode
+    build:
+      context: .
+      dockerfile: Dockerfile.v2
+    ports:
+      - "127.0.0.1:${VARRO_SERVER_PORT:-4096}:4096"
+    environment:
+      OPENCODE_SERVER_USERNAME: ${OPENCODE_SERVER_USERNAME:-opencode}
+      OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:?Set OPENCODE_SERVER_PASSWORD}
+    working_dir: ${VARRO_WORKSPACE:?Set VARRO_WORKSPACE to an absolute workspace path}
+    volumes:
+      - type: bind
+        source: ${VARRO_WORKSPACE}
+        target: ${VARRO_WORKSPACE}
+      - config:/root/.config/opencode
+      - data:/root/.local/share/opencode
+volumes:
+  config:
+  data:

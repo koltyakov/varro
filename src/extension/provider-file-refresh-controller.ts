@@ -33,7 +33,8 @@ type ProviderFileRefreshDependencies = {
   server: Pick<
     OpenCodeServer,
     'status' | 'request' | 'restart' | 'readServerInfo' | 'readRestartBlockers' | 'on' | 'off'
-  >;
+  > &
+    Partial<Pick<OpenCodeServer, 'isAttachOnly'>>;
   persistence: Pick<Persistence, 'get' | 'set' | 'remove'>;
   clearProviderLimitCache(): void;
   postRefresh(options?: { revalidateAuth: true }): void;
@@ -106,7 +107,7 @@ export class ProviderFileRefreshController {
     const pendingState = dependencies.persistence.get<unknown>(
       ProviderFileRefreshController.PENDING_STATE_KEY
     );
-    if (isPersistedPendingState(pendingState)) {
+    if (!dependencies.server.isAttachOnly && isPersistedPendingState(pendingState)) {
       this.pendingScope = pendingState.version === 1 ? 'global' : pendingState.scope;
       this.pendingRevision = 1;
       this.authRevalidationPending = pendingState.revalidateAuth;
@@ -124,6 +125,7 @@ export class ProviderFileRefreshController {
   }
 
   async initializeSignature() {
+    if (this.dependencies.server.isAttachOnly) return;
     const generation = this.refreshGeneration;
     const signature = await this.readFilesSignature();
     if (
@@ -137,6 +139,7 @@ export class ProviderFileRefreshController {
   }
 
   setActive(active: boolean) {
+    if (this.dependencies.server.isAttachOnly) active = false;
     if (active) {
       if (this.configWatchers.length > 0 || this.authWatcher) return;
       const generation = ++this.refreshGeneration;
@@ -299,6 +302,7 @@ export class ProviderFileRefreshController {
   }
 
   async readFilesSignature() {
+    if (this.dependencies.server.isAttachOnly) return '';
     const signatures = await Promise.all(
       [...getOpenCodeConfigPaths(), getOpenCodeAuthFilePath()].map(async (path) => {
         try {
@@ -387,6 +391,10 @@ export class ProviderFileRefreshController {
   }
 
   private async maybeInvalidate(generation: number, retryCount: number) {
+    if (this.dependencies.server.isAttachOnly) {
+      this.dependencies.postPendingStatus(false);
+      return;
+    }
     const pendingScope = this.pendingScope;
     if (
       this.disposed ||

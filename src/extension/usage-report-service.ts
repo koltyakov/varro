@@ -8,7 +8,8 @@ import { resolveOpenCodeDataDirectory } from '../shared/opencode-data-directory'
 import { asRecord } from '../shared/type-utils';
 import type { OpenCodeServer } from './server';
 
-type OpenCodeRequest = Pick<OpenCodeServer, 'request'>;
+type OpenCodeRequest = Pick<OpenCodeServer, 'request'> &
+  Partial<Pick<OpenCodeServer, 'isAttachOnly'>>;
 
 type Session = {
   id: string;
@@ -136,7 +137,9 @@ export class UsageReportService {
     const warnings: string[] = [];
     const now = Date.now();
     const start = includeAllTime ? undefined : now - 30 * DAY_MS;
-    const local = await this.readLocalUsage?.(start, now, includeAllTime);
+    const local = this.server.isAttachOnly
+      ? null
+      : await this.readLocalUsage?.(start, now, includeAllTime);
     if (local) {
       this.sessionUsageCache.clear();
       this.sessionUsageCacheEntries = 0;
@@ -149,7 +152,9 @@ export class UsageReportService {
     const sessions = await this.listSessions(warnings, start);
     if (sessions.length > SESSION_FALLBACK_MAX_SESSIONS) {
       throw new Error(
-        `The local OpenCode usage database is unavailable. Refusing to fetch full history for ${sessions.length.toLocaleString()} sessions.`
+        this.server.isAttachOnly
+          ? `Usage reports in attach-only mode support up to ${SESSION_FALLBACK_MAX_SESSIONS} sessions through the API. Run usage reporting on the server host for ${sessions.length.toLocaleString()} sessions.`
+          : `The local OpenCode usage database is unavailable. Refusing to fetch full history for ${sessions.length.toLocaleString()} sessions.`
       );
     }
     const sessionIDs = new Set(sessions.map((session) => session.id));

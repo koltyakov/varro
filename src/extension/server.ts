@@ -404,6 +404,7 @@ export class OpenCodeServer extends EventEmitter {
     signal: AbortSignal,
     serverVersion?: string
   ) {
+    if (this.isAttachOnly) return;
     if (this.existingServerPreparationOperation) return;
     const operation = (async () => {
       try {
@@ -1292,7 +1293,7 @@ export class OpenCodeServer extends EventEmitter {
     let activeAgentError: string | null = null;
 
     try {
-      cliVersion = await this.readInstalledCliVersion();
+      if (!this.isAttachOnly) cliVersion = await this.readInstalledCliVersion();
     } catch (err) {
       cliVersionError = err instanceof Error ? err.message : String(err);
     }
@@ -1415,6 +1416,7 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private async runMaintenanceTick() {
+    if (this.isAttachOnly) return;
     await this.processManager.runMaintenanceTick({
       isDisposing: () => this.isDisposing,
       getStatus: () => this._status,
@@ -1442,6 +1444,12 @@ export class OpenCodeServer extends EventEmitter {
     const observed = serverVersion
       ? `the running server is ${serverVersion}`
       : 'the running server version could not be determined';
+
+    if (this.isAttachOnly) {
+      const message = `OpenCode update required: ${observed}. Update OpenCode on the server host or rebuild the Docker image, then reconnect Varro. Local updates are not supported in attach-only mode.`;
+      this.setStatus({ state: 'error', message, detail: { kind: 'generic' } });
+      throw new Error(message);
+    }
 
     if (!this.processManager.isAutoUpdateEnabled) {
       this.failForRequiredUpdate(observed, 'Automatic updates are disabled.', {
@@ -2083,7 +2091,20 @@ export class OpenCodeServer extends EventEmitter {
     this.processManager.updateLaunchSettings(options);
   }
 
+  /** Attach-only endpoints may be Docker ports or tunnels, even on loopback. */
+  get isAttachOnly(): boolean {
+    return !this.processManager.isAutoStartEnabled && !this.managedProcess;
+  }
+
   restart(options: { force?: boolean } = {}): Promise<string> {
+    if (this.isAttachOnly) {
+      if (this._status.state !== 'running') return this.start();
+      return Promise.reject(
+        new Error(
+          'Restart is not supported in attach-only mode. Restart OpenCode on its server host or with Docker, then reconnect Varro.'
+        )
+      );
+    }
     // Restart is how the user says "I just installed it, look again", so the
     // memoized lookup must not survive: its key only covers the environment,
     // which does not change when a CLI appears in a directory already on PATH.
