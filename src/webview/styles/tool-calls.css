@@ -2803,6 +2803,7 @@ kbd {
 
 .background-process .tool-invocation-header {
   cursor: default;
+  opacity: 0.4;
 }
 
 .interactive-loading-row.trailing-assistant-summary-row {

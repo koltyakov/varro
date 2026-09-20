@@ -418,12 +418,12 @@ export function LoadingRow(props: {
           <div class="tool-invocation-header">
             <UiIcon
               source={hourglassIcon}
-              class="tool-call-icon tool-call-wait-icon tool-status-pending"
+              class="tool-call-icon tool-call-wait-icon tool-status-running"
               width="16"
               height="16"
               aria-hidden="true"
             />
-            <span class="tool-invocation-title">Background process</span>
+            <span class="tool-invocation-title shimmer-progress">Background process</span>
             <span class="tool-invocation-duration" title="Background process elapsed time">
               {formatElapsed()}
             </span>
