@@ -86,7 +86,6 @@ export function renderAboutHtml(data: AboutViewData, cspSource: string): string 
     dt { color: var(--vscode-descriptionForeground); }
     dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
     code { padding: 0; color: inherit; background: transparent; font-family: var(--vscode-editor-font-family); font-size: 12px; }
-    dd code { padding: 2px 6px; border-radius: 4px; background: var(--about-inset); box-decoration-break: clone; }
     .runtime { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--about-border); border-radius: 10px; background: var(--about-surface); }
     .runtime-item { min-width: 0; padding: 16px 20px; overflow-wrap: anywhere; }
     .runtime-item + .runtime-item { border-left: 1px solid var(--about-border); }

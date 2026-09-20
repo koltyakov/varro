@@ -827,6 +827,7 @@ body.vscode-high-contrast-light
 }
 
 .permission-prompt-group-note,
+.permission-prompt-error,
 .permission-prompt-scope-note {
   margin: 2px 12px 4px;
   font-size: 11px;
@@ -836,6 +837,11 @@ body.vscode-high-contrast-light
 
 .permission-prompt-scope-note {
   margin-top: 4px;
+}
+
+.permission-prompt-error {
+  color: var(--vscode-errorForeground);
+  overflow-wrap: anywhere;
 }
 
 .permission-prompt-actions {

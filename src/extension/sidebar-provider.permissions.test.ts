@@ -651,6 +651,40 @@ describe('SidebarProvider permission replay', () => {
     });
   });
 
+  it.each([1, 2] as const)(
+    'shows the external v%s server address before versions without local CLI details',
+    async (apiVersion) => {
+      const version = readMaximumTestedOpenCodeVersion(undefined, apiVersion);
+      const server = createServer({
+        isAttachOnly: true,
+        apiVersion,
+        url: 'http://127.0.0.1:4097',
+        status: { state: 'stopped' },
+        readServerInfo: vi.fn(async () => ({
+          managedProcess: false,
+          cliVersion: '0.0.1',
+          health: { healthy: true, version },
+        })),
+      });
+      await createSidebarProviderInstance({ server });
+      const createStatusBarItem = getVscodeMock().window.createStatusBarItem;
+      const itemIndex = createStatusBarItem.mock.calls.findIndex(
+        ([id]) => id === 'varro.opencode-version'
+      );
+      const item = createStatusBarItem.mock.results[itemIndex]?.value;
+      const address = 'Server address: http://127.0.0.1:4097\nServer IP: 127.0.0.1';
+      expect(item.tooltip).toBe(`${address}\nOpenCode Server: unknown\n\nVarro extension: 0.26.4`);
+
+      const statusHandler = server.on.mock.calls.findLast(([event]) => event === 'status')?.[1];
+      statusHandler?.({ state: 'running', url: server.url });
+
+      await vi.waitFor(() => expect(item.text).toBe(`$(robot) OpenCode ${version}`));
+      expect(item.tooltip).toBe(
+        `${address}\nOpenCode Server: ${version}\n\nVarro extension: 0.26.4`
+      );
+    }
+  );
+
   it('marks the OpenCode version when the running server trails the installed CLI', async () => {
     const server = createServer({
       readServerInfo: vi.fn(async () => ({

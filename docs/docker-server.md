@@ -1,4 +1,7 @@
-# Connect Varro to OpenCode in Docker
+# Docker and remote OpenCode servers
+
+> [!IMPORTANT]
+> This is an advanced, reduced-functionality setup. We do not recommend Docker or a separately managed remote OpenCode server for general Varro use. Use this mode only if you have a specific requirement and understand how to manage the server's networking, authentication, workspace paths, tools, storage, and updates yourself. Read the unsupported and limited features below before following the setup instructions.
 
 ## Recommended setup: install OpenCode on the machine
 
@@ -6,7 +9,35 @@ Docker is usually unnecessary for Varro. For most users, installing OpenCode dir
 
 A direct installation can use your existing project tools, dependencies, credentials, and workspace files without port forwarding or matching container mounts. It also supports local CLI session export and terminal access, file-based configuration editing, and server restart and update management. A separate Docker server uses attach-only mode, which limits these integrations as described in [Feature availability in attach-only mode](#feature-availability-in-attach-only-mode).
 
-Use Docker when you specifically need a containerized toolchain, isolation, or an existing container-hosted OpenCode service. With WSL or Remote SSH, a direct installation means installing OpenCode in that WSL distribution or on the SSH host, alongside Varro's extension host.
+Consider Docker only when a containerized toolchain, isolation, or an existing container-hosted OpenCode service is a requirement. If you do not have such a requirement, use the direct installation.
+
+With WSL, Remote SSH, or Dev Containers, the recommended setup is still to install OpenCode alongside Varro's extension host and let Varro manage it. A remote VS Code workspace does not itself require attach-only mode. The restrictions below apply when you disable Varro's server management and connect to a separately managed server.
+
+## Feature availability in attach-only mode
+
+These limits apply to both OpenCode v1 and v2 when `varro.server.autoStart` is `false` and Varro does not own a running process. Varro cannot distinguish a local manual server from a Docker port or SSH tunnel, so it treats all of them the same way.
+
+Chat, tools, session history, and embedded provider connection use the connected server's API. Workspace paths, tools, dependencies, and provider credentials must be valid on that server. Session permission rules, pending approvals, and server-memory approvals remain available through the API.
+
+The following functionality is unsupported or limited in this mode:
+
+| Feature | Limitation and required action |
+| --- | --- |
+| Server startup, restart, and automatic CLI updates | Varro does not start, restart, or update the external server. Manage its lifecycle yourself. Retrying a connection reconnects to the existing server. |
+| Terminal provider login/logout and local installation commands | Unavailable through Varro's local CLI integration. Run the commands on the server host or inside the container. |
+| Open session in Terminal and CLI session export | Unsupported. Use OpenCode on the server host or inside the container. Varro will not launch an unrelated local CLI. |
+| Edit global AGENTS.md and import local v1 history | Unsupported through Varro in this mode. Perform these operations on the server host. Project AGENTS.md remains available through the shared workspace. |
+| File-based model routing and provider disabling | Varro can read model routing from the API, but cannot edit the server's configuration files. Edit those files on the server host. |
+| Project permission configuration and `Allow always > For this project` | Unsupported because these operations write configuration files. Edit the server's project configuration directly, or use Allow once, session-scoped approval, or approval until server restart. An unsupported project approval leaves the request pending and displays an explanation. |
+| Provider quota checks | Unavailable because Varro cannot read server-side provider credentials. Session token and cost information reported by OpenCode remains available. |
+| Usage report | Uses the server API instead of a local database. Reports support up to 250 sessions; larger reports show an explanatory error. |
+| Global configuration and credential-file watching | Local changes are not watched or applied to the external server. Refresh providers after server-side changes and restart the server externally when needed. |
+| Varro auto-compaction and injected Ask agent settings | Varro cannot inject startup configuration into an external process. Configure these settings on the OpenCode server. |
+| Custom server hostname, URL, or HTTPS endpoint | No direct setting is available. Forward the server to `http://127.0.0.1:<port>` as seen by the VS Code extension host. |
+| Workspace path translation and file synchronization | Unsupported. Both environments need the same files at identical absolute paths. A port forward does not synchronize files, and native Windows paths do not map to Linux container paths. |
+| Provider authentication that needs a server-side browser callback | May require additional forwarding or login inside the container. Host provider credentials are not automatically shared. |
+
+File opening, diffs, and project context still use the VS Code workspace. Files created only on the server outside shared mounts are not available in the editor. You are responsible for keeping the editor and server workspaces consistent and for supplying the server's build tools and dependencies.
 
 ## Docker setup overview
 
@@ -217,22 +248,3 @@ If the connection still fails, include your Varro and OpenCode versions, Docker 
 Docker owns this server's lifecycle. Use `docker stop varro-opencode`, `docker start varro-opencode`, or `docker restart varro-opencode` to manage it. Varro's restart command only restarts a server it manages.
 
 To update OpenCode, rebuild the image with a supported version and recreate the container with the same mounts and credentials. Varro does not update the OpenCode installation inside this container. Varro settings that require injecting configuration into a managed server, such as its auto-compaction settings, must instead be configured in OpenCode for this setup.
-
-## Feature availability in attach-only mode
-
-These limits apply to both API families when `varro.server.autoStart` is `false` and Varro does not own a running process. Varro cannot distinguish a local manual server from a Docker port or SSH tunnel, so it treats all of them the same way.
-
-| Feature | Behavior |
-| --- | --- |
-| Chat, tools, session history, and embedded provider connection | Use the connected server's API. Workspace paths and provider setup must be valid on that server. OAuth flows that need a server-side browser callback may require additional forwarding or login inside the container. |
-| Server restart and automatic CLI updates | Varro does not restart or update the external server. Restart actions explain where to manage it; retry after a connection error reconnects without claiming ownership. |
-| Terminal provider login/logout and local installation commands | Show a message to run the command on the server host or inside the container. |
-| Open session in Terminal and CLI session export | Show an unsupported-setup message instead of launching an unrelated local CLI. |
-| Edit global AGENTS.md and import local v1 history | Show a message directing you to the server host. Project AGENTS.md remains available through the shared workspace. |
-| File-based model routing, provider disabling, and project permission configuration | Read model routing from the API. File-based configuration actions show an unsupported-setup message; edit the server's configuration directly. Session permission rules, pending approvals, and server-memory approvals continue through the API. Project-scoped Always approvals require file-based configuration, so use session or server-memory scope instead. |
-| Usage report | Reads the connected server through the API instead of the local database. The API fallback supports up to 250 sessions; larger reports show an explanatory error. |
-| Provider quota checks | Report that server-side credentials are unavailable in attach-only mode. Session token and cost information reported by OpenCode remains available. |
-| Global configuration and credential-file watching | Local files are not watched or applied to the external server. Refresh providers after changing the server configuration, and restart it externally when needed. |
-| Varro auto-compaction and injected Ask agent settings | Configure these on the OpenCode server. Varro cannot inject a startup configuration into an external process. |
-
-File opening, diffs, and project context still use the VS Code workspace. Files created only in the container outside the shared mounts will not be available in the editor.

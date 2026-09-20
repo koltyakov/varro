@@ -200,6 +200,7 @@ export function createContextProvider() {
 export function createServer(
   overrides: Partial<{
     isAttachOnly: boolean;
+    url: string;
     apiVersion: 1 | 2;
     status: { state: string; url?: string; message?: string };
     on: ReturnType<typeof vi.fn>;
@@ -218,6 +219,7 @@ export function createServer(
   return {
     apiVersion: 1 as const,
     isAttachOnly: false,
+    url: 'http://127.0.0.1:4096',
     status: { state: 'running', url: 'http://127.0.0.1:4096' },
     on: vi.fn(),
     off: vi.fn(),

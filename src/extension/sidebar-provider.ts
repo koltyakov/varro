@@ -3325,23 +3325,24 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private renderOpenCodeStatusBarItem() {
-    const updateMarker = this.openCodeUpdateAvailable ? '*' : '';
-    const displayedVersion = this.openCodeServerVersion ?? this.openCodeCliVersion;
+    const attachOnly = this.server.isAttachOnly;
+    const cliVersion = attachOnly ? null : this.openCodeCliVersion;
+    const updateMarker = !attachOnly && this.openCodeUpdateAvailable ? '*' : '';
+    const displayedVersion = this.openCodeServerVersion ?? cliVersion;
     const maximumTestedOpenCodeVersion = readMaximumTestedOpenCodeVersion(
       undefined,
-      (this.openCodeCliVersion ?? displayedVersion)?.startsWith('2.') ? 2 : 1
+      (cliVersion ?? displayedVersion)?.startsWith('2.') ? 2 : 1
     );
     const autoUpdatesEnabled = vscode.workspace
       .getConfiguration('varro')
       .get<boolean>('server.autoUpdate', true);
     const versionLines = [
-      `OpenCode CLI: ${this.openCodeCliVersion ?? 'unknown'}`,
+      ...(attachOnly
+        ? [`Server address: ${this.server.url}`, `Server IP: ${new URL(this.server.url).hostname}`]
+        : [`OpenCode CLI: ${cliVersion ?? 'unknown'}`]),
       `OpenCode Server: ${this.openCodeServerVersion ?? 'unknown'}`,
     ];
-    if (
-      this.openCodeCliVersion &&
-      compareVersions(this.openCodeCliVersion, maximumTestedOpenCodeVersion) < 0
-    ) {
+    if (cliVersion && compareVersions(cliVersion, maximumTestedOpenCodeVersion) < 0) {
       versionLines.push(
         '',
         `New CLI version: OpenCode ${maximumTestedOpenCodeVersion} is not installed yet.`,
@@ -3349,20 +3350,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       );
     }
     if (
-      this.openCodeCliVersion &&
+      cliVersion &&
       this.openCodeServerVersion &&
-      compareVersions(this.openCodeServerVersion, this.openCodeCliVersion) < 0
+      compareVersions(this.openCodeServerVersion, cliVersion) < 0
     ) {
       versionLines.push(
         '',
-        `CLI updated to OpenCode ${this.openCodeCliVersion}; server ${this.openCodeServerVersion} is stale.`
+        `CLI updated to OpenCode ${cliVersion}; server ${this.openCodeServerVersion} is stale.`
       );
     }
     if (versionLines.length > 2) versionLines.push('');
     versionLines.push(`Varro extension: ${this.extensionVersion}`);
     if (
-      (this.openCodeCliVersion &&
-        differsByMajorOrMinor(this.openCodeCliVersion, maximumTestedOpenCodeVersion)) ||
+      (cliVersion && differsByMajorOrMinor(cliVersion, maximumTestedOpenCodeVersion)) ||
       (this.openCodeServerVersion &&
         differsByMajorOrMinor(this.openCodeServerVersion, maximumTestedOpenCodeVersion))
     ) {

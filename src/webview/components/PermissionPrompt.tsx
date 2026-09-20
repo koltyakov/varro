@@ -52,6 +52,7 @@ export function PermissionPrompt(props: {
     return messageAgent?.trim() || session?.agent?.trim() || taskAgent || 'subagent';
   });
   const [alwaysMenuOpen, setAlwaysMenuOpen] = createSignal(false);
+  const [responseError, setResponseError] = createSignal<string>();
   const [alwaysMenuPosition, setAlwaysMenuPosition] = createSignal({ left: 0, top: 0 });
   let alwaysMenuButton: HTMLButtonElement | undefined;
   let alwaysMenu: HTMLDivElement | undefined;
@@ -66,10 +67,13 @@ export function PermissionPrompt(props: {
   const handleRespond = async (response: 'once' | 'always' | 'reject') => {
     const permissionId = props.permission.id;
     if (respondingPermissionIds.has(permissionId)) return;
+    setResponseError(undefined);
     respondingPermissionIds.add(permissionId);
     setRespondingPermissionVersion((version) => version + 1);
     try {
       await respondPermission(sessionId(), permissionId, response);
+    } catch (error) {
+      setResponseError(error instanceof Error ? error.message : 'Failed to respond to permission');
     } finally {
       respondingPermissionIds.delete(permissionId);
       setRespondingPermissionVersion((version) => version + 1);
@@ -78,6 +82,7 @@ export function PermissionPrompt(props: {
   const handleAlways = async (scope: 'session' | 'server' | 'project') => {
     const permissionId = props.permission.id;
     if (respondingPermissionIds.has(permissionId)) return;
+    setResponseError(undefined);
     setAlwaysMenuOpen(false);
     respondingPermissionIds.add(permissionId);
     setRespondingPermissionVersion((version) => version + 1);
@@ -89,6 +94,10 @@ export function PermissionPrompt(props: {
       } else {
         await respondPermission(sessionId(), permissionId, 'always');
       }
+    } catch (error) {
+      setResponseError(
+        error instanceof Error ? error.message : 'Failed to save permission approval'
+      );
     } finally {
       respondingPermissionIds.delete(permissionId);
       setRespondingPermissionVersion((version) => version + 1);
@@ -222,6 +231,14 @@ export function PermissionPrompt(props: {
             Always allow also guides AI review toward similar non-destructive actions.
           </Show>
         </div>
+      </Show>
+
+      <Show when={responseError()}>
+        {(error) => (
+          <div class="permission-prompt-error" role="alert">
+            {error()}
+          </div>
+        )}
       </Show>
 
       <div class="permission-prompt-actions">

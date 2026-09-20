@@ -370,6 +370,37 @@ describe('PermissionPrompt', () => {
     }
   );
 
+  it.each(['session', 'project'] as const)(
+    'shows failed %s approval feedback and keeps Allow once usable',
+    async (scope) => {
+      const message = 'File-based OpenCode configuration is not supported in attach-only mode.';
+      const approve =
+        scope === 'project'
+          ? mocks.alwaysAllowPermissionForProject
+          : mocks.alwaysAllowPermissionForSession;
+      approve.mockRejectedValueOnce(new Error(message));
+      cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
+      container?.querySelector<HTMLButtonElement>('[aria-label="Allow always"]')?.click();
+      await Promise.resolve();
+      document.body
+        .querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
+        .item(scope === 'project' ? 2 : 0)
+        .click();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(container?.querySelector('[role="alert"]')?.textContent).toBe(message);
+      expect(container?.querySelector('.permission-prompt')).not.toBeNull();
+      expect(mocks.respondPermission).not.toHaveBeenCalled();
+      const once = container?.querySelector<HTMLButtonElement>('[aria-label="Allow once"]');
+      expect(once?.disabled).toBe(false);
+      once?.click();
+      await Promise.resolve();
+      expect(mocks.respondPermission).toHaveBeenCalledWith('session-1', 'permission-1', 'once');
+      expect(container?.querySelector('[role="alert"]')).toBeNull();
+    }
+  );
+
   it.each(['Escape', 'outside click', 'trigger click'])(
     'dismisses the scope menu with %s without responding',
     async (dismissal) => {

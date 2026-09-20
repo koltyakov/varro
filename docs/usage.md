@@ -28,13 +28,15 @@ From inside Varro, `/connect` opens the provider connection dialog. The no-provi
 
 Varro connects to `http://127.0.0.1:4096` by default. It does not start OpenCode at extension activation time. Instead, it starts or attaches to the server the first time the chat view needs it.
 
-For advanced manual server management, disable `varro.server.autoStart` and start OpenCode yourself. VS Code marks this switch as deprecated and debug-only, but it remains available for this workflow:
+For normal use, leave `varro.server.autoStart` enabled and let Varro manage OpenCode alongside the VS Code extension host. Docker and separately managed remote servers are not recommended for general use: they disable local integrations and require you to manage networking, authentication, workspace paths, and server maintenance yourself.
+
+Only use manual server management if you have a specific requirement and understand the [unsupported and limited features](docker-server.md#feature-availability-in-attach-only-mode). Disable `varro.server.autoStart` and start OpenCode yourself. VS Code marks this switch as deprecated and debug-only, but it remains available for this advanced workflow:
 
 ```sh
 opencode serve --port 4096
 ```
 
-For a container-hosted server, see [Connect Varro to OpenCode in Docker](docker-server.md) for port publishing, workspace mounts, authentication, and troubleshooting.
+For Docker or a separately managed remote server, read the [advanced setup guide](docker-server.md), including its limitations, before configuring the connection.
 
 If the CLI is installed somewhere that is not on `PATH`, set `varro.server.command` to the executable path.
 
@@ -105,6 +107,8 @@ Varro is a workspace extension. In Remote SSH, Dev Containers, and similar setup
 - Files dragged from the desktop can use Varro's bounded content-upload fallback when their local paths are unavailable to the remote extension host.
 
 VS Code WSL follows the same rule. Check the lower-left remote indicator before troubleshooting `PATH`, configuration, credentials, or session history. A window with a `WSL` indicator uses the distribution's Linux CLI and files; a normal local window uses the native Windows CLI and files.
+
+These remote workspace environments support the recommended Varro-managed setup. Keep OpenCode alongside the extension host with `varro.server.autoStart` enabled. Connecting to a separately managed server uses [attach-only mode with reduced functionality](docker-server.md#feature-availability-in-attach-only-mode).
 
 ## What Varro Sends As Context
 
