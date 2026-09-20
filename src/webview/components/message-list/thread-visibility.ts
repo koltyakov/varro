@@ -38,6 +38,7 @@ function shouldHideThreadMessage(
   activeTreeIds: ReadonlySet<string>,
   childSessionIds: ReadonlySet<string>
 ) {
+  if (entry.info.role === 'user' && entry.info.pendingDelivery === 'steer') return true;
   if (!activeTreeIds.has(entry.info.sessionID)) return true;
   if (entry.info.sessionID === activeSessionId) return false;
   return childSessionIds.has(entry.info.sessionID);

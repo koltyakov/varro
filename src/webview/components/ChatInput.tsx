@@ -224,6 +224,7 @@ import {
   QueuedMessages,
   type QueuedMessageItem,
 } from './chat-input/QueuedMessages';
+import { getUserMessageEditText } from './message/UserMessageContent';
 import { UsageLimitBanner } from './chat-input/UsageLimitBanner';
 import {
   estimateContextBreakdown,
@@ -4694,6 +4695,38 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       : []
   );
 
+  const pendingSteersForSession = createMemo(() => {
+    const deliveredIds = new Set(
+      state.messages
+        .filter((entry) => entry.info.role === 'user' && !entry.info.pendingDelivery)
+        .map((entry) => entry.info.id)
+    );
+    const queued = queuedForSession().filter(
+      (item) => steeringQueuedMessageIds().has(item.id) && !deliveredIds.has(item.messageId ?? '')
+    );
+    const queuedMessageIds = new Set(queued.map((item) => item.messageId));
+    return [
+      ...queued,
+      ...state.messages
+        .filter(
+          (entry) =>
+            entry.info.sessionID === composerSessionId() &&
+            entry.info.role === 'user' &&
+            entry.info.pendingDelivery === 'steer' &&
+            !queuedMessageIds.has(entry.info.id)
+        )
+        .map((entry) => ({
+          id: entry.info.id,
+          sessionId: entry.info.sessionID,
+          text:
+            getUserMessageEditText(entry.parts) ||
+            entry.parts
+              .flatMap((part) => (part.type === 'file' ? [part.filename || 'Attachment'] : []))
+              .join(', '),
+        })),
+    ];
+  });
+
   const selectedAgentLabel = () => {
     const name = state.selectedAgent;
     if (!name) return 'Agent';
@@ -4751,11 +4784,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
       <Show
         when={
-          !hasExpandedDiffOverlay() && queuedForSession().length > 0 && !composerEditingMessage()
+          !hasExpandedDiffOverlay() &&
+          (queuedForSession().length > 0 || pendingSteersForSession().length > 0) &&
+          !composerEditingMessage()
         }
       >
         <QueuedMessages
-          items={queuedForSession()}
+          items={queuedForSession().filter((item) => !steeringQueuedMessageIds().has(item.id))}
+          pendingSteers={pendingSteersForSession()}
           dispatchingItemId={dispatchingQueuedMessageId()}
           failedDispatchItemIds={failedQueuedMessageIds()}
           steeringItemIds={steeringQueuedMessageIds()}

@@ -49,12 +49,14 @@ describe('v2 pending steering history', () => {
     });
     const reopen = () =>
       new OpenCodeV2Adapter(wire).request('GET', '/session/ses_one/message', undefined);
+    const projectedPending = projectV2Message(delivered, 'ses_one');
+    projectedPending.info.pendingDelivery = 'steer';
     const expected = [
       projectV2Message(original, 'ses_one'),
       projectV2Message(delivered, 'ses_one'),
     ];
-    expect(await reopen()).toEqual(expected);
-    expect(await reopen()).toEqual(expected);
+    expect(await reopen()).toEqual([expected[0], projectedPending]);
+    expect(await reopen()).toEqual([expected[0], projectedPending]);
     consumed = true;
     expect(await reopen()).toEqual(expected);
   });
@@ -95,8 +97,8 @@ describe('v2 pending steering history', () => {
     ).toMatchObject({
       data: [
         { info: { id: 'msg_original' }, parts: [] },
-        { info: { id: 'msg_steer' }, parts: [] },
-        { info: { id: 'msg_queue' }, parts: [] },
+        { info: { id: 'msg_steer', pendingDelivery: 'steer' }, parts: [] },
+        { info: { id: 'msg_queue', pendingDelivery: 'queue' }, parts: [] },
       ],
       nextCursor: 'older',
     });
@@ -121,8 +123,10 @@ describe('v2 pending steering history', () => {
     const adapter = new OpenCodeV2Adapter(async (_method, path) => ({
       data: path.endsWith('/inbox') ? [pending] : [],
     }));
+    const projected = projectV2Message(delivered, 'ses_one');
+    projected.info.pendingDelivery = 'steer';
     expect(await adapter.request('GET', '/session/ses_one/message', undefined)).toEqual([
-      projectV2Message(delivered, 'ses_one'),
+      projected,
     ]);
   });
 });

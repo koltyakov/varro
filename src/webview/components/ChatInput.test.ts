@@ -54,6 +54,8 @@ import { sendQueuedAsSteer } from './chat-input/queued-steer';
 import { databaseBackupIcon, databaseScriptPlusIcon, runningIcon } from '../lib/ui-icons';
 import { toCssUrl } from './UiIcon';
 import { getMaterialChipIcon } from './MaterialChipIcon';
+import { getVisibleThreadMessages } from './message-list/thread-visibility';
+import { upsertMessageInfo } from '../lib/state-messages';
 
 interface SessionEventProperties extends UnknownRecord {
   sessionID: string;
@@ -5249,6 +5251,63 @@ describe('ChatInput', () => {
     expect(state.queuedMessages.map((item) => item.id)).toEqual(['q2']);
   });
 
+  it('shows inbox steers above the queue until the same message lands in the transcript', async () => {
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'Later follow-up' }]);
+    const info: UserMessage = {
+      id: 'msg_pending_steer',
+      sessionID: 'session-1',
+      role: 'user',
+      pendingDelivery: 'steer',
+      time: { created: 1 },
+      agent: 'build',
+      model: { providerID: 'openai', modelID: 'test-model' },
+    };
+    setState('messages', [
+      {
+        info,
+        parts: [
+          {
+            id: 'part_pending',
+            messageID: info.id,
+            sessionID: info.sessionID,
+            type: 'text',
+            text: 'Change direction',
+          },
+        ],
+      },
+    ]);
+    cleanup = render(() => ChatInput(), container!);
+
+    expect(
+      [...container!.querySelectorAll('[role="list"]')].map((list) =>
+        list.getAttribute('aria-label')
+      )
+    ).toEqual(['Steered messages', 'Queued messages']);
+    expect(container?.querySelector('[aria-label="Steered messages"]')?.textContent).toBe(
+      'Change direction'
+    );
+    expect(getVisibleThreadMessages(state.messages, 'session-1')).toEqual([]);
+
+    setState('activeSessionId', 'session-other');
+    expect(container?.querySelector('[aria-label="Steered messages"]')).toBeNull();
+    setState('activeSessionId', 'session-1');
+    expect(container?.querySelector('[aria-label="Steered messages"]')?.textContent).toBe(
+      'Change direction'
+    );
+
+    upsertMessageInfo({ ...info, pendingDelivery: undefined });
+    await flushAsyncWork();
+    expect(container?.querySelector('[aria-label="Steered messages"]')).toBeNull();
+    expect(
+      getVisibleThreadMessages(state.messages, 'session-1').map((entry) => entry.info.id)
+    ).toEqual([info.id]);
+    expect(container?.querySelector('[aria-label="Queued messages"]')?.textContent).toContain(
+      'Later follow-up'
+    );
+  });
+
   it('does not resend a restored queued steer that OpenCode already admitted', async () => {
     setIsLoading(true);
     setState('activeSessionId', 'session-1');
@@ -5324,9 +5383,14 @@ describe('ChatInput', () => {
       queuedMessageDispatch: { itemId: 'q1', lease: expect.any(Number) },
     });
     expect(queueLabels()).toEqual(['test 1', 'test 2']);
-    expect(
-      container?.querySelector<HTMLButtonElement>('[aria-label="Send as Steer"]')?.disabled
-    ).toBe(true);
+    expect(container?.querySelector('[aria-label="Steered messages"]')?.textContent).toBe('test 1');
+    expect(container?.querySelector('[aria-label="Queued messages"]')?.textContent).toContain(
+      'test 2'
+    );
+    expect(container?.querySelector('[aria-label="Queued messages"]')?.textContent).not.toContain(
+      'test 1'
+    );
+    expect(container?.querySelector('[aria-label="Steered messages"] button')).toBeNull();
 
     setIsLoading(false);
     await flushAsyncWork();

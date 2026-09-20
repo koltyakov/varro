@@ -2216,10 +2216,23 @@
   opacity: 0.4;
 }
 
-.chat-queue-drag-handle {
+.chat-steer-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.chat-queue-drag-handle,
+.chat-steer-icon {
   margin-right: -2px;
   margin-left: -2px;
   color: var(--color-vscode-muted);
+}
+
+.chat-queue-drag-handle {
   cursor: grab;
 }
 

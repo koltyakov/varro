@@ -517,6 +517,11 @@ Direct input acquires ownership only when it can affect the transcript:
 
 ### View Scoping
 
+- Steered user messages with `pendingDelivery: 'steer'` belong to the read-only queue above the
+  composer, not the visible transcript or its virtual rows. Inbox history and optimistic sends retain
+  this marker until OpenCode publishes the actual message. Delivery preserves the message ID and
+  removes the marker, so the message enters the transcript only once.
+
 - Row-local actions and adjacency derive from the same visible message collection as the renderer.
   Hidden child-session messages must not change the visible parent's Retry action, latest plan action,
   model transition, or preceding file-event context.

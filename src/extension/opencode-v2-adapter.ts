@@ -669,6 +669,7 @@ export class OpenCodeV2Adapter {
           );
           if (options.stripMessageParts) projected.parts = [];
           messages.push(projected);
+          projected.info.pendingDelivery = item.delivery;
           messageIDs.add(item.id);
         }
         return options.captureNextCursor ? { data: messages, nextCursor: cursor } : messages;

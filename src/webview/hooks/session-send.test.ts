@@ -1524,6 +1524,7 @@ describe('session-send helpers', () => {
   it('does not start a new loading state for steers', async () => {
     const startLoading = vi.fn();
     const setSessionStatusEntry = vi.fn();
+    const appendOptimisticMessage = vi.fn();
 
     await sendMessageWithDependencies(
       {
@@ -1534,8 +1535,9 @@ describe('session-send helpers', () => {
         syncSessionMcps: vi.fn(async () => {}),
         buildSendPayload: () => ({
           body: { parts: [{ type: 'text', text: 'steer' }], delivery: 'steer' },
-          effectiveModel: null,
+          effectiveModel: { providerID: 'openai', modelID: 'test-model' },
         }),
+        appendOptimisticMessage,
         requestMessageListScrollToBottom: vi.fn(),
         startLoading,
         setError: vi.fn(),
@@ -1564,6 +1566,11 @@ describe('session-send helpers', () => {
 
     expect(startLoading).not.toHaveBeenCalled();
     expect(setSessionStatusEntry).not.toHaveBeenCalled();
+    expect(appendOptimisticMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        info: expect.objectContaining({ role: 'user', pendingDelivery: 'steer' }),
+      })
+    );
   });
 
   it('bootstraps missing session permissions before sending', async () => {

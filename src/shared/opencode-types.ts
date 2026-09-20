@@ -19,6 +19,8 @@ export type UserMessage = {
   id: string;
   sessionID: string;
   role: 'user';
+  /** The prompt is waiting in OpenCode's inbox, outside the transcript. */
+  pendingDelivery?: 'steer' | 'queue';
   time: { created: number };
   format?: OutputFormat;
   summary?: {
