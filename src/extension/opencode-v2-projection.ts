@@ -112,8 +112,25 @@ export function projectV2Agent(agent: AgentInfo): UnknownRecord {
   };
 }
 
+export function projectV2ModelCost(value: unknown) {
+  const tiers = (Array.isArray(value) ? value : [value])
+    .map(asRecord)
+    .filter((tier) => tier !== null);
+  const cost = tiers.find((tier) => !tier.tier) ?? tiers[0];
+  const cache = asRecord(cost?.cache);
+  const read = isNumber(cache?.read) ? cache.read : 0;
+  const write = isNumber(cache?.write) ? cache.write : 0;
+  return {
+    input: isNumber(cost?.input) ? cost.input : 0,
+    output: isNumber(cost?.output) ? cost.output : 0,
+    cache_read: read,
+    cache_write: write,
+    cache: { read, write },
+    tiers: tiers.filter((tier) => tier.tier),
+  };
+}
+
 export function projectV2Model(model: ModelInfo): UnknownRecord {
-  const cost = model.cost.find((tier) => !tier.tier) ?? model.cost[0];
   const released = new Date(model.time.released);
   return {
     ...model,
@@ -122,14 +139,7 @@ export function projectV2Model(model: ModelInfo): UnknownRecord {
         ? released.toISOString().slice(0, 10)
         : undefined,
     api: { id: model.modelID, npm: model.package ?? '', url: '' },
-    cost: {
-      input: cost?.input ?? 0,
-      output: cost?.output ?? 0,
-      cache_read: cost?.cache.read ?? 0,
-      cache_write: cost?.cache.write ?? 0,
-      cache: { read: cost?.cache.read ?? 0, write: cost?.cache.write ?? 0 },
-      tiers: model.cost.filter((tier) => tier.tier),
-    },
+    cost: projectV2ModelCost(model.cost),
     variants: Object.fromEntries(model.variants.map((variant) => [variant.id, variant])),
     capabilities: model.capabilities,
     options: model.settings ?? {},

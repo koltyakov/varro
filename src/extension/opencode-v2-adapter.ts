@@ -26,6 +26,7 @@ import {
   projectV2Form,
   projectV2Message,
   projectV2Model,
+  projectV2ModelCost,
   projectV2Permission,
   projectV2Session,
   v1Action,
@@ -935,11 +936,19 @@ export class OpenCodeV2Adapter {
           providerID: id,
           name: model.name ?? modelID,
           api: { id: model.modelID ?? modelID, npm: provider.package ?? '', url: '' },
-          cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
           capabilities: { tools: true, input: ['text'], output: ['text'] },
-          limit: { context: 0, output: 0 },
           ...existing,
           ...model,
+          cost:
+            model.cost !== undefined
+              ? projectV2ModelCost(model.cost)
+              : (existing?.cost ?? projectV2ModelCost([])),
+          limit: {
+            context: 0,
+            output: 0,
+            ...asRecord(existing?.limit),
+            ...asRecord(model.limit),
+          },
           enabled: model.disabled !== true,
           variants: Array.isArray(model.variants)
             ? Object.fromEntries(

@@ -112,7 +112,13 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
             npm: '@ai-sdk/openai-compatible',
             name: 'Fixture',
             options: { baseURL: `http://127.0.0.1:${address.port}/v1`, apiKey: 'fixture-only' },
-            models: { fixture: { name: 'Fixture', limit: { context: 32000, output: 1000 } } },
+            models: {
+              fixture: {
+                name: 'Fixture',
+                cost: { input: 2, output: 8 },
+                limit: { context: 32000, output: 1000 },
+              },
+            },
           },
         },
       })
@@ -218,9 +224,23 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
         2
       )
     );
-    expect(providers?.connected).toContain('fixture');
-    expect(asRecord(await transport.request('GET', '/config/providers'))?.providers).toBeInstanceOf(
-      Array
+    // Config-only providers are usable without a saved integration connection.
+    expect(providers?.all).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'fixture', source: 'config' })])
+    );
+    expect(asRecord(await transport.request('GET', '/config/providers'))?.providers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'fixture',
+          models: expect.objectContaining({
+            fixture: expect.objectContaining({
+              id: 'fixture',
+              cost: expect.objectContaining({ input: 2, output: 8 }),
+              limit: expect.objectContaining({ context: 32000, output: 1000 }),
+            }),
+          }),
+        }),
+      ])
     );
     expect(await transport.request('GET', '/permission')).toEqual([]);
     expect(await transport.request('GET', '/question')).toEqual([]);

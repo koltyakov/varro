@@ -492,6 +492,91 @@ describe('v2 provider refresh', () => {
   });
 });
 
+describe('v2 configured model catalogs', () => {
+  const tier = { tier: { type: 'context', size: 128_000 }, input: 4, output: 16 };
+  const base = { input: 2, output: 8, cache: { read: 0.5, write: 1 } };
+
+  it.each([
+    ['single price', base, 0.5, 1, []],
+    ['tiered prices', [tier, base], 0.5, 1, [tier]],
+    ['omitted cache prices', { input: 2, output: 8 }, 0, 0, []],
+  ])('normalizes configured %s for catalog consumers', async (_name, cost, read, write, tiers) => {
+    const adapter = new OpenCodeV2Adapter(async (_method, path) => {
+      if (path === '/api/provider' || path === '/api/model' || path === '/api/integration')
+        return { data: [] };
+      if (path === '/api/config')
+        return [
+          {
+            info: {
+              providers: { fixture: { models: { priced: { cost, limit: { context: 64000 } } } } },
+            },
+          },
+        ];
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    expect(await adapter.request('GET', '/config/providers', undefined)).toMatchObject({
+      providers: [
+        {
+          id: 'fixture',
+          models: {
+            priced: {
+              cost: {
+                input: 2,
+                output: 8,
+                cache_read: read,
+                cache_write: write,
+                cache: { read, write },
+                tiers,
+              },
+              limit: { context: 64000, output: 0 },
+            },
+          },
+        },
+      ],
+    });
+  });
+
+  it('preserves resolved prices and output limits when configuration only overrides context', async () => {
+    const model: ModelInfo = {
+      id: 'priced',
+      modelID: 'priced',
+      providerID: 'fixture',
+      name: 'Priced',
+      capabilities: { tools: true, input: ['text'], output: ['text'] },
+      variants: [],
+      time: { released: 0 },
+      cost: [base],
+      status: 'active',
+      enabled: true,
+      limit: { context: 32000, input: 30000, output: 1000 },
+    };
+    const adapter = new OpenCodeV2Adapter(async (_method, path) => {
+      if (path === '/api/provider') return { data: [{ id: 'fixture', name: 'Fixture' }] };
+      if (path === '/api/model') return { data: [model] };
+      if (path === '/api/integration') return { data: [] };
+      if (path === '/api/config')
+        return [
+          {
+            info: { providers: { fixture: { models: { priced: { limit: { context: 64000 } } } } } },
+          },
+        ];
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    expect(await adapter.request('GET', '/provider', undefined)).toMatchObject({
+      all: [
+        {
+          models: {
+            priced: {
+              cost: { ...base, cache_read: 0.5, cache_write: 1, tiers: [] },
+              limit: { context: 64000, input: 30000, output: 1000 },
+            },
+          },
+        },
+      ],
+    });
+  });
+});
+
 describe('v2 model release dates', () => {
   const model: ModelInfo = {
     id: 'model',
