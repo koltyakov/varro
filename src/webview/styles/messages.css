@@ -1304,6 +1304,16 @@ body.vscode-light
   margin-top: 6px;
 }
 
+.interactive-item-container[data-msg-id]:has(
+    > .assistant-dialog-summary.message-compaction-divider
+  ) {
+  padding-top: 0;
+}
+
+.interactive-item-container[data-msg-id] > .assistant-dialog-summary.message-compaction-divider {
+  margin-top: 0;
+}
+
 .model-change-indicator.assistant-dialog-summary:has(.assistant-dialog-summary-actions) {
   height: auto;
 }

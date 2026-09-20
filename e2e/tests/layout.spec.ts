@@ -1761,6 +1761,61 @@ test('matches the visual incoming Thinking gap to markdown', async ({ page }) =>
   expect(gaps.samples.every((sample) => sample.boxTop >= sample.trayTop - 0.5)).toBe(true);
 });
 
+for (const elapsedSeconds of [0, 31]) {
+  test(`keeps loading text and timer fixed through every ellipsis phase at ${elapsedSeconds}s`, async ({
+    page,
+  }) => {
+    const startedAt = new Date('2030-01-01T00:00:00Z');
+    await page.clock.setFixedTime(startedAt);
+    await page.setViewportSize({ width: 494, height: 800 });
+    await page.goto('/e2e/harness/index.html?scenario=large-transcript&activeReasoningEntrance=1');
+    const loading = page.locator('.interactive-loading-row .loading-indicator');
+    await expect(loading).toBeVisible();
+    if (elapsedSeconds) {
+      await page.clock.setFixedTime(new Date(startedAt.getTime() + elapsedSeconds * 1000));
+      await expect(loading.locator('.loading-elapsed')).toHaveText(`${elapsedSeconds}s`);
+    }
+    const samples = await loading.evaluate(async (element) => {
+      const verb = element.querySelector('.loading-verb')!;
+      const ellipsis = verb.querySelector('.chat-animated-ellipsis')!;
+      const row = element.closest('.interactive-loading-row')!;
+      const text = [...verb.childNodes].find(
+        (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim()
+      );
+      if (!text) throw new Error('Missing loading label text');
+      const range = document.createRange();
+      range.selectNodeContents(text);
+      const result: Array<{
+        dots: string;
+        textTop: number;
+        timerTop: number | null;
+        labelHeight: number;
+      }> = [];
+      for (let frame = 0; frame < 90; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const rowTop = row.getBoundingClientRect().top;
+        const timer = element.querySelector('.loading-elapsed');
+        result.push({
+          dots: getComputedStyle(ellipsis, '::after').content,
+          textTop: range.getBoundingClientRect().top - rowTop,
+          timerTop: timer ? timer.getBoundingClientRect().top - rowTop : null,
+          labelHeight: verb.getBoundingClientRect().height,
+        });
+      }
+      return result;
+    });
+    expect(new Set(samples.map((sample) => sample.dots)).size).toBe(4);
+    for (const key of ['textTop', 'timerTop', 'labelHeight'] as const) {
+      const values = samples.flatMap((sample) => (sample[key] === null ? [] : [sample[key]]));
+      if (!values.length) continue;
+      expect(
+        Math.max(...values) - Math.min(...values),
+        JSON.stringify({ key, samples })
+      ).toBeLessThan(0.1);
+    }
+  });
+}
+
 test('keeps the hidden Thinking slot fixed while an active tool is visible', async ({ page }) => {
   await page.setViewportSize({ width: 1000, height: 800 });
   await page.goto('/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayCount=1');

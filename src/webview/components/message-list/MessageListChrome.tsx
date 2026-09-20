@@ -354,17 +354,10 @@ export function LoadingRow(props: { compacting: boolean; visible: boolean }) {
         <Show
           when={!props.compacting && isStale()}
           fallback={
-            <Show
-              when={props.compacting}
-              fallback={
-                <span class="shimmer-progress loading-verb">
-                  {verb()}
-                  <span class="chat-animated-ellipsis" />
-                </span>
-              }
-            >
-              <span class="loading-verb">Compacting conversation context…</span>
-            </Show>
+            <span class="shimmer-progress loading-verb">
+              {props.compacting ? 'Compacting context' : verb()}
+              <span class="chat-animated-ellipsis" />
+            </span>
           }
         >
           <span>Session may be stale</span>

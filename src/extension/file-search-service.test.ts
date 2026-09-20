@@ -225,11 +225,10 @@ describe('FileSearchService', () => {
 
     expect(firstSearch?.cancel).toHaveBeenCalledTimes(1);
     expect(firstSearch?.dispose).toHaveBeenCalledTimes(1);
-    expect(vscodeMock.workspace.findFiles.mock.calls[0]).toHaveLength(3);
+    expect(vscodeMock.workspace.findFiles.mock.calls[0]).toHaveLength(2);
     expect(vscodeMock.workspace.findFiles).toHaveBeenCalledWith(
       expect.objectContaining({ base: vscodeMock.workspaceFolder, pattern: '**/*' }),
-      '{**/node_modules/**,**/.venv/**,**/venv/**,**/.tox/**,**/__pycache__/**,**/.git/**,**/dist/**,**/build/**,**/out/**,**/.next/**,**/.turbo/**,**/tmp/**,**/coverage/**}',
-      4_000
+      '{**/node_modules/**,**/.venv/**,**/venv/**,**/.tox/**,**/__pycache__/**,**/.git/**,**/dist/**,**/build/**,**/out/**,**/.next/**,**/.turbo/**,**/tmp/**,**/coverage/**}'
     );
     expect(onResult).toHaveBeenCalledTimes(1);
     expect(onResult).toHaveBeenCalledWith({
@@ -241,6 +240,31 @@ describe('FileSearchService', () => {
     service.dispose();
     expect(secondSearch?.cancel).toHaveBeenCalledTimes(1);
     expect(secondSearch?.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('finds files beyond the first 4,000 discovered workspace entries', async () => {
+    const files = Array.from({ length: 4_000 }, (_, index) => ({
+      fsPath: `/repo/src/file-${index}.ts`,
+    }));
+    files.push({ fsPath: '/repo/src/last-file.ts' });
+    vscodeMock.workspace.findFiles.mockImplementation(
+      (_include: unknown, _exclude: unknown, maxResults?: number) =>
+        Promise.resolve(maxResults === undefined ? files : files.slice(0, maxResults))
+    );
+    const { FileSearchService } = await loadModule();
+    const service = new FileSearchService();
+    const onResult = vi.fn();
+    try {
+      search(service, 1, 'last-file.ts', 10, onResult);
+      await vi.waitFor(() => expect(onResult).toHaveBeenCalledTimes(1));
+      expect(onResult).toHaveBeenCalledWith({
+        requestId: 1,
+        query: 'last-file.ts',
+        files: [{ path: '/repo/src/last-file.ts', relativePath: 'src/last-file.ts', type: 'file' }],
+      });
+    } finally {
+      service.dispose();
+    }
   });
 
   it('returns unique parent folders ahead of their matching files', async () => {
@@ -584,8 +608,7 @@ describe('FileSearchService', () => {
         base: vscodeMock.workspace.workspaceFolders[0],
         pattern: '**/*',
       }),
-      expect.any(String),
-      2_000
+      expect.any(String)
     );
   });
 

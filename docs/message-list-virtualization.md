@@ -376,6 +376,10 @@ Direct input acquires ownership only when it can affect the transcript:
 - Animation identity is a one-time message/render-key claim, not current DOM position. Virtual remount,
   completed-history reopening, or appending to an existing file-edit stack must not replay a claimed
   entrance.
+- File-edit stack entrances in a virtualized transcript publish their final height.
+  Bottom-follow owns their reveal, as it does for measured message-row appends. Animating those inner
+  heights leaves fractional row corrections after the content settles and briefly increases the
+  Thinking gap. `thinking-file-edit.spec.ts` checks that gap at every frame.
 - Deduplicating consecutive edits to the same file preserves the first edit's render and preview-state
   keys while displaying the newest tool's unchanged ID and payload. Appending another edit must not
   unmount an opened diff, restart its entrance, or reset its scroll position. The streaming diff

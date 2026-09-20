@@ -1057,7 +1057,9 @@ export function AssistantMessageContent(props: {
       return (
         <div
           ref={(element) => {
-            if (revealClass) {
+            // Measured transcripts reveal growth through bottom-follow. Animating this
+            // height too leaves stale fractional row corrections below the new card.
+            if (revealClass && !props.outerListVirtualized) {
               onCleanup(
                 prepareMeasuredEntrance(element, {
                   animationName: 'streamed-assistant-item-in',

@@ -50,7 +50,6 @@ export class FileSearchService {
   private static readonly CACHE_TTL_MS = 15_000;
   private static readonly CACHE_INVALIDATION_DEBOUNCE_MS = 100;
   private static readonly MAX_CACHE_INVALIDATION_RETRIES = 1;
-  private static readonly MAX_CANDIDATES = 4_000;
   private static readonly RESULT_LIMIT = 30;
 
   private workspaceWatchers: vscode.FileSystemWatcher[] = [];
@@ -263,17 +262,13 @@ export class FileSearchService {
     if (this.workspaceFileCachePromise) return this.workspaceFileCachePromise;
 
     const cacheGeneration = this.workspaceFileCacheGeneration;
-    const perFolderLimit = Math.max(
-      1,
-      Math.floor(FileSearchService.MAX_CANDIDATES / Math.max(1, workspaceFolders.length))
-    );
+    // Discovery order is not relevance order. Limit ranked results, not the index.
     const promise = Promise.all(
       workspaceFolders.map((workspaceFolder) =>
         Promise.resolve(
           vscode.workspace.findFiles(
             new vscode.RelativePattern(workspaceFolder, WORKSPACE_FILE_GLOB),
-            WORKSPACE_FILE_EXCLUDE_GLOB,
-            perFolderLimit
+            WORKSPACE_FILE_EXCLUDE_GLOB
           )
         ).then((files) => files.map((uri) => ({ uri, workspaceFolder })))
       )
@@ -290,7 +285,6 @@ export class FileSearchService {
         const entries: WorkspaceFileSearchEntry[] = fileGroups
           .flat()
           .flatMap(({ uri, workspaceFolder }) => {
-            if (seen.size >= FileSearchService.MAX_CANDIDATES) return [];
             const identity = normalizeWorkspaceIdentity(uri.fsPath) ?? uri.fsPath;
             if (seen.has(identity)) return [];
             seen.add(identity);

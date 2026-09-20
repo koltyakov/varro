@@ -284,16 +284,23 @@ export async function executeVscodeCommand(remoteDebuggingPort, commandLabel) {
     const focusedPalette = `document.activeElement?.matches('.quick-input-widget input') && document.activeElement.getBoundingClientRect().height > 0`;
     await waitForPalette(focusedPalette, 'did not receive focus');
     await requests.call('Input.insertText', { text: commandLabel });
+    const commandRow = `[...document.querySelectorAll('.quick-input-list .monaco-list-row')].find(row => row.querySelector('.label-name')?.textContent?.trim() === ${JSON.stringify(commandLabel)})`;
     await waitForPalette(
-      `(${focusedPalette}) && document.querySelector('.quick-input-list .monaco-list-row.focused .label-name')?.textContent?.trim() === ${JSON.stringify(commandLabel)}`,
-      'did not select the requested command'
+      `(${focusedPalette}) && (${commandRow})?.getBoundingClientRect().height > 0`,
+      'did not find the requested command'
     );
-    for (const type of ['keyDown', 'keyUp']) {
-      await requests.call('Input.dispatchKeyEvent', {
+    const response = await requests.call('Runtime.evaluate', {
+      expression: `(() => { const row = ${commandRow}; if (!row) return null; const rect = row.getBoundingClientRect(); return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }; })()`,
+      returnByValue: true,
+    });
+    const point = response.result?.value;
+    if (!point) throw new Error(`VS Code command disappeared before selection: ${commandLabel}`);
+    for (const type of ['mousePressed', 'mouseReleased']) {
+      await requests.call('Input.dispatchMouseEvent', {
         type,
-        key: 'Enter',
-        code: 'Enter',
-        windowsVirtualKeyCode: 13,
+        ...point,
+        button: 'left',
+        clickCount: 1,
       });
     }
   } finally {
