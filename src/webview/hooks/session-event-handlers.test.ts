@@ -3574,6 +3574,39 @@ describe('registerSessionEventHandlers', () => {
     loadingStartedAt.mockReturnValue(null);
   });
 
+  it('keeps a terminal response pending when background work is reported', () => {
+    const handlers = installHandlers();
+    const setSessionStatusEntry = vi.fn();
+    const terminalAssistant = createCompletedAssistantEntry(1, 2);
+    terminalAssistant.info.finish = 'stop';
+    loadingStartedAt.mockReturnValue(1);
+    startLoading.mockClear();
+    stopLoading.mockClear();
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [terminalAssistant],
+        getSessionStatus: () => ({ type: 'busy' }),
+        setSessionStatusEntry,
+      })
+    );
+    handlers.get('session.status')?.({
+      properties: {
+        sessionID: 'session-1',
+        status: { type: 'busy', background: true, backgroundStartedAt: 1 },
+      },
+    });
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', {
+      type: 'busy',
+      background: true,
+      backgroundStartedAt: 1,
+    });
+    expect(setSessionStatusEntry).not.toHaveBeenCalledWith('session-1', { type: 'idle' });
+    expect(startLoading).toHaveBeenCalled();
+    expect(stopLoading).not.toHaveBeenCalled();
+    loadingStartedAt.mockReturnValue(null);
+  });
+
   it('rechecks status after the final text quiets without clearing active loading', () => {
     vi.useFakeTimers();
     try {

@@ -180,7 +180,9 @@ export function clearQuestionResponsePending(sessionID: string, authoritativeAt?
 }
 
 export function addPermission(permission: Permission) {
-  markPermissionMutations([permission.id]);
+  // Replayed persisted details are not a newer server ask. Let the pending snapshot
+  // replace their incomplete approval data, or remove an already-resolved request.
+  if (!permission.recoveredIncomplete) markPermissionMutations([permission.id]);
   setState(
     'permissions',
     produce((perms) => {

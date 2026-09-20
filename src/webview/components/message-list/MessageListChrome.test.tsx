@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { markLoadingActivity, startLoading, stopLoading } from '../../lib/state';
-import { attachmentIcon, mediaImageIcon } from '../../lib/ui-icons';
+import { attachmentIcon, hourglassIcon, mediaImageIcon } from '../../lib/ui-icons';
 import { toCssUrl } from '../UiIcon';
 import type { Permission, QuestionRequest } from '../../types';
 
@@ -71,6 +71,32 @@ describe('MessageListChrome', () => {
     startLoading();
     vi.advanceTimersByTime(10_000);
     expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('10s');
+  });
+
+  it('shows the background process card with its elapsed duration and no stale-session warning', () => {
+    vi.useFakeTimers();
+    startLoading();
+    const startedAt = Date.now() - 13_000;
+    cleanup = render(
+      () => <LoadingRow compacting={false} visible waiting waitingStartedAt={startedAt} />,
+      container!
+    );
+    expect(
+      container?.querySelector('.background-process .tool-invocation-duration')?.textContent
+    ).toBe('13s');
+    vi.advanceTimersByTime(180_000);
+    expect(
+      container?.querySelector('.background-process .tool-invocation-title')?.textContent
+    ).toBe('Background process');
+    expect(
+      container?.querySelector('.background-process .tool-invocation-duration')?.textContent
+    ).toBe('3m 13s');
+    expect(container?.querySelector('.tool-call-wait-icon')?.getAttribute('style')).toContain(
+      toCssUrl(hourglassIcon)
+    );
+    expect(container?.querySelector('.loading-indicator')).toBeNull();
+    expect(container?.textContent).not.toContain('Session may be stale');
+    expect(container?.querySelector('.loading-action')).toBeNull();
   });
 
   it('renders the sticky user message preview shell with hidden semantics', () => {

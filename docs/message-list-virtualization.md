@@ -292,6 +292,11 @@ Direct input acquires ownership only when it can affect the transcript:
 - The trailing Thinking, loading, empty-reserve, and Worked states share one post-message slot. The
   slot may remain invisibly reserved while visible streaming text or tools replace its label. Debounce
   label reappearance and reserve release so short transitions do not collapse and regrow the bottom.
+- V2 background shell work keeps that slot in a Background process card after a terminal assistant response. A completed
+  tool call only confirms that the process was launched. Suppress Worked until the process finishes
+  and the resumed response settles; preserve the card while the new assistant message is being loaded.
+  Use the standard tool-card border and hourglass, with the process's elapsed time aligned on the right.
+  Restore this state from the running-shell snapshot on reload, and retain the existing scroll owner.
 - A failed assistant attempt with retry metadata is not a final response while the turn is working,
   even if it has completed partial text and `finish: error`. Keep the loading slot through retry and
   the next empty attempt; do not briefly insert Worked. `automatic-retry.spec.ts` checks that handoff

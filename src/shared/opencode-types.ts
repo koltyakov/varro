@@ -429,7 +429,7 @@ export type SessionStatus =
       };
       next: number;
     }
-  | { type: 'busy' };
+  | { type: 'busy'; background?: boolean; backgroundStartedAt?: number };
 
 export type FileDiff = {
   file?: string;

@@ -30,6 +30,11 @@ export function projectV2Event(value: unknown, context: V2MessageContext = {}): 
     { ...base, type, properties: props },
   ];
   const sessionID = isString(data.sessionID) ? data.sessionID : '';
+  const backgroundStatus = {
+    type: 'busy',
+    background: true,
+    backgroundStartedAt: context.backgroundStartedAt,
+  };
   if (event.type === 'server.connected') return emit('server.connected');
   if (event.type === 'session.created')
     return emit('session.created', {
@@ -49,7 +54,10 @@ export function projectV2Event(value: unknown, context: V2MessageContext = {}): 
     return emit('session.deleted', { sessionID, info: { id: sessionID } });
   if (event.type === 'session.status.updated') return emit('session.status');
   if (event.type === 'session.execution.started')
-    return emit('session.status', { sessionID, status: { type: 'busy' } });
+    return emit('session.status', {
+      sessionID,
+      status: context.backgroundPending ? backgroundStatus : { type: 'busy' },
+    });
   if (
     [
       'session.execution.succeeded',
@@ -58,7 +66,10 @@ export function projectV2Event(value: unknown, context: V2MessageContext = {}): 
     ].includes(event.type)
   ) {
     if (event.type !== 'session.execution.failed')
-      return emit('session.status', { sessionID, status: { type: 'idle' } });
+      return emit('session.status', {
+        sessionID,
+        status: context.backgroundPending ? backgroundStatus : { type: 'idle' },
+      });
     // Record the failure before settling busy state, so an idle notification cannot report success.
     const error = normalizeV2Error(data.error);
     const messages: unknown[] = [];
@@ -170,7 +181,7 @@ export function projectV2Event(value: unknown, context: V2MessageContext = {}): 
     if (event.type === 'session.step.streamed')
       return emit('session.next.context.updated', { sessionID });
     const model = asRecord(data.model);
-    return emit(event.type.replace('session.', 'session.next.'), {
+    const events = emit(event.type.replace('session.', 'session.next.'), {
       ...properties,
       timestamp:
         event.type === 'session.step.started' && isNumber(data.started)
@@ -179,6 +190,18 @@ export function projectV2Event(value: unknown, context: V2MessageContext = {}): 
       model: model ? { ...model, modelID: model.id } : undefined,
       executionContinues: true,
     });
+    if (event.type === 'session.step.ended' && context.backgroundPending)
+      return [
+        ...events,
+        {
+          ...base,
+          id: `${String(event.id)}:waiting`,
+          seq: undefined,
+          type: 'session.status',
+          properties: { sessionID, status: backgroundStatus },
+        },
+      ];
+    return events;
   }
   if (
     /^session\.(compaction|revert)\./.test(event.type) ||

@@ -10,7 +10,12 @@ type RetryHarness = Window & {
   };
 };
 
-type RetryGapSamples = { running: boolean; gaps: number[]; showedWorked: boolean };
+type RetryGapSamples = {
+  running: boolean;
+  gaps: number[];
+  rowCorrections: number[];
+  showedWorked: boolean;
+};
 
 for (const width of [441, 494]) {
   test(`keeps Thinking adjacent through retry and recovery at ${width}px`, async ({ page }) => {
@@ -23,6 +28,7 @@ for (const width of [441, 494]) {
       const state: RetryGapSamples = {
         running: true,
         gaps: [],
+        rowCorrections: [],
         showedWorked: false,
       };
       const sample = () => {
@@ -30,10 +36,19 @@ for (const width of [441, 494]) {
         const thinking = document.querySelector('.interactive-loading-row .loading-verb');
         if (notice) {
           state.showedWorked ||= !!document.querySelector('.trailing-assistant-summary-row');
-          if (thinking)
+          if (thinking) {
             state.gaps.push(
               thinking.getBoundingClientRect().top - notice.getBoundingClientRect().bottom
             );
+            const row = notice.closest('[data-msg-id]');
+            state.rowCorrections.push(
+              row
+                ? Number.parseFloat(
+                    getComputedStyle(row).getPropertyValue('--interactive-item-block-correction')
+                  ) || 0
+                : 0
+            );
+          }
         }
         if (state.running) requestAnimationFrame(sample);
       };
@@ -123,7 +138,11 @@ for (const width of [441, 494]) {
     );
     const samples = await collector.evaluate((state) => {
       state.running = false;
-      return { gaps: state.gaps, showedWorked: state.showedWorked };
+      return {
+        gaps: state.gaps,
+        rowCorrections: state.rowCorrections,
+        showedWorked: state.showedWorked,
+      };
     });
     expect(samples.showedWorked).toBe(false);
     expect(samples.gaps.length).toBeGreaterThan(10);
@@ -131,7 +150,11 @@ for (const width of [441, 494]) {
       Math.max(...samples.gaps) - Math.min(...samples.gaps),
       JSON.stringify(samples)
     ).toBeLessThan(1);
-    expect(samples.gaps.at(-1)).toBeCloseTo(12, 0);
+    // Virtual rows round their block size up to whole CSS pixels.
+    expect(
+      samples.gaps.at(-1)! - samples.rowCorrections.at(-1)!,
+      JSON.stringify(samples)
+    ).toBeCloseTo(12, 0);
     await expect(page.locator('.interactive-loading-row .loading-indicator')).toBeVisible();
   });
 }
@@ -212,12 +235,23 @@ for (const outcome of ['recovered', 'failed'] as const) {
         ? 'Recovered after an automatic retry. Work continued.'
         : 'Response interrupted. Retried automatically.'
     );
-    await notice.getByRole('button', { name: 'Details', exact: true }).click();
+    const disclosure = notice.getByRole('button', {
+      name:
+        outcome === 'recovered'
+          ? 'Recovered after an automatic retry. Work continued.'
+          : 'Response interrupted. Retried automatically.',
+      exact: true,
+    });
+    await disclosure.click();
+    await expect(disclosure).toHaveAttribute('aria-expanded', 'true');
     await expect(notice.locator('pre')).toContainText('provider.transport');
     await expect(notice.locator('pre')).toContainText('WebSocket closed with code 1006');
     expect(await notice.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
       true
     );
+    await disclosure.click();
+    await expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+    await expect(notice.locator('pre')).toHaveCount(0);
     if (outcome === 'failed') {
       const failure = page.locator(
         '[data-msg-id="retry-continuation"] .assistant-message-flow-item-error'

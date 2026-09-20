@@ -2792,6 +2792,19 @@ kbd {
   visibility: hidden;
 }
 
+.interactive-loading-row.is-background-waiting {
+  height: auto;
+  overflow: visible;
+}
+
+.interactive-loading-row.is-reserved .background-process {
+  visibility: hidden;
+}
+
+.background-process .tool-invocation-header {
+  cursor: default;
+}
+
 .interactive-loading-row.trailing-assistant-summary-row {
   height: auto;
   min-height: 24px;

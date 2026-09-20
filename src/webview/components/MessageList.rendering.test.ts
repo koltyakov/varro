@@ -4179,6 +4179,66 @@ describe('MessageList loading row', () => {
     expect(container?.querySelector('.loading-indicator')).toBeNull();
   });
 
+  it('shows the background process card through the final-answer and resume handoff', async () => {
+    setState('activeSessionId', 'session-1');
+    const interim = assistantMessage('assistant-1', {
+      time: { created: 2_000, completed: 11_000 },
+    });
+    interim.finish = 'stop';
+    const entries: MessageEntry[] = [
+      {
+        info: { ...userMessage('user-1'), time: { created: 1_000 } },
+        parts: [textPart('text-user-1', 'Run the tests')],
+      },
+      { info: interim, parts: [textPart('text-assistant-1', 'Testing is still running.')] },
+    ];
+    replaceMessages(entries);
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy', background: true } }));
+    startLoading(1_000);
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    expect(container?.querySelector('.background-process')?.textContent).toContain(
+      'Background process'
+    );
+    expect(container?.textContent).not.toContain('Worked for');
+
+    // The new execution can start before its first assistant message is hydrated.
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    await Promise.resolve();
+    expect(container?.querySelector('.background-process')?.textContent).toContain(
+      'Background process'
+    );
+    expect(container?.textContent).not.toContain('Worked for');
+    replaceMessages([
+      ...entries,
+      {
+        info: assistantMessage('assistant-2', { time: { created: 12_000 } }),
+        parts: [],
+      },
+    ]);
+    await Promise.resolve();
+    vi.advanceTimersByTime(700);
+    await Promise.resolve();
+    expect(container?.querySelector('.background-process')).toBeNull();
+    expect(container?.textContent).not.toContain('Worked for');
+
+    const final = assistantMessage('assistant-2', { time: { created: 12_000, completed: 13_000 } });
+    final.finish = 'stop';
+    batch(() => {
+      replaceMessages([
+        ...entries,
+        { info: final, parts: [textPart('text-assistant-2', 'All checks pass.')] },
+      ]);
+      setState('sessionStatus', reconcile({ 'session-1': { type: 'idle' } }));
+      stopLoading();
+    });
+    await Promise.resolve();
+    vi.advanceTimersByTime(3_000);
+    await Promise.resolve();
+    expect(container?.textContent).toContain('Worked for 12s');
+    expect(container?.querySelector('.loading-indicator')).toBeNull();
+  });
+
   it('does not show a trailing worked summary before the final text response', async () => {
     const prompt = {
       info: { ...userMessage('user-1'), time: { created: 1_000 } },

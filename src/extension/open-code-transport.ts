@@ -773,7 +773,10 @@ export class OpenCodeTransport {
       this.v2.observe(
         record.type,
         asRecord(record.data)!,
-        isString(record.id) ? record.id : undefined
+        isString(record.id) ? record.id : undefined,
+        isString(asRecord(record.location)?.directory)
+          ? String(asRecord(record.location)?.directory)
+          : undefined
       );
     }
     const sessionID = asRecord(record?.data)?.sessionID;

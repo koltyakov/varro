@@ -15,6 +15,7 @@ import type {
   SessionInboxInfo,
   SessionsResponse,
   ModelRef,
+  ShellInfo,
 } from '@opencode/client';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -26,6 +27,7 @@ import type {
 } from '../shared/opencode-types';
 import { OpenCodeResponseTooLargeError, type OpenCodeRequestOptions } from './open-code-transport';
 import { OpenCodeV2SessionState } from './opencode-v2-session-state';
+import { OpenCodeV2BackgroundWork } from './opencode-v2-background-work';
 import {
   projectV2Agent,
   projectV2Form,
@@ -198,6 +200,7 @@ function v2AuthAnswers(form: FormFields | undefined, value: unknown) {
 }
 
 export class OpenCodeV2Adapter {
+  private readonly backgroundWork = new OpenCodeV2BackgroundWork();
   private readonly permissions = new Map<string, string>();
   private readonly forms = new Map<string, FormInfo>();
   private readonly messageParents = new Map<string, string>();
@@ -216,7 +219,8 @@ export class OpenCodeV2Adapter {
     private readonly openExternal: (url: string) => Promise<boolean> = async () => false
   ) {}
 
-  observe(type: string, data: UnknownRecord, eventID?: string): void {
+  observe(type: string, data: UnknownRecord, eventID?: string, eventDirectory?: string): void {
+    this.backgroundWork.observe(type, data, eventDirectory);
     if (isString(data.sessionID)) {
       const context = { ...this.contexts.get(data.sessionID) };
       const directory = asRecord(data.location)?.directory;
@@ -257,6 +261,7 @@ export class OpenCodeV2Adapter {
   }
 
   reset(): void {
+    this.backgroundWork.reset();
     this.permissions.clear();
     this.forms.clear();
     this.messageParents.clear();
@@ -267,7 +272,11 @@ export class OpenCodeV2Adapter {
   }
 
   eventContext(sessionID: string): V2MessageContext | undefined {
-    return this.contexts.get(sessionID);
+    return {
+      ...this.contexts.get(sessionID),
+      backgroundPending: this.backgroundWork.isWaiting(sessionID),
+      backgroundStartedAt: this.backgroundWork.startedAt(sessionID),
+    };
   }
 
   async request(
@@ -420,14 +429,32 @@ export class OpenCodeV2Adapter {
       };
     }
     if (route === '/session/status') {
-      const active = await data<Record<string, SessionActive>>('GET', '/api/session/active');
-      return Object.fromEntries(
-        Object.entries(active).map(([id, status]) => {
+      const version = this.backgroundWork.snapshotVersion();
+      const [active, shells] = await Promise.all([
+        data<Record<string, SessionActive>>('GET', '/api/session/active'),
+        data<ShellInfo[]>('GET', query('/api/shell', true)),
+      ]);
+      const waiting = this.backgroundWork.reconcile(
+        shells,
+        new Set(Object.keys(active)),
+        directory,
+        version
+      );
+      return Object.fromEntries([
+        ...Object.entries(active).map(([id, status]) => {
           if (status.type !== 'running')
             throw new Error('Invalid OpenCode v2 active-session status');
           return [id, { type: 'busy' }];
-        })
-      );
+        }),
+        ...waiting.map((id) => [
+          id,
+          {
+            type: 'busy',
+            background: true,
+            backgroundStartedAt: this.backgroundWork.startedAt(id),
+          },
+        ]),
+      ]);
     }
     if ((route === '/session' || route === '/experimental/session') && method === 'GET') {
       const target = new URL('/api/session', 'http://localhost');
@@ -771,6 +798,14 @@ export class OpenCodeV2Adapter {
         });
       }
       if (action === 'abort') {
+        if (this.backgroundWork.isWaiting(sessionID)) {
+          await Promise.all(
+            this.backgroundWork
+              .shellIDs(sessionID)
+              .map((id) => raw('DELETE', query(`/api/shell/${encodeURIComponent(id)}`, true)))
+          );
+          this.backgroundWork.clearSession(sessionID);
+        }
         await raw('POST', `${endpoint}/interrupt`, {});
         return true;
       }

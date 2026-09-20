@@ -131,6 +131,21 @@ describe('permissionsStore', () => {
     expect(state.permissions).toEqual([]);
   });
 
+  it('hydrates restored approval details when the cached request is replayed during reconciliation', () => {
+    const permission = createPermission('permission-restored', 1);
+    const restored: Permission = { ...permission, recoveredIncomplete: true };
+    permissionsStore.addPermission(restored);
+    const reconciliation = permissionsStore.beginPermissionReconciliation();
+
+    permissionsStore.addPermission(restored);
+    permissionsStore.reconcilePermissions([permission], reconciliation);
+
+    expect(state.permissions).toHaveLength(1);
+    expect(state.permissions[0]?.id).toBe(permission.id);
+    expect(state.permissions[0]?.recoveredIncomplete).toBeUndefined();
+    expect(state.permissions[0]?.metadata).toEqual(permission.metadata);
+  });
+
   it('does not restore a permission removed while its server snapshot was loading', () => {
     const permission = createPermission('permission-1', 1);
     permissionsStore.addPermission(permission);

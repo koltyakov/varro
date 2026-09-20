@@ -915,6 +915,7 @@ describe('OpenCode connection discovery', () => {
         if (path === '/api/status') return new Response('', { status: 404 });
         if (path === '/api/session/active')
           return Response.json({ data: { ses_busy: { type: 'running' } } });
+        if (path === '/api/shell') return Response.json({ data: [] });
         throw new Error(`Unexpected request: ${path}`);
       });
       const transport = new OpenCodeTransport({
@@ -941,7 +942,7 @@ describe('OpenCode connection discovery', () => {
       await expect(transport.request('GET', 'https://example.com/session')).rejects.toThrow(
         'Unsupported OpenCode API path'
       );
-      expect(calls).toHaveLength(healthPath === '/api/status' ? 4 : 6);
+      expect(calls).toHaveLength(healthPath === '/api/status' ? 5 : 7);
     }
   );
 

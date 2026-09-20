@@ -1341,6 +1341,77 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.toolbar-turn-timer')).toBeNull();
   });
 
+  it.each([false, true])(
+    'keeps cumulative turn duration during background waiting, initially pending: %s',
+    async (initiallyPending) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(80_000);
+      setShowTurnTimer(true);
+      setState('activeSessionId', 'session-1');
+      setState('sessions', [session('session-1', 70_000)]);
+      const userMessage = {
+        info: {
+          id: 'user-1',
+          sessionID: 'session-1',
+          role: 'user',
+          time: { created: 70_000 },
+          agent: 'build',
+          model: { providerID: 'openai', modelID: 'gpt-4o' },
+        },
+        parts: [],
+      } satisfies MessageEntry<UserMessage>;
+      const assistant = assistantMessageEntry({ input: 0, output: 0 });
+      assistant.info.time = { created: 71_000 };
+      const interim = {
+        ...assistant,
+        info: { ...assistant.info, finish: 'stop', time: { created: 71_000, completed: 80_000 } },
+      };
+      setState('messages', [userMessage, initiallyPending ? interim : assistant]);
+      setState(
+        'sessionStatus',
+        'session-1',
+        initiallyPending
+          ? { type: 'busy', background: true, backgroundStartedAt: 79_000 }
+          : { type: 'busy' }
+      );
+      cleanup = render(() => ChatInput(), container!);
+      const timer = container?.querySelector('.toolbar-turn-timer');
+      expect(timer?.textContent).toBe('10s');
+      setState('sessionStatus', 'session-1', {
+        type: 'busy',
+        background: true,
+        backgroundStartedAt: 79_000,
+      });
+      setState('messages', [userMessage, interim]);
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(container?.querySelector('.toolbar-turn-timer')).toBe(timer);
+      expect(timer?.textContent).toBe('30s');
+
+      const resumed = {
+        ...assistant,
+        info: { ...assistant.info, id: 'assistant-resumed', time: { created: Date.now() } },
+      };
+      setState('messages', [userMessage, interim, resumed]);
+      setState('sessionStatus', 'session-1', reconcile({ type: 'busy' }));
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(timer?.textContent).toBe('40s');
+      setState('messages', [
+        userMessage,
+        interim,
+        {
+          ...resumed,
+          info: {
+            ...resumed.info,
+            finish: 'stop',
+            time: { ...resumed.info.time, completed: Date.now() },
+          },
+        },
+      ]);
+      setState('sessionStatus', 'session-1', { type: 'idle' });
+      expect(container?.querySelector('.toolbar-turn-timer')).toBeNull();
+    }
+  );
+
   it('hides the active-turn timer in the new-session composer', () => {
     vi.useFakeTimers();
     vi.setSystemTime(80_000);

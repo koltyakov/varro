@@ -3,7 +3,7 @@ import { recheckSessionStatus } from '../../hooks/useOpenCode';
 import { formatMessageSentTime } from '../../lib/message-time';
 import { observeSettledResize } from '../../lib/settled-resize-observer';
 import { loadingLastActivityAt, loadingStartedAt, state, stopLoading } from '../../lib/state';
-import { attachmentIcon, mediaImageIcon } from '../../lib/ui-icons';
+import { attachmentIcon, hourglassIcon, mediaImageIcon } from '../../lib/ui-icons';
 import type { Part, Permission, QuestionRequest } from '../../types';
 import { PermissionPrompt } from '../PermissionPrompt';
 import { QuestionPrompt } from '../QuestionPrompt';
@@ -305,10 +305,30 @@ export function PendingActionRows(props: {
   );
 }
 
-export function LoadingRow(props: { compacting: boolean; visible: boolean }) {
+export function LoadingRow(props: {
+  compacting: boolean;
+  visible: boolean;
+  waiting?: boolean;
+  waitingStartedAt?: number;
+}) {
   const [now, setNow] = createSignal(Date.now());
+  const waiting = () => props.waiting && !props.compacting;
+  const waitingClock = createMemo<{ sessionId: string | null; startedAt: number } | null>(
+    (previous) => {
+      if (!waiting()) return null;
+      const sessionId = state.activeSessionId;
+      return {
+        sessionId,
+        startedAt:
+          props.waitingStartedAt ??
+          (previous?.sessionId === sessionId ? previous.startedAt : Date.now()),
+      };
+    },
+    null
+  );
 
   const isStale = () => {
+    if (props.waiting) return false;
     const currentNow = now();
     const startedAt = loadingStartedAt();
     if (startedAt === null || currentNow - startedAt < STALE_LOADING_TOTAL_MS) return false;
@@ -322,14 +342,14 @@ export function LoadingRow(props: { compacting: boolean; visible: boolean }) {
   onCleanup(() => clearInterval(timer));
 
   const totalElapsedMs = () => {
-    const startedAt = loadingStartedAt();
+    const startedAt = waiting() ? (waitingClock()?.startedAt ?? null) : loadingStartedAt();
     return startedAt === null ? 0 : Math.max(0, now() - startedAt);
   };
   const elapsedSeconds = () => Math.floor(totalElapsedMs() / 1000);
   const verb = () => LOADING_VERBS[Math.floor(elapsedSeconds() / 6) % LOADING_VERBS.length];
   const formatElapsed = () => {
     const seconds = elapsedSeconds();
-    if (seconds < 10) return null;
+    if (seconds < 10 && !waiting()) return null;
     if (seconds < 60) return `${seconds}s`;
     if (seconds >= 60 * 60) {
       const hours = Math.floor(seconds / (60 * 60));
@@ -345,45 +365,71 @@ export function LoadingRow(props: { compacting: boolean; visible: boolean }) {
     <div
       class={`interactive-item-container interactive-response interactive-loading-row${
         props.visible ? '' : ' is-reserved'
-      }`}
+      }${waiting() ? ' is-background-waiting' : ''}`}
       aria-hidden={props.visible ? undefined : true}
     >
-      <div
-        class={`loading-indicator ${isStale() ? 'stale' : ''} ${props.compacting ? 'is-compacting' : ''}`}
+      <Show
+        when={waiting()}
+        fallback={
+          <div
+            class={`loading-indicator ${isStale() ? 'stale' : ''} ${props.compacting ? 'is-compacting' : ''}`}
+          >
+            <Show
+              when={!props.compacting && isStale()}
+              fallback={
+                <span class="shimmer-progress loading-verb">
+                  {props.compacting ? 'Compacting context' : verb()}
+                  <span class="chat-animated-ellipsis" />
+                </span>
+              }
+            >
+              <span>Session may be stale</span>
+            </Show>
+            <Show when={formatElapsed()}>
+              <span class="loading-elapsed">{formatElapsed()}</span>
+            </Show>
+            <Show when={isStale()}>
+              <button
+                class="loading-action"
+                onClick={() => {
+                  if (state.activeSessionId) recheckSessionStatus(state.activeSessionId);
+                }}
+                title="Check if session is still running"
+              >
+                Recheck
+              </button>
+              <button
+                class="loading-action"
+                onClick={() => stopLoading()}
+                title="Dismiss loading indicator"
+              >
+                Dismiss
+              </button>
+            </Show>
+          </div>
+        }
       >
-        <Show
-          when={!props.compacting && isStale()}
-          fallback={
-            <span class="shimmer-progress loading-verb">
-              {props.compacting ? 'Compacting context' : verb()}
-              <span class="chat-animated-ellipsis" />
-            </span>
-          }
+        <div
+          class="chat-tool-invocation-part background-process"
+          role="status"
+          aria-label="Background process running"
+          aria-live="off"
         >
-          <span>Session may be stale</span>
-        </Show>
-        <Show when={formatElapsed()}>
-          <span class="loading-elapsed">{formatElapsed()}</span>
-        </Show>
-        <Show when={isStale()}>
-          <button
-            class="loading-action"
-            onClick={() => {
-              if (state.activeSessionId) recheckSessionStatus(state.activeSessionId);
-            }}
-            title="Check if session is still running"
-          >
-            Recheck
-          </button>
-          <button
-            class="loading-action"
-            onClick={() => stopLoading()}
-            title="Dismiss loading indicator"
-          >
-            Dismiss
-          </button>
-        </Show>
-      </div>
+          <div class="tool-invocation-header">
+            <UiIcon
+              source={hourglassIcon}
+              class="tool-call-icon tool-call-wait-icon tool-status-pending"
+              width="16"
+              height="16"
+              aria-hidden="true"
+            />
+            <span class="tool-invocation-title">Background process</span>
+            <span class="tool-invocation-duration" title="Background process elapsed time">
+              {formatElapsed()}
+            </span>
+          </div>
+        </div>
+      </Show>
     </div>
   );
 }

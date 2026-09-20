@@ -790,6 +790,29 @@ export function MessageList() {
     return notice && shouldDisplayUsageLimitNotice(notice) ? notice : null;
   });
   const activeSessionWorking = createMemo(() => isActiveSessionWorking());
+  const backgroundWorkPending = createMemo(() => {
+    const sessionId = state.activeSessionId;
+    if (!sessionId) return false;
+    const rootId = getSessionTreeRootId(sessionId) || sessionId;
+    return [rootId, sessionId, ...getSessionTreeIds(rootId)].some((id) => {
+      const status = state.sessionStatus[id];
+      return status?.type === 'busy' && status.background === true;
+    });
+  });
+  const backgroundWorkStartedAt = createMemo(() => {
+    const sessionId = state.activeSessionId;
+    if (!sessionId) return undefined;
+    const rootId = getSessionTreeRootId(sessionId) || sessionId;
+    const starts = [rootId, sessionId, ...getSessionTreeIds(rootId)].flatMap((id) => {
+      const status = state.sessionStatus[id];
+      return status?.type === 'busy' &&
+        status.background &&
+        status.backgroundStartedAt !== undefined
+        ? [status.backgroundStartedAt]
+        : [];
+    });
+    return starts.length > 0 ? Math.min(...starts) : undefined;
+  });
   const activePermissionReviewInFlight = createMemo(() => {
     const sessionId = state.activeSessionId;
     if (!sessionId) return false;
@@ -1877,8 +1900,29 @@ export function MessageList() {
     }
     return null;
   });
+  const backgroundResponse = createMemo<{
+    sessionId: string | null;
+    messageId: string | null;
+  } | null>((previous) => {
+    if (backgroundWorkPending())
+      return {
+        sessionId: state.activeSessionId,
+        messageId: structurallyTrailingFinalResponseCandidateMessageId(),
+      };
+    return previous?.sessionId === state.activeSessionId && activeSessionWorking()
+      ? previous
+      : null;
+  }, null);
+  const waitingForBackground = createMemo(() => {
+    if (backgroundWorkPending()) return true;
+    const response = backgroundResponse();
+    return (
+      !!response?.messageId &&
+      response.messageId === structurallyTrailingFinalResponseCandidateMessageId()
+    );
+  });
   const trailingSummaryMessageId = createMemo(() =>
-    presentation.pending()
+    presentation.pending() || waitingForBackground()
       ? null
       : (structurallyTrailingInterruptedMessageId() ??
         explicitTerminalFinalResponseMessageId() ??
@@ -1958,6 +2002,15 @@ export function MessageList() {
         loadingRowReserveReleaseTimer = 0;
         if (!loadingRowEligible()) setReserveLoadingRow(false);
       }, LOADING_ROW_RESERVE_RELEASE_DELAY_MS);
+      return;
+    }
+
+    if (waitingForBackground()) {
+      clearLoadingRowReappearTimer();
+      clearLoadingRowCommittedTextTimer();
+      clearLoadingRowReserveReleaseTimer();
+      if (!isReserved) setReserveLoadingRow(true);
+      if (!isShowing) setShowLoadingRow(true);
       return;
     }
 
@@ -2224,6 +2277,7 @@ export function MessageList() {
     const sessionId = state.activeSessionId;
     const owner = trailingSummaryOwner();
     const ownerMatchesCurrentResponse =
+      !waitingForBackground() &&
       owner &&
       owner.sessionId === sessionId &&
       owner.messageId === structurallyTrailingFinalResponseCandidateMessageId();
@@ -2243,7 +2297,7 @@ export function MessageList() {
     }
 
     const messageId = trailingFinalResponseMessageId();
-    const settled = !activeSessionWorking() && messageId !== null;
+    const settled = !waitingForBackground() && !activeSessionWorking() && messageId !== null;
     const nextOwner = settled && sessionId && messageId ? { sessionId, messageId } : null;
     const ownerEpoch = ++trailingSummaryOwnerEpoch;
     batch(() => {
@@ -8349,6 +8403,8 @@ export function MessageList() {
               <Show when={reserveLoadingRow() && !editingMessage() && !!state.activeSessionId}>
                 <LoadingRow
                   compacting={isSessionCompacting()}
+                  waiting={waitingForBackground()}
+                  waitingStartedAt={backgroundWorkStartedAt()}
                   visible={!state.messagesLoading && showLoadingRow()}
                 />
               </Show>

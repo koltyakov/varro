@@ -1076,7 +1076,7 @@ export class CdpController {
     await new Promise((resolve) => setTimeout(resolve, 100));
     if ((await this.snapshot()).routeSessionId === sessionId) return true;
 
-    await executeVscodeCommand(this.port, 'View: Focus Secondary Side Bar');
+    await executeVscodeCommand(this.port, 'View: Focus into Secondary Side Bar');
     await this.refreshContext();
     for (let attempt = 0; attempt < 40; attempt += 1) {
       const focused = await this.evaluate(`(() => {
@@ -1192,7 +1192,7 @@ export class CdpController {
       !(await this.evaluate('document.hasFocus()')) &&
       this.targetContext?.surface === 'sidebar'
     ) {
-      await executeVscodeCommand(this.port, 'View: Focus Secondary Side Bar');
+      await executeVscodeCommand(this.port, 'View: Focus into Secondary Side Bar');
       await this.refreshContext();
     }
     for (let attempt = 0; attempt < 60; attempt += 1) {

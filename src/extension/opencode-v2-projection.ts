@@ -210,6 +210,8 @@ export type V2MessageContext = {
   parentID?: string;
   directory?: string;
   hasAssistant?: boolean;
+  backgroundPending?: boolean;
+  backgroundStartedAt?: number;
   error?: SessionStructuredError;
 };
 

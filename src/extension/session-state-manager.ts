@@ -634,7 +634,12 @@ export class SessionStateManager {
         const statusType = getString(asRecord(props?.status)?.type);
         if (!sessionID || !statusType) break;
         this.clearQuestionResponsePending(sessionID);
-        if (statusType === 'busy' && this.trailingBusyAfterCompletion.delete(sessionID)) break;
+        if (
+          statusType === 'busy' &&
+          this.trailingBusyAfterCompletion.delete(sessionID) &&
+          asRecord(props?.status)?.background !== true
+        )
+          break;
         if (statusType === 'busy' || statusType === 'retry') {
           this.trailingBusyAfterCompletion.delete(sessionID);
           this.serverBusySessions.add(sessionID);

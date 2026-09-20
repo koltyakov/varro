@@ -1262,6 +1262,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       // that trailing status to restart loading flashes Thinking before idle arrives.
       if (
         status.type === 'busy' &&
+        !status.background &&
         isSessionInActiveTree(sessionID) &&
         latestAssistantFinishedBeforeLoading(
           messagesForSession(sessionID),
@@ -1700,7 +1701,14 @@ function parseSessionStatus<T>(value: T): SessionStatus | null {
   if (!value || !isObject(value)) return null;
   // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
   const status = value as UnknownRecord;
-  if (status.type === 'idle' || status.type === 'busy') return { type: status.type };
+  if (status.type === 'idle') return { type: 'idle' };
+  if (status.type === 'busy') {
+    if (status.background !== true) return { type: 'busy' };
+    const pending: SessionStatus = { type: 'busy', background: true };
+    if (isNumber(status.backgroundStartedAt) && Number.isFinite(status.backgroundStartedAt))
+      pending.backgroundStartedAt = status.backgroundStartedAt;
+    return pending;
+  }
   if (
     status.type !== 'retry' ||
     !isNumber(status.attempt) ||
