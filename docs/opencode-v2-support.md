@@ -42,6 +42,13 @@ Startup Ask-agent detection now accepts both `agent` and native `agents` keys in
 documents it reads. Provider dialogs also cancel pending authentication on unmount, reject duplicate
 submissions, and prevent a cancelled request from re-enabling controls for a newer request.
 
+Provider forms preserve visible scalar defaults and text placeholders. Boolean fields use Yes/No
+choices; the adapter converts their answers and numeric answers from the dialog's strings into native
+v2 values before evaluating hidden-field conditions. Both OAuth and API-key connections submit hidden
+defaults. Invalid boolean, non-finite numeric, and fractional integer inputs fail before authentication
+starts. Regression tests cover both connection paths, false and zero values, and default initialization
+in the dialog.
+
 ### Workspace path compatibility
 
 Directory headers now use URI encoding, matching the published v1 SDK and the server's

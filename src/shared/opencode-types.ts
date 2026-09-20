@@ -786,6 +786,7 @@ export type ProviderAuthPromptText = {
   key: string;
   message: string;
   placeholder?: string;
+  default?: string;
   required?: boolean;
   when?: ProviderAuthPromptCondition | ProviderAuthPromptCondition[];
 };
@@ -800,6 +801,7 @@ export type ProviderAuthPromptSelect = {
   type: 'select';
   key: string;
   message: string;
+  default?: string;
   options: Array<{
     label: string;
     value: string;

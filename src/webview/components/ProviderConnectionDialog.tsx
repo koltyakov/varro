@@ -146,7 +146,13 @@ export function ProviderConnectionDialog(props: {
   function chooseMethod(index: number) {
     authController?.abort(new Error('Provider authorization cancelled'));
     setMethodIndex(index);
-    setInputs({});
+    setInputs(
+      Object.fromEntries(
+        (selectedMethod()?.prompts ?? []).flatMap((prompt) =>
+          prompt.default !== undefined ? [[prompt.key, prompt.default]] : []
+        )
+      )
+    );
     setApiKey('');
     setAuthorization(null);
     setAuthorizationCode('');

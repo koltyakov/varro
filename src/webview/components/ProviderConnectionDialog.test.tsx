@@ -608,6 +608,57 @@ describe('ProviderConnectionDialog API key flow', () => {
     );
   });
 
+  it('initializes prompt defaults, reveals dependent fields, and preserves edits', async () => {
+    setState('providerAuthMethods', {
+      openai: [
+        {
+          type: 'api',
+          label: 'Configured key',
+          prompts: [
+            {
+              type: 'select',
+              key: 'enabled',
+              message: 'Enabled',
+              default: 'false',
+              options: [
+                { value: 'true', label: 'Yes' },
+                { value: 'false', label: 'No' },
+              ],
+            },
+            {
+              type: 'text',
+              key: 'count',
+              message: 'Count',
+              default: '0',
+              when: { key: 'enabled', op: 'eq', value: 'false' },
+            },
+          ],
+        },
+      ],
+    });
+    renderDialog();
+    chooseProvider('OpenAI');
+    chooseMethod('Configured key');
+    expect(dialog()!.querySelector('.provider-connect-select-trigger')?.textContent).toContain(
+      'No'
+    );
+    const count = dialog()!.querySelector<HTMLInputElement>('input[type="text"]')!;
+    expect(count.value).toBe('0');
+    type(count, '2');
+    type(dialog()!.querySelector<HTMLInputElement>('input[type="password"]')!, 'key');
+    expect(primaryButton().disabled).toBe(false);
+    primaryButton().click();
+    await flush();
+    expect(clientMocks.connectApiProvider).toHaveBeenCalledWith(
+      {
+        providerID: 'openai',
+        key: 'key',
+        metadata: { enabled: 'false', count: '2' },
+      },
+      { signal: expect.any(AbortSignal) }
+    );
+  });
+
   it('renders select prompts as a listbox and reveals conditional prompts', async () => {
     setState('providerAuthMethods', {
       gitlab: [

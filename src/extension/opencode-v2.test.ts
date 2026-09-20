@@ -138,7 +138,165 @@ describe('v2 session system instructions', () => {
   });
 });
 
-describe('v2 hidden authentication fields', () => {
+describe('v2 authentication fields', () => {
+  it.each([
+    { type: 'boolean', value: 'yes' },
+    { type: 'number', value: '' },
+    { type: 'number', value: 'not-a-number' },
+    { type: 'number', value: 'Infinity' },
+    { type: 'integer', value: '1.5' },
+  ])(
+    'rejects invalid $type answers before starting authentication: $value',
+    async ({ type, value }) => {
+      const wire = vi.fn(async (_method: string, path: string) => {
+        if (path === '/api/provider/fixture') return { data: {} };
+        if (path === '/api/integration/fixture')
+          return {
+            data: {
+              methods: [
+                {
+                  type: 'oauth',
+                  id: 'login',
+                  form: [{ key: 'setting', type }],
+                },
+              ],
+            },
+          };
+        throw new Error(`Unexpected request: ${path}`);
+      });
+      const adapter = new OpenCodeV2Adapter(wire);
+      await expect(
+        adapter.request('POST', '/provider/fixture/oauth/authorize', {
+          method: 0,
+          inputs: { setting: value },
+        })
+      ).rejects.toThrow(`Invalid ${type} answer for setting`);
+      expect(wire.mock.calls.every(([method]) => method === 'GET')).toBe(true);
+    }
+  );
+
+  it('supplies hidden API-key defaults when the dialog has no visible form inputs', async () => {
+    const wire = vi.fn(async (_method: string, path: string) => {
+      if (path === '/api/provider/fixture') return { data: {} };
+      if (path === '/api/integration/fixture')
+        return {
+          data: {
+            methods: [
+              {
+                type: 'key',
+                form: [
+                  { key: 'server', type: 'string', hidden: true, default: 'https://example.test' },
+                ],
+              },
+            ],
+          },
+        };
+      if (path.endsWith('/connect/key')) return null;
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    await new OpenCodeV2Adapter(wire).request('PUT', '/auth/fixture', {
+      type: 'api',
+      key: 'fixture-key',
+    });
+    expect(wire).toHaveBeenLastCalledWith(
+      'POST',
+      '/api/integration/fixture/connect/key',
+      {
+        key: 'fixture-key',
+        answer: { server: 'https://example.test' },
+      },
+      expect.anything()
+    );
+  });
+
+  it.each(['oauth', 'key'])('preserves scalar defaults and typed %s answers', async (type) => {
+    const integration = {
+      id: 'fixture',
+      methods: [
+        {
+          id: 'login',
+          type,
+          label: 'Sign in',
+          form: [
+            { key: 'enabled', type: 'boolean', default: false, required: true },
+            { key: 'count', type: 'integer', default: 0 },
+            { key: 'ratio', type: 'number' },
+            {
+              key: 'server',
+              type: 'string',
+              default: 'https://example.test',
+              placeholder: 'Server URL',
+            },
+            {
+              key: 'internal',
+              type: 'string',
+              hidden: true,
+              default: 'internal-default',
+              when: [{ key: 'enabled', op: 'eq', value: false }],
+            },
+            {
+              key: 'inactive',
+              type: 'string',
+              hidden: true,
+              default: 'omit',
+              when: [{ key: 'enabled', op: 'eq', value: true }],
+            },
+          ],
+        },
+      ],
+    };
+    const wire = vi.fn(async (_method: string, path: string) => {
+      if (path === '/api/provider') return { data: [] };
+      if (path === '/api/provider/fixture') return { data: {} };
+      if (path === '/api/integration') return { data: [integration] };
+      if (path === '/api/integration/fixture') return { data: integration };
+      if (path.endsWith('/connect/oauth')) return { data: { attemptID: 'attempt' } };
+      if (path.endsWith('/connect/key')) return null;
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const adapter = new OpenCodeV2Adapter(wire);
+    expect(await adapter.request('GET', '/provider/auth', undefined)).toMatchObject({
+      fixture: [
+        {
+          prompts: [
+            {
+              key: 'enabled',
+              type: 'select',
+              default: 'false',
+              options: [
+                { value: 'true', label: 'Yes' },
+                { value: 'false', label: 'No' },
+              ],
+            },
+            { key: 'count', default: '0' },
+            { key: 'ratio', type: 'text' },
+            { key: 'server', default: 'https://example.test', placeholder: 'Server URL' },
+          ],
+        },
+      ],
+    });
+    const inputs = { enabled: 'false', count: '0', ratio: '1.25', server: 'https://custom.test' };
+    await adapter.request(
+      type === 'key' ? 'PUT' : 'POST',
+      type === 'key' ? '/auth/fixture' : '/provider/fixture/oauth/authorize',
+      type === 'key' ? { type: 'api', key: 'token', metadata: inputs } : { method: 0, inputs }
+    );
+    expect(wire).toHaveBeenLastCalledWith(
+      'POST',
+      `/api/integration/fixture/connect/${type}`,
+      expect.objectContaining({
+        answer: {
+          enabled: false,
+          count: 0,
+          ratio: 1.25,
+          server: 'https://custom.test',
+          internal: 'internal-default',
+        },
+      }),
+      expect.anything()
+    );
+  });
+
   it.each([undefined, { server: 'https://custom.example' }])(
     'omits hidden prompts and sends their defaults unless supplied: %j',
     async (inputs) => {
@@ -226,6 +384,7 @@ describe('v2 hidden authentication fields', () => {
       if (path === '/api/provider') return { data: [] };
       if (path === '/api/integration') return { data: [integration] };
       if (path === '/api/provider/github-copilot') return { data: {} };
+      if (path === '/api/integration/github-copilot') return { data: integration };
       if (path === '/api/integration/github-copilot/connect/key') return null;
       throw new Error(`Unexpected request: ${path}`);
     });

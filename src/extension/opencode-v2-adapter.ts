@@ -3,6 +3,7 @@ import type {
   AgentInfo,
   CommandInfo,
   FormInfo,
+  FormFields,
   IntegrationInfo,
   ModelInfo,
   PermissionRequest,
@@ -18,7 +19,11 @@ import type {
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { asRecord, isString, type UnknownRecord } from '../shared/type-utils';
-import type { ProviderAuthMethod, ProviderAuthPromptCondition } from '../shared/opencode-types';
+import type {
+  ProviderAuthMethod,
+  ProviderAuthPromptCondition,
+  ProviderAuthPromptText,
+} from '../shared/opencode-types';
 import { OpenCodeResponseTooLargeError, type OpenCodeRequestOptions } from './open-code-transport';
 import { OpenCodeV2SessionState } from './opencode-v2-session-state';
 import {
@@ -83,6 +88,7 @@ type V1AuthPromptBase = {
   key: string;
   message: string;
   required?: boolean;
+  default?: string;
   when?: ProviderAuthPromptCondition[];
 };
 
@@ -112,12 +118,25 @@ function v1AuthMethods(integration: IntegrationInfo | undefined): ProviderAuthMe
             message: field.title ?? field.description ?? field.key,
             required: field.required === true,
           };
+          if (field.default !== undefined && !Array.isArray(field.default))
+            base.default = String(field.default);
           if (field.when?.length)
             base.when = field.when.map((condition) => ({
               key: condition.key,
               op: condition.op,
               value: String(condition.value),
             }));
+          if (field.type === 'boolean')
+            return [
+              {
+                ...base,
+                type: 'select',
+                options: [
+                  { value: 'true', label: 'Yes' },
+                  { value: 'false', label: 'No' },
+                ],
+              },
+            ];
           if (field.type === 'string' && field.options)
             return [
               {
@@ -130,10 +149,50 @@ function v1AuthMethods(integration: IntegrationInfo | undefined): ProviderAuthMe
                 })),
               },
             ];
-          return [{ ...base, type: 'text' as const }];
+          const prompt: ProviderAuthPromptText = { ...base, type: 'text' };
+          if (field.type === 'string' && field.placeholder !== undefined)
+            prompt.placeholder = field.placeholder;
+          return [prompt];
         }),
       })) ?? []
   );
+}
+
+function v2AuthAnswers(form: FormFields | undefined, value: unknown) {
+  const answer = { ...asRecord(value) };
+  // The legacy dialog transports strings. Convert before evaluating typed conditions.
+  for (const field of form ?? []) {
+    const input = answer[field.key];
+    if (!isString(input)) continue;
+    if (field.type === 'boolean') {
+      if (input !== 'true' && input !== 'false')
+        throw new Error(`Invalid boolean answer for ${field.title ?? field.key}`);
+      answer[field.key] = input === 'true';
+    }
+    if (field.type === 'number' || field.type === 'integer') {
+      const number = Number(input);
+      if (
+        !input.trim() ||
+        !Number.isFinite(number) ||
+        (field.type === 'integer' && !Number.isInteger(number))
+      )
+        throw new Error(`Invalid ${field.type} answer for ${field.title ?? field.key}`);
+      answer[field.key] = number;
+    }
+  }
+  for (const field of form ?? []) {
+    if (field.type === 'external' || !field.hidden || answer[field.key] !== undefined) continue;
+    if (
+      field.when?.some((condition) =>
+        condition.op === 'eq'
+          ? answer[condition.key] !== condition.value
+          : answer[condition.key] === condition.value
+      )
+    )
+      continue;
+    if (field.default !== undefined) answer[field.key] = field.default;
+  }
+  return Object.keys(answer).length > 0 ? answer : value;
 }
 
 export class OpenCodeV2Adapter {
@@ -1017,9 +1076,13 @@ export class OpenCodeV2Adapter {
     }
     const base = `/api/integration/${encodeURIComponent(integrationID)}`;
     if (method === 'PUT' && input.type === 'api') {
+      const integration = asRecord(await raw('GET', base))?.data as IntegrationInfo;
       await raw('POST', `${base}/connect/key`, {
         key: input.key,
-        answer: input.metadata,
+        answer: v2AuthAnswers(
+          integration.methods.find((item) => item.type === 'key')?.form,
+          input.metadata
+        ),
       });
       return true;
     }
@@ -1053,24 +1116,11 @@ export class OpenCodeV2Adapter {
       );
       const selected = methods[Number(input.method ?? 0)];
       if (selected?.type !== 'oauth') throw new Error('Unsupported OpenCode authentication method');
-      const answer = { ...asRecord(input.inputs) };
-      for (const field of selected.form ?? []) {
-        if (field.type === 'external' || !field.hidden || answer[field.key] !== undefined) continue;
-        if (
-          field.when?.some((condition) =>
-            condition.op === 'eq'
-              ? answer[condition.key] !== condition.value
-              : answer[condition.key] === condition.value
-          )
-        )
-          continue;
-        if (field.default !== undefined) answer[field.key] = field.default;
-      }
       const result = asRecord(
         asRecord(
           await raw('POST', `${base}/connect/oauth`, {
             methodID: selected.id,
-            answer: Object.keys(answer).length > 0 ? answer : input.inputs,
+            answer: v2AuthAnswers(selected.form, input.inputs),
           })
         )?.data
       );
