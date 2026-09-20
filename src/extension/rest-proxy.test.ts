@@ -382,17 +382,27 @@ describe('getOpenCodeDirectoryHeaders', () => {
     expect(getOpenCodeDirectoryHeaders(undefined)).toEqual({});
   });
 
-  it('returns raw directory header', () => {
+  it('returns an encoded directory header', () => {
     expect(getOpenCodeDirectoryHeaders('/some/path')).toEqual({
-      'x-opencode-directory': '/some/path',
+      'x-opencode-directory': '%2Fsome%2Fpath',
     });
   });
 
-  it('returns raw normalized Windows directory headers', () => {
+  it('encodes Windows directories without changing separators or casing', () => {
     expect(getOpenCodeDirectoryHeaders('C:\\Users\\Andrew\\Projects\\Varro')).toEqual({
-      'x-opencode-directory': 'C:\\Users\\Andrew\\Projects\\Varro',
+      'x-opencode-directory': 'C%3A%5CUsers%5CAndrew%5CProjects%5CVarro',
     });
   });
+
+  it.each(['/workspace/日本語/🚀', '/workspace/project\nname', '/workspace/%2Fproject'])(
+    'round trips %j through Fetch headers and server URI decoding',
+    (directory) => {
+      const request = new Request('http://localhost/path', {
+        headers: getOpenCodeDirectoryHeaders(directory),
+      });
+      expect(decodeURIComponent(request.headers.get('x-opencode-directory')!)).toBe(directory);
+    }
+  );
 });
 
 describe('RestProxy handleRequest', () => {

@@ -248,6 +248,16 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
     expect(await transport.request('GET', '/experimental/session?limit=1000')).toEqual([]);
   }, 60000);
 
+  it.each(['日本語 🚀', 'literal%2Fdirectory'])(
+    'resolves the exact workspace path for %s',
+    async (name) => {
+      const directory = join(root, 'workspace', name);
+      await mkdir(directory);
+      const location = asRecord(await transport.request('GET', '/path', undefined, { directory }));
+      expect(location?.directory).toBe(directory);
+    }
+  );
+
   it('creates, updates, and reads a session through the common API', async () => {
     const session = asRecord(
       await transport.request('POST', '/session', {

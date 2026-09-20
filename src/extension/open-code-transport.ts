@@ -193,6 +193,16 @@ export class OpenCodeTransport {
         ? undefined
         : (options?.directory ?? this.getWorkspaceDirectoryForRequest(method, path))
     );
+    if (this.apiVersion === 1) {
+      const url = new URL(scoped.url);
+      const directory = url.searchParams.get('directory');
+      // V1 URI-decodes legacy directory queries again after parsing the URL.
+      // Protect literal percent escapes from becoming different filesystem paths.
+      if (directory?.includes('%') && !url.pathname.startsWith('/api/')) {
+        url.searchParams.set('directory', directory.replaceAll('%', '%25'));
+        scoped.url = url.toString();
+      }
+    }
     if (this.testServerUrl && new URL(scoped.url).origin !== this.testServerUrl) {
       throw new Error('AI test transport refused a request outside its verified server');
     }

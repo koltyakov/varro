@@ -47,7 +47,8 @@ export function scopeOpenCodeRequest(baseUrl: string, path: string, directory?: 
 
 export function getOpenCodeDirectoryHeaders(directory?: string): Record<string, string> {
   if (!directory) return {};
-  return { 'x-opencode-directory': directory };
+  // Fetch headers cannot carry arbitrary Unicode. Both server families URI-decode this header.
+  return { 'x-opencode-directory': encodeURIComponent(directory) };
 }
 
 export function normalizeOpenCodeDirectory(directory: string | undefined) {
