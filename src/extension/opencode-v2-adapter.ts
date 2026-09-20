@@ -85,6 +85,18 @@ type V1AuthPromptBase = {
   when?: ProviderAuthPromptCondition[];
 };
 
+function connectionInfo(integration: IntegrationInfo | undefined) {
+  const connections = integration?.connections ?? [];
+  return {
+    env: connections.flatMap((connection) => (connection.type === 'env' ? [connection.name] : [])),
+    source: connections.some((connection) => connection.type === 'credential')
+      ? 'api'
+      : connections.some((connection) => connection.type === 'env')
+        ? 'env'
+        : 'custom',
+  };
+}
+
 function v1AuthMethods(integration: IntegrationInfo | undefined): ProviderAuthMethod[] {
   return (
     integration?.methods
@@ -232,6 +244,14 @@ export class OpenCodeV2Adapter {
 
     // Internal callers already use a few native permission endpoints.
     if (route.startsWith('/api/')) return raw(method, query(path, true), body);
+    if (method === 'POST' && route === '/global/dispose') {
+      await raw('POST', '/api/location/reload');
+      return true;
+    }
+    if (method === 'POST' && route === '/instance/dispose') {
+      await raw('DELETE', query('/api/debug/location', true));
+      return true;
+    }
     if (route === '/agent' && method === 'GET') {
       const agents = (await data<AgentInfo[]>('GET', query('/api/agent', true))).map(
         projectV2Agent
@@ -837,14 +857,19 @@ export class OpenCodeV2Adapter {
     const models = asRecord(modelResult)?.data as ModelInfo[];
     if (!Array.isArray(providers) || !Array.isArray(models))
       throw new Error('Invalid OpenCode v2 provider catalog');
+    const integrations = asRecord(integrationResult)?.data as IntegrationInfo[];
+    if (!Array.isArray(integrations)) throw new Error('Invalid OpenCode v2 integration catalog');
     const all = providers.map((provider) => ({
       ...provider,
       disconnectMode:
         !provider.integrationID && ['ollama', 'lmstudio', 'vllm'].includes(provider.id)
           ? ('disable' as const)
           : undefined,
-      env: [],
-      source: 'config',
+      ...connectionInfo(
+        integrations.find(
+          (integration) => integration.id === (provider.integrationID ?? provider.id)
+        )
+      ),
       options: provider.settings ?? {},
       models: Object.fromEntries(
         models
@@ -852,8 +877,6 @@ export class OpenCodeV2Adapter {
           .map((model) => [model.id, projectV2Model(model)])
       ),
     }));
-    const integrations = asRecord(integrationResult)?.data as IntegrationInfo[];
-    if (!Array.isArray(integrations)) throw new Error('Invalid OpenCode v2 integration catalog');
     for (const integration of integrations) {
       if (
         !all.some(
@@ -867,8 +890,7 @@ export class OpenCodeV2Adapter {
           name: integration.name,
           package: '',
           activation: 'auto',
-          env: [],
-          source: 'api',
+          ...connectionInfo(integration),
           options: {},
           models: {},
         });
@@ -889,6 +911,7 @@ export class OpenCodeV2Adapter {
       const provider = asRecord(entry);
       if (!provider) continue;
       let target = all.find((item) => item.id === id);
+      if (target?.source === 'custom') target.source = 'config';
       if (!target) {
         target = {
           id,
@@ -932,17 +955,31 @@ export class OpenCodeV2Adapter {
         Object.keys(provider.models).find((id) => provider.models[id]?.enabled !== false) ?? '',
       ])
     );
-    return route === '/config/providers'
-      ? { providers: all, default: defaults }
-      : {
-          all,
-          default: defaults,
-          connected: all
-            .filter((provider) =>
-              Object.values(provider.models).some((model) => model.enabled !== false)
-            )
-            .map((provider) => provider.id),
-        };
+    const connected = all
+      .filter((provider) =>
+        integrations.some(
+          (integration) =>
+            integration.id === (provider.integrationID ?? provider.id) &&
+            (integration.connections?.length ?? 0) > 0
+        )
+      )
+      .map((provider) => provider.id);
+    if (route === '/config/providers') {
+      const activeProviders = all.filter(
+        (provider) =>
+          connected.includes(provider.id) ||
+          Object.hasOwn(configured, provider.id) ||
+          provider.activation === 'enabled' ||
+          Object.values(provider.models).some((model) => model.enabled !== false)
+      );
+      return {
+        providers: activeProviders,
+        default: Object.fromEntries(
+          activeProviders.map((provider) => [provider.id, defaults[provider.id]])
+        ),
+      };
+    }
+    return { all, default: defaults, connected };
   }
 
   private async authenticate(

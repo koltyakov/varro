@@ -294,6 +294,80 @@ describe('v2 hidden authentication fields', () => {
 });
 
 describe('v2 provider disconnect', () => {
+  it('uses saved connections even when Ollama Cloud has no models', async () => {
+    let connected = true;
+    const wire = vi.fn(async (method: string, path: string) => {
+      const integration = {
+        id: 'ollama-cloud-account',
+        name: 'Ollama Cloud',
+        methods: [],
+        connections: connected ? [{ type: 'credential', id: 'cloud-key', label: 'Cloud' }] : [],
+      };
+      if (path === '/api/provider')
+        return {
+          data: [{ id: 'ollama-cloud', name: 'Ollama Cloud', integrationID: integration.id }],
+        };
+      if (path === '/api/provider/ollama-cloud') return { data: { integrationID: integration.id } };
+      if (path === '/api/model') return { data: [] };
+      if (path === '/api/config') return [];
+      if (path === '/api/integration') return { data: [integration] };
+      if (path === '/api/integration/ollama-cloud-account') return { data: integration };
+      if (method === 'DELETE' && path === '/api/credential/cloud-key') {
+        connected = false;
+        return undefined;
+      }
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+    const adapter = new OpenCodeV2Adapter(wire);
+    expect(await adapter.request('GET', '/provider', undefined)).toMatchObject({
+      all: [expect.objectContaining({ id: 'ollama-cloud', source: 'api', models: {} })],
+      connected: ['ollama-cloud'],
+    });
+    expect(await adapter.request('GET', '/config/providers', undefined)).toMatchObject({
+      providers: [expect.objectContaining({ id: 'ollama-cloud', models: {} })],
+    });
+    await adapter.request('DELETE', '/auth/ollama-cloud', undefined);
+    expect(await adapter.request('GET', '/provider', undefined)).toMatchObject({
+      all: [expect.objectContaining({ id: 'ollama-cloud', source: 'custom' })],
+      connected: [],
+    });
+    expect(await adapter.request('GET', '/config/providers', undefined)).toEqual({
+      providers: [],
+      default: {},
+    });
+    expect(wire).toHaveBeenCalledWith(
+      'DELETE',
+      '/api/credential/cloud-key',
+      undefined,
+      expect.anything()
+    );
+  });
+
+  it('reports environment connections separately from saved credentials', async () => {
+    const adapter = new OpenCodeV2Adapter(async (_method, path) => {
+      if (path === '/api/provider' || path === '/api/model') return { data: [] };
+      if (path === '/api/config') return [];
+      if (path === '/api/integration')
+        return {
+          data: [
+            {
+              id: 'ollama-cloud',
+              name: 'Ollama Cloud',
+              methods: [],
+              connections: [{ type: 'env', name: 'OLLAMA_API_KEY' }],
+            },
+          ],
+        };
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    expect(await adapter.request('GET', '/provider', undefined)).toMatchObject({
+      all: [
+        expect.objectContaining({ id: 'ollama-cloud', source: 'env', env: ['OLLAMA_API_KEY'] }),
+      ],
+      connected: ['ollama-cloud'],
+    });
+  });
+
   it('offers local-provider disabling and does not restore disabled configured models', async () => {
     let disabled = false;
     const adapter = new OpenCodeV2Adapter(async (_method, path) => {
@@ -317,7 +391,7 @@ describe('v2 provider disconnect', () => {
     });
     expect(await adapter.request('GET', '/provider', undefined)).toMatchObject({
       all: [expect.objectContaining({ id: 'ollama', disconnectMode: 'disable' })],
-      connected: ['ollama'],
+      connected: [],
     });
     disabled = true;
     expect(await adapter.request('GET', '/provider', undefined)).toMatchObject({
@@ -395,6 +469,25 @@ describe('v2 provider disconnect', () => {
 
     await expect(adapter.request('DELETE', '/auth/amazon-bedrock', undefined)).rejects.toThrow(
       'Remove the provider environment variable to disconnect this OpenCode integration'
+    );
+  });
+});
+
+describe('v2 provider refresh', () => {
+  it.each([
+    ['/global/dispose', 'POST', '/api/location/reload'],
+    ['/instance/dispose', 'DELETE', '/api/debug/location?location%5Bdirectory%5D=%2Frepo'],
+  ])('translates %s into the native reload operation', async (route, method, path) => {
+    const wire = vi.fn(async () => undefined);
+    const adapter = new OpenCodeV2Adapter(wire);
+    await expect(adapter.request('POST', route, undefined, { directory: '/repo' })).resolves.toBe(
+      true
+    );
+    expect(wire).toHaveBeenCalledExactlyOnceWith(
+      method,
+      path,
+      undefined,
+      expect.objectContaining({ unscoped: true })
     );
   });
 });

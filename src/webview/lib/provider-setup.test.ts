@@ -28,7 +28,7 @@ describe('openProviderSetup', () => {
 
     expect(postMessageMock).toHaveBeenCalledWith({
       type: 'terminal/run',
-      payload: { command: 'opencode providers logout', title: 'OpenCode Provider Logout' },
+      payload: { command: 'opencode auth logout', title: 'OpenCode Provider Logout' },
     });
   });
 });

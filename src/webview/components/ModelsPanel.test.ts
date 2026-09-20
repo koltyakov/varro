@@ -670,7 +670,7 @@ describe('ModelsPanel', () => {
     expect(dialog?.textContent).toContain('Remove the saved credential for OpenAI?');
     expect(dialog?.textContent).toContain('configured in OpenCode config');
     expect(dialog?.querySelector('.provider-connect-options')).toBeNull();
-    findButton(dialog, 'Open opencode.json')?.click();
+    findButton(dialog, 'Open opencode.json in VS Code')?.click();
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open',
       payload: {
@@ -818,52 +818,71 @@ describe('ModelsPanel', () => {
 
     expect(deleteButton).toBeInstanceOf(HTMLButtonElement);
     expect(deleteButton?.disabled).toBe(true);
+    deleteButton?.click();
     expect(document.body.querySelector('[role="dialog"]')).toBeNull();
   });
 
-  it('opens config guidance for a provider without a saved credential', async () => {
-    clientMocks.openCodeConfig.mockResolvedValue({
-      smallModel: null,
-      agentModels: {},
-      commitMessageModel: null,
-      autoApproveModel: null,
-      providerConfigPaths: { custom: ['/repo/opencode.jsonc'] },
-    });
-    clientMocks.providerCatalog.mockResolvedValue({
-      all: [{ id: 'custom', name: 'Custom', source: 'config', models: {} }],
-      default: {},
-      connected: [],
-    });
-    setState('providers', [
-      {
-        id: 'custom',
-        name: 'Custom',
-        source: 'config',
-        models: {
-          model: {
-            id: 'model',
-            name: 'Model',
-            capabilities: { toolcall: true },
-            cost: { input: 1, output: 1 },
+  it.each([true, false])(
+    'shows config links only for matching provider entries, known provider path=%s',
+    async (knownProviderPath) => {
+      const send = vi.fn();
+      window.__sendToExtension = send;
+      clientMocks.openCodeConfig.mockResolvedValue({
+        smallModel: null,
+        agentModels: {},
+        commitMessageModel: null,
+        autoApproveModel: null,
+        providerConfigPaths: knownProviderPath
+          ? { custom: ['/repo/opencode.jsonc'] }
+          : { unrelated: ['/repo/opencode.jsonc'] },
+      });
+      clientMocks.providerCatalog.mockResolvedValue({
+        all: [{ id: 'custom', name: 'Custom', source: 'config', models: {} }],
+        default: {},
+        connected: [],
+      });
+      setState('providers', [
+        {
+          id: 'custom',
+          name: 'Custom',
+          source: 'config',
+          models: {
+            model: {
+              id: 'model',
+              name: 'Model',
+              capabilities: { toolcall: true },
+              cost: { input: 1, output: 1 },
+            },
           },
         },
-      },
-    ]);
-    cleanup = render(() => ModelsPanel(), container!);
-    await Promise.resolve();
+      ]);
+      cleanup = render(() => ModelsPanel(), container!);
+      await Promise.resolve();
 
-    container
-      ?.querySelector<HTMLElement>('.models-provider-header')
-      ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    findButton(document.body, 'Disconnect provider')?.click();
-    await Promise.resolve();
-    await Promise.resolve();
+      container
+        ?.querySelector<HTMLElement>('.models-provider-header')
+        ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      findButton(document.body, 'Disconnect provider')?.click();
+      await Promise.resolve();
+      await Promise.resolve();
 
-    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
-    expect(dialog?.textContent).toContain('has no saved credential to disconnect');
-    expect(findButton(dialog, 'Open opencode.jsonc')).toBeInstanceOf(HTMLButtonElement);
-    expect(findButton(dialog, 'Disconnect')).toBeUndefined();
-  });
+      const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
+      expect(dialog?.textContent).toContain('has no saved credential to disconnect');
+      const openConfig = findButton(dialog, 'Open opencode.jsonc in VS Code');
+      if (knownProviderPath) {
+        expect(openConfig).toBeInstanceOf(HTMLButtonElement);
+        openConfig?.click();
+        expect(send).toHaveBeenCalledWith({
+          type: 'vscode/open',
+          payload: { path: '/repo/opencode.jsonc', kind: 'file' },
+        });
+      } else {
+        expect(openConfig).toBeUndefined();
+        expect(dialog?.textContent).not.toContain('configured in OpenCode config');
+      }
+      expect(findButton(dialog, 'Disconnect')).toBeUndefined();
+    }
+  );
 
   it('explains when environment credentials keep a provider connected', async () => {
     clientMocks.providerCatalog.mockResolvedValue({

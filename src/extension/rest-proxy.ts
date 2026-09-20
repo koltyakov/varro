@@ -4079,9 +4079,9 @@ export class RestProxy {
     const { config, files } = await this.readOpenCodeConfigObject();
     const routing = this.normalizeOpenCodeModelRouting(config);
     const providerConfigPaths = await this.readOpenCodeProviderConfigPaths(files);
-    return Object.keys(providerConfigPaths).length > 0
-      ? { ...routing, providerConfigPaths }
-      : routing;
+    if (Object.keys(providerConfigPaths).length > 0)
+      routing.providerConfigPaths = providerConfigPaths;
+    return routing;
   }
 
   private async readOpenCodeProviderConfigPaths(

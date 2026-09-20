@@ -230,7 +230,7 @@ export function ProviderDisconnectionDialog(props: {
                   <Show
                     when={
                       provider().disconnectMode !== 'disable' &&
-                      (provider().source === 'config' || selectedProviderConfigPaths().length > 0)
+                      selectedProviderConfigPaths().length > 0
                     }
                   >
                     <div class="provider-disconnect-config-notice">
@@ -250,7 +250,7 @@ export function ProviderDisconnectionDialog(props: {
                               })
                             }
                           >
-                            Open {formatConfigFilename(path)}
+                            Open {formatConfigFilename(path)} in VS Code
                           </button>
                         )}
                       </For>
