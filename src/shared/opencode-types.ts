@@ -788,6 +788,7 @@ export type ProviderAuthPromptText = {
   placeholder?: string;
   default?: string;
   required?: boolean;
+  hidden?: boolean;
   when?: ProviderAuthPromptCondition | ProviderAuthPromptCondition[];
 };
 
@@ -808,6 +809,7 @@ export type ProviderAuthPromptSelect = {
     hint?: string;
   }>;
   required?: boolean;
+  hidden?: boolean;
   when?: ProviderAuthPromptCondition | ProviderAuthPromptCondition[];
 };
 
@@ -823,6 +825,7 @@ export type ProviderAuthAuthorization = {
   url: string;
   method: 'auto' | 'code';
   instructions: string;
+  attemptID?: string;
 };
 
 export type ServerEventPropertiesByName = {

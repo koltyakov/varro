@@ -733,9 +733,111 @@ describe('ProviderConnectionDialog API key flow', () => {
       { signal: expect.any(AbortSignal) }
     );
   });
+
+  it.each(['api', 'oauth'] as const)(
+    'uses active hidden defaults to reveal required %s fields without rendering hidden controls',
+    async (authType) => {
+      setState('providerAuthMethods', {
+        openai: [
+          {
+            type: authType,
+            label: 'Enterprise',
+            prompts: [
+              {
+                key: 'deployment',
+                type: 'select',
+                message: 'Deployment',
+                default: 'enterprise',
+                options: [
+                  { value: 'enterprise', label: 'Enterprise' },
+                  { value: 'public', label: 'Public' },
+                ],
+              },
+              {
+                key: 'enterprise',
+                type: 'text',
+                message: 'Hidden flag',
+                hidden: true,
+                default: 'true',
+                when: { key: 'deployment', op: 'eq', value: 'enterprise' },
+              },
+              {
+                key: 'organization',
+                type: 'text',
+                message: 'Organization',
+                required: true,
+                when: { key: 'enterprise', op: 'eq', value: 'true' },
+              },
+            ],
+          },
+        ],
+      });
+      renderDialog();
+      chooseProvider('OpenAI');
+      chooseMethod('Enterprise');
+      expect(dialog()?.textContent).toContain('Organization');
+      expect(dialog()?.textContent).not.toContain('Hidden flag');
+      expect(primaryButton().disabled).toBe(true);
+      const select = dialog()!.querySelector<HTMLButtonElement>(
+        '.provider-connect-select-trigger'
+      )!;
+      select.click();
+      findButton('Public')!.click();
+      expect(dialog()?.textContent).not.toContain('Organization');
+      select.click();
+      findButton('Enterprise')!.click();
+      type(dialog()!.querySelector<HTMLInputElement>('input[type="text"]')!, 'acme');
+      if (authType === 'api')
+        type(dialog()!.querySelector<HTMLInputElement>('input[type="password"]')!, 'key');
+      primaryButton().click();
+      await flush();
+      const answers = { deployment: 'enterprise', organization: 'acme' };
+      expect(
+        authType === 'api' ? clientMocks.connectApiProvider : clientMocks.authorizeProvider
+      ).toHaveBeenCalledWith(
+        authType === 'api'
+          ? { providerID: 'openai', key: 'key', metadata: answers }
+          : { providerID: 'openai', method: 0, inputs: answers },
+        { signal: expect.any(AbortSignal) }
+      );
+    }
+  );
 });
 
 describe('ProviderConnectionDialog OAuth flow', () => {
+  it.each(['auto', 'code'] as const)(
+    'completes the exact %s OAuth attempt returned to this dialog',
+    async (method) => {
+      clientMocks.authorizeProvider.mockResolvedValue({
+        url: '',
+        method,
+        instructions: 'Sign in',
+        attemptID: 'attempt-for-this-dialog',
+      });
+      renderDialog();
+      chooseProvider('Anthropic');
+      chooseMethod('Claude subscription');
+      primaryButton().click();
+      await flush();
+      if (method === 'code') {
+        type(
+          dialog()!.querySelector<HTMLInputElement>('.provider-connect-authorization input')!,
+          'code'
+        );
+        primaryButton().click();
+        await flush();
+      }
+      expect(clientMocks.completeProviderAuth).toHaveBeenCalledWith(
+        {
+          providerID: 'anthropic',
+          method: 0,
+          attemptID: 'attempt-for-this-dialog',
+          code: method === 'code' ? 'code' : undefined,
+        },
+        { signal: expect.any(AbortSignal) }
+      );
+    }
+  );
   it('does not require a conditional enterprise field for GitHub.com re-authentication', async () => {
     setState('providerAuthMethods', {
       'github-copilot': [

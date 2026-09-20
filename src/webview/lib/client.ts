@@ -480,6 +480,7 @@ export const client = {
         providerID: string;
         method: number;
         code?: string;
+        attemptID?: string;
       },
       options?: { signal?: AbortSignal }
     ): Promise<boolean> {
@@ -489,6 +490,7 @@ export const client = {
         {
           method: body.method,
           code: body.code ? body.code : undefined,
+          attemptID: body.attemptID,
         },
         {
           timeoutMs: 315_000,

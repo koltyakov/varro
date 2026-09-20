@@ -6842,6 +6842,63 @@ describe('RestProxy handleRequest', () => {
     expect(JSON.parse(raw).small_model).toBeUndefined();
   });
 
+  it.each([
+    {
+      target: 'small_model',
+      config: { small_model: 'openai/small', agents: { build: { system: 'Keep this prompt' } } },
+      expected: { agents: { build: { system: 'Keep this prompt' } } },
+    },
+    {
+      target: 'agent',
+      config: {
+        agent: { review: { model: 'openai/small', prompt: 'Keep review' } },
+        agents: { build: { system: 'Keep this prompt' } },
+      },
+      expected: {
+        agent: { review: { prompt: 'Keep review' } },
+        agents: { build: { system: 'Keep this prompt' } },
+      },
+    },
+    {
+      target: 'small_model',
+      config: {
+        agents: { title: { model: 'openai/small' } },
+        agent: { build: { prompt: 'Keep' } },
+      },
+      expected: { agent: { build: { prompt: 'Keep' } } },
+    },
+  ])(
+    'unsets $target from its original property in mixed-format model routing',
+    async ({ target, config, expected }) => {
+      let raw = JSON.stringify(config);
+      mocks.vscode.workspace.fs.readFile.mockImplementation(async (uri: { fsPath: string }) => {
+        if (uri.fsPath !== '/repo/opencode.json') throw { code: 'FileNotFound' };
+        return new TextEncoder().encode(raw);
+      });
+      mocks.vscode.workspace.fs.stat.mockResolvedValue({ mtime: 1, size: 3, type: 0, ctime: 1 });
+      mocks.vscode.workspace.fs.writeFile.mockImplementation(async (_uri, encoded) => {
+        raw = new TextDecoder().decode(encoded);
+      });
+      const { proxy, callbacks } = createProxy({
+        server: { ...createCallbacks().server, apiVersion: 2 },
+      });
+      await proxy.handleRequest(
+        makePayload(407, 'POST', '/varro/opencode-config/model-routing', {
+          target,
+          agentName: 'review',
+          providerID: 'openai',
+          modelID: 'small',
+          unset: true,
+        })
+      );
+      expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+        id: 407,
+        data: expect.objectContaining({ smallModel: null, agentModels: {} }),
+      });
+      expect(JSON.parse(raw)).toEqual(expected);
+    }
+  );
+
   it('serializes concurrent project model routing updates across proxy instances', async () => {
     let raw = '{}\n';
     let synchronizedReads = 0;

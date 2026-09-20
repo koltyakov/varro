@@ -89,6 +89,7 @@ type V1AuthPromptBase = {
   message: string;
   required?: boolean;
   default?: string;
+  hidden?: boolean;
   when?: ProviderAuthPromptCondition[];
 };
 
@@ -112,12 +113,13 @@ function v1AuthMethods(integration: IntegrationInfo | undefined): ProviderAuthMe
         type: item.type === 'key' ? 'api' : 'oauth',
         label: item.label ?? 'API key',
         prompts: item.form?.flatMap<NonNullable<ProviderAuthMethod['prompts']>[number]>((field) => {
-          if (field.type === 'external' || field.hidden) return [];
+          if (field.type === 'external') return [];
           const base: V1AuthPromptBase = {
             key: field.key,
             message: field.title ?? field.description ?? field.key,
             required: field.required === true,
           };
+          if (field.hidden) base.hidden = true;
           if (field.default !== undefined && !Array.isArray(field.default))
             base.default = String(field.default);
           if (field.when?.length)
@@ -203,7 +205,10 @@ export class OpenCodeV2Adapter {
   private readonly inputTypes = new Map<string, string>();
   private readonly failures = new Map<string, V2MessageContext>();
   private readonly submissions = new Map<string, Promise<unknown>>();
-  private readonly oauth = new Map<string, { integrationID: string; attemptID: string }>();
+  private readonly oauth = new Map<
+    string,
+    { integrationID: string; attemptID: string; providerID: string; directory?: string }
+  >();
 
   constructor(
     private readonly wire: WireRequest,
@@ -871,10 +876,18 @@ export class OpenCodeV2Adapter {
       if (!isString(authorization?.url))
         throw new Error('OpenCode did not provide an MCP authentication URL');
       if (mcpAuth[2] !== 'authenticate')
-        return { authorizationUrl: authorization.url, oauthState: this.oauth.get(key)?.attemptID };
+        return { authorizationUrl: authorization.url, oauthState: authorization.attemptID };
       if (!(await this.openExternal(authorization.url)))
         throw new Error('Could not open the MCP authentication page');
-      await this.authenticate(key, 'callback', 'POST', {}, directory, options, integrationID);
+      await this.authenticate(
+        key,
+        'callback',
+        'POST',
+        { attemptID: authorization.attemptID },
+        directory,
+        options,
+        integrationID
+      );
       return true;
     }
     const mcp = route.match(/^\/mcp\/([^/]+)\/(connect|disconnect)$/);
@@ -1127,15 +1140,28 @@ export class OpenCodeV2Adapter {
         )?.data
       );
       if (!isString(result?.attemptID)) throw new Error('Invalid OpenCode OAuth attempt');
-      this.oauth.set(providerID, { integrationID, attemptID: result.attemptID });
+      this.oauth.set(result.attemptID, {
+        integrationID,
+        attemptID: result.attemptID,
+        providerID,
+        directory,
+      });
       return {
+        attemptID: result.attemptID,
         url: result.url,
         method: result.mode === 'code' ? 'code' : 'auto',
         instructions: result.instructions ?? '',
       };
     }
     if (action === 'callback') {
-      const attempt = this.oauth.get(providerID);
+      const candidates = [...this.oauth.values()].filter(
+        (attempt) => attempt.providerID === providerID && attempt.directory === directory
+      );
+      const attempt = isString(input.attemptID)
+        ? candidates.find((candidate) => candidate.attemptID === input.attemptID)
+        : candidates.length === 1
+          ? candidates[0]
+          : undefined;
       if (!attempt) throw new Error('OpenCode OAuth attempt was not started');
       const attemptPath = `/api/integration/${encodeURIComponent(attempt.integrationID)}/connect/oauth/${encodeURIComponent(attempt.attemptID)}`;
       let completed = false;
@@ -1157,7 +1183,7 @@ export class OpenCodeV2Adapter {
         completed = true;
         return true;
       } finally {
-        if (this.oauth.get(providerID) === attempt) this.oauth.delete(providerID);
+        this.oauth.delete(attempt.attemptID);
         if (!completed) {
           await this.wire('DELETE', attemptPath + suffix, undefined, {
             ...options,

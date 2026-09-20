@@ -1338,6 +1338,23 @@ describe('client', () => {
     });
   });
 
+  it('forwards the OAuth attempt identity on completion', async () => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockResolvedValue(true);
+    await client.config.completeProviderAuth({
+      providerID: 'fixture',
+      method: 0,
+      code: 'code',
+      attemptID: 'attempt-1',
+    });
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
+      'POST',
+      '/provider/fixture/oauth/callback',
+      { method: 0, code: 'code', attemptID: 'attempt-1' },
+      expect.objectContaining({ retries: 0 })
+    );
+  });
+
   it('loads the full provider catalog', async () => {
     const { client } = await loadClient();
     const response = {

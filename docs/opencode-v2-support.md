@@ -54,6 +54,16 @@ defaults. Invalid boolean, non-finite numeric, and fractional integer inputs fai
 starts. Regression tests cover both connection paths, false and zero values, and default initialization
 in the dialog.
 
+OAuth authorization responses retain their attempt IDs through the dialog and completion request.
+Pending attempts are checked against their provider and workspace, so overlapping connections in
+separate chat views cannot complete or remove each other's attempts. Legacy callbacks without an
+attempt ID are accepted only when there is one matching pending attempt.
+
+Hidden provider fields retain their defaults and conditions in the dialog's form definition without
+rendering controls. Visible fields can depend on those defaults, including conditional hidden fields.
+Removing model-routing overrides from mixed-format files targets the original `small_model`, `agent`,
+or `agents` property instead of inferring its location from unrelated native settings.
+
 ### Workspace path compatibility
 
 Directory headers now use URI encoding, matching the published v1 SDK and the server's

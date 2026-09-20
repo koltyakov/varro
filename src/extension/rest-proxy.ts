@@ -4243,11 +4243,19 @@ export class RestProxy {
         }
 
         const modelRef = `${request.providerID}/${request.modelID}`;
-        const agentKey =
-          target.config.agents !== undefined ||
-          (target.config.agent === undefined && config.agents !== undefined)
-            ? 'agents'
-            : 'agent';
+        const nativeAgent = asRecord(
+          asRecord(target.config.agents)?.[
+            request.target === 'small_model' ? 'title' : request.agentName || ''
+          ]
+        );
+        const agentKey = (
+          request.unset
+            ? parseModelRoute(nativeAgent?.model) !== null
+            : target.config.agents !== undefined ||
+              (target.config.agent === undefined && config.agents !== undefined)
+        )
+          ? 'agents'
+          : 'agent';
         const nativeTitle = request.target === 'small_model' && agentKey === 'agents';
         if (request.target === 'small_model' && !nativeTitle) {
           nextRaw = applyJsoncChange(
@@ -4798,9 +4806,8 @@ export class RestProxy {
                 asRecord(asRecord(file.config.agents)?.title)?.model ?? file.config.small_model
               )
             : parseModelRoute(
-                asRecord(
-                  asRecord(file.config.agents ?? file.config.agent)?.[request.agentName || '']
-                )?.model
+                asRecord(asRecord(file.config.agents)?.[request.agentName || ''])?.model ??
+                  asRecord(asRecord(file.config.agent)?.[request.agentName || ''])?.model
               );
         return route?.providerID === request.providerID && route.modelID === request.modelID;
       }) ?? null

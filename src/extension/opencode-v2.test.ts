@@ -271,6 +271,8 @@ describe('v2 authentication fields', () => {
             { key: 'count', default: '0' },
             { key: 'ratio', type: 'text' },
             { key: 'server', default: 'https://example.test', placeholder: 'Server URL' },
+            { key: 'internal', hidden: true, default: 'internal-default' },
+            { key: 'inactive', hidden: true, default: 'omit' },
           ],
         },
       ],
@@ -298,7 +300,7 @@ describe('v2 authentication fields', () => {
   });
 
   it.each([undefined, { server: 'https://custom.example' }])(
-    'omits hidden prompts and sends their defaults unless supplied: %j',
+    'marks hidden prompts and sends their defaults unless supplied: %j',
     async (inputs) => {
       const integration = {
         id: 'opencode',
@@ -335,7 +337,30 @@ describe('v2 authentication fields', () => {
           {
             type: 'oauth',
             label: 'Sign in',
-            prompts: [{ key: 'account', message: 'Account', type: 'text', required: false }],
+            prompts: [
+              {
+                key: 'server',
+                message: 'server',
+                type: 'text',
+                required: false,
+                hidden: true,
+                default: 'https://console.example',
+              },
+              { key: 'account', message: 'Account', type: 'text', required: false },
+              {
+                key: 'inactive',
+                message: 'inactive',
+                type: 'select',
+                required: false,
+                hidden: true,
+                default: 'true',
+                when: [{ key: 'account', op: 'eq', value: 'other' }],
+                options: [
+                  { value: 'true', label: 'Yes' },
+                  { value: 'false', label: 'No' },
+                ],
+              },
+            ],
           },
         ],
       });
@@ -450,6 +475,86 @@ describe('v2 authentication fields', () => {
       expect.objectContaining({ signal: undefined, unscoped: true })
     );
   });
+
+  it.each(['/repo-a', '/repo-b'])(
+    'isolates overlapping OAuth code attempts when the second view uses %s',
+    async (secondDirectory) => {
+      let nextAttempt = 0;
+      const wire = vi.fn(async (method: string, path: string) => {
+        const route = new URL(path, 'http://localhost').pathname;
+        if (route === '/api/provider/fixture') return { data: {} };
+        if (route === '/api/integration/fixture')
+          return {
+            data: {
+              methods: [{ id: 'login', type: 'oauth' }],
+            },
+          };
+        if (route.endsWith('/connect/oauth'))
+          return {
+            data: {
+              attemptID: `attempt-${++nextAttempt}`,
+              mode: 'code',
+            },
+          };
+        if (method === 'POST' && route.endsWith('/complete')) return null;
+        if (method === 'GET') return { data: { status: 'complete' } };
+        throw new Error(`Unexpected request: ${method} ${path}`);
+      });
+      const adapter = new OpenCodeV2Adapter(wire);
+      const first = await adapter.request(
+        'POST',
+        '/provider/fixture/oauth/authorize',
+        { method: 0 },
+        { directory: '/repo-a' }
+      );
+      const second = await adapter.request(
+        'POST',
+        '/provider/fixture/oauth/authorize',
+        { method: 0 },
+        { directory: secondDirectory }
+      );
+      expect(first).toMatchObject({ attemptID: 'attempt-1' });
+      expect(second).toMatchObject({ attemptID: 'attempt-2' });
+      if (secondDirectory === '/repo-a') {
+        await expect(
+          adapter.request(
+            'POST',
+            '/provider/fixture/oauth/callback',
+            { code: 'ambiguous' },
+            { directory: '/repo-a' }
+          )
+        ).rejects.toThrow('attempt was not started');
+      }
+      await adapter.request(
+        'POST',
+        '/provider/fixture/oauth/callback',
+        { attemptID: 'attempt-1', code: 'first-code' },
+        { directory: '/repo-a' }
+      );
+      await adapter.request(
+        'POST',
+        '/provider/fixture/oauth/callback',
+        { attemptID: 'attempt-2', code: 'second-code' },
+        { directory: secondDirectory }
+      );
+      expect(
+        wire.mock.calls.filter(([method, path]) => method === 'POST' && path.includes('/complete'))
+      ).toEqual([
+        [
+          'POST',
+          '/api/integration/fixture/connect/oauth/attempt-1/complete?location[directory]=%2Frepo-a',
+          { code: 'first-code' },
+          expect.anything(),
+        ],
+        [
+          'POST',
+          `/api/integration/fixture/connect/oauth/attempt-2/complete?location[directory]=${encodeURIComponent(secondDirectory)}`,
+          { code: 'second-code' },
+          expect.anything(),
+        ],
+      ]);
+    }
+  );
 });
 
 describe('v2 provider disconnect', () => {
