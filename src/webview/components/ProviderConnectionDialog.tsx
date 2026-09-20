@@ -53,6 +53,8 @@ export function ProviderConnectionDialog(props: {
   let authController: AbortController | undefined;
   let initialProviderApplied = false;
 
+  onCleanup(() => authController?.abort(new Error('Provider authorization cancelled')));
+
   const providers = createMemo(() => {
     if (props.isLoadingProviders) return [];
     const byID = new Map(
@@ -173,6 +175,7 @@ export function ProviderConnectionDialog(props: {
   }
 
   async function connect() {
+    if (isSubmitting()) return;
     const id = providerID();
     const index = methodIndex();
     const method = selectedMethod();
@@ -227,12 +230,15 @@ export function ProviderConnectionDialog(props: {
         setErrorMessage(error instanceof Error ? error.message : String(error));
       }
     } finally {
-      if (authController === controller) authController = undefined;
-      setIsSubmitting(false);
+      if (authController === controller) {
+        authController = undefined;
+        setIsSubmitting(false);
+      }
     }
   }
 
   async function submitCode() {
+    if (isSubmitting()) return;
     const id = providerID();
     const index = methodIndex();
     const code = authorizationCode().trim();
@@ -255,8 +261,10 @@ export function ProviderConnectionDialog(props: {
         setErrorMessage(error instanceof Error ? error.message : String(error));
       }
     } finally {
-      if (authController === controller) authController = undefined;
-      setIsSubmitting(false);
+      if (authController === controller) {
+        authController = undefined;
+        setIsSubmitting(false);
+      }
     }
   }
 

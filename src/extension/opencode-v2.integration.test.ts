@@ -258,6 +258,41 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
     }
   );
 
+  it('loads v2 configuration above the Git root and applies .opencode overrides last', async (context) => {
+    if (transport.version !== 2) return context.skip();
+    const ancestor = join(root, 'config-precedence');
+    const repository = join(ancestor, 'repo');
+    const directory = join(repository, 'package');
+    await mkdir(directory, { recursive: true });
+    await mkdir(join(ancestor, '.opencode'));
+    expect(spawnSync('git', ['init', '--quiet'], { cwd: repository }).status).toBe(0);
+    await writeFile(
+      join(ancestor, 'opencode.json'),
+      JSON.stringify({
+        agents: {
+          'fixture-review': { model: 'fixture/ancestor', description: 'Inherited above Git root' },
+        },
+      })
+    );
+    await writeFile(
+      join(directory, 'opencode.json'),
+      JSON.stringify({
+        agents: { 'fixture-review': { model: 'fixture/direct' } },
+      })
+    );
+    await writeFile(
+      join(ancestor, '.opencode/opencode.json'),
+      JSON.stringify({
+        agents: { 'fixture-review': { model: 'fixture/hidden' } },
+      })
+    );
+    const config = asRecord(await transport.request('GET', '/config', undefined, { directory }));
+    expect(asRecord(config?.agent)?.['fixture-review']).toMatchObject({
+      model: 'fixture/hidden',
+      description: 'Inherited above Git root',
+    });
+  });
+
   it('creates, updates, and reads a session through the common API', async () => {
     const session = asRecord(
       await transport.request('POST', '/session', {

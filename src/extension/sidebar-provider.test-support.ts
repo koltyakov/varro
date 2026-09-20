@@ -75,6 +75,7 @@ const mocks = vi.hoisted(() => ({
         readFile: vi.fn(),
         stat: vi.fn(),
         writeFile: vi.fn(() => Promise.resolve()),
+        createDirectory: vi.fn(() => Promise.resolve()),
       },
       openTextDocument: vi.fn(() => Promise.resolve({})),
     },
@@ -198,6 +199,7 @@ export function createContextProvider() {
 
 export function createServer(
   overrides: Partial<{
+    apiVersion: 1 | 2;
     status: { state: string; url?: string; message?: string };
     on: ReturnType<typeof vi.fn>;
     off: ReturnType<typeof vi.fn>;
@@ -213,6 +215,7 @@ export function createServer(
   }> = {}
 ) {
   return {
+    apiVersion: 1 as const,
     status: { state: 'running', url: 'http://127.0.0.1:4096' },
     on: vi.fn(),
     off: vi.fn(),

@@ -322,7 +322,7 @@ export interface RestProxyCallbacks {
     info: Record<string, unknown>,
     parts: Record<string, unknown>[]
   ): Record<string, unknown>[];
-  server: Pick<OpenCodeServer, 'getWorkspaceCwd' | 'request'>;
+  server: Pick<OpenCodeServer, 'apiVersion' | 'getWorkspaceCwd' | 'request'>;
   contextProvider: Pick<
     ContextProvider,
     'context' | 'getOpenWorkspaceRoot' | 'readFile' | 'resolvePath'
@@ -4015,8 +4015,10 @@ export class RestProxy {
     const workspacePath = this.getOpenCodeWorkspacePath();
     const files: OpenCodeConfigFile[] = [];
     const pathApi = getOpenCodePathApi(workspacePath);
-    const candidates = resolveOpenCodeProjectConfigPaths(workspacePath, (path) =>
-      pathApi.basename(path) === '.git' ? existsSync(path) : true
+    const candidates = resolveOpenCodeProjectConfigPaths(
+      workspacePath,
+      (path) => (pathApi.basename(path) === '.git' ? existsSync(path) : true),
+      this.callbacks.server.apiVersion
     );
     for (const path of candidates) {
       const uri = vscode.Uri.file(path);
@@ -4041,10 +4043,17 @@ export class RestProxy {
       (merged, file) => mergeOpenCodeConfig(merged, file.config),
       {}
     );
-    const localFiles = files.filter((file) => pathApi.dirname(file.path) === workspacePath);
+    // V2 merges every .opencode config after every direct config. A local direct
+    // write cannot override even an ancestor's .opencode settings.
+    const targetDirectory =
+      this.callbacks.server.apiVersion === 2 &&
+      files.some((file) => pathApi.basename(pathApi.dirname(file.path)) === '.opencode')
+        ? pathApi.join(workspacePath, '.opencode')
+        : workspacePath;
+    const localFiles = files.filter((file) => pathApi.dirname(file.path) === targetDirectory);
     const target = localFiles.at(-1) || {
-      path: pathApi.join(workspacePath, 'opencode.json'),
-      uri: vscode.Uri.file(pathApi.join(workspacePath, 'opencode.json')),
+      path: pathApi.join(targetDirectory, 'opencode.json'),
+      uri: vscode.Uri.file(pathApi.join(targetDirectory, 'opencode.json')),
       raw: '{}\n',
       config: {} as Record<string, unknown>,
     };
@@ -4173,6 +4182,10 @@ export class RestProxy {
         if (!this.areConfigStatsEqual(initialStat, await this.readConfigStat(target.uri))) {
           throw new Error(`${target.path} changed while disabling the provider; please retry`);
         }
+        if (!initialStat)
+          await vscode.workspace.fs.createDirectory(
+            vscode.Uri.file(getOpenCodePathApi(target.path).dirname(target.path))
+          );
         await vscode.workspace.fs.writeFile(target.uri, new TextEncoder().encode(raw));
         // Provider policies require a reload even when model routing is unchanged.
         await this.callbacks.refreshOpenCodeConfig?.(undefined, undefined, current.workspacePath);
@@ -4230,7 +4243,11 @@ export class RestProxy {
         }
 
         const modelRef = `${request.providerID}/${request.modelID}`;
-        const agentKey = target.config.agents !== undefined ? 'agents' : 'agent';
+        const agentKey =
+          target.config.agents !== undefined ||
+          (target.config.agent === undefined && config.agents !== undefined)
+            ? 'agents'
+            : 'agent';
         const nativeTitle = request.target === 'small_model' && agentKey === 'agents';
         if (request.target === 'small_model' && !nativeTitle) {
           nextRaw = applyJsoncChange(
@@ -4271,6 +4288,10 @@ export class RestProxy {
           );
         }
         const previousRouting = this.normalizeOpenCodeModelRouting(config);
+        if (!initialStat)
+          await vscode.workspace.fs.createDirectory(
+            vscode.Uri.file(getOpenCodePathApi(target.path).dirname(target.path))
+          );
         await vscode.workspace.fs.writeFile(uri, encoded);
         let effectiveConfig = files.reduce<Record<string, unknown>>(
           (merged, file) =>
@@ -4382,6 +4403,10 @@ export class RestProxy {
           );
         }
         const encoded = new TextEncoder().encode(nextRaw.endsWith('\n') ? nextRaw : `${nextRaw}\n`);
+        if (!initialStat)
+          await vscode.workspace.fs.createDirectory(
+            vscode.Uri.file(getOpenCodePathApi(target.path).dirname(target.path))
+          );
         await vscode.workspace.fs.writeFile(target.uri, encoded);
         return { kind: 'complete' as const };
       });
@@ -4748,6 +4773,10 @@ export class RestProxy {
           );
         }
         const encoded = new TextEncoder().encode(nextRaw.endsWith('\n') ? nextRaw : `${nextRaw}\n`);
+        if (!initialStat)
+          await vscode.workspace.fs.createDirectory(
+            vscode.Uri.file(getOpenCodePathApi(target.path).dirname(target.path))
+          );
         await vscode.workspace.fs.writeFile(target.uri, encoded);
         return { kind: 'complete' as const };
       });
@@ -4831,22 +4860,34 @@ export class RestProxy {
 
 export function resolveOpenCodeProjectConfigPaths(
   directory: string,
-  pathExists: (path: string) => boolean = existsSync
+  pathExists: (path: string) => boolean = existsSync,
+  apiVersion: 1 | 2 = 1
 ) {
   const files: string[] = [];
+  const directories: string[] = [];
   const pathApi = getOpenCodePathApi(directory);
   let current = pathApi.resolve(directory);
   while (true) {
+    directories.push(current);
     for (const name of ['opencode.jsonc', 'opencode.json']) {
       const candidate = pathApi.join(current, name);
       if (pathExists(candidate)) files.push(candidate);
     }
-    if (pathExists(pathApi.join(current, '.git'))) break;
+    if (apiVersion === 1 && pathExists(pathApi.join(current, '.git'))) break;
     const parent = pathApi.dirname(current);
     if (parent === current) break;
     current = parent;
   }
-  return files.toReversed();
+  const ordered = files.toReversed();
+  if (apiVersion === 2) {
+    for (const ancestor of directories.toReversed()) {
+      for (const name of ['opencode.json', 'opencode.jsonc']) {
+        const candidate = pathApi.join(ancestor, '.opencode', name);
+        if (pathExists(candidate)) ordered.push(candidate);
+      }
+    }
+  }
+  return ordered;
 }
 
 function getOpenCodePathApi(path: string) {

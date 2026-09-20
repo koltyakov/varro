@@ -78,6 +78,7 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
   const serverMemoryPermissions = new Map<string, OpenCodeServerMemoryPermission>();
   return {
     server: {
+      apiVersion: 1,
       getWorkspaceCwd: vi.fn(() => '/repo'),
       request: vi.fn(() => Promise.resolve(undefined)),
     },
@@ -349,6 +350,27 @@ describe('scopeOpenCodeRequest', () => {
 });
 
 describe('resolveOpenCodeProjectConfigPaths', () => {
+  it.each(['/repo/packages/app', 'C:\\repo\\packages\\app'])(
+    'loads v2 ancestor configs through the filesystem root, then .opencode configs: %s',
+    (directory) => {
+      const windows = directory.startsWith('C:');
+      const path = (value: string) => (windows ? `C:${value.replaceAll('/', '\\')}` : value);
+      const expected = [
+        '/opencode.json',
+        '/repo/opencode.json',
+        '/repo/packages/app/opencode.jsonc',
+        '/.opencode/opencode.json',
+        '/repo/.opencode/opencode.json',
+        '/repo/.opencode/opencode.jsonc',
+        '/repo/packages/app/.opencode/opencode.json',
+      ].map(path);
+      const existing = new Set([...expected, path('/repo/.git')]);
+      expect(resolveOpenCodeProjectConfigPaths(directory, (file) => existing.has(file), 2)).toEqual(
+        expected
+      );
+    }
+  );
+
   it('loads ancestors first, lets JSONC win, and stops at the worktree', () => {
     const existing = new Set([
       '/repo/.git',
@@ -6701,6 +6723,82 @@ describe('RestProxy handleRequest', () => {
     });
     expect(JSON.parse(raw).permission).toBeUndefined();
   });
+
+  it.each([false, true])(
+    'writes v2 model routing after inherited .opencode configs (local=%s)',
+    async (local) => {
+      const files = new Map([
+        ['/opencode.json', JSON.stringify({ agents: { review: { model: 'openai/ancestor' } } })],
+        ['/repo/opencode.json', JSON.stringify({ agents: { review: { model: 'openai/direct' } } })],
+        [
+          '/.opencode/opencode.json',
+          JSON.stringify({ agents: { review: { model: 'openai/hidden' } } }),
+        ],
+      ]);
+      const target = '/repo/.opencode/opencode.json';
+      if (local)
+        files.set(
+          target,
+          JSON.stringify({
+            agents: { review: { model: 'openai/local', system: 'Keep this prompt' } },
+          })
+        );
+      const original = new Map(files);
+      mocks.vscode.workspace.fs.readFile.mockImplementation(async (uri: { fsPath: string }) => {
+        const raw = files.get(uri.fsPath);
+        if (raw === undefined) throw { code: 'FileNotFound' };
+        return new TextEncoder().encode(raw);
+      });
+      mocks.vscode.workspace.fs.stat.mockImplementation(async (uri: { fsPath: string }) => {
+        const raw = files.get(uri.fsPath);
+        if (raw === undefined) throw { code: 'FileNotFound' };
+        return { mtime: 1, size: raw.length, type: 0, ctime: 1 };
+      });
+      mocks.vscode.workspace.fs.writeFile.mockImplementation(
+        async (uri: { fsPath: string }, encoded: Uint8Array) => {
+          files.set(uri.fsPath, new TextDecoder().decode(encoded));
+        }
+      );
+      const { proxy, callbacks } = createProxy({
+        server: { ...createCallbacks().server, apiVersion: 2 },
+      });
+      await proxy.handleRequest(makePayload(403, 'GET', '/varro/opencode-config'));
+      expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(
+        1,
+        expect.objectContaining({
+          id: 403,
+          data: expect.objectContaining({
+            agentModels: { review: { providerID: 'openai', modelID: local ? 'local' : 'hidden' } },
+          }),
+        })
+      );
+      await proxy.handleRequest(
+        makePayload(404, 'POST', '/varro/opencode-config/model-routing', {
+          target: 'agent',
+          agentName: 'review',
+          providerID: 'openai',
+          modelID: 'new',
+        })
+      );
+      expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(
+        1,
+        expect.objectContaining({
+          id: 404,
+          data: expect.objectContaining({
+            agentModels: { review: { providerID: 'openai', modelID: 'new' } },
+          }),
+        })
+      );
+      const written = JSON.parse(files.get(target)!);
+      expect(written.agents.review.model).toBe('openai/new');
+      if (local) expect(written.agents.review.system).toBe('Keep this prompt');
+      for (const [path, raw] of original) if (path !== target) expect(files.get(path)).toBe(raw);
+      if (!local)
+        expect(mocks.vscode.workspace.fs.createDirectory).toHaveBeenCalledWith(
+          expect.objectContaining({ fsPath: '/repo/.opencode' })
+        );
+    }
+  );
 
   it('updates model routing in the existing native v2 agent map', async () => {
     let raw = JSON.stringify({

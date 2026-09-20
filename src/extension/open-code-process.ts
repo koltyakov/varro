@@ -156,9 +156,12 @@ function containsAskAgent(raw: string): boolean {
   const errors: ParseError[] = [];
   const value: unknown = parse(raw, errors, { allowTrailingComma: true });
   if (errors.length > 0 || !value || typeof value !== 'object' || Array.isArray(value)) return true;
-  const agent = (value as Record<string, unknown>).agent;
-  if (!agent || typeof agent !== 'object' || Array.isArray(agent)) return false;
-  return Object.keys(agent).some((name) => name.toLowerCase() === 'ask');
+  return ['agent', 'agents'].some((key) => {
+    const agents = (value as Record<string, unknown>)[key];
+    return agents && typeof agents === 'object' && !Array.isArray(agents)
+      ? Object.keys(agents).some((name) => name.toLowerCase() === 'ask')
+      : false;
+  });
 }
 
 export function normalizeCompactionSettings(

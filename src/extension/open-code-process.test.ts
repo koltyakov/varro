@@ -2684,25 +2684,28 @@ describe('OpenCodeProcess config ownership', () => {
     await rm(configHome, { recursive: true, force: true });
   });
 
-  it('prefers a case-conflicting Ask agent from inherited OpenCode config', async () => {
-    process.env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
-      agent: { Ask: { description: 'User-defined agent', mode: 'primary' } },
-    });
-    const manager = new OpenCodeProcess(
-      4096,
-      true,
-      'opencode',
-      false,
-      undefined,
-      undefined,
-      undefined,
-      true
-    );
+  it.each(['agent', 'agents'])(
+    'prefers a case-conflicting Ask agent from inherited OpenCode %s config',
+    async (key) => {
+      process.env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
+        [key]: { Ask: { description: 'User-defined agent', mode: 'primary' } },
+      });
+      const manager = new OpenCodeProcess(
+        4096,
+        true,
+        'opencode',
+        false,
+        undefined,
+        undefined,
+        undefined,
+        true
+      );
 
-    expect(JSON.parse(await manager.serializeInjectedConfig())).toEqual({
-      experimental: { continue_loop_on_deny: true },
-    });
-  });
+      expect(JSON.parse(await manager.serializeInjectedConfig())).toEqual({
+        experimental: { continue_loop_on_deny: true },
+      });
+    }
+  );
 
   it('prefers an Ask agent from an ancestor project OpenCode config', async () => {
     const project = await mkdtemp(join(tmpdir(), 'varro-project-config-'));

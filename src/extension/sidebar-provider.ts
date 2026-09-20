@@ -611,14 +611,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       webviewContext.surface === 'sidebar'
     );
 
+    const server = this.server;
     const endpointServer = {
+      get apiVersion() {
+        return server.apiVersion;
+      },
       getWorkspaceCwd: () =>
         endpointRef.endpoint
           ? (endpointRef.endpoint.workspacePath ?? undefined)
           : (initialWorkspacePath ?? undefined),
       // oxlint-disable-next-line anti-slop/no-unknown-parameters -- RestProxy validates each route before forwarding its opaque request body.
       request: (method: string, path: string, body?: unknown, options?: { directory?: string }) =>
-        this.server.request(method, path, body, {
+        server.request(method, path, body, {
           ...options,
           directory:
             options?.directory ??

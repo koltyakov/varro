@@ -486,6 +486,68 @@ describe('ProviderConnectionDialog API key flow', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps a replacement connection busy when the cancelled request settles', async () => {
+    const first = deferred<boolean>();
+    const second = deferred<boolean>();
+    clientMocks.connectApiProvider
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const onClose = renderDialog();
+    type(await startApiFlow(), 'first-key');
+    primaryButton().click();
+    findButton('Back to methods')!.click();
+    chooseMethod('API key');
+    const keyInput = dialog()!.querySelector<HTMLInputElement>('input[type="password"]')!;
+    type(keyInput, 'second-key');
+    primaryButton().click();
+
+    first.resolve(true);
+    await flush();
+    expect(primaryButton().disabled).toBe(true);
+    expect(keyInput.disabled).toBe(true);
+    expect(primaryButton().textContent).toBe('Connecting...');
+    expect(onClose).not.toHaveBeenCalled();
+
+    second.resolve(true);
+    await flush();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores duplicate form submissions while saving credentials', async () => {
+    const completion = deferred<boolean>();
+    clientMocks.connectApiProvider.mockReturnValue(completion.promise);
+    renderDialog();
+    type(await startApiFlow(), 'test-key');
+    primaryButton().click();
+    dialog()!
+      .querySelector('form')!
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    expect(clientMocks.connectApiProvider).toHaveBeenCalledTimes(1);
+    completion.resolve(true);
+    await flush();
+  });
+
+  it('cancels credential saving on unmount and ignores its late result', async () => {
+    const completion = deferred<boolean>();
+    let signal: AbortSignal | undefined;
+    clientMocks.connectApiProvider.mockImplementation(
+      (_body: TestRuntimeValue, options: { signal: AbortSignal }) => {
+        signal = options.signal;
+        return completion.promise;
+      }
+    );
+    const onClose = renderDialog();
+    type(await startApiFlow(), 'test-key');
+    primaryButton().click();
+    cleanup!();
+    cleanup = undefined;
+    expect(signal?.aborted).toBe(true);
+    completion.resolve(true);
+    await flush();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(postMessageMock).not.toHaveBeenCalledWith({ type: 'providers/auth-changed' });
+  });
+
   it('disables inputs and shows Connecting while the request is pending', async () => {
     const completion = deferred<boolean>();
     clientMocks.connectApiProvider.mockImplementation(() => completion.promise);
@@ -738,7 +800,7 @@ describe('ProviderConnectionDialog OAuth flow', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('aborts a pending authorization exchange when the dialog closes', async () => {
+  it.each(['close', 'unmount'])('aborts a pending authorization exchange on %s', async (action) => {
     let capturedSignal: AbortSignal | undefined;
     clientMocks.completeProviderAuth.mockImplementation(
       (_body: TestRuntimeValue, options?: { signal?: AbortSignal }) => {
@@ -755,10 +817,15 @@ describe('ProviderConnectionDialog OAuth flow', () => {
 
     expect(capturedSignal?.aborted).toBe(false);
 
-    dialog()!.querySelector<HTMLButtonElement>('[aria-label="Close"]')!.click();
+    if (action === 'close')
+      dialog()!.querySelector<HTMLButtonElement>('[aria-label="Close"]')!.click();
+    else {
+      cleanup!();
+      cleanup = undefined;
+    }
 
     expect(capturedSignal?.aborted).toBe(true);
-    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(action === 'close' ? 1 : 0);
   });
 
   it('completes automatic authorization without opening an empty URL', async () => {

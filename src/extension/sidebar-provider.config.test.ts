@@ -197,6 +197,32 @@ describe('SidebarProvider local config routing', () => {
     });
   });
 
+  it('uses the detected API version when reading .opencode model routing', async () => {
+    vscodeMock.workspace.fs.readFile.mockImplementation(async (uri: { fsPath: string }) => {
+      if (uri.fsPath !== '/repo/.opencode/opencode.json') throw { code: 'FileNotFound' };
+      return new TextEncoder().encode(
+        JSON.stringify({ agents: { review: { model: 'openai/custom' } } })
+      );
+    });
+    const server = createServer();
+    const { provider } = await createSidebarProviderInstance({ server });
+    const { posted } = attachTestView(provider);
+    server.apiVersion = 2;
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: { id: 101, method: 'GET', path: '/varro/opencode-config' },
+    });
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: {
+        id: 101,
+        data: expect.objectContaining({
+          agentModels: { review: { providerID: 'openai', modelID: 'custom' } },
+        }),
+      },
+    });
+  });
+
   it('handles local config routes without starting the server', async () => {
     vscodeMock.workspace.fs.readFile.mockImplementation((uri: { fsPath: string }) =>
       uri.fsPath === '/repo/opencode.json'
