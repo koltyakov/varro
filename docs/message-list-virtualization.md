@@ -73,6 +73,9 @@ the shared invariants below remain true.
   pinned anchor.
 - Visual adjacency uses the previous nonzero projected row, not the immediately preceding array entry.
   Render-empty rows must not break assistant-response spacing or cross-message activity continuation.
+- Response adjacency padding must also exclude physically empty rows. A pending activity can render
+  no DOM before its semantic empty flag catches up; overriding the base `:empty` reset creates a
+  transient 6 px gap above Thinking. `thinking-activity.spec.ts` checks this fallback and rehydration.
 - Outer virtualization operates on message rows only. A mounted assistant row renders its complete
   part sequence; do not add inner paging or truncation that changes row semantics.
 - Wheel and scroll hot paths must use prefix lookup and mounted-row maps rather than synchronously

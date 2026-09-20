@@ -1300,26 +1300,32 @@ body.vscode-light
   padding-top: 10px;
 }
 
+/* Pending activity can render no DOM before its semantic empty flag catches up.
+   Keep the base :empty padding reset stronger than response adjacency spacing. */
 .interactive-item-container.interactive-response.interactive-response-follows-response:not(
-    .interactive-item-render-empty
+    .interactive-item-render-empty,
+    :empty
   ) {
   padding-top: 6px;
 }
 
 .interactive-item-container.interactive-response.interactive-response-follows-response.interactive-response-continues-activity-group:not(
-    .interactive-item-render-empty
+    .interactive-item-render-empty,
+    :empty
   ) {
   padding-top: 6px;
 }
 
 .interactive-item-container.interactive-item-follows-bordered-block:not(
-    .interactive-item-render-empty
+    .interactive-item-render-empty,
+    :empty
   ) {
   padding-top: 3px;
 }
 
 .interactive-item-container.interactive-response.interactive-response-follows-response.interactive-item-follows-bordered-block:not(
-    .interactive-item-render-empty
+    .interactive-item-render-empty,
+    :empty
   ) {
   padding-top: 3px;
 }
