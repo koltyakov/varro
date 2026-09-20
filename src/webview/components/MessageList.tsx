@@ -6777,8 +6777,11 @@ export function MessageList() {
         newTurnAlignmentRafId = 0;
         newTurnReserveSessionId = null;
         if (!activityReserveOwnsCompletion) {
-          appendBottomReserveTarget = 0;
-          if (untrack(appendBottomReserve) > 0.5) setAppendBottomReserve(0);
+          // A short reply may still depend on this space. Removing it clamps the
+          // viewport backward before the completion follow loop can restore it.
+          appendBottomReserveTarget = containerRef?.scrollTop ?? 0;
+          if (appendBottomReserveTarget > 0.5) reconcileAppendBottomReserve();
+          else if (untrack(appendBottomReserve) > 0.5) setAppendBottomReserve(0);
         }
       }
       queueMicrotask(() => {

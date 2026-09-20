@@ -99,6 +99,10 @@ the shared invariants below remain true.
 - A row measurement correction above the visible anchor must preserve that anchor's viewport
   position.
 - Content below the anchor may change `scrollHeight`, but it must not move the anchor.
+- Completing a short new turn must retain any bottom reserve needed by the current viewport.
+  Clearing the new-turn reserve outright can shrink the scroll range and clamp already-painted
+  content backward before the completion follow loop runs. Transfer it to the current scroll target;
+  ordinary reserve consumption and host resizing still release it.
 - The trailing Thinking, empty-reserve, and Worked states share one bottom slot outside virtual row
   prefixes. Switching states must not briefly mount both the loading label and dialog summary.
 - Asynchronous content must reserve its final layout space where practical. Images are the primary
