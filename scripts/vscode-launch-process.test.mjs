@@ -6,6 +6,7 @@ import test from 'node:test';
 
 import {
   createCdpRequestClient,
+  executeVscodeCommand,
   getVscodeSidebarGeometry,
   hasRecreatedVarroTarget,
   reserveLoopbackPort,
@@ -40,6 +41,49 @@ class FakeSocket {
     return this.listeners.get(type)?.size ?? 0;
   }
 }
+
+test('never types a command into an editor when the palette did not receive focus', async (t) => {
+  const sent = [];
+  t.mock.method(globalThis, 'fetch', async () => ({
+    json: async () => [
+      {
+        type: 'page',
+        title: '[Extension Development Host]',
+        webSocketDebuggerUrl: 'ws://127.0.0.1/test',
+      },
+    ],
+  }));
+  const originalWebSocket = globalThis.WebSocket;
+  t.after(() => {
+    globalThis.WebSocket = originalWebSocket;
+  });
+  globalThis.WebSocket = class extends FakeSocket {
+    constructor() {
+      super();
+      queueMicrotask(() => this.emit('open'));
+    }
+    send(value) {
+      const request = JSON.parse(value);
+      sent.push(request);
+      queueMicrotask(() =>
+        this.emit('message', {
+          data: JSON.stringify({
+            id: request.id,
+            result: request.method === 'Runtime.evaluate' ? { result: { value: false } } : {},
+          }),
+        })
+      );
+    }
+    close() {}
+  };
+
+  await assert.rejects(
+    executeVscodeCommand(12345, 'View: Close Editor'),
+    /command palette did not receive focus/
+  );
+  assert.ok(!sent.some((request) => request.method === 'Input.insertText'));
+  assert.ok(!sent.some((request) => request.params.key === 'Enter'));
+});
 
 function fakeElement(rect, { src = '', title = '' } = {}) {
   return {

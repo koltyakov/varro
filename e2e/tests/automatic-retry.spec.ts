@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { MessageEntry } from '../../src/webview/types';
 import type { ServerEvent } from '../../src/shared/protocol';
+import { waitForAnimationFrames } from './helpers';
 
 type RetryHarness = Window & {
   __varroE2E?: {
@@ -8,6 +9,109 @@ type RetryHarness = Window & {
     replayServerEvent(event: ServerEvent): void;
   };
 };
+
+type RetryGapSamples = { running: boolean; gaps: number[]; showedWorked: boolean };
+
+test('keeps Thinking adjacent to the retry notice while the next attempt starts', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 441, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
+  await expect(
+    page.locator('[data-msg-id="message-rapid-assistant-streaming"] .rendered-markdown')
+  ).toContainText('Starting...');
+  const collector = await page.evaluateHandle(() => {
+    const state: RetryGapSamples = {
+      running: true,
+      gaps: [],
+      showedWorked: false,
+    };
+    const sample = () => {
+      const notice = document.querySelector('.assistant-message-flow-item-error-notice');
+      const thinking = document.querySelector('.interactive-loading-row .loading-verb');
+      if (notice) {
+        state.showedWorked ||= !!document.querySelector('.trailing-assistant-summary-row');
+        if (thinking)
+          state.gaps.push(
+            thinking.getBoundingClientRect().top - notice.getBoundingClientRect().bottom
+          );
+      }
+      if (state.running) requestAnimationFrame(sample);
+    };
+    sample();
+    return state;
+  });
+  await page.evaluate(() => {
+    // SAFETY: The local E2E harness installs these fixture-only methods.
+    const harness = (window as RetryHarness).__varroE2E!;
+    const sessionID = 'session-rapid-streaming-jitter';
+    const info = harness.getSessionMessages(sessionID).at(-1)!.info;
+    if (info.role !== 'assistant') throw new Error('Expected an assistant fixture');
+    harness.replayServerEvent({
+      type: 'message.updated',
+      properties: {
+        info: {
+          ...info,
+          time: { ...info.time, completed: Date.now() },
+          finish: 'error',
+          error: {
+            name: 'provider.transport',
+            data: { message: 'WebSocket closed with code 1006' },
+          },
+          retry: { attempt: 2, at: Date.now() + 2000 },
+        },
+      },
+    });
+    harness.replayServerEvent({
+      type: 'session.status',
+      properties: {
+        sessionID,
+        status: { type: 'retry', attempt: 2, next: Date.now() + 2000, message: 'Connection lost' },
+      },
+    });
+  });
+  const notice = page.locator('.assistant-message-flow-item-error-notice');
+  await expect(notice).toContainText('Retrying automatically');
+  await expect(page.locator('.trailing-assistant-summary-row')).toHaveCount(0);
+  await expect(page.locator('.interactive-loading-row .loading-indicator')).toBeVisible();
+  await page.evaluate(() => {
+    // SAFETY: The local E2E harness installs these fixture-only methods.
+    const harness = (window as RetryHarness).__varroE2E!;
+    const sessionID = 'session-rapid-streaming-jitter';
+    const info = harness.getSessionMessages(sessionID).at(-1)!.info;
+    if (info.role !== 'assistant') throw new Error('Expected an assistant fixture');
+    harness.replayServerEvent({
+      type: 'message.updated',
+      properties: {
+        info: {
+          ...info,
+          id: 'retry-next-attempt',
+          time: { created: Date.now() },
+          finish: undefined,
+          error: undefined,
+          retry: undefined,
+        },
+      },
+    });
+    harness.replayServerEvent({
+      type: 'session.status',
+      properties: { sessionID, status: { type: 'busy' } },
+    });
+  });
+  await waitForAnimationFrames(page, 30);
+  const samples = await collector.evaluate((state) => {
+    state.running = false;
+    return { gaps: state.gaps, showedWorked: state.showedWorked };
+  });
+  expect(samples.showedWorked).toBe(false);
+  expect(samples.gaps.length).toBeGreaterThan(10);
+  expect(
+    Math.max(...samples.gaps) - Math.min(...samples.gaps),
+    JSON.stringify(samples)
+  ).toBeLessThan(1);
+  expect(samples.gaps.at(-1)).toBeCloseTo(12, 0);
+  await expect(page.locator('.interactive-loading-row .loading-indicator')).toBeVisible();
+});
 
 for (const outcome of ['recovered', 'failed'] as const) {
   test(`automatic retry is shown as ${outcome} in a virtualized transcript`, async ({

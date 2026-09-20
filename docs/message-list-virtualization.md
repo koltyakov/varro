@@ -289,6 +289,10 @@ Direct input acquires ownership only when it can affect the transcript:
 - The trailing Thinking, loading, empty-reserve, and Worked states share one post-message slot. The
   slot may remain invisibly reserved while visible streaming text or tools replace its label. Debounce
   label reappearance and reserve release so short transitions do not collapse and regrow the bottom.
+- A failed assistant attempt with retry metadata is not a final response while the turn is working,
+  even if it has completed partial text and `finish: error`. Keep the loading slot through retry and
+  the next empty attempt; do not briefly insert Worked. `automatic-retry.spec.ts` checks that handoff
+  and the gap from the retry notice to Thinking every frame.
 - Starting the next turn moves the previous Worked summary from the shared trailing slot into its
   assistant row. Its painted top must remain fixed across that ownership handoff; row-local spacing
   must match the spacing previously supplied by the assistant row boundary.

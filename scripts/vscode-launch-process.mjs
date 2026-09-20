@@ -110,8 +110,7 @@ export function vscodeLaunchCommandMatches(command, launch) {
     `--user-data-dir=${launch.userDataDir}`,
     `--extensions-dir=${launch.extensionsDir}`,
   ];
-  const hasArgument = (argument) =>
-    command.includes(`${argument} `) || command.endsWith(argument);
+  const hasArgument = (argument) => command.includes(`${argument} `) || command.endsWith(argument);
   return (
     path.dirname(launch.userDataDir) === launch.profileRoot &&
     path.dirname(launch.extensionsDir) === launch.profileRoot &&
@@ -199,14 +198,11 @@ export function hasRecreatedVarroTarget(originalTargetId, currentTargetId, sawUn
 }
 
 export function getVscodeSidebarGeometry(documentValue, viewportWidth) {
-  const sidebarRects = [
-    ...documentValue.querySelectorAll('.part.auxiliarybar, .part.sidebar'),
-  ].map((element) => element.getBoundingClientRect());
+  const sidebarRects = [...documentValue.querySelectorAll('.part.auxiliarybar, .part.sidebar')].map(
+    (element) => element.getBoundingClientRect()
+  );
   const candidates = [...documentValue.querySelectorAll('iframe.webview')].filter((iframe) => {
-    if (
-      !iframe.src.includes('extensionId=koltyakov.varro') &&
-      !iframe.title.includes('Varro')
-    ) {
+    if (!iframe.src.includes('extensionId=koltyakov.varro') && !iframe.title.includes('Varro')) {
       return false;
     }
     const frame = iframe.getBoundingClientRect();
@@ -255,9 +251,7 @@ export async function executeVscodeCommand(remoteDebuggingPort, commandLabel) {
     (target) => target.type === 'page' && target.title.includes('[Extension Development Host]')
   );
   if (workbenches.length !== 1 || !workbenches[0]?.webSocketDebuggerUrl) {
-    throw new Error(
-      `Expected one VS Code workbench target, found ${String(workbenches.length)}`
-    );
+    throw new Error(`Expected one VS Code workbench target, found ${String(workbenches.length)}`);
   }
   const socket = new WebSocket(workbenches[0].webSocketDebuggerUrl);
   await new Promise((resolve, reject) => {
@@ -266,22 +260,40 @@ export async function executeVscodeCommand(remoteDebuggingPort, commandLabel) {
   });
   const requests = createCdpRequestClient(socket);
   try {
+    const waitForPalette = async (expression, description) => {
+      const deadline = Date.now() + 3_000;
+      while (Date.now() < deadline) {
+        const response = await requests.call('Runtime.evaluate', {
+          expression,
+          returnByValue: true,
+        });
+        if (response.result?.value === true) return;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      throw new Error(`VS Code command palette ${description}: ${commandLabel}`);
+    };
     for (const type of ['keyDown', 'keyUp']) {
       await requests.call('Input.dispatchKeyEvent', {
         type,
-        key: process.platform === 'win32' ? 'F1' : 'P',
-        code: process.platform === 'win32' ? 'F1' : 'KeyP',
-        windowsVirtualKeyCode: process.platform === 'win32' ? 112 : 80,
-        modifiers: process.platform === 'win32' ? 0 : process.platform === 'darwin' ? 12 : 10,
+        key: 'F1',
+        code: 'F1',
+        windowsVirtualKeyCode: 112,
+        modifiers: 0,
       });
     }
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    const focusedPalette = `document.activeElement?.matches('.quick-input-widget input') && document.activeElement.getBoundingClientRect().height > 0`;
+    await waitForPalette(focusedPalette, 'did not receive focus');
     await requests.call('Input.insertText', { text: commandLabel });
-    // Filtering the command palette is asynchronous on a cold workbench.
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await waitForPalette(
+      `(${focusedPalette}) && document.querySelector('.quick-input-list .monaco-list-row.focused .label-name')?.textContent?.trim() === ${JSON.stringify(commandLabel)}`,
+      'did not select the requested command'
+    );
     for (const type of ['keyDown', 'keyUp']) {
       await requests.call('Input.dispatchKeyEvent', {
-        type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13,
+        type,
+        key: 'Enter',
+        code: 'Enter',
+        windowsVirtualKeyCode: 13,
       });
     }
   } finally {
@@ -335,7 +347,8 @@ export async function resizeVscodeSidebar(remoteDebuggingPort, targetWidth, time
       const workbench = targets.find(
         (target) => target.type === 'page' && target.title.includes('[Extension Development Host]')
       );
-      if (!workbench?.webSocketDebuggerUrl) throw new Error('VS Code workbench target is not ready');
+      if (!workbench?.webSocketDebuggerUrl)
+        throw new Error('VS Code workbench target is not ready');
 
       const socket = new WebSocket(workbench.webSocketDebuggerUrl);
       await new Promise((resolve, reject) => {
@@ -423,7 +436,9 @@ export async function reloadVscodeWindow(
       .map((target) => target.id)
   );
   if (expectedVarroTargetId && !originalVarroTargetIds.has(expectedVarroTargetId)) {
-    throw new Error(`Requested Varro target ${expectedVarroTargetId} is not attached to the workbench`);
+    throw new Error(
+      `Requested Varro target ${expectedVarroTargetId} is not attached to the workbench`
+    );
   }
 
   await executeVscodeCommand(remoteDebuggingPort, 'Developer: Reload Window');
@@ -467,11 +482,17 @@ async function readProcessBirthIdentity(pid) {
 async function readWindowsProcess(pid) {
   if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('Invalid VS Code process ID');
   // PowerShell startup plus the first CIM query can exceed 10s on cold Windows CI runners.
-  const { stdout } = await execFileAsync('powershell.exe', [
-    '-NoProfile', '-NonInteractive', '-Command',
-    `$ErrorActionPreference = 'Stop'; $p = Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}'; ` +
-      "if (!$p) { throw 'VS Code process is unavailable' }; " +
-      '@{ command = $p.CommandLine; birthIdentity = $p.CreationDate.ToUniversalTime().Ticks.ToString() } | ConvertTo-Json -Compress',
-  ], { timeout: 60_000 });
+  const { stdout } = await execFileAsync(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      `$ErrorActionPreference = 'Stop'; $p = Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}'; ` +
+        "if (!$p) { throw 'VS Code process is unavailable' }; " +
+        '@{ command = $p.CommandLine; birthIdentity = $p.CreationDate.ToUniversalTime().Ticks.ToString() } | ConvertTo-Json -Compress',
+    ],
+    { timeout: 60_000 }
+  );
   return JSON.parse(stdout);
 }

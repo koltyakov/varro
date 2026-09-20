@@ -65,6 +65,52 @@ describe('message entrance detection', () => {
 });
 
 describe('automatic retry notices', () => {
+  it.each(['busy', 'retry'] as const)(
+    'keeps partial failed attempts out of Worked while %s',
+    (status) => {
+      const frames = installQueuedAnimationFrameMocks();
+      setState('activeSessionId', 'session-1');
+      setState(
+        'sessionStatus',
+        'session-1',
+        status === 'busy'
+          ? { type: 'busy' }
+          : { type: 'retry', attempt: 2, next: 3000, message: 'Connection lost' }
+      );
+      replaceMessages([
+        { info: userMessage('user-1'), parts: [textPart('prompt', 'Continue working')] },
+        {
+          info: {
+            ...assistantMessage('interrupted', {
+              parentID: 'user-1',
+              time: { created: 1000, completed: 2000 },
+            }),
+            finish: 'error',
+            error: { name: 'provider.transport', data: { message: 'Connection lost' } },
+            retry: { attempt: 2, at: 3000 },
+          },
+          parts: [
+            {
+              ...textPart('partial', 'I will check the implementation.'),
+              messageID: 'interrupted',
+            },
+          ],
+        },
+      ]);
+      cleanup = render(() => MessageList(), container!);
+      expect(
+        container!.querySelector('.assistant-message-flow-item-error-notice')?.textContent
+      ).toContain('Retrying automatically');
+      expect(container!.querySelector('.trailing-assistant-summary-row')).toBeNull();
+      expect(container!.querySelector('.loading-indicator')).not.toBeNull();
+
+      setState('sessionStatus', 'session-1', { type: 'idle' });
+      expect(container!.querySelector('.trailing-assistant-summary-row')).not.toBeNull();
+      expect(container!.querySelector('.loading-indicator')).toBeNull();
+      frames.restore();
+    }
+  );
+
   it('updates from retrying to recovered live and preserves diagnostics after reopening', async () => {
     const frames = installQueuedAnimationFrameMocks();
     setState('activeSessionId', 'session-1');

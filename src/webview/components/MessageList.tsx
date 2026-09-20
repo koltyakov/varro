@@ -1808,6 +1808,8 @@ export function MessageList() {
       if (entry.info.role === 'user') return null;
       if (entry.info.mode === 'subagent') continue;
       if (isContinuationAssistantFinish(entry.info.finish)) return null;
+      // A completed failed attempt does not finish the turn while its retry is active.
+      if (entry.info.error && entry.info.retry && activeSessionWorking()) return null;
 
       const finalTextPartId = getFinalAssistantTextPartId(entry.parts, true);
       if (!finalTextPartId) return null;
