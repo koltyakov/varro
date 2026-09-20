@@ -34,6 +34,8 @@ For advanced manual server management, disable `varro.server.autoStart` and star
 opencode serve --port 4096
 ```
 
+For a container-hosted server, see [Connect Varro to OpenCode in Docker](docker-server.md) for port publishing, workspace mounts, authentication, and troubleshooting.
+
 If the CLI is installed somewhere that is not on `PATH`, set `varro.server.command` to the executable path.
 
 When `varro.server.command` is empty, Varro searches `PATH` and common install locations for `opencode2` first, then falls back to `opencode`. Current v1 and v2 packages both install `opencode`. Check the selected executable with `--version`; its name does not determine its API version.
