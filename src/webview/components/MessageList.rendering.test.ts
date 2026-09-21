@@ -319,7 +319,6 @@ describe('MessageList entrance animation', () => {
   });
 
   it('does not height-animate appends once row measurement is active', async () => {
-    // oxlint-disable-next-line unicorn/consistent-function-scoping -- Shared fixtures are imported from the test-utils module.
     const buildMessages = (count: number) =>
       Array.from({ length: count }, (_, index) => ({
         info: userMessage(`user-${index}`),
@@ -376,7 +375,6 @@ describe('MessageList entrance animation', () => {
   it('does not animate a message that was appended while scrolled up when it mounts later', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
 
-    // oxlint-disable-next-line unicorn/consistent-function-scoping -- Shared fixtures are imported from the test-utils module.
     const buildMessages = (count: number) =>
       Array.from({ length: count }, (_, index) => ({
         info: userMessage(`user-${index}`),
@@ -1877,7 +1875,6 @@ describe('MessageList compact activity', () => {
   });
 
   it('keeps one Explored group while a command between completed tools is retained', async () => {
-    // oxlint-disable-next-line unicorn/consistent-function-scoping -- Shared fixtures are imported from the test-utils module.
     const completedCommand = (id: string, command: string, start: number) => {
       const part = toolPart(id, 'assistant-1', `call-${id}`);
       part.state = {

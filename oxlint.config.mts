@@ -72,6 +72,8 @@ export default defineConfig({
     'typescript/no-namespace': 'error',
     'typescript/consistent-type-imports': 'warn',
     'import/no-duplicates': 'error',
+    // Keep lifecycle handlers and test helpers beside their registration and cleanup.
+    'unicorn/consistent-function-scoping': 'off',
     'react/immutability': 'off',
     'react/purity': 'off',
     'react/refs': 'off',

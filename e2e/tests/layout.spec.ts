@@ -208,7 +208,6 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
     const trayGap = getComputedStyle(activityTray).rowGap;
     const samples: number[] = [];
     const summaryTops = [summaryTop];
-    // oxlint-disable-next-line unicorn/consistent-function-scoping
     const getLoadingTop = () => {
       const loading = document.querySelector<HTMLElement>('.interactive-loading-row');
       const container = loading?.closest<HTMLElement>('.interactive-list');
@@ -582,7 +581,6 @@ test('keeps streamed response text fixed when it follows Explored', async ({ pag
     if (!element.closest('.interactive-item-container')) {
       throw new Error('Streamed response row is missing');
     }
-    // oxlint-disable-next-line unicorn/consistent-function-scoping
     const measure = () => {
       const currentRow = document.querySelector<HTMLElement>(
         '[data-msg-id="message-streamed-after-explored"]'
@@ -915,7 +913,6 @@ test('keeps inline edits separated from a following Explored summary', async ({ 
   await expect(row.locator('.assistant-active-activity-tray')).toBeVisible();
   await page.evaluate(() => {
     const messageID = 'message-tool-cards-assistant';
-    // oxlint-disable-next-line unicorn/consistent-function-scoping -- The helper runs in the browser context.
     const postEvent = (type: string, properties: Record<string, unknown>) => {
       window.postMessage({ type: 'server/event', payload: { type, properties } }, '*');
     };
@@ -1184,7 +1181,6 @@ test('tightens only bordered activity boundaries', async ({ page }) => {
       ?.getSessionMessages?.('session-tool-cards')
       .find((message) => message.info.role === 'assistant');
     if (!original) throw new Error('Tool-card assistant fixture is missing');
-    // oxlint-disable-next-line unicorn/consistent-function-scoping
     const postEvent = (type: string, properties: Record<string, unknown>) => {
       window.postMessage({ type: 'server/event', payload: { type, properties } }, '*');
     };
@@ -1634,7 +1630,6 @@ test('matches the visual incoming Thinking gap to markdown', async ({ page }) =>
       ?.getSessionMessages?.('session-tool-cards')
       .find((message) => message.info.role === 'assistant');
     if (!assistant) throw new Error('Tool-card assistant fixture is missing');
-    // oxlint-disable-next-line unicorn/consistent-function-scoping
     const postEvent = (type: string, properties: Record<string, unknown>) => {
       window.postMessage({ type: 'server/event', payload: { type, properties } }, '*');
     };
@@ -2620,7 +2615,6 @@ test('virtualized sticky preview remains visible through active tool layout chan
           time: { start: Date.now() },
         },
       };
-      // oxlint-disable-next-line unicorn/consistent-function-scoping
       const postEvent = (type: string, properties: Record<string, unknown>) => {
         window.postMessage({ type: 'server/event', payload: { type, properties } }, '*');
       };
@@ -2764,7 +2758,6 @@ test('virtualized append hides the sticky before its source enters the overlay',
     const parentID = element.closest('[data-msg-id]')?.getAttribute('data-msg-id');
     if (!parentID) throw new Error('Optimistic prompt message ID is missing');
     const messageID = 'sticky-append-live-assistant';
-    // oxlint-disable-next-line unicorn/consistent-function-scoping
     const postEvent = (type: string, properties: Record<string, unknown>) => {
       window.postMessage({ type: 'server/event', payload: { type, properties } }, '*');
     };
@@ -3219,7 +3212,6 @@ test('active streaming never covers the mounted first prompt with a sticky copy'
   const samples = await page.evaluate(async () => {
     const sessionID = 'session-sticky-preview-large';
     const messageID = 'message-sticky-first-prompt-live-assistant';
-    // oxlint-disable-next-line unicorn/consistent-function-scoping
     const postEvent = (type: string, properties: Record<string, unknown>) => {
       window.postMessage({ type: 'server/event', payload: { type, properties } }, '*');
     };

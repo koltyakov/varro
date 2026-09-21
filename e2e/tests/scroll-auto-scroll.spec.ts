@@ -2647,7 +2647,6 @@ test.describe('auto-scroll', () => {
           requests?: Array<{ path: string }>;
         };
       };
-      // oxlint-disable-next-line consistent-function-scoping -- Playwright serializes this scope.
       const waitForFrame = () =>
         new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(() => resolve(), 0)));
       const getRequestCount = () =>
@@ -2664,7 +2663,6 @@ test.describe('auto-scroll', () => {
       const violations: Array<Record<string, unknown>> = [];
       // Track mutation peaks as well as painted frames. A pinned history gap must not briefly
       // materialize one placeholder MessageRow per skipped message between frame samples.
-      // oxlint-disable-next-line unicorn/consistent-function-scoping -- Playwright serializes this scope.
       const countRows = (node: Node) => {
         if (!(node instanceof Element)) return 0;
         return (

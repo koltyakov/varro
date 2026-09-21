@@ -18,7 +18,7 @@ update does not block later deletion. Cancelled updates check their signal befor
 reading, and before replacing the annotation file, so cancellation while queued or preparing a write
 does not commit that update.
 
-`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. Its latest matrix passed 54 checks across `opencode-ai@1.16.0`, `opencode-ai@1.18.31`, `@opencode/cli@2.0.5`, and `@opencode/cli@2.0.10`, with ten platform- or family-specific skips. The checks cover managed startup, credential recovery in a second window, restart, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
+`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. Its latest matrix passed 54 checks across `opencode-ai@1.16.0`, `opencode-ai@1.18.31`, `@opencode/cli@2.0.5`, and `@opencode/cli@2.0.12`, with ten platform- or family-specific skips. The checks cover managed startup, credential recovery in a second window, restart, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
 
 Fresh VS Code sandbox windows passed `v2-first-run` and the existing `healthy-first-run` scenario. These editor checks verify activation, ownership, health, and event-stream connection. `test:compatibility:ui` additionally exercises the actual composer, successful replies, pre-turn failures, HTTP 401 handling, recovery through a working provider, and reopening history. Full visual streaming performance remains a separate verification task.
 
@@ -76,6 +76,25 @@ resolve to `literal/directory`. V2 location queries retain their normal URL enco
 The released-server adapter tests cover exact workspace resolution for Japanese text, emoji,
 and literal percent escapes. Unit tests also cover header construction with embedded newlines
 and preservation of Windows separators and casing.
+
+### 2.0.12 compatibility review
+
+Reviewed v2.0.11 to v2.0.12, `991b727eb8` through `6f655dcbab`, and the preceding
+v2.0.10 to v2.0.11 range to catch up the implementation notes. The client, protocol, schema,
+and server packages change only their version numbers across these releases. The HTTP routes,
+SSE envelopes, configuration shapes, and session/message, permission, and form contracts
+consumed by Varro are unchanged. No adapter change is required.
+
+Upstream restores Anthropic thinking-budget variants, refreshes model metadata, forwards
+Promise-tool cancellation, and reports fatal CLI startup causes on stderr. Varro already
+preserves the server's variants and reads both startup output streams. The preceding release
+also fixes provider WebSocket fallback and error decoding, honors session permissions during
+skill and MCP discovery, and adds Vite+ installation support to the CLI updater. These changes
+run in OpenCode and use Varro's existing integration.
+
+Rich artifact tabs and browser previews, desktop startup optimizations, and TUI presentation
+changes are optional UI parity work. V1's latest published CLI and SDK remain at `1.18.31`.
+The runtime support floors remain v2 `2.0.5` and v1 `1.16.0`.
 
 ### 2.0.10 compatibility review
 

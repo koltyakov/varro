@@ -1019,7 +1019,6 @@ describe('MessageList history pagination', () => {
 
   it('keeps prepended rows lightweight while pinning a distant history anchor', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
-    // oxlint-disable-next-line unicorn/consistent-function-scoping -- Shared fixtures are imported from the test-utils module.
     const buildMessages = (prefix: string) =>
       Array.from({ length: 50 }, (_, index) => {
         const messageId = `${prefix}-${index}`;
@@ -1124,7 +1123,6 @@ describe('MessageList history pagination', () => {
     let mountedRows = list.querySelectorAll('[data-msg-id]').length;
     let peakMountedRows = mountedRows;
     let sawPinnedGap = false;
-    // oxlint-disable-next-line unicorn/consistent-function-scoping -- Kept beside the observer it measures.
     const countRows = (node: Node) => {
       if (!(node instanceof Element)) return 0;
       return (
@@ -1820,7 +1818,6 @@ describe('MessageList history pagination', () => {
   });
 
   it('does not let one session pagination request lock another session', async () => {
-    // oxlint-disable-next-line unicorn/consistent-function-scoping -- Keeping the page builder beside its one scenario makes pagination setup explicit.
     const pageFor = (sessionId: string, messageId: string) =>
       // SAFETY: The page contains the complete message and part fields read by pagination.
       [

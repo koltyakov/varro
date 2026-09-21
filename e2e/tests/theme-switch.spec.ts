@@ -1,4 +1,3 @@
-/* oxlint-disable unicorn/consistent-function-scoping -- Browser-side contrast helpers must stay inside the serialized page.evaluate callback. */
 import { expect, test } from '@playwright/test';
 
 for (const themeId of ['Dark+', 'Default Dark+', 'Dark Modern', 'Visual Studio Dark']) {

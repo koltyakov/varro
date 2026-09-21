@@ -121,7 +121,6 @@ test('appending a message does not remount the full transcript', async ({ page }
 
   const stats = await page.locator('.interactive-list').evaluate(async (element) => {
     // Playwright serializes this callback, so the helper must remain inside its browser scope.
-    // oxlint-disable-next-line consistent-function-scoping
     const countRows = (node: Node) => {
       if (!(node instanceof Element)) return 0;
       return (

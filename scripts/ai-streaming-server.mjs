@@ -161,7 +161,6 @@ export async function createStreamingServer({ capture, timeline, directory }) {
   });
 
   // Keep the reducer private to this server; preflight and delivery use identical rules.
-  // oxlint-disable-next-line unicorn/consistent-function-scoping
   function apply(state, event) {
     const p = event.properties;
     const messageID = p.messageID ?? p.part?.messageID ?? p.info?.id;

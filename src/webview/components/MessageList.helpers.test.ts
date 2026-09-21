@@ -142,7 +142,6 @@ describe('MessageList prompt numbers', () => {
   });
 
   it('loads every older prompt page before showing absolute counters', async () => {
-    // oxlint-disable-next-line unicorn/consistent-function-scoping -- Shared fixtures are imported from the test-utils module.
     const promptPage = (start: number, end: number, nextCursor?: string) => {
       // SAFETY: The fixture provides the complete domain shape read by this statement.
       const page = Array.from({ length: end - start + 1 }, (_, index) => {
