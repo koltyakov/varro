@@ -157,7 +157,9 @@ export function ModelsPanel() {
     }
   }
   const [isSaving, setIsSaving] = createSignal(false);
-  const [isReloading, setIsReloading] = createSignal(false);
+  const [showReloadIndicator, setShowReloadIndicator] = createSignal(false);
+  const isReloading = () => showReloadIndicator() || state.providersRefreshing;
+  const [showRefreshAnimation, setShowRefreshAnimation] = createSignal(false);
   const [providerConnectionData, setProviderConnectionData] = createSignal<{
     providers: Provider[];
     error: string;
@@ -171,6 +173,7 @@ export function ModelsPanel() {
     loading: boolean;
     initialProviderID: string | null;
   } | null>(null);
+  let panelRef: HTMLDivElement | undefined;
   let bodyRef: HTMLDivElement | undefined;
   let providerActionsButtonRef: HTMLButtonElement | undefined;
   let providerActionsMenuRef: HTMLDivElement | undefined;
@@ -406,9 +409,15 @@ export function ModelsPanel() {
 
   function reloadProviders() {
     if (isReloading()) return;
-    setIsReloading(true);
+    if (panelRef) {
+      const header = panelRef.querySelector<HTMLElement>(':scope > .models-header');
+      panelRef.style.setProperty('--chat-reselect-top', `${header?.offsetHeight ?? 0}px`);
+    }
+    setShowReloadIndicator(true);
+    setShowRefreshAnimation(true);
+    setState('providersRefreshing', true);
     reloadIndicatorTimer = setTimeout(() => {
-      setIsReloading(false);
+      setShowReloadIndicator(false);
     }, MIN_RELOAD_INDICATOR_MS);
     postMessage({ type: 'providers/refresh' });
   }
@@ -530,7 +539,20 @@ export function ModelsPanel() {
   });
 
   return (
-    <div class="models-panel">
+    <div
+      class="models-panel"
+      classList={{ 'models-list-refreshed': showRefreshAnimation() }}
+      ref={(element) => (panelRef = element)}
+      onAnimationIteration={(event) => {
+        if (
+          event.target === event.currentTarget &&
+          event.animationName === 'models-list-refresh' &&
+          !isReloading()
+        ) {
+          setShowRefreshAnimation(false);
+        }
+      }}
+    >
       <div class="models-header">
         <div class="models-header-inner">
           <div class="models-header-left">

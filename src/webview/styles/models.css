@@ -13,6 +13,21 @@
   visibility: hidden;
 }
 
+.models-panel.models-list-refreshed::after {
+  animation: models-list-refresh 1800ms linear infinite;
+}
+
+@keyframes models-list-refresh {
+  0%,
+  100% {
+    background-position: 0 -45%;
+  }
+
+  50% {
+    background-position: 0 145%;
+  }
+}
+
 .models-header {
   padding: 0;
   flex-shrink: 0;

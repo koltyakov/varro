@@ -233,6 +233,7 @@ beforeEach(() => {
   ]);
   setState('providerDefaults', { openai: 'gpt-5' });
   setState('providersLoaded', true);
+  setState('providersRefreshing', false);
   setState('providerRefreshPending', false);
   setState('sessions', []);
   setState('sessionStatus', {});
@@ -1302,6 +1303,10 @@ describe('ModelsPanel', () => {
     window.__sendToExtension = send;
     cleanup = render(() => ModelsPanel(), container!);
 
+    setState('providersRefreshing', true);
+    expect(container?.querySelector('.models-list-refreshed')).toBeNull();
+    setState('providersRefreshing', false);
+
     const actionsButton = container?.querySelector<HTMLButtonElement>(
       '[aria-label="Provider actions"]'
     );
@@ -1310,6 +1315,8 @@ describe('ModelsPanel', () => {
 
     expect(actionsButton?.getAttribute('aria-busy')).toBe('true');
 
+    setState('providersRefreshing', false);
+
     await vi.advanceTimersByTimeAsync(499);
     expect(actionsButton?.getAttribute('aria-busy')).toBe('true');
 
@@ -1317,7 +1324,7 @@ describe('ModelsPanel', () => {
     expect(actionsButton?.getAttribute('aria-busy')).toBe('false');
   });
 
-  it('re-enables provider reload for retry when the refresh remains incomplete', async () => {
+  it('keeps the animation active until a slow refresh finishes and allows retry', async () => {
     vi.useFakeTimers();
     const send = vi.fn();
     window.__sendToExtension = send;
@@ -1332,7 +1339,26 @@ describe('ModelsPanel', () => {
 
     await vi.advanceTimersByTimeAsync(500);
 
+    expect(actionsButton?.getAttribute('aria-busy')).toBe('true');
+    expect(container?.querySelector('.models-list-refreshed')).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(3000);
+    container?.querySelector('.models-panel')?.dispatchEvent(
+      Object.assign(new Event('animationiteration', { bubbles: true }), {
+        animationName: 'models-list-refresh',
+      })
+    );
+    expect(container?.querySelector('.models-list-refreshed')).not.toBeNull();
+
+    // A failed refresh finishes too, even though providersLoaded stays false.
+    setState('providersRefreshing', false);
     expect(actionsButton?.getAttribute('aria-busy')).toBe('false');
+    expect(container?.querySelector('.models-list-refreshed')).not.toBeNull();
+    container?.querySelector('.models-panel')?.dispatchEvent(
+      Object.assign(new Event('animationiteration', { bubbles: true }), {
+        animationName: 'models-list-refresh',
+      })
+    );
+    expect(container?.querySelector('.models-list-refreshed')).toBeNull();
     actionsButton?.click();
     findButton(container, 'Refresh list')?.click();
     expect(send).toHaveBeenCalledTimes(2);

@@ -107,6 +107,7 @@ export interface AppState {
   serverReconnecting: boolean;
   restartBlocked: RestartBlockedState | null;
   providersLoaded: boolean;
+  providersRefreshing: boolean;
   workspaceCatalogReloadPending: boolean;
   agentsLoaded: boolean;
   commandsLoaded: boolean;
@@ -356,6 +357,7 @@ export function createAppState(): AppStateInstance {
     serverReconnecting: false,
     restartBlocked: null,
     providersLoaded: false,
+    providersRefreshing: false,
     workspaceCatalogReloadPending: false,
     agentsLoaded: false,
     commandsLoaded: false,

@@ -100,7 +100,8 @@ input:focus-visible {
   position: relative;
 }
 
-.chat-main-shell.active-session-reselected::after {
+.chat-main-shell.active-session-reselected::after,
+.models-panel.models-list-refreshed::after {
   /* Tint opaque tool and composer surfaces along with the shared chat background. */
   content: '';
   position: absolute;
