@@ -2004,6 +2004,181 @@ describe('RestProxy handleRequest', () => {
     mocks.vscode.workspace.fs.writeFile.mockClear();
   });
 
+  it.each([
+    ['project', '/repo-b'],
+    ['session', '/repo-b'],
+    ['project', '/repo/packages/other'],
+    ['session', '/repo/packages/other'],
+  ])('allows %s approval in an authorized session directory %s', async (scope, directory) => {
+    const existingConfig = JSON.stringify({ permission: { bash: { '*': 'ask' } } });
+    mocks.vscode.workspace.fs.readFile.mockImplementation((uri: { fsPath: string }) =>
+      uri.fsPath === `${directory}/opencode.json`
+        ? Promise.resolve(new TextEncoder().encode(existingConfig))
+        : Promise.reject({ code: 'FileNotFound' })
+    );
+    mocks.vscode.workspace.fs.stat.mockResolvedValue({ mtime: 1, size: existingConfig.length });
+    mocks.vscode.workspace.fs.writeFile.mockClear();
+    const serverRequest = vi.fn(async (method: string, path: string) => {
+      const url = new URL(path, 'http://localhost');
+      if (method === 'GET' && url.pathname === '/project/current') {
+        return { id: 'project-1', worktree: '/repo', vcs: 'git' };
+      }
+      if (method === 'GET' && url.pathname === '/session') {
+        return [{ id: 'session-other', projectID: 'project-1', directory }];
+      }
+      if (method === 'GET' && url.pathname === '/session/session-other') {
+        return { id: 'session-other', projectID: 'project-1', directory };
+      }
+      if (method === 'GET' && path === '/permission') {
+        return [
+          {
+            id: 'perm-other',
+            sessionID: 'session-other',
+            permission: 'bash',
+            always: ['npm test *'],
+          },
+        ];
+      }
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+    const callbacks = createCallbacks({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      getWorkspacePath: () => '/repo',
+      getSessionHistoryScope: () => 'project',
+      sessionState: {
+        ...createCallbacks().sessionState,
+        isSessionInWorkspace: vi.fn(() => false),
+      } as never,
+    });
+    callbacks.contextProvider.context.workspaceFolders = [
+      { name: 'repo', path: '/repo' },
+      { name: 'repo-b', path: '/repo-b' },
+    ];
+    callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((path: string) =>
+      path === '/repo' || path === '/repo-b' ? path : null
+    );
+    const { proxy } = createProxy(callbacks);
+    if (directory === '/repo/packages/other') {
+      await proxy.handleRequest(makePayload(8520, 'GET', '/session?limit=100&directory=%2Frepo'));
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+        id: 8520,
+        data: expect.objectContaining({ items: expect.any(Array) }),
+      });
+    }
+
+    await proxy.handleRequest(
+      makePayload(
+        8521,
+        'POST',
+        `/varro/permission/${scope}-allow?directory=${encodeURIComponent(directory)}`,
+        { sessionId: 'session-other', permissionId: 'perm-other' }
+      )
+    );
+
+    expect(serverRequest).toHaveBeenCalledWith(
+      'GET',
+      '/permission',
+      undefined,
+      withSignal({ directory })
+    );
+    if (scope === 'project') {
+      expect(mocks.vscode.workspace.fs.writeFile).toHaveBeenCalledOnce();
+      const [uri, encoded] = mocks.vscode.workspace.fs.writeFile.mock.calls[0]!;
+      expect(uri.fsPath).toBe(`${directory}/opencode.json`);
+      expect(JSON.parse(new TextDecoder().decode(encoded))).toMatchObject({
+        permission: { bash: { '*': 'ask', 'npm test *': 'allow' } },
+      });
+      expect(callbacks.allowPermissionForSession).not.toHaveBeenCalled();
+    } else {
+      expect(callbacks.allowPermissionForSession).toHaveBeenCalledExactlyOnceWith(
+        'session-other',
+        'bash',
+        ['npm test *'],
+        directory
+      );
+      expect(mocks.vscode.workspace.fs.writeFile).not.toHaveBeenCalled();
+    }
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 8521,
+      data: scope === 'project' ? { permission: 'bash', patterns: ['npm test *'] } : undefined,
+    });
+    mocks.vscode.workspace.fs.writeFile.mockClear();
+  });
+
+  it.each(['project', 'session'])(
+    'rejects %s approval for a session outside the requested open directory',
+    async (scope) => {
+      mocks.vscode.workspace.fs.writeFile.mockClear();
+      const serverRequest = vi.fn(async () => ({ id: 'session-1', directory: '/repo' }));
+      const { proxy, callbacks } = createProxy({
+        server: { ...createCallbacks().server, request: serverRequest } as never,
+        sessionState: {
+          ...createCallbacks().sessionState,
+          isSessionInWorkspace: vi.fn(() => false),
+        } as never,
+      });
+
+      await proxy.handleRequest(
+        makePayload(8522, 'POST', `/varro/permission/${scope}-allow?directory=%2Frepo-b`, {
+          sessionId: 'session-1',
+          permissionId: 'perm-1',
+        })
+      );
+
+      expect(serverRequest).toHaveBeenCalledExactlyOnceWith(
+        'GET',
+        '/session/session-1?directory=%2Frepo-b',
+        undefined,
+        { directory: '/repo-b' }
+      );
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+        id: 8522,
+        error: '404 Session not found',
+      });
+      expect(callbacks.allowPermissionForSession).not.toHaveBeenCalled();
+      expect(mocks.vscode.workspace.fs.writeFile).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['project', 'session'])(
+    'rejects %s approval when the pending permission belongs to another session',
+    async (scope) => {
+      mocks.vscode.workspace.fs.writeFile.mockClear();
+      const serverRequest = vi.fn(async (method: string, path: string) => {
+        if (method === 'GET' && path === '/session/session-1?directory=%2Frepo-b') {
+          return { id: 'session-1', directory: '/repo-b' };
+        }
+        if (method === 'GET' && path === '/permission') {
+          return [
+            { id: 'perm-1', sessionID: 'another-session', permission: 'bash', always: ['*'] },
+          ];
+        }
+        throw new Error(`Unexpected request: ${method} ${path}`);
+      });
+      const { proxy, callbacks } = createProxy({
+        server: { ...createCallbacks().server, request: serverRequest } as never,
+        sessionState: {
+          ...createCallbacks().sessionState,
+          isSessionInWorkspace: vi.fn(() => false),
+        } as never,
+      });
+
+      await proxy.handleRequest(
+        makePayload(8523, 'POST', `/varro/permission/${scope}-allow?directory=%2Frepo-b`, {
+          sessionId: 'session-1',
+          permissionId: 'perm-1',
+        })
+      );
+
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+        id: 8523,
+        error: '404 permission request not found',
+      });
+      expect(callbacks.allowPermissionForSession).not.toHaveBeenCalled();
+      expect(mocks.vscode.workspace.fs.writeFile).not.toHaveBeenCalled();
+    }
+  );
+
   it('persists scalar-only project permissions as action strings', async () => {
     const existingConfig = JSON.stringify({
       permission: { webfetch: { '*': 'ask' } },

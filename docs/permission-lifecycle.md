@@ -227,6 +227,11 @@ Default mode presents `Reject`, `Once`, and an `Always` scope menu.
 The `Allow always` button only opens the menu; it has no default or remembered scope.
 Choosing a scope immediately submits that approval. Dismissing the menu leaves the request pending.
 
+Session and project approval routes authorize the permission-owning session's directory before
+applying workspace guards. They may target another open root or an authorized catalog directory
+without activating that workspace in the chat view. Both routes must verify the pending permission
+ID and owning session against the server before changing rules.
+
 - `Once` approves the specific request.
 - `Always allow for this session` adds the request's server-provided `always` patterns to that
   session's permission rules, then replies `once` to the pending request so the approval does not

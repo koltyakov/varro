@@ -770,7 +770,23 @@ export class RestProxy {
         (typeof queuedHistoryWorkspaceDirectory === 'string'
           ? queuedHistoryWorkspaceDirectory.trim() || null
           : null);
-      const directSessionID = parseDirectSessionID(payload.path);
+      const sessionPermissionAllowRequest = this.parsePermissionAllowRequest(
+        VARRO_API_ENDPOINTS.permissionSessionAllow,
+        method,
+        payload.path,
+        payload.body
+      );
+      const projectPermissionAllowRequest = this.parsePermissionAllowRequest(
+        VARRO_API_ENDPOINTS.permissionProjectAllow,
+        method,
+        payload.path,
+        payload.body
+      );
+      // Scoped approvals carry their owning session in the body, not the route.
+      const directSessionID =
+        parseDirectSessionID(payload.path) ??
+        sessionPermissionAllowRequest?.sessionId ??
+        projectPermissionAllowRequest?.sessionId;
       let explicitWorkspaceDirectory: string | null = null;
       if (requestedWorkspaceDirectory) {
         if (directSessionID) {
@@ -1163,19 +1179,8 @@ export class RestProxy {
         return;
       }
 
-      const sessionPermissionAllowRequest = this.parsePermissionAllowRequest(
-        VARRO_API_ENDPOINTS.permissionSessionAllow,
-        method,
-        payload.path,
-        payload.body
-      );
       if (sessionPermissionAllowRequest) {
         const directory = explicitWorkspaceDirectory ?? this.getCurrentWorkspaceResolutionRoot();
-        await this.assertSessionInWorkspace(
-          sessionPermissionAllowRequest.sessionId,
-          directory,
-          directory
-        );
         const scope = await this.getPendingPermissionAllowScope(
           sessionPermissionAllowRequest,
           directory ?? undefined,
@@ -1191,19 +1196,8 @@ export class RestProxy {
         return;
       }
 
-      const projectPermissionAllowRequest = this.parsePermissionAllowRequest(
-        VARRO_API_ENDPOINTS.permissionProjectAllow,
-        method,
-        payload.path,
-        payload.body
-      );
       if (projectPermissionAllowRequest) {
         const directory = explicitWorkspaceDirectory ?? this.getCurrentWorkspaceResolutionRoot();
-        await this.assertSessionInWorkspace(
-          projectPermissionAllowRequest.sessionId,
-          directory,
-          directory
-        );
         const data = await this.persistProjectPermissionAllow(
           projectPermissionAllowRequest,
           directory ?? undefined,
