@@ -164,50 +164,96 @@ it('renders an All snapshot as one inline Problems count chip', () => {
   });
 });
 
-it('renders problems as a count chip without leaking details into visible or editable prompt text', () => {
-  const send = installSendToExtension();
+it.each(['separate', 'combined', 'combined-crlf'])(
+  'renders %s problems as a count chip without leaking details into visible or editable prompt text',
+  (layout) => {
+    const send = installSendToExtension();
+    const details =
+      '[VS Code problems for playwright.config.ts: 1 errors, 0 warnings]\nCannot find module @playwright/test';
+    const parts =
+      layout === 'separate'
+        ? [textPart('prompt', 'Explain this problem'), textPart('problems', details)]
+        : [
+            textPart(
+              'prompt',
+              ['Explain this problem', details]
+                .join('\n')
+                .replaceAll('\n', layout === 'combined-crlf' ? '\r\n' : '\n')
+            ),
+          ];
+    renderUserContent(parts);
+    const chip = container?.querySelector<HTMLButtonElement>('.message-attachment-chip');
+    expect(chip?.querySelector('.chip-label')?.textContent).toBe('Problems');
+    expect(chip?.querySelector('.chip-detail')?.textContent).toBe('1');
+    expect(chip?.textContent).not.toContain('·');
+    expect(container?.textContent).toContain('Explain this problem');
+    expect(container?.textContent).not.toContain('Cannot find module');
+    expect(container?.textContent).not.toContain('[VS Code problems');
+    expect(getUserMessageEditText(parts)).toBe('Explain this problem');
+    expect(getUserMessageEditContext(parts).issues).toMatchObject({ count: 1, text: details });
+    chip?.click();
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open-text',
+      payload: {
+        content: details,
+        title: 'Problems 1',
+        language: 'plaintext',
+      },
+    });
+    expect(getUserMessagePreviewText([textPart('problems-only', details)])).toBe('Problems 1');
+  }
+);
+
+it('keeps context after combined diagnostics as separate attachments', () => {
   const details =
-    '[VS Code problems for playwright.config.ts: 1 errors, 0 warnings]\nCannot find module @playwright/test';
-  const parts = [textPart('prompt', 'Explain this problem'), textPart('problems', details)];
+    '[VS Code problems for app.ts: 0 errors, 2 warnings]\nEditor diagnostics are context, not a request to fix unrelated issues.\nWARNING app.ts:1:1-1:2\nFirst warning\n\nWARNING app.ts:2:1-2:2\nSecond warning';
+  const parts = [
+    textPart(
+      'prompt',
+      `Explain this\n[Active file: app.ts]\n${details}\n[Attached file: notes.txt]`
+    ),
+  ];
   renderUserContent(parts);
-  const chip = container?.querySelector<HTMLButtonElement>('.message-attachment-chip');
-  expect(chip?.querySelector('.chip-label')?.textContent).toBe('Problems');
-  expect(chip?.querySelector('.chip-detail')?.textContent).toBe('1');
-  expect(chip?.textContent).not.toContain('·');
-  expect(container?.textContent).toContain('Explain this problem');
-  expect(container?.textContent).not.toContain('Cannot find module');
-  expect(container?.textContent).not.toContain('[VS Code problems');
-  expect(getUserMessageEditText(parts)).toBe('Explain this problem');
-  expect(getUserMessageEditContext(parts).issues).toMatchObject({ count: 1, text: details });
-  chip?.click();
-  expect(send).toHaveBeenCalledWith({
-    type: 'vscode/open-text',
-    payload: {
-      content: details,
-      title: 'Problems 1',
-      language: 'plaintext',
-    },
-  });
-  expect(getUserMessagePreviewText([textPart('problems-only', details)])).toBe('Problems 1');
+  expect(container!.querySelectorAll('.message-attachment-chip')).toHaveLength(3);
+  expect(container!.querySelector('.user-message-text-scroll')?.textContent).toBe('Explain this');
+  expect(getUserMessageEditContext(parts).issues).toMatchObject({ count: 2, text: details });
+  expect(getUserMessageEditContext(parts).files.map((file) => file.path)).toEqual([
+    'app.ts',
+    'notes.txt',
+  ]);
 });
 
-it('renders explicit Problems references inline and restores their captured context for editing', () => {
-  const details = '[Attached diagnostics: 1 of 1]\nERROR app.ts:3 - Missing declaration';
-  const parts = [textPart('prompt', 'Explain [Problems] please'), textPart('problems', details)];
-  renderUserContent(parts);
-  const chip = container?.querySelector('.user-message-text-scroll .inline-chip');
-  expect(chip?.querySelector('.inline-chip-label')?.textContent).toBe('Problems');
-  expect(chip?.querySelector('.inline-chip-detail')?.textContent).toBe('1');
-  expect(container?.querySelector('.message-attachment-chip')).toBeNull();
-  expect(container?.textContent).not.toContain('[Problems]');
-  expect(container?.textContent).not.toContain('Missing declaration');
-  expect(getUserMessageEditText(parts)).toBe('Explain [Problems] please');
-  expect(getUserMessageEditContext(parts).issues).toMatchObject({
-    count: 1,
-    text: details,
-    inline: true,
-  });
+it('leaves diagnostic examples inside code fences visible', () => {
+  const text =
+    'Example:\n```text\n[VS Code problems for app.ts: 1 errors, 0 warnings]\nERROR app.ts:1\nMissing name\n```';
+  const parts = [textPart('prompt', text)];
+  expect(getUserMessageEditText(parts)).toBe(text);
+  expect(getUserMessageEditContext(parts).issues).toBeUndefined();
 });
+
+it.each(['separate', 'combined'])(
+  'renders %s explicit Problems references inline and restores their captured context for editing',
+  (layout) => {
+    const details = '[Attached diagnostics: 1 of 1]\nERROR app.ts:3 - Missing declaration';
+    const parts =
+      layout === 'separate'
+        ? [textPart('prompt', 'Explain [Problems] please'), textPart('problems', details)]
+        : [textPart('prompt', `Explain [Problems] please\n${details}`)];
+    renderUserContent(parts);
+    const chip = container?.querySelector('.user-message-text-scroll .inline-chip');
+    expect(chip?.querySelector('.inline-chip-label')?.textContent).toBe('Problems');
+    expect(chip?.querySelector('.inline-chip-detail')?.textContent).toBe('1');
+    expect(container?.querySelector('.message-attachment-chip')).toBeNull();
+    expect(container?.textContent).not.toContain('[Problems]');
+    expect(container?.textContent).not.toContain('Missing declaration');
+    expect(getUserMessageEditText(parts)).toBe('Explain [Problems] please');
+    expect(getUserMessageEditContext(parts).issues).toMatchObject({
+      count: 1,
+      text: details,
+      inline: true,
+    });
+  }
+);
 
 it('renders saved table attachments with their table identity and keeps the snapshot openable', () => {
   const send = installSendToExtension();

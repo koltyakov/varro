@@ -288,11 +288,6 @@ export function parseUserMessageContent(parts: Part[]): ParsedUserMessageContent
       attachments.push({ type: 'problem-reference', reference: problemReference });
       continue;
     }
-    const issues = parseIssueAttachment(text);
-    if (issues) {
-      attachments.push({ type: 'issues', ...issues });
-      continue;
-    }
     const skill = parseSkillAttachment(text);
     if (skill) {
       if (
@@ -373,6 +368,30 @@ function parseUserMessageText(text: string): ParsedUserMessageText {
     const trimmedLine = line.trim();
 
     if (!inCodeFence) {
+      // Some backends join prompt and context parts into one text part.
+      if (parseIssueAttachment(`${line}\n`)) {
+        let end = index + 1;
+        while (end < lines.length) {
+          const candidate = lines[end]!.trim();
+          if (
+            parseIssueAttachment(`${candidate}\n`) ||
+            parseUserMessageAttachmentLine(candidate, false) ||
+            /^\[(?:Working directory:|Database context\]|Selection from terminal |Unsaved (?:selection|buffer) from |Problem [\w-]+\])/.test(
+              candidate
+            )
+          )
+            break;
+          end += 1;
+        }
+        const issues = parseIssueAttachment(lines.slice(index, end).join('\n').trimEnd());
+        if (issues) {
+          flushTextBuffer();
+          attachments.push({ type: 'issues', ...issues });
+          index = end - 1;
+          continue;
+        }
+      }
+
       if (trimmedLine.startsWith('[Working directory:')) {
         flushTextBuffer();
         continue;
