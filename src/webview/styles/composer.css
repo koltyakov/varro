@@ -1217,6 +1217,7 @@
   height: 4px;
   border-radius: 50%;
   background: var(--vscode-charts-blue, #3794ff);
+  opacity: 0.55;
 }
 
 .permission-activity-item.auto-approved .permission-activity-dot {
