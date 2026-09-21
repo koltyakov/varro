@@ -159,6 +159,7 @@ Varro reloads global OpenCode configuration when OpenCode is idle. Changes to pr
 ## Documentation
 
 - [Usage guide](https://github.com/koltyakov/varro/blob/main/docs/usage.md)
+- [Docker Sandboxes with Remote SSH](https://github.com/koltyakov/varro/blob/main/docs/docker-sandboxes.md): suggested step-by-step setup for running Varro and OpenCode inside a sandbox
 - [Docker and remote servers](https://github.com/koltyakov/varro/blob/main/docs/docker-server.md): advanced setup with reduced functionality, not recommended for general use
 - [Permissions guide](https://github.com/koltyakov/varro/blob/main/docs/permissions.md)
 - [Configure primary agents](https://github.com/koltyakov/varro/blob/main/docs/usage.md#configure-primary-agents)

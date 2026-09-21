@@ -1,5 +1,7 @@
 # Docker and remote OpenCode servers
 
+For Docker Sandboxes with Varro running inside a VS Code Remote SSH workspace, use the [Docker Sandboxes guide](docker-sandboxes.md). That setup lets Varro manage OpenCode inside the sandbox; this page covers attaching to a separately managed server.
+
 > [!IMPORTANT]
 > This is an advanced, reduced-functionality setup. We do not recommend Docker or a separately managed remote OpenCode server for general Varro use. Use this mode only if you have a specific requirement and understand how to manage the server's networking, authentication, workspace paths, tools, storage, and updates yourself. Read the unsupported and limited features below before following the setup instructions.
 
