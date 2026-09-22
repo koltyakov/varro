@@ -96,6 +96,42 @@ describe('appendBoundedCliOutput', () => {
 });
 
 describe('v2 shared service routing', () => {
+  it('logs missing credentials and environment fallback once without exposing secrets', () => {
+    const manager = new OpenCodeProcess(
+      4096,
+      false,
+      '',
+      false,
+      undefined,
+      join(tmpdir(), `varro-credential-diagnostic-${process.pid}.json`)
+    );
+    vi.stubEnv('OPENCODE_SERVER_PASSWORD', '');
+    vi.stubEnv('OPENCODE_SERVER_USERNAME', 'private-user');
+    loggerMock.info.mockClear();
+    try {
+      expect(manager.serverAuthorization).toBeUndefined();
+      expect(manager.serverAuthorization).toBeUndefined();
+      expect(loggerMock.info).toHaveBeenCalledExactlyOnceWith(
+        'No credentials for OpenCode were provided; connecting without authentication.'
+      );
+
+      vi.stubEnv('OPENCODE_SERVER_PASSWORD', 'private-password');
+      const authorization = `Basic ${Buffer.from('private-user:private-password').toString('base64')}`;
+      expect(manager.serverAuthorization).toBe(authorization);
+      expect(manager.serverAuthorization).toBe(authorization);
+      expect(loggerMock.info).toHaveBeenCalledTimes(2);
+      expect(loggerMock.info).toHaveBeenLastCalledWith(
+        'Using OpenCode credentials from environment variables: OPENCODE_SERVER_PASSWORD=*; OPENCODE_SERVER_USERNAME=*'
+      );
+      const output = JSON.stringify(loggerMock.info.mock.calls);
+      expect(output).not.toContain('private-password');
+      expect(output).not.toContain('private-user');
+      expect(output).not.toContain(authorization);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('discovers credentials for an existing v2 server before probing the CLI', async () => {
     const manager = new OpenCodeProcess(
       4096,
