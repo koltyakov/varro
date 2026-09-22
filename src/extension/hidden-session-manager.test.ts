@@ -177,18 +177,18 @@ describe('HiddenSessionManager', () => {
       permission: legacyJudgePermission,
       time: { updated: now - 180_000 },
     };
-    const projectedLegacyHelper = {
-      id: 'projected-legacy-commit-helper',
+    const titleOnlySession = {
+      id: 'title-only-session',
       title: 'Varro commit message: 3',
       time: { updated: now - 180_000 },
     };
 
     expect(
       manager.observeSessionList(
-        [visibleSession, visibleNumericSession, markedHelper, legacyHelper, projectedLegacyHelper],
+        [visibleSession, visibleNumericSession, markedHelper, legacyHelper, titleOnlySession],
         now
       )
-    ).toEqual(['marked-commit-helper', 'legacy-commit-helper', 'projected-legacy-commit-helper']);
+    ).toEqual(['marked-commit-helper', 'legacy-commit-helper']);
     expect(
       manager
         .filterVisibleSessions([
@@ -196,10 +196,10 @@ describe('HiddenSessionManager', () => {
           visibleNumericSession,
           markedHelper,
           legacyHelper,
-          projectedLegacyHelper,
+          titleOnlySession,
         ])
         .map(({ id }) => id)
-    ).toEqual(['visible', 'visible-numeric']);
+    ).toEqual(['visible', 'visible-numeric', 'title-only-session']);
   });
 
   it('does not hide an ordinary session renamed with the legacy title prefix', () => {
