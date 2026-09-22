@@ -3563,13 +3563,19 @@ export class RestProxy {
         return Boolean(removed);
       }
       case 'empty': {
-        const roots = [...new Set(entries.map((entry) => entry.root.directory))];
+        const roots = new Map<string, string[]>();
+        for (const entry of entries) {
+          const rootIDs = roots.get(entry.root.directory) ?? [];
+          rootIDs.push(entry.rootID);
+          roots.set(entry.root.directory, rootIDs);
+        }
         const removed = (
           await Promise.all(
-            roots.map((root) =>
+            [...roots].map(([root, rootIDs]) =>
               this.callbacks.sessionTrash.empty(
                 (session) => this.deleteSessionForDirectory(session),
-                root
+                root,
+                rootIDs
               )
             )
           )

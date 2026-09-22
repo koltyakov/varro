@@ -255,6 +255,25 @@ describe('SessionTrashManager', () => {
     expect(manager.isHidden('other-root')).toBe(true);
   });
 
+  it('empties only selected entries when projects share a directory', async () => {
+    const manager = new SessionTrashManager(workspaceState as never);
+    await manager.moveToTrash('current', [session('current', 1_000)], 5_000);
+    await manager.moveToTrash(
+      'older-project',
+      [session('older-project', 2_000, { projectID: 'project-2' })],
+      6_000
+    );
+    const deleteSession = vi.fn(async (_target: SessionDeleteTarget) => true);
+
+    await expect(manager.empty(deleteSession, '/repo', ['current'])).resolves.toMatchObject([
+      { rootID: 'current' },
+    ]);
+
+    expect(deleteSession).toHaveBeenCalledExactlyOnceWith({ id: 'current', directory: '/repo' });
+    expect(manager.list().map(({ rootID }) => rootID)).toEqual(['older-project']);
+    expect(new SessionTrashManager(workspaceState as never).isHidden('older-project')).toBe(true);
+  });
+
   it('keeps expiration cleanup global across workspace roots', async () => {
     const manager = new SessionTrashManager(workspaceState as never);
     await manager.moveToTrash('repo-root', [session('repo-root', 1_000)], 5_000);

@@ -177,11 +177,14 @@ export class SessionTrashManager {
 
   async empty(
     deleteSession: (target: SessionDeleteTarget) => Promise<unknown>,
-    workspaceDirectory?: string
+    workspaceDirectory?: string,
+    rootIDs?: readonly string[]
   ) {
     return this.mutate(async () => {
       const removed: RecycleBinEntry[] = [];
+      const allowedRoots = rootIDs ? new Set(rootIDs) : null;
       for (const entry of this.list(workspaceDirectory)) {
+        if (allowedRoots && !allowedRoots.has(entry.rootID)) continue;
         await deleteEntrySessions(entry, deleteSession);
         const next = new Map(this.entries);
         next.delete(entry.rootID);

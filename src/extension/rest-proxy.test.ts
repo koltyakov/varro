@@ -1386,7 +1386,7 @@ describe('RestProxy handleRequest', () => {
 
   it('authorizes project worktree recycle-bin operations by project ID', async () => {
     const sibling = recycleBinEntry('sibling', '/worktrees/feature');
-    const foreign = recycleBinEntry('foreign', '/other-project');
+    const foreign = recycleBinEntry('foreign', '/worktrees/feature');
     foreign.root.projectID = 'project-2';
     for (const session of foreign.sessions) session.projectID = 'project-2';
     const restore = vi.fn(() => Promise.resolve({ rootID: 'sibling', sessions: sibling.sessions }));
@@ -1423,7 +1423,7 @@ describe('RestProxy handleRequest', () => {
       '/worktrees/feature'
     );
     expect(empty).toHaveBeenCalledOnce();
-    expect(empty).toHaveBeenCalledWith(expect.any(Function), '/worktrees/feature');
+    expect(empty).toHaveBeenCalledWith(expect.any(Function), '/worktrees/feature', ['sibling']);
     expect(serverRequest.mock.calls.filter(([, path]) => path === '/project/current')).toHaveLength(
       1
     );
@@ -1454,8 +1454,12 @@ describe('RestProxy handleRequest', () => {
       } as never,
     });
     await proxy.handleRequest(makePayload(3, 'DELETE', '/varro/session-trash'));
-    expect(callbacks.sessionTrash.empty).toHaveBeenCalledWith(expect.any(Function), '/repo/a');
-    expect(callbacks.sessionTrash.empty).toHaveBeenCalledWith(expect.any(Function), '/repo/b');
+    expect(callbacks.sessionTrash.empty).toHaveBeenCalledWith(expect.any(Function), '/repo/a', [
+      's1',
+    ]);
+    expect(callbacks.sessionTrash.empty).toHaveBeenCalledWith(expect.any(Function), '/repo/b', [
+      's2',
+    ]);
     expect(serverRequest.mock.calls).toEqual([
       ['DELETE', '/session/s1?directory=%2Frepo%2Fa'],
       ['DELETE', '/session/s2?directory=%2Frepo%2Fb'],
