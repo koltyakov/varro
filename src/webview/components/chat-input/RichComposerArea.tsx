@@ -93,6 +93,7 @@ export function RichComposerArea(props: {
   let isComposing = false;
   let historyHandledByKeydown = false;
   let revealCaretAfterControlledInput = false;
+  let pendingControlledCursorReveal = false;
   let nativeInputSync: { value: string; cursorOffset: number } | undefined;
   let unregisterComposerDismiss: (() => void) | undefined;
   const [problemTooltipTargets, setProblemTooltipTargets] = createSignal<
@@ -627,8 +628,8 @@ export function RichComposerArea(props: {
     sel.addRange(range);
   }
 
-  function revealCaret() {
-    if (!revealCaretAfterControlledInput || !editorEl) return;
+  function revealCaret(controlledCursorUpdate = false) {
+    if ((!revealCaretAfterControlledInput && !controlledCursorUpdate) || !editorEl) return;
     revealCaretAfterControlledInput = false;
 
     const range = getSelectionRange();
@@ -703,6 +704,7 @@ export function RichComposerArea(props: {
       (!externalLinksOutOfSync || preserveEditedExternalLinks)
     ) {
       lastSyncedValue = text;
+      pendingControlledCursorReveal = false;
       revealCaret();
       return;
     }
@@ -712,10 +714,13 @@ export function RichComposerArea(props: {
       textNeedsResync || (externalLinksOutOfSync && !preserveEditedExternalLinks);
 
     if (!textChanged && !chipsChanged && !domNeedsResync) {
+      let cursorUpdated = false;
       if (isFocused && requestedCursor != null && getCursorOffset() !== requestedCursor) {
         setCursorOffset(Math.min(requestedCursor, text.length));
+        cursorUpdated = true;
       }
-      revealCaret();
+      revealCaret(cursorUpdated && pendingControlledCursorReveal);
+      if (cursorUpdated) pendingControlledCursorReveal = false;
       return;
     }
 
@@ -735,6 +740,8 @@ export function RichComposerArea(props: {
     if (isFocused) {
       setCursorOffset(Math.min(cursorOff, text.length));
     }
+    // Deferred paste resolution can supply the new text before its cursor offset.
+    pendingControlledCursorReveal = textChanged && isFocused && !revealCaretAfterControlledInput;
     revealCaret();
   });
 
