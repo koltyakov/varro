@@ -431,10 +431,15 @@ try {
       // Keep selected sessions as the outer loop. Otherwise SQLite can scan and decode
       // every message in both versions before checking whether its session was selected.
       if (tables.has('session') && tables.has('message')) {
-        messages.push("SELECT m.session_id, m.data, json_extract(m.data, '$.parentID') AS parentID FROM selected s CROSS JOIN message m ON s.id = m.session_id WHERE s.version = 1 AND length(m.data) <= ? AND json_extract(m.data, '$.role') = 'assistant'");
+        messages.push("SELECT m.session_id, m.data, NULL AS originalCompleted, json_extract(m.data, '$.parentID') AS parentID FROM selected s CROSS JOIN message m ON s.id = m.session_id WHERE s.version = 1 AND length(m.data) <= ? AND json_extract(m.data, '$.role') = 'assistant'");
       }
       if (tables.has('session_v2') && tables.has('session_message')) {
-        messages.push("SELECT m.session_id, m.data, coalesce(json_extract(m.data, '$.parentID'), (SELECT u.id FROM session_message u WHERE u.session_id = m.session_id AND u.type = 'user' AND u.seq < m.seq ORDER BY u.seq DESC LIMIT 1)) AS parentID FROM selected s CROSS JOIN session_message m ON s.id = m.session_id WHERE s.version = 2 AND m.type = 'assistant' AND length(m.data) <= ?");
+        // Migration can replace completion times with the import time. Recover timing only
+        // from the same original message, without selecting its older token usage.
+        const originalCompleted = tables.has('message')
+          ? "(SELECT CASE WHEN json_valid(original.data) THEN CASE WHEN json_extract(original.data, '$.role') = 'assistant' AND json_extract(original.data, '$.time.created') = json_extract(m.data, '$.time.created') AND json_extract(original.data, '$.providerID') = coalesce(json_extract(m.data, '$.providerID'), json_extract(m.data, '$.model.providerID')) AND json_extract(original.data, '$.modelID') = coalesce(json_extract(m.data, '$.modelID'), json_extract(m.data, '$.model.id'), json_extract(m.data, '$.model.modelID')) AND json_type(original.data, '$.time.completed') IN ('integer', 'real') AND json_extract(original.data, '$.time.completed') >= json_extract(original.data, '$.time.created') THEN json_extract(original.data, '$.time.completed') END END FROM message original WHERE original.id = m.id AND original.session_id = s.identity)"
+          : 'NULL';
+        messages.push("SELECT m.session_id, m.data, " + originalCompleted + " AS originalCompleted, coalesce(json_extract(m.data, '$.parentID'), (SELECT u.id FROM session_message u WHERE u.session_id = m.session_id AND u.type = 'user' AND u.seq < m.seq ORDER BY u.seq DESC LIMIT 1)) AS parentID FROM selected s CROSS JOIN session_message m ON s.id = m.session_id WHERE s.version = 2 AND m.type = 'assistant' AND length(m.data) <= ?");
       }
       const query = [
         selected,
@@ -445,8 +450,8 @@ try {
         "coalesce(json_extract(m.data, '$.model.id'), json_extract(m.data, '$.model.modelID')) AS nestedModelID,",
         'm.parentID AS parentID,',
         "json_extract(m.data, '$.time.created') AS timeCreated,",
-        "json_extract(m.data, '$.time.completed') AS timeCompleted,",
-        "coalesce(json_extract(m.data, '$.time.completed'), json_extract(m.data, '$.time.created')) AS created,",
+        "coalesce(m.originalCompleted, json_extract(m.data, '$.time.completed')) AS timeCompleted,",
+        "coalesce(m.originalCompleted, json_extract(m.data, '$.time.completed'), json_extract(m.data, '$.time.created')) AS created,",
         "json_extract(m.data, '$.tokens.total') AS total,",
         "json_extract(m.data, '$.tokens.input') AS input,",
         "json_extract(m.data, '$.tokens.output') AS output,",

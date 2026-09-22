@@ -98,6 +98,53 @@ async function fixture(versions: number[]) {
 }
 
 describe('local usage database versions', () => {
+  it('recovers migrated completion timing without reverting token usage', async () => {
+    const { add, report, now, database } = await fixture([1, 2]);
+    add(1, 'migrated', now - 1, 'luna');
+    add(2, 'migrated', now, 'luna');
+    database.prepare("DELETE FROM session_message WHERE id = 'migrated-reply-2'").run();
+    const created = now - 5 * 24 * 60 * 60 * 1_000;
+    database
+      .prepare(
+        "UPDATE message SET data = json_set(data, '$.time.created', ?, '$.time.completed', ?)"
+      )
+      .run(created, created + 4_700);
+    database
+      .prepare(
+        "UPDATE session_message SET data = json_set(data, '$.time.created', ?, '$.tokens.output', 15) WHERE type = 'assistant'"
+      )
+      .run(created);
+
+    const content = await report();
+    expect(content.split('## Last 7 rolling days')[0]).toContain('_No token usage._');
+    expect(content).toContain('| provider | luna | 1 | 31 | 5s | 10 | 15 | 2 | 3 | 1 |');
+    expect(content).not.toContain('120h');
+  });
+
+  it.each(['created', 'model', 'session', 'invalid completion'])(
+    'keeps native timing when the legacy message has mismatched %s',
+    async (mismatch) => {
+      const { add, report, now, database } = await fixture([1, 2]);
+      add(1, 'migrated', now - 1, 'luna');
+      add(2, 'migrated', now, 'luna');
+      if (mismatch === 'session') {
+        database.prepare("UPDATE message SET session_id = 'other'").run();
+      } else {
+        const path =
+          mismatch === 'created'
+            ? '$.time.created'
+            : mismatch === 'model'
+              ? '$.modelID'
+              : '$.time.completed';
+        database
+          .prepare('UPDATE message SET data = json_set(data, ?, ?)')
+          .run(path, mismatch === 'model' ? 'other' : 0);
+      }
+      const content = await report();
+      expect(content).toContain('| provider | luna | 1 | 42 | 4s |');
+    }
+  );
+
   it.each([1, 2])('reads a V%i-only database', async (version) => {
     const { add, report, now } = await fixture([version]);
     add(version, 'only', now, 'only-model');
