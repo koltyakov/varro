@@ -224,7 +224,7 @@ import {
   QueuedMessages,
   type QueuedMessageItem,
 } from './chat-input/QueuedMessages';
-import { getUserMessageEditText } from './message/UserMessageContent';
+import { parseUserMessageContent } from './message/UserMessageContent';
 import { UsageLimitBanner } from './chat-input/UsageLimitBanner';
 import {
   estimateContextBreakdown,
@@ -4724,15 +4724,18 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             entry.info.pendingDelivery === 'steer' &&
             !queuedMessageIds.has(entry.info.id)
         )
-        .map((entry) => ({
-          id: entry.info.id,
-          sessionId: entry.info.sessionID,
-          text:
-            getUserMessageEditText(entry.parts) ||
-            entry.parts
-              .flatMap((part) => (part.type === 'file' ? [part.filename || 'Attachment'] : []))
-              .join(', '),
-        })),
+        .map((entry) => {
+          const parsed = parseUserMessageContent(entry.parts);
+          return {
+            id: entry.info.id,
+            sessionId: entry.info.sessionID,
+            text: parsed.messageTexts.join('\n'),
+            imageCount: parsed.fileParts.filter((part) => part.mime.startsWith('image/')).length,
+            attachmentCount:
+              parsed.attachments.length +
+              parsed.fileParts.filter((part) => !part.mime.startsWith('image/')).length,
+          };
+        }),
     ];
   });
 

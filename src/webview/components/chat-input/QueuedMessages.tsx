@@ -57,7 +57,7 @@ function bindQueueOverflowFade(element: HTMLElement, trackItemCount: () => numbe
 
 export function QueuedMessages(props: {
   items: QueuedMessageItem[];
-  pendingSteers?: QueuedMessageItem[];
+  pendingSteers?: (QueuedMessageItem & { imageCount?: number; attachmentCount?: number })[];
   dispatchingItemId?: string | null;
   failedDispatchItemIds?: ReadonlySet<string>;
   steeringItemIds?: ReadonlySet<string>;
@@ -116,6 +116,16 @@ export function QueuedMessages(props: {
                       {item.text || 'Attached context'}
                     </span>
                   </div>
+                  <QueueAttachmentIcons
+                    imageCount={item.imageCount ?? item.clipboardImages?.length ?? 0}
+                    attachmentCount={
+                      item.attachmentCount ??
+                      (item.droppedFiles?.length ?? 0) +
+                        (item.terminalSelection ? 1 : 0) +
+                        (item.inlineProblems?.length ?? 0) +
+                        (item.attachedDiagnostics ? 1 : 0)
+                    }
+                  />
                 </div>
               )}
             </For>
@@ -272,34 +282,10 @@ export function QueuedMessages(props: {
                         <span class="chat-queue-paused-label">Paused</span>
                       </Show>
                     </div>
-                    <Show when={attachmentCount > 0 || imageCount > 0}>
-                      <span class="chat-queue-meta">
-                        <Show when={imageCount > 0}>
-                          <span
-                            class="chat-queue-meta-item"
-                            title={`${imageCount} ${imageCount === 1 ? 'image' : 'images'}`}
-                            aria-label={`${imageCount} ${imageCount === 1 ? 'image' : 'images'}`}
-                          >
-                            <span class="chat-queue-image-icon" aria-hidden="true">
-                              <UiIcon source={mediaImageIcon} width={12} height={12} />
-                            </span>
-                            <span>{imageCount}</span>
-                          </span>
-                        </Show>
-                        <Show when={attachmentCount > 0}>
-                          <span
-                            class="chat-queue-meta-item"
-                            title={`${attachmentCount} ${attachmentCount === 1 ? 'attachment' : 'attachments'}`}
-                            aria-label={`${attachmentCount} ${attachmentCount === 1 ? 'attachment' : 'attachments'}`}
-                          >
-                            <span class="chat-queue-attachment-icon" aria-hidden="true">
-                              <UiIcon source={attachmentIcon} width={12} height={12} />
-                            </span>
-                            <span>{attachmentCount}</span>
-                          </span>
-                        </Show>
-                      </span>
-                    </Show>
+                    <QueueAttachmentIcons
+                      imageCount={imageCount}
+                      attachmentCount={attachmentCount}
+                    />
                     <div class="chat-queue-actions">
                       <Show when={isEditing()}>
                         <span class="chat-queue-editing-label">Editing</span>
@@ -402,5 +388,38 @@ export function QueuedMessages(props: {
         </div>
       </Show>
     </>
+  );
+}
+
+function QueueAttachmentIcons(props: { imageCount: number; attachmentCount: number }) {
+  return (
+    <Show when={props.attachmentCount > 0 || props.imageCount > 0}>
+      <span class="chat-queue-meta">
+        <Show when={props.imageCount > 0}>
+          <span
+            class="chat-queue-meta-item"
+            title={`${props.imageCount} ${props.imageCount === 1 ? 'image' : 'images'}`}
+            aria-label={`${props.imageCount} ${props.imageCount === 1 ? 'image' : 'images'}`}
+          >
+            <span class="chat-queue-image-icon" aria-hidden="true">
+              <UiIcon source={mediaImageIcon} width={12} height={12} />
+            </span>
+            <span>{props.imageCount}</span>
+          </span>
+        </Show>
+        <Show when={props.attachmentCount > 0}>
+          <span
+            class="chat-queue-meta-item"
+            title={`${props.attachmentCount} ${props.attachmentCount === 1 ? 'attachment' : 'attachments'}`}
+            aria-label={`${props.attachmentCount} ${props.attachmentCount === 1 ? 'attachment' : 'attachments'}`}
+          >
+            <span class="chat-queue-attachment-icon" aria-hidden="true">
+              <UiIcon source={attachmentIcon} width={12} height={12} />
+            </span>
+            <span>{props.attachmentCount}</span>
+          </span>
+        </Show>
+      </span>
+    </Show>
   );
 }
