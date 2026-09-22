@@ -812,6 +812,7 @@ export type QueuedContextSnapshot = {
     };
   };
   currentDocumentEnabled: boolean;
+  autoAttachedFilePath?: string;
   issuesEnabled?: boolean;
   visionDelegationAvailable?: boolean;
 };

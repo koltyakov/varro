@@ -3681,6 +3681,7 @@ describe('ChatInput', () => {
         diagnostics: [],
       },
       currentDocumentEnabled: true,
+      autoAttachedFilePath: '/repo/src/menus.css',
       issuesEnabled: true,
       visionDelegationAvailable: false,
     });
@@ -4760,6 +4761,88 @@ describe('ChatInput', () => {
     expect(state.queuedMessages[0]?.id).toBe('q1');
     expect(state.queuedMessages[1]?.paused).toBe(true);
     expect(state.queuedMessages[2]?.id).toBe('q3');
+  });
+
+  it('can disable an automatically attached document while editing a queued message', async () => {
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: {
+        path: '/repo/CHANGELOG.md',
+        relativePath: 'CHANGELOG.md',
+        language: 'markdown',
+      },
+      selection: null,
+      diagnostics: [],
+    });
+    setInputText('Also run performance tests');
+    cleanup = render(() => ChatInput(), container!);
+
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Add to queue (Enter)"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+    expect(state.queuedMessages[0]?.droppedFiles?.map((file) => file.path)).toEqual([
+      '/repo/CHANGELOG.md',
+    ]);
+
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(state.droppedFiles).toEqual([]);
+    const documentChip = container?.querySelector<HTMLElement>(
+      '.chat-attachments-container [role="button"][aria-pressed="true"]'
+    );
+    expect(documentChip?.textContent).toContain('CHANGELOG.md');
+    documentChip?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(documentChip?.getAttribute('aria-pressed')).toBe('false');
+
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Add to queue (Enter)"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+    expect(state.queuedMessages[0]?.droppedFiles).toEqual([]);
+    expect(state.queuedMessages[0]?.queuedContext?.currentDocumentEnabled).toBe(false);
+  });
+
+  it('keeps an explicitly attached active file when editing a queued message', () => {
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: {
+        path: '/repo/CHANGELOG.md',
+        relativePath: 'CHANGELOG.md',
+        language: 'markdown',
+      },
+      selection: null,
+      diagnostics: [],
+    });
+    setState('queuedMessages', [
+      {
+        id: 'q1',
+        sessionId: 'session-1',
+        text: 'Review changes',
+        droppedFiles: [
+          {
+            path: '/repo/CHANGELOG.md',
+            relativePath: 'CHANGELOG.md',
+            type: 'file',
+            attachmentSequence: 1,
+          },
+        ],
+        queuedContext: { editorContext: state.editorContext, currentDocumentEnabled: true },
+      },
+    ]);
+    cleanup = render(() => ChatInput(), container!);
+
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(state.droppedFiles).toEqual([
+      expect.objectContaining({ path: '/repo/CHANGELOG.md', attachmentSequence: 1 }),
+    ]);
   });
 
   it('sends an edited attempted message with a fresh message id', async () => {

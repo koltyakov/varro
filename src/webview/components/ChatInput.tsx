@@ -89,6 +89,7 @@ import {
   getPermissionModeForSession,
   requestMessageListScrollToBottom,
   getCurrentDocumentEnabled,
+  setCurrentDocumentEnabled,
   getProviderLimit,
   getModelDisplayName,
   getSelectedMcpsForSession,
@@ -2624,6 +2625,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       const queuedMessagePaused = existingQueuedMessage?.paused;
       const queuedDroppedFiles = [...(queuedAttachments.droppedFiles ?? [])];
       const activeFile = composerActiveFile();
+      let autoAttachedFilePath: string | undefined;
       if (activeFile && activeContextEnabled(sessionId)) {
         const activeFileContext = {
           path: activeFile.path,
@@ -2636,6 +2638,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         );
         if (existingIndex === -1) {
           queuedDroppedFiles.push(activeFileContext);
+          autoAttachedFilePath = activeFile.path;
         } else {
           queuedDroppedFiles[existingIndex] = mergeContextFile(
             queuedDroppedFiles[existingIndex],
@@ -2676,6 +2679,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             ...captureQueuedModelSnapshot(sessionId),
           },
           currentDocumentEnabled: activeContextEnabled(sessionId),
+          autoAttachedFilePath,
           issuesEnabled: state.issuesEnabled,
           visionDelegationAvailable: canDelegateCurrentImages(text),
         },
@@ -3239,9 +3243,30 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       setHistoryDraft('');
       setCompletionIndex(0);
       setSuppressCompletion(false);
+      const queuedContext = queued.queuedContext;
+      if (
+        queuedContext &&
+        activeContextEnabled(queued.sessionId) !== queuedContext.currentDocumentEnabled
+      ) {
+        setCurrentDocumentEnabled(queuedContext.currentDocumentEnabled, queued.sessionId);
+      }
+      const autoAttachedFile = queuedContext?.editorContext.activeFile;
+      const autoAttachedPath = queuedContext?.autoAttachedFilePath;
+      const files = (queued.droppedFiles ?? []).filter((file) => {
+        if (!autoAttachedFile || !queuedContext?.currentDocumentEnabled) return true;
+        if (!isSamePath(file.path, autoAttachedPath ?? autoAttachedFile.path)) return true;
+        if (autoAttachedPath) return false;
+        // Queues saved before auto-attachment provenance was recorded have no
+        // sequence on their generated file. Keep explicitly attached files.
+        const ranges = getSelectionRangesFromEditorContext(queuedContext.editorContext.selection);
+        return (
+          file.attachmentSequence !== undefined ||
+          JSON.stringify(file.lineRanges ?? []) !== JSON.stringify(ranges)
+        );
+      });
       applyComposerEditState(
         {
-          files: queued.droppedFiles ?? [],
+          files,
           images: queued.clipboardImages ?? [],
           pdfs: queued.nativePdfs ?? [],
           terminalSelection: queued.terminalSelection ?? null,
