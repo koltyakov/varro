@@ -85,6 +85,7 @@ export class ProviderFileRefreshController {
   private pendingStatusPosted = false;
   private invalidationInFlight = false;
   private pendingRevision = 0;
+  private persistenceOperation: Promise<void> = Promise.resolve();
   private authIdleCandidate: { generation: number; since: number } | null = null;
   private unmanagedServerSynchronized = false;
   private disposed = false;
@@ -458,6 +459,7 @@ export class ProviderFileRefreshController {
       this.authIdleCandidate = null;
 
       const pendingRevision = this.pendingRevision;
+      const revalidateAuth = this.authRevalidationPending;
       if (pendingScope === 'workspace') {
         const directories = [...this.pendingWorkspaceDirectories];
         if (directories.length === 0) {
@@ -472,9 +474,7 @@ export class ProviderFileRefreshController {
           );
         }
       } else {
-        const managedState = this.authRevalidationPending
-          ? await this.readManagedServerState()
-          : false;
+        const managedState = revalidateAuth ? await this.readManagedServerState() : false;
         if (this.disposed || generation !== this.refreshGeneration) return;
         if (managedState === true) {
           await this.dependencies.server.restart();
@@ -499,15 +499,18 @@ export class ProviderFileRefreshController {
         this.pendingWorkspaceDirectories.clear();
         this.workspaceRoutingBaselines.clear();
         this.pendingAuthOnlyInvalidation = false;
+        this.authRevalidationPending = false;
         await this.clearPersistedPendingState();
-        if (!this.disposed && this.pendingStatusPosted) {
+        if (
+          !this.disposed &&
+          pendingRevision === this.pendingRevision &&
+          this.pendingStatusPosted
+        ) {
           this.pendingStatusPosted = false;
           this.dependencies.postPendingStatus(false);
         }
       }
       if (this.disposed || generation !== this.refreshGeneration) return;
-      const revalidateAuth = this.authRevalidationPending;
-      this.authRevalidationPending = false;
       this.dependencies.clearProviderLimitCache();
       this.dependencies.postRefresh(revalidateAuth ? { revalidateAuth: true } : undefined);
     } catch (err) {
@@ -625,15 +628,16 @@ export class ProviderFileRefreshController {
         revalidateAuth: this.authRevalidationPending,
         source: this.pendingAuthOnlyInvalidation ? ('auth' as const) : ('config' as const),
       };
-      await this.dependencies.persistence.set(
-        ProviderFileRefreshController.PENDING_STATE_KEY,
+      const state =
         this.pendingWorkspaceDirectories.size > 0
           ? {
               version: 4,
               ...common,
               workspaceDirectories: [...this.pendingWorkspaceDirectories],
             }
-          : { version: 3, ...common }
+          : { version: 3, ...common };
+      await this.persist(() =>
+        this.dependencies.persistence.set(ProviderFileRefreshController.PENDING_STATE_KEY, state)
       );
     } catch (err) {
       logger.warn(
@@ -644,12 +648,20 @@ export class ProviderFileRefreshController {
 
   private async clearPersistedPendingState() {
     try {
-      await this.dependencies.persistence.remove(ProviderFileRefreshController.PENDING_STATE_KEY);
+      await this.persist(() =>
+        this.dependencies.persistence.remove(ProviderFileRefreshController.PENDING_STATE_KEY)
+      );
     } catch (err) {
       logger.warn(
         `Failed to clear provider refresh state: ${err instanceof Error ? err.message : String(err)}`
       );
     }
+  }
+
+  private async persist(operation: () => void | PromiseLike<void>) {
+    const pending = this.persistenceOperation.then(operation);
+    this.persistenceOperation = pending.catch(() => undefined);
+    await pending;
   }
 
   private async cancelWorkspaceRefresh() {
