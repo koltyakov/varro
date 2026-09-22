@@ -122,6 +122,11 @@ function mergeModelPreferences(
     ),
     hiddenModels: mergeArray(current.hiddenModels, base.hiddenModels, next.hiddenModels),
     addedModels: mergeArray(current.addedModels, base.addedModels, next.addedModels),
+    removedModels: mergeArray(
+      current.removedModels ?? [],
+      base.removedModels ?? [],
+      next.removedModels ?? []
+    ),
     pinnedModels: mergeArray(current.pinnedModels, base.pinnedModels, next.pinnedModels),
     modelDisplayNames: mergeRecord(
       current.modelDisplayNames,
@@ -175,6 +180,7 @@ function cloneModelPreferences(preferences: ModelPreferences): ModelPreferences 
     hiddenProviders: [...preferences.hiddenProviders],
     hiddenModels: [...preferences.hiddenModels],
     addedModels: [...preferences.addedModels],
+    removedModels: [...(preferences.removedModels ?? [])],
     pinnedModels: [...preferences.pinnedModels],
     modelDisplayNames: { ...preferences.modelDisplayNames },
   };

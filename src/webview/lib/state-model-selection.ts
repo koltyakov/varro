@@ -1,7 +1,7 @@
 import { produce, reconcile } from 'solid-js/store';
 import type { Command, Provider } from '../types';
 import type { SelectedModel } from './app-state-types';
-import type { McpStatus, ProviderLimitStatus } from '../../shared/protocol';
+import type { McpStatus, ModelPreferences, ProviderLimitStatus } from '../../shared/protocol';
 import { JEV_DECISION_PROVIDER_ID } from '../../shared/protocol';
 import type { ProviderAuthMethodsByProvider } from '../../shared/opencode-types';
 import { setState, showSessionPicker, state } from './app-state';
@@ -304,8 +304,9 @@ export function isModelListed(providerID: string, modelID: string) {
   const provider = state.providers.find((item) => item.id === providerID);
   return (
     !provider ||
-    (!isLargeModelCatalog(provider) && !hasManagedModelCatalog(providerID)) ||
-    isModelAdded(providerID, modelID)
+    (isLargeModelCatalog(provider)
+      ? isModelAdded(providerID, modelID)
+      : !state.removedModels.includes(modelVisibilityKey(providerID, modelID)))
   );
 }
 
@@ -355,9 +356,12 @@ export function setModelOrder(providerID: string, modelIDs: readonly string[]) {
 
 export function setModelAdded(providerID: string, modelID: string, added: boolean) {
   const prefix = `${providerID}:`;
-  const currentModelIDs = state.addedModels
-    .filter((item) => item.startsWith(prefix))
-    .map((item) => item.slice(prefix.length));
+  const provider = state.providers.find((item) => item.id === providerID);
+  const currentModelIDs = provider
+    ? getListedProviderModels(provider).map((model) => model.id)
+    : state.addedModels
+        .filter((item) => item.startsWith(prefix))
+        .map((item) => item.slice(prefix.length));
   setModelsAdded(
     providerID,
     added
@@ -375,10 +379,12 @@ export function setModelsAdded(providerID: string, modelIDs: readonly string[]) 
     ? isLargeModelCatalog(provider) || hasManagedModelCatalog(providerID)
     : false;
   const previousModelIDs = new Set(
-    state.addedModels
-      .filter((item) => item.startsWith(prefix))
-      .map((item) => item.slice(prefix.length))
-      .filter((modelID) => modelID !== MANAGED_MODEL_CATALOG_MARKER)
+    provider
+      ? getListedProviderModels(provider).map((model) => model.id)
+      : state.addedModels
+          .filter((item) => item.startsWith(prefix))
+          .map((item) => item.slice(prefix.length))
+          .filter((modelID) => modelID !== MANAGED_MODEL_CATALOG_MARKER)
   );
   const nextModelIDs = [...new Set(modelIDs)].filter(
     (modelID) => modelID !== MANAGED_MODEL_CATALOG_MARKER
@@ -388,6 +394,22 @@ export function setModelsAdded(providerID: string, modelIDs: readonly string[]) 
     ...(usesManagedMarker ? [modelVisibilityKey(providerID, MANAGED_MODEL_CATALOG_MARKER)] : []),
     ...nextModelIDs.map((modelID) => modelVisibilityKey(providerID, modelID)),
   ];
+
+  if (provider && !isLargeModelCatalog(provider)) {
+    const selected = new Set(nextModelIDs);
+    const removed = [
+      ...state.removedModels.filter(
+        (key) =>
+          !key.startsWith(prefix) ||
+          (!provider.models[key.slice(prefix.length)] && !selected.has(key.slice(prefix.length)))
+      ),
+      ...Object.keys(provider.models)
+        .filter((modelID) => !selected.has(modelID))
+        .map((modelID) => modelVisibilityKey(providerID, modelID)),
+    ];
+    setState('removedModels', removed);
+    writeStored(STORAGE_KEYS.removedModels, removed);
+  }
 
   setState('addedModels', next);
   writeStored(STORAGE_KEYS.addedModels, next);
@@ -407,10 +429,11 @@ export function setModelsAdded(providerID: string, modelIDs: readonly string[]) 
 }
 
 export function getListedProviderModels(provider: Provider) {
-  if (!isLargeModelCatalog(provider) && !hasManagedModelCatalog(provider.id)) {
-    return Object.values(provider.models);
-  }
-  return Object.values(provider.models).filter((model) => isModelAdded(provider.id, model.id));
+  return Object.values(provider.models).filter((model) =>
+    isLargeModelCatalog(provider)
+      ? isModelAdded(provider.id, model.id)
+      : !state.removedModels.includes(modelVisibilityKey(provider.id, model.id))
+  );
 }
 
 export function getVisibleProviders(providers: Provider[]) {
@@ -531,20 +554,20 @@ export function getModelPreferencesSnapshot() {
     hiddenProviders: [...state.hiddenProviders],
     hiddenModels: [...state.hiddenModels],
     addedModels: [...state.addedModels],
+    removedModels: [...state.removedModels],
     pinnedModels: [...state.pinnedModels],
     modelDisplayNames: { ...state.modelDisplayNames },
   };
 }
 
-export function applyModelPreferencesSnapshot(
-  preferences: ReturnType<typeof getModelPreferencesSnapshot>
-) {
+export function applyModelPreferencesSnapshot(preferences: ModelPreferences) {
   setState('modelVariantSelections', reconcile(preferences.modelVariantSelections));
   setState('providerOrder', reconcile(preferences.providerOrder));
   setState('modelOrder', reconcile(preferences.modelOrder));
   setState('hiddenProviders', reconcile(preferences.hiddenProviders));
   setState('hiddenModels', reconcile(preferences.hiddenModels));
   setState('addedModels', reconcile(preferences.addedModels));
+  setState('removedModels', reconcile(preferences.removedModels ?? []));
   setState('pinnedModels', reconcile(preferences.pinnedModels));
   setState('modelDisplayNames', reconcile(preferences.modelDisplayNames));
   writeStored(STORAGE_KEYS.modelVariantSelections, preferences.modelVariantSelections);
@@ -553,6 +576,7 @@ export function applyModelPreferencesSnapshot(
   writeStored(STORAGE_KEYS.hiddenProviders, preferences.hiddenProviders);
   writeStored(STORAGE_KEYS.hiddenModels, preferences.hiddenModels);
   writeStored(STORAGE_KEYS.addedModels, preferences.addedModels);
+  writeStored(STORAGE_KEYS.removedModels, preferences.removedModels ?? []);
   writeStored(STORAGE_KEYS.pinnedModels, preferences.pinnedModels);
   writeStored(STORAGE_KEYS.modelDisplayNames, preferences.modelDisplayNames);
 }

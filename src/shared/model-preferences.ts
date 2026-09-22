@@ -16,6 +16,7 @@ export function parseModelPreferences(value: unknown): ModelPreferences {
     hiddenProviders: parseStringArray(record?.hiddenProviders),
     hiddenModels: parseStringArray(record?.hiddenModels),
     addedModels: parseStringArray(record?.addedModels),
+    removedModels: parseStringArray(record?.removedModels),
     pinnedModels: parseStringArray(record?.pinnedModels),
     modelDisplayNames: parseStringRecord(record?.modelDisplayNames),
   };
@@ -31,6 +32,7 @@ export function parseRequiredModelPreferences(value: unknown): ModelPreferences 
     !isStringArray(record.hiddenProviders) ||
     !isStringArray(record.hiddenModels) ||
     !isStringArray(record.addedModels) ||
+    (record.removedModels !== undefined && !isStringArray(record.removedModels)) ||
     !isStringArray(record.pinnedModels) ||
     !isStringRecord(record.modelDisplayNames)
   ) {

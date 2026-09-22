@@ -181,6 +181,7 @@ export interface AppState {
   hiddenProviders: string[];
   hiddenModels: string[];
   addedModels: string[];
+  removedModels: string[];
   pinnedModels: string[];
   modelDisplayNames: Record<string, string>;
   lastSeenSessions: Record<string, number>;
@@ -449,6 +450,9 @@ export function createAppState(): AppStateInstance {
     hiddenModels:
       modelPreferences?.hiddenModels ?? readStoredStringArray(STORAGE_KEYS.hiddenModels),
     addedModels: modelPreferences?.addedModels ?? readStoredStringArray(STORAGE_KEYS.addedModels),
+    removedModels: modelPreferences
+      ? (modelPreferences.removedModels ?? [])
+      : readStoredStringArray(STORAGE_KEYS.removedModels),
     pinnedModels:
       modelPreferences?.pinnedModels ?? readStoredStringArray(STORAGE_KEYS.pinnedModels),
     modelDisplayNames:

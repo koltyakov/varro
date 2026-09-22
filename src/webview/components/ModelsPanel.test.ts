@@ -267,6 +267,7 @@ beforeEach(() => {
   ]);
   setState('hiddenProviders', []);
   setState('hiddenModels', []);
+  setState('removedModels', []);
   setState('providerOrder', []);
   setState('modelOrder', []);
   setState('addedModels', []);
@@ -277,6 +278,7 @@ beforeEach(() => {
   window.localStorage.removeItem(STORAGE_KEYS.modelDisplayNames);
   window.localStorage.removeItem(STORAGE_KEYS.hiddenProviders);
   window.localStorage.removeItem(STORAGE_KEYS.hiddenModels);
+  window.localStorage.removeItem(STORAGE_KEYS.removedModels);
   window.localStorage.removeItem(STORAGE_KEYS.providerOrder);
   window.localStorage.removeItem(STORAGE_KEYS.modelOrder);
   setState('providerAuthMethods', reconcile({}));
@@ -302,6 +304,7 @@ afterEach(() => {
   setState('workspaceStatuses', []);
   setState('hiddenProviders', []);
   setState('hiddenModels', []);
+  setState('removedModels', []);
   setState('providerOrder', []);
   setState('modelOrder', []);
   setState('addedModels', []);
@@ -312,6 +315,7 @@ afterEach(() => {
   window.localStorage.removeItem(STORAGE_KEYS.modelDisplayNames);
   window.localStorage.removeItem(STORAGE_KEYS.hiddenProviders);
   window.localStorage.removeItem(STORAGE_KEYS.hiddenModels);
+  window.localStorage.removeItem(STORAGE_KEYS.removedModels);
   window.localStorage.removeItem(STORAGE_KEYS.providerOrder);
   window.localStorage.removeItem(STORAGE_KEYS.modelOrder);
   setState('providerAuthMethods', reconcile({}));
@@ -458,6 +462,40 @@ describe('ModelsPanel', () => {
 
     expect(dialog?.textContent).toContain('Search 541 available models');
     expect(Object.keys(state.providers[0]?.models ?? {})).toHaveLength(541);
+  });
+
+  it('selects newly published models when refreshing a managed provider catalog', async () => {
+    const provider = state.providers[0]!;
+    setState('addedModels', ['openai:*', 'openai:gpt-5']);
+    setState('removedModels', ['openai:gpt-5-mini']);
+    clientMocks.providers.mockResolvedValue({
+      providers: [
+        {
+          ...provider,
+          models: {
+            ...provider.models,
+            'new-model': { ...provider.models['gpt-5']!, id: 'new-model', name: 'New model' },
+          },
+        },
+      ],
+      default: {},
+      defaultModel: null,
+    });
+    cleanup = render(() => ModelsPanel(), container!);
+    findButton(container, 'Add models')?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    const dialog = document.body.querySelector<HTMLElement>('.models-model-catalog-dialog');
+    const rows = Array.from(
+      dialog?.querySelectorAll<HTMLElement>('.models-model-catalog-row') ?? []
+    );
+    const checkbox = (id: string) =>
+      rows
+        .find((row) => row.querySelector('.models-model-catalog-id')?.textContent === `(${id})`)
+        ?.querySelector<HTMLInputElement>('input');
+    expect(checkbox('new-model')?.checked).toBe(true);
+    expect(checkbox('gpt-5-mini')?.checked).toBe(false);
+    expect(findButton(dialog, 'Save changes')?.disabled).toBe(true);
   });
 
   it('adds Jev from the provider actions menu and shows it above providers', async () => {

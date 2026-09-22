@@ -780,6 +780,8 @@ export type ModelPreferences = {
   hiddenProviders: string[];
   hiddenModels: string[];
   addedModels: string[];
+  /** Explicit catalog removals. Older allowlists cannot distinguish removals from new models. */
+  removedModels?: string[];
   pinnedModels: string[];
   modelDisplayNames: Record<string, string>;
 };

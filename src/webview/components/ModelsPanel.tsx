@@ -1166,6 +1166,12 @@ function ModelCatalogDialog(props: { provider: ModelProvider; onClose: () => voi
           throw new Error(`${props.provider.name} is no longer available`);
         }
         setCatalogProvider(refreshedProvider);
+        if (!isLargeModelCatalog(refreshedProvider)) {
+          for (const model of getListedProviderModels(refreshedProvider)) {
+            initialModelIDs.add(model.id);
+          }
+          setSelectedModelIDs(new Set(initialModelIDs));
+        }
         setState(
           'providers',
           state.providers.map((provider) =>

@@ -67,6 +67,7 @@ describe('webview message validation', () => {
       modelOrder: [],
       hiddenProviders: [],
       hiddenModels: [],
+      removedModels: [],
       addedModels: [],
       pinnedModels: [],
       modelDisplayNames: {},

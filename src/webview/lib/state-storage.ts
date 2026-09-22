@@ -18,6 +18,7 @@ export const STORAGE_KEYS = {
   hiddenProviders: 'varro.hiddenProviders',
   hiddenModels: 'varro.hiddenModels',
   addedModels: 'varro.addedModels',
+  removedModels: 'varro.removedModels',
   pinnedModels: 'varro.pinnedModels',
   modelDisplayNames: 'varro.modelDisplayNames',
   modelPickerOpened: 'varro.modelPickerOpened',

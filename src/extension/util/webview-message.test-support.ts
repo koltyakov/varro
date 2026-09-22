@@ -9,6 +9,7 @@ const MODEL_PREFERENCES: ModelPreferences = {
   modelOrder: ['anthropic:claude-opus-5'],
   hiddenProviders: ['openai'],
   hiddenModels: ['openai/gpt-5'],
+  removedModels: ['openai/gpt-4'],
   addedModels: ['anthropic/claude-haiku-4-5'],
   pinnedModels: ['anthropic/claude-opus-5'],
   modelDisplayNames: { 'anthropic/claude-opus-5': 'Opus' },
