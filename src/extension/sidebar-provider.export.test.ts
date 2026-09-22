@@ -1,5 +1,5 @@
-/* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-runtime-typeof, anti-slop/require-safety-comment-for-type-assertion -- These export tests inspect controlled provider internals and deliberately verify opaque response representations. */
-import { writeSync } from 'node:fs';
+/* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/require-safety-comment-for-type-assertion -- These export tests inspect controlled provider internals and deliberately verify opaque response representations. */
+import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import {
   createServer,
@@ -24,21 +24,27 @@ function createExportServer() {
   });
 }
 
+function mockExportProcess() {
+  const stdout = new PassThrough();
+  const closeHandlers: Array<(code: number | null, signal: NodeJS.Signals | null) => void> = [];
+  spawnMock.mockReturnValue({
+    stdout,
+    stderr: { on: vi.fn() },
+    once: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+      if (event === 'close') {
+        closeHandlers.push((code, signal) => {
+          stdout.end();
+          (handler as (code: number | null, signal: NodeJS.Signals | null) => void)(code, signal);
+        });
+      }
+    }),
+  });
+  return { stdout, closeHandlers };
+}
+
 describe('SidebarProvider export flows', () => {
   it('exports a session through the OpenCode CLI and opens the result', async () => {
-    const closeHandlers: Array<(code: number | null, signal: NodeJS.Signals | null) => void> = [];
-    spawnMock.mockReturnValue({
-      stderr: {
-        on: vi.fn(),
-      },
-      once: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
-        if (event === 'close') {
-          closeHandlers.push(
-            handler as (code: number | null, signal: NodeJS.Signals | null) => void
-          );
-        }
-      }),
-    });
+    const { stdout, closeHandlers } = mockExportProcess();
 
     const { provider } = await createSidebarProviderInstance({
       server: createExportServer(),
@@ -53,10 +59,7 @@ describe('SidebarProvider export flows', () => {
       expect(spawnMock).toHaveBeenCalledTimes(1);
       expect(closeHandlers).toHaveLength(1);
     });
-    const options = spawnMock.mock.calls[0]?.[2] as { stdio?: unknown[] } | undefined;
-    const outputFd = Array.isArray(options?.stdio) ? (options.stdio[1] as number) : undefined;
-    expect(typeof outputFd).toBe('number');
-    writeSync(outputFd!, '{"id":"session-1"}');
+    stdout.write('{"id":"session-1"}');
     closeHandlers[0]?.(0, null);
     await exportPromise;
 
@@ -69,19 +72,7 @@ describe('SidebarProvider export flows', () => {
   });
 
   it('waits for close before opening a large export result', async () => {
-    const closeHandlers: Array<(code: number | null, signal: NodeJS.Signals | null) => void> = [];
-    spawnMock.mockReturnValue({
-      stderr: {
-        on: vi.fn(),
-      },
-      once: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
-        if (event === 'close') {
-          closeHandlers.push(
-            handler as (code: number | null, signal: NodeJS.Signals | null) => void
-          );
-        }
-      }),
-    });
+    const { stdout, closeHandlers } = mockExportProcess();
 
     const { provider } = await createSidebarProviderInstance({
       server: createExportServer(),
@@ -98,11 +89,8 @@ describe('SidebarProvider export flows', () => {
       expect(spawnMock).toHaveBeenCalledTimes(1);
       expect(closeHandlers).toHaveLength(1);
     });
-    const options = spawnMock.mock.calls[0]?.[2] as { stdio?: unknown[] } | undefined;
-    const outputFd = Array.isArray(options?.stdio) ? (options.stdio[1] as number) : undefined;
-    expect(typeof outputFd).toBe('number');
     const content = '{"items":[{"id":1}]}';
-    writeSync(outputFd!, content);
+    stdout.write(content);
     closeHandlers[0]?.(0, null);
     await exportPromise;
 
@@ -114,19 +102,7 @@ describe('SidebarProvider export flows', () => {
   });
 
   it('shows an error when export output is invalid JSON', async () => {
-    const closeHandlers: Array<(code: number | null, signal: NodeJS.Signals | null) => void> = [];
-    spawnMock.mockReturnValue({
-      stderr: {
-        on: vi.fn(),
-      },
-      once: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
-        if (event === 'close') {
-          closeHandlers.push(
-            handler as (code: number | null, signal: NodeJS.Signals | null) => void
-          );
-        }
-      }),
-    });
+    const { stdout, closeHandlers } = mockExportProcess();
 
     const { provider } = await createSidebarProviderInstance({
       server: createExportServer(),
@@ -141,10 +117,7 @@ describe('SidebarProvider export flows', () => {
       expect(spawnMock).toHaveBeenCalledTimes(1);
       expect(closeHandlers).toHaveLength(1);
     });
-    const options = spawnMock.mock.calls[0]?.[2] as { stdio?: unknown[] } | undefined;
-    const outputFd = Array.isArray(options?.stdio) ? (options.stdio[1] as number) : undefined;
-    expect(typeof outputFd).toBe('number');
-    writeSync(outputFd!, '{"items":[');
+    stdout.write('{"items":[');
     closeHandlers[0]?.(0, null);
     await exportPromise;
 
@@ -155,20 +128,7 @@ describe('SidebarProvider export flows', () => {
   });
 
   it('exports through a temp file to avoid stdout truncation', async () => {
-    const closeHandlers: Array<(code: number | null, signal: NodeJS.Signals | null) => void> = [];
-
-    spawnMock.mockReturnValue({
-      stderr: {
-        on: vi.fn(),
-      },
-      once: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
-        if (event === 'close') {
-          closeHandlers.push(
-            handler as (code: number | null, signal: NodeJS.Signals | null) => void
-          );
-        }
-      }),
-    });
+    const { stdout, closeHandlers } = mockExportProcess();
 
     const { provider } = await createSidebarProviderInstance({
       server: createExportServer(),
@@ -186,11 +146,10 @@ describe('SidebarProvider export flows', () => {
     const options = spawnMock.mock.calls[0]?.[2] as { stdio?: unknown[] } | undefined;
     expect(Array.isArray(options?.stdio)).toBe(true);
     expect(options?.stdio?.[0]).toBe('ignore');
-    expect(typeof options?.stdio?.[1]).toBe('number');
+    expect(options?.stdio?.[1]).toBe('pipe');
     expect(options?.stdio?.[2]).toBe('pipe');
-    const outputFd = options?.stdio?.[1] as number;
     const content = `{"items":[{"id":1,"text":"${'x'.repeat(70_000)}"}]}`;
-    writeSync(outputFd, content);
+    stdout.write(content);
     closeHandlers[0]?.(0, null);
     await exportPromise;
 
@@ -203,6 +162,7 @@ describe('SidebarProvider export flows', () => {
   it('times out a hung export process and reports an error', async () => {
     let closeHandler: ((code: number | null, signal: NodeJS.Signals | null) => void) | undefined;
     const proc = {
+      stdout: new PassThrough(),
       stderr: {
         on: vi.fn(),
       },

@@ -140,4 +140,26 @@ describe('SessionHistoryScopeStore', () => {
 
     expect(new SessionHistoryScopeStore(persistence).getForRoot('/repo')).toBe('project');
   });
+
+  it('keeps the previous scope when persistence fails and retries the change', async () => {
+    const saved = new Map<string, unknown>();
+    const persistence: Persistence = {
+      get<T>(key: string) {
+        return saved.get(key) as T | undefined;
+      },
+      set: vi.fn<Persistence['set']>(async (key, value) => {
+        saved.set(key, value);
+      }),
+      remove: vi.fn(),
+    };
+    const store = new SessionHistoryScopeStore(persistence);
+    await store.associate('/repo', 'project:one');
+    await store.set('project:one', 'directory');
+    vi.mocked(persistence.set).mockRejectedValueOnce(new Error('Storage unavailable'));
+
+    await expect(store.set('project:one', 'descendants')).rejects.toThrow('Storage unavailable');
+    expect(store.getForRoot('/repo')).toBe('directory');
+    await store.set('project:one', 'descendants');
+    expect(store.getForRoot('/repo')).toBe('descendants');
+  });
 });

@@ -81,12 +81,14 @@ export class SessionPlanStateStore {
     }
     return this.mutate(async () => {
       if (update.skippedAt !== undefined) {
-        this.state = { ...this.state, [sessionId]: update.skippedAt };
-        await this.persistence.set(SESSION_PLAN_STATE_KEY, this.state);
+        const next = { ...this.state, [sessionId]: update.skippedAt };
+        await this.persistence.set(SESSION_PLAN_STATE_KEY, next);
+        this.state = next;
       }
       if (update.agent !== undefined) {
+        const next = { ...this.agents, [sessionId]: update.agent };
+        await this.persistence.set(SESSION_PLAN_AGENT_STATE_KEY, next);
         this.agents = { ...this.agents, [sessionId]: update.agent };
-        await this.persistence.set(SESSION_PLAN_AGENT_STATE_KEY, this.agents);
       }
       return { state: this.list(), agents: this.listAgents() };
     });
