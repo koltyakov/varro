@@ -4,7 +4,7 @@ import { writeFile, mkdtemp, mkdir, readFile, readdir, rm, stat as statPath } fr
 import { tmpdir } from 'os';
 import { Buffer } from 'buffer';
 import { randomBytes } from 'crypto';
-import { join, isAbsolute, relative } from 'path';
+import { join, isAbsolute, relative, sep } from 'path';
 import * as vscode from 'vscode';
 import {
   MAX_DROPPED_CONTENT_FILES,
@@ -394,7 +394,11 @@ export class DroppedFilesService {
     for (const folder of resolutionOrder) {
       const candidate = vscode.Uri.file(join(folder.uri.fsPath, relativePath));
       const folderRelativePath = relative(folder.uri.fsPath, candidate.fsPath);
-      if (folderRelativePath.startsWith('..') || isAbsolute(folderRelativePath)) {
+      if (
+        folderRelativePath === '..' ||
+        folderRelativePath.startsWith(`..${sep}`) ||
+        isAbsolute(folderRelativePath)
+      ) {
         continue;
       }
       try {

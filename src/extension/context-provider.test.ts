@@ -192,6 +192,9 @@ describe('ContextProvider', () => {
     clipboardState.terminalSelection = null;
     clipboardState.deferWrite = null;
     clipboardState.deferCopy = null;
+    vscodeMock.env.clipboard.readText.mockImplementation(() =>
+      Promise.resolve(clipboardState.current)
+    );
     fsState.symlinks.clear();
     fsState.directories.clear();
     vscodeMock.window.activeTerminal = { name: 'Terminal 1' };
@@ -284,6 +287,30 @@ describe('ContextProvider', () => {
       });
       expect(vscodeMock.env.clipboard.writeText).toHaveBeenCalledWith('existing clipboard');
       expect(clipboardState.current).toBe('existing clipboard');
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('keeps a newer user copy made while terminal capture is finishing', async () => {
+    clipboardState.current = 'existing clipboard';
+    clipboardState.terminalSelection = 'terminal output';
+    const originalRead = vscodeMock.env.clipboard.readText.getMockImplementation()!;
+    let reads = 0;
+    vscodeMock.env.clipboard.readText.mockImplementation(() => {
+      reads += 1;
+      if (reads === 3) clipboardState.current = 'new user copy';
+      return originalRead();
+    });
+    const provider = new ContextProvider(vi.fn());
+
+    try {
+      await expect(provider.captureTerminalSelection()).resolves.toEqual({
+        ok: true,
+        terminalName: 'Terminal 1',
+      });
+      expect(clipboardState.current).toBe('new user copy');
+      expect(clipboardState.writes).not.toContain('existing clipboard');
     } finally {
       provider.dispose();
     }
@@ -407,7 +434,7 @@ describe('ContextProvider', () => {
     }
   });
 
-  it('restores a terminal copy that lands after the command times out before dequeuing', async () => {
+  it('does not overwrite an unknown clipboard value after a terminal copy times out', async () => {
     clipboardState.current = 'existing clipboard';
     clipboardState.terminalSelection = 'late terminal output';
     let releaseCopy: () => void = noop;
@@ -434,8 +461,36 @@ describe('ContextProvider', () => {
       await vi.advanceTimersByTimeAsync(1_000);
 
       await expect(secondCapture).resolves.toEqual({ ok: false, reason: 'empty-selection' });
-      expect(clipboardState.current).toBe('existing clipboard');
-      expect(clipboardState.current).not.toBe('late terminal output');
+      expect(clipboardState.current).toBe('late terminal output');
+    } finally {
+      provider.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps a user copy when a timed-out terminal command finishes without copying', async () => {
+    clipboardState.current = 'existing clipboard';
+    clipboardState.terminalSelection = null;
+    let releaseCopy: () => void = noop;
+    clipboardState.deferCopy = {
+      promise: new Promise<void>((resolve) => {
+        releaseCopy = resolve;
+      }),
+      resolve: () => releaseCopy(),
+    };
+    vi.useFakeTimers();
+    const provider = new ContextProvider(vi.fn());
+
+    try {
+      const capture = provider.captureTerminalSelection();
+      await vi.advanceTimersByTimeAsync(2_000);
+      await expect(capture).rejects.toThrow(/Timed out copying terminal selection/);
+      clipboardState.current = 'new user copy';
+      releaseCopy();
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(clipboardState.current).toBe('new user copy');
+      expect(clipboardState.writes).not.toContain('new user copy');
     } finally {
       provider.dispose();
       vi.useRealTimers();

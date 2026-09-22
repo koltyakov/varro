@@ -186,10 +186,15 @@ export class ContextProvider implements vscode.Disposable {
     let restoreCompleted = false;
 
     // Issued outside the timeout wrapper: `withTimeout` abandons the wait but
-    // cannot cancel the write, so from here on the clipboard counts as dirtied
-    // and the restore below is unconditional.
+    // cannot cancel the write, so from here on the clipboard counts as dirtied.
+    // Restore only if it still contains a value this capture wrote.
     const primeWrite = Promise.resolve(vscode.env.clipboard.writeText(sentinel));
-    this.trackClipboardMutation(primeWrite, previousClipboard, () => restoreCompleted);
+    this.trackClipboardMutation(
+      primeWrite,
+      previousClipboard,
+      () => restoreCompleted,
+      () => sentinel
+    );
 
     try {
       await withTimeout(
@@ -200,7 +205,12 @@ export class ContextProvider implements vscode.Disposable {
       const copyCommand = Promise.resolve(
         vscode.commands.executeCommand('workbench.action.terminal.copySelection')
       );
-      this.trackClipboardMutation(copyCommand, previousClipboard, () => restoreCompleted);
+      this.trackClipboardMutation(
+        copyCommand,
+        previousClipboard,
+        () => restoreCompleted,
+        () => selectionText || undefined
+      );
       await withTimeout(
         copyCommand,
         ContextProvider.TERMINAL_COPY_TIMEOUT_MS,
@@ -231,7 +241,8 @@ export class ContextProvider implements vscode.Disposable {
         ).catch(() => undefined);
         await this.restoreClipboard(
           previousClipboard,
-          'Failed to restore clipboard after terminal selection capture'
+          'Failed to restore clipboard after terminal selection capture',
+          [sentinel, selectionText]
         );
       } finally {
         restoreCompleted = true;
@@ -253,7 +264,8 @@ export class ContextProvider implements vscode.Disposable {
   private trackClipboardMutation(
     mutation: Promise<unknown>,
     previousClipboard: string,
-    isRestoreCompleted: () => boolean
+    isRestoreCompleted: () => boolean,
+    expectedValue: () => string | undefined
   ) {
     const settle = withTimeout(
       mutation.catch(() => undefined),
@@ -262,9 +274,12 @@ export class ContextProvider implements vscode.Disposable {
     )
       .then(async () => {
         if (!isRestoreCompleted()) return;
+        const expected = expectedValue();
+        if (!expected) return;
         await this.restoreClipboard(
           previousClipboard,
-          'Could not undo a late clipboard mutation from terminal selection capture'
+          'Could not undo a late clipboard mutation from terminal selection capture',
+          [expected]
         );
       })
       .catch(() => {
@@ -276,8 +291,18 @@ export class ContextProvider implements vscode.Disposable {
     );
   }
 
-  private async restoreClipboard(previousClipboard: string, warning: string) {
+  private async restoreClipboard(
+    previousClipboard: string,
+    warning: string,
+    expectedValues: readonly string[]
+  ) {
     try {
+      const current = await withTimeout(
+        vscode.env.clipboard.readText(),
+        ContextProvider.TERMINAL_COPY_TIMEOUT_MS,
+        'Timed out checking clipboard before terminal selection restore'
+      );
+      if (current === previousClipboard || !expectedValues.includes(current)) return;
       const restoreWrite = Promise.resolve(vscode.env.clipboard.writeText(previousClipboard));
       // A restore that outlives its immediate timeout is itself a late clipboard
       // mutation. Wait for it before dequeuing, but never try to restore a restore.
