@@ -14,7 +14,7 @@ import {
 } from './vscode-launch-process.mjs';
 import { requireFixtureWorkspace } from './ai-fuzzy-preconditions.mjs';
 import { requireIsolatedTestServer } from './ai-test-isolation.mjs';
-import { savePlaybackCapture } from './ai-session-playback.mjs';
+import { normalizeCapturedEvents, savePlaybackCapture } from './ai-session-playback.mjs';
 import { installObserver } from './ai-streaming.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -79,16 +79,26 @@ export function parseRestartCount(value) {
 
 export function fixtureIsSafeForScenario(fixture, manifest, scenario) {
   if (fixture.commit !== manifest.fixture.commit) return false;
+  if (!fixture.status) return true;
   if (!['AI-08', 'AI-18', 'AI-19'].includes(scenario)) return !fixture.status;
-  const preparedFixture = manifest.livePreparation?.['AI-07']?.fixtureAfterPreparation;
-  if (manifest.livePreparation?.['AI-07']?.prepared !== true) return false;
+  // Exit evidence establishes ownership of edits even when a timing check failed.
+  // Use only the latest exit, never an older matching state after subsequent work.
+  const exits = Object.values(manifest.livePreparation ?? {})
+    .map((result) => result.fixtureExitEvidence)
+    .filter((evidence) => evidence?.capturedAt)
+    .toSorted((left, right) => right.capturedAt.localeCompare(left.capturedAt));
+  const preparedFixture =
+    exits[0] ??
+    (manifest.livePreparation?.['AI-07']?.prepared === true
+      ? manifest.livePreparation['AI-07'].fixtureAfterPreparation
+      : null);
   return (
     preparedFixture?.commit === fixture.commit &&
     preparedFixture?.status === fixture.status &&
     JSON.stringify(preparedFixture?.changedPaths ?? []) ===
       JSON.stringify(fixture.changedPaths ?? []) &&
-    (preparedFixture?.contentHash === undefined ||
-      preparedFixture.contentHash === fixture.contentHash)
+    !!preparedFixture.contentHash &&
+    preparedFixture.contentHash === fixture.contentHash
   );
 }
 
@@ -118,6 +128,14 @@ export function shouldRetryNestedHandoff(handoff) {
 
 export function shouldRetryAi08WithFreshStream(actionFailure, attempt, maxPrompts) {
   return actionFailure?.reason === 'model stream settled' && attempt < maxPrompts;
+}
+
+export function shouldRetryActivityWithFreshStream(execution, attempt, maxPrompts) {
+  return (
+    attempt < maxPrompts &&
+    execution?.executed === false &&
+    execution.actions?.at(-1)?.outcome === 'active-window-ended'
+  );
 }
 
 export function beginLivePreparationRun(manifest, scenario) {
@@ -1592,7 +1610,7 @@ async function fixtureStatus(workspace) {
 
 async function writeJsonAtomic(filePath, value) {
   const temporaryPath = `${filePath}.${String(process.pid)}.tmp`;
-  await writeFile(temporaryPath, `${JSON.stringify(value, null, 2)}\n`);
+  await writeFile(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
   await rename(temporaryPath, filePath);
 }
 
@@ -3788,8 +3806,8 @@ async function runLive(options) {
     throw new Error('--scenario must be AI-07, AI-08, AI-17, AI-18, or AI-19');
   }
   const playbackLabel = options['playback-label']?.trim() ?? '';
-  if (playbackLabel && scenario !== 'AI-07') {
-    throw new Error('--playback-label is currently supported for AI-07');
+  if (playbackLabel && !['AI-07', 'AI-08'].includes(scenario)) {
+    throw new Error('--playback-label is supported for AI-07 and AI-08');
   }
   const playbackDatabase = path.resolve(options['playback-db'] ?? 'varro-playback.db');
   const maxPrompts = Number(options['max-prompts'] ?? DEFAULT_MAX_PROMPTS);
@@ -3820,7 +3838,9 @@ async function runLive(options) {
   }
   const fixture = await fixtureStatus(manifest.workspace);
   if (!fixtureIsSafeForScenario(fixture, manifest, scenario)) {
-    throw new Error('The OpenCode fixture is not at the clean recorded baseline');
+    throw new Error(
+      'The OpenCode fixture must match the clean baseline or latest recorded exit evidence'
+    );
   }
   const tracked = manifest.runSessions.find((session) => !session.deleted && !session.parentID);
   if (!tracked) throw new Error('The manifest has no active run session');
@@ -3918,7 +3938,7 @@ async function runLive(options) {
       descendantsBefore = new Set(
         findSessionDescendants(sessionsBefore, tracked.id).map((session) => session.id)
       );
-      if (playbackLabel) {
+      if (['AI-07', 'AI-08'].includes(scenario)) {
         const [session, initialMessages] = await Promise.all([
           client.getSession(tracked.id),
           client.messages(tracked.id, 1000),
@@ -4076,6 +4096,9 @@ async function runLive(options) {
         activityObservationStarted = true;
       }
       for (let attempt = 1; attempt <= maxPrompts; attempt += 1) {
+        handoff = null;
+        actions = [];
+        activityExecution = null;
         const idleDeadline = Date.now() + timeoutMs;
         while (await client.isBusy(tracked.id)) {
           if (Date.now() >= idleDeadline) {
@@ -4184,6 +4207,7 @@ async function runLive(options) {
           });
           actions = activityExecution.actions;
           attemptRecord.activityExecution = activityExecution;
+          if (shouldRetryActivityWithFreshStream(activityExecution, attempt, maxPrompts)) continue;
           break;
         }
 
@@ -4324,17 +4348,22 @@ async function runLive(options) {
         cdp.finishSessionEventCapture(),
         client.messages(tracked.id, 1000),
       ]);
-      const playback = savePlaybackCapture(playbackDatabase, {
-        label: playbackLabel,
+      const capture = {
+        label: playbackLabel || `${manifest.seed} ${scenario} R${promptRun}`,
         scenario,
         capturedAt: new Date().toISOString(),
         model: requestedModel,
         session: playbackSource.session,
         initialMessages: playbackSource.initialMessages,
         finalMessages,
-        events,
-      });
-      process.stdout.write(`${JSON.stringify({ playback }, null, 2)}\n`);
+        events: normalizeCapturedEvents(events, tracked.id),
+      };
+      const capturePath = `${manifestPath}.${scenario}.R${promptRun}.capture.json`;
+      await writeJsonAtomic(capturePath, capture);
+      manifest.livePreparation[scenario].playbackCapture = capturePath;
+      await writeJsonAtomic(manifestPath, manifest);
+      const playback = playbackLabel ? savePlaybackCapture(playbackDatabase, capture) : null;
+      process.stdout.write(`${JSON.stringify({ capturePath, playback }, null, 2)}\n`);
     } catch (error) {
       controllerError = controllerError
         ? new AggregateError(

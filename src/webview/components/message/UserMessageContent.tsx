@@ -33,6 +33,7 @@ import {
   getFirstContextLine,
   mergeContextFile,
   parseSelectionReference,
+  TERMINAL_SELECTION_MARKER,
 } from '../../../shared/context-files';
 import { AttachmentLabel } from '../AttachmentLabel';
 import { ImagePreviewOverlay, createImagePreviewEffect } from '../ImagePreview';
@@ -1425,7 +1426,9 @@ function getAttachmentTextMarker(attachment: MessageAttachment): string | null {
     case 'file-selection':
       return `@${attachment.filename}`;
     case 'editor-text':
+      return null;
     case 'terminal-selection':
+      return TERMINAL_SELECTION_MARKER;
     case 'database':
       return null;
     case 'issues':
@@ -1814,6 +1817,10 @@ function InlineMessageAttachmentChip(props: { attachment: MessageAttachment }) {
     attachment().type === 'file-reference' &&
     // SAFETY: The surrounding shape or discriminator check establishes the Extract<MessageAttachment, { type: 'file-reference' }> contract used below.
     (attachment() as Extract<MessageAttachment, { type: 'file-reference' }>).isDirectory;
+  const terminal = () => {
+    const value = attachment();
+    return value.type === 'terminal-selection' ? value : null;
+  };
   const fileSelection = () =>
     // SAFETY: The surrounding shape or discriminator check establishes the Extract<MessageAttachment, { type: 'file-selection' }> contract used below.
     attachment().type === 'file-selection'
@@ -1841,7 +1848,14 @@ function InlineMessageAttachmentChip(props: { attachment: MessageAttachment }) {
         fallback={
           <Show
             when={database()}
-            fallback={<FileTypeIcon path={filePath()} class="inline-chip-icon" />}
+            fallback={
+              <Show
+                when={terminal()}
+                fallback={<FileTypeIcon path={filePath()} class="inline-chip-icon" />}
+              >
+                <MaterialChipIcon kind="terminal" class="inline-chip-icon" />
+              </Show>
+            }
           >
             <MaterialChipIcon kind="table" class="inline-chip-icon" />
           </Show>
@@ -1856,6 +1870,11 @@ function InlineMessageAttachmentChip(props: { attachment: MessageAttachment }) {
       <Show when={fileSelection()}>
         {(selection) => (
           <span class="inline-chip-detail">{formatContextLineRanges(selection().lineRanges)}</span>
+        )}
+      </Show>
+      <Show when={terminal()}>
+        {(selection) => (
+          <span class="inline-chip-detail">{getTerminalLineCountLabel(selection().text)}</span>
         )}
       </Show>
     </button>

@@ -63,10 +63,10 @@ checks. Long virtualized histories are required for pagination and scroll tests.
 Real file/diff checks require a recorded fixture edit.
 
 An incomplete AI-07 scroll-timing check must not prevent independent action rows
-from running. Existing AI-08, AI-18, and AI-19 controllers retain their documented
-preconditions. An independently prepared action check is reported under its ACT ID;
-it must not fabricate successful AI-07 preparation or be relabeled as an AI-18/19
-pass.
+from running. AI-08, AI-18, and AI-19 accept a clean baseline or exact latest fixture
+exit evidence, including after an AI-07 timing miss. They must establish their own
+content and interaction preconditions. An independently prepared action check is
+reported under its ACT ID unless it exercises the complete named scenario.
 
 ## Execution and reporting
 

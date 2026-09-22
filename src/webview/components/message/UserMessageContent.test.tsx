@@ -758,6 +758,34 @@ describe('UserMessageContent', () => {
     });
   });
 
+  it('renders the pasted terminal marker inline with the message text', () => {
+    const send = installSendToExtension();
+    renderUserContent([
+      textPart('text-prompt', '[Terminal selection] seems to be slower than usual'),
+      textPart(
+        'text-selection',
+        '[Selection from terminal zsh]\n```text\nnpm test\nfailed output\n```'
+      ),
+    ]);
+
+    const text = container?.querySelector('.user-message-text');
+    const chip = text?.querySelector<HTMLButtonElement>('.inline-chip');
+    expect(chip?.textContent).toBe('zsh2 lines');
+    expect(chip?.querySelector('[data-chip-icon="terminal"]')).not.toBeNull();
+    expect(text?.textContent).toContain('seems to be slower than usual');
+    expect(text?.textContent).not.toContain('[Terminal selection]');
+    expect(container?.querySelector('.message-attachment-chip')).toBeNull();
+    chip?.click();
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open-text',
+      payload: {
+        content: 'npm test\nfailed output',
+        title: 'zsh terminal selection',
+        language: 'shellscript',
+      },
+    });
+  });
+
   it('renders a terminal selection without text as a non-clickable chip', () => {
     const send = installSendToExtension();
     renderUserContent([textPart('text-1', '[Selection from terminal zsh]')]);

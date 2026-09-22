@@ -21,6 +21,7 @@ import type {
   ChatModelSelection,
   DecisionProviderRequest,
   DecisionProviderStatus,
+  DroppedFile,
   LspStatus,
   McpStatus,
   ModelPricing,
@@ -656,6 +657,15 @@ export const client = {
     } | null> {
       const params = new URLSearchParams({ path });
       return apiCall('GET', `${VARRO_API_ENDPOINTS.workspacePathResolve}?${params.toString()}`);
+    },
+    async matchCopiedSelection(
+      text: string
+    ): Promise<
+      | { type: 'file'; file: DroppedFile }
+      | { type: 'terminal'; selection: { text: string; terminalName: string } }
+      | null
+    > {
+      return apiCall('POST', VARRO_API_ENDPOINTS.copiedSelectionMatch, { text });
     },
     async openCodeConfig(): Promise<OpenCodeModelRouting> {
       return apiCall('GET', VARRO_API_ENDPOINTS.openCodeConfig);

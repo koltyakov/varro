@@ -13,6 +13,7 @@ import type {
   PermissionRule,
 } from '../shared/opencode-types';
 import { parseSessionPromptEndpoint } from '../shared/opencode-endpoints';
+import { getSelectionRangesFromEditorContext } from '../shared/context-files';
 import { isScalarConfigPermission } from '../shared/permission-rules';
 import {
   createSessionWorkspaceMetadata,
@@ -327,7 +328,8 @@ export interface RestProxyCallbacks {
   contextProvider: Pick<
     ContextProvider,
     'context' | 'getOpenWorkspaceRoot' | 'readFile' | 'resolvePath'
-  >;
+  > &
+    Partial<Pick<ContextProvider, 'captureTerminalSelection' | 'terminalSelection'>>;
   providerLimitService: Pick<ProviderLimitService, 'get'>;
   sessionState: Pick<
     SessionStateManager,
@@ -1067,6 +1069,16 @@ export class RestProxy {
             allowSiblingWorkspaceFolders: true,
           }
         );
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
+
+      if (method === 'POST' && payload.path === VARRO_API_ENDPOINTS.copiedSelectionMatch) {
+        const text = asRecord(payload.body)?.text;
+        if (typeof text !== 'string' || !text.trim() || text.length > 256 * 1024) {
+          throw new Error('Invalid copied selection text');
+        }
+        const data = await this.matchCopiedSelection(text);
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
       }
@@ -3764,6 +3776,37 @@ export class RestProxy {
 
   private isWorkspaceFilePickRequest(method: string, path: string) {
     return method === 'GET' && path === VARRO_API_ENDPOINTS.workspaceFilePick;
+  }
+
+  private async matchCopiedSelection(text: string) {
+    const editor = vscode.window.activeTextEditor;
+    if (editor && !editor.selection.isEmpty && editor.document.getText(editor.selection) === text) {
+      const uri = editor.document.uri;
+      const folder = vscode.workspace.getWorkspaceFolder(uri);
+      if (!editor.document.isUntitled && folder) {
+        return {
+          type: 'file' as const,
+          file: {
+            path: uri.fsPath,
+            relativePath: getRelativePath(uri, folder),
+            type: 'file' as const,
+            lineRanges: getSelectionRangesFromEditorContext({
+              startLine: editor.selection.start.line + 1,
+              endLine: editor.selection.end.line + (editor.selection.end.character === 0 ? 0 : 1),
+            }),
+          },
+        };
+      }
+    }
+
+    if (!vscode.window.activeTerminal || !this.callbacks.contextProvider.captureTerminalSelection) {
+      return null;
+    }
+    const result = await this.callbacks.contextProvider.captureTerminalSelection();
+    const selection = this.callbacks.contextProvider.terminalSelection;
+    return result.ok && selection?.text === text
+      ? { type: 'terminal' as const, selection: { ...selection } }
+      : null;
   }
 
   private parseWorkspaceResolveRequest(method: string, path: string) {

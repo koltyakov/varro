@@ -188,6 +188,8 @@ import {
   getSelectionRangesFromEditorContext,
   hasExplicitContextForPath,
   mergeContextFile,
+  subtractContextLineRanges,
+  TERMINAL_SELECTION_MARKER,
 } from '../../shared/context-files';
 import { normalizeSessionTitle } from '../../shared/session-title';
 import { createOpenCodeMessageID } from '../../shared/opencode-id';
@@ -1289,6 +1291,19 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const chips: RichComposerChip[] = [];
     const text = inputText();
     const problems = explicitProblemAttachment();
+    const terminal = composerTerminalSelection();
+    if (terminal && text.includes(TERMINAL_SELECTION_MARKER)) {
+      const lines = terminal.text.trimEnd().split(/\r?\n/).length;
+      chips.push({
+        id: 'terminal-selection',
+        type: 'mention-terminal',
+        label: terminal.terminalName,
+        detail: `${lines} ${lines === 1 ? 'line' : 'lines'}`,
+        title: terminal.text,
+        icon: 'terminal',
+        textMarker: TERMINAL_SELECTION_MARKER,
+      });
+    }
     for (const reference of state.inlineProblems) {
       const marker = problemReferenceMarker(reference);
       if (!text.includes(marker)) continue;
@@ -1495,10 +1510,19 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const selectedLines = editorText
       ? [editorText.range]
       : getSelectionRangesFromEditorContext(composerSelection());
+    const explicitFile = file && !editorText ? explicitContextForActiveFile() : null;
+    if (
+      explicitFile &&
+      selectedLines.length > 0 &&
+      formatContextLineRanges(explicitFile.lineRanges) === formatContextLineRanges(selectedLines) &&
+      inputText().includes(`@${explicitFile.relativePath || explicitFile.path}`)
+    ) {
+      return null;
+    }
     if (
       file &&
       !editorText &&
-      explicitContextForActiveFile() &&
+      explicitFile &&
       (composerEditingMessage() || selectedLines.length === 0)
     )
       return null;
@@ -1525,7 +1549,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const hasAttachmentStripItems = () =>
     !!activeContext() ||
     composerIssueCount() > 0 ||
-    !!composerTerminalSelection() ||
+    (!!composerTerminalSelection() && !inputText().includes(TERMINAL_SELECTION_MARKER)) ||
     (state.enableProblemsContext &&
       !!state.attachedDiagnostics &&
       !state.attachedDiagnostics.inline) ||
@@ -1691,7 +1715,20 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   const activeCompletion = createMemo(() => {
     const fallbackCursor = caretPosition();
-    return getActiveCompletion(inputText(), fallbackCursor);
+    const text = inputText();
+    const completion = getActiveCompletion(text, fallbackCursor);
+    if (
+      completion?.type === 'mention' &&
+      inlineChips().some(
+        (chip) =>
+          chip.type === 'mention-file' &&
+          text.startsWith(chip.textMarker, completion.start) &&
+          fallbackCursor <= completion.start + chip.textMarker.length
+      )
+    ) {
+      return null;
+    }
+    return completion;
   });
 
   createEffect(() => {
@@ -3652,6 +3689,20 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       if (!pastedText) e.preventDefault();
       void attachNativePdfFiles(pdfFiles);
     }
+    if (
+      imageItems.length === 0 &&
+      pdfFiles.length === 0 &&
+      pastedText.trim() &&
+      pastedText.length <= 256 * 1024 &&
+      pastedContextFiles.length === 0 &&
+      !/(^|\s)@\S+/.test(pastedText)
+    ) {
+      // SAFETY: RichComposerArea reads this flag from the same paste event to retain the selection range.
+      (e as ClipboardEvent & { varroCopiedSelectionPaste?: boolean }).varroCopiedSelectionPaste =
+        true;
+      e.preventDefault();
+      return;
+    }
     if (imageItems.length === 0) {
       for (const file of pastedContextFiles) addContextFile(file);
       if (pasteHandledAsContextOnly) {
@@ -3755,12 +3806,104 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       return;
     }
     if (!insertion) return;
+    // SAFETY: handlePaste marks this same clipboard event only for deferred source matching.
+    if ((e as ClipboardEvent & { varroCopiedSelectionPaste?: boolean }).varroCopiedSelectionPaste) {
+      const pastedText = e.clipboardData?.getData('text/plain') ?? '';
+      resolveCopiedSelection(pastedText, insertion);
+      return;
+    }
     // SAFETY: handlePaste assigns this optional marker on clipboard events containing context files.
     if ((e as ClipboardEvent & { __varroPasteText?: string }).__varroPasteText === '') return;
     const pastedText = e.clipboardData?.getData('text/plain') ?? '';
     if (!pastedText) return;
 
     resolvePastedMentions(pastedText, insertion);
+  }
+
+  function resolveCopiedSelection(pastedText: string, insertion: RichComposerPasteInsertion) {
+    const owner = {
+      sessionId: composerSessionId(),
+      mutationVersion: inputTextMutationVersion(),
+      value: inputText(),
+    };
+    void client.varro
+      .matchCopiedSelection(pastedText)
+      .then((match) => {
+        if (
+          composerDisposed ||
+          composerSessionId() !== owner.sessionId ||
+          inputTextMutationVersion() !== owner.mutationVersion ||
+          inputText() !== owner.value
+        ) {
+          return;
+        }
+        if (
+          match?.type === 'terminal' &&
+          owner.value.includes(TERMINAL_SELECTION_MARKER) &&
+          composerTerminalSelection()?.text === match.selection.text &&
+          composerTerminalSelection()?.terminalName === match.selection.terminalName
+        ) {
+          return;
+        }
+        if (
+          match?.type === 'file' &&
+          owner.value.includes(`@${match.file.relativePath || match.file.path}`)
+        ) {
+          const existing = composerFiles().find((file) => isSamePath(file.path, match.file.path));
+          if (existing) {
+            if (
+              !existing.lineRanges?.length ||
+              (match.file.lineRanges?.length &&
+                subtractContextLineRanges(match.file.lineRanges, existing.lineRanges).length === 0)
+            )
+              return;
+            addContextFile(match.file);
+            return;
+          }
+        }
+        const marker =
+          match?.type === 'file'
+            ? `@${match.file.relativePath || match.file.path}`
+            : match?.type === 'terminal'
+              ? TERMINAL_SELECTION_MARKER
+              : pastedText;
+        const before = inputText().slice(0, insertion.start);
+        const after = inputText().slice(insertion.end);
+        const prefix = match && shouldPadInlineInsertion(before.at(-1)) ? ' ' : '';
+        const suffix =
+          match && after ? getInlineInsertionSuffix(`${before}${after}`, before.length) : '';
+        const replacement = `${prefix}${marker}${suffix}`;
+        const value = `${before}${replacement}${after}`;
+        batch(() => {
+          if (match?.type === 'file') addContextFile(match.file);
+          if (match?.type === 'terminal') setState('terminalSelection', match.selection);
+          setInputText(value);
+          setCaretPosition(before.length + replacement.length);
+        });
+        if (!match) {
+          resolvePastedMentions(pastedText, {
+            start: insertion.start + prefix.length,
+            end: insertion.start + prefix.length + pastedText.length,
+            text: pastedText,
+            value,
+          });
+        }
+      })
+      .catch((err) => {
+        logError('chat-input:matchCopiedSelection', err);
+        // A failed host lookup should still paste the original clipboard text.
+        if (
+          composerDisposed ||
+          composerSessionId() !== owner.sessionId ||
+          inputTextMutationVersion() !== owner.mutationVersion ||
+          inputText() !== owner.value
+        )
+          return;
+        setInputText(
+          `${owner.value.slice(0, insertion.start)}${pastedText}${owner.value.slice(insertion.end)}`
+        );
+        setCaretPosition(insertion.start + pastedText.length);
+      });
   }
 
   function resolvePastedMentions(pastedText: string, insertion: RichComposerPasteInsertion | null) {
@@ -4995,7 +5138,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               problemDetails={composerProblemDetails()}
               issuesEnabled={state.issuesEnabled}
               onToggleIssues={toggleIssuesEnabled}
-              terminalSelection={composerTerminalSelection()}
+              terminalSelection={
+                inputText().includes(TERMINAL_SELECTION_MARKER) ? null : composerTerminalSelection()
+              }
               diagnostics={
                 state.enableProblemsContext &&
                 state.attachedDiagnostics &&
@@ -5105,6 +5250,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               }
               if (chipId === 'problems' && !inputText().includes(PROBLEMS_REFERENCE)) {
                 setState('attachedDiagnostics', null);
+              }
+              if (
+                chipId === 'terminal-selection' &&
+                !inputText().includes(TERMINAL_SELECTION_MARKER)
+              ) {
+                setState('terminalSelection', null);
+                postMessage({ type: 'terminal-selection/clear' });
               }
               if (chipId.startsWith('file:')) {
                 const path = chipId.slice(5);

@@ -27,14 +27,17 @@ const MAX_SUBSCRIBER_BUFFER_BYTES = 8 * 1024 * 1024;
  * buildReplayTimeline. delayMs is a nonnegative gap, not an absolute deadline.
  * directory: absolute replay workspace path; never read, created, or written.
  *
- * Returns {url, port, start, close, getResult}. start() synchronously rejects a
+ * Returns {url, port, start, pause, resume, close, getResult}. start() synchronously rejects a
  * closed/already-started server or absence of a /global/event subscriber, then
  * returns a Promise<Result>. Deadlines are cumulative delayMs from one monotonic
  * epoch, so delivery work does not accumulate timing drift. Subscriber loss at
  * delivery fails the run; reconnecting does not restart it or resend old events.
  * close(): Promise<void>, idempotent, cancels waits, resolves an active start()
  * with state 'cancelled', and destroys ALL sockets, including SSE/idle sockets.
- * getResult(): detached snapshot with state ready/running/completed/cancelled/
+ * Optional checkpoints: increasing applied-event counts; delivery pauses at each.
+ * pause()/resume() control delivery only. Paused time shifts the monotonic epoch,
+ * preserving the remaining gap without a catch-up burst. close() releases pauses.
+ * getResult(): detached snapshot with state ready/running/paused/completed/cancelled/
  * failed, error, sessionID, directory, finalMessages, expectedMessages,
  * canonicalMatch (null until completed), and scheduler timing metrics. Equality
  * compares all JSON fields, ignoring object key order but preserving array order.
@@ -62,7 +65,7 @@ const MAX_SUBSCRIBER_BUFFER_BYTES = 8 * 1024 * 1024;
  * All non-GET requests return 405, including config/dispose/prompt/abort/auth.
  * There are NO bootstrap mutation exceptions, model calls, tools, or FS access.
  */
-export async function createStreamingServer({ capture, timeline, directory }) {
+export async function createStreamingServer({ capture, timeline, directory, checkpoints = [] }) {
   if (!isAbsolute(directory ?? '')) throw new Error('directory must be an absolute path');
   const sourceID = capture?.session?.id;
   if (typeof sourceID !== 'string' || !sourceID) throw new Error('capture.session.id is required');
@@ -159,6 +162,19 @@ export async function createStreamingServer({ capture, timeline, directory }) {
       throw new Error('Timeline duration is too large');
     return { scheduledMs: durationMs, event: mapEvent(entry.event) };
   });
+  if (
+    !Array.isArray(checkpoints) ||
+    checkpoints.some(
+      (count, index) =>
+        !Number.isSafeInteger(count) ||
+        count < 0 ||
+        count > entries.length ||
+        (index > 0 && count <= checkpoints[index - 1])
+    )
+  ) {
+    throw new Error('Checkpoints must be increasing event counts between 0 and timeline length');
+  }
+  const pendingCheckpoints = new Set(checkpoints);
 
   // Keep the reducer private to this server; preflight and delivery use identical rules.
   function apply(state, event) {
@@ -243,7 +259,50 @@ export async function createStreamingServer({ capture, timeline, directory }) {
   let cancelWait;
   let epoch;
   let elapsedMs = 0;
+  let pausedAt;
+  let pausedMs = 0;
+  const pauses = [];
   const timings = [];
+
+  function activeElapsed() {
+    return (pausedAt ?? performance.now()) - epoch;
+  }
+
+  function wake() {
+    clearTimeout(timer);
+    cancelWait?.();
+  }
+
+  function pause(reason = 'controller') {
+    if (closed || phase !== 'running') throw new Error(`Cannot pause replay in ${phase}`);
+    pausedAt = performance.now();
+    phase = 'paused';
+    pauses.push({ afterEvents: timings.length, activeMs: activeElapsed(), reason });
+    wake();
+  }
+
+  function resume() {
+    if (closed || phase !== 'paused') throw new Error(`Cannot resume replay in ${phase}`);
+    const duration = performance.now() - pausedAt;
+    pauses.at(-1).durationMs = duration;
+    pausedMs += duration;
+    epoch += duration;
+    pausedAt = undefined;
+    phase = 'running';
+    wake();
+  }
+
+  async function waitAtCheckpoint(count) {
+    if (closed) return;
+    if (pendingCheckpoints.delete(count) && phase === 'running') pause('checkpoint');
+    for (;;) {
+      if (phase !== 'paused' || closed) break;
+      await new Promise((resolve) => {
+        cancelWait = resolve;
+      });
+      cancelWait = undefined;
+    }
+  }
 
   function getResult() {
     return structuredClone({
@@ -257,7 +316,10 @@ export async function createStreamingServer({ capture, timeline, directory }) {
         phase === 'completed' ? isDeepStrictEqual(state.messages, expectedMessages) : null,
       scheduler: {
         scheduledDurationMs: durationMs,
-        elapsedMs: phase === 'running' ? performance.now() - epoch : elapsedMs,
+        elapsedMs: ['running', 'paused'].includes(phase) ? activeElapsed() : elapsedMs,
+        pausedMs: pausedMs + (pausedAt === undefined ? 0 : performance.now() - pausedAt),
+        checkpoints,
+        pauses,
         scheduledEvents: entries.length,
         appliedEvents: timings.length,
         maxLatenessMs: timings.reduce((max, entry) => Math.max(max, entry.latenessMs), 0),
@@ -422,9 +484,12 @@ export async function createStreamingServer({ capture, timeline, directory }) {
         for (const [index, entry] of entries.entries()) {
           // Yield even when every deadline is overdue, so stop requests and deadlines can run.
           if (index % 64 === 0) await new Promise((resolve) => setImmediate(resolve));
-          let remaining;
-          while ((remaining = epoch + entry.scheduledMs - performance.now()) > 0) {
+          await waitAtCheckpoint(index);
+          for (;;) {
+            await waitAtCheckpoint(index);
             if (closed) break;
+            const remaining = epoch + entry.scheduledMs - performance.now();
+            if (remaining <= 0) break;
             await new Promise((resolve) => {
               cancelWait = resolve;
               timer = setTimeout(resolve, Math.min(Math.ceil(remaining), 2_147_483_647));
@@ -453,12 +518,14 @@ export async function createStreamingServer({ capture, timeline, directory }) {
             subscribers: subscribers.size,
           });
         }
+        await waitAtCheckpoint(entries.length);
+        if (closed) return getResult();
         phase = 'completed';
       } catch (cause) {
         phase = 'failed';
         error = cause.message;
       } finally {
-        elapsedMs = performance.now() - epoch;
+        if (!closed) elapsedMs = activeElapsed();
       }
       return getResult();
     })();
@@ -467,10 +534,16 @@ export async function createStreamingServer({ capture, timeline, directory }) {
   function close() {
     if (closePromise) return closePromise;
     closed = true;
-    if (phase === 'running') elapsedMs = performance.now() - epoch;
-    if (phase === 'ready' || phase === 'running') phase = 'cancelled';
-    clearTimeout(timer);
-    cancelWait?.();
+    if (['running', 'paused'].includes(phase)) elapsedMs = activeElapsed();
+    if (pausedAt !== undefined) {
+      const duration = performance.now() - pausedAt;
+      pauses.at(-1).durationMs = duration;
+      pausedMs += duration;
+      epoch += duration;
+      pausedAt = undefined;
+    }
+    if (['ready', 'running', 'paused'].includes(phase)) phase = 'cancelled';
+    wake();
     closePromise = new Promise((resolve, reject) => {
       server.close((cause) => (cause ? reject(cause) : resolve()));
       for (const socket of sockets) socket.destroy();
@@ -480,5 +553,5 @@ export async function createStreamingServer({ capture, timeline, directory }) {
   }
 
   const port = server.address().port;
-  return { url: `http://127.0.0.1:${port}`, port, start, close, getResult };
+  return { url: `http://127.0.0.1:${port}`, port, start, pause, resume, close, getResult };
 }

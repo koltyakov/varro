@@ -17,6 +17,7 @@ import { ProblemsTooltip } from '../ProblemsTooltip';
 
 type ComposerClipboardEvent = ClipboardEvent & {
   __varroPasteText?: string;
+  varroCopiedSelectionPaste?: boolean;
 };
 
 const CARET_SPACER = '\u200B';
@@ -25,6 +26,7 @@ export type RichComposerChip = {
   id: string;
   type:
     | 'mention-file'
+    | 'mention-terminal'
     | 'mention-agent'
     | 'mention-skill'
     | 'mention-problems'
@@ -775,12 +777,14 @@ export function RichComposerArea(props: {
     const selection = getSelectionOffsets();
     props.onPaste(e);
     if (e.defaultPrevented) {
+      // SAFETY: The parent paste handler marks this same clipboard event before the composer reads it.
+      const copiedSelectionPaste = (e as ComposerClipboardEvent).varroCopiedSelectionPaste;
       props.onPasteInsertion?.(
         e,
         selection
           ? {
               start: selection.start,
-              end: selection.start,
+              end: copiedSelectionPaste ? selection.end : selection.start,
               text: '',
               value: props.value,
             }

@@ -1,6 +1,8 @@
 import type { ContextLineRange, DroppedFile, EditorContext } from './protocol';
 import { isSameWorkspacePath } from './workspace-path';
 
+export const TERMINAL_SELECTION_MARKER = '[Terminal selection]';
+
 function isSameContextPath(left: string, right: string): boolean {
   return isSameWorkspacePath(left.replace(/\\/g, '/'), right.replace(/\\/g, '/'));
 }

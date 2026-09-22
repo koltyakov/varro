@@ -454,6 +454,7 @@ export const VARRO_API_ENDPOINTS = {
   workspaceFilePick: `${VARRO_API_NAMESPACE}/workspace-file/pick`,
   workspaceProblems: `${VARRO_API_NAMESPACE}/workspace-problems`,
   workspacePathResolve: `${VARRO_API_NAMESPACE}/workspace-path/resolve`,
+  copiedSelectionMatch: `${VARRO_API_NAMESPACE}/copied-selection/match`,
   permissionJudge: `${VARRO_API_NAMESPACE}/permission/judge`,
   permissionJudgeModel: `${VARRO_API_NAMESPACE}/permission/judge/model`,
   permissionSessionAllow: `${VARRO_API_NAMESPACE}/permission/session-allow`,

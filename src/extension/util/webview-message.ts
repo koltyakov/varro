@@ -1826,6 +1826,7 @@ const API_ROUTES: ApiRoute[] = [
     ({ method, url }) => method === 'GET' && onlyQuery(url, 'path') && requiredQuery(url, 'path')
   ),
   route(VARRO_API_ENDPOINTS.workspaceFilePick, methodsNoQuery('GET')),
+  route(VARRO_API_ENDPOINTS.copiedSelectionMatch, methodsNoQuery('POST')),
   route(VARRO_API_ENDPOINTS.workspaceProblems, methodsNoQuery('GET')),
   route(
     VARRO_API_ENDPOINTS.sessionHistoryScope,

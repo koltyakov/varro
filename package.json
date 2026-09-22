@@ -62,6 +62,7 @@
     "ai:live": "node scripts/ai-fuzzy-live.mjs",
     "ai:playback": "node scripts/ai-session-playback.mjs",
     "ai:streaming": "node scripts/ai-streaming.mjs",
+    "test:ai-runner": "npm run build && node scripts/ai-streaming-smoke.mjs",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc -p tsconfig.json",
     "typecheck:suggestions": "node scripts/check-ts-suggestions.mjs",

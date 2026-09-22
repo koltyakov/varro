@@ -1,5 +1,8 @@
 # AI streaming tests in VS Code
 
+Start with the [controller workflow](ai-test-workflow.md). The controller handles launch, native input,
+and recovery without asking the user to perform routine setup.
+
 Use this playbook when the user asks to **Run streaming tests**, case-insensitively. This is a
 separate extension of [AI/fuzzy testing](ai-fuzzy-verification.md), not an alias for its live-model
 suite. It selects existing OpenCode responses and replays their output through the normal extension
@@ -44,6 +47,9 @@ npm run test:e2e -- e2e/tests/scroll-streaming.spec.ts e2e/tests/scroll-tool-fli
 Run the focused script command and the streaming unit/E2E suites for an unqualified request. Record
 any scope reduction. After code changes also run the repository lint and type-check requirements.
 Script tests use generated data; normal test discovery never reads the user's session database.
+
+When changing the editor controller, run `npm run test:ai-runner` as well. It checks the real VS Code
+launch, checkpoint delivery, snapshots, and cleanup using generated data without model calls.
 
 ## Select history
 
@@ -174,6 +180,47 @@ npm run ai:streaming -- stop --control artifacts/ai-streaming/<run>/str-01/contr
 If editor automation is unavailable, attempt the real launcher and inspect diagnostics, then ask
 whether the user wants to enable automation, perform the specified native actions while the AI
 observes, or stop with `FAIL`. Do not leave a host waiting indefinitely.
+
+### Checkpointed interaction and AI investigation
+
+Inspect a selected or automatically retained live capture before launching:
+
+```sh
+npm run ai:streaming -- inspect --capture <capture.json>
+```
+
+The output lists part creation, tool-state transitions, status changes, and diff boundaries with exact
+`afterEvents` counts. It includes timing and identities, without printing tool output. Use those counts
+to stop at repeatable states:
+
+```sh
+npm run ai:streaming -- run --capture <capture.json> --output <new-output> --checkpoints 12,34
+npm run ai:streaming -- start --control <new-output>/control.json
+npm run ai:streaming -- status --control <new-output>/control.json
+npm run ai:streaming -- snapshot --control <new-output>/control.json
+npm run ai:streaming -- resume --control <new-output>/control.json
+```
+
+Counts must be increasing, unique, and between zero and the capture's event count. Zero pauses before
+delivery; the final count pauses after the last event and before host cleanup. Check `playbackState` for
+`paused`. A checkpoint freezes event delivery, not the editor. Use native inputs to establish the next
+interaction, then resume and observe its response to the remaining events. `pause` can also interrupt a
+running replay when the AI notices an unexpected behavior. Each resume preserves the remaining source
+gap rather than delivering overdue events in a burst.
+
+`snapshot` works while armed, running, or paused. It writes owner-readable `snapshot-N.json` and a
+workbench PNG containing route, scheduler position, mounted-row text/rectangles, and transcript geometry.
+DOM rectangles are inspection evidence, not a clipping-aware visibility oracle. Read the screenshot
+and relevant frame evidence too. The control log and server result retain pauses and event counts so
+an exploratory branch can become a repeatable action sequence.
+
+The replay deadline includes paused time. Increase `--replay-timeout-ms` for a planned investigation;
+stop and cleanup still work while paused. The runner continues to return `NEEDS_AI_REVIEW`.
+
+Keep checkpointed interaction results separate from uninterrupted timing/performance results. Pausing
+changes wall-clock cadence and gives animations time to settle. A checkpointed run cannot clear a
+flicker or latency failure from continuous playback, and frozen busy state is not live-model coverage.
+Use both runs when a required interaction window is too short for the AI to target reliably.
 
 ## Timing contract
 

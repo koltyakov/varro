@@ -10,7 +10,7 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 - Added opt-in TypeSafe Jev decisions for Auto-mode approvals, provider disabling, and v2 authentication. Model refreshes now show progress and discover new models without restoring removed ones.
 - Kept background shell processes visible during resumed v2 responses and pending steers in the composer until published.
 - Improved permission handling, provider-error visibility, streaming Markdown, scrolling, and chat layout.
-- Made session exports, recycle-bin deletion, diff views, dropped files, and saved preferences more reliable.
+- Recognized pasted editor and terminal selections as context. Made session exports, recycle-bin deletion, diff views, dropped files, and saved preferences more reliable.
 
 ## 0.28.x - September 2026
 
