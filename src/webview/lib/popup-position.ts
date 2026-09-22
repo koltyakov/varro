@@ -9,7 +9,7 @@ export const RIGHT_PICKER_DETAILS_HOVER_DELAY_MS = 500;
  * and the sticky chat header stacks above popups. Scrollable ancestors mark
  * where that chrome begins, so popups are kept below it.
  */
-function getPopupTopBound(el: HTMLElement, margin: number): number {
+export function getPopupTopBound(el: HTMLElement, margin: number): number {
   let bound = margin;
   let node = el.parentElement;
   while (node && node !== document.body) {

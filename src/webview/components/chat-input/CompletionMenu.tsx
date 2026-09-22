@@ -6,6 +6,7 @@ import { ProblemsIcon } from '../ProblemsIcon';
 import {
   clampPopupToViewport,
   flipPopupDownIfNeeded,
+  getPopupTopBound,
   observePopupViewport,
 } from '../../lib/popup-position';
 import type {
@@ -78,6 +79,7 @@ export function CompletionMenu(props: {
   onSelect: (item: CompletionItem) => void;
   header?: string;
   emptyMessage?: string;
+  anchorRect?: () => DOMRect | null;
 }) {
   // oxlint-disable-next-line no-unassigned-vars
   let menuRef: HTMLDivElement | undefined;
@@ -89,6 +91,28 @@ export function CompletionMenu(props: {
     const scrollbarInset = Math.max(0, menuRef.offsetWidth - menuRef.clientWidth - borderWidth);
     menuRef.style.setProperty('--composer-completion-scrollbar-inset', `${scrollbarInset}px`);
   }
+
+  function reposition() {
+    if (!menuRef) return;
+    const caret = props.anchorRect?.();
+    const host = menuRef.offsetParent;
+    if (caret && host instanceof HTMLElement) {
+      const bottom = caret.top - 6;
+      menuRef.style.top = 'auto';
+      menuRef.style.bottom = `${host.getBoundingClientRect().bottom - bottom}px`;
+      menuRef.style.transform = '';
+      menuRef.style.maxHeight = `${Math.min(220, Math.max(0, bottom - getPopupTopBound(menuRef, 8)))}px`;
+    } else {
+      flipPopupDownIfNeeded(menuRef);
+      clampPopupToViewport(menuRef);
+    }
+    updateScrollbarInset();
+  }
+
+  createEffect(() => {
+    props.anchorRect?.();
+    queueMicrotask(reposition);
+  });
 
   createEffect(() => {
     const items = props.items;
@@ -123,13 +147,16 @@ export function CompletionMenu(props: {
     updateScrollbarInset();
     if (!menuRef) return;
 
-    const reposition = () => {
-      if (!menuRef) return;
-      updateScrollbarInset();
-      flipPopupDownIfNeeded(menuRef);
-      clampPopupToViewport(menuRef);
-    };
     onCleanup(observePopupViewport(menuRef, reposition));
+    document.addEventListener('selectionchange', reposition);
+    document.addEventListener('scroll', reposition, true);
+    const observer = globalThis.ResizeObserver ? new ResizeObserver(reposition) : undefined;
+    if (menuRef.parentElement) observer?.observe(menuRef.parentElement);
+    onCleanup(() => {
+      document.removeEventListener('selectionchange', reposition);
+      document.removeEventListener('scroll', reposition, true);
+      observer?.disconnect();
+    });
   });
 
   return (

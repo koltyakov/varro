@@ -1065,6 +1065,15 @@ export function RichComposerArea(props: {
           selectedIndex={props.completionSelectedIndex}
           header={props.completionHeader}
           emptyMessage={props.completionEmptyMessage}
+          anchorRect={() => {
+            // Track controlled edits as well as native selection changes.
+            void props.value;
+            void props.cursorOffset;
+            const range = getSelectionRange();
+            if (!range || !('getBoundingClientRect' in range)) return null;
+            const rect = range.getBoundingClientRect();
+            return rect.height > 0 ? rect : null;
+          }}
           onSelect={props.onSelectCompletion}
         />
       </Show>
