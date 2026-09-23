@@ -1107,6 +1107,24 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
   });
 
+  // Keep the exact pasted text with history so undo restores partial-line selections too.
+  const pastedFileChipText = new Map<string, { ranges: string | null; text: string }>();
+  const [pendingCopiedSelectionPaste, setPendingCopiedSelectionPaste] = createSignal<{
+    sessionId: string | null;
+    mutationVersion: number;
+    value: string;
+    insertion: RichComposerPasteInsertion;
+  } | null>(null);
+  const pendingPasteInsertion = () => {
+    const pending = pendingCopiedSelectionPaste();
+    return pending &&
+      pending.sessionId === composerSessionId() &&
+      pending.mutationVersion === inputTextMutationVersion() &&
+      pending.value === inputText()
+      ? pending.insertion
+      : undefined;
+  };
+
   function captureComposerSnapshot(): ComposerSnapshot {
     return {
       text: inputText(),
@@ -1117,6 +1135,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       problems: state.attachedDiagnostics,
       inlineProblems: state.inlineProblems,
       terminalSelection: state.terminalSelection,
+      pastedFileChips: [...pastedFileChipText].map(([path, pasted]) => ({ path, ...pasted })),
     };
   }
 
@@ -1141,6 +1160,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
     applyingComposerHistory = true;
     try {
+      pastedFileChipText.clear();
+      for (const { path, ranges, text } of snapshot.pastedFileChips ?? []) {
+        pastedFileChipText.set(path, { ranges, text });
+      }
       batch(() => {
         setHistoryIndex(null);
         setHistoryDraft('');
@@ -3723,11 +3746,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       pastedContextFiles.length === 0 &&
       !/(^|\s)@\S+/.test(pastedText)
     ) {
-      // SAFETY: RichComposerArea and handlePasteInsertion read this flag from the same
-      // paste event to keep the selection range and look up where the text came from.
+      // SAFETY: handlePasteInsertion reads this flag from the same paste event
+      // after RichComposerArea inserts the text synchronously.
       (e as ClipboardEvent & { varroCopiedSelectionPaste?: boolean }).varroCopiedSelectionPaste =
         true;
-      e.preventDefault();
+      composerHistory.breakCoalescing();
       return;
     }
     if (imageItems.length === 0) {
@@ -3832,19 +3855,15 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       drainPasteTransactions();
       return;
     }
-    // SAFETY: handlePaste marks this same clipboard event only for deferred source matching.
+    // SAFETY: handlePaste marks this same clipboard event for source matching.
     if ((e as ClipboardEvent & { varroCopiedSelectionPaste?: boolean }).varroCopiedSelectionPaste) {
+      if (!insertion) return;
       const pastedText = e.clipboardData?.getData('text/plain') ?? '';
       // VS Code's terminal copies plain text only; editors and browsers add rich formats.
       const types = Array.from(e.clipboardData?.types ?? []);
       const plainTextOnly =
         types.length > 0 && types.every((type) => type.split(';')[0] === 'text/plain');
-      const value = inputText();
-      resolveCopiedSelection(
-        pastedText,
-        insertion ?? { start: value.length, end: value.length, text: '', value },
-        plainTextOnly
-      );
+      resolveCopiedSelection(pastedText, insertion, plainTextOnly);
       return;
     }
     if (!insertion) return;
@@ -3861,47 +3880,46 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     insertion: RichComposerPasteInsertion,
     plainTextOnly: boolean
   ) {
-    // Inserted once the source is known, as a chip or as plain text, so a match
-    // never flashes the raw text first.
+    // The paste is already editable and sendable. Only upgrade it while this
+    // lookup still owns the unchanged draft and its undo entry.
     const owner = {
       sessionId: composerSessionId(),
       mutationVersion: inputTextMutationVersion(),
       value: inputText(),
+      insertion,
     };
+    setPendingCopiedSelectionPaste(owner);
     let settled = false;
     const settle = (match: Awaited<ReturnType<typeof client.varro.matchCopiedSelection>>) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
-      if (composerDisposed || composerSessionId() !== owner.sessionId) return;
-      if (inputTextMutationVersion() !== owner.mutationVersion || inputText() !== owner.value) {
-        // The user kept typing; keep the paste as text at the caret instead of dropping it.
-        const value = inputText();
-        const caret = Math.min(caretPosition(), value.length);
-        insertPastedText({ start: caret, end: caret, text: '', value });
+      if (
+        composerDisposed ||
+        composerSessionId() !== owner.sessionId ||
+        inputTextMutationVersion() !== owner.mutationVersion ||
+        inputText() !== owner.value
+      ) {
+        if (pendingCopiedSelectionPaste() === owner) setPendingCopiedSelectionPaste(null);
         return;
       }
-      if (!match || !insertCopiedSelectionChip(match)) insertPastedText(insertion);
+      applyingComposerHistory = true;
+      try {
+        if (match && insertCopiedSelectionChip(match)) {
+          composerHistory.replaceCurrent(captureComposerSnapshot());
+          return;
+        }
+      } finally {
+        applyingComposerHistory = false;
+        if (pendingCopiedSelectionPaste() === owner) setPendingCopiedSelectionPaste(null);
+      }
+      resolvePastedMentions(pastedText, insertion);
     };
     const timeout = setTimeout(() => settle(null), COPIED_SELECTION_MATCH_TIMEOUT_MS);
     void client.varro.matchCopiedSelection(pastedText, plainTextOnly).then(settle, (err) => {
       logError('chat-input:matchCopiedSelection', err);
       settle(null);
     });
-
-    function insertPastedText(range: RichComposerPasteInsertion) {
-      const value = `${range.value.slice(0, range.start)}${pastedText}${range.value.slice(range.end)}`;
-      batch(() => {
-        setInputText(value);
-        setCaretPosition(range.start + pastedText.length);
-      });
-      resolvePastedMentions(pastedText, {
-        start: range.start,
-        end: range.start + pastedText.length,
-        text: pastedText,
-        value,
-      });
-    }
 
     /** Returns false when the paste should stay plain text. */
     function insertCopiedSelectionChip(
@@ -3920,7 +3938,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         // The composer holds one terminal selection. A repeat paste folds into
         // its chip; a different one stays plain text instead of replacing it.
         if (current && !sameSelection) return false;
-        if (sameSelection && rest.includes(marker)) return true;
+        if (sameSelection && rest.includes(marker)) {
+          batch(() => {
+            setInputText(rest);
+            setCaretPosition(before.length);
+          });
+          return true;
+        }
       } else {
         marker = `@${match.file.relativePath || match.file.path}`;
         const existing = rest.includes(marker)
@@ -3931,7 +3955,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             !existing.lineRanges?.length ||
             (!!match.file.lineRanges?.length &&
               subtractContextLineRanges(match.file.lineRanges, existing.lineRanges).length === 0);
-          if (!covered) addContextFile(match.file);
+          batch(() => {
+            if (!covered) addContextFile(match.file);
+            setInputText(rest);
+            setCaretPosition(before.length);
+          });
           return true;
         }
       }
@@ -3954,10 +3982,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       return true;
     }
   }
-
-  // Exact text behind file chips made from a paste, so expanding restores what
-  // was pasted rather than whole lines while the chip keeps its original ranges.
-  const pastedFileChipText = new Map<string, { ranges: string | null; text: string }>();
 
   function expandableFile(chipId: string) {
     if (!chipId.startsWith('file:')) return null;
@@ -4289,6 +4313,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   createEffect(() => {
     void composerSessionId();
+    pastedFileChipText.clear();
     setHistoryIndex(null);
     setHistoryDraft('');
     setCompletionIndex(0);
@@ -4296,6 +4321,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   });
 
   createEffect(() => {
+    for (const [path, pasted] of pastedFileChipText) {
+      if (
+        !state.droppedFiles.some(
+          (file) => file.path === path && formatContextLineRanges(file.lineRanges) === pasted.ranges
+        )
+      )
+        pastedFileChipText.delete(path);
+    }
     const snapshot = captureComposerSnapshot();
     if (applyingComposerHistory) return;
     composerHistory.record(snapshot);
@@ -5311,6 +5344,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
                     : 'Describe what to build'
             }
             value={inputText()}
+            pendingPaste={pendingPasteInsertion()}
             cursorOffset={caretPosition()}
             chips={inlineChips()}
             isFocused={isFocused()}

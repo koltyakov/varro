@@ -192,6 +192,73 @@ test('replaces a selected session reference when pasting', async ({ page }) => {
   await expect(composer.locator('.composer-session-reference')).toHaveCount(0);
 });
 
+test('turns a terminal paste into a chip without painting the raw output first', async ({
+  page,
+}) => {
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+  const composer = page.locator('.rich-composer').first();
+  await composer.fill('Explain ');
+  const samples = await composer.evaluate(async (editor) => {
+    const harness = window as Window & {
+      __sendToExtension?: (message: unknown) => void | Promise<void>;
+    };
+    const originalSend = harness.__sendToExtension;
+    let requestId: number | undefined;
+    harness.__sendToExtension = (message) => {
+      const request = message as { type?: string; payload?: { id: number; path: string } };
+      if (
+        request.type === 'api/request' &&
+        request.payload?.path === '/varro/copied-selection/match'
+      ) {
+        requestId = request.payload.id;
+        return;
+      }
+      return originalSend?.(message);
+    };
+    const text = Array.from({ length: 40 }, (_, index) => `terminal output ${index}`).join('\n');
+    const read = () => ({
+      text: editor.textContent ?? '',
+      height: editor.getBoundingClientRect().height,
+    });
+    const frames = [read()];
+    try {
+      const clipboardData = new DataTransfer();
+      clipboardData.setData('text/plain', text);
+      editor.dispatchEvent(
+        new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData })
+      );
+      frames.push(read());
+      for (let frame = 0; frame < 3; frame++) {
+        await new Promise(requestAnimationFrame);
+        frames.push(read());
+      }
+      if (requestId === undefined) throw new Error('Expected copied-selection lookup');
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: {
+            type: 'api/response',
+            payload: {
+              id: requestId,
+              data: {
+                type: 'terminal',
+                selection: { text, terminalName: 'zsh' },
+              },
+            },
+          },
+        })
+      );
+      await new Promise(requestAnimationFrame);
+      frames.push(read());
+      return frames;
+    } finally {
+      harness.__sendToExtension = originalSend;
+    }
+  });
+  await expect(composer.locator('[data-chip-type="mention-terminal"]')).toContainText('40 lines');
+  expect(samples.every((sample) => !sample.text.includes('terminal output'))).toBe(true);
+  expect(Math.max(...samples.map((sample) => sample.height)) - samples[0]!.height).toBeLessThan(8);
+});
+
 test('scrolls a large paste to keep the caret visible', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
 

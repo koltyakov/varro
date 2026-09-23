@@ -3794,6 +3794,8 @@ export class RestProxy {
     ) {
       const uri = editor.document.uri;
       const folder = vscode.workspace.getWorkspaceFolder(uri);
+      // A file reference cannot carry unsaved buffer contents to the model.
+      if (editor.document.isDirty) return null;
       if (!editor.document.isUntitled && folder) {
         return {
           type: 'file' as const,

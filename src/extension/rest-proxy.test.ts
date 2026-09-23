@@ -1629,12 +1629,14 @@ describe('RestProxy handleRequest', () => {
 
   function setActiveEditorSelection(
     start: { line: number; character: number },
-    end: { line: number; character: number }
+    end: { line: number; character: number },
+    isDirty = false
   ) {
     mocks.vscode.window.activeTextEditor = {
       selection: { isEmpty: false, start, end },
       document: {
         isUntitled: false,
+        isDirty,
         uri: { fsPath: '/repo/src/foo.ts' },
         getText: vi.fn(() => 'selected code'),
       },
@@ -1661,6 +1663,29 @@ describe('RestProxy handleRequest', () => {
           }),
         },
       });
+    } finally {
+      mocks.vscode.window.activeTextEditor = undefined;
+    }
+  });
+
+  it('keeps copied dirty editor text as plain text even if terminal output also matches', async () => {
+    setActiveEditorSelection({ line: 2, character: 2 }, { line: 4, character: 3 }, true);
+    mocks.vscode.workspace.getWorkspaceFolder.mockReturnValueOnce({
+      uri: { fsPath: '/repo' },
+    } as never);
+    const findTerminalText = vi.fn(() => ({ text: 'selected code', terminalName: 'zsh' }));
+    const { proxy, callbacks } = createProxy({
+      contextProvider: { ...createCallbacks().contextProvider, findTerminalText } as never,
+    });
+    try {
+      await proxy.handleRequest(
+        makePayload(62, 'POST', '/varro/copied-selection/match', {
+          text: 'selected code',
+          plainTextOnly: true,
+        })
+      );
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 62, data: null });
+      expect(findTerminalText).not.toHaveBeenCalled();
     } finally {
       mocks.vscode.window.activeTextEditor = undefined;
     }

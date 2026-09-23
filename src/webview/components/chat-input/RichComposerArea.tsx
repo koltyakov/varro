@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal, onMount, onCleanup } from 'solid-js';
+import { For, Show, batch, createEffect, createSignal, onMount, onCleanup } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { splitExternalLinkText } from '../../lib/external-link';
 import { emptyPageIcon, folderIcon } from '../../lib/ui-icons';
@@ -18,7 +18,6 @@ import { ProblemsTooltip } from '../ProblemsTooltip';
 
 type ComposerClipboardEvent = ClipboardEvent & {
   __varroPasteText?: string;
-  varroCopiedSelectionPaste?: boolean;
 };
 
 const CARET_SPACER = '\u200B';
@@ -68,6 +67,7 @@ export function RichComposerArea(props: {
   editorRef: (el: HTMLDivElement) => void;
   placeholder: string;
   value: string;
+  pendingPaste?: RichComposerPasteInsertion;
   cursorOffset?: number;
   chips: RichComposerChip[];
   isFocused: boolean;
@@ -187,30 +187,49 @@ export function RichComposerArea(props: {
     if (!text) return frag;
 
     const sortedMarkers = Array.from(chips.keys()).toSorted((a, b) => b.length - a.length);
-    if (sortedMarkers.length === 0) {
-      appendTextWithLineBreaks(frag, text);
-      return frag;
-    }
-
-    const pattern = new RegExp(`(${sortedMarkers.map((m) => escapeRegex(m)).join('|')})`, 'g');
-
-    const parts = text.split(pattern);
-    for (const [index, part] of parts.entries()) {
-      const chip = chips.get(part);
-      if (chip) {
-        const previousNode = frag.lastChild;
-        const isAtomicChip = chip.type !== 'external-link' && chip.type !== 'mention-session';
-        if (isAtomicChip && previousNode instanceof HTMLBRElement) {
+    const pattern = sortedMarkers.length
+      ? new RegExp(`(${sortedMarkers.map((m) => escapeRegex(m)).join('|')})`, 'g')
+      : null;
+    const pending = props.pendingPaste;
+    const segments =
+      pending?.value === text ? [text.slice(0, pending.start), text.slice(pending.end)] : [text];
+    for (const [segmentIndex, segment] of segments.entries()) {
+      const parts = pattern ? segment.split(pattern) : [segment];
+      for (const [index, part] of parts.entries()) {
+        const chip = chips.get(part);
+        if (chip) {
+          const previousNode = frag.lastChild;
+          const isAtomicChip = chip.type !== 'external-link' && chip.type !== 'mention-session';
+          if (isAtomicChip && previousNode instanceof HTMLBRElement) {
+            frag.appendChild(document.createTextNode(CARET_SPACER));
+          }
+          const element = createChipElement(chip);
+          frag.appendChild(element);
+          if (chip.problemDetails) tooltipTargets.push({ element, text: chip.problemDetails });
+          if (chip.type !== 'external-link') {
+            frag.appendChild(document.createTextNode(CARET_SPACER));
+          }
+        } else {
+          appendTextWithLineBreaks(
+            frag,
+            part,
+            index === parts.length - 1 && segmentIndex === segments.length - 1
+          );
+        }
+      }
+      if (segments.length === 2 && segmentIndex === 0 && pending) {
+        // Keep the text in logical offsets and clipboard extraction without
+        // painting it or expanding the editor while its source is resolved.
+        const placeholder = document.createElement('span');
+        placeholder.contentEditable = 'false';
+        placeholder.dataset.chipMarker = text.slice(pending.start, pending.end);
+        placeholder.dataset.pendingPaste = 'true';
+        placeholder.setAttribute('aria-hidden', 'true');
+        if (frag.lastChild instanceof HTMLBRElement) {
           frag.appendChild(document.createTextNode(CARET_SPACER));
         }
-        const element = createChipElement(chip);
-        frag.appendChild(element);
-        if (chip.problemDetails) tooltipTargets.push({ element, text: chip.problemDetails });
-        if (chip.type !== 'external-link') {
-          frag.appendChild(document.createTextNode(CARET_SPACER));
-        }
-      } else {
-        appendTextWithLineBreaks(frag, part, index === parts.length - 1);
+        frag.appendChild(placeholder);
+        frag.appendChild(document.createTextNode(CARET_SPACER));
       }
     }
     setProblemTooltipTargets(tooltipTargets);
@@ -711,9 +730,12 @@ export function RichComposerArea(props: {
 
   let lastSyncedValue = '';
   let lastSyncedChips = '';
+  let lastSyncedPendingPaste: RichComposerPasteInsertion | undefined;
 
   createEffect(() => {
     const text = props.value;
+    const pendingPaste = props.pendingPaste;
+    const pendingPasteChanged = pendingPaste !== lastSyncedPendingPaste;
     const requestedCursor = props.cursorOffset;
     const chips = JSON.stringify(
       props.chips
@@ -748,6 +770,7 @@ export function RichComposerArea(props: {
     if (
       nativeInputAcknowledged &&
       !chipsChanged &&
+      !pendingPasteChanged &&
       (!externalLinksOutOfSync || preserveEditedExternalLinks)
     ) {
       lastSyncedValue = text;
@@ -760,7 +783,7 @@ export function RichComposerArea(props: {
     const domNeedsResync =
       textNeedsResync || (externalLinksOutOfSync && !preserveEditedExternalLinks);
 
-    if (!textChanged && !chipsChanged && !domNeedsResync) {
+    if (!textChanged && !chipsChanged && !pendingPasteChanged && !domNeedsResync) {
       let cursorUpdated = false;
       if (isFocused && requestedCursor != null && getCursorOffset() !== requestedCursor) {
         setCursorOffset(Math.min(requestedCursor, text.length));
@@ -773,6 +796,8 @@ export function RichComposerArea(props: {
 
     lastSyncedValue = text;
     lastSyncedChips = chips;
+    lastSyncedPendingPaste = pendingPaste;
+    if (pendingPasteChanged && isFocused) revealCaretAfterControlledInput = true;
     const cursorOff =
       textChanged && requestedCursor != null
         ? requestedCursor
@@ -831,14 +856,12 @@ export function RichComposerArea(props: {
     const selection = getSelectionOffsets();
     props.onPaste(e);
     if (e.defaultPrevented) {
-      // SAFETY: The parent paste handler marks this same clipboard event before the composer reads it.
-      const copiedSelectionPaste = (e as ComposerClipboardEvent).varroCopiedSelectionPaste;
       props.onPasteInsertion?.(
         e,
         selection
           ? {
               start: selection.start,
-              end: copiedSelectionPaste ? selection.end : selection.start,
+              end: selection.start,
               text: '',
               value: props.value,
             }
@@ -864,12 +887,14 @@ export function RichComposerArea(props: {
     e.preventDefault();
     const nextValue = `${props.value.slice(0, insertionRange.start)}${text}${props.value.slice(insertionRange.end)}`;
     revealCaretAfterControlledInput = true;
-    props.onInput(nextValue, insertionRange.start + text.length);
-    props.onPasteInsertion?.(e, {
-      start: insertionRange.start,
-      end: insertionRange.start + text.length,
-      text,
-      value: nextValue,
+    batch(() => {
+      props.onInput(nextValue, insertionRange.start + text.length);
+      props.onPasteInsertion?.(e, {
+        start: insertionRange.start,
+        end: insertionRange.start + text.length,
+        text,
+        value: nextValue,
+      });
     });
   }
 
