@@ -30,6 +30,7 @@ import {
 } from '../lib/ui-icons';
 import { toCssUrl } from './UiIcon';
 import { getFileTypeIcon } from './FileTypeIcon';
+import { getFolderTypeIcon } from './FolderTypeIcon';
 
 const selectSessionMock = vi.hoisted(() => vi.fn(async () => {}));
 
@@ -2682,6 +2683,9 @@ describe('ToolCall', () => {
     expect(directoryLink?.textContent).toBe('src');
     expect(container?.querySelector('.file-read-meta')?.textContent).toBe('directory');
     expect(directoryLink?.querySelector('.file-read-file-icon')).toBeNull();
+    expect(directoryLink?.querySelector('.file-read-folder-icon')?.getAttribute('src')).toBe(
+      getFolderTypeIcon('/repo/src')
+    );
 
     directoryLink?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
@@ -2711,6 +2715,34 @@ describe('ToolCall', () => {
     );
     expect(container?.querySelector('.file-read-target[href]')).toBeNull();
     expect(container?.querySelector('.file-read-file-icon')).toBeNull();
+  });
+
+  it('recognizes a conventional folder when the read output lacks directory markers', () => {
+    const sendSpy = setExtensionSender();
+    const part: ToolPart = {
+      id: 'tool-docs',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-docs',
+      tool: 'read',
+      state: completedState({ file_path: '/repo/docs' }, 'README.md\narchitecture.md'),
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    const link = container?.querySelector<HTMLAnchorElement>('.file-read-target');
+    expect(link?.querySelector('.file-read-folder-icon')?.getAttribute('src')).toBe(
+      getFolderTypeIcon('/repo/docs')
+    );
+    expect(link?.querySelector('.file-read-file-icon')).toBeNull();
+    expect(container?.querySelector('.file-read-meta')?.textContent).toBe('directory');
+
+    link?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(sendSpy).toHaveBeenCalledWith({
+      type: 'vscode/open',
+      payload: { path: '/repo/docs', kind: 'directory' },
+    });
   });
 
   it('renders read paths containing edit as reads rather than file changes', () => {

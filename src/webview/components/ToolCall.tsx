@@ -45,6 +45,7 @@ import type { DiffViewFile } from './DiffView';
 import { ClampedToolText } from './ClampedToolText';
 import { CopyIconButton } from './CopyIconButton';
 import { FileTypeIcon } from './FileTypeIcon';
+import { FolderTypeIcon, hasRecognizedFolderType } from './FolderTypeIcon';
 import { isBoolean, isNumber, isString } from '../lib/runtime-values';
 import {
   bookIcon,
@@ -755,7 +756,9 @@ function ReadToolCard(props: {
       normalizedSessionDirectory() !== null &&
       normalizedPath() === normalizedSessionDirectory());
 
-  const isDirectory = () => hasFilePath() && (isCurrentDirectory() || isDirectoryOutput(s()));
+  const isDirectory = () =>
+    hasFilePath() &&
+    (isCurrentDirectory() || isDirectoryOutput(s()) || hasRecognizedFolderType(props.filePath!));
   const lineRange = () => extractReadRange(asRecord(s().input) ?? {}, metadata());
 
   const openFile = (e: Event) => {
@@ -815,8 +818,13 @@ function ReadToolCard(props: {
               fallback={<span class="file-read-target file-read-target-text">{name()}</span>}
             >
               <a href="#" class="file-path-link file-read-target" onClick={openFile}>
-                <Show when={!isDirectory()}>
-                  <FileTypeIcon path={props.filePath ?? undefined} class="file-read-file-icon" />
+                <Show
+                  when={isDirectory()}
+                  fallback={
+                    <FileTypeIcon path={props.filePath ?? undefined} class="file-read-file-icon" />
+                  }
+                >
+                  <FolderTypeIcon path={props.filePath!} class="file-read-folder-icon" />
                 </Show>
                 {name()}
               </a>

@@ -1,14 +1,18 @@
 import cIcon from 'material-icon-theme/icons/c.svg';
 import cppIcon from 'material-icon-theme/icons/cpp.svg';
 import csharpIcon from 'material-icon-theme/icons/csharp.svg';
+import contributingIcon from 'material-icon-theme/icons/contributing.svg';
 import cssIcon from 'material-icon-theme/icons/css.svg';
 import dartIcon from 'material-icon-theme/icons/dart.svg';
 import audioIcon from 'material-icon-theme/icons/audio.svg';
 import databaseIcon from 'material-icon-theme/icons/database.svg';
 import dockerIcon from 'material-icon-theme/icons/docker.svg';
+import editorconfigIcon from 'material-icon-theme/icons/editorconfig.svg';
 import fileIcon from 'material-icon-theme/icons/file.svg';
+import gemfileIcon from 'material-icon-theme/icons/gemfile.svg';
 import gitIcon from 'material-icon-theme/icons/git.svg';
 import goIcon from 'material-icon-theme/icons/go.svg';
+import gradleIcon from 'material-icon-theme/icons/gradle.svg';
 import graphqlIcon from 'material-icon-theme/icons/graphql.svg';
 import htmlIcon from 'material-icon-theme/icons/html.svg';
 import imageIcon from 'material-icon-theme/icons/image.svg';
@@ -22,12 +26,17 @@ import lockIcon from 'material-icon-theme/icons/lock.svg';
 import luaIcon from 'material-icon-theme/icons/lua.svg';
 import makefileIcon from 'material-icon-theme/icons/makefile.svg';
 import markdownIcon from 'material-icon-theme/icons/markdown.svg';
+import mavenIcon from 'material-icon-theme/icons/maven.svg';
+import nodeIcon from 'material-icon-theme/icons/nodejs.svg';
+import npmIcon from 'material-icon-theme/icons/npm.svg';
 import pdfIcon from 'material-icon-theme/icons/pdf.svg';
 import perlIcon from 'material-icon-theme/icons/perl.svg';
 import phpIcon from 'material-icon-theme/icons/php.svg';
 import powershellIcon from 'material-icon-theme/icons/powershell.svg';
+import pythonMiscIcon from 'material-icon-theme/icons/python-misc.svg';
 import pythonIcon from 'material-icon-theme/icons/python.svg';
 import rIcon from 'material-icon-theme/icons/r.svg';
+import readmeIcon from 'material-icon-theme/icons/readme.svg';
 import reactIcon from 'material-icon-theme/icons/react.svg';
 import reactTsIcon from 'material-icon-theme/icons/react_ts.svg';
 import rubyIcon from 'material-icon-theme/icons/ruby.svg';
@@ -51,14 +60,34 @@ import { getLeafPathName } from '../lib/path-display';
 const FILE_NAME_ICONS = new Map<string, string>(
   Object.entries({
     '.dockerignore': dockerIcon,
+    '.editorconfig': editorconfigIcon,
     '.gitattributes': gitIcon,
     '.gitignore': gitIcon,
+    '.npmrc': npmIcon,
+    '.nvmrc': nodeIcon,
+    'compose.yaml': dockerIcon,
+    'compose.yml': dockerIcon,
+    contributing: contributingIcon,
+    'contributing.md': contributingIcon,
+    'docker-compose.yaml': dockerIcon,
+    'docker-compose.yml': dockerIcon,
     dockerfile: dockerIcon,
+    gemfile: gemfileIcon,
     'go.mod': goIcon,
     'go.sum': goIcon,
+    'gradle.properties': gradleIcon,
+    'gradle-wrapper.properties': gradleIcon,
+    gradlew: gradleIcon,
+    'gradlew.bat': gradleIcon,
     license: licenseIcon,
     makefile: makefileIcon,
     'package-lock.json': lockIcon,
+    'package.json': nodeIcon,
+    'pom.xml': mavenIcon,
+    'pyproject.toml': pythonMiscIcon,
+    readme: readmeIcon,
+    'readme.md': readmeIcon,
+    'requirements.txt': pythonMiscIcon,
     'tsconfig.json': tsconfigIcon,
   })
 );
@@ -82,6 +111,7 @@ const FILE_EXTENSION_ICONS = new Map<string, string>(
     gif: imageIcon,
     git: gitIcon,
     go: goIcon,
+    gradle: gradleIcon,
     gql: graphqlIcon,
     graphql: graphqlIcon,
     h: cIcon,
@@ -147,7 +177,7 @@ const FILE_EXTENSION_ICONS = new Map<string, string>(
 
 export function hasRecognizedFileType(path: string): boolean {
   const filename = getLeafPathName(path).toLowerCase();
-  if (FILE_NAME_ICONS.has(filename)) return true;
+  if (FILE_NAME_ICONS.has(filename) || filename.endsWith('.gradle.kts')) return true;
 
   const dotIndex = filename.lastIndexOf('.');
   return dotIndex >= 0 && FILE_EXTENSION_ICONS.has(filename.slice(dotIndex + 1));
@@ -159,6 +189,7 @@ export function getFileTypeIcon(path: string | undefined): string {
   const filename = getLeafPathName(path).toLowerCase();
   const namedIcon = FILE_NAME_ICONS.get(filename);
   if (namedIcon) return namedIcon;
+  if (filename.endsWith('.gradle.kts')) return gradleIcon;
 
   const dotIndex = filename.lastIndexOf('.');
   if (dotIndex < 0 || dotIndex === filename.length - 1) return fileIcon;

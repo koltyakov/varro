@@ -1948,7 +1948,8 @@ kbd {
 }
 
 .file-edit-file-icon,
-.file-read-file-icon {
+.file-read-file-icon,
+.file-read-folder-icon {
   width: 14px;
   height: 14px;
   object-fit: contain;
