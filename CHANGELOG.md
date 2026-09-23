@@ -4,7 +4,7 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 
 ## 0.29.x - September 2026
 
-- Added OpenCode v2 support alongside v1, with automatic API detection and v2 client updates through 2.0.14. Install v2 with `npm install -g @opencode/cli`, then run `Varro: Restart Server`. See [restart recovery steps](docs/usage.md#if-restart-does-not-switch-to-v2) if needed.
+- Added OpenCode v2 support alongside v1, with automatic API detection and v2 client updates. Install v2 with `npm install -g @opencode/cli`, then run `Varro: Restart Server`. See [restart recovery steps](docs/usage.md#if-restart-does-not-switch-to-v2) if needed.
 - Imported copies of v1 conversations that v2 cannot open, including child sessions. Usage reports include both versions without double-counting.
 - Added attach-only connections to externally managed servers, Docker setup guides, and saved credentials for authenticated connections.
 - Added opt-in TypeSafe Jev decisions for Auto-mode approvals, provider disabling, and v2 authentication. Model refreshes now show progress and discover new models without restoring removed ones.

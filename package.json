@@ -72,7 +72,7 @@
   },
   "dependencies": {
     "@opencode-ai/sdk": "^1.18.32",
-    "@opencode/client": "^2.0.14",
+    "@opencode/client": "^2.0.15",
     "cross-spawn": "7.0.6",
     "dompurify": "3.4.15",
     "highlight.js": "11.12.0",
