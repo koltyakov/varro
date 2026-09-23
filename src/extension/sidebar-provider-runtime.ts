@@ -59,14 +59,20 @@ export class SidebarProviderRuntime {
     this.recycleBinMaintenanceInFlight = true;
     this.lastRecycleBinCleanupAt = now;
     try {
-      const removed = await this.sessionTrash.cleanupExpired((session) =>
-        this.server.request(
-          'DELETE',
-          session.directory
-            ? `/session/${encodeURIComponent(session.id)}?directory=${encodeURIComponent(session.directory)}`
-            : `/session/${encodeURIComponent(session.id)}`
-        )
-      );
+      const removed = await this.sessionTrash.cleanupExpired(async (session) => {
+        const path = session.directory
+          ? `/session/${encodeURIComponent(session.id)}?directory=${encodeURIComponent(session.directory)}`
+          : `/session/${encodeURIComponent(session.id)}`;
+        const deleted = await this.server.request('DELETE', path);
+        if (deleted === true) return;
+        try {
+          await this.server.request('GET', path);
+        } catch (error) {
+          if (error instanceof Error && /\b404\b/.test(error.message)) return;
+          throw error;
+        }
+        throw new Error(`OpenCode did not confirm session deletion: ${session.id}`);
+      });
       if (removed.length > 0) {
         this.sessionState.removeSessions(
           removed.flatMap((entry) => entry.sessions.map((session) => session.id))

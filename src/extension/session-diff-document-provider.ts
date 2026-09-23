@@ -29,7 +29,14 @@ export class SessionDiffDocumentProvider implements vscode.TextDocumentContentPr
     this.disposables = [
       vscode.workspace.registerTextDocumentContentProvider(SCHEME, this),
       vscode.workspace.onDidCloseTextDocument((document) => {
-        if (document.uri.scheme === SCHEME) this.contents.delete(document.uri.toString());
+        if (document.uri.scheme !== SCHEME) return;
+        const key = document.uri.toString();
+        // Changing the language closes and reopens the same virtual document.
+        queueMicrotask(() => {
+          if (!vscode.workspace.textDocuments.some((open) => open.uri.toString() === key)) {
+            this.contents.delete(key);
+          }
+        });
       }),
     ];
   }

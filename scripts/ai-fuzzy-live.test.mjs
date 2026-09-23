@@ -31,6 +31,7 @@ import {
   sendComposerPromptWithRetry,
   sessionSnapshotMatches,
   shouldRetryAi08WithFreshStream,
+  shouldRetryActivityWithFreshStream,
   shouldRetryNestedHandoff,
   summarizeCanonicalDelivery,
   summarizeQueuedDelivery,
@@ -49,6 +50,25 @@ const ready = {
   diffControl: true,
   nestedActivityScroller: { hasRange: true },
 };
+
+test('retries an exhausted live tool window without retrying a scrolling failure', () => {
+  const execution = { executed: false, actions: [{ outcome: 'active-window-ended' }] };
+  assert.equal(shouldRetryActivityWithFreshStream(execution, 1, 3), true);
+  assert.equal(shouldRetryActivityWithFreshStream(execution, 3, 3), false);
+  assert.equal(shouldRetryActivityWithFreshStream({ ...execution, executed: true }, 1, 3), false);
+  assert.equal(
+    shouldRetryActivityWithFreshStream(
+      { executed: false, actions: [{ outcome: 'bottom-not-reached' }] },
+      1,
+      3
+    ),
+    false
+  );
+  assert.equal(
+    shouldRetryActivityWithFreshStream({ executed: false, failurePhase: 'nested-handoff' }, 1, 3),
+    false
+  );
+});
 
 function transcriptStateAt(scrollTop) {
   return {
@@ -233,9 +253,12 @@ test('accepts a focused transcript key at its requested scroll boundary', () => 
     },
   };
 
-  assert.deepEqual(verifyActionEffect({ action: 'Space on transcript' }, state, state, { dispatched: true }), {
-    verified: true,
-  });
+  assert.deepEqual(
+    verifyActionEffect({ action: 'Space on transcript' }, state, state, { dispatched: true }),
+    {
+      verified: true,
+    }
+  );
 });
 
 test('accepts a transcript wheel at its requested scroll boundary', () => {
@@ -300,7 +323,10 @@ test('distinguishes canonical prompt admission from queued and unobserved input'
     userIds: [],
     queuedItemIds: ['queue-1'],
   });
-  assert.equal(classifyPromptDisposition(messages, queueItems, marker).status, 'admitted-and-queued');
+  assert.equal(
+    classifyPromptDisposition(messages, queueItems, marker).status,
+    'admitted-and-queued'
+  );
   assert.equal(classifyPromptDisposition([], [], marker).status, 'unobserved');
 });
 
@@ -333,7 +359,10 @@ test('dispatches editable-control keys to the composer during AI-08', async () =
     ['[aria-label="Message composer"]', 'Space'],
     ['[aria-label="Message composer"]', 'Shift+Space'],
   ]);
-  assert.equal(results.every(({ executed }) => executed), true);
+  assert.equal(
+    results.every(({ executed }) => executed),
+    true
+  );
 });
 
 test('stops the AI-08 action plan when the model stream settles', async () => {
@@ -478,14 +507,8 @@ test('retries a nested handoff only when live tray geometry changed', () => {
 });
 
 test('retries AI-08 only for an early settled stream within the prompt budget', () => {
-  assert.equal(
-    shouldRetryAi08WithFreshStream({ reason: 'model stream settled' }, 1, 3),
-    true
-  );
-  assert.equal(
-    shouldRetryAi08WithFreshStream({ reason: 'model stream settled' }, 3, 3),
-    false
-  );
+  assert.equal(shouldRetryAi08WithFreshStream({ reason: 'model stream settled' }, 1, 3), true);
+  assert.equal(shouldRetryAi08WithFreshStream({ reason: 'model stream settled' }, 3, 3), false);
   assert.equal(
     shouldRetryAi08WithFreshStream({ reason: 'transcript moved opposite' }, 1, 3),
     false
@@ -518,7 +541,7 @@ test('accepts a bounded restart count for duplicate-delivery stress', () => {
   assert.throws(() => parseRestartCount('11'), /integer from 1 through 10/);
 });
 
-test('allows AI-08 to continue from the exact recorded AI-07 fixture state', () => {
+test('independent scenarios accept a clean baseline or exact owned edits, not a previous scenario verdict', () => {
   const fixture = {
     commit: 'abc',
     status: ' M source.ts',
@@ -550,11 +573,54 @@ test('allows AI-08 to continue from the exact recorded AI-07 fixture state', () 
   assert.equal(
     fixtureIsSafeForScenario(
       fixture,
-      { ...manifest, livePreparation: { 'AI-07': { prepared: false, fixtureAfterPreparation: fixture } } },
+      {
+        ...manifest,
+        livePreparation: { 'AI-07': { prepared: false, fixtureAfterPreparation: fixture } },
+      },
       'AI-08'
     ),
     false
   );
+  for (const scenario of ['AI-08', 'AI-18', 'AI-19']) {
+    assert.equal(
+      fixtureIsSafeForScenario(
+        { commit: 'abc', status: '' },
+        { fixture: manifest.fixture },
+        scenario
+      ),
+      true
+    );
+    const failed = {
+      ...manifest,
+      livePreparation: {
+        'AI-07': {
+          prepared: false,
+          fixtureExitEvidence: { ...fixture, capturedAt: '2026-09-22T10:00:00Z' },
+        },
+      },
+    };
+    assert.equal(fixtureIsSafeForScenario(fixture, failed, scenario), true);
+    assert.equal(
+      fixtureIsSafeForScenario({ ...fixture, contentHash: 'external-edit' }, failed, scenario),
+      false
+    );
+    failed.livePreparation['AI-19'] = {
+      fixtureExitEvidence: {
+        ...fixture,
+        contentHash: 'later-edit',
+        capturedAt: '2026-09-22T11:00:00Z',
+      },
+    };
+    assert.equal(fixtureIsSafeForScenario(fixture, failed, scenario), false);
+    assert.equal(
+      fixtureIsSafeForScenario({ ...fixture, contentHash: 'later-edit' }, failed, scenario),
+      true
+    );
+    assert.equal(
+      fixtureIsSafeForScenario({ ...fixture, commit: 'different' }, failed, scenario),
+      false
+    );
+  }
 });
 
 test('builds valid JavaScript for the duplicate-delivery frame observer', () => {
@@ -748,10 +814,12 @@ test('matches open sessions by recorded route ID rather than title alone', () =>
 });
 
 test('parses exact changed paths including both sides of a rename', () => {
-  assert.deepEqual(
-    parseGitStatusPaths(' M source.ts\0?? new file.ts\0R  renamed.ts\0old.ts\0'),
-    ['new file.ts', 'old.ts', 'renamed.ts', 'source.ts']
-  );
+  assert.deepEqual(parseGitStatusPaths(' M source.ts\0?? new file.ts\0R  renamed.ts\0old.ts\0'), [
+    'new file.ts',
+    'old.ts',
+    'renamed.ts',
+    'source.ts',
+  ]);
 });
 
 test('atomically records fixture evidence and controller failures on exit', async () => {
@@ -1064,26 +1132,53 @@ test('requires settle evidence when height changes without a shared visible row'
 test('reads canonical order when Home leaves both mounted windows', async () => {
   const before = {
     focusOwner: 'transcript',
-    transcript: { sessionId: 'session', scrollTop: 19000, scrollHeight: 20825, clientHeight: 514, mountedMessageIds: ['new'], visibleRows: [{ messageId: 'new', top: -16 }] },
+    transcript: {
+      sessionId: 'session',
+      scrollTop: 19000,
+      scrollHeight: 20825,
+      clientHeight: 514,
+      mountedMessageIds: ['new'],
+      visibleRows: [{ messageId: 'new', top: -16 }],
+    },
   };
   const after = {
     focusOwner: 'transcript',
-    transcript: { sessionId: 'session', scrollTop: 9309, scrollHeight: 29924, clientHeight: 514, mountedMessageIds: ['old'], visibleRows: [{ messageId: 'old', top: -34 }] },
+    transcript: {
+      sessionId: 'session',
+      scrollTop: 9309,
+      scrollHeight: 29924,
+      clientHeight: 514,
+      mountedMessageIds: ['old'],
+      visibleRows: [{ messageId: 'old', top: -34 }],
+    },
   };
   let capture = 0;
   let reads = 0;
-  const actions = await executeActionPlan({
-    captureActionState: async () => capture++ === 0 ? before : after,
-    key: async () => true,
-  }, [{ step: 45, action: 'key on transcript', key: 'Home' }], 'session', 0, {
-    readMessageOrder: async () => { reads += 1; return ['old', 'middle', 'new']; },
-  });
+  const actions = await executeActionPlan(
+    {
+      captureActionState: async () => (capture++ === 0 ? before : after),
+      key: async () => true,
+    },
+    [{ step: 45, action: 'key on transcript', key: 'Home' }],
+    'session',
+    0,
+    {
+      readMessageOrder: async () => {
+        reads += 1;
+        return ['old', 'middle', 'new'];
+      },
+    }
+  );
   assert.equal(actions[0].executed, true);
   assert.equal(reads, 1);
   assert.deepEqual(actions[0].messageOrder, ['old', 'middle', 'new']);
-  assert.equal(verifyActionEffect({ action: 'key on transcript', key: 'Home' }, before, after, {
-    dispatched: true, messageOrder: ['new', 'middle', 'old'],
-  }).verified, false);
+  assert.equal(
+    verifyActionEffect({ action: 'key on transcript', key: 'Home' }, before, after, {
+      dispatched: true,
+      messageOrder: ['new', 'middle', 'old'],
+    }).verified,
+    false
+  );
 });
 
 test('uses the current editor action label', async () => {
@@ -1179,10 +1274,7 @@ test('scopes AI-08 disclosure actions to current-turn message identities', async
   );
 
   assert.deepEqual(clicks, [
-    [
-      '.assistant-activity-summary[data-activity-summary-group-key="group-current"]',
-      scope,
-    ],
+    ['.assistant-activity-summary[data-activity-summary-group-key="group-current"]', scope],
   ]);
   assert.equal(results[0].executed, true);
 });
@@ -1245,7 +1337,10 @@ test('records only new descendants whose full ancestry reaches the tracked root'
     'AI-08'
   );
 
-  assert.deepEqual(result.observed.map((session) => session.id), ['grandchild']);
+  assert.deepEqual(
+    result.observed.map((session) => session.id),
+    ['grandchild']
+  );
   assert.deepEqual(result.recorded, [
     {
       id: 'grandchild',
@@ -1256,7 +1351,10 @@ test('records only new descendants whose full ancestry reaches the tracked root'
       createdBy: 'AI-08',
     },
   ]);
-  assert.equal(manifest.runSessions.some((session) => session.id === 'missing-parent'), false);
+  assert.equal(
+    manifest.runSessions.some((session) => session.id === 'missing-parent'),
+    false
+  );
 });
 
 test('defines and judges the AI-18 multi-webview controller plan', () => {
@@ -1293,12 +1391,9 @@ test('defines and judges the AI-18 multi-webview controller plan', () => {
       childTitleRouted: true,
     },
     synchronization: {
-      samples: [
-        'sidebar-source',
-        'editor-root',
-        'editor-root-return',
-        'editor-reload',
-      ].map((phase) => ({ phase, model: true, permissionMode: true })),
+      samples: ['sidebar-source', 'editor-root', 'editor-root-return', 'editor-reload'].map(
+        (phase) => ({ phase, model: true, permissionMode: true })
+      ),
     },
     queues: {
       sessionId: 'root',

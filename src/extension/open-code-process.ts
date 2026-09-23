@@ -1116,6 +1116,7 @@ export class OpenCodeProcess {
   private serverPassword: string | undefined;
   private serverUsername: string | undefined;
   private credentialUrl: string | undefined;
+  private lastCredentialDiagnostic: string | undefined;
 
   discoverSharedServer(): false | Promise<boolean> {
     if (openCodeApiVersion(this.installedCliVersionCache?.value ?? '') !== 2) return false;
@@ -1197,9 +1198,19 @@ export class OpenCodeProcess {
   }
 
   get serverAuthorization(): string | undefined {
-    if (this.serverPassword && this.credentialUrl === this.url)
+    if (this.serverPassword && this.credentialUrl === this.url) {
+      this.lastCredentialDiagnostic = undefined;
       return basicAuthorization(this.serverPassword, this.serverUsername);
+    }
     const password = process.env.OPENCODE_SERVER_PASSWORD;
+    const diagnostic = password
+      ? 'Using OpenCode credentials from environment variables: OPENCODE_SERVER_PASSWORD=*; ' +
+        `OPENCODE_SERVER_USERNAME=${process.env.OPENCODE_SERVER_USERNAME ? '*' : 'opencode (default)'}`
+      : 'No credentials for OpenCode were provided; connecting without authentication.';
+    if (this.lastCredentialDiagnostic !== diagnostic) {
+      logger.info(diagnostic);
+      this.lastCredentialDiagnostic = diagnostic;
+    }
     return password
       ? basicAuthorization(password, process.env.OPENCODE_SERVER_USERNAME)
       : undefined;

@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-unknown-parameters -- Child process and stream failures are normalized to Error before delivery. */
 import { spawn, type ChildProcess, type SpawnOptions } from 'child_process';
 import crossSpawn from 'cross-spawn';
 import { mkdtemp, open, readFile, rm, stat } from 'fs/promises';
@@ -104,6 +105,7 @@ export class SessionExportService {
       let timedOut = false;
       let hardTerminationStarted = false;
       let proc: ReturnType<typeof spawn> | null = null;
+      let outputOperation: Promise<void> = Promise.resolve();
       let escalationTimeout: ReturnType<typeof setTimeout> | null = null;
       let forceSettleTimeout: ReturnType<typeof setTimeout> | null = null;
       const timeoutError = new Error('OpenCode CLI export timed out');
@@ -129,6 +131,7 @@ export class SessionExportService {
       const finish = (error?: Error) => {
         if (settled) return;
         settled = true;
+        if (error) proc?.stdout?.destroy();
         clearTimeout(timeout);
         if (escalationTimeout) {
           clearTimeout(escalationTimeout);
@@ -170,13 +173,41 @@ export class SessionExportService {
         }
         const command = this.server.resolveCommand();
         const spawnOptions: SpawnOptions = {
-          stdio: ['ignore', fileHandle.fd, 'pipe'],
+          stdio: ['ignore', 'pipe', 'pipe'],
           cwd: workspacePath,
           env: buildServerEnv(),
           windowsHide: true,
         };
         if (process.platform !== 'win32') spawnOptions.detached = true;
         proc = crossSpawn(command, args, spawnOptions);
+        if (!proc.stdout) throw new Error('OpenCode CLI export stdout is unavailable');
+        const runningProcess = proc;
+        outputOperation = (async () => {
+          let outputBytes = 0;
+          for await (const value of runningProcess.stdout!) {
+            const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
+            if (outputBytes + chunk.length > MAX_EXPORT_BYTES) {
+              throw new Error(
+                `OpenCode export exceeds the ${MAX_EXPORT_BYTES / (1024 * 1024)} MB safety limit`
+              );
+            }
+            outputBytes += chunk.length;
+            let offset = 0;
+            while (offset < chunk.length) {
+              const { bytesWritten } = await fileHandle.write(chunk, offset, chunk.length - offset);
+              if (bytesWritten <= 0) throw new Error('Could not write OpenCode export output');
+              offset += bytesWritten;
+            }
+          }
+        })();
+        void outputOperation.catch((err: unknown) => {
+          if (settled || timedOut) return;
+          const error = err instanceof Error ? err : new Error(String(err));
+          void terminateProcessTree(runningProcess, true).then(
+            () => finish(error),
+            () => finish(error)
+          );
+        });
 
         proc.stderr?.on('data', (data: Buffer) => {
           const chunk = Buffer.isBuffer(data) ? data : Buffer.from(data);
@@ -203,14 +234,23 @@ export class SessionExportService {
             return;
           }
           if (code === 0) {
-            finish();
+            void outputOperation.then(
+              () => {
+                if (!timedOut) finish();
+              },
+              (err: unknown) => {
+                if (!timedOut) finish(err instanceof Error ? err : new Error(String(err)));
+              }
+            );
             return;
           }
-          finish(
-            new Error(
-              formatExportStderr(stderr, stderrTruncated) ||
-                `OpenCode CLI command failed${signal ? ` (${signal})` : code !== null ? ` (code ${code})` : ''}`
-            )
+          const failure = new Error(
+            formatExportStderr(stderr, stderrTruncated) ||
+              `OpenCode CLI command failed${signal ? ` (${signal})` : code !== null ? ` (code ${code})` : ''}`
+          );
+          void outputOperation.then(
+            () => finish(failure),
+            () => finish(failure)
           );
         });
       } catch (err) {

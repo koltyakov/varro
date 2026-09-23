@@ -18,6 +18,7 @@ import {
   createBootstrapProxy,
   createControl,
   installObserver,
+  inspectCapture,
   isSidebarContext,
   loopbackPortOpen,
   ownedProcessExists,
@@ -80,6 +81,14 @@ test('CLI parses explicit sources and timing, rejecting ambiguous or unsafe argu
       .options['short-gap-ms'],
     0
   );
+  assert.deepEqual(
+    parseArgs(['run', '--capture', 'x', '--output', 'y', '--checkpoints', '0,12,30']).options
+      .checkpoints,
+    [0, 12, 30]
+  );
+  for (const command of ['pause', 'resume', 'snapshot']) {
+    assert.equal(parseArgs([command, '--control', 'x']).command, command);
+  }
   for (const args of [
     [],
     ['serve'],
@@ -91,9 +100,49 @@ test('CLI parses explicit sources and timing, rejecting ambiguous or unsafe argu
     ['run', '--capture', 'x', '--output', 'x', '--start-timeout-ms', '0'],
     ['run', '--capture', 'x', '--output', 'x', '--short-gap-ms', '501'],
     ['run', '--capture', 'x', '--output', 'x', '--max-gap-ms', '2147483648'],
+    ['run', '--capture', 'x', '--output', 'x', '--checkpoints', '2,1'],
+    ['run', '--capture', 'x', '--output', 'x', '--checkpoints', '1,1'],
+    ['run', '--capture', 'x', '--output', 'x', '--checkpoints', '-1'],
+    ['run', '--capture', 'x', '--output', 'x', '--checkpoints', '1,'],
   ]) {
     assert.throws(() => parseArgs(args));
   }
+});
+
+test('capture inspection identifies exact part and tool boundaries without exposing output', () => {
+  const update = (status) => ({
+    type: 'message.part.updated',
+    properties: {
+      part: {
+        id: 'tool',
+        messageID: 'message',
+        type: 'tool',
+        tool: 'shell',
+        state: { status, output: 'private output' },
+      },
+    },
+  });
+  const result = inspectCapture({
+    scenario: 'AI-07',
+    initialMessages: [],
+    events: [
+      { offsetMs: 0, event: update('running') },
+      { offsetMs: 10, event: update('running') },
+      { offsetMs: 10_000, event: update('completed') },
+    ],
+  });
+  assert.deepEqual(
+    result.boundaries.map(({ afterEvents, scheduledMs, state }) => ({
+      afterEvents,
+      scheduledMs,
+      state,
+    })),
+    [
+      { afterEvents: 1, scheduledMs: 0, state: 'running' },
+      { afterEvents: 3, scheduledMs: 510, state: 'completed' },
+    ]
+  );
+  assert.equal(JSON.stringify(result).includes('private output'), false);
 });
 
 test('bounded waits resolve, reject on deadline, and honor cancellation', async () => {
@@ -332,9 +381,19 @@ test('control requires authentication, enforces armed start, and handles status/
     stop: () => {
       phase = 'stopped';
     },
+    pause: () => {
+      phase = 'paused';
+    },
+    resume: () => {
+      phase = 'running';
+    },
+    snapshot: async () => {
+      await sleep(5);
+      return { json: 'snapshot-1.json', screenshot: 'snapshot-1.png' };
+    },
   });
   t.after(() => control.close());
-  for (const operation of ['status', 'start', 'stop']) {
+  for (const operation of ['status', 'start', 'stop', 'pause', 'resume', 'snapshot']) {
     const response = await fetch(`${control.url}/${operation}`, {
       method: operation === 'status' ? 'GET' : 'POST',
     });
@@ -343,6 +402,12 @@ test('control requires authentication, enforces armed start, and handles status/
   await assert.rejects(controlRequest(control, 'start'), /not armed/);
   phase = 'armed';
   assert.equal((await controlRequest(control, 'start')).phase, 'running');
+  assert.equal((await controlRequest(control, 'pause')).phase, 'paused');
+  assert.deepEqual((await controlRequest(control, 'snapshot')).evidence, {
+    json: 'snapshot-1.json',
+    screenshot: 'snapshot-1.png',
+  });
+  assert.equal((await controlRequest(control, 'resume')).phase, 'running');
   await assert.rejects(controlRequest(control, 'start'), /not armed/);
   assert.equal(starts, 1);
   assert.equal((await controlRequest(control, 'status')).status, 'NEEDS_AI_REVIEW');

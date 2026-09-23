@@ -1,6 +1,7 @@
 /* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-known-value-widening, anti-slop/no-module-mocking, anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- These server integration tests deliberately model malformed health data, partial child processes, and private lifecycle state. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'events';
+import type * as vscode from 'vscode';
 import type * as FsModule from 'fs';
 import type * as FsPromisesModule from 'fs/promises';
 import type * as OsModule from 'os';
@@ -26,6 +27,7 @@ const { getConfigurationMock, loggerMock, mkdirMock, spawnMock, vscodeMock, writ
         activeTextEditor: undefined,
         showInformationMessage: vi.fn<ShowMessageMock>(() => Promise.resolve(undefined)),
         showWarningMessage: vi.fn<ShowMessageMock>(() => Promise.resolve(undefined)),
+        showInputBox: vi.fn<(options: vscode.InputBoxOptions) => Promise<string | undefined>>(),
         createTerminal: vi.fn(() => ({
           show: vi.fn(),
           sendText: vi.fn(),
@@ -93,7 +95,8 @@ class OpenCodeServer extends RealOpenCodeServer {
     autoStart: boolean,
     command?: string,
     simulateMissingCli = false,
-    compactionSettings?: ConstructorParameters<typeof RealOpenCodeServer>[4]
+    compactionSettings?: ConstructorParameters<typeof RealOpenCodeServer>[4],
+    secrets?: vscode.SecretStorage
   ) {
     super(
       port,
@@ -101,7 +104,9 @@ class OpenCodeServer extends RealOpenCodeServer {
       command,
       simulateMissingCli,
       compactionSettings,
-      join('/tmp', `varro-server-test-${process.pid}-${++serverOwnershipPathSequence}.json`)
+      join('/tmp', `varro-server-test-${process.pid}-${++serverOwnershipPathSequence}.json`),
+      false,
+      secrets
     );
   }
 }
@@ -389,6 +394,106 @@ afterEach(async () => {
   else process.env.OPENCODE_CONFIG = originalOpenCodeConfig;
   if (originalOpenCodeConfigContent === undefined) delete process.env.OPENCODE_CONFIG_CONTENT;
   else process.env.OPENCODE_CONFIG_CONTENT = originalOpenCodeConfigContent;
+});
+
+describe('OpenCodeServer credential prompts', () => {
+  function setup(stored?: string) {
+    const secrets = {
+      get: vi.fn(async () => stored),
+      store: vi.fn(async () => {}),
+      delete: vi.fn(async () => {}),
+      keys: vi.fn(async () => []),
+      onDidChange: vi.fn(() => ({ dispose() {} })),
+    };
+    const server = new OpenCodeServer(4096, false, '', false, undefined, secrets);
+    const api = server as unknown as {
+      beginRunningEventStream: () => void;
+      startExistingServerPreparation: () => void;
+      processManager: { discoverServerCredentials: () => Promise<void> };
+    };
+    api.beginRunningEventStream = vi.fn();
+    api.startExistingServerPreparation = vi.fn();
+    api.processManager.discoverServerCredentials = vi.fn(async () => {});
+    vscodeMock.window.showInputBox.mockReset();
+    const authorization = `Basic ${Buffer.from('fixture-user: password with spaces ').toString('base64')}`;
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (new Headers(init?.headers).get('Authorization') !== authorization)
+        return new Response(null, { status: 401 });
+      return new URL(String(input)).pathname === '/api/info'
+        ? new Response(JSON.stringify({ version: '2.0.8', pid: 1234 }))
+        : new Response(null, { status: 404 });
+    });
+    return { server, secrets, authorization };
+  }
+
+  it('shares one prompt across concurrent starts, verifies and saves credentials', async () => {
+    const { server, secrets, authorization } = setup();
+    vscodeMock.window.showInputBox
+      .mockResolvedValueOnce('fixture-user')
+      .mockResolvedValueOnce(' password with spaces ');
+
+    await expect(Promise.all([server.start(), server.start()])).resolves.toEqual([
+      server.url,
+      server.url,
+    ]);
+
+    expect(vscodeMock.window.showInputBox).toHaveBeenCalledTimes(2);
+    expect(vscodeMock.window.showInputBox).toHaveBeenLastCalledWith(
+      expect.objectContaining({ password: true, ignoreFocusOut: true })
+    );
+    expect(secrets.store).toHaveBeenCalledExactlyOnceWith(
+      `varro.opencode.serverCredentials:${server.url}`,
+      JSON.stringify({ username: 'fixture-user', password: ' password with spaces ' })
+    );
+    expect(spawnMock).not.toHaveBeenCalled();
+    const logs = JSON.stringify(loggerMock.info.mock.calls);
+    expect(logs).not.toContain(' password with spaces ');
+    expect(logs).not.toContain(authorization);
+  });
+
+  it('reuses credentials from secret storage without prompting', async () => {
+    const { server, secrets } = setup(
+      JSON.stringify({ username: 'fixture-user', password: ' password with spaces ' })
+    );
+    await expect(server.start()).resolves.toBe(server.url);
+    expect(secrets.get).toHaveBeenCalledWith(`varro.opencode.serverCredentials:${server.url}`);
+    expect(vscodeMock.window.showInputBox).not.toHaveBeenCalled();
+    expect(secrets.store).not.toHaveBeenCalled();
+  });
+
+  it('replaces rejected saved credentials after verifying the new password', async () => {
+    const { server, secrets } = setup(
+      JSON.stringify({ username: 'fixture-user', password: 'old-password' })
+    );
+    vscodeMock.window.showInputBox
+      .mockResolvedValueOnce('fixture-user')
+      .mockResolvedValueOnce(' password with spaces ');
+    await expect(server.start()).resolves.toBe(server.url);
+    expect(secrets.store).toHaveBeenCalledOnce();
+  });
+
+  it.each(['username', 'password', 'rejected'])(
+    'does not save or launch a server when credentials are %s',
+    async (outcome) => {
+      const { server, secrets } = setup();
+      if (outcome !== 'username') {
+        vscodeMock.window.showInputBox
+          .mockResolvedValueOnce('fixture-user')
+          .mockResolvedValueOnce(outcome === 'rejected' ? 'wrong-password' : undefined);
+      }
+      await expect(server.start()).rejects.toThrow('authentication failed');
+      expect(secrets.store).not.toHaveBeenCalled();
+      expect(spawnMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it('does not prompt for a network failure', async () => {
+    const { server, secrets } = setup();
+    vi.mocked(fetch).mockRejectedValue(new Error('Connection refused'));
+    await expect(server.start()).rejects.toThrow();
+    expect(vscodeMock.window.showInputBox).not.toHaveBeenCalled();
+    expect(secrets.store).not.toHaveBeenCalled();
+  });
 });
 
 describe('OpenCodeServer event stream', () => {

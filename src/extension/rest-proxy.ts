@@ -13,6 +13,7 @@ import type {
   PermissionRule,
 } from '../shared/opencode-types';
 import { parseSessionPromptEndpoint } from '../shared/opencode-endpoints';
+import { getSelectionRangesFromEditorContext } from '../shared/context-files';
 import { isScalarConfigPermission } from '../shared/permission-rules';
 import {
   createSessionWorkspaceMetadata,
@@ -327,7 +328,8 @@ export interface RestProxyCallbacks {
   contextProvider: Pick<
     ContextProvider,
     'context' | 'getOpenWorkspaceRoot' | 'readFile' | 'resolvePath'
-  >;
+  > &
+    Partial<Pick<ContextProvider, 'findTerminalText'>>;
   providerLimitService: Pick<ProviderLimitService, 'get'>;
   sessionState: Pick<
     SessionStateManager,
@@ -1067,6 +1069,17 @@ export class RestProxy {
             allowSiblingWorkspaceFolders: true,
           }
         );
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
+
+      if (method === 'POST' && payload.path === VARRO_API_ENDPOINTS.copiedSelectionMatch) {
+        const body = asRecord(payload.body);
+        const text = body?.text;
+        if (typeof text !== 'string' || !text.trim() || text.length > 256 * 1024) {
+          throw new Error('Invalid copied selection text');
+        }
+        const data = this.matchCopiedSelection(text, body?.plainTextOnly === true);
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
       }
@@ -3563,13 +3576,19 @@ export class RestProxy {
         return Boolean(removed);
       }
       case 'empty': {
-        const roots = [...new Set(entries.map((entry) => entry.root.directory))];
+        const roots = new Map<string, string[]>();
+        for (const entry of entries) {
+          const rootIDs = roots.get(entry.root.directory) ?? [];
+          rootIDs.push(entry.rootID);
+          roots.set(entry.root.directory, rootIDs);
+        }
         const removed = (
           await Promise.all(
-            roots.map((root) =>
+            [...roots].map(([root, rootIDs]) =>
               this.callbacks.sessionTrash.empty(
                 (session) => this.deleteSessionForDirectory(session),
-                root
+                root,
+                rootIDs
               )
             )
           )
@@ -3758,6 +3777,45 @@ export class RestProxy {
 
   private isWorkspaceFilePickRequest(method: string, path: string) {
     return method === 'GET' && path === VARRO_API_ENDPOINTS.workspaceFilePick;
+  }
+
+  /**
+   * Answered from state the host already holds, without touching the terminal
+   * or clipboard. Terminal matches need a plain-text clipboard, since a
+   * terminal copy carries no rich formats while editors and browsers add them.
+   */
+  private matchCopiedSelection(text: string, plainTextOnly: boolean) {
+    const pasted = normalizeLineEndings(text);
+    const editor = vscode.window.activeTextEditor;
+    if (
+      editor &&
+      !editor.selection.isEmpty &&
+      normalizeLineEndings(editor.document.getText(editor.selection)) === pasted
+    ) {
+      const uri = editor.document.uri;
+      const folder = vscode.workspace.getWorkspaceFolder(uri);
+      // A file reference cannot carry unsaved buffer contents to the model.
+      if (editor.document.isDirty) return null;
+      if (!editor.document.isUntitled && folder) {
+        return {
+          type: 'file' as const,
+          file: {
+            path: uri.fsPath,
+            relativePath: getRelativePath(uri, folder),
+            type: 'file' as const,
+            lineRanges: getSelectionRangesFromEditorContext({
+              startLine: editor.selection.start.line + 1,
+              endLine: editor.selection.end.line + (editor.selection.end.character === 0 ? 0 : 1),
+            }),
+          },
+        };
+      }
+    }
+
+    const selection = plainTextOnly
+      ? this.callbacks.contextProvider.findTerminalText?.(text)
+      : null;
+    return selection ? { type: 'terminal' as const, selection } : null;
   }
 
   private parseWorkspaceResolveRequest(method: string, path: string) {
@@ -5188,4 +5246,9 @@ function parseAttentionReplyRequestID(method: string, path: string): string | nu
   );
   const requestID = match?.[1] ?? match?.[2];
   return requestID ? decodeURIComponent(requestID) : null;
+}
+
+/** Clipboard text can arrive with CRLF on one side and LF on the other. */
+function normalizeLineEndings(text: string): string {
+  return text.replace(/\r\n/g, '\n');
 }

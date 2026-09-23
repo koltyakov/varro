@@ -1,5 +1,6 @@
 /* oxlint-disable anti-slop/no-known-value-widening, anti-slop/no-module-mocking, anti-slop/require-safety-comment-for-type-assertion -- These export tests verify VS Code save-dialog integration with partial message and filesystem fixtures. */
 import { join } from 'path';
+import { PassThrough } from 'node:stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -89,6 +90,7 @@ function createServer() {
 }
 
 function createSpawnResult() {
+  const stdout = new PassThrough();
   const handlers: {
     close?: CloseHandler;
     error?: ErrorHandler;
@@ -97,6 +99,7 @@ function createSpawnResult() {
   const stderrOn = vi.fn();
 
   const proc = {
+    stdout,
     stderr: {
       on: stderrOn.mockImplementation((event: string, handler: (data: Buffer) => void) => {
         if (event === 'data') {
@@ -106,7 +109,10 @@ function createSpawnResult() {
     },
     once: vi.fn((event: string, handler: CloseHandler | ErrorHandler) => {
       if (event === 'close') {
-        handlers.close = handler as CloseHandler;
+        handlers.close = (code, signal) => {
+          stdout.end();
+          (handler as CloseHandler)(code, signal);
+        };
       }
       if (event === 'error') {
         handlers.error = handler as ErrorHandler;
@@ -145,7 +151,13 @@ describe('SessionExportService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.mkdtemp.mockResolvedValue('/tmp/varro-opencode-export-123');
-    mocks.open.mockResolvedValue({ fd: 17, close: vi.fn().mockResolvedValue(undefined) });
+    mocks.open.mockResolvedValue({
+      fd: 17,
+      write: vi.fn(async (_chunk: Buffer, _offset: number, length: number) => ({
+        bytesWritten: length,
+      })),
+      close: vi.fn().mockResolvedValue(undefined),
+    });
     mocks.readFile.mockResolvedValue('{"id":"session-1"}\n');
     mocks.stat.mockResolvedValue({ size: 19 });
     mocks.rm.mockResolvedValue(undefined);
@@ -172,7 +184,7 @@ describe('SessionExportService', () => {
       'opencode',
       ['export', 'session-1'],
       expect.objectContaining({
-        stdio: ['ignore', 17, 'pipe'],
+        stdio: ['ignore', 'pipe', 'pipe'],
         cwd: '/repo',
         windowsHide: true,
       })
@@ -270,6 +282,63 @@ describe('SessionExportService', () => {
     spawnResult.handlers.close(0, null);
 
     await expect(exportPromise).rejects.toThrow('OpenCode export exceeds the 64 MB safety limit');
+    expect(mocks.readFile).not.toHaveBeenCalled();
+    expect(mocks.rm).toHaveBeenCalled();
+  });
+
+  it('completes partial file writes before reading the export', async () => {
+    const spawnResult = createSpawnResult();
+    const service = new SessionExportService(createServer(), 1000);
+    const exportPromise = service.exportSession('session-1');
+    await vi.waitFor(() => expect(mocks.spawn).toHaveBeenCalledOnce());
+    const file = await mocks.open.mock.results[0]!.value;
+    file.write.mockImplementation(async (_chunk: Buffer, _offset: number, length: number) => ({
+      bytesWritten: Math.min(length, 5),
+    }));
+
+    spawnResult.proc.stdout.write('{"id":"session-1"}');
+    spawnResult.handlers.close(0, null);
+    await exportPromise;
+
+    expect(file.write.mock.calls.map((call: unknown[]) => call[1])).toEqual([0, 5, 10, 15]);
+    expect(mocks.readFile).toHaveBeenCalledOnce();
+  });
+
+  it('times out a file write that stalls after the CLI has closed', async () => {
+    vi.useFakeTimers();
+    try {
+      const spawnResult = createSpawnResult();
+      const service = new SessionExportService(createServer(), 1000);
+      const exportPromise = service.exportSession('session-1');
+      const rejection = expect(exportPromise).rejects.toThrow('OpenCode CLI export timed out');
+      await vi.advanceTimersByTimeAsync(0);
+      const file = await mocks.open.mock.results[0]!.value;
+      file.write.mockImplementation(() => new Promise(() => undefined));
+      spawnResult.proc.stdout.write('{"id":"session-1"}');
+      spawnResult.handlers.close(0, null);
+
+      await vi.advanceTimersByTimeAsync(3_000);
+      await rejection;
+      expect(mocks.readFile).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops an oversized stream before writing bytes beyond the limit', async () => {
+    const spawnResult = createSpawnResult();
+    const service = new SessionExportService(createServer(), 1000);
+    const exportPromise = service.exportSession('session-1');
+    await vi.waitFor(() => expect(mocks.spawn).toHaveBeenCalledOnce());
+    const file = await mocks.open.mock.results[0]!.value;
+
+    spawnResult.proc.stdout.write(Buffer.alloc(64 * 1024 * 1024));
+    await vi.waitFor(() => expect(file.write).toHaveBeenCalled());
+    spawnResult.proc.stdout.write(Buffer.from('overflow'));
+
+    await expect(exportPromise).rejects.toThrow('OpenCode export exceeds the 64 MB safety limit');
+    expect(file.write).toHaveBeenCalledTimes(1);
+    expect(spawnResult.proc.kill).toHaveBeenCalledWith('SIGKILL');
     expect(mocks.readFile).not.toHaveBeenCalled();
     expect(mocks.rm).toHaveBeenCalled();
   });

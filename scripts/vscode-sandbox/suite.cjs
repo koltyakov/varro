@@ -83,7 +83,7 @@ const EXPECTATIONS = {
     '  - **Health:** healthy',
   ],
   'v2-first-run': [
-    '- **Version:** `2.0.12`',
+    '- **Version:** `2.0.14`',
     '- **Ownership:** managed by Varro',
     '  - **Status:** `running, event stream healthy`',
     '  - **Health:** healthy',

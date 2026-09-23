@@ -4,7 +4,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates git ripgrep \
     && rm -rf /var/lib/apt/lists/*
 
-ARG OPENCODE_VERSION=1.18.31
+ARG OPENCODE_VERSION=1.18.32
 RUN npm install --global "opencode-ai@${OPENCODE_VERSION}"
 
 EXPOSE 4096

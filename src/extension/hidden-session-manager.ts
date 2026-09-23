@@ -58,9 +58,7 @@ function isInternalHelperSession(session: SessionSnapshot) {
     metadata?.varroInternal === PERMISSION_JUDGE_SESSION_METADATA.varroInternal ||
     metadata?.varroInternal === COMMIT_MESSAGE_SESSION_METADATA.varroInternal ||
     (title?.startsWith(PERMISSION_JUDGE_SESSION_TITLE_PREFIX) === true && hasHelperRules) ||
-    (commitMessageSequence !== null &&
-      /^[1-9]\d*$/.test(commitMessageSequence) &&
-      (session.permission === undefined || hasHelperRules))
+    (commitMessageSequence !== null && /^[1-9]\d*$/.test(commitMessageSequence) && hasHelperRules)
   );
 }
 

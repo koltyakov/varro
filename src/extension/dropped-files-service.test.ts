@@ -212,6 +212,21 @@ describe('DroppedFilesService', () => {
     ]);
   });
 
+  it('accepts relative paths under a directory whose name starts with two dots', async () => {
+    const service = new DroppedFilesService({ context: { workspacePath: '/repo' } } as never);
+    services.push(service);
+    const folder = { name: 'repo', uri: { fsPath: '/repo' } };
+    const filePath = join('/repo', '..config/file.txt');
+    vscodeMock.workspace.workspaceFolders = [folder];
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 0 });
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue(folder);
+    vscodeMock.workspace.asRelativePath.mockReturnValue('..config/file.txt');
+
+    await expect(service.fromPaths(['..config/file.txt'])).resolves.toEqual([
+      { path: filePath, relativePath: '..config/file.txt', type: 'file' },
+    ]);
+  });
+
   it('deduplicates absolute paths and preserves directory drops', async () => {
     const service = new DroppedFilesService({ context: { workspacePath: '/repo/alpha' } } as never);
     services.push(service);

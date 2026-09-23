@@ -10,6 +10,8 @@ export type ComposerSnapshot = {
   pdfs?: NativePdfAttachment[];
   problems?: AttachedDiagnostics | null;
   inlineProblems?: InlineProblemAttachment[];
+  terminalSelection?: { text: string; terminalName: string } | null;
+  pastedFileChips?: { path: string; ranges: string | null; text: string }[];
 };
 
 export type ComposerHistoryAction = 'undo' | 'redo';
@@ -43,7 +45,7 @@ function getAttachmentSignature(snapshot: ComposerSnapshot): string {
     .join('\u0001');
   const imageSignature = snapshot.images.map((image) => image.id).join('\u0001');
   const pdfSignature = (snapshot.pdfs ?? []).map((pdf) => pdf.id).join('\u0001');
-  return `${fileSignature}\u0001${imageSignature}\u0001${pdfSignature}\u0001${JSON.stringify(snapshot.problems ?? null)}\u0001${JSON.stringify(snapshot.inlineProblems ?? [])}`;
+  return `${fileSignature}\u0001${imageSignature}\u0001${pdfSignature}\u0001${JSON.stringify(snapshot.problems ?? null)}\u0001${JSON.stringify(snapshot.inlineProblems ?? [])}\u0001${JSON.stringify(snapshot.terminalSelection ?? null)}\u0001${JSON.stringify(snapshot.pastedFileChips ?? [])}`;
 }
 
 function cloneSnapshot(snapshot: ComposerSnapshot): ComposerSnapshot {
@@ -63,6 +65,8 @@ function cloneSnapshot(snapshot: ComposerSnapshot): ComposerSnapshot {
     problems: snapshot.problems
       ? { ...snapshot.problems, diagnostics: snapshot.problems.diagnostics.map((d) => ({ ...d })) }
       : undefined,
+    terminalSelection: snapshot.terminalSelection ? { ...snapshot.terminalSelection } : undefined,
+    pastedFileChips: snapshot.pastedFileChips?.map((chip) => ({ ...chip })),
   };
 }
 
@@ -191,6 +195,9 @@ export function createComposerHistory(options?: {
     undo,
     redo,
     reset,
+    breakCoalescing: () => {
+      breakNextCoalesce = true;
+    },
     canUndo: () => index > 0,
     canRedo: () => index < stack.length - 1,
   };

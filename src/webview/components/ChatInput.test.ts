@@ -152,6 +152,8 @@ vi.mock('../lib/client', () => ({
         })),
       },
       resolveJudgeModel: vi.fn(async () => null),
+      matchCopiedSelection: vi.fn(async () => null),
+      readWorkspaceFile: vi.fn(async (_path: string): Promise<string | null> => null),
       resolveWorkspacePath: vi.fn(async (path: string) => {
         if (path === 'README.md') {
           return { path: '/repo/README.md', relativePath: 'README.md', type: 'file' as const };
@@ -3681,6 +3683,7 @@ describe('ChatInput', () => {
         diagnostics: [],
       },
       currentDocumentEnabled: true,
+      autoAttachedFilePath: '/repo/src/menus.css',
       issuesEnabled: true,
       visionDelegationAvailable: false,
     });
@@ -4760,6 +4763,129 @@ describe('ChatInput', () => {
     expect(state.queuedMessages[0]?.id).toBe('q1');
     expect(state.queuedMessages[1]?.paused).toBe(true);
     expect(state.queuedMessages[2]?.id).toBe('q3');
+  });
+
+  it('can disable an automatically attached document while editing a queued message', async () => {
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: {
+        path: '/repo/CHANGELOG.md',
+        relativePath: 'CHANGELOG.md',
+        language: 'markdown',
+      },
+      selection: null,
+      diagnostics: [],
+    });
+    setInputText('Also run performance tests');
+    cleanup = render(() => ChatInput(), container!);
+
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Add to queue (Enter)"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+    expect(state.queuedMessages[0]?.droppedFiles?.map((file) => file.path)).toEqual([
+      '/repo/CHANGELOG.md',
+    ]);
+
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(state.droppedFiles).toEqual([]);
+    const documentChip = container?.querySelector<HTMLElement>(
+      '.chat-attachments-container [role="button"][aria-pressed="true"]'
+    );
+    expect(documentChip?.textContent).toContain('CHANGELOG.md');
+    documentChip?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(documentChip?.getAttribute('aria-pressed')).toBe('false');
+
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Add to queue (Enter)"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+    expect(state.queuedMessages[0]?.droppedFiles).toEqual([]);
+    expect(state.queuedMessages[0]?.queuedContext?.currentDocumentEnabled).toBe(false);
+  });
+
+  it('keeps an explicitly attached active file when editing a queued message', () => {
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: {
+        path: '/repo/CHANGELOG.md',
+        relativePath: 'CHANGELOG.md',
+        language: 'markdown',
+      },
+      selection: null,
+      diagnostics: [],
+    });
+    setState('queuedMessages', [
+      {
+        id: 'q1',
+        sessionId: 'session-1',
+        text: 'Review changes',
+        droppedFiles: [
+          {
+            path: '/repo/CHANGELOG.md',
+            relativePath: 'CHANGELOG.md',
+            type: 'file',
+            attachmentSequence: 1,
+          },
+        ],
+        queuedContext: { editorContext: state.editorContext, currentDocumentEnabled: true },
+      },
+    ]);
+    cleanup = render(() => ChatInput(), container!);
+
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(state.droppedFiles).toEqual([
+      expect.objectContaining({ path: '/repo/CHANGELOG.md', attachmentSequence: 1 }),
+    ]);
+  });
+
+  it('restores the composer document toggle after cancelling a queued message edit', () => {
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: {
+        path: '/repo/CHANGELOG.md',
+        relativePath: 'CHANGELOG.md',
+        language: 'markdown',
+      },
+      selection: null,
+      diagnostics: [],
+    });
+    setState('queuedMessages', [
+      {
+        id: 'q1',
+        sessionId: 'session-1',
+        text: 'Review changes',
+        droppedFiles: [],
+        queuedContext: { editorContext: state.editorContext, currentDocumentEnabled: false },
+      },
+    ]);
+    setState('currentDocumentEnabled', true);
+    setState('currentDocumentEnabledBySession', reconcile({}));
+    setState('draftCurrentDocumentEnabled', null);
+    cleanup = render(() => ChatInput(), container!);
+
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(state.currentDocumentEnabledBySession['session-1']).toBe(false);
+    expect(state.currentDocumentEnabled).toBe(true);
+
+    container
+      ?.querySelector<HTMLButtonElement>('[title="Cancel queued message edit"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(state.queuedMessageEdit).toBeNull();
+    expect(state.currentDocumentEnabledBySession['session-1']).toBeUndefined();
+    expect(state.currentDocumentEnabled).toBe(true);
   });
 
   it('sends an edited attempted message with a fresh message id', async () => {
@@ -7568,6 +7694,657 @@ describe('ChatInput', () => {
     expect(editor?.getAttribute('role')).toBe('textbox');
   });
 
+  it('keeps a pending paste before subsequently typed text', async () => {
+    let resolveMatch!: (value: null) => void;
+    vi.mocked(client.varro.matchCopiedSelection).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveMatch = resolve;
+        })
+    );
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+    editor.focus();
+    setCollapsedSelection(editor, 0);
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: { getData: () => 'pasted ', items: [], types: ['text/plain'] },
+    });
+    editor.dispatchEvent(event);
+    editor.appendChild(document.createTextNode('typed'));
+    setCollapsedSelection(editor.lastChild!, 5);
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
+    resolveMatch(null);
+    await flushAsyncWork();
+    expect(inputText()).toBe('pasted typed');
+    expect(editor.textContent).toBe('pasted typed');
+  });
+
+  it('includes a pending paste in Send without inserting it into the next draft', async () => {
+    let resolveMatch!: (
+      value: Awaited<ReturnType<typeof client.varro.matchCopiedSelection>>
+    ) => void;
+    vi.mocked(client.varro.matchCopiedSelection).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveMatch = resolve;
+        })
+    );
+    setState('activeSessionId', 'session-1');
+    setInputText('Explain ');
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+    editor.focus();
+    setCollapsedSelection(editor.firstChild!, 8);
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: { getData: () => 'pasted code', items: [], types: ['text/plain'] },
+    });
+    editor.dispatchEvent(event);
+    container!.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')!.click();
+    await flushAsyncWork();
+    resolveMatch({ type: 'terminal', selection: { text: 'pasted code', terminalName: 'zsh' } });
+    await flushAsyncWork();
+    expect({ sent: sendMessageMock.mock.calls[0]?.[0], draft: inputText() }).toEqual({
+      sent: 'Explain pasted code',
+      draft: '',
+    });
+    expect(state.terminalSelection).toBeNull();
+  });
+
+  it('restores exact file chip text through undo and redo after a later paste', async () => {
+    const file = {
+      path: '/repo/src/app.ts',
+      relativePath: 'src/app.ts',
+      type: 'file' as const,
+      lineRanges: [{ startLine: 3, endLine: 3 }],
+    };
+    vi.mocked(client.varro.matchCopiedSelection)
+      .mockResolvedValueOnce({ type: 'file', file })
+      .mockResolvedValueOnce({ type: 'file', file });
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+    editor.focus();
+    setCollapsedSelection(editor, 0);
+    const paste = (text: string) => {
+      const event = new Event('paste', { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'clipboardData', {
+        value: { getData: () => text, items: [], types: ['text/plain'] },
+      });
+      editor.dispatchEvent(event);
+    };
+    const history = async (redo = false) => {
+      editor.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'z',
+          metaKey: true,
+          shiftKey: redo,
+          bubbles: true,
+        })
+      );
+      await flushAsyncWork();
+    };
+    paste('alpha');
+    await flushAsyncWork();
+    openChipMenu(editor, 'mention-file');
+    clickExpandToText();
+    await flushAsyncWork();
+    expect(inputText()).toBe('alpha');
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    paste('beta');
+    await flushAsyncWork();
+    expect(inputText()).toBe('@src/app.ts');
+    await history();
+    expect(inputText()).toBe('alpha');
+    await history();
+    expect(inputText()).toBe('@src/app.ts');
+    await history(true);
+    await history(true);
+    openChipMenu(editor, 'mention-file');
+    clickExpandToText();
+    await flushAsyncWork();
+    expect(inputText()).toBe('beta');
+    await history();
+    await history();
+    await history();
+    expect(inputText()).toBe('@src/app.ts');
+    openChipMenu(editor, 'mention-file');
+    clickExpandToText();
+    await flushAsyncWork();
+    expect(inputText()).toBe('alpha');
+  });
+
+  it('turns a matching copied editor selection into a file-range chip', async () => {
+    vi.mocked(client.varro.matchCopiedSelection).mockResolvedValueOnce({
+      type: 'file',
+      file: {
+        path: '/repo/src/app.ts',
+        relativePath: 'src/app.ts',
+        type: 'file',
+        lineRanges: [{ startLine: 3, endLine: 5 }],
+      },
+    });
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    editor?.focus();
+    if (editor) setCollapsedSelection(editor, 0);
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: { getData: (type: string) => (type === 'text/plain' ? 'copied code' : ''), items: [] },
+    });
+    editor?.dispatchEvent(event);
+    expect(inputText()).toBe('copied code');
+    await flushAsyncWork();
+
+    expect(client.varro.matchCopiedSelection).toHaveBeenCalledWith('copied code', false);
+    expect(inputText()).toBe('@src/app.ts');
+    expect(editor?.querySelector('.inline-chip')?.textContent).toContain('L3-5');
+    const chip = editor?.querySelector<HTMLElement>('[data-chip-type="mention-file"]');
+    const trailingSpacer = chip?.nextSibling;
+    if (!editor || trailingSpacer?.nodeType !== Node.TEXT_NODE) {
+      throw new Error('Expected a file chip followed by a caret spacer');
+    }
+    editor.focus();
+    setCollapsedSelection(trailingSpacer, 1);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowRight', bubbles: true }));
+    await flushAsyncWork();
+    expect(container?.querySelector('.composer-completion-menu')).toBeNull();
+
+    setInputText('@src/app.ts @');
+    await flushAsyncWork();
+    const finalText = editor.querySelector('[data-chip-type="mention-file"]')?.nextSibling;
+    if (finalText?.nodeType !== Node.TEXT_NODE)
+      throw new Error('Expected text after the file chip');
+    setCollapsedSelection(finalText, finalText.textContent!.length);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: '@', bubbles: true }));
+    await flushAsyncWork();
+    expect(container?.querySelector('.composer-completion-menu')).not.toBeNull();
+    expect(state.droppedFiles).toEqual([
+      expect.objectContaining({
+        path: '/repo/src/app.ts',
+        lineRanges: [{ startLine: 3, endLine: 5 }],
+      }),
+    ]);
+  });
+
+  it('turns a matching terminal paste into a terminal chip', async () => {
+    vi.mocked(client.varro.matchCopiedSelection).mockResolvedValueOnce({
+      type: 'terminal',
+      selection: { text: 'first line\nsecond line', terminalName: 'zsh' },
+    });
+    setInputText('Test ');
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    editor?.focus();
+    if (editor?.firstChild) setCollapsedSelection(editor.firstChild, 5);
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: {
+        getData: (type: string) => (type === 'text/plain' ? 'first line\nsecond line' : ''),
+        items: [],
+      },
+    });
+    editor?.dispatchEvent(event);
+    expect(inputText()).toBe('Test first line\nsecond line');
+    expect(editor?.textContent).not.toContain('first line');
+    await flushAsyncWork();
+
+    expect(inputText()).toBe('Test [Terminal selection]');
+    expect(editor?.querySelector('.inline-chip')?.textContent).toContain('2 lines');
+    expect(editor?.querySelector('.inline-chip')?.getAttribute('title')).toBe(
+      'first line\nsecond line'
+    );
+    expect(container?.querySelector('.chat-attachments-container')).toBeNull();
+    expect(state.terminalSelection).toEqual({
+      text: 'first line\nsecond line',
+      terminalName: 'zsh',
+    });
+    container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')?.click();
+    await flushAsyncWork();
+    expect(sendMessageMock).toHaveBeenCalledWith(
+      'Test [Terminal selection]',
+      expect.objectContaining({ noReply: false })
+    );
+  });
+
+  it('does not insert the same copied terminal selection twice', async () => {
+    const selection = { text: 'first line\nsecond line', terminalName: 'zsh' };
+    vi.mocked(client.varro.matchCopiedSelection)
+      .mockResolvedValueOnce({ type: 'terminal', selection })
+      .mockResolvedValueOnce({ type: 'terminal', selection });
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor) throw new Error('Expected composer editor');
+    editor.focus();
+    setCollapsedSelection(editor, 0);
+    const paste = () => {
+      const event = new Event('paste', { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'clipboardData', {
+        value: {
+          getData: (type: string) => (type === 'text/plain' ? selection.text : ''),
+          items: [],
+        },
+      });
+      editor.dispatchEvent(event);
+    };
+
+    paste();
+    await flushAsyncWork();
+    const firstValue = inputText();
+    const chip = editor.querySelector<HTMLElement>('[data-chip-type="mention-terminal"]');
+    if (chip?.nextSibling?.nodeType !== Node.TEXT_NODE) throw new Error('Expected caret spacer');
+    setCollapsedSelection(chip.nextSibling, 1);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowRight', bubbles: true }));
+    paste();
+    await flushAsyncWork();
+
+    expect(inputText()).toBe(firstValue);
+    expect(editor.querySelectorAll('[data-chip-type="mention-terminal"]')).toHaveLength(1);
+  });
+
+  it('keeps a different terminal paste as text instead of replacing the attached selection', async () => {
+    setState('terminalSelection', { text: 'npm test', terminalName: 'zsh' });
+    setInputText('Check [Terminal selection] ');
+    vi.mocked(client.varro.matchCopiedSelection).mockResolvedValueOnce({
+      type: 'terminal',
+      selection: { text: 'npm run lint', terminalName: 'zsh' },
+    });
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor) throw new Error('Expected composer editor');
+    editor.focus();
+    const trailingText = editor.querySelector('[data-chip-type="mention-terminal"]')?.nextSibling;
+    if (trailingText?.nodeType !== Node.TEXT_NODE) throw new Error('Expected text after chip');
+    setCollapsedSelection(trailingText, trailingText.textContent!.length);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'End', bubbles: true }));
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: {
+        getData: (type: string) => (type === 'text/plain' ? 'npm run lint' : ''),
+        items: [],
+      },
+    });
+    editor.dispatchEvent(event);
+    await flushAsyncWork();
+
+    expect(inputText()).toBe('Check [Terminal selection] npm run lint');
+    expect(state.terminalSelection).toEqual({ text: 'npm test', terminalName: 'zsh' });
+  });
+
+  function openChipMenu(editor: HTMLElement, chipType: string) {
+    const chip = editor.querySelector<HTMLElement>(`[data-chip-type="${chipType}"]`);
+    if (!chip) throw new Error(`Expected a ${chipType} chip`);
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+    chip.dispatchEvent(event);
+    return event;
+  }
+
+  function clickExpandToText() {
+    const item = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find(
+      (button) => button.textContent === 'Expand to Text'
+    );
+    if (!item) throw new Error('Expected the Expand to Text menu item');
+    item.click();
+  }
+
+  it('expands a pasted file chip back to the exact pasted text', async () => {
+    vi.mocked(client.varro.matchCopiedSelection).mockResolvedValueOnce({
+      type: 'file',
+      file: {
+        path: '/repo/src/app.ts',
+        relativePath: 'src/app.ts',
+        type: 'file',
+        lineRanges: [{ startLine: 3, endLine: 5 }],
+      },
+    });
+    setInputText('Fix ');
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor?.firstChild) throw new Error('Expected composer editor');
+    editor.focus();
+    setCollapsedSelection(editor.firstChild, 4);
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: { getData: (type: string) => (type === 'text/plain' ? 'fooBar(1)' : ''), items: [] },
+    });
+    editor.dispatchEvent(event);
+    await flushAsyncWork();
+    expect(inputText()).toBe('Fix @src/app.ts');
+
+    expect(openChipMenu(editor, 'mention-file').defaultPrevented).toBe(true);
+    clickExpandToText();
+    await flushAsyncWork();
+
+    expect(inputText()).toBe('Fix fooBar(1)');
+    expect(state.droppedFiles).toEqual([]);
+    expect(client.varro.readWorkspaceFile).not.toHaveBeenCalled();
+
+    editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, bubbles: true }));
+    await flushAsyncWork();
+    expect(inputText()).toBe('Fix @src/app.ts');
+    expect(state.droppedFiles).toEqual([
+      expect.objectContaining({
+        path: '/repo/src/app.ts',
+        lineRanges: [{ startLine: 3, endLine: 5 }],
+      }),
+    ]);
+
+    openChipMenu(editor, 'mention-file');
+    clickExpandToText();
+    await flushAsyncWork();
+    expect(inputText()).toBe('Fix fooBar(1)');
+    expect(client.varro.readWorkspaceFile).not.toHaveBeenCalled();
+  });
+
+  it('expands a terminal chip back to the terminal text', async () => {
+    const bridgeWindow = fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window);
+    const originalSend = bridgeWindow.__sendToExtension;
+    const sent: WebviewMessage[] = [];
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
+    setState('terminalSelection', { text: 'npm test\nok', terminalName: 'zsh' });
+    setInputText('Check [Terminal selection] please');
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor) throw new Error('Expected composer editor');
+
+    try {
+      openChipMenu(editor, 'mention-terminal');
+      clickExpandToText();
+      await flushAsyncWork();
+
+      expect(inputText()).toBe('Check npm test\nok please');
+      expect(state.terminalSelection).toBeNull();
+      expect(sent).toContainEqual({ type: 'terminal-selection/clear' });
+
+      editor.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'z', metaKey: true, bubbles: true })
+      );
+      await flushAsyncWork();
+      expect(inputText()).toBe('Check [Terminal selection] please');
+      expect(state.terminalSelection).toEqual({ text: 'npm test\nok', terminalName: 'zsh' });
+      expect(editor.querySelector('[data-chip-type="mention-terminal"]')).not.toBeNull();
+
+      editor.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'z', metaKey: true, shiftKey: true, bubbles: true })
+      );
+      await flushAsyncWork();
+      expect(inputText()).toBe('Check npm test\nok please');
+      expect(state.terminalSelection).toBeNull();
+    } finally {
+      bridgeWindow.__sendToExtension = originalSend;
+    }
+  });
+
+  it('expands other file range chips to the lines they reference', async () => {
+    vi.mocked(client.varro.readWorkspaceFile).mockResolvedValueOnce('one\ntwo\nthree\nfour');
+    addContextFile({
+      path: '/repo/src/app.ts',
+      relativePath: 'src/app.ts',
+      type: 'file',
+      lineRanges: [{ startLine: 2, endLine: 3 }],
+    });
+    setInputText('See @src/app.ts');
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor) throw new Error('Expected composer editor');
+
+    openChipMenu(editor, 'mention-file');
+    clickExpandToText();
+    await flushAsyncWork();
+
+    expect(client.varro.readWorkspaceFile).toHaveBeenCalledWith('/repo/src/app.ts');
+    expect(inputText()).toBe('See two\nthree');
+    expect(state.droppedFiles).toEqual([]);
+  });
+
+  it('keeps the native context menu for whole-file chips', () => {
+    addContextFile({ path: '/repo/src/app.ts', relativePath: 'src/app.ts', type: 'file' });
+    setInputText('See @src/app.ts');
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor) throw new Error('Expected composer editor');
+
+    expect(openChipMenu(editor, 'mention-file').defaultPrevented).toBe(false);
+    expect(document.querySelector('[aria-label="Chip actions"]')).toBeNull();
+  });
+
+  it('does not insert the same copied file range twice', async () => {
+    const file = {
+      path: '/repo/src/app.ts',
+      relativePath: 'src/app.ts',
+      type: 'file' as const,
+      lineRanges: [{ startLine: 3, endLine: 5 }],
+    };
+    vi.mocked(client.varro.matchCopiedSelection)
+      .mockResolvedValueOnce({ type: 'file', file })
+      .mockResolvedValueOnce({ type: 'file', file });
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor) throw new Error('Expected composer editor');
+    editor.focus();
+    setCollapsedSelection(editor, 0);
+    const paste = () => {
+      const event = new Event('paste', { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'clipboardData', {
+        value: {
+          getData: (type: string) => (type === 'text/plain' ? 'copied code' : ''),
+          items: [],
+        },
+      });
+      editor.dispatchEvent(event);
+    };
+
+    paste();
+    await flushAsyncWork();
+    const chip = editor.querySelector<HTMLElement>('[data-chip-type="mention-file"]');
+    if (chip?.nextSibling?.nodeType !== Node.TEXT_NODE) throw new Error('Expected caret spacer');
+    setCollapsedSelection(chip.nextSibling, 1);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowRight', bubbles: true }));
+    paste();
+    await flushAsyncWork();
+
+    expect(inputText()).toBe('@src/app.ts');
+    expect(editor.querySelectorAll('[data-chip-type="mention-file"]')).toHaveLength(1);
+    expect(state.droppedFiles).toHaveLength(1);
+  });
+
+  it('extends an existing file chip for another range without adding a second chip', async () => {
+    addContextFile({
+      path: '/repo/src/app.ts',
+      relativePath: 'src/app.ts',
+      type: 'file',
+      lineRanges: [{ startLine: 3, endLine: 5 }],
+    });
+    setInputText('@src/app.ts ');
+    vi.mocked(client.varro.matchCopiedSelection).mockResolvedValueOnce({
+      type: 'file',
+      file: {
+        path: '/repo/src/app.ts',
+        relativePath: 'src/app.ts',
+        type: 'file',
+        lineRanges: [{ startLine: 8, endLine: 9 }],
+      },
+    });
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor) throw new Error('Expected composer editor');
+    editor.focus();
+    const trailingText = editor.querySelector('[data-chip-type="mention-file"]')?.nextSibling;
+    if (trailingText?.nodeType !== Node.TEXT_NODE) throw new Error('Expected text after file chip');
+    setCollapsedSelection(trailingText, trailingText.textContent!.length);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'End', bubbles: true }));
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: {
+        getData: (type: string) => (type === 'text/plain' ? 'different copied code' : ''),
+        items: [],
+      },
+    });
+    editor.dispatchEvent(event);
+    await flushAsyncWork();
+
+    expect(inputText()).toBe('@src/app.ts ');
+    expect(editor.querySelectorAll('[data-chip-type="mention-file"]')).toHaveLength(1);
+    expect(state.droppedFiles[0]?.lineRanges).toEqual([
+      { startLine: 3, endLine: 5 },
+      { startLine: 8, endLine: 9 },
+    ]);
+  });
+
+  it('inserts copied text immediately and upgrades it to a chip at the same position', async () => {
+    let resolveMatch:
+      | ((value: Awaited<ReturnType<typeof client.varro.matchCopiedSelection>>) => void)
+      | undefined;
+    vi.mocked(client.varro.matchCopiedSelection).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveMatch = resolve;
+        })
+    );
+    setInputText('Before after');
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    editor?.focus();
+    if (editor?.firstChild) setCollapsedSelection(editor.firstChild, 7);
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: { getData: (type: string) => (type === 'text/plain' ? 'copied code' : ''), items: [] },
+    });
+    editor?.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(inputText()).toBe('Before copied codeafter');
+
+    resolveMatch?.({
+      type: 'file',
+      file: {
+        path: '/repo/src/app.ts',
+        relativePath: 'src/app.ts',
+        type: 'file',
+        lineRanges: [{ startLine: 7, endLine: 8 }],
+      },
+    });
+    await flushAsyncWork();
+    expect(inputText()).toBe('Before @src/app.ts after');
+    expect(editor?.querySelector('.inline-chip')?.textContent).toContain('L7-8');
+  });
+
+  it('does not restore pasted text after the user replaces it before the lookup resolves', async () => {
+    let resolveMatch:
+      | ((value: Awaited<ReturnType<typeof client.varro.matchCopiedSelection>>) => void)
+      | undefined;
+    vi.mocked(client.varro.matchCopiedSelection).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveMatch = resolve;
+        })
+    );
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    editor?.focus();
+    if (editor) setCollapsedSelection(editor, 0);
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: { getData: (type: string) => (type === 'text/plain' ? 'copied code' : ''), items: [] },
+    });
+    editor?.dispatchEvent(event);
+    setInputText('typed');
+
+    resolveMatch?.({
+      type: 'file',
+      file: {
+        path: '/repo/src/app.ts',
+        relativePath: 'src/app.ts',
+        type: 'file',
+        lineRanges: [{ startLine: 7, endLine: 8 }],
+      },
+    });
+    await flushAsyncWork();
+    expect(inputText()).toBe('typed');
+    expect(state.droppedFiles).toEqual([]);
+  });
+
+  it('keeps pasted text when the selection lookup does not answer in time', async () => {
+    vi.mocked(client.varro.matchCopiedSelection).mockImplementationOnce(
+      () => new Promise(() => undefined)
+    );
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    editor?.focus();
+    if (editor) setCollapsedSelection(editor, 0);
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: { getData: (type: string) => (type === 'text/plain' ? 'copied code' : ''), items: [] },
+    });
+    editor?.dispatchEvent(event);
+    expect(inputText()).toBe('copied code');
+    expect(editor?.textContent).not.toContain('copied code');
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(inputText()).toBe('copied code');
+    expect(editor?.textContent).toBe('copied code');
+  });
+
+  it('marks plain-text-only clipboards as possible terminal copies', async () => {
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    editor?.focus();
+    if (editor) setCollapsedSelection(editor, 0);
+    const paste = (types: string[]) => {
+      const event = new Event('paste', { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'clipboardData', {
+        value: {
+          getData: (type: string) => (type === 'text/plain' ? 'npm test' : ''),
+          items: [],
+          types,
+        },
+      });
+      editor?.dispatchEvent(event);
+    };
+
+    paste(['text/plain']);
+    paste(['text/plain', 'text/html']);
+    await flushAsyncWork();
+
+    expect(vi.mocked(client.varro.matchCopiedSelection).mock.calls).toEqual([
+      ['npm test', true],
+      ['npm test', false],
+    ]);
+  });
+
+  it('keeps pasted text when the selection lookup fails', async () => {
+    vi.mocked(client.varro.matchCopiedSelection).mockRejectedValueOnce(new Error('host gone'));
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    editor?.focus();
+    if (editor) setCollapsedSelection(editor, 0);
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: { getData: (type: string) => (type === 'text/plain' ? 'copied code' : ''), items: [] },
+    });
+    editor?.dispatchEvent(event);
+    await flushAsyncWork();
+    expect(inputText()).toBe('copied code');
+    expect(editor?.textContent).toBe('copied code');
+  });
+
+  it('keeps unmatched clipboard text at the original cursor after the lookup', async () => {
+    setInputText('Before after');
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    editor?.focus();
+    if (editor?.firstChild) setCollapsedSelection(editor.firstChild, 7);
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: { getData: (type: string) => (type === 'text/plain' ? 'plain text ' : ''), items: [] },
+    });
+    editor?.dispatchEvent(event);
+    expect(inputText()).toBe('Before plain text after');
+    await flushAsyncWork();
+    expect(inputText()).toBe('Before plain text after');
+  });
+
   it('rehydrates pasted file mentions into context files', async () => {
     setState('editorContext', {
       workspacePath: '/repo',
@@ -9105,6 +9882,65 @@ describe('ChatInput', () => {
 
     expect(container?.querySelector('.rich-composer .inline-chip')).not.toBeNull();
     expect(container?.querySelector('.chat-attachments-container')).toBeNull();
+  });
+
+  it('hides an active selection attachment when the same file and lines are inline', async () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: {
+        path: '/repo/CHANGELOG.md',
+        relativePath: 'CHANGELOG.md',
+        language: 'markdown',
+      },
+      selection: { startLine: 23, endLine: 24 },
+      diagnostics: [],
+    });
+    addContextFile({
+      path: '/repo/CHANGELOG.md',
+      relativePath: 'CHANGELOG.md',
+      type: 'file',
+      lineRanges: [{ startLine: 23, endLine: 24 }],
+    });
+    setInputText('Test message @CHANGELOG.md');
+
+    cleanup = render(() => ChatInput(), container!);
+    await flushAsyncWork();
+
+    expect(
+      container?.querySelector('.rich-composer [data-chip-type="mention-file"]')?.textContent
+    ).toContain('L23-24');
+    expect(container?.querySelector('.chat-attachments-container')).toBeNull();
+    expect(state.droppedFiles).toHaveLength(1);
+  });
+
+  it('keeps active selection context when its lines differ from the inline file range', async () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: {
+        path: '/repo/CHANGELOG.md',
+        relativePath: 'CHANGELOG.md',
+        language: 'markdown',
+      },
+      selection: { startLine: 25, endLine: 26 },
+      diagnostics: [],
+    });
+    addContextFile({
+      path: '/repo/CHANGELOG.md',
+      relativePath: 'CHANGELOG.md',
+      type: 'file',
+      lineRanges: [{ startLine: 23, endLine: 24 }],
+    });
+    setInputText('Test message @CHANGELOG.md');
+
+    cleanup = render(() => ChatInput(), container!);
+    await flushAsyncWork();
+
+    expect(
+      container?.querySelector('.rich-composer [data-chip-type="mention-file"]')?.textContent
+    ).toContain('L23-24');
+    expect(container?.querySelector('.chat-attachments-container')?.textContent).toContain(
+      'L25-26'
+    );
   });
 
   it('renders an inline table attachment without exposing the snapshot filename', async () => {

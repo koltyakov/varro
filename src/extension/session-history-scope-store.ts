@@ -71,8 +71,8 @@ export class SessionHistoryScopeStore {
   set(key: string, scope: SessionHistoryScope): Promise<void> {
     const update = this.mutationQueue.then(async () => {
       const next = { ...this.scopes, [key]: scope };
-      this.scopes = next;
       await this.persistence.set(SESSION_HISTORY_SCOPES_KEY, next);
+      this.scopes = next;
     });
     this.mutationQueue = update.catch(() => undefined);
     return update;

@@ -4,6 +4,7 @@ import net from 'node:net';
 import { once } from 'node:events';
 import { performance } from 'node:perf_hooks';
 import test from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { createStreamingServer } from './ai-streaming-server.mjs';
 
@@ -76,6 +77,76 @@ async function waitFor(predicate) {
     await new Promise((resolve) => setTimeout(resolve, 2));
   }
 }
+
+test('checkpoints stop exact event bursts, preserve REST state, and resume without catch-up', async (t) => {
+  const input = fixture();
+  const server = await createStreamingServer({ ...input, checkpoints: [0, 1, 2] });
+  t.after(() => server.close());
+  await connect(server, t);
+  const run = server.start();
+  await waitFor(() => server.getResult().state === 'paused');
+  assert.equal(server.getResult().scheduler.appliedEvents, 0);
+  assert.throws(() => server.pause(), /Cannot pause/);
+  server.resume();
+  await waitFor(() => server.getResult().state === 'paused');
+  const before = server.getResult();
+  assert.equal(before.scheduler.appliedEvents, 1);
+  await sleep(220);
+  assert.equal(server.getResult().scheduler.appliedEvents, 1);
+  assert.equal(server.getResult().scheduler.elapsedMs, before.scheduler.elapsedMs);
+  const response = await fetch(`${server.url}/session/${before.sessionID}/message`);
+  assert.equal((await response.json())[0].parts[0].text, 'hello');
+  server.resume();
+  assert.throws(() => server.resume(), /Cannot resume/);
+  await sleep(30);
+  assert.equal(server.getResult().scheduler.appliedEvents, 1);
+  await waitFor(() => server.getResult().state === 'paused');
+  assert.equal(server.getResult().scheduler.appliedEvents, 2);
+  server.resume();
+  const result = await run;
+  assert.equal(result.canonicalMatch, true);
+  assert.ok(result.scheduler.pausedMs >= 220);
+  assert.deepEqual(
+    result.scheduler.pauses.map((entry) => entry.afterEvents),
+    [0, 1, 2]
+  );
+  assert.deepEqual(input, fixture());
+});
+
+test('controller pause interrupts a scheduled wait and stop releases a paused replay', async (t) => {
+  const input = fixture();
+  input.timeline[0].delayMs = 10_000;
+  const server = await createStreamingServer(input);
+  t.after(() => server.close());
+  await connect(server, t);
+  const run = server.start();
+  await sleep(10);
+  server.pause();
+  await sleep(20);
+  assert.equal(server.getResult().scheduler.appliedEvents, 0);
+  await server.close();
+  const result = await run;
+  assert.equal(result.state, 'cancelled');
+  assert.ok(result.scheduler.pauses[0].durationMs >= 20);
+});
+
+test('zero-gap bursts stop at each checkpoint and invalid checkpoints fail before listening', async (t) => {
+  for (const checkpoints of [[-1], [3], [1, 1], [2, 1], [0.5], ['1'], null]) {
+    await assert.rejects(createStreamingServer({ ...fixture(), checkpoints }), /Checkpoints/);
+  }
+  const input = fixture();
+  input.timeline.forEach((entry) => {
+    entry.delayMs = 0;
+  });
+  const server = await createStreamingServer({ ...input, checkpoints: [1] });
+  t.after(() => server.close());
+  await connect(server, t);
+  const run = server.start();
+  await waitFor(() => server.getResult().state === 'paused');
+  assert.equal(server.getResult().scheduler.appliedEvents, 1);
+  server.resume();
+  assert.equal((await run).canonicalMatch, true);
+});
 
 test('real SDK bootstrap, HTTP partial snapshots, SSE remapping and canonical completion', async (t) => {
   const input = fixture();

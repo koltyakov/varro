@@ -63,8 +63,8 @@ Choose one API family. Complete samples are included in the repository:
 
 | Family | Package and example version | Dockerfile | Compose sample | Health endpoint |
 | --- | --- | --- | --- | --- |
-| v1 | `opencode-ai@1.18.31` | [Dockerfile.v1](../examples/docker/Dockerfile.v1) | [compose.v1.yaml](../examples/docker/compose.v1.yaml) | `/global/health` |
-| v2 | `@opencode/cli@2.0.12` | [Dockerfile.v2](../examples/docker/Dockerfile.v2) | [compose.v2.yaml](../examples/docker/compose.v2.yaml) | `/api/info` |
+| v1 | `opencode-ai@1.18.32` | [Dockerfile.v1](../examples/docker/Dockerfile.v1) | [compose.v1.yaml](../examples/docker/compose.v1.yaml) | `/global/health` |
+| v2 | `@opencode/cli@2.0.14` | [Dockerfile.v2](../examples/docker/Dockerfile.v2) | [compose.v2.yaml](../examples/docker/compose.v2.yaml) | `/api/info` |
 
 From the Varro repository root, build the selected image:
 
@@ -87,7 +87,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates git ripgrep \
     && rm -rf /var/lib/apt/lists/*
 
-ARG OPENCODE_VERSION=2.0.12
+ARG OPENCODE_VERSION=2.0.14
 RUN npm install --global "@opencode/cli@${OPENCODE_VERSION}"
 
 EXPOSE 4096
@@ -97,7 +97,7 @@ CMD ["opencode", "serve", "--hostname", "0.0.0.0", "--port", "4096"]
 The v1 sample replaces the package installation with:
 
 ```dockerfile
-ARG OPENCODE_VERSION=1.18.31
+ARG OPENCODE_VERSION=1.18.32
 RUN npm install --global "opencode-ai@${OPENCODE_VERSION}"
 ```
 

@@ -18,7 +18,7 @@ update does not block later deletion. Cancelled updates check their signal befor
 reading, and before replacing the annotation file, so cancellation while queued or preparing a write
 does not commit that update.
 
-`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. Its latest matrix passed 54 checks across `opencode-ai@1.16.0`, `opencode-ai@1.18.31`, `@opencode/cli@2.0.5`, and `@opencode/cli@2.0.12`, with ten platform- or family-specific skips. The checks cover managed startup, credential recovery in a second window, restart, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
+`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. Its latest matrix passed 54 checks across `opencode-ai@1.16.0`, `opencode-ai@1.18.32`, `@opencode/cli@2.0.5`, and `@opencode/cli@2.0.14`, with ten platform- or family-specific skips. The checks cover managed startup, credential recovery in a second window, restart, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
 
 Fresh VS Code sandbox windows passed `v2-first-run` and the existing `healthy-first-run` scenario. These editor checks verify activation, ownership, health, and event-stream connection. `test:compatibility:ui` additionally exercises the actual composer, successful replies, pre-turn failures, HTTP 401 handling, recovery through a working provider, and reopening history. Full visual streaming performance remains a separate verification task.
 
@@ -76,6 +76,35 @@ resolve to `literal/directory`. V2 location queries retain their normal URL enco
 The released-server adapter tests cover exact workspace resolution for Japanese text, emoji,
 and literal percent escapes. Unit tests also cover header construction with embedded newlines
 and preservation of Windows separators and casing.
+
+### 2.0.14 and 1.18.32 compatibility review
+
+Reviewed v2.0.12 to v2.0.13, `6f655dcbab` through `be4e5a6d06`.
+The 2.0.13 API adds `method: "key" | "oauth"` to credential connection
+records. Varro reads their type and ID and accepts the additional field. HTTP
+routes, SSE envelopes, session/message records, and permission/form contracts
+consumed by Varro require no adaptation.
+
+V2 also updates server-side Console policy enforcement, AI SDK HTTP hooks,
+subagent prompt-cache affinity, MCP OAuth behavior, and CLI upgrade diagnostics.
+The web-shell authentication change retains authentication on API routes.
+Desktop pairing, provider sign-in presentation, and TUI tabs
+do not require changes to Varro's adapters.
+
+Reviewed v2.0.13 to v2.0.14, `be4e5a6d06` through `8864eb507e`.
+Client, protocol, schema, server, and CLI source contracts are unchanged.
+The release refreshes model metadata, fixes desktop IPC serialization and the
+TUI project list, and adds Console API documentation. No adapter change is required.
+
+Reviewed v1.18.31 to v1.18.32, `a74c472ffb` through `fe3f3a41f7`. The SDK and
+HTTP contracts are unchanged. Runtime fixes cover Bedrock tool-result image
+support, Node package resolution, and filesystem search imports. The runtime
+support floors remain v2 `2.0.5` and v1 `1.16.0`.
+
+The v1 Docker matrix passed all 524 required checks across 14 releases, including
+43/43 on 1.18.32. Of 78 advisory checks, 76 passed; 1.16.0 and the below-floor
+1.15.13 probe still have the MCP pagination caveat. No required-check failure
+boundary was found, and the declared support floor is unchanged.
 
 ### 2.0.12 compatibility review
 

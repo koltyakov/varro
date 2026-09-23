@@ -1,5 +1,8 @@
 # AI Fuzzy Verification In VS Code
 
+Start with the [controller workflow](ai-test-workflow.md) for input selection, automatic recovery,
+checkpointed replay, and independent scenario execution.
+
 > [!IMPORTANT]
 > An AI test run passes only when the requested scenarios run in a real, interactable VS Code
 > Extension Development Host. If VS Code cannot be launched or controlled, GPT Luna or Terra cannot be
@@ -358,12 +361,13 @@ response cannot by itself prove that flicker did not occur.
 
 ### Recorded Session Playback Variation
 
-AI-07 can optionally retain the exact `server/event` messages delivered to the real Varro webview.
-Use this for a stream with an unusual tool order, edit pattern, or flicker boundary that is worth testing
-again without another model run. It is an ad-hoc variation, not part of the standard suite and not a CI
-requirement.
+AI-07 and AI-08 automatically retain the selected session's `server/event` messages, initial history,
+and final canonical history in `<manifest>.<scenario>.R<prompt-run>.capture.json`. The manifest records
+the path. Capture runs on failed attempts too, when the editor remains reachable, so a missed timing
+window can be investigated without buying another model response. Partial captures and unsupported
+events still need inspection before replay; capture success is not a scenario pass.
 
-Capture only by explicit choice. Add a label to the normal AI-07 controller command:
+To also retain a named entry in the local playback database, add a label:
 
 ```sh
 npm run ai:live -- run --manifest <manifest-path> --launch <launch.json> --scenario AI-07 \
@@ -427,6 +431,11 @@ opacity during an exit, or a final transcript that differs from the recorded can
 This variation replays the model/session event stream, not native wheel, keyboard, resize, or workbench
 actions. Keep those actions in the seeded real-editor run. A playback pass is useful regression evidence,
 but it cannot satisfy AI-07's real-editor precondition or change the overall AI test result.
+
+For reproduction in an actual VS Code host, pass the automatic capture JSON to `ai:streaming inspect`
+and `ai:streaming run`. Use checkpoints to position native actions at the same event boundary on each
+attempt. Keep continuous playback for cadence-sensitive evidence; report checkpointed replay separately
+from the live-model scenario.
 
 ## Transcript Recipes
 
@@ -779,9 +788,9 @@ Pass invariants:
 
 Precondition: an active Luna or Terra realistic repository stream in a virtualized session with at
 least one file edit and one expandable disclosure.
-AI-08 also requires a successful recorded AI-07 preparation. Its current fixture commit, status, and
-exact changed paths must equal AI-07's exit evidence. A generically clean fixture does not bypass this
-precondition.
+AI-08 establishes these gates independently. It can start from the clean recorded baseline or reuse
+edits whose commit, status, exact changed paths, and content hash equal the latest fixture exit evidence.
+An AI-07 timing miss does not block it. Unknown edits or a changed commit still block fixture reuse.
 
 Generate and record all 50 seeded actions before starting the stream. Reserve an early position for the
 session switch so the model cannot normally finish before that action.
@@ -879,8 +888,9 @@ npm run ai:live -- run --manifest <manifest-path> --launch <launch.json> --scena
   --surface sidebar --view-id sidebar --model openai/gpt-5.6-luna
 ```
 
-Precondition: AI-07 completed successfully and the fixture still has AI-07's exact recorded commit,
-status, and changed paths. The prepared root session is openable in the sidebar. The controller creates
+Precondition: the fixture is at its clean baseline or matches the latest recorded fixture exit evidence,
+including content hash. Prepare a real file-change card for the diff-toggle step; this requires a fixture
+edit, not a successful AI-07 scrolling verdict. The root session is openable in the sidebar. The controller creates
 and inventories one child session for route testing. Cleanup must remove that run-created child and
 verify its recorded ancestry.
 
@@ -927,7 +937,8 @@ npm run ai:live -- run --manifest <manifest-path> --launch <launch.json> --scena
   --surface sidebar --view-id sidebar --model openai/gpt-5.6-luna
 ```
 
-Precondition: AI-07 completed successfully and the fixture still matches AI-07's exact recorded state.
+Precondition: the fixture is at its clean baseline or matches the latest recorded fixture exit evidence,
+including content hash. AI-19 prepares its own live queue state and does not require AI-07.
 
 The controller opens the same root in the sidebar and an editor, changes permission mode from each
 surface, starts a real stream, pauses and edits an editor-owned queue row, hides the editor, and sends

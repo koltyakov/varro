@@ -209,13 +209,15 @@ describe('extension activation', () => {
     vi.useRealTimers();
   });
 
-  it('passes compaction settings into OpenCodeServer', async () => {
+  it('passes compaction settings and secret storage into OpenCodeServer', async () => {
     const { activate } = await import('./extension');
+    const secrets = { get: vi.fn(), store: vi.fn(), delete: vi.fn() };
 
     await activate({
       extensionUri: {},
       extension: { id: 'koltyakov.varro' },
       workspaceState: {},
+      secrets,
       subscriptions: [],
     } as never);
 
@@ -229,7 +231,8 @@ describe('extension activation', () => {
         reserved: 7777,
       },
       undefined,
-      true
+      true,
+      secrets
     );
   });
 
@@ -420,7 +423,8 @@ describe('extension activation', () => {
         reserved: 4096,
       },
       undefined,
-      true
+      true,
+      undefined
     );
   });
 

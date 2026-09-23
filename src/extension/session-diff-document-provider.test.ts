@@ -1,5 +1,6 @@
 /* oxlint-disable anti-slop/no-module-mocking, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/require-safety-comment-for-type-assertion -- These provider tests verify VS Code URI integration with minimal document and content-provider fixtures. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Uri } from 'vscode';
 
 type ExecuteCommandMock = (
   command: string,
@@ -18,7 +19,10 @@ const vscodeMock = vi.hoisted(() => ({
         return { dispose: vi.fn() };
       }
     ),
-    onDidCloseTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
+    textDocuments: [] as Array<{ uri: Uri }>,
+    onDidCloseTextDocument: vi.fn((_listener: (document: { uri: Uri }) => void) => ({
+      dispose: vi.fn(),
+    })),
   },
   commands: {
     executeCommand: vi.fn<ExecuteCommandMock>(() => Promise.resolve(undefined)),
@@ -39,6 +43,7 @@ describe('SessionDiffDocumentProvider', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vscodeMock.provider = undefined;
+    vscodeMock.workspace.textDocuments = [];
   });
 
   it('opens exact session snapshots in the native VS Code diff editor', async () => {
@@ -78,6 +83,46 @@ describe('SessionDiffDocumentProvider', () => {
       const [, beforeUri, afterUri] = vscodeMock.commands.executeCommand.mock.calls[0]!;
       expect(vscodeMock.provider?.provideTextDocumentContent(beforeUri)).toBe('const value = 1;\n');
       expect(vscodeMock.provider?.provideTextDocumentContent(afterUri)).toBe('const value = 2;\n');
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('keeps a snapshot across a same-URI reopen and releases it after a real close', async () => {
+    const server = {
+      getWorkspaceCwd: () => '/repo',
+      request: vi.fn(async (_method: string, path: string) =>
+        path === '/session/session-1'
+          ? { id: 'session-1', directory: '/repo' }
+          : [{ file: 'src/app.ts', before: 'old', after: 'new' }]
+      ),
+    };
+    const provider = new SessionDiffDocumentProvider(server as never);
+
+    try {
+      await provider.open('session-1', 'src/app.ts');
+      const [, beforeUri, afterUri] = vscodeMock.commands.executeCommand.mock.calls[0] as [
+        string,
+        Uri,
+        Uri,
+        string,
+        { preview: boolean },
+      ];
+      const original = { uri: beforeUri };
+      const reopened = { uri: beforeUri };
+      vscodeMock.workspace.textDocuments = [original, { uri: afterUri }];
+      const onClose = vscodeMock.workspace.onDidCloseTextDocument.mock.calls.at(-1)![0];
+
+      vscodeMock.workspace.textDocuments = [reopened, { uri: afterUri }];
+      onClose(original);
+      await Promise.resolve();
+      expect(provider.provideTextDocumentContent(beforeUri)).toBe('old');
+
+      vscodeMock.workspace.textDocuments = [{ uri: afterUri }];
+      onClose(reopened);
+      await Promise.resolve();
+      expect(provider.provideTextDocumentContent(beforeUri)).toBe('');
+      expect(provider.provideTextDocumentContent(afterUri)).toBe('new');
     } finally {
       provider.dispose();
     }

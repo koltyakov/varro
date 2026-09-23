@@ -161,7 +161,8 @@ export async function activate(context: vscode.ExtensionContext) {
     simulateMissingCli,
     compactionSettings,
     undefined,
-    askAgentEnabled
+    askAgentEnabled,
+    context.secrets
   );
   let scopedWorkspacePath: string | null | undefined;
   contextProvider = new ContextProvider((ctx) => {

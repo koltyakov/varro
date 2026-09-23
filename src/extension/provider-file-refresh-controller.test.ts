@@ -708,6 +708,72 @@ describe('ProviderFileRefreshController', () => {
       expect(h.values.has(PENDING_STATE_KEY)).toBe(false);
       expect(h.server.restart).not.toHaveBeenCalled();
     });
+
+    it('orders pending-state writes before a newer refresh clears them', async () => {
+      const h = createHarness({ files: { [CONFIG_PATHS[0]]: 'c1' } });
+      await activateWatching(h);
+      resetCalls(h);
+      let releaseFirstWrite!: () => void;
+      h.persistence.set.mockImplementationOnce(async (key: string, value: unknown) => {
+        await new Promise<void>((resolve) => {
+          releaseFirstWrite = resolve;
+        });
+        h.values.set(key, value);
+      });
+
+      h.fileSystem.files.set(CONFIG_PATHS[0], 'c2');
+      fireWatcherEvent(0);
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+      expect(h.persistence.set).toHaveBeenCalledOnce();
+
+      h.fileSystem.files.set(CONFIG_PATHS[0], 'c3');
+      fireWatcherEvent(0);
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+      expect(h.persistence.set).toHaveBeenCalledOnce();
+      expect(h.persistence.remove).not.toHaveBeenCalled();
+
+      releaseFirstWrite();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(h.persistence.set).toHaveBeenCalledTimes(2);
+      expect(globalDisposeCallCount(h)).toBe(1);
+      expect(h.persistence.remove).toHaveBeenCalledOnce();
+      expect(h.values.has(PENDING_STATE_KEY)).toBe(false);
+    });
+
+    it('restarts a managed server when auth changes during a config disposal', async () => {
+      const h = createHarness({ files: { [CONFIG_PATHS[0]]: 'c1', [AUTH_PATH]: 'a1' } });
+      await activateWatching(h);
+      resetCalls(h);
+      let releaseDispose!: () => void;
+      h.server.request.mockImplementation(async (_method: string, path: string) => {
+        if (path === '/session/status') return {};
+        if (path === '/question' || path === '/permission') return [];
+        if (path === '/global/dispose') {
+          await new Promise<void>((resolve) => {
+            releaseDispose = resolve;
+          });
+        }
+        return undefined;
+      });
+
+      h.fileSystem.files.set(CONFIG_PATHS[0], 'c2');
+      fireWatcherEvent(0);
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+      expect(globalDisposeCallCount(h)).toBe(1);
+
+      h.fileSystem.files.set(AUTH_PATH, 'a2');
+      fireWatcherEvent(3);
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+      releaseDispose();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(RETRY_MS);
+
+      expect(globalDisposeCallCount(h)).toBe(1);
+      expect(h.server.restart).toHaveBeenCalledOnce();
+      expect(h.postRefresh).toHaveBeenLastCalledWith({ revalidateAuth: true });
+      expect(h.values.has(PENDING_STATE_KEY)).toBe(false);
+    });
   });
 
   describe('invalidation scheduling', () => {

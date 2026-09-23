@@ -145,6 +145,30 @@ describe('routingStore', () => {
     expect(routingStore.getVisibleProviders(state.providers)).toEqual([]);
   });
 
+  it('shows published models while preserving explicit catalog removals and visibility choices', () => {
+    const provider = createProvider('provider-1');
+    routingStore.setProviders([provider]);
+    routingStore.setModelsAdded(provider.id, ['model-2']);
+    routingStore.setModelVisible(provider.id, 'model-2', false);
+    const refreshed = {
+      ...provider,
+      models: { ...provider.models, 'model-3': { ...provider.models['model-2']!, id: 'model-3' } },
+    };
+    routingStore.setProviders([refreshed]);
+    expect(routingStore.isModelVisible(provider.id, 'model-1')).toBe(false);
+    expect(routingStore.isModelVisible(provider.id, 'model-2')).toBe(false);
+    expect(routingStore.isModelVisible(provider.id, 'model-3')).toBe(true);
+    expect(state.removedModels).toEqual(['provider-1:model-1']);
+    expect(JSON.parse(window.localStorage.getItem('varro.removedModels')!)).toEqual(
+      state.removedModels
+    );
+    routingStore.setModelsAdded(provider.id, ['model-2', 'model-3']);
+    expect(routingStore.isModelVisible(provider.id, 'model-2')).toBe(false);
+    routingStore.setModelAdded(provider.id, 'model-1', true);
+    expect(routingStore.isModelVisible(provider.id, 'model-1')).toBe(true);
+    expect(routingStore.isModelVisible(provider.id, 'model-3')).toBe(true);
+  });
+
   it('hides superseded models when a provider is first connected', () => {
     const connected = createProvider('provider-1');
     connected.models['model-1'] = {

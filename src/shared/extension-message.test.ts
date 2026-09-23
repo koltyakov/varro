@@ -1356,6 +1356,7 @@ describe('parseExtensionMessage plan state and model preference syncs', () => {
       modelOrder: ['anthropic:claude-opus-5'],
       hiddenProviders: ['openai'],
       hiddenModels: [],
+      removedModels: [],
       addedModels: [],
       pinnedModels: [],
       modelDisplayNames: {},

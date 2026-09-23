@@ -9,6 +9,7 @@ const preferences = {
   modelOrder: ['openai:gpt-5.6-sol'],
   hiddenProviders: ['anthropic'],
   hiddenModels: ['openai:gpt-5.5'],
+  removedModels: ['openai:explicitly-removed'],
   addedModels: ['openai:gpt-5.6-sol'],
   pinnedModels: ['openai:gpt-5.6-sol'],
   modelDisplayNames: { 'openai:gpt-5.6-sol': 'Sol' },

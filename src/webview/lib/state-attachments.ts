@@ -130,6 +130,24 @@ export function clearCurrentDocumentStateForSession(sessionId: string) {
   );
 }
 
+/**
+ * Applies a session-only value without changing the saved project preference.
+ * The returned restore is skipped when the toggle changed in the meantime.
+ */
+export function overrideCurrentDocumentEnabledForSession(sessionId: string, enabled: boolean) {
+  const hadOverride = sessionId in state.currentDocumentEnabledBySession;
+  const previous = state.currentDocumentEnabledBySession[sessionId];
+  setState('currentDocumentEnabledBySession', sessionId, enabled);
+  return () => {
+    if (state.currentDocumentEnabledBySession[sessionId] !== enabled) return;
+    if (hadOverride && previous !== undefined) {
+      setState('currentDocumentEnabledBySession', sessionId, previous);
+    } else {
+      clearCurrentDocumentStateForSession(sessionId);
+    }
+  };
+}
+
 export function addContextFile(file: DroppedFile) {
   const attachmentSequence = ensureContextFileAttachmentSequence(
     file.path,

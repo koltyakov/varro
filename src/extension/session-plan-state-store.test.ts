@@ -51,6 +51,35 @@ describe('SessionPlanStateStore', () => {
     expect(store.listAgents()).toEqual({ 'session-1': 'build' });
   });
 
+  it.each(['varro.sessionPlanState', 'varro.sessionPlanAgentState'])(
+    'keeps the last saved value when an update to %s fails',
+    async (failedKey) => {
+      const saved = new Map<string, unknown>();
+      const persistence: Persistence = {
+        get<T>(key: string) {
+          return saved.get(key) as T | undefined;
+        },
+        set: vi.fn<Persistence['set']>(async (key, value) => {
+          if (key === failedKey && value !== undefined && saved.has(key)) {
+            throw new Error('Storage unavailable');
+          }
+          saved.set(key, value);
+        }),
+        remove: vi.fn(),
+      };
+      const store = new SessionPlanStateStore(persistence);
+      await store.update('session-1', { skippedAt: 100, agent: 'plan' });
+
+      await expect(store.update('session-1', { skippedAt: 200, agent: 'build' })).rejects.toThrow(
+        'Storage unavailable'
+      );
+      expect(store.list()).toEqual({
+        'session-1': failedKey === 'varro.sessionPlanState' ? 100 : 200,
+      });
+      expect(store.listAgents()).toEqual({ 'session-1': 'plan' });
+    }
+  );
+
   it('removes all persisted state for a deleted session', async () => {
     const persistence: Persistence = {
       get: vi.fn(),

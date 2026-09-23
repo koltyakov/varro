@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal, onMount, onCleanup } from 'solid-js';
+import { For, Show, batch, createEffect, createSignal, onMount, onCleanup } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { splitExternalLinkText } from '../../lib/external-link';
 import { emptyPageIcon, folderIcon } from '../../lib/ui-icons';
@@ -9,6 +9,7 @@ import {
   type MaterialChipIconKind,
 } from '../MaterialChipIcon';
 import { createUiIconElement } from '../UiIcon';
+import { clampPopupToViewport } from '../../lib/popup-position';
 import { CompletionMenu, type CompletionItem } from './CompletionMenu';
 import { registerComposerOverlayDismiss } from './composer-overlay-dismiss';
 import type { EditorDiagnostic } from '../../../shared/protocol';
@@ -25,6 +26,7 @@ export type RichComposerChip = {
   id: string;
   type:
     | 'mention-file'
+    | 'mention-terminal'
     | 'mention-agent'
     | 'mention-skill'
     | 'mention-problems'
@@ -65,6 +67,7 @@ export function RichComposerArea(props: {
   editorRef: (el: HTMLDivElement) => void;
   placeholder: string;
   value: string;
+  pendingPaste?: RichComposerPasteInsertion;
   cursorOffset?: number;
   chips: RichComposerChip[];
   isFocused: boolean;
@@ -85,12 +88,15 @@ export function RichComposerArea(props: {
   onSelectCompletion: (item: CompletionItem) => void;
   onChipClick?: (chipId: string) => void;
   onRemoveChip?: (chipId: string) => void;
+  isChipExpandable?: (chipId: string) => boolean;
+  onExpandChip?: (chipId: string) => void;
   onHistory?: (action: 'undo' | 'redo') => void;
 }) {
   let editorEl: HTMLDivElement | undefined;
   let isComposing = false;
   let historyHandledByKeydown = false;
   let revealCaretAfterControlledInput = false;
+  let pendingControlledCursorReveal = false;
   let nativeInputSync: { value: string; cursorOffset: number } | undefined;
   let unregisterComposerDismiss: (() => void) | undefined;
   const [problemTooltipTargets, setProblemTooltipTargets] = createSignal<
@@ -101,6 +107,50 @@ export function RichComposerArea(props: {
     image: { url: string; alt: string };
     style: Record<string, string>;
   } | null>(null);
+
+  const [chipMenu, setChipMenu] = createSignal<{ chipId: string; x: number; y: number } | null>(
+    null
+  );
+  let chipMenuRef: HTMLDivElement | undefined;
+  const closeChipMenu = () => setChipMenu(null);
+
+  createEffect(() => {
+    const menu = chipMenu();
+    if (!menu) return;
+    if (!props.chips.some((chip) => chip.id === menu.chipId)) {
+      closeChipMenu();
+      return;
+    }
+    const closeIfOutside = (event: Event) => {
+      if (event.target instanceof Node && chipMenuRef?.contains(event.target)) return;
+      closeChipMenu();
+    };
+    window.addEventListener('contextmenu', closeIfOutside, true);
+    window.addEventListener('pointerdown', closeIfOutside, true);
+    window.addEventListener('focusin', closeIfOutside);
+    const unregisterDismiss = registerComposerOverlayDismiss(closeChipMenu);
+    onCleanup(() => {
+      window.removeEventListener('contextmenu', closeIfOutside, true);
+      window.removeEventListener('pointerdown', closeIfOutside, true);
+      window.removeEventListener('focusin', closeIfOutside);
+      unregisterDismiss();
+    });
+    queueMicrotask(() => {
+      if (!chipMenuRef) return;
+      clampPopupToViewport(chipMenuRef);
+      chipMenuRef.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
+    });
+  });
+
+  function handleContextMenu(event: MouseEvent) {
+    const chipId =
+      event.target instanceof Element
+        ? event.target.closest<HTMLElement>('.inline-chip[data-chip-id]')?.dataset.chipId
+        : undefined;
+    if (!chipId || !props.isChipExpandable?.(chipId)) return;
+    event.preventDefault();
+    setChipMenu({ chipId, x: event.clientX, y: event.clientY });
+  }
 
   const hidePreview = () => {
     unregisterComposerDismiss?.();
@@ -137,30 +187,49 @@ export function RichComposerArea(props: {
     if (!text) return frag;
 
     const sortedMarkers = Array.from(chips.keys()).toSorted((a, b) => b.length - a.length);
-    if (sortedMarkers.length === 0) {
-      appendTextWithLineBreaks(frag, text);
-      return frag;
-    }
-
-    const pattern = new RegExp(`(${sortedMarkers.map((m) => escapeRegex(m)).join('|')})`, 'g');
-
-    const parts = text.split(pattern);
-    for (const [index, part] of parts.entries()) {
-      const chip = chips.get(part);
-      if (chip) {
-        const previousNode = frag.lastChild;
-        const isAtomicChip = chip.type !== 'external-link' && chip.type !== 'mention-session';
-        if (isAtomicChip && previousNode instanceof HTMLBRElement) {
+    const pattern = sortedMarkers.length
+      ? new RegExp(`(${sortedMarkers.map((m) => escapeRegex(m)).join('|')})`, 'g')
+      : null;
+    const pending = props.pendingPaste;
+    const segments =
+      pending?.value === text ? [text.slice(0, pending.start), text.slice(pending.end)] : [text];
+    for (const [segmentIndex, segment] of segments.entries()) {
+      const parts = pattern ? segment.split(pattern) : [segment];
+      for (const [index, part] of parts.entries()) {
+        const chip = chips.get(part);
+        if (chip) {
+          const previousNode = frag.lastChild;
+          const isAtomicChip = chip.type !== 'external-link' && chip.type !== 'mention-session';
+          if (isAtomicChip && previousNode instanceof HTMLBRElement) {
+            frag.appendChild(document.createTextNode(CARET_SPACER));
+          }
+          const element = createChipElement(chip);
+          frag.appendChild(element);
+          if (chip.problemDetails) tooltipTargets.push({ element, text: chip.problemDetails });
+          if (chip.type !== 'external-link') {
+            frag.appendChild(document.createTextNode(CARET_SPACER));
+          }
+        } else {
+          appendTextWithLineBreaks(
+            frag,
+            part,
+            index === parts.length - 1 && segmentIndex === segments.length - 1
+          );
+        }
+      }
+      if (segments.length === 2 && segmentIndex === 0 && pending) {
+        // Keep the text in logical offsets and clipboard extraction without
+        // painting it or expanding the editor while its source is resolved.
+        const placeholder = document.createElement('span');
+        placeholder.contentEditable = 'false';
+        placeholder.dataset.chipMarker = text.slice(pending.start, pending.end);
+        placeholder.dataset.pendingPaste = 'true';
+        placeholder.setAttribute('aria-hidden', 'true');
+        if (frag.lastChild instanceof HTMLBRElement) {
           frag.appendChild(document.createTextNode(CARET_SPACER));
         }
-        const element = createChipElement(chip);
-        frag.appendChild(element);
-        if (chip.problemDetails) tooltipTargets.push({ element, text: chip.problemDetails });
-        if (chip.type !== 'external-link') {
-          frag.appendChild(document.createTextNode(CARET_SPACER));
-        }
-      } else {
-        appendTextWithLineBreaks(frag, part, index === parts.length - 1);
+        frag.appendChild(placeholder);
+        frag.appendChild(document.createTextNode(CARET_SPACER));
       }
     }
     setProblemTooltipTargets(tooltipTargets);
@@ -625,8 +694,8 @@ export function RichComposerArea(props: {
     sel.addRange(range);
   }
 
-  function revealCaret() {
-    if (!revealCaretAfterControlledInput || !editorEl) return;
+  function revealCaret(controlledCursorUpdate = false) {
+    if ((!revealCaretAfterControlledInput && !controlledCursorUpdate) || !editorEl) return;
     revealCaretAfterControlledInput = false;
 
     const range = getSelectionRange();
@@ -661,9 +730,12 @@ export function RichComposerArea(props: {
 
   let lastSyncedValue = '';
   let lastSyncedChips = '';
+  let lastSyncedPendingPaste: RichComposerPasteInsertion | undefined;
 
   createEffect(() => {
     const text = props.value;
+    const pendingPaste = props.pendingPaste;
+    const pendingPasteChanged = pendingPaste !== lastSyncedPendingPaste;
     const requestedCursor = props.cursorOffset;
     const chips = JSON.stringify(
       props.chips
@@ -698,9 +770,11 @@ export function RichComposerArea(props: {
     if (
       nativeInputAcknowledged &&
       !chipsChanged &&
+      !pendingPasteChanged &&
       (!externalLinksOutOfSync || preserveEditedExternalLinks)
     ) {
       lastSyncedValue = text;
+      pendingControlledCursorReveal = false;
       revealCaret();
       return;
     }
@@ -709,16 +783,21 @@ export function RichComposerArea(props: {
     const domNeedsResync =
       textNeedsResync || (externalLinksOutOfSync && !preserveEditedExternalLinks);
 
-    if (!textChanged && !chipsChanged && !domNeedsResync) {
+    if (!textChanged && !chipsChanged && !pendingPasteChanged && !domNeedsResync) {
+      let cursorUpdated = false;
       if (isFocused && requestedCursor != null && getCursorOffset() !== requestedCursor) {
         setCursorOffset(Math.min(requestedCursor, text.length));
+        cursorUpdated = true;
       }
-      revealCaret();
+      revealCaret(cursorUpdated && pendingControlledCursorReveal);
+      if (cursorUpdated) pendingControlledCursorReveal = false;
       return;
     }
 
     lastSyncedValue = text;
     lastSyncedChips = chips;
+    lastSyncedPendingPaste = pendingPaste;
+    if (pendingPasteChanged && isFocused) revealCaretAfterControlledInput = true;
     const cursorOff =
       textChanged && requestedCursor != null
         ? requestedCursor
@@ -733,6 +812,8 @@ export function RichComposerArea(props: {
     if (isFocused) {
       setCursorOffset(Math.min(cursorOff, text.length));
     }
+    // Deferred paste resolution can supply the new text before its cursor offset.
+    pendingControlledCursorReveal = textChanged && isFocused && !revealCaretAfterControlledInput;
     revealCaret();
   });
 
@@ -806,12 +887,14 @@ export function RichComposerArea(props: {
     e.preventDefault();
     const nextValue = `${props.value.slice(0, insertionRange.start)}${text}${props.value.slice(insertionRange.end)}`;
     revealCaretAfterControlledInput = true;
-    props.onInput(nextValue, insertionRange.start + text.length);
-    props.onPasteInsertion?.(e, {
-      start: insertionRange.start,
-      end: insertionRange.start + text.length,
-      text,
-      value: nextValue,
+    batch(() => {
+      props.onInput(nextValue, insertionRange.start + text.length);
+      props.onPasteInsertion?.(e, {
+        start: insertionRange.start,
+        end: insertionRange.start + text.length,
+        text,
+        value: nextValue,
+      });
     });
   }
 
@@ -936,6 +1019,7 @@ export function RichComposerArea(props: {
         aria-placeholder={props.placeholder}
         data-placeholder={props.placeholder}
         onInput={handleInput}
+        onContextMenu={handleContextMenu}
         onBeforeInput={(e) => {
           // The editor DOM is rebuilt programmatically, so the browser's
           // native undo stack is unreliable; route history edits (context
@@ -1059,12 +1143,56 @@ export function RichComposerArea(props: {
         </Show>
       </Portal>
 
+      <Show when={chipMenu()}>
+        {(menu) => (
+          <Portal>
+            <div
+              ref={(element) => {
+                chipMenuRef = element;
+              }}
+              class="session-item-actions-menu"
+              role="menu"
+              aria-label="Chip actions"
+              style={{ left: `${menu().x}px`, top: `${menu().y}px` }}
+              onKeyDown={(event) => {
+                if (event.key !== 'Escape') return;
+                event.preventDefault();
+                closeChipMenu();
+                editorEl?.focus();
+              }}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  const chipId = menu().chipId;
+                  closeChipMenu();
+                  editorEl?.focus();
+                  props.onExpandChip?.(chipId);
+                }}
+              >
+                Expand to Text
+              </button>
+            </div>
+          </Portal>
+        )}
+      </Show>
+
       <Show when={props.isFocused && props.showCompletionMenu}>
         <CompletionMenu
           items={props.completionItems}
           selectedIndex={props.completionSelectedIndex}
           header={props.completionHeader}
           emptyMessage={props.completionEmptyMessage}
+          anchorRect={() => {
+            // Track controlled edits as well as native selection changes.
+            void props.value;
+            void props.cursorOffset;
+            const range = getSelectionRange();
+            if (!range || !('getBoundingClientRect' in range)) return null;
+            const rect = range.getBoundingClientRect();
+            return rect.height > 0 ? rect : null;
+          }}
           onSelect={props.onSelectCompletion}
         />
       </Show>

@@ -62,7 +62,9 @@ function createRuntime(options?: {
   start?: () => Promise<string>;
 }) {
   const server = {
-    request: vi.fn(() => Promise.resolve(undefined)),
+    request: vi.fn((_method: string, _path: string): Promise<unknown> =>
+      Promise.resolve(undefined)
+    ),
     start: vi.fn(options?.start ?? (() => Promise.resolve('http://127.0.0.1:4096'))),
     status: options?.serverStatus ?? ({ state: 'stopped' } satisfies ServerStatus),
   };
@@ -179,6 +181,7 @@ describe('SidebarProviderRuntime', () => {
         return cleanup.promise;
       }),
     });
+    server.request.mockResolvedValue(true);
 
     const firstRun = runtime.cleanupExpiredRecycleBin(RUNNING_STATUS);
     const overlappingRun = runtime.cleanupExpiredRecycleBin(RUNNING_STATUS);
@@ -208,6 +211,51 @@ describe('SidebarProviderRuntime', () => {
     now.mockReturnValue(3_500);
     await runtime.cleanupExpiredRecycleBin({ state: 'stopped' });
     expect(sessionTrash.cleanupExpired).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps an expired entry when a false delete response still leaves the session on the server', async () => {
+    const entry = createRecycleBinEntry('root', ['root']);
+    const { runtime, server, sessionState, sessionTrash } = createRuntime({
+      cleanupExpired: vi.fn(async (removeSession) => {
+        try {
+          await removeSession({ id: 'root', directory: '/repo' });
+          return [entry];
+        } catch {
+          return [];
+        }
+      }),
+    });
+    server.request.mockImplementation(async (method: string) =>
+      method === 'DELETE' ? false : entry.root
+    );
+
+    await runtime.cleanupExpiredRecycleBin(RUNNING_STATUS);
+
+    expect(server.request.mock.calls).toEqual([
+      ['DELETE', '/session/root?directory=%2Frepo'],
+      ['GET', '/session/root?directory=%2Frepo'],
+    ]);
+    expect(sessionTrash.cleanupExpired).toHaveBeenCalledOnce();
+    expect(sessionState.removeSessions).not.toHaveBeenCalled();
+  });
+
+  it('accepts an unconfirmed delete when a follow-up lookup confirms the session is gone', async () => {
+    const entry = createRecycleBinEntry('root', ['root']);
+    const { runtime, server, sessionState } = createRuntime({
+      cleanupExpired: vi.fn(async (removeSession) => {
+        await removeSession({ id: 'root', directory: '/repo' });
+        return [entry];
+      }),
+    });
+    server.request.mockImplementation(async (method: string) => {
+      if (method === 'DELETE') return false;
+      throw new Error('404 Session not found');
+    });
+
+    await runtime.cleanupExpiredRecycleBin(RUNNING_STATUS);
+
+    expect(server.request).toHaveBeenCalledWith('GET', '/session/root?directory=%2Frepo');
+    expect(sessionState.removeSessions).toHaveBeenCalledWith(['root']);
   });
 
   it('suppresses events for hidden sessions discovered anywhere in the payload', () => {

@@ -44,7 +44,7 @@ import {
   normalizeRunningStatus,
 } from './server-utils';
 import { FULL_SESSION_LIST_LIMIT } from './util/session-list';
-import { openCodeApiVersion } from './opencode-connection';
+import { basicAuthorization, openCodeApiVersion } from './opencode-connection';
 
 export type { OpenCodeCompactionSettings };
 
@@ -236,6 +236,7 @@ export class OpenCodeServer extends EventEmitter {
   private lastRestartBlockers: RestartBlockedState | null = null;
   private adoptedServerRecoveryOperation: Promise<void> | null = null;
   private existingServerPreparationOperation: Promise<void> | null = null;
+  private savedServerAuthorization: { url: string; value: string } | undefined;
 
   constructor(
     port: number,
@@ -244,7 +245,8 @@ export class OpenCodeServer extends EventEmitter {
     simulateMissingCli = false,
     compactionSettings?: Partial<OpenCodeCompactionSettings>,
     ownershipLeasePath?: string,
-    askAgentEnabled = false
+    askAgentEnabled = false,
+    private readonly secrets?: vscode.SecretStorage
   ) {
     super();
     this.processManager = new OpenCodeProcess(
@@ -264,7 +266,10 @@ export class OpenCodeServer extends EventEmitter {
       isDisposing: () => this.isDisposing,
       updateEventStreamState: (eventStream) => this.updateEventStreamState(eventStream),
       emitEvent: (event) => this.handleServerEvent(event),
-      getAuthorization: () => this.processManager.serverAuthorization,
+      getAuthorization: () =>
+        this.savedServerAuthorization?.url === this.url
+          ? this.savedServerAuthorization.value
+          : this.processManager.serverAuthorization,
       refreshAuthorization: () => this.processManager.discoverServerCredentials(),
       openExternal: async (value) => {
         const url = new URL(value);
@@ -455,6 +460,87 @@ export class OpenCodeServer extends EventEmitter {
     return this.startOperation(false);
   }
 
+  private async recoverServerAuthentication(signal: AbortSignal) {
+    const url = this.url;
+    const secrets = this.secrets;
+    if (!secrets) return { healthy: false };
+    const key = `varro.opencode.serverCredentials:${url}`;
+    const checkCurrent = () => {
+      signal.throwIfAborted();
+      if (this.url !== url)
+        throw new Error('OpenCode server address changed during authentication');
+    };
+    const stored = await secrets.get(key);
+    checkCurrent();
+    let username = 'opencode';
+    if (stored) {
+      try {
+        const credentials: unknown = JSON.parse(stored);
+        if (
+          credentials &&
+          typeof credentials === 'object' &&
+          'username' in credentials &&
+          typeof credentials.username === 'string' &&
+          'password' in credentials &&
+          typeof credentials.password === 'string' &&
+          credentials.password
+        ) {
+          username = credentials.username;
+          this.savedServerAuthorization = {
+            url,
+            value: basicAuthorization(credentials.password, username),
+          };
+        }
+      } catch {
+        logger.warn('Could not parse saved OpenCode server credentials');
+      }
+      if (this.savedServerAuthorization?.url === url) {
+        logger.info('Using OpenCode server credentials from VS Code secret storage; password=*');
+        const health = await this.transport.readHealthInfo(signal);
+        checkCurrent();
+        if (health.healthy || !this.transport.healthError?.includes('authentication'))
+          return health;
+      }
+    }
+
+    const enteredUsername = await vscode.window.showInputBox({
+      title: 'Connect to OpenCode server',
+      prompt: `Authentication required for ${url}. Enter the server username.`,
+      value: username,
+      ignoreFocusOut: true,
+      validateInput: (value) =>
+        !value.trim()
+          ? 'Enter a username'
+          : value.includes(':')
+            ? 'Username cannot contain :'
+            : null,
+    });
+    checkCurrent();
+    if (enteredUsername === undefined) return { healthy: false };
+    const password = await vscode.window.showInputBox({
+      title: 'Connect to OpenCode server',
+      prompt: `Enter the password for ${url}. Verified credentials are saved in VS Code secret storage.`,
+      password: true,
+      ignoreFocusOut: true,
+      validateInput: (value) => (value ? null : 'Enter a password'),
+    });
+    checkCurrent();
+    if (!password) return { healthy: false };
+    this.savedServerAuthorization = {
+      url,
+      value: basicAuthorization(password, enteredUsername),
+    };
+    const health = await this.transport.readHealthInfo(signal);
+    checkCurrent();
+    if (health.healthy) {
+      await secrets.store(key, JSON.stringify({ username: enteredUsername, password }));
+      logger.info('Saved OpenCode server credentials in VS Code secret storage; password=*');
+    } else {
+      this.savedServerAuthorization = undefined;
+    }
+    return health;
+  }
+
   private startOperation(preserveRetryCount: boolean): Promise<string> {
     return this.setStartPromise(async (signal) => {
       this.clearRestartTimer();
@@ -476,8 +562,22 @@ export class OpenCodeServer extends EventEmitter {
         await this.processManager.stopServerForRestart();
         this.throwIfStartCancelled(disposeGeneration, signal);
       }
-      const health = await this.readHealthInfo();
+      let health = await this.readHealthInfo();
       this.throwIfStartCancelled(disposeGeneration, signal);
+      if (
+        !health.healthy &&
+        this.transport.healthError?.includes('authentication') &&
+        this.secrets
+      ) {
+        health = await this.recoverServerAuthentication(signal);
+        this.throwIfStartCancelled(disposeGeneration, signal);
+        if (!health.healthy) {
+          const message =
+            this.transport.healthError ?? 'Could not verify OpenCode server credentials.';
+          this.setStatus({ state: 'error', message });
+          throw new Error(message);
+        }
+      }
       if (this.transport.healthError?.startsWith('Unsupported OpenCode')) {
         const message = this.transport.healthError;
         this.setStatus({ state: 'error', message });

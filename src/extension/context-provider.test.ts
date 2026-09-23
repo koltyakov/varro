@@ -57,6 +57,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 const vscodeMock = vi.hoisted(() => ({
   window: {
     activeTerminal: { name: 'Terminal 1' } as { name: string } | undefined,
+    terminals: [] as unknown[],
     activeTextEditor: undefined as unknown,
     tabGroups: {
       activeTabGroup: { activeTab: undefined as unknown },
@@ -64,6 +65,11 @@ const vscodeMock = vi.hoisted(() => ({
     },
     onDidChangeActiveTextEditor: vi.fn((_listener?: () => void) => ({ dispose: vi.fn() })),
     onDidChangeTextEditorSelection: vi.fn((_listener?: () => void) => ({ dispose: vi.fn() })),
+    onDidStartTerminalShellExecution: vi.fn((_listener?: (event: unknown) => void) => ({
+      dispose: vi.fn(),
+    })),
+    onDidCloseTerminal: vi.fn((_listener?: (terminal: unknown) => void) => ({ dispose: vi.fn() })),
+    onDidOpenTerminal: vi.fn((_listener?: (terminal: unknown) => void) => ({ dispose: vi.fn() })),
     showTextDocument: vi.fn(),
   },
   languages: {
@@ -192,6 +198,9 @@ describe('ContextProvider', () => {
     clipboardState.terminalSelection = null;
     clipboardState.deferWrite = null;
     clipboardState.deferCopy = null;
+    vscodeMock.env.clipboard.readText.mockImplementation(() =>
+      Promise.resolve(clipboardState.current)
+    );
     fsState.symlinks.clear();
     fsState.directories.clear();
     vscodeMock.window.activeTerminal = { name: 'Terminal 1' };
@@ -252,6 +261,82 @@ describe('ContextProvider', () => {
     unsaved.dispose();
   });
 
+  it('finds pasted text in recent terminal output', async () => {
+    const provider = new ContextProvider(vi.fn());
+    const terminal = { name: 'zsh' };
+    vscodeMock.window.activeTerminal = terminal;
+    const listener = vscodeMock.window.onDidStartTerminalShellExecution.mock.calls.at(-1)![0]!;
+    async function* output() {
+      yield '\x1b[31mError: build failed   \x1b[0m\r\n';
+      yield '  at compile (src/app.ts:3)\r\n';
+    }
+
+    try {
+      listener({
+        terminal,
+        execution: { commandLine: { value: 'npm run build' }, read: output },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(provider.findTerminalText('Error: build failed')).toEqual({
+        text: 'Error: build failed',
+        terminalName: 'zsh',
+      });
+      expect(
+        provider.findTerminalText(
+          'user@host % npm run build\nError: build failed\n  at compile (src/app'
+        )
+      ).toEqual(expect.objectContaining({ terminalName: 'zsh' }));
+      expect(provider.findTerminalText('build')).toBeNull();
+      expect(provider.findTerminalText('copied from a browser')).toBeNull();
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('restores captured terminal output after a window reload reconnects the same process', async () => {
+    vi.useFakeTimers();
+    const stored = new Map<string, unknown>();
+    const workspaceState = {
+      get: vi.fn((key: string) => stored.get(key)),
+      update: vi.fn((key: string, value: unknown) => {
+        stored.set(key, value);
+        return Promise.resolve();
+      }),
+    };
+    const before = new ContextProvider(vi.fn(), workspaceState);
+    const terminal = { name: 'zsh', processId: Promise.resolve(42) };
+    vscodeMock.window.activeTerminal = terminal;
+    async function* output() {
+      yield 'DONE  Packaged: varro-0.29.12.vsix\r\n';
+    }
+    try {
+      vscodeMock.window.onDidStartTerminalShellExecution.mock.calls.at(-1)![0]!({
+        terminal,
+        execution: { commandLine: { value: 'npm run package' }, read: output },
+      });
+      await vi.advanceTimersByTimeAsync(1000);
+    } finally {
+      before.dispose();
+    }
+
+    const reconnected = { name: 'zsh', processId: Promise.resolve(42) };
+    vscodeMock.window.activeTerminal = reconnected;
+    vscodeMock.window.terminals = [reconnected];
+    const after = new ContextProvider(vi.fn(), workspaceState);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(after.findTerminalText('DONE  Packaged: varro-0.29.12.vsix')).toEqual({
+        text: 'DONE  Packaged: varro-0.29.12.vsix',
+        terminalName: 'zsh',
+      });
+    } finally {
+      after.dispose();
+      vscodeMock.window.terminals = [];
+      vi.useRealTimers();
+    }
+  });
+
   it('does not reuse stale clipboard text when terminal copy captures nothing', async () => {
     clipboardState.current = 'existing clipboard';
     clipboardState.terminalSelection = null;
@@ -284,6 +369,30 @@ describe('ContextProvider', () => {
       });
       expect(vscodeMock.env.clipboard.writeText).toHaveBeenCalledWith('existing clipboard');
       expect(clipboardState.current).toBe('existing clipboard');
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('keeps a newer user copy made while terminal capture is finishing', async () => {
+    clipboardState.current = 'existing clipboard';
+    clipboardState.terminalSelection = 'terminal output';
+    const originalRead = vscodeMock.env.clipboard.readText.getMockImplementation()!;
+    let reads = 0;
+    vscodeMock.env.clipboard.readText.mockImplementation(() => {
+      reads += 1;
+      if (reads === 3) clipboardState.current = 'new user copy';
+      return originalRead();
+    });
+    const provider = new ContextProvider(vi.fn());
+
+    try {
+      await expect(provider.captureTerminalSelection()).resolves.toEqual({
+        ok: true,
+        terminalName: 'Terminal 1',
+      });
+      expect(clipboardState.current).toBe('new user copy');
+      expect(clipboardState.writes).not.toContain('existing clipboard');
     } finally {
       provider.dispose();
     }
@@ -407,7 +516,7 @@ describe('ContextProvider', () => {
     }
   });
 
-  it('restores a terminal copy that lands after the command times out before dequeuing', async () => {
+  it('does not overwrite an unknown clipboard value after a terminal copy times out', async () => {
     clipboardState.current = 'existing clipboard';
     clipboardState.terminalSelection = 'late terminal output';
     let releaseCopy: () => void = noop;
@@ -434,8 +543,36 @@ describe('ContextProvider', () => {
       await vi.advanceTimersByTimeAsync(1_000);
 
       await expect(secondCapture).resolves.toEqual({ ok: false, reason: 'empty-selection' });
-      expect(clipboardState.current).toBe('existing clipboard');
-      expect(clipboardState.current).not.toBe('late terminal output');
+      expect(clipboardState.current).toBe('late terminal output');
+    } finally {
+      provider.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps a user copy when a timed-out terminal command finishes without copying', async () => {
+    clipboardState.current = 'existing clipboard';
+    clipboardState.terminalSelection = null;
+    let releaseCopy: () => void = noop;
+    clipboardState.deferCopy = {
+      promise: new Promise<void>((resolve) => {
+        releaseCopy = resolve;
+      }),
+      resolve: () => releaseCopy(),
+    };
+    vi.useFakeTimers();
+    const provider = new ContextProvider(vi.fn());
+
+    try {
+      const capture = provider.captureTerminalSelection();
+      await vi.advanceTimersByTimeAsync(2_000);
+      await expect(capture).rejects.toThrow(/Timed out copying terminal selection/);
+      clipboardState.current = 'new user copy';
+      releaseCopy();
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(clipboardState.current).toBe('new user copy');
+      expect(clipboardState.writes).not.toContain('new user copy');
     } finally {
       provider.dispose();
       vi.useRealTimers();

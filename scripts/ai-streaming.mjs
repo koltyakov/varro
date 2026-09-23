@@ -44,8 +44,13 @@ const schemas = {
     'setup-timeout-ms',
     'start-timeout-ms',
     'replay-timeout-ms',
+    'checkpoints',
   ],
+  inspect: ['capture', 'short-gap-ms', 'max-gap-ms'],
   start: ['control'],
+  pause: ['control'],
+  resume: ['control'],
+  snapshot: ['control'],
   status: ['control'],
   stop: ['control'],
 };
@@ -53,7 +58,7 @@ const schemas = {
 export function parseArgs(args) {
   const [command, ...rest] = args;
   if (!Object.hasOwn(schemas, command))
-    throw new Error('Expected prepare, run, start, status, or stop');
+    throw new Error(`Expected ${Object.keys(schemas).join(', ')}`);
   const options = {};
   for (let i = 0; i < rest.length; i += 2) {
     const key = rest[i].slice(2);
@@ -73,7 +78,9 @@ export function parseArgs(args) {
       ? ['source', 'directory', 'seed']
       : command === 'run'
         ? ['capture', 'output']
-        : ['control'];
+        : command === 'inspect'
+          ? ['capture']
+          : ['control'];
   for (const key of required) if (!options[key]?.trim()) throw new Error(`--${key} is required`);
   for (const [key, value] of Object.entries(options)) {
     if (key === 'count' || key.endsWith('-ms')) {
@@ -88,9 +95,66 @@ export function parseArgs(args) {
       options[key] = number;
     }
   }
-  if (command === 'run' && (options['short-gap-ms'] ?? 250) > (options['max-gap-ms'] ?? 500))
+  if (
+    ['run', 'inspect'].includes(command) &&
+    (options['short-gap-ms'] ?? 250) > (options['max-gap-ms'] ?? 500)
+  )
     throw new Error('short-gap-ms must not exceed max-gap-ms');
+  if (options.checkpoints !== undefined) {
+    if (!/^\d+(,\d+)*$/.test(options.checkpoints)) throw new Error('Invalid --checkpoints');
+    options.checkpoints = options.checkpoints.split(',').map(Number);
+    if (
+      options.checkpoints.some(
+        (count, index, values) =>
+          !Number.isSafeInteger(count) || (index > 0 && count <= values[index - 1])
+      )
+    ) {
+      throw new Error('--checkpoints must be increasing event counts');
+    }
+  }
   return { command, options };
+}
+
+export function inspectCapture(capture, timing = {}) {
+  const timeline = buildReplayTimeline(capture.events, timing);
+  let scheduledMs = 0;
+  const boundaries = [];
+  const seen = new Set();
+  const toolStates = new Map();
+  for (const [index, entry] of timeline.entries()) {
+    scheduledMs += entry.delayMs;
+    const { type, properties } = entry.event;
+    const part = properties?.part;
+    const state = part?.state?.status;
+    const firstPart = part && !seen.has(part.id);
+    if (part) seen.add(part.id);
+    const toolTransition = part?.type === 'tool' && toolStates.get(part.id) !== state;
+    if (part?.type === 'tool') toolStates.set(part.id, state);
+    if (
+      firstPart ||
+      toolTransition ||
+      ['session.status', 'session.idle', 'session.diff'].includes(type)
+    ) {
+      boundaries.push({
+        afterEvents: index + 1,
+        scheduledMs,
+        type,
+        messageID: part?.messageID ?? properties?.messageID,
+        partID: part?.id,
+        partType: part?.type,
+        tool: part?.tool,
+        state: state ?? properties?.status?.type,
+      });
+    }
+  }
+  return {
+    provenance: capture.scenario,
+    model: capture.model,
+    initialMessages: capture.initialMessages.length,
+    events: timeline.length,
+    durationMs: scheduledMs,
+    boundaries,
+  };
 }
 
 export async function bounded(promise, ms, label, signal) {
@@ -145,9 +209,9 @@ function send(response, status, value) {
   response.end(JSON.stringify(value));
 }
 
-export async function createControl({ status, start, stop }) {
+export async function createControl({ status, start, stop, pause, resume, snapshot }) {
   const token = randomBytes(32).toString('hex');
-  const server = await listen((request, response) => {
+  const server = await listen(async (request, response) => {
     request.resume();
     if (request.headers.authorization !== `Bearer ${token}`)
       return send(response, 401, { error: 'Authentication required' });
@@ -157,6 +221,13 @@ export async function createControl({ status, start, stop }) {
       if (request.method === 'POST' && request.url === '/start') {
         start();
         return send(response, 202, status());
+      }
+      const action = { '/pause': pause, '/resume': resume, '/snapshot': snapshot }[request.url];
+      if (request.method === 'POST' && action) {
+        const evidence = await action();
+        const result = status();
+        if (evidence) result.evidence = evidence;
+        return send(response, 200, result);
       }
       if (request.method === 'POST' && request.url === '/stop') {
         send(response, 202, { stopping: true });
@@ -183,14 +254,14 @@ export async function controlRequest(control, command) {
     url.search ||
     url.hash ||
     !/^[a-f0-9]{64}$/.test(control.token) ||
-    !['start', 'status', 'stop'].includes(command)
+    !['start', 'status', 'stop', 'pause', 'resume', 'snapshot'].includes(command)
   )
     throw new Error('Invalid loopback control descriptor');
   const response = await fetch(new URL(`/${command}`, url), {
     method: command === 'status' ? 'GET' : 'POST',
     headers: { authorization: `Bearer ${control.token}` },
     redirect: 'error',
-    signal: AbortSignal.timeout(5_000),
+    signal: AbortSignal.timeout(command === 'snapshot' ? 15_000 : 5_000),
   });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error ?? `Control HTTP ${response.status}`);
@@ -372,6 +443,32 @@ export function installObserver() {
     },
   };
   return { installed: true, longtasksSupported: supported };
+}
+
+export function readReplaySnapshot() {
+  const list = document.querySelector('.interactive-list');
+  const bounds = (element) => {
+    const rect = element.getBoundingClientRect();
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  };
+  return {
+    context: globalThis.__initialWebviewState?.webviewContext,
+    hidden: document.hidden,
+    viewport: { width: innerWidth, height: innerHeight },
+    transcript: list
+      ? {
+          ...bounds(list),
+          scrollTop: list.scrollTop,
+          scrollHeight: list.scrollHeight,
+          clientHeight: list.clientHeight,
+        }
+      : null,
+    rows: [...document.querySelectorAll('[data-msg-id]')].slice(0, 250).map((row) => ({
+      messageID: row.getAttribute('data-msg-id'),
+      ...bounds(row),
+      text: row.textContent.slice(0, 2_000),
+    })),
+  };
 }
 
 export async function connectFrameTarget(target, signal) {
@@ -687,6 +784,7 @@ export async function runCapture(options) {
     output,
     capture: path.resolve(options.capture),
     startedAt: new Date().toISOString(),
+    controlActions: [],
   };
   let replay, proxy, control, child, browser, frame, launch, workspace;
   let launchOutput = '';
@@ -695,6 +793,23 @@ export async function runCapture(options) {
   let routeSearch;
   let log;
   const cleanupErrors = [];
+  let snapshotOperation;
+  let snapshotCount = 0;
+  const screenshot = async (file) => {
+    const workbenches = browser
+      .contexts()
+      .flatMap((context) => context.pages())
+      .filter((page) => page.url().includes('/workbench/workbench.html'));
+    if (workbenches.length !== 1) throw new Error('Expected one owned workbench screenshot target');
+    await workbenches[0].screenshot({ path: file, timeout: 5_000 });
+  };
+  const recordControl = (action) => {
+    metadata.controlActions.push({
+      action,
+      at: new Date().toISOString(),
+      afterEvents: replay.getResult().scheduler.appliedEvents,
+    });
+  };
   try {
     workspace = await mkdtemp(path.join(os.tmpdir(), 'vstream-'));
     metadata.workspace = workspace;
@@ -713,7 +828,14 @@ export async function runCapture(options) {
     const replayTimeout = options['replay-timeout-ms'] ?? 600_000;
     if (duration + 2_000 > replayTimeout)
       throw new Error(`Replay needs at least ${duration + 2_000}ms; increase --replay-timeout-ms`);
-    replay = await createStreamingServer({ capture, timeline, directory: workspace });
+    replay = await createStreamingServer({
+      capture,
+      timeline,
+      directory: workspace,
+      checkpoints: options.checkpoints,
+    });
+    metadata.checkpoints = options.checkpoints ?? [];
+    metadata.timingMode = metadata.checkpoints.length ? 'checkpointed' : 'continuous';
     proxy = await createBootstrapProxy(replay);
     metadata.sessionID = replay.getResult().sessionID;
     metadata.replayUrl = proxy.url;
@@ -739,11 +861,47 @@ export async function runCapture(options) {
       begin = resolve;
     });
     control = await createControl({
-      status: () => ({ ...metadata, progress: replay.getResult().scheduler }),
+      status: () => {
+        const result = replay.getResult();
+        return { ...metadata, playbackState: result.state, progress: result.scheduler };
+      },
       start: () => {
         if (metadata.phase !== 'armed') throw new Error(`Run is ${metadata.phase}, not armed`);
         metadata.phase = 'starting';
+        recordControl('start');
         begin();
+      },
+      pause: () => {
+        replay.pause();
+        metadata.timingMode = 'checkpointed';
+        recordControl('pause');
+      },
+      resume: () => {
+        replay.resume();
+        recordControl('resume');
+      },
+      snapshot: () => {
+        if (!frame || !['armed', 'running'].includes(metadata.phase))
+          throw new Error(`Cannot inspect editor in ${metadata.phase}`);
+        if (snapshotOperation) throw new Error('Snapshot already in progress');
+        snapshotOperation = (async () => {
+          recordControl('snapshot');
+          const prefix = path.join(output, `snapshot-${++snapshotCount}`);
+          const evidence = {
+            at: new Date().toISOString(),
+            playbackState: replay.getResult().state,
+            progress: replay.getResult().scheduler,
+            route: await frame.evaluate(readRouteEvidence),
+            dom: await frame.evaluate(readReplaySnapshot),
+            screenshot: `${prefix}.png`,
+          };
+          await screenshot(evidence.screenshot);
+          await json(`${prefix}.json`, evidence);
+          return { json: `${prefix}.json`, screenshot: evidence.screenshot };
+        })();
+        return snapshotOperation.finally(() => {
+          snapshotOperation = undefined;
+        });
       },
       stop,
     });
@@ -869,12 +1027,7 @@ export async function runCapture(options) {
       'Replay route after delivery',
       finalRouteSignal
     );
-    const workbenches = browser
-      .contexts()
-      .flatMap((context) => context.pages())
-      .filter((page) => page.url().includes('/workbench/workbench.html'));
-    if (workbenches.length !== 1) throw new Error('Expected one owned workbench screenshot target');
-    await workbenches[0].screenshot({ path: path.join(output, 'completed.png'), timeout: 5_000 });
+    await screenshot(path.join(output, 'completed.png'));
     await json(path.join(output, 'server-result.json'), result);
     if (result.state !== 'completed' || !result.canonicalMatch)
       throw new Error('Replay did not complete with canonical transcript equality');
@@ -896,6 +1049,8 @@ export async function runCapture(options) {
       await clean('Launcher exit', async () => {
         metadata.launcherCleanup = await stopLauncher(child, launchExit);
       });
+    if (snapshotOperation)
+      await clean('Pending snapshot', () => bounded(snapshotOperation, 16_000, 'Snapshot'), true);
     if (frame)
       await clean('Observer evidence', async () => {
         const metrics = await frame.evaluate(
@@ -953,6 +1108,14 @@ export async function runCapture(options) {
 export async function main(args = process.argv.slice(2)) {
   const { command, options } = parseArgs(args);
   if (command === 'run') return runCapture(options);
+  if (command === 'inspect') {
+    const result = inspectCapture(await readJson(options.capture), {
+      shortGapMs: options['short-gap-ms'] ?? 250,
+      maxGapMs: options['max-gap-ms'] ?? 500,
+    });
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return result;
+  }
   if (command === 'prepare') {
     const suffix = options.seed.replaceAll(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80);
     const manifest = await prepareStreamingRun({

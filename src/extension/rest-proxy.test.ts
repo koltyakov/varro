@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
       executeCommand: vi.fn(() => Promise.resolve()),
     },
     window: {
+      activeTextEditor: undefined as unknown,
+      activeTerminal: undefined as unknown,
       showOpenDialog: vi.fn(() => Promise.resolve(undefined)),
       showTextDocument: vi.fn(() => Promise.resolve()),
     },
@@ -1386,7 +1388,7 @@ describe('RestProxy handleRequest', () => {
 
   it('authorizes project worktree recycle-bin operations by project ID', async () => {
     const sibling = recycleBinEntry('sibling', '/worktrees/feature');
-    const foreign = recycleBinEntry('foreign', '/other-project');
+    const foreign = recycleBinEntry('foreign', '/worktrees/feature');
     foreign.root.projectID = 'project-2';
     for (const session of foreign.sessions) session.projectID = 'project-2';
     const restore = vi.fn(() => Promise.resolve({ rootID: 'sibling', sessions: sibling.sessions }));
@@ -1423,7 +1425,7 @@ describe('RestProxy handleRequest', () => {
       '/worktrees/feature'
     );
     expect(empty).toHaveBeenCalledOnce();
-    expect(empty).toHaveBeenCalledWith(expect.any(Function), '/worktrees/feature');
+    expect(empty).toHaveBeenCalledWith(expect.any(Function), '/worktrees/feature', ['sibling']);
     expect(serverRequest.mock.calls.filter(([, path]) => path === '/project/current')).toHaveLength(
       1
     );
@@ -1454,8 +1456,12 @@ describe('RestProxy handleRequest', () => {
       } as never,
     });
     await proxy.handleRequest(makePayload(3, 'DELETE', '/varro/session-trash'));
-    expect(callbacks.sessionTrash.empty).toHaveBeenCalledWith(expect.any(Function), '/repo/a');
-    expect(callbacks.sessionTrash.empty).toHaveBeenCalledWith(expect.any(Function), '/repo/b');
+    expect(callbacks.sessionTrash.empty).toHaveBeenCalledWith(expect.any(Function), '/repo/a', [
+      's1',
+    ]);
+    expect(callbacks.sessionTrash.empty).toHaveBeenCalledWith(expect.any(Function), '/repo/b', [
+      's2',
+    ]);
     expect(serverRequest.mock.calls).toEqual([
       ['DELETE', '/session/s1?directory=%2Frepo%2Fa'],
       ['DELETE', '/session/s2?directory=%2Frepo%2Fb'],
@@ -1619,6 +1625,132 @@ describe('RestProxy handleRequest', () => {
       workspaceDirectory: '/repo',
     });
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 61, data: resolved });
+  });
+
+  function setActiveEditorSelection(
+    start: { line: number; character: number },
+    end: { line: number; character: number },
+    isDirty = false
+  ) {
+    mocks.vscode.window.activeTextEditor = {
+      selection: { isEmpty: false, start, end },
+      document: {
+        isUntitled: false,
+        isDirty,
+        uri: { fsPath: '/repo/src/foo.ts' },
+        getText: vi.fn(() => 'selected code'),
+      },
+    };
+  }
+
+  it('matches copied editor text to its selected file lines', async () => {
+    setActiveEditorSelection({ line: 2, character: 2 }, { line: 4, character: 3 });
+    mocks.vscode.workspace.getWorkspaceFolder.mockReturnValueOnce({
+      uri: { fsPath: '/repo' },
+    } as never);
+    const { proxy, callbacks } = createProxy();
+    try {
+      await proxy.handleRequest(
+        makePayload(62, 'POST', '/varro/copied-selection/match', { text: 'selected code' })
+      );
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+        id: 62,
+        data: {
+          type: 'file',
+          file: expect.objectContaining({
+            path: '/repo/src/foo.ts',
+            lineRanges: [{ startLine: 3, endLine: 5 }],
+          }),
+        },
+      });
+    } finally {
+      mocks.vscode.window.activeTextEditor = undefined;
+    }
+  });
+
+  it('keeps copied dirty editor text as plain text even if terminal output also matches', async () => {
+    setActiveEditorSelection({ line: 2, character: 2 }, { line: 4, character: 3 }, true);
+    mocks.vscode.workspace.getWorkspaceFolder.mockReturnValueOnce({
+      uri: { fsPath: '/repo' },
+    } as never);
+    const findTerminalText = vi.fn(() => ({ text: 'selected code', terminalName: 'zsh' }));
+    const { proxy, callbacks } = createProxy({
+      contextProvider: { ...createCallbacks().contextProvider, findTerminalText } as never,
+    });
+    try {
+      await proxy.handleRequest(
+        makePayload(62, 'POST', '/varro/copied-selection/match', {
+          text: 'selected code',
+          plainTextOnly: true,
+        })
+      );
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 62, data: null });
+      expect(findTerminalText).not.toHaveBeenCalled();
+    } finally {
+      mocks.vscode.window.activeTextEditor = undefined;
+    }
+  });
+
+  it('matches CRLF editor text pasted with LF line endings', async () => {
+    setActiveEditorSelection({ line: 0, character: 6 }, { line: 1, character: 3 });
+    const editor = mocks.vscode.window.activeTextEditor as {
+      document: { getText: ReturnType<typeof vi.fn> };
+    };
+    editor.document.getText.mockReturnValue('fooBar = 1;\r\nend');
+    mocks.vscode.workspace.getWorkspaceFolder.mockReturnValueOnce({
+      uri: { fsPath: '/repo' },
+    } as never);
+    const { proxy, callbacks } = createProxy();
+    try {
+      await proxy.handleRequest(
+        makePayload(63, 'POST', '/varro/copied-selection/match', { text: 'fooBar = 1;\nend' })
+      );
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+        id: 63,
+        data: {
+          type: 'file',
+          file: expect.objectContaining({ lineRanges: [{ startLine: 1, endLine: 2 }] }),
+        },
+      });
+    } finally {
+      mocks.vscode.window.activeTextEditor = undefined;
+    }
+  });
+
+  it('matches plain-text pastes against recent terminal output without touching the terminal', async () => {
+    const findTerminalText = vi.fn((text: string) =>
+      text === 'terminal output' ? { text, terminalName: 'zsh' } : null
+    );
+    const { proxy, callbacks } = createProxy({
+      contextProvider: { ...createCallbacks().contextProvider, findTerminalText } as never,
+    });
+    await proxy.handleRequest(
+      makePayload(64, 'POST', '/varro/copied-selection/match', {
+        text: 'terminal output',
+        plainTextOnly: true,
+      })
+    );
+    await proxy.handleRequest(
+      makePayload(65, 'POST', '/varro/copied-selection/match', {
+        text: 'different output',
+        plainTextOnly: true,
+      })
+    );
+    await proxy.handleRequest(
+      makePayload(66, 'POST', '/varro/copied-selection/match', {
+        text: 'terminal output',
+        plainTextOnly: false,
+      })
+    );
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 64,
+      data: { type: 'terminal', selection: { text: 'terminal output', terminalName: 'zsh' } },
+    });
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 65, data: null });
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 66, data: null });
+    expect(findTerminalText).toHaveBeenCalledTimes(2);
+    expect(mocks.vscode.commands.executeCommand).not.toHaveBeenCalled();
   });
 
   it('returns the selected plan path with its multi-root workspace directory', async () => {
