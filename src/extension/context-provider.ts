@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { readdir, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, join, parse, relative, sep } from 'path';
 import type { EditorContext, EditorTextContext } from '../shared/protocol';
+import { asRecord, isNumber, isString } from '../shared/type-utils';
 import { isSameWorkspacePath } from '../shared/workspace-path';
 import { toEditorDiagnostic } from './workspace-problems';
 import { logger } from './logger';
@@ -37,6 +38,12 @@ export class ContextProvider implements vscode.Disposable {
   private static readonly TERMINAL_COPY_TIMEOUT_MS = 1500;
   private static readonly LATE_CLIPBOARD_WRITE_TIMEOUT_MS = 10_000;
   private static readonly ACTIVE_EDITOR_SETTLE_DELAY_MS = 60;
+  private static readonly RECENT_TERMINAL_TEXT_CHARACTERS = 256 * 1024;
+  private static readonly RECENT_TERMINAL_COMMANDS = 50;
+  private static readonly TERMINAL_HISTORY_KEY = 'varro.recentTerminalOutput';
+  private static readonly SAVED_TERMINAL_TEXT_CHARACTERS = 64 * 1024;
+  private static readonly SAVED_TERMINALS = 10;
+  private static readonly TERMINAL_HISTORY_SAVE_DELAY_MS = 1000;
   private disposables: vscode.Disposable[] = [];
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private diagnosticsDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -54,6 +61,11 @@ export class ContextProvider implements vscode.Disposable {
     diagnosticCounts: { errors: 0, warnings: 0 },
   };
   private _terminalSelection: { text: string; terminalName: string } | null = null;
+  private readonly recentTerminalText = new Map<vscode.Terminal, string>();
+  private readonly recentTerminalCommands = new Map<vscode.Terminal, string[]>();
+  private readonly terminalProcessIds = new Map<vscode.Terminal, number>();
+  private readonly restoredTerminals = new Set<vscode.Terminal>();
+  private terminalHistorySaveTimer: ReturnType<typeof setTimeout> | null = null;
   private terminalCaptureQueue: Promise<void> = Promise.resolve();
   private pendingClipboardSettle: Promise<void> = Promise.resolve();
   private _lastContextSnapshot: ContextSnapshot | null = null;
@@ -86,8 +98,23 @@ export class ContextProvider implements vscode.Disposable {
           this.debouncedDiagnosticsUpdate();
         }
       }),
-      vscode.workspace.onDidChangeWorkspaceFolders(() => this.update())
+      vscode.workspace.onDidChangeWorkspaceFolders(() => this.update()),
+      vscode.window.onDidStartTerminalShellExecution((event) => {
+        void this.recordTerminalExecution(event);
+      }),
+      vscode.window.onDidOpenTerminal((terminal) => {
+        void this.restoreTerminalHistory(terminal);
+      }),
+      vscode.window.onDidCloseTerminal((terminal) => {
+        this.recentTerminalText.delete(terminal);
+        this.recentTerminalCommands.delete(terminal);
+        this.restoredTerminals.delete(terminal);
+        const processId = this.terminalProcessIds.get(terminal);
+        this.terminalProcessIds.delete(terminal);
+        if (processId !== undefined) void this.saveTerminalHistory([processId]);
+      })
     );
+    for (const terminal of vscode.window.terminals) void this.restoreTerminalHistory(terminal);
 
     this.update();
   }
@@ -98,6 +125,160 @@ export class ContextProvider implements vscode.Disposable {
 
   get terminalSelection() {
     return this._terminalSelection;
+  }
+
+  /**
+   * Finds an open terminal that recently showed the pasted text. The API
+   * cannot read a terminal's screen, so this compares against output captured
+   * through shell integration; terminals without it never match. Prompts are
+   * not part of that output, so a selected prompt line counts when it ends with
+   * a command the terminal ran. A single line must be a whole terminal line,
+   * which keeps words that merely occur in the output as plain text.
+   */
+  findTerminalText(text: string): { text: string; terminalName: string } | null {
+    const lines = normalizeTerminalLines(text)
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (lines.length === 0) return null;
+    const active = vscode.window.activeTerminal;
+    const terminals = [
+      ...(active ? [active] : []),
+      ...vscode.window.terminals.filter((terminal) => terminal !== active),
+    ];
+    for (const terminal of terminals) {
+      const recent = this.recentTerminalText.get(terminal);
+      if (!recent) continue;
+      const output = normalizeTerminalLines(recent);
+      const outputLines = new Set(output.split('\n').map((line) => line.trim()));
+      const commands = this.recentTerminalCommands.get(terminal) ?? [];
+      const isPromptLine = (line: string) => commands.some((command) => line.endsWith(command));
+      const matches =
+        lines.length === 1
+          ? outputLines.has(lines[0]!) || isPromptLine(lines[0]!)
+          : lines.every((line) => output.includes(line) || isPromptLine(line));
+      if (matches) return { text, terminalName: terminal.name };
+    }
+    return null;
+  }
+
+  private async recordTerminalExecution(event: vscode.TerminalShellExecutionStartEvent) {
+    const command = event.execution.commandLine.value.trim();
+    if (command) {
+      const commands = this.recentTerminalCommands.get(event.terminal) ?? [];
+      this.recentTerminalCommands.set(
+        event.terminal,
+        [...commands, command].slice(-ContextProvider.RECENT_TERMINAL_COMMANDS)
+      );
+      this.appendTerminalText(event.terminal, `${command}\n`);
+    }
+    void this.trackTerminalProcess(event.terminal);
+    try {
+      for await (const data of event.execution.read()) {
+        this.appendTerminalText(event.terminal, data);
+      }
+    } catch {
+      // Output capture is best effort; missed output only leaves a paste as text.
+    }
+  }
+
+  private appendTerminalText(terminal: vscode.Terminal, data: string) {
+    const text = `${this.recentTerminalText.get(terminal) ?? ''}${stripTerminalEscapes(data)}`;
+    const max = ContextProvider.RECENT_TERMINAL_TEXT_CHARACTERS;
+    this.recentTerminalText.set(terminal, text.length > max ? text.slice(-max) : text);
+    this.scheduleTerminalHistorySave();
+  }
+
+  /**
+   * A window reload restarts the extension host but reconnects the same
+   * terminal processes, so captured output is saved per process id and
+   * restored when the terminal reappears.
+   */
+  private async restoreTerminalHistory(terminal: vscode.Terminal) {
+    if (this.restoredTerminals.has(terminal)) return;
+    this.restoredTerminals.add(terminal);
+    const processId = await this.trackTerminalProcess(terminal);
+    if (processId === undefined) return;
+    const saved = this.readTerminalHistory().get(String(processId));
+    if (!saved) return;
+    // Output captured since activation follows what was saved before the reload.
+    this.recentTerminalText.set(
+      terminal,
+      `${saved.text}${this.recentTerminalText.get(terminal) ?? ''}`.slice(
+        -ContextProvider.RECENT_TERMINAL_TEXT_CHARACTERS
+      )
+    );
+    this.recentTerminalCommands.set(
+      terminal,
+      [...saved.commands, ...(this.recentTerminalCommands.get(terminal) ?? [])].slice(
+        -ContextProvider.RECENT_TERMINAL_COMMANDS
+      )
+    );
+  }
+
+  private async trackTerminalProcess(terminal: vscode.Terminal) {
+    const known = this.terminalProcessIds.get(terminal);
+    if (known !== undefined) return known;
+    try {
+      const processId = await terminal.processId;
+      if (processId !== undefined) this.terminalProcessIds.set(terminal, processId);
+      return processId;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private readTerminalHistory() {
+    const history = new Map<string, SavedTerminalOutput>();
+    const stored = asRecord(this.workspaceState?.get(ContextProvider.TERMINAL_HISTORY_KEY));
+    for (const [processId, value] of Object.entries(stored ?? {})) {
+      const entry = asRecord(value);
+      const commands = entry?.commands;
+      if (!entry || !isString(entry.text) || !Array.isArray(commands) || !isNumber(entry.savedAt)) {
+        continue;
+      }
+      history.set(processId, {
+        text: entry.text,
+        commands: commands.filter(isString),
+        savedAt: entry.savedAt,
+      });
+    }
+    return history;
+  }
+
+  private scheduleTerminalHistorySave() {
+    if (!this.workspaceState || this.terminalHistorySaveTimer) return;
+    this.terminalHistorySaveTimer = setTimeout(() => {
+      this.terminalHistorySaveTimer = null;
+      void this.saveTerminalHistory();
+    }, ContextProvider.TERMINAL_HISTORY_SAVE_DELAY_MS);
+  }
+
+  private async saveTerminalHistory(closedProcessIds: readonly number[] = []) {
+    if (!this.workspaceState) return;
+    const history = this.readTerminalHistory();
+    for (const processId of closedProcessIds) history.delete(String(processId));
+    const savedAt = Date.now();
+    for (const [terminal, processId] of this.terminalProcessIds) {
+      const text = this.recentTerminalText.get(terminal);
+      if (!text) continue;
+      history.set(String(processId), {
+        text: text.slice(-ContextProvider.SAVED_TERMINAL_TEXT_CHARACTERS),
+        commands: this.recentTerminalCommands.get(terminal) ?? [],
+        savedAt,
+      });
+    }
+    const kept = [...history]
+      .toSorted(([, left], [, right]) => right.savedAt - left.savedAt)
+      .slice(0, ContextProvider.SAVED_TERMINALS);
+    try {
+      await this.workspaceState.update(
+        ContextProvider.TERMINAL_HISTORY_KEY,
+        Object.fromEntries(kept)
+      );
+    } catch {
+      // Losing saved output only means a paste after reload stays plain text.
+    }
   }
 
   isOpenWorkspaceRoot(path: string): boolean {
@@ -920,6 +1101,11 @@ export class ContextProvider implements vscode.Disposable {
   }
 
   dispose() {
+    if (this.terminalHistorySaveTimer) {
+      clearTimeout(this.terminalHistorySaveTimer);
+      this.terminalHistorySaveTimer = null;
+      void this.saveTerminalHistory();
+    }
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     if (this.diagnosticsDebounceTimer) clearTimeout(this.diagnosticsDebounceTimer);
     if (this.activeEditorSettleTimer) clearTimeout(this.activeEditorSettleTimer);
@@ -1180,3 +1366,22 @@ function withTimeout<T>(promise: Thenable<T>, timeoutMs: number, message: string
     );
   });
 }
+
+// CSI, OSC and two-character escape sequences, as written by shells.
+const TERMINAL_ESCAPE_PATTERN =
+  // oxlint-disable-next-line no-control-regex -- Matching the ESC and BEL control bytes is the point.
+  /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]/g;
+
+function stripTerminalEscapes(data: string): string {
+  return data.replace(TERMINAL_ESCAPE_PATTERN, '');
+}
+
+/** Terminal selections drop trailing spaces and use LF, whatever the output wrote. */
+function normalizeTerminalLines(text: string): string {
+  return text
+    .split(/\r\n|\r|\n/)
+    .map((line) => line.trimEnd())
+    .join('\n');
+}
+
+type SavedTerminalOutput = { text: string; commands: string[]; savedAt: number };

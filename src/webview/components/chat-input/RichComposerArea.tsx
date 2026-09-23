@@ -9,6 +9,7 @@ import {
   type MaterialChipIconKind,
 } from '../MaterialChipIcon';
 import { createUiIconElement } from '../UiIcon';
+import { clampPopupToViewport } from '../../lib/popup-position';
 import { CompletionMenu, type CompletionItem } from './CompletionMenu';
 import { registerComposerOverlayDismiss } from './composer-overlay-dismiss';
 import type { EditorDiagnostic } from '../../../shared/protocol';
@@ -87,6 +88,8 @@ export function RichComposerArea(props: {
   onSelectCompletion: (item: CompletionItem) => void;
   onChipClick?: (chipId: string) => void;
   onRemoveChip?: (chipId: string) => void;
+  isChipExpandable?: (chipId: string) => boolean;
+  onExpandChip?: (chipId: string) => void;
   onHistory?: (action: 'undo' | 'redo') => void;
 }) {
   let editorEl: HTMLDivElement | undefined;
@@ -104,6 +107,50 @@ export function RichComposerArea(props: {
     image: { url: string; alt: string };
     style: Record<string, string>;
   } | null>(null);
+
+  const [chipMenu, setChipMenu] = createSignal<{ chipId: string; x: number; y: number } | null>(
+    null
+  );
+  let chipMenuRef: HTMLDivElement | undefined;
+  const closeChipMenu = () => setChipMenu(null);
+
+  createEffect(() => {
+    const menu = chipMenu();
+    if (!menu) return;
+    if (!props.chips.some((chip) => chip.id === menu.chipId)) {
+      closeChipMenu();
+      return;
+    }
+    const closeIfOutside = (event: Event) => {
+      if (event.target instanceof Node && chipMenuRef?.contains(event.target)) return;
+      closeChipMenu();
+    };
+    window.addEventListener('contextmenu', closeIfOutside, true);
+    window.addEventListener('pointerdown', closeIfOutside, true);
+    window.addEventListener('focusin', closeIfOutside);
+    const unregisterDismiss = registerComposerOverlayDismiss(closeChipMenu);
+    onCleanup(() => {
+      window.removeEventListener('contextmenu', closeIfOutside, true);
+      window.removeEventListener('pointerdown', closeIfOutside, true);
+      window.removeEventListener('focusin', closeIfOutside);
+      unregisterDismiss();
+    });
+    queueMicrotask(() => {
+      if (!chipMenuRef) return;
+      clampPopupToViewport(chipMenuRef);
+      chipMenuRef.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
+    });
+  });
+
+  function handleContextMenu(event: MouseEvent) {
+    const chipId =
+      event.target instanceof Element
+        ? event.target.closest<HTMLElement>('.inline-chip[data-chip-id]')?.dataset.chipId
+        : undefined;
+    if (!chipId || !props.isChipExpandable?.(chipId)) return;
+    event.preventDefault();
+    setChipMenu({ chipId, x: event.clientX, y: event.clientY });
+  }
 
   const hidePreview = () => {
     unregisterComposerDismiss?.();
@@ -947,6 +994,7 @@ export function RichComposerArea(props: {
         aria-placeholder={props.placeholder}
         data-placeholder={props.placeholder}
         onInput={handleInput}
+        onContextMenu={handleContextMenu}
         onBeforeInput={(e) => {
           // The editor DOM is rebuilt programmatically, so the browser's
           // native undo stack is unreliable; route history edits (context
@@ -1069,6 +1117,41 @@ export function RichComposerArea(props: {
           )}
         </Show>
       </Portal>
+
+      <Show when={chipMenu()}>
+        {(menu) => (
+          <Portal>
+            <div
+              ref={(element) => {
+                chipMenuRef = element;
+              }}
+              class="session-item-actions-menu"
+              role="menu"
+              aria-label="Chip actions"
+              style={{ left: `${menu().x}px`, top: `${menu().y}px` }}
+              onKeyDown={(event) => {
+                if (event.key !== 'Escape') return;
+                event.preventDefault();
+                closeChipMenu();
+                editorEl?.focus();
+              }}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  const chipId = menu().chipId;
+                  closeChipMenu();
+                  editorEl?.focus();
+                  props.onExpandChip?.(chipId);
+                }}
+              >
+                Expand to Text
+              </button>
+            </div>
+          </Portal>
+        )}
+      </Show>
 
       <Show when={props.isFocused && props.showCompletionMenu}>
         <CompletionMenu

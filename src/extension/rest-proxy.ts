@@ -329,7 +329,7 @@ export interface RestProxyCallbacks {
     ContextProvider,
     'context' | 'getOpenWorkspaceRoot' | 'readFile' | 'resolvePath'
   > &
-    Partial<Pick<ContextProvider, 'captureTerminalSelection' | 'terminalSelection'>>;
+    Partial<Pick<ContextProvider, 'findTerminalText'>>;
   providerLimitService: Pick<ProviderLimitService, 'get'>;
   sessionState: Pick<
     SessionStateManager,
@@ -1074,11 +1074,12 @@ export class RestProxy {
       }
 
       if (method === 'POST' && payload.path === VARRO_API_ENDPOINTS.copiedSelectionMatch) {
-        const text = asRecord(payload.body)?.text;
+        const body = asRecord(payload.body);
+        const text = body?.text;
         if (typeof text !== 'string' || !text.trim() || text.length > 256 * 1024) {
           throw new Error('Invalid copied selection text');
         }
-        const data = await this.matchCopiedSelection(text);
+        const data = this.matchCopiedSelection(text, body?.plainTextOnly === true);
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
       }
@@ -3778,9 +3779,19 @@ export class RestProxy {
     return method === 'GET' && path === VARRO_API_ENDPOINTS.workspaceFilePick;
   }
 
-  private async matchCopiedSelection(text: string) {
+  /**
+   * Answered from state the host already holds, without touching the terminal
+   * or clipboard. Terminal matches need a plain-text clipboard, since a
+   * terminal copy carries no rich formats while editors and browsers add them.
+   */
+  private matchCopiedSelection(text: string, plainTextOnly: boolean) {
+    const pasted = normalizeLineEndings(text);
     const editor = vscode.window.activeTextEditor;
-    if (editor && !editor.selection.isEmpty && editor.document.getText(editor.selection) === text) {
+    if (
+      editor &&
+      !editor.selection.isEmpty &&
+      normalizeLineEndings(editor.document.getText(editor.selection)) === pasted
+    ) {
       const uri = editor.document.uri;
       const folder = vscode.workspace.getWorkspaceFolder(uri);
       if (!editor.document.isUntitled && folder) {
@@ -3799,14 +3810,10 @@ export class RestProxy {
       }
     }
 
-    if (!vscode.window.activeTerminal || !this.callbacks.contextProvider.captureTerminalSelection) {
-      return null;
-    }
-    const result = await this.callbacks.contextProvider.captureTerminalSelection();
-    const selection = this.callbacks.contextProvider.terminalSelection;
-    return result.ok && selection?.text === text
-      ? { type: 'terminal' as const, selection: { ...selection } }
+    const selection = plainTextOnly
+      ? this.callbacks.contextProvider.findTerminalText?.(text)
       : null;
+    return selection ? { type: 'terminal' as const, selection } : null;
   }
 
   private parseWorkspaceResolveRequest(method: string, path: string) {
@@ -5237,4 +5244,9 @@ function parseAttentionReplyRequestID(method: string, path: string): string | nu
   );
   const requestID = match?.[1] ?? match?.[2];
   return requestID ? decodeURIComponent(requestID) : null;
+}
+
+/** Clipboard text can arrive with CRLF on one side and LF on the other. */
+function normalizeLineEndings(text: string): string {
+  return text.replace(/\r\n/g, '\n');
 }

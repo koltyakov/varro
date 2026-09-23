@@ -89,7 +89,7 @@ import {
   getPermissionModeForSession,
   requestMessageListScrollToBottom,
   getCurrentDocumentEnabled,
-  setCurrentDocumentEnabled,
+  overrideCurrentDocumentEnabledForSession,
   getProviderLimit,
   getModelDisplayName,
   getSelectedMcpsForSession,
@@ -527,6 +527,8 @@ type StagedPastedImage = { url: string; mime: string; size: number };
 type PastedImageRejection = 'duplicate' | 'limit' | 'oversized' | 'unreadable';
 const PASTED_IMAGE_DECODE_CONCURRENCY = 2;
 const PASTED_IMAGE_READ_TIMEOUT_MS = 10_000;
+// The host answers from memory in a few milliseconds; this only bounds a stalled host.
+const COPIED_SELECTION_MATCH_TIMEOUT_MS = 150;
 const MAX_PENDING_PASTE_TRANSACTIONS = 16;
 const MAX_PENDING_PASTE_IMAGE_BYTES = MAX_CLIPBOARD_IMAGES * MAX_CLIPBOARD_IMAGE_SIZE;
 
@@ -929,6 +931,19 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
   }
 
+  // Editing a queued message shows its document toggle for that session only;
+  // the composer's own preference returns once the edit ends.
+  let restoreQueuedEditCurrentDocument: (() => void) | null = null;
+  const restoreCurrentDocumentAfterQueuedEdit = () => {
+    const restore = restoreQueuedEditCurrentDocument;
+    restoreQueuedEditCurrentDocument = null;
+    if (restore) untrack(restore);
+  };
+  onCleanup(restoreCurrentDocumentAfterQueuedEdit);
+  createEffect(() => {
+    if (!queuedMessageEdit()) restoreCurrentDocumentAfterQueuedEdit();
+  });
+
   createEffect(() => {
     const queuedEdit = queuedMessageEdit();
     if (!queuedEdit) return;
@@ -1101,6 +1116,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       pdfs: state.nativePdfs.map((pdf) => ({ ...pdf })),
       problems: state.attachedDiagnostics,
       inlineProblems: state.inlineProblems,
+      terminalSelection: state.terminalSelection,
     };
   }
 
@@ -1121,6 +1137,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const removedFilePaths = state.droppedFiles
       .filter((file) => !snapshot.files.some((item) => item.path === file.path))
       .map((file) => file.path);
+    const clearsTerminalSelection = !!state.terminalSelection && !snapshot.terminalSelection;
 
     applyingComposerHistory = true;
     try {
@@ -1134,6 +1151,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         replaceNativePdfs(snapshot.pdfs ?? []);
         setState('attachedDiagnostics', snapshot.problems ?? null);
         setState('inlineProblems', cloneInlineProblems(snapshot.inlineProblems));
+        setState(
+          'terminalSelection',
+          snapshot.terminalSelection ? { ...snapshot.terminalSelection } : null
+        );
         setCompletionIndex(0);
         setSuppressCompletion(false);
       });
@@ -1144,6 +1165,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     for (const path of removedFilePaths) {
       postMessage({ type: 'files/remove', payload: { path } });
     }
+    if (clearsTerminalSelection) postMessage({ type: 'terminal-selection/clear' });
   }
 
   const explicitContextForActiveFile = () =>
@@ -3285,7 +3307,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         queuedContext &&
         activeContextEnabled(queued.sessionId) !== queuedContext.currentDocumentEnabled
       ) {
-        setCurrentDocumentEnabled(queuedContext.currentDocumentEnabled, queued.sessionId);
+        restoreQueuedEditCurrentDocument?.();
+        restoreQueuedEditCurrentDocument = overrideCurrentDocumentEnabledForSession(
+          queued.sessionId,
+          queuedContext.currentDocumentEnabled
+        );
       }
       const autoAttachedFile = queuedContext?.editorContext.activeFile;
       const autoAttachedPath = queuedContext?.autoAttachedFilePath;
@@ -3697,7 +3723,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       pastedContextFiles.length === 0 &&
       !/(^|\s)@\S+/.test(pastedText)
     ) {
-      // SAFETY: RichComposerArea reads this flag from the same paste event to retain the selection range.
+      // SAFETY: RichComposerArea and handlePasteInsertion read this flag from the same
+      // paste event to keep the selection range and look up where the text came from.
       (e as ClipboardEvent & { varroCopiedSelectionPaste?: boolean }).varroCopiedSelectionPaste =
         true;
       e.preventDefault();
@@ -3805,13 +3832,22 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       drainPasteTransactions();
       return;
     }
-    if (!insertion) return;
     // SAFETY: handlePaste marks this same clipboard event only for deferred source matching.
     if ((e as ClipboardEvent & { varroCopiedSelectionPaste?: boolean }).varroCopiedSelectionPaste) {
       const pastedText = e.clipboardData?.getData('text/plain') ?? '';
-      resolveCopiedSelection(pastedText, insertion);
+      // VS Code's terminal copies plain text only; editors and browsers add rich formats.
+      const types = Array.from(e.clipboardData?.types ?? []);
+      const plainTextOnly =
+        types.length > 0 && types.every((type) => type.split(';')[0] === 'text/plain');
+      const value = inputText();
+      resolveCopiedSelection(
+        pastedText,
+        insertion ?? { start: value.length, end: value.length, text: '', value },
+        plainTextOnly
+      );
       return;
     }
+    if (!insertion) return;
     // SAFETY: handlePaste assigns this optional marker on clipboard events containing context files.
     if ((e as ClipboardEvent & { __varroPasteText?: string }).__varroPasteText === '') return;
     const pastedText = e.clipboardData?.getData('text/plain') ?? '';
@@ -3820,90 +3856,181 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     resolvePastedMentions(pastedText, insertion);
   }
 
-  function resolveCopiedSelection(pastedText: string, insertion: RichComposerPasteInsertion) {
+  function resolveCopiedSelection(
+    pastedText: string,
+    insertion: RichComposerPasteInsertion,
+    plainTextOnly: boolean
+  ) {
+    // Inserted once the source is known, as a chip or as plain text, so a match
+    // never flashes the raw text first.
     const owner = {
       sessionId: composerSessionId(),
       mutationVersion: inputTextMutationVersion(),
       value: inputText(),
     };
-    void client.varro
-      .matchCopiedSelection(pastedText)
-      .then((match) => {
-        if (
-          composerDisposed ||
-          composerSessionId() !== owner.sessionId ||
-          inputTextMutationVersion() !== owner.mutationVersion ||
-          inputText() !== owner.value
-        ) {
-          return;
-        }
-        if (
-          match?.type === 'terminal' &&
-          owner.value.includes(TERMINAL_SELECTION_MARKER) &&
-          composerTerminalSelection()?.text === match.selection.text &&
-          composerTerminalSelection()?.terminalName === match.selection.terminalName
-        ) {
-          return;
-        }
-        if (
-          match?.type === 'file' &&
-          owner.value.includes(`@${match.file.relativePath || match.file.path}`)
-        ) {
-          const existing = composerFiles().find((file) => isSamePath(file.path, match.file.path));
-          if (existing) {
-            if (
-              !existing.lineRanges?.length ||
-              (match.file.lineRanges?.length &&
-                subtractContextLineRanges(match.file.lineRanges, existing.lineRanges).length === 0)
-            )
-              return;
-            addContextFile(match.file);
-            return;
-          }
-        }
-        const marker =
-          match?.type === 'file'
-            ? `@${match.file.relativePath || match.file.path}`
-            : match?.type === 'terminal'
-              ? TERMINAL_SELECTION_MARKER
-              : pastedText;
-        const before = inputText().slice(0, insertion.start);
-        const after = inputText().slice(insertion.end);
-        const prefix = match && shouldPadInlineInsertion(before.at(-1)) ? ' ' : '';
-        const suffix =
-          match && after ? getInlineInsertionSuffix(`${before}${after}`, before.length) : '';
-        const replacement = `${prefix}${marker}${suffix}`;
-        const value = `${before}${replacement}${after}`;
-        batch(() => {
-          if (match?.type === 'file') addContextFile(match.file);
-          if (match?.type === 'terminal') setState('terminalSelection', match.selection);
-          setInputText(value);
-          setCaretPosition(before.length + replacement.length);
-        });
-        if (!match) {
-          resolvePastedMentions(pastedText, {
-            start: insertion.start + prefix.length,
-            end: insertion.start + prefix.length + pastedText.length,
-            text: pastedText,
-            value,
-          });
-        }
-      })
-      .catch((err) => {
-        logError('chat-input:matchCopiedSelection', err);
-        // A failed host lookup should still paste the original clipboard text.
-        if (
-          composerDisposed ||
-          composerSessionId() !== owner.sessionId ||
-          inputTextMutationVersion() !== owner.mutationVersion ||
-          inputText() !== owner.value
-        )
-          return;
-        setInputText(
-          `${owner.value.slice(0, insertion.start)}${pastedText}${owner.value.slice(insertion.end)}`
-        );
-        setCaretPosition(insertion.start + pastedText.length);
+    let settled = false;
+    const settle = (match: Awaited<ReturnType<typeof client.varro.matchCopiedSelection>>) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (composerDisposed || composerSessionId() !== owner.sessionId) return;
+      if (inputTextMutationVersion() !== owner.mutationVersion || inputText() !== owner.value) {
+        // The user kept typing; keep the paste as text at the caret instead of dropping it.
+        const value = inputText();
+        const caret = Math.min(caretPosition(), value.length);
+        insertPastedText({ start: caret, end: caret, text: '', value });
+        return;
+      }
+      if (!match || !insertCopiedSelectionChip(match)) insertPastedText(insertion);
+    };
+    const timeout = setTimeout(() => settle(null), COPIED_SELECTION_MATCH_TIMEOUT_MS);
+    void client.varro.matchCopiedSelection(pastedText, plainTextOnly).then(settle, (err) => {
+      logError('chat-input:matchCopiedSelection', err);
+      settle(null);
+    });
+
+    function insertPastedText(range: RichComposerPasteInsertion) {
+      const value = `${range.value.slice(0, range.start)}${pastedText}${range.value.slice(range.end)}`;
+      batch(() => {
+        setInputText(value);
+        setCaretPosition(range.start + pastedText.length);
       });
+      resolvePastedMentions(pastedText, {
+        start: range.start,
+        end: range.start + pastedText.length,
+        text: pastedText,
+        value,
+      });
+    }
+
+    /** Returns false when the paste should stay plain text. */
+    function insertCopiedSelectionChip(
+      match: NonNullable<Awaited<ReturnType<typeof client.varro.matchCopiedSelection>>>
+    ) {
+      const before = insertion.value.slice(0, insertion.start);
+      const after = insertion.value.slice(insertion.end);
+      const rest = `${before}${after}`;
+      let marker: string;
+      if (match.type === 'terminal') {
+        marker = TERMINAL_SELECTION_MARKER;
+        const current = composerTerminalSelection();
+        const sameSelection =
+          current?.text === match.selection.text &&
+          current.terminalName === match.selection.terminalName;
+        // The composer holds one terminal selection. A repeat paste folds into
+        // its chip; a different one stays plain text instead of replacing it.
+        if (current && !sameSelection) return false;
+        if (sameSelection && rest.includes(marker)) return true;
+      } else {
+        marker = `@${match.file.relativePath || match.file.path}`;
+        const existing = rest.includes(marker)
+          ? composerFiles().find((file) => isSamePath(file.path, match.file.path))
+          : undefined;
+        if (existing) {
+          const covered =
+            !existing.lineRanges?.length ||
+            (!!match.file.lineRanges?.length &&
+              subtractContextLineRanges(match.file.lineRanges, existing.lineRanges).length === 0);
+          if (!covered) addContextFile(match.file);
+          return true;
+        }
+      }
+      const prefix = shouldPadInlineInsertion(before.at(-1)) ? ' ' : '';
+      const suffix = after ? getInlineInsertionSuffix(rest, before.length) : '';
+      const replacement = `${prefix}${marker}${suffix}`;
+      batch(() => {
+        if (match.type === 'file') {
+          addContextFile(match.file);
+          pastedFileChipText.set(match.file.path, {
+            ranges: formatContextLineRanges(match.file.lineRanges),
+            text: pastedText,
+          });
+        } else {
+          setState('terminalSelection', { ...match.selection });
+        }
+        setInputText(`${before}${replacement}${after}`);
+        setCaretPosition(before.length + replacement.length);
+      });
+      return true;
+    }
+  }
+
+  // Exact text behind file chips made from a paste, so expanding restores what
+  // was pasted rather than whole lines while the chip keeps its original ranges.
+  const pastedFileChipText = new Map<string, { ranges: string | null; text: string }>();
+
+  function expandableFile(chipId: string) {
+    if (!chipId.startsWith('file:')) return null;
+    const path = chipId.slice(5);
+    const file = composerFiles().find((item) => isSamePath(item.path, path));
+    return file?.type === 'file' && file.lineRanges?.length ? file : null;
+  }
+
+  function isChipExpandable(chipId: string) {
+    return chipId === 'terminal-selection'
+      ? !!composerTerminalSelection()
+      : !!expandableFile(chipId);
+  }
+
+  async function readContextLines(file: DroppedFile) {
+    const content = await client.varro.readWorkspaceFile(file.path);
+    if (content === null) return null;
+    const lines = content.split(/\r?\n/);
+    return (file.lineRanges ?? [])
+      .map((range) => lines.slice(range.startLine - 1, range.endLine).join('\n'))
+      .join('\n');
+  }
+
+  async function expandChip(chipId: string) {
+    const chip = inlineChips().find((item) => item.id === chipId);
+    if (!chip) return;
+    const owner = {
+      sessionId: composerSessionId(),
+      mutationVersion: inputTextMutationVersion(),
+      value: inputText(),
+    };
+    let text: string | null;
+    let detach: () => void;
+    const terminal = composerTerminalSelection();
+    if (chipId === 'terminal-selection' && terminal) {
+      text = terminal.text;
+      detach = () => {
+        setState('terminalSelection', null);
+        postMessage({ type: 'terminal-selection/clear' });
+      };
+    } else {
+      const file = expandableFile(chipId);
+      if (!file) return;
+      const pasted = pastedFileChipText.get(file.path);
+      try {
+        text =
+          pasted?.ranges === formatContextLineRanges(file.lineRanges)
+            ? pasted.text
+            : await readContextLines(file);
+      } catch (err) {
+        logError('chat-input:expandChip', err);
+        return;
+      }
+      detach = () => {
+        removeContextFile(file.path);
+      };
+    }
+    if (
+      text === null ||
+      composerDisposed ||
+      composerSessionId() !== owner.sessionId ||
+      inputTextMutationVersion() !== owner.mutationVersion ||
+      inputText() !== owner.value
+    ) {
+      return;
+    }
+    const [first = '', ...rest] = owner.value.split(chip.textMarker);
+    const expanded = text;
+    batch(() => {
+      detach();
+      setInputText([first, ...rest].join(expanded));
+      setCaretPosition(first.length + expanded.length);
+    });
   }
 
   function resolvePastedMentions(pastedText: string, insertion: RichComposerPasteInsertion | null) {
@@ -5238,6 +5365,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             onSelect={(cursorOffset, selectionEnd) => {
               if (cursorOffset === selectionEnd) setCaretPosition(cursorOffset);
             }}
+            isChipExpandable={isChipExpandable}
+            onExpandChip={(chipId) => void expandChip(chipId)}
             onRemoveChip={(chipId) => {
               if (chipId.startsWith('problem:')) {
                 setState('inlineProblems', (references) =>

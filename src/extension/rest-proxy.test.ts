@@ -1627,19 +1627,22 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 61, data: resolved });
   });
 
-  it('matches copied editor text to its selected file lines', async () => {
+  function setActiveEditorSelection(
+    start: { line: number; character: number },
+    end: { line: number; character: number }
+  ) {
     mocks.vscode.window.activeTextEditor = {
-      selection: {
-        isEmpty: false,
-        start: { line: 2, character: 0 },
-        end: { line: 4, character: 3 },
-      },
+      selection: { isEmpty: false, start, end },
       document: {
         isUntitled: false,
         uri: { fsPath: '/repo/src/foo.ts' },
         getText: vi.fn(() => 'selected code'),
       },
     };
+  }
+
+  it('matches copied editor text to its selected file lines', async () => {
+    setActiveEditorSelection({ line: 2, character: 2 }, { line: 4, character: 3 });
     mocks.vscode.workspace.getWorkspaceFolder.mockReturnValueOnce({
       uri: { fsPath: '/repo' },
     } as never);
@@ -1663,38 +1666,66 @@ describe('RestProxy handleRequest', () => {
     }
   });
 
-  it('only matches terminal text when the live selection equals the pasted text', async () => {
-    mocks.vscode.window.activeTerminal = { name: 'zsh' };
-    const captureTerminalSelection = vi.fn(async () => ({
-      ok: true as const,
-      terminalName: 'zsh',
-    }));
-    const { proxy, callbacks } = createProxy({
-      contextProvider: {
-        ...createCallbacks().contextProvider,
-        captureTerminalSelection,
-        terminalSelection: { text: 'terminal output', terminalName: 'zsh' },
-      } as never,
-    });
+  it('matches CRLF editor text pasted with LF line endings', async () => {
+    setActiveEditorSelection({ line: 0, character: 6 }, { line: 1, character: 3 });
+    const editor = mocks.vscode.window.activeTextEditor as {
+      document: { getText: ReturnType<typeof vi.fn> };
+    };
+    editor.document.getText.mockReturnValue('fooBar = 1;\r\nend');
+    mocks.vscode.workspace.getWorkspaceFolder.mockReturnValueOnce({
+      uri: { fsPath: '/repo' },
+    } as never);
+    const { proxy, callbacks } = createProxy();
     try {
       await proxy.handleRequest(
-        makePayload(63, 'POST', '/varro/copied-selection/match', { text: 'terminal output' })
+        makePayload(63, 'POST', '/varro/copied-selection/match', { text: 'fooBar = 1;\nend' })
       );
       expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
         id: 63,
         data: {
-          type: 'terminal',
-          selection: { text: 'terminal output', terminalName: 'zsh' },
+          type: 'file',
+          file: expect.objectContaining({ lineRanges: [{ startLine: 1, endLine: 2 }] }),
         },
       });
-      await proxy.handleRequest(
-        makePayload(64, 'POST', '/varro/copied-selection/match', { text: 'different output' })
-      );
-      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 64, data: null });
-      expect(captureTerminalSelection).toHaveBeenCalledTimes(2);
     } finally {
-      mocks.vscode.window.activeTerminal = undefined;
+      mocks.vscode.window.activeTextEditor = undefined;
     }
+  });
+
+  it('matches plain-text pastes against recent terminal output without touching the terminal', async () => {
+    const findTerminalText = vi.fn((text: string) =>
+      text === 'terminal output' ? { text, terminalName: 'zsh' } : null
+    );
+    const { proxy, callbacks } = createProxy({
+      contextProvider: { ...createCallbacks().contextProvider, findTerminalText } as never,
+    });
+    await proxy.handleRequest(
+      makePayload(64, 'POST', '/varro/copied-selection/match', {
+        text: 'terminal output',
+        plainTextOnly: true,
+      })
+    );
+    await proxy.handleRequest(
+      makePayload(65, 'POST', '/varro/copied-selection/match', {
+        text: 'different output',
+        plainTextOnly: true,
+      })
+    );
+    await proxy.handleRequest(
+      makePayload(66, 'POST', '/varro/copied-selection/match', {
+        text: 'terminal output',
+        plainTextOnly: false,
+      })
+    );
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 64,
+      data: { type: 'terminal', selection: { text: 'terminal output', terminalName: 'zsh' } },
+    });
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 65, data: null });
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 66, data: null });
+    expect(findTerminalText).toHaveBeenCalledTimes(2);
+    expect(mocks.vscode.commands.executeCommand).not.toHaveBeenCalled();
   });
 
   it('returns the selected plan path with its multi-root workspace directory', async () => {

@@ -57,6 +57,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 const vscodeMock = vi.hoisted(() => ({
   window: {
     activeTerminal: { name: 'Terminal 1' } as { name: string } | undefined,
+    terminals: [] as unknown[],
     activeTextEditor: undefined as unknown,
     tabGroups: {
       activeTabGroup: { activeTab: undefined as unknown },
@@ -64,6 +65,11 @@ const vscodeMock = vi.hoisted(() => ({
     },
     onDidChangeActiveTextEditor: vi.fn((_listener?: () => void) => ({ dispose: vi.fn() })),
     onDidChangeTextEditorSelection: vi.fn((_listener?: () => void) => ({ dispose: vi.fn() })),
+    onDidStartTerminalShellExecution: vi.fn((_listener?: (event: unknown) => void) => ({
+      dispose: vi.fn(),
+    })),
+    onDidCloseTerminal: vi.fn((_listener?: (terminal: unknown) => void) => ({ dispose: vi.fn() })),
+    onDidOpenTerminal: vi.fn((_listener?: (terminal: unknown) => void) => ({ dispose: vi.fn() })),
     showTextDocument: vi.fn(),
   },
   languages: {
@@ -253,6 +259,82 @@ describe('ContextProvider', () => {
     const unsaved = new ContextProvider(noop);
     expect(unsaved.context.workspaceDirectory).toBe('/repos/a');
     unsaved.dispose();
+  });
+
+  it('finds pasted text in recent terminal output', async () => {
+    const provider = new ContextProvider(vi.fn());
+    const terminal = { name: 'zsh' };
+    vscodeMock.window.activeTerminal = terminal;
+    const listener = vscodeMock.window.onDidStartTerminalShellExecution.mock.calls.at(-1)![0]!;
+    async function* output() {
+      yield '\x1b[31mError: build failed   \x1b[0m\r\n';
+      yield '  at compile (src/app.ts:3)\r\n';
+    }
+
+    try {
+      listener({
+        terminal,
+        execution: { commandLine: { value: 'npm run build' }, read: output },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(provider.findTerminalText('Error: build failed')).toEqual({
+        text: 'Error: build failed',
+        terminalName: 'zsh',
+      });
+      expect(
+        provider.findTerminalText(
+          'user@host % npm run build\nError: build failed\n  at compile (src/app'
+        )
+      ).toEqual(expect.objectContaining({ terminalName: 'zsh' }));
+      expect(provider.findTerminalText('build')).toBeNull();
+      expect(provider.findTerminalText('copied from a browser')).toBeNull();
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('restores captured terminal output after a window reload reconnects the same process', async () => {
+    vi.useFakeTimers();
+    const stored = new Map<string, unknown>();
+    const workspaceState = {
+      get: vi.fn((key: string) => stored.get(key)),
+      update: vi.fn((key: string, value: unknown) => {
+        stored.set(key, value);
+        return Promise.resolve();
+      }),
+    };
+    const before = new ContextProvider(vi.fn(), workspaceState);
+    const terminal = { name: 'zsh', processId: Promise.resolve(42) };
+    vscodeMock.window.activeTerminal = terminal;
+    async function* output() {
+      yield 'DONE  Packaged: varro-0.29.12.vsix\r\n';
+    }
+    try {
+      vscodeMock.window.onDidStartTerminalShellExecution.mock.calls.at(-1)![0]!({
+        terminal,
+        execution: { commandLine: { value: 'npm run package' }, read: output },
+      });
+      await vi.advanceTimersByTimeAsync(1000);
+    } finally {
+      before.dispose();
+    }
+
+    const reconnected = { name: 'zsh', processId: Promise.resolve(42) };
+    vscodeMock.window.activeTerminal = reconnected;
+    vscodeMock.window.terminals = [reconnected];
+    const after = new ContextProvider(vi.fn(), workspaceState);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(after.findTerminalText('DONE  Packaged: varro-0.29.12.vsix')).toEqual({
+        text: 'DONE  Packaged: varro-0.29.12.vsix',
+        terminalName: 'zsh',
+      });
+    } finally {
+      after.dispose();
+      vscodeMock.window.terminals = [];
+      vi.useRealTimers();
+    }
   });
 
   it('does not reuse stale clipboard text when terminal copy captures nothing', async () => {

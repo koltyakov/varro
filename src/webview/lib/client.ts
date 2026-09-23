@@ -659,13 +659,14 @@ export const client = {
       return apiCall('GET', `${VARRO_API_ENDPOINTS.workspacePathResolve}?${params.toString()}`);
     },
     async matchCopiedSelection(
-      text: string
+      text: string,
+      plainTextOnly: boolean
     ): Promise<
       | { type: 'file'; file: DroppedFile }
       | { type: 'terminal'; selection: { text: string; terminalName: string } }
       | null
     > {
-      return apiCall('POST', VARRO_API_ENDPOINTS.copiedSelectionMatch, { text });
+      return apiCall('POST', VARRO_API_ENDPOINTS.copiedSelectionMatch, { text, plainTextOnly });
     },
     async openCodeConfig(): Promise<OpenCodeModelRouting> {
       return apiCall('GET', VARRO_API_ENDPOINTS.openCodeConfig);
