@@ -97,7 +97,7 @@
     "oxfmt": "0.70.0",
     "oxlint": "1.85.0",
     "oxlint-plugin-anti-slop": "github:dmmulroy/anti-slop#c44ef22",
-    "rolldown": "1.2.9",
+    "rolldown": "1.2.10",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.3.0",
@@ -376,7 +376,7 @@
         "command": "varro.chat.addTerminalSelectionToContext",
         "key": "ctrl+shift+k",
         "mac": "cmd+shift+k",
-        "when": "terminalFocus"
+        "when": "terminalFocus && terminalTextSelected"
       }
     ],
     "configuration": {
