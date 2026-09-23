@@ -1,4 +1,5 @@
 import {
+  For,
   Show,
   createEffect,
   createMemo,
@@ -462,7 +463,7 @@ export function Message(props: {
   });
   const shouldRender = () => {
     if (compactionDivider()) return true;
-    if (isUser()) return hasUserContent() || hasOmittedDiffs();
+    if (isUser()) return hasUserContent() || automaticActions().length > 0 || hasOmittedDiffs();
     return !!assistantErrorMessage() || hasVisibleAssistantOutput() || visibleDiffs().length > 0;
   };
   createEffect(() => {
@@ -518,6 +519,7 @@ export function Message(props: {
   const parsedUserContent = createMemo(() =>
     isUser() ? parseUserMessageContent(normalizedParts()) : null
   );
+  const automaticActions = () => parsedUserContent()?.automaticActions ?? [];
   const hasImageTextBubble = createMemo(() => {
     const parsed = parsedUserContent();
     return (
@@ -547,7 +549,7 @@ export function Message(props: {
     !isActiveSessionWorking() &&
     hasUserMessageEditableContent(normalizedParts());
   const handleUserCardClick = (event: MouseEvent) => {
-    if (props.info.role !== 'user') return;
+    if (props.info.role !== 'user' || !hasUserContent()) return;
     const target = event.target;
     if (target instanceof Element && target.closest('.user-message-leading-content')) return;
     if (target instanceof Element && target.closest('button, a, textarea')) return;
@@ -595,72 +597,81 @@ export function Message(props: {
           ref={(element) => {
             turnRef = element;
           }}
-          class={`chat-turn ${isUser() ? 'chat-turn-user' : 'chat-turn-assistant'}${isWrapperlessAssistant() ? ' chat-turn-assistant-plain' : ''}${pulseFinalMark() ? ' assistant-final-mark-pulse' : ''}`}
+          class={`chat-turn ${isUser() ? (hasUserContent() ? 'chat-turn-user' : 'chat-turn-automated') : 'chat-turn-assistant'}${isWrapperlessAssistant() ? ' chat-turn-assistant-plain' : ''}${pulseFinalMark() ? ' assistant-final-mark-pulse' : ''}`}
           onAnimationEnd={(event) => {
             if (event.animationName === 'assistant-final-mark-pulse') setPulseFinalMark(false);
           }}
         >
-          <div
-            class={`value chat-turn-content ${
-              isUser()
-                ? `chat-turn-card user-message-card${isWrapperlessUserMessage() ? ' user-message-card-wrapperless' : ''}`
-                : assistantContainerClass()
-            } ${isSubagent() ? 'chat-turn-subagent' : ''} ${canEditUserMessage() && !isEditingUserMessage() ? 'user-message-card-editable' : ''}`}
-            onClick={handleUserCardClick}
-            onMouseEnter={() => notifyUserMessageHoverChange(true)}
-            onMouseLeave={() => notifyUserMessageHoverChange(false)}
-          >
-            <Show when={!hasImageTextBubble() ? visiblePromptNumber() : undefined}>
-              {(promptNumber) => (
-                <span class="prompt-number-badge" aria-hidden="true">
-                  {promptNumber()}
-                </span>
-              )}
-            </Show>
-            <Show when={isUser() && hasUserContent()}>
-              <UserMessageContent
-                parts={normalizedParts()}
-                leadingAgent={
-                  props.info.role === 'user' && props.info.agent === 'plan' ? 'plan' : undefined
-                }
-                promptNumber={hasImageTextBubble() ? visiblePromptNumber() : undefined}
-                onMessageHoverChange={notifyUserMessageHoverChange}
-              />
-            </Show>
-            <Show when={!isUser() && assistant()}>
-              <AssistantMessageContent
-                // SAFETY: The surrounding shape or discriminator check establishes the AssistantMessage contract used below.
-                info={assistant() as AssistantMessage}
-                parts={visibleAssistantParts()}
-                errorMessage={assistantErrorMessage()}
-                errorDetails={assistantErrorDetails()}
-                errorIsNotice={
-                  !!props.retryState || (providerAuthRequired() && providerAuthRestored())
-                }
-                errorAction={assistantErrorAction()}
-                highlightFinalAnswer={props.highlightFinalAnswer}
-                highlightPlanningAnswer={props.highlightPlanningAnswer}
-                suppressHighlightedCardMetaParts={!!props.highlightFinalAnswer}
-                isLastAssistant={props.isLastAssistant}
-                nearViewport={props.nearViewport}
-                outerListVirtualized={props.outerListVirtualized}
-                textForPart={getEffectivePartText}
-                isPartStreaming={isPartStreaming}
-                allowInitialItemReveal={props.allowInitialAssistantItemReveal}
-                claimItemReveal={props.claimAssistantItemReveal}
-                questionRequestForTool={props.questionRequestForTool}
-                permissionMatchForTool={props.permissionMatchForTool}
-                compactActivityGroups={props.compactActivityGroups}
-                retainedActivityPartKeys={props.retainedActivityPartKeys}
-                exitingActivityPartKeys={props.exitingActivityPartKeys}
-                visibleActiveActivityPartKeys={props.visibleActiveActivityPartKeys}
-                groupedActiveActivityPartKeys={props.groupedActiveActivityPartKeys}
-                keepReasoningInline={props.keepReasoningInline}
-                expandReasoning={props.expandReasoning}
-              />
-            </Show>
-          </div>
-          <Show when={isUser()}>
+          <Show when={!isUser() || hasUserContent()}>
+            <div
+              class={`value chat-turn-content ${
+                isUser()
+                  ? `chat-turn-card user-message-card${isWrapperlessUserMessage() ? ' user-message-card-wrapperless' : ''}`
+                  : assistantContainerClass()
+              } ${isSubagent() ? 'chat-turn-subagent' : ''} ${canEditUserMessage() && !isEditingUserMessage() ? 'user-message-card-editable' : ''}`}
+              onClick={handleUserCardClick}
+              onMouseEnter={() => notifyUserMessageHoverChange(true)}
+              onMouseLeave={() => notifyUserMessageHoverChange(false)}
+            >
+              <Show when={!hasImageTextBubble() ? visiblePromptNumber() : undefined}>
+                {(promptNumber) => (
+                  <span class="prompt-number-badge" aria-hidden="true">
+                    {promptNumber()}
+                  </span>
+                )}
+              </Show>
+              <Show when={isUser() && hasUserContent()}>
+                <UserMessageContent
+                  parts={normalizedParts()}
+                  leadingAgent={
+                    props.info.role === 'user' && props.info.agent === 'plan' ? 'plan' : undefined
+                  }
+                  promptNumber={hasImageTextBubble() ? visiblePromptNumber() : undefined}
+                  onMessageHoverChange={notifyUserMessageHoverChange}
+                />
+              </Show>
+              <Show when={!isUser() && assistant()}>
+                <AssistantMessageContent
+                  // SAFETY: The surrounding shape or discriminator check establishes the AssistantMessage contract used below.
+                  info={assistant() as AssistantMessage}
+                  parts={visibleAssistantParts()}
+                  errorMessage={assistantErrorMessage()}
+                  errorDetails={assistantErrorDetails()}
+                  errorIsNotice={
+                    !!props.retryState || (providerAuthRequired() && providerAuthRestored())
+                  }
+                  errorAction={assistantErrorAction()}
+                  highlightFinalAnswer={props.highlightFinalAnswer}
+                  highlightPlanningAnswer={props.highlightPlanningAnswer}
+                  suppressHighlightedCardMetaParts={!!props.highlightFinalAnswer}
+                  isLastAssistant={props.isLastAssistant}
+                  nearViewport={props.nearViewport}
+                  outerListVirtualized={props.outerListVirtualized}
+                  textForPart={getEffectivePartText}
+                  isPartStreaming={isPartStreaming}
+                  allowInitialItemReveal={props.allowInitialAssistantItemReveal}
+                  claimItemReveal={props.claimAssistantItemReveal}
+                  questionRequestForTool={props.questionRequestForTool}
+                  permissionMatchForTool={props.permissionMatchForTool}
+                  compactActivityGroups={props.compactActivityGroups}
+                  retainedActivityPartKeys={props.retainedActivityPartKeys}
+                  exitingActivityPartKeys={props.exitingActivityPartKeys}
+                  visibleActiveActivityPartKeys={props.visibleActiveActivityPartKeys}
+                  groupedActiveActivityPartKeys={props.groupedActiveActivityPartKeys}
+                  keepReasoningInline={props.keepReasoningInline}
+                  expandReasoning={props.expandReasoning}
+                />
+              </Show>
+            </div>
+          </Show>
+          <For each={automaticActions()}>
+            {(action) => (
+              <div class="automated-message" role="note" aria-label="Automatic action">
+                {action}
+              </div>
+            )}
+          </For>
+          <Show when={isUser() && hasUserContent()}>
             <time
               class={`message-sent-time${timestampVisible() ? ' is-visible' : ''}${timestampTransitionActive() ? ' is-transition-active' : ''}${props.suppressTimestampAnimation ? ' is-animation-suppressed' : ''}`}
               dateTime={new Date(props.info.time.created).toISOString()}

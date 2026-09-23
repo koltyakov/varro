@@ -236,18 +236,40 @@ describe('sendMessage', () => {
 
     stateModule.setState('activeSessionId', 'session-1');
     stateModule.setState('sessions', [session()]);
+    stateModule.setState('providers', [
+      provider('openai', {
+        'gpt-4o': {
+          id: 'gpt-4o',
+          name: 'GPT-4o',
+          capabilities: { toolcall: true },
+          cost: { input: 0, output: 0 },
+        },
+      }),
+    ]);
     stateModule.setState('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
-    clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+    const sent = deferred<void>();
+    clientMocks.sessionSendAsync.mockReturnValue(sent.promise);
     clientMocks.sessionGet.mockResolvedValue(session());
     clientMocks.sessionMessages.mockResolvedValue([]);
 
-    await hookModule.sendMessage('Use the server clock');
+    const sending = hookModule.sendMessage('Use the server clock');
+    await vi.waitFor(() => expect(clientMocks.sessionSendAsync).toHaveBeenCalled());
+
+    const optimisticText = stateModule.state.messages
+      .flatMap((message) => message.parts)
+      .find((part) => part.type === 'text' && part.text === 'Use the server clock');
+    expect(optimisticText?.type).toBe('text');
+    expect(optimisticText?.type === 'text' && optimisticText.synthetic).not.toBe(true);
+
+    sent.resolve();
+    await sending;
 
     expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
       'session-1',
       {
         messageID: expect.stringMatching(OPEN_CODE_MESSAGE_ID),
         parts: [{ type: 'text', text: 'Use the server clock' }],
+        model: { providerID: 'openai', modelID: 'gpt-4o' },
       },
       { directory: '/repo' }
     );

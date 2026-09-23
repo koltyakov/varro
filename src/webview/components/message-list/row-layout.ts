@@ -92,15 +92,17 @@ export function getMessageBlockBoundaryMap(
     }
 
     if (message.info.role === 'user') {
+      const parsed = parseUserMessageContent(message.parts);
       const hasContent =
-        hasUserMessageContent(parseUserMessageContent(message.parts)) ||
-        message.info.summary?.diffsOmitted === true;
+        hasUserMessageContent(parsed) || message.info.summary?.diffsOmitted === true;
       const interruptedStart = options.modelChangeMessageIds?.has(messageId) ?? false;
-      const interruptedEnd = options.dialogSummaryMessageIds?.has(messageId) ?? false;
+      const interruptedEnd =
+        (options.dialogSummaryMessageIds?.has(messageId) ?? false) ||
+        parsed.automaticActions.length > 0;
       boundaries.set(messageId, {
         startsBordered: hasContent && !interruptedStart,
         endsBordered: hasContent && !interruptedEnd,
-        signature: `user:${hasContent ? 'content' : 'empty'}:${hasContent && !interruptedStart ? 'b' : 'u'}:${hasContent && !interruptedEnd ? 'b' : 'u'}`,
+        signature: `user:${hasContent ? 'content' : 'empty'}:${hasContent && !interruptedStart ? 'b' : 'u'}:${hasContent && !interruptedEnd ? 'b' : 'u'}${parsed.automaticActions.length ? `:${parsed.automaticActions.join('|')}` : ''}`,
       });
       continue;
     }
@@ -378,8 +380,10 @@ export function getRenderEmptyMessageIds(
 
   for (const message of messages) {
     if (message.info.role === 'user') {
+      const parsed = parseUserMessageContent(message.parts);
       if (
-        !hasUserMessageContent(parseUserMessageContent(message.parts)) &&
+        !hasUserMessageContent(parsed) &&
+        parsed.automaticActions.length === 0 &&
         !message.parts.some((part) => part.type === 'compaction') &&
         message.info.summary?.diffsOmitted !== true
       ) {

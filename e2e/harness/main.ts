@@ -55,6 +55,7 @@ const SCENARIO_NAMES = [
   'dispose-during-start',
   'startup-race',
   'plan-ready',
+  'automatic-messages',
   'mixed-image-tiles',
   'sticky-preview',
   'sticky-preview-first-image',
@@ -1275,6 +1276,108 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       },
     });
     state.nextSequence = 26;
+    return state;
+  }
+
+  if (name === 'automatic-messages') {
+    const session = makeSession(
+      'session-automatic-messages',
+      'Automatic action notices',
+      BASE_TIME
+    );
+    const messages: MessageEntry[] = [];
+    if (new URLSearchParams(window.location.search).get('history') === '1') {
+      for (let index = 0; index < 35; index += 1) {
+        const user = makeUserMessage(
+          session.id,
+          `history-user-${index}`,
+          [`Earlier prompt ${index}`],
+          BASE_TIME - 100_000 + index * 2
+        );
+        messages.push(
+          user,
+          makeAssistantMessage(
+            session.id,
+            `history-assistant-${index}`,
+            user.info.id,
+            'Earlier response with enough text to exercise transcript virtualization.',
+            BASE_TIME - 99_999 + index * 2
+          )
+        );
+      }
+    }
+    const mixed = makeUserMessage(session.id, 'mixed-user', ['Test message'], BASE_TIME - 10_000);
+    // Shapes observed read-only in ses_f76ffb53fffeEyyn9aQWZo7Njq and ses_f534acd07ffe23EXvNejQ6ZD33.
+    for (const [index, text] of [
+      'Called the Read tool with the following input: {"filePath":"/repo/package.json"}',
+      '<path>/repo/package.json</path>\n<type>file</type>\n<content>Private file contents</content>',
+      'The user explicitly invoked the unslop skill. Use the corresponding skill tool to handle this request.',
+    ].entries()) {
+      mixed.parts.push({
+        id: `context-${index}`,
+        sessionID: session.id,
+        messageID: mixed.info.id,
+        type: 'text',
+        text,
+        synthetic: true,
+      });
+    }
+    messages.push(mixed);
+    // V2 history ses_f910ce880ffejAZPpMtMrr4Dpf has a completed compaction at seq 58,
+    // immediately followed by its synthetic continuation at seq 59.
+    const compaction = makeUserMessage(session.id, 'automatic-compaction', [], BASE_TIME - 9_100);
+    compaction.parts = [
+      {
+        id: 'automatic-compaction-part',
+        sessionID: session.id,
+        messageID: compaction.info.id,
+        type: 'compaction',
+        auto: true,
+        status: 'completed',
+      },
+    ];
+    messages.push(compaction);
+    // Exact continuation text and metadata from msg_0ae773de1001iAMMLNtFJkKJcS.
+    const automaticTexts = [
+      'Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed.',
+      'Summarize the task tool output above and continue with your task.',
+      'The plan at /repo/plan.md has been approved, you can now edit files. Execute the plan',
+      'The server restarted while you were working.',
+      'Instructions from: /repo/AGENTS.md\nLong project instructions',
+      '<shell id="sh_test" state="completed" command="npm test">\nLong test output\n</shell>',
+      'Unknown internal instructions that must not be rendered as a user prompt.',
+    ];
+    for (const [index, text] of automaticTexts.entries()) {
+      const entry = makeUserMessage(
+        session.id,
+        `automatic-${index}`,
+        [text],
+        BASE_TIME - 9_000 + index
+      );
+      entry.parts = entry.parts.map((part) =>
+        part.type === 'text'
+          ? {
+              ...part,
+              synthetic: true,
+              metadata: index === 0 ? { compaction_continue: true } : undefined,
+            }
+          : part
+      );
+      messages.push(entry);
+    }
+    messages.push(
+      makeAssistantMessage(
+        session.id,
+        'automatic-response',
+        mixed.info.id,
+        'Work continued.',
+        BASE_TIME - 1_000
+      )
+    );
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = messages;
+    state.persistedActiveSessionId = session.id;
     return state;
   }
 

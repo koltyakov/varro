@@ -1432,7 +1432,6 @@ function createOptimisticUserMessage(
           messageID: messageId,
           type: 'text',
           text: part.text ?? '',
-          synthetic: true,
         },
       ];
     }

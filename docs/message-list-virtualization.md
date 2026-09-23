@@ -93,6 +93,11 @@ the shared invariants below remain true.
   cannot remain trapped behind a zero-height virtual range.
 - Compaction-only user messages paint a divider and must have a measured nonzero height. Treating
   them as empty makes virtual unmounts briefly shrink the scroll range and clamp bottom follow.
+- Synthetic user-role text paints short automatic-action notices, never editable user cards. Mixed
+  messages keep these notices outside the real prompt. Action-only rows have nonzero measured height,
+  and their labels participate in layout invalidation. They do not receive prompt numbers or sticky
+  navigation entries. Preserve explicit attachment chips while keeping generated prompt text out of
+  user previews and edit drafts.
 - `virtualMetrics.prefix[index]` must describe the same ordered ID list used by the renderer.
 - Cached prefix entries may only be reused while both the ID order and all earlier effective heights
   remain valid.

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { createSignal } from 'solid-js';
-import type { FilePart, MessageEntry, Part, Session, ToolPart } from '../types';
+import type { FilePart, MessageEntry, Part, Session, TextPart, ToolPart } from '../types';
 import { client } from '../lib/client';
 import { editingMessage, resetMessageEditState } from '../lib/message-edit-state';
 import {
@@ -77,7 +77,7 @@ afterEach(() => {
   delete window.__sendToExtension;
 });
 
-function textPart(id: string, text: string): Part {
+function textPart(id: string, text: string): TextPart {
   return {
     id,
     sessionID: 'session-1',
@@ -1717,6 +1717,132 @@ describe('Message user editing', () => {
     setAppState('sessions', []);
     setAppState('sessionStatus', {});
     resetMessageEditState();
+  });
+
+  it('labels automatic continuation prompts and prevents editing them as user messages', () => {
+    setAppState('activeSessionId', 'session-1');
+    const text =
+      'Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed.';
+    const parts: Part[] = [{ ...textPart('continuation', text), synthetic: true }];
+    cleanup = render(() => Message({ info: userMessage('continuation'), parts }), container!);
+
+    const notice = container?.querySelector<HTMLElement>('.automated-message');
+    expect(notice?.textContent).toBe('Continued after context compaction');
+    expect(container?.textContent).not.toContain(text);
+    expect(container?.querySelector('.user-message-card')).toBeNull();
+    expect(container?.querySelector('.user-message-card-editable')).toBeNull();
+    notice?.click();
+    expect(editingMessage()).toBeNull();
+    expect(getUserMessagePreviewText(parts)).toBe('(no content)');
+  });
+
+  it('summarizes automatic context outside a mixed user prompt and excludes it from editing', () => {
+    setAppState('activeSessionId', 'session-1');
+    const parts: Part[] = [
+      textPart('prompt', 'Test message'),
+      {
+        ...textPart(
+          'read',
+          'Called the Read tool with the following input: {"filePath":"/repo/package.json"}'
+        ),
+        synthetic: true,
+      },
+      {
+        ...textPart(
+          'file-content',
+          '<path>/repo/package.json</path>\n<type>file</type>\n<content>private file contents</content>'
+        ),
+        synthetic: true,
+      },
+      {
+        ...textPart(
+          'skill',
+          'The user explicitly invoked the unslop skill. Use the corresponding skill tool to handle this request.'
+        ),
+        synthetic: true,
+      },
+    ];
+    cleanup = render(() => Message({ info: userMessage('mixed'), parts }), container!);
+    expect(container?.querySelector('.user-message-card')?.textContent).toBe('Test message');
+    expect(container?.querySelectorAll('.automated-message')).toHaveLength(2);
+    expect(container?.textContent).toContain('Added file context');
+    expect(container?.textContent).toContain('Added skill instructions');
+    expect(container?.textContent).not.toContain('private file contents');
+    expect(getUserMessageEditText(parts)).toBe('Test message');
+    expect(getUserMessagePreviewText(parts)).toBe('Test message');
+  });
+
+  it.each([
+    [
+      'Summarize the task tool output above and continue with your task.',
+      'Continued after subagent task',
+    ],
+    [
+      'The previous response was interrupted. Continue from where you left off without repeating completed content.',
+      'Resumed after interruption',
+    ],
+    [
+      'Instructions from: /repo/AGENTS.md\nVery long repository instructions',
+      'Loaded agent instructions',
+    ],
+    [
+      '<shell id="sh_1" state="completed" command="npm test">\nLong test output\n</shell>',
+      'Background command finished',
+    ],
+    ['The following tool was executed by the user', 'Ran a shell command'],
+    [
+      'The plan at /repo/plan.md has been approved, you can now edit files. Execute the plan',
+      'Started approved plan',
+    ],
+    [
+      '<system-reminder>\nYour operational mode has changed from plan to build.\nLong internal instructions\n</system-reminder>',
+      'Switched to build mode',
+    ],
+    [
+      '<system-reminder>\nPlan mode is active.\nLong internal instructions\n</system-reminder>',
+      'Entered plan mode',
+    ],
+    ['Reading MCP resource: example (resource://example)', 'Added MCP resource context'],
+    ['Unknown internal instruction with a long private payload', 'Added automatic context'],
+  ])('shows a short action for automatic prompt %s', (text, label) => {
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('automatic'),
+          parts: [{ ...textPart('auto', text), synthetic: true }],
+        }),
+      container!
+    );
+    expect(container?.querySelector('.automated-message')?.textContent).toBe(label);
+    expect(container?.querySelector('.user-message-card')).toBeNull();
+    expect(container?.textContent).not.toContain(text);
+  });
+
+  it('keeps a user-authored continuation prompt editable even with synthetic context', () => {
+    setAppState('activeSessionId', 'session-1');
+    const text =
+      'Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed.';
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('typed-continuation'),
+          parts: [
+            textPart('typed', text),
+            {
+              id: 'context',
+              sessionID: 'session-1',
+              messageID: 'typed-continuation',
+              type: 'text',
+              text: '[Working directory: /repo]',
+              synthetic: true,
+            },
+          ],
+        }),
+      container!
+    );
+
+    expect(container?.querySelector('.automated-message')).toBeNull();
+    expect(container?.querySelector('.user-message-card-editable')).not.toBeNull();
   });
 
   it('starts a composer edit with the message text on click and highlights the target', () => {

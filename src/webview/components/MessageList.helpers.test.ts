@@ -15,6 +15,7 @@ import {
   reconcilePendingPermissionSequence,
 } from './message-list/pending-prompts';
 import { getRenderedMessages } from './message-list/thread-visibility';
+import { getUserMessageNavigationPreviews } from './message-list/sticky-preview';
 import {
   buildPlanDocumentContent,
   buildPlanImplementationPrompt,
@@ -54,6 +55,25 @@ installMessageListTestEnvironment({
 });
 
 describe('MessageList prompt numbers', () => {
+  it('excludes automatic actions from prompt numbers and navigation', () => {
+    const messages = [
+      { info: userMessage('user-1'), parts: [textPart('first', 'First prompt')] },
+      {
+        info: userMessage('automatic'),
+        parts: [textPart('auto', 'Internal instructions', { synthetic: true })],
+      },
+      { info: userMessage('user-2'), parts: [textPart('second', 'Second prompt')] },
+    ];
+    expect([...getPromptNumberMap(messages)]).toEqual([
+      ['user-1', 1],
+      ['user-2', 2],
+    ]);
+    expect(getUserMessageNavigationPreviews(messages).map((preview) => preview.id)).toEqual([
+      'user-1',
+      'user-2',
+    ]);
+  });
+
   it('numbers user prompts in transcript order', () => {
     const numbers = getPromptNumberMap([
       { info: userMessage('user-1'), parts: [] },

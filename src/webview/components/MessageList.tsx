@@ -70,6 +70,7 @@ import {
 } from '../lib/part-utils';
 import { shouldDisplayUsageLimitNotice } from '../lib/usage-limit';
 import type { AssistantMessage, MessageEntry, Part } from '../types';
+import { hasUserMessageContent, parseUserMessageContent } from './message/UserMessageContent';
 import { editingMessage } from '../lib/message-edit-state';
 import { hasExpandedDiffOverlay } from '../lib/diff-overlay-state';
 import {
@@ -305,6 +306,8 @@ export function getPromptNumberMap(messages: readonly MessageEntry[]) {
   let promptNumber = 0;
   for (const message of messages) {
     if (message.info.role !== 'user') continue;
+    const parsed = parseUserMessageContent(message.parts);
+    if (parsed.automaticActions.length > 0 && !hasUserMessageContent(parsed)) continue;
     promptNumber += 1;
     result.set(message.info.id, promptNumber);
   }
