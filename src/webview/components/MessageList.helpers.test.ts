@@ -84,7 +84,7 @@ describe('MessageList prompt numbers', () => {
     const summary = container!.querySelector<HTMLButtonElement>('.assistant-activity-summary')!;
     expect(container!.querySelectorAll('.assistant-activity-summary')).toHaveLength(1);
     expect(summary.textContent).toContain('1 command');
-    expect(summary.textContent).toContain('1 automatic action');
+    expect(summary.textContent).toContain('1 action');
     const automatic = () => container!.querySelector('[data-msg-id="automatic"]')!;
     expect(automatic().classList.contains('interactive-item-render-empty')).toBe(true);
     summary.click();

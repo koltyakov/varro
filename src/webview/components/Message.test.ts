@@ -1729,7 +1729,7 @@ describe('Message user editing', () => {
     cleanup = render(() => Message({ info: userMessage('continuation'), parts }), container!);
 
     const notice = container?.querySelector<HTMLElement>('.assistant-activity-summary');
-    expect(notice?.textContent).toContain('1 automatic action');
+    expect(notice?.textContent).toContain('1 action');
     expect(container?.textContent).not.toContain(text);
     expect(container?.querySelector('.user-message-card')).toBeNull();
     expect(container?.querySelector('.user-message-card-editable')).toBeNull();
@@ -1770,7 +1770,7 @@ describe('Message user editing', () => {
     cleanup = render(() => Message({ info: userMessage('mixed'), parts }), container!);
     expect(container?.querySelector('.user-message-card')?.textContent).toBe('Test message');
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
-      '3 automatic actions'
+      '3 actions'
     );
     container?.querySelector<HTMLButtonElement>('.assistant-activity-summary')?.click();
     expect(container?.textContent).toContain('Added file context');
@@ -1826,7 +1826,7 @@ describe('Message user editing', () => {
       container!
     );
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
-      '1 automatic action'
+      '1 action'
     );
     expect(container?.querySelector('.user-message-card')).toBeNull();
     expect(container?.textContent).not.toContain(text);

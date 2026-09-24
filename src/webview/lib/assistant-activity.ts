@@ -92,7 +92,7 @@ function formatActivityCount(kind: AssistantActivityKind, count: number) {
     case 'tools':
       return formatCount(count, 'tool call');
     case 'actions':
-      return formatCount(count, 'automatic action');
+      return formatCount(count, 'action');
   }
 }
 
