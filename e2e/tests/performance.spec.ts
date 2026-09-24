@@ -914,14 +914,15 @@ test('width reflow after PageDown preserves a painted block in a tall response',
   const anchor = await list.evaluate((element) => {
     const viewport = element.getBoundingClientRect();
     const candidates = element.querySelectorAll<HTMLElement>('.rendered-markdown :is(p, li, pre)');
+    // Match the resize anchor's inset so a barely visible preceding block can rewrap.
     const item = [...candidates].find((candidate) => {
       const rect = candidate.getBoundingClientRect();
       const owner = candidate.closest<HTMLElement>('[data-assistant-render-key]');
       return (
         owner &&
         owner.getBoundingClientRect().height > element.clientHeight &&
-        rect.top >= viewport.top &&
-        rect.bottom <= viewport.bottom
+        rect.top >= viewport.top + 8 &&
+        rect.bottom <= viewport.bottom - 8
       );
     });
     return item

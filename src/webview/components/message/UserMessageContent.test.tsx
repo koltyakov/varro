@@ -360,6 +360,42 @@ describe('UserMessageContent', () => {
     }
   );
 
+  it.each([true, false, 'base64'])(
+    'consumes pasted file clicks when content is available: %s',
+    (available) => {
+      const send = installSendToExtension();
+      const filename = 'pasted-text.txt';
+      const file: FilePart = {
+        id: 'paste',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        type: 'file',
+        mime: 'text/plain',
+        filename,
+        url:
+          available === 'base64'
+            ? 'data:text/plain;base64,Y29udGVudA=='
+            : available
+              ? pastedTextDataUrl('content')
+              : 'file:///missing/pasted-text.txt',
+      };
+      renderUserContent([textPart('prompt', `@${filename}`), file]);
+      const onMessageClick = vi.fn();
+      container!.addEventListener('click', onMessageClick);
+      container!.querySelector<HTMLElement>('.inline-chip')!.click();
+
+      expect(onMessageClick).not.toHaveBeenCalled();
+      if (available) {
+        expect(send).toHaveBeenCalledWith({
+          type: 'vscode/open-text',
+          payload: { content: 'content', title: filename, language: 'plaintext' },
+        });
+      } else {
+        expect(send).not.toHaveBeenCalled();
+      }
+    }
+  );
+
   it('shows duplicate unreferenced pasted files as a single attachment', () => {
     const file: FilePart = {
       id: 'paste',

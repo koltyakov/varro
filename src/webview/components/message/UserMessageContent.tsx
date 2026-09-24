@@ -502,22 +502,25 @@ export function isWrapperlessUserMessageContent(parsed: ParsedUserMessageContent
     parsed.attachments.length + parsed.fileParts.length + parsed.agentParts.length;
   if (attachmentCount === 0) return false;
   if (parsed.messageTexts.length === 0) return true;
-  if (attachmentCount !== 1 || parsed.messageTexts.length !== 1) return false;
 
   const indexedAttachments = parsed.attachments.map((attachment, index) => ({
     id: `attachment-${index}`,
     attachment,
     marker: getAttachmentTextMarker(attachment),
   }));
-  const segments = buildInlineTextSegments(
-    parsed.messageTexts[0]!,
-    indexedAttachments,
-    parsed.fileParts.filter((part) => part.mime.startsWith('image/')),
-    parsed.agentParts,
-    parsed.fileParts
-  ).filter((segment) => segment.type !== 'text' || segment.content.trim().length > 0);
+  const segments = parsed.messageTexts
+    .flatMap((text) =>
+      buildInlineTextSegments(
+        text,
+        indexedAttachments,
+        parsed.fileParts.filter((part) => part.mime.startsWith('image/')),
+        parsed.agentParts,
+        parsed.fileParts
+      )
+    )
+    .filter((segment) => segment.type !== 'text' || segment.content.trim().length > 0);
 
-  return segments.length === 1 && segments[0]?.type === 'attachment';
+  return segments.length > 0 && segments.every((segment) => segment.type === 'attachment');
 }
 
 function isVisionDelegationContextText(text: string): boolean {
@@ -2596,7 +2599,8 @@ function MessageFileAttachment(props: { part: FilePart; inline?: boolean; marker
       title={label()}
       role={text() !== null ? 'button' : undefined}
       tabIndex={text() !== null ? 0 : undefined}
-      onClick={() => {
+      on:click={(event) => {
+        event.stopPropagation();
         const content = text();
         if (content !== null)
           postMessage({

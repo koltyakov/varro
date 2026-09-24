@@ -649,6 +649,44 @@ describe('Message user prompt rendering', () => {
     );
   });
 
+  it.each(['', 'Review '])(
+    'renders pasted file chips with prose %j using the appropriate bubble',
+    (prefix) => {
+      const filename = 'pasted-text-18b4d50a.txt';
+      cleanup = render(
+        () =>
+          Message({
+            info: userMessage('message-pasted-file'),
+            parts: [
+              textPart('prompt', `${prefix}@${filename}`),
+              {
+                ...filePart('paste', filename),
+                mime: 'text/plain',
+                url: 'data:text/plain;base64,Y29udGVudA==',
+              },
+              {
+                id: 'agent',
+                sessionID: 'session-1',
+                messageID: 'message-pasted-file',
+                type: 'agent',
+                name: 'build',
+              },
+            ],
+          }),
+        container!
+      );
+
+      expect(container?.querySelector('.user-message-text .inline-chip')?.textContent).toBe(
+        filename
+      );
+      expect(
+        container
+          ?.querySelector('.user-message-card')
+          ?.classList.contains('user-message-card-wrapperless')
+      ).toBe(!prefix);
+    }
+  );
+
   it('renders sent attachments and image tiles above the user text', () => {
     cleanup = render(
       () =>
